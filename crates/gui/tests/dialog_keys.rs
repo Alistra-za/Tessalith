@@ -441,11 +441,16 @@ fn delete_set_has_no_dialog_and_undoes() {
     );
     assert!(!has_set(h.state(), &id));
     assert_eq!(h.state().history.undo.len(), before + 1);
-    let s = if members == 1 { "" } else { "s" };
+    // Note HF1: the textures go to no set.
+    let text = if members == 1 {
+        format!("Deleted set {id} (1 texture now in no set)")
+    } else {
+        format!("Deleted set {id} ({members} textures now in no set)")
+    };
     for _ in 0..6 {
         h.step();
     }
-    h.get_by_label(&format!("Deleted set {id} ({members} member{s})"));
+    h.get_by_label(&text);
     h.get_by_label("Undo the deleted set").click();
     for _ in 0..3 {
         h.step();
@@ -458,7 +463,9 @@ fn delete_set_has_no_dialog_and_undoes() {
 #[test]
 fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
     let d = tempfile::tempdir().unwrap();
-    let (m, id) = with_a_created_set(d.path());
+    // A PGPatcher PBR set: only it has the Rename outputs entry (Note HJ1).
+    let m = pbr_opened(d.path());
+    let id = "landscape/rock01".to_string();
     let mut h = harness(m);
     h.run();
     pill(&h, &id).click_secondary();
@@ -474,6 +481,43 @@ fn a_sets_menu_groups_the_three_renames_in_a_submenu_with_hover_text() {
     h.get_by_label("Rename inputs…").hover();
     h.run();
     h.get_by_label_contains("Read the source files under other names");
+}
+
+/// Note HJ1: a vanilla set's Rename submenu has no Rename outputs.
+#[test]
+fn a_vanilla_sets_rename_submenu_has_no_rename_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(opened(d.path()));
+    h.run();
+    pill(&h, "landscape/leaf").click_secondary();
+    h.run();
+    h.get_by_label_contains("Rename").click();
+    h.run();
+    h.get_by_label("Rename…");
+    h.get_by_label("Rename inputs…");
+    assert!(h.query_by_label("Rename outputs…  F2").is_none());
+    assert!(h.query_by_label_contains("Rename outputs").is_none());
+}
+
+/// Note HJ1: the dialog's mode switch hides Outputs when no selected set is a PGPatcher PBR set.
+#[test]
+fn the_rename_dialog_has_an_outputs_tab_only_for_pbr_sets() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.click_item("landscape/leaf.png", false, false);
+    let mut h = harness(m);
+    h.run();
+    h.state_mut()
+        .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
+    h.run();
+    h.get_by_label("Inputs");
+    assert!(h.query_by_label("Outputs").is_none(), "vanilla leaf");
+    h.state_mut()
+        .click_item("landscape/rock01.png", false, false);
+    h.state_mut()
+        .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
+    h.run();
+    h.get_by_label("Outputs");
 }
 
 #[test]
@@ -887,10 +931,9 @@ fn enter_right_after_typing_in_find_applies_the_rename() {
 
 /// Note FC5 (supersedes CZ4's "other Destructive buttons unchanged"): Enter or Space on a focused Destructive button
 /// in any `dialogs::dialog` does nothing; a click still does. One row per dialog with a Destructive button (the
-/// `Role::Destructive` uses in `ui/`): Reload, Changed on disk, Reset all, Delete generated file, Export running,
-/// Close / Open unsaved, the sets column's Replace and the presets Discard. A NIF file Tessalith did not write has no
-/// dialog: it is answered on its Review row (Note GD2), and Enter there writes nothing
-/// (`nif_edit::a_foreign_file_opens_no_guard_dialog`).
+/// `Role::Destructive` uses in `ui/`): Reload, Changed on disk, Reset all, Export running, Close / Open unsaved, the
+/// sets column's Replace and the presets Discard. A NIF file Tessalith did not write has no dialog: it is answered on
+/// its Review row (Note GD2), and Enter there writes nothing (`nif_edit::a_foreign_file_opens_no_guard_dialog`).
 #[test]
 fn focused_destructive_buttons_ignore_enter_and_space() {
     use sdc_gui::model::sets::DropChoice;
@@ -938,23 +981,6 @@ fn focused_destructive_buttons_ignore_enter_and_space() {
         let mut h = harness(m);
         press_on(&mut h, "Reset", key);
         assert_eq!(h.state().history.undo.len(), steps, "ResetAll {key:?}");
-        // Delete generated file: the file stays.
-        let mut m = opened(d.path());
-        let f = d.path().join("gen.png");
-        std::fs::write(&f, b"x").unwrap();
-        m.dialog = Some(Dialog::ConfirmDeleteGenerated(Box::new(
-            sdc_gui::model::from_normal::DeleteGenerated {
-                key: "gen.png".into(),
-                name: "gen.png".into(),
-                path: f.clone(),
-                body: "Delete gen.png?".into(),
-                refused: None,
-                seen: None,
-            },
-        )));
-        let mut h = harness(m);
-        press_on(&mut h, "Delete gen.png", key);
-        assert!(f.exists(), "DeleteGenerated {key:?}: file kept");
         // Export running: the export keeps going.
         let d = tempfile::tempdir().unwrap();
         let mut m = opened(d.path());
@@ -1122,13 +1148,14 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
     h.get_by_label_contains(&format!("s already has {existing} in"));
 }
 
-/// Owner 2026-10-19: the rename table has no New column (Output shows the result), and Inputs has a Whole path
-/// toggle that makes Find see the folders.
+/// Owner 2026-10-19: the rename table has no New column (Output shows the result), and a Whole path toggle makes
+/// Find see the folders, in both modes (Note HJ5).
 #[test]
 fn the_rename_dialog_has_no_new_column_and_a_whole_path_toggle() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.click_item("landscape/leaf.png", false, false);
+    // A PBR set: Outputs is offered for it only (Note HJ1).
+    let mut m = pbr_opened(d.path());
+    m.click_item("landscape/rock01.png", false, false);
     let mut h = harness(m);
     h.run();
     h.state_mut()
@@ -1145,8 +1172,7 @@ fn the_rename_dialog_has_no_new_column_and_a_whole_path_toggle() {
     h.state_mut()
         .set_rename_mode(sdc_gui::model::rename::RenameMode::Outputs);
     h.run();
-    assert!(
-        h.query_by_label("Whole path").is_none(),
-        "Outputs renames base names only"
-    );
+    // Note HJ5: Outputs moves whole paths too, through slot commands.
+    h.get_by_label("Whole path");
+    h.get_by_label_contains("A new folder is written as PGPatcher slot commands.");
 }

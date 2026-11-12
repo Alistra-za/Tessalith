@@ -1,10 +1,10 @@
 # Getting started
 
-This page takes one small texture set from source images to finished DDS files, first with the `sdc` command line and then with the Tessalith GUI (`tessalith.exe`). It assumes you have unzipped the release (or built both programs; see [Installation](Installation.md)) and that `sdc` is on your `PATH`.
+For a modder with a folder of source PNGs who wants one TruePBR set finished and working in game. It goes through the GUI, then what to check in game. It assumes you've unzipped the release ([Installation](Installation.md)).
 
-## The example project
+## The example set
 
-You are making a TruePBR iron plate for Community Shaders. Your source folder looks like this:
+You're making a TruePBR iron plate for Community Shaders. Your source folder looks like this:
 
 ```text
 C:\Work\IronPlate\
@@ -16,155 +16,69 @@ C:\Work\IronPlate\
     ironplate_ao.png          grayscale
 ```
 
-Things to notice:
+Notice:
 
-- Tessalith takes the game path of each file from the last `textures` folder in its path, so `textures\pbr\armor\ironplate\ironplate.png` has the game path `textures/pbr/armor/ironplate/ironplate.png`. Rules and sub-type detection use it.
-- The five files share the base name `ironplate`, so they form one texture set.
-- The raw `_roughness`, `_metallic` and `_ao` maps are packing inputs. Under `cs` they are packed into one `ironplate_rmaos.dds` (R roughness, G metallic, B AO, A specular). Under `cs`, any of these makes the set a PBR set: a raw roughness, glossiness, metallic or AO map; an `_rmaos`, `_rfaos`, `_cnr` or `_f` file; or a `pbr` folder in the path.
-- The output tree mirrors the input tree under the output folder, with `.dds` extensions.
+- The game path starts at the last `textures` folder, so `ironplate.png` is `textures/pbr/armor/ironplate/ironplate.png`. Rules and sub-type detection read that path.
+- The five files share the base name `ironplate`, so they're one set.
+- Under `cs` the three raw maps pack into one `ironplate_rmaos.dds` (R roughness, G metallic, B AO, A specular). What makes a set PBR is on [Texture types](Texture-Types.md#suffixes).
+- The output mirrors the input tree, with `.dds` extensions.
 
-See [Texture types](Texture-Types.md) for the full naming rules.
+## In the GUI
 
-## Part 1: the command line
+### Open the folder
 
-### Step 1. Look before you convert
+Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet. **Mode** (in the Presets tab) should read `cs`.
 
-`sdc inspect` runs the whole planning stage and prints what would happen, without encoding or writing anything:
+![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
-```powershell
-cd C:\Work\IronPlate
-sdc inspect C:\Work\IronPlate --recursive --accept-suggestions high
-```
+### Settle the undecided textures
 
-`--recursive` is needed because the images sit several folders down; without it only the files directly inside the folder are read. `--accept-suggestions high` accepts High-confidence guesses about what each file is, as the GUI does. The CLI default is `none`, which leaves every file whose sub-type came from a suggestion (rather than from a rule, a `--set`, or a `[files]` entry) unresolved.
+A tile with an amber border is undecided: Tessalith won't guess what it is. The **Undecided** pill above the tiles shows only those. Click a tile, and the centre column lists its settings and where each value came from. **(auto)** means Tessalith picked it; hover it for why.
 
-The output has one block per file and one per set. Abridged, it looks like this:
+Answer what the centre column asks: a sub-type dropdown and **Confirm**, the alpha dropdown and **Confirm**, **Treat as OpenGL (flip green)** for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry. The three raw maps are rows in the **Helpers** group under the tiles, showing → ironplate_rmaos. They feed the `_rmaos` and need no answer.
 
-```text
-set textures/pbr/armor/ironplate/ironplate  shader pbr (auto:pbr)
-  pack textures/pbr/armor/ironplate/ironplate_rmaos.dds (rmaos) run
-    R source:ironplate_roughness.png:R  G source:ironplate_metallic.png:R  B source:ironplate_ao.png:R  A default:1
-C:\Work\IronPlate\textures\pbr\armor\ironplate\ironplate.png
-  suggested pbr_albedo (high confidence: colour member of a PBR set)
-  sub-type pbr_albedo  format bc7  tag srgb  alpha remove  output textures/pbr/armor/ironplate/ironplate.dds
-  status ready
-C:\Work\IronPlate\textures\pbr\armor\ironplate\ironplate_n.png
-  suggested pbr_normal (high confidence: _n in a PBR set)
-  sub-type pbr_normal  format bc7  tag unorm  alpha remove  output textures/pbr/armor/ironplate/ironplate_n.dds
-  status ready
-...
-```
+![The texture settings of a fern texture in the demo project.](../img/gui/GUI-Texture-Panel/texture-panel.png)
 
-What to check:
+### Check the set
 
-| Line | Meaning |
-|---|---|
-| `set ... shader pbr (auto:pbr)` | The set's shader, and why it was chosen. `auto:<rule>` means Tessalith picked it; `set` means you did; `fallback` means the shader you asked for is not available under this target. |
-| `pack ... run` | A packed output that will be built. `conflict`, `failed` or `disabled` means it will not, and the reason follows. |
-| `R source:... A default:1` | Where each channel comes from. `source:<file>:R` reads the file's red channel (`:G`, `:B`, `:A` or `:luma` when `channels.grayscale_source` picks another, and a `1-` prefix means inverted, as when gloss stands in for roughness). `default:` means no source map was found and the neutral default (on a 0 to 1 scale) is used; `fill:` means you set an 8-bit value. |
-| `status ready` | The file will be converted. `unresolved`, `blocked` or `error` means it will not, and the reasons follow on the same line. `packing_input` (a raw map waiting to be packed) and `normal_layer` (an RNM layer) are not converted on their own either; they feed another output. |
-| Lines starting with `warning` or `blocking` | Diagnostic codes. See [Troubleshooting](Troubleshooting.md). |
+Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TruePBR settings are optional, and **Matching** stays on the diffuse path.
 
-If a file shows `status unresolved`, the reason says what is missing: usually a sub-type that is only a Medium or Low confidence guess or the meaning of a varying alpha channel. Fix it with one of the methods in Step 2.
+![The set editor for a set in the demo project.](../img/gui/GUI-Set-Editor/set-editor.png)
 
-### Step 2. Record decisions in sdc.toml
+### Export
 
-Anything you would otherwise type as a `--set` flag every time belongs in a project config. Create `C:\Work\IronPlate\sdc.toml`:
+1. Pick **Export to**. Each project remembers its own folder; the rule is on [Main window](GUI-Main-Window.md#export-to).
+2. Optional: in the JSON editor (**Export to ▾ → PGPatcher JSON editor…**), set **JSON name:**, the name of the PGPatcher JSON. It defaults to the folder name.
+3. Press **Export**. If Review opens first, something is undecided or blocking: fix it or tick it there, then press Review's **Export** ([Review and Export](GUI-Review-and-Export.md)).
 
-```toml
-schema_version = 1
-target = "cs"
+![The Review tab in the demo project.](../img/gui/GUI-Review-and-Export/review-tab.png)
 
-# This set has no specular map. Use 0.5 (128) instead of the default 1.0.
-[files."textures/pbr/armor/ironplate/ironplate_rmaos"]
-packing.fill.specular = 128
-```
+You get the DDS tree, plus `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported completely.
 
-`sdc convert` and `sdc inspect` read `sdc.toml` from the first input folder automatically. `[files]` keys are paths relative to the folder holding `sdc.toml`; a packed output is keyed without an extension. See [Project config](Project-Config.md) for every key.
+On the command line: [quick start](CLI-Reference.md#quick-start).
 
-Here is how you would answer the usual open questions in the same file:
+## Converting a whole mod folder
 
-```toml
-# A colour map whose alpha is a cutout mask
-[files."textures/pbr/armor/ironplate/ironplate_trim.png"]
-alpha.policy = "cutout"
-alpha.threshold = 127
+Open the folder in the GUI. Expect questions on the first run: a file whose type can't be worked out waits for you instead of being guessed ([why](Texture-Types.md#how-files-form-a-set)). Your answers are saved in `sdc.toml`, so later runs don't ask again.
 
-# A normal map saved as _normal, exported from an OpenGL tool
-[files."textures/pbr/armor/ironplate/ironplate_normal.png"]
-channels.green_convention = "opengl"
+## Install it
 
-# A file whose name gives no clue
-[files."textures/pbr/armor/ironplate/ironplate_mask.png"]
-subtype = "generic_data"
-```
+Copy the output into your mod and leave `_sdc` out. Install the JSON from `PBRNIFPatcher`, then run PGPatcher ([Installing the output](Validation-and-Output.md#installing-the-output)).
 
-### Step 3. Convert
+## Check it in game
 
-```powershell
-sdc convert C:\Work\IronPlate --recursive --accept-suggestions high -o C:\Work\IronPlate-out
-```
+Tessalith's validation checks the files, not the game. Look at these, each with what a bad result means:
 
-Progress goes to stderr, one line per file. Paths in the log use forward slashes:
-
-```text
-ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate.dds
-ok    C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate_n.png -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_n.dds
-ok    ... -> C:/Work/IronPlate-out/textures/pbr/armor/ironplate/ironplate_rmaos.dds
-done: 3 converted, 0 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
-```
-
-The three raw maps get no lines of their own: the packed output consumed them, and they are not counted as skipped. Without `-o`, output goes to `.\sdc-out` in the current directory ([layout](Validation-and-Output.md#output-layout)).
-
-`$LASTEXITCODE` is `0` when every file converted and passed validation; the other codes are in [CLI reference](CLI-Reference.md#exit-codes).
-
-### Step 4. Run it again
-
-```powershell
-sdc convert C:\Work\IronPlate --recursive --accept-suggestions high -o C:\Work\IronPlate-out
-```
-
-```text
-skip  C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate.png: up to date
-skip  C:/Work/IronPlate/textures/pbr/armor/ironplate/ironplate_n.png: up to date
-skip  ...: up to date
-done: 0 converted, 3 up to date, 0 skipped (0 on purpose), 0 failed, 0 failed validation, 0 cancelled
-```
-
-The default `--on-existing if-changed` compares each output with its record in `C:\Work\IronPlate-out\_sdc\manifest.jsonl` and re-encodes only what changed. Edit `ironplate_roughness.png` and run again, and only the `_rmaos` is rebuilt ([what counts as changed](Validation-and-Output.md#re-runs-and-if-changed)).
-
-### Step 5. Verify a DDS
-
-```powershell
-sdc validate C:\Work\IronPlate-out\textures\pbr\armor\ironplate\ironplate.dds --subtype pbr_albedo
-sdc inspect  C:\Work\IronPlate-out\textures\pbr\armor\ironplate\ironplate_rmaos.dds
-```
-
-`validate` checks the header, format and tag against the target's rules for that sub-type. `inspect` on a DDS prints its header and an alpha report for every mip level.
-
-### Step 6. Install
-
-Install the output as [Installing the output](Validation-and-Output.md#installing-the-output) says. The CLI does not write the PGPatcher JSON a TruePBR set needs; the GUI does (Part 2).
-
-## Part 2: the GUI
-
-The GUI runs the same engine and reads and writes the same `sdc.toml`, so you can switch between the two at any point.
-
-1. Start `tessalith.exe`, click **Open folder** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet.
-2. Check **Mode** at the top of the **Presets** tab (**Presets…** in the header's Preset menu). It should read `cs`. Changing it writes `target` to `sdc.toml`.
-3. The Textures column on the left shows a tile per file. The three raw maps show "Packed into ..." because they feed the `_rmaos`. A tile with an amber border is undecided. Click the **Undecided** pill above the tiles to see only those (**Filter ▾** has the other filters and the sort).
-4. Click a tile. The centre column shows its settings in groups (Type, Colour, Alpha, Mipmaps, Compression), and each value says where it came from. A sub-type the GUI accepted reads **(auto)**; hover it to see why.
-5. For an amber tile, answer the question shown in the centre column: the sub-type buttons, the alpha buttons (*Remove*, *Cutout*, *Blend*, *Cutout + Blend*, *Data*), *DirectX* or *OpenGL* for a normal map's green channel, or **Acknowledge for this texture** for a blocking warning. Each answer is written to `sdc.toml` as a `[files]` entry.
-6. Click the `ironplate` set in the Sets column on the right. Its card shows the set's status, its shader and a lettered chip per slot. The set editor shows a row for each slot (Diffuse, Normal, RMAOS and so on) and the set's **Shader**, which should read `pbr` (auto). On the RMAOS card you can set fills for missing channels; for this example set Specular to 128 to match the `sdc.toml` from Part 1.
-7. Fill in the TruePBR settings for the set (Material, Features and the rest) if you want values other than the defaults. Leave **Matching** on the diffuse path.
-8. Check **Export to** in the header (its menu has **Choose export folder…**). It reads **Export to: not chosen** until you choose a folder: use its **Choose export folder…**, or the **Choose the export folder…** button in Review. Each project remembers its own export folder. Set the **JSON:** name; by default it is the folder name.
-9. Press **Export**. If the Review tab opens first, fix or tick what it lists and press its Export ([Export](GUI-Review-and-Export.md#export)).
-10. When the export finishes, the GUI writes `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported fully.
-
-**Copy CLI command** in the Files tab copies an equivalent command line. Set edits made in the Sets column live in `sdc-project.toml`, which the CLI does not read ([what carries over](GUI-Review-and-Export.md#export)).
+- **Textures load.** A missing one means its output path differs from the path the mesh uses. The Meshes view shows a mesh's slots.
+- **PBR colour brightness.** Compare albedo, `_g` and `_f` with linear lighting on and off. Washed out means a `color.tag = "unorm"` override: `TAG-UNORM-PBR`. [sRGB or UNORM](Texture-Types.md#srgb-or-unorm) has the rule.
+- **Ordinary diffuse brightness.** Too dark under Community Shaders means an `_SRGB` override: `TAG-SRGB-NONPBR`.
+- **Complex `_m` maps.** Check parallax and complex shading at a distance. `VAL-M-COMPLEX-MARGIN` warns when the smallest mip's alpha nears the point where Community Shaders turns complex material off ([the rule](Validation-and-Output.md#what-is-checked)).
+- **Plain `_m` maps and PGPatcher.** PGPatcher treats a plain `_m` as complex when half or more of its alpha is non-white. Tessalith keeps `_m` alpha exactly opaque by default (`exact_opaque`) and warns with `VAL-PGPATCHER-50`.
+- **Cutouts at a distance.** Foliage and fences that thin out or thicken point at `alpha.threshold`, and `VAL-COVERAGE`.
+- **TruePBR sets.** After PGPatcher, check the material lands on the intended meshes and no others. Watch for delete sections that hit your own sets.
 
 ## Where to go next
 
-- [GUI guide](GUI-Guide.md) for bulk editing, renaming, the 3D preview and editing the PGPatcher JSON.
-- [Mod scanning](Mod-Scanning.md) to let the GUI learn alpha modes and shaders from the meshes that use your textures.
-- [Presets and targets](Presets-and-Targets.md) to switch to Vanilla output (with complex material `_m` maps if you want them), or to smaller BC1 files.
+- [GUI guide](GUI-Guide.md): the window, area by area.
+- [Meshes and mod scanning](Mod-Scanning.md): let the GUI read alpha and shaders from the meshes that use your textures.
+- [Presets and targets](Presets-and-Targets.md): Vanilla output, or smaller files.

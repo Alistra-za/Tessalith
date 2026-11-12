@@ -9,14 +9,14 @@
 //! DIM-RESIZED (the power of two or `resize` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
 //! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
 //! CFG-PRESET-SKIPPED (a user preset folder file that failed to load, skipped) and CFG-GREEN-CONFLICT (an explicit
-//! `flip_green` that contradicts `green_convention`) (M6 Track D) and the five `RNM-*` codes of RNM normal layers (M6 Track F2).
+//! `flip_green` that contradicts `green_convention`) (M6 Track D).
 //! and the five `GRASS-*` codes and VAL-GRASS-DETECT (complex grass design 2026-10-12 §3.6, §3.7, §4)
 //! and IN-ALIAS-INVALID / IN-ALIAS-STALE (an `[inputs]` alias that was refused or matched no file, M6 Track F3b)
 //! and ALPHA-PARALLAX-NO-ALPHA (`alpha.parallax` on for a complex `_m` whose source has no alpha, DECISIONS AH2).
 //! and PBR-GRASS-DETECT (a PBR grass albedo CS would read as complex grass) (PBR grass design 2026-10-14 §4.4).
 //! and the four `CHK-*` codes of the GUI's artist checks, and CHK-LOW-DETAIL of check 3 at convert time (v2 artist checks, DECISIONS Note CL).
 //! and ENC-WEIGHTS-IGNORED (an `encoder.bc7_weights` that perceptual or the format overrides, DECISIONS Note CP).
-//! and the three `GEN-*` codes of generated maps: GEN-REPLACED, GEN-STALE (GUI only) and GEN-AO (v2 Generate from normal map, DECISIONS Note CO).
+//! and the two `GEN-*` codes of generated maps: GEN-REPLACED and GEN-AO (`_generated` files, DECISIONS Notes CO and GV).
 //! and CUBE-FACES / CUBE-NO-MIPS of cubemaps (cubemap support v1, DECISIONS Note DS).
 //! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM)
 //! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
@@ -135,10 +135,6 @@ codes! {
     PackUnusedInput = "PACK-UNUSED-INPUT" => Warning,
     PackRecipeConflict = "PACK-RECIPE-CONFLICT" => Warning,
     PackRecipeUnbuildable = "PACK-RECIPE-UNBUILDABLE" => Warning,
-    RnmNoBase = "RNM-NO-BASE" => Warning,
-    RnmIgnoredEye = "RNM-IGNORED-EYE" => Warning,
-    RnmMaskOrphan = "RNM-MASK-ORPHAN" => Warning,
-    RnmLayerShadowed = "RNM-LAYER-SHADOWED" => Warning,
     ShaderAuto = "SHADER-AUTO" => Info,
     ShaderUnavailable = "SHADER-UNAVAILABLE" => Warning,
     ShaderExtraMap = "SHADER-EXTRA-MAP" => Warning,
@@ -156,8 +152,6 @@ codes! {
     ChkParallaxScale = "CHK-PARALLAX-SCALE" => Warning,
     // Check 3 (fake resolution): the one CHK code the engine emits, during a run whose request sets `low_detail`.
     ChkLowDetail = "CHK-LOW-DETAIL" => Warning,
-    // UV coverage (GUI): UV islands of a meshed colour texture sit closer than the mip-bleed distance.
-    ChkUvGutter = "CHK-UV-GUTTER" => Warning,
     // Track A derive step (DECISIONS Note CN): PBR sets converted to vanilla and complex-material maps.
     // Set skipped: a source it needs is DDS (never re-encoded, M9).
     DeriveDdsSource = "DERIVE-DDS-SOURCE" => Warning,
@@ -165,18 +159,15 @@ codes! {
     DeriveNoAlbedo = "DERIVE-NO-ALBEDO" => Warning,
     // A derived output lands on another job's output (TA12); the other job is kept.
     DerivePathConflict = "DERIVE-PATH-CONFLICT" => Error,
-    // A member with no recipe role (TA11), or an RNM detail layer (TA28; its own reason).
+    // A member with no recipe role (TA11).
     DeriveNotConverted = "DERIVE-NOT-CONVERTED" => Info,
     // Data {glossiness, specular_strength, env_map}: suggested NIF values for the set.
     DeriveNifSuggest = "DERIVE-NIF-SUGGEST" => Info,
     // Track A Also export (Note CN): the Vanilla or CM phase stopped with an engine error; its exit code is kept.
     AlsoPhaseFailed = "ALSO-PHASE-FAILED" => Error,
-    // v2 Generate from normal map (Note CO): a generated member skipped because a real map fills its slot.
+    // A `_generated` file (Note CO, GV) skipped because a real map fills its slot.
     GenReplaced = "GEN-REPLACED" => Info,
-    // v2 Generate from normal map (Note CO): a generated file whose normal, height neutral or shader changed since it
-    // was generated. GUI only: the slot row's dot hover and the texture's message list, never a Problems row.
-    GenStale = "GEN-STALE" => Info,
-    // v2 Generate from normal map (Note CO): a packed _rmaos whose B channel is an AO generated from the normal map.
+    // A packed _rmaos whose B channel is an `_ao_generated` file (Note CO, GV).
     GenAo = "GEN-AO" => Info,
     // Cubemap (DECISIONS Note DS): a cube's faces are missing, not square or not the same size.
     CubeFaces = "CUBE-FACES" => Error,
@@ -262,7 +253,7 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 97);
+        assert_eq!(Code::ALL.len(), 91);
         assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);

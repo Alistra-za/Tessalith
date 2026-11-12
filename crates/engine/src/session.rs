@@ -292,10 +292,15 @@ impl AnalysisCache {
     }
     /// The job's analysis: its packed image's for a packed job, else its source's. Like [`Self::thumbnail`], it
     /// ignores stamps. `None` for a derived job: its image is never cached, and its input's analysis is the
-    /// albedo's, not its own (preflight P25).
+    /// albedo's, not its own (preflight P25). A filled job's is the filled image's (FM31's cache entry), `None` when
+    /// that entry is missing: never the analysis of the unfilled source.
     pub fn analysis(&self, job: &ResolvedJob) -> Option<Analysis> {
         if job.derive.is_some() {
             return None;
+        }
+        if let Some(fill) = &job.fill {
+            let key = fill_cache_key(&job.input, job.source, fill, job.profile.alpha.exr_straight)?;
+            return lock(&self.packs).get(&key).map(|e| e.analysis.clone());
         }
         match &job.pack {
             Some(pk) => {
@@ -375,10 +380,11 @@ impl Session {
             skeleton: Mutex::new(None),
         })
     }
-    /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to about 200 MB.
-    pub fn with_disk_cache(mut self, dir: PathBuf) -> Session {
+    /// Keep analyses in `dir` between sessions (Note DZ), first pruning it to `max_bytes` (Note HV2: the caller's
+    /// limit; the GUI's is a setting).
+    pub fn with_disk_cache(mut self, dir: PathBuf, max_bytes: u64) -> Session {
         let store = AnalysisStore::new(dir);
-        store.prune(200 * 1024 * 1024);
+        store.prune(max_bytes);
         self.cache.disk = Some(store);
         self
     }

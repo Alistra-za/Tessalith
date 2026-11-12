@@ -4,7 +4,7 @@ use super::fields::{
     all_fields, encoding_options, field_view, filter_option_lock, hidden_reason, views_of,
     weighting_option_lock, FieldView, EDGE_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD, WEIGHTING,
 };
-use super::from_normal::{GenMap, GenOp};
+use super::set_groups::GroupTarget;
 use super::sets::{
     engine_inputs, game_path_in, locked_items, member_game_path, slot_gives, slot_of, SlotCommand,
     SlotKind, NOTHING, SLOT_LOCKED,
@@ -144,7 +144,7 @@ impl AppModel {
     }
 
     /// The keys of the sets the column shows, in display order (R17: the Sets filter applied).
-    fn set_order(&self) -> Vec<String> {
+    pub(super) fn set_order(&self) -> Vec<String> {
         let views = super::sets::views(self);
         self.visible_sets()
             .iter()
@@ -320,7 +320,7 @@ impl AppModel {
             .iter()
             .filter(|k| {
                 if sets {
-                    self.sets.iter().any(|s| &s.key == *k)
+                    super::sets::has_card(self, k)
                 } else {
                     self.item(k).is_some()
                 }
@@ -657,6 +657,42 @@ fn textures(n: usize) -> String {
 /// One ticked field of a copy: its id, the value, and the plan over the targets.
 type CopyWrite = (String, Value, Vec<(String, Change)>);
 
+/// Note HS8: `job` as the copy's `landed` writes leave it. Each value is set at its field's path in the serialised
+/// profile (a format pair sets `format` and `color.tag`); one the profile cannot hold is left out.
+// shortcut: a copied sub-type projects only `subtype`, not the preset values it brings; upgrade if a lock that reads
+// those values skips a field copied with a sub-type.
+fn projected(job: &ResolvedJob, landed: &[(&str, &Value)]) -> ResolvedJob {
+    let mut pj = job.clone();
+    for &(field, v) in landed {
+        let sets = match encoding_of(field, v) {
+            Some((f, t)) => vec![
+                ("format", serde_json::json!(f)),
+                ("color.tag", serde_json::json!(t)),
+            ],
+            None => vec![(field, v.clone())],
+        };
+        let Ok(mut doc) = serde_json::to_value(&pj.profile) else {
+            continue;
+        };
+        for (f, v) in sets {
+            // A leaf the profile skips while default (`unset_default`) is inserted; `resize*` sit in the root.
+            let (parent, leaf) = f.rsplit_once('.').unwrap_or(("", f));
+            let ptr = if parent.is_empty() {
+                String::new()
+            } else {
+                format!("/{}", parent.replace('.', "/"))
+            };
+            if let Some(o) = doc.pointer_mut(&ptr).and_then(Value::as_object_mut) {
+                o.insert(leaf.to_string(), v);
+            }
+        }
+        if let Ok(p) = serde_json::from_value(doc) {
+            pj.profile = p;
+        }
+    }
+    pj
+}
+
 /// "Format: written to 9 of 12; locked on 3 of 12: BC1 only".
 fn report(label: &str, plan: &[(String, Change)]) -> String {
     let n = plan.len();
@@ -756,7 +792,7 @@ impl AppModel {
         // A source with a tag but no format of its own copies the tag alone (F3a ledger R15, DECISIONS AF5).
         let pair = fields.iter().any(|f| f == "format") && p.file_value(from, "format").is_some();
         let from_job = self.item(from).and_then(|i| i.job.as_ref());
-        let writes: Vec<CopyWrite> = fields
+        let mut writes: Vec<CopyWrite> = fields
             .iter()
             .filter(|f| !(pair && *f == "color.tag"))
             .filter_map(|f| {
@@ -771,6 +807,47 @@ impl AppModel {
                 Some((f.clone(), v, plan))
             })
             .collect();
+        // Note HS8: a skipped field is planned again against the target as the copy's written fields leave it.
+        // A pass only flips Skip to Write, never back, so the loop ends.
+        let locked = locked_items(self);
+        loop {
+            let mut flipped = false;
+            for (n, k) in to.iter().enumerate() {
+                let Some(job) = self
+                    .item(k)
+                    .and_then(|i| i.job.as_ref())
+                    .filter(|_| !locked.contains_key(k))
+                else {
+                    continue;
+                };
+                for i in 0..writes.len() {
+                    // shortcut: BC7 weighting is not planned again (its row value is not a profile value); upgrade
+                    // if a copy that changes the format to BC7 should carry it.
+                    let (f, v, plan) = &writes[i];
+                    let retry =
+                        f != WEIGHTING && matches!(&plan[n].1, Change::Skip(r) if r != INVALID);
+                    if !retry {
+                        continue;
+                    }
+                    let landed: Vec<(&str, &Value)> = writes
+                        .iter()
+                        .filter(|w| w.2[n].1 == Change::Write)
+                        .map(|w| (w.0.as_str(), &w.1))
+                        .collect();
+                    let pj = projected(job, &landed);
+                    let view = field_view(self.target, &pj, f);
+                    let op = BulkOp::Set(v.clone());
+                    if skip_of(Some(&pj), view.as_ref(), f, Some(&op), None, self.target).is_none()
+                    {
+                        writes[i].2[n].1 = Change::Write;
+                        flipped = true;
+                    }
+                }
+            }
+            if !flipped {
+                break;
+            }
+        }
         let name = self.item(from).map_or(from.to_string(), |i| i.name.clone());
         self.batch_edit(&format!("Copy settings from {name}"), |m| {
             for (f, v, plan) in &writes {
@@ -970,11 +1047,19 @@ pub enum MenuAction {
     ClearInputAlias,
     /// Task 5: select the source file of texture `key` in Explorer.
     ShowInExplorer(String),
-    /// Note CO: "Generate from normal map…" (open the dialog) or "Delete generated file…" on set `set` (an id).
-    Generated {
-        set: String,
-        op: GenOp,
-    },
+    /// Note HF1: the selected no-set textures go back to the sets their names make.
+    BackToAutomaticSet,
+    /// Note HF6: the "Move to group" submenu of the sets' menu; the `ToGroup`, `ToNewGroup` and `ToNoGroup` entries
+    /// follow it and the menu draws them inside it.
+    MoveToGroup,
+    /// The selected sets join the group of this name.
+    ToGroup(String),
+    /// The UI opens the name dialog; `run_menu` does nothing.
+    ToNewGroup,
+    /// The selected sets leave their groups.
+    ToNoGroup,
+    /// Note HF9: export the selected sets only ("Export 3 sets").
+    ExportSets,
 }
 
 /// The slot menu's PGPatcher lock entry, off and on (Note AN).
@@ -1154,6 +1239,16 @@ impl AppModel {
         .into_iter()
         .chain(self.rename_entries(false))
         .chain(active.filter(|_| n == 1).map(|k| self.show_entry(k)))
+        .chain(
+            self.selected_items()
+                .iter()
+                .any(|k| self.is_no_set(k))
+                .then(|| MenuEntry {
+                    action: MenuAction::BackToAutomaticSet,
+                    label: "Back to its automatic set".into(),
+                    disabled: self.sets_read_only_reason(),
+                }),
+        )
         .collect()
     }
 
@@ -1194,19 +1289,26 @@ impl AppModel {
                 .clone()
                 .or_else(|| (ni == 0).then(|| "nothing to rename".into())),
         };
-        let outputs = MenuEntry {
+        // Note HJ1: absent, not greyed, when no selected set is a PGPatcher PBR set. A mixed selection counts only
+        // the sets that qualify.
+        let outputs = (no > 0).then(|| MenuEntry {
             action: MenuAction::RenameOutputs,
             label: format!(
-                "{}…{}",
+                "{}{}…{}",
                 plural(no, "Rename output", "Rename outputs"),
+                if no < self.selected_set_total() {
+                    format!(" ({no})")
+                } else {
+                    String::new()
+                },
                 if sets { f2.as_str() } else { "" }
             ),
-            disabled: project.or_else(|| (no == 0).then(|| "no set writes an output".into())),
-        };
+            disabled: project,
+        });
         let mut v = if sets {
-            vec![outputs, inputs]
+            outputs.into_iter().chain([inputs]).collect::<Vec<_>>()
         } else {
-            vec![inputs, outputs]
+            [inputs].into_iter().chain(outputs).collect()
         };
         // As `aliased_selection`, over the Inputs keys already built.
         let aliased = self.project.as_ref().map_or(0, |p| {
@@ -1242,11 +1344,61 @@ impl AppModel {
             },
         ];
         v.extend(self.rename_entries(true));
+        v.extend(self.group_entries(&self.selected_set_ids()));
+        v.push(MenuEntry {
+            action: MenuAction::ExportSets,
+            label: format!("Export {n} sets"),
+            // Note HF10: a scope set under a running export would change what its lists count.
+            disabled: self
+                .export
+                .running
+                .is_some()
+                .then(|| super::also::EXPORT_RUNNING.to_string()),
+        });
         v.extend(kind_chips(self, &sets).into_iter().map(|c| MenuEntry {
             action: MenuAction::SelectMembersOfKind(c.kind),
             label: format!("{} ({})", c.label, c.members.len()),
             disabled: None,
         }));
+        v
+    }
+
+    /// Note HF6: "Move to group" and its choices for the sets `ids`: each group (off when every set is in it), a
+    /// new one, none. A read-only `sdc-project.toml` disables the lot with the reason.
+    pub fn group_entries(&self, ids: &[String]) -> Vec<MenuEntry> {
+        let off = self.sets_read_only_reason();
+        let entry = |action, label: String, disabled| MenuEntry {
+            action,
+            label,
+            disabled,
+        };
+        let in_any = ids.iter().any(|i| self.group_of(i).is_some());
+        let mut v = vec![entry(
+            MenuAction::MoveToGroup,
+            "Move to group".into(),
+            off.clone(),
+        )];
+        v.extend(self.groups().into_iter().map(|g| {
+            let all_in = !ids.is_empty()
+                && ids
+                    .iter()
+                    .all(|i| g.sets.iter().any(|s| engine::sets::same_id(s, i)));
+            let why = off
+                .clone()
+                .or(all_in.then(|| "already in this group".to_string()));
+            entry(MenuAction::ToGroup(g.name.clone()), g.name, why)
+        }));
+        v.push(entry(
+            MenuAction::ToNewGroup,
+            "New group…".into(),
+            off.clone(),
+        ));
+        let none = (!in_any).then(|| "not in a group".to_string());
+        v.push(entry(
+            MenuAction::ToNoGroup,
+            "No group".into(),
+            off.or(none),
+        ));
         v
     }
 
@@ -1354,14 +1506,6 @@ impl AppModel {
                 }),
             });
         }
-        // Note CO: after the PGPatcher lock, so the existing rows keep their places.
-        match kind {
-            SlotKind::Height => menu.push(self.gen_entry(&id, Some(GenMap::Height))),
-            SlotKind::Rmaos => menu.push(self.gen_entry(&id, Some(GenMap::Ao))),
-            _ => {}
-        }
-        // Task 7: after Generate (P12: tests find it by action).
-        menu.extend(self.delete_slot_entry(v, kind));
         menu
     }
 
@@ -1477,14 +1621,27 @@ impl AppModel {
                 self.clear_input_alias(&keys);
             }
             MenuAction::ShowInExplorer(key) => return self.reveal_item(&key).err(),
-            MenuAction::Generated {
-                set,
-                op: GenOp::Open(pre),
-            } => self.open_gen(&set, pre),
-            MenuAction::Generated {
-                op: GenOp::Delete(key),
-                ..
-            } => self.ask_delete_generated(&key),
+            MenuAction::BackToAutomaticSet => {
+                let keys = self.selected_items();
+                return self.back_to_automatic_set(&keys).err();
+            }
+            MenuAction::MoveToGroup | MenuAction::ToNewGroup => {}
+            MenuAction::ToGroup(name) => {
+                return self
+                    .move_to_group(&self.selected_set_ids(), GroupTarget::Existing(name))
+                    .err();
+            }
+            MenuAction::ToNoGroup => {
+                return self
+                    .move_to_group(&self.selected_set_ids(), GroupTarget::None)
+                    .err();
+            }
+            MenuAction::ExportSets => {
+                let keys: std::collections::BTreeSet<String> =
+                    self.selected_sets().into_iter().collect();
+                let label = format!("Export {} sets", keys.len());
+                self.export_sets(keys, label);
+            }
         }
         None
     }

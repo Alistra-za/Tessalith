@@ -1,13 +1,14 @@
-//! The cubemap section of a cube's settings (cubemap GUI step, Note DT7-DT12): one row per `cubemap.*` key, in five
+//! The cubemap section of a cube's settings (cubemap GUI step, Note DT7-DT12): one row per `cubemap.*` key, in four
 //! groups. Drawing only: the edits come back as (item key, dotted field, value) and the panel applies them through
 //! `AppModel::set_field` / `clear_field`, so sdc.toml stays the only place a setting is written.
 use super::columns::RED;
 use super::settings_panel::{combo, options_of, Options};
+use crate::model::code_text::not_a_cube;
 use crate::model::fields::{cube_views, provenance_text, FieldView};
 use crate::model::AppModel;
 use eframe::egui;
-use engine::config::{CubeLayout, FaceFlip, GroundFill, GroundMode, Subtype};
-use engine::policy::ResolvedJob;
+use engine::config::{CubeLayout, FaceFlip, Subtype};
+use engine::policy::{JobStatus, Need, ResolvedJob};
 use serde_json::{json, Value};
 use std::ops::RangeInclusive;
 
@@ -17,13 +18,9 @@ pub type Edits = Vec<(String, String, Option<Value>)>;
 /// A field's edit: `Some(Some(v))` sets it, `Some(None)` clears it, `None` leaves it.
 type Edit = Option<Option<Value>>;
 
-/// The first ground colour a "Colour" pick writes: a dark earth brown, raw 0..255 codes (Note DT10).
-const FIRST_GROUND: [u8; 3] = [40, 30, 20];
 /// What ticking "Highlight clamp" or "Blur" first writes (Note DT10): the engine's own examples.
 const FIRST_CLAMP: f64 = 4.0;
 const FIRST_BLUR: f64 = 0.35;
-/// The photo layout's blur when `cubemap.blur` is unset (engine DS16).
-const PHOTO_BLUR: &str = "0.6 (photo default)";
 const FACE_NAMES: [&str; 6] = ["+X", "-X", "+Y", "-Y", "+Z", "-Z"];
 
 /// Every selected item is a cube; `key` alone when the selection is a set or empty.
@@ -171,13 +168,17 @@ impl Cx<'_> {
         f: &FieldView,
         body: impl FnOnce(&mut egui::Ui) -> (Edit, egui::Response),
     ) -> Edit {
-        ui.label(f.label);
+        // Note HI1: the texture panel's label and control columns.
+        super::settings_panel::field_label(ui, true, f.label, None);
         let off = f.lock.is_some() || self.ro.is_some();
-        let scope = ui.scope(|ui| {
-            if off {
-                ui.disable();
-            }
-            body(ui)
+        let w = super::settings_panel::column_widths(ui).1;
+        let scope = super::settings_panel::control_slot(ui, w, |ui| {
+            ui.scope(|ui| {
+                if off {
+                    ui.disable();
+                }
+                body(ui)
+            })
         });
         let (mut edit, _) = scope.inner;
         if let Some(why) = f.lock.map(str::to_string).or(self.ro.clone()) {
@@ -280,7 +281,18 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                         return (None, r);
                     }
                     let cur = c.layout.map_or(json!("auto"), |l| json!(l));
-                    let (p, r) = named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f));
+                    // Note GU2: not a cube source, so no layout can help; the row stays, disabled, and says why.
+                    let not_cube = matches!(&job.status, JobStatus::Unresolved { needs, .. } if needs.contains(&Need::CubeLayout));
+                    let (p, r) = ui
+                        .add_enabled_ui(!not_cube, |ui| {
+                            named_combo(ui, cx.id(f.field), &cur, &opts(f.field), &name(f))
+                        })
+                        .inner;
+                    let r = if not_cube {
+                        r.on_disabled_hover_text(not_a_cube(Some(&job)))
+                    } else {
+                        r
+                    };
                     // Auto is the unset layout.
                     (p.map(|v| (v != json!("auto")).then_some(v)), r)
                 });
@@ -325,17 +337,8 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
             });
-            let has_faces = matches!(
-                layout,
-                Some(
-                    CubeLayout::Faces
-                        | CubeLayout::Hcross
-                        | CubeLayout::Vcross
-                        | CubeLayout::Hstrip
-                        | CubeLayout::Vstrip
-                )
-            );
-            if has_faces {
+            // Any layout is six faces to turn or flip.
+            if layout.is_some() {
                 faces(ui, &cx, &views, &opts, &mut put);
             }
             grid(ui, &cx, "Colour grade", |ui| {
@@ -395,53 +398,6 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
             });
-            grid(ui, &cx, "Ground", |ui| {
-                let f = find(&views, "cubemap.ground_fill");
-                let e = cx.row(ui, f, |ui| {
-                    ui.horizontal(|ui| {
-                        let cur = match c.ground_fill {
-                            None => "none",
-                            Some(GroundFill::Mode(GroundMode::Gradient)) => "gradient",
-                            Some(GroundFill::Color(_)) => "colour",
-                        };
-                        let (p, r) =
-                            named_combo(ui, cx.id(f.field), &json!(cur), &opts(f.field), &name(f));
-                        let mut edit: Edit = p.map(|v| match v.as_str() {
-                            Some("gradient") => Some(json!("gradient")),
-                            Some("colour") => Some(json!(FIRST_GROUND)),
-                            _ => None,
-                        });
-                        if let Some(GroundFill::Color(rgb)) = c.ground_fill {
-                            let (q, _) = colour(
-                                ui,
-                                cx.busy,
-                                cx.id("cubemap.ground_colour"),
-                                rgb,
-                                "Cubemap ground colour",
-                            );
-                            edit = edit.or(q.map(|v| Some(json!(v))));
-                        }
-                        (edit, r)
-                    })
-                    .inner
-                });
-                put(f.field, e);
-                let f = find(&views, "cubemap.horizon");
-                let e = cx.row(ui, f, |ui| {
-                    let (p, r) = num(
-                        ui,
-                        cx.busy,
-                        cx.id(f.field),
-                        c.horizon,
-                        -45.0..=45.0,
-                        0.5,
-                        "°",
-                        &name(f),
-                    );
-                    (p.map(|v| Some(json!(v))), r)
-                });
-                put(f.field, e);
-            });
             grid(ui, &cx, "Look", |ui| {
                 let f = find(&views, "cubemap.style");
                 let e = cx.row(ui, f, |ui| {
@@ -451,10 +407,9 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                 });
                 put(f.field, e);
                 let f = find(&views, "cubemap.blur");
-                // Blur the engine fills (a photo, a style, a preset) cannot be unticked: clearing the key changes
+                // Blur the engine fills (a style, a preset) cannot be unticked: clearing the key changes
                 // nothing, so the tick is disabled with the reason (Note DT13).
                 let inherited = c.blur.is_some() && !f.edited;
-                let photo_auto = inherited && layout == Some(CubeLayout::Photo);
                 let e = cx.row(ui, f, |ui| {
                     ui.horizontal(|ui| {
                         let (tick, r) = ui
@@ -463,11 +418,8 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                             })
                             .inner;
                         if inherited {
-                            let why = if photo_auto {
-                                "photo default; set 0 for no blur".to_string()
-                            } else {
-                                format!("{}; set 0 for no blur", provenance_text(&f.provenance))
-                            };
+                            let why =
+                                format!("{}; set 0 for no blur", provenance_text(&f.provenance));
                             r.clone().on_disabled_hover_text(why);
                         }
                         let Some(v) = c.blur else {
@@ -483,9 +435,6 @@ pub fn cube_section(ui: &mut egui::Ui, model: &AppModel, key: &str) -> Edits {
                             "",
                             "Cubemap blur value",
                         );
-                        if photo_auto {
-                            ui.weak(PHOTO_BLUR);
-                        }
                         // Unticked is Off: the key goes.
                         (tick.map(|_| None).or(p.map(|v| Some(json!(v)))), r2)
                     })

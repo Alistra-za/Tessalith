@@ -131,23 +131,6 @@ fn hand_role_on_unnamed_file_makes_helper() {
 }
 
 #[test]
-fn hand_layer_role_makes_normal_layer() {
-    let d = fixture(
-        &["x_n.png", "x_extra.png"],
-        &files("x_extra", "helper.role = \"detailnorm\""),
-    );
-    let p = plan(d.path(), Target::Cs, &[]);
-    match job(&p, "x_extra.png").status {
-        JobStatus::NormalLayer { term } => {
-            assert_eq!(term.layer, LayerId::Detail);
-            assert!(!term.mask);
-            assert_eq!(term.prefix, None);
-        }
-        ref other => panic!("{other:?}"),
-    }
-}
-
-#[test]
 fn hand_role_beats_requested_subtype() {
     let d = fixture(
         &["x_ao.png"],
@@ -306,6 +289,7 @@ fn hand_role_warning_points_to_none() {
         members: vec![0],
         suffixes: Default::default(),
         shared_skin: false,
+        shares: vec![],
     };
     let img = engine::image::Rgba32F::new(64, 64, [0.5, 0.5, 0.5, 1.0]);
     let info = engine::image::SourceInfo {
@@ -388,6 +372,39 @@ fn joined_helper_packs_under_its_set_name() {
     }
 }
 
+/// Note HS2: the packed output of a joined helper is keyed under the set's name (`x_rmaos`), as policy reads it.
+#[test]
+fn a_files_key_on_a_joined_helpers_output_is_not_reported_unmatched() {
+    let toml = format!(
+        "{}{}",
+        files("x_mask", "helper.role = \"roughness\""),
+        "[files.\"x_rmaos\"]\npacking.fill.metallic = 200\n"
+    );
+    let d = fixture(&["x.png", "x_ao.png", "x_mask.png"], &toml);
+    let sink = Arc::new(VecSink::default());
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    let rep = Reporter::new(sink.clone(), "helper-roles");
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    // Precondition: policy reads the key (the set has no metallic map, so the fill lands).
+    assert_eq!(
+        packed(&p, "x_rmaos.dds").pack.as_ref().unwrap().channels[1],
+        ChannelSource::Fill {
+            role: RawMap::Metallic,
+            code: 200
+        }
+    );
+    let unmatched: Vec<_> = sink
+        .take()
+        .into_iter()
+        .filter(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == engine::codes::Code::CfgFileUnmatched))
+        .collect();
+    assert!(unmatched.is_empty(), "{unmatched:#?}");
+}
+
 /// Review fix round 3: a set base that itself ends in a term (`x_ao`) is not cut twice, and the packed output's own
 /// `[files]` key reaches it.
 #[test]
@@ -451,7 +468,7 @@ fn parse_set_helper_fields() {
 #[test]
 fn role_and_target_ids_round_trip() {
     let roles = HelperRole::all();
-    assert_eq!(roles.len(), 1 + 13 + 10);
+    assert_eq!(roles.len(), 1 + 13);
     for r in roles {
         assert_eq!(HelperRole::parse(&r.id()), Some(r), "{}", r.id());
     }

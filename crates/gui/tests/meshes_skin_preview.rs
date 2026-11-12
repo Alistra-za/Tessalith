@@ -160,10 +160,9 @@ fn the_render_thread_applies_the_picks_and_keeps_them_across_a_reload() {
         env!("CARGO_MANIFEST_DIR"),
         "/../render3d/tests/fixtures/standin"
     ));
-    let f = render3d::locate::fingerprint(&standin, None).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let mut v = Viewport3d::new(Some(f.clone()));
-    v.on_located(Ok(Some(f)));
+    let mut v = Viewport3d::new();
+    v.use_shader_folder(standin);
     v.cache_dir = Some(cache.path().to_path_buf());
     let mut mat = MaterialState::builtin_default();
     mat.shader_type = 5;

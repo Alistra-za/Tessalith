@@ -1,11 +1,8 @@
-//! Generate's provenance and the JSON hashes are recorded at write time in `<project root>/_sdc/generated.json`
-//! (Note FC11). The stale-outputs list these tests once shared a file with is gone (Note FM).
+//! The JSON hashes are recorded at write time in `<project root>/_sdc/generated.json` (Note FC11). The stale-outputs
+//! list these tests once shared a file with is gone (Note FM).
 mod support;
-use engine::shader::Shader;
-use sdc_gui::model::from_normal::GenMap;
 use sdc_gui::model::review::{DiskState, JsonKind};
 use sdc_gui::model::AppModel;
-use std::path::Path;
 use std::time::Duration;
 use support::*;
 
@@ -15,49 +12,6 @@ const ROCK_SET: &str = "landscape/rock01";
 fn idle(m: &mut AppModel) {
     assert!(m.wait_idle(WAIT), "the model did not settle");
 }
-/// `pbr_opened_plain` with a relief normal, so Generate makes a height map; the shader pick is unsaved.
-fn relief_rock(d: &Path) -> AppModel {
-    let mut m = pbr_opened_plain(d);
-    relief_normal(&d.join("textures/landscape"), "rock01_normal.png", 64);
-    m.replan();
-    idle(&mut m);
-    m
-}
-
-/// CO39/CO51, superseded: Generate records its provenance at write time, so closing without Save keeps the
-/// generated file "generated here".
-#[test]
-fn generate_then_close_without_save_is_still_ours() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = relief_rock(d.path());
-    assert!(
-        m.sets_doc.as_ref().unwrap().is_dirty(),
-        "the unsaved shader pick"
-    );
-    m.open_gen(ROCK_SET, Some(GenMap::Height));
-    m.gen_generate();
-    idle(&mut m);
-    assert!(d
-        .path()
-        .join("textures/landscape/rock01_p_generated.png")
-        .is_file());
-    let root = d.path().join("textures");
-    // Close without Save: a new session opens the folder.
-    drop(m);
-    let mut m = opened_as_the_app(root, d.path().join("export"));
-    m.set_shader(ROCK_SET, Some(Shader::Pbr));
-    idle(&mut m);
-    assert!(
-        m.provenance("landscape/rock01_p_generated.png").is_some(),
-        "the provenance came back from the sidecar"
-    );
-    assert_eq!(
-        m.gen_offer(ROCK_SET, GenMap::Height),
-        Ok(()),
-        "generated here"
-    );
-}
-
 /// BD2/P21, superseded: the JSON hash is recorded at write time, so discarding the unsaved edits after an export
 /// does not make the next export ask about Tessalith's own JSON.
 #[test]

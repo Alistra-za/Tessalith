@@ -1,5 +1,5 @@
 //! Helper textures Task 8 (Note DY17): the helper panel edits the helper file's `helper.*` keys in `sdc.toml` (role,
-//! fills, read from, invert; `rnm.target` for normal-type roles), one undo step each. Temp dirs only.
+//! fills, read from, invert), one undo step each. Temp dirs only.
 mod support;
 use eframe::egui;
 use egui::accesskit::Role;
@@ -108,6 +108,45 @@ fn click(h: &mut H, name: &str) {
     settle(h);
 }
 
+/// Clicks the Helper tick (Note HI4).
+fn tick(h: &mut H) {
+    h.get_by_role_and_label(Role::CheckBox, "Helper").click();
+    settle(h);
+}
+
+fn ticked(h: &H) -> bool {
+    h.get_by_role_and_label(Role::CheckBox, "Helper")
+        .accesskit_node()
+        .toggled()
+        == Some(egui::accesskit::Toggled::True)
+}
+
+/// The rects of the `role` controls named `name` in the centre column.
+fn in_centre(h: &H, role: Role, name: &str) -> Vec<egui::Rect> {
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre");
+    h.query_all_by_role_and_label(role, name)
+        .map(|n| n.rect())
+        .filter(|r| c.contains(r.center()))
+        .collect()
+}
+
+fn toml_text(h: &H) -> String {
+    h.state().project.as_ref().unwrap().text()
+}
+
+/// The Helper row reads "set by you", with the Reset role button (a `helper.role = "none"` file, Note HI6).
+fn set_by_you_on_the_helper_row(h: &H) {
+    let row = h.get_by_role_and_label(Role::CheckBox, "Helper").rect();
+    let on_row = |r: egui::Rect| r.center().y > row.min.y && r.center().y < row.max.y;
+    assert!(
+        h.query_all_by_label("set by you").any(|n| on_row(n.rect())),
+        "the Helper row says set by you"
+    );
+    assert!(on_row(
+        h.get_by_role_and_label(Role::Button, "Reset role").rect()
+    ));
+}
+
 /// The Textures column's helper row for `file`, by its accessible name.
 fn row_name(h: &H, file: &str) -> Option<String> {
     let prefix = format!("Helper {file}:");
@@ -171,7 +210,7 @@ fn not_a_helper_makes_a_tile() {
     let d = tempfile::tempdir().unwrap();
     let mut h = app(fixture(d.path(), &XSET, ""), "x_opacity.png");
     assert!(row_name(&h, "x_opacity.png").is_some());
-    pick(&mut h, "Helper role", "Not a helper");
+    tick(&mut h);
     assert_eq!(
         value(&h, "x_opacity.png", "helper.role"),
         Some(json!("none"))
@@ -184,7 +223,8 @@ fn not_a_helper_makes_a_tile() {
         .iter()
         .any(|&i| m.items[i].name == "x_opacity.png"));
     assert!(row_name(&h, "x_opacity.png").is_none(), "no helper row");
-    h.get_by_label("Not a helper (set by you)");
+    assert!(!ticked(&h));
+    set_by_you_on_the_helper_row(&h);
     click(&mut h, "Reset role");
     assert_eq!(value(&h, "x_opacity.png", "helper.role"), None);
     assert!(row_name(&h, "x_opacity.png").is_some(), "the row is back");
@@ -202,7 +242,11 @@ fn not_a_helper_leaves_a_subtype_key_alone() {
         row_name(&h, "x_opacity.png").is_some(),
         "hand-set role wins"
     );
-    pick(&mut h, "Helper role", "Not a helper");
+    tick(&mut h);
+    assert_eq!(
+        value(&h, "x_opacity.png", "helper.role"),
+        Some(json!("none"))
+    );
     assert_eq!(value(&h, "x_opacity.png", "subtype"), subtype);
     assert!(row_name(&h, "x_opacity.png").is_none());
     click(&mut h, "Reset role");
@@ -265,21 +309,6 @@ fn fills_reset_returns_to_suggestion() {
     assert_eq!(value(&h, "x_roughness.png", "helper.fills"), None);
     h.get_by_label("suggested");
     assert_eq!(h.query_all_by_label("Reset fills").count(), 0);
-}
-
-#[test]
-fn read_and_invert_hidden_for_normal_roles() {
-    let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_n.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
-    assert_eq!(h.query_all_by_label("Read from").count(), 0);
-    assert_eq!(h.query_all_by_label("Invert").count(), 0);
-    assert_eq!(h.query_all_by_label("Add fill target").count(), 0);
-    pick(&mut h, "Layer target", "CNR");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("cnr"))
-    );
 }
 
 #[test]
@@ -462,21 +491,25 @@ fn a_packed_target_is_named_by_its_output() {
     m.set_output_name(&set, Some("steel")).unwrap();
     idle(&mut m);
     let rep = m.item("x_roughness.png").unwrap().helper.clone().unwrap();
+    let tails = m.helper_tails(&rep);
     let rmaos = engine::helper::FillTarget::parse("rmaos.r").unwrap();
     let lost = engine::helper::FillTarget::parse("m.r").unwrap();
     assert_eq!(
-        sdc_gui::model::helpers::target_file(&rep, rmaos),
+        sdc_gui::model::helpers::target_file(&rep, rmaos, tails),
         "steel_rmaos"
     );
     // Final review M4: a target that did not land is named by the outputs' base name, like the rows beside it.
     assert_eq!(
-        sdc_gui::model::helpers::target_file(&rep, lost),
+        sdc_gui::model::helpers::target_file(&rep, lost, tails),
         "steel_m",
         "no output of its own: another output's base name"
     );
     // Final review K2: the colour output has no suffix, and its stem is the base too.
     let colour = engine::helper::FillTarget::Alpha(engine::helper::AlphaTarget::Diffuse);
-    assert_eq!(sdc_gui::model::helpers::target_file(&rep, colour), "steel");
+    assert_eq!(
+        sdc_gui::model::helpers::target_file(&rep, colour, tails),
+        "steel"
+    );
     let h = app(m, "x_roughness.png");
     h.get_by_role_and_label(Role::Button, "Stop filling RMAOS R");
     h.get_by_role_and_label(Role::Button, "Show steel_rmaos");
@@ -488,7 +521,7 @@ fn a_packed_target_is_named_by_its_output() {
 }
 
 /// Review pictures of the helper panel at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a GPU and
-/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test helper_panel -- --ignored shots`.
+/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helper_panel::shots -- --ignored`.
 #[test]
 #[ignore]
 fn shots() {
@@ -496,62 +529,24 @@ fn shots() {
         return;
     };
     let d = tempfile::tempdir().unwrap();
-    let files = [
-        "x.png",
-        "x_roughness.png",
-        "x_cnr.png",
-        "x_n.png",
-        "x_detailnorm.png",
-    ];
+    let files = ["x.png", "x_roughness.png", "x_cnr.png", "x_n.png"];
     let toml = "[files.\"x_roughness.png\"]\nhelper.fills = [\"rmaos.r\", \"cnr.a\"]\nhelper.read = \"g\"\n";
     for (w, hgt) in [(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)] {
-        for key in ["x_roughness.png", "x_detailnorm.png"] {
-            let mut m = fixture(d.path(), &files, toml);
-            m.select_item(key);
-            let mut h = Harness::builder()
-                .with_size(egui::vec2(w, hgt))
-                .with_pixels_per_point(1.0)
-                .wgpu()
-                .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-            sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-            h.run_steps(10);
-            let img = h.render().expect("render");
-            let stem = key.trim_end_matches(".png");
-            img.save(Path::new(&out).join(format!("helper-panel-{stem}-{w}.png")))
-                .expect("save png");
-        }
+        let key = "x_roughness.png";
+        let mut m = fixture(d.path(), &files, toml);
+        m.select_item(key);
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(w, hgt))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(10);
+        let img = h.render().expect("render");
+        let stem = key.trim_end_matches(".png");
+        img.save(Path::new(&out).join(format!("helper-panel-{stem}-{w}.png")))
+            .expect("save png");
     }
-}
-
-/// Review fix (DY17): a layer with no prefix in a set with `_cnr` and no `_n` blends into `_cnr` (Note W4); the panel
-/// shows the engine's target, and picking a value writes `rnm.target` even when it is the one shown.
-#[test]
-fn layer_target_follows_the_engine() {
-    let d = tempfile::tempdir().unwrap();
-    let files = ["x.png", "x_cnr.png", "x_detailnorm.png"];
-    let mut h = app(fixture(d.path(), &files, ""), "x_detailnorm.png");
-    let combo = h.get_by_role_and_label(Role::ComboBox, "Layer target");
-    assert_eq!(combo.accesskit_node().value().as_deref(), Some("CNR"));
-    pick(&mut h, "Layer target", "CNR");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("cnr"))
-    );
-    pick(&mut h, "Layer target", "Normal");
-    assert_eq!(
-        value(&h, "x_detailnorm.png", "rnm.target"),
-        Some(json!("n"))
-    );
-    let rep = h
-        .state()
-        .item("x_detailnorm.png")
-        .unwrap()
-        .helper
-        .clone()
-        .unwrap();
-    assert_eq!(rep.rnm_target, Some(engine::config::RnmTarget::N));
-    let combo = h.get_by_role_and_label(Role::ComboBox, "Layer target");
-    assert_eq!(combo.accesskit_node().value().as_deref(), Some("Normal"));
 }
 
 /// Review fix (DY17): picking the guessed role writes it, so it becomes assigned and replaces the diffuse's own
@@ -637,11 +632,8 @@ fn ordinary_image_can_become_a_helper() {
     assert_ne!(item(&h).kind, ItemKind::Helper, "a tile to start with");
     let steps = h.state().history.undo.len();
     let opened_type = value(&h, "x_mask.png", "subtype");
-    let combo = h.get_by_role_and_label(Role::ComboBox, "Helper role");
-    assert_eq!(
-        combo.accesskit_node().value().as_deref(),
-        Some("Not a helper")
-    );
+    assert!(!ticked(&h), "an unticked Helper box");
+    tick(&mut h);
     pick(&mut h, "Helper role", "Opacity");
     assert_eq!(
         value(&h, "x_mask.png", "helper.role"),
@@ -676,6 +668,11 @@ fn dds_has_no_helper_role_row() {
     let h = app(fixture(d.path(), &["x.png"], ""), "y_mask.dds");
     assert_eq!(h.state().item("y_mask.dds").unwrap().kind, ItemKind::Dds);
     assert_eq!(h.query_all_by_label("Helper role").count(), 0);
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::CheckBox, "Helper")
+            .count(),
+        0
+    );
     h.get_by_label_contains("Already a DDS file");
 }
 
@@ -686,9 +683,200 @@ fn read_only_disables_the_helper_role_row() {
         fixture(d.path(), &["x.png", "x_mask.png"], "target = [\n"),
         "x_mask.png",
     );
-    let n = h.get_by_role_and_label(Role::ComboBox, "Helper role");
+    let n = h.get_by_role_and_label(Role::CheckBox, "Helper");
     assert!(n.accesskit_node().is_disabled());
     n.hover();
     h.run();
     assert!(h.query_by_label_contains("sdc.toml is read-only").is_some());
+    // The role combo is off too, with the same reason. The tick can't be clicked here, so set the ticked state the
+    // tick keeps in egui temp data (`helper_panel::tick_id`, Note HI5).
+    h.ctx
+        .data_mut(|d| d.insert_temp(egui::Id::new(("helper-tick", "x_mask.png")), true));
+    h.run();
+    let role = h.get_by_role_and_label(Role::ComboBox, "Helper role");
+    assert!(role.accesskit_node().is_disabled());
+    role.hover();
+    h.run();
+    assert!(h.query_by_label_contains("sdc.toml is read-only").is_some());
+}
+
+/// Note HI4: the tick swaps Sub-type for the role list; nothing is written until a role is picked (HI5).
+#[test]
+fn ticking_helper_swaps_the_dropdown_and_writes_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET, ""), "x.png");
+    let sub = in_centre(&h, Role::ComboBox, "Sub-type");
+    assert_eq!(sub.len(), 1, "{sub:?}");
+    let (text, dirty) = (toml_text(&h), h.state().is_dirty());
+    tick(&mut h);
+    assert!(ticked(&h));
+    let role = in_centre(&h, Role::ComboBox, "Helper role");
+    assert_eq!(role.len(), 1, "{role:?}");
+    assert!(
+        (role[0].min - sub[0].min).length() <= 1.0
+            && (role[0].width() - sub[0].width()).abs() <= 1.0,
+        "Helper role {:?} where Sub-type was {:?}",
+        role[0],
+        sub[0]
+    );
+    let shown = h.get_by_role_and_label(Role::ComboBox, "Helper role");
+    assert_eq!(
+        shown.accesskit_node().value().as_deref(),
+        Some("Pick a role…")
+    );
+    h.get_by_label("pick a role to make this a helper");
+    assert!(in_centre(&h, Role::ComboBox, "Sub-type").is_empty());
+    assert_eq!(toml_text(&h), text);
+    assert_eq!(h.state().is_dirty(), dirty);
+}
+
+#[test]
+fn picking_a_role_makes_it_a_helper() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET, ""), "x.png");
+    tick(&mut h);
+    pick(&mut h, "Helper role", "Glossiness");
+    assert_eq!(
+        value(&h, "x.png", engine::helper::ROLE_FIELD),
+        Some(json!("glossiness"))
+    );
+    assert_eq!(h.state().item("x.png").unwrap().kind, ItemKind::Helper);
+    // The helper panel, ticked.
+    h.get_by_role_and_label(Role::ComboBox, "Read from");
+    assert!(ticked(&h));
+}
+
+#[test]
+fn unticking_before_picking_goes_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET, ""), "x.png");
+    let text = toml_text(&h);
+    tick(&mut h);
+    tick(&mut h);
+    assert!(!ticked(&h));
+    assert_eq!(in_centre(&h, Role::ComboBox, "Sub-type").len(), 1);
+    assert!(in_centre(&h, Role::ComboBox, "Helper role").is_empty());
+    assert_eq!(toml_text(&h), text);
+}
+
+#[test]
+fn the_tick_stays_on_its_own_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &["x.png", "y.png"], ""), "x.png");
+    let text = toml_text(&h);
+    tick(&mut h);
+    h.state_mut().select_item("y.png");
+    h.run();
+    h.run();
+    assert!(!ticked(&h), "y reads unticked");
+    assert_eq!(in_centre(&h, Role::ComboBox, "Sub-type").len(), 1);
+    h.state_mut().select_item("x.png");
+    h.run();
+    h.run();
+    assert!(ticked(&h), "x is still ticked");
+    assert_eq!(in_centre(&h, Role::ComboBox, "Helper role").len(), 1);
+    assert_eq!(toml_text(&h), text);
+}
+
+#[test]
+fn unticking_a_helper_writes_none() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET, ""), "x_roughness.png");
+    assert!(ticked(&h), "a helper reads ticked");
+    tick(&mut h);
+    assert_eq!(
+        value(&h, "x_roughness.png", engine::helper::ROLE_FIELD),
+        Some(json!("none"))
+    );
+    assert_eq!(
+        in_centre(&h, Role::ComboBox, "Sub-type").len(),
+        1,
+        "the texture panel"
+    );
+    assert!(!ticked(&h));
+    set_by_you_on_the_helper_row(&h);
+    click(&mut h, "Reset role");
+    assert_eq!(
+        value(&h, "x_roughness.png", engine::helper::ROLE_FIELD),
+        None
+    );
+    assert!(ticked(&h), "the guessed helper again");
+}
+
+#[test]
+fn a_helper_role_list_has_no_not_a_helper_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = app(fixture(d.path(), &XSET, ""), "x_roughness.png");
+    h.get_by_role_and_label(Role::ComboBox, "Helper role")
+        .click();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Glossiness");
+    assert_eq!(h.query_all_by_label("Not a helper").count(), 0);
+}
+
+/// A failed image has no Type group; its Helper tick stays reachable, and ticked it offers the roles (Note HI4).
+#[test]
+fn a_jobless_image_keeps_the_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path(), &XSET, "");
+    let i = m.items.iter().position(|i| i.key == "x.png").unwrap();
+    m.items[i].status = sdc_gui::model::items::ItemStatus::Failed("no good".into());
+    m.items[i].job = None;
+    let mut h = app(m, "x.png");
+    h.get_by_label("Failed: no good");
+    assert!(!ticked(&h));
+    tick(&mut h);
+    assert!(ticked(&h));
+    h.get_by_role_and_label(Role::ComboBox, "Helper role");
+}
+
+const MASK_ROUGHNESS: &str = "[files.\"x_mask.png\"]\nhelper.role = \"roughness\"\n";
+
+fn packed_keys(m: &AppModel) -> Vec<String> {
+    m.items
+        .iter()
+        .filter(|i| i.kind == ItemKind::Packed)
+        .map(|i| i.key.clone())
+        .collect()
+}
+
+/// Note HS2: a joined helper's packed output is keyed as the engine reads it, under the set's name.
+#[test]
+fn a_joined_helpers_packed_output_is_keyed_as_the_set() {
+    let d = tempfile::tempdir().unwrap();
+    let m = fixture(
+        d.path(),
+        &["x.png", "x_ao.png", "x_mask.png"],
+        MASK_ROUGHNESS,
+    );
+    assert!(m.item("x_rmaos").is_some(), "{:?}", packed_keys(&m));
+    assert!(m.item("x_mask_rmaos").is_none());
+}
+
+/// Note HS2 (Review Focus 3): a helper whose name differs from the set's in letter case keeps one packed item, and a
+/// fill under its key reaches the job.
+#[test]
+fn a_joined_helper_differing_in_case_keeps_one_item() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(
+        d.path(),
+        &["X.png", "X_ao.png", "x_mask.png"],
+        MASK_ROUGHNESS,
+    );
+    let keys = packed_keys(&m);
+    assert_eq!(keys.len(), 1, "{keys:?}");
+    m.set_pack_fill(&keys[0], engine::config::RawMap::Metallic, Some(77));
+    idle(&mut m);
+    let job = m
+        .item(&keys[0])
+        .and_then(|i| i.job.as_ref())
+        .expect("the job");
+    assert_eq!(
+        job.pack.as_ref().unwrap().channels[1],
+        engine::pack::ChannelSource::Fill {
+            role: engine::config::RawMap::Metallic,
+            code: 77
+        },
+        "{keys:?}"
+    );
 }

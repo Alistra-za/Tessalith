@@ -401,6 +401,7 @@ mod tests {
             domain,
             roughness_r_squared: false,
             nonfinite_samples: 0,
+            source_coverage: None,
         }
     }
 
@@ -537,6 +538,7 @@ mod tests {
             domain: Domain::Stored,
             roughness_r_squared: true,
             nonfinite_samples: 0,
+            source_coverage: None,
         };
         let c = build_chain(&w, &p);
         assert!(

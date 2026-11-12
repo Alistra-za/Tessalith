@@ -239,19 +239,6 @@ pub fn files_table_schema(gen: &mut schemars::SchemaGenerator) -> schemars::Sche
                 "type": "boolean"
             }),
         );
-        let target = gen.subschema_for::<crate::config::RnmTarget>();
-        let mut rnm = gen
-            .definitions()
-            .get("PartialRnmSpec")
-            .cloned()
-            .unwrap_or_default();
-        if let Some(Value::Object(rp)) = rnm.get_mut("properties") {
-            rp.insert("target".into(), target.to_value());
-        }
-        gen.definitions_mut().insert("FileRnmSpec".into(), rnm);
-        if let Some(Value::Object(r)) = props.get_mut("rnm") {
-            r.insert("$ref".into(), format!("{prefix}FileRnmSpec").into());
-        }
         // Note DY: the helper-texture selectors.
         let roles: Vec<String> = crate::helper::HelperRole::all()
             .iter()

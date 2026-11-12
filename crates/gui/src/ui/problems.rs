@@ -258,7 +258,10 @@ fn fix_button(
             };
             let (label, name) = match miss {
                 Missing::NoFilesLeft => ("Delete set", format!("Delete set {id}")),
-                _ => ("Remove from set", format!("Remove {} from {id}", miss.text())),
+                _ => (
+                    "Remove from set",
+                    format!("Remove {} from {id}", miss.text()),
+                ),
             };
             let b = ui.add_enabled(sets_off.is_none(), egui::Button::new(label));
             b.widget_info(|| {
@@ -270,13 +273,6 @@ fn fix_button(
             }
             .clicked()
         }
-        // Review Focus 3: nothing is written from the row; the Generate dialog's own button writes.
-        Fix::Regenerate(_) => button(
-            ui,
-            "Regenerate…",
-            "Open Generate with this map's last settings; nothing is written until you click Generate there",
-            off,
-        ),
         Fix::RebuildZ(k) => {
             let on = m
                 .project
@@ -669,22 +665,6 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
             if let At::Set { id, .. } = at {
                 if let Err(why) = model.remove_missing(&id, &miss) {
                     model.status_line = why;
-                }
-            }
-        }
-        Fix::Regenerate(k) => {
-            let map = model.provenance(&k).map(|p| p.kind);
-            let set = model.item(&k).and_then(|i| i.set_key.clone());
-            let id = crate::model::sets::views(model)
-                .iter()
-                .find(|v| Some(&v.key) == set.as_ref())
-                .map(|v| v.id.clone());
-            match id {
-                Some(id) => model.open_gen(&id, map),
-                None => {
-                    model.status_line = format!(
-                        "Cannot regenerate {k}: it is no longer in a set; generate it from its set"
-                    )
                 }
             }
         }

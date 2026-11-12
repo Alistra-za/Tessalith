@@ -14,7 +14,7 @@ fn compile(
     _hash: &str,
 ) -> Result<Compiled, String> {
     let rel = file.strip_prefix(root).unwrap_or(file);
-    let src = SourceSet::new(root.to_path_buf()).get(rel)?;
+    let src = SourceSet::new(render3d::ShaderSource::Folder(root.to_path_buf())).get(rel)?;
     render3d::compile::compile(&src, d, target, cache)
 }
 
@@ -301,12 +301,17 @@ fn cbuffer_writer_sets_by_name() {
     assert_eq!(&w.bytes()[24..28], &0.25f32.to_le_bytes());
 }
 
-/// Opt-in: compiles the user's installed CS Lighting.hlsl (Global Constraints path).
-/// `SDC_CS_SHADERS=...\Shaders cargo test -p render3d -- --ignored installed_cs`
+/// Compiles the bundled CS `Lighting.hlsl` (Note GT).
 #[test]
-#[ignore]
-fn installed_cs() {
-    let root = std::path::PathBuf::from(std::env::var("SDC_CS_SHADERS").unwrap());
+fn bundled_cs_lighting_compiles() {
+    let compile =
+        |_file: &Path, _root: &Path, d: &Defines, target: &str, cache: &Path, _h: &str| {
+            let src = SourceSet::new(render3d::ShaderSource::Bundled)
+                .get(Path::new("Lighting.hlsl"))
+                .unwrap();
+            render3d::compile::compile(&src, d, target, cache)
+        };
+    let root = std::path::PathBuf::new();
     let cache = tempfile::tempdir().unwrap();
     for (st, skinned, target, stage) in [
         (0, true, "ps_5_0", Stage::Pixel),
@@ -525,7 +530,7 @@ fn composite_reflects_uavs_and_threads() {
         env!("CARGO_MANIFEST_DIR"),
         "/tests/fixtures/standin"
     ));
-    let src = SourceSet::new(root)
+    let src = SourceSet::new(render3d::ShaderSource::Folder(root))
         .get(Path::new("DeferredCompositeCS.hlsl"))
         .unwrap();
     let cache = tempfile::tempdir().unwrap();

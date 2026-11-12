@@ -1,5 +1,5 @@
 //! Batch planning of cube jobs (cubemap support v1, DECISIONS DS8): six face files merge into one job, and a single
-//! cross, strip or cube DDS gets its layout or an unclear-layout verdict.
+//! cross, strip or cube DDS gets its layout or a not-a-cube-source verdict.
 use super::{CubeJob, CubeSource, FACES};
 use crate::api::SkippedFile;
 use crate::codes::{Code, Warning};
@@ -8,6 +8,9 @@ use crate::group::fold;
 use crate::policy::{cube_layout_of, JobStatus, ResolvedJob};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+
+/// What a cube source is, as the refusal message and the GUI name it (Note GU2).
+pub const CUBE_SOURCES: &str = "six faces, a cross or a strip";
 
 /// A trailing face tag (`_posx` .. `_negz`, `_px` .. `_nz`, ASCII case-insensitive): the stem without it and the
 /// face index (+X -X +Y -Y +Z -Z).
@@ -107,7 +110,12 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
         let verdict = match layout {
             None => JobStatus::Unresolved {
                 reasons: vec![format!(
-                    "cube layout unclear for {w}x{h}: set cubemap.layout for this file in sdc.toml (hcross, vcross, hstrip, vstrip, equirect, mirror_ball, angular, photo)"
+                    "not a cube source: {w}x{h} is not {CUBE_SOURCES}. Change this file's sub-type.{}",
+                    if w == 2 * h {
+                        " 3.0 no longer reads panoramas: convert it to six faces, a cross or a strip first."
+                    } else {
+                        ""
+                    }
                 )],
                 needs: vec![crate::policy::Need::CubeLayout],
             },
@@ -115,7 +123,10 @@ pub fn plan_cubes(facts: &InputFacts, jobs: &mut Vec<ResolvedJob>, skipped: &mut
                 let msg = if l == CubeLayout::Faces {
                     "cubemap.layout faces is six separate files, not one image".to_string()
                 } else {
-                    format!("{} layout does not fit {w}x{h}", format!("{l:?}").to_lowercase())
+                    format!(
+                        "{} layout does not fit {w}x{h}",
+                        format!("{l:?}").to_lowercase()
+                    )
                 };
                 j.warnings.push(Warning::new(Code::CubeFaces, msg));
                 JobStatus::Error {

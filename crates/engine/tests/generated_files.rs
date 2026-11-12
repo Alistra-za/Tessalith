@@ -109,6 +109,9 @@ fn other_generated_names_plan_as_on_main() {
         "wall_n.png",
         "wall_n_generated.png",
         "wall_d_generated.png",
+        // Note GY1: a normal that uses each as its base, so neither is a lone unknown suffix.
+        "wall_n_generated_n.png",
+        "wall_d_generated_n.png",
     ] {
         put(d.path(), n, 16, |x, y| (x * 8 + y) as u8);
     }
@@ -704,30 +707,6 @@ fn a_generated_ao_loses_to_any_real_ao_source() {
             .values()
             .any(|v| *v == Provenance::Source("rock_ao_generated.png:R".into()))));
     }
-    // the bent layer's AO is the real one
-    let d = tempfile::tempdir().unwrap();
-    put(d.path(), "rock.png", 16, |x, _| x as u8 * 8);
-    put_rgb(d.path(), "rock_n.png", 16, |_, _| [128, 128, 255]);
-    put_rgb(d.path(), "rock_bent.png", 16, |x, y| {
-        [(x * 8) as u8, (y * 8) as u8, 255]
-    });
-    put(d.path(), "rock_ao_generated.png", 16, |_, y| {
-        100 + y as u8 * 8
-    });
-    put(d.path(), "rock_ao.png", 16, |x, _| 120 + x as u8);
-    let (p, _) = plan(d.path(), Target::Cs, &[]);
-    let ao = job(&p, "rock_n.png")
-        .rnm
-        .as_ref()
-        .unwrap()
-        .ao
-        .clone()
-        .unwrap();
-    assert!(
-        ao.file.path.ends_with("rock_ao.png"),
-        "{}",
-        ao.file.path.display()
-    );
 }
 
 #[test]
@@ -803,40 +782,6 @@ fn a_generated_ao_fills_b_with_an_info_note_instead_of_defaulted() {
     assert!(without
         .iter()
         .any(|w| w.code == Code::PackDefaulted && w.data["channel"] == "B"));
-}
-
-#[test]
-fn a_bent_layer_set_weights_by_the_generated_ao() {
-    let ao_file = |real: bool| {
-        let d = tempfile::tempdir().unwrap();
-        put(d.path(), "rock.png", 16, |x, _| x as u8 * 8);
-        put_rgb(d.path(), "rock_n.png", 16, |_, _| [128, 128, 255]);
-        put_rgb(d.path(), "rock_bent.png", 16, |x, y| {
-            [(x * 8) as u8, (y * 8) as u8, 255]
-        });
-        put(d.path(), "rock_ao_generated.png", 16, |_, y| {
-            100 + y as u8 * 8
-        });
-        if real {
-            put(d.path(), "rock_ao.png", 16, |x, _| 120 + x as u8);
-        }
-        let (p, _) = plan(d.path(), Target::Cs, &[]);
-        let ao = job(&p, "rock_n.png")
-            .rnm
-            .as_ref()
-            .unwrap()
-            .ao
-            .clone()
-            .unwrap();
-        ao.file
-            .path
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned()
-    };
-    assert_eq!(ao_file(false), "rock_ao_generated.png");
-    assert_eq!(ao_file(true), "rock_ao.png");
 }
 
 // ---- Task 11: a generated AO on a pre-packed `_rmaos` image ----
@@ -993,27 +938,6 @@ fn a_prepacked_rmaos_with_baked_ao_keeps_its_b() {
         a.keys()
     );
     assert_eq!(a, b, "the output equals the run without the generated file");
-    // A bent layer weights by the image's B, not by the replaced generated file.
-    let d = tempfile::tempdir().unwrap();
-    prepacked_rock(d.path(), baked, true);
-    put_rgb(d.path(), "rock_n.png", 16, |_, _| [128, 128, 255]);
-    put_rgb(d.path(), "rock_bent.png", 16, |x, y| {
-        [(x * 8) as u8, (y * 8) as u8, 255]
-    });
-    let (p, _) = plan(d.path(), Target::Cs, &[]);
-    let ao = job(&p, "rock_n.png")
-        .rnm
-        .as_ref()
-        .unwrap()
-        .ao
-        .clone()
-        .unwrap();
-    assert!(
-        ao.file.path.ends_with("rock_rmaos.png"),
-        "{}",
-        ao.file.path.display()
-    );
-    assert_eq!(ao.channel, 2);
 }
 
 // ---- A separate specular beside a pre-packed image with a flat alpha (Note HC1) ----

@@ -176,9 +176,24 @@ pub(super) fn border_of(ui: &egui::Ui, status: &ItemStatus) -> egui::Color32 {
     }
 }
 
-/// The hover text of a tile: what the status means, then the warnings.
-fn tile_tooltip(item: &TextureItem) -> String {
+/// A tile's border: Note HF1 (agent ruling): a no-set texture's is never amber, its questions count for nothing.
+fn tile_border(ui: &egui::Ui, status: &ItemStatus, no_set: bool) -> egui::Color32 {
+    if no_set && *status == ItemStatus::NeedsDecision {
+        return ui.visuals().widgets.noninteractive.bg_stroke.color;
+    }
+    border_of(ui, status)
+}
+
+/// The hover text of a tile: what the status means, then the warnings. A no-set texture says `No set` in place of
+/// its question and its warnings (Note HF1).
+fn tile_tooltip(item: &TextureItem, no_set: bool) -> String {
     let mut lines = vec![item.key.clone()];
+    if no_set {
+        lines.push("No set".to_string());
+        if !matches!(item.status, ItemStatus::Failed(_) | ItemStatus::Error(_)) {
+            return lines.join("\n");
+        }
+    }
     match &item.status {
         ItemStatus::Failed(e) => lines.push(format!("Failed: {e}")),
         ItemStatus::Error(codes) => lines.push(format!(
@@ -194,7 +209,9 @@ fn tile_tooltip(item: &TextureItem) -> String {
         ItemStatus::PackedInto(j) => lines.push(format!("Packed into {j}")),
         ItemStatus::Ready => {}
     }
-    lines.extend(item.warnings.iter().map(|w| w.message.clone()));
+    if !no_set {
+        lines.extend(item.warnings.iter().map(|w| w.message.clone()));
+    }
     lines.join("\n")
 }
 
@@ -209,6 +226,7 @@ fn tile(
     let inner_h = tile_height(ui, size) - 2.0 * (TILE_MARGIN + TILE_STROKE);
     let item = &model.items[idx];
     let selected = chosen.contains(&item.key);
+    let no_set = model.is_no_set(&item.key);
     let fill = if selected {
         ui.visuals().selection.bg_fill.linear_multiply(0.4)
     } else {
@@ -227,7 +245,10 @@ fn tile(
         .read_as_of(&key)
         .map(|a| a.rsplit(['/', '\\']).next().unwrap_or_default().to_string());
     let resp = egui::Frame::default()
-        .stroke(egui::Stroke::new(TILE_STROKE, border_of(ui, &item.status)))
+        .stroke(egui::Stroke::new(
+            TILE_STROKE,
+            tile_border(ui, &item.status, no_set),
+        ))
         .fill(fill)
         .inner_margin(TILE_MARGIN)
         .show(ui, |ui| {
@@ -245,7 +266,9 @@ fn tile(
                 }
                 ui.add(egui::Label::new(egui::RichText::new(&item.name).small()).truncate());
                 let mut badges = vec![];
-                if item.warnings.iter().any(super::counts_toward_badge) {
+                if no_set {
+                    badges.push("No set".to_string());
+                } else if item.warnings.iter().any(super::counts_toward_badge) {
                     badges.push("⚠".to_string());
                 }
                 if let ItemStatus::PackedInto(j) = &item.status {
@@ -257,7 +280,7 @@ fn tile(
                 if let Some(a) = &read_as {
                     badges.push(format!("read as {a}"));
                 }
-                let ready = crate::model::bottom::tile_ready(item);
+                let ready = !no_set && crate::model::bottom::tile_ready(item);
                 ui.horizontal(|ui| {
                     if ready {
                         super::status::dot(ui, super::status::Status::Ready);
@@ -271,11 +294,11 @@ fn tile(
         })
         .response
         .interact(egui::Sense::click_and_drag())
-        .on_hover_text(tile_tooltip(item));
+        .on_hover_text(tile_tooltip(item, no_set));
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).
-    let base = border_of(ui, &item.status);
+    let base = tile_border(ui, &item.status, no_set);
     let stroke = interact_stroke(ui, &resp, base);
     if stroke != base && !dim {
         ui.painter().rect_stroke(
@@ -590,16 +613,24 @@ fn helper_row(
         return;
     };
     let key = item.key.clone();
+    // Note HF1: a no-set helper reads `No set` in place of its role and where it goes.
+    let no_set = model.is_no_set(&key);
     let target = crate::model::items::helper_target_text(&h);
     let role = h.role.label();
     // Registered before the cells, so the truncated labels keep their hover (the topmost widget wins the click).
     let resp = ui.interact(
         rect,
         ui.id().with(("helper-row", &key)),
-        egui::Sense::click(),
+        egui::Sense::click_and_drag(),
     );
+    // Note HH5: dropped on a set card, as a tile is (a no-set helper is on no card, so this is its one way there).
+    resp.dnd_set_drag_payload(crate::ui::sets_column::DragItem(key.clone()));
     let by_you = if h.role_hand_set { " (set by you)" } else { "" };
-    let name = format!("Helper {}: {role}{by_you}, {target}", item.name);
+    let name = if no_set {
+        format!("Helper {}: No set", item.name)
+    } else {
+        format!("Helper {}: {role}{by_you}, {target}", item.name)
+    };
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
     if chosen.contains(&key) {
         ui.painter().rect_filled(
@@ -640,14 +671,23 @@ fn helper_row(
                 |ui| {
                     // The name keeps at least half the row; right to left: the chip, then the target.
                     ui.set_max_width(width * 0.5);
+                    if no_set {
+                        ui.add(egui::Label::new(egui::RichText::new("No set").weak()).truncate());
+                        return;
+                    }
                     role_chip(ui, &role, h.role_hand_set);
-                    let shown = if h.fills.is_empty() {
+                    let shown = if let Some(sets) = crate::model::items::used_by(&h) {
+                        format!("used by {sets}")
+                    } else if h.fills.is_empty() {
                         "not used".to_string()
                     } else {
                         format!("→ {}", target.trim_start_matches("fills "))
                     };
                     ui.add(egui::Label::new(egui::RichText::new(shown).weak()).truncate())
-                        .on_hover_text(crate::model::items::helper_target_files(&h));
+                        .on_hover_text(crate::model::items::helper_target_files(
+                            &h,
+                            model.helper_tails(&h),
+                        ));
                 },
             );
     });
@@ -1084,9 +1124,41 @@ pub fn set_label(export_root: &str, key: &str) -> String {
     }
 }
 
+/// Note HF6: the "Move to group" entry and its submenu, from `model.group_entries` (the header entry first). One
+/// source for the set card's menu and the bulk menu. Returns the entry's response and the clicked choice.
+pub(super) fn group_submenu(
+    ui: &mut egui::Ui,
+    entries: &[MenuEntry],
+) -> (egui::Response, Option<MenuAction>) {
+    let (head, items) = entries.split_first().expect("the header entry comes first");
+    let mut picked = None;
+    let r = ui
+        .add_enabled_ui(head.disabled.is_none(), |ui| {
+            ui.menu_button(&head.label, |ui| {
+                for l in items {
+                    let r = ui.add_enabled(l.disabled.is_none(), egui::Button::new(&l.label));
+                    let r = match &l.disabled {
+                        Some(why) => r.on_disabled_hover_text(why),
+                        None => r,
+                    };
+                    if r.clicked() {
+                        picked = Some(l.action.clone());
+                        ui.close();
+                    }
+                }
+            })
+        })
+        .response;
+    let r = match &head.disabled {
+        Some(why) => r.on_disabled_hover_text(why),
+        None => r,
+    };
+    (r, picked)
+}
+
 /// F3a D4: a right-click menu drawn from `entries` under its count title; the members-of-kind entries go in a
-/// "Select members of kind" submenu, the slot menu's links in "From another set". The menus are lists so F3b can
-/// append. Returns the clicked action.
+/// "Select members of kind" submenu, the slot menu's links in "From another set", the group choices in "Move to
+/// group". The menus are lists so F3b can append. Returns the clicked action.
 pub(super) fn bulk_menu(
     ui: &mut egui::Ui,
     title: &str,
@@ -1102,7 +1174,23 @@ pub(super) fn bulk_menu(
     let (links, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest
         .into_iter()
         .partition(|e| matches!(e.action, MenuAction::SlotLink { .. }));
+    // Note HF6: the group choices go in the "Move to group" submenu, which its header entry draws.
+    let (groups, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest.into_iter().partition(|e| {
+        matches!(
+            e.action,
+            MenuAction::ToGroup(_) | MenuAction::ToNewGroup | MenuAction::ToNoGroup
+        )
+    });
     for e in rest {
+        if e.action == MenuAction::MoveToGroup {
+            let all: Vec<MenuEntry> = std::iter::once(e)
+                .chain(groups.iter().copied())
+                .cloned()
+                .collect();
+            let (_, p) = group_submenu(ui, &all);
+            picked = p.or(picked);
+            continue;
+        }
         if e.action == MenuAction::FromAnotherSet {
             let r = ui
                 .add_enabled_ui(e.disabled.is_none(), |ui| {

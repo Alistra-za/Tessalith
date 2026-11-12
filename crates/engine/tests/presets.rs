@@ -1189,6 +1189,100 @@ fn removed_encoder_keys_and_codes_are_named() {
     );
 }
 
+/// Note GU2: the four single-image cube layouts 3.0 removed are refused by value wherever `cubemap.layout` sits
+/// (config defaults, a `[files]` entry, a rule, a user preset, `--set`); the kept layouts still load.
+#[test]
+fn a_removed_layout_is_refused_everywhere() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for layout in ["equirect", "mirror_ball", "angular", "photo"] {
+        let table = format!("cubemap = {{ layout = \"{layout}\" }}");
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.hdr\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"sky.hdr\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        for set in [
+            format!("cubemap.layout={layout}"),
+            format!("file:sky.hdr.cubemap.layout={layout}"),
+        ] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains("cubemap.layout") && e.contains("removed in 3.0"),
+                "{layout}: {e}"
+            );
+            assert!(e.contains("six faces, a cross or a strip"), "{layout}: {e}");
+        }
+    }
+    for layout in ["faces", "hcross", "vcross", "hstrip", "vstrip"] {
+        ConfigFile::parse(
+            &format!("[defaults]\ncubemap = {{ layout = \"{layout}\" }}\n"),
+            "sdc.toml",
+        )
+        .unwrap();
+        engine::overrides::parse_set(&format!("cubemap.layout={layout}")).unwrap();
+    }
+}
+
+/// Note GU3: `cubemap.ground_fill` and `cubemap.horizon` are refused with the removal message in a project's defaults,
+/// a `[files]` entry, a rule, a user preset and `--set` (with and without `file:`); the kept keys still load.
+#[test]
+fn ground_fill_and_horizon_are_refused() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (key, val) in [("ground_fill", "\"gradient\""), ("horizon", "-5.0")] {
+        let table = format!("cubemap = {{ {key} = {val} }}");
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.hdr\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"sky.hdr\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        for set in [
+            format!("cubemap.{key}={val}"),
+            format!("file:sky.hdr.cubemap.{key}={val}"),
+        ] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains(&format!("cubemap.{key}")) && e.contains("removed in 3.0"),
+                "{key}: {e}"
+            );
+        }
+    }
+    ConfigFile::parse("[defaults]\ncubemap = { yaw = 90.0 }\n", "sdc.toml").unwrap();
+}
+
 #[test]
 fn an_allow_list_naming_an_nvtt_code_is_named() {
     for code in ["ENC-NVTT-MISSING", "ENC-NVTT-VERSION", "ENC-NVTT-FAILED"] {
@@ -1240,6 +1334,76 @@ fn removed_check_codes_in_allow_lists_are_named() {
     }
     // The checks that stay are still allowable.
     assert!(Code::parse_allow("CHK-PARALLAX").is_ok());
+}
+
+/// Note GV2: GEN-STALE went with the solver. An allow list that names it gets the 3.0 removal message from config,
+/// `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn gen_stale_in_allow_is_refused() {
+    assert!(
+        Code::parse("GEN-STALE").is_none(),
+        "GEN-STALE is still a code"
+    );
+    let e = ConfigFile::parse("allow = [\"GEN-STALE\"]\n", "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("removed in 3.0"), "{e}");
+    let e = Code::parse_allow("GEN-STALE").unwrap_err();
+    assert!(
+        e.contains("GEN-STALE") && e.contains("removed in 3.0"),
+        "{e}"
+    );
+    let e = engine::overrides::parse_set("allow=[\"GEN-STALE\"]").unwrap_err();
+    assert!(e.contains("removed in 3.0"), "{e}");
+}
+
+/// Note IB1: CHK-UV-GUTTER left with the GUI's UV checker. An allow list that names it gets the 3.0 removal message,
+/// which points at `sdc uv`, from config, `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn chk_uv_gutter_in_allow_is_refused() {
+    assert!(
+        Code::parse("CHK-UV-GUTTER").is_none(),
+        "CHK-UV-GUTTER is still a code"
+    );
+    let e = ConfigFile::parse("allow = [\"CHK-UV-GUTTER\"]\n", "sdc.toml").unwrap_err();
+    assert!(e.to_string().contains("removed in 3.0"), "{e}");
+    let e = Code::parse_allow("CHK-UV-GUTTER").unwrap_err();
+    assert!(
+        e.contains("CHK-UV-GUTTER") && e.contains("removed in 3.0") && e.contains("sdc uv"),
+        "{e}"
+    );
+    let e = engine::overrides::parse_set("allow=[\"CHK-UV-GUTTER\"]").unwrap_err();
+    assert!(e.contains("removed in 3.0"), "{e}");
+}
+
+/// Final review (Important 4): the removed-key walk matches `allow` at every depth, so GEN-STALE is refused under
+/// `[files]`, in a `[[rules]]` entry and in a preset file too. The `Ok` lines are pins (they pass on any code): the
+/// codes that stayed are still accepted.
+#[test]
+fn gen_stale_in_allow_is_refused_at_every_depth() {
+    for text in [
+        "[files.\"a.png\"]\nallow = [\"GEN-STALE\"]\n",
+        "[[rules]]\nallow = [\"GEN-STALE\"]\n",
+    ] {
+        let e = ConfigFile::parse(text, "sdc.toml").unwrap_err();
+        assert!(e.to_string().contains("removed in 3.0"), "{text}: {e}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let f = write(
+        d.path(),
+        "stale.toml",
+        "schema_version = 1\nid = \"w\"\nversion = \"1\"\nbase = \"cs-quality\"\nallow = [\"GEN-STALE\"]\n",
+    );
+    let e = PresetRegistry::builtin()
+        .unwrap()
+        .add_file(&f)
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("removed in 3.0"), "{e}");
+    for kept in ["GEN-AO", "GEN-REPLACED"] {
+        assert!(Code::parse_allow(kept).is_ok(), "{kept}");
+    }
+    // `allow` lives under `[files]` (a top-level one is an unknown field either way).
+    let r = ConfigFile::parse("[files.\"a.png\"]\nallow = [\"GEN-AO\"]\n", "sdc.toml");
+    assert!(r.is_ok(), "{:?}", r.err());
 }
 
 /// Trace-debug #15: a quoted dotted key under `[files."x"]` used to pass the field check and then read as null (the
@@ -1388,4 +1552,177 @@ fn defaults_tables_refuse_keys_that_would_do_nothing() {
         "{m}"
     );
     assert!(check(json!({ "resize": "half" }), json!({})).is_ok());
+}
+
+/// Every key RNM read: the 20 `RnmSpec` fields as dotted paths, each with a TOML literal, then `rnm.target`.
+const RNM_KEYS: [(&str, &str); 21] = [
+    ("rnm.enabled", "false"),
+    ("rnm.order", "[\"bump\"]"),
+    ("rnm.bump.strength", "0.5"),
+    ("rnm.bump.flip_green", "true"),
+    ("rnm.bump.mask", "false"),
+    ("rnm.bump2.strength", "0.5"),
+    ("rnm.bump2.flip_green", "true"),
+    ("rnm.bump2.mask", "false"),
+    ("rnm.detail.strength", "0.5"),
+    ("rnm.detail.flip_green", "true"),
+    ("rnm.detail.mask", "false"),
+    ("rnm.detail2.strength", "0.5"),
+    ("rnm.detail2.flip_green", "true"),
+    ("rnm.detail2.mask", "false"),
+    ("rnm.bent.strength", "0.5"),
+    ("rnm.bent.flip_green", "true"),
+    ("rnm.bent.mask", "false"),
+    ("rnm.bent.mode", "\"detail\""),
+    ("rnm.bent.ao_power", "1.0"),
+    ("rnm.bent.ao", "false"),
+    ("rnm.target", "\"n\""),
+];
+
+/// `rnm.bump.strength` and `0.5` as the inline table `rnm = { bump = { strength = 0.5 } }`.
+fn nested(path: &str, val: &str) -> String {
+    let (head, last) = path.rsplit_once('.').unwrap();
+    let mut s = format!("{last} = {val}");
+    for k in head.rsplit('.') {
+        s = format!("{k} = {{ {s} }}");
+    }
+    s
+}
+
+/// Note GW3: `rnm.*` is refused with the removal message in a project's defaults, a `[files]` entry, a rule, a user
+/// preset and `--set` (with and without `file:`).
+#[test]
+fn rnm_keys_are_refused() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for (path, val) in RNM_KEYS {
+        let table = nested(path, val);
+        let rule =
+            format!("[[rules]]\nmatch = {{ glob = \"*.png\" }}\noverrides = {{ {table} }}\n");
+        let mut r = PresetRegistry::builtin().unwrap();
+        let mut refused = vec![
+            ConfigFile::parse(&format!("[defaults]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&format!("[files.\"a.png\"]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            ConfigFile::parse(&rule, "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}[defaults]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+            r.add_toml(&format!("{head}{rule}"))
+                .unwrap_err()
+                .to_string(),
+        ];
+        refused.push(
+            ConfigFile::parse(&format!("[subtypes.normal]\n{table}\n"), "sdc.toml")
+                .unwrap_err()
+                .to_string(),
+        );
+        refused.push(
+            r.add_toml(&format!("{head}[subtypes.normal]\n{table}\n"))
+                .unwrap_err()
+                .to_string(),
+        );
+        for set in [
+            format!("{path}={val}"),
+            format!("file:a.png.{path}={val}"),
+            format!("subtype:normal.{path}={val}"),
+        ] {
+            refused.push(engine::overrides::parse_set(&set).unwrap_err());
+        }
+        for e in refused {
+            assert!(
+                e.contains(path) && e.contains("removed in 3.0"),
+                "{path}: {e}"
+            );
+        }
+    }
+}
+
+/// Note GW1: a suffix alias spelled like a detail map name is refused, since those names are fixed.
+#[test]
+fn a_detail_map_name_is_no_suffix_alias() {
+    let head = "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n";
+    for alias in ["detail", "detailnorm"] {
+        let e = PresetRegistry::builtin()
+            .unwrap()
+            .add_toml(&format!("{head}[suffix_aliases]\n{alias} = \"n\"\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(e.contains(alias) && e.contains("detail map name"), "{e}");
+    }
+}
+
+/// Review Focus 4: a file called `rnm` is an ordinary `[files]` key; only the `rnm` profile table is refused. A pin
+/// of existing behaviour: it passes before the rows exist, and keeps passing because they are leaf rows.
+#[test]
+fn a_file_called_rnm_is_not_refused() {
+    for text in [
+        "[files.\"rnm\"]\nsubtype = \"normal\"\n",
+        "[files.\"rnm\"]\nsubtype = \"normal\"\npacking = { enabled = false }\n",
+        "[defaults]\npacking = { enabled = false }\n[files.\"rnm\"]\nsubtype = \"normal\"\n",
+    ] {
+        ConfigFile::parse(text, "sdc.toml").unwrap_or_else(|e| panic!("{text}: {e}"));
+    }
+}
+
+/// Note GW3: the four `RNM-*` codes left with the blend; an allow list that names one gets the 3.0 removal message
+/// from config, `Code::parse_allow` (so `--allow`) and `--set`.
+#[test]
+fn rnm_codes_in_allow_are_refused() {
+    for code in [
+        "RNM-NO-BASE",
+        "RNM-IGNORED-EYE",
+        "RNM-MASK-ORPHAN",
+        "RNM-LAYER-SHADOWED",
+    ] {
+        assert!(Code::parse(code).is_none(), "{code} is still a code");
+        let e = ConfigFile::parse(&format!("allow = [\"{code}\"]\n"), "sdc.toml").unwrap_err();
+        assert!(
+            e.to_string().contains(code) && e.to_string().contains("removed in 3.0"),
+            "{e}"
+        );
+        let e = Code::parse_allow(code).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 3.0"), "{e}");
+        let e = engine::overrides::parse_set(&format!("allow=[\"{code}\"]")).unwrap_err();
+        assert!(e.contains(code) && e.contains("removed in 3.0"), "{e}");
+    }
+}
+
+/// Note GW3: `helper.role` values that named a normal layer are refused, in a project and in `--set`; the other roles load.
+#[test]
+fn a_layer_role_is_refused() {
+    for role in [
+        "bump",
+        "bumpmask",
+        "bump2",
+        "bumpmask2",
+        "detailnorm",
+        "detailnormmask",
+        "detailnorm2",
+        "detailnormmask2",
+        "bent",
+        "bentmask",
+    ] {
+        let e = ConfigFile::parse(
+            &format!("[files.\"a.png\"]\nhelper.role = \"{role}\"\n"),
+            "sdc.toml",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            e.contains("helper.role") && e.contains("removed in 3.0"),
+            "{role}: {e}"
+        );
+        let e =
+            engine::overrides::parse_set(&format!("file:a.png.helper.role={role}")).unwrap_err();
+        assert!(
+            e.contains("helper.role") && e.contains("removed in 3.0"),
+            "{role}: {e}"
+        );
+    }
+    ConfigFile::parse("[files.\"a.png\"]\nhelper.role = \"opacity\"\n", "sdc.toml").unwrap();
 }

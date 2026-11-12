@@ -799,7 +799,7 @@ fn checks_settings_default_on_and_load_from_an_old_gui_toml() {
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_none(), "{err:?}");
     let c = s.checks;
-    assert!(c.low_detail && c.green && c.parallax && c.uv);
+    assert!(c.low_detail && c.green && c.parallax);
     let mut s = s;
     s.checks.green = false;
     s.save(&p).unwrap();
@@ -808,8 +808,8 @@ fn checks_settings_default_on_and_load_from_an_old_gui_toml() {
     assert!(!back.checks.green);
 }
 
-/// Notes FM24 and FM26: the removed `[checks]` switches (`drop_top_mip`, `range`, `plastic`) in an old gui.toml load
-/// quietly and are dropped on save.
+/// Notes FM24, FM26 and IB1: the removed `[checks]` switches (`drop_top_mip`, `range`, `plastic`, `uv`) in an old
+/// gui.toml load quietly and are dropped on save.
 #[test]
 fn removed_check_keys_in_gui_toml_are_ignored() {
     let d = tempfile::tempdir().unwrap();
@@ -821,11 +821,10 @@ fn removed_check_keys_in_gui_toml_are_ignored() {
     .unwrap();
     let (s, err) = GuiSettings::load(&p);
     assert!(err.is_none(), "{err:?}");
-    assert!(!s.checks.uv, "the other keys still load");
-    assert!(s.checks.low_detail);
+    assert!(s.checks.low_detail, "the other keys still load");
     s.save(&p).unwrap();
     let text = std::fs::read_to_string(&p).unwrap();
-    for gone in ["drop_top_mip", "range", "plastic"] {
+    for gone in ["drop_top_mip", "range", "plastic", "uv ="] {
         assert!(!text.contains(gone), "{gone} survived the save: {text}");
     }
 }

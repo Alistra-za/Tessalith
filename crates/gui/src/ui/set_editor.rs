@@ -3,28 +3,23 @@
 use super::columns::{border_of, bulk_menu, status_text, AMBER, RED};
 use super::sets_column::{DropState, Pending, SlotNote};
 use super::slot_commands::SlotCmdState;
-use super::status::{code_hover, dot, Status};
+use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::model::bottom::tile_ready;
 use crate::model::bulk::MenuAction;
-use crate::model::code_text::shown_for;
 use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
     PARALLAX_HOVER,
 };
-use crate::model::from_normal::GenMap;
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
-use crate::model::rnm::{rnm_active, rnm_rows};
 use crate::model::sets::{
     card_title, is_json_set, shared_cells, shows_json_panel, slot_clash_text, slot_of, slot_row,
     views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
-use crate::pgp::prefix::{
-    active_matches, extra_match_refusal, lock_key, match_toggle, pgp_locked, slot_match_path,
-};
+use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
 use eframe::egui;
 use engine::config::{ColorTag, Format, PackRecipe, RawMap, Target};
 use engine::events::RecipeReport;
@@ -43,9 +38,6 @@ pub const PGP_LOCK_UNWRITTEN: &str = "lock stored, not written (no PGPatcher ent
 /// plus the centre panel's 16 px of margin and a little slack.
 pub const ROWS_MIN: f32 = 540.0;
 
-/// The Height and RMAOS rows' Generate button (R1): its text; its accessible name is the entry's full label.
-pub const GEN_BUTTON: &str = "Generate…";
-pub const REGEN_BUTTON: &str = "Regenerate…";
 const THUMB: f32 = 56.0;
 /// The format and recipe combos (A5).
 const COMBO_W: f32 = 96.0;
@@ -80,6 +72,8 @@ enum Act {
     FileDrop(String, SlotKind),
     /// Note AO7: take a member out of the set (set id, item), from a clashing slot card.
     RemoveMember(String, String),
+    /// Note HH: the set stops sharing a helper (set id, item).
+    StopSharing(String, String),
 }
 
 /// How the set editor shares the view with the 3D preview panel.
@@ -143,6 +137,7 @@ pub fn draw(
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
         slot_note(ui, drops, &v.id);
         unslotted_packed(ui, model, v, &mut acts);
+        shared_rows(ui, model, v, thumbs, &why, &mut acts);
         ui.add_space(6.0);
         // A2: a normal button, not stretched across the justified column.
         ui.horizontal(|ui| {
@@ -176,6 +171,15 @@ pub fn draw(
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::FileDrop(set, slot) => file_drop(model, drops, &set, slot),
+            Act::StopSharing(set, item) => {
+                if let Err(why) = model.stop_sharing(&set, &item) {
+                    drops.slot_note = Some(SlotNote {
+                        set,
+                        text: why,
+                        error: true,
+                    });
+                }
+            }
             Act::RemoveMember(set, item) => {
                 if let Err(why) = model.remove_member(&set, &item) {
                     drops.slot_note = Some(SlotNote {
@@ -215,7 +219,7 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     let mut clear_name = false;
     if let Some(n) = model.output_name_of(&v.id) {
         ui.horizontal_wrapped(|ui| {
-            if v.pbr && model.target == Target::Cs {
+            if model.renames_outputs(v) {
                 ui.colored_label(
                     AMBER,
                     format!("Output name {n:?} is ignored on a PBR set; use Rename"),
@@ -394,10 +398,6 @@ fn under_grid(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
         ui.add_space(4.0);
         recipe(ui, r);
     }
-    for w in model.rnm_notes.get(&v.key).into_iter().flatten() {
-        ui.colored_label(AMBER, &*shown_for(Some(w.code), &w.message))
-            .on_hover_ui(|ui| code_hover(ui, &w.message, w.code.as_str()));
-    }
     // R10: the codes live in Problems; one line points there.
     let n = crate::model::bottom::set_problem_count(model, &v.key);
     if n > 0 {
@@ -530,24 +530,6 @@ fn row(
         }
     }
     let top = ui.cursor().min;
-    // The blue outline: this normal blends RNM layers (F2 spec §5.2). The amber one wins.
-    let rnm_layers: Vec<&str> = match (fill, slot) {
-        (
-            SlotFill::Own { item } | SlotFill::Borrowed { item, .. },
-            SlotKind::Normal | SlotKind::Coat,
-        ) => model
-            .item(item)
-            .and_then(|i| i.job.as_ref())
-            .filter(|j| rnm_active(j))
-            .map(|j| {
-                rnm_rows(j, &model.rnm_keys, &|_| None)
-                    .iter()
-                    .map(|r| r.label)
-                    .collect()
-            })
-            .unwrap_or_default(),
-        _ => vec![],
-    };
     let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
     let title = match fill.item() {
         Some(item) if slot != SlotKind::Rmaos => {
@@ -561,15 +543,6 @@ fn row(
         SlotFill::Empty => (None, None),
     };
     let item = item_key.as_deref().and_then(|k| model.item(k));
-    // Note CO (owner answers 2 and 7): a generated file says where it came from; stale turns only this row's dot amber.
-    // P20: a packed output (the `_rmaos` row) shows the generated source it reads (a generated AO).
-    let gen = item_key.as_deref().and_then(|k| model.generated_info(k));
-    // P20: a packed output (the `_rmaos` row) names the generated AO it reads on its hover and dot, with no marker
-    // (review M1: the packed output itself is not generated).
-    let fed = match &gen {
-        None => item_key.as_deref().and_then(|k| model.generated_feed(k)),
-        Some(_) => None,
-    };
 
     // Slot: the title, dim when empty.
     let text = if locked {
@@ -589,10 +562,6 @@ fn row(
     } else {
         t
     };
-    if cell.usable && !rnm_layers.is_empty() {
-        t.clone()
-            .on_hover_text(format!("RNM: {}", rnm_layers.join(" → ")));
-    }
     // Note GI (X16): CS does not draw the projected detail normal in this build.
     let landscape = v
         .shader
@@ -671,16 +640,10 @@ fn row(
             Some(i) => {
                 let size =
                     size.map(|e| format!("{}×{} · {}", e.width, e.height, human(e.file_bytes())));
-                let mut hover = match &size {
+                let hover = match &size {
                     Some(s) => format!("{}\n{s}", i.name),
                     None => i.name.clone(),
                 };
-                if let Some(g) = &gen {
-                    hover.push_str(&format!("\nGenerated from {}", g.from));
-                }
-                if let Some(g) = &fed {
-                    hover.push_str(&format!("\nAO generated from {}", g.from));
-                }
                 ui.add(egui::Label::new(egui::RichText::new(&i.name).small()).truncate())
                     .on_hover_text(hover);
                 if let Some(s) = size {
@@ -726,41 +689,6 @@ fn row(
                     acts.push(Act::Slot(a));
                 }
             }
-            // R1/R2: Generate sits under Assign… (empty) or the format combo (filled); never on a packed item.
-            let gen_btn = |ui: &mut egui::Ui, acts: &mut Vec<Act>| {
-                let pre = match slot {
-                    SlotKind::Height => GenMap::Height,
-                    SlotKind::Rmaos => GenMap::Ao,
-                    _ => return,
-                };
-                if item.is_some_and(|i| i.kind == ItemKind::Packed) {
-                    return;
-                }
-                let e = model.gen_entry(&v.id, Some(pre));
-                let text = if e.label == REGEN_BUTTON {
-                    REGEN_BUTTON
-                } else {
-                    GEN_BUTTON
-                };
-                let r = ui.add_enabled(e.disabled.is_none(), egui::Button::new(text).small());
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        e.disabled.is_none(),
-                        &e.label,
-                    )
-                });
-                let r = match &e.disabled {
-                    Some(why) => r.on_disabled_hover_text(format!("{}\n{why}", e.label)),
-                    None => r.on_hover_text(&e.label),
-                };
-                if r.clicked() {
-                    acts.push(Act::Slot(e.action));
-                }
-            };
-            if own_job.is_none() {
-                gen_btn(ui, acts);
-            }
             let Some((i, job)) = own_job else { return };
             let (cur_f, cur_t) = (job.profile.format, job.profile.color.tag);
             // Format and Opaque write `sdc.toml`: a read-only one would drop the edit silently.
@@ -783,7 +711,6 @@ fn row(
             if choice != (cur_f, cur_t) {
                 acts.push(Act::Format(i.key.clone(), choice.0, choice.1));
             }
-            gen_btn(ui, acts);
             if i.kind == ItemKind::Packed {
                 packed_controls(ui, model, i, toml_read_only.as_deref(), acts);
             }
@@ -796,14 +723,6 @@ fn row(
     // full label as its accessible name and leads its hover with it.
     let flags_w = ui
         .vertical(|ui| {
-            if let Some(g) = &gen {
-                let name = format!("Generated from {}", g.from);
-                let r = ui.add(egui::Label::new(
-                    egui::RichText::new("generated").small().weak(),
-                ));
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
-                r.on_hover_text(name);
-            }
             if let (Some(n), Some(_)) = (
                 match slot {
                     _ if !shows_json_panel(v, model.target) => None,
@@ -819,15 +738,8 @@ fn row(
                     .iter()
                     .any(|(m, _)| *m == n);
                 let path = slot_match_path(derived, slot.suffix());
-                // AN2: a renamed set takes no second match.
-                let (k, val) = match_toggle(n, true, &path);
-                // Audit lead 17: a read-only sdc-project.toml is the reason first.
-                let refused = model.sets_read_only_reason().or_else(|| {
-                    (!on)
-                        .then(|| extra_match_refusal(&v.settings, derived, &k, val.as_ref()))
-                        .flatten()
-                        .map(str::to_string)
-                });
+                // Audit lead 17: a read-only sdc-project.toml is the reason.
+                let refused = model.sets_read_only_reason();
                 if flag(
                     ui,
                     refused.is_none(),
@@ -870,17 +782,10 @@ fn row(
             }
             if let (false, Some(p)) = (cell.usable, &v.shader) {
                 lines.push(format!("not used by {}", p.shader.label()));
-            } else if !rnm_layers.is_empty() {
-                lines.push(format!("RNM, {} layers", rnm_layers.len()));
-            }
-            let stale = gen.as_ref().or(fed.as_ref()).and_then(|g| g.stale.as_ref());
-            if let Some(r) = stale {
-                lines.push(format!("stale: {r}"));
             }
             if let Some(i) = item {
                 let s = match i.status {
                     ItemStatus::Failed(_) | ItemStatus::Error(_) => Status::Blocks,
-                    _ if stale.is_some() => Status::Warning,
                     _ if tile_ready(i) => Status::Ready,
                     _ => Status::Warning,
                 };
@@ -904,21 +809,12 @@ fn row(
     let rect = egui::Rect::from_min_max(top, ui.min_rect().max);
     ui.end_row();
     ui.data_mut(|d| d.insert_temp(row_id, rect));
-    // A filled slot the shader cannot use stays at its place, outlined, and says why (F1 spec §5); a normal blending RNM
-    // layers is outlined in the accent.
-    let outline = if !cell.usable {
-        Some(AMBER)
-    } else if !rnm_layers.is_empty() {
-        // Note FC9: the one accent, not a blue of its own.
-        Some(ui.visuals().selection.stroke.color)
-    } else {
-        None
-    };
-    if let Some(c) = outline {
+    // A filled slot the shader cannot use stays at its place, outlined, and says why (F1 spec §5).
+    if !cell.usable {
         ui.painter().rect_stroke(
             rect,
             2.0,
-            egui::Stroke::new(2.0, c),
+            egui::Stroke::new(2.0, AMBER),
             egui::StrokeKind::Outside,
         );
     }
@@ -1238,23 +1134,7 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                         source_picker(ui, model, key, role, Some((&src, &file)), acts)
                     })
                     .inner;
-                // Note CO (P20): a generated source (the `_m` alpha's height) says where it came from and if stale.
-                match model.generated_info(&src) {
-                    Some(g) => {
-                        r.on_hover_text(format!("{file}\nGenerated from {}", g.from));
-                        if let Some(s) = g.stale {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(format!("stale: {s}")).small().weak(),
-                                )
-                                .truncate(),
-                            );
-                        }
-                    }
-                    None => {
-                        r.on_hover_text(file);
-                    }
-                }
+                r.on_hover_text(file);
             }
             FillRow::Value {
                 role,
@@ -1343,6 +1223,70 @@ fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut
         })
         .response
         .on_disabled_hover_text(why.clone().unwrap_or_default());
+    }
+}
+
+/// Note HH7: one row per helper the set shares (it belongs to another set, or to no set): its thumbnail and name,
+/// outlined amber as a borrowed slot is, and a `✕` that stops sharing it. A click on the row selects the helper.
+/// `why` is the read-only reason (empty when the project takes edits), which turns off only the ✕.
+fn shared_rows(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    v: &SetView,
+    thumbs: &mut ThumbCache,
+    why: &str,
+    acts: &mut Vec<Act>,
+) {
+    for i in v.shared_helpers.iter().filter_map(|k| model.item(k)) {
+        ui.add_space(4.0);
+        // Keyed by the file, so the ✕'s id does not depend on what the rows above drew.
+        // A click anywhere on the row selects the helper; the ✕ (registered later) keeps its own clicks.
+        let row = egui::UiBuilder::new()
+            .id_salt(("shared-helper", &i.key))
+            .sense(egui::Sense::click());
+        let row = ui.scope_builder(row, |ui| {
+            // The editor's scroll bar floats over the right edge: keep the ✕ clear of it.
+            let s = &ui.spacing().scroll;
+            let gutter = s.bar_width + s.bar_outer_margin + ui.spacing().item_spacing.x;
+            ui.set_max_width(ui.available_width() - gutter);
+            egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| {
+                    if let Some(t) = thumbs.get(ui.ctx(), i) {
+                        ui.add(egui::Image::new(&t).fit_to_exact_size(egui::vec2(20.0, 20.0)));
+                    }
+                    // truncate() shows the full name on hover; not selectable, so a click reaches the row.
+                    ui.add(
+                        egui::Label::new(format!("{} (shared)", i.name))
+                            .truncate()
+                            .selectable(false),
+                    );
+                },
+                |ui| {
+                    // Only the edit is off on a read-only project; selecting the helper is not an edit.
+                    let x = ui
+                        .add_enabled(why.is_empty(), egui::Button::new("✕").small())
+                        .on_hover_text("Stop sharing: this set no longer reads the file")
+                        .on_disabled_hover_text(why);
+                    let label = format!("Stop sharing {}", i.name);
+                    ui.ctx()
+                        .accesskit_node_builder(x.id, |b| b.set_label(label));
+                    x.clicked()
+                },
+            )
+        });
+        let (_, stop) = row.inner;
+        if stop {
+            acts.push(Act::StopSharing(v.id.clone(), i.key.clone()));
+        } else if row.response.clicked() {
+            acts.push(Act::Select(i.key.clone()));
+        }
+        ui.painter().rect_stroke(
+            row.response.rect.expand(2.0),
+            2.0,
+            egui::Stroke::new(1.0, AMBER),
+            egui::StrokeKind::Inside,
+        );
     }
 }
 

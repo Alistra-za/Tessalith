@@ -1,7 +1,7 @@
 //! v2 Phase D, D6c: sdc's own NIF material against the capture (extraction_matches_capture, report-only). A hybrid
 //! replay: geometry, scene cbuffers, engine textures, samplers and depth from the capture; the material (PS b1 used
 //! variables, the PS b2 material fields, VS b1 TexcoordOffset, material textures) from sdc's own `Renderer::load`.
-//! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN, SDC_CS_SHADERS and SDC_ACHERUS.
+//! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN and SDC_ACHERUS; the shaders are the bundled tree.
 mod common;
 
 use render3d::compile::{compile, used_vars, CbVar, SrvKind, VarKind};
@@ -134,23 +134,18 @@ impl Game {
 
 struct Env {
     root: PathBuf,
-    shaders: PathBuf,
     game: Game,
     cache: tempfile::TempDir,
 }
 
 fn env() -> Option<Env> {
-    let (Ok(root), Ok(shaders), Ok(acherus)) = (
-        std::env::var("SDC_GOLDEN"),
-        std::env::var("SDC_CS_SHADERS"),
-        std::env::var("SDC_ACHERUS"),
-    ) else {
-        println!("skipped: set SDC_GOLDEN, SDC_CS_SHADERS and SDC_ACHERUS");
+    let (Ok(root), Ok(acherus)) = (std::env::var("SDC_GOLDEN"), std::env::var("SDC_ACHERUS"))
+    else {
+        println!("skipped: set SDC_GOLDEN and SDC_ACHERUS");
         return None;
     };
     Some(Env {
         root: root.into(),
-        shaders: shaders.into(),
         game: Game::load(Path::new(&acherus)),
         cache: tempfile::tempdir().unwrap(),
     })
@@ -309,7 +304,7 @@ fn same(kind: VarKind, a: &[f32], b: &[f32]) -> bool {
 /// The capture's used material fields (PS b1 PerMaterial, the PS b2 material fields, VS b1 TexcoordOffset), each
 /// with its reflected layout var and cbuffer size, keyed by fixture cbuffer stem.
 fn material_fields(env: &Env, r: &Replay) -> Result<Vec<(&'static str, CbVar, u32)>, String> {
-    let src = SourceSet::new(env.shaders.clone()).get(Path::new("Lighting.hlsl"))?;
+    let src = SourceSet::new(render3d::ShaderSource::Bundled).get(Path::new("Lighting.hlsl"))?;
     let ps_list = &r.defines[0];
     let ps_d: Vec<String> = std::iter::once("PSHADER".to_string())
         .chain(ps_list.iter().cloned())
@@ -491,8 +486,8 @@ fn fmt_v(v: &[f32]) -> String {
 #[ignore]
 fn extraction_matches_capture() {
     let Some(env) = env() else { return };
-    let fp = render3d::locate::fingerprint(&env.shaders, None).unwrap();
-    let mut ren = Renderer::new(fp, env.cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Bundled;
+    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
     let noise = Noise::load(
         &env.root
             .join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
@@ -821,11 +816,11 @@ const WANTED: [&str; 5] = [
 #[ignore]
 fn trace_values_match_unit_functions() {
     let Some(env) = env() else { return };
-    let fp = render3d::locate::fingerprint(&env.shaders, None).unwrap();
-    let mut ren = Renderer::new(fp, env.cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Bundled;
+    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
     assert!(
         ren.debug_supported(),
-        "the installed Lighting.hlsl has no debug anchor"
+        "the bundled Lighting.hlsl has no debug anchor"
     );
     // D-P24: a trace counts only when its fragment is the one the replay keeps (depth within 2 D24 ulps).
     ren.set_replay_depth_readback(true);

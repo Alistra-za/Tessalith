@@ -176,3 +176,26 @@ fn cli_validate_flags_a_mipless_cube() {
     let o = sdc().args(["validate"]).arg(&good).output().unwrap();
     assert!(!text(&o).contains("cube has no mips"), "{}", text(&o));
 }
+
+/// Note DS12: validate reads every cube face's alpha, so the marker `cubemap-marker` writes passes.
+#[test]
+fn validate_passes_the_markers_cubemap_marker_writes() {
+    let dir = scratch("marker-validate");
+    for (i, extra) in [vec![], vec!["--roughness", "1"]].into_iter().enumerate() {
+        let p = dir.join(i.to_string()).join("dyn_e.dds");
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        let o = sdc()
+            .arg("cubemap-marker")
+            .args(&extra)
+            .arg("-o")
+            .arg(&p)
+            .output()
+            .unwrap();
+        assert_eq!(o.status.code(), Some(0), "{}", text(&o));
+        let v = sdc().arg("validate").arg(&p).output().unwrap();
+        assert_eq!(v.status.code(), Some(0), "{extra:?}: {}", text(&v));
+        assert!(!text(&v).contains("VAL-ALPHA-GUARANTEE"), "{}", text(&v));
+        assert!(text(&v).contains("alpha data"), "{}", text(&v));
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}

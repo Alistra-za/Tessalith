@@ -137,7 +137,7 @@ pub(crate) struct TextureViewCache {
     options: Option<(u64, Arc<FilterOptions>)>,
     /// The tiles and the helper rows, built together in one pass (one build per change).
     list: Option<(ListKey, Lists)>,
-    counts: Option<(u64, FilterCounts)>,
+    counts: Option<((u64, u64, u64), FilterCounts)>,
     #[cfg(feature = "test-hooks")]
     builds: u64,
 }
@@ -148,6 +148,10 @@ type Lists = (Arc<Vec<usize>>, Arc<Vec<usize>>);
 #[derive(PartialEq)]
 struct ListKey {
     items: u64,
+    /// Note HF1: the sets document, which says what is in no set.
+    doc: u64,
+    /// Note HF10: the export scope, which `item_in_run` reads.
+    scope: u64,
     filter: Filter,
     search: String,
     sort: SortKey,
@@ -176,6 +180,13 @@ fn source_size(i: &TextureItem) -> u64 {
 }
 
 impl AppModel {
+    /// The sets document's revision (0 without one): what is in no set changes with it.
+    pub(super) fn doc_rev(&self) -> u64 {
+        self.sets_doc
+            .as_ref()
+            .map_or(0, crate::sets_doc::SetsDoc::rev)
+    }
+
     /// The sets of more than one member, by key (the rule of "in a set").
     fn multi_sets(&self) -> HashSet<&str> {
         self.sets
@@ -214,8 +225,10 @@ impl AppModel {
 
     /// The pill counts over all items, cached by the items revision.
     pub fn filter_counts(&self) -> FilterCounts {
-        if let Some((rev, c)) = self.texture_cache.borrow().counts {
-            if rev == self.items_rev() {
+        // Note HF10: `item_in_run` reads the export scope, so the key holds `scope_rev`.
+        let rev = (self.items_rev(), self.doc_rev(), self.scope_rev);
+        if let Some((r, c)) = self.texture_cache.borrow().counts {
+            if r == rev {
                 return c;
             }
         }
@@ -224,15 +237,17 @@ impl AppModel {
             ..FilterCounts::default()
         };
         for i in &self.items {
-            c.needs_decision += usize::from(i.status == ItemStatus::NeedsDecision);
-            c.warnings += usize::from(i.warnings.iter().any(counts_toward_badge));
+            // Note HF1: a no-set texture's undecided state and warnings count for nothing.
+            let counts = self.item_in_run(i);
+            c.needs_decision += usize::from(counts && i.status == ItemStatus::NeedsDecision);
+            c.warnings += usize::from(counts && i.warnings.iter().any(counts_toward_badge));
             c.failed += usize::from(matches!(
                 i.status,
                 ItemStatus::Failed(_) | ItemStatus::Error(_)
             ));
             c.helpers += usize::from(i.kind == ItemKind::Helper);
         }
-        self.texture_cache.borrow_mut().counts = Some((self.items_rev(), c));
+        self.texture_cache.borrow_mut().counts = Some((rev, c));
         c
     }
 
@@ -257,6 +272,8 @@ impl AppModel {
     fn visible_lists(&self) -> Lists {
         let key = ListKey {
             items: self.items_rev(),
+            doc: self.doc_rev(),
+            scope: self.scope_rev,
             filter: self.filter.clone(),
             search: self.search.clone(),
             sort: self.prefs.sort,
@@ -288,7 +305,11 @@ impl AppModel {
         let q = self.search.to_lowercase();
         let f = &self.filter;
         let multi = self.multi_sets();
-        let in_set = |i: &TextureItem| i.set_key.as_deref().is_some_and(|k| multi.contains(k));
+        let no_set_sets = self.no_set_sets();
+        // Note HF1: a no-set texture is in no set, whatever its own set holds (its packed output).
+        let in_set = |i: &TextureItem| {
+            i.set_key.as_deref().is_some_and(|k| multi.contains(k)) && !self.is_no_set(&i.key)
+        };
         let mut out: Vec<usize> = self
             .items
             .iter()
@@ -296,8 +317,14 @@ impl AppModel {
             .filter(|(_, i)| {
                 let profile = i.job.as_ref().map(|j| &j.profile);
                 (q.is_empty() || i.key.to_lowercase().contains(&q))
-                    && (!f.needs_decision || i.status == ItemStatus::NeedsDecision)
-                    && (!f.warnings || i.warnings.iter().any(counts_toward_badge))
+                    // Note HF1: a packed output of a set whose files are all in no set is not listed (an excluded
+                    // or out-of-scope set's packed outputs are, as its raw maps are).
+                    && !(i.kind == ItemKind::Packed
+                        && i.set_key.as_deref().is_some_and(|k| no_set_sets.contains(k)))
+                    && (!f.needs_decision
+                        || i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
+                    && (!f.warnings
+                        || i.warnings.iter().any(counts_toward_badge) && self.item_in_run(i))
                     && (!f.failed
                         || matches!(i.status, ItemStatus::Failed(_) | ItemStatus::Error(_)))
                     && (!f.not_in_set || !in_set(i))
@@ -357,7 +384,9 @@ impl AppModel {
         let multi = self.multi_sets();
         self.items
             .iter()
-            .filter(|i| !i.set_key.as_deref().is_some_and(|k| multi.contains(k)))
+            .filter(|i| {
+                !i.set_key.as_deref().is_some_and(|k| multi.contains(k)) || self.is_no_set(&i.key)
+            })
             .count()
     }
 }

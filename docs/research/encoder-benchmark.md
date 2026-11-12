@@ -673,6 +673,65 @@ Open-source BC7 quality has not moved since 2021. No fixes are expected from the
 - **NVTT was an opt-in quality option for BC7 and BC6H in 1.x, at Production only, run as the user's own `nvcompress.exe`; 2.0 removed it** (Note FM14). The per-level feeding it used is in [spikes S7 and S7b](#nvtt-per-level-feeding-spikes-s7-and-s7b-2026-10-09-and-13).
 - **The bench and its gates** (parity, exact-opaque, `radius45` for the search radius) live on branch `bench` (Note FM8).
 
+## Summary tables behind the README charts
+
+The data behind the README charts, drawn by `tools/readme-charts.py`. "—" means not measured; "n/a" means the encoder has no such format.
+
+### BC7: GPU and CPU encoders, speed and quality
+
+Δ is against bc7e u6, in dB. "Real" means real textures.
+
+| Encoder | Speed (s/Mpix) | Δ RGB (real) | Δ (real alpha) |
+|---|--:|--:|--:|
+| NVTT Normal (GPU) / texconv GPU | 0.03–0.09 | −1.4 / −1.8 | −0.75 / −2.8 |
+| ISPC basic | 0.11 | −0.75 | −0.69 |
+| bc7e u4 | 0.12 | −0.39 | −0.36 |
+| bc7e u5 | 0.22 | +0.01 | −0.03 |
+| bc7e u6 | 0.28 | 0 | 0 |
+| bc7e max‡ | ~0.6 | +0.15 | +0.04 |
+| ISPC slow | 0.30 | −0.59 | −0.67 |
+| NVTT Production/Highest | ~14 | −0.32 | −0.37 |
+| texconv CPU (-bc x) | ~16–20 | −1.6 | −2.4 |
+| Compressonator q1.0 | ~33 | −0.16 | −1.50 |
+
+NVIDIA Texture Tools 3 is not part of Tessalith; its rows are a reference.
+
+‡ `max` is opt-in (`encoder.effort = "max"`). Its Δ comes from the same bench round as the other rows (7 colour textures, 4 with alpha). On the 92 colour textures of bench round 3 it gains +0.19 dB RGB and beats u6 on all 92; on the 96 with smooth alpha it gains +0.12 dB premultiplied. It takes 2.7 times the time of u5 (`veryslow`) in the [bc7e tuning](bc7e-tuning.md) runs, about 0.6 s/Mpix on this table's scale.
+
+### BC7: bc7e u5 against the other CPU encoders at maximum settings
+
+| Measure | bc7e -u5 | NVTT 3 Production | Compressonator q1.0 | Intel ISPC slow | texconv -bc x |
+|---|--:|--:|--:|--:|--:|
+| Real colour textures (Δ dB) | +0.03 | −0.27 | −0.16† | −0.44 | −1.47 |
+| Smooth gradients, synthetic (Δ dB) | 0.00 | +3.86 | +3.21 | +0.73 | −6.89 |
+| Real decals, smooth alpha (Δ dB) | −0.02 | −0.06 | −1.50† | −0.58 | −2.04 |
+| Packed data maps (RGB PSNR, dB) | 41.22 | 41.58 | —† | 41.20 | 40.38 |
+| Normal maps (mean angle error) | 1.77° | 1.71° | —† | 1.79° | 2.19° |
+| Opaque input decoded with alpha 254 | 28%* | 0% | 1.1% | 15% | 2.4% |
+| Time per megapixel | 0.22 s | ~14 s | ~33 s | 0.30 s | ~20 s |
+
+\* An optional patch (mode 6 p-bit override, exact opaque) is for when alpha 254 is not acceptable.
+
+† Compressonator q1.0 was measured on the original 4–7 images only. On those images it was 0.15 dB behind NVTT on packed data and 0.27° behind on normals. Its alpha-254 and timing rows are from the original run.
+
+### Other formats: best encoders per format
+
+| Format and measure | rgbcx (Tessalith) | Intel ISPC | NVTT 3 -highest | Compressonator | texconv (CPU) |
+|---|--:|--:|--:|--:|--:|
+| BC1 colour, NVIDIA decoder (RGB PSNR, dB) | 39.51 | 37.99 | 39.38 | 38.83 | 37.30 |
+| BC1 colour, AMD decoder (RGB PSNR, dB) | 39.75 | 38.00 | 39.62 | 38.93 | 37.30 |
+| BC3 colour + smooth alpha (premultiplied PSNR, dB) | 49.50 | 48.03 | 49.29 | 48.74 | 48.08 |
+| BC3 cutout alpha (alpha PSNR, dB) | 50.30 | 45.73 | 49.13 | 49.31 | 47.43 |
+| BC4 masks (PSNR, dB) | 49.10 | 47.13 | 49.02 | 48.65 | 46.83 |
+| BC5 normals (RG PSNR, dB) | 47.16 | 45.32 | 47.16 | 46.87 | 45.51 |
+| BC5 normals (mean angle error) | 1.89° | 1.99° | 1.90° | 1.90° | 1.98° |
+| BC6H HDR (multi-exposure PSNR, dB) | n/a | 50.38 | 48.00 | —† | 49.62 |
+| BC6H brightest highlight kept (worst image) | n/a | 22% | 94% | 29%† | 29% |
+
+Each row has its own image set, so compare encoders within a row, not across rows; the README chart plots each row against Tessalith's encoder. BC1 to BC5 are bench round 3 (93 colour textures, 96 with smooth alpha, 95 cutouts, 93 masks, 93 normal maps), scored the way GPUs decode: BC1 on the NVIDIA and AMD models, BC3 alpha, BC4 and BC5 rounding to nearest. The rgbcx column is Tessalith's patched build: BC1 Dual endpoints ([BC1 Dual rescore](#bc1-dual-rescore-2026-11-04)) and the wider BC4 block search above. Its BC3 colour half in this table is the Ideal-model encode, not Dual. On BC6H the texconv GPU path is slower than ISPC (0.41 against 0.19 s/Mpix) and 2.2 dB lower in mPSNR (4 HDR images).
+
+† Original 4 HDRIs only; Compressonator's mPSNR there was 1.2 dB below ISPC.
+
 ## Sources
 
 The main published sources were the [Aras 2020 benchmark](https://aras-p.info/blog/2020/12/08/Texture-Compression-in-2020/), Geldreich's posts ([2018 showdown](http://richg42.blogspot.com/2018/04/bc7-showdown-ispctexcomp-vs-my-ispc.html), [showdown 2](http://richg42.blogspot.com/2018/04/bc7-showdown-2-basis-ispc-vs-nvidia.html), [2021/02](https://richg42.blogspot.com/2021/02/)), the [bc7e README](https://github.com/BinomialLLC/bc7e), [bc7enc_rdo](https://github.com/richgel999/bc7enc_rdo), [ISPC TC](https://github.com/GameTechDev/ISPCTextureCompressor), [DirectXTex](https://github.com/microsoft/DirectXTex/wiki/Compress), the [Compressonator docs](https://compressonator.readthedocs.io/en/latest/), [Microsoft's BC7 format reference](https://learn.microsoft.com/en-us/windows/win32/direct3d11/bc7-format), [GPURealTimeBC6H](https://github.com/knarkowicz/GPURealTimeBC6H), [Ludicon Spark 1.4](https://www.ludicon.com/castano/blog/2026/09/spark-1-4/) and NVIDIA's [Texture Tools pages and forum posts](https://developer.nvidia.com/gpu-accelerated-texture-compression).

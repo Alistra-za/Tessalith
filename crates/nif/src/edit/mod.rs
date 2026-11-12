@@ -11,7 +11,7 @@ use crate::NifError;
 mod compact;
 mod structural;
 pub use compact::compact;
-pub use structural::{clip_key, convert_check, trailer_defaults};
+pub use structural::trailer_defaults;
 pub mod validate;
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -133,66 +133,6 @@ pub enum Op {
     RemoveController {
         at: Anchor, // Role::Ctrl
     },
-    /// Appends a clip to the root's NiControllerManager, creating the manager, an MTTC, the palette and text keys
-    /// when the root has none (v2 C2). Each track's controller becomes manager-controlled.
-    AddSequence {
-        at: Anchor, // Role::Root
-        name: String,
-        cycle: u32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        freq: f32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        start: f32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        stop: f32,
-        tracks: Vec<ClipTrack>,
-    },
-    /// Unlinks the `nth` clip named `name` from the root's manager (v2 C2, spec §5.3).
-    RemoveSequence {
-        at: Anchor, // Role::Root
-        name: String,
-        nth: u32,
-    },
-    /// Points the `nth` clip named `name` at the string `new_name`.
-    RenameSequence {
-        at: Anchor, // Role::Root
-        name: String,
-        nth: u32,
-        new_name: String,
-    },
-    /// Sets the cycle, frequency, start and stop of the `nth` clip named `name` (Note GD8). Values that fail
-    /// [`validate::timing_problem`] leave the clip as it is; `validate_ops` says so in a Warn.
-    SetSequenceTiming {
-        at: Anchor, // Role::Root
-        name: String,
-        nth: u32,
-        cycle: u32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        freq: f32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        start: f32,
-        #[cfg_attr(feature = "serde", serde(with = "crate::keys::f32_bits"))]
-        stop: f32,
-    },
-    /// Turns the free controllers of a shader or alpha property into one clip on the root's manager: C2's AddSequence
-    /// with one track per free controller, their keys as they are (v2 C3, D11). One op, so one undo step.
-    ConvertChainToClips {
-        at: Anchor, // Role::Shader or Role::Alpha of a shape
-        name: String,
-    },
-}
-
-/// The name the GUI offers for a converted chain, and the hover beside it (plan C5).
-pub const CONVERT_NAME: &str = "SpecialIdle";
-pub const CONVERT_HOVER: &str =
-    "SpecialIdle loops constantly in game; Open/Close play as door states.";
-
-/// One track of a new clip. Its anchor is resolved on every apply; `rebase` never writes it back (F3).
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, PartialEq)]
-pub struct ClipTrack {
-    pub at: Anchor, // Role::Ctrl: the controller this clip drives
-    pub keys: KeyData,
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -394,13 +334,6 @@ pub fn merge_key(op: &Op) -> String {
             ("AddController", at, format!("{class}/{var:?}"))
         }
         Op::RemoveController { at } => ("RemoveController", at, String::new()),
-        Op::AddSequence { at, name, .. } => ("AddSequence", at, name.clone()),
-        Op::RemoveSequence { at, name, nth } => ("RemoveSequence", at, format!("{name}/{nth}")),
-        Op::RenameSequence { at, name, nth, .. } => ("RenameSequence", at, format!("{name}/{nth}")),
-        Op::SetSequenceTiming { at, name, nth, .. } => {
-            ("SetSequenceTiming", at, format!("{name}/{nth}"))
-        }
-        Op::ConvertChainToClips { at, name } => ("ConvertChainToClips", at, name.clone()),
     };
     format!("{v}|{}|{what}", at.block)
 }
@@ -452,11 +385,6 @@ fn anchor_of(op: &Op) -> &Anchor {
         | Op::SetKeys { at, .. }
         | Op::AddController { at, .. }
         | Op::RemoveController { at }
-        | Op::AddSequence { at, .. }
-        | Op::RemoveSequence { at, .. }
-        | Op::RenameSequence { at, .. }
-        | Op::SetSequenceTiming { at, .. }
-        | Op::ConvertChainToClips { at, .. }
         | Op::SetTexturePath { at, .. } => at,
     }
 }
@@ -479,11 +407,6 @@ pub fn rebase(new_src: &[u8], ops: &[Op]) -> Result<(Vec<Op>, Vec<Outcome>), Nif
                 | Op::SetKeys { at, .. }
                 | Op::AddController { at, .. }
                 | Op::RemoveController { at }
-                | Op::AddSequence { at, .. }
-                | Op::RemoveSequence { at, .. }
-                | Op::RenameSequence { at, .. }
-                | Op::SetSequenceTiming { at, .. }
-                | Op::ConvertChainToClips { at, .. }
                 | Op::SetTexturePath { at, .. } => at.block = *block,
             }
         }
@@ -617,30 +540,6 @@ fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
     }
     if matches!(op, Op::AddController { .. } | Op::RemoveController { .. }) {
         return match structural::ctrl_op(&mut doc, &m, at, block, op) {
-            Ok(Outcome::Applied) => (Some(doc.bytes()), outcome),
-            Ok(o) => (None, o),
-            Err(e) => refused(e),
-        };
-    }
-    if matches!(
-        op,
-        Op::AddSequence { .. }
-            | Op::RemoveSequence { .. }
-            | Op::RenameSequence { .. }
-            | Op::SetSequenceTiming { .. }
-    ) {
-        return match structural::clip_op(&mut doc, cur, &m, block, op) {
-            Ok(Outcome::Applied) => (Some(doc.bytes()), outcome),
-            Ok(o) => (None, o),
-            Err(e) => refused(e),
-        };
-    }
-    if matches!(op, Op::ConvertChainToClips { .. }) {
-        let r = match at.role {
-            Role::Shader | Role::Alpha => structural::convert_op(&mut doc, cur, &m, at, block, op),
-            _ => Err("Convert anchors on a shader or alpha property.".into()),
-        };
-        return match r {
             Ok(Outcome::Applied) => (Some(doc.bytes()), outcome),
             Ok(o) => (None, o),
             Err(e) => refused(e),

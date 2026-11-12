@@ -33,20 +33,15 @@ fn the_standin_refuses_debug_views_and_lit_keys_are_unchanged() {
     );
 }
 
-/// Opt-in: a TruePBR sphere with roughness scale 1 (PBRParams1.x, L:1439) and a 1×1 RMAOS (64, 128, 192) reads back
+/// A TruePBR sphere with roughness scale 1 (PBRParams1.x, L:1439) and a 1×1 RMAOS (64, 128, 192) reads back
 /// as those values in Roughness / Metallic / AO (vertexAO 1: no vertex colours, L:269), encode on and off.
-/// `SDC_CS_SHADERS=…\Shaders cargo test -p render3d --release --test debug -- --ignored`
 #[test]
-#[ignore]
-fn installed_cs_reads_rmaos_back_as_its_values() {
-    let root = std::path::PathBuf::from(
-        std::env::var("SDC_CS_SHADERS").expect("set SDC_CS_SHADERS to the CS Shaders folder"),
-    );
-    let fp = render3d::locate::fingerprint(&root, None).unwrap();
+fn bundled_cs_reads_rmaos_back_as_its_values() {
+    let fp = render3d::ShaderSource::Bundled;
     let cache = tempfile::tempdir().unwrap();
-    let mut r =
-        Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
-    assert!(r.debug_supported(), "the installed CS has the anchor");
+    let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+        .unwrap();
+    assert!(r.debug_supported(), "the bundled CS has the anchor");
     let mut m = MaterialState::builtin_default();
     m.slsf2 |= SLSF2_TRUE_PBR;
     m.params.specular_strength = 1.0; // the roughness scale

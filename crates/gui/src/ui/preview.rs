@@ -3,7 +3,6 @@
 //! All state lives in the model (`AppModel::view`, `AppModel::preview`); this file maps input to model calls.
 use crate::model::cube_cross::FACE_LABELS;
 use crate::model::items::ItemKind;
-use crate::model::overlay::OverlayKind;
 use crate::model::preview::NO_GPU;
 use crate::model::preview::{EncodedState, PreviewOut, SourceState};
 use crate::model::view::{self, readouts, skipped_note, Channel, ViewState};
@@ -56,8 +55,6 @@ pub struct PreviewUi {
     settings_open: bool,
     /// The first frame of this preview has drawn (it decides the settings' start).
     started: bool,
-    /// The overlay on the GPU and the image it was uploaded from (uploaded again only when that `Arc` changes).
-    overlay_tex: Option<(Arc<egui::ColorImage>, egui::TextureHandle)>,
 }
 
 /// The facts about the expanded texture's mips that the toolbar, the viewports and the notes share.
@@ -166,8 +163,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
             .show(ui, |ui| {
                 // I2: both axes, so settings wider than the panel scroll inside it instead of moving its left edge
                 // under the toolbar (egui cuts an over-wide right panel from the left). Thin bars show without hover.
-                // shortcut: an over-wide combo (Normals) makes the panel scroll sideways (CE20); give each combo an
-                // exact-width slot (ui-rules 3.5) when the settings panel's rows are next reworked (Note FC8).
+                // Its combos have one exact width (Note HI3).
                 ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
@@ -286,7 +282,7 @@ fn caption_label(ui: &mut egui::Ui, text: &str) {
     ui.label(RichText::new(text).small().weak());
 }
 
-/// Heatmap, Lens, Tile 3×3, the cube's face labels, UV coverage, Fit, 1:1 and, for HDR, the exposure.
+/// Heatmap, Lens, Tile 3×3, the cube's face labels, Fit, 1:1 and, for HDR, the exposure.
 fn view_cluster(ui: &mut egui::Ui, model: &mut AppModel, info: &Info, requests: &mut Requests) {
     caption_label(ui, "View");
     // `add_enabled`, not `add_enabled_ui`: a nested scope's first widget never wraps, so it ran under ✕ Close.
@@ -334,7 +330,6 @@ fn view_cluster(ui: &mut egui::Ui, model: &mut AppModel, info: &Info, requests: 
             model.view.face_labels = !on;
         }
     }
-    uv_toggle(ui, model);
     requests.fit = ui
         .button("Fit")
         .on_hover_text("Zoom to fit the viewport")
@@ -583,8 +578,7 @@ fn viewports(
     }
     let mut encode = false;
     let mut face_pick = None;
-    let overlay = overlay_texture(ui, model, state, key);
-    let left_draw = draw_source_pane(ui, model, info, gpu, left, size, overlay, &mut face_pick);
+    let left_draw = draw_source_pane(ui, model, info, gpu, left, size, &mut face_pick);
     let right_draw = draw_encoded_pane(ui, model, info, gpu, right, size, &mut encode);
     if let Some(face) = face_pick {
         model.set_source_face(face);
@@ -717,104 +711,7 @@ fn paint_clipped(ui: &mut egui::Ui, viewport: Rect, slot: Slot, params: Params) 
     });
 }
 
-/// "UV coverage" (Task 8): drawn for every texture (K7), one `add_enabled` widget (CE20), disabled with
-/// `uv_offered`'s reason. The hover names the coverage once it has been read (on click only, owner).
-fn uv_toggle(ui: &mut egui::Ui, model: &mut AppModel) {
-    let key = model.expanded.clone().unwrap_or_default();
-    let offered = model.uv_offered(&key);
-    let on = model.view.overlay == Some(OverlayKind::Uv);
-    // Review I2: a failed read (cached, K18) disables the toggle with its error lines, and paints nothing.
-    let failed = model.uv_failed(&key);
-    let reason = match offered {
-        Err(why) => why.to_string(),
-        Ok(()) => failed
-            .as_deref()
-            .map(crate::model::uv_coverage::summary)
-            .unwrap_or_default(),
-    };
-    let r = ui
-        .add_enabled(
-            reason.is_empty(),
-            egui::Button::selectable(on, "UV coverage"),
-        )
-        .on_disabled_hover_text(reason);
-    let r = if on {
-        let c = model.uv_coverage(&key);
-        r.on_hover_ui(|ui| {
-            ui.label(c.as_deref().map_or_else(
-                || "Reading which meshes use this texture…".to_string(),
-                crate::model::uv_coverage::summary,
-            ));
-        })
-    } else {
-        r.on_hover_text("Dim the texels no mesh uses, from the meshes in your scan")
-    };
-    // ui-rules 8.4: distinct from the Checks section's "UV coverage check".
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(
-            egui::WidgetType::Button,
-            r.enabled(),
-            on,
-            "UV coverage overlay",
-        )
-    });
-    if r.clicked() {
-        model.view.overlay = (!on).then_some(OverlayKind::Uv);
-    }
-}
-
-/// The overlay's texture while its toggle is on and offered: UV coverage from its cached mask, built by an overlay
-/// job (`uv_coverage`, `uv_overlay`, CL44).
-fn overlay_texture(
-    ui: &egui::Ui,
-    model: &mut AppModel,
-    state: &mut PreviewUi,
-    key: &str,
-) -> Option<egui::TextureId> {
-    let offered = model.view.overlay == Some(OverlayKind::Uv)
-        && model.uv_offered(key).is_ok()
-        && model.uv_failed(key).is_none();
-    if !offered {
-        // Review M7: off frees the full-size image and its texture.
-        state.overlay_tex = None;
-        if model.overlay.key.is_some() {
-            model.overlay.clear();
-        }
-        return None;
-    }
-    if !matches!(model.preview.source, SourceState::Ready(_)) {
-        return None;
-    }
-    model.uv_coverage(key)?;
-    let img = model.uv_overlay(key)?;
-    if !state
-        .overlay_tex
-        .as_ref()
-        .is_some_and(|(a, _)| Arc::ptr_eq(a, &img))
-    {
-        // Review I1, M4: the worker built the ColorImage; the upload shares its `Arc` (no per-texel work here), and
-        // Nearest both ways keeps a single bad texel visible when zoomed out.
-        let options = egui::TextureOptions {
-            magnification: egui::TextureFilter::Nearest,
-            minification: egui::TextureFilter::Nearest,
-            wrap_mode: egui::TextureWrapMode::Repeat,
-            ..Default::default()
-        };
-        let data = egui::ImageData::Color(img.clone());
-        let tex = match state.overlay_tex.take() {
-            Some((_, mut tex)) => {
-                tex.set(data, options);
-                tex
-            }
-            None => ui.ctx().load_texture("overlay", data, options),
-        };
-        state.overlay_tex = Some((img, tex));
-    }
-    state.overlay_tex.as_ref().map(|(_, t)| t.id())
-}
-
-/// K8: the screen rect of the picture (uv `[0, 1]²`, or `[-1, 2)²` with Tile 3×3, as the shader shows it) and that uv
-/// rect. An overlay painted there with Repeat wrap lines up with the picture and never draws past it.
+/// The screen rect of the picture (uv `[0, 1]²`, or `[-1, 2)²` with Tile 3×3, as the shader shows it) and that uv rect.
 pub fn picture_rects(
     view: &ViewState,
     viewport: Rect,
@@ -833,7 +730,6 @@ pub fn picture_rects(
     )
 }
 
-#[allow(clippy::too_many_arguments)]
 fn draw_source_pane(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -841,7 +737,6 @@ fn draw_source_pane(
     gpu: &GpuStatus,
     viewport: Rect,
     size: [f32; 2],
-    overlay: Option<egui::TextureId>,
     face_pick: &mut Option<usize>,
 ) -> Option<(Slot, Params)> {
     ui.painter().rect_filled(viewport, 0.0, PANE_BG);
@@ -870,12 +765,6 @@ fn draw_source_pane(
         let params = params_for(&masked(&model.view, info), size, own, in_texture, tonemap);
         paint_clipped(ui, viewport, Slot::Source, params);
         drawn = Some((Slot::Source, params));
-        if let Some(id) = overlay {
-            let (pic, uv) = picture_rects(&masked(&model.view, info), viewport, size, own);
-            ui.painter()
-                .with_clip_rect(viewport.intersect(ui.clip_rect()))
-                .image(id, pic, uv, Color32::WHITE);
-        }
     }
     pane_overlay(ui, viewport, "Source", None, text.as_deref(), false);
     if info.six_files && text.is_none() {

@@ -176,57 +176,13 @@ impl Bc7Weights {
     }
 }
 cfg_enum!(GreenConvention, "lowercase" { Directx, Opengl });
-cfg_enum!(
-    /// One RNM normal layer (M6 Track F2 spec §2.1).
-    LayerId, "lowercase" { Bump, Bump2, Detail, Detail2, Bent }
-);
-cfg_enum!(#[derive(Default)] BentMode, "snake_case" { #[default] AoBlend, Detail });
-cfg_enum!(
-    /// Which base normal a layer file feeds (F2 spec §2.3): `n` (`_n`), `cnr` (`_cnr`) or both.
-    RnmTarget, "lowercase" { N, Cnr, Both }
-);
-
-impl LayerId {
-    /// The default blend order (F2 spec §3.1 step 5).
-    pub const ORDER: [LayerId; 5] = [
-        LayerId::Bent,
-        LayerId::Bump,
-        LayerId::Bump2,
-        LayerId::Detail,
-        LayerId::Detail2,
-    ];
-    pub fn id(self) -> &'static str {
-        match self {
-            LayerId::Bump => "bump",
-            LayerId::Bump2 => "bump2",
-            LayerId::Detail => "detail",
-            LayerId::Detail2 => "detail2",
-            LayerId::Bent => "bent",
-        }
-    }
-    pub fn label(self) -> &'static str {
-        match self {
-            LayerId::Bump => "bump",
-            LayerId::Bump2 => "bump 2",
-            LayerId::Detail => "detail",
-            LayerId::Detail2 => "detail 2",
-            LayerId::Bent => "bent",
-        }
-    }
-    /// F2 spec §3.4 (rnm.py's defaults).
-    pub fn default_strength(self) -> f64 {
-        match self {
-            LayerId::Bump | LayerId::Bump2 => 0.4,
-            LayerId::Detail => 0.6,
-            LayerId::Detail2 => 0.3,
-            LayerId::Bent => 0.35,
-        }
-    }
-}
-
-impl BentMode {
-    pub fn is_ao_blend(&self) -> bool {
-        *self == BentMode::AoBlend
+// What Preprocess does to a model-space normal (`msn`) to reach Skyrim's layout (Note IA1): `skyrim` nothing,
+// `swap_gb` for a Blender object-space bake, `invert_b` for Marmoset right-handed or Substance, `invert_gb` for
+// Marmoset left-handed.
+cfg_enum!(#[derive(Default)] MsnSource, "snake_case" { #[default] Skyrim, SwapGb, InvertB, InvertGb });
+impl MsnSource {
+    pub fn is_skyrim(&self) -> bool {
+        *self == MsnSource::Skyrim
     }
 }
 
@@ -235,160 +191,6 @@ fn yes() -> bool {
 }
 fn is_true(b: &bool) -> bool {
     *b
-}
-
-/// One layer's settings (F2 spec §4). Every field is optional at its default: `strength` = the layer's
-/// `default_strength`, `flip_green` = the base's own `channels.flip_green`, `mask` = on when the mask file exists.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct LayerSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strength: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flip_green: Option<bool>,
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
-    pub mask: bool,
-}
-
-impl Default for LayerSpec {
-    fn default() -> Self {
-        LayerSpec {
-            strength: None,
-            flip_green: None,
-            mask: true,
-        }
-    }
-}
-
-impl LayerSpec {
-    pub fn is_default(&self) -> bool {
-        *self == LayerSpec::default()
-    }
-}
-
-/// The `bent` layer: a layer plus its AO-blend settings (F2 spec §3.1, §3.3).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct BentSpec {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub strength: Option<f64>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub flip_green: Option<bool>,
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
-    pub mask: bool,
-    #[serde(default, skip_serializing_if = "BentMode::is_ao_blend")]
-    pub mode: BentMode,
-    /// The power on the occlusion `1 − AO`; `None` = 1.5.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ao_power: Option<f64>,
-    /// Read the AO source; `false` = a uniform weight.
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
-    pub ao: bool,
-}
-
-impl Default for BentSpec {
-    fn default() -> Self {
-        BentSpec {
-            strength: None,
-            flip_green: None,
-            mask: true,
-            mode: BentMode::AoBlend,
-            ao_power: None,
-            ao: true,
-        }
-    }
-}
-
-impl BentSpec {
-    pub fn is_default(&self) -> bool {
-        *self == BentSpec::default()
-    }
-}
-
-/// A layer's resolved settings.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct LayerView {
-    pub strength: f64,
-    /// `None` = follow the base's `channels.flip_green`.
-    pub flip_green: Option<bool>,
-    pub mask: bool,
-}
-
-/// RNM normal layers (M6 Track F2 spec §4). A field of every profile, read only by base normals (`Subtype::rnm_base`);
-/// not serialised at its default, so profile hashes written before F2 hold (DECISIONS Note W6).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(deny_unknown_fields)]
-pub struct RnmSpec {
-    #[serde(default = "yes", skip_serializing_if = "is_true")]
-    pub enabled: bool,
-    /// Blend order; see [`RnmSpec::effective_order`].
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub order: Option<Vec<LayerId>>,
-    #[serde(default, skip_serializing_if = "LayerSpec::is_default")]
-    pub bump: LayerSpec,
-    #[serde(default, skip_serializing_if = "LayerSpec::is_default")]
-    pub bump2: LayerSpec,
-    #[serde(default, skip_serializing_if = "LayerSpec::is_default")]
-    pub detail: LayerSpec,
-    #[serde(default, skip_serializing_if = "LayerSpec::is_default")]
-    pub detail2: LayerSpec,
-    #[serde(default, skip_serializing_if = "BentSpec::is_default")]
-    pub bent: BentSpec,
-}
-
-impl Default for RnmSpec {
-    fn default() -> Self {
-        RnmSpec {
-            enabled: true,
-            order: None,
-            bump: LayerSpec::default(),
-            bump2: LayerSpec::default(),
-            detail: LayerSpec::default(),
-            detail2: LayerSpec::default(),
-            bent: BentSpec::default(),
-        }
-    }
-}
-
-impl RnmSpec {
-    pub fn is_default(&self) -> bool {
-        *self == RnmSpec::default()
-    }
-    /// `order` without repeats (the first wins), then the missing ids in [`LayerId::ORDER`] (DECISIONS Note W6).
-    pub fn effective_order(&self) -> Vec<LayerId> {
-        let mut v: Vec<LayerId> = vec![];
-        for id in self.order.iter().flatten().chain(LayerId::ORDER.iter()) {
-            if !v.contains(id) {
-                v.push(*id);
-            }
-        }
-        v
-    }
-    pub fn layer(&self, id: LayerId) -> LayerView {
-        let (strength, flip_green, mask) = match id {
-            LayerId::Bump => (self.bump.strength, self.bump.flip_green, self.bump.mask),
-            LayerId::Bump2 => (self.bump2.strength, self.bump2.flip_green, self.bump2.mask),
-            LayerId::Detail => (
-                self.detail.strength,
-                self.detail.flip_green,
-                self.detail.mask,
-            ),
-            LayerId::Detail2 => (
-                self.detail2.strength,
-                self.detail2.flip_green,
-                self.detail2.mask,
-            ),
-            LayerId::Bent => (self.bent.strength, self.bent.flip_green, self.bent.mask),
-        };
-        LayerView {
-            strength: strength.unwrap_or(id.default_strength()),
-            flip_green,
-            mask,
-        }
-    }
-    pub fn ao_power(&self) -> f64 {
-        self.bent.ao_power.unwrap_or(1.5)
-    }
 }
 // `FuzzWeight` and `SubsurfaceWeight` (Note DY) come only from a hand-set `helper.role`: no name carries them.
 cfg_enum!(RawMap, "lowercase" { Roughness, Metallic, Ao, Specular, Glossiness, Height, Opacity, Fuzz, Orm, Curves, Cavity, Rmaos, FuzzWeight, SubsurfaceWeight });
@@ -548,16 +350,6 @@ pub enum MipLevels {
 }
 
 impl Subtype {
-    /// Which base an RNM layer stack can blend into (F2 spec §2.3, DECISIONS Note W5); `None` for every other
-    /// sub-type, `msn` included.
-    pub fn rnm_base(self) -> Option<RnmTarget> {
-        match self {
-            Subtype::Normal | Subtype::PbrNormal | Subtype::LandscapeNormal => Some(RnmTarget::N),
-            Subtype::CoatNormal => Some(RnmTarget::Cnr),
-            _ => None,
-        }
-    }
-
     pub const ALL: [Subtype; 34] = {
         use Subtype::*;
         [
@@ -752,6 +544,9 @@ pub struct ChannelSpec {
     /// `opengl` makes Resolve set `flip_green`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub green_convention: Option<GreenConvention>,
+    /// The baker a model-space normal came from (Note IA1); read only by `msn`.
+    #[serde(default, skip_serializing_if = "MsnSource::is_skyrim")]
+    pub msn_source: MsnSource,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -814,56 +609,9 @@ pub struct ValidationSpec {
 // Cubemap styles (DECISIONS DS4): each fills `face_size`, `format`, `blur` (and `vanilla_metal` `saturation`) where
 // no explicit layer set them.
 cfg_enum!(CubeStyle, "snake_case" { VanillaMetal, Room, Eye, Hd });
-// How a cubemap source is laid out; unset = from the aspect ratio. `equirect` is a 2:1 360-degree panorama.
-cfg_enum!(CubeLayout, "snake_case" { Faces, Hcross, Vcross, Hstrip, Vstrip, Equirect, MirrorBall, Angular, Photo });
+// How a cubemap source is laid out; unset = from the aspect ratio. 3.0 removed equirect, mirror_ball, angular, photo.
+cfg_enum!(CubeLayout, "snake_case" { Faces, Hcross, Vcross, Hstrip, Vstrip });
 cfg_enum!(#[derive(Default)] FaceFlip, "lowercase" { #[default] None, H, V });
-// The ground fill look: the horizon colour darkening towards the nadir.
-cfg_enum!(GroundMode, "lowercase" { Gradient });
-/// What fills the cube below `cubemap.horizon`: `"gradient"` or `[r, g, b]` code values (game gamma, like `tint`).
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
-#[serde(untagged)]
-pub enum GroundFill {
-    Mode(GroundMode),
-    Color([u8; 3]),
-}
-
-// Hand-written so a bad value names the accepted forms (an untagged derive says only "did not match any variant").
-impl<'de> Deserialize<'de> for GroundFill {
-    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        use serde::de::{Error, SeqAccess, Unexpected, Visitor};
-        struct V;
-        impl<'de> Visitor<'de> for V {
-            type Value = GroundFill;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("\"gradient\" or [r, g, b] with each 0..=255")
-            }
-            fn visit_str<E: Error>(self, s: &str) -> Result<GroundFill, E> {
-                match s {
-                    "gradient" => Ok(GroundFill::Mode(GroundMode::Gradient)),
-                    _ => Err(E::invalid_value(Unexpected::Str(s), &self)),
-                }
-            }
-            fn visit_seq<A: SeqAccess<'de>>(self, mut a: A) -> Result<GroundFill, A::Error> {
-                let mut rgb = [0u8; 3];
-                for (i, c) in rgb.iter_mut().enumerate() {
-                    // Read as f64 so a fractional element also gets the accepted forms (DS25).
-                    let v: f64 = a
-                        .next_element()?
-                        .ok_or_else(|| A::Error::invalid_length(i, &self))?;
-                    if v.fract() != 0.0 || !(0.0..=255.0).contains(&v) {
-                        return Err(A::Error::invalid_value(Unexpected::Float(v), &self));
-                    }
-                    *c = v as u8;
-                }
-                match a.next_element::<serde::de::IgnoredAny>()? {
-                    None => Ok(GroundFill::Color(rgb)),
-                    Some(_) => Err(A::Error::invalid_length(4, &self)),
-                }
-            }
-        }
-        d.deserialize_any(V)
-    }
-}
 fn is_zero(v: &f64) -> bool {
     *v == 0.0
 }
@@ -924,12 +672,6 @@ pub struct CubemapSpec {
     /// Highlights above this (linear) are clamped; at least 1.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub highlight_clamp: Option<f64>,
-    /// Fill below the horizon line; unset = no fill (the horizon alone does nothing).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ground_fill: Option<GroundFill>,
-    /// Horizon elevation in degrees, -45..=45; read only with ground_fill.
-    #[serde(default, skip_serializing_if = "is_zero")]
-    pub horizon: f64,
 }
 
 impl Default for CubemapSpec {
@@ -951,8 +693,6 @@ impl Default for CubemapSpec {
             saturation: 1.0,
             tint: None,
             highlight_clamp: None,
-            ground_fill: None,
-            horizon: 0.0,
         }
     }
 }
@@ -1000,9 +740,6 @@ pub struct Profile {
     #[serde(default)]
     pub validation: ValidationSpec,
     pub packing: PackingSpec,
-    /// RNM normal layers (M6 Track F2); read only by base normals (`Subtype::rnm_base`).
-    #[serde(default, skip_serializing_if = "RnmSpec::is_default")]
-    pub rnm: RnmSpec,
     /// Cubemap settings; read only by `Subtype::Cubemap`, reset for every other sub-type.
     #[serde(default, skip_serializing_if = "CubemapSpec::is_default")]
     pub cubemap: CubemapSpec,
@@ -1094,38 +831,6 @@ mod tests {
     }
 
     #[test]
-    fn ground_fill_parses_both_forms() {
-        let p = |s: &str| toml::from_str::<CubemapSpec>(s).unwrap();
-        assert_eq!(
-            p("ground_fill = \"gradient\"").ground_fill,
-            Some(GroundFill::Mode(GroundMode::Gradient))
-        );
-        let s = p("ground_fill = [10, 20, 30]\nhorizon = -5.0");
-        assert_eq!(s.ground_fill, Some(GroundFill::Color([10, 20, 30])));
-        assert_eq!(s.horizon, -5.0);
-    }
-
-    #[test]
-    fn bad_ground_fill_names_the_accepted_forms() {
-        for bad in [
-            "\"gradiant\"",
-            "[1, 2]",
-            "[300, 0, 0]",
-            "[1, 2, 3, 4]",
-            "[-1, 0, 0]",
-            "[1.5, 0, 0]",
-            "5",
-        ] {
-            let e = toml::from_str::<CubemapSpec>(&format!("ground_fill = {bad}"))
-                .unwrap_err()
-                .to_string();
-            assert!(
-                e.contains("\"gradient\" or [r, g, b] with each 0..=255"),
-                "{bad}: {e}"
-            );
-        }
-    }
-    #[test]
     fn subtype_all_order() {
         assert_eq!(Subtype::ALL.len(), 34);
         assert_eq!(
@@ -1177,7 +882,6 @@ mod tests {
         use crate::presets::PresetRegistry;
         assert_eq!(Subtype::DetailNormal.id(), "detail_normal");
         assert_eq!(Subtype::DetailNormal.category(), Category::Normal);
-        assert_eq!(Subtype::DetailNormal.rnm_base(), None);
         let r = PresetRegistry::builtin().unwrap();
         for target in [Target::Cs, Target::Vanilla] {
             let d = r

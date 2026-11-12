@@ -4,7 +4,6 @@ use engine::config::*;
 use engine::discover::{InputFile, InputKind};
 use engine::group::TextureSet;
 use engine::helper::plan::{plan_fills, AlphaFacts, FillPlan};
-use engine::helper::{AlphaTarget, FillTarget};
 use engine::overrides::parse_set;
 use engine::policy::*;
 use engine::presets::PresetRegistry;
@@ -41,6 +40,7 @@ fn fx(target: Target, members: &[(&str, Kind)]) -> Fx {
             members: (0..members.len()).collect(),
             suffixes: Default::default(),
             shared_skin: false,
+            shares: vec![],
         },
     };
     for (name, kind) in members {
@@ -72,10 +72,10 @@ fn fx(target: Target, members: &[(&str, Kind)]) -> Fx {
             pack: None,
             bake: None,
             shader: None,
-            rnm: None,
             derive: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         });
         out.facts.insert(
             f.path.clone(),
@@ -477,31 +477,4 @@ fn helper_never_fills_itself() {
     );
     assert!(p.candidates.is_empty(), "{:?}", landed(&p));
     assert!(p.not_used.contains_key(&path("x_d.png")), "{p:?}");
-}
-
-#[test]
-fn incompatible_hand_targets_are_reported() {
-    let mut f = fx(
-        Target::Cs,
-        &[
-            ("x.png", Kind::Plain(Subtype::Diffuse)),
-            ("x_mask.png", Kind::Plain(Subtype::Normal)),
-        ],
-    );
-    let p = run(
-        Target::Cs,
-        &[
-            "file:**/x_mask.png.helper.role=bump",
-            "file:**/x_mask.png.helper.fills=[\"diffuse.a\"]",
-        ],
-        &mut f,
-    );
-    assert!(p.candidates.is_empty(), "{:?}", landed(&p));
-    let s = &p.skipped_targets[&path("x_mask.png")];
-    assert_eq!(s.len(), 1, "{s:?}");
-    assert_eq!(s[0].0, FillTarget::Alpha(AlphaTarget::Diffuse));
-    assert!(
-        s[0].1.contains("normal-type roles feed RNM layers only"),
-        "{s:?}"
-    );
 }

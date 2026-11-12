@@ -1,8 +1,6 @@
-//! P1-D: shape-keyed CS settings rules and the coverage report over the four CS builds the owner has
+//! P1-D: shape-keyed CS settings rules (`feature_data`) over the four CS builds the owner had
 //! (03-cs-settings-drift.md). Fixtures = name lists extracted by the P1-D plan Task 1 (no CS source, no CS values).
-use render3d::cs_settings::{
-    coverage, feature_data, linear_lighting_on, read_settings, Coverage, CsSettings, SettingsPaths,
-};
+use render3d::cs_settings::{feature_data, linear_lighting_on, CsSettings};
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
@@ -25,14 +23,14 @@ fn fields_of(tag: &str) -> BTreeSet<String> {
         .collect()
 }
 
-/// The build's reflected names and its SettingsDefault key set, read like a real settings file.
+/// The build's reflected names and its SettingsDefault key set. `nexus191`'s file is empty: no JSON until CS first runs.
 fn build(tag: &str) -> (BTreeSet<String>, CsSettings) {
-    let s = read_settings(&SettingsPaths {
-        default: Some(dir(tag).join("keys.json")),
-        ..Default::default()
-    });
-    assert!(!s.parse_failed, "{tag}: {:?}", s.notes);
-    (fields_of(tag), s)
+    let bytes = std::fs::read(dir(tag).join("keys.json")).unwrap();
+    let json = serde_json::from_slice(bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&bytes));
+    (
+        fields_of(tag),
+        with(json.unwrap_or_else(|e| panic!("{tag}: {e}"))),
+    )
 }
 
 fn value(fd: &[(String, Vec<f64>)], name: &str) -> Vec<f64> {
@@ -96,7 +94,7 @@ fn the_installed_build_keeps_the_p1c_values() {
     );
 }
 
-/// Settings as `read_settings` would give them for a file with exactly `json`.
+/// Settings for a file with exactly `json`.
 fn with(json: serde_json::Value) -> CsSettings {
     let merged = json.as_object().unwrap().clone();
     let linear_lighting = merged
@@ -259,19 +257,14 @@ fn flat_skin_settings_are_read_like_cs_does() {
     );
 }
 
-/// Golden, capture 11178 (owner settings, installed build): body b7 skinDetailParams (20, 2, 0.25, 0) at ev 4386,
+/// Golden, capture 11178 (its settings: tiling 10 x body 2, strength 0.25, detail off): body b7 skinDetailParams (20, 2, 0.25, 0) at ev 4386,
 /// head (FaceGen, ev 4182) (10, 1, 0.25, 0); FeatureData b6 stays the body value for both (GetCommonBufferData).
 #[test]
 fn new_packing_premultiplies_and_heads_use_tiling_one() {
-    let owner = PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/fixtures/cs_settings"
-    ));
-    let s = read_settings(&SettingsPaths {
-        user: Some(owner.join("SettingsUser.json")),
-        default: Some(owner.join("SettingsDefault.json")),
-        ..Default::default()
-    });
+    let s = with(serde_json::json!({"Advanced Skin": {"DefaultProfile": {
+        "SkinDetailTiling": 10.0, "BodyTilingMultiplier": 2.0, "SkinDetailStrength": 0.25,
+        "EnableSkinDetail": false
+    }}}));
     let f = fields_of("aio190");
     let body = feature_data(&s, &f, true, false);
     let head = feature_data(&s, &f, true, true);
@@ -338,74 +331,6 @@ fn skin_tiling_follows_the_settings_values() {
     assert_eq!(value(&old, "skinData.skinDetailParams")[..2], [7.0, 3.0]);
 }
 
-/// 03 report 6.3: with the rules of Tasks 2-3 every build lands its own keys; Nexus has no JSON, so the old-LL
-/// gammas and the ExtMat/ExtTrans fields stay unset (zero), the honest answer.
-#[test]
-fn coverage_per_build() {
-    for tag in BUILDS {
-        let (f, s) = build(tag);
-        let c = coverage(&s, &f, &feature_data(&s, &f, true, false));
-        assert!(c.unmatched.is_empty(), "{tag}: {:?}", c.unmatched);
-        if tag == "nexus191" {
-            let want: BTreeSet<String> = [
-                "extendedMaterialSettings.EnableComplexMaterial",
-                "extendedMaterialSettings.EnableHeightBlending",
-                "extendedMaterialSettings.EnableParallax",
-                "extendedMaterialSettings.EnableParallaxWarpingFix",
-                "extendedMaterialSettings.EnableShadows",
-                "extendedMaterialSettings.EnableTerrainParallax",
-                "extendedTranslucencySettings.MaterialModel",
-                "extendedTranslucencySettings.Reduction",
-                "extendedTranslucencySettings.Softness",
-                "extendedTranslucencySettings.Strength",
-            ]
-            .map(String::from)
-            .into();
-            assert_eq!(c.unset, want);
-        } else {
-            assert_eq!(c, Coverage::default(), "{tag}");
-            assert_eq!(c.line(), None);
-        }
-    }
-}
-
-/// Drift shows: an old-generation key on the new build is unmatched, a reflected field nothing writes is unset;
-/// pads, struct-less sections and known JSON-only keys stay quiet.
-#[test]
-fn coverage_names_the_drift() {
-    // The installed build own (clean) key set plus one drifted field and two drifted keys.
-    let (mut f, mut s) = build("aio190");
-    f.insert("linearLightingSettings.newThing".into());
-    let section = |s: &CsSettings, name: &str| -> serde_json::Map<String, serde_json::Value> {
-        s.merged[name].as_object().unwrap().clone()
-    };
-    let mut ll = section(&s, "Linear Lighting");
-    ll.insert("lightGamma".into(), 2.2.into());
-    s.merged.insert("Linear Lighting".into(), ll.into());
-    let mut skin = section(&s, "Advanced Skin");
-    skin["DefaultProfile"]
-        .as_object_mut()
-        .unwrap()
-        .insert("NewSkinKnob".into(), 1.0.into());
-    s.merged.insert("Advanced Skin".into(), skin.into());
-    let c = coverage(&s, &f, &feature_data(&s, &f, true, false));
-    assert_eq!(
-        c.unset,
-        BTreeSet::from(["linearLightingSettings.newThing".to_string()])
-    );
-    assert_eq!(
-        c.unmatched,
-        BTreeSet::from([
-            "Advanced Skin.NewSkinKnob".to_string(),
-            "Linear Lighting.lightGamma".to_string()
-        ])
-    );
-    assert_eq!(
-        c.line().as_deref(),
-        Some("CS settings: 1 fields unset, 2 keys unmatched")
-    );
-}
-
 /// Task 5 Step 3: 1.6/1.8 shaders with 1.9 settings (no gamma keys) drew black: the old-LL gamma fields and
 /// vanillaDiffuseColorMult fell to 0. They take the old builds' SettingsDefault values; a user key still wins.
 #[test]
@@ -431,14 +356,13 @@ fn old_ll_fields_without_a_key_take_the_old_defaults() {
             [1.0],
             "{tag}"
         );
-        let c = coverage(&s, &fields, &fd);
-        assert!(
-            !c.unset
-                .iter()
-                .any(|f| f.starts_with("linearLightingSettings.")),
-            "{tag}: {:?}",
-            c.unset
-        );
+        // Every non-pad old-LL field has a written value (the survivor of the removed coverage report).
+        for n in fields
+            .iter()
+            .filter(|n| n.starts_with("linearLightingSettings.") && !n.contains(".pad"))
+        {
+            assert!(fd.iter().any(|(w, _)| w == n), "{tag}: {n} not written");
+        }
     }
     let s = with(serde_json::json!({"Linear Lighting": {"lightGamma": 2.2}}));
     let fd = feature_data(&s, &fields_of("cs16_0528"), true, false);

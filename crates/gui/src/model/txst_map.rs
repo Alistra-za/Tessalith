@@ -100,7 +100,7 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
             continue;
         };
-        if m.record_ignored(v) {
+        if m.renames_outputs(v) {
             continue;
         }
         let base = txst.base.as_deref().zip(defaults.as_ref());
@@ -111,7 +111,8 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
             if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
-                out.push((v.id.clone(), k, rel));
+                // Note HQ6: explicit paths are under the export folder.
+                out.push((v.id.clone(), k, m.export_rel(&rel)));
             }
         }
     }
@@ -137,7 +138,7 @@ fn member_write(
         (Some(p), _) => p.clone(),
         (None, Some((base, defaults))) => {
             let (dir, stem) = base.rsplit_once('/')?;
-            let named = renamed_output(&defaults.key(item)?, stem, v.skin || v.shared)?;
+            let named = renamed_output(&defaults.key(item, &v.members)?, stem, v.tails())?;
             format!("{dir}/{}", named.file_name()?.to_string_lossy())
         }
         (None, None) => return None,
@@ -506,9 +507,9 @@ impl AppModel {
         })
     }
 
-    /// Whether the plan ignores `v`'s mapping: a PGPatcher PBR set on Community Shaders names its outputs in the JSON
-    /// (`record_entries`, the menu, the picker and the record rows all ask this).
-    pub fn record_ignored(&self, v: &SetView) -> bool {
+    /// Whether `v` renames its outputs (Note HJ1) and the plan ignores its mapping: a PGPatcher PBR set on Community
+    /// Shaders names its outputs in the JSON (`record_entries`, the menus, the picker and the record rows all ask this).
+    pub fn renames_outputs(&self, v: &SetView) -> bool {
         v.pbr && self.target == Target::Cs
     }
 
@@ -520,7 +521,7 @@ impl AppModel {
         let (Some(v), Some(root)) = (self.view_of(set), self.root.as_deref()) else {
             return vec![];
         };
-        let off = self.record_ignored(&v);
+        let off = self.renames_outputs(&v);
         v.members
             .iter()
             .filter_map(|k| self.item(k))
@@ -582,7 +583,7 @@ impl AppModel {
         let (Some(t), Some(root)) = (self.target(), self.root.as_deref()) else {
             return vec![];
         };
-        let txst = self.stored_txst(&v.id).filter(|_| !self.record_ignored(v));
+        let txst = self.stored_txst(&v.id).filter(|_| !self.renames_outputs(v));
         let defaults = txst
             .as_ref()
             .is_some_and(TxstMap::is_base)

@@ -64,12 +64,8 @@ impl SdcApp {
             model.scan_db.clone(),
             model.settings.meshes.clone(),
         );
-        meshes.v3 =
-            crate::model::viewport3d::Viewport3d::new(model.settings.render3d.shaders.clone());
-        let mut set3d = crate::model::set_preview::SetPreview::from_settings(
-            &model.settings,
-            model.scan_db.clone(),
-        );
+        meshes.v3 = crate::model::viewport3d::Viewport3d::new();
+        let mut set3d = crate::model::set_preview::SetPreview::from_settings(model.scan_db.clone());
         meshes.v3.cache_dir = model.shader_cache.clone();
         set3d.v3.cache_dir = model.shader_cache.clone();
         // The saved arrangement: filters, preview channel and layout, and both 3D looks (AG17).
@@ -282,8 +278,6 @@ impl SdcApp {
     /// The window regained focus: the place to look for source files that changed meanwhile.
     fn focus_regained(&mut self) {
         self.model.check_sources();
-        self.meshes.relocate();
-        self.state.set3d.relocate();
     }
 }
 
@@ -416,10 +410,6 @@ impl eframe::App for SdcApp {
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
             crate::ui::meshes::show(ui, &mut self.meshes);
-            if let Some(fp) = self.meshes.v3.take_shaders_changed() {
-                self.model.settings.render3d.shaders = Some(fp);
-                self.model.save_settings();
-            }
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
@@ -459,22 +449,16 @@ impl eframe::App for SdcApp {
             self.model.settings.meshes = s;
             self.model.save_settings();
         }
-        if let Some(fp) = self.state.set3d.v3.take_shaders_changed() {
-            self.model.settings.render3d.shaders = Some(fp);
-            self.model.save_settings();
-        }
 
         // Worker results arrive on a channel, not as input events: keep frames coming while one is pending.
         let visible = self.model.busy()
             || self.model.heatmap_pending()
-            || self.model.rnm_preview_pending()
             || self.model.picker.busy()
             || self.meshes.scanning()
             || self.meshes.v3.busy()
             || self.state.set3d.busy()
             // GE16: the set preview's crash lines appear when the JSON read lands, even on an idle Textures view.
-            || self.meshes.pg_reading()
-            || self.model.v2_jobs_pending();
+            || self.meshes.pg_reading();
         let background = self.model.dims_pending()
             || self.model.used_by_pending()
             || self.model.report_saving

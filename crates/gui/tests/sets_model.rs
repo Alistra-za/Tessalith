@@ -99,7 +99,10 @@ fn vanilla_gets_no_output_paths() {
         .output
         .to_string_lossy()
         .replace('\\', "/");
-    assert!(out.ends_with("export/landscape/rock01.dds"), "{out}");
+    assert!(
+        out.ends_with("export/textures/landscape/rock01.dds"),
+        "{out}"
+    );
 }
 
 #[test]
@@ -202,13 +205,16 @@ fn duplicating_a_raw_source_copies_it_and_undo_deletes_it_only_when_unchanged() 
             from: "landscape/rock01".into()
         }
     );
-    assert!(
-        matches!(
-            m.drop_choice(&rough, &id, DropChoice::Share),
-            DropOutcome::Refused(_)
-        ),
-        "raw maps are not shareable"
+    // Note HH5: a raw helper is shared as the file (a `share` line); undone here, the test is about Duplicate.
+    assert_eq!(
+        m.drop_choice(&rough, &id, DropChoice::Share),
+        DropOutcome::Joined
     );
+    idle(&mut m);
+    assert!(m.sets_doc.as_ref().unwrap().text().contains("share"));
+    m.undo();
+    idle(&mut m);
+    assert!(!m.sets_doc.as_ref().unwrap().text().contains("share"));
     assert_eq!(
         m.drop_choice(&rough, &id, DropChoice::Duplicate),
         DropOutcome::Joined
@@ -314,7 +320,7 @@ fn edits_go_creates_and_renames_first_then_moves_then_removes() {
     use engine::sets::SetEdit;
     assert!(matches!(&edits[0], SetEdit::Create { set } if set == "mine/new"));
     assert!(matches!(&edits[1], SetEdit::Move { to, .. } if to == "mine/new"));
-    assert!(matches!(edits.last().unwrap(), SetEdit::Remove { .. }));
+    assert!(matches!(edits.last().unwrap(), SetEdit::NoSet { .. }));
 }
 
 #[test]
@@ -373,25 +379,25 @@ fn clearing_a_match_returns_to_the_derived_prefix() {
 }
 
 #[test]
-fn removing_the_only_member_of_a_set_does_nothing() {
-    // The engine would make it a set of its own named `<stem>~2` (it is already one).
+fn removing_the_only_member_of_a_set_puts_it_in_no_set() {
+    // Note HF1 supersedes the old refusal (DU5): it leaves for no set, with no `remove` line.
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
     let leaf = key_of(&m, "leaf.png");
-    let before = m.sets_doc.as_ref().unwrap().text();
     let steps = m.history.undo.len();
-    assert!(m.remove_member("landscape/leaf", &leaf).is_err());
-    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before);
-    assert_eq!(m.history.undo.len(), steps);
-    // The only member of a set it was moved into goes back to the automatic grouping (no Remove edit).
+    assert!(m.remove_member("landscape/leaf", &leaf).is_ok());
+    assert_eq!(m.history.undo.len(), steps + 1);
+    assert!(m.is_no_set(&leaf));
+    // The only member of a set it was moved into leaves for no set too (its `add` line goes).
     let odd = key_of(&m, "odd.png");
     let id = m.drop_new_set(&odd).unwrap();
     idle(&mut m);
     assert!(m.remove_member(&id, &odd).is_ok());
     idle(&mut m);
     let v = set_views(&m);
-    assert!(view(&v, "landscape/odd").members.contains(&odd));
+    assert!(m.is_no_set(&odd));
+    assert!(v.iter().all(|s| !s.members.contains(&odd)));
     assert!(
         view(&v, &id).members.is_empty(),
         "the created set stays, empty"
@@ -439,12 +445,87 @@ fn rename_refuses_names_in_use_and_bad_names() {
         .all(|e| !matches!(e, engine::sets::SetEdit::Rename { .. })));
 }
 
+/// Note HS11: the engine still makes a deleted automatic set (it renames before it moves files out), so its name
+/// stays refused to a rename.
 #[test]
-fn delete_set_only_deletes_created_sets() {
+fn rename_refuses_the_name_of_a_deleted_automatic_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    idle(&mut m);
+    assert!(m.delete_set("landscape/leaf"));
+    idle(&mut m);
+    assert!(!set_views(&m).iter().any(|s| s.id == "landscape/leaf"));
+    assert!(m.rename_set("landscape/rock01", "landscape/leaf").is_err());
+    idle(&mut m);
+    let entries = m.sets_doc.as_ref().unwrap().entries();
+    let rock = entries
+        .iter()
+        .find(|e| e.id == "landscape/rock01")
+        .expect("rock01's entry");
+    assert_eq!(rock.shader, Some(engine::shader::Shader::Pbr));
+    assert!(entries.iter().all(|e| e.renamed_from.is_none()));
+    assert!(!set_views(&m).iter().any(|s| s.id == "landscape/leaf"));
+    assert!(engine_inputs(&m)
+        .0
+        .iter()
+        .all(|e| !matches!(e, engine::sets::SetEdit::Rename { .. })));
+}
+
+#[test]
+fn rename_refuses_the_name_of_an_automatic_set_emptied_by_a_move() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
-    assert!(!m.delete_set("landscape/rock01"));
+    let leaf = key_of(&m, "leaf.png");
+    m.drop_replace(&leaf, "landscape/rock01", DropChoice::Move)
+        .unwrap();
+    idle(&mut m);
+    let v = set_views(&m);
+    assert!(!v.iter().any(|s| s.id == "landscape/leaf"), "no leaf card");
+    let odd = key_of(&m, "odd.png");
+    let odd_set = v
+        .iter()
+        .find(|s| s.members.contains(&odd))
+        .expect("odd's set")
+        .id
+        .clone();
+    let e = m.rename_set(&odd_set, "landscape/leaf").unwrap_err();
+    assert!(e.contains("automatic set of a file"), "{e}");
+}
+
+/// Note HS11 (final review Issue 3): a file's automatic set follows its input name, so the name it was read under
+/// before is free.
+#[test]
+fn rename_may_take_an_automatic_name_an_input_name_left() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.set_input_name("landscape/rock01", "textures/landscape/stone")
+        .unwrap();
+    idle(&mut m);
+    assert!(set_views(&m).iter().any(|s| s.id == "landscape/stone"));
+    assert_eq!(m.rename_set("landscape/leaf", "landscape/rock01"), Ok(()));
+}
+
+/// A set the user created makes no automatic set, so it may take a hidden automatic name.
+#[test]
+fn a_created_set_may_take_a_hidden_automatic_name() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    idle(&mut m);
+    assert!(m.delete_set("landscape/leaf"));
+    idle(&mut m);
+    let odd = key_of(&m, "odd.png");
+    let id = m.drop_new_set(&odd).unwrap();
+    idle(&mut m);
+    assert_eq!(m.rename_set(&id, "landscape/leaf"), Ok(()));
+}
+
+#[test]
+fn delete_set_deletes_a_created_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
     let odd = key_of(&m, "odd.png");
     let id = m.drop_new_set(&odd).unwrap();
     idle(&mut m);
@@ -1729,7 +1810,7 @@ fn a_grass_diffuse_card_is_titled_complex_grass() {
 fn a_bad_prefix_on_a_non_json_set_is_no_export_block() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_json_value("landscape/rock01", "rename", Some(json!("a/b")));
+    m.set_json_value("landscape/rock01", "rename", Some(json!("../b")));
     idle(&mut m);
     let v = view(&set_views(&m), "landscape/rock01").clone();
     assert!(!v.pbr && v.prefix_error.is_some(), "{v:?}");

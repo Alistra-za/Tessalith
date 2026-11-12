@@ -13,15 +13,15 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 
 | Group | What you set |
 |---|---|
-| Material | Specular level, Roughness scale, and Displacement scale while Parallax is on. |
+| Material | Specular level ([F0 by material](Specular-Reference.md)), Roughness scale, and Displacement scale while Parallax is on. |
 | Features | Emissive, Parallax, Hair, Multilayer (coat), Glint, Fuzz. |
 | Coat | Coat colour, specular level, roughness, strength, diffuse, normal, parallax and inner UV scale. Shown while Multilayer is on. |
 | Subsurface | **Off / Standard / Foliage**, then colour and opacity. |
 | Emissive, Glint, Fuzz settings | Their own values. Shown while the feature is on. |
 | NiAlphaProperty | The `alphaprop_*` keys ([below](#nialphaproperty)). |
 | Matching | The texture paths the entry matches (`match1` to `match8`). |
-| CS PBR records | Community Shaders' records ([Set materials](GUI-Set-Materials.md#community-shaders-pbr-records)). |
-| Advanced TruePBR settings | Path contains, Mesh path contains, Rename, UV and cubemap, vertex colours and depth, texture locks. |
+| CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
+| Advanced TruePBR settings | Path contains, Mesh path contains, [Rename](#rename), UV and cubemap, vertex colours and depth, texture locks. |
 
 Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
 
@@ -82,9 +82,12 @@ The entry applies when any of its paths matches. The set's diffuse path is on by
 
 ## Rename
 
-**Rename** (Advanced TruePBR settings) takes a new file name, no folders. Your outputs keep the matched texture's folder under `textures\pbr\` and take the new name. Tessalith writes it as `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. So a renamed set has exactly one match: **+** and **Match on this** are greyed until you clear Rename, and older extra rows say "not written".
+**Rename** (Advanced TruePBR settings) takes a new file name or a whole path. A file name keeps the matched texture's folder under `textures\pbr\`. A path such as `armor\steel\plate` is relative to `Data` (`textures\` is added when it's missing), so the outputs land at `textures\armor\steel\plate.dds`, `plate_n.dds` and so on, wherever your source folder is. The path can't leave `Data` (`..`, a drive) or end in a map suffix. <!-- D:HJ5 -->
 
-If your matches point at different textures and Rename is empty, you get a warning: the output name depends on which match hits first. Point them at the same texture.
+- **One match and a file name:** Tessalith writes `match_diffuse` + `rename`, because `match_diffuse` is the key PGPatcher renames from. <!-- D:HJ4 -->
+- **A path, more matches or a path contains:** PGPatcher's `rename` would land on a wrong path, so the entry keeps its matches and names each renamed file in a slot command (`slot1`, `slot2`, `slot6` …). A slot you set yourself wins, and a locked slot stays unnamed. <!-- D:HJ3 -->
+
+If your matches point at different textures, you get a warning: PGPatcher looks up every slot without a slot command next to whichever match hits first. Point them at the same texture.
 
 ## NiAlphaProperty
 
@@ -100,7 +103,8 @@ These keys set the shape's alpha blending and testing in the NIF. A key that's o
 
 After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name.
 
-- Only sets that exported fully go in. Advanced skin sets have no entry.
+- Only sets that exported fully go in. Advanced skin sets have no entry ([Advanced skin](PBR-Landscape.md#advanced-skin)).
+- On a partial or excluding run ([Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project)), a set the run left out keeps its entry while its DDS files are in the export folder. One whose files aren't there (never exported, or the folder was emptied) is left out, with a "not exported yet" note in the Files tab. <!-- D:HF12 -->
 - **IMPORTANT** Tessalith never overwrites a JSON it didn't write without asking you first. An identical file is left alone without a prompt.
 
 ## The JSON editor
@@ -109,20 +113,13 @@ Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button bes
 
 ![The JSON editor.](../img/gui/GUI-PGPatcher-JSON/json-editor.png)
 
-- Each entry shows its set's keys with the same controls as the Material tab. **Show** jumps to the set.
-- **+ key** adds any schema key. Keys Tessalith doesn't know show in amber and are kept as you wrote them.
-- The **▾** [path picker](GUI-Set-Editor.md#path-pickers) on a match lists the scanned textures for that slot. Without a scan it lists only your project's paths.
-- **JSON text** shows the file exactly as it would be written now, with **Copy**.
+Each entry has the same controls as the Material tab; **+ key** adds any schema key, and keys Tessalith doesn't know show in amber and are kept as you wrote them.
 
 ### Deleting vanilla shapes
 
 **+ Add a delete section** makes PGPatcher delete the shapes it matches, for example a vanilla glow shape your PBR base shape replaces. Delete sections belong to no set, are saved in `sdc-project.toml` and are written with `delete: true` after the set entries.
 
 If a delete section would hit one of your own sets, that set is struck through and outlined amber, and its set editor warns you too.
-
-### Errors and warnings
-
-The header reads "N errors, M warnings". Errors block Export; warnings are what Export will ask you about. **Next error** (F8) and **Prev** (Shift+F8) jump between them. The search box narrows the entries by set name or any path in them, but the counts always cover everything.
 
 ## Quick Q/A
 

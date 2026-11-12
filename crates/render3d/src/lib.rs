@@ -1,5 +1,6 @@
 pub mod background;
 pub mod builtin;
+mod bundled;
 pub mod cache;
 pub mod cbuffer;
 pub mod compile;
@@ -13,7 +14,6 @@ pub mod glint_noise;
 pub mod golden;
 pub mod hdri;
 pub mod includes;
-pub mod locate;
 pub mod material;
 pub mod mesh;
 pub mod parse;
@@ -28,6 +28,7 @@ pub mod textures;
 pub use builtin::{builtin_mesh, Builtin};
 pub use composite::Composite;
 pub use debug::{Availability, DebugOutput};
+pub use includes::ShaderSource;
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
@@ -41,13 +42,13 @@ use compile::{cached, program_key, CompiledPair, ProgramKey, SrvKind};
 use cs_settings::CsSettings;
 use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
-use locate::Fingerprint;
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
 use nif::material::{MaterialState, SkinPreview};
 use permutation::{defines, Defines, Stage};
 pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
 use source::{ExpandedSource, SourceSet};
+
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -67,14 +68,6 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_TEXTURE_ADDRESS_WRAP, D3D11_VIEWPORT,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_R16_UINT;
-
-/// CS feature defines compiled by default. The owner's installed CS 1.9 has Linear Lighting on
-/// (answers.md: `SettingsUser.json` `enableLinearLighting: 1`), and Linear Lighting is the compile-time
-/// define `ENABLE_LL` (`Common/ColorManagement.hlsli:13,133`). P0 does no other installed-feature detection;
-/// the GUI's "Community Shaders features" toggle clears this list (`Renderer::set_features`).
-///
-/// This is the owner's CS SettingsUser.json / frame-11178 value; P1 reads the enabled features per user.
-pub const DEFAULT_FEATURES: &[&str] = &["ENABLE_LL"];
 
 /// Result of [`Renderer::load`].
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -342,23 +335,24 @@ fn wet_candidates(m: &MaterialState) -> Vec<String> {
 /// into a sidecar process. Single-threaded, like [`Gpu`].
 pub struct Renderer {
     gpu: Gpu,
-    shaders: Fingerprint,
+    /// Where the shader text comes from; kept for [`Renderer::rebuild_device_on`].
+    source: ShaderSource,
     cache_dir: PathBuf,
     /// The CS feature defines every program is compiled with. `set_features` replaces it whole; `set_settings`
     /// and `set_features_on` replace only the settings defines (`ENABLE_LL` and [`cs_settings::PREVIEW_FEATURES`]).
     features: Vec<String>,
-    /// The user CS settings last applied (P1-C C11); default = no settings files found.
+    /// The CS settings in force (P1-C C11): [`cs_settings::defaults`] until a test replaces them.
     settings: CsSettings,
     /// The "Community Shaders features" toggle (C8): off, the settings add no define.
     features_on: bool,
-    /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source, reset by `set_shaders`.
+    /// The shaders are an old Linear Lighting build (P1-D); memoised from the expanded source.
     old_ll: std::cell::OnceCell<bool>,
-    /// One expanded `Lighting.hlsl` per shaders folder (03 §5); dropped with the folder by `set_shaders`.
+    /// The expanded entry files of the shader source (03 §5).
     sources: SourceSet,
-    /// Device objects by pair key; dropped by `set_shaders` and by a device rebuild.
+    /// Device objects by pair key; dropped by a device rebuild.
     programs: HashMap<ProgramKey, Result<Program, String>>,
     /// Plain-data results by pair key (a worker's answer or a disk hit). Content-addressed, so they survive
-    /// `set_shaders` and a device rebuild: a rebuilt device compiles nothing.
+    /// a device rebuild: a rebuilt device compiles nothing.
     compiled: HashMap<ProgramKey, Result<Arc<CompiledPair>, String>>,
     /// Keys whose job was queued and has not been applied yet.
     inflight: HashSet<ProgramKey>,
@@ -408,6 +402,9 @@ pub struct Renderer {
     last_frame: Option<(Scene, View)>,
     /// Cbuffer uploads of the last frame.
     uploads: usize,
+    /// Depth pre-pass draws of the last frame (test hook, Note GX1).
+    #[cfg(feature = "test-hooks")]
+    prepass_draws: usize,
     /// Test hook: draw with P0's by-name writer (every field, every cbuffer, every frame).
     #[cfg(feature = "test-hooks")]
     reference_writer: bool,
@@ -453,17 +450,33 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    /// Creates the device (hardware, else WARP; see [`Gpu::new`]) and the fixed pipeline states.
-    pub fn new(shaders: Fingerprint, cache_dir: PathBuf) -> Result<Renderer, String> {
+    /// Creates the device (hardware, else WARP; see [`Gpu::new`]) and the fixed pipeline states, on the bundled
+    /// shaders and CS's default settings.
+    pub fn new(cache_dir: PathBuf) -> Result<Renderer, String> {
         cache::prune_in_background(cache_dir.clone());
-        Renderer::with_gpu(Gpu::new()?, shaders, cache_dir)
+        Renderer::with_gpu(Gpu::new()?, cache_dir)
     }
 
-    pub fn with_gpu(
+    pub fn with_gpu(gpu: Gpu, cache_dir: PathBuf) -> Result<Renderer, String> {
+        Renderer::build(gpu, ShaderSource::Bundled, cache_dir)
+    }
+
+    /// [`Renderer::new`] on another shader source (a stand-in folder in tests).
+    pub fn with_source(source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
+        cache::prune_in_background(cache_dir.clone());
+        Renderer::build(Gpu::new()?, source, cache_dir)
+    }
+
+    /// [`Renderer::with_gpu`] on another shader source.
+    pub fn with_gpu_source(
         gpu: Gpu,
-        shaders: Fingerprint,
+        source: ShaderSource,
         cache_dir: PathBuf,
     ) -> Result<Renderer, String> {
+        Renderer::build(gpu, source, cache_dir)
+    }
+
+    fn build(gpu: Gpu, source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
         let sd = D3D11_SAMPLER_DESC {
             Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
             AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
@@ -543,6 +556,8 @@ impl Renderer {
             last_frame: None,
             uploads: 0,
             #[cfg(feature = "test-hooks")]
+            prepass_draws: 0,
+            #[cfg(feature = "test-hooks")]
             reference_writer: false,
             backdrop: None,
             missing_fill: None,
@@ -565,12 +580,11 @@ impl Renderer {
             glint_noise: None,
             glint_noise_logged: false,
             gpu,
-            sources: SourceSet::new(shaders.root.clone()),
-            shaders,
+            sources: SourceSet::new(source.clone()),
+            source,
             cache_dir,
-            // = preview_defines(&CsSettings::default(), true): the P0 Linear Lighting default.
-            features: DEFAULT_FEATURES.iter().map(|s| s.to_string()).collect(),
-            settings: CsSettings::default(),
+            features: cs_settings::preview_defines(cs_settings::defaults(), true),
+            settings: cs_settings::defaults().clone(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
             programs: HashMap::new(),
@@ -606,9 +620,9 @@ impl Renderer {
         &self.gpu
     }
 
-    /// The whole CS feature define list for the next load or rebuilt draw (default [`DEFAULT_FEATURES`]): tests
-    /// and P0 callers. A later [`Renderer::set_settings`] / [`Renderer::set_features_on`] replaces only the
-    /// settings defines in it and keeps the rest (the stand-in STANDIN_* hooks) in order.
+    /// The whole CS feature define list for the next load or rebuilt draw (default: the pinned defaults' defines):
+    /// tests and P0 callers. A later `set_settings` / [`Renderer::set_features_on`] replaces only the settings
+    /// defines in it and keeps the rest (the stand-in STANDIN_* hooks) in order.
     pub fn set_features(&mut self, features: Vec<String>) {
         self.features = features;
     }
@@ -617,10 +631,12 @@ impl Renderer {
         &self.features
     }
 
-    /// Applies the user CS settings (P1-C C11). The FeatureData values are recomputed per draw. If the settings
-    /// defines are unchanged, the static block of every drawing shape is rewritten (a cbuffer edit, next
-    /// frame). If they changed, every shape goes through the permutation path, and the old draws keep drawing
-    /// with their old constants until their programs land. The display sRGB encode follows `ENABLE_LL`.
+    /// Test seam: replaces the bundled default CS settings (P1-C C11). The FeatureData values are recomputed per
+    /// draw. If the settings defines are unchanged, the static block of every drawing shape is rewritten (a
+    /// cbuffer edit, next frame). If they changed, every shape goes through the permutation path, and the old
+    /// draws keep drawing with their old constants until their programs land. The display sRGB encode follows
+    /// `ENABLE_LL`.
+    #[cfg(feature = "test-hooks")]
     pub fn set_settings(&mut self, s: CsSettings) {
         self.settings = s;
         self.apply_settings_defines();
@@ -631,15 +647,16 @@ impl Renderer {
     }
 
     /// The "Community Shaders features" toggle (C8): off drops every settings define (LL included) and the sRGB
-    /// encode; applied like [`Renderer::set_settings`].
+    /// encode; applied through `apply_settings_defines`.
     pub fn set_features_on(&mut self, on: bool) {
         self.features_on = on;
         self.apply_settings_defines();
     }
 
-    /// Features CS loaded (Info.ini, or the Features inis) that this preview does not compile, in name order, for
+    /// Features of the bundled CS (the pinned feature list) that this preview does not compile, in name order, for
     /// the panel "off in preview" line. TruePBR is never listed: it has no define (TRUE_PBR is per material)
-    /// and its settings are always written. Features in `NON_VISUAL` (no shader/visual effect in this preview) are never listed either.
+    /// and its settings are always written. Features in `NON_VISUAL` (tools, display, performance: nothing a
+    /// frame shows) are never listed either.
     pub fn off_in_preview(&self) -> Vec<String> {
         self.settings
             .loaded
@@ -796,22 +813,6 @@ impl Renderer {
         }
         self.default_srv(kind, textures::projected_default(reg))
             .map(Some)
-    }
-
-    /// Replaces the shaders (a moved or updated CS): the expansion memo and the device programs are dropped (`compiled` is content-addressed and stays valid). The loaded model still uses the old programs until the next [`Renderer::load`].
-    pub fn set_shaders(&mut self, shaders: Fingerprint) {
-        self.sources = SourceSet::new(shaders.root.clone());
-        self.shaders = shaders;
-        self.programs.clear();
-        self.composite = None;
-        (self.prefilter, self.env) = (None, None);
-        self.old_ll = std::cell::OnceCell::new();
-        // The LL generation may have changed, so the display encode (follows linear_lighting) must be re-derived.
-        self.encode_srgb = self.linear_lighting();
-    }
-
-    pub fn shaders(&self) -> &Fingerprint {
-        &self.shaders
     }
 
     #[cfg(feature = "test-hooks")]
@@ -993,8 +994,8 @@ impl Renderer {
         self.deferred && !self.fixed_pipeline && pipe(m).blend.is_none()
     }
 
-    /// The loaded CS `Lighting.hlsl` has the single `return psout;` and the names the debug block reads. After
-    /// `set_shaders` to a build without them, `debug_output()` keeps the request but every shape compiles Lit.
+    /// The shader source's `Lighting.hlsl` has the single `return psout;` and the names the debug block reads.
+    /// Without them (a test stand-in), `debug_output()` keeps the request but every shape compiles Lit.
     pub fn debug_supported(&self) -> bool {
         self.sources.get_debug(Path::new("Lighting.hlsl")).is_ok()
     }
@@ -1014,6 +1015,20 @@ impl Renderer {
     /// changed).
     pub fn last_uploads(&self) -> usize {
         self.uploads
+    }
+
+    /// Test hook: depth pre-pass draws of the last [`Renderer::render`] (0 = no pre-pass and no t17 copy, Note GX1).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn last_prepass_draws(&self) -> usize {
+        self.prepass_draws
+    }
+
+    /// Test hook: the current target holds a t17 depth copy (made on its first pre-pass frame, Note GX2).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn has_depth_copy(&self) -> bool {
+        self.target.as_ref().is_some_and(|t| t.depth_copy.is_some())
     }
 
     /// Test hook: draw with P0's by-name writer (`Scene::write` into every cbuffer and every upload, every
@@ -1289,6 +1304,7 @@ impl Renderer {
             vs_cbs,
             ps_cbs,
             srvs,
+            reads_depth: draw::reads_depth(&program.ps.reflection),
             samplers: program.ps.reflection.samplers.iter().map(|s| s.1).collect(),
             model: *world,
             blend: m.blend(),
@@ -1531,7 +1547,7 @@ impl Renderer {
     /// dir, features, CS settings and toggle, sRGB mode and `compiled` results. Everything that lived on the old
     /// device is gone, including the loaded model: load it again, and every program comes from `compiled` with no compile.
     pub fn rebuild_device_on(&mut self, gpu: Gpu) -> Result<(), String> {
-        let mut n = Renderer::with_gpu(gpu, self.shaders.clone(), self.cache_dir.clone())?;
+        let mut n = Renderer::build(gpu, self.source.clone(), self.cache_dir.clone())?;
         n.features = std::mem::take(&mut self.features);
         n.settings = std::mem::take(&mut self.settings);
         n.features_on = self.features_on;
@@ -1865,7 +1881,7 @@ impl Renderer {
             let program = match self.lookup(&w) {
                 Lookup::Ready(p) => p,
                 Lookup::Failed(e) => return Err(e),
-                // Sync mode (no pool) compiles inline, as the old `program()` did, e.g. after `set_shaders`.
+                // Sync mode (no pool) compiles inline, as the old `program()` did.
                 Lookup::Waiting if !self.async_compile => {
                     let d = run_job(w.job(&self.cache_dir, &self.load_epoch));
                     self.compiled.insert(d.key, d.result);
@@ -2167,7 +2183,8 @@ impl Renderer {
 
     /// Drops the current target (render's recreation branch). The context holds references to bound
     /// views, so they are unbound first: otherwise the old textures outlive this drop while the new ones are made.
-    /// `render` binds only the target's RTVs and DSV (no SRV or UAV of it), and rebinds them every frame.
+    /// `render` leaves only the target's RTVs and DSV bound (it unbinds the t17 depth copy), and rebinds them every
+    /// frame.
     fn release_target(&mut self) {
         // The composite binds the target's SRVs and UAV to the CS stage (and unbinds them); null them here too.
         let srvs: [Option<ID3D11ShaderResourceView>; 20] = Default::default();
@@ -2176,6 +2193,10 @@ impl Renderer {
         // SAFETY: plain context calls; the arrays are live locals of the length passed.
         unsafe {
             self.gpu.ctx.OMSetRenderTargets(None, None);
+            // An error-path `?` in render skips its end-of-frame t17 unbind.
+            self.gpu
+                .ctx
+                .PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
             self.gpu.ctx.CSSetShaderResources(0, Some(&srvs));
             self.gpu
                 .ctx
@@ -2452,6 +2473,21 @@ impl Renderer {
             // A failure is kept, so it is neither recompiled nor reported on every frame: the model draws on black.
             self.backdrop = Some(Backdrop::new(&self.gpu));
         }
+        // Note GX1: a frame that draws a scene-depth reader (CS hair self-shadow, t17) first draws the opaque
+        // z-writing shapes into the depth alone with their own programs (alpha test included), as the game's
+        // pre-pass does, and binds a copy at t17. Other frames skip both and allocate no copy.
+        let prepass = self.draw_order.iter().any(|id| {
+            self.shapes
+                .get(id)
+                .and_then(|s| s.draw.as_ref())
+                .is_some_and(|d| d.reads_depth && (!d.deferred || deferred_frame))
+        });
+        if prepass {
+            self.target
+                .as_mut()
+                .ok_or("no target")?
+                .ensure_depth_copy(&self.gpu)?;
+        }
         let gpu = &self.gpu;
         let target = self.target.as_ref().ok_or("no target")?;
         let clear = match scene.background {
@@ -2481,16 +2517,34 @@ impl Renderer {
             // RT0 alone until a DEFERRED draw: a forward program must never see RT1-7 (its PS_OUTPUT writes
             // MotionVectors and NormalGlossiness too, Lighting.hlsl:303-308).
             let mut bound_all = false;
-            // Opaque, then CS's composite into RT0 (deferred Lit frames only; debug views write psout.Diffuse
-            // alone), then blended draws forward on top, as in game. draw_order is already opaque-then-blended.
+            // The main pass then tests against the final opaque depth, not the depth so far, and still shows what it
+            // showed before (Note GX3): the pre-pass writes depth in the same order with the same states, so the last
+            // depth writer of a pixel passes again at equal depth and overwrites every earlier fragment, and the
+            // shapes after it see the same depth as before. That holds for z-write-off and z-test-off shapes too.
+            let in_prepass = |s: &ShapeDraw| {
+                prepass && !s.blend && s.pipe.z_write && (!s.deferred || target.deferred())
+            };
+            #[cfg(feature = "test-hooks")]
+            let mut prepass_draws = 0;
+            // The pre-pass (None), opaque, then CS's composite into RT0 (deferred Lit frames only; debug views write
+            // psout.Diffuse alone), then blended draws forward on top, as in game. draw_order is already
+            // opaque-then-blended.
             // shortcut: the composite reads every pixel. The clear and the backdrop see RT4 = 0, bit-exact under Linear
             // Lighting but a GameGamma round trip without it. A non-DEFERRED opaque draw on this target (a shape
             // still pending forward after a toggle, or Failed keeping its forward draw) that wins the depth test
             // over a DEFERRED pixel keeps that pixel's RT4/RT5, so the composite adds the hidden shape's specular
             // and reflectance. Upgrade if either shows: draw non-DEFERRED opaque shapes (and the backdrop, with
-            // depth_states[1]) after the composite, with the blended pass.
-            for pass in [false, true] {
-                if pass && target.deferred() && self.debug == DebugOutput::Lit {
+            // depth_states[1]) after the composite, with the blended pass. On a pre-pass frame (Note GX3) the main
+            // pass tests against the final opaque depth, so a hidden DEFERRED fragment never draws and the leak
+            // does not happen there.
+            for pass in [None, Some(false), Some(true)] {
+                if pass.is_none() {
+                    if !prepass {
+                        continue;
+                    }
+                    ctx.OMSetRenderTargets(None, &target.dsv);
+                }
+                if pass == Some(true) && target.deferred() && self.debug == DebugOutput::Lit {
                     if let Some(c) = self.composite.as_mut() {
                         let fv = cs_settings::feature_data(
                             &self.settings,
@@ -2514,11 +2568,15 @@ impl Renderer {
                         continue;
                     };
                     // A DEFERRED program never draws into a forward target (its RT1-7 output would be lost; D-P12).
-                    if s.blend != pass || (s.deferred && !target.deferred()) {
+                    let drawn = match pass {
+                        None => in_prepass(s),
+                        Some(blend) => s.blend == blend && (!s.deferred || target.deferred()),
+                    };
+                    if !drawn {
                         continue;
                     }
                     let want = s.deferred && target.deferred();
-                    if want != bound_all {
+                    if pass.is_some() && want != bound_all {
                         let rtvs = if want {
                             target.rtvs()
                         } else {
@@ -2527,10 +2585,14 @@ impl Renderer {
                         ctx.OMSetRenderTargets(Some(&rtvs), &target.dsv);
                         bound_all = want;
                     }
+                    // The pre-pass already wrote this frame's fields.
+                    let fresh = pass.is_none() || !in_prepass(s);
                     // Test hook only (P0's reference writer, recomputed every frame): the default build takes the
                     // shipped path with no check.
                     #[cfg(feature = "test-hooks")]
-                    let n = if self.reference_writer {
+                    let n = if !fresh {
+                        0
+                    } else if self.reference_writer {
                         let fv = values_for(
                             &self.settings,
                             self.features_on,
@@ -2543,7 +2605,7 @@ impl Renderer {
                         s.update(gpu, &inputs)
                     };
                     #[cfg(not(feature = "test-hooks"))]
-                    let n = s.update(gpu, &inputs);
+                    let n = if fresh { s.update(gpu, &inputs) } else { 0 };
                     uploads += n;
                     ctx.IASetInputLayout(&s.mesh.layout);
                     for (slot, (b, stride)) in s.mesh.streams.iter().enumerate() {
@@ -2566,6 +2628,12 @@ impl Renderer {
                     }
                     for (reg, v) in &s.srvs {
                         ctx.PSSetShaderResources(*reg, Some(&[Some(v.clone())]));
+                    }
+                    // In the pre-pass the default stays: nothing is written but depth.
+                    if let (true, Some((_, srv))) =
+                        (s.reads_depth && pass.is_some(), &target.depth_copy)
+                    {
+                        ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[Some(srv.clone())]));
                     }
                     // D5 R3: the env cube over the 2×2 default at the forward DC registers (t30/t31).
                     if let Some((_, e)) = &self.env {
@@ -2598,11 +2666,30 @@ impl Renderer {
                         ctx.OMSetBlendState(None, None, 0xffff_ffff);
                     }
                     ctx.DrawIndexed(s.mesh.index_count, 0, 0);
+                    #[cfg(feature = "test-hooks")]
+                    {
+                        prepass_draws += usize::from(pass.is_none());
+                    }
+                }
+                if pass.is_none() {
+                    if let Some((copy, _)) = &target.depth_copy {
+                        ctx.CopyResource(copy, &target.depth);
+                    }
+                    ctx.OMSetRenderTargets(Some(&[Some(target.rtv.clone())]), &target.dsv);
                 }
             }
             ctx.OMSetBlendState(None, None, 0xffff_ffff);
             ctx.OMSetDepthStencilState(None, 0);
             ctx.RSSetState(&self.raster);
+            // No view of the target stays bound between frames (`release_target`), and the next copy's destination
+            // is never bound for reading.
+            if prepass {
+                ctx.PSSetShaderResources(draw::DEPTH_TEXTURE, Some(&[None]));
+            }
+            #[cfg(feature = "test-hooks")]
+            {
+                self.prepass_draws = prepass_draws;
+            }
         }
         self.uploads = uploads;
         #[cfg(feature = "test-hooks")]
@@ -2647,6 +2734,12 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
             }
         })
         .collect()
+}
+
+/// Every path in the embedded CS tree, for the test that it holds only the include closure.
+#[cfg(feature = "test-hooks")]
+pub fn bundled_names() -> Vec<&'static str> {
+    bundled::names().collect()
 }
 
 /// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a

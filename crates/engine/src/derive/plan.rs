@@ -231,9 +231,7 @@ pub fn plan_derived(
         .filter(|j| {
             !matches!(
                 j.status,
-                JobStatus::PackingInput { .. }
-                    | JobStatus::NormalLayer { .. }
-                    | JobStatus::Error { .. }
+                JobStatus::PackingInput { .. } | JobStatus::Error { .. }
             )
         })
         .map(|j| (fold(&j.output), j.input.clone()))
@@ -362,16 +360,11 @@ pub fn plan_derived(
                 format!("set {}: no albedo, so no diffuse is written", set.id),
             ));
         }
-        // TA11, TA28: members that feed no slot are reported once, on the Vanilla plan.
+        // TA11: members that feed no slot are reported once, on the Vanilla plan.
         if d.mode == DeriveMode::Vanilla {
             let used: BTreeSet<&Path> = reads(set).collect();
             for m in set.members.iter().filter(|m| !used.contains(m.as_path())) {
-                let stem = m.file_stem().unwrap_or_default().to_string_lossy();
-                let reason = if crate::rnm::split_layer(&stem).is_some() {
-                    "detail layer not in the vanilla _n"
-                } else {
-                    "no vanilla or complex-material map uses it"
-                };
+                let reason = "no vanilla or complex-material map uses it";
                 notes.push(
                     Warning::new(
                         Code::DeriveNotConverted,
@@ -483,7 +476,7 @@ pub fn plan_derived(
 /// Review I1: a `DERIVE-NOT-CONVERTED` skip for each member of `d`'s sets and of `d.drop` that nothing else ends:
 /// no derived job in `jobs` reads it (those get a `packed_source` event in `run`), and it has no skip, no earlier
 /// failure (`failed`, before the derive admission) and was not cancelled. So every discovered file gets one
-/// terminal event, keyed by its own output: `_g` and RNM layers, members left out (C2), the other members of a set
+/// terminal event, keyed by its own output: `_g`, members left out (C2), the other members of a set
 /// skipped for DDS or no albedo, and the sources of an error or failed derived job. A member in `own` (its own
 /// output is written by a job) is ended by that job.
 #[allow(clippy::too_many_arguments)]
@@ -580,6 +573,7 @@ pub fn finish_derived(
         provenance: Provenance::Recipe(kind.id().into()),
         decided: true,
         suggestions: vec![],
+        waits: false,
     };
     let mut job = resolve_decided(ctx, &facts, decision);
     // CN14: the stack's bottom half is the `_n`, whose specular alpha `remove` would drop (an opaque albedo, mesh

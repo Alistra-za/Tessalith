@@ -11,13 +11,13 @@ use crate::config::*;
 use crate::discover::{canonicalise_outputs, discover_reporting, InputFile, InputKind};
 use crate::events::{EventKind, Reporter, SkipKind, Stage};
 use crate::group::{
-    group_sets_with, join_skin_detail, join_skin_wet, member_split, SuffixSplit, TextureSet,
+    group_sets_with, join_detail_n, join_skin_wet, member_split, SuffixSplit, TextureSet,
 };
 use crate::image::SourceInfo;
 use crate::load::{load_image_meta, LoadError};
 use crate::manifest::{
-    encode_version, output_key, profile_sha256, sha256_file, EncoderVersions, Manifest,
-    ManifestEntry, PresetRef, BC1_ENCODE_ID,
+    encode_version, output_key, profile_sha256, recorded_sources, sha256_file, EncoderVersions,
+    Manifest, ManifestEntry, PresetRef, BC1_ENCODE_ID,
 };
 use crate::overrides::{project_rel, to_patch, FileScopes, KeyForms, Scope, SetOverride};
 use crate::pack;
@@ -131,6 +131,14 @@ pub struct BatchRequest {
     /// Track A (Note CN): the folder discovery skips in place of `output_root` (the Also export location, which
     /// holds the PBR, Vanilla and CM folders). `None` skips `output_root` as before.
     pub skip_root: Option<PathBuf>,
+    /// Note HQ1: the export folder when `output_root` lies below it (`set_export`); `output_paths` are relative to it,
+    /// so an explicit path such as a PGPatcher `textures\pbr\...` prefix can leave the output root. `None`: relative
+    /// to `output_root`.
+    pub export_root: Option<PathBuf>,
+    /// GUI (Note HF9): the set keys a partial or excluding export writes. `run` drops every job, skip, failure and
+    /// fill end of a set not listed before its first event, so the summary and events cover only them; an entry with
+    /// no set stays. `None` (the CLI, and a whole-project export with nothing left out) writes everything.
+    pub write_only: Option<BTreeSet<String>>,
 }
 
 /// What a run does with a texture whose mip 0 adds little detail over mip 1 (`CHK-LOW-DETAIL`).
@@ -153,10 +161,11 @@ pub struct PlanProgress {
 }
 
 impl BatchRequest {
-    pub fn new(inputs: Vec<PathBuf>, output_root: PathBuf, target: Target) -> Self {
-        BatchRequest {
+    /// `export` is the export folder; the request plans under `set_export`'s output root inside it (Note HQ1).
+    pub fn new(inputs: Vec<PathBuf>, export: PathBuf, target: Target) -> Self {
+        let mut r = BatchRequest {
             inputs,
-            output_root,
+            output_root: PathBuf::new(),
             target: Some(target),
             preset: None,
             preset_files: vec![],
@@ -188,7 +197,29 @@ impl BatchRequest {
             low_detail: LowDetailMode::Off,
             derive: None,
             skip_root: None,
-        }
+            export_root: None,
+            write_only: None,
+        };
+        r.set_export(export);
+        r
+    }
+
+    /// Note HQ1: plan into export folder `export`. The output root is `export` below the first input folder's own
+    /// `textures` folders (`discover::effective_output_root`), so outputs land at their game paths while `rel`, set ids
+    /// and the manifest stay relative to it, while `output_paths` stay relative to `export` (`export_root`).
+    /// Discovery then skips the whole export folder, unless that folder holds the input root (HQ5: it writes beside
+    /// the source). A first input that is a file, or no input, adds nothing.
+    // shortcut: later input folders share the first one's prefix; upgrade if multi-root CLI runs need their own.
+    pub fn set_export(&mut self, export: PathBuf) {
+        let root = self.inputs.first().filter(|p| p.is_dir());
+        self.output_root = match root {
+            Some(root) => crate::discover::effective_output_root(root, &export),
+            None => export.clone(),
+        };
+        let moved = self.output_root != export;
+        let holds_root = root.is_some_and(|r| crate::discover::holds(&export, r));
+        self.skip_root = (moved && !holds_root).then(|| export.clone());
+        self.export_root = moved.then_some(export);
     }
 
     /// A hash of every field except the `[files]` table of `project_config_inline` and `plan_progress` (live
@@ -242,8 +273,11 @@ impl BatchRequest {
             low_detail,
             derive,
             skip_root,
+            export_root,
+            // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
+            write_only: _,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 31] = [
+        let fields: [&dyn std::fmt::Debug; 32] = [
             inputs,
             output_root,
             target,
@@ -275,6 +309,7 @@ impl BatchRequest {
             low_detail,
             derive,
             skip_root,
+            export_root,
         ];
         for f in fields {
             let _ = write!(h, "{f:?};");
@@ -460,6 +495,12 @@ pub struct Plan {
     pub fill_ends: Vec<(PathBuf, PathBuf, String)>,
     /// Note DY: every helper of the batch (`helper::report::reports`), by set key then file name.
     pub helpers: Vec<crate::helper::report::HelperReport>,
+    /// Note HF1: the files `[project] no_set` names (`sets::no_set_paths`). Their jobs stay in `jobs` (the GUI lists
+    /// them), but `run` never writes one, whatever `write_only` says.
+    pub no_set: BTreeSet<PathBuf>,
+    /// Note HH4: the sets whose jobs `run` never writes (every member is in `no_set`); a set sharing a no-set helper
+    /// is not one.
+    pub no_set_sets: BTreeSet<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -702,9 +743,8 @@ fn job_dims_by(
 
 /// [`estimated_bytes`] of the job's input, plus what its variance bake holds (DECISIONS R4; the M4 carry "the
 /// summed-area table counts against `--mem-budget`", a length pyramid since R5), plus (S-mips-11) 8 B/texel for a
-/// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus (Note BB) the active
-/// RNM layers' [`crate::rnm::RnmJob::admission_bytes`] at the resized size and, for complex grass, one more float
-/// chain (both half chains and the stacked chain are live together in `grass::build`).
+/// non-box filter's intermediate and 32 B/texel for a resize (64 when an axis grows), both on the input's size, plus, for complex grass,
+/// one more float chain (both half chains and the stacked chain are live together in `grass::build`).
 fn job_bytes(job: &ResolvedJob) -> u64 {
     let p = &job.profile;
     let own = input_dims(&job.input);
@@ -730,9 +770,6 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         } else {
             0
         };
-        let layers = job
-            .active_rnm()
-            .map_or(0, |r| r.admission_bytes(&p.rnm, to));
         // Note CN13: a derived job also holds the colour maps it reads, its scalars (and `_curves`/cavity) image and
         // the recipe's output, twice the input for the grass stack.
         let derived = job.derive.as_ref().map_or(0, |dj| {
@@ -746,7 +783,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
             let output = if dj.kind == GrassStack { 2 } else { 1 };
             texels * 16 * (colour + 1 + detail + output)
         });
-        texels * (filter + resize) + grass + layers + derived
+        texels * (filter + resize) + grass + derived
     });
     // DECISIONS DS8: a cube holds every source plus three float cubes of its face size (base, blur copy, mip chain).
     let cube = job.cube.as_ref().map_or(0, |c| {
@@ -759,12 +796,7 @@ fn job_bytes(job: &ResolvedJob) -> u64 {
         let face = own.map_or(0, |src| {
             u64::from(crate::cube::layout::face_size(p, c.layout, src))
         });
-        // DS19: a single photo also holds its fake 2w x w float panorama (`import_dir::photo_panorama`).
-        let panorama = match (c.layout, own) {
-            (CubeLayout::Photo, Some((w, _))) => 2 * u64::from(w) * u64::from(w) * 16,
-            _ => 0,
-        };
-        others + 6 * face * face * 16 * 3 + panorama
+        others + 6 * face * face * 16 * 3
     });
     own.map_or(0, |d| bytes_at(&job.input, d))
         .max(dims.map_or(0, |(w, h)| input_bytes(w, h)))
@@ -838,89 +870,20 @@ fn unresolved_code(job: &ResolvedJob) -> Code {
         .unwrap_or(Code::SugLowConfidence)
 }
 
-/// (SHA-256, bake identity, RNM role, derive identity, fill identity) of one recorded source.
-type SourceKey = (
-    String,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-    Option<String>,
-);
+/// (SHA-256, bake identity, derive identity, fill identity) of one recorded source.
+type SourceKey = (String, Option<String>, Option<String>, Option<String>);
 
-/// Every recorded source of `job` now, in record order: the pack sources, then the baked `_n` (DECISIONS R12), then
-/// the RNM inputs (M6 Track F2), as `SourceKey`s. Empty for an ordinary file that does not bake; `None` when a
-/// source cannot be hashed (then the output is not up to date).
+/// Every recorded source of `job` now, as `SourceKey`s in record order: the pack sources, a derived job's sources,
+/// a six-file cube's faces, the baked `_n` and the helper that fills the alpha (`manifest::recorded_sources`, the
+/// list `process_file` records). Empty for an ordinary file; `None` when a source cannot be hashed (then the output
+/// is not up to date).
 fn current_sources(job: &ResolvedJob) -> Option<Vec<SourceKey>> {
-    let mut v = vec![];
-    if let Some(pk) = &job.pack {
-        for s in &pk.sources {
-            v.push((
-                sha256_file(&s.path).ok()?,
-                None,
-                None,
-                None,
-                Some(pack::source_fill(pk, s)),
-            ));
-        }
-    }
-    // Note CN12: a derived job's sources, each with the job's identity, so a changed setting re-encodes.
-    if let Some(dj) = &job.derive {
-        let identity = dj.identity_sha256();
-        for s in &dj.sources {
-            v.push((
-                sha256_file(&s.path).ok()?,
-                None,
-                None,
-                Some(identity.clone()),
-                None,
-            ));
-        }
-    }
-    // DECISIONS DS8: a six-file cube's faces in face order; a one-file cube is `source_sha256` alone.
-    for s in job
-        .cube
-        .iter()
-        .filter(|c| c.sources.len() > 1)
-        .flat_map(|c| &c.sources)
-    {
-        v.push((sha256_file(&s.path).ok()?, None, None, None, None));
-    }
-    if let Some(b) = &job.bake {
-        v.push((
-            sha256_file(&b.normal).ok()?,
-            Some(b.identity_sha256()),
-            None,
-            None,
-            None,
-        ));
-        if let Some(r) = &b.rnm {
-            for (f, role) in r.inputs(&b.normal_profile.rnm) {
-                v.push((
-                    sha256_file(&f.path).ok()?,
-                    None,
-                    Some(format!("bake.{role}")),
-                    None,
-                    None,
-                ));
-            }
-        }
-    }
-    if let Some(r) = job.active_rnm() {
-        for (f, role) in r.inputs(&job.profile.rnm) {
-            v.push((sha256_file(&f.path).ok()?, None, Some(role), None, None));
-        }
-    }
-    // Note DY: the helper that fills the alpha, last, as `process_file` records it.
-    if let Some(f) = &job.fill {
-        v.push((
-            sha256_file(&f.source.path).ok()?,
-            None,
-            None,
-            None,
-            Some(f.identity()),
-        ));
-    }
-    Some(v)
+    let now = recorded_sources(job).ok()?;
+    Some(
+        now.into_iter()
+            .map(|r| (r.sha256, r.bake, r.derive, r.fill))
+            .collect(),
+    )
 }
 
 /// A packed job's sources fill the same roles, inverted the same way, as the record's (DECISIONS N7). A schema-1
@@ -931,7 +894,7 @@ fn pack_roles_match(e: &ManifestEntry, job: &ResolvedJob) -> bool {
         Some(pk) => e
             .sources
             .iter()
-            .filter(|r| r.bake.is_none() && r.rnm.is_none())
+            .filter(|r| r.bake.is_none())
             .map(|r| (r.role, r.invert))
             .eq(pk
                 .sources
@@ -1001,7 +964,6 @@ pub(crate) fn is_up_to_date(
                 (
                     r.sha256.clone(),
                     r.bake.clone(),
-                    r.rnm.clone(),
                     r.derive.clone(),
                     r.fill.clone(),
                 )
@@ -1135,8 +1097,7 @@ pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
     f.kind == InputKind::Dds && crate::policy::reencode_requested(ctx, f)
 }
 
-/// Note HE7: the images that write nothing of their own (a raw map, a hand-set normal layer, a skin `_f`; a normal
-/// layer found by its name is not counted, so two of those stay `IN-DUPLICATE`): pack planning
+/// Note HE7: the images that write nothing of their own (a raw map, a skin `_f`): pack planning
 /// consumes them or reports them unused, so two of one name are not duplicates and `prepare` leaves them out of the
 /// `IN-DUPLICATE` comparison. The first by path feeds the channel (M13). The fast re-plan runs this on the old and the
 /// new state, so an edit that moves any file in or out is seen.
@@ -1157,10 +1118,7 @@ pub(crate) fn waiting_images(
         for &i in set.members.iter().filter(|i| !typed.contains(i)) {
             let f = &files[i];
             let writes_nothing = match hand[i] {
-                Some(r) => matches!(
-                    r,
-                    crate::helper::HelperRole::Raw(_) | crate::helper::HelperRole::Layer(_)
-                ),
+                Some(r) => matches!(r, crate::helper::HelperRole::Raw(_)),
                 None => {
                     pack::plan::raw_role(f).is_some() || pack::plan::is_skin_f(ctx, &predicted, f)
                 }
@@ -1197,7 +1155,8 @@ pub(crate) fn is_typed(
         }
 }
 
-/// Each typed raw member's role leaves its set's suffixes unless an untyped raw member has it too.
+/// Each typed raw member's role leaves its set's suffixes unless an untyped raw member has it too. A shared file
+/// counts as a member (Note HH1).
 pub(crate) fn drop_typed_roles(
     sets: &mut [TextureSet],
     files: &[InputFile],
@@ -1205,8 +1164,11 @@ pub(crate) fn drop_typed_roles(
 ) {
     for set in sets.iter_mut() {
         let role = |i: usize| pack::plan::raw_role(&files[i]).map(|r| r.id());
-        let (typed_m, raw_m): (Vec<usize>, Vec<usize>) =
-            set.members.iter().partition(|i| typed.contains(i));
+        let (typed_m, raw_m): (Vec<usize>, Vec<usize>) = set
+            .members
+            .iter()
+            .chain(&set.shares)
+            .partition(|i| typed.contains(i));
         for r in typed_m.into_iter().filter_map(role) {
             if !raw_m.iter().any(|&j| role(j).as_ref() == Some(&r)) {
                 set.suffixes.remove(&r);
@@ -1240,7 +1202,29 @@ pub(crate) fn join_members(
                 .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, s, &files[i]))
         };
         join_skin_wet(sets, files, aliases, is_skin);
-        join_skin_detail(sets, files, aliases, is_skin);
+    }
+    // Note GW1: `x_detail_n` joins any detail host, on every target (Landscape is on both).
+    join_detail_n(sets, files, aliases, detail_host(ctx, files, explicit));
+}
+
+/// Note GW1: a set takes the detail names `_detail`, `_detailnorm` and `_detail_n` as one map when it is an Advanced skin
+/// set (cs), or is landscape by its path (`suggest::landscape_path`) or by an explicit Landscape or PBR Landscape.
+/// shortcut: a Landscape picked later (from a mesh) is not seen here, so such a set needs an explicit shader for
+/// `_detail_n`; `plan_sets` repeats the IN-DUPLICATE rule after the pick.
+pub(crate) fn detail_host<'a>(
+    ctx: &'a ResolveCtx<'a>,
+    files: &'a [InputFile],
+    explicit: &'a BTreeMap<String, Shader>,
+) -> impl Fn(&TextureSet) -> bool + 'a {
+    move |s| {
+        let first = s.members.first().map(|&i| &files[i]);
+        first.is_some_and(|f| {
+            (ctx.target == Target::Cs && pack::plan::set_is_advanced_skin(ctx, s, f))
+                || crate::suggest::landscape_path(&f.game_path)
+        }) || matches!(
+            explicit.get(&s.key),
+            Some(Shader::Landscape | Shader::PbrLandscape)
+        )
     }
 }
 
@@ -1255,9 +1239,11 @@ pub(crate) fn predict_suffixes(
     typed: &BTreeSet<usize>,
     hand: &[Option<crate::helper::HelperRole>],
 ) {
+    // Note HH1: a shared helper's role is read as a member's.
     let roles: BTreeSet<RawMap> = set
         .members
         .iter()
+        .chain(&set.shares)
         .filter(|i| !typed.contains(i))
         .filter_map(|&i| match hand[i] {
             Some(crate::helper::HelperRole::Raw(r)) => Some(r),
@@ -1287,6 +1273,8 @@ pub(crate) fn set_is_pbr(target: Target, set: &TextureSet, files: &[InputFile]) 
         alpha: AlphaContent::None,
         is_float: false,
         advanced_skin: false,
+        // Only `is_pbr_set` reads this context, and it never asks whether a file waits.
+        may_wait: false,
     }))
 }
 
@@ -1592,8 +1580,8 @@ impl Engine {
         // A touched set's suffixes were rebuilt from its members' names.
         drop_typed_roles(&mut sets, &files, &typed);
         // Note HG2: decided on the edited sets, so a created or renamed set is shared by the same rule.
+        let (explicit, _) = explicit_shaders(req, &sets);
         if target == Target::Cs {
-            let (explicit, _) = explicit_shaders(req, &sets);
             crate::group::mark_shared_skin(&mut sets, &files, registry.alias_table(), &explicit);
         }
         for s in &stale {
@@ -1609,14 +1597,17 @@ impl Engine {
                 ),
             );
         }
+        // Note HQ1: explicit paths are under the export folder, which may hold the output root.
+        let paths_root = req.export_root.as_deref().unwrap_or(&req.output_root);
         crate::sets::apply_output_paths(
             &mut files,
             scope_root.as_deref(),
-            &req.output_root,
+            paths_root,
             &req.output_paths,
         );
         // Read by 3b too (CO102): a DDS at a packed output's explicit path is that output's earlier export.
-        let packed_outputs = crate::sets::packed_outputs(&req.output_root, &req.output_paths);
+        let packed_outputs =
+            crate::sets::packed_outputs(&req.output_root, paths_root, &req.output_paths);
         // 3b, Note CO (the M9 fold): a generated member loses to a real map for its slot before duplicates and
         // pack planning see it, since a generated `_p` and a real `_p` share one output.
         let mut gen_replaced: Vec<SkippedFile> = vec![];
@@ -1682,11 +1673,23 @@ impl Engine {
             );
         }
         let waits = waiting_images(&ctx, target, &sets, &files, &typed, &hand);
-        let dups = crate::group::duplicate_outputs_with(&files, |f| {
+        // Note HF1: a no-set file writes nothing, so it blocks no same-named file.
+        let no_set = crate::sets::no_set_paths(&files, scope_root.as_deref(), &req.set_edits);
+        let counts = |f: &InputFile| {
             !losers.contains(&f.path)
                 && !waits.contains(&f.path)
+                && !no_set.contains(&f.path)
                 && (f.kind != InputKind::Dds || reencodes(&ctx, f))
-        });
+        };
+        let mut dups = crate::group::duplicate_outputs_with(&files, counts);
+        // Note GW1: two detail maps of one host write different files for one slot.
+        dups.extend(crate::group::duplicate_details(
+            &sets,
+            &files,
+            registry.alias_table(),
+            detail_host(&ctx, &files, &explicit),
+            counts,
+        ));
         let dup_idx: BTreeSet<usize> = dups.iter().flatten().copied().collect();
         Ok(Prepared {
             req: req.clone(),
@@ -1710,7 +1713,7 @@ impl Engine {
     }
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
-    /// derive, RNM, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
+    /// derive, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
     /// `pbr_sets`). `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
     /// and skips the batch-wide steps: the SET-EDIT-STALE shader warnings, CFG-FILE-UNMATCHED, the BV2 writer dedupe
     /// and the progress counters (the request is the skeleton's). Its skipped entries are the scope files' only.
@@ -2022,7 +2025,7 @@ impl Engine {
             })
             .collect();
         // Note GI27: a set whose `_noise` or `_detail` the Vanilla derive keeps is typed as its PBR phase typed it,
-        // so the 6c pass below re-types them (a detail layer into a detail normal, a medium `_noise`).
+        // so the 6c pass below re-types them (a detail map into a detail normal, a medium `_noise`).
         let kept_maps: BTreeSet<&Path> = (req.derive.iter())
             .flat_map(|d| d.sets.iter().filter(|s| d.keeps_landscape(s)))
             .flat_map(|s| s.kept_maps.iter().map(PathBuf::as_path))
@@ -2048,6 +2051,31 @@ impl Engine {
             shaders: &picks,
             ..base_ctx
         };
+        // Note GW1: a Landscape picked now (from a mesh) makes its set a detail host too, so two detail maps in it
+        // are IN-DUPLICATE like any other host's. `prepare` could not see the pick; its groups are not repeated.
+        let late: Vec<usize> = crate::group::duplicate_details(
+            &sets,
+            files,
+            registry.alias_table(),
+            |s| {
+                picks
+                    .get(&s.key)
+                    .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape))
+            },
+            |f| f.kind != InputKind::Dds || reencodes(&ctx, f),
+        )
+        .into_iter()
+        .flatten()
+        .filter(|i| !dup_idx.contains(i))
+        .collect();
+        skipped.extend(late.iter().map(|&i| SkippedFile {
+            path: files[i].path.clone(),
+            output: files[i].output.clone(),
+            set: set_of.get(&i).map(|k| k.to_string()),
+            code: Some(Code::InDuplicate),
+            reason: "two inputs map to one output; exclude one".into(),
+        }));
+        let late_paths: BTreeSet<&Path> = late.iter().map(|&i| files[i].path.as_path()).collect();
         // Note CO103: images whose B is empty, for a generated AO beside a pre-packed `_rmaos` (pack planning).
         let flat_b: BTreeSet<PathBuf> = pass1
             .iter()
@@ -2099,14 +2127,18 @@ impl Engine {
                 &work[wi].1.output,
             ));
             let (set, f) = work[wi];
-            // Note GI (X13, R5): a PBR Landscape `_detail` layer or `_noise` is typed again (detail normal, noise).
-            let landscape_retype = matches!(
-                &old.status,
-                JobStatus::NormalLayer { term } if term.layer == crate::config::LayerId::Detail
-            ) || old
-                .suggestions
-                .first()
-                .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
+            if late_paths.contains(f.path.as_path()) {
+                continue;
+            }
+            // Note GI (R5), GW1: a PBR Landscape detail map or `_noise` is typed again (detail normal, noise).
+            let landscape_retype = split_for((set, f))
+                .suffix
+                .as_deref()
+                .is_some_and(crate::group::is_detail_suffix)
+                || old
+                    .suggestions
+                    .first()
+                    .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
@@ -2188,9 +2220,11 @@ impl Engine {
             &flat_a,
             &fills,
         );
-        // As step 3b drops its losers, so later steps (the RNM bent AO) never read a replaced generated AO.
+        // As step 3b drops its losers, so later steps never read a replaced generated AO.
         for s in &mut sets {
             s.members
+                .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
+            s.shares
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
         }
         // Pass 1 may add a recipe job it fails at once (sources of different sizes); like every job it records the
@@ -2592,8 +2626,8 @@ impl Engine {
                 );
             }
         }
-        // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes,
-        // the RNM layers and `file_planned` read the sizes. A cube's size comes from pass 1's facts; any other map's
+        // Note FM44: a `resize_relative_to` reads its set's final members (after packing and derive), before the bakes
+        // and `file_planned` read the sizes. A cube's size comes from pass 1's facts; any other map's
         // from `input_dims`, which reads the file's header again (a few header reads per relative job).
         let known = |p: &Path| {
             cube_facts
@@ -2635,9 +2669,6 @@ impl Engine {
         for j in &mut jobs {
             j.shader = picks.get(&j.set_key).cloned();
         }
-        // M6 Track F2: RNM layers attach to their base normals once the shaders are known (eye sets are skipped),
-        // before the bakes, so a baking roughness member copies its `_n`'s blend (Note W18).
-        crate::rnm::plan::plan_rnm(&ctx, &sets, files, registry.alias_table(), &mut jobs);
         let helpers = crate::helper::report::reports(&ctx, &sets, files, &jobs, &fills);
         let bake_cx = crate::bake::plan::BakeCtx {
             target,
@@ -2667,11 +2698,11 @@ impl Engine {
                 project_rel(root, &f)
             };
             for j in &jobs {
-                // A packed output, or a derived `_m` (TA15, Note CN19): the folder of its first source plus the
-                // virtual stem (e.g. `rock01_rmaos`, from the first source's name, whatever output path it has),
+                // A packed output, or a derived `_m` (TA15, Note CN19): the folder of its first source plus its
+                // stem (e.g. `rock01_rmaos`; a packed output's own name, Note HS2, whatever output path it has),
                 // compared with the extension-less key. A packed output's raw sources count too.
                 let stem = match (&j.pack, &j.derive) {
-                    (Some(pk), _) => Some(crate::pack::plan::virtual_stem(&j.input, pk.kind)),
+                    (Some(pk), _) => Some(crate::pack::plan::files_stem(j, pk.kind)),
                     (None, Some(dj)) => dj
                         .kind
                         .suffix()
@@ -2767,8 +2798,21 @@ impl Engine {
             false
         });
         let mut writers: BTreeMap<String, PathBuf> = BTreeMap::new();
+        // Note HF9: a no-set file writes nothing, so it neither claims nor loses a path.
+        let no_set = crate::sets::no_set_paths(files, file_scopes.root.as_deref(), &req.set_edits);
+        // Note HH4: by set, so another set's recipe whose first source is a shared no-set helper still writes.
+        let no_set_sets: BTreeSet<String> = sets
+            .iter()
+            .filter(|s| {
+                !s.members.is_empty() && s.members.iter().all(|&i| no_set.contains(&files[i].path))
+            })
+            .map(|s| s.key.clone())
+            .collect();
         jobs.retain(|j: &ResolvedJob| {
-            if scope.is_some() || !matches!(j.status, JobStatus::Ready) {
+            if scope.is_some()
+                || !matches!(j.status, JobStatus::Ready)
+                || no_set_sets.contains(&j.set_key)
+            {
                 return true;
             }
             let Some(first) = writers.get(&output_key(&req.output_root, &j.output)) else {
@@ -2893,6 +2937,11 @@ impl Engine {
         for f in &mut failed {
             f.set = set_of.get(f.path.as_path()).map(|k| k.to_string());
         }
+        // Note HF9: a file cancelled while planning is listed only when its set is in the run (`run` filters the
+        // rest; a cancelled path keeps no set, so it is done here, where the sets are known).
+        if let Some(only) = &req.write_only {
+            cancelled.retain(|p| set_of.get(p.as_path()).is_none_or(|k| only.contains(*k)));
+        }
         let plan = Plan {
             request: req.clone(),
             registry: registry.clone(),
@@ -2907,6 +2956,8 @@ impl Engine {
             derive_own,
             fill_ends,
             helpers,
+            no_set,
+            no_set_sets,
         };
         Ok((plan, pbr_sets))
     }
@@ -2917,10 +2968,23 @@ impl Engine {
     /// have listed and one that would have been up to date or kept by `--on-existing`.
     pub fn run(
         &self,
-        plan: Plan,
+        mut plan: Plan,
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<BatchSummary, EngineError> {
+        // Note HF1: a no-set file writes nothing, on every run (BV2 does not stop it: it claims no output path).
+        // Note HH4: dropped by set, so a share's recipe in another set still writes.
+        let no_set = std::mem::take(&mut plan.no_set_sets);
+        plan.jobs.retain(|j| !no_set.contains(&j.set_key));
+        // Note HF9: a partial or excluding run covers the listed sets only, from its first event and count; an entry
+        // with no set (an input duplicate) is a project-wide fact and stays.
+        if let Some(only) = &plan.request.write_only {
+            let listed = |s: Option<&String>| s.is_none_or(|s| only.contains(s));
+            plan.jobs.retain(|j| only.contains(&j.set_key));
+            plan.skipped.retain(|s| listed(s.set.as_ref()));
+            plan.failed.retain(|f| listed(f.set.as_ref()));
+            plan.fill_ends.retain(|(_, _, set)| only.contains(set));
+        }
         let req = &plan.request;
         let mut summary = BatchSummary {
             failed: plan.failed.len() as u32,
@@ -3106,26 +3170,6 @@ impl Engine {
                             code: Some(w.map_or(Code::InPackingInput, |w| w.code)),
                             reason: w.map_or_else(
                                 || format!("raw {} map, not converted on its own", role.id()),
-                                |w| w.message.clone(),
-                            ),
-                        },
-                    )
-                }
-                // M6 Track F2: a layer is reported once, with its RNM-* warning when it feeds nothing.
-                JobStatus::NormalLayer { .. } => {
-                    let w = job
-                        .warnings
-                        .iter()
-                        .find(|w| w.code.as_str().starts_with("RNM-"));
-                    rep.emit_job(
-                        Some(&key(&job.output)),
-                        set,
-                        path,
-                        EventKind::FileSkipped {
-                            kind: SkipKind::NormalLayer,
-                            code: w.map(|w| w.code),
-                            reason: w.map_or_else(
-                                || "RNM normal layer, used through its base normal".to_string(),
                                 |w| w.message.clone(),
                             ),
                         },
@@ -3465,6 +3509,7 @@ pub(crate) fn pre_edit_shaders(
                 members: vec![],
                 suffixes: BTreeSet::new(),
                 shared_skin: false,
+                shares: vec![],
             };
             let (found, _) = explicit_shaders(req, std::slice::from_ref(&renamed));
             if let Some(&shader) = found.get(&renamed.key) {
@@ -3508,13 +3553,9 @@ fn map_members(
         {
             continue;
         }
-        // Trace-debug #25 (Note BQ): an RNM layer or mask is never converted on its own, as the shader pick knows.
         if let Some(j) = jobs.by_input(&f.path).find(|j| j.pack.is_none()) {
             // Note DR: a skin `_f` packing input has no file-name role, so its job status leaves it out.
-            if matches!(
-                j.status,
-                JobStatus::NormalLayer { .. } | JobStatus::PackingInput { .. }
-            ) {
+            if matches!(j.status, JobStatus::PackingInput { .. }) {
                 continue;
             }
             out.push(crate::shader::MemberMap {
@@ -3543,6 +3584,8 @@ fn map_members(
                 alpha: AlphaContent::None,
                 is_float: false,
                 advanced_skin: false,
+                // Note GY4: a kept DDS is never planned, so it never waits; its name still fills a slot.
+                may_wait: false,
             })
             .first()
             .map(|s| s.subtype);
@@ -3793,30 +3836,28 @@ mod tests {
         }
     }
 
-    /// Final review I1: a single-photo cube also holds its fake 2w x w float panorama (`import_dir::photo_panorama`).
+    /// A pin (passes on the old code too): admission (DS8) counts three float cubes of the face size beside the
+    /// source; rebuilt on a strip when the photo layout (and its panorama term) went in 3.0.
     #[test]
-    fn a_photo_cube_is_admitted_for_its_panorama() {
+    fn a_strip_cube_is_admitted_for_three_float_cubes() {
         let d = tempfile::tempdir().unwrap();
-        let mut j = png_job(d.path(), "sky_e.png", (64, 36), Subtype::Cubemap);
+        let mut j = png_job(d.path(), "sky_e.png", (384, 64), Subtype::Cubemap);
         let base = job_bytes(&j);
-        let cube = |layout| crate::cube::CubeJob {
-            layout,
+        j.cube = Some(crate::cube::CubeJob {
+            layout: CubeLayout::Hstrip,
             sources: vec![crate::cube::CubeSource {
                 path: j.input.clone(),
                 stamp: None,
                 face: None,
             }],
-        };
-        let face = |layout| u64::from(crate::cube::layout::face_size(&j.profile, layout, (64, 36)));
-        let photo_face = face(CubeLayout::Photo);
-        j.cube = Some(cube(CubeLayout::Photo));
-        assert_eq!(
-            job_bytes(&j),
-            base + 6 * photo_face * photo_face * 16 * 3 + 2 * 64 * 64 * 16
-        );
-        let eq_face = face(CubeLayout::Equirect);
-        j.cube = Some(cube(CubeLayout::Equirect));
-        assert_eq!(job_bytes(&j), base + 6 * eq_face * eq_face * 16 * 3);
+        });
+        let face = u64::from(crate::cube::layout::face_size(
+            &j.profile,
+            CubeLayout::Hstrip,
+            (384, 64),
+        ));
+        assert_eq!(face, 64);
+        assert_eq!(job_bytes(&j), base + 6 * face * face * 16 * 3);
     }
 
     #[test]
@@ -3925,82 +3966,12 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
-    }
-
-    /// Note BB: a 64 `_n` with a 256 detail layer (the 8K-on-2K ratio, 4x) and the base-only bytes of that job.
-    fn layered_normal(dir: &Path) -> (ResolvedJob, u64) {
-        let mut j = png_job(dir, "a_n.png", (64, 64), Subtype::Normal);
-        let base = job_bytes(&j);
-        let layer = dir.join("detail.png");
-        image::RgbImage::new(256, 256).save(&layer).unwrap();
-        j.rnm = Some(crate::rnm::RnmJob {
-            layers: vec![crate::rnm::RnmLayer {
-                id: LayerId::Detail,
-                file: crate::rnm::RnmFile {
-                    path: layer,
-                    stamp: None,
-                },
-                mask: None,
-            }],
-            ao: None,
-        });
-        (j, base)
-    }
-
-    /// Note BB: a layered normal is admitted for its largest layer's decode (8-bit RGB: 3 + 16 per layer texel)
-    /// plus that layer resampled to the base (16 per base texel), on top of the base.
-    #[test]
-    fn a_layer_bigger_than_its_normal_is_admitted_for_its_decode_and_resample() {
-        let d = tempfile::tempdir().unwrap();
-        let (mut j, base) = layered_normal(d.path());
-        assert_eq!(job_bytes(&j), base + 256 * 256 * 19 + 64 * 64 * 16);
-        // Off, the layers are not loaded, so they are not admitted.
-        j.profile.rnm.enabled = false;
-        assert_eq!(job_bytes(&j), base);
-    }
-
-    /// Note BB: under a budget that holds two base-only jobs, two layered ones run one at a time.
-    #[test]
-    fn two_layered_normals_are_not_admitted_together_under_a_small_budget() {
-        let d = tempfile::tempdir().unwrap();
-        let (j, base) = layered_normal(d.path());
-        let n = job_bytes(&j);
-        // One layered job fits, two do not; two base-only jobs would.
-        let b = Budget::new(n + base, 8);
-        b.acquire(n);
-        let admitted = std::sync::atomic::AtomicBool::new(false);
-        std::thread::scope(|s| {
-            s.spawn(|| {
-                b.acquire(n);
-                admitted.store(true, Ordering::SeqCst);
-            });
-            std::thread::sleep(std::time::Duration::from_millis(100));
-            assert!(
-                !admitted.load(Ordering::SeqCst),
-                "second layered job admitted beside the first"
-            );
-            b.release(n);
-        });
-        assert!(admitted.load(Ordering::SeqCst));
-        assert_eq!(*lock(&b.used), (n, 1));
-    }
-
-    /// Note BB: a layered job bigger than the whole budget is admitted alone, as any oversized file is.
-    #[test]
-    fn a_layered_normal_over_the_whole_budget_still_runs_alone() {
-        let d = tempfile::tempdir().unwrap();
-        let (j, base) = layered_normal(d.path());
-        let n = job_bytes(&j);
-        assert!(n > 2 * base, "{n} <= {}", 2 * base);
-        let b = Budget::new(2 * base, 8);
-        b.acquire(n);
-        assert_eq!(*lock(&b.used), (n, 1));
     }
 
     /// Note BB: complex grass holds both half chains and the stacked chain at once, one float chain (16 B/texel ×
@@ -4015,6 +3986,36 @@ mod tests {
         assert_eq!(grass, generic + 32 * 64 * 16 * 134 / 100);
         let ratio = grass as f64 / input_bytes(32, 64) as f64;
         assert!((1.3..=1.5).contains(&ratio), "{ratio}");
+    }
+
+    /// Generic admission (kept from the Note BB layered tests): a job larger than the whole budget is admitted alone,
+    /// and a second job waits while the first holds the budget.
+    #[test]
+    fn an_oversized_job_runs_alone_and_blocks_a_second() {
+        let d = tempfile::tempdir().unwrap();
+        let j = png_job(d.path(), "big.png", (64, 64), Subtype::Diffuse);
+        let n = job_bytes(&j);
+        let oversized = Budget::new(n / 2, 8);
+        oversized.acquire(n);
+        assert_eq!(*lock(&oversized.used), (n, 1));
+        // Two jobs of `n` do not fit in `n + n / 2`: the second is admitted only after the first is released.
+        let b = Budget::new(n + n / 2, 8);
+        b.acquire(n);
+        let admitted = std::sync::atomic::AtomicBool::new(false);
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                b.acquire(n);
+                admitted.store(true, Ordering::SeqCst);
+            });
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            assert!(
+                !admitted.load(Ordering::SeqCst),
+                "second job admitted beside the first"
+            );
+            b.release(n);
+        });
+        assert!(admitted.load(Ordering::SeqCst));
+        assert_eq!(*lock(&b.used), (n, 1));
     }
 
     /// Note DY: a filled job also holds its helper's decoded image.
@@ -4129,11 +4130,11 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         let texels = 48 * 40;
         // `mips.levels = "none"` keeps the 48x40 size (Note FM29).
@@ -4194,11 +4195,11 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         };
         std::fs::write(&job.output, b"dds").unwrap();
         let enc = EncoderVersions::current();
@@ -4277,7 +4278,6 @@ mod tests {
                         role: None,
                         invert: false,
                         bake: None,
-                        rnm: None,
                         derive: None,
                         derive_role: None,
                         cube_face: None,

@@ -16,7 +16,7 @@ fn none(_: &str) -> Option<Vec<u8>> {
     None
 }
 
-/// Settings as `read_settings` would give them for a SettingsUser.json with only a "Linear Lighting" section.
+/// Settings with only a "Linear Lighting" section.
 /// Both `linear_lighting` and the merged key are set, so the test does not depend on which one
 /// `preview_defines` reads.
 fn settings(ll: bool, ambient: f64) -> CsSettings {
@@ -24,7 +24,6 @@ fn settings(ll: bool, ambient: f64) -> CsSettings {
         "Linear Lighting": {"enableLinearLighting": i32::from(ll), "ambientMult": ambient}
     });
     CsSettings {
-        hash: format!("test ll={ll} ambient={ambient}"),
         linear_lighting: ll,
         merged: merged.as_object().unwrap().clone(),
         ..CsSettings::default()
@@ -150,6 +149,36 @@ fn off_in_preview_lists_loaded_but_uncompiled_features() {
     assert_eq!(r.settings(), &s);
 }
 
+/// Note GT5: with the 48 pinned defaults loaded, the off list names real visual gaps and none of the tools,
+/// display or performance features.
+#[test]
+fn off_in_preview_for_the_pinned_defaults_names_only_visual_features() {
+    let cache = tempfile::tempdir().unwrap();
+    let source = render3d::ShaderSource::Folder(standin_root());
+    let r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), source, cache.path().to_path_buf())
+        .unwrap();
+    let off = r.off_in_preview();
+    for tool in [
+        "CSEditor",
+        "Effects11",
+        "NRD",
+        "PerformanceOverlay",
+        "RemoteControl",
+        "RenderDoc",
+        "SceneManager",
+        "Screenshot",
+        "Upscaling",
+    ] {
+        assert!(
+            !off.iter().any(|n| n == tool),
+            "{tool} is not visual: {off:?}"
+        );
+    }
+    for visual in ["LightLimitFix", "Skylighting", "ScreenSpaceShadows"] {
+        assert!(off.iter().any(|n| n == visual), "{visual} draws: {off:?}");
+    }
+}
+
 /// Trace 2026-11-04 #45: CS_GAME_GAMMA is a settings define: a new value replaces the old one, back to 1.6 drops it.
 #[test]
 fn game_gamma_define_follows_the_settings() {
@@ -217,9 +246,10 @@ fn an_old_linear_lighting_build_compiles_without_the_enable_ll_define() {
     )
     .unwrap();
     let ll_defined = |root: &Path| -> Vec<bool> {
-        let fp = render3d::locate::fingerprint(root, None).unwrap();
+        let fp = render3d::ShaderSource::Folder((root).to_path_buf());
         let mut r =
-            Renderer::with_gpu(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf()).unwrap();
+            Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+                .unwrap();
         r.set_features(FLAT.iter().map(|s| s.to_string()).collect());
         r.set_settings(settings(true, 1.0));
         assert!(
@@ -250,9 +280,10 @@ fn an_old_linear_lighting_build_compiles_without_the_enable_ll_define() {
     assert_eq!(ll_defined(old.path()), [false, false], "old LL: never a -D");
 }
 
-/// P1-D fix round 1: switching shaders between LL generations on one renderer re-derives the display encode.
+/// P1-D fix round 1: the display encode follows the LL generation of the shader source. An old-LL build with no LL
+/// key in the settings reads the flag off, so no encode; the new-LL stand-in defaults on.
 #[test]
-fn set_shaders_between_ll_generations_refreshes_encode_and_defines() {
+fn the_display_encode_follows_the_ll_generation_of_the_source() {
     let cache = tempfile::tempdir().unwrap();
     let old = tempfile::tempdir().unwrap();
     let src = std::fs::read_to_string(standin_root().join("Lighting.hlsl")).unwrap();
@@ -261,24 +292,21 @@ fn set_shaders_between_ll_generations_refreshes_encode_and_defines() {
         src + "\nstatic const uint isDirLightLinear = 0; // P1-D old-LL marker\n",
     )
     .unwrap();
-    let fp = |root: &Path| render3d::locate::fingerprint(root, None).unwrap();
-    let mut r = Renderer::with_gpu(
-        Gpu::new_warp().unwrap(),
-        fp(&standin_root()),
-        cache.path().to_path_buf(),
-    )
-    .unwrap();
-    r.set_features(FLAT.iter().map(|s| s.to_string()).collect());
-    r.set_settings(settings(false, 1.0));
-    r.set_settings(settings(true, 1.0));
-    let defined = |r: &mut Renderer| -> Vec<bool> {
+    let on = |root: &Path| {
+        let fp = render3d::ShaderSource::Folder(root.to_path_buf());
+        let mut r =
+            Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
+                .unwrap();
+        r.set_features(FLAT.iter().map(|s| s.to_string()).collect());
+        r.set_settings(CsSettings::default());
         let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
         assert!(
             rep.errors.is_empty() && rep.compile_errors.is_empty(),
             "{rep:?}"
         );
         let ids: Vec<_> = r.shapes().into_iter().map(|s| s.id).collect();
-        ids.into_iter()
+        let defined: Vec<bool> = ids
+            .into_iter()
             .map(|id| {
                 r.draw_diag(id)
                     .unwrap()
@@ -286,16 +314,13 @@ fn set_shaders_between_ll_generations_refreshes_encode_and_defines() {
                     .iter()
                     .any(|(n, _)| n == "ENABLE_LL")
             })
-            .collect()
+            .collect();
+        (r.encode_srgb(), defined)
     };
-    assert!(r.encode_srgb(), "new LL, setting on");
-    assert_eq!(defined(&mut r), [true, true]);
-    // Old LL with no LL key in the settings: the flag reads off, so no display encode.
-    r.set_settings(CsSettings::default());
-    r.set_shaders(fp(old.path()));
-    assert!(!r.encode_srgb(), "old LL, no key: encode follows the flag");
-    assert_eq!(defined(&mut r), [false, false]);
-    r.set_shaders(fp(&standin_root()));
-    assert!(r.encode_srgb(), "back on new LL: default on");
-    assert_eq!(defined(&mut r), [true, true]);
+    assert_eq!(
+        on(old.path()),
+        (false, vec![false, false]),
+        "old LL, no key"
+    );
+    assert_eq!(on(&standin_root()), (true, vec![true, true]), "new LL");
 }

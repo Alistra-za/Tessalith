@@ -250,23 +250,6 @@ fn every_row_says_its_target_or_not_used() {
 }
 
 #[test]
-fn layer_files_now_have_rows() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = app(fixture(
-        d.path(),
-        &["x.png", "x_n.png", "x_detailnorm.png"],
-        "",
-    ));
-    let (name, _) = row(&h, "x_detailnorm.png");
-    assert!(name.contains("fills N layer"), "{name}");
-    h.state_mut().select_item("x_n.png");
-    h.run();
-    h.run();
-    assert!(h.query_all_by_label("RNM").count() > 0, "the RNM section");
-    h.get_by_label("detail");
-}
-
-#[test]
 fn helper_row_stays_inside_column_at_1100() {
     let d = tempfile::tempdir().unwrap();
     let long = format!("x_{}_roughness.png", "a".repeat(64));
@@ -667,7 +650,7 @@ fn a_problems_click_on_a_helper_opens_the_group() {
 }
 
 /// Review pictures of the Textures column at 1100, 1280 and 1600 px (egui-ui-rules step 5). Needs a GPU and
-/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test helpers_list -- --ignored shots`.
+/// `SDC_SHOTS_DIR`: `cargo test -p sdc-gui --test it helpers_list::shots -- --ignored`.
 #[test]
 #[ignore]
 fn shots() {
@@ -681,7 +664,6 @@ fn shots() {
         "x_roughness.png",
         "x_opacity.png",
         "x_n.png",
-        "x_detailnorm.png",
         "y_opacity.png",
         &long,
     ];

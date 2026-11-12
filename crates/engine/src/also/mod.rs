@@ -282,6 +282,15 @@ pub fn derive_sets(
             }
             // Note DY: a helper filling this job's alpha is a member too (derived jobs never take a fill).
             members.extend(j.fill.iter().map(|f| f.source.path.clone()));
+            // Note HS6: a size-mismatched job lists the sources it could not join; they are members too.
+            for w in j
+                .warnings
+                .iter()
+                .filter(|w| w.code == Code::PackSizeMismatch)
+            {
+                let found = w.data["sources"].as_array().into_iter().flatten();
+                members.extend(found.filter_map(|s| s["path"].as_str()).map(PathBuf::from));
+            }
         }
         members.extend(
             pbr.skipped
@@ -300,7 +309,13 @@ pub fn derive_sets(
             });
             continue;
         }
-        if let Some(&n) = failed_in.get(key.as_str()) {
+        // Note HS6: a job with an Error status (a failed recipe) is a failed map as well.
+        let n = failed_in.get(key.as_str()).copied().unwrap_or(0)
+            + jobs
+                .iter()
+                .filter(|j| matches!(j.status, JobStatus::Error { .. }))
+                .count();
+        if n > 0 {
             drop.extend(members);
             notes.push(SetNote {
                 id,
@@ -432,7 +447,7 @@ pub fn derive_sets(
 
 /// O4: the Vanilla job writes what its cs twin wrote, so the PBR folder's file can be copied: both ready, same input,
 /// the same key relative to their roots (the cs key folded by `vanilla_rel`, TA12; O6's landscape `_p`), the same
-/// pack, RNM and bake, not derived, and the same profile but for the target.
+/// pack and bake, not derived, and the same profile but for the target.
 pub fn same_identity(cs: &ResolvedJob, cs_root: &Path, van: &ResolvedJob, van_root: &Path) -> bool {
     let folded = vanilla_rel(Path::new(&output_key(cs_root, &cs.output)), &cs.game_path)
         .to_string_lossy()
@@ -442,7 +457,6 @@ pub fn same_identity(cs: &ResolvedJob, cs_root: &Path, van: &ResolvedJob, van_ro
         && cs.input == van.input
         && folded == output_key(van_root, &van.output)
         && cs.pack == van.pack
-        && cs.rnm == van.rnm
         && cs.bake == van.bake
         && van.derive.is_none()
         && Profile {
@@ -468,6 +482,8 @@ impl EventSink for NoBatchWarnings {
 struct Recorder {
     inner: Arc<dyn EventSink>,
     keys: Arc<Mutex<BTreeSet<String>>>,
+    /// The output root below the folder (Note HQ1), as an output key; empty for none.
+    prefix: String,
 }
 
 impl EventSink for Recorder {
@@ -481,7 +497,11 @@ impl EventSink for Recorder {
                 }
         );
         if let (true, Some(k)) = (done, &ev.job) {
-            crate::api::lock(&self.keys).insert(k.clone());
+            let k = match self.prefix.as_str() {
+                "" => k.clone(),
+                p => format!("{p}/{k}"),
+            };
+            crate::api::lock(&self.keys).insert(k);
         }
         self.inner.emit(ev);
     }
@@ -491,7 +511,7 @@ impl EventSink for Recorder {
 /// never deletes) and reported.
 pub const NOT_WRITTEN: &str = "not written by this export; kept as it is";
 
-/// Every file under `folder` but `_sdc` and leftover `.sdc-*.tmp` files (08d-3).
+/// Every file under `folder` but `_sdc` folders and leftover `.sdc-*.tmp` files (08d-3).
 fn folder_files(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
     let (mut out, mut todo) = (vec![], vec![folder.to_path_buf()]);
     while let Some(d) = todo.pop() {
@@ -499,7 +519,8 @@ fn folder_files(folder: &Path) -> std::io::Result<Vec<PathBuf>> {
             let p = e?.path();
             let name = p.file_name().unwrap_or_default().to_string_lossy();
             if p.is_dir() {
-                if !(d == folder && name.eq_ignore_ascii_case("_sdc")) {
+                // Note HQ1: the manifest sits in the output root, which can be below the folder.
+                if !name.eq_ignore_ascii_case("_sdc") {
                     todo.push(p);
                 }
             } else if !(name.starts_with(".sdc-") && name.ends_with(".tmp")) {
@@ -741,10 +762,25 @@ pub fn start_also(
 ) -> Result<AlsoRun, EngineError> {
     let keys: [Arc<Mutex<BTreeSet<String>>>; 3] = Default::default();
     let dry_run = base.dry_run;
+    // Note HQ1: job keys are under each phase's output root, the walk's under the folder; this is the part between.
+    let prefix = match base.inputs.first().filter(|p| p.is_dir()) {
+        Some(root) => output_key(
+            Path::new(""),
+            // The PBR folder's, which the other two share (they sit beside it).
+            &crate::discover::root_prefix(
+                root,
+                &project_name(&base.inputs)
+                    .map(|n| folders(spec, &n)[0].clone())
+                    .unwrap_or_else(|_| spec.location.clone()),
+            ),
+        ),
+        None => String::new(),
+    };
     let recorder = |i: usize, inner: Arc<dyn EventSink>| -> Arc<dyn EventSink> {
         Arc::new(Recorder {
             inner,
             keys: keys[i].clone(),
+            prefix: prefix.clone(),
         })
     };
     // The PBR phase's reporter; the later phases' batch-level warnings go out under its batch.
@@ -785,6 +821,17 @@ pub fn finish_also(run: AlsoRun, extra: &[PathBuf], cancel: &CancelToken) -> Als
     s
 }
 
+/// Note HF9: set keys hold their output root, so a phase planned under another folder lists the same set ids under
+/// its own root.
+fn rebase_write_only(r: &mut BatchRequest, from: &Path) {
+    if let Some(w) = r.write_only.as_mut() {
+        *w = w
+            .iter()
+            .map(|k| crate::sets::set_key(&r.output_root, &crate::sets::set_id(from, k)))
+            .collect();
+    }
+}
+
 /// `run_also` without the walk; `rep` is the PBR phase's reporter, `recorder` wraps each later phase's sink (P4).
 #[allow(clippy::too_many_arguments)]
 fn run_phases(
@@ -809,12 +856,16 @@ fn run_phases(
 
     // TA14: the same request (preset id included) with target vanilla; each preflighted before anything is written.
     let mut pbr_req = base;
-    pbr_req.output_root = folders[0].clone();
+    let base_root = pbr_req.output_root.clone();
+    pbr_req.set_export(folders[0].clone());
     pbr_req.skip_root = Some(spec.location.clone());
+    rebase_write_only(&mut pbr_req, &base_root);
     let phase_req = |i: usize, mode: DeriveMode, sets: &[DeriveSet], drop: &[PathBuf]| {
         let mut r = pbr_req.clone();
         r.target = Some(Target::Vanilla);
-        r.output_root = folders[i].clone();
+        r.set_export(folders[i].clone());
+        r.skip_root = Some(spec.location.clone());
+        rebase_write_only(&mut r, &pbr_req.output_root);
         // P10: the low-detail check runs once, in the PBR phase.
         r.low_detail = LowDetailMode::Off;
         r.derive = Some(DeriveRequest {
@@ -916,6 +967,14 @@ fn run_phases(
     let mut copies = vec![];
     let mut keep = vec![];
     for j in std::mem::take(&mut vplan.jobs) {
+        // Note HF9: a set outside the run is neither copied nor written (`run` drops its jobs too).
+        if vreq
+            .write_only
+            .as_ref()
+            .is_some_and(|w| !w.contains(&j.set_key))
+        {
+            continue;
+        }
         // shortcut: a packed job is never copied (its raw sources' `packed_source` events belong to its encode);
         // upgrade if a pre-packed copy matters for speed.
         let copy = (j.pack.is_none())

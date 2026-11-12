@@ -1,16 +1,15 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
+use crate::model::fields::HELPER_HELP;
 use crate::model::helpers::{fill_text, target_file};
+use crate::model::sets::Tails;
 use crate::model::AppModel;
 use eframe::egui;
 use egui::text::LayoutJob;
-use engine::config::RnmTarget;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
-use serde_json::json;
-
-/// The fixed width of the panel's combos (egui-ui-rules 3.5: `ComboBox::width` is only a minimum).
-const COMBO_W: f32 = 200.0;
+// Note HI1: the texture panel's columns, so the helper rows line up with the texture rows.
+use super::settings_panel::{column_widths_beside, control_slot, field_label};
 
 const READS: [(Option<HelperRead>, &str); 6] = [
     (None, "Auto (R)"),
@@ -26,7 +25,6 @@ enum Edit {
     Fills(Option<Vec<FillTarget>>),
     Read(Option<HelperRead>),
     Invert(bool),
-    LayerTarget(RnmTarget),
     Select(String),
 }
 
@@ -50,21 +48,32 @@ fn push(job: &mut LayoutJob, style: &egui::Style, text: &str, weak: bool) {
     job.append(text, 0.0, egui::TextFormat::simple(font_id, color));
 }
 
-fn push_target(job: &mut LayoutJob, h: &HelperReport, t: FillTarget, style: &egui::Style) {
+fn push_target(
+    job: &mut LayoutJob,
+    h: &HelperReport,
+    t: FillTarget,
+    tails: Tails,
+    style: &egui::Style,
+) {
     push(job, style, &fill_text(t), false);
     push(job, style, "  ", false);
-    push(job, style, &target_file(h, t), true);
+    push(job, style, &target_file(h, t, tails), true);
 }
 
 /// Note HP: a fill as one line: what it writes in the body colour, two spaces, the file it lands in in the weak one.
-pub(crate) fn target_job(h: &HelperReport, t: FillTarget, style: &egui::Style) -> LayoutJob {
+pub(crate) fn target_job(
+    h: &HelperReport,
+    t: FillTarget,
+    tails: Tails,
+    style: &egui::Style,
+) -> LayoutJob {
     let mut job = LayoutJob::default();
-    push_target(&mut job, h, t, style);
+    push_target(&mut job, h, t, tails, style);
     job
 }
 
 /// Note HP: the panel's subtitle: "fills " and the targets joined by ", ", or the weak "not used: <reason>".
-pub(crate) fn fills_job(h: &HelperReport, style: &egui::Style) -> LayoutJob {
+pub(crate) fn fills_job(h: &HelperReport, tails: Tails, style: &egui::Style) -> LayoutJob {
     let mut job = LayoutJob::default();
     if h.fills.is_empty() {
         push(
@@ -80,7 +89,7 @@ pub(crate) fn fills_job(h: &HelperReport, style: &egui::Style) -> LayoutJob {
         if i > 0 {
             push(&mut job, style, ", ", false);
         }
-        push_target(&mut job, h, *t, style);
+        push_target(&mut job, h, *t, tails, style);
     }
     job
 }
@@ -115,33 +124,41 @@ pub(super) fn combo(
 
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport) {
     let Some(item) = model.item(key) else { return };
-    let (name, set_key) = (item.name.clone(), item.set_key.clone());
+    let name = item.name.clone();
+    // Note HF1: one check from a texture to its set; a no-set texture has none.
+    let set_key = model.set_key_of_item(key);
     let ro = model.toml_read_only_reason();
     let mut edits = vec![];
-    if let Some(sk) = set_key.filter(|k| model.sets.iter().any(|s| &s.key == k)) {
+    if let Some(sk) = set_key.filter(|k| !k.is_empty()) {
         let label = super::columns::set_label(&super::columns::export_prefix(model), &sk);
         if ui.link(format!("← {label}")).clicked() {
             model.select_set(&sk);
         }
     }
     ui.heading(&name);
-    ui.label(fills_job(h, ui.style()));
+    let tails = model.helper_tails(h);
+    ui.label(fills_job(h, tails, ui.style()));
+    // Note HH7: every set that shares the file, used or not, each a link to its set.
+    if !h.shared_with.is_empty() {
+        let prefix = super::columns::export_prefix(model);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Shared with");
+            for sk in &h.shared_with {
+                if ui.link(super::columns::set_label(&prefix, sk)).clicked() {
+                    model.select_set(sk);
+                }
+            }
+        });
+    }
     ui.add_space(4.0);
-    // The engine's `rnm.target` in effect (Note W4's `_cnr` fallback included).
-    let layer_target = h.rnm_target.filter(|_| h.role.is_normal());
     ui.add_enabled_ui(ro.is_none(), |ui| {
         egui::Grid::new(("helper-panel", key))
             .num_columns(3)
             .show(ui, |ui| {
                 role_row(ui, key, h, &ro, &mut edits);
-                match layer_target {
-                    Some(t) => layer_row(ui, key, t, &ro, &mut edits),
-                    None => {
-                        let now = model.current_fills(key, h);
-                        fills_rows(ui, key, h, now, &ro, &mut edits);
-                        read_rows(ui, key, h, &ro, &mut edits);
-                    }
-                }
+                let now = model.current_fills(key, h);
+                fills_rows(ui, key, h, tails, now, &ro, &mut edits);
+                read_rows(ui, key, h, &ro, &mut edits);
             });
         for (t, reason) in &h.skipped_targets {
             ui.weak(format!("Skipped {}: {reason}", fill_text(*t)));
@@ -154,11 +171,14 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, h: &HelperReport
     }
     for e in edits {
         match e {
-            Edit::Role(r) => model.set_helper_role(key, r),
+            Edit::Role(r) => {
+                // A tick left from before the file became a helper must not come back with the panel (Note HI5).
+                ui.data_mut(|d| d.remove_temp::<bool>(tick_id(key)));
+                model.set_helper_role(key, r);
+            }
             Edit::Fills(f) => model.set_helper_fills(key, f),
             Edit::Read(r) => model.set_helper_read(key, r),
             Edit::Invert(on) => model.set_helper_invert(key, on),
-            Edit::LayerTarget(t) => model.set_field(key, "rnm.target", json!(t)),
             Edit::Select(k) => model.select_item(&k),
         }
     }
@@ -194,11 +214,28 @@ fn output_items(
     v
 }
 
+/// The helper rows' control width: the texture rows' one, less the Reset (the widest button beside a control) where
+/// the row would not fit, so the centre is not widened under the Advanced drawer (Note HI1, rule 3.1).
+fn control_w(ui: &egui::Ui) -> f32 {
+    let reset = egui::WidgetText::from("Reset")
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Small,
+        )
+        .size()
+        .x;
+    let s = ui.spacing();
+    column_widths_beside(ui, reset + 2.0 * s.button_padding.x + s.item_spacing.x).1
+}
+
 fn hint(ui: &mut egui::Ui, text: &str) {
     ui.add(egui::Label::new(egui::RichText::new(text).small().weak()).truncate());
 }
 
-fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
+/// A small Reset button named `name` with `hover`, off with `ro`'s reason; the texture panel's Helper row uses it too.
+pub(crate) fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
     let r = ui.small_button("Reset");
     named(&r, egui::WidgetType::Button, name, None);
     why(r.on_hover_text(hover), ro).clicked()
@@ -211,9 +248,10 @@ fn role_row(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    ui.label("Role");
+    field_label(ui, true, "Role", None);
+    let w = control_w(ui);
     ui.horizontal(|ui| {
-        if let Some(role) = role_combo(ui, key, h.role, h.role_hand_set, ro) {
+        if let Some(role) = role_combo(ui, key, Some(h.role), h.role_hand_set, ro, w) {
             edits.push(Edit::Role(Some(role)));
         }
         if h.role_hand_set && reset(ui, "Reset role", "Use the role guessed from the name", ro) {
@@ -229,28 +267,41 @@ fn role_row(
         },
     );
     ui.end_row();
+    // Note HI4, HI16: unticked, the file is an ordinary texture again (`helper.role = "none"`), in every set.
+    field_label(ui, true, "Helper", Some(HELPER_HELP));
+    let r = control_slot(ui, w, |ui| helper_tick(ui, true, h.shared_with.len(), ro));
+    if r.changed() {
+        edits.push(Edit::Role(Some(HelperRole::NotHelper)));
+    }
+    ui.label("");
+    ui.end_row();
 }
 
-/// The "Helper role" combo (fixed width): "Not a helper" then every role. Returns the role picked, if it is to be
-/// written: a different role, or the current one while it is not hand-set (an assigned role beats a suggestion).
+/// The "Helper role" combo (`w` wide): every role but "Not a helper" (the unticked Helper box, Note HI6); `None` shows
+/// "Pick a role…". Returns the role picked, if it is to be written: a different role, or the current one while it is
+/// not hand-set (an assigned role beats a suggestion).
 pub(crate) fn role_combo(
     ui: &mut egui::Ui,
     key: &str,
-    current: HelperRole,
+    current: Option<HelperRole>,
     hand_set: bool,
     ro: &Option<String>,
+    w: f32,
 ) -> Option<HelperRole> {
     let mut picked = None;
-    let shown = current.label();
-    let r = combo(ui, (key, "helper-role"), &shown, COMBO_W, |ui| {
-        // "Not a helper" first (`all()`'s order), so it is in view without scrolling the long list.
-        for role in HelperRole::all() {
-            let new = role != current || !hand_set;
-            if ui.selectable_label(role == current, role.label()).clicked() && new {
+    let shown = current.map_or_else(|| "Pick a role…".to_string(), |r| r.label());
+    let r = combo(ui, (key, "helper-role"), &shown, w, |ui| {
+        for role in HelperRole::all()
+            .into_iter()
+            .filter(|r| *r != HelperRole::NotHelper)
+        {
+            let new = Some(role) != current || !hand_set;
+            if ui
+                .selectable_label(Some(role) == current, role.label())
+                .clicked()
+                && new
+            {
                 picked = Some(role);
-            }
-            if role == HelperRole::NotHelper {
-                ui.separator();
             }
         }
     });
@@ -259,29 +310,31 @@ pub(crate) fn role_combo(
     picked
 }
 
-fn layer_row(
+/// The id of a texture's ticked Helper box while it has no role yet (Note HI5): egui temp data, never written.
+pub(crate) fn tick_id(key: &str) -> egui::Id {
+    egui::Id::new(("helper-tick", key))
+}
+
+/// The Helper tick (Note HI4), named "Helper". `shared_with` other sets stop using the file when it is unticked (HI16).
+pub(crate) fn helper_tick(
     ui: &mut egui::Ui,
-    key: &str,
-    t: RnmTarget,
+    on: bool,
+    shared_with: usize,
     ro: &Option<String>,
-    edits: &mut Vec<Edit>,
-) {
-    ui.label("Blends into");
-    let shown = super::rnm_section::target_label(t);
-    let r = combo(ui, (key, "helper-layer-target"), shown, COMBO_W, |ui| {
-        for o in [RnmTarget::N, RnmTarget::Cnr, RnmTarget::Both] {
-            if ui
-                .selectable_label(o == t, super::rnm_section::target_label(o))
-                .clicked()
-            {
-                edits.push(Edit::LayerTarget(o));
-            }
-        }
+) -> egui::Response {
+    let mut v = on;
+    let r = ui.add_enabled(ro.is_none(), egui::Checkbox::new(&mut v, ""));
+    r.widget_info(|| {
+        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, "Helper")
     });
-    named(&r, egui::WidgetType::ComboBox, "Layer target", Some(shown));
-    why(r, ro);
-    hint(ui, "rnm.target");
-    ui.end_row();
+    let r = match shared_with {
+        0 => r,
+        1 => r.on_hover_text("Also used by 1 other set: it stops using it too."),
+        n => r.on_hover_text(format!(
+            "Also used by {n} other sets: they stop using it too."
+        )),
+    };
+    why(r, ro)
 }
 
 /// One Grid row per line (`Fills | name ✕ | hint`, then `Add ▾ Reset`), so nothing is centred on a tall cell and the
@@ -290,12 +343,14 @@ fn fills_rows(
     ui: &mut egui::Ui,
     key: &str,
     h: &HelperReport,
+    tails: Tails,
     // Final review M1: the `sdc.toml` list when hand-set (DY18b), so ✕ on one target never drops one that did not land.
     now: Vec<FillTarget>,
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
     let (row_h, pad) = (ui.spacing().interact_size.y, ui.spacing().button_padding.x);
+    let w = control_w(ui);
     let hint_text = if h.fills_hand_set {
         "set by you"
     } else {
@@ -303,7 +358,7 @@ fn fills_rows(
     };
     let mut first = true;
     let lead = |ui: &mut egui::Ui, first: &mut bool| {
-        ui.label(if *first { "Fills" } else { "" });
+        field_label(ui, true, if *first { "Fills" } else { "" }, None);
         *first = false;
     };
     for t in &now {
@@ -311,13 +366,13 @@ fn fills_rows(
         lead(ui, &mut first);
         ui.horizontal(|ui| {
             ui.allocate_ui_with_layout(
-                egui::vec2(COMBO_W, row_h),
+                egui::vec2(w, row_h),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
-                    ui.set_min_size(egui::vec2(COMBO_W, row_h));
+                    ui.set_min_size(egui::vec2(w, row_h));
                     ui.spacing_mut().item_spacing.x = 0.0;
                     ui.add_space(pad);
-                    ui.add(egui::Label::new(target_job(h, *t, ui.style())).truncate());
+                    ui.add(egui::Label::new(target_job(h, *t, tails, ui.style())).truncate());
                 },
             );
             let hover = format!("Stop filling {}", fill_text(*t));
@@ -347,12 +402,12 @@ fn fills_rows(
     lead(ui, &mut first);
     ui.horizontal(|ui| {
         if more.is_empty() {
-            ui.allocate_space(egui::vec2(COMBO_W, row_h));
+            ui.allocate_space(egui::vec2(w, row_h));
         } else {
-            let r = combo(ui, (key, "helper-add-fill"), "Add target", COMBO_W, |ui| {
+            let r = combo(ui, (key, "helper-add-fill"), "Add target", w, |ui| {
                 for o in &more {
                     if ui
-                        .selectable_label(false, target_job(h, *o, ui.style()))
+                        .selectable_label(false, target_job(h, *o, tails, ui.style()))
                         .clicked()
                     {
                         let mut next = now.clone();
@@ -386,9 +441,10 @@ fn read_rows(
     ro: &Option<String>,
     edits: &mut Vec<Edit>,
 ) {
-    ui.label("Read from");
+    field_label(ui, true, "Read from", None);
+    let w = control_w(ui);
     let shown = READS.iter().find(|r| r.0 == h.read).map_or("", |r| r.1);
-    let r = combo(ui, (key, "helper-read"), shown, COMBO_W, |ui| {
+    let r = combo(ui, (key, "helper-read"), shown, w, |ui| {
         for (v, label) in READS {
             if ui.selectable_label(v == h.read, label).clicked() && v != h.read {
                 edits.push(Edit::Read(v));
@@ -399,7 +455,7 @@ fn read_rows(
     why(r, ro);
     hint(ui, "the helper's channel used");
     ui.end_row();
-    ui.label("");
+    field_label(ui, true, "", None);
     let mut on = h.invert;
     let r = ui.checkbox(&mut on, "Invert");
     if why(r, ro).changed() {

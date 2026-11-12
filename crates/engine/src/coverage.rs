@@ -5,6 +5,7 @@
 //!
 //! Level 0 defines the target: the fraction `p` of texels whose 8-bit alpha code passes the
 //! alpha test. Each lower level is remapped so that exactly `round(p · n)` of its texels pass.
+//! A resized texture takes `p` from its source instead and fits level 0 too ([`preserve_coverage_to`], Note HR6).
 //! The counter ([`coverage_fraction`]) and the solver
 //! ([`preserve_coverage`]) share [`passes`] and the engine's [`code8`] rounding, so they
 //! cannot disagree.
@@ -217,6 +218,18 @@ pub fn preserve_coverage(chain: &mut [Rgba32F], threshold: u8, compare: AlphaCom
     let Some((base, rest)) = chain.split_first_mut() else {
         return;
     };
+    let p = coverage_fraction(base.px.iter().map(|q| q[3]), threshold, compare);
+    fit_levels(rest, p, threshold, compare);
+}
+
+/// [`preserve_coverage`] against a given pass fraction `p`: every level, level 0 included, is fitted to
+/// `k = round(p · n)`. A resized texture's reference is its source's coverage (Note HR6).
+pub fn preserve_coverage_to(chain: &mut [Rgba32F], p: f64, threshold: u8, compare: AlphaCompare) {
+    fit_levels(chain, p, threshold, compare);
+}
+
+/// Fit each of `levels` to pass `k = round(p · n)` texels, by the rules of [`preserve_coverage`].
+fn fit_levels(levels: &mut [Rgba32F], p: f64, threshold: u8, compare: AlphaCompare) {
     // No passing code (`gt 255`): p = 0. Every code passes (`ge 0`): every level is full.
     let Some(c) = first_passing_code(threshold, compare) else {
         return;
@@ -228,13 +241,12 @@ pub fn preserve_coverage(chain: &mut [Rgba32F], threshold: u8, compare: AlphaCom
     // (each clamped to the code range), so BC7 error cannot flip them (mipcheck B6).
     let t_pass = first_float_with_code(c.saturating_add(EDGE_MARGIN_CODES));
     let t_fail = first_float_with_code(c.saturating_sub(EDGE_MARGIN_CODES).max(1)).next_down();
-    let p = coverage_fraction(base.px.iter().map(|q| q[3]), threshold, compare);
     let pass_count = |l: &Rgba32F| {
         l.px.iter()
             .filter(|q| passes(code8(q[3]), threshold, compare))
             .count()
     };
-    for level in rest {
+    for level in levels {
         let n = level.px.len();
         let k = ((p * n as f64).round() as usize).min(n);
         // "No texel passes" is the target: the box alpha is left alone (spec §5.5). So is a level already on target.
@@ -816,6 +828,37 @@ mod tests {
                 (*n as f64 - mean).abs() <= 0.1 * mean,
                 "bands {bands:?} vs mean {mean}"
             );
+        }
+    }
+
+    /// Note HR6: with a given reference, level 0 is fitted too.
+    #[test]
+    fn preserve_coverage_to_fits_level_0() {
+        // 4x4, alpha 0.9 on 8 texels (the left two columns), 0.1 on the rest: 8 pass `ge 128`.
+        let mut l0 = Rgba32F::new(4, 4, [0.0, 0.0, 0.0, 0.1]);
+        for (i, px) in l0.px.iter_mut().enumerate() {
+            if i % 4 < 2 {
+                px[3] = 0.9;
+            }
+        }
+        let mut chain = vec![l0];
+        preserve_coverage_to(&mut chain, 0.25, 128, AlphaCompare::Ge);
+        let pass = alpha_of(&chain[0])
+            .filter(|&a| passes(code8(a), 128, AlphaCompare::Ge))
+            .count();
+        assert_eq!(pass, 4);
+    }
+
+    /// Note HR6: a reference of 0 or 1 invents nothing and does not panic.
+    #[test]
+    fn preserve_coverage_to_at_the_ends() {
+        for (p, alpha, want) in [(0.0, 0.1_f32, 0usize), (1.0, 0.9, 16), (1.0, 0.0, 0)] {
+            let mut chain = vec![Rgba32F::new(4, 4, [0.0, 0.0, 0.0, alpha])];
+            preserve_coverage_to(&mut chain, p, 128, AlphaCompare::Ge);
+            let pass = alpha_of(&chain[0])
+                .filter(|&a| passes(code8(a), 128, AlphaCompare::Ge))
+                .count();
+            assert_eq!(pass, want, "p = {p}, alpha = {alpha}");
         }
     }
 

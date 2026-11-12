@@ -9,21 +9,20 @@
 use crate::api::{BatchRequest, CancelToken, LowDetailMode};
 use crate::bake::NormalVariance;
 use crate::config::{Format, Profile, Subtype};
-use crate::coverage::{coverage_fraction, preserve_coverage};
+use crate::coverage::{coverage_fraction, preserve_coverage, preserve_coverage_to};
 use crate::dds::{dds_bytes, dds_bytes_cube, resolve_header, write_atomic, DdsDesc};
 use crate::encode::{encode_level, EncodeCtx};
 use crate::events::{EventKind, Reporter, Stage};
 use crate::image::Rgba32F;
 use crate::load::load_image_as;
 use crate::manifest::{
-    dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, sha256_file,
-    EncoderVersions, Manifest, ManifestRecord, PresetRef, SourceRef, BC1_ENCODE_ID, ENGINE_VERSION,
-    MANIFEST_SCHEMA,
+    dispatched_isa, engine_commit, now_rfc3339, output_key, profile_sha256, recorded_sources,
+    sha256_file, EncoderVersions, Manifest, ManifestRecord, PresetRef, BC1_ENCODE_ID,
+    ENGINE_VERSION, MANIFEST_SCHEMA,
 };
 use crate::mips::build_chain_with;
 use crate::ops::{preprocess_with, Domain, SourceTransfer};
 use crate::pack::assemble::assemble;
-use crate::pack::invert_of;
 use crate::policy::{ResolvedJob, SourceStamp};
 use crate::quantize::{to_encoder_input, EncoderInput};
 use crate::session::first_level_within;
@@ -36,6 +35,16 @@ pub enum FileError {
     /// Stopped by the cancel token before anything was written.
     Cancelled,
     Failed(Stage, String),
+}
+
+/// The message alone, as the export's Problems row words a `FileFailed`, so a preview names a failure the same way.
+impl std::fmt::Display for FileError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FileError::Cancelled => f.write_str("cancelled"),
+            FileError::Failed(_, e) => f.write_str(e),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -65,17 +74,33 @@ fn fail(stage: Stage) -> impl Fn(String) -> FileError {
     move |e| FileError::Failed(stage, e)
 }
 
-/// Coverage of `level` under the profile's alpha test, when coverage preservation applies (spec §5.5): a stored
-/// alpha channel and `mips.coverage` on (by default for `cutout` and `cutout_blend`). The same predicate gates the
-/// coverage check in `validate`, so a `remove`d channel (decoding to all-255) is never compared.
-fn base_coverage(level: &Rgba32F, p: &Profile, alpha_present: bool) -> Option<f64> {
-    (alpha_present && p.coverage_enabled()).then(|| {
-        coverage_fraction(
-            level.px.iter().map(|q| q[3]),
-            p.alpha.threshold,
-            p.alpha.compare,
-        )
-    })
+/// The coverage step (spec §5.5), when coverage preservation applies: a stored alpha channel and `mips.coverage` on
+/// (by default for `cutout` and `cutout_blend`). Returns the reference coverage, `Prepared::base_coverage`. A resized
+/// texture is fitted, mip 0 included, to `source_coverage`, its coverage before the resize (Note HR6); otherwise
+/// mip 0 is the reference and is left alone. The same predicate gates the coverage check in `validate`, so a
+/// `remove`d channel (decoding to all-255) is never compared.
+fn apply_coverage(
+    chain: &mut [Rgba32F],
+    p: &Profile,
+    alpha_present: bool,
+    source_coverage: Option<f64>,
+) -> Option<f64> {
+    if !(alpha_present && p.coverage_enabled()) {
+        return None;
+    }
+    let (threshold, compare) = (p.alpha.threshold, p.alpha.compare);
+    match source_coverage {
+        Some(src) => {
+            preserve_coverage_to(chain, src, threshold, compare);
+            Some(src)
+        }
+        None => {
+            let base =
+                coverage_fraction(chain.first()?.px.iter().map(|q| q[3]), threshold, compare);
+            preserve_coverage(chain, threshold, compare);
+            Some(base)
+        }
+    }
 }
 
 /// Peak Rec. 709 luminance of the HDR base level as the encoder sees it (channels clamped to `[0, 65504]`,
@@ -194,26 +219,11 @@ fn check_stamps(job: &ResolvedJob) -> Result<(), FileError> {
     if let Some(f) = &job.fill {
         stamps.push((f.source.path.as_path(), f.source.stamp));
     }
-    if let Some(r) = job
-        .bake
-        .as_ref()
-        .and_then(|b| b.rnm.as_ref().map(|r| (r, &b.normal_profile)))
-    {
-        for (f, _) in r.0.inputs(&r.1.rnm) {
-            stamps.push((f.path.as_path(), f.stamp));
-        }
-    }
-    if let Some(r) = job.active_rnm() {
-        for (f, _) in r.inputs(&job.profile.rnm) {
-            stamps.push((f.path.as_path(), f.stamp));
-        }
-    }
     let named = job.pack.is_some()
         || job.derive.is_some()
         || faces.is_some()
         || job.bake.is_some()
-        || job.fill.is_some()
-        || job.active_rnm().is_some();
+        || job.fill.is_some();
     for (src, planned) in stamps {
         if let Some(planned) = planned {
             if SourceStamp::of(src) != Some(planned) {
@@ -332,11 +342,6 @@ fn prepare_then<T>(
     } else {
         (preprocess_with(img, p, transfer), None)
     };
-    // M6 Track F2 (DECISIONS Note W1): RNM layers blend into the preprocessed base; alpha is never touched. Admission
-    // counts the largest layer and its resample (`api::job_bytes`, Note BB).
-    if let Some(r) = job.active_rnm() {
-        crate::rnm::blend::apply(&mut work.img, r, p).map_err(fail(Stage::Load))?;
-    }
     stop()?;
 
     enter(Stage::Mipmaps);
@@ -355,11 +360,8 @@ fn prepare_then<T>(
     let base_coverage = if grass {
         None
     } else {
-        base_coverage(&chain[0], p, alpha_present)
+        apply_coverage(&mut chain, p, alpha_present, work.source_coverage)
     };
-    if base_coverage.is_some() {
-        preserve_coverage(&mut chain, p.alpha.threshold, p.alpha.compare);
-    }
     // Check 3 runs on the finished chain. An eligible job has `resize = none`, so `chain[0]` is the power-of-two size.
     let detail_ratio = (detail
         && crate::checks::low_detail_eligible(p, (chain[0].width, chain[0].height)))
@@ -373,7 +375,8 @@ fn prepare_then<T>(
         }
     };
     // The BC6H peak check compares the first decoded level with this peak, so it is measured on the first level kept
-    // (mip 0 for an export). `base_coverage` stays mip 0's: coverage is compared with the base on every level.
+    // (mip 0 for an export). `base_coverage` stays the reference (mip 0's, or the source's after a resize, Note HR6):
+    // coverage is compared with it on every level.
     let source_peak = source_peak(&chain[first_level], p);
     // Quantise clamps mip 0 (Task 31). These exact levels are encoded and handed to Validate (Task 35).
     let inputs: Vec<EncoderInput> = match keep {
@@ -514,80 +517,7 @@ pub fn process_file(
         prepare_then(job, cancel, tracker, Keep::Encode, detail, || {
             let source_sha256 =
                 sha256_file(&job.input).map_err(|e| fail(Stage::Load)(e.to_string()))?;
-            // Spec §6.4 "Provenance": a packed output records every source (its first source is `job.input`, Note M8).
-            let mut sources: Vec<SourceRef> = match &job.pack {
-                Some(pk) => pk
-                    .sources
-                    .iter()
-                    .map(|s| {
-                        Ok(SourceRef {
-                            fill: Some(crate::pack::source_fill(pk, s)),
-                            ..SourceRef::of_pack(&s.path, s.role, invert_of(pk, &s.path))?
-                        })
-                    })
-                    .collect::<std::io::Result<_>>()
-                    .map_err(|e| fail(Stage::Load)(e.to_string()))?,
-                None => vec![],
-            };
-            // Note CN12: a derived output records every file it read, with its slots and the job's identity.
-            if let Some(dj) = &job.derive {
-                let identity = dj.identity_sha256();
-                for s in &dj.sources {
-                    sources.push(
-                        SourceRef::of_derive(&s.path, &s.role, identity.clone())
-                            .map_err(|e| fail(Stage::Load)(format!("{}: {e}", s.path.display())))?,
-                    );
-                }
-            }
-            // DECISIONS DS8: a six-file cube records every face, in face order (`source_sha256` covers a one-file cube).
-            for s in job
-                .cube
-                .iter()
-                .filter(|c| c.sources.len() > 1)
-                .flat_map(|c| &c.sources)
-            {
-                sources.push(
-                    SourceRef::of_cube(&s.path, s.face.unwrap_or(0))
-                        .map_err(|e| fail(Stage::Load)(format!("{}: {e}", s.path.display())))?,
-                );
-            }
-            // DECISIONS R12: the baked `_n`, with the identity of its decode settings.
-            if let Some(b) = &job.bake {
-                sources.push(
-                    SourceRef::of_bake(&b.normal, b.identity_sha256())
-                        .map_err(|e| fail(Stage::Load)(format!("{}: {e}", b.normal.display())))?,
-                );
-            }
-            // Note W18: the baked `_n`'s RNM inputs, roles prefixed `bake.`.
-            if let Some(r) = job
-                .bake
-                .as_ref()
-                .and_then(|b| b.rnm.as_ref().map(|r| (r, &b.normal_profile)))
-            {
-                for (f, role) in r.0.inputs(&r.1.rnm) {
-                    sources.push(
-                        SourceRef::of_rnm(&f.path, format!("bake.{role}"))
-                            .map_err(|e| fail(Stage::Load)(format!("{}: {e}", f.path.display())))?,
-                    );
-                }
-            }
-            // M6 Track F2: every RNM input the blend reads, with its role.
-            if let Some(r) = job.active_rnm() {
-                for (f, role) in r.inputs(&job.profile.rnm) {
-                    sources
-                        .push(SourceRef::of_rnm(&f.path, role).map_err(|e| {
-                            fail(Stage::Load)(format!("{}: {e}", f.path.display()))
-                        })?);
-                }
-            }
-            // Note DY: the helper that fills the alpha, with its read and invert, so `if-changed` re-encodes on either.
-            if let Some(f) = &job.fill {
-                sources.push(
-                    SourceRef::of_fill(&f.source.path, f.identity()).map_err(|e| {
-                        fail(Stage::Load)(format!("{}: {e}", f.source.path.display()))
-                    })?,
-                );
-            }
+            let sources = recorded_sources(job).map_err(fail(Stage::Load))?;
             Ok((source_sha256, sources))
         })?;
     let low_detail = flagged(&prep);
@@ -679,4 +609,50 @@ pub fn process_file(
         output: job.output.clone(),
         report,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::{AlphaCompare, ResizeMode};
+    use crate::coverage::passes;
+    use crate::ops::tests::{cutout_profile, sparse_cutout};
+
+    /// QA2: a failure reads as its message alone, as the export's Problems row shows `FileFailed`.
+    #[test]
+    fn file_error_reads_as_text() {
+        assert_eq!(
+            FileError::Failed(Stage::Load, r"C:\mods\a.png: bad".into()).to_string(),
+            r"C:\mods\a.png: bad"
+        );
+        assert_eq!(FileError::Cancelled.to_string(), "cancelled");
+    }
+
+    /// Note HR6: a resized cutout's chain, mip 0 included, is fitted to the source's coverage; without a resize mip 0
+    /// is untouched.
+    #[test]
+    fn a_resized_cutout_keeps_its_source_coverage() {
+        let mut p = cutout_profile();
+        p.resize = ResizeMode::Half;
+        let work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        let mut chain = build_chain_with(&work, &p, None);
+        let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
+        assert_eq!(base, Some(0.125));
+        assert_eq!(chain[0].px.len(), 16);
+        let pass = chain[0]
+            .px
+            .iter()
+            .filter(|q| passes(crate::analyse::code8(q[3]), 128, AlphaCompare::Ge))
+            .count();
+        assert_eq!(pass, 2);
+
+        let p = cutout_profile();
+        let mut work = preprocess_with(sparse_cutout(), &p, SourceTransfer::Stored);
+        // A failing alpha inside the threshold margin (code 126 of 128): a fit of level 0 would push it clear.
+        work.img.at_mut(1, 1)[3] = 126.0 / 255.0;
+        let mut chain = build_chain_with(&work, &p, None);
+        let base = apply_coverage(&mut chain, &p, work.alpha_present, work.source_coverage);
+        assert_eq!(base, Some(0.125));
+        assert_eq!(chain[0], work.img);
+    }
 }

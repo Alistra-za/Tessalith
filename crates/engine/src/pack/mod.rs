@@ -786,17 +786,30 @@ pub fn read_of(s: &PackSource) -> Option<String> {
 
 /// What `SourceRef.fill` records for a packed source; the pipeline records it and `if-changed` compares it, so the
 /// two never drift. `read:<id>` as [`read_of`] when set, then `ch:<rgba>`, every channel the source feeds (Note
-/// DY21).
+/// DY21), then `,inv:<rgba>` when only some of those channels are stored inverted (Note HS3).
 pub fn source_fill(pk: &PackJob, s: &PackSource) -> String {
-    let fed =
-        |i: usize| matches!(&pk.channels[i], ChannelSource::Source { path, .. } if *path == s.path);
-    let c: String = (0..4)
-        .filter(|&i| fed(i))
-        .map(|i| ['r', 'g', 'b', 'a'][i])
-        .collect();
+    let mut fed = String::new();
+    let mut inv = String::new();
+    for (c, l) in pk.channels.iter().zip(['r', 'g', 'b', 'a']) {
+        if let ChannelSource::Source { path, invert, .. } = c {
+            if *path == s.path {
+                fed.push(l);
+                if *invert {
+                    inv.push(l);
+                }
+            }
+        }
+    }
+    // Note HS3: `invert_of` is one flag per source, so a toggle that flips every channel of a mixed source shows
+    // only here.
+    let ch = if inv.is_empty() || inv == fed {
+        format!("ch:{fed}")
+    } else {
+        format!("ch:{fed},inv:{inv}")
+    };
     match read_of(s) {
-        Some(r) => format!("{r},ch:{c}"),
-        None => format!("ch:{c}"),
+        Some(r) => format!("{r},{ch}"),
+        None => ch,
     }
 }
 

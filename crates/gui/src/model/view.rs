@@ -53,8 +53,6 @@ pub struct ViewState {
     pub lens: bool,
     /// Repeat the picture 3×3 to check seams.
     pub tile: bool,
-    /// The overlay painted over the source pane (Note CL); not saved in `gui.toml`, like the heatmap (AG59).
-    pub overlay: Option<crate::model::overlay::OverlayKind>,
     /// Name each face on a cube's cross ("Face labels", cube items only; Note DT16).
     pub face_labels: bool,
     /// Which face (0..6, +X..-Z) the source pane shows for a six-file cube; back to 0 on every texture change.
@@ -74,7 +72,6 @@ impl Default for ViewState {
             full_scale: FULL_SCALE_DEFAULT,
             lens: false,
             tile: false,
-            overlay: None,
             face_labels: true,
             source_face: 0,
         }

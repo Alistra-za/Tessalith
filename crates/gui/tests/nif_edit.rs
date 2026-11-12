@@ -285,97 +285,6 @@ fn add_controller_times_round_trip_as_bits() {
     assert!(matches!(old.ops[0].op, Op::AddController { freq, .. } if freq == 1.5));
 }
 
-/// v2 C2: the three clip ops survive the edit document; AddSequence's times keep their bits (a NaN stop too).
-#[test]
-fn clip_ops_survive_the_edit_document() {
-    use nif::edit::{ClipTrack, Owner};
-    let root = Anchor {
-        block: 0,
-        kind: "NiNode".into(),
-        shape: None,
-        role: Role::Root,
-    };
-    let track = |var: u32, block: u32| ClipTrack {
-        at: Anchor {
-            block,
-            kind: "BSLightingShaderPropertyFloatController".into(),
-            shape: Some("S".into()),
-            role: Role::Ctrl {
-                owner: Owner::Shader,
-                class: "BSLightingShaderPropertyFloatController".into(),
-                var: Some(var),
-                nth: 0,
-            },
-        },
-        keys: KeyData::Float(KeyGroup {
-            key_type: Some(1),
-            keys: vec![Key {
-                time: 0.0,
-                value: 0.5,
-                forward: None,
-                backward: None,
-                tbc: None,
-            }],
-        }),
-    };
-    let ops = [
-        Op::AddSequence {
-            at: root.clone(),
-            name: "Open".into(),
-            cycle: 2,
-            freq: 1.0,
-            start: -0.0,
-            stop: f32::from_bits(0xFFC0_0001),
-            tracks: vec![track(11, 4), track(20, 5)],
-        },
-        Op::RemoveSequence {
-            at: root.clone(),
-            name: "Idle".into(),
-            nth: 1,
-        },
-        Op::SetSequenceTiming {
-            at: root.clone(),
-            name: "Idle".into(),
-            nth: 0,
-            cycle: 1,
-            freq: 2.5,
-            start: -0.0,
-            stop: 3.0,
-        },
-        Op::RenameSequence {
-            at: root,
-            name: "Open".into(),
-            nth: 0,
-            new_name: "Close".into(),
-        },
-    ];
-    let mut d = doc();
-    d.ops = ops
-        .iter()
-        .map(|op| DocOp {
-            op: op.clone(),
-            status: OpStatus::Applied,
-        })
-        .collect();
-    let back = EditDoc::from_text(&d.to_text()).unwrap();
-    let Op::AddSequence { start, stop, .. } = &back.ops[0].op else {
-        panic!("{:?}", back.ops)
-    };
-    assert_eq!(
-        [start.to_bits(), stop.to_bits()],
-        [0x8000_0000, 0xFFC0_0001]
-    );
-    // NaN != NaN: compare the rest with the stop made equal
-    let mut back = back;
-    if let Op::AddSequence { stop, .. } = &mut back.ops[0].op {
-        *stop = 1.0;
-    }
-    if let Op::AddSequence { stop, .. } = &mut d.ops[0].op {
-        *stop = 1.0;
-    }
-    assert_eq!(back, d);
-}
-
 #[test]
 fn every_op_variant_round_trips() {
     use nif::edit::Owner;
@@ -501,10 +410,6 @@ fn every_op_variant_round_trips() {
             stop: 2.0,
         },
         Op::RemoveController { at: ctrl.clone() },
-        Op::ConvertChainToClips {
-            at: shader.clone(),
-            name: "Caf\u{e9}".into(),
-        },
     ];
     for v in [
         E::Bsx(7),
@@ -534,6 +439,402 @@ fn every_op_variant_round_trips() {
         .collect();
     assert_eq!(EditDoc::from_text(&d.to_text()).unwrap(), d);
     assert_eq!(EditDoc::from_text(&doc().to_text()).unwrap(), doc());
+}
+
+// Documents written before clip editing was removed (Note GR2): the variants as the serializer wrote them.
+const DOC_HEAD: &str = "version = 1\n\n[source]\norigin = \"A\"\ndata_path = \"meshes/x.nif\"\nsize = 3\nsha256 = \"ab\"\n\n";
+const OP_SET_FIELD: &str = r#"[[ops]]
+status = "Conflict"
+
+[ops.op.SetField]
+field = "ShaderType"
+
+[ops.op.SetField.at]
+block = 3
+kind = "BSLightingShaderProperty"
+shape = "Shape"
+role = "Shader"
+
+[ops.op.SetField.value]
+U32 = 1
+
+[ops.op.SetField.base]
+U32 = 0
+
+"#;
+const OP_ADD_SEQUENCE: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.AddSequence]
+name = "Open"
+cycle = 2
+freq = 1065353216
+start = 2147483648
+stop = 4290772993
+tracks = []
+
+[ops.op.AddSequence.at]
+block = 0
+kind = "NiNode"
+role = "Root"
+
+"#;
+const OP_RENAME_SEQUENCE: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.RenameSequence]
+name = "Open"
+nth = 0
+new_name = "Close"
+
+[ops.op.RenameSequence.at]
+block = 0
+kind = "NiNode"
+role = "Root"
+
+"#;
+const OP_SET_KEYS_CLIP: &str = r#"[[ops]]
+status = "Applied"
+
+[ops.op.SetKeys]
+clip = 2
+clip_name = "Open"
+
+[ops.op.SetKeys.at]
+block = 9
+kind = "BSLightingShaderPropertyFloatController"
+shape = "S"
+
+[ops.op.SetKeys.at.role.Ctrl]
+owner = "Shader"
+class = "BSLightingShaderPropertyFloatController"
+var = 2
+nth = 1
+
+[ops.op.SetKeys.keys.Float]
+key_type = 1
+
+[[ops.op.SetKeys.keys.Float.keys]]
+time = 1056964608
+value = 1065353216
+
+[ops.op.SetKeys.base.Float]
+key_type = 1
+keys = []
+
+"#;
+const EXPORTED: &str = "[export]\nsha256 = \"ee\"\nops_hash = \"0123\"\n\n";
+const CLIP_ONLY_LINE: &str =
+    "meshes/x.nif: 2 clip edit(s) dropped: NIF Edit no longer edits clips.";
+
+fn clip_only_text() -> String {
+    [DOC_HEAD, EXPORTED, OP_ADD_SEQUENCE, OP_RENAME_SEQUENCE].concat()
+}
+
+fn open_with(edit_mod: &Path, autosave: Option<&Path>) -> NifEdit {
+    NifEdit::open(
+        fixture("TestNifFile_Skinned_SE.nif"),
+        copy("A", 1, false),
+        "meshes/x.nif",
+        Some(edit_mod),
+        autosave,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_document_of_only_clip_ops_opens_empty_and_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, clip_only_text()).unwrap();
+    let e = open_with(d.path(), None);
+    assert_eq!(e.doc.ops.len(), 0);
+    assert!(
+        e.doc.pending(),
+        "the export has the clip edits, this does not"
+    );
+    assert_eq!(e.open_lines, vec![CLIP_ONLY_LINE.to_string()]);
+}
+
+#[test]
+fn a_mixed_document_keeps_its_other_ops_in_order() {
+    let t = [
+        DOC_HEAD,
+        OP_SET_FIELD,
+        OP_ADD_SEQUENCE,
+        OP_SET_KEYS_CLIP,
+        OP_RENAME_SEQUENCE,
+    ]
+    .concat();
+    let doc = EditDoc::from_text(&t).unwrap();
+    assert_eq!(doc.dropped_clip_ops, 2);
+    assert_eq!(doc.ops.len(), 2);
+    assert!(matches!(doc.ops[0].op, Op::SetField { .. }));
+    assert_eq!(doc.ops[0].status, OpStatus::Conflict);
+    assert!(matches!(
+        &doc.ops[1].op,
+        Op::SetKeys { clip: Some(2), clip_name: Some(n), .. } if n == "Open"
+    ));
+    assert_eq!(doc.ops[1].status, OpStatus::Applied);
+    assert_eq!(
+        EditDoc::from_text(&doc.to_text()).unwrap().dropped_clip_ops,
+        0
+    );
+}
+
+#[test]
+fn an_autosave_with_clip_ops_recovers() {
+    let d = tempfile::tempdir().unwrap();
+    let auto = d.path().join("auto.toml");
+    std::fs::write(&auto, clip_only_text()).unwrap();
+    let e = open_with(&d.path().join("mod"), Some(&auto));
+    assert!(e.open_lines.iter().all(|l| !l.contains("does not load")));
+    assert_eq!(
+        e.open_lines,
+        vec![
+            format!(
+                "Recovered the edits of meshes/x.nif autosaved in {}.",
+                auto.display()
+            ),
+            CLIP_ONLY_LINE.to_string(),
+        ]
+    );
+    assert_eq!(e.doc.ops.len(), 0);
+}
+
+#[test]
+fn the_badge_scan_reads_a_document_with_clip_ops() {
+    let d = tempfile::tempdir().unwrap();
+    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, clip_only_text()).unwrap();
+    assert_eq!(
+        pending_docs(d.path()),
+        vec![("meshes/x.nif".to_string(), DocBadge::Pending)]
+    );
+}
+
+/// Final review I4: a typo in any of the five names would make a whole document fail to open.
+#[test]
+fn every_removed_clip_op_name_is_dropped() {
+    for name in [
+        "AddSequence",
+        "RemoveSequence",
+        "RenameSequence",
+        "SetSequenceTiming",
+        "ConvertChainToClips",
+    ] {
+        let t =
+            format!("{DOC_HEAD}[[ops]]\nstatus = \"Applied\"\n\n[ops.op.{name}]\nname = \"x\"\n");
+        let d = EditDoc::from_text(&t).unwrap_or_else(|e| panic!("{name}: {e}"));
+        assert_eq!((d.ops.len(), d.dropped_clip_ops), (0, 1), "{name}");
+    }
+}
+
+/// Final review I4: pending follows the hash of the ops that are left, not a constant.
+#[test]
+fn pending_follows_the_hash_of_the_ops_left_after_the_drop() {
+    let mixed = |hash: &str| {
+        let export = format!("[export]\nsha256 = \"ee\"\nops_hash = \"{hash}\"\n\n");
+        [DOC_HEAD, &export, OP_SET_FIELD, OP_ADD_SEQUENCE].concat()
+    };
+    let real = EditDoc::from_text(&mixed("0")).unwrap().ops_hash();
+    let d = EditDoc::from_text(&mixed(&real)).unwrap();
+    assert_eq!(d.dropped_clip_ops, 1);
+    assert!(!d.pending(), "the hash of the kept ops matches");
+    assert!(EditDoc::from_text(&mixed("0123")).unwrap().pending());
+    // a clip-only document exported before the drop: its exported hash was of ops that are gone
+    let mut gone = EditDoc::from_text(&clip_only_text()).unwrap();
+    assert!(gone.pending());
+    gone.export.ops_hash = Some(EditDoc::new(gone.source.clone()).ops_hash());
+    assert!(
+        !gone.pending(),
+        "an empty op list with its own hash is not pending"
+    );
+}
+
+/// Final review Minor 5: a bad field reports its line, with or without clip ops in the document.
+#[test]
+fn a_bad_field_in_a_document_reports_its_line() {
+    let bad = OP_SET_FIELD.replace("Conflict", "Bogus");
+    let e = EditDoc::from_text(&[DOC_HEAD, &bad].concat()).unwrap_err();
+    assert!(e.contains("line") && e.contains("Bogus"), "{e}");
+    let e = EditDoc::from_text(&[DOC_HEAD, OP_ADD_SEQUENCE, &bad].concat()).unwrap_err();
+    assert!(
+        e.contains("line") && e.contains("Bogus"),
+        "with clip ops: {e}"
+    );
+}
+
+/// Final review I1: a clip key edit whose `AddSequence` (or Convert) was dropped names a clip that is no longer
+/// there. It is never applied and never panics: the row is red (Conflict or Refused), the bytes are the source's, and
+/// Revert clears it.
+#[test]
+fn a_clip_key_edit_that_depended_on_a_dropped_clip_op_does_not_apply() {
+    let bytes = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
+    let open = |edit_mod: Option<&Path>| {
+        NifEdit::open(
+            bytes.clone(),
+            copy("A", 1, false),
+            "meshes/x.nif",
+            edit_mod,
+            None,
+        )
+        .unwrap()
+    };
+    let probe = open(None);
+    let (shape, _) = lit_shape(&probe);
+    let role = Role::Ctrl {
+        owner: nif::edit::Owner::Shader,
+        class: "BSLightingShaderPropertyFloatController".into(),
+        var: Some(20),
+        nth: 0,
+    };
+    let at = nif::edit::anchor_role(&probe.model, Some(shape), role).unwrap();
+    let key = |time: f32, value: f32| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    let group = |v: f32| {
+        KeyData::Float(KeyGroup {
+            key_type: Some(1),
+            keys: vec![key(0.0, 0.0), key(1.0, v)],
+        })
+    };
+    // a block past the end of the file (the appended sequence), and one inside it that is no sequence
+    let blocks = nif::header::Header::parse(&bytes).unwrap().offsets().len() as u32;
+    for clip in [blocks + 3, 1] {
+        let mut d = EditDoc::new(probe.doc.source.clone());
+        d.ops.push(DocOp {
+            op: Op::SetKeys {
+                at: at.clone(),
+                clip: Some(clip),
+                clip_name: Some("SpecialIdle".into()),
+                keys: group(2.0),
+                base: group(1.0),
+            },
+            status: OpStatus::Applied,
+        });
+        let text = d
+            .to_text()
+            .replacen("[[ops]]", &format!("{OP_ADD_SEQUENCE}[[ops]]"), 1);
+        let dir = tempfile::tempdir().unwrap();
+        let p = doc_path(dir.path(), "meshes/x.nif").unwrap();
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, text).unwrap();
+        let mut e = open(Some(dir.path()));
+        assert_eq!(e.open_lines.len(), 1, "{:?}", e.open_lines);
+        assert_eq!(e.doc.ops.len(), 1);
+        assert!(
+            matches!(
+                e.outcomes[0],
+                nif::edit::Outcome::Conflict(_) | nif::edit::Outcome::Refused(_)
+            ),
+            "clip {clip}: {:?}",
+            e.outcomes
+        );
+        assert_eq!(*e.patched, *e.source, "clip {clip}: nothing was applied");
+        assert!(e.export_block().is_some(), "the red row blocks the export");
+        e.revert(0);
+        assert!(
+            e.outcomes.is_empty() && !e.doc.has_conflicts(),
+            "Revert clears it"
+        );
+    }
+}
+
+/// Final review I3: an export-folder change reaches Messages with the drop line when the new folder's document opens
+/// in place of an untouched session. A touched session keeps its own document (nothing is loaded into it), and the
+/// folder's document, clip ops and all, is kept aside whole at the next save.
+#[test]
+fn a_folder_change_says_what_it_dropped_and_keeps_the_other_document_whole() {
+    let doc_in = |out: &Path| {
+        let p = nif_doc(out);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(&p, clip_only_text()).unwrap();
+        p
+    };
+    // untouched: the same NIF reopens from the new folder
+    let (d, mut m) = export_session();
+    m.open_edit();
+    let out = d.path().join("mods").join("MyOut");
+    doc_in(&out);
+    m.messages.clear();
+    m.set_nif_export_root(Some(out));
+    assert_eq!(m.messages, vec![CLIP_ONLY_LINE.to_string()]);
+    assert_eq!(m.edit.as_ref().unwrap().doc.ops.len(), 0);
+    // touched: its edit moves; the destination's document is not loaded, so nothing is dropped
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let out = d.path().join("mods").join("MyOut");
+    let p = doc_in(&out);
+    m.messages.clear();
+    m.set_nif_export_root(Some(out));
+    assert!(
+        m.messages.iter().all(|l| !l.contains("dropped")),
+        "{:?}",
+        m.messages
+    );
+    gloss(&mut m, 13.5);
+    let aside: Vec<_> = std::fs::read_dir(p.parent().unwrap())
+        .unwrap()
+        .flatten()
+        .map(|f| f.path())
+        .filter(|f| *f != p)
+        .collect();
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    let kept = std::fs::read_to_string(&aside[0]).unwrap();
+    assert!(kept.contains("AddSequence") && kept.contains("RenameSequence"));
+}
+
+/// Spec decision 4: a document of only clip ops, exported before the drop, opens pending; Review lists it, nothing
+/// says "No edits to export.", and its export writes the unedited NIF over the old export.
+#[test]
+fn the_next_export_of_a_clip_only_document_writes_the_nif_without_them() {
+    let (d, mut m) = export_session();
+    let out = d.path().join("mods").join(EDIT_MOD);
+    let old = b"exported with clip edits";
+    let target = exported(&d);
+    std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+    std::fs::write(&target, old).unwrap();
+    let text = [
+        DOC_HEAD,
+        &format!(
+            "[export]\nsha256 = \"{}\"\nops_hash = \"0123\"\n\n",
+            sha256_hex(old)
+        ),
+        OP_ADD_SEQUENCE,
+        OP_RENAME_SEQUENCE,
+    ]
+    .concat();
+    let p = nif_doc(&out);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, text).unwrap();
+    m.open_edit();
+    assert_eq!(m.error, None);
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(e.doc.ops.len(), 0);
+    assert!(e.pending());
+    assert_eq!(
+        e.blocked, None,
+        "the footer is Ready, not No edits to export"
+    );
+    let rows = m.nif_review_rows();
+    assert_eq!(rows.len(), 1, "Review lists it: {rows:?}");
+    assert_eq!(rows[0].blocked, None, "and Export is not off for it");
+    assert_eq!(export(&mut m), Ok(1));
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        std::fs::read(&target).unwrap(),
+        *e.source,
+        "the unedited NIF"
+    );
+    assert!(!e.doc.pending());
 }
 
 #[test]
@@ -571,7 +872,6 @@ fn bad_documents_are_refused() {
 
 mod support;
 use modscan::store::PathCopy;
-use render3d::locate::Fingerprint;
 use sdc_gui::model::meshes::nif_edit::*;
 use sdc_gui::model::meshes::MeshesModel;
 use sdc_gui::model::viewport3d::{Content, V3Cmd};
@@ -864,7 +1164,7 @@ fn scan_and_select(m: &mut MeshesModel, root: &Path) {
     m.start();
     let t = Instant::now();
     m.poll();
-    while m.scanning() || m.v3.locating() {
+    while m.scanning() {
         assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
         std::thread::sleep(Duration::from_millis(10));
         m.poll();
@@ -886,13 +1186,8 @@ fn session(le: bool) -> (tempfile::TempDir, MeshesModel) {
     (d, m)
 }
 
-/// Confirms shaders and stands in for the render thread.
-fn attach(m: &mut MeshesModel, root: &Path) -> Receiver<V3Cmd> {
-    m.v3.on_located(Ok(Some(Fingerprint {
-        root: root.join("CS"),
-        owner_mod: None,
-        hash: "h".into(),
-    })));
+/// Stands in for the render thread.
+fn attach(m: &mut MeshesModel) -> Receiver<V3Cmd> {
     m.v3.attach_test_thread()
 }
 
@@ -940,8 +1235,8 @@ fn open_edit_loads_the_source_and_previews_parsed() {
 
 #[test]
 fn glossiness_edit_reaches_the_viewport_without_a_reload() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     assert_eq!(loads(&cmds).len(), 1, "the first LoadParsed");
@@ -981,8 +1276,8 @@ fn glossiness_edit_reaches_the_viewport_without_a_reload() {
 
 #[test]
 fn new_texture_path_reloads_the_same_view() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     let first = loads(&cmds);
@@ -1019,8 +1314,8 @@ fn new_texture_path_reloads_the_same_view() {
 /// Note GP9: a drag tick on a float field names no texture, so it queries no store.
 #[test]
 fn a_float_edit_makes_no_store_query() {
-    let (d, mut m) = session(false);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(false);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     assert_eq!(loads(&cmds).len(), 1, "the first LoadParsed");
@@ -1133,8 +1428,8 @@ fn a_failed_texture_lookup_is_retried_on_the_next_change() {
 
 #[test]
 fn le_file_opens_without_preview() {
-    let (d, mut m) = session(true);
-    let cmds = attach(&mut m, d.path());
+    let (_d, mut m) = session(true);
+    let cmds = attach(&mut m);
     m.open_edit();
     m.v3.request_frame(64, 64);
     let e = m.edit.as_ref().expect("an LE NIF opens read-only");
@@ -2343,7 +2638,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
         frame3d.width() > 100.0 && frame3d.height() > 100.0,
         "{frame3d:?}"
     );
-    let folder = h.get_by_label("Shader folder…").rect();
+    let folder = h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).rect();
     assert!(
         folder.max.x <= edit.min.x,
         "3D toolbar pushed under the panel"
@@ -2494,25 +2789,7 @@ fn tab(h: &mut Harness<'static, MeshesModel>, name: &str) {
     h.run_steps(3);
 }
 
-/// Meshes UI T4: opens the Controllers tab's "Clips (…)" section (closed by default) unless it is open.
-fn open_clips(h: &mut Harness<'static, MeshesModel>) {
-    if h.query_by_label("New clip name").is_some() {
-        return;
-    }
-    if h.query_by_label_contains("Clips (").is_none() {
-        return;
-    }
-    // The section ends the tab, often below the fold: scroll it into view before the click.
-    h.get_by_label_contains("Clips (").scroll_to_me();
-    h.run_steps(12);
-    h.get_by_label_contains("Clips (").click();
-    h.run_steps(3);
-}
-
 fn edit_number(h: &mut Harness<'static, MeshesModel>, label: &str, text: &str) {
-    if h.query_by_label(label).is_none() {
-        open_clips(h); // Meshes UI T4: the New clip fields sit in the closed Clips section
-    }
     h.get_by_label(label).focus();
     h.run_steps(2);
     h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
@@ -2571,7 +2848,7 @@ fn controller_rows_show_variable_cycle_and_edit_frequency() {
     assert_eq!(e.model.interps[&5].value, vec![0.75], "{:?}", e.outcomes);
 }
 
-/// The managed-clip scene in a direct session with its shape selected, on the Controllers tab (Clips closed).
+/// The managed-clip scene in a direct session with its shape selected, on the Controllers tab.
 fn clip_view() -> Harness<'static, MeshesModel> {
     let mut m = direct(scenes::managed_clip());
     let b = m.edit.as_ref().unwrap().model.shapes[0].block;
@@ -2583,64 +2860,64 @@ fn clip_view() -> Harness<'static, MeshesModel> {
     h
 }
 
-/// Meshes UI T4: Preview stays at the top; one closed "Clips (N · showing X)" section at the end holds Rename,
-/// Remove, Convert to clips and New clip; a managed controller names its clip in one weak line.
+/// Note GR1: the Clips section holds only the Preview picker; no clip editing control is offered, the picker lists
+/// both clips, and a managed controller's "In clip" key table still edits that clip.
 #[test]
-fn clip_controls_sit_in_one_closed_section_under_the_chains() {
+fn the_clips_section_has_no_editing_controls() {
     let mut h = clip_view();
-    let preview = h
-        .get_by_role_and_label(AkRole::ComboBox, "Preview animation")
-        .rect();
-    let shader = h.get_by_label("Shader property").rect();
-    assert!(preview.max.y <= shader.min.y, "Preview on top");
-    let header = h.get_by_label("Clips (2 · showing free chains)").rect();
-    assert!(
-        header.min.y > shader.max.y,
-        "the section is after the chains"
-    );
+    // The section is open by default: its picker is on screen, so the absences below are not just a closed section.
+    h.get_by_label("Clips (2 · showing free chains)");
+    h.get_by_role_and_label(AkRole::ComboBox, "Preview animation");
     for l in [
+        "Add clip",
+        "Remove clip",
+        "Convert to clips",
+        "Convert shader controllers to clips",
         "Clip name",
         "New clip name",
-        "Convert shader controllers to clips",
+        "Clip cycle",
+        "Clip frequency",
+        "Clip start",
+        "Clip stop",
     ] {
-        assert!(
-            h.query_by_label(l).is_none(),
-            "{l} is inside the closed section"
-        );
+        assert!(h.query_by_label(l).is_none(), "{l} is offered");
     }
-    h.get_by_label_contains("In clip A · ");
-    h.get_by_label("Clips (2 · showing free chains)").click();
+    assert!(h.query_by_label_contains("Remove clip").is_none());
+    assert!(h.query_by_label_contains("Add clip").is_none());
+    h.get_by_role_and_label(AkRole::ComboBox, "Preview animation")
+        .click();
     h.run_steps(3);
-    // T4 review Minor 6: the order inside the section, and the Convert row's label.
-    let y = |h: &Harness<'static, MeshesModel>, l: &str| h.get_by_label(l).rect().min.y;
-    let (rename, convert, new) = (
-        y(&h, "Clip name"),
-        y(&h, "Convert to clips: shader property"),
-        y(&h, "New clip name"),
-    );
+    h.get_by_role_and_label(AkRole::Button, "Free chains");
+    let names = {
+        let e = h.state().edit.as_ref().unwrap();
+        e.model
+            .sequences
+            .iter()
+            .map(|s| s.name.clone().unwrap())
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names.len(), 2);
+    for n in &names {
+        h.get_by_role_and_label(AkRole::Button, n);
+    }
+    // Pick the first clip: its key table edits that clip.
+    h.get_by_role_and_label(AkRole::Button, &names[0]).click();
+    h.run_steps(3);
+    let seq = h.state().edit.as_ref().unwrap().model.sequences[0].block;
+    assert_eq!(h.state().edit.as_ref().unwrap().playing, Playing::Clip(seq));
+    assert!(h.query_all_by_label_contains("In clip ").count() >= 1);
+    let add = format!("Add key to Emissive multiple in {}", names[0]);
+    reveal(&mut h, &add);
+    h.get_by_label(&add).click();
+    h.run_steps(3);
+    let last = ops(h.state()).pop();
     assert!(
-        rename < convert && convert < new,
-        "{rename} {convert} {new}"
+        matches!(last, Some(Op::SetKeys { clip: Some(s), .. }) if s == seq),
+        "{last:?}"
     );
-    h.get_by_label("Convert shader controllers to clips");
 }
 
-/// T4 review Minor 1: a refusal left from an earlier file state does not open the section.
-#[test]
-fn a_stale_clip_refusal_does_not_open_the_clips_section() {
-    let mut h = clip_view();
-    let id = egui::Id::new("meshes-edit-clip").with("refused");
-    // Revision 0 is never a state's (`next_key` starts at 1).
-    h.ctx
-        .data_mut(|d| d.insert_temp(id, ("0|None".to_string(), "old".to_string())));
-    h.run_steps(3);
-    assert!(
-        h.query_by_label("Clip name").is_none(),
-        "opened on a stale refusal"
-    );
-}
-
-/// T4 review Minor 2: on a shape with no shader and no alpha the Clips section (Rename, Remove) is still there.
+/// T4 review Minor 2: on a shape with no shader and no alpha the Clips section (the Preview picker) is still there.
 #[test]
 fn the_clips_section_shows_on_a_shape_without_properties() {
     let mut m = direct(scenes::managed_clip_and_bare_shape());
@@ -2650,36 +2927,8 @@ fn the_clips_section_shows_on_a_shape_without_properties() {
     h.get_by_label("Controllers tab").click();
     h.run_steps(3);
     h.get_by_label("This shape has no shader or alpha property.");
-    h.get_by_label("Clips (2 · showing free chains)").click();
-    h.run_steps(3);
-    h.get_by_label("Clip name");
-}
-
-/// Meshes UI T4: a clip refusal stored while the section is closed opens it, so the red line is seen. The refusal is
-/// stored as the Rename row stores it (its id, and inputs = state revision | picked clip).
-#[test]
-fn a_clip_refusal_opens_the_clips_section() {
-    let mut h = clip_view();
-    let (rev, a) = {
-        let e = h.state().edit.as_ref().unwrap();
-        (e.rev, e.model.sequences[0].block)
-    };
-    h.state_mut().edit_with(|e| e.set_playing(Playing::Clip(a)));
-    h.run_steps(3);
-    let rev = h.state().edit.as_ref().unwrap().rev.max(rev);
-    assert!(h.query_by_label("Clip name").is_none(), "closed");
-    let id = egui::Id::new("meshes-edit-clip").with("refused");
-    let inputs = format!("{rev}|{:?}", Some(a));
-    h.ctx
-        .data_mut(|d| d.insert_temp(id, (inputs, "Type a name for the clip.".to_string())));
-    h.run_steps(3);
-    h.get_by_label("Clip name");
-    h.get_by_label("Type a name for the clip.");
-    // Closed by hand, it stays closed while that refusal stands.
-    // T4 review Minor 6: the title names the clip the Preview shows.
-    h.get_by_label("Clips (2 · showing A)").click();
-    h.run_steps(3);
-    assert!(h.query_by_label("Clip name").is_none());
+    h.get_by_label("Clips (2 · showing free chains)");
+    h.get_by_role_and_label(AkRole::ComboBox, "Preview animation");
 }
 
 /// R8 lifted (v2 B7, E9: replaces `managed_variable_combo_is_disabled`): the Variable combo of a managed controller
@@ -4011,6 +4260,144 @@ fn a_path_typed_without_enter_is_committed_by_the_review_click() {
     assert!(!e.doc.pending(), "the export includes the typed edit");
 }
 
+/// Types `path` into slot 1 of the open edit, without Enter: the field keeps the focus.
+fn type_path(h: &mut Harness<'static, MeshesModel>, path: &str) {
+    let field = "Diffuse path (slot 1)";
+    h.get_by_role_and_label(AkRole::TextInput, field).focus();
+    h.run_steps(1);
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run_steps(1);
+    h.get_by_role_and_label(AkRole::TextInput, field)
+        .type_text(path);
+    h.run_steps(1);
+    assert!(
+        !ops(h.state())
+            .iter()
+            .any(|o| matches!(o, Op::SetTexturePath { path: p, .. } if p == path)),
+        "the path is not committed before the click"
+    );
+}
+
+fn has_path(m: &MeshesModel, path: &str) -> bool {
+    ops(m)
+        .iter()
+        .any(|o| matches!(o, Op::SetTexturePath { path: p, .. } if p == path))
+}
+
+/// Note HS15: a tab click ends the typing too; the old tab is drawn once more, so its field commits.
+#[test]
+fn a_path_typed_without_enter_survives_a_tab_click() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let (shape, _) = lit_shape(m.edit.as_ref().unwrap());
+    m.select_edit(Selection::Shape(shape));
+    gloss(&mut m, 12.5);
+    let mut h = view(m);
+    h.run_steps(3);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get_by_label("Alpha tab").click();
+    h.run_steps(4);
+    assert!(
+        has_path(h.state(), "textures\\typed.dds"),
+        "{:?}",
+        ops(h.state())
+    );
+}
+
+/// Note HS15: a later control's click (here a flag's Fix) keeps the typed path as well as its own edit.
+#[test]
+fn a_path_typed_without_enter_survives_a_click_on_a_later_control() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let (shape, shader) = lit_shape(m.edit.as_ref().unwrap());
+    m.select_edit(Selection::Shape(shape));
+    gloss(&mut m, 12.5);
+    let e = m.edit.as_ref().unwrap();
+    let lt = &e.model.lighting[&shader].lighting;
+    assert_ne!(
+        lt.shader_type, 5,
+        "precondition: bit 21 is an error off Skin Tint"
+    );
+    let f1 = lt.slsf1;
+    assert_eq!(f1 & (1 << 21), 0, "precondition: the skin tint flag is off");
+    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
+    m.edit_push(
+        vec![Op::SetBits {
+            at,
+            field: Field::Slsf1,
+            mask: 1 << 21,
+            value: 1 << 21,
+            base: f1,
+        }],
+        None,
+    );
+    let mut h = view(m);
+    h.run_steps(3);
+    let clear = format!("Clear the flag: {SKIN_TINT} (SLSF1 flags)");
+    h.get_by_role_and_label(AkRole::Button, &clear)
+        .scroll_to_me();
+    h.run_steps(3);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get_by_role_and_label(AkRole::Button, &clear).click();
+    h.run_steps(4);
+    let m = h.state();
+    assert!(has_path(m, "textures\\typed.dds"), "{:?}", ops(m));
+    assert!(
+        ops(m).iter().any(|o| matches!(
+            o,
+            Op::SetBits { field: Field::Slsf1, mask, value: 0, .. } if *mask & (1 << 21) != 0
+        )),
+        "the flag's Fix is kept too: {:?}",
+        ops(m)
+    );
+}
+
+/// Note HS15 (pin: it passed before the fix too, and fails if the `same_slot` drop is removed): the same slot's Fix
+/// clicked while a path is typed is dropped (the typed path wins), never a Conflict.
+#[test]
+fn a_same_slot_fix_while_a_path_is_typed_is_dropped() {
+    let mut m = direct(scenes::shared_alpha_and_set());
+    let a = select(&mut m, "A");
+    let e = m.edit.as_ref().unwrap();
+    let set = e.model.lighting[&e.model.shape(a).unwrap().shader.unwrap()]
+        .texture_set
+        .unwrap();
+    let base = String::from_utf8_lossy(&e.model.texsets[&set].raw.slots[0]).into_owned();
+    let at = nif::edit::anchor_shape(&e.model, a);
+    m.edit_push(
+        vec![Op::SetTexturePath {
+            at,
+            slot: 0,
+            path: r"C:\Game\Data\textures\a.dds".into(),
+            base,
+        }],
+        None,
+    );
+    let mut h = view(m);
+    h.run_steps(2);
+    type_path(&mut h, "textures\\typed.dds");
+    h.get(
+        egui_kittest::kittest::By::new()
+            .role(AkRole::Button)
+            .label_contains("Fix slot 1: "),
+    )
+    .click();
+    h.run_steps(4);
+    let m = h.state();
+    assert!(has_path(m, "textures\\typed.dds"), "{:?}", ops(m));
+    let slot0 = ops(m)
+        .iter()
+        .filter(|o| matches!(o, Op::SetTexturePath { slot: 0, .. }))
+        .count();
+    assert_eq!(
+        slot0,
+        2,
+        "the setup edit and the typed path only: {:?}",
+        ops(m)
+    );
+    assert!(!m.edit.as_ref().unwrap().doc.has_conflicts());
+}
+
 // ---- v2 A20: the shared Undo / Redo act on the NIF history while an edit is open in the Meshes view ----
 
 /// One app-data redirect for every `SdcApp` test of this binary (as meshes_header.rs): the variables are process-wide,
@@ -4891,6 +5278,47 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     assert_eq!(std::fs::read(nif_doc(&old)).unwrap(), before);
 }
 
+/// Note HS12: a touched edit never takes as its export folder the folder holding its source copy (an export there
+/// would replace the source); the row is blocked as GD12's, in any spelling of that folder.
+#[test]
+fn an_export_folder_holding_the_source_copy_is_not_taken() {
+    let (d, mut m) = export_session();
+    m.set_nif_export_root(None);
+    m.open_edit();
+    let src = d.path().join(r"mods\A");
+    assert_eq!(
+        m.edit.as_ref().unwrap().source_copy.origin,
+        "A",
+        "precondition: the source is A's copy"
+    );
+    let before = std::fs::read(src.join(r"meshes\x.nif")).unwrap();
+    gloss(&mut m, 12.5);
+    // Review Focus 5: the same folder in another case and with a trailing separator
+    let other = std::path::PathBuf::from(format!("{}\\", d.path().join(r"MODS\a").display()));
+    for root in [src.clone(), other] {
+        m.set_nif_export_root(Some(root.clone()));
+        assert_eq!(m.nif_export_root, None, "{} is not taken", root.display());
+        let e = m.edit.as_ref().unwrap();
+        assert_ne!(e.export_path, src.join(r"meshes\x.nif"));
+        let why = review_row(&m).blocked.expect("the row is blocked");
+        assert!(why.contains(&root.display().to_string()), "{why}");
+        assert!(why.contains("holds the mesh"), "{why}");
+        export_fails(&mut m, "holds the mesh");
+    }
+    assert_eq!(std::fs::read(src.join(r"meshes\x.nif")).unwrap(), before);
+    assert!(!nif_doc(&src).exists());
+    gloss(&mut m, 13.5);
+    assert_eq!(
+        load(&autosave(&d)).unwrap().unwrap().ops.len(),
+        2,
+        "the work is kept in the autosave meanwhile"
+    );
+    let good = d.path().join(r"mods\Good");
+    m.set_nif_export_root(Some(good.clone()));
+    assert_eq!(m.nif_export_root.as_deref(), Some(good.as_path()));
+    assert_eq!(review_row(&m).blocked, None);
+}
+
 /// Note GD20: a failed folder change reads the new folder's document once, not each frame; a change to the file (its
 /// length or time) reads it again.
 #[test]
@@ -5202,7 +5630,7 @@ fn session_on(nif: &[u8]) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>) {
     let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
     m.procs = sdc_gui::model::meshes::no_procs;
     scan_and_select(&mut m, d.path());
-    let cmds = attach(&mut m, d.path());
+    let cmds = attach(&mut m);
     m.open_edit();
     assert_eq!(m.error, None);
     m.tick_anim(0.0); // makes the clock
@@ -6404,17 +6832,18 @@ fn with_clip(bytes: &[u8]) -> (Vec<u8>, u32) {
             })
             .into(),
     });
-    with_clip_at(bytes, true, 0.0, Some(keys), [1.0, 0.0, 1.0])
+    with_clip_at(bytes, true, 0.0, Some(keys), [1.0, 0.0, 1.0], 0)
 }
 
 /// [`with_clip`] with the CB bound by ref or (ref -1) by strings only, the CB interpolator's value, its keys (None:
-/// data -1, the empty group) and the sequence's (frequency, start, stop).
+/// data -1, the empty group), the sequence's (frequency, start, stop) and its cycle type (0 Loop, 1 Reverse).
 fn with_clip_at(
     bytes: &[u8],
     by_ref: bool,
     value: f32,
     keys: Option<KeyData>,
     timing: [f32; 3],
+    cycle: u32,
 ) -> (Vec<u8>, u32) {
     let m = nif::model::read_model(bytes).unwrap();
     let (shape, lsp) = m
@@ -6492,7 +6921,7 @@ fn with_clip_at(
         .i32(-1)
         .f(1.0)
         .i32(tk as i32)
-        .u32(0)
+        .u32(cycle)
         .fs(&timing)
         .i32(-1)
         .i32(-1)
@@ -6605,24 +7034,134 @@ fn clip_preview_swaps_interpolators_only_while_selected() {
 const IDLE_FIRST: [f32; 3] = [0.9, 0.3, 0.1];
 const IDLE_LAST: [f32; 3] = [0.1, 0.2, 0.3];
 
-/// [`playing_session`] with an LSCC (key 1 `IDLE_FIRST`, key 2 `IDLE_LAST`, 0..1) added to the lit shape, then the
-/// shader chain (U offset and the LSCC) converted into one clip `name`. Returns the session, the shape and the
-/// sequence block.
-fn idle_session(name: &str) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>, u32, u32) {
-    let (d, mut m, cmds) = playing_session();
-    let (shape, lsp) = lit_shape(m.edit.as_ref().unwrap());
-    add_colour_ctrl(&mut m, shape, IDLE_FIRST, IDLE_LAST);
-    let e = m.edit.as_ref().unwrap();
-    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
-    m.edit_push(
-        vec![Op::ConvertChainToClips {
-            at,
-            name: name.into(),
-        }],
-        None,
+/// The skinned fixture with, first in the lit shape's chain, a manager-controlled LSCC "Emissive colour" (var 1, flags
+/// 0x68, a NiBlendPoint3Interpolator) driven by a NiControllerSequence `name` (one CB bound by ref, NiPosData LINEAR
+/// `IDLE_FIRST` at 0 and `IDLE_LAST` at 1; Loop, frequency 1, 0 to 1) that a NiControllerManager on the root lists.
+fn with_idle_clip(name: impl AsRef<[u8]>) -> Vec<u8> {
+    let bytes = fixture("TestNifFile_Skinned_SE.nif");
+    let m = nif::model::read_model(&bytes).unwrap();
+    let (shape, lsp) = m
+        .shapes
+        .iter()
+        .find_map(|s| {
+            s.shader
+                .filter(|b| m.lighting.contains_key(b))
+                .map(|b| (s, b))
+        })
+        .unwrap();
+    let net = m.lighting[&lsp].prop.net.clone();
+    let root = m.root.unwrap();
+    let root_net = m.root_net.clone().unwrap();
+    let mut doc = nif::write::NifDoc::open(&bytes).unwrap();
+    let at = net.controller_at() - doc.header().offsets()[lsp as usize];
+    let inv = f32::from_bits(0xFF7F_FFFF);
+    let blend = doc
+        .append(
+            b"NiBlendPoint3Interpolator",
+            nif::clips::encode_blend_interp("NiBlendPoint3Interpolator", &[inv; 3]).unwrap(),
+        )
+        .unwrap();
+    let ctrl = doc
+        .append(
+            b"BSLightingShaderPropertyColorController",
+            scenes::ctrl_body(
+                net.controller,
+                0x68,
+                lsp as i32,
+                builder::W::default().i32(blend as i32).u32(1),
+            ),
+        )
+        .unwrap();
+    doc.patch(lsp, at, &(ctrl as i32).to_le_bytes()).unwrap();
+    let key = |time: f32, value: [f32; 3]| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    let keys = KeyData::Pos(KeyGroup {
+        key_type: Some(1),
+        keys: vec![key(0.0, IDLE_FIRST), key(1.0, IDLE_LAST)],
+    });
+    let data = doc
+        .append(b"NiPosData", nif::keys::encode_data(&keys))
+        .unwrap();
+    let interp = doc
+        .append(
+            b"NiPoint3Interpolator",
+            builder::W::default().fs(&IDLE_FIRST).i32(data as i32).0,
+        )
+        .unwrap();
+    let s = |doc: &mut nif::write::NifDoc, x: &[u8]| doc.string(x).unwrap();
+    let (start, end) = (s(&mut doc, b"start"), s(&mut doc, b"end"));
+    let tk = doc
+        .append(
+            b"NiTextKeyExtraData",
+            builder::W::default()
+                .i32(-1)
+                .u32(2)
+                .f(0.0)
+                .i32(start)
+                .f(1.0)
+                .i32(end)
+                .0,
+        )
+        .unwrap();
+    let (name, prop, ctype, cid) = (
+        s(&mut doc, name.as_ref()),
+        s(&mut doc, b"BSLightingShaderProperty"),
+        s(&mut doc, b"BSLightingShaderPropertyColorController"),
+        s(&mut doc, b"1"),
     );
+    let seq = builder::W::default()
+        .i32(name)
+        .u32(1)
+        .u32(0)
+        .i32(interp as i32)
+        .i32(ctrl as i32)
+        .u8(0)
+        .i32(shape.net.name)
+        .i32(prop)
+        .i32(ctype)
+        .i32(cid)
+        .i32(-1)
+        .f(1.0)
+        .i32(tk as i32)
+        .u32(0)
+        .fs(&[1.0, 0.0, 1.0])
+        .i32(-1)
+        .i32(-1)
+        .u16(0)
+        .0;
+    let seq = doc.append(b"NiControllerSequence", seq).unwrap();
+    let manager = doc
+        .append(
+            b"NiControllerManager",
+            scenes::ctrl_body(
+                root_net.controller,
+                0x48,
+                root as i32,
+                builder::W::default().u8(0).u32(1).i32(seq as i32).i32(-1),
+            ),
+        )
+        .unwrap();
+    let at = root_net.controller_at() - doc.header().offsets()[root as usize];
+    doc.patch(root, at, &(manager as i32).to_le_bytes())
+        .unwrap();
+    let out = doc.bytes();
+    let back = nif::model::read_model(&out).unwrap();
+    assert!(back.problems.is_empty(), "{:?}", back.problems);
+    assert!(back.managed(ctrl));
+    assert_eq!(back.sequences.len(), 1);
+    out
+}
+
+/// [`with_idle_clip`] `name` in a scanned session. Returns the session, the shape and the sequence block.
+fn idle_session(name: &str) -> (tempfile::TempDir, MeshesModel, Receiver<V3Cmd>, u32, u32) {
+    let (d, m, cmds) = session_on(&with_idle_clip(name));
     let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
+    let (shape, lsp) = lit_shape(e);
     assert_eq!(e.playing, Playing::Free);
     assert_ne!(
         e.model.lighting[&lsp].lighting.params.emissive_color,
@@ -6671,7 +7210,7 @@ fn an_idle_clip_previews_its_first_key() {
 /// spans it.
 #[test]
 fn a_special_idle_clip_plays_under_free_chains() {
-    let (_d, mut m, _cmds, shape, _) = idle_session(nif::edit::CONVERT_NAME);
+    let (_d, mut m, _cmds, shape, _) = idle_session(nif::anim::CONVERT_NAME);
     assert_eq!(emissive_at(&m, shape, 0.0), IDLE_FIRST);
     assert_eq!(emissive_at(&m, shape, 1.0), IDLE_LAST);
     let mid = emissive_at(&m, shape, 0.5);
@@ -6712,7 +7251,7 @@ fn losing_the_selected_clip_returns_to_the_free_chains() {
 #[test]
 fn add_key_on_a_string_bound_empty_clip_starts_at_its_interpolator_value() {
     let plain = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
-    let (nif, seq) = with_clip_at(&plain, false, 5.0, None, [1.0, 0.0, 1.0]);
+    let (nif, seq) = with_clip_at(&plain, false, 5.0, None, [1.0, 0.0, 1.0], 0);
     let mut m = direct(nif);
     m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
     let e = m.edit.as_ref().unwrap();
@@ -6828,7 +7367,7 @@ fn picking_a_clip_sets_the_clock_range_to_its_timing() {
         key_type: Some(1),
         keys: vec![key(0.0, 0.0), key(3.0, 3.0)],
     });
-    let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [1.0, 0.0, 3.0]);
+    let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [1.0, 0.0, 3.0], 0);
     let (_d, mut m, _cmds) = session_on(&nif);
     assert_eq!(m.v3.clock.unwrap().range, (0.0, 1.0), "Free");
     m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
@@ -6837,6 +7376,64 @@ fn picking_a_clip_sets_the_clock_range_to_its_timing() {
     m.edit_with(|e| e.set_playing(Playing::Free));
     m.tick_anim(0.0);
     assert_eq!(m.v3.clock.unwrap().range, (0.0, 1.0), "Free again");
+}
+
+/// Kept by Note GR1 (it was `clip_timing_moves_the_time_slider`): the Time slider spans a picked clip's
+/// `(stop - start) / |frequency|`, and a Reverse clip counts both legs.
+#[test]
+fn a_clips_cycle_and_frequency_set_the_time_slider_span() {
+    let plain = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
+    let key = |time: f32, value: f32| Key {
+        time,
+        value,
+        forward: None,
+        backward: None,
+        tbc: None,
+    };
+    for (cycle, span) in [(0, 0.75), (1, 1.5)] {
+        let keys = KeyData::Float(KeyGroup {
+            key_type: Some(1),
+            keys: vec![key(0.0, 0.0), key(3.0, 3.0)],
+        });
+        let (nif, seq) = with_clip_at(&plain, true, 0.0, Some(keys), [4.0, 0.0, 3.0], cycle);
+        let (_d, mut m, _cmds) = session_on(&nif);
+        m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
+        assert_eq!(
+            m.edit.as_ref().unwrap().anim_range(),
+            Some((0.0, span)),
+            "cycle {cycle}"
+        );
+        m.tick_anim(0.0);
+        assert_eq!(m.v3.clock.unwrap().range, (0.0, span), "cycle {cycle}");
+    }
+}
+
+/// Kept by Note CU1 and GR1 (it was `preview_never_switches_clips_after_a_revert`, `preview_tells_non_ascii_clip_names_apart`):
+/// the picked clip stays picked only while a sequence at its block keeps its name; a source reload that puts another
+/// name there returns the Preview to Free chains. Names are Windows-1252 bytes, so "Café" and "Cafè" differ.
+#[test]
+fn a_picked_clip_stays_picked_only_while_its_block_keeps_its_name() {
+    for (a, b) in [
+        (&b"Glow"[..], &b"Dim"[..]),
+        (&b"Caf\xe9"[..], &b"Caf\xe8"[..]),
+    ] {
+        let (_d, mut m, _cmds) = session_on(&with_idle_clip(a));
+        let seq = m.edit.as_ref().unwrap().model.sequences[0].block;
+        m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
+        m.edit_with(|e| e.reload_source(with_idle_clip(a)).unwrap());
+        assert_eq!(
+            m.edit.as_ref().unwrap().playing,
+            Playing::Clip(seq),
+            "same name"
+        );
+        m.edit_with(|e| e.reload_source(with_idle_clip(b)).unwrap());
+        let e = m.edit.as_ref().unwrap();
+        assert_eq!(
+            e.model.sequences[0].block, seq,
+            "the other name is on the same block"
+        );
+        assert_eq!(e.playing, Playing::Free, "{a:?} then {b:?}");
+    }
 }
 
 // ---- v2 B8: In game (simulated) through pgpsim ----
@@ -8279,8 +8876,6 @@ fn add_key_is_off_when_no_later_time_exists() {
 
 // ---- v2 C5: clips in the Controllers tab ----
 
-const CONVERT_SHADER: &str = "Convert shader controllers to clips";
-
 /// `animated(Some(1), 2)` with "S" selected: free LSCF var 11 "Emissive multiple" (4) and var 20 "U offset" (5).
 fn clip_scene() -> MeshesModel {
     let mut m = direct(scenes::animated(Some(1), 2));
@@ -8288,46 +8883,8 @@ fn clip_scene() -> MeshesModel {
     m
 }
 
-/// Converts S's shader chain into the clip "SpecialIdle"; returns the sequence block.
-fn convert(m: &mut MeshesModel) -> u32 {
-    let e = m.edit.as_ref().unwrap();
-    let s = shape_named(e, "S");
-    let at = nif::edit::anchor_role(&e.model, Some(s), Role::Shader).unwrap();
-    m.edit_push(
-        vec![Op::ConvertChainToClips {
-            at,
-            name: nif::edit::CONVERT_NAME.into(),
-        }],
-        None,
-    );
-    let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.outcomes, vec![nif::edit::Outcome::Applied]);
-    e.model.sequences[0].block
-}
-
-/// `label` is disabled, and hovering it shows `why`.
-fn disabled_with(h: &mut Harness<'static, MeshesModel>, label: &str, why: &str) {
-    reveal(h, label);
-    let n = h.get_by_label(label);
-    assert!(n.accesskit_node().is_disabled(), "{label} is enabled");
-    let c = n.rect().center();
-    h.hover_at(c);
-    h.run_steps(3);
-    h.get_by_label(why);
-}
-
-/// Scrolls `label` into the panel's view and clicks it (the clip rows sit below the fold at 900 px).
-fn click(h: &mut Harness<'static, MeshesModel>, label: &str) {
-    reveal(h, label);
-    h.get_by_label(label).click();
-    h.run_steps(3);
-}
-
 /// `scroll_to_me` animates: step until the node has not moved for three frames (at most 60).
 fn reveal(h: &mut Harness<'static, MeshesModel>, label: &str) {
-    if h.query_by_label(label).is_none() {
-        open_clips(h); // Meshes UI T4: clip controls sit in the closed Clips section
-    }
     h.get_by_label(label).scroll_to_me();
     let (mut last, mut still) = (h.get_by_label(label).rect(), 0);
     for _ in 0..60 {
@@ -8341,611 +8898,8 @@ fn reveal(h: &mut Harness<'static, MeshesModel>, label: &str) {
     }
 }
 
-fn enabled(h: &Harness<'static, MeshesModel>, label: &str) -> bool {
-    !h.get_by_label(label).accesskit_node().is_disabled()
-}
-
-fn clip_names(m: &MeshesModel) -> Vec<Option<String>> {
-    let e = m.edit.as_ref().unwrap();
-    e.model
-        .sequences
-        .iter()
-        .map(|s| s.name.as_deref().map(str::to_string))
-        .collect()
-}
-
-fn managed(m: &MeshesModel, c: u32) -> bool {
-    m.edit.as_ref().unwrap().model.managed(c)
-}
-
-#[test]
-fn convert_button_makes_one_undo_step_and_lists_the_clip() {
-    let mut h = view(clip_scene());
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    assert!(enabled(&h, CONVERT_SHADER));
-    click(&mut h, CONVERT_SHADER);
-    h.run_steps(3);
-    let got = ops(h.state());
-    assert!(
-        matches!(got.as_slice(), [Op::ConvertChainToClips { name, .. }] if name == "SpecialIdle"),
-        "{got:?}"
-    );
-    let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(e.outcomes, vec![nif::edit::Outcome::Applied]);
-    assert_eq!(clip_names(h.state()), vec![Some("SpecialIdle".into())]);
-    h.get_by_label("Preview animation");
-    assert!(managed(h.state(), 4) && managed(h.state(), 5));
-    h.state_mut().undo_edit();
-    h.run_steps(3);
-    assert!(ops(h.state()).is_empty());
-    assert!(clip_names(h.state()).is_empty());
-    assert!(h.query_by_label("Preview animation").is_none());
-    assert!(
-        !h.state().edit.as_ref().unwrap().history.can_undo(),
-        "one step"
-    );
-    assert!(enabled(&h, CONVERT_SHADER));
-}
-
-#[test]
-fn rename_clip_updates_the_selector() {
-    let mut m = clip_scene();
-    let seq = convert(&mut m);
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    edit_number(&mut h, "Clip name", "Open");
-    let got = ops(h.state());
-    assert!(
-        matches!(got.last(), Some(Op::RenameSequence { name, nth: 0, new_name, .. })
-            if name == "SpecialIdle" && new_name == "Open"),
-        "{got:?}"
-    );
-    let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
-    assert_eq!(e.playing, Playing::Clip(seq), "the same block stays shown");
-    assert_eq!(
-        h.get_by_label("Preview animation").accesskit_node().value(),
-        Some("Open".into())
-    );
-}
-
-#[test]
-fn remove_clip_returns_to_free_chains_when_none_left() {
-    let mut m = clip_scene();
-    let seq = convert(&mut m);
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    click(&mut h, "Remove clip SpecialIdle");
-    h.run_steps(3);
-    let got = ops(h.state());
-    assert!(
-        matches!(got.last(), Some(Op::RemoveSequence { name, nth: 0, .. }) if name == "SpecialIdle"),
-        "{got:?}"
-    );
-    let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
-    assert!(e.model.sequences.is_empty());
-    assert_eq!(e.playing, Playing::Free);
-    // The scene's shape has no geometry, so the clock has no range here (anim_range() is None before the convert
-    // too); the free chains' own timing is back instead.
-    assert_eq!(e.anim_range(), clip_scene().edit.unwrap().anim_range());
-    for c in [4, 5] {
-        let t = &e.model.ctrls[&c];
-        assert_eq!((t.start, t.stop, t.flags & 0x20), (0.0, 1.0, 0), "{c}");
-    }
-    assert!(h.query_by_label("Preview animation").is_none());
-    assert!(!managed(h.state(), 4) && !managed(h.state(), 5));
-    assert!(enabled(&h, CONVERT_SHADER));
-}
-
-#[test]
-fn clip_actions_are_disabled_on_free_chains() {
-    let mut m = clip_scene();
-    convert(&mut m);
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    assert!(h.get_by_label("Clip name").accesskit_node().is_disabled());
-    disabled_with(
-        &mut h,
-        "Remove clip",
-        "Pick a clip in Preview to rename or remove it.",
-    );
-}
-
-#[test]
-fn convert_is_disabled_with_a_reason() {
-    // (a) two timings
-    let mut m = clip_scene();
-    let at = Anchor {
-        block: 5,
-        kind: "BSLightingShaderPropertyFloatController".into(),
-        shape: Some("S".into()),
-        role: Role::Ctrl {
-            owner: nif::edit::Owner::Shader,
-            class: "BSLightingShaderPropertyFloatController".into(),
-            var: Some(20),
-            nth: 0,
-        },
-    };
-    m.edit_push(
-        vec![Op::SetField {
-            at,
-            field: Field::Frequency,
-            value: Value::F32(2.0f32.to_bits()),
-            base: Value::F32(1.0f32.to_bits()),
-        }],
-        None,
-    );
-    assert_eq!(
-        m.edit.as_ref().unwrap().outcomes,
-        vec![nif::edit::Outcome::Applied]
-    );
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    disabled_with(
-        &mut h,
-        CONVERT_SHADER,
-        "These controllers run on different timings: they cannot share one clip.",
-    );
-    // (b) the root is the shape
-    let mut m = direct(scenes::shader_ctrl(false));
-    select(&mut m, "S");
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    disabled_with(
-        &mut h,
-        CONVERT_SHADER,
-        "The root is not a node: a clip needs a node root.",
-    );
-    // (c) a shared alpha
-    let mut m = direct(scenes::shared_alpha_with_testref_chain());
-    select(&mut m, "A");
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    disabled_with(
-        &mut h,
-        "Convert alpha controllers to clips",
-        "This alpha is shared by 2 shapes: split it before editing.",
-    );
-}
-
-#[test]
-fn new_clip_drives_the_picked_controllers() {
-    let mut h = view(clip_scene());
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    disabled_with(&mut h, "Add clip", "Type a name for the clip.");
-    edit_number(&mut h, "New clip name", "Open");
-    disabled_with(&mut h, "Add clip", "Tick at least one controller.");
-    let keys = h.state().edit.as_ref().unwrap().keys[&(5, None)].clone();
-    click(&mut h, "Add U offset to the new clip");
-    h.run_steps(3);
-    click(&mut h, "Add clip");
-    h.run_steps(3);
-    let got = ops(h.state());
-    let Some(Op::AddSequence {
-        name,
-        cycle,
-        start,
-        stop,
-        tracks,
-        ..
-    }) = got.last()
-    else {
-        panic!("{got:?}")
-    };
-    assert_eq!(
-        (name.as_str(), *cycle, *start, *stop),
-        ("Open", 2, 0.0, 1.0)
-    );
-    assert_eq!(tracks.len(), 1, "{tracks:?}");
-    assert_eq!(tracks[0].at.block, 5);
-    assert_eq!(Ok(tracks[0].keys.clone()), keys);
-    let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
-    assert!(managed(h.state(), 5) && !managed(h.state(), 4));
-}
-
-/// C-P35 I2: New clip on a controller whose own keys are TBC starts flat, so the clip never blocks Export NIF.
-#[test]
-fn new_clip_on_tbc_keys_starts_flat_without_an_error() {
-    let b = scenes::animated(Some(1), 2);
-    let m = nif::model::read_model(&b).unwrap();
-    let role = Role::Ctrl {
-        owner: nif::edit::Owner::Shader,
-        class: "BSLightingShaderPropertyFloatController".into(),
-        var: Some(20),
-        nth: 0,
-    };
-    let s = m
-        .shapes
-        .iter()
-        .find(|s| s.name.as_deref() == Some("S"))
-        .unwrap()
-        .block;
-    let at = nif::edit::anchor_role(&m, Some(s), role).unwrap();
-    let Ok(KeyData::Float(base)) = nif::edit::keys_of(&b, &m, 5, None) else {
-        panic!("float keys")
-    };
-    let mut tbc = base.clone();
-    tbc.key_type = Some(3);
-    for k in &mut tbc.keys {
-        k.tbc = Some([0.0; 3]);
-    }
-    let op = Op::SetKeys {
-        at,
-        clip: None,
-        clip_name: None,
-        keys: KeyData::Float(tbc),
-        base: KeyData::Float(base),
-    };
-    let r = nif::edit::apply(&b, &[op]).unwrap();
-    assert_eq!(r.outcomes, vec![nif::edit::Outcome::Applied]);
-    let mut m = direct(r.bytes);
-    select(&mut m, "S");
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    edit_number(&mut h, "New clip name", "Open");
-    let tick = "Add U offset to the new clip";
-    reveal(&mut h, tick);
-    let c = h.get_by_label(tick).rect().center();
-    h.hover_at(c);
-    h.run_steps(3);
-    h.get_by_label("Its keys are not linear or quadratic: the clip starts flat.");
-    click(&mut h, tick);
-    h.run_steps(3);
-    click(&mut h, "Add clip");
-    h.run_steps(3);
-    let got = ops(h.state());
-    let Some(Op::AddSequence { tracks, .. }) = got.last() else {
-        panic!("{got:?}")
-    };
-    assert!(
-        matches!(&tracks[0].keys, KeyData::Float(g) if g.key_type == Some(1)),
-        "{:?}",
-        tracks[0].keys
-    );
-    let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
-    let errors: Vec<_> = e
-        .op_warnings
-        .iter()
-        .filter(|w| w.level == nif::edit::validate::Level::Error)
-        .collect();
-    assert!(errors.is_empty(), "{errors:?}");
-}
-
-/// C-P35 M6: the New clip ticks belong to one file and shape; opening another file clears them.
-#[test]
-fn new_clip_ticks_clear_when_the_file_changes() {
-    let mut h = view(clip_scene());
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    let tick = "Add U offset to the new clip";
-    click(&mut h, tick);
-    h.run_steps(3);
-    let on = |h: &Harness<'static, MeshesModel>| {
-        h.get_by_label(tick).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
-    };
-    assert!(on(&h), "ticked");
-    // Same path, same bytes, same shape block: only the mod differs.
-    let mut other = MeshesModel::empty();
-    other.edit = Some(
-        NifEdit::open(
-            scenes::animated(Some(1), 2),
-            copy("B", 2, false),
-            "meshes/x.nif",
-            None,
-            None,
-        )
-        .unwrap(),
-    );
-    select(&mut other, "S");
-    *h.state_mut() = other;
-    h.run_steps(3);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    reveal(&mut h, tick);
-    assert!(!on(&h), "another file starts with nothing ticked");
-}
-
-#[test]
-fn a_refused_clip_name_records_nothing_and_says_why() {
-    let mut m = clip_scene();
-    convert(&mut m);
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    edit_number(&mut h, "New clip name", "specialidle");
-    click(&mut h, "Add Emissive multiple to the new clip");
-    click(&mut h, "Add clip");
-    h.run_steps(3);
-    assert_eq!(ops(h.state()).len(), 1, "nothing recorded");
-    h.get_by_label("Another clip is already named specialidle.");
-}
-
-#[test]
-fn clips_ui_fits_the_panel_at_1100() {
-    let mut m = clip_scene();
-    let seq = convert(&mut m);
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let mut h = Harness::builder()
-        .with_size(egui::vec2(1100.0, 800.0))
-        .build_ui_state(
-            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
-            m,
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
-        .expect("the edit panel")
-        .outer_rect;
-    for l in [
-        "Clip name",
-        "Remove clip SpecialIdle",
-        CONVERT_SHADER,
-        "Add clip",
-    ] {
-        let r = h.get_by_label(l).rect();
-        assert!(
-            r.max.x <= panel.max.x + 0.5,
-            "{l}: {r:?} past the edit panel's right edge {}",
-            panel.max.x
-        );
-    }
-}
-
-/// `clip_scene` converted, with the clip picked in Preview and the Controllers tab open.
-fn playing_clip_view() -> Harness<'static, MeshesModel> {
-    let mut m = clip_scene();
-    let seq = convert(&mut m);
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    open_clips(&mut h);
-    h
-}
-
-/// C-P33 (rule 5.2): Enter on a focused Remove clip button removes nothing; a mouse click still does.
-#[test]
-fn enter_never_removes_a_clip() {
-    let mut h = playing_clip_view();
-    reveal(&mut h, "Remove clip SpecialIdle");
-    h.get_by_label("Remove clip SpecialIdle").focus();
-    h.run_steps(2);
-    h.key_press(egui::Key::Enter);
-    h.run_steps(3);
-    assert_eq!(ops(h.state()).len(), 1, "{:?}", ops(h.state()));
-    assert_eq!(clip_names(h.state()), vec![Some("SpecialIdle".into())]);
-    click(&mut h, "Remove clip SpecialIdle");
-    assert!(
-        matches!(ops(h.state()).last(), Some(Op::RemoveSequence { .. })),
-        "a click still removes"
-    );
-}
-
-/// C-P33 (C5-D3): a rename refusal clears as soon as the name changes; the change alone records nothing.
-#[test]
-fn a_rename_refusal_clears_when_the_name_changes() {
-    let mut h = playing_clip_view();
-    h.get_by_label("Clip name").focus();
-    h.run_steps(2);
-    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    h.key_press(egui::Key::Backspace);
-    h.run_steps(1);
-    h.key_press(egui::Key::Enter);
-    h.run_steps(3);
-    h.get_by_label("Type a name for the clip.");
-    h.get_by_label("Clip name").focus();
-    h.run_steps(2);
-    h.get_by_label("Clip name").type_text("Open");
-    h.run_steps(3);
-    assert!(h.query_by_label("Type a name for the clip.").is_none());
-    assert_eq!(ops(h.state()).len(), 1, "typing records nothing");
-}
-
-/// C-P33: a clip with a null Name says so instead of "not on the root's manager".
-#[test]
-fn a_nameless_clip_says_it_has_no_name() {
-    let mut m = clip_scene();
-    let seq = convert(&mut m);
-    let mut b = m.edit.as_ref().unwrap().patched.to_vec();
-    let at = nif::header::Header::parse(&b).unwrap().offsets()[seq as usize];
-    b[at..at + 4].copy_from_slice(&(-1i32).to_le_bytes()); // the sequence's Name index
-    let mut m = direct(b);
-    select(&mut m, "S");
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    click(&mut h, &format!("Remove clip Clip {seq}"));
-    assert!(ops(h.state()).is_empty());
-    h.get_by_label("This clip has no name: it cannot be renamed or removed here.");
-}
-
-// ---- Note CU: parked NIF editor fixes ----
-
-/// `clip_scene` with two added clips, "Open" on U offset (5) then "Close" on Emissive multiple (4); returns the
-/// sequence blocks (Open, Close).
-fn two_clips() -> (MeshesModel, u32, u32) {
-    two_clips_named("Open", "Close")
-}
-
-/// `two_clips` with the clips named `first` (on U offset) and `second` (on Emissive multiple).
-fn two_clips_named(first: &str, second: &str) -> (MeshesModel, u32, u32) {
-    let mut m = clip_scene();
-    let e = m.edit.as_ref().unwrap();
-    let s = shape_named(e, "S");
-    let root = nif::edit::anchor_role(&e.model, None, Role::Root).unwrap();
-    let track = |var: u32| {
-        let role = Role::Ctrl {
-            owner: nif::edit::Owner::Shader,
-            class: "BSLightingShaderPropertyFloatController".into(),
-            var: Some(var),
-            nth: 0,
-        };
-        nif::edit::ClipTrack {
-            at: nif::edit::anchor_role(&e.model, Some(s), role).unwrap(),
-            keys: KeyData::Float(KeyGroup {
-                key_type: Some(1),
-                keys: vec![fkey(0.0, 0.0, None), fkey(1.0, 1.0, None)],
-            }),
-        }
-    };
-    let add = |name: &str, var: u32| Op::AddSequence {
-        at: root.clone(),
-        name: name.into(),
-        cycle: 2,
-        freq: 1.0,
-        start: 0.0,
-        stop: 1.0,
-        tracks: vec![track(var)],
-    };
-    let ops = vec![add(first, 20), add(second, 11)];
-    for op in ops {
-        m.edit_push(vec![op], None);
-    }
-    let e = m.edit.as_ref().unwrap();
-    assert!(e.outcomes.iter().all(|o| *o == nif::edit::Outcome::Applied));
-    // appended in order: the first clip has the lower block
-    let mut blocks: Vec<u32> = e.model.sequences.iter().map(|q| q.block).collect();
-    blocks.sort();
-    (m, blocks[0], blocks[1])
-}
-
-/// Fix round 1 (review I2): clip identity is the Windows-1252 name, so "é" and "ö" never pass for each other, and a
-/// rename to "Café" keeps the Preview on that clip.
-#[test]
-fn preview_tells_non_ascii_clip_names_apart() {
-    let (mut m, first, _) = two_clips_named("é", "ö");
-    m.edit_with(|e| e.set_playing(Playing::Clip(first)));
-    assert_eq!(shown_clip(&m), Some(Some("é".into())));
-    m.edit_with(|e| e.revert(0));
-    assert_eq!(shown_clip(&m), None, "Free chains, not ö");
-    // rename the picked clip to Café
-    let (mut m, first, _) = two_clips_named("Open", "Close");
-    m.edit_with(|e| e.set_playing(Playing::Clip(first)));
-    let e = m.edit.as_ref().unwrap();
-    let (name, nth) = nif::edit::clip_key(&e.patched, &e.model, first).unwrap();
-    let at = nif::edit::anchor_role(&e.model, None, Role::Root).unwrap();
-    m.edit_push(
-        vec![Op::RenameSequence {
-            at,
-            name,
-            nth,
-            new_name: "Café".into(),
-        }],
-        None,
-    );
-    assert_eq!(shown_clip(&m), Some(Some("Café".into())));
-}
-
-/// The name of the clip the Preview shows, None on Free chains.
-fn shown_clip(m: &MeshesModel) -> Option<Option<String>> {
-    let e = m.edit.as_ref().unwrap();
-    match e.playing {
-        Playing::Free => None,
-        Playing::Clip(b) => Some(
-            e.model
-                .sequences
-                .iter()
-                .find(|s| s.block == b)
-                .and_then(|s| s.name.as_deref().map(str::to_string)),
-        ),
-    }
-}
-
-/// Note CU8 (C-P36): removing the last clip takes the manager off the root's chain; undo puts it back.
-#[test]
-fn removing_the_last_clip_unlinks_the_manager_and_undo_restores_it() {
-    let mut m = clip_scene();
-    convert(&mut m);
-    let root_ctrl = |m: &MeshesModel| {
-        let e = m.edit.as_ref().unwrap();
-        let c = e.model.root_net.as_ref().unwrap().controller;
-        let h = nif::header::Header::parse(&e.patched).unwrap();
-        (c >= 0).then(|| String::from_utf8_lossy(h.kind(c as usize)).into_owned())
-    };
-    assert_eq!(root_ctrl(&m).as_deref(), Some("NiControllerManager"));
-    let at = nif::edit::anchor_role(&m.edit.as_ref().unwrap().model, None, Role::Root).unwrap();
-    m.edit_push(
-        vec![Op::RemoveSequence {
-            at,
-            name: nif::edit::CONVERT_NAME.into(),
-            nth: 0,
-        }],
-        None,
-    );
-    let e = m.edit.as_ref().unwrap();
-    assert!(e.outcomes.iter().all(|o| *o == nif::edit::Outcome::Applied));
-    assert_eq!(root_ctrl(&m), None, "no manager on the root");
-    assert!(m
-        .edit
-        .as_ref()
-        .unwrap()
-        .warnings
-        .iter()
-        .all(|w| w.text != nif::edit::validate::EMPTY_MANAGER));
-    m.undo_edit();
-    assert_eq!(root_ctrl(&m).as_deref(), Some("NiControllerManager"));
-}
-
-/// Note CU1: a revert that moves another clip onto the picked clip's block never shows that other clip.
-#[test]
-fn preview_never_switches_clips_after_a_revert() {
-    // Open picked, its AddSequence reverted: Close now sits on Open's block
-    let (mut m, open, _) = two_clips();
-    m.edit_with(|e| e.set_playing(Playing::Clip(open)));
-    m.edit_with(|e| e.revert(0));
-    assert_eq!(
-        m.edit.as_ref().unwrap().model.sequences[0].name.as_deref(),
-        Some("Close")
-    );
-    assert_eq!(shown_clip(&m), None, "Free chains, not Close");
-    // Close picked, Open's AddSequence reverted: Free, or Close itself
-    let (mut m, _, close) = two_clips();
-    m.edit_with(|e| e.set_playing(Playing::Clip(close)));
-    m.edit_with(|e| e.revert(0));
-    let got = shown_clip(&m);
-    assert!(
-        got.is_none() || got == Some(Some("Close".into())),
-        "{got:?}"
-    );
-    // undo brings Open back on its block: the Preview does not jump to it
-    m.undo_edit();
-    let got = shown_clip(&m);
-    assert!(
-        got.is_none() || got == Some(Some("Close".into())),
-        "{got:?}"
-    );
-}
-
-/// Note CU2: every change of the edited bytes gives a new revision, so a refusal line never comes back on a later
-/// state (the `Arc` address could be reused).
+/// Note CU2: every change of the edited bytes gives a new revision. `rev` keys the pending cache (Note GD23) and the
+/// stale-block checks (Note GP8), so a state that reused an earlier `rev` would show that state's answers.
 #[test]
 fn every_apply_gives_a_new_revision() {
     let mut m = clip_scene();
@@ -8955,7 +8909,8 @@ fn every_apply_gives_a_new_revision() {
         assert!(!seen.contains(&r), "{r} seen before: {seen:?}");
         seen.push(r);
     };
-    convert(&mut m);
+    let s = shape_named(m.edit.as_ref().unwrap(), "S");
+    add_colour_ctrl(&mut m, s, [0.0; 3], [1.0; 3]);
     note(&m);
     m.undo_edit();
     note(&m);
@@ -8965,82 +8920,6 @@ fn every_apply_gives_a_new_revision() {
     note(&m);
     m.undo_edit();
     note(&m);
-}
-
-/// Note CU2: a refused New clip line goes on undo and stays gone on redo.
-#[test]
-fn a_refusal_line_goes_on_undo_and_stays_gone() {
-    let mut m = clip_scene();
-    convert(&mut m);
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    edit_number(&mut h, "New clip name", "specialidle");
-    click(&mut h, "Add Emissive multiple to the new clip");
-    click(&mut h, "Add clip");
-    h.run_steps(3);
-    let line = "Another clip is already named specialidle.";
-    h.get_by_label(line);
-    h.state_mut().undo_edit();
-    h.run_steps(3);
-    assert!(h.query_by_label(line).is_none(), "gone after undo");
-    h.state_mut().redo_edit();
-    h.run_steps(3);
-    assert!(h.query_by_label(line).is_none(), "still gone after redo");
-}
-
-/// Note CU3: Convert to clips is off, with AddSequence's reason, for cycle bits 3 and an empty range.
-#[test]
-fn convert_is_disabled_for_cycle_3_and_an_empty_range() {
-    let patch = |b: &mut Vec<u8>, off: usize, v: &[u8]| {
-        let offs = nif::header::Header::parse(b).unwrap().offsets().to_vec();
-        for c in [4, 5] {
-            b[offs[c] + off..offs[c] + off + v.len()].copy_from_slice(v);
-        }
-    };
-    let mut cycle3 = scenes::animated(Some(1), 2);
-    patch(&mut cycle3, 4, &0x4Eu16.to_le_bytes());
-    let mut empty = scenes::animated(Some(1), 2);
-    patch(&mut empty, 18, &0f32.to_le_bytes());
-    for (b, why) in [
-        (cycle3, "The cycle must be Loop, Reverse or Clamp."),
-        (empty, "Stop must be after start."),
-    ] {
-        let mut m = direct(b);
-        select(&mut m, "S");
-        let mut h = view(m);
-        h.run_steps(2);
-        tab(&mut h, "Controllers");
-        disabled_with(&mut h, CONVERT_SHADER, why);
-    }
-}
-
-/// Note CU6 (C-P35 M6, shape half): the New clip ticks clear when another shape is selected.
-#[test]
-fn new_clip_ticks_clear_when_the_shape_changes() {
-    let mut m = direct(scenes::two_animated());
-    select(&mut m, "S");
-    let mut h = view(m);
-    h.run_steps(2);
-    tab(&mut h, "Controllers");
-    let tick = "Add Emissive multiple to the new clip";
-    let on = |h: &Harness<'static, MeshesModel>| {
-        h.get_by_label(tick).accesskit_node().toggled() == Some(egui::accesskit::Toggled::True)
-    };
-    click(&mut h, tick);
-    assert!(on(&h), "ticked on S");
-    let t = shape_named(h.state().edit.as_ref().unwrap(), "T");
-    h.state_mut().select_edit(Selection::Shape(t));
-    h.run_steps(3);
-    tab(&mut h, "Controllers");
-    reveal(&mut h, tick);
-    assert!(!on(&h), "T starts with nothing ticked");
-    let s = shape_named(h.state().edit.as_ref().unwrap(), "S");
-    h.state_mut().select_edit(Selection::Shape(s));
-    h.run_steps(3);
-    tab(&mut h, "Controllers");
-    reveal(&mut h, tick);
-    assert!(!on(&h), "back on S, the old tick is gone");
 }
 
 // ---- Note CS: SLSF1 bits that need a shader type (owner) ----
@@ -9910,7 +9789,7 @@ fn cards_stay_when_the_controller_read_fails() {
     m.start();
     let t = Instant::now();
     m.poll();
-    while m.scanning() || m.v3.locating() {
+    while m.scanning() {
         assert!(t.elapsed() < Duration::from_secs(60), "scan did not end");
         std::thread::sleep(Duration::from_millis(10));
         m.poll();
@@ -10462,210 +10341,6 @@ fn nif_tab_request_switches_to_the_meshes_view() {
     assert!(h.state().meshes.nif_tab.is_none(), "the panel took it");
     assert!(
         h.query_by_label("Texture slots").is_none() && h.query_by_label("Shader type").is_none()
-    );
-}
-
-// ---- Note GD8: clip timing ----
-
-/// An exportable session on `scenes::animated` (S's shader chain free), its edit open.
-fn timing_session() -> (tempfile::TempDir, MeshesModel) {
-    let d = instance("+sdc NIF Edits\n+A\n");
-    std::fs::create_dir_all(d.path().join("mods").join(EDIT_MOD)).unwrap();
-    put(
-        d.path(),
-        "mods/A/meshes/x.nif",
-        Some(&scenes::animated(Some(1), 2)),
-    );
-    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
-    m.procs = sdc_gui::model::meshes::no_procs;
-    scan_and_select(&mut m, d.path());
-    m.open_edit();
-    assert_eq!(m.error, None);
-    (d, m)
-}
-
-/// A SetSequenceTiming on the converted clip SpecialIdle.
-fn timing(m: &MeshesModel, cycle: u32, freq: f32, start: f32, stop: f32) -> Op {
-    let e = m.edit.as_ref().unwrap();
-    Op::SetSequenceTiming {
-        at: nif::edit::anchor_role(&e.model, None, Role::Root).unwrap(),
-        name: nif::edit::CONVERT_NAME.into(),
-        nth: 0,
-        cycle,
-        freq,
-        start,
-        stop,
-    }
-}
-
-/// (cycle, frequency, start, stop) of the first clip in `b`, as a reload reads them.
-fn clip_timing(b: &[u8]) -> (u32, f32, f32, f32) {
-    let s = &nif::model::read_model(b).unwrap().sequences[0];
-    (s.cycle, s.frequency, s.start, s.stop)
-}
-
-#[test]
-fn set_sequence_timing_round_trips() {
-    let (d, mut m) = timing_session();
-    let seq = convert(&mut m);
-    m.edit_with(|e| e.set_playing(Playing::Clip(seq)));
-    let before = m.edit.as_ref().unwrap().patched.to_vec();
-    let op = timing(&m, 1, 2.0, 0.25, 0.75);
-    m.edit_push(vec![op.clone()], None);
-    let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.outcomes.last(), Some(&nif::edit::Outcome::Applied));
-    assert_eq!(e.history.undo_label(), Some("Set clip timing"));
-    assert_eq!(clip_timing(&e.patched), (1, 2.0, 0.25, 0.75));
-    assert_eq!(
-        e.playing,
-        Playing::Clip(seq),
-        "the Preview stays on the clip"
-    );
-    assert_eq!(e.blocked, None);
-    assert_eq!(export(&mut m), Ok(1));
-    let file = std::fs::read(exported(&d)).unwrap();
-    assert_eq!(clip_timing(&file), (1, 2.0, 0.25, 0.75));
-    let saved = load(&m.edit.as_ref().unwrap().doc_path).unwrap().unwrap();
-    assert_eq!(saved.ops.last().map(|d| &d.op), Some(&op));
-    m.edit_with(|e| {
-        e.undo();
-    });
-    assert_eq!(
-        *m.edit.as_ref().unwrap().patched,
-        before,
-        "Undo restores the bytes"
-    );
-}
-
-#[test]
-fn invalid_timing_is_a_warning_entry() {
-    use sdc_gui::model::meshes::{NifLevel, NifTab};
-    let (_d, mut m) = timing_session();
-    convert(&mut m);
-    let good = m.edit.as_ref().unwrap().patched.to_vec();
-    for (op, why) in [
-        (timing(&m, 0, 1.0, 0.75, 0.25), "start is after stop"),
-        (timing(&m, 0, 0.0, 0.0, 1.0), "frequency 0 freezes the clip"),
-        (
-            timing(&m, 0, f32::NAN, 0.0, 1.0),
-            "times must be finite numbers",
-        ),
-        (
-            timing(&m, 3, 1.0, 0.0, 1.0),
-            "the cycle must be Loop, Reverse or Clamp",
-        ),
-    ] {
-        m.edit_push(vec![op], None);
-        let e = m.edit.as_ref().unwrap();
-        let text = format!("Clip SpecialIdle timing: {why}; the clip keeps the timing it had");
-        let rows: Vec<_> = e
-            .problems
-            .iter()
-            .filter(|p| p.text == text)
-            .map(|p| (p.level, p.tab))
-            .collect();
-        assert_eq!(rows, [(NifLevel::Warning, NifTab::Controllers)], "{why}");
-        assert!(e.outcomes.iter().all(|o| *o == nif::edit::Outcome::Applied));
-        assert_eq!(*e.patched, good, "{why}: the clip keeps its timing");
-        assert_eq!(e.blocked, None, "{why}: the rest still exports");
-        m.edit_with(|e| {
-            e.undo();
-        });
-    }
-}
-
-/// CR6 as GD8 rules it: reverting the Convert takes the clip's later timing with it, and its row says so.
-#[test]
-fn reverting_a_convert_drops_its_clip_timing() {
-    let (_d, mut m) = timing_session();
-    convert(&mut m);
-    let op = timing(&m, 2, 1.0, 0.0, 0.5);
-    m.edit_push(vec![op], None);
-    assert_eq!(m.edit.as_ref().unwrap().timing_dependents(0), vec![1]);
-    let mut h = view(m);
-    h.run_steps(2);
-    h.get_by_label("Pending edits (2)").click();
-    h.run_steps(3);
-    h.get_by_label("S: Convert to clip SpecialIdle (Revert also removes its clip timing)");
-    h.get_by_label_contains("Revert 1: ").click();
-    h.run_steps(3);
-    let e = h.state().edit.as_ref().unwrap();
-    assert!(e.doc.ops.is_empty(), "{:?}", e.doc.ops());
-    assert!(e.outcomes.is_empty());
-}
-
-/// The Clips section's timing fields: a typed frequency is one SetSequenceTiming with the clip's other values.
-#[test]
-fn clip_timing_fields_push_one_op() {
-    let mut m = direct(scenes::managed_clip());
-    let e = m.edit.as_ref().unwrap();
-    let b = e.model.shapes[0].block;
-    let s = e.model.sequences[0].clone();
-    let (name, nth) = nif::edit::clip_key(&e.patched, &e.model, s.block).unwrap();
-    let at = nif::edit::anchor_role(&e.model, None, Role::Root).unwrap();
-    m.select_edit(Selection::Shape(b));
-    m.edit_with(|e| e.set_playing(Playing::Clip(s.block)));
-    let mut h = view(m);
-    h.run_steps(2);
-    h.get_by_label("Controllers tab").click();
-    h.run_steps(3);
-    h.get_by_label_contains("Clips (2 · showing").click();
-    h.run_steps(3);
-    let id = h.get_by_label("Clip frequency").accesskit_node().id();
-    h.get(egui_kittest::kittest::by().predicate(move |n| n.id() == id))
-        .focus();
-    h.run_steps(2);
-    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
-    h.run_steps(1);
-    h.get(egui_kittest::kittest::by().predicate(move |n| n.id() == id))
-        .type_text("2.5");
-    h.run_steps(1);
-    h.key_press(egui::Key::Enter);
-    h.run_steps(3);
-    assert_eq!(
-        ops(h.state()),
-        vec![Op::SetSequenceTiming {
-            at,
-            name,
-            nth,
-            cycle: s.cycle,
-            freq: 2.5,
-            start: s.start,
-            stop: s.stop,
-        }]
-    );
-    h.get_by_role_and_label(AkRole::ComboBox, "Clip cycle");
-}
-
-/// The Time slider's span follows a clip's new timing (`anim_end`'s math: a Reverse cycle counts both legs).
-#[test]
-fn clip_timing_moves_the_time_slider() {
-    let plain = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
-    let (_d, mut m, _cmds) = session_on(&plain);
-    let e = m.edit.as_ref().unwrap();
-    let (shape, _) = lit_shape(e);
-    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
-    m.edit_push(
-        vec![Op::ConvertChainToClips {
-            at,
-            name: nif::edit::CONVERT_NAME.into(),
-        }],
-        None,
-    );
-    let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.outcomes, vec![nif::edit::Outcome::Applied]);
-    let s = e.model.sequences[0].clone();
-    m.edit_with(|e| e.set_playing(Playing::Clip(s.block)));
-    m.tick_anim(0.0);
-    let span = (s.stop - s.start) / s.frequency;
-    assert!(span > 0.0);
-    assert_eq!(m.v3.clock.unwrap().range, (0.0, span));
-    let op = timing(&m, 1, 4.0, s.start, s.stop);
-    m.edit_push(vec![op], None);
-    m.tick_anim(0.0);
-    assert_eq!(
-        m.v3.clock.unwrap().range,
-        (0.0, (s.stop - s.start) * 2.0 / 4.0)
     );
 }
 
@@ -11507,7 +11182,7 @@ fn the_set_preview_has_no_export_menu() {
             |ui, (m, s): &mut (sdc_gui::model::AppModel, SetPreview)| {
                 sdc_gui::ui::set_preview::draw(ui, m, s)
             },
-            (m, SetPreview::new(None, None, None, DEFAULT_CAP)),
+            (m, SetPreview::new(None, DEFAULT_CAP)),
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     for _ in 0..3 {

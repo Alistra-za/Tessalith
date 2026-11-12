@@ -84,11 +84,11 @@ fn plan_with(
             sources: vec![source(rough, RawMap::Roughness), source(ao, RawMap::Ao)],
         }),
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     };
     Plan {
         request,
@@ -104,6 +104,8 @@ fn plan_with(
         derive_own: Default::default(),
         fill_ends: Default::default(),
         helpers: vec![],
+        no_set: Default::default(),
+        no_set_sets: Default::default(),
     }
 }
 

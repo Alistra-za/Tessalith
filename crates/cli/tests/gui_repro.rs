@@ -111,8 +111,9 @@ fn a_gui_export_and_sdc_convert_agree() {
         String::from_utf8_lossy(&out.stderr)
     );
     let (gui, cli) = (
-        outputs(&d.path().join("gui-out")),
-        outputs(&d.path().join("cli-out")),
+        // Note HQ1: a `textures` root writes, and keeps its manifest, under `<out>\textures`.
+        outputs(&d.path().join("gui-out/textures")),
+        outputs(&d.path().join("cli-out/textures")),
     );
     // rock01, leaf, the normal, the 3 px texture and the packed _rmaos.
     assert_eq!(

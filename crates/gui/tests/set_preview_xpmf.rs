@@ -75,7 +75,7 @@ fn opened(dir: &Path, db: Option<PathBuf>) -> (AppModel, SetPreview) {
     m.set_cs_edids(ID, Kind::Mato, &["SnowMat1P".to_string()]);
     let key = set_views(&m).into_iter().find(|v| v.id == ID).unwrap().key;
     m.select_set(&key);
-    (m, SetPreview::new(None, None, db, DEFAULT_CAP))
+    (m, SetPreview::new(db, DEFAULT_CAP))
 }
 
 fn frame(s: &mut SetPreview, m: &AppModel) {
@@ -336,10 +336,9 @@ fn off_and_on_in_one_batch_resolve_the_textures_again() {
         env!("CARGO_MANIFEST_DIR"),
         "/../render3d/tests/fixtures/standin"
     ));
-    let f = render3d::locate::fingerprint(&standin, None).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let mut v = Viewport3d::new(Some(f.clone()));
-    v.on_located(Ok(Some(f)));
+    let mut v = Viewport3d::new();
+    v.use_shader_folder(standin);
     v.cache_dir = Some(cache.path().to_path_buf());
     let mut mat = nif::material::MaterialState::builtin_default();
     // DO_ALPHA_TEST: the stand-in's pixel permutation compiles.

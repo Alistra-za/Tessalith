@@ -1,7 +1,8 @@
 //! M6 Track F3b Task 3: the rename plan (spec §4), Apply as one step and one plan (§7), and the menu entries (§6).
 mod support;
+use engine::config::Subtype;
 use image::{ImageBuffer, Rgb};
-use sdc_gui::model::bulk::MenuAction;
+use sdc_gui::model::bulk::{BulkOp, MenuAction};
 use sdc_gui::model::rename::*;
 use sdc_gui::model::*;
 use std::path::{Path, PathBuf};
@@ -89,7 +90,7 @@ fn an_input_alias_is_written_read_and_undone_in_one_step() {
     idle(&mut m);
     assert_eq!(m.read_as_of(LEAF).as_deref(), Some("landscape/leaf_n.png"));
     assert!(
-        output_of(&m, LEAF).ends_with("export/landscape/leaf_n.dds"),
+        output_of(&m, LEAF).ends_with("export/textures/landscape/leaf_n.dds"),
         "{}",
         output_of(&m, LEAF)
     );
@@ -97,7 +98,7 @@ fn an_input_alias_is_written_read_and_undone_in_one_step() {
     m.undo();
     idle(&mut m);
     assert_eq!(m.read_as_of(LEAF), None);
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/leaf.dds"));
+    assert!(output_of(&m, LEAF).ends_with("export/textures/landscape/leaf.dds"));
 }
 
 #[test]
@@ -261,10 +262,20 @@ fn packed_outputs_and_locked_slots_are_skipped_in_inputs_mode() {
     assert!(row(&p, "landscape/rock01_normal.png").writes());
 }
 
+/// `pbr_opened` with `leaf.png` picked as a PBR albedo too: Outputs mode is for PGPatcher PBR sets only (Note HJ1), so
+/// the tests that rename `leaf` (and `rock01`) in it use this.
+fn pbr_leaf(dir: &Path) -> AppModel {
+    use sdc_gui::model::Answer;
+    let mut m = pbr_opened(dir);
+    m.decide(LEAF, Answer::Subtype(engine::config::Subtype::PbrAlbedo));
+    idle(&mut m);
+    m
+}
+
 #[test]
 fn outputs_mode_names_a_set_and_blocks_collisions_and_suffixes() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
+    let mut m = pbr_leaf(d.path());
     let leaf = set_id_of(&m, LEAF);
     m.click_item(LEAF, false, false);
     m.run_menu(MenuAction::RenameOutputs);
@@ -285,15 +296,20 @@ fn outputs_mode_names_a_set_and_blocks_collisions_and_suffixes() {
     dialog(&mut m).typed.clear();
     dialog(&mut m).recipe.prefix = "big_".into();
     let p = plan(&m);
-    assert_eq!(row(&p, &leaf).old, "leaf");
-    assert_eq!(row(&p, &leaf).new, "big_leaf");
-    assert_eq!(row(&p, &leaf).output, "landscape/big_leaf.dds");
+    // Note HJ9: the export folder's frame (a game path).
+    assert_eq!(row(&p, &leaf).old, "textures/pbr/landscape/leaf");
+    assert_eq!(row(&p, &leaf).new, "textures/pbr/landscape/big_leaf");
+    assert_eq!(row(&p, &leaf).output, "textures/pbr/landscape/big_leaf.dds");
     let steps = m.history.undo.len();
     assert!(m.apply_rename());
     assert_eq!(m.history.undo.len(), steps + 1);
     idle(&mut m);
-    assert_eq!(m.output_name_of(&leaf).as_deref(), Some("big_leaf"));
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/big_leaf.dds"));
+    assert_eq!(m.output_name_of(&leaf), None);
+    assert_eq!(
+        pbr_settings_of(&m, &leaf).unwrap()["rename"],
+        serde_json::json!("big_leaf")
+    );
+    assert!(output_of(&m, LEAF).ends_with("export/textures/pbr/landscape/big_leaf.dds"));
     assert_eq!(m.last_recipe.prefix, "big_", "the recipe is kept");
 }
 
@@ -363,6 +379,14 @@ fn many(dir: &Path, n: usize) -> PathBuf {
 fn renaming_300_outputs_is_one_step_and_one_plan() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened_as_the_app(many(d.path(), 300), d.path().join("export"));
+    // Outputs mode is for PGPatcher PBR sets only (Note HJ1): make all 300 PBR albedos in one step.
+    let keys: Vec<String> = m.items.iter().map(|i| i.key.clone()).collect();
+    m.apply_bulk_edit(
+        &keys,
+        "subtype",
+        BulkOp::Set(serde_json::json!(Subtype::PbrAlbedo)),
+    );
+    idle(&mut m);
     m.select_all_visible();
     m.open_rename(RenameMode::Outputs);
     assert_eq!(dialog(&mut m).keys.len(), 300);
@@ -473,9 +497,9 @@ fn an_input_rename_onto_another_sets_output_blocks_apply() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let leaf = set_id_of(&m, LEAF);
-    m.set_output_name(&leaf, Some("steel")).unwrap();
-    idle(&mut m);
-    assert!(output_of(&m, LEAF).ends_with("export/landscape/steel.dds"));
+    // Note HJ2: an old project's `output_name` (a vanilla set cannot be given one any more).
+    seed_output_name(&mut m, &leaf, "steel");
+    assert!(output_of(&m, LEAF).ends_with("export/textures/landscape/steel.dds"));
     m.click_item(ROCK, false, false);
     m.open_rename(RenameMode::Inputs);
     dialog(&mut m)
@@ -590,7 +614,8 @@ fn strs(v: &[&str]) -> Vec<String> {
 #[test]
 fn rename_keys_on_the_fixture_follow_the_selection() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
+    // `leaf` and `rock01` are PBR sets; `odd` is not and takes no part in Outputs (Note HJ1).
+    let mut m = pbr_leaf(d.path());
     m.select_all_visible();
     assert_eq!(
         m.rename_keys(RenameMode::Inputs),
@@ -604,7 +629,7 @@ fn rename_keys_on_the_fixture_follow_the_selection() {
     );
     assert_eq!(
         m.rename_keys(RenameMode::Outputs),
-        strs(&["landscape/leaf", "landscape/odd", "landscape/rock01"])
+        strs(&["landscape/leaf", "landscape/rock01"])
     );
     // Two textures of one set give that set once; the order is the selection's.
     m.click_item("landscape/rock01_normal.png", false, false);
@@ -642,7 +667,7 @@ fn rename_keys_on_the_fixture_follow_the_selection() {
 #[test]
 fn rename_keys_skip_textures_that_are_in_no_set_in_outputs_mode() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
+    let mut m = pbr_leaf(d.path());
     let leaf_set = set_key_of(&m, LEAF);
     m.sets.retain(|s| s.key != leaf_set);
     m.invalidate_views();
@@ -660,7 +685,17 @@ fn rename_keys_skip_textures_that_are_in_no_set_in_outputs_mode() {
 #[test]
 fn rename_keys_over_sets_that_share_members_and_a_texture_in_two_sets() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = many_sets(d.path(), 3);
+    // Clones of the first set (`leaf`), made a PBR set as Outputs mode needs (Note HJ1).
+    let mut m = pbr_leaf(d.path());
+    let first = m.sets[0].clone();
+    m.sets = (0..3)
+        .map(|i| {
+            let mut s = first.clone();
+            s.key = format!("{}{i:04}", first.key);
+            s
+        })
+        .collect();
+    m.invalidate_views();
     let keys: Vec<String> = sdc_gui::model::sets::views(&m)
         .iter()
         .map(|v| v.key.clone())
@@ -710,6 +745,16 @@ fn aliased_selection_keeps_the_selection_order() {
     assert_eq!(m.aliased_selection(), Vec::<String>::new());
 }
 
+/// The Outputs dialog as the user opens it: the sets of `items` selected, then Rename outputs (Note HJ1).
+fn open_outputs(m: &mut AppModel, items: &[&str]) {
+    let keys: Vec<String> = items.iter().map(|i| set_key_of(m, i)).collect();
+    for (n, k) in keys.iter().enumerate() {
+        m.click_set(k, n > 0, false);
+    }
+    m.open_rename(RenameMode::Outputs);
+    assert_eq!(dialog(m).keys.len(), items.len());
+}
+
 #[test]
 fn the_plan_rows_and_collision_messages_are_pinned() {
     let d = tempfile::tempdir().unwrap();
@@ -727,42 +772,48 @@ fn the_plan_rows_and_collision_messages_are_pinned() {
             "landscape/rock01_rmaos|landscape/rock01_rmaos|landscape/rock01_rmaos|None||true|false|None|None|Some(\"skipped (a packed output has no file of its own)\")",
         ])
     );
-    m.open_rename(RenameMode::Outputs);
-    dialog(&mut m).recipe.prefix = "x_".into();
+    // Outputs (PGPatcher PBR sets only, Note HJ1): rows in the export folder's frame (HJ9).
+    let pd = tempfile::tempdir().unwrap();
+    let mut pm = pbr_leaf(pd.path());
+    open_outputs(&mut pm, &[LEAF, ROCK]);
+    dialog(&mut pm).recipe.prefix = "x_".into();
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/leaf|leaf|x_leaf|None|landscape/x_leaf.dds|true|true|None|None|None",
-            "landscape/odd|odd|x_odd|None|landscape/x_odd.dds|true|true|None|None|None",
-            "landscape/rock01|rock01|x_rock01|None|landscape/x_rock01.dds (+2 more)|true|true|None|None|None",
+            "landscape/leaf|textures/pbr/landscape/leaf|textures/pbr/landscape/x_leaf|None|textures/pbr/landscape/x_leaf.dds|true|true|None|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/x_rock01|None|textures/pbr/landscape/x_rock01.dds (+2 more)|true|true|None|None|None",
         ])
     );
-    // Outputs: two sets onto one name (the second is refused), and a set onto a name a selected set gives up.
-    let (leaf, odd) = (set_id_of(&m, LEAF), set_id_of(&m, "landscape/odd.png"));
-    let rock = set_id_of(&m, ROCK);
-    dialog(&mut m).recipe.prefix.clear();
-    let d2 = dialog(&mut m);
+    // Outputs: two sets onto one name (the second is refused).
+    let (leaf, rock) = (set_id_of(&pm, LEAF), set_id_of(&pm, ROCK));
+    dialog(&mut pm).recipe.prefix.clear();
+    let d2 = dialog(&mut pm);
     d2.typed.insert(leaf.clone(), "same".into());
-    d2.typed.insert(odd.clone(), "same".into());
-    d2.typed.insert(rock.clone(), "leaf".into());
+    d2.typed.insert(rock.clone(), "same".into());
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/leaf|leaf|same|None|landscape/same.dds|true|true|None|None|None",
-            "landscape/odd|odd|same|None|landscape/same.dds|true|true|Some(\"landscape/leaf is renamed onto landscape/same.dds too\")|None|None",
-            "landscape/rock01|rock01|leaf|None|landscape/leaf.dds (+2 more)|true|true|None|None|None",
+            "landscape/leaf|textures/pbr/landscape/leaf|textures/pbr/landscape/same|None|textures/pbr/landscape/same.dds|true|true|None|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/same|None|textures/pbr/landscape/same.dds (+2 more)|true|true|Some(\"landscape/leaf is renamed onto textures/pbr/landscape/same.dds too\")|None|None",
         ])
+    );
+    // Outputs: a set onto a name a selected set gives up.
+    dialog(&mut pm).typed.insert(rock.clone(), "leaf".into());
+    assert_eq!(
+        project(&plan(&pm))[1],
+        "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/leaf|None|textures/pbr/landscape/leaf.dds (+2 more)|true|true|None|None|None"
     );
     // Outputs: a set onto the output of a set that is not renamed.
-    m.click_item(ROCK, false, false);
-    m.open_rename(RenameMode::Outputs);
-    dialog(&mut m).typed.insert(rock.clone(), "LEAF".into());
+    pm.dialog = None;
+    open_outputs(&mut pm, &[ROCK]);
+    dialog(&mut pm).typed.insert(rock.clone(), "LEAF".into());
     assert_eq!(
-        project(&plan(&m)),
+        project(&plan(&pm)),
         strs(&[
-            "landscape/rock01|rock01|LEAF|None|landscape/LEAF.dds (+2 more)|true|true|Some(\"landscape/leaf already writes landscape/LEAF.dds\")|None|None",
+            "landscape/rock01|textures/pbr/landscape/rock01|textures/pbr/landscape/LEAF|None|textures/pbr/landscape/LEAF.dds (+2 more)|true|true|Some(\"landscape/leaf already writes textures/pbr/landscape/LEAF.dds\")|None|None",
         ])
     );
+    let rock = set_id_of(&m, ROCK);
     // Inputs: onto a name another file has, two files onto one name, one onto a name another file gives up.
     m.select_all_visible();
     m.open_rename(RenameMode::Inputs);
@@ -818,7 +869,7 @@ fn rename_menu(
 #[test]
 fn the_item_and_set_menus_keep_their_rename_entries_in_order() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
+    let mut m = pbr_leaf(d.path());
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
     let f2 = format!("  {}", sdc_gui::ui::actions::keys_text("rename"));

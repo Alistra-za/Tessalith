@@ -32,6 +32,9 @@ pub struct SuggestContext<'a> {
     pub is_float: bool,
     /// The set holds or builds an `_rfaos` (`pack::plan::set_is_advanced_skin`): Advanced skin sub-types apply.
     pub advanced_skin: bool,
+    /// The file is its set's only member, counted after joins and set edits (Note GY1), and no scanned mesh uses it as
+    /// a diffuse (Note GY6).
+    pub may_wait: bool,
 }
 
 pub(crate) fn has_component(path: &str, name: &str) -> bool {
@@ -51,6 +54,20 @@ pub fn is_pbr_set(c: &SuggestContext) -> bool {
                 .any(|r| r.starts_rmaos() && c.set_suffixes.contains(&r.id())))
 }
 
+/// Whether a game path is landscape: under `textures/landscape/` or with a whole `landscape` component.
+pub fn landscape_path(game_path: &str) -> bool {
+    game_path.starts_with("textures/landscape/") || has_component(game_path, "landscape")
+}
+
+/// Note GY1: a stem with no recognised suffix (§6.1, alias or vocabulary) that has an underscore, alone in its set
+/// (`may_wait`, `SuggestContext::may_wait`). [`suggest`] gives it nothing unless a path arm says what it is; `iron` and
+/// `iron_ore` beside `iron_ore_n` are colour.
+pub fn unknown_suffix(suffix: Option<&str>, game_path: &str, may_wait: bool) -> bool {
+    let name = game_path.rsplit('/').next().unwrap_or(game_path);
+    let stem = name.rsplit_once('.').map_or(name, |(s, _)| s);
+    may_wait && suffix.is_none() && stem.contains('_') && crate::group::split_vocab(stem).is_none()
+}
+
 pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
     use Confidence::*;
     use Subtype::*;
@@ -60,11 +77,10 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
         reason: why.to_string(),
     };
     let pbr = is_pbr_set(c);
-    let landscape =
-        c.game_path.starts_with("textures/landscape/") || has_component(c.game_path, "landscape");
+    let landscape = landscape_path(c.game_path);
     let ui_or_sky = has_component(c.game_path, "interface") || has_component(c.game_path, "sky");
     // M6 Track E (owner, 2026-10-12; DECISIONS Note U1, reversing Note H's "a bare stem is only a guess"): no suffix
-    // is the colour member, at High like `_d`. `hdr_sky` and `_i` stay Medium.
+    // is the colour member, at High like `_d`, unless it waits for a type (Note GY1). `hdr_sky` and `_i` stay Medium.
     match c.suffix {
         Some("n") if landscape => vec![s(LandscapeNormal, High, "_n under textures/landscape")],
         Some("n") if pbr || c.advanced_skin => {
@@ -86,10 +102,11 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
             High,
             "_wet in an Advanced skin set (normal + mask or height)",
         )],
-        Some("detail_n") if c.advanced_skin => vec![s(
+        // Note GW1: the three detail names are one slot. Landscape sets get theirs from the shader (`decide_subtype`).
+        Some("detail" | "detailnorm" | "detail_n") if c.advanced_skin => vec![s(
             SkinDetail,
             High,
-            "_detail_n in an Advanced skin set (detail normal)",
+            "detail map in an Advanced skin set (detail normal)",
         )],
         Some("cnr") | Some("crn") => {
             vec![s(CoatNormal, High, "_cnr/_crn coat normal + roughness")]
@@ -138,6 +155,8 @@ pub fn suggest(c: &SuggestContext) -> Vec<Suggestion> {
             vec![s(HdrSky, Medium, "float source under sky/")]
         }
         Some("d") | None if ui_or_sky => vec![s(UiSky, High, "colour under interface/ or sky/")],
+        // Note GY1: after the path arms, so the path still says what the file is.
+        None if unknown_suffix(c.suffix, c.game_path, c.may_wait) => vec![],
         Some("d") | None if c.advanced_skin => {
             vec![s(
                 SkinAlbedo,
@@ -162,7 +181,6 @@ pub fn apply_vocabulary(suggestions: &mut Vec<Suggestion>, v: &Vocab) {
         VocabRole::Emissive => "emissive",
         VocabRole::PackingInput(_) => "packing input",
         VocabRole::CoatColour => "coat colour + strength",
-        VocabRole::NormalLayer(_) => "normal layer",
     };
     for s in suggestions.iter_mut() {
         s.reason = format!("exporter suffix _{} ({role}); {}", v.term, s.reason);
@@ -242,6 +260,7 @@ mod tests {
             alpha,
             is_float: false,
             advanced_skin: false,
+            may_wait: false,
         }
     }
 

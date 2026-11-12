@@ -524,7 +524,7 @@ fn meshes_settings_round_trip_in_gui_toml() {
 
 /// Headless stand-in for the owner's manual check (plan step 5): scans the owner's MO2 instance read-only through
 /// the model and the worker, with the database in %TEMP%, and prints what the view would show. No asserts on the
-/// machine's data. `cargo test --release -p sdc-gui --test meshes_view owner_meshes_view -- --ignored --nocapture`
+/// machine's data. `cargo test --release -p sdc-gui --test it meshes_view::owner_meshes_view -- --ignored --nocapture`
 #[test]
 #[ignore]
 fn owner_meshes_view() {
@@ -1965,6 +1965,46 @@ fn alpha_reads_in_words() {
     assert_eq!(alpha_line(0x0000, 7), "Alpha: none");
 }
 
+/// Note GT4: a NIF opened through the model reaches its first draw on the bundled tree. The instance has no
+/// Community Shaders and no settings file anywhere, and nothing asks the GUI for either.
+#[test]
+fn no_worker_message_reads_cs_settings() {
+    let (_d, mut m) = scanned();
+    let cache = tempfile::tempdir().unwrap();
+    m.v3.cache_dir = Some(cache.path().to_path_buf());
+    let a = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a);
+    let copy = m.nifs[0].copy_id;
+    m.select_nif(copy);
+    assert!(m.v3.is_mesh(), "the NIF is the viewport's content");
+    let t = Instant::now();
+    loop {
+        m.v3.poll();
+        m.v3.request_frame(64, 64);
+        if !m.v3.busy() && !m.v3.shapes.is_empty() {
+            break;
+        }
+        assert!(t.elapsed() < Duration::from_secs(180), "{:?}", m.v3.shapes);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(
+        m.v3.shapes
+            .iter()
+            .all(|s| s.status == render3d::ShapeStatus::Drawing),
+        "{:?}",
+        m.v3.shapes
+    );
+    assert_eq!(m.v3.notice, None);
+    assert_eq!(m.v3.render_error, None);
+    let f = m.v3.frame.as_ref().expect("a frame");
+    assert!(
+        f.rgba
+            .chunks(4)
+            .any(|p| p[0] as u32 + p[1] as u32 + p[2] as u32 > 0),
+        "a lit frame"
+    );
+}
+
 /// A model on a scan database whose host has no PGPatcher running, whatever the machine runs.
 fn scan_model(db: PathBuf) -> MeshesModel {
     let mut m = MeshesModel::new(Some(db), MeshesSettings::default());
@@ -2025,7 +2065,7 @@ fn cancelled_or_failed_scan_does_not_mark_a_completed_scan() {
 }
 
 /// Trace-debug 2026-10-22 #5 (Note CW2): a scan that stops before `begin_scan` (PGPatcher running) leaves the store as
-/// it was, so the Used-by lists and UV coverage come back; a cancelled scan (store disabled) still keeps them off.
+/// it was, so the Used-by lists come back; a cancelled scan (store disabled) still keeps them off.
 #[test]
 fn a_scan_that_stops_before_begin_scan_keeps_the_store_settled() {
     let session = std::sync::Arc::new(engine::session::Session::new().expect("an encoder session"));

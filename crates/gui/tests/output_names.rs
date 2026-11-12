@@ -47,8 +47,7 @@ fn entry(m: &AppModel, id: &str) -> sdc_gui::sets_doc::SetEntry {
 fn an_output_name_renames_a_plain_set_on_cs() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_output_name("landscape/leaf", Some("maple")).unwrap();
-    idle(&mut m);
+    seed_output_name(&mut m, "landscape/leaf", "maple");
     assert_eq!(
         entry(&m, "landscape/leaf").output_name.as_deref(),
         Some("maple")
@@ -57,14 +56,14 @@ fn an_output_name_renames_a_plain_set_on_cs() {
         engine_inputs(&m)
             .1
             .get(&OutputKey::File(key_of(&m, "leaf.png"))),
-        Some(&PathBuf::from("landscape/maple.dds"))
+        Some(&PathBuf::from("textures/landscape/maple.dds"))
     );
-    assert!(output_of(&m, "leaf.png").ends_with("export/landscape/maple.dds"));
+    assert!(output_of(&m, "leaf.png").ends_with("export/textures/landscape/maple.dds"));
     assert!(d.path().join("textures/landscape/leaf.png").exists());
     // One step back restores the mirrored name.
     m.undo();
     idle(&mut m);
-    assert!(output_of(&m, "leaf.png").ends_with("export/landscape/leaf.dds"));
+    assert!(output_of(&m, "leaf.png").ends_with("export/textures/landscape/leaf.dds"));
 }
 
 #[test]
@@ -73,11 +72,9 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     let mut m = opened(d.path());
     m.set_target(Target::Vanilla);
     idle(&mut m);
-    m.set_output_name("landscape/rock01", Some("boulder"))
-        .unwrap();
-    idle(&mut m);
-    assert!(output_of(&m, "rock01.png").ends_with("export/landscape/boulder.dds"));
-    assert!(output_of(&m, "rock01_normal.png").ends_with("export/landscape/boulder_n.dds"));
+    seed_output_name(&mut m, "landscape/rock01", "boulder");
+    assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/boulder.dds"));
+    assert!(output_of(&m, "rock01_normal.png").ends_with("export/textures/landscape/boulder_n.dds"));
     // Planning again changes nothing: the name is applied to its own result idempotently.
     let before = engine_inputs(&m).1;
     m.replan();
@@ -87,7 +84,51 @@ fn every_member_keeps_its_suffix_on_vanilla() {
     m.set_output_name("landscape/rock01", None).unwrap();
     idle(&mut m);
     assert_eq!(entry(&m, "landscape/rock01").output_name, None);
-    assert!(output_of(&m, "rock01.png").ends_with("export/landscape/rock01.dds"));
+    assert!(output_of(&m, "rock01.png").ends_with("export/textures/landscape/rock01.dds"));
+}
+
+/// Note HS2 pin (final review Issue 1): a PBR set's packed output keeps its item key and `[files]` key whatever
+/// output path it has: the explicit `textures/pbr/…` path the prefix gives, and that path under a new name. A fill
+/// set on the item reaches the job, and the key is not reported unmatched.
+#[test]
+fn a_fill_on_a_renamed_pbr_sets_packed_output_reaches_the_engine() {
+    use engine::config::RawMap;
+    use engine::pack::ChannelSource;
+    const PACKED: &str = "landscape/rock01_rmaos";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.set_pack_fill(PACKED, RawMap::Metallic, Some(200));
+    idle(&mut m);
+    for (rename, out) in [
+        (None, "export/textures/pbr/landscape/rock01_rmaos.dds"),
+        (
+            Some("steel"),
+            "export/textures/pbr/landscape/steel_rmaos.dds",
+        ),
+    ] {
+        if let Some(n) = rename {
+            m.set_output_name("landscape/rock01", Some(n)).unwrap();
+            idle(&mut m);
+        }
+        let job = m
+            .item(PACKED)
+            .unwrap_or_else(|| panic!("no item {PACKED}"))
+            .job
+            .clone()
+            .unwrap();
+        let written = job.output.to_string_lossy().replace('\\', "/");
+        assert!(written.ends_with(out), "{written}");
+        assert_eq!(
+            job.pack.as_ref().unwrap().channels[1],
+            ChannelSource::Fill {
+                role: RawMap::Metallic,
+                code: 200
+            },
+            "{out}"
+        );
+        assert!(m.unmatched_keys.is_empty(), "{:?}", m.unmatched_keys);
+    }
 }
 
 #[test]
@@ -132,6 +173,12 @@ fn output_names_windows_cannot_use_or_that_end_in_a_suffix_are_refused() {
     let mut m = opened(d.path());
     assert!(m.set_output_name("landscape/leaf", Some("leaf_n")).is_err());
     assert_eq!(entry_or_none(&m, "landscape/leaf"), None);
+    // HJ1: a valid name on a vanilla set is refused too, with the rule's text.
+    assert_eq!(
+        m.set_output_name("landscape/leaf", Some("maple")),
+        Err("output names are for PGPatcher PBR sets".to_string())
+    );
+    assert_eq!(entry_or_none(&m, "landscape/leaf"), None);
 }
 
 fn entry_or_none(m: &AppModel, id: &str) -> Option<String> {
@@ -148,33 +195,80 @@ fn entry_or_none(m: &AppModel, id: &str) -> Option<String> {
 #[test]
 fn renamed_output_keeps_folder_and_suffix() {
     assert_eq!(
-        renamed_output("armor/wall_n.dds", "steel", false),
+        renamed_output("armor/wall_n.dds", "steel", Tails::Plain),
         Some(PathBuf::from("armor/steel_n.dds"))
     );
     assert_eq!(
-        renamed_output("wall.dds", "steel", false),
+        renamed_output("wall.dds", "steel", Tails::Plain),
         Some(PathBuf::from("steel.dds"))
     );
     assert_eq!(
-        renamed_output("a/b/rock_rmaos.dds", "x", false),
+        renamed_output("a/b/rock_rmaos.dds", "x", Tails::Plain),
         Some(PathBuf::from("a/b/x_rmaos.dds"))
     );
     // An exporter term an output keeps stays too, so it never lands on the diffuse's name.
     assert_eq!(
-        renamed_output("a/rock01_roughness.dds", "x", false),
+        renamed_output("a/rock01_roughness.dds", "x", Tails::Plain),
         Some(PathBuf::from("a/x_roughness.dds"))
     );
     // Final review I1: in an Advanced skin set the joined `_wet` and `_detail_n` are tails; elsewhere they are not.
     assert_eq!(
-        renamed_output("a/body_wet.dds", "x", true),
+        renamed_output("a/body_wet.dds", "x", Tails::Skin),
         Some(PathBuf::from("a/x_wet.dds"))
     );
     assert_eq!(
-        renamed_output("a/body_detail_n.dds", "x", true),
+        renamed_output("a/body_detail_n.dds", "x", Tails::Skin),
         Some(PathBuf::from("a/x_detail_n.dds"))
     );
     assert_eq!(
-        renamed_output("a/body_detail_n.dds", "x", false),
+        renamed_output("a/body_detail_n.dds", "x", Tails::Plain),
         Some(PathBuf::from("a/x_n.dds"))
     );
+}
+
+/// Note GW1: `_detail` and `_detailnorm` are tails in a set that joined them, `_detail_n` in a landscape or skin set, `_wet` in a
+/// skin set only.
+#[test]
+fn renamed_output_keeps_the_detail_names() {
+    for tails in [Tails::Detail, Tails::Landscape, Tails::Skin] {
+        for tail in ["detail", "detailnorm"] {
+            assert_eq!(
+                renamed_output(&format!("a/body_{tail}.dds"), "x", tails),
+                Some(PathBuf::from(format!("a/x_{tail}.dds"))),
+                "{tails:?} {tail}"
+            );
+        }
+    }
+    assert_eq!(
+        renamed_output("a/body_detail_n.dds", "x", Tails::Landscape),
+        Some(PathBuf::from("a/x_detail_n.dds"))
+    );
+    assert_eq!(
+        renamed_output("a/body_wet.dds", "x", Tails::Landscape),
+        Some(PathBuf::from("a/x.dds"))
+    );
+}
+
+/// Note GW1 (fix round 1): a lone `rock_detail` is its own set, so its name has no tail; a joined detail member does.
+#[test]
+fn a_lone_detail_set_renames_without_a_tail_and_twice_is_stable() {
+    let once = renamed_output("a/rock_detail.dds", "y", Tails::Plain).unwrap();
+    assert_eq!(once, PathBuf::from("a/y.dds"));
+    let twice = renamed_output(once.to_str().unwrap(), "y", Tails::Plain).unwrap();
+    assert_eq!(twice, once);
+    for tails in [Tails::Landscape, Tails::Skin] {
+        let once = renamed_output("a/rock_detail.dds", "y", tails).unwrap();
+        assert_eq!(once, PathBuf::from("a/y_detail.dds"), "{tails:?}");
+        let twice = renamed_output(once.to_str().unwrap(), "y", tails).unwrap();
+        assert_eq!(twice, once, "{tails:?}");
+    }
+}
+
+#[test]
+fn output_names_ending_in_a_detail_spelling_are_refused() {
+    for bad in ["wall_detail", "wall_detailnorm", "Wall_Detail"] {
+        assert!(check_output_name(bad).is_err(), "{bad}");
+    }
+    assert!(check_output_name("detail").is_ok());
+    assert!(check_output_name("detailed").is_ok());
 }

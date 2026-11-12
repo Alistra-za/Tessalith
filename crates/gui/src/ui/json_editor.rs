@@ -12,8 +12,7 @@ use crate::model::sections::{delete_hits, not_written_reason, DeleteHit};
 use crate::model::sets::{slot_matches, SetView};
 use crate::model::AppModel;
 use crate::pgp::prefix::{
-    active_matches, json_rename, match_toggle, stored_set_match, NOT_WRITTEN,
-    PATH_CONTAINS_NOT_WRITTEN, RENAMED_MATCH_NOTE, RENAMED_ONE_MATCH,
+    active_matches, json_rename, match_toggle, stored_set_match, RENAMED_MATCH_NOTE,
 };
 use crate::pgp::schema::{grass_ignores, spec, KeyKind, KeySpec, NumRange, KEYS};
 use crate::pgp::settings::{number_default, rgb_default, Settings};
@@ -307,7 +306,17 @@ fn entry_frame(ui: &egui::Ui, stroke: egui::Color32) -> egui::Frame {
 
 /// One key as a small rounded pill.
 fn pill<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
-    egui::Frame::new()
+    // A frame never wraps in `horizontal_wrapped` (it is placed at the cursor and drawn past the edge): start a new
+    // row when this pill's width last frame no longer fits what is left of this one.
+    let width_id = ui.next_auto_id().with("pill-width");
+    let row_start = ui.cursor().min.x <= ui.max_rect().min.x + 0.5;
+    let last = ui.data(|d| d.get_temp::<f32>(width_id));
+    // Not `available_width`: in a wrapping layout it is the next row's width once the cursor is past the edge.
+    let left = ui.max_rect().right() - ui.cursor().min.x;
+    if ui.layout().main_wrap && !row_start && last.is_some_and(|w| w > left) {
+        ui.end_row();
+    }
+    let r = egui::Frame::new()
         .corner_radius(PILL_RADIUS)
         .fill(ui.visuals().faint_bg_color)
         .stroke(egui::Stroke::new(
@@ -315,8 +324,9 @@ fn pill<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
             ui.visuals().widgets.noninteractive.bg_stroke.color,
         ))
         .inner_margin(egui::Margin::symmetric(8, 3))
-        .show(ui, |ui| ui.horizontal(add).inner)
-        .inner
+        .show(ui, |ui| ui.horizontal(add).inner);
+    ui.data_mut(|d| d.insert_temp(width_id, r.response.rect.width()));
+    r.inner
 }
 
 fn remove_button(ui: &mut egui::Ui) -> bool {
@@ -690,33 +700,21 @@ fn set_entry(
         let waiting = pending(ui, &owner);
         if let Some((d, _)) = &renamed_to {
             ui.weak(RENAMED_MATCH_NOTE).on_hover_text(format!(
-                "Written as match_diffuse = {d}; other match slots are not written"
+                "Written as match_diffuse = {d}; a second match or path_contains writes slot commands instead"
             ));
         }
         ui.horizontal_wrapped(|ui| {
-            // AN2: a renamed set's matches keep their mode (another would be refused), and only its first is written.
-            let renamed = renamed_to.is_some();
-            let blocked: Vec<Mode> = if renamed {
-                (1..=8u8).map(Mode::Exact).chain([Mode::Contains]).collect()
-            } else {
-                taken.clone()
-            };
-            let first = active.first().map(|(n, _)| *n);
             for (n, path) in &active {
-                let n = *n;
                 match_pill(
                     ui,
                     model,
                     &owner,
-                    Mode::Exact(n),
+                    Mode::Exact(*n),
                     path,
                     &derived,
-                    &blocked,
+                    &taken,
                     acts,
                 );
-                if renamed && Some(n) != first {
-                    ui.colored_label(AMBER, NOT_WRITTEN);
-                }
             }
             // Trace #18: an exact slot with no known path is a pending pill, not an invisible `matchN = ""`.
             // Slot 1 too: a pill switched to slot 1 (turned off, `match1 = ""`) would otherwise vanish.
@@ -730,7 +728,7 @@ fn set_entry(
                     Mode::Exact(n),
                     "",
                     &derived,
-                    &blocked,
+                    &taken,
                     acts,
                 );
             }
@@ -743,12 +741,9 @@ fn set_entry(
                     Mode::Contains,
                     &p,
                     &derived,
-                    &blocked,
+                    &taken,
                     acts,
                 );
-                if renamed {
-                    ui.colored_label(AMBER, PATH_CONTAINS_NOT_WRITTEN);
-                }
             }
             let nif = text_of(&c.own, "nif_filter").map(str::to_string);
             if nif.is_some() || waiting.iter().any(|k| k == "nif_filter") {
@@ -812,19 +807,11 @@ fn add_set_key_menu(
     ui.menu_button("+ key", |ui| {
         ui.menu_button("Match", |ui| {
             let (_, addable) = slot_matches(v);
-            // AN2: a renamed set takes no second match.
-            let renamed = json_rename(&c.own, &derived).is_some();
-            let refused = (renamed && taken.iter().any(|m| matches!(m, Mode::Exact(_))))
-                .then_some(RENAMED_ONE_MATCH);
             for n in 1..=8u8 {
                 if taken.contains(&Mode::Exact(n)) {
                     continue;
                 }
-                if ui
-                    .add_enabled(refused.is_none(), egui::Button::new(Mode::Exact(n).label()))
-                    .on_disabled_hover_text(refused.unwrap_or_default())
-                    .clicked()
-                {
+                if ui.button(Mode::Exact(n).label()).clicked() {
                     let path = if n == 1 {
                         derived.clone()
                     } else {
@@ -843,13 +830,7 @@ fn add_set_key_menu(
                     ui.close();
                 }
             }
-            let pc = renamed.then_some(RENAMED_ONE_MATCH);
-            if !taken.contains(&Mode::Contains)
-                && ui
-                    .add_enabled(pc.is_none(), egui::Button::new("path contains"))
-                    .on_disabled_hover_text(pc.unwrap_or_default())
-                    .clicked()
-            {
+            if !taken.contains(&Mode::Contains) && ui.button("path contains").clicked() {
                 add_pending(ui, owner, waiting, "path_contains");
                 ui.close();
             }

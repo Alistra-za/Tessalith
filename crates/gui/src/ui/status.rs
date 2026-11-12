@@ -28,7 +28,7 @@ impl Status {
         }
     }
 
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             Status::Blocks => "blocks export",
             Status::Warning => "warning",

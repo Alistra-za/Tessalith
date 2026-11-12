@@ -85,7 +85,7 @@ fn create_rename_delete_and_order() {
         .any(|e| e.id == "mine/uno" && e.created && e.renamed_from.is_none()));
     s.set_order(&["mine/two".to_string(), "mine/uno".into()]);
     assert_eq!(s.order(), vec!["mine/two".to_string(), "mine/uno".into()]);
-    s.delete_set("mine/two");
+    s.delete_set("mine/two", &[]);
     assert!(!s.entries().iter().any(|e| e.id == "mine/two"));
     assert_eq!(
         s.order(),
@@ -371,7 +371,7 @@ fn an_unknown_shader_id_reads_as_none_and_survives_a_save() {
 #[test]
 fn moving_a_file_back_lifts_its_own_remove() {
     let (_d, mut s) = doc(None);
-    s.remove_member("a/wall", "a/wall_n.png");
+    s.add_remove_line("a/wall", "a/wall_n.png");
     assert_eq!(s.entries()[0].remove, vec!["a/wall_n.png".to_string()]);
     s.add_member("a/wall", "a/wall_n.png");
     let e = &s.entries()[0];
@@ -428,7 +428,8 @@ fn removing_one_of_two_same_stem_files_keeps_the_shared_add_key() {
     s.remove_member("a/new", "a/foo.tga");
     let e = &s.entries()[0];
     assert_eq!(e.add, ["a/foo"], "{e:?}");
-    assert_eq!(e.remove, ["a/foo.tga"], "{e:?}");
+    // Note HF1: the engine applies the no-set edit after the moves, so only this file leaves.
+    assert_eq!(s.no_set(), ["a/foo.tga"]);
 }
 
 /// Trace #30 (AG100 gap): a hand-written extension-less `remove` key that also names a sibling cannot be lifted
@@ -519,7 +520,7 @@ fn a_shared_add_key_is_kept_when_a_dds_sibling_exists() {
     s.remove_member("a/new", "a/foo.png");
     let e = &s.entries()[0];
     assert_eq!(e.add, ["a/foo"], "{e:?}");
-    assert_eq!(e.remove, ["a/foo.png"], "{e:?}");
+    assert_eq!(s.no_set(), ["a/foo.png"]);
 }
 
 /// Final review M7: an undo or redo back to the saved text is clean even though the JSON hash is put back after the

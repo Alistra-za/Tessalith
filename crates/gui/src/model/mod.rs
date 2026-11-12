@@ -13,8 +13,8 @@ pub mod cs_skin_json;
 pub mod cube_cross;
 pub mod encoding_follow;
 pub mod export;
+pub mod export_scope;
 pub mod fields;
-pub mod from_normal;
 pub mod heatmap;
 pub mod helpers;
 pub mod history;
@@ -29,7 +29,6 @@ pub mod meshes;
 pub mod messages;
 pub mod nav;
 pub mod out_size;
-pub mod overlay;
 pub mod pack_fills;
 pub mod pbr_export;
 mod pbr_follow;
@@ -40,9 +39,8 @@ pub mod readout;
 mod reencode;
 pub mod rename;
 pub mod review;
-pub mod rnm;
-pub mod rnm_preview;
 pub mod sections;
+pub mod set_groups;
 pub mod set_preview;
 pub mod sets;
 pub mod sets_filter;
@@ -52,7 +50,6 @@ pub mod target_mod;
 pub mod texture_view;
 pub mod txst_map;
 pub mod used_by;
-pub mod uv_coverage;
 pub mod view;
 pub mod viewport3d;
 pub mod xpmf_json;
@@ -72,7 +69,7 @@ use engine::session::{Session, Thumbnail};
 use items::*;
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -185,10 +182,6 @@ pub enum Dialog {
     ConfirmResetAll(Vec<String>),
     /// F3b: the rename dialog (input aliases or output names).
     Rename(rename::RenameDialog),
-    /// v2 Track B: "Generate from normal map…" for this set id; its state is `AppModel::gen` (floats are not `Eq`).
-    GenerateFromNormal(String),
-    /// Note CO: "Delete generated file…", asked once per file; texts and refusals read when it opened.
-    ConfirmDeleteGenerated(Box<from_normal::DeleteGenerated>),
     /// Export to ▾: Make marker cube… (cubemap GUI, Task 6); the draft is AppModel::marker.
     MakeMarker,
     Error(String),
@@ -268,6 +261,10 @@ type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
 pub(crate) struct ViewCache {
     pub key: Option<ViewKey>,
     pub views: Option<Arc<Vec<sets::SetView>>>,
+    /// Note HF1: the set keys whose files are all in no set.
+    pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
+    /// Note HF9: the set keys of the excluded groups.
+    pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
     /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
@@ -338,6 +335,8 @@ pub(crate) struct ViewKey {
     known_rev: u64,
     /// Note HL: the target mod's read; the export-overlap block reads the stored path.
     target_mod_rev: u64,
+    /// Note HF9: the export scope (`AppModel::scope_rev`): what `in_run` answers, so every cache here.
+    scope: u64,
 }
 
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
@@ -396,8 +395,8 @@ pub struct AppModel {
     pub scan_store_unsettled: bool,
     /// What `scan_store_unsettled` was when the running scan started (Note CW2: an error raised before `begin_scan` restores it).
     unsettled_before_scan: bool,
-    /// Note FC13 (CL32 M6): a Meshes scan is running now, between `scan_started` and `scan_finished`; with
-    /// `scan_store_unsettled` and no run, the last scan was stopped. Read by the UV coverage reasons.
+    /// Note FC13: a Meshes scan is running now, between `scan_started` and `scan_finished`; with
+    /// `scan_store_unsettled` and no run, the last scan was stopped.
     pub scan_running: bool,
     /// `scan_db`'s stamp, taken once per frame in `poll` (REPORT #9: `view_key` does not stat it per call).
     scan_stamp: cs_pbr::Stamp,
@@ -493,10 +492,6 @@ pub struct AppModel {
     /// The rename dialog's last plan, for drawing only (Note FA).
     rename_cache: std::cell::RefCell<Option<rename::PlanCache>>,
     pub unmatched_keys: Vec<String>,
-    /// Per-set RNM-* notes from layer jobs (they have no item).
-    pub rnm_notes: std::collections::BTreeMap<String, Vec<engine::codes::Warning>>,
-    /// Layer, mask and AO path to its `[files]` key.
-    pub rnm_keys: std::collections::BTreeMap<PathBuf, String>,
     /// The preset id the last plan resolved (empty before the first plan).
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
@@ -543,8 +538,6 @@ pub struct AppModel {
     pub(crate) set_cards_drawn: std::cell::Cell<u64>,
     /// Item 22: per-item DDS sizes by plan revision.
     pub sizes: out_size::SizeCache,
-    /// Item 21: the RNM blended thumbnail job.
-    pub rnm_preview: rnm_preview::RnmPreview,
     /// A note kept in front of the status line until the next Export click (an Export cancelled by an edit, AF4).
     pub status_note: Option<String>,
     /// "Undid: <label>" / "Redid: <label>" in front of the status line until the next edit (item 2).
@@ -576,10 +569,6 @@ pub struct AppModel {
     pub export: export::ExportModel,
     pub preview: preview::PreviewModel,
     pub view: view::ViewState,
-    /// The preview overlay job and the overlay on show (v2 checks, Note CL).
-    pub overlay: overlay::OverlayState,
-    /// UV coverage: the session cache, its reads, Check all and the scan-has-rows answer (Note CL, Task 8).
-    pub uv: uv_coverage::UvState,
     /// The largest texture side the GPU takes; set from the renderer at start-up (M3a spec §6.5).
     pub gpu_max_dim: u32,
     /// False when eframe found no usable GPU adapter: the preview is off, everything else works (M3a spec §7).
@@ -593,16 +582,6 @@ pub struct AppModel {
     /// File-exists answers asked while drawing (the scan DB, Show in Explorer), re-checked at most once a second
     /// (AG128).
     pub stats: std::cell::RefCell<shell::StatCache>,
-    /// Header sizes read for the Generate offers, by (path, size, mtime) (Note CO, spec-M5).
-    pub(crate) gen_dims: std::cell::RefCell<from_normal::GenDims>,
-    /// Generated-file facts for the slot rows: the normals' hashes by (path, stamp) and `GenInfo` by item (Task 7).
-    pub(crate) gen_info: std::cell::RefCell<from_normal::GenInfoCache>,
-    /// The Generate path's alias map by plan, and its lookup counters (Task 10, Task 6 review M6).
-    pub(crate) gen_look: std::cell::RefCell<from_normal::GenLookups>,
-    /// The Generate dialog's state while it is open, or while a cancelled Generate that started writing lands.
-    pub gen: Option<from_normal::GenDialog>,
-    /// The first file the last Generate wrote: selected by the plan that lists it.
-    pub gen_select: Option<String>,
     /// Note FC8: clicks and keys that waited one frame for a focused text field to commit (`ui::after_commit`); run
     /// first thing next frame, by `ui::actions::keys`.
     pub after_commit: Vec<AfterCommit>,
@@ -611,10 +590,6 @@ pub struct AppModel {
     weighting_follow: Vec<(String, String, String)>,
     /// Note FI3: a re-encode step's history merge key; the FC1 recording its settled plan makes joins that step.
     reencode_follow: Option<String>,
-    /// The last Generate job id, so a new dialog's ids never repeat a closed one's.
-    pub(crate) gen_ids: u64,
-    /// Generate dialogs opened so far; the preview zoom is reset when this changes.
-    pub(crate) gen_opens: u64,
     /// A Save report write is on a worker (AG130); the app keeps frames coming until it lands.
     pub report_saving: bool,
     /// "Show in Meshes" asked for this texture (normalised scan path); app.rs switches the view (Note GC).
@@ -676,6 +651,10 @@ pub struct AppModel {
     also_cancel: Option<CancelToken>,
     /// Final review I2: `Some` while the walk runs: the export's failure, shown when they end.
     also_tail: Option<Option<String>>,
+    /// Note HF9: Export set / group / N sets, from the click until Review closes or the export ends.
+    export_scope: Option<export_scope::ExportScope>,
+    /// Bumped with every scope change; part of the view key, so every count and list cached there follows it.
+    scope_rev: u64,
     /// `sdc.toml` was made read-only because the engine rejected it (not because it failed to parse).
     ignored_by_plan: bool,
     /// Note FC14: `history.pushes` at the last `replan`, and, when a step was pushed since the one before, that count:
@@ -834,8 +813,6 @@ impl AppModel {
             sets: vec![],
             sets_root: None,
             unmatched_keys: vec![],
-            rnm_notes: Default::default(),
-            rnm_keys: Default::default(),
             batch_preset: String::new(),
             batch: false,
             selection: Selection::None,
@@ -867,7 +844,6 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             set_cards_drawn: Default::default(),
             sizes: Default::default(),
-            rnm_preview: Default::default(),
             status_note: None,
             undo_note: None,
             undo_note_at: None,
@@ -886,8 +862,6 @@ impl AppModel {
             export: export::ExportModel::default(),
             preview,
             view: view::ViewState::default(),
-            overlay: Default::default(),
-            uv: Default::default(),
             gpu_max_dim: 16384,
             gpu_available: true,
             export_after_plan: false,
@@ -913,6 +887,8 @@ impl AppModel {
             also_json: Vec::new(),
             also_cancel: None,
             also_tail: None,
+            export_scope: None,
+            scope_rev: 0,
             ignored_by_plan: false,
             replan_pushes: (0, None),
             close_ready: false,
@@ -920,16 +896,9 @@ impl AppModel {
             nav: Default::default(),
             shell: Vec::new(),
             stats: Default::default(),
-            gen_dims: Default::default(),
-            gen_info: Default::default(),
-            gen_look: Default::default(),
-            gen: None,
-            gen_select: None,
             after_commit: Vec::new(),
             weighting_follow: Vec::new(),
             reencode_follow: None,
-            gen_ids: 0,
-            gen_opens: 0,
             report_saving: false,
             show_in_meshes: None,
             nif_tab_request: None,
@@ -981,13 +950,9 @@ impl AppModel {
         self.pending_json_answer = None;
         self.nif_export_queued = false;
         self.nif_export_due = false;
-        // A Generate of the previous folder: cancelled; one that writes still lands, and records nothing here (I1).
-        self.gen_cancel();
-        self.gen_select = None;
         self.weighting_follow.clear();
         self.reencode_follow = None;
         self.after_commit.clear();
-        self.drop_provenance_note();
         // Every dialog that can be open here belongs to the previous folder (`OpenUnsaved` and `ExportRunning`
         // were answered to get here).
         self.dialog = None;
@@ -1094,9 +1059,47 @@ impl AppModel {
         }
     }
 
-    /// The export folder the current sets were planned with (their keys are under it), else `export_root`.
+    /// Note HV2: the analysis disk cache's limit, saved now and applied when the app next starts.
+    pub fn set_analysis_cache_mb(&mut self, mb: u32) {
+        self.settings.analysis_cache_mb = Some(mb);
+        self.save_settings();
+    }
+
+    /// The output root the current sets were planned with (their keys are under it), else `export_root`'s (Note HQ1:
+    /// inside the export folder, below the root's own `textures` folders).
     pub fn sets_root(&self) -> PathBuf {
-        self.sets_root.clone().unwrap_or_else(|| self.export_root())
+        self.sets_root.clone().unwrap_or_else(|| match &self.root {
+            Some(r) => engine::discover::effective_output_root(r, &self.export_root()),
+            None => self.export_root(),
+        })
+    }
+
+    /// Note HQ1: `rel`, a path under the output root the sets were planned with, as a path under the export folder
+    /// (a game path once it starts at `textures`).
+    pub fn export_rel(&self, rel: &Path) -> PathBuf {
+        // `/`-separated, as the explicit paths it joins.
+        PathBuf::from(
+            self.plan_prefix()
+                .join(rel)
+                .to_string_lossy()
+                .replace('\\', "/"),
+        )
+    }
+
+    /// The folders between the export folder and the plan's output root (Note HQ1); empty while the export folder
+    /// changes and the new plan has not landed.
+    fn plan_prefix(&self) -> PathBuf {
+        let (out, root) = (self.output_root(), self.sets_root());
+        root.strip_prefix(&out)
+            .map(Path::to_path_buf)
+            .unwrap_or_default()
+    }
+
+    /// A plan path (a `job_key`) as an explicit-path key: under the export folder, `/`, lower case (Note HQ6).
+    pub fn export_key(&self, rel: &str) -> String {
+        self.export_rel(Path::new(rel))
+            .to_string_lossy()
+            .to_lowercase()
     }
 
     /// The export folder the user chose for this project (Note FB1): with a usable project document (loaded, not
@@ -1168,8 +1171,6 @@ impl AppModel {
         if !after_plan {
             // A finished scan (or another database): the "Used by meshes" list reads again.
             self.used_by_scan_changed();
-            // And UV coverage, a session cache read from the scan.
-            self.uv.clear();
         }
         // Note FL6: a post-plan read of the inputs (mesh keys, database, stamp) the last landed read had would return
         // the same evidence, so the kept evidence lands at once and the plan's tail runs now: no read is pending, so
@@ -1319,7 +1320,7 @@ impl AppModel {
                 _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
                     self.queued_export_dropped()
                 }
-                _ if clicked => self.export_clicked(),
+                _ if clicked => self.export_go(),
                 // A plan may still be in flight, or sources changed: the same front half as Review's Export.
                 Some(_) => self.continue_review(),
                 None => {}
@@ -1583,16 +1584,6 @@ impl AppModel {
         self.plan_wait() || self.non_plan_busy()
     }
 
-    /// A v2 worker job is in flight (owner answer 8): the app's one poll line keeps frames coming and `wait_idle`
-    /// waits for it. Not part of `busy()`, which greys the Advanced fields. Tracks A and B add their jobs here.
-    pub fn v2_jobs_pending(&self) -> bool {
-        self.overlay_pending()
-            || self.uv.read_pending()
-            || self.uv.all_running()
-            || self.uv.probe_pending()
-            || self.gen_pending()
-    }
-
     /// Drain worker messages. True when anything changed (the UI repaints).
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
@@ -1610,7 +1601,6 @@ impl AppModel {
             changed = true;
         }
         self.scan_stamp = cs_pbr::stamp(self.scan_db.as_deref());
-        self.uv_poll();
         self.cs_pbr.new_frame();
         for d in self.picker.take() {
             changed = true;
@@ -1636,6 +1626,8 @@ impl AppModel {
         if thumbs_landed {
             self.invalidate_views();
         }
+        // Note HF10: a queued scoped export that was dropped or cancelled above takes its scope with it.
+        self.end_idle_scope();
         // Last, so a plan that landed above is checked in this poll (K1).
         changed |= self.refresh_checks();
         changed
@@ -1813,27 +1805,7 @@ impl AppModel {
             WorkerMsg::Source { token, result } => self.on_source(token, result),
             WorkerMsg::Encoded { token, result } => self.on_encoded(token, result),
             WorkerMsg::Heatmap { id, image } => self.heatmap_landed(id, image),
-            WorkerMsg::Overlay { generation, image } => self.overlay_landed(generation, image),
-            WorkerMsg::UvCoverage {
-                generation,
-                tex,
-                size,
-                coverage,
-            } => self.uv_landed(generation, (tex, size), coverage),
-            WorkerMsg::UvProgress {
-                run,
-                done,
-                total,
-                finished,
-            } => self.uv_progress(run, done, total, finished),
-            WorkerMsg::ScanHasRows { stamp, rows } => self.uv_rows_landed(stamp, rows),
             WorkerMsg::Dims(dims) => self.dims_landed(dims),
-            WorkerMsg::RnmPreview { id, image } => self.rnm_preview_landed(id, image),
-            WorkerMsg::Generated {
-                id,
-                preview,
-                result,
-            } => self.gen_landed(id, preview, result),
             _ => {}
         }
     }
@@ -1859,6 +1831,11 @@ impl AppModel {
                 .flatten(),
         };
         let cancelled = cancelled || result.as_ref().is_ok_and(|s| !s.cancelled.is_empty());
+        // Note HF9: on a partial or excluding run that ended cleanly, a row still queued is a texture the run left
+        // out (an Also phase's own rows have keys of their own folder), not a failure.
+        if !cancelled && why.is_none() && !self.export.outside_run.is_empty() {
+            self.export.drop_unstarted();
+        }
         self.export.end_unfinished(cancelled, why.as_deref());
         if let Some(p) = self.export.pace.as_mut() {
             p.stop(Instant::now());
@@ -1928,6 +1905,8 @@ impl AppModel {
 
     /// The end of an export: what was asked while it ran (close, or open another folder), else its error as a dialog.
     fn after_export(&mut self, failure: Option<String>) {
+        // Note HF9: an Export set / group ends with its run.
+        self.set_scope(None);
         // Note FC5: the run has fully ended (with Also on, after its walk). Opening another folder below clears it.
         self.nif_export_due |= std::mem::take(&mut self.nif_export_queued);
         // A user who cancelled the export to leave does not need its error as a dialog.
@@ -1955,17 +1934,6 @@ impl AppModel {
             )),
             _ => Ok(()),
         }
-    }
-
-    /// I1: a close or open asked while a Generate writes: done when it has landed and recorded its files, so a file
-    /// Tessalith wrote is never left unrecorded or recorded into another project.
-    fn defer_until_generated(&mut self, action: AfterExport) {
-        self.status_line = match action {
-            AfterExport::Close => "Closing when Generate has finished",
-            AfterExport::Open(_) => "Opening the folder when Generate has finished",
-        }
-        .into();
-        self.after_export = Some(action);
     }
 
     /// Tests: end the export with a made-up result (`WorkerMsg` is private), as the worker's `ExportDone` would.
@@ -1998,6 +1966,13 @@ impl AppModel {
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
     /// are flagged and the plan is made again first, so the export starts from fresh plans (M3a spec §7).
     pub fn export_clicked(&mut self) {
+        // Note HF9: a plain Export is the whole project, whatever Review was opened for.
+        self.set_scope(None);
+        self.export_go();
+    }
+
+    /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
+    fn export_go(&mut self) {
         self.status_note = None;
         if self.root.is_none() {
             return;
@@ -2026,9 +2001,11 @@ impl AppModel {
         if self.plan_unsettled() {
             return true;
         }
-        // P14: with a tick on, Review's gate checks the location and the three folders instead (TA19).
-        if let Some(problem) = (!self.also_on())
-            .then(|| export::export_folder_problem(&root, &self.export_root()))
+        // With a tick on, Review's gate checks the location and the three folders instead (TA19). A run that skips
+        // that gate (a scoped export) writes under `output_root()`, the PBR folder, so that is the one checked
+        // (Note HS7).
+        if let Some(problem) = (!self.also_runs())
+            .then(|| export::export_folder_problem(&root, &self.output_root()))
             .flatten()
         {
             self.dialog = Some(Dialog::Error(problem));
@@ -2057,7 +2034,7 @@ impl AppModel {
         if self.nif_rows_written()
             || self.undecided() > 0
             || self.pgp_json_edited()
-            || self.also_on()
+            || self.also_runs()
             || self.export_folder_chosen().is_none()
         {
             self.open_review();
@@ -2091,7 +2068,7 @@ impl AppModel {
     pub fn undecided_keys(&self) -> Vec<String> {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::NeedsDecision)
+            .filter(|i| i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
             .map(|i| i.key.clone())
             .collect()
     }
@@ -2307,12 +2284,6 @@ impl AppModel {
                     .collect(),
                 None => vec![(job.input.as_path(), job.source)],
             };
-            let rnm = job
-                .active_rnm()
-                .into_iter()
-                .flat_map(|r| r.inputs(&job.profile.rnm))
-                .map(|(f, _)| (f.path.as_path(), f.stamp));
-            let stamps: Vec<_> = stamps.into_iter().chain(rnm).collect();
             for (path, planned) in stamps {
                 if planned.is_some_and(|p| SourceStamp::of(path) != Some(p)) {
                     changed_paths.insert(path.to_path_buf());
@@ -2329,10 +2300,6 @@ impl AppModel {
                 || item.job.as_ref().is_some_and(|j| {
                     j.pack.as_ref().is_some_and(|pk| {
                         pk.sources.iter().any(|s| changed_paths.contains(&s.path))
-                    }) || j.active_rnm().is_some_and(|r| {
-                        r.inputs(&j.profile.rnm)
-                            .iter()
-                            .any(|(f, _)| changed_paths.contains(&f.path))
                     })
                 });
             n += usize::from(item.changed_on_disk);
@@ -2367,7 +2334,8 @@ impl AppModel {
         } else {
             engine::api::LowDetailMode::Off
         };
-        let also = self.also_on();
+        req.write_only = self.write_only();
+        let also = self.also_runs();
         self.also_error = None;
         self.also_phases.clear();
         self.also_written = None;
@@ -2384,8 +2352,19 @@ impl AppModel {
         // R4: the ticks are for this export only. K12: the JSON answer goes with this export, or none does.
         self.pending_json_answer = self.review.take().and_then(|r| r.json_answer);
         self.review_json_cache.take();
+        // Note HF9: the textures a partial or excluding run leaves out get no Files row.
+        let outside_run = match req.write_only {
+            Some(_) => self
+                .items
+                .iter()
+                .filter(|i| !i.job_key.is_empty() && !self.item_in_run(i))
+                .map(|i| i.job_key.to_lowercase())
+                .collect(),
+            None => Default::default(),
+        };
         self.export = export::ExportModel {
             pace: Some(export::Pace::new(Instant::now())),
+            outside_run,
             ..Default::default()
         };
         self.show_tab(bottom::BottomTab::Files);
@@ -2572,9 +2551,9 @@ impl AppModel {
         }
     }
 
-    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes, generated-file
-    /// provenance; P14): saves `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next
-    /// Save. True when it deferred.
+    /// The one save-if-clean rule for records kept outside the undo history (JSON hashes; P14): saves
+    /// `sdc-project.toml` when it had no unsaved edits, else leaves the record for the next Save. True when it
+    /// deferred.
     pub(crate) fn save_record(&mut self, was_dirty: bool) -> bool {
         if was_dirty {
             return true;
@@ -2670,16 +2649,14 @@ impl AppModel {
     fn apply_plan(&mut self, view: PlanView) {
         // A plan landed: any blame on `sdc.toml` is settled, so a later failure must not unblame it (review I1 of #9).
         self.ignored_by_plan = false;
-        // Task 9 (Z11): the sub-types before this plan chain, compared when it settles.
-        if self.type_base.is_none() {
-            self.type_base = Some(self.subtypes());
-        }
+        self.keep_type_base();
         // Look the expanded item's set up before the items are replaced: if the item vanishes, its set is the
         // fallback selection (Review Focus 1).
         let expanded_set = self
             .expanded
             .as_deref()
             .and_then(|k| self.item(k))
+            .filter(|i| !self.is_no_set(&i.key))
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
@@ -2688,16 +2665,16 @@ impl AppModel {
         let carried = std::mem::take(&mut *self.views.borrow_mut());
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
-        self.refresh_game_paths();
         self.request_dds_thumbs();
         // K1: the checks run on this plan's analyses at the end of the poll that lands it.
         self.check_state.plans_applied += 1;
         self.invalidate_views();
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
+        self.rekey_scope(old_root.as_deref());
+        // Note HQ6: after the output root lands, since the game paths are read under it.
+        self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;
-        self.rnm_notes = view.rnm_notes;
-        self.rnm_keys = view.rnm_keys;
         self.batch_preset = view.preset_id;
         self.loaded_user_presets = view.user_presets;
         self.suffix_aliases = view.suffix_aliases;
@@ -2722,24 +2699,19 @@ impl AppModel {
         // Keep the selection when its item or set still exists; else nothing.
         let gone = match &self.selection {
             Selection::Item(k) => self.item(k).is_none(),
-            Selection::Set(k) => !self.sets.iter().any(|s| &s.key == k),
+            // Note GY5: a set that lost its card is gone too.
+            Selection::Set(k) => !sets::has_card(self, k),
             Selection::None => false,
         };
         if gone {
             self.selection = Selection::None;
-        }
-        // Generate's first file, by the plan Generate started (it lists the file); never a later one.
-        if let Some(k) = self.gen_select.take().filter(|k| self.item(k).is_some()) {
-            self.select_item(&k);
         }
         if let Some(k) = self.expanded.clone() {
             if self.item(&k).is_none() {
                 self.expanded = None;
                 self.preview_close();
                 if selected_expanded {
-                    if let Some(set) =
-                        expanded_set.filter(|s| self.sets.iter().any(|x| &x.key == s))
-                    {
+                    if let Some(set) = expanded_set.filter(|s| sets::has_card(self, s)) {
                         self.selection = Selection::Set(set);
                     }
                 }
@@ -2764,31 +2736,16 @@ impl AppModel {
 
     /// Fast re-plan (R2 §5): splice a partial plan of the `scope` sets into the last full plan's items and sets.
     /// It writes nothing to the project and runs none of the full plan's tail (`finish_plan`, mesh votes, checks,
-    /// `last_inputs`); the full plan lands behind it and replaces everything.
+    /// `last_inputs`); the full plan lands behind it and replaces everything. It keeps the sub-types before the chain
+    /// (`keep_type_base`), since the partial can be the first plan after an edit.
     fn apply_partial(&mut self, view: PlanView, scope: &BTreeSet<String>) {
+        self.keep_type_base();
         let in_scope = |i: &TextureItem| i.set_key.as_ref().is_some_and(|s| scope.contains(s));
         let expanded_in_scope = self
             .expanded
             .as_deref()
             .and_then(|k| self.item(k))
             .is_some_and(in_scope);
-        // The RNM layer, mask and AO paths of some items (as `PlanView::build` collects them).
-        fn rnm_paths<'a>(items: impl Iterator<Item = &'a TextureItem>) -> BTreeSet<PathBuf> {
-            items
-                .filter_map(|i| i.job.as_ref()?.rnm.as_ref())
-                .flat_map(|r| {
-                    r.layers
-                        .iter()
-                        .flat_map(|l| {
-                            std::iter::once(&l.file.path).chain(l.mask.as_ref().map(|m| &m.path))
-                        })
-                        .chain(r.ao.as_ref().map(|a| &a.file.path))
-                        .cloned()
-                })
-                .collect()
-        }
-        // The scope sets' paths: the view's replace them.
-        let old_rnm = rnm_paths(self.items.iter().filter(|i| in_scope(i)));
         // A failed file has no set: the partial's own item for its key replaces it.
         let new: BTreeSet<String> = view.items.iter().map(|i| i.key.clone()).collect();
         let mut items = view.items;
@@ -2806,14 +2763,6 @@ impl AppModel {
                 *x = s;
             }
         }
-        // A path a set outside the scope still reads stays (final fix, parked from Task 6).
-        let kept = rnm_paths(self.items.iter().filter(|i| !in_scope(i)));
-        for p in old_rnm.difference(&kept) {
-            self.rnm_keys.remove(p);
-        }
-        self.rnm_notes.retain(|k, _| !scope.contains(k));
-        self.rnm_notes.extend(view.rnm_notes);
-        self.rnm_keys.extend(view.rnm_keys);
         // Note FL7: the views cache moves to the new key with only the scope sets' views built again (the frame after
         // a partial must not rebuild 10k views); the export blocks and asks stay as of the last full plan.
         let old_key = self.view_key();
@@ -2930,7 +2879,8 @@ impl AppModel {
             _ if (clicked || continued.is_some()) && self.dialog.is_some() => {
                 self.queued_export_dropped()
             }
-            _ if clicked => self.export_checks(),
+            // Note HF10: through `export_go`, as the scan-finished read does; the scope stays.
+            _ if clicked => self.export_go(),
             Some(how) => self.run_continue(how),
             None => {}
         }
@@ -2948,7 +2898,7 @@ impl AppModel {
         let end = Instant::now() + timeout;
         loop {
             self.poll();
-            if !self.busy() && !self.v2_jobs_pending() {
+            if !self.busy() {
                 return true;
             }
             if Instant::now() > end {
@@ -3001,8 +2951,10 @@ impl AppModel {
         let mut paths: Vec<String> = self
             .items
             .iter()
+            .filter(|i| !i.job_key.is_empty())
             .filter_map(|i| {
-                let k = &i.job_key;
+                // Note HQ1: under the export folder, so a root at or inside `textures` keeps that folder.
+                let k = &self.export_key(&i.job_key);
                 let at = if k.starts_with("textures/") {
                     0
                 } else {
@@ -3167,6 +3119,7 @@ impl AppModel {
             scan: self.scan_stamp,
             known_rev: self.known_rev,
             target_mod_rev: self.target_mod_rev,
+            scope: self.scope_rev,
         }
     }
 
@@ -3180,7 +3133,7 @@ impl AppModel {
     pub fn undecided(&self) -> usize {
         self.items
             .iter()
-            .filter(|i| i.status == ItemStatus::NeedsDecision)
+            .filter(|i| i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
             .count()
     }
 
@@ -3220,7 +3173,6 @@ impl AppModel {
     pub fn collapse(&mut self) {
         self.expanded = None;
         self.preview_close();
-        self.overlay.clear();
     }
 
     fn snapshot_of(
@@ -3436,7 +3388,7 @@ impl AppModel {
 
     /// "1 texture, 1 set" / "3 textures, 2 sets" (Note FI14).
     fn counts_line(&self) -> String {
-        let (t, s) = (self.items.len(), self.sets.len());
+        let (t, s) = (self.items.len(), sets::carded_sets(self));
         format!(
             "{t} texture{}, {s} set{}",
             review::plural(t),
@@ -3582,7 +3534,7 @@ impl AppModel {
         if !self.crash_restore_on_top() {
             self.messages.notify(
                 messages::Severity::Info,
-                "The restored edits were already undone or edited since: use Undo or Redo",
+                "The restored edits were already undone or edited since: press Ctrl+Z to undo or Ctrl+Y to redo",
             );
             return;
         }
@@ -4164,8 +4116,6 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
-        // The deferred provenance is written now (M2).
-        self.drop_provenance_note();
         if wrote {
             self.refresh_banner(); // the save removed the saved documents' recovery files
             self.messages.notify(messages::Severity::Info, "Saved");
@@ -4218,9 +4168,6 @@ impl AppModel {
     pub fn request_open(&mut self, root: PathBuf) -> bool {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
-            false
-        } else if self.gen_writing() {
-            self.defer_until_generated(AfterExport::Open(root));
             false
         } else if self.prompts_unsaved() {
             self.dialog = Some(Dialog::OpenUnsaved(root));
@@ -4284,9 +4231,6 @@ impl AppModel {
     pub fn request_close(&mut self) -> bool {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Close));
-            false
-        } else if self.gen_writing() {
-            self.defer_until_generated(AfterExport::Close);
             false
         } else if self.prompts_unsaved() {
             self.dialog = Some(Dialog::CloseUnsaved);
@@ -4361,11 +4305,10 @@ mod tests {
         AppModel::new(GuiSettings::default(), None, session)
     }
 
-    /// Owner answer 8: an idle model has no v2 job in flight, and `wait_idle` returns at once.
+    /// An idle model has nothing in flight, and `wait_idle` returns at once.
     #[test]
-    fn an_idle_model_has_no_v2_jobs_pending() {
+    fn an_idle_model_is_idle() {
         let mut m = bare_model();
-        assert!(!m.v2_jobs_pending());
         assert!(m.wait_idle(Duration::from_secs(1)));
     }
 
@@ -4403,7 +4346,10 @@ mod tests {
             "landscape/rock01_normal.png",
             Answer::Subtype(Subtype::PbrNormal),
         );
-        m.set_output_name("landscape/leaf", Some("maple")).unwrap();
+        // Note HJ2: `leaf` is vanilla, which `set_output_name` refuses now; an old project holds the name in its file.
+        m.edit_docs("Seed output name", None, true, |_, d| {
+            d.set_output_name("landscape/leaf", Some("maple"))
+        });
         assert!(m.wait_idle(Duration::from_secs(60)));
         assert_eq!(m.target, Target::Cs);
         m
@@ -4475,7 +4421,7 @@ mod tests {
         let inputs = sets::engine_inputs(&m);
         assert_eq!(
             inputs.1.get(&OutputKey::File("landscape/moss.png".into())),
-            Some(&PathBuf::from("landscape/moss_new.dds")),
+            Some(&PathBuf::from("textures/landscape/moss_new.dds")),
             "{inputs:?}"
         );
         assert_eq!(
@@ -4483,7 +4429,7 @@ mod tests {
                 set: "landscape/q".into(),
                 suffix: "rfaos".into()
             }),
-            Some(&PathBuf::from("landscape/z_rfaos.dds")),
+            Some(&PathBuf::from("textures/landscape/z_rfaos.dds")),
             "{inputs:?}"
         );
         assert_eq!(inputs, sets::linear::engine_inputs(&m));

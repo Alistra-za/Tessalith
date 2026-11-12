@@ -130,7 +130,7 @@ fn files_that_are_not_cache_keys_survive_a_prune_that_removes_everything() {
 fn tiny() -> (SourceSet, Defines) {
     let dir = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures");
     (
-        SourceSet::new(dir.into()),
+        SourceSet::new(render3d::ShaderSource::Folder(dir.into())),
         Defines(vec![("PSHADER".into(), "1".into())]),
     )
 }

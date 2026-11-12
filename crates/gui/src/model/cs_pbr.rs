@@ -628,7 +628,7 @@ pub fn set_key(v: &SetView) -> Option<TexKey> {
         entry
             .entry("match_diffuse")
             .or_insert_with(|| Json::String(d.clone()));
-        // AN1: a renamed entry is written with its `match_diffuse` only.
+        // AN1: a `Key`-form rename is written with its `match_diffuse` only; a `Slots`-form one keeps every match (HJ3).
         if let Some((md, _)) = crate::pgp::prefix::json_rename(&v.settings, d) {
             entry.retain(|k, _| {
                 k == "match_diffuse" || !(k.starts_with("match") || k == "path_contains")

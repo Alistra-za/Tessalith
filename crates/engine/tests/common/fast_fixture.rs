@@ -78,7 +78,7 @@ fn put_normal(dir: &Path, name: &str) {
 /// - PBR set `a` (`a`, `a_n`, `a_rmaos`);
 /// - `b` and the hand-set helper `b_mask` (`helper.role = opacity`), joined to set `b`;
 /// - six cube faces `c_px` .. `c_nz`, each `subtype = cubemap`;
-/// - RNM `d` (`d`, `d_n`, layer `d_detailnorm`);
+/// - `d` (`d`, `d_n`);
 /// - packed raw `e_ao`, `e_rough`, `e_metal` (key `dir/e_p` names their set);
 /// - stem `f` over `f.png` and `f.dds`;
 /// - duplicates `g.png` and `g.tga`;
@@ -108,7 +108,6 @@ pub fn fast_fixture() -> FastFixture {
     }
     put_rgb(&d, "d.png", 20);
     put_normal(&d, "d_n.png");
-    put_normal(&d, "d_detailnorm.png");
     for (n, role) in ["ao", "rough", "metal"].iter().enumerate() {
         put_grey(&d, &format!("e_{role}.png"), 30 + n as u8 * 40);
     }

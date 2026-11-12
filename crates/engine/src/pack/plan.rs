@@ -31,7 +31,7 @@ fn slash(p: &Path) -> String {
     p.to_string_lossy().replace('\\', "/")
 }
 
-/// The input of a job that writes (or will, once decided or acknowledged: not a raw input, an RNM layer or an
+/// The input of a job that writes (or will, once decided or acknowledged: not a raw input or an
 /// error), or of another recipe, that also writes `output` (case-insensitive, either separator). The recipe's own
 /// raw sources are raw inputs (Note M8). `outputs` holds every recipe's output (explicit or default), input and
 /// whether it writes, in planning order, collected before any recipe is planned, so a later recipe counts too
@@ -48,9 +48,7 @@ fn other_output(
         .filter(|j| {
             !matches!(
                 j.status,
-                JobStatus::PackingInput { .. }
-                    | JobStatus::NormalLayer { .. }
-                    | JobStatus::Error { .. }
+                JobStatus::PackingInput { .. } | JobStatus::Error { .. }
             )
         })
         .find(|j| fold(&j.output) == want)
@@ -111,11 +109,30 @@ pub(crate) fn virtual_input_as(first: &InputFile, suffix: &str) -> InputFile {
 }
 
 /// The packed output's stem, from its first source's name: `<base>_<suffix>` (`rock01_roughness` → `rock01_rmaos`,
-/// and `rock01_rmaos` → `rock01_rmaos` for a source that already carries a §6.1 suffix, audit 08a-4). Its `[files]`
-/// key is this stem in the first source's folder, wherever an output path puts the file.
+/// and `rock01_rmaos` → `rock01_rmaos` for a source that already carries a §6.1 suffix, audit 08a-4). A shared or
+/// joined helper's output takes its set's name instead; [`files_stem`] gives the stem its `[files]` key uses.
 /// The base is `group::base_of`, which carries the alias `shortcut:`.
 pub fn virtual_stem(first_source: &Path, kind: RecipeKind) -> String {
     virtual_stem_as(first_source, kind.suffix())
+}
+
+/// Note HS2: the stem of a packed job's `[files]` key, as policy reads it (the key is this stem in the first source's
+/// folder, wherever an output path puts the file): the stem of the job's own output name (`game_path`), so a shared
+/// helper's output in another set (`slab_rmaos` from `rock_roughness`) and a joined helper's (`x_rmaos` from
+/// `x_mask`) key under their set's name. [`virtual_stem`] when the two agree but for letter case, so existing keys
+/// keep theirs.
+pub fn files_stem(job: &ResolvedJob, kind: RecipeKind) -> String {
+    let own = virtual_stem(&job.input, kind);
+    let named = Path::new(&job.game_path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    // Both sides folded alike: `game_path` may be folded for ASCII only (`discover::game_path`).
+    if named.is_empty() || own.to_lowercase() == named.to_lowercase() {
+        own
+    } else {
+        named
+    }
 }
 
 pub(crate) fn virtual_stem_as(first_source: &Path, suffix: &str) -> String {
@@ -173,6 +190,37 @@ fn joined_helper_names(
             (f.path.clone(), g)
         })
         .collect()
+}
+
+/// Note HH2: the file as set `set` reads it. A recipe's output is built from its first source, so a shared helper
+/// stands in under the set's folder, base and game folder, as `joined_helper_names` does for a hand-set helper in
+/// the same folder. `path` stays the real file's (sizes, `consumed`, job removal).
+fn shared_stand_in(set: &TextureSet, files: &[InputFile], f: &InputFile) -> InputFile {
+    let key_base = set
+        .key
+        .rsplit_once('/')
+        .map_or(set.key.as_str(), |(_, b)| b);
+    let mut members = set.members.iter().map(|&i| &files[i]);
+    let Some(anchor) = members
+        .clone()
+        .find(|m| source_base(&m.rel).to_lowercase() == key_base)
+        .or_else(|| members.clone().find(|m| m.kind == InputKind::Image))
+        .or_else(|| members.next())
+    else {
+        return f.clone();
+    };
+    let stem = anchor.rel.file_stem().unwrap_or_default().to_string_lossy();
+    let ext = f.rel.extension().unwrap_or_default().to_string_lossy();
+    let file = format!("{stem}.{ext}");
+    let lower = file.to_lowercase();
+    let mut g = f.clone();
+    g.rel = anchor.rel.with_file_name(&file);
+    g.output = anchor.output.with_file_name(format!("{stem}.dds"));
+    g.game_path = match anchor.game_path.rsplit_once('/') {
+        Some((dir, _)) => format!("{dir}/{lower}"),
+        None => lower,
+    };
+    g
 }
 
 /// A recipe that passed pass 1: assembled, analysed and resolved in pass 2.
@@ -540,11 +588,11 @@ pub(crate) fn recipe_error_job(
         source: None,
         pack: None,
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix: false,
     }
 }
 
@@ -812,14 +860,29 @@ pub fn plan_packing(
         .iter()
         .flat_map(|set| joined_helper_names(ctx, set, files))
         .collect();
-    for set in sets {
+    // Note HH2: one stand-in per (set, shared file), indexed like `sets`.
+    let stand_ins: Vec<BTreeMap<PathBuf, InputFile>> = sets
+        .iter()
+        .map(|set| {
+            set.shares
+                .iter()
+                .map(|&i| {
+                    (
+                        files[i].path.clone(),
+                        shared_stand_in(set, files, &files[i]),
+                    )
+                })
+                .collect()
+        })
+        .collect();
+    for (set, stand_in) in sets.iter().zip(&stand_ins) {
         // Raw members still waiting for a recipe: a planned packing input, or one that failed to load or was
         // cancelled before its Load. A raw map whose sub-type a rule or `--set` named is an ordinary file
-        // (spec §4.4) and takes no part.
+        // (spec §4.4) and takes no part. A shared file (Note HH1) takes part as a member does.
         let mut raw = vec![];
         let mut members: BTreeMap<PathBuf, &InputFile> = BTreeMap::new();
         let mut sel = BTreeMap::new();
-        for &i in &set.members {
+        for &i in set.members.iter().chain(&set.shares) {
             let f = &files[i];
             // Images only: a re-encoded raw-map DDS keeps its old behaviour (no part in packing). The job's role comes
             // first: a hand-set `helper.role` (Note DY) overrides the name's.
@@ -857,7 +920,8 @@ pub fn plan_packing(
                     path: f.path.clone(),
                     role,
                 });
-                members.insert(f.path.clone(), renamed.get(&f.path).unwrap_or(f));
+                let named = stand_in.get(&f.path).or_else(|| renamed.get(&f.path));
+                members.insert(f.path.clone(), named.unwrap_or(f));
                 // Note DY: its hand-set fills, read and invert.
                 let s = crate::policy::helper_requested(ctx, f);
                 if s != crate::helper::HelperSel::default() {
@@ -1228,6 +1292,7 @@ pub fn finish_recipe(
         provenance: Provenance::Recipe(c.kind.id().into()),
         decided: true,
         suggestions: vec![],
+        waits: false,
     };
     let mut job = resolve_decided(ctx, &facts, decision);
     for (ch, src) in ["r", "g", "b", "a"].iter().zip(&c.job.channels) {
@@ -1309,4 +1374,56 @@ pub fn finish_recipe(
     }
     job.pack = Some(c.job.clone());
     job
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::Subtype;
+
+    fn job(input: &str, game_path: &str) -> ResolvedJob {
+        ResolvedJob {
+            input: input.into(),
+            output: PathBuf::new(),
+            game_path: game_path.into(),
+            set_key: String::new(),
+            profile: crate::presets::PresetRegistry::builtin()
+                .unwrap()
+                .base_profile(Target::Cs, Subtype::Diffuse),
+            provenance: Default::default(),
+            suggestions: vec![],
+            warnings: vec![],
+            status: JobStatus::Ready,
+            suffix_alias: None,
+            source: None,
+            pack: None,
+            bake: None,
+            derive: None,
+            shader: None,
+            cube: None,
+            fill: None,
+            unknown_suffix: false,
+        }
+    }
+
+    /// Note HS2: the own stem when the names agree but for letter case (ASCII or not), else the job's own name.
+    #[test]
+    fn files_stem_keeps_the_own_case_and_takes_a_set_name() {
+        let stem =
+            |input: &str, game_path: &str| files_stem(&job(input, game_path), RecipeKind::Rmaos);
+        assert_eq!(
+            stem("a/Rock_roughness.png", "textures/a/rock_rmaos.png"),
+            "Rock_rmaos"
+        );
+        // `discover::game_path` folds ASCII only.
+        assert_eq!(
+            stem("a/ÄRMEL.png", "textures/a/Ärmel_rmaos.png"),
+            "ÄRMEL_rmaos"
+        );
+        assert_eq!(
+            stem("a/rock_roughness.png", "textures/c/slab_rmaos.png"),
+            "slab_rmaos"
+        );
+        assert_eq!(stem("a/Rock_roughness.png", ""), "Rock_rmaos");
+    }
 }

@@ -1,5 +1,5 @@
 //! The MATO projected layer (Note GG): eligibility, defines, the captured constants (writer level, no GPU), the
-//! unresolved-texture list (WARP stand-in), and `render_projected_*` on the installed CS (`SDC_CS_SHADERS`).
+//! unresolved-texture list (WARP stand-in), and `render_projected_*` on the bundled CS.
 mod common;
 
 use nif::material::MaterialState;
@@ -439,15 +439,10 @@ fn eligibility_flip_is_a_permutation() {
     assert!(projected(&mut r));
 }
 
-// ---- render_projected_*: the installed CS (`SDC_CS_SHADERS`); run alone with --test-threads=1. ----
+// ---- render_projected_*: the bundled CS; run alone with --test-threads=1. ----
 
 fn cs_renderer(cache: &std::path::Path) -> Option<Renderer> {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return None;
-    };
-    let fp = render3d::locate::fingerprint(std::path::Path::new(&shaders), None).unwrap();
-    Some(Renderer::new(fp, cache.to_path_buf()).unwrap())
+    Some(Renderer::with_source(render3d::ShaderSource::Bundled, cache.to_path_buf()).unwrap())
 }
 
 /// The built-in plane turned to face +Z (x, y, z) → (x, −z, y): normals, tangents and bitangents together, so the

@@ -50,7 +50,7 @@ pub fn to_text(kind: Kind, values: &Map<String, Json>) -> String {
 }
 
 use super::cs_pbr::{valid_value, CsBlock, StaticsStatus};
-use super::history::{orphans, record_key, recorded, records_at, remove_own_case_twin, sha256_of};
+use super::history::{orphans, records_at};
 use super::pbr_export::{file_name_problem, json_entries};
 use super::AppModel;
 use crate::sets_doc::SetEntry;
@@ -125,6 +125,8 @@ pub struct PendingCs {
     pub notes: Vec<String>,
     /// #49: paths of refused files (already noted): not orphans, and their record stays.
     pub refused: Vec<String>,
+    /// Note HF9: a run that leaves sets out (a scope or an excluded group) reports no orphans.
+    pub scoped: bool,
 }
 
 /// Design §5: one file per EDID per block (CS only). `Some` on CS even without blocks: the orphan report needs it.
@@ -136,10 +138,12 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
     let refused = refusals(&entries);
     let mut p = PendingCs {
         root: m.output_root(),
+        scoped: !m.reports_orphans(),
         ..Default::default()
     };
     let mut done = BTreeSet::new();
-    for e in entries.iter() {
+    // Note HF9: only the sets in the run write their files; the others' stay as they are.
+    for e in entries.iter().filter(|e| m.in_run_id(&e.id)) {
         for (kind, b) in blocks(e) {
             let mut values = b.values.clone();
             values.retain(|k, v| writable(kind, k, v));
@@ -206,23 +210,8 @@ pub fn finish(
     let mut written = 0;
     for (rel, text) in &p.files {
         let path = p.root.join(rel);
-        let key = record_key(&path);
-        let last = out.get(&key).cloned();
-        let last = last.as_deref();
-        // O6: an EDID whose case changed renames sdc's own (unchanged) file; a replace may keep the old name's case.
-        remove_own_case_twin(&path, last);
-        if let Err(k) = engine::dds::may_replace(&path, text.as_bytes(), recorded(last)) {
-            notes.push(k.note(&path));
-            continue;
-        }
-        match engine::dds::write_atomic(&path, text.as_bytes()) {
-            Ok(()) => {
-                written += 1;
-                if let Some(s) = sha256_of(&path) {
-                    out.insert(key, s);
-                }
-            }
-            Err(e) => notes.push(format!("{} not written: {e}", path.display())),
+        if super::json_finish::guarded_write(&path, text, &mut out, notes) {
+            written += 1;
         }
     }
     if written > 0 {
@@ -232,7 +221,10 @@ pub fn finish(
         ));
     }
     let this_run = p.files.iter().map(|(r, _)| r).chain(&p.refused);
-    for path in orphans(&out, &p.root, this_run) {
+    for path in orphans(&out, &p.root, this_run)
+        .into_iter()
+        .filter(|_| !p.scoped)
+    {
         notes.push(format!(
             "{}: no set binds this EDID any more; the file was left in place",
             path.display()

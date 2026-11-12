@@ -327,6 +327,7 @@ fn a_hand_edited_old_case_file_survives_the_rename() {
         files: vec![("PBRTextureSets/LandscapeRock01.json".into(), "{}".into())],
         notes: vec![],
         refused: vec![],
+        scoped: false,
     };
     let mut notes = vec![];
     finish(&p, &shas, &mut notes);
@@ -512,6 +513,7 @@ fn an_unrecorded_unreadable_old_case_file_survives_the_rename() {
         files: vec![("PBRTextureSets/Foo.json".into(), "{}".into())],
         notes: vec![],
         refused: vec![],
+        scoped: false,
     };
     let mut notes = vec![];
     finish(&p, &Default::default(), &mut notes);

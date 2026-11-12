@@ -3,7 +3,6 @@ use crate::support::in_sets_column;
 use eframe::egui::{self, accesskit::Role};
 use egui::containers::panel::PanelState;
 use egui_kittest::kittest::{NodeT, Queryable};
-use engine::config::RnmTarget as R;
 use engine::helper::{AlphaTarget as A, FillTarget as F};
 use sdc_gui::model::helpers::{docked, fill_channel, fill_slot};
 use sdc_gui::model::items::{helper_target_text, ItemKind};
@@ -53,8 +52,6 @@ fn fill_targets_map_to_the_chip_they_fill() {
             None,
             "G",
         ),
-        (F::Rnm(R::Cnr), Some(SlotKind::Coat), "layer"),
-        (F::Rnm(R::N), Some(SlotKind::Normal), "layer"),
     ] {
         assert_eq!((fill_slot(t), fill_channel(t)), (slot, ch), "{t:?}");
     }
@@ -113,33 +110,6 @@ fn the_helpers_fixture_has_a_two_chip_helper_a_filled_chip_helper_and_an_unused_
             ("props/crate_opacity.png".into(), SlotKind::Diffuse, "alpha"),
             ("props/crate_roughness.png".into(), SlotKind::Rmaos, "R"),
             ("props/crate_roughness.png".into(), SlotKind::Coat, "alpha"),
-        ]
-    );
-}
-
-#[test]
-fn the_demos_iron_layers_dock_on_its_normal_chip() {
-    let (_d, h) = crate::replay("demo", &[]);
-    let m = &h.state().model;
-    let views = sets::views(m);
-    let v = views
-        .iter()
-        .find(|v| v.id == "armor/iron")
-        .expect("iron's set");
-    let mut got: Vec<_> = docked(m, v)
-        .into_iter()
-        .map(|d| (d.helper, d.slot, d.channel))
-        .collect();
-    got.sort();
-    assert_eq!(
-        got,
-        [
-            ("armor/iron_bump.png".into(), SlotKind::Normal, "layer"),
-            (
-                "armor/iron_detailnorm.png".into(),
-                SlotKind::Normal,
-                "layer"
-            ),
         ]
     );
 }
@@ -408,16 +378,36 @@ fn each_badge_sits_on_its_own_chip() {
             );
         }
     }
-    // a second helper on one chip takes the top-left corner
-    let (_d, h) = crate::replay("demo", &[]);
-    let chip = one(
-        &h,
-        "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
+    // a second helper on one chip takes the top-left corner (3.0 has no RNM layers, so the metallic fills RMAOS G)
+    let (_d, h) = crate::replay_with(
+        "helpers",
+        |h| {
+            let g = F::Packed {
+                suffix: "rmaos",
+                channel: 1,
+            };
+            let m = &mut h.state_mut().model;
+            m.set_helper_fills("props/crate_metallic.png", Some(vec![g]));
+            crate::app_harness::settle(h, 3);
+        },
+        &[SEARCH],
     );
-    let first = drawn_badge(&h, one(&h, "iron_bump.png, fills N layer"));
-    let second = drawn_badge(&h, one(&h, "iron_detailnorm.png, fills N layer"));
-    assert!((first.center() - chip.right_top()).abs().max_elem() <= 0.5);
-    assert!((second.center() - chip.left_top()).abs().max_elem() <= 0.5);
+    let (_, packed_name) = packed(&h);
+    // the chip names both helpers; their order there is not what this pins
+    let names = named_from(&h, &format!("RMAOS, {packed_name}, filled by "));
+    assert_eq!(names.len(), 1, "one RMAOS chip: {names:?}");
+    assert!(names[0].contains("crate_metallic.png"), "{names:?}");
+    let chip = one(&h, &names[0]);
+    let mut at: Vec<_> = [
+        "crate_roughness.png, fills RMAOS R",
+        "crate_metallic.png, fills RMAOS G",
+    ]
+    .map(|l| drawn_badge(&h, one(&h, l)).center())
+    .into_iter()
+    .collect();
+    at.sort_by(|a, b| a.x.total_cmp(&b.x));
+    assert!((at[0] - chip.left_top()).abs().max_elem() <= 0.5, "{at:?}");
+    assert!((at[1] - chip.right_top()).abs().max_elem() <= 0.5, "{at:?}");
 }
 
 #[test]
@@ -465,18 +455,6 @@ fn a_badged_chip_and_its_badges_are_named_for_the_helpers() {
     assert_eq!(
         named_from(&h, "crate_opacity.png, "),
         ["crate_opacity.png, fills D alpha"]
-    );
-    let (_d, h) = crate::replay("demo", &[]);
-    for l in [
-        "N, iron_n.png, filled by iron_bump.png, iron_detailnorm.png",
-        "iron_bump.png, fills N layer",
-        "iron_detailnorm.png, fills N layer",
-    ] {
-        one(&h, l);
-    }
-    assert_eq!(
-        named_from(&h, "iron_bump.png, "),
-        ["iron_bump.png, fills N layer"]
     );
 }
 
@@ -1000,6 +978,7 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
             }
         };
         let (_d, mut h) = crate::replay_mid("demo", |_| {}, &first, narrow, &rest);
+        crate::app_harness::quiet(&mut h);
         // the list starts under the filter row
         let list_top = texts(&h)
             .into_iter()
@@ -1074,6 +1053,7 @@ fn a_search_keeps_its_match_in_cut_titles() {
             |h| sets_width(h, 180.0),
             &[r#"{"op":"settle","frames":6}"#],
         );
+        crate::app_harness::quiet(&mut h);
         let mut any_cut = false;
         for (id, leaf) in ids {
             let title = h
@@ -1115,6 +1095,7 @@ fn one_fill_has_one_wording() {
     for (w, h_px) in [(1400.0, 790.0), (1055.0, 770.0)] {
         let resize = resize_line(w, h_px);
         let (_d, mut h) = crate::replay("helpers", &[resize.as_str(), SEARCH]);
+        crate::app_harness::quiet(&mut h);
         let at = format!("at {w}x{h_px}");
         for l in [
             "crate_opacity.png, fills D alpha",

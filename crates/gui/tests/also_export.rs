@@ -1337,3 +1337,42 @@ fn clearing_the_read_only_flag_reopens_reviews_export() {
     idle(&mut m);
     assert_eq!(m.review_gate().map(|_| ()), Ok(()));
 }
+
+/// Note FC7 (CN3), moved from the removed Generate tests: a `_curves_generated` file on disk (an old Generate's
+/// output, or one made by hand) that no recipe reads is Also export's input. Its Problems row is Info with no button,
+/// not the generic "remove it" warning.
+#[test]
+fn a_curves_generated_row_is_also_only() {
+    use sdc_gui::model::bottom::Level;
+    const KEY: &str = "textures/pbr/arm/steel_curves_generated.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    let file = d.path().join("mods/Mod").join(KEY);
+    ImageBuffer::from_fn(16, 16, |x, _| image::Luma([(x * 4000) as u16]))
+        .save(&file)
+        .unwrap();
+    m.replan();
+    idle(&mut m);
+    let item = m.item(KEY).expect("the generated file is a source");
+    assert!(
+        item.warnings.iter().any(|w| w.code == Code::PackUnusedInput
+            && w.message
+                .contains("read only by Also export as (Vanilla / Complex material)")),
+        "{:?}",
+        item.warnings
+    );
+    let rows: Vec<_> = problems(&m)
+        .iter()
+        .filter(|p| p.at == At::Texture(KEY.into()))
+        .cloned()
+        .collect();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert_eq!(
+        (rows[0].level, rows[0].text.as_str(), rows[0].fix.is_none()),
+        (
+            Level::Info,
+            "Read only by Also export; not written on its own",
+            true
+        )
+    );
+}

@@ -351,10 +351,9 @@ fn the_render_thread_loads_the_picked_slots() {
         env!("CARGO_MANIFEST_DIR"),
         "/../render3d/tests/fixtures/standin"
     ));
-    let f = render3d::locate::fingerprint(&standin, None).unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let mut v = Viewport3d::new(Some(f.clone()));
-    v.on_located(Ok(Some(f)));
+    let mut v = Viewport3d::new();
+    v.use_shader_folder(standin);
     v.cache_dir = Some(cache.path().to_path_buf());
     let nif = std::path::PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),

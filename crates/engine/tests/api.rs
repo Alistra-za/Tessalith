@@ -77,8 +77,8 @@ fn converts_skips_unresolved_and_reruns_as_up_to_date() {
     // leaf.png: diffuse with varying alpha -> alpha meaning unconfirmed -> skipped
     assert_eq!((s.converted, s.skipped, s.failed), (2, 1, 0), "{ev:#?}");
     assert_eq!(s.exit_code(), 1);
-    assert!(d.path().join("out/armor/iron_n.dds").exists());
-    assert!(!d.path().join("out/armor/leaf.dds").exists());
+    assert!(d.path().join("out/textures/armor/iron_n.dds").exists());
+    assert!(!d.path().join("out/textures/armor/leaf.dds").exists());
     assert_eq!(kinds(&ev, "file_done"), 2);
     assert_eq!(kinds(&ev, "batch_done"), 1);
     assert!(ev.windows(2).all(|w| w[0].seq < w[1].seq));
@@ -92,7 +92,7 @@ fn converts_skips_unresolved_and_reruns_as_up_to_date() {
             ..
         }
     ));
-    let m = Manifest::at(&d.path().join("out")).load().unwrap();
+    let m = Manifest::at(&d.path().join("out/textures")).load().unwrap();
     assert_eq!(m.len(), 2);
     assert!(m.contains_key("armor/iron_n.dds"), "{:?}", m.keys());
 
@@ -344,7 +344,7 @@ fn planning_admits_loads_through_the_memory_budget() {
 fn a_failed_manifest_append_removes_the_output() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
-    let manifest = Manifest::at(&d.path().join("out"));
+    let manifest = Manifest::at(&d.path().join("out/textures"));
     std::fs::create_dir_all(manifest.path().parent().unwrap()).unwrap();
     std::fs::write(manifest.path(), b"").unwrap();
     let set_readonly = |ro: bool| {
@@ -389,7 +389,7 @@ fn a_replaced_output_is_reencoded() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
     run(request(d.path()));
-    let out = d.path().join("out/armor/iron.dds");
+    let out = d.path().join("out/textures/armor/iron.dds");
     let good = std::fs::read(&out).unwrap();
     std::fs::write(&out, &good[..good.len() / 2]).unwrap();
     let (s, _) = run(request(d.path()));
@@ -403,7 +403,7 @@ fn a_record_without_an_output_stamp_is_stale_once() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
     run(request(d.path()));
-    let m = Manifest::at(&d.path().join("out"));
+    let m = Manifest::at(&d.path().join("out/textures"));
     let text = std::fs::read_to_string(m.path()).unwrap();
     let legacy: String = text
         .lines()
@@ -429,9 +429,9 @@ fn a_1x_manifest_record_is_known_and_stale() {
         let d = tempfile::tempdir().unwrap();
         fixtures(d.path());
         run(request(d.path()));
-        let out = d.path().join("out/armor/iron.dds");
+        let out = d.path().join("out/textures/armor/iron.dds");
         let first = std::fs::read(&out).unwrap();
-        let m = Manifest::at(&d.path().join("out"));
+        let m = Manifest::at(&d.path().join("out/textures"));
         let old: String = std::fs::read_to_string(m.path())
             .unwrap()
             .lines()
@@ -479,7 +479,7 @@ fn records_carry_the_bc1_target() {
         .push(parse_set("file:**/iron.png.format=bc1").unwrap());
     let (s, ev) = run(req);
     assert_eq!(s.converted, 2, "{ev:#?}");
-    let m = Manifest::at(&d.path().join("out")).load().unwrap();
+    let m = Manifest::at(&d.path().join("out/textures")).load().unwrap();
     for key in ["armor/iron.dds", "armor/iron_n.dds"] {
         assert_eq!(m[key].raw["bc1_model"], "dual", "{key}");
     }
@@ -510,7 +510,7 @@ fn a_resolve_error_fails_the_file_at_resolve() {
         }
         _ => unreachable!(),
     }
-    assert!(!d.path().join("out/armor/iron_n.dds").exists());
+    assert!(!d.path().join("out/textures/armor/iron_n.dds").exists());
 }
 
 /// Note CP: `--set encoder.bc7_weights=…` reaches the profile; ENC-WEIGHTS-IGNORED when perceptual wins, on a
@@ -586,7 +586,7 @@ fn bc7_weights_set_resolves_and_warns_where_it_has_no_effect() {
 fn on_existing_skip_keeps_existing_outputs() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
-    let out = d.path().join("out/armor");
+    let out = d.path().join("out/textures/armor");
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("iron.dds"), b"keep me").unwrap();
     let mut req = request(d.path());
@@ -619,7 +619,7 @@ fn skip_events_carry_the_set_key() {
         .save(t.join("iron_n.tga"))
         .unwrap();
     std::fs::write(t.join("old.dds"), b"DDS ").unwrap();
-    let out = d.path().join("out/armor");
+    let out = d.path().join("out/textures/armor");
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("iron.dds"), b"not ours").unwrap();
     let (_, ev) = run(request(d.path()));
@@ -641,7 +641,7 @@ fn skip_events_carry_the_set_key() {
 fn existing_output_without_record_is_kept_unless_overwrite() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
-    let out = d.path().join("out/armor");
+    let out = d.path().join("out/textures/armor");
     std::fs::create_dir_all(&out).unwrap();
     std::fs::write(out.join("iron.dds"), b"not ours").unwrap();
     let (s, ev) = run(request(d.path()));
@@ -673,7 +673,13 @@ fn changed_source_is_reencoded() {
         .unwrap();
     let (s, _) = run(req);
     assert_eq!((s.converted, s.up_to_date), (1, 1));
-    assert_eq!(Manifest::at(&d.path().join("out")).load().unwrap().len(), 2);
+    assert_eq!(
+        Manifest::at(&d.path().join("out/textures"))
+            .load()
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 /// Spec §6.4 (M2.5): a lone raw roughness map packs into `_rmaos`; a raw map no recipe uses is reported but does
@@ -691,7 +697,7 @@ fn raw_maps_pack_and_unused_ones_do_not_count_as_skipped() {
     let (s, ev) = run(request(d.path()));
     assert_eq!((s.converted, s.skipped), (3, 0), "{ev:#?}");
     assert_eq!(s.exit_code(), 0);
-    assert!(d.path().join("out/armor/stone_rmaos.dds").exists());
+    assert!(d.path().join("out/textures/armor/stone_rmaos.dds").exists());
     assert!(ev.iter().any(|e| matches!(
         e.kind,
         EventKind::FileSkipped {
@@ -775,8 +781,8 @@ fn suffix_alias_preset_is_recorded_in_the_manifest() {
     let (s, ev) = run(req);
     assert_eq!(s.converted, 1, "{ev:#?}");
     assert!(t.exists());
-    assert!(d.path().join("out/armor/iron_rmaos.dds").exists());
-    let m = Manifest::at(&d.path().join("out")).load().unwrap();
+    assert!(d.path().join("out/textures/armor/iron_rmaos.dds").exists());
+    let m = Manifest::at(&d.path().join("out/textures")).load().unwrap();
     let e = &m["armor/iron_rmaos.dds"];
     let p = e.preset.as_ref().unwrap();
     assert_eq!(p.id, "ultra");
@@ -931,8 +937,8 @@ fn a_source_changed_after_planning_fails_at_load() {
         ),
         "{ev:#?}"
     );
-    assert!(!d.path().join("out/armor/iron.dds").exists());
-    assert!(d.path().join("out/armor/iron_n.dds").exists());
+    assert!(!d.path().join("out/textures/armor/iron.dds").exists());
+    assert!(d.path().join("out/textures/armor/iron_n.dds").exists());
 }
 
 #[test]
@@ -1003,7 +1009,7 @@ fn the_plan_reports_nonfinite_samples_before_any_output() {
             .find(|w| w.code == Code::InNonfinite)
             .expect("IN-NONFINITE at plan");
         assert_eq!(w.data["samples"], want, "{policy}");
-        assert!(!d.path().join("out/hot.dds").exists());
+        assert!(!d.path().join("out/textures/hot.dds").exists());
     }
 }
 
@@ -1167,7 +1173,8 @@ fn a_real_convert_writes_a_power_of_two_dds() {
     req.overrides = vec![parse_set("file:**/odd.png.subtype=diffuse").unwrap()];
     let (s, ev) = run(req);
     assert_eq!((s.converted, s.failed), (1, 0), "{ev:#?}");
-    let f = engine::dds::read_dds(&std::fs::read(d.path().join("out/odd.dds")).unwrap()).unwrap();
+    let f = engine::dds::read_dds(&std::fs::read(d.path().join("out/textures/odd.dds")).unwrap())
+        .unwrap();
     assert_eq!((f.width, f.height, f.mip_count), (32, 16, 6));
 }
 
@@ -1179,7 +1186,7 @@ fn a_dry_run_in_place_does_not_rewrite_a_big_stale_manifest() {
     fixtures(d.path());
     // A DDS input makes the run read the manifest for its IN-DDS-SKIPPED summary.
     std::fs::write(d.path().join("textures/armor/old.dds"), b"DDS ").unwrap();
-    let m = Manifest::at(&d.path().join("out"));
+    let m = Manifest::at(&d.path().join("out/textures"));
     std::fs::create_dir_all(m.path().parent().unwrap()).unwrap();
     let line = b"{\"schema\":1,\"output\":\"a.dds\"}\n";
     let n = engine::manifest::COMPACT_MIN_BYTES as usize / line.len() + 1;
@@ -1201,11 +1208,11 @@ fn a_1x_dds_json_is_never_deleted() {
     let d = tempfile::tempdir().unwrap();
     fixtures(d.path());
     run(request(d.path()));
-    let side = d.path().join("out/armor/iron.dds.json");
+    let side = d.path().join("out/textures/armor/iron.dds.json");
     assert!(!side.exists(), "2.0 writes no sidecar");
     // What 1.x wrote: the record itself.
     let record = serde_json::to_string_pretty(
-        &Manifest::at(&d.path().join("out")).load().unwrap()["armor/iron.dds"].raw,
+        &Manifest::at(&d.path().join("out/textures")).load().unwrap()["armor/iron.dds"].raw,
     )
     .unwrap();
     std::fs::write(&side, &record).unwrap();
@@ -1220,7 +1227,7 @@ fn a_1x_dds_json_is_never_deleted() {
     assert_eq!(std::fs::read_to_string(&side).unwrap(), record);
 
     change(99);
-    let manifest = Manifest::at(&d.path().join("out"));
+    let manifest = Manifest::at(&d.path().join("out/textures"));
     let set_readonly = |ro: bool| {
         let mut perm = std::fs::metadata(manifest.path()).unwrap().permissions();
         perm.set_readonly(ro);
@@ -1230,7 +1237,7 @@ fn a_1x_dds_json_is_never_deleted() {
     let (s, ev) = run(request(d.path()));
     set_readonly(false);
     assert_eq!(s.failed, 1, "{ev:#?}");
-    assert!(!d.path().join("out/armor/iron.dds").exists());
+    assert!(!d.path().join("out/textures/armor/iron.dds").exists());
     assert_eq!(std::fs::read_to_string(&side).unwrap(), record);
 }
 

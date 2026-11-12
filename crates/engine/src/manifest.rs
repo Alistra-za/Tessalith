@@ -21,18 +21,14 @@ pub const RELEASED_ENGINE_VERSION: &str = "2.0.0";
 /// The engine version in which each sub-type's output last changed. Set an arm to the current `ENGINE_VERSION` in
 /// the same commit that changes that type's output bytes or validation verdict. Bumping the engine version alone
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
-/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 2.1.0. No `_` arm: a new
-/// `Subtype` fails to compile until it gets one.
+/// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
+/// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`. No `_` arm: a new `Subtype` fails to compile until it gets one.
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
-        Subtype::Diffuse
-        | Subtype::LandscapeDiffuse
-        | Subtype::PbrAlbedo
+        Subtype::LandscapeDiffuse
         | Subtype::Glow
         | Subtype::SubsurfaceTint
         | Subtype::BacklightTint
-        | Subtype::UiSky
-        | Subtype::SkinAlbedo
         | Subtype::PbrSubsurface
         | Subtype::PbrFuzz
         | Subtype::Normal
@@ -41,8 +37,6 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::Msn
         | Subtype::CoatNormal
         | Subtype::GenericData
-        | Subtype::ComplexGrass
-        | Subtype::Cubemap
         | Subtype::PbrEmissive
         | Subtype::HdrSky
         | Subtype::Envmask
@@ -53,11 +47,20 @@ pub const fn encode_version(st: Subtype) -> &'static str {
         | Subtype::SkinSk
         | Subtype::ProjectedNoise
         | Subtype::DetailNormal
+        | Subtype::ComplexGrass
+        | Subtype::Cubemap
         | Subtype::Gray => "2.0.0",
-        // 2.1.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
-        // A new sub-type in 2.1.0.
+        // 3.0: a resized cutout texture is fitted to its source's coverage (Note HR6). These are the sub-types a
+        // built-in layer can make a cutout: the mesh layer and alpha suggestion (`alpha_from_mesh`), the hair shader.
+        // shortcut: a hand-written cutout on any other sub-type that is also resized keeps its old bytes under
+        // if-changed; move that arm if it is ever reported (Note HR6).
+        Subtype::Diffuse | Subtype::PbrAlbedo | Subtype::UiSky | Subtype::SkinAlbedo => {
+            ENGINE_VERSION
+        }
+        // 3.0.0: a grey `skin_wet` is no longer written and the CS loader formats are checked.
+        // A new sub-type in 3.0.0.
         Subtype::SkinWet | Subtype::SkinDetail => ENGINE_VERSION,
-        // 2.1.0: the variance bake adds nothing to mip 0 (Note HD1).
+        // 3.0.0: the variance bake adds nothing to mip 0 (Note HD1).
         Subtype::Rmaos | Subtype::SkinRfaos | Subtype::ComplexMaterial => ENGINE_VERSION,
     }
 }
@@ -190,23 +193,19 @@ pub struct SourceRef {
     /// level shift (`BakeJob::identity_sha256`). Absent on every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bake: Option<String>,
-    /// M6 Track F2: an RNM input of a base normal and its role (`detail`, `detail.mask`, `bent.ao.r`, `bent.ao.b`). Absent on
-    /// every other source.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rnm: Option<String>,
     /// Track A (DECISIONS Note CN12): a derived job's source, with the job's `DeriveJob::identity_sha256`. Absent on
     /// every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derive: Option<String>,
-    /// The slots that source fills in a derived job (`albedo`, `rough+metal+ao`, ...), as `rnm` holds its role.
+    /// The slots that source fills in a derived job (`albedo`, `rough+metal+ao`, ...).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub derive_role: Option<String>,
     /// The face (`posx` .. `negz`) a six-file cube's source fills (DECISIONS DS8). Absent on every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cube_face: Option<String>,
     /// Note DY: a helper that fills this output's alpha (`FillJob::identity`, `a:r`, `a:luma:inv`), or a packed
-    /// source's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`). Absent on
-    /// every other source.
+    /// source's explicit `helper.read` (`read:g`) and the channels it feeds (`ch:ba`, `pack::source_fill`), with the
+    /// inverted ones when only some are (`ch:ra,inv:r`, Note HS3). Absent on every other source.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<String>,
 }
@@ -220,7 +219,6 @@ impl SourceRef {
             role: None,
             invert: false,
             bake: None,
-            rnm: None,
             derive: None,
             derive_role: None,
             cube_face: None,
@@ -253,14 +251,6 @@ impl SourceRef {
         })
     }
 
-    /// An RNM input of a base normal, with its role (M6 Track F2).
-    pub fn of_rnm(path: &Path, role: String) -> io::Result<SourceRef> {
-        Ok(SourceRef {
-            rnm: Some(role),
-            ..SourceRef::of(path)?
-        })
-    }
-
     /// A derived job's source, with the slots it fills and the job's identity (Note CN12).
     pub fn of_derive(path: &Path, role: &str, identity: String) -> io::Result<SourceRef> {
         Ok(SourceRef {
@@ -277,6 +267,58 @@ impl SourceRef {
             ..SourceRef::of(path)?
         })
     }
+}
+
+/// Every recorded source of `job`, in record order: the pack sources, a derived job's sources, a six-file cube's
+/// faces, the baked `_n`, then the helper that fills the alpha. `process_file` records this list and `if-changed`
+/// compares against it (`api::current_sources`), so the two never drift. Empty for an ordinary file; the error is
+/// `"<path>: <io error>"` for the first source that cannot be hashed.
+pub(crate) fn recorded_sources(job: &crate::policy::ResolvedJob) -> Result<Vec<SourceRef>, String> {
+    fn at(p: &Path) -> impl FnOnce(io::Error) -> String + '_ {
+        move |e| format!("{}: {e}", p.display())
+    }
+    // Spec §6.4 "Provenance": a packed output records every source (its first source is `job.input`, Note M8).
+    let mut sources = match &job.pack {
+        Some(pk) => pk
+            .sources
+            .iter()
+            .map(|s| {
+                let invert = crate::pack::invert_of(pk, &s.path);
+                Ok(SourceRef {
+                    fill: Some(crate::pack::source_fill(pk, s)),
+                    ..SourceRef::of_pack(&s.path, s.role, invert).map_err(at(&s.path))?
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?,
+        None => vec![],
+    };
+    // Note CN12: a derived output records every file it read, with its slots and the job's identity.
+    if let Some(dj) = &job.derive {
+        let identity = dj.identity_sha256();
+        for s in &dj.sources {
+            sources.push(
+                SourceRef::of_derive(&s.path, &s.role, identity.clone()).map_err(at(&s.path))?,
+            );
+        }
+    }
+    // DECISIONS DS8: a six-file cube records every face, in face order (`source_sha256` covers a one-file cube).
+    for s in job
+        .cube
+        .iter()
+        .filter(|c| c.sources.len() > 1)
+        .flat_map(|c| &c.sources)
+    {
+        sources.push(SourceRef::of_cube(&s.path, s.face.unwrap_or(0)).map_err(at(&s.path))?);
+    }
+    // DECISIONS R12: the baked `_n`, with the identity of its decode settings.
+    if let Some(b) = &job.bake {
+        sources.push(SourceRef::of_bake(&b.normal, b.identity_sha256()).map_err(at(&b.normal))?);
+    }
+    // Note DY: the helper that fills the alpha, with its read and invert, so `if-changed` re-encodes on either.
+    if let Some(f) = &job.fill {
+        sources.push(SourceRef::of_fill(&f.source.path, f.identity()).map_err(at(&f.source.path))?);
+    }
+    Ok(sources)
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -570,12 +612,13 @@ mod tests {
         }
     }
 
-    /// Note FM9: every sub-type has the one encode version, 2.0.0, except the five that changed in 2.1.0 (comment below).
+    /// Note FM9: every sub-type has the one encode version, 2.0.0, except those that changed since (comment below).
     #[test]
     fn every_subtype_has_the_one_encode_version() {
         for st in Subtype::ALL {
             // 2.1.0 changed `skin_wet` (a grey one is not written, the CS loader formats are checked) and added `skin_detail`;
-            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1).
+            // the variance bake no longer touches mip 0 of the three bakeable types (Note HD1); a resized cutout keeps
+            // its source's coverage on the colour types a built-in layer makes a cutout (Note HR6).
             let want = if matches!(
                 st,
                 Subtype::SkinWet
@@ -583,8 +626,12 @@ mod tests {
                     | Subtype::Rmaos
                     | Subtype::SkinRfaos
                     | Subtype::ComplexMaterial
+                    | Subtype::Diffuse
+                    | Subtype::PbrAlbedo
+                    | Subtype::UiSky
+                    | Subtype::SkinAlbedo
             ) {
-                "2.1.0"
+                ENGINE_VERSION
             } else {
                 "2.0.0"
             };

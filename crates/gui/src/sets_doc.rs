@@ -3,6 +3,7 @@
 //! read-only (DECISIONS P8); `sdc.toml` editing is unaffected.
 use crate::model::cm_json::{block_of as cm_block_of, CmBlock};
 use crate::model::cs_pbr::{self, block_of, field, fields, CsBlock, Kind, Template};
+use crate::model::set_groups::{GroupTarget, SetGroup};
 use crate::pgp::settings::Settings;
 use crate::project::{
     dotted_table, item_json, json_to_toml, set_value, sub_table, toml_to_json, SaveError, TomlFile,
@@ -18,6 +19,7 @@ use toml_edit::{Array, ArrayOfTables, Item, Table, TableLike, Value};
 
 pub const FILE_NAME: &str = "sdc-project.toml";
 const GENERATED: &str = "generated";
+const GROUPS: &str = "groups";
 
 /// `json_to_toml` that also writes objects, as nested inline tables; `null` members are dropped.
 fn json_to_toml_deep(v: &Json) -> Option<Value> {
@@ -54,12 +56,13 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
-const RESERVED: [&str; 16] = [
+const RESERVED: [&str; 17] = [
     "id",
     "created",
     "renamed_from",
     "add",
     "remove",
+    "share",
     "borrow",
     "shader",
     "lock",
@@ -100,6 +103,8 @@ pub struct SetEntry {
     pub renamed_from: Option<String>,
     pub add: Vec<String>,
     pub remove: Vec<String>,
+    /// Note HH: helper files of other sets (or of no set) this set reads as its own (`share = ["a/rock_ao.png"]`).
+    pub share: Vec<String>,
     /// Slot number (1–8) → the id of the set whose finished output this set uses.
     pub borrow: BTreeMap<u8, String>,
     /// M6: the explicit shader choice (`shader = "<id>"`); an unknown id reads as `None` and stays in the file.
@@ -135,9 +140,11 @@ pub(crate) fn next_rev() -> u64 {
 pub struct SetsDoc {
     f: TomlFile,
     entries_cache: RefCell<Option<(u64, Arc<Vec<SetEntry>>)>>,
+    /// `no_set_keys`, by revision.
+    no_set_cache: RefCell<Option<(u64, Arc<BTreeSet<String>>)>>,
     /// Note FC11: `<project root>/_sdc/generated.json` as last read or written: the records kept outside the undo
-    /// history (`[generated]` and the JSON hash tables), under the same keys as in this document. Written when a
-    /// record is made, so it holds even when the document is never saved; a table it holds wins over the document's.
+    /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
+    /// holds even when the document is never saved; a table it holds wins over the document's.
     side: serde_json::Map<String, Json>,
 }
 
@@ -248,6 +255,7 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
             .map(str::to_string),
         add: strings(t.get("add")),
         remove: strings(t.get("remove")),
+        share: strings(t.get("share")),
         borrow,
         shader: t
             .get("shader")
@@ -285,6 +293,7 @@ impl SetsDoc {
         let mut d = SetsDoc {
             f: TomlFile::open(root.join(FILE_NAME)),
             entries_cache: RefCell::default(),
+            no_set_cache: RefCell::default(),
             side: Default::default(),
         };
         d.load_sidecar();
@@ -323,10 +332,6 @@ impl SetsDoc {
                 self.set_shas(k, &m);
             }
         }
-        if self.side.contains_key(GENERATED) {
-            let g = self.generated();
-            self.put_doc_generated(&g);
-        }
         // Fix round 1 (controller ruling): applied quietly. The records are not the user's edits, so the document stays
         // clean (Discard leaves it clean too); the readable copy reaches `sdc-project.toml` with the next real Save.
         // Note FC14: only a document that was clean before; `TomlFile::open`/`reload` always leave it so today.
@@ -344,6 +349,8 @@ impl SetsDoc {
             return Ok(());
         }
         self.side.insert(key.to_string(), v);
+        // The key an earlier version kept here (Note GV1): read as nothing, dropped by the next write.
+        self.side.remove(GENERATED);
         // The getters read the sidecar first: a cache keyed on `rev` must see the change, even in a read-only document.
         self.f.rev = next_rev();
         let b = serde_json::to_vec_pretty(&self.side).map_err(std::io::Error::other)?;
@@ -401,8 +408,6 @@ impl SetsDoc {
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
         let target = self.target_mod();
-        let generated = self.f.doc.get(GENERATED).cloned();
-        let was_generated = self.doc_generated();
         let old = self.text();
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
@@ -429,14 +434,6 @@ impl SetsDoc {
         // Note HL: nor is the target mod.
         if self.target_mod() != target {
             self.set_target_mod(target.as_deref());
-        }
-        // Note CO (P15): `[generated]` records generated files on disk, which undo does not change either.
-        if self.doc_generated() != was_generated {
-            match generated {
-                Some(t) => self.f.doc.insert(GENERATED, t),
-                None => self.f.doc.remove(GENERATED),
-            };
-            self.f.touch();
         }
         if self.text() == old {
             self.f.doc = doc;
@@ -510,90 +507,6 @@ impl SetsDoc {
             "target_mod",
             p.map(|p| Value::from(p.to_string_lossy().as_ref())),
         );
-    }
-
-    /// Note CO: the top-level `[generated]` table, item key → provenance record (`model::from_normal::Provenance`).
-    /// Note FC11: the sidecar's copy when it has one.
-    pub fn generated(&self) -> BTreeMap<String, Json> {
-        match self.side.get(GENERATED) {
-            Some(Json::Object(o)) => o.clone().into_iter().collect(),
-            _ => self.doc_generated(),
-        }
-    }
-
-    /// `[generated]` as this document holds it.
-    fn doc_generated(&self) -> BTreeMap<String, Json> {
-        self.f
-            .doc
-            .get(GENERATED)
-            .and_then(Item::as_table_like)
-            .map(|t| {
-                t.iter()
-                    .filter_map(|(k, i)| Some((k.to_string(), item_json(i)?)))
-                    .collect()
-            })
-            .unwrap_or_default()
-    }
-
-    /// Record (`Some`) or remove (`None`) the provenance of item `key`, matched by Unicode lowercase (Note BF). Not
-    /// through `set_project`: `[generated]` is a table of its own (P15). Err: the sidecar was not written (Note FC14).
-    pub fn set_generated(&mut self, key: &str, v: Option<&Json>) -> std::io::Result<()> {
-        let fold = key.to_lowercase();
-        // Note FC11: the sidecar first, as the document would hold it (no `null` members), so a reopen compares equal.
-        let mut all = self.generated();
-        all.retain(|k, _| k.to_lowercase() != fold);
-        if let Some(x) = v
-            .and_then(json_to_toml_deep)
-            .and_then(|t| item_json(&Item::Value(t)))
-        {
-            all.insert(key.to_string(), x);
-        }
-        let side = self.put_side(GENERATED, Json::Object(all.into_iter().collect()));
-        let now = self.doc_generated();
-        let same: Vec<&String> = now.keys().filter(|k| k.to_lowercase() == fold).collect();
-        let unchanged = match v {
-            None => same.is_empty(),
-            Some(v) => same.len() == 1 && same[0] == key && now.get(key) == Some(v),
-        };
-        if self.read_only() || unchanged {
-            return side;
-        }
-        let value = v.and_then(json_to_toml_deep);
-        let Some(t) = sub_table(self.f.doc.as_table_mut(), GENERATED, || {
-            Item::Table(Table::new())
-        }) else {
-            return side;
-        };
-        for k in same {
-            t.remove(k);
-        }
-        if let Some(value) = value {
-            t.insert(key, Item::Value(value));
-        }
-        if t.is_empty() {
-            self.f.doc.remove(GENERATED);
-        }
-        self.f.touch();
-        side
-    }
-
-    /// Note FC11: make the document's `[generated]` equal `all` (reconcile on open); no edit when it already is.
-    fn put_doc_generated(&mut self, all: &BTreeMap<String, Json>) {
-        if self.read_only() || self.doc_generated() == *all {
-            return;
-        }
-        let mut t = Table::new();
-        for (k, v) in all {
-            if let Some(v) = json_to_toml_deep(v) {
-                t.insert(k, Item::Value(v));
-            }
-        }
-        if t.is_empty() {
-            self.f.doc.remove(GENERATED);
-        } else {
-            self.f.doc.insert(GENERATED, Item::Table(t));
-        }
-        self.f.touch();
     }
 
     /// TA10: `[project] also_location`, where this project's Also export writes its three folders.
@@ -726,6 +639,169 @@ impl SetsDoc {
             arr.push(id.as_str());
         }
         self.set_project("order", Some(Value::Array(arr)));
+    }
+
+    /// Note HF4: the `[[groups]]` tables, in file order. A table with no name is skipped, a repeated name (ignoring
+    /// case) keeps its first table.
+    pub fn groups(&self) -> Vec<SetGroup> {
+        let mut out: Vec<SetGroup> = vec![];
+        let tables = self
+            .f
+            .doc
+            .get(GROUPS)
+            .and_then(Item::as_array_of_tables)
+            .into_iter()
+            .flatten();
+        for t in tables {
+            let Some(name) = t.get("name").and_then(Item::as_str) else {
+                continue;
+            };
+            if out.iter().any(|g| same_id(&g.name, name)) {
+                continue;
+            }
+            // Note HF4: a set is in one group: a hand edit listing it again (here or in a later group) is not read.
+            let mut sets: Vec<String> = vec![];
+            for s in strings(t.get("sets")) {
+                let seen = |l: &[String]| l.iter().any(|x| same_id(x, &s));
+                if !seen(&sets) && !out.iter().any(|g| seen(&g.sets)) {
+                    sets.push(s);
+                }
+            }
+            out.push(SetGroup {
+                name: name.to_string(),
+                sets,
+                excluded: t.get("excluded").and_then(Item::as_bool).unwrap_or(false),
+            });
+        }
+        out
+    }
+
+    /// Note HF4: store `groups` as the `[[groups]]` tables (none left: the key goes). An unchanged list is no edit.
+    /// A group with no sets is dropped: a group goes with its last set. Writing also drops a repeated name (the
+    /// second table), so a hand-edited file with either is tidied by the next group edit.
+    fn write_groups(&mut self, groups: &[SetGroup]) {
+        let groups: Vec<&SetGroup> = groups.iter().filter(|g| !g.sets.is_empty()).collect();
+        let current = self.groups();
+        if self.read_only()
+            || (current.len() == groups.len() && current.iter().zip(&groups).all(|(a, b)| a == *b))
+        {
+            return;
+        }
+        let mut tables = ArrayOfTables::new();
+        for g in groups {
+            let mut t = Table::new();
+            t.insert("name", toml_edit::value(g.name.as_str()));
+            let mut arr = Array::new();
+            for s in &g.sets {
+                arr.push(s.as_str());
+            }
+            t.insert("sets", toml_edit::value(arr));
+            if g.excluded {
+                t.insert("excluded", toml_edit::value(true));
+            }
+            tables.push(t);
+        }
+        if tables.is_empty() {
+            self.f.doc.remove(GROUPS);
+        } else {
+            self.f.doc.insert(GROUPS, Item::ArrayOfTables(tables));
+        }
+        self.f.touch();
+    }
+
+    /// Note HF4: put each of `ids` in the group `target` (`None`: in none), after taking it out of the group it was in.
+    /// A group left with no sets goes. The caller has checked the target (`Existing` exists, `New` is unused).
+    pub fn move_to_group(&mut self, ids: &[String], target: &GroupTarget) {
+        let mut groups = self.groups();
+        for g in &mut groups {
+            g.sets.retain(|s| !ids.iter().any(|i| same_id(i, s)));
+        }
+        match target {
+            GroupTarget::None => {}
+            GroupTarget::Existing(n) => {
+                if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, n)) {
+                    g.sets.extend(ids.iter().cloned());
+                }
+            }
+            GroupTarget::New(n) => groups.push(SetGroup {
+                name: n.clone(),
+                sets: ids.to_vec(),
+                excluded: false,
+            }),
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: rename group `old` to `new`; the caller has checked that `new` is free.
+    pub fn rename_group(&mut self, old: &str, new: &str) {
+        let mut groups = self.groups();
+        if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, old)) {
+            g.name = new.to_string();
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: remove group `name`; its sets stay.
+    pub fn ungroup(&mut self, name: &str) {
+        let mut groups = self.groups();
+        groups.retain(|g| !same_id(&g.name, name));
+        self.write_groups(&groups);
+    }
+
+    pub fn set_group_excluded(&mut self, name: &str, on: bool) {
+        let mut groups = self.groups();
+        if let Some(g) = groups.iter_mut().find(|g| same_id(&g.name, name)) {
+            g.excluded = on;
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF4: set `from` is now `to` in every group (a rename carries membership, as `order` does).
+    fn rename_in_groups(&mut self, from: &str, to: &str) {
+        let mut groups = self.groups();
+        for s in groups.iter_mut().flat_map(|g| g.sets.iter_mut()) {
+            if same_id(s, from) {
+                *s = to.to_string();
+            }
+        }
+        self.write_groups(&groups);
+    }
+
+    /// Note HF1: the textures in no set (`[project] no_set`, `[files]`-style keys): not on a card, never written.
+    pub fn no_set(&self) -> Vec<String> {
+        strings(self.f.doc.get("project").and_then(|p| p.get("no_set")))
+    }
+    /// `no_set`, parsed once per revision (the model asks per item; match with `engine::sets::no_set_names`).
+    pub fn no_set_keys(&self) -> Arc<BTreeSet<String>> {
+        let rev = self.f.rev;
+        if let Some((r, k)) = &*self.no_set_cache.borrow() {
+            if *r == rev {
+                return k.clone();
+            }
+        }
+        let k: Arc<BTreeSet<String>> = Arc::new(self.no_set().into_iter().collect());
+        *self.no_set_cache.borrow_mut() = Some((rev, k.clone()));
+        k
+    }
+    /// Put `key` in no set (`on`) or take it out; no edit when it already is as asked.
+    pub fn set_no_set(&mut self, key: &str, on: bool) {
+        if self.read_only() {
+            return;
+        }
+        let mut keys = self.no_set();
+        let n = keys.len();
+        // Taken out: every key naming the file goes (the engine's rule), so it is in no set no more.
+        keys.retain(|k| !(same_id(k, key) || (!on && engine::sets::no_set_names(k, key))));
+        if on {
+            keys.push(key.to_string());
+        } else if keys.len() == n {
+            return;
+        }
+        let mut arr = Array::new();
+        for k in &keys {
+            arr.push(k.as_str());
+        }
+        self.set_project("no_set", (!keys.is_empty()).then_some(Value::Array(arr)));
     }
 
     /// Files whose sub-type was switched to its PBR counterpart because their set's diffuse became `pbr_albedo`
@@ -919,36 +995,43 @@ impl SetsDoc {
         self.f.touch();
     }
 
-    /// Drop set `id`'s entry and remove it from the order list (DECISIONS P2: its files return to automatic grouping).
-    pub fn delete_set(&mut self, id: &str) {
+    /// Note HF1: drop set `id`'s entry and remove it from the order list; its `files` go to no set, so an automatic
+    /// set does not come back. An entry with no files just goes.
+    pub fn delete_set(&mut self, id: &str, files: &[String]) {
         if self.read_only() {
             return;
         }
         let lower = fold_id(id);
-        if !self.parse_entries().iter().any(|e| fold_id(&e.id) == lower) {
-            return;
+        if self.parse_entries().iter().any(|e| fold_id(&e.id) == lower) {
+            if let Some(tables) = self
+                .f
+                .doc
+                .get_mut("sets")
+                .and_then(Item::as_array_of_tables_mut)
+            {
+                tables.retain(|t| {
+                    !t.get("id")
+                        .and_then(Item::as_str)
+                        .is_some_and(|s| fold_id(s) == lower)
+                });
+            }
+            self.f.touch();
         }
-        if let Some(tables) = self
-            .f
-            .doc
-            .get_mut("sets")
-            .and_then(Item::as_array_of_tables_mut)
-        {
-            tables.retain(|t| {
-                !t.get("id")
-                    .and_then(Item::as_str)
-                    .is_some_and(|s| fold_id(s) == lower)
-            });
-        }
-        let order: Vec<String> = self
-            .order()
-            .into_iter()
+        let before = self.order();
+        let order: Vec<String> = before
+            .iter()
             .filter(|o| fold_id(o) != lower)
+            .cloned()
             .collect();
-        if !self.order().is_empty() {
+        // Only a changed list is written: an unchanged one must not dirty the document.
+        if order.len() != before.len() {
             self.set_order(&order);
         }
-        self.f.touch();
+        for f in files {
+            self.set_no_set(f, true);
+        }
+        // Note HF4: the set leaves its group in the same step; a group left with no sets goes.
+        self.move_to_group(&[id.to_string()], &GroupTarget::None);
     }
 
     /// Rename set `from` to `to`. A created set just changes its id; an automatic set records `renamed_from`. Other
@@ -977,12 +1060,22 @@ impl SetsDoc {
                 t.insert("renamed_from", toml_edit::value(original));
             }
         }
-        let order: Vec<String> = self
-            .order()
-            .into_iter()
-            .map(|o| if same_id(&o, from) { to.to_string() } else { o })
-            .collect();
-        if !order.is_empty() {
+        self.rename_refs(from, to);
+        self.f.touch();
+    }
+
+    /// Note HS13: every reference to set `from` becomes `to`: the order list (one place for `to`, the first), other
+    /// entries' borrows and group membership.
+    fn rename_refs(&mut self, from: &str, to: &str) {
+        let before = self.order();
+        let mut order: Vec<String> = vec![];
+        for o in &before {
+            let o = if same_id(o, from) { to } else { o.as_str() };
+            if !order.iter().any(|p| same_id(p, o)) {
+                order.push(o.to_string());
+            }
+        }
+        if !order.is_empty() && order != before {
             self.set_order(&order);
         }
         for e in self.parse_entries() {
@@ -992,7 +1085,7 @@ impl SetsDoc {
                 }
             }
         }
-        self.f.touch();
+        self.rename_in_groups(from, to);
     }
 
     /// GUI tweaks G1: the automatic set `from` is now named `to` by the engine (its members were given new input
@@ -1025,6 +1118,13 @@ impl SetsDoc {
             self.rename_set(from, to);
             self.table_mut(to).remove("renamed_from");
             self.f.touch();
+        } else if !entries
+            .iter()
+            .any(|e| (e.created || e.renamed_from.is_some()) && same_id(&e.id, from))
+        {
+            // Notes HF4, HS13: order, borrows and membership follow the automatic set even when no entry moved (none to
+            // move, or one already at `to`), so the set never silently leaves its group or the order.
+            self.rename_refs(from, to);
         }
     }
 
@@ -1056,6 +1156,15 @@ impl SetsDoc {
 
     /// `file` moves into set `id` (a `Move` edit); it is taken out of every other entry's `add` and `remove`.
     pub fn add_member(&mut self, id: &str, file: &str) {
+        self.set_no_set(file, false);
+        // Note HH6: a member of the set is not shared with it too.
+        if self
+            .parse_entries()
+            .iter()
+            .any(|e| same_id(&e.id, id) && e.share.iter().any(|f| self.names_only(f, file)))
+        {
+            self.list_edit(id, "share", file, false);
+        }
         for e in self.parse_entries() {
             if !same_id(&e.id, id) {
                 if e.add.iter().any(|f| self.names_only(f, file)) {
@@ -1093,7 +1202,8 @@ impl SetsDoc {
         }
     }
 
-    /// `file` leaves set `id`: it is dropped from `id`'s `add` when it was moved in, else recorded in `remove`.
+    /// Note HF1: `file` leaves set `id` for no set; a line that moved it in goes too. An older `remove` line stays
+    /// as it is (it kept meaning a one-file set).
     pub fn remove_member(&mut self, id: &str, file: &str) {
         let moved_in = self
             .parse_entries()
@@ -1101,18 +1211,42 @@ impl SetsDoc {
             .any(|e| same_id(&e.id, id) && e.add.iter().any(|f| self.names_only(f, file)));
         if moved_in {
             self.list_edit(id, "add", file, false);
-        } else {
-            self.list_edit(id, "remove", file, true);
+        }
+        self.set_no_set(file, true);
+    }
+
+    /// Tests: an older project's `remove` line (Note HF1: nothing writes one any more, but they keep their meaning).
+    #[cfg(feature = "test-hooks")]
+    pub fn add_remove_line(&mut self, id: &str, file: &str) {
+        self.list_edit(id, "remove", file, true);
+    }
+
+    /// Note HH: set `id` reads helper `file` as its own (a `share` line); the file stays where it is.
+    pub fn add_share(&mut self, id: &str, file: &str) {
+        self.list_edit(id, "share", file, true);
+    }
+
+    /// Note HH: set `id` stops reading `file`; an emptied list goes. A line goes when it names the file the way the set
+    /// view matches it (`path_key_matches`: any case, or without the extension), so the row's ✕ always takes it.
+    pub fn remove_share(&mut self, id: &str, file: &str) {
+        if self.read_only() {
+            return;
+        }
+        let mut items = strings(self.table_mut(id).get("share"));
+        let n = items.len();
+        items.retain(|f| !engine::overrides::path_key_matches(f, file));
+        if items.len() != n {
+            self.set_list(id, "share", &items);
         }
     }
 
-    /// Note DU1: drop `key` from set `id`'s `add` and `remove` lists, as written: an entry that names no file, so
-    /// there is nothing to move.
+    /// Note DU1: drop `key` from set `id`'s `add`, `remove` and `share` lists, as written: an entry that names no
+    /// file, so there is nothing to move.
     pub fn drop_entry(&mut self, id: &str, key: &str) {
         if self.read_only() {
             return;
         }
-        for list in ["add", "remove"] {
+        for list in ["add", "remove", "share"] {
             let mut items = strings(self.table_mut(id).get(list));
             let n = items.len();
             items.retain(|f| !same_id(f, key));
@@ -1772,7 +1906,7 @@ mod tests {
                 }),
             ),
             ("retarget_auto", Box::new(|s| s.retarget_auto("a/x", "a/y"))),
-            ("delete_set", Box::new(|s| s.delete_set("c/z"))),
+            ("delete_set", Box::new(|s| s.delete_set("c/z", &[]))),
             ("add_section", Box::new(|s| s.add_section(&Settings::new()))),
             ("set_json_name", Box::new(|s| s.set_json_name(Some("n")))),
             (

@@ -220,22 +220,16 @@ fn cbuffer_edit_in_deferred_mode_compiles_nothing() {
     assert_eq!(px(&r.read_mrt(0).unwrap(), 64, 32, 32), plus_m4(new));
 }
 
-/// Opt-in step-1 record: the installed composite compiles with CSHADER + ENABLE_LL; prints its reflection.
-/// `SDC_CS_SHADERS=…\Shaders cargo test -p render3d --test composite -- --ignored --nocapture`
+/// Step-1 record: the bundled composite compiles with CSHADER + ENABLE_LL; prints its reflection.
 #[test]
-#[ignore]
-fn installed_composite_reflects() {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
+fn bundled_composite_reflects() {
     let gpu = render3d::device::Gpu::new().unwrap();
     println!(
         "adapter {} typed load {}",
         gpu.adapter,
         Composite::typed_uav_load(&gpu)
     );
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Bundled);
     let cache = tempfile::tempdir().unwrap();
     let t = std::time::Instant::now();
     let c = Composite::new(
@@ -269,18 +263,13 @@ fn installed_composite_reflects() {
     assert_eq!(r.threads, [8, 8, 1]);
 }
 
-/// D5 step 0: the installed composite with the A_DC defines reflects exactly what frame246061's composite.json binds
+/// D5 step 0: the bundled composite with the A_DC defines reflects exactly what frame246061's composite.json binds
 /// (t0, t2, t4 depth, t5, t7 cube; t6 EnvTexture is stripped) and one sampler, s0 LinearSampler.
 #[test]
-#[ignore]
-fn installed_dc_composite_reflects() {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
+fn bundled_dc_composite_reflects() {
     use render3d::compile::SrvKind;
     let gpu = render3d::device::Gpu::new().unwrap();
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Bundled);
     let cache = tempfile::tempdir().unwrap();
     let defines = [
         "CSHADER",
@@ -539,7 +528,7 @@ fn composite_without_env_input_fails_closed() {
     use render3d::device::{Gpu, Target};
     let gpu = Gpu::new_warp().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(standin_root());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(standin_root()));
     let c = Composite::new(&gpu, &src, &["CSHADER".into(), DC.into()], cache.path()).unwrap();
     assert!(c.needs_env());
     let t = Target::new_deferred(&gpu, 16, 16).unwrap();
@@ -625,7 +614,7 @@ fn forward_dc_draw_samples_env_texture_t31() {
 fn composite_with_an_unknown_sampler_fails_closed() {
     let gpu = render3d::device::Gpu::new_warp().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(standin_root());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(standin_root()));
     let defines = ["CSHADER", DC, "STANDIN_COMPOSITE_SAMPLER2"].map(String::from);
     let e = Composite::new(&gpu, &src, &defines, cache.path())
         .err()
@@ -723,7 +712,9 @@ fn gpu_prefilter_writes_each_level_at_its_roughness() {
         shaders_with_prefilter(MARK_PREFILTER),
         tempfile::tempdir().unwrap(),
     );
-    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(
+        shaders.path().to_path_buf(),
+    ));
     let mut p = Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path()).unwrap();
     let img = &render3d::hdri::studio().image;
     let e = EnvMaps::new_gpu(&gpu, &mut p, img, 16, 0.0).unwrap();
@@ -764,7 +755,9 @@ fn prefilter_with_an_unknown_interface_fails_closed() {
         shaders_with_prefilter(&two_srvs),
         tempfile::tempdir().unwrap(),
     );
-    let src = render3d::source::SourceSet::new(shaders.path().to_path_buf());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Folder(
+        shaders.path().to_path_buf(),
+    ));
     let e = render3d::composite::Prefilter::new(&gpu, &src, &["CSHADER".into()], cache.path())
         .err()
         .expect("two SRVs");
@@ -792,20 +785,14 @@ fn forward_dc_draw_samples_the_gpu_prefiltered_cube() {
     assert_eq!(r.env_builds(), 1);
 }
 
-/// Note GM1/GM2 against the CPU reference on the user's install: CS's SpecularIrradianceCS on the GPU vs
+/// Note GM1/GM2 against the CPU reference on the bundled tree: CS's SpecularIrradianceCS on the GPU vs
 /// [`render3d::hdri::specular_chain`] texel by texel, per level, and the GPU build time.
-/// `SDC_CS_SHADERS=…\Shaders cargo test --release -p render3d --test composite installed_prefilter -- --ignored --nocapture`
 #[test]
-#[ignore]
-fn installed_prefilter_matches_the_cpu_chain() {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
+fn bundled_prefilter_matches_the_cpu_chain() {
     use render3d::composite::{EnvMaps, Prefilter};
     let gpu = render3d::device::Gpu::new().unwrap();
     let cache = tempfile::tempdir().unwrap();
-    let src = render3d::source::SourceSet::new(shaders.into());
+    let src = render3d::source::SourceSet::new(render3d::ShaderSource::Bundled);
     let defines = ["CSHADER", "ENABLE_LL"].map(String::from);
     let mut p = Prefilter::new(&gpu, &src, &defines, cache.path()).unwrap();
     let img = &render3d::hdri::studio().image;

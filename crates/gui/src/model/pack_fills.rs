@@ -209,7 +209,7 @@ impl AppModel {
 }
 
 /// Note DY18: the greyscale helpers of the packed output's set, `(item key, file name, role)`, in the engine's order
-/// (by file name); normal layers are left out.
+/// (by file name). Note HH7: the helpers the set shares are listed too; a pick writes the file's one row.
 pub fn channel_helpers(model: &AppModel, packed_key: &str) -> Vec<(String, String, HelperRole)> {
     let Some(set) = model.item(packed_key).and_then(|i| i.set_key.clone()) else {
         return vec![];
@@ -218,7 +218,7 @@ pub fn channel_helpers(model: &AppModel, packed_key: &str) -> Vec<(String, Strin
         .items
         .iter()
         .filter_map(|i| Some((i, i.helper.as_ref()?)))
-        .filter(|(_, h)| h.set_key == set && !h.role.is_normal())
+        .filter(|(_, h)| h.set_key == set || h.shared_with.contains(&set))
         .map(|(i, h)| (i.key.clone(), i.name.clone(), h.role))
         .collect()
 }

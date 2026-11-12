@@ -270,69 +270,6 @@ fn undo_after_partial() {
     equals_a_fresh_open(d.path(), &mut m);
 }
 
-/// Final fix (parked from Task 6): a partial removes only the RNM keys no item outside its scope still reads.
-#[test]
-fn a_partial_keeps_the_rnm_keys_other_sets_read() {
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path().join("m");
-    std::fs::create_dir_all(&r).unwrap();
-    for f in ["iron.png", "copper.png"] {
-        image::ImageBuffer::from_fn(64, 64, |x, y| {
-            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
-        })
-        .save(r.join(f))
-        .unwrap();
-    }
-    for f in [
-        "iron_n.png",
-        "iron_bump.png",
-        "iron_detailnorm.png",
-        "iron_detailnormmask.png",
-    ] {
-        image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([(x * 3) as u8]))
-            .save(r.join(f))
-            .unwrap();
-    }
-    let settings = GuiSettings {
-        export_folder: Some(d.path().join("export")),
-        ..GuiSettings::default()
-    };
-    let mut m = AppModel::new(settings, None, session());
-    m.accept = engine::policy::AcceptSuggestions::High;
-    m.open_folder(d.path().to_path_buf());
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    choose_export(&mut m, d.path().join("export"));
-    let rnm = m
-        .item("m/iron_n.png")
-        .unwrap()
-        .job
-        .as_ref()
-        .unwrap()
-        .rnm
-        .clone();
-    let rnm = rnm.expect("iron_n has layers");
-    let layer = rnm.layers[0].file.path.clone();
-    assert!(m.rnm_keys.contains_key(&layer));
-    // Copper, a set of its own, reads the same layer file.
-    let copper = m
-        .items
-        .iter()
-        .position(|i| i.key == "m/copper.png")
-        .unwrap();
-    m.items[copper].job.as_mut().expect("copper's job").rnm = Some(rnm);
-    m.invalidate_views();
-    m.hold_plan_results = true;
-    m.set_field("m/copper.png", "alpha.policy", json!(AlphaPolicy::Cutout));
-    let (partials, full) = collect(&mut m, 1, 1);
-    assert!(
-        matches!(&partials[0], WorkerMsg::Partial { result: Ok((_, scope)), .. } if scope.len() == 1),
-        "a partial of copper's set alone"
-    );
-    deliver(&mut m, partials);
-    assert!(m.rnm_keys.contains_key(&layer), "iron_n still reads it");
-    finish(&mut m, full);
-}
-
 #[test]
 fn needs_full_waits_for_full() {
     let d = tempfile::tempdir().unwrap();
@@ -825,4 +762,53 @@ fn a_global_edit_sends_no_partial() {
     assert!(m.partial_pending);
     let (_, full) = collect(&mut m, 1, 1);
     finish(&mut m, full);
+}
+
+#[test]
+fn subtype_edit_on_the_fast_path_clears_an_invalid_format() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    m.hold_plan_results = false;
+    let normal = engine::policy::allowed_encodings_for(Subtype::Normal, m.target, false);
+    let pair = engine::policy::allowed_encodings_for(Subtype::Diffuse, m.target, false)
+        .into_iter()
+        .find(|p| !normal.contains(p))
+        .expect("a diffuse encoding a normal map does not allow");
+    m.set_format(LEAF, pair.0, pair.1);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(LEAF, "format")
+        .is_some());
+    assert!(m.encoding_note.is_none());
+    let steps = m.history.undo.len();
+    m.hold_plan_results = true;
+    m.set_field(LEAF, "subtype", json!(Subtype::Normal));
+    let (partials, full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "the fast path ran"
+    );
+    deliver(&mut m, partials);
+    finish(&mut m, full);
+    let p = m.project.as_ref().unwrap();
+    assert_eq!(p.file_value(LEAF, "format"), None);
+    assert_eq!(p.file_value(LEAF, "color.tag"), None);
+    let (line, _) = m.encoding_note.clone().expect("a note");
+    assert!(line.contains("format reset to the default"), "{line}");
+    assert_eq!(
+        m.history.undo.len(),
+        steps + 1,
+        "folded into the edit's step"
+    );
+    m.undo();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(LEAF, "format")
+        .is_some());
 }

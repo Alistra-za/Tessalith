@@ -469,7 +469,8 @@ fn advanced_has_no_batch_or_preview_size_rows() {
     let want = [
         "Advanced texture fields",
         "Also export recipe",
-        "Check all UV coverage",
+        "Analysis cache limit",
+        "Cache",
         "Checks",
         "Close",
         "Green direction check",
@@ -480,10 +481,60 @@ fn advanced_has_no_batch_or_preview_size_rows() {
         "Preset inspector",
         "Presets…",
         "Preview",
-        "UV coverage check",
         "Unmatched [files] entries",
     ];
     assert_eq!(labels, want);
+}
+
+/// Note HV2: the Cache section's box shows the analysis cache limit, and a typed limit is saved to gui.toml once. A
+/// limit from gui.toml outside the box's range is left as it is by drawing the drawer.
+#[test]
+fn the_cache_limit_box_saves_a_typed_limit() {
+    use eframe::egui::{Event, Key, Modifiers};
+    use sdc_gui::settings::GuiSettings;
+    fn spin<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
+        h.get_by_role_and_label(Role::SpinButton, "Analysis cache limit")
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.settings.advanced_open = true;
+    let toml = d.path().join("settings").join("gui.toml");
+    model.settings_path = Some(toml.clone());
+    let mut h = harness(model);
+    h.run();
+    assert_eq!(spin(&h).accesskit_node().numeric_value(), Some(500.0));
+
+    h.state_mut().settings.analysis_cache_mb = Some(7);
+    h.run();
+    assert_eq!(spin(&h).accesskit_node().numeric_value(), Some(7.0));
+    assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
+    assert!(!toml.exists(), "drawing saves nothing");
+
+    // Entering the box and leaving it with Enter, nothing typed, keeps the out-of-range limit too.
+    spin(&h).focus();
+    h.run();
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
+    assert!(!toml.exists(), "leaving the box saves nothing");
+
+    spin(&h).focus();
+    h.run();
+    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    h.run();
+    h.event(Event::Text("800".into()));
+    h.run();
+    assert_eq!(
+        h.state().settings.analysis_cache_mb,
+        Some(7),
+        "not while typing"
+    );
+    h.key_press(Key::Enter);
+    h.run();
+    h.run();
+    assert_eq!(h.state().settings.analysis_cache_mb, Some(800));
+    assert_eq!(GuiSettings::load(&toml).0.analysis_cache_mb, Some(800));
 }
 
 /// Backlog T32: while a plan is pending the drawer's rows are off, like the settings panel's (Note FK), so a pick is
@@ -565,4 +616,48 @@ fn drawer_resize_pick_waits_for_the_plan_then_writes() {
         .unwrap()
         .file_value("landscape/leaf.png", "resize");
     assert_eq!(own, Some(serde_json::json!("none")));
+}
+
+/// Note HI18: the drawer's rows have no `?`, so the label shows the row's help on hover.
+#[test]
+fn a_drawer_label_shows_the_rows_help() {
+    let d = tempfile::tempdir().unwrap();
+    let model = leaf_model(d.path());
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(380.0, 1400.0))
+        .build_ui_state(
+            |ui, model: &mut AppModel| {
+                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
+                ui.allocate_ui(eframe::egui::vec2(380.0, 1400.0), |ui| {
+                    sdc_gui::ui::advanced::body(ui, model, &mut state);
+                });
+            },
+            model,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    let text = sdc_gui::model::fields::field_help("resize_floor").unwrap();
+    assert!(h.query_all_by_label_contains(text).next().is_none());
+    let rects: Vec<_> = h
+        .query_all_by_label("Size floor")
+        .filter(|n| n.accesskit_node().role() == Role::Label)
+        .map(|n| n.rect())
+        .collect();
+    assert!(!rects.is_empty(), "the drawer has a Size floor row");
+    let shown = rects.iter().any(|r| {
+        h.query_all_by_label("Size floor")
+            .find(|n| n.rect() == *r)
+            .unwrap()
+            .hover();
+        h.run();
+        h.query_all_by_label_contains(text).next().is_some()
+    });
+    assert!(shown, "no Size floor label shows its help");
+    assert!(
+        !h.query_all_by_role(Role::Label).any(|n| n
+            .accesskit_node()
+            .value()
+            .is_some_and(|v| v.starts_with("Help: "))),
+        "a ? in the drawer"
+    );
 }

@@ -9,8 +9,8 @@ use super::sets::{
 use super::txst_map::record_entries;
 use super::AppModel;
 use crate::pgp::prefix::{
-    check_file_name, check_json_path, matches_nothing, output_rel, pitfalls, rename_hits_elsewhere,
-    subsurface_pitfalls,
+    check_file_name, check_json_path, default_prefix, matches_nothing, output_rel, pitfalls,
+    rename_hits_elsewhere, subsurface_pitfalls,
 };
 use crate::pgp::settings::{blocked_by, feature_key, feature_on, Feature, Settings, FEATURE_KEYS};
 use crate::pgp::validate::validate;
@@ -87,13 +87,6 @@ fn slots_of(
     m: &AppModel,
 ) -> BTreeMap<u8, String> {
     let mut out = BTreeMap::new();
-    // The output paths are relative to the project root; a root that is itself a `textures` folder leaves that
-    // folder out of them, and the game path has it.
-    let root_is_textures = m
-        .root
-        .as_deref()
-        .and_then(std::path::Path::file_name)
-        .is_some_and(|n| n.eq_ignore_ascii_case("textures"));
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
@@ -104,7 +97,7 @@ fn slots_of(
         // `textures`), else the file's game path.
         let json_only = v.json && !v.pbr;
         let p = match fill_path(item, views, paths, m) {
-            Some(p) if json_only && root_is_textures => PathBuf::from("textures").join(p),
+            // Note HQ6: an explicit path is under the export folder, as the JSON names it.
             Some(p) => p.clone(),
             None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
                 Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
@@ -112,14 +105,14 @@ fn slots_of(
             },
             None => continue,
         };
-        // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command. Its slot 3 default
-        // is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an explicit slot is
-        // never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
+        // PGPatcher finds the set's own texture at `<prefix>_<suffix>.dds` without a slot command, `prefix` being the
+        // one it fills from by default: a `Slots`-form rename moves the files away from it, so each is named (HJ3).
+        // Its slot 3 default is not known to look for `_sk`, so a skin `_sk` is always named (final review M5): an
+        // explicit slot is never wrong. An `_rfaos` is not at the RMAOS slot's own path, so slot 6 is named too.
         let at_own_path = *kind != SlotKind::SkinSk
             && v.pbr
-            && v.prefix
-                .as_deref()
-                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(pre, kind.suffix())));
+            && default_prefix(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+                .is_some_and(|pre| path_lower(&p) == path_lower(&output_rel(&pre, kind.suffix())));
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, p.to_string_lossy().replace('/', "\\"));
@@ -176,8 +169,8 @@ fn slot_filled(v: &SetView, n: u8) -> bool {
 
 /// Note HL5: a JSON set with no albedo and no texture (own or mapped) for slot 2 or 6 locks it, so PGPatcher keeps
 /// the mesh's own; a lock or `slotN` the user set wins. A filled slot `slots_of` could not name (a kept DDS with no
-/// job) is locked too, whatever its number: PGPatcher would fill it from `textures\pbr\<match>_<suffix>.dds` and
-/// skip the shape.
+/// job) is locked too, whatever its number: PGPatcher would fill it from its default `<prefix>_<suffix>.dds`
+/// (`default_prefix`, under `textures\pbr\`) and skip the shape.
 fn lock_empty_slots(v: &SetView, slots: &BTreeMap<u8, String>, s: &mut Settings) {
     if !v.json || v.pbr {
         return;
@@ -375,7 +368,8 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             });
         }
     }
-    for v in &set_views(m) {
+    // Note HF9: a set outside the run gates nothing; the project-wide checks below still block.
+    for v in set_views(m).iter().filter(|v| m.in_run(&v.key)) {
         // A value CS would reject voids the whole `.csskin.json`; it is not a PGPatcher entry, so it comes first.
         if m.target == Target::Cs && v.skin {
             for (k, why) in super::skin::bad_skin_values(&m.skin_values(&v.id)) {
@@ -459,7 +453,10 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             if out.is_empty() {
                 let views = set_views(m);
                 let (_, paths) = engine_inputs(m);
-                for v in views.iter().filter(|v| v.json && m.pgp_entry_wanted(v)) {
+                for v in views
+                    .iter()
+                    .filter(|v| v.json && m.pgp_entry_wanted(v) && m.in_run(&v.key))
+                {
                     for (n, from) in unresolved_slots(v, &views, &paths, m) {
                         let text = match from {
                             Some(from) => format!(
@@ -549,13 +546,14 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
         if item_output_key_in(&owners, it).is_some_and(|k| owned.contains(&k)) {
             continue;
         }
-        if let Some((owner, k)) = seen.get(&it.job_key.replace('\\', "/").to_lowercase()) {
+        let at = m.export_key(&it.job_key);
+        if let Some((owner, k)) = seen.get(&at) {
             out.push(ExportIssue {
                 set_id: owner.clone(),
                 set_key: key_of_set(owner),
                 text: format!(
                     "{owner} writes {} ({}), the same file {} is written to (no path of its own)",
-                    it.job_key,
+                    at,
                     name(k),
                     it.key
                 ),
@@ -566,32 +564,9 @@ pub fn path_collisions(m: &AppModel) -> Vec<ExportIssue> {
     out
 }
 
-/// What Review asks to acknowledge: the photo crops (project-wide), then the pitfalls of every PBR set.
+/// What Review asks to acknowledge: the pitfalls of every PBR set.
 pub fn export_asks(m: &AppModel) -> Vec<ExportIssue> {
-    photo_crops(m)
-        .into_iter()
-        .chain(set_asks(m).iter().cloned())
-        .collect()
-}
-
-/// Note FC12 (supersedes DS26's "no warning"): a single photo taller than wide keeps only its middle `w` rows when it
-/// becomes a cube (`import_dir::photo_panorama`); each such texture is an ask, from the size the plan read.
-fn photo_crops(m: &AppModel) -> Vec<ExportIssue> {
-    let session = m.session.as_ref();
-    m.items
-        .iter()
-        .filter_map(|i| {
-            let j = i.job.as_ref()?;
-            if j.cube.as_ref()?.layout != engine::config::CubeLayout::Photo {
-                return None;
-            }
-            let st = j.source?;
-            let (w, h) = session?.cache().dims(&j.input, st)?;
-            // The texture's path, not its file name: two same-named photos are two acknowledgements.
-            let name = &i.key;
-            (h > w).then(|| general(format!("Only the middle {w}×{w} of {name} is used")))
-        })
-        .collect()
+    set_asks(m).to_vec()
 }
 
 /// The PBR sets' pitfalls. Cached like `export_blocks`, plus `evidence_rev` (the known texture paths and the mesh
@@ -618,7 +593,7 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
     let known = m.known_textures(Some(0));
     set_views(m)
         .iter()
-        .filter(|v| v.json)
+        .filter(|v| v.json && m.in_run(&v.key))
         .flat_map(|v| {
             let derived = v.derived_match.as_deref().unwrap_or("");
             pitfalls(&v.settings, derived)
@@ -644,6 +619,9 @@ pub struct PendingJson {
     pub entries: Vec<(String, Vec<String>, EntryInput)>,
     /// Borrowed-slot copies for vanilla: (owner output, borrower path, owner job key), paths absolute (P4).
     pub copies: Vec<(PathBuf, PathBuf, String)>,
+    /// Note HF9: on a run that leaves sets out, the plan's output root: a dep with no row passes when its file is
+    /// there. `None`: every dep needs its row, as before.
+    pub untouched_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -660,7 +638,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
     let views = set_views(m);
     if m.target != Target::Cs {
         let mut copies = vec![];
-        for v in &views {
+        // Note HF9: copies are per-set files, made only for the sets in the run.
+        for v in views.iter().filter(|v| m.in_run(&v.key)) {
             let Some(SlotFill::Own { item: d }) = v.slots.get(&SlotKind::Diffuse) else {
                 continue;
             };
@@ -700,6 +679,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             path: PathBuf::new(),
             entries: vec![],
             copies,
+            untouched_root: m.untouched_root(),
         });
     }
     let deps = |v: &SetView| -> Vec<String> {
@@ -739,6 +719,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
         entries,
         copies: vec![],
         root,
+        untouched_root: m.untouched_root(),
     })
 }
 
@@ -753,6 +734,22 @@ fn exported(rows: &[Row], key: &str) -> Result<(), String> {
     }
 }
 
+/// Note HF9: one dep of an entry: written or up to date in this run, or, on a run that leaves sets out, untouched by it
+/// and on disk ("leave it alone" keeps an entry whose source changed since).
+fn dep_ok(p: &PendingJson, rows: &[Row], key: &str) -> Result<(), String> {
+    let touched = rows.iter().any(|r| r.job_key.eq_ignore_ascii_case(key));
+    match &p.untouched_root {
+        Some(root) if !touched => {
+            if root.join(key).is_file() {
+                Ok(())
+            } else {
+                Err("not exported yet".into())
+            }
+        }
+        _ => exported(rows, key),
+    }
+}
+
 /// After a successful export, the vanilla borrowed-slot copies (P4, P22). A copy replaces only a file it wrote
 /// before (its hash is in `shas`, keyed by `history::record_key`) or one with the same bytes; any other file is
 /// kept with a note (Note BV3). `shas` gets the hash of each copy written.
@@ -764,7 +761,7 @@ pub fn copy_files(
 ) {
     for (src, dst, owner_key) in &p.copies {
         if !owner_key.is_empty() {
-            if let Err(why) = exported(rows, owner_key) {
+            if let Err(why) = dep_ok(p, rows, owner_key) {
                 notes.push(format!("could not copy {} ({why})", src.display()));
                 continue;
             }
@@ -809,7 +806,11 @@ pub fn finish(
     }
     let mut kept = vec![];
     for (id, deps, e) in &p.entries {
-        match deps.iter().map(|k| exported(rows, k)).find_map(Result::err) {
+        match deps
+            .iter()
+            .map(|k| dep_ok(p, rows, k))
+            .find_map(Result::err)
+        {
             None => kept.push(e.clone()),
             Some(why) => notes.push(format!("not in JSON: {id} ({why})")),
         }
@@ -940,7 +941,7 @@ pub fn json_issues(m: &AppModel, entry_ids: &[&str]) -> JsonIssues {
     for i in export_blocks(m).iter().cloned() {
         place(i, true);
     }
-    // The photo crops are not the JSON's: the sets' pitfalls only.
+    // Only the sets' pitfalls are asked.
     for i in set_asks(m).iter().cloned() {
         place(i, false);
     }

@@ -794,8 +794,7 @@ fn unmapping_a_created_set_after_a_rename_uses_the_new_folder() {
     let mut m = project_toml(d.path(), &["textures/a/x.png"], "");
     let id = m.drop_new_set("textures/a/x.png").unwrap();
     idle(&mut m);
-    m.set_output_name(&id, Some("steel")).unwrap();
-    idle(&mut m);
+    support::seed_output_name(&mut m, &id, "steel");
     m.map_record(&id, record(&[(1, "textures/b/body.dds")]))
         .unwrap();
     idle(&mut m);
@@ -844,7 +843,7 @@ fn the_default_output_matches_the_plan_when_nothing_moves_it() {
         .filter(|i| i.job.is_some() && !i.job_key.is_empty())
     {
         assert_eq!(
-            defaults.key(it).as_deref(),
+            defaults.key(it, &[]).as_deref(),
             Some(it.job_key.as_str()),
             "{}",
             it.key
@@ -991,7 +990,7 @@ fn no_fill_round_trips() {
     let text = std::fs::read_to_string(d.path().join("sdc-project.toml")).unwrap();
     assert!(!text.contains("no_fill"), "{text}");
 }
-/// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test txst_map -- --ignored render_`: the card and the editor of the
+/// `TXST_SHOTS_DIR=<dir> cargo test -p sdc-gui --test it txst_map::render_ -- --ignored`: the card and the editor of the
 /// shared set at 1100, 1280 and 1600 px wide.
 #[test]
 #[ignore]

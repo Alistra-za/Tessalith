@@ -4,7 +4,7 @@ use crate::codes::{Code, Warning};
 use crate::presets::ReadAs;
 use serde::Serialize;
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
 pub const IMAGE_EXTS: [&str; 14] = [
     "png", "tga", "tif", "tiff", "exr", "hdr", "bmp", "jpg", "jpeg", "webp", "psd", "psb", "kra",
@@ -64,6 +64,92 @@ pub fn game_path(abs: &Path, rel: &Path) -> String {
             .replace('\\', "/")
             .to_ascii_lowercase(),
     }
+}
+
+fn is_textures(c: Component) -> bool {
+    c.as_os_str().eq_ignore_ascii_case("textures")
+}
+
+/// Note HQ1: the folders of the input `root`'s own path that go between the export folder and the outputs, so the
+/// export mirrors game paths: from the last `textures` in it down to `root`, each named as its parent folder lists
+/// it (case from disk). Empty when the path has no `textures` (HQ2). When `export` holds `root`, only the part below
+/// `export` (HQ3, HQ5: a DDS lands beside its source). Also empty when `root` holds a `textures` folder itself or in
+/// a sub-folder (a `textures` folder of mod folders, Note BQ8): game paths start there, and `rel` already has it (HQ8).
+/// Note HS4: an `export` strictly inside `root` is ignored in that check, with every folder in it, so its own `textures`
+/// folder (made by the first run) does not flip the output root.
+// shortcut: HQ8 is all or nothing (files beside such a nested folder export without `textures`) and looks two levels
+// down only; upgrade to a per-file prefix if such a layout shows up.
+// shortcut: HS4 compares the export folder as written, so one reached through a junction or `..` is not recognised;
+// upgrade to canonical paths if that shows up.
+pub fn root_prefix(root: &Path, export: &Path) -> PathBuf {
+    let root = crate::overrides::absolute_or_same(root);
+    let comps: Vec<Component> = root.components().collect();
+    let Some(i) = comps.iter().rposition(|&c| is_textures(c)) else {
+        return PathBuf::new();
+    };
+    let dirs = |p: &Path| -> Vec<PathBuf> {
+        std::fs::read_dir(p)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_dir()))
+            .map(|e| e.path())
+            .collect()
+    };
+    let named = |p: &Path| {
+        p.file_name()
+            .is_some_and(|n| n.eq_ignore_ascii_case("textures"))
+    };
+    // Note HS4: the export folder and what is in it are ours, not source layout.
+    let out = crate::overrides::absolute_or_same(export);
+    let ours = |p: &Path| !is_under(&root, &out) && is_under(p, &out);
+    if dirs(&root)
+        .iter()
+        .filter(|d| !ours(d))
+        .any(|d| named(d) || dirs(d).iter().any(|g| !ours(g) && named(g)))
+    {
+        return PathBuf::new();
+    }
+    let start = depth_below(export, &root).map_or(i, |n| i.max(comps.len().saturating_sub(n)));
+    let mut at: PathBuf = comps[..start].iter().collect();
+    let mut prefix = PathBuf::new();
+    for c in &comps[start..] {
+        let name = std::fs::read_dir(&at)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.file_name())
+            .find(|n| n.eq_ignore_ascii_case(c.as_os_str()))
+            .unwrap_or_else(|| c.as_os_str().to_os_string());
+        at.push(c);
+        prefix.push(name);
+    }
+    prefix
+}
+
+/// Note HQ3, HQ5: whether `export` is `root` or an ancestor of it.
+pub fn holds(export: &Path, root: &Path) -> bool {
+    depth_below(export, root).is_some()
+}
+
+/// How many folders `root` lies below `export` when `export` holds it. Resolved paths when both exist, so a junction
+/// or `..` cannot hide it; else absolute ones (an export folder not made yet holds nothing that exists).
+fn depth_below(export: &Path, root: &Path) -> Option<usize> {
+    let real = |p: &Path| std::fs::canonicalize(p).ok();
+    let (r, e) = match (real(root), real(export)) {
+        (Some(r), Some(e)) => (r, e),
+        _ => (
+            crate::overrides::absolute_or_same(root),
+            crate::overrides::absolute_or_same(export),
+        ),
+    };
+    is_under(&r, &e).then(|| r.components().count() - e.components().count())
+}
+
+/// Note HQ1: the output root a request with input `root` and export folder `export` plans with:
+/// `export/<root_prefix>`. Set ids, `rel` and the manifest are relative to it.
+pub fn effective_output_root(root: &Path, export: &Path) -> PathBuf {
+    export.join(root_prefix(root, export))
 }
 
 /// Component-wise prefix test that ignores case, as NTFS does.
@@ -133,8 +219,7 @@ pub fn discover_reporting(
             // Note BC (audit #3): only an output root strictly inside this folder is skipped; in place skips nothing.
             let in_abs = std::path::absolute(input)?;
             let skip_out = is_under(&out_abs, &in_abs) && !is_under(&in_abs, &out_abs);
-            // A followed link into the output folder must be skipped too: compare resolved paths (Note CV6).
-            // shortcut: only folder links are resolved; a file link into the output folder is still read.
+            // A followed folder or file link into the output folder must be skipped too: compare resolved paths (Note CV6, HR3).
             let real = |p: &Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
             let (in_real, out_real) = (real(&in_abs), real(&out_abs));
             let skip_real = !is_under(&in_real, &out_real);
@@ -189,6 +274,7 @@ pub fn discover_reporting(
                 let p = e.path();
                 if !e.file_type().is_file()
                     || (skip_out && is_under(&std::path::absolute(p)?, &out_abs))
+                    || (skip_real && e.path_is_symlink() && is_under(&real(p), &out_real))
                 {
                     continue;
                 }
@@ -397,7 +483,7 @@ pub fn canonicalise_outputs(files: &mut [InputFile], aliases: &BTreeMap<String, 
         let name = match (&split.alias, vocab_of(&stem)) {
             (Some(_), _) => suffixed(),
             (None, Some(v)) => match v.role {
-                VocabRole::PackingInput(_) | VocabRole::NormalLayer(_) => None,
+                VocabRole::PackingInput(_) => None,
                 VocabRole::Colour => Some(format!("{}.dds", split.base)),
                 VocabRole::Normal(_) | VocabRole::Emissive | VocabRole::CoatColour => suffixed(),
             },

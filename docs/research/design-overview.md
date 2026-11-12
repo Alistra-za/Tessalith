@@ -142,4 +142,4 @@ Every output is written atomically, and a batch manifest records how each file w
 
 - **Plain `_normal` files are assumed DirectX**, with an info message, instead of blocking until the user states the convention ([DECISIONS](../../.claude/DECISIONS.md) Note AW).
 - **Version 0.8.0** is the first public alpha ([DECISIONS](../../.claude/DECISIONS.md) Note AX).
-- **Channel packing, RNM normal layers, complex grass, PGPatcher JSON export and a 3D preview** were added after the plan. See the [wiki](../wiki/Home.md).
+- **Channel packing, complex grass, PGPatcher JSON export and a 3D preview** were added after the plan. See the [wiki](../wiki/Home.md).

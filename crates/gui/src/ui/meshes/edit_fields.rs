@@ -20,6 +20,8 @@ use render3d::material::{engine_blend, verified_blend};
 #[derive(Default)]
 pub(super) struct Act {
     pub push: Option<(Vec<Op>, Option<String>)>,
+    /// Note HS15: a texture path committed this frame; its own slot, so the click that ended the typing keeps its edit.
+    pub path: Option<(Vec<Op>, Option<String>)>,
     /// A drag or a typed value ended: the next change is a new undo step.
     pub flush: bool,
     pub solo: Option<bool>,
@@ -762,7 +764,7 @@ fn texture_slots(
             },
         );
         if let Some(path) = commit.filter(|p| *p != text) {
-            act.push = Some((
+            act.path = Some((
                 vec![Op::SetTexturePath {
                     at: anchor.clone(),
                     slot: i as u32,

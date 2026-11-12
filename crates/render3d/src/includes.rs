@@ -1,5 +1,42 @@
 //! Textual #include expansion so D3DCompile sees one buffer; CS includes are root-relative ("Common/x.hlsli").
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+
+/// Where shader text is read from: the tree embedded in the exe. Tests can also read a folder (stand-ins, the
+/// owner's CS for comparisons).
+#[derive(Clone, Debug, Default)]
+pub enum ShaderSource {
+    #[default]
+    Bundled,
+    #[cfg(feature = "test-hooks")]
+    Folder(PathBuf),
+}
+
+impl ShaderSource {
+    fn read(&self, rel: &str) -> Option<Vec<u8>> {
+        match self {
+            ShaderSource::Bundled => crate::bundled::read(rel).map(<[u8]>::to_vec),
+            #[cfg(feature = "test-hooks")]
+            ShaderSource::Folder(root) => std::fs::read(root.join(rel)).ok(),
+        }
+    }
+
+    fn has(&self, rel: &str) -> bool {
+        match self {
+            ShaderSource::Bundled => crate::bundled::read(rel).is_some(),
+            #[cfg(feature = "test-hooks")]
+            ShaderSource::Folder(root) => root.join(rel).is_file(),
+        }
+    }
+
+    /// What error messages and `Expanded::files` call `rel`: the bundle's `rel` itself, or a test folder's path.
+    pub(crate) fn path_of(&self, rel: &str) -> PathBuf {
+        match self {
+            ShaderSource::Bundled => PathBuf::from(rel),
+            #[cfg(feature = "test-hooks")]
+            ShaderSource::Folder(root) => root.join(rel),
+        }
+    }
+}
 
 pub struct Expanded {
     pub text: String,
@@ -17,43 +54,29 @@ fn target(line: &str) -> Option<&str> {
     rest.split(['"', '>']).next()
 }
 
-fn slash(p: &Path) -> String {
-    p.display()
-        .to_string()
-        .replace(std::path::MAIN_SEPARATOR, "/")
-}
-
-/// The name written into `#line`: relative to `root` when `p` is under it, so the expansion (and the hash of
-/// it) is the same wherever the folder sits on disk.
-fn shown(p: &Path, root: Option<&Path>) -> String {
-    slash(root.and_then(|r| p.strip_prefix(r).ok()).unwrap_or(p))
-}
-
-fn go(file: &Path, search: &[PathBuf], depth: u32, out: &mut Expanded) -> std::io::Result<()> {
+fn go(source: &ShaderSource, rel: &str, depth: u32, out: &mut Expanded) -> std::io::Result<()> {
     if depth > 64 {
         return Err(std::io::Error::other(format!(
-            "include depth > 64 at {}",
-            file.display()
+            "include depth > 64 at {rel}"
         )));
     }
-    let bytes = std::fs::read(file)?;
+    let bytes = source.read(rel).ok_or_else(|| {
+        std::io::Error::new(std::io::ErrorKind::NotFound, format!("{rel} not found"))
+    })?;
     let text = String::from_utf8_lossy(&bytes);
     let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
-    out.files.push(file.to_path_buf());
-    let root = search.first().map(PathBuf::as_path);
-    let fname = shown(file, root);
+    out.files.push(source.path_of(rel));
+    let dir = rel.rsplit_once('/').map(|(d, _)| d);
     for (n, line) in text.lines().enumerate() {
         if let Some(t) = target(line) {
-            let dirs = file
-                .parent()
-                .into_iter()
-                .map(Path::to_path_buf)
-                .chain(search.iter().cloned());
-            if let Some(found) = dirs.map(|d| d.join(t)).find(|p| p.is_file()) {
-                out.text
-                    .push_str(&format!("#line 1 \"{}\"\n", shown(&found, root)));
-                go(&found, search, depth + 1, out)?;
-                out.text.push_str(&format!("#line {} \"{fname}\"\n", n + 2));
+            let t = t.replace('\\', "/");
+            // The includer's folder first, then the root.
+            let beside = dir.map(|d| format!("{d}/{t}"));
+            let found = beside.into_iter().chain([t]).find(|p| source.has(p));
+            if let Some(found) = found {
+                out.text.push_str(&format!("#line 1 \"{found}\"\n"));
+                go(source, &found, depth + 1, out)?;
+                out.text.push_str(&format!("#line {} \"{rel}\"\n", n + 2));
                 continue;
             }
         }
@@ -63,11 +86,12 @@ fn go(file: &Path, search: &[PathBuf], depth: u32, out: &mut Expanded) -> std::i
     Ok(())
 }
 
-pub fn expand(file: &Path, search: &[PathBuf]) -> std::io::Result<Expanded> {
+/// `rel` (root-relative, `/` or `\`) with every include inlined. The `#line` names are root-relative with `/`.
+pub fn expand(source: &ShaderSource, rel: &str) -> std::io::Result<Expanded> {
     let mut out = Expanded {
         text: String::new(),
         files: vec![],
     };
-    go(file, search, 0, &mut out)?;
+    go(source, &rel.replace('\\', "/"), 0, &mut out)?;
     Ok(out)
 }

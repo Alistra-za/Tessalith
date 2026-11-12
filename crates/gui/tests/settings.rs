@@ -31,6 +31,26 @@ fn settings_round_trip_and_bad_files_fall_back_to_defaults() {
     assert!(err.is_some());
 }
 
+/// Note HV2: the analysis cache limit is 500 MB until one is set, and an unset limit is not written to the file.
+#[test]
+fn the_analysis_cache_limit_is_500_mb_until_set() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    let mut s = GuiSettings::default();
+    assert_eq!(s.analysis_cache_bytes(), 500 * 1024 * 1024);
+    s.save(&p).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(!text.contains("analysis_cache_mb"), "{text}");
+    s.analysis_cache_mb = Some(800);
+    s.save(&p).unwrap();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(800));
+    assert_eq!(back.analysis_cache_bytes(), 800 * 1024 * 1024);
+    // The largest value the file can hold does not overflow.
+    s.analysis_cache_mb = Some(u32::MAX);
+    assert_eq!(s.analysis_cache_bytes(), u64::from(u32::MAX) << 20);
+}
+
 #[test]
 fn recent_keeps_ten() {
     let mut s = GuiSettings::default();
@@ -142,6 +162,27 @@ fn a_hand_edit_made_while_running_survives_the_next_save() {
         "both changed: the app wins"
     );
     assert_eq!(m.settings, back, "the app now holds what it wrote");
+}
+
+/// Note HV2: a cache limit typed into gui.toml while the app runs survives the app's next save, and a limit set in
+/// the app replaces it.
+#[test]
+fn a_hand_edited_cache_limit_survives_the_next_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    GuiSettings::default().save(&p).unwrap();
+    let (s, _) = GuiSettings::load(&p);
+    let mut m = sdc_gui::model::AppModel::new(s, Some(p.clone()), support::session());
+    let mut hand = GuiSettings::load(&p).0;
+    hand.analysis_cache_mb = Some(1000);
+    hand.save(&p).unwrap();
+    m.settings.live_encode = true;
+    m.save_settings();
+    let back = GuiSettings::load(&p).0;
+    assert_eq!(back.analysis_cache_mb, Some(1000), "the hand edit is kept");
+    assert!(back.live_encode);
+    m.set_analysis_cache_mb(800);
+    assert_eq!(GuiSettings::load(&p).0.analysis_cache_mb, Some(800));
 }
 
 /// Audit 2026-10-15 item 9: a failed gui.toml write is a warning toast, once per distinct error.
@@ -333,26 +374,58 @@ fn a_non_unicode_path_does_not_stop_the_settings_saving() {
     assert!(back.meshes.folder.is_none());
 }
 
-/// Backlog T39: a shaders root that is not valid Unicode is left out of the file too, not failing every save.
-#[cfg(windows)]
+/// Note GT4: a gui.toml written before the preview used the bundled shaders still has `[render3d] shaders`; it loads
+/// without an error, the other settings survive, and the next save drops the key.
 #[test]
-fn a_non_unicode_shaders_root_does_not_stop_the_settings_saving() {
-    use std::os::windows::ffi::OsStringExt;
-    let bad = std::path::PathBuf::from(std::ffi::OsString::from_wide(&[0x43, 0x3a, 0x5c, 0xD800]));
+fn an_old_shaders_key_is_ignored() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
-    let mut s = GuiSettings {
-        live_encode: true,
-        ..Default::default()
-    };
-    s.render3d.shaders = Some(render3d::locate::Fingerprint {
-        root: bad,
-        owner_mod: None,
-        hash: "h".into(),
-    });
-    s.save(&p).unwrap();
-    let (back, err) = GuiSettings::load(&p);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(
+        &p,
+        "live_encode = true\n[render3d.shaders]\nroot = 'C:\\CS\\Shaders'\nowner_mod = 'CS'\nhash = 'ab12'\n",
+    )
+    .unwrap();
+    let (s, err) = GuiSettings::load(&p);
     assert_eq!(err, None);
-    assert!(back.live_encode);
-    assert!(back.render3d.shaders.is_none());
+    assert!(s.live_encode);
+    s.save(&p).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        !text.contains("render3d") && !text.contains("shaders"),
+        "{text}"
+    );
+}
+
+/// Note GT4: the app's own save (`save_merged`) with the file changed since `base` runs the merge branch; the old
+/// key is gone from the text and the hand-edited field survives.
+#[test]
+fn an_old_shaders_key_is_dropped_by_the_merging_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(
+        &p,
+        "live_encode = true\n[render3d.shaders]\nroot = 'C:\\CS'\n",
+    )
+    .unwrap();
+    let (mut s, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    let mut base = Some((s.clone(), engine::policy::SourceStamp::of(&p)));
+    // A hand edit while the app runs: still carries the old key.
+    std::fs::write(
+        &p,
+        "live_encode = true\nadvanced_open = true\n[render3d.shaders]\nroot = 'C:\\CS\\Shaders'\nhash = 'ab12'\n",
+    )
+    .unwrap();
+    s.live_encode = false;
+    s.save_merged(&p, &mut base).unwrap();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(
+        !text.contains("render3d") && !text.contains("shaders"),
+        "{text}"
+    );
+    let back = GuiSettings::load(&p).0;
+    assert!(back.advanced_open, "the hand-edited field survives: {text}");
+    assert!(!back.live_encode, "the app's change is written: {text}");
 }

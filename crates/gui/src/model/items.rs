@@ -9,7 +9,7 @@ use engine::helper::report::HelperReport;
 use engine::helper::FillTarget;
 use engine::manifest::output_key;
 use engine::overrides::project_rel;
-use engine::pack::plan::virtual_stem;
+use engine::pack::plan::files_stem;
 use engine::pack::RecipeKind;
 use engine::policy::{near_binary, JobStatus, Need, ResolvedJob, SourceStamp};
 use engine::session::{Session, Thumbnail};
@@ -44,8 +44,8 @@ pub enum Decision {
         suggested: Option<Subtype>,
     },
     AlphaMeaning,
-    /// A single image that could be several cube layouts (`Need::CubeLayout`).
-    CubeLayout,
+    /// A single image that is not six faces, a cross or a strip (`Need::CubeLayout`); its only answer is a sub-type.
+    NotACubeSource,
     Acknowledge(Code),
 }
 
@@ -74,6 +74,8 @@ pub struct TextureItem {
     pub stamp: Option<SourceStamp>,
     /// Note DY16: the engine's report for a `Helper` item.
     pub helper: Option<std::sync::Arc<HelperReport>>,
+    /// Note GY5: the job waits for a type (`ResolvedJob::waits_for_type`); alone in its set, it has no set card.
+    pub waiting: bool,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -104,10 +106,6 @@ pub struct PlanView {
     pub items: Vec<TextureItem>,
     pub sets: Vec<SetItem>,
     pub unmatched: Vec<String>,
-    /// Set key to the RNM-* notes of its layer jobs (a layer file has no item).
-    pub rnm_notes: BTreeMap<String, Vec<Warning>>,
-    /// Layer, mask and AO path to its `[files]` key.
-    pub rnm_keys: BTreeMap<PathBuf, String>,
     /// The export folder the plan ran with: set keys are under it (audit 08c-3).
     pub output_root: PathBuf,
 }
@@ -125,14 +123,14 @@ pub(crate) fn key_of(root: &Path, path: &Path) -> String {
     project_rel(root, &f).unwrap_or_else(|| path.to_string_lossy().replace('\\', "/"))
 }
 
-/// A packed job's key: its first source's folder plus the virtual stem from the first source's name, without
-/// extension (as the engine scopes `[files]`; an output path does not change it).
+/// A packed job's key: its first source's folder plus the stem of its own output name (`files_stem`, Note HS2),
+/// without extension (as the engine scopes `[files]`; an output path does not change it).
 fn packed_key(root: &Path, job: &ResolvedJob, kind: RecipeKind) -> String {
     let src = key_of(root, &job.input);
     let dir = src
         .rsplit_once('/')
         .map_or(String::new(), |(d, _)| format!("{d}/"));
-    format!("{dir}{}", virtual_stem(&job.input, kind))
+    format!("{dir}{}", files_stem(job, kind))
 }
 
 pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
@@ -144,7 +142,7 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
                     suggested: job.suggestions.first().map(|s| s.subtype),
                 },
                 Need::AlphaMeaning => Decision::AlphaMeaning,
-                Need::CubeLayout => Decision::CubeLayout,
+                Need::CubeLayout => Decision::NotACubeSource,
             });
         }
     }
@@ -187,10 +185,21 @@ pub fn helper_tag_text(h: &HelperReport) -> String {
 }
 
 /// Note HP: `helper_target_text` with the file after each fill ("fills RMAOS R  x_rmaos, D alpha  x").
-pub fn helper_target_files(h: &HelperReport) -> String {
+pub fn helper_target_files(h: &HelperReport, tails: super::sets::Tails) -> String {
     target_line(h, "not used", |h, t| {
-        format!("{}  {}", fill_text(t), target_file(h, t))
+        format!("{}  {}", fill_text(t), target_file(h, t, tails))
     })
+}
+
+/// Note HH7: for a helper its own set leaves out but a sharing set uses, the base names of the sets it lands in
+/// ("stone, slab"); `None` otherwise, also when a set shares it but none uses it (that one is "not used").
+pub fn used_by(h: &HelperReport) -> Option<String> {
+    let bases: Vec<&str> = h
+        .used_by
+        .iter()
+        .map(|k| k.rsplit(['/', '\\']).next().unwrap_or(k))
+        .collect();
+    (h.fills.is_empty() && !bases.is_empty()).then(|| bases.join(", "))
 }
 
 /// `word` is how a helper that fills nothing is called ("not used", or "unused" where a tag paints that).
@@ -199,6 +208,9 @@ fn target_line(
     word: &str,
     one: impl Fn(&HelperReport, FillTarget) -> String,
 ) -> String {
+    if let Some(sets) = used_by(h) {
+        return format!("used by {sets}");
+    }
     if h.fills.is_empty() {
         return match h.not_used.as_deref().filter(|r| !r.is_empty()) {
             Some(r) => format!("{word}: {r}"),
@@ -220,29 +232,13 @@ impl PlanView {
     pub fn build(plan: &Plan, events: &[EngineEvent], session: &Session, root: &Path) -> PlanView {
         let out_root = &plan.request.output_root;
         let mut items = vec![];
-        let mut rnm_notes: BTreeMap<String, Vec<Warning>> = BTreeMap::new();
-        let mut rnm_keys = BTreeMap::new();
         // Note DY16: a file with a helper report is one Helper item; its own raw job and its pack-source item are not.
         let helper_paths: std::collections::HashSet<&Path> =
             plan.helpers.iter().map(|h| h.path.as_path()).collect();
         let mut helper_warnings: BTreeMap<&Path, Vec<Warning>> = BTreeMap::new();
+        // Note HF1 (GY1 guard): a no-set file never waits for a type, so no question, set or count is made of it.
+        // The engine keeps it waiting (a suggestion there would be recorded into `[files]`) and never writes it.
         for job in &plan.jobs {
-            // M6 Track F2 (Note W11): a layer file has no item; its RNM-* notes are kept for its set.
-            if matches!(job.status, JobStatus::NormalLayer { .. }) {
-                let notes: Vec<Warning> = job
-                    .warnings
-                    .iter()
-                    .filter(|w| w.code.as_str().starts_with("RNM-"))
-                    .cloned()
-                    .collect();
-                if !notes.is_empty() {
-                    rnm_notes
-                        .entry(job.set_key.clone())
-                        .or_default()
-                        .extend(notes);
-                }
-                continue;
-            }
             if matches!(job.status, JobStatus::PackingInput { .. })
                 && helper_paths.contains(job.input.as_path())
             {
@@ -252,17 +248,6 @@ impl PlanView {
                     .or_default()
                     .extend(job.warnings.iter().cloned());
                 continue;
-            }
-            if let Some(r) = &job.rnm {
-                for l in &r.layers {
-                    rnm_keys.insert(l.file.path.clone(), key_of(root, &l.file.path));
-                    if let Some(m) = &l.mask {
-                        rnm_keys.insert(m.path.clone(), key_of(root, &m.path));
-                    }
-                }
-                if let Some(a) = &r.ao {
-                    rnm_keys.insert(a.file.path.clone(), key_of(root, &a.file.path));
-                }
             }
             let packed = job.pack.is_some();
             let key = if let Some(pk) = &job.pack {
@@ -279,7 +264,6 @@ impl PlanView {
                 JobStatus::PackingInput { role } => {
                     ItemStatus::Skipped(format!("raw {} map, not packed", role.id()))
                 }
-                JobStatus::NormalLayer { .. } => unreachable!("layer jobs are skipped above"),
             };
             let name = if packed {
                 job.output
@@ -310,6 +294,7 @@ impl PlanView {
                 warnings: job.warnings.clone(),
                 thumb: session.thumbnail(job),
                 analysis: session.cache().analysis(job).map(std::sync::Arc::new),
+                waiting: job.waits_for_type() && !plan.no_set.contains(&job.input),
                 job: Some(job.clone()),
                 status,
                 changed_on_disk: false,
@@ -338,6 +323,7 @@ impl PlanView {
                         changed_on_disk: false,
                         stamp: None,
                         helper: None,
+                        waiting: false,
                     });
                 }
             }
@@ -369,6 +355,7 @@ impl PlanView {
                     changed_on_disk: false,
                     stamp: None,
                     helper: Some(std::sync::Arc::new(h.clone())),
+                    waiting: false,
                 }
             })
             .collect();
@@ -399,6 +386,7 @@ impl PlanView {
                 changed_on_disk: false,
                 stamp: if dds { SourceStamp::of(&s.path) } else { None },
                 helper: None,
+                waiting: false,
             });
         }
         for f in &plan.failed {
@@ -418,6 +406,7 @@ impl PlanView {
                 changed_on_disk: false,
                 stamp: None,
                 helper: None,
+                waiting: false,
             });
         }
         // De-duplicate by key (a raw source can feed two recipes): keep the first.
@@ -425,8 +414,11 @@ impl PlanView {
         items.retain(|i| seen.insert(i.key.clone()));
         items.sort_by_key(|i| i.key.to_lowercase());
 
-        let by_input: BTreeMap<String, Vec<String>> =
-            items.iter().fold(BTreeMap::new(), |mut m, i| {
+        // Note HS2: not packed items: two sets' packed outputs can share a first source; each joins by `set_key` below.
+        let by_input: BTreeMap<String, Vec<String>> = items
+            .iter()
+            .filter(|i| i.kind != ItemKind::Packed)
+            .fold(BTreeMap::new(), |mut m, i| {
                 m.entry(i.input.to_string_lossy().replace('\\', "/"))
                     .or_default()
                     .push(i.key.clone());
@@ -498,9 +490,19 @@ impl PlanView {
             items,
             sets,
             unmatched,
-            rnm_notes,
-            rnm_keys,
             output_root: out_root.clone(),
         }
+    }
+}
+
+impl super::AppModel {
+    /// The texture's message list (the settings panel's): its warnings and its check results.
+    pub fn item_messages(&self, key: &str) -> Vec<Warning> {
+        let mut ws = self
+            .item(key)
+            .map(|i| i.warnings.clone())
+            .unwrap_or_default();
+        ws.extend(self.check_warnings(key).iter().cloned());
+        ws
     }
 }

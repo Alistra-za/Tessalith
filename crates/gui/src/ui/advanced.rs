@@ -27,8 +27,7 @@ enum Action {
     RemoveUnmatched(String),
     Live(bool),
     Checks(ChecksSettings),
-    CheckAllUv,
-    CancelCheckAllUv,
+    CacheMb(u32),
     AlsoRecipe(LegacyParams),
 }
 
@@ -80,6 +79,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     inspector(ui, model, state);
     preview_settings(ui, model, &mut actions);
     checks(ui, model, &mut actions);
+    cache(ui, model, &mut actions);
     also_recipe(ui, model, &mut actions);
     mipmaps(ui, model, &mut actions);
     texture_fields(ui, model, &mut actions);
@@ -91,8 +91,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::Live(on) => model.set_live(on),
             Action::Checks(c) => model.set_checks(c),
-            Action::CheckAllUv => model.check_all_uv(),
-            Action::CancelCheckAllUv => model.cancel_check_all_uv(),
+            Action::CacheMb(mb) => model.set_analysis_cache_mb(mb),
             Action::AlsoRecipe(p) => model.set_also_settings(|c| c.legacy = p),
         }
     }
@@ -348,11 +347,10 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Checks", |ui| {
         let now = model.settings.checks;
         let mut c = now;
-        let boxes: [(&mut bool, &str, &str); 4] = [
+        let boxes: [(&mut bool, &str, &str); 3] = [
             (&mut c.low_detail, "Low detail", "Low detail check"),
             (&mut c.green, "Green direction", "Green direction check"),
             (&mut c.parallax, "Parallax", "Parallax check"),
-            (&mut c.uv, "UV coverage", "UV coverage check"),
         ];
         for (on, text, name) in boxes {
             let r = ui.checkbox(on, text);
@@ -362,7 +360,6 @@ fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
         if c != now {
             actions.push(Action::Checks(c));
         }
-        check_all_uv(ui, model, actions);
     });
 }
 
@@ -377,6 +374,63 @@ pub(super) fn held_value(
 ) -> (egui::Response, Option<f64>) {
     let (out, r) = held(ui, egui::Id::new(id), current, false, false, add);
     (r, out)
+}
+
+/// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
+/// opens: 5,000 MB is about 150,000 entries.
+const CACHE_MB: (f64, f64) = (50.0, 5_000.0);
+
+/// The analysis disk cache's limit (Note HV2): one number box, in MB. The cache is pruned at start only, so the
+/// hover says when a new limit applies.
+fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
+    const NAME: &str = "Analysis cache limit";
+    section(ui, "Cache", |ui| {
+        let now = f64::from(
+            model
+                .settings
+                .analysis_cache_mb
+                .unwrap_or(crate::settings::ANALYSIS_CACHE_MB),
+        );
+        // Built only while hovered (ui-rules 9.3).
+        let tip = |ui: &mut egui::Ui| {
+            ui.label(
+                "The most disk space the saved analyses and thumbnails of your textures may use \
+                 (%LOCALAPPDATA%\\sdc\\analysis-cache). They let a folder open without reading every image again. \
+                 Over the limit, the ones unused for longest are deleted when Tessalith starts.",
+            );
+            ui.label(
+                "A new limit applies the next time Tessalith starts. (gui.toml analysis_cache_mb)",
+            );
+        };
+        ui.horizontal(|ui| {
+            // The number box first, as the recipe rows: in a narrow drawer the text is cut, never the box.
+            let mut shown = now;
+            let (r, done) = held_value(ui, "analysis-cache-mb", now, |ui, x| {
+                let r = ui.add(
+                    egui::DragValue::new(x)
+                        .speed(10.0)
+                        // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the
+                        // box, or leaving it, never changes it.
+                        .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
+                        .max_decimals(0)
+                        .suffix(" MB")
+                        .update_while_editing(false),
+                );
+                shown = *x;
+                r
+            });
+            r.widget_info(|| {
+                let mut i = egui::WidgetInfo::drag_value(true, shown);
+                i.label = Some(NAME.to_string());
+                i
+            });
+            r.on_hover_ui(tip);
+            ui.label(NAME).on_hover_ui(tip);
+            if let Some(mb) = done {
+                actions.push(Action::CacheMb(mb.round() as u32));
+            }
+        });
+    });
 }
 
 const OPEN_RECIPE: &str = "advanced-open-recipe";
@@ -531,47 +585,6 @@ fn also_recipe(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     });
 }
 
-/// "Check all UV coverage" for the open folder, or while it runs its bar and the button that stops it. Never greyed
-/// by `busy()` (owner answer 8).
-fn check_all_uv(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    if let Some((done, total)) = model.uv.all_progress() {
-        let frac = if total == 0 {
-            0.0
-        } else {
-            done as f32 / total as f32
-        };
-        let bar = ui.add(
-            egui::ProgressBar::new(frac)
-                .text(format!("{done} / {total}"))
-                .animate(false),
-        );
-        // Review M3: the visible "3 / 72" alone names nothing.
-        bar.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::ProgressIndicator,
-                true,
-                format!("Checking UV coverage: {done} of {total}"),
-            )
-        });
-        // After Stop, the reads in flight still finish (a big NIF can take seconds).
-        if model.uv.all_stopping() {
-            ui.add_enabled(false, egui::Button::new("Stopping…"));
-        } else if ui.button("Stop checking UV coverage").clicked() {
-            actions.push(Action::CancelCheckAllUv);
-        }
-        return;
-    }
-    let offered = model.uv_check_all_offered();
-    if ui
-        .add_enabled(offered.is_ok(), egui::Button::new("Check all UV coverage"))
-        .on_hover_text("Read the UV coverage of every colour texture in this folder from the meshes in your scan")
-        .on_disabled_hover_text(offered.err().unwrap_or_default())
-        .clicked()
-    {
-        actions.push(Action::CheckAllUv);
-    }
-}
-
 /// The mip level count (Full chain, None or 2..N levels); the basic panel only has the on/off tick box.
 fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Mipmaps", |ui| {
@@ -592,6 +605,8 @@ fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
                         target: model.target,
                         busy: model.edit_busy(),
                         compact: false,
+                        aligned: false,
+                        alpha_asked: false,
                         edit_off: why.clone(),
                         warnings: &[],
                     };
@@ -627,6 +642,8 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
                         target: model.target,
                         busy,
                         compact: false,
+                        aligned: false,
+                        alpha_asked: false,
                         edit_off: why.clone(),
                         warnings: &[],
                     };
@@ -726,15 +743,6 @@ pub(super) mod gesture {
         h.state().commits.clone()
     }
 
-    /// Click the widget once: what was committed.
-    pub fn click(draw: fn(&mut egui::Ui, &mut St), role: Role) -> Vec<f64> {
-        let mut h = harness(draw);
-        h.get_by_role(role).click();
-        h.run();
-        h.run();
-        h.state().commits.clone()
-    }
-
     /// Focus the box and press the arrow key, without leaving it: what was committed so far.
     pub fn arrow_held(draw: fn(&mut egui::Ui, &mut St), role: Role, key: egui::Key) -> Vec<f64> {
         let mut h = harness(draw);
@@ -795,6 +803,33 @@ mod tests {
     fn a_number_box_commits_nothing_before_it_is_left() {
         use super::gesture::arrow_held;
         assert!(arrow_held(settled, Role::SpinButton, egui::Key::ArrowUp).is_empty());
+    }
+
+    fn slider_box(ui: &mut egui::Ui, s: &mut St) {
+        let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
+            ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false))
+        });
+        s.take(done);
+    }
+
+    /// FY1: a click on a slider settles it, and commits once.
+    #[test]
+    fn a_click_on_a_slider_commits_once() {
+        use egui_kittest::kittest::Queryable as _;
+        let st = St {
+            cur: 0.0,
+            commits: vec![],
+        };
+        let mut h = egui_kittest::Harness::builder()
+            .with_size(egui::vec2(300.0, 100.0))
+            .build_ui_state(slider_box, st);
+        h.run();
+        h.get_by_role(Role::Slider).click();
+        h.run();
+        h.run();
+        let commits = &h.state().commits;
+        assert_eq!(commits.len(), 1, "{commits:?}");
+        assert!(commits[0] > 0.0, "{commits:?}");
     }
 
     #[test]

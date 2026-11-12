@@ -1,7 +1,7 @@
 //! Cube yaw and mirror (DECISIONS DS14), and colour filters on linear-light faces (exposure, highlight clamp, display-space grading in the game's 1.6 gamma, DECISIONS DS11). Alpha is untouched.
 use super::world::{to_cube, to_world};
-use super::{cube_dir, Cube};
-use crate::config::{CubemapSpec, GroundFill};
+use super::Cube;
+use crate::config::CubemapSpec;
 use crate::ops::{game_gamma_to_linear, linear_to_game_gamma};
 
 /// The cube turned `degrees` about world up, positive clockwise seen from above (Skyrim's heading sense: 90 moves
@@ -26,66 +26,6 @@ pub fn mirror(c: &Cube) -> Cube {
     })
 }
 
-/// Blend weight of the fill at elevation `e`: 1 below `h - 1`, 0 above `h + 1`, linear between.
-fn fill_weight(e: f64, h: f64) -> f32 {
-    ((h + 1.0 - e) / 2.0).clamp(0.0, 1.0) as f32
-}
-
-/// Fill the cube below `horizon_deg` (DECISIONS DS17); alpha untouched.
-pub fn ground_fill(c: &mut Cube, fill: &GroundFill, horizon_deg: f64) {
-    let size = c.size;
-    let elev = |f: usize, i: usize| {
-        let d = cube_dir(f, i as u32 % size, i as u32 / size, size);
-        (to_world(d)[2].clamp(-1.0, 1.0) as f64).asin().to_degrees()
-    };
-    let h = horizon_deg;
-    let rgb_of = |p: &[f32; 4]| [p[0] as f64, p[1] as f64, p[2] as f64];
-    let mean_where = |c: &Cube, keep: &dyn Fn(f64) -> bool| {
-        let (mut sum, mut n) = ([0f64; 3], 0u32);
-        for (f, face) in c.faces.iter().enumerate() {
-            for (i, p) in face.px.iter().enumerate() {
-                if keep(elev(f, i)) {
-                    let v = rgb_of(p);
-                    (0..3).for_each(|k| sum[k] += v[k]);
-                    n += 1;
-                }
-            }
-        }
-        (sum, n)
-    };
-    // Horizon colour: mean over [h, h+5]. If no texel is there (very small cubes), pass 1 finds the smallest
-    // elevation e0 >= h and pass 2 averages the texels with e < e0 + 0.5.
-    let (mut sum, mut n) = mean_where(c, &|e| (h..=h + 5.0).contains(&e));
-    if n == 0 {
-        let e0 = (0..6)
-            .flat_map(|f| (0..(size * size) as usize).map(move |i| (f, i)))
-            .map(|(f, i)| elev(f, i))
-            .filter(|&e| e >= h)
-            .fold(f64::MAX, f64::min);
-        (sum, n) = mean_where(c, &|e| e >= h && e < e0 + 0.5);
-    }
-    let hc = sum.map(|v| (v / n.max(1) as f64) as f32);
-    let ground = match fill {
-        GroundFill::Color(rgb) => Some(rgb.map(|v| game_gamma_to_linear(v as f32 / 255.0))),
-        GroundFill::Mode(_) => None,
-    };
-    for (f, face) in c.faces.iter_mut().enumerate() {
-        for (i, p) in face.px.iter_mut().enumerate() {
-            let e = elev(f, i);
-            let a = fill_weight(e, h);
-            if a == 0.0 {
-                continue;
-            }
-            let target = ground.unwrap_or_else(|| {
-                let t = ((h - e) / (h + 90.0)).clamp(0.0, 1.0) as f32;
-                hc.map(|v| v * (1.0 - 0.5 * t))
-            });
-            for k in 0..3 {
-                p[k] = p[k] * (1.0 - a) + target[k] * a;
-            }
-        }
-    }
-}
 fn luma(c: [f32; 3]) -> f32 {
     0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2]
 }
@@ -224,167 +164,66 @@ mod tests {
         assert!((linear_to_game_gamma(p[0]) - d).abs() < 1e-5);
     }
 
-    fn elevation(face: usize, x: u32, y: u32, size: u32) -> f64 {
-        let w = to_world(crate::cube::cube_dir(face, x, y, size));
-        (w[2] as f64).asin().to_degrees()
-    }
-
-    fn texels(size: u32) -> impl Iterator<Item = (usize, usize, f64)> {
-        (0..6).flat_map(move |f| {
-            (0..size * size).map(move |i| (f, i as usize, elevation(f, i % size, i / size, size)))
-        })
+    /// The first texel of a flat cube after `s`, in display space.
+    fn graded(rgb: [f32; 3], s: &CubemapSpec) -> [f32; 3] {
+        let mut c = flat(rgb);
+        colour(&mut c, s);
+        let p = c.faces[0].px[0];
+        [p[0], p[1], p[2]].map(linear_to_game_gamma)
     }
 
     #[test]
-    fn ground_colour_replaces_the_lower_hemisphere() {
-        let mut c = Cube {
-            size: 16,
-            faces: std::array::from_fn(|_| Rgba32F::new(16, 16, [0.5, 0.5, 0.5, 0.7])),
+    fn brightness_is_added_before_the_contrast_pivot() {
+        let d = linear_to_game_gamma(0.2);
+        let s = CubemapSpec {
+            brightness: 0.1,
+            contrast: 0.5,
+            ..Default::default()
         };
-        ground_fill(&mut c, &GroundFill::Color([0, 0, 0]), 0.0);
-        let down = crate::cube::dir_to_face(super::super::world::UP.map(|v| -v)).0;
-        assert_eq!(down, 5);
-        assert_eq!(c.faces[5].px[8 * 16 + 8], [0.0, 0.0, 0.0, 0.7]);
-        assert_eq!(c.faces[4].px[8 * 16 + 8], [0.5, 0.5, 0.5, 0.7]);
+        // Brightness after the pivot would give 0.05 less.
+        let want = (d + 0.1 - 0.5) * 1.5 + 0.5;
+        assert!((graded([0.2; 3], &s)[0] - want).abs() < 1e-5);
     }
 
     #[test]
-    fn colour_code_decodes_with_game_gamma() {
-        let mut c = flat([0.5; 3]);
-        ground_fill(&mut c, &GroundFill::Color([255, 0, 128]), 0.0);
-        let p = c.faces[5].px[0];
-        assert!((p[0] - 1.0).abs() < 1e-6 && p[1] == 0.0);
-        assert!((p[2] - game_gamma_to_linear(128.0 / 255.0)).abs() < 1e-6);
-    }
-
-    fn grad(c: &mut Cube, h: f64) {
-        ground_fill(c, &GroundFill::Mode(crate::config::GroundMode::Gradient), h);
-    }
-
-    fn flat_size(size: u32, v: f32) -> Cube {
-        Cube {
-            size,
-            faces: std::array::from_fn(|_| Rgba32F::new(size, size, [v, v, v, 1.0])),
-        }
-    }
-
-    #[test]
-    fn gradient_follows_the_pinned_ramp_at_any_horizon() {
-        let size = 64;
-        for h in [0.0, 30.0, -30.0] {
-            let mut c = flat_size(size, 0.6);
-            grad(&mut c, h);
-            let mut checked = 0;
-            for (f, i, e) in texels(size) {
-                if e < h - 1.0 {
-                    let t = ((h - e) / (h + 90.0)) as f32;
-                    let want = 0.6 * (1.0 - 0.5 * t);
-                    let got = c.faces[f].px[i][0];
-                    assert!((got - want).abs() < 1e-4, "h {h} e {e}: {got} vs {want}");
-                    checked += 1;
-                } else if e > h + 1.0 {
-                    assert_eq!(c.faces[f].px[i][0], 0.6);
-                }
-            }
-            assert!(checked > 100);
-        }
-    }
-
-    #[test]
-    fn blend_weights_at_the_edges() {
-        for h in [0.0, 30.0, -30.0] {
-            assert_eq!(fill_weight(h - 1.0, h), 1.0);
-            assert_eq!(fill_weight(h, h), 0.5);
-            assert_eq!(fill_weight(h + 1.0, h), 0.0);
-        }
-        // Texels inside the blend zone land strictly between the original and the fill.
-        let size = 64;
-        let mut c = flat_size(size, 0.5);
-        ground_fill(&mut c, &GroundFill::Color([0, 0, 0]), 20.0);
-        let mut seen = 0;
-        for (f, i, e) in texels(size) {
-            if (19.1..20.9).contains(&e) {
-                let v = c.faces[f].px[i][0];
-                assert!(
-                    (v - 0.5 * (1.0 - fill_weight(e, 20.0))).abs() < 1e-6 && v > 0.0 && v < 0.5
-                );
-                seen += 1;
-            }
-        }
-        assert!(seen > 0);
-    }
-
-    #[test]
-    fn horizon_colour_is_the_in_band_mean() {
-        let size = 64;
-        let h = 10.0;
-        let mut c = flat_size(size, 0.0);
-        for (f, i, e) in texels(size) {
-            // Distinct values above, in and below the band, so a wrong band or a whole-cube mean shows.
-            c.faces[f].px[i][..3].fill(if e > h + 5.0 {
-                1.0
-            } else if e >= h {
-                0.2
-            } else {
-                0.7
-            });
-        }
-        grad(&mut c, h);
-        let mut checked = 0;
-        for (f, i, e) in texels(size) {
-            if e < h - 1.0 {
-                let t = ((h - e) / (h + 90.0)) as f32;
-                let got = c.faces[f].px[i][0];
-                assert!((got - 0.2 * (1.0 - 0.5 * t)).abs() < 1e-4, "e {e}: {got}");
-                checked += 1;
-            }
-        }
-        assert!(checked > 100);
-    }
-
-    #[test]
-    fn empty_band_uses_the_nearest_row_above() {
-        // A 2x2 cube has texels only at e = +-24.1 and +-54.7 degrees, so [0, 5] is empty.
-        let mut c = flat_size(2, 0.0);
-        let mut rows = 0;
-        for (f, i, e) in texels(2) {
-            assert!(!(0.0..=5.0).contains(&e));
-            c.faces[f].px[i][..3].fill(if e > 30.0 {
-                0.2
-            } else if e > 0.0 {
-                rows += 1;
-                0.8
-            } else {
-                0.5
-            });
-        }
-        assert!(rows > 0);
-        grad(&mut c, 0.0);
-        for (f, i, e) in texels(2) {
-            if e < -1.0 {
-                let want = 0.8 * (1.0 - 0.5 * (-e / 90.0) as f32);
-                let got = c.faces[f].px[i][0];
-                assert!(
-                    (got - want).abs() < 1e-4 && got > 0.0,
-                    "e {e}: {got} vs {want}"
-                );
-            }
-        }
-    }
-    #[test]
-    fn horizon_moves_the_line() {
-        let size = 32;
-        let run = |h: f64| {
-            let mut c = Cube {
-                size,
-                faces: std::array::from_fn(|_| Rgba32F::new(size, size, [0.5, 0.5, 0.5, 1.0])),
-            };
-            ground_fill(&mut c, &GroundFill::Color([0, 0, 0]), h);
-            c
+    fn midtones_is_the_inverse_exponent() {
+        let d = linear_to_game_gamma(0.2);
+        let s = CubemapSpec {
+            midtones: 2.0,
+            ..Default::default()
         };
-        let (a, b) = (run(0.0), run(20.0));
-        let (f, i, _) = texels(size).find(|t| (9.0..11.0).contains(&t.2)).unwrap();
-        assert_eq!(a.faces[f].px[i][0], 0.5);
-        assert_eq!(b.faces[f].px[i][0], 0.0);
+        assert!((graded([0.2; 3], &s)[0] - d.sqrt()).abs() < 1e-5);
+    }
+
+    #[test]
+    fn a_channel_pushed_below_zero_is_zero_under_midtones_not_nan() {
+        // Contrast takes blue below zero. A negative base under powf is NaN, and saturation's luma would spread it
+        // to every channel (the cube would go black).
+        let s = CubemapSpec {
+            contrast: 0.5,
+            midtones: 2.0,
+            saturation: 0.5,
+            ..Default::default()
+        };
+        let hi = ((linear_to_game_gamma(0.5) - 0.5) * 1.5 + 0.5).sqrt();
+        let y = (0.2126 + 0.7152) * hi;
+        let got = graded([0.5, 0.5, 0.0], &s);
+        assert!((got[0] - (y + (hi - y) * 0.5)).abs() < 1e-5, "{got:?}");
+        assert!((got[2] - y * 0.5).abs() < 1e-5, "{got:?}");
+    }
+
+    #[test]
+    fn midtones_runs_before_saturation() {
+        let s = CubemapSpec {
+            midtones: 2.0,
+            saturation: 0.5,
+            ..Default::default()
+        };
+        let m = [0.8f32, 0.2, 0.1].map(|v| linear_to_game_gamma(v).sqrt());
+        let y = 0.2126 * m[0] + 0.7152 * m[1] + 0.0722 * m[2];
+        let got = graded([0.8, 0.2, 0.1], &s);
+        for i in 0..3 {
+            assert!((got[i] - (y + (m[i] - y) * 0.5)).abs() < 1e-5, "{i}");
+        }
     }
 }

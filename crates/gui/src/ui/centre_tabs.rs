@@ -73,9 +73,8 @@ fn strip_row(
             if tab == CentreTab::Selection {
                 r.clone().on_hover_text("The selected texture or set");
             }
-            if r.clicked() {
-                model.centre_tab = tab;
-            }
+            // Note FC8, HS9: the switch hides the view this frame, so a focused field commits first.
+            super::commit_click(ui, &r, model, move |m| m.centre_tab = tab);
         }
     });
     ui.separator();

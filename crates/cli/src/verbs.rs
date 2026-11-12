@@ -200,37 +200,6 @@ fn print_dds_info(info: &DdsInfo) {
     }
 }
 
-/// One compact line per RNM layer of a base normal: file, resolved strength, mask and AO source when used.
-fn print_rnm(job: &ResolvedJob) {
-    let Some(r) = job.active_rnm() else { return };
-    let name = |f: &engine::rnm::RnmFile| {
-        f.path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned()
-    };
-    let spec = &job.profile.rnm;
-    let inputs = r.inputs(spec);
-    for (f, role) in inputs.iter().filter(|(_, k)| !k.contains('.')) {
-        let Some(l) = r.layers.iter().find(|l| l.id.id() == *role) else {
-            continue;
-        };
-        let mask = inputs.iter().find(|(_, k)| *k == format!("{role}.mask"));
-        let ao = inputs.iter().find(|(_, k)| k.starts_with("bent.ao"));
-        let ao = ao.filter(|_| *role == "bent");
-        out!(
-            "  rnm {role} {} strength {}{}{}",
-            name(f),
-            spec.layer(l.id).strength,
-            mask.map(|(m, _)| format!(", mask {}", name(m)))
-                .unwrap_or_default(),
-            ao.map(|(a, _)| format!(", AO {}", name(a)))
-                .unwrap_or_default(),
-        );
-    }
-}
-
 fn print_planned(job: &ResolvedJob) {
     out!("{}", job.input.display());
     match job.suggestions.first() {
@@ -255,14 +224,13 @@ fn print_planned(job: &ResolvedJob) {
         JobStatus::Blocked { codes } | JobStatus::Error { codes } => {
             codes.iter().map(|c| c.as_str().to_string()).collect()
         }
-        JobStatus::Ready | JobStatus::PackingInput { .. } | JobStatus::NormalLayer { .. } => vec![],
+        JobStatus::Ready | JobStatus::PackingInput { .. } => vec![],
     };
     let state = serde_json::to_value(&job.status)
         .ok()
         .and_then(|v| v["state"].as_str().map(str::to_owned))
         .unwrap_or_else(|| "-".into());
     out!("  status {state} {}", detail.join("; "));
-    print_rnm(job);
     for w in &job.warnings {
         out!("  {}", warning_line(None, w));
     }
@@ -515,7 +483,8 @@ struct Mip0Alpha {
     speck: bool,
 }
 
-/// Mip-0 alpha, for formats that carry alpha (`None` for others and on decode errors).
+/// Mip-0 alpha, for formats that carry alpha (`None` for others and on decode errors). A cube's `min` is the
+/// lowest over all six faces' mip 0 (Note DS12: the marker keeps alpha 0 in faces 1-5); `speck` is face 0's.
 fn mip0_alpha(file: &DdsFile) -> Option<Mip0Alpha> {
     if !carries_alpha(file.format) {
         return None;
@@ -526,12 +495,28 @@ fn mip0_alpha(file: &DdsFile) -> Option<Mip0Alpha> {
             let low = |i: usize| engine::analyse::is_low_alpha(f32::from(px[i][3]) / 255.0);
             let n_low = (0..px.len()).filter(|&i| low(i)).count() as u64;
             let (w, h) = (*w as usize, *h as usize);
-            Some(Mip0Alpha {
+            let mut a = Mip0Alpha {
                 min: alpha_stats(&px).min,
                 speck: n_low > 0
                     && px.len() == w * h
                     && engine::analyse::low_alpha_is_speck_noise(w, h, n_low, low),
-            })
+            };
+            // `levels` is non-empty here, so the step is never 0.
+            for (fw, fh, fr) in file
+                .surfaces()
+                .into_iter()
+                .step_by(file.levels.len())
+                .skip(1)
+            {
+                if let Some(Ok(Decoded::Ldr(f))) = file
+                    .data
+                    .get(fr)
+                    .map(|d| decode_level(file.format, fw, fh, d))
+                {
+                    a.min = a.min.min(alpha_stats(&f).min);
+                }
+            }
+            Some(a)
         }
         _ => None,
     }
@@ -571,6 +556,8 @@ fn infer_subtype(path: &Path, file: &DdsFile, target: Target, alpha: Option<Mip0
             DdsPixelFormat::Rgba16f | DdsPixelFormat::Rgba32f | DdsPixelFormat::Bc6hUf16
         ),
         advanced_skin: false,
+        // A DDS on its own has no set: its name alone answers.
+        may_wait: false,
     };
     suggest(&ctx)
         .first()

@@ -4,7 +4,7 @@ use eframe::egui::{self, Key, Modifiers};
 use egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::bottom::{problems, BottomTab, Level};
+use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::{pbr_export, AppModel, Selection};
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
@@ -285,6 +285,48 @@ fn accept_all_explains_an_alpha_proposal() {
     // Note FM35: Review's row asks it as one line and one dropdown, open on the proposed type.
     h.get_by_label("Alpha: Cutout (proposed) — confirm");
     h.get_by_label("Review alpha type: Cutout");
+}
+
+/// Note HI8: Problems and Review each ask the alpha with their own Confirm, and each answers its row. They are tabs
+/// of one bottom panel, so each is checked beside the texture panel, which asks it too.
+#[test]
+fn problems_and_review_have_their_own_confirm() {
+    for surface in ["Problems", "Review"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        m.decide(
+            "landscape/leaf.png",
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        m.select_item("landscape/leaf.png");
+        match surface {
+            "Problems" => m.open_problems(None),
+            _ => m.open_review(),
+        }
+        let mut h = harness(m);
+        h.run();
+        for name in [
+            "Confirm alpha".to_string(),
+            format!("{surface} confirm alpha"),
+        ] {
+            assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}");
+        }
+        press(&mut h, &format!("{surface} confirm alpha"));
+        settle(&mut h);
+        let doc = h.state().project.as_ref().unwrap();
+        assert_eq!(
+            doc.file_value("landscape/leaf.png", "alpha.policy"),
+            Some(serde_json::json!("cutout")),
+            "{surface}"
+        );
+        for name in [
+            "Confirm alpha".to_string(),
+            format!("{surface} confirm alpha"),
+        ] {
+            assert!(h.query_by_label(&name).is_none(), "{name}");
+        }
+    }
 }
 
 /// Review Focus 3.
@@ -607,68 +649,4 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     h.state_mut().show_tab(BottomTab::Review);
     h.run_steps(4);
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
-}
-
-/// Note FC12, Note FM: a portrait photo read as a cube loses its top and bottom; Problems says which part is used, as a
-/// Warning row that gates nothing.
-#[test]
-fn portrait_face_is_a_row() {
-    use engine::config::Subtype;
-    use sdc_gui::model::Answer;
-    let d = tempfile::tempdir().unwrap();
-    let r = d.path().join("textures/sky");
-    std::fs::create_dir_all(&r).unwrap();
-    let night = d.path().join("textures/night");
-    std::fs::create_dir_all(&night).unwrap();
-    for dir in [&r, &night] {
-        image::RgbImage::from_fn(64, 128, |x, y| image::Rgb([x as u8, y as u8, 40]))
-            .save(dir.join("photo.png"))
-            .unwrap();
-    }
-    let mut m = AppModel::new(GuiSettings::default(), None, session());
-    m.accept = engine::policy::AcceptSuggestions::None;
-    m.open_folder(d.path().join("textures"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    choose_export(&mut m, d.path().join("export"));
-    for key in ["sky/photo.png", "night/photo.png"] {
-        m.decide(key, Answer::Subtype(Subtype::Cubemap));
-        assert!(m.wait_idle(Duration::from_secs(60)));
-        m.set_field(key, "cubemap.layout", json!("photo"));
-        assert!(m.wait_idle(Duration::from_secs(60)));
-    }
-    const ROW: &str = "Only the middle 64×64 of sky/photo.png is used";
-    const ROW2: &str = "Only the middle 64×64 of night/photo.png is used";
-    let asks: Vec<String> = pbr_export::export_asks(&m)
-        .into_iter()
-        .map(|a| a.text)
-        .collect();
-    // Fix round 1: one row per texture path, so each same-named photo needs its own tick.
-    assert!(
-        asks.iter().any(|a| a == ROW) && asks.iter().any(|a| a == ROW2),
-        "{asks:?}"
-    );
-    let warning_rows = |m: &AppModel| -> Vec<String> {
-        problems(m)
-            .iter()
-            .filter(|p| p.level == Level::Warning && p.text.starts_with("Only the middle"))
-            .map(|p| p.text.clone())
-            .collect()
-    };
-    let rows = warning_rows(&m);
-    assert!(
-        rows.iter().any(|a| a == ROW) && rows.iter().any(|a| a == ROW2),
-        "{rows:?}"
-    );
-    m.open_review();
-    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
-    let mut h = harness(m);
-    h.run();
-    assert!(h.query_by_label(ROW).is_none(), "Review lists no warnings");
-    // A landscape photo (wider than tall) is used whole: no row.
-    let w = image::RgbImage::from_fn(128, 64, |x, y| image::Rgb([x as u8, y as u8, 40]));
-    w.save(r.join("photo.png")).unwrap();
-    w.save(night.join("photo.png")).unwrap();
-    h.state_mut().replan();
-    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
-    assert!(warning_rows(h.state()).is_empty());
 }

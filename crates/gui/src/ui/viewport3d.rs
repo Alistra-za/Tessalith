@@ -1,13 +1,10 @@
 //! The 3D panel of the Meshes view (plan B Task B8): draws `Viewport3d`, turns drag / scroll / double-click into
 //! orbit changes and uploads a new frame into an egui texture when its id changes (P0 CPU path).
 use crate::model::meshes::LE_WARNING;
-use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
 use crate::model::viewport3d::{
-    moved_text, off_line, Clock, Look, V3State, Viewport3d, CHOOSE_FOLDER, DEFERRED_LABEL,
-    FEATURES_LABEL, FRAME_LABEL, KEEP_OLD, NOT_FOUND, USE_NEW,
+    off_line, Clock, Look, V3State, Viewport3d, DEFERRED_LABEL, FEATURES_LABEL, FRAME_LABEL,
 };
 use eframe::egui;
-use render3d::locate::Change;
 use render3d::ShapeStatus;
 
 const AMBER: egui::Color32 = egui::Color32::from_rgb(230, 160, 30);
@@ -56,21 +53,6 @@ fn keys(ctx: &egui::Context, v: &mut Viewport3d) {
         let next = v.debug().next(&v.offered());
         v.set_debug(next);
     }
-}
-
-fn pick_folder(ctx: &egui::Context, v: &Viewport3d) {
-    let spec = PickerSpec {
-        title: Some("Community Shaders folder (the mod folder or its Shaders folder)"),
-        kind: PickerKind::Folder,
-        start: None,
-    };
-    v.picker
-        .request(ctx, PickerPurpose::ShaderFolder, None, spec);
-}
-
-/// A picker button: disabled with the shared hover text while a dialog is open.
-fn gated(ui: &mut egui::Ui, v: &Viewport3d, b: egui::Button<'_>) -> bool {
-    picker::button(ui, &v.picker, b)
 }
 
 /// The Meshes view's 3D panel (AG132): one toolbar line and the warnings above, the frame in all the height left,
@@ -142,14 +124,13 @@ pub fn clock_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
     });
 }
 
-/// The Moved popup and the panel's keys: first, before the panel's widgets.
+/// The panel's keys: first, before the panel's widgets.
 pub fn prelude(ctx: &egui::Context, v: &mut Viewport3d) {
-    popup(ctx, v);
     keys(ctx, v);
 }
 
-/// The toolbar's 3D part, on the caller's line: View ▾ (debug views, background, lights, Reset view), Copy image,
-/// Shader folder…, and the render status.
+/// The toolbar's 3D part, on the caller's line: View ▾ (debug views, background, lights, Reset view), Copy image
+/// and the render status.
 pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
     // The View menu holds sliders, a hex box and the colour popup: it keeps its own open state, so the popup does
     // not close it (Note GK).
@@ -165,20 +146,6 @@ pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
     if copy.clicked() {
         v.copy_image(clipboard);
     }
-    let used = v
-        .shaders
-        .as_ref()
-        .map_or("none yet".into(), |f| f.root.display().to_string());
-    let busy = v.picker.busy();
-    let r = ui.add_enabled(!busy, egui::Button::new("Shader folder…"));
-    let r = if busy {
-        r.on_disabled_hover_text(picker::BUSY_HOVER)
-    } else {
-        r.on_hover_text(format!("Community Shaders in use: {used}"))
-    };
-    if r.clicked() {
-        pick_folder(ui.ctx(), v);
-    }
     if let Some(s) = &v.status {
         ui.weak(s);
     }
@@ -190,7 +157,7 @@ pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
 /// The View menu's button.
 pub const VIEW_MENU: &str = "View ▾";
 
-/// What needs attention, kept above the frame (never in Details): the notice, a missing or failed Community Shaders,
+/// What needs attention, kept above the frame (never in Details): the notice, a failed preview,
 /// an LE mesh, render and compile errors, failed shaders and missing textures.
 pub fn warnings(ui: &mut egui::Ui, v: &mut Viewport3d) {
     if let Some(n) = v.notice.clone() {
@@ -202,21 +169,10 @@ pub fn warnings(ui: &mut egui::Ui, v: &mut Viewport3d) {
         });
     }
     match v.state.clone() {
-        V3State::NotFound => {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(NOT_FOUND);
-                if gated(ui, v, egui::Button::new(CHOOSE_FOLDER)) {
-                    pick_folder(ui.ctx(), v);
-                }
-            });
-        }
         V3State::Error(e) => {
             ui.colored_label(RED, e);
         }
         V3State::Ready | V3State::Rendering => {}
-    }
-    if v.shaders.is_none() && v.state != V3State::NotFound && v.locating() {
-        ui.label("Looking for Community Shaders…");
     }
     if le_mesh(v) {
         ui.colored_label(AMBER, LE_WARNING);
@@ -490,11 +446,17 @@ fn problems(ui: &mut egui::Ui, v: &mut Viewport3d) {
     }
 }
 
+/// The "Off in this preview" line (Note GT4): one row, cut with an ellipsis, the whole list on hover. The label's
+/// text, and so its accessible name, stays complete.
+pub fn off_label(ui: &mut egui::Ui, text: egui::RichText) {
+    ui.add(egui::Label::new(text).truncate());
+}
+
 fn footer(ui: &mut egui::Ui, v: &Viewport3d) {
+    if let Some(off) = off_line(&v.off_in_preview) {
+        off_label(ui, egui::RichText::new(off).weak());
+    }
     ui.horizontal_wrapped(|ui| {
-        if let Some(off) = off_line(&v.off_in_preview) {
-            ui.weak(off);
-        }
         if let Some((name, warp)) = &v.adapter {
             if *warp {
                 ui.colored_label(AMBER, format!("· {name} (software renderer)"));
@@ -503,29 +465,4 @@ fn footer(ui: &mut egui::Ui, v: &Viewport3d) {
             }
         }
     });
-}
-
-fn popup(ctx: &egui::Context, v: &mut Viewport3d) {
-    let Some(Change::Moved { old, new }) = v.popup.clone() else {
-        return;
-    };
-    let (mut use_new, mut choose, mut keep) = (false, false, false);
-    egui::Modal::new(egui::Id::new("viewport3d-moved")).show(ctx, |ui| {
-        ui.set_max_width(520.0);
-        ui.label(moved_text(&old, &new));
-        ui.horizontal(|ui| {
-            use_new = ui.button(USE_NEW).clicked();
-            choose = gated(ui, v, egui::Button::new(CHOOSE_FOLDER));
-            if old.root.is_dir() {
-                keep = ui.button(KEEP_OLD).clicked();
-            }
-        });
-    });
-    if use_new {
-        v.use_new();
-    } else if keep {
-        v.keep_old();
-    } else if choose {
-        pick_folder(ctx, v);
-    }
 }

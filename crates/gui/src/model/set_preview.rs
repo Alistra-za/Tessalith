@@ -6,7 +6,6 @@
 //! during an export. Results come back on this module's own channel, so `worker.rs` needs no new message.
 use crate::model::cs_pbr::{self, CsBlock};
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
-use crate::model::meshes::ScanTarget;
 use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
 use crate::model::sets::set_views;
@@ -18,7 +17,6 @@ use crate::model::Selection;
 use crate::pgp::prefix::output_rel;
 use crate::pgp::writer::EntryInput;
 use crate::pgp::writer::{document, entry_node};
-use crate::settings::MeshesSettings;
 use engine::api::CancelToken;
 use engine::config::Format;
 use engine::dds::{
@@ -143,12 +141,7 @@ pub fn signature(item: &TextureItem) -> String {
             let p = sha256_json(&job.profile).unwrap_or_default();
             let head = match &job.pack {
                 Some(pk) => format!("{p}:{}", pack_key(pk).unwrap_or_default()),
-                None => format!(
-                    "{p}:{:?}:{:?}:{:?}",
-                    job.input,
-                    job.source,
-                    job.active_rnm()
-                ),
+                None => format!("{p}:{:?}:{:?}", job.input, job.source),
             };
             format!("{head}:{}", extra_inputs_key(job))
         }
@@ -413,7 +406,7 @@ pub struct Encoder {
     /// A/B is in use: the user has flipped the mode once this session (kept across sets). Until then only the
     /// shown mode encodes.
     ab: bool,
-    /// A member failed since the last drain, or `sync` newly blocked one: the scene must be pushed again so the game's
+    /// A member failed since the last drain, or `sync` newly blocked or unblocked one (Note HS5): the scene must be pushed again so the game's
     /// copy of its texture comes back (a Fresh result needs no push, it is swapped in).
     pub scene_dirty: bool,
     tx: Sender<EncDone>,
@@ -528,7 +521,7 @@ pub fn encode(
         Source::Job(job) if mode == PreviewMode::Source => {
             let r = session
                 .preview_source_stored(job, cap, cancel)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(|e| e.to_string())?;
             uncompressed_dds(
                 &as_sampled(r.levels, job.profile.format),
                 job.profile.format.is_hdr(),
@@ -541,7 +534,7 @@ pub fn encode(
         Source::Job(job) => {
             let r = session
                 .preview(job, cap, cancel)
-                .map_err(|e| format!("{e:?}"))?;
+                .map_err(|e| e.to_string())?;
             let (width, height) = r.source.dims[r.source.first_level];
             let desc = DdsDesc {
                 width,
@@ -710,8 +703,8 @@ impl Encoder {
                     mem.slot = slot
                 }
                 Some(mem) => {
-                    // Newly blocked: no bytes to swap in, the game's copy must come back (Note GQ5).
-                    if blocked.is_some() && !matches!(mem.state, EncState::Blocked(_)) {
+                    // Newly blocked or unblocked (Note HS5): a blocked member has no bytes and changes the existence check, so push the scene.
+                    if blocked.is_some() != matches!(mem.state, EncState::Blocked(_)) {
                         self.scene_dirty = true;
                     }
                     if let Some(c) = mem.cancel.take() {
@@ -977,14 +970,10 @@ pub const NO_SCAN: &str = "Scan your mods in the Meshes view to preview on a rea
 pub const NO_MATCH: &str = "No scanned mesh uses this diffuse";
 pub const NO_BUILTIN_MATCH: &str =
     "A built-in shape cannot match this entry's match keys: it shows the plain textures; pick a game mesh";
-/// D4: the CS features the preview leaves off (03 §3.2 "off" rows), under the single CS toggle.
 /// Design §7: the landscape plane's preview-only tiling slider.
 pub const TILING: &str = "Tiling (preview only)";
 pub const LE_ONLY: &str =
     "Every mesh using this diffuse is an LE mesh, which is not drawn: showing a built-in shape";
-pub const OFF_FEATURES: &str = "Off in this preview: Light Limit Fix, Skylighting, Screen-Space Shadows, \
-Subsurface Scattering, Image-Based Lighting, Physical Sky, Wetness, Cloud Shadows, terrain effects, \
-water, fog, Volumetric Shadows";
 /// How often the fingerprint is checked when no input arrived (02 §3.2).
 pub const THROTTLE: Duration = Duration::from_millis(200);
 /// Rows asked of the scan DB; `shape_matches` (with `nif_filter`) thins them out afterwards.
@@ -1023,21 +1012,9 @@ pub fn count_text(n: usize) -> String {
 pub fn followed_set(m: &AppModel) -> Option<String> {
     match &m.selection {
         Selection::Set(k) => Some(k.clone()),
-        Selection::Item(k) => m.item(k).and_then(|i| i.set_key.clone()),
+        // Note HF1: a no-set texture has no set.
+        Selection::Item(k) => m.set_key_of_item(k),
         Selection::None => None,
-    }
-}
-
-/// The scan target `[meshes]` names, read as `MeshesModel::activate_with` reads it (`meshes.rs:304-311`): the
-/// Meshes view may never have been opened, so its `target` may still be `None`.
-pub fn target_of(s: &MeshesSettings) -> Option<ScanTarget> {
-    match (&s.instance, &s.profile, &s.folder) {
-        (Some(root), Some(profile), _) => Some(ScanTarget::Mo2 {
-            root: root.clone(),
-            profile: profile.clone(),
-        }),
-        (_, _, Some(f)) => Some(ScanTarget::Folder(f.clone())),
-        _ => None,
     }
 }
 
@@ -1123,7 +1100,7 @@ pub fn tex_key(entry: &Value, default: &Value) -> Option<(TexKey, Option<String>
 pub struct Delta {
     /// Another set, or the set switched between simulated and plain (D3): everything again.
     pub set: bool,
-    /// A member's bytes change: encode it again and swap it in (a newly blocked member pushes the scene, Note GQ5).
+    /// A member's bytes change: encode it again and swap it in (a newly blocked or unblocked member pushes the scene, Notes GQ5, HS5).
     pub encode: bool,
     /// The match key or `nif_filter` changed: query the meshes again (and reload).
     pub requery: bool,
@@ -1655,8 +1632,6 @@ pub struct SetPreview {
     /// Off in `SetPreview::default()` (so `ui::draw`'s test state keeps the existing layout); on from `new`.
     pub enabled: bool,
     pub store_path: Option<PathBuf>,
-    /// What the CS locate searches.
-    pub target: Option<ScanTarget>,
     pub fp: Option<SetFingerprint>,
     pub candidates: Candidates,
     /// The mesh per set key, this session only (spec §8).
@@ -1694,7 +1669,6 @@ pub struct SetPreview {
     querying: Option<u64>,
     loading: Option<(u64, i64)>,
     last_check: Option<Instant>,
-    located: bool,
     next: u64,
     store: RefCell<Option<Store>>,
     store_tried: Cell<bool>,
@@ -1739,33 +1713,27 @@ pub struct SetPreview {
 }
 
 impl Default for SetPreview {
-    /// No IO and no threads: no store path, no saved shaders, disabled.
+    /// No IO and no threads: no store path, disabled.
     fn default() -> SetPreview {
-        let mut s = SetPreview::new(None, None, None, DEFAULT_CAP);
+        let mut s = SetPreview::new(None, DEFAULT_CAP);
         s.enabled = false;
         s
     }
 }
 
 impl SetPreview {
-    /// `shaders`: `[render3d] shaders` from `gui.toml`; `store_path`: the scan DB. Opens nothing until shown.
-    pub fn new(
-        shaders: Option<render3d::locate::Fingerprint>,
-        target: Option<ScanTarget>,
-        store_path: Option<PathBuf>,
-        cap: u32,
-    ) -> SetPreview {
+    /// `store_path`: the scan DB. Opens nothing until shown.
+    pub fn new(store_path: Option<PathBuf>, cap: u32) -> SetPreview {
         let (tx, rx) = channel();
         SetPreview {
             v3: {
-                let mut v = Viewport3d::new(shaders);
+                let mut v = Viewport3d::new();
                 v.panel = "set_preview";
                 v
             },
             enc: Encoder::new(cap),
             enabled: true,
             store_path,
-            target,
             fp: None,
             candidates: Candidates::NotAsked,
             choice: HashMap::new(),
@@ -1792,7 +1760,6 @@ impl SetPreview {
             querying: None,
             loading: None,
             last_check: None,
-            located: false,
             next: 0,
             store: RefCell::new(None),
             store_tried: Cell::new(false),
@@ -1894,13 +1861,6 @@ impl SetPreview {
         self.poll_at(m, Instant::now())
     }
 
-    /// Window focus (`app.rs`): look for CS and re-read its settings again, once this panel has located it.
-    pub fn relocate(&mut self) {
-        if self.located {
-            self.v3.locate(self.target.clone());
-        }
-    }
-
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
         self.v3.poll();
@@ -1917,10 +1877,6 @@ impl SetPreview {
         self.visible = shown;
         if !shown || !self.enabled {
             return;
-        }
-        if !self.located {
-            self.located = true;
-            self.v3.locate(self.target.clone());
         }
         let key = followed_set(m);
         let due = input
@@ -2024,7 +1980,7 @@ impl SetPreview {
         }
         self.entry = fp.entry.as_ref().map(|e| entry_node(e).to_value());
         self.enc.sync(m, fp.members.clone(), now, d.set);
-        // A re-encoded member is swapped in when it lands (`sync_textures`); a newly blocked one needs the push now.
+        // A re-encoded member is swapped in when it lands (`sync_textures`); a newly blocked or unblocked one (Note HS5) needs the push now.
         let blocked = std::mem::take(&mut self.enc.scene_dirty);
         self.fp = Some(fp);
         if d.set || d.requery {
@@ -2922,16 +2878,8 @@ impl SetPreview {
 }
 
 impl SetPreview {
-    /// The app's instance: the saved shaders, the `[meshes]` target, the scan DB path and the D5 cap. No IO.
-    pub fn from_settings(
-        s: &crate::settings::GuiSettings,
-        store_path: Option<PathBuf>,
-    ) -> SetPreview {
-        SetPreview::new(
-            s.render3d.shaders.clone(),
-            target_of(&s.meshes),
-            store_path,
-            DEFAULT_CAP,
-        )
+    /// The app's instance: the scan DB path and the D5 cap. No IO.
+    pub fn from_settings(store_path: Option<PathBuf>) -> SetPreview {
+        SetPreview::new(store_path, DEFAULT_CAP)
     }
 }

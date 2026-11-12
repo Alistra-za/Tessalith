@@ -197,9 +197,10 @@ fn sample_cube(
                [numthreads(1, 1, 1)] void main(uint3 id : SV_DispatchThreadID) { Out[id.x] = Env.SampleLevel(Pt, Dirs[id.x].xyz, 0); }\n";
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("probe.hlsl"), src).unwrap();
-    let s = render3d::source::SourceSet::new(dir.path().to_path_buf())
-        .get(std::path::Path::new("probe.hlsl"))
-        .unwrap();
+    let s =
+        render3d::source::SourceSet::new(render3d::ShaderSource::Folder(dir.path().to_path_buf()))
+            .get(std::path::Path::new("probe.hlsl"))
+            .unwrap();
     let c = render3d::compile::compile(
         &s,
         &render3d::permutation::Defines(vec![]),

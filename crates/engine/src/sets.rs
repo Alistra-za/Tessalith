@@ -14,13 +14,33 @@ use std::path::{Path, PathBuf};
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum SetEdit {
     /// A new, empty set.
-    Create { set: String },
+    Create {
+        set: String,
+    },
     /// The set keeps its members under a new id.
-    Rename { from: String, to: String },
+    Rename {
+        from: String,
+        to: String,
+    },
     /// The file leaves its set and joins `to`.
-    Move { file: String, to: String },
+    Move {
+        file: String,
+        to: String,
+    },
     /// The file leaves its set and becomes a set of its own.
-    Remove { file: String },
+    Remove {
+        file: String,
+    },
+    /// The file leaves its set and becomes a set of its own that writes nothing (Note HF1). It groups as `Remove`
+    /// does; `prepare` also leaves it out of the `IN-DUPLICATE` comparison.
+    NoSet {
+        file: String,
+    },
+    // Note HH1: set `to` also reads the file as one of its helpers; the file stays a member of its own set.
+    Share {
+        file: String,
+        to: String,
+    },
 }
 
 /// An edit that could not apply: it names a file or set that is not there (it is reported, never fatal).
@@ -90,6 +110,8 @@ pub fn apply_set_edits(
     };
     let mut touched: BTreeSet<String> = BTreeSet::new();
     let mut stale = vec![];
+    // Note HH3: each share that applied and its set, so a set left with no member of its own reports it.
+    let mut shared: Vec<(usize, &SetEdit)> = vec![];
     for e in edits {
         let r: Result<(), String> = match e {
             SetEdit::Create { set } => {
@@ -103,6 +125,7 @@ pub fn apply_set_edits(
                         members: vec![],
                         suffixes: BTreeSet::new(),
                         shared_skin: false,
+                        shares: vec![],
                     });
                     Ok(())
                 }
@@ -131,7 +154,7 @@ pub fn apply_set_edits(
                     Ok(())
                 }
             },
-            SetEdit::Remove { file } => match file_of(file) {
+            SetEdit::Remove { file } | SetEdit::NoSet { file } => match file_of(file) {
                 None => Err(format!("no file '{file}'")),
                 Some(f) => {
                     for s in sets.iter_mut() {
@@ -154,7 +177,21 @@ pub fn apply_set_edits(
                         members: vec![f],
                         suffixes: BTreeSet::new(),
                         shared_skin: false,
+                        shares: vec![],
                     });
+                    Ok(())
+                }
+            },
+            SetEdit::Share { file, to } => match (file_of(file), pos(sets, to)) {
+                (None, _) => Err(format!("no file '{file}'")),
+                (_, None) => Err(format!("no set '{to}'")),
+                (Some(f), Some(t)) => {
+                    let s = &mut sets[t];
+                    if !s.members.contains(&f) && !s.shares.contains(&f) {
+                        s.shares.push(f);
+                        touched.insert(s.key.clone());
+                        shared.push((t, e));
+                    }
                     Ok(())
                 }
             },
@@ -168,18 +205,62 @@ pub fn apply_set_edits(
     }
     // A touched set's suffixes come from its members, as `group_sets_with` derives them (a skin `_wet` or `_detail_n` member that
     // `join_skin_wet` / `join_skin_detail` joined keeps its `wet` / `detail_n`).
+    // Note HH1: a shared file adds its role, as `predict_suffixes` reads it; one that later joined the set is a member.
     for s in sets.iter_mut().filter(|s| touched.contains(&s.key)) {
         s.members.sort_unstable();
+        let members = &s.members;
+        s.shares.retain(|i| !members.contains(i));
         let suffixes = s
             .members
             .iter()
             .filter_map(|&i| member_split(&stem_lower(&files[i]), s, aliases).suffix)
+            .chain(
+                s.shares
+                    .iter()
+                    .filter_map(|&i| crate::pack::plan::raw_role(&files[i]).map(|r| r.id())),
+            )
             .collect();
         s.suffixes = suffixes;
+    }
+    for (t, e) in shared {
+        if let (true, SetEdit::Share { to, .. }) = (sets[t].members.is_empty(), e) {
+            stale.push(StaleEdit {
+                edit: e.clone(),
+                reason: format!("set '{to}' has no texture of its own"),
+            });
+        }
     }
     sets.retain(|s| !s.members.is_empty());
     sets.sort_by(|a, b| a.key.cmp(&b.key));
     stale
+}
+
+/// The paths of the files `edits` mark `NoSet` (a key naming no file is the stale edit `apply_set_edits` reports).
+pub(crate) fn no_set_paths(
+    files: &[InputFile],
+    root: Option<&Path>,
+    edits: &[SetEdit],
+) -> BTreeSet<PathBuf> {
+    let Some(root) = root else {
+        return BTreeSet::new();
+    };
+    let index = KeyIndex::new(root, files);
+    edits
+        .iter()
+        .filter_map(|e| match e {
+            SetEdit::NoSet { file } => {
+                Some(index.hits(file).iter().map(|&i| files[i].path.clone()))
+            }
+            _ => None,
+        })
+        .flatten()
+        .collect()
+}
+
+/// Note HF1: whether `[project] no_set` key `key` names the file at project-relative path `rel`: the `[files]` rule
+/// (the path, or the path without its last extension, case-insensitively). Every file a key names is in no set.
+pub fn no_set_names(key: &str, rel: &str) -> bool {
+    crate::overrides::KeyForms::of(rel).matches(key)
 }
 
 /// What an explicit output path applies to (DECISIONS P1).
@@ -222,10 +303,12 @@ pub fn apply_output_paths(
     }
 }
 
-/// The packed-output paths by (set key, recipe suffix), absolute, for `plan_packing`. A path that would leave the
-/// output root is ignored, as in `apply_output_paths`.
+/// The packed-output paths by (set key, recipe suffix), absolute, for `plan_packing`: set keys under `output_root`,
+/// paths under `paths_root` (Note HQ1: the export folder). A path that would leave it is ignored, as in
+/// `apply_output_paths`.
 pub fn packed_outputs(
     output_root: &Path,
+    paths_root: &Path,
     paths: &BTreeMap<OutputKey, PathBuf>,
 ) -> BTreeMap<(String, String), PathBuf> {
     paths
@@ -234,7 +317,7 @@ pub fn packed_outputs(
         .filter_map(|(k, rel)| match k {
             OutputKey::Packed { set, suffix } => Some((
                 (set_key(output_root, set), suffix.to_lowercase()),
-                output_root.join(rel),
+                paths_root.join(rel),
             )),
             OutputKey::File(_) => None,
         })

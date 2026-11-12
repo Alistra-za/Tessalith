@@ -238,8 +238,9 @@ fn pbr_fixture() -> Vec<(&'static str, DynamicImage)> {
     ]
 }
 
-/// rnm_bake.rs: an RNM base `_n` with one detail layer, plus the `_rmaos` its bake reads.
-fn rnm_fixture(dir: &Path) {
+/// A base `_n` and the `_rmaos` its bake reads, under `textures/rnm/` (the folder keeps its name: renaming it would
+/// move every identity key).
+fn normal_fixture(dir: &Path) {
     let p = |n: &str| format!("textures/rnm/{n}");
     put(
         dir,
@@ -260,17 +261,6 @@ fn rnm_fixture(dir: &Path) {
         &p("iron_rmaos.png"),
         DynamicImage::ImageRgba8(ImageBuffer::from_fn(32, 32, |_, _| {
             Rgba([128, 0, 255, 255])
-        })),
-    );
-    put(
-        dir,
-        &p("iron_detailnorm.png"),
-        DynamicImage::ImageRgb8(ImageBuffer::from_fn(32, 32, |x, y| {
-            Rgb([
-                (128.0 + 100.0 * (x as f32 * 1.7).sin()) as u8,
-                (128.0 + 100.0 * (y as f32 * 1.3).cos()) as u8,
-                200,
-            ])
         })),
     );
 }
@@ -551,7 +541,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
     for (rel, img) in pbr_fixture() {
         put(d.path(), rel, img);
     }
-    rnm_fixture(d.path());
+    normal_fixture(d.path());
     let guarded = || {
         Subtype::ALL
             .into_iter()
@@ -582,22 +572,18 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         (0, 0),
         "{events:#?}"
     );
-    // Only the cs-only sub-types are refused: their forced fixtures are skipped with CFG-UNAVAILABLE. Uncoded skips
-    // are intentional (vanilla skips the RNM detail layer as a normal layer).
+    // Only the cs-only sub-types are refused: their forced fixtures are skipped with CFG-UNAVAILABLE.
     let refused: BTreeSet<String> = events
         .iter()
-        .filter_map(|e| match &e.kind {
-            EventKind::FileSkipped { code: None, .. } => None,
+        .map(|e| match &e.kind {
             EventKind::FileSkipped { code: Some(c), .. } if c.as_str() == "CFG-UNAVAILABLE" => {
                 // A forced fixture by its sub-type id, any other file by its path under `in/`.
                 let p = e.path.clone().unwrap_or_default().replace('\\', "/");
                 let rel = p.rsplit_once("/in/").map_or(p.as_str(), |(_, r)| r);
-                Some(
-                    rel.strip_prefix("textures/h/")
-                        .map_or(rel.to_string(), |f| {
-                            f.split('.').next().unwrap().to_string()
-                        }),
-                )
+                rel.strip_prefix("textures/h/")
+                    .map_or(rel.to_string(), |f| {
+                        f.split('.').next().unwrap().to_string()
+                    })
             }
             _ => panic!("unexpected vanilla event: {e:#?}"),
         })

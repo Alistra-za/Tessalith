@@ -1,14 +1,16 @@
-//! The three guarded JSON finishers (CS PBR, complex material, XPMF) as one (Note FW). Each kind says how it reads and
-//! writes its files and which Also phase gates it; the gate, the hash record and the Also walk's file list are here once.
+//! The four guarded JSON finishers (CS PBR, complex material, CS skin, XPMF) as one (Note FW). Each kind says how it
+//! reads and writes its files and which Also phase gates it; the gate, the guarded write, the hash record and the Also
+//! walk's file list are here once.
 use super::{also, AppModel};
 use crate::sets_doc::SetsDoc;
 use engine::also::Phase;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-/// One guarded JSON write (complex material, CS skin): drop sdc's own case twin (O6), keep a file Tessalith did not
-/// write or cannot read, else write `text` atomically and record its hash in `out`. A kept or failed file adds its
-/// note. Returns whether it was written.
+/// One guarded JSON write, for every kind: drop sdc's own case twin (O6: a name whose case changed renames sdc's own
+/// unchanged file; a replace may keep the old name's case), keep a file Tessalith did not write or cannot read, else
+/// write `text` atomically and record its hash in `out`. A kept or failed file adds its note. Returns whether it was
+/// written.
 pub(super) fn guarded_write(
     path: &Path,
     text: &str,

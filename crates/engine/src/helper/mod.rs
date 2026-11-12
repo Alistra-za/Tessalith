@@ -1,7 +1,6 @@
 //! Helper textures (DECISIONS Note DY): a grey map that fills a channel of another output of its set. This module
 //! holds the hand-set roles, the fill targets and the four per-file `helper.*` selectors.
-use crate::config::{LayerId, RawMap};
-use crate::rnm::{LayerTerm, LayerTermId};
+use crate::config::RawMap;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -42,46 +41,21 @@ pub enum HelperRole {
     // "none": an ordinary file, converted on its own.
     NotHelper,
     Raw(RawMap),
-    // A normal layer; `prefix` is always `None` (the target is `rnm.target`).
-    Layer(LayerTermId),
 }
 
 impl HelperRole {
-    /// Every role, in menu order: Not a helper, the raw maps, the normal layers.
+    /// Every role, in menu order: Not a helper, then the raw maps.
     pub fn all() -> Vec<HelperRole> {
-        let layers = [
-            LayerId::Bump,
-            LayerId::Bump2,
-            LayerId::Detail,
-            LayerId::Detail2,
-            LayerId::Bent,
-        ]
-        .into_iter()
-        .flat_map(|layer| {
-            [false, true].map(|mask| {
-                HelperRole::Layer(LayerTermId {
-                    layer,
-                    mask,
-                    prefix: None,
-                })
-            })
-        });
         std::iter::once(HelperRole::NotHelper)
             .chain(RAW_ROLES.map(HelperRole::Raw))
-            .chain(layers)
             .collect()
     }
 
-    /// The `helper.role` value: `none`, a `RawMap` id, or a layer's canonical suffix without prefix.
+    /// The `helper.role` value: `none` or a `RawMap` id.
     pub fn id(&self) -> String {
         match self {
             HelperRole::NotHelper => "none".into(),
             HelperRole::Raw(r) => r.id(),
-            HelperRole::Layer(t) => LayerTerm {
-                prefix: None,
-                ..(*t).into()
-            }
-            .canonical(),
         }
     }
 
@@ -109,19 +83,7 @@ impl HelperRole {
                 RawMap::Rmaos => "RMAOS",
             }
             .into(),
-            HelperRole::Layer(t) => {
-                let l = t.layer.label();
-                let mut s = l[..1].to_uppercase() + &l[1..] + " normal";
-                if t.mask {
-                    s.push_str(" mask");
-                }
-                s
-            }
         }
-    }
-
-    pub fn is_normal(&self) -> bool {
-        matches!(self, HelperRole::Layer(_))
     }
 }
 
@@ -196,9 +158,6 @@ impl AlphaTarget {
 pub enum FillTarget {
     Alpha(AlphaTarget),
     Packed { suffix: &'static str, channel: u8 },
-    // A normal layer blended into its base `_n` or `_cnr` (reports only: never in `all()`, so never a `helper.fills`
-    // value; a layer's base is `rnm.target`).
-    Rnm(crate::config::RnmTarget),
 }
 
 /// The packed outputs and how many channels a helper may fill in each (`_p` has only R).
@@ -224,7 +183,6 @@ impl FillTarget {
             FillTarget::Packed { suffix, channel } => {
                 format!("{suffix}.{}", CHANNELS[usize::from(*channel)])
             }
-            FillTarget::Rnm(t) => format!("rnm.{}", rnm_suffix(*t)),
         }
     }
 
@@ -243,16 +201,7 @@ impl FillTarget {
                 "{set_base}_{suffix} {}",
                 CHANNELS[usize::from(*channel)].to_uppercase()
             ),
-            FillTarget::Rnm(t) => format!("{set_base}_{}", rnm_suffix(*t)),
         }
-    }
-}
-
-/// The base normal's suffix; `Both` never names one base (a report lists each).
-fn rnm_suffix(t: crate::config::RnmTarget) -> &'static str {
-    match t {
-        crate::config::RnmTarget::Cnr => "cnr",
-        _ => "n",
     }
 }
 

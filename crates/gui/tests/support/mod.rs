@@ -106,6 +106,20 @@ pub fn many_sets(dir: &Path, n: usize) -> AppModel {
     m
 }
 
+/// Note HJ2: `set_output_name` refuses a name on a non-PBR set, but an old project can still hold one. This seeds
+/// `output_name` in `sdc-project.toml` as such a project would, and plans again.
+pub fn seed_output_name(m: &mut AppModel, id: &str, name: &str) {
+    let id = id.to_string();
+    let name = name.to_string();
+    m.edit_docs("Seed output name", None, true, move |_, d| {
+        d.set_output_name(&id, Some(&name))
+    });
+    assert!(
+        m.wait_idle(Duration::from_secs(60)),
+        "planning did not finish"
+    );
+}
+
 /// The M3a fixture with rock01 decided as a TruePBR set: `pbr_albedo` diffuse, `pbr_normal` normal (DirectX green).
 /// leaf.png and odd.png stay undecided, as in M3a.
 pub fn pbr_opened(dir: &Path) -> AppModel {
@@ -298,47 +312,6 @@ pub fn pbr_wall(dir: &Path, albedo: u8, rmaos: [u8; 3]) -> AppModel {
     m
 }
 
-/// Track B Task 6: the engine's `solve::tests::torus` relief (sines of periods W..W/8 plus a wrapped Gaussian) as
-/// unit tangent-space normals, slopes `4·(h[x+1] − h[x−1])`, wrapped.
-pub fn relief_normals(n: u32) -> Vec<[f64; 3]> {
-    use std::f64::consts::PI;
-    let (w, nf) = (n as usize, n as f64);
-    let gauss = |x: f64, y: f64, c: f64, s: f64| {
-        (-((x - c).powi(2) + (y - c).powi(2)) / (2.0 * s * s)).exp()
-    };
-    let hf: Vec<f64> = (0..w * w)
-        .map(|i| {
-            let (x, y) = ((i % w) as f64, (i / w) as f64);
-            let mut v = 0.0;
-            for d in [1.0, 2.0, 4.0, 8.0] {
-                v += (2.0 * PI * d * x / nf).sin() + (2.0 * PI * d * y / nf + d).cos();
-            }
-            for ox in [-nf, 0.0, nf] {
-                for oy in [-nf, 0.0, nf] {
-                    v += 4.0 * gauss(x + ox, y + oy, nf / 3.0, 8.0);
-                }
-            }
-            0.25 * v
-        })
-        .collect();
-    slopes_to_normals(&hf, w, 4.0)
-}
-
-/// Unit normals of the wrapped `w`×`w` height field `hf`, slopes `k·(h[x+1] − h[x−1])`.
-pub fn slopes_to_normals(hf: &[f64], w: usize, k: f64) -> Vec<[f64; 3]> {
-    let n = w as isize;
-    let at = |x: isize, y: isize| hf[(y.rem_euclid(n) * n + x.rem_euclid(n)) as usize];
-    (0..w * w)
-        .map(|i| {
-            let (x, y) = ((i % w) as isize, (i / w) as isize);
-            let p = k * (at(x + 1, y) - at(x - 1, y));
-            let q = k * (at(x, y + 1) - at(x, y - 1));
-            let l = (p * p + q * q + 1.0).sqrt();
-            [-p / l, -q / l, 1.0 / l]
-        })
-        .collect()
-}
-
 /// A 64 px BC1 DDS at `path` (parent folders made), written by the engine's writer, never copied.
 pub fn bc1_dds(path: &Path) {
     use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
@@ -363,21 +336,4 @@ pub fn dds_pbr_sets(dir: &Path, sets: &[&str]) -> PathBuf {
         }
     }
     dir.join("textures")
-}
-
-/// A unit normal stored as 8-bit RGB, `(n + 1) / 2`.
-pub fn normal_rgb(n: [f64; 3]) -> [u8; 3] {
-    n.map(|c| ((c.clamp(-1.0, 1.0) * 0.5 + 0.5) * 255.0).round() as u8)
-}
-
-/// `relief_normals(size)` as an 8-bit PNG at `dir/name` (pass `rock01_normal.png` to replace the flat fixture).
-pub fn relief_normal(dir: &Path, name: &str, size: u32) -> PathBuf {
-    let n = relief_normals(size);
-    let path = dir.join(name);
-    ImageBuffer::from_fn(size, size, |x, y| {
-        Rgb(normal_rgb(n[(y * size + x) as usize]))
-    })
-    .save(&path)
-    .unwrap();
-    path
 }

@@ -524,6 +524,188 @@ fn copy_with_format_ticked_keeps_a_tag_only_source_tag() {
     assert_eq!(file(&m, ODD, "color.tag"), Some(json!(t)));
 }
 
+/// Whether `k`'s planned alpha policy is cutout or cutout + blend.
+fn is_cutout(m: &AppModel, k: &str) -> bool {
+    use engine::config::AlphaPolicy;
+    let p = &m.item(k).unwrap().job.as_ref().unwrap().profile;
+    matches!(
+        p.alpha.policy,
+        AlphaPolicy::Cutout | AlphaPolicy::CutoutBlend
+    )
+}
+
+/// Note HS8 (I13): Copy settings plans the threshold against the target as the copied cutout policy leaves it.
+#[test]
+fn copy_settings_writes_a_field_that_another_copied_field_unlocks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    assert!(!is_cutout(&m, ROCK), "precondition: ROCK is not cutout");
+    m.set_field(LEAF, "alpha.policy", json!("cutout"));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.threshold", json!(100));
+    idle(&mut m);
+    let steps = m.history.undo.len();
+    m.apply_copy_settings(
+        LEAF,
+        &strings(&[ROCK]),
+        &["alpha.policy".into(), "alpha.threshold".into()],
+    );
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "alpha.policy"), Some(json!("cutout")));
+    assert_eq!(file(&m, ROCK, "alpha.threshold"), Some(json!(100)));
+    let report = m.bulk.report.clone().unwrap();
+    assert!(!report.contains("locked"), "{report}");
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+}
+
+/// Note HS8: the edge, locked on a Box filter, is written when the copy also writes a filter that reads it.
+#[test]
+fn copy_settings_writes_the_edge_with_a_non_box_filter() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_field(LEAF, "mips.filter", json!("tent"));
+    idle(&mut m);
+    m.set_field(LEAF, "mips.edge", json!("clamp"));
+    idle(&mut m);
+    let rock = &m.item(ROCK).unwrap().job.as_ref().unwrap().profile;
+    assert_eq!(rock.mips.filter, engine::config::MipFilter::Box, "fixture");
+    m.apply_copy_settings(
+        LEAF,
+        &strings(&[ROCK]),
+        &["mips.filter".into(), "mips.edge".into()],
+    );
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "mips.filter"), Some(json!("tent")));
+    assert_eq!(file(&m, ROCK, "mips.edge"), Some(json!("clamp")));
+    let report = m.bulk.report.clone().unwrap();
+    assert!(!report.contains("locked"), "{report}");
+}
+
+/// Note HS8 (Review Focus 1): the BC1 pair unlocks 1-bit alpha and the cutout policy unlocks the threshold, on a
+/// BC7 target that is not cutout; all four land in one copy.
+#[test]
+fn copy_settings_lands_a_whole_unlock_chain() {
+    use engine::config::Format;
+    use engine::policy::allowed_encodings;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    // A landscape diffuse takes no BC1 under cs; a plain diffuse does.
+    let both = strings(&[LEAF, ROCK]);
+    m.apply_bulk_edit(&both, "subtype", BulkOp::Set(json!("diffuse")));
+    idle(&mut m);
+    m.set_field(ROCK, "format", json!("bc7"));
+    idle(&mut m);
+    let allowed = |m: &AppModel, k: &str| {
+        let st = m.item(k).unwrap().job.as_ref().unwrap().profile.subtype;
+        allowed_encodings(st, m.target)
+    };
+    let rock = allowed(&m, ROCK);
+    let (f, t) = *allowed(&m, LEAF)
+        .iter()
+        .find(|e| e.0 == Format::Bc1 && rock.contains(e))
+        .expect("fixture: a BC1 pair both allow");
+    let p = &m.item(ROCK).unwrap().job.as_ref().unwrap().profile;
+    assert_eq!(p.format, Format::Bc7, "precondition: ROCK is BC7");
+    assert!(!is_cutout(&m, ROCK), "precondition: ROCK is not cutout");
+    m.set_format(LEAF, f, t);
+    idle(&mut m);
+    m.set_field(LEAF, "encoder.bc1_alpha", json!(true));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.policy", json!("cutout"));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.threshold", json!(90));
+    idle(&mut m);
+    m.apply_copy_settings(
+        LEAF,
+        &strings(&[ROCK]),
+        &[
+            "format".into(),
+            "color.tag".into(),
+            "encoder.bc1_alpha".into(),
+            "alpha.policy".into(),
+            "alpha.threshold".into(),
+        ],
+    );
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "format"), Some(json!(f)));
+    assert_eq!(file(&m, ROCK, "color.tag"), Some(json!(t)));
+    assert_eq!(file(&m, ROCK, "encoder.bc1_alpha"), Some(json!(true)));
+    assert_eq!(file(&m, ROCK, "alpha.policy"), Some(json!("cutout")));
+    assert_eq!(file(&m, ROCK, "alpha.threshold"), Some(json!(90)));
+    let report = m.bulk.report.clone().unwrap();
+    assert!(!report.contains("locked"), "{report}");
+}
+
+/// Note HS8 (final review Issue 4): a field unlocked by a field that is itself unlocked by the copy lands even when it
+/// is ticked first: the BC1 format unlocks 1-bit alpha, which makes the blend policy cutout and unlocks the
+/// threshold, so the threshold needs a second pass.
+#[test]
+fn copy_settings_lands_a_two_step_unlock_ticked_in_reverse() {
+    use engine::config::Format;
+    use engine::policy::allowed_encodings;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let both = strings(&[LEAF, ROCK]);
+    m.apply_bulk_edit(&both, "subtype", BulkOp::Set(json!("diffuse")));
+    idle(&mut m);
+    m.set_field(ROCK, "format", json!("bc7"));
+    idle(&mut m);
+    let allowed = |m: &AppModel, k: &str| {
+        let st = m.item(k).unwrap().job.as_ref().unwrap().profile.subtype;
+        allowed_encodings(st, m.target)
+    };
+    let rock = allowed(&m, ROCK);
+    let (f, t) = *allowed(&m, LEAF)
+        .iter()
+        .find(|e| e.0 == Format::Bc1 && rock.contains(e))
+        .expect("fixture: a BC1 pair both allow");
+    assert!(!is_cutout(&m, ROCK), "precondition: ROCK is not cutout");
+    m.set_format(LEAF, f, t);
+    idle(&mut m);
+    m.set_field(LEAF, "encoder.bc1_alpha", json!(true));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.policy", json!("blend"));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.threshold", json!(90));
+    idle(&mut m);
+    m.apply_copy_settings(
+        LEAF,
+        &strings(&[ROCK]),
+        &[
+            "alpha.threshold".into(),
+            "encoder.bc1_alpha".into(),
+            "format".into(),
+            "color.tag".into(),
+            "alpha.policy".into(),
+        ],
+    );
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "encoder.bc1_alpha"), Some(json!(true)));
+    assert_eq!(file(&m, ROCK, "alpha.policy"), Some(json!("blend")));
+    assert_eq!(file(&m, ROCK, "alpha.threshold"), Some(json!(90)));
+    let report = m.bulk.report.clone().unwrap();
+    assert!(!report.contains("locked"), "{report}");
+}
+
+/// Note HS8 guard (pin of existing behaviour): a field nothing in the copy unlocks is still skipped and reported.
+#[test]
+fn copy_settings_still_skips_a_field_nothing_in_the_copy_unlocks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    assert!(!is_cutout(&m, ROCK), "precondition: ROCK is not cutout");
+    m.set_field(LEAF, "alpha.policy", json!("cutout"));
+    idle(&mut m);
+    m.set_field(LEAF, "alpha.threshold", json!(100));
+    idle(&mut m);
+    m.apply_copy_settings(LEAF, &strings(&[ROCK]), &["alpha.threshold".into()]);
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "alpha.threshold"), None);
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("Threshold: written to 0 of 1; locked on 1 of 1: used only by cutout and cutout + blend")
+    );
+}
+
 /// Trace #28: a write of the value already stored is no edit: no undo step, and the document stays clean.
 #[test]
 fn writing_an_equal_value_leaves_sdc_toml_clean() {

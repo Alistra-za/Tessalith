@@ -9,7 +9,7 @@ use crate::model::meshes::MeshesModel;
 use crate::ui::header::elide_middle;
 use crate::ui::status::{self, Status, AMBER, GREEN, RED};
 use eframe::egui;
-use nif::edit::Outcome;
+use nif::edit::{Op, Outcome};
 use nif::fields::Field;
 
 const TABS: [&str; 4] = ["Shader", "Alpha", "Controllers", "Extra data"];
@@ -48,6 +48,8 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
         let tab_id = egui::Id::new("meshes-edit-tab");
         let mut tab: usize = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
+        // Note HS15: a tab click draws the old tab once more, so a field it ended the typing in commits.
+        let shown = tab;
         ui.horizontal(|ui| {
             for (i, t) in TABS.iter().enumerate() {
                 let r = ui.selectable_label(tab == i, *t);
@@ -70,7 +72,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         egui::ScrollArea::both()
             .id_salt("meshes-edit-scroll")
             .auto_shrink([false, false])
-            .show(ui, |ui| match tab {
+            .show(ui, |ui| match shown {
                 0 => edit_fields::shader_tab(ui, m, e, &mut act),
                 1 => edit_fields::alpha_tab(ui, e, &mut act),
                 2 => edit_ctrl::controllers_tab(ui, m, e, &mut act),
@@ -144,11 +146,7 @@ fn top(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
                     .show(ui, |ui| {
                         for (i, d) in e.doc.ops.iter().enumerate() {
                             let failed = d.status == OpStatus::Conflict;
-                            let mut label = e.op_label_at(i);
-                            // Note GD8: the row says that its Revert takes the clip's timing too
-                            if !e.timing_dependents(i).is_empty() {
-                                label.push_str(" (Revert also removes its clip timing)");
-                            }
+                            let label = e.op_label_at(i);
                             op_row(ui, e, i, &label, failed, act);
                         }
                     });
@@ -347,11 +345,25 @@ fn export_block(
 }
 
 fn apply(m: &mut MeshesModel, act: Act) {
-    if let Some((ops, merge)) = act.push {
+    // Note HS15: the same slot's Fix clicked while its path was typed is dropped: after the path its base is stale,
+    // so it would only become a Conflict.
+    let same_slot = match (&act.path, &act.push) {
+        (Some((p, _)), Some((q, _))) => matches!(
+            (p.as_slice(), q.as_slice()),
+            ([Op::SetTexturePath { at: a, slot: s, .. }], [Op::SetTexturePath { at: b, slot: t, .. }])
+                if a == b && s == t
+        ),
+        _ => false,
+    };
+    let push = if same_slot { None } else { act.push };
+    // the typed path first: the click that ended the typing came after it
+    let mut pushed = false;
+    for (ops, merge) in [act.path, push].into_iter().flatten() {
         m.edit_push(ops, merge);
-        if let Some(e) = &mut m.edit {
-            e.notice = act.notice;
-        }
+        pushed = true;
+    }
+    if let (true, Some(e)) = (pushed, &mut m.edit) {
+        e.notice = act.notice;
     }
     if let (true, Some(e)) = (act.flush, &mut m.edit) {
         e.flush();
@@ -382,7 +394,8 @@ fn apply(m: &mut MeshesModel, act: Act) {
     if act.open.is_some() {
         m.open_in_textures = act.open;
     }
-    // A field that lost its focus to the Review… click committed its push (and flush) above this frame (rule 7.5).
+    // A field that lost its focus to the Review… click committed its push or typed path (and flush) above this frame
+    // (rule 7.5).
     m.open_review_request |= act.review;
     match act.diff {
         Some(true) => {

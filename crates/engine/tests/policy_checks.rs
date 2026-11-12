@@ -70,6 +70,7 @@ fn run_info(
         members: vec![0],
         suffixes: sets.iter().map(|s| s.to_string()).collect(),
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(&img, info);
     resolve_file(
@@ -341,6 +342,7 @@ fn run_with(
         members: vec![0],
         suffixes: suffix.iter().map(|s| s.to_string()).collect(),
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(&opaque(), &RGBA8);
     resolve_file(
@@ -816,6 +818,7 @@ fn preset_alpha_policy_counts_as_explicit() {
         members: vec![0],
         suffixes: BTreeSet::new(),
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(&img, &RGBA8);
     let facts = FileFacts {
@@ -1003,6 +1006,7 @@ fn resolve_in(ctx: &ResolveCtx, rel: &str, suffix: Option<&str>, img: &Rgba32F) 
         members: vec![0],
         suffixes: suffix.iter().map(|s| s.to_string()).collect(),
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(img, &RGBA8);
     resolve_file(
@@ -2621,7 +2625,6 @@ fn out_of_range_cube_keys_are_invalid() {
         "cubemap.saturation=2.5",
         "cubemap.highlight_clamp=0.5",
         "cubemap.yaw=400",
-        "cubemap.horizon=50",
     ] {
         let j = cube(&[set]);
         assert!(
@@ -2632,10 +2635,6 @@ fn out_of_range_cube_keys_are_invalid() {
     }
     // A NaN never gets that far: --set refuses it (and the range check would too).
     assert!(parse_set("cubemap.yaw=nan").is_err());
-    assert!(parse_set("cubemap.horizon=nan").is_err());
-    // A ground fill at a valid horizon is accepted.
-    let j = cube(&["cubemap.ground_fill=\"gradient\"", "cubemap.horizon=-10"]);
-    assert!(!codes(&j).contains(&Code::CfgInvalid), "{:?}", j.warnings);
 }
 
 /// An `_e` source of `w` x `h` with the given source facts, resolved as a cubemap; `tweak` edits the analysis.
@@ -2684,6 +2683,7 @@ fn cube_src_named(
         members: vec![0],
         suffixes: BTreeSet::from(["e".to_string()]),
         shared_skin: false,
+        shares: vec![],
     };
     let mut a = analyse(&Rgba32F::new(w, h, [0.5, 0.4, 0.3, 1.0]), &info);
     tweak(&mut a);
@@ -2786,18 +2786,13 @@ fn cube_dds_is_decided_as_a_cubemap() {
     );
 }
 
+/// A pin (passes on the old code too): only a style sets `cubemap.blur`, and the vanilla_metal 0.6 stays.
 #[test]
-fn photo_defaults_to_heavy_blur() {
-    assert_eq!(
-        cube(&["cubemap.layout=photo"]).profile.cubemap.blur,
-        Some(0.6)
-    );
-    let j = cube(&["cubemap.layout=photo", "cubemap.blur=0.2"]);
-    assert_eq!(j.profile.cubemap.blur, Some(0.2));
+fn a_layout_sets_no_blur_default() {
     assert_eq!(cube(&[]).profile.cubemap.blur, None);
     assert_eq!(
-        cube(&["cubemap.layout=equirect"]).profile.cubemap.blur,
-        None
+        cube(&["cubemap.style=vanilla_metal"]).profile.cubemap.blur,
+        Some(0.6)
     );
 }
 

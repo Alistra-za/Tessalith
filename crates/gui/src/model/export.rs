@@ -77,6 +77,9 @@ pub struct ExportModel {
     pub(crate) index: HashMap<String, usize>,
     /// Rows were removed since `index` was built: rebuild it at the next lookup (audit item 6).
     pub(crate) index_stale: bool,
+    /// Note HF9: job keys (lower case) of textures outside this run. The plan still discovers them, but they get no
+    /// row: the engine's `write_only` never runs them, so a row would end as "not run".
+    pub(crate) outside_run: std::collections::HashSet<String>,
 }
 
 /// The source of `ExportModel::revision`: unique across models, so a cache never mistakes one for another.
@@ -115,7 +118,7 @@ impl ExportModel {
             .map(|r| r.path.as_str())
     }
 
-    /// Drop the queued rows of `path` (a raw map packed into a recipe, a used RNM layer).
+    /// Drop the queued rows of `path` (a raw map packed into a recipe).
     fn drop_queued(&mut self, path: &str) {
         let before = self.rows.len();
         self.rows
@@ -189,6 +192,8 @@ impl ExportModel {
                     self.drop_queued(p);
                 }
             }
+            EventKind::FileDiscovered { .. }
+                if ev.job.as_ref().is_some_and(|j| self.outside(j)) => {}
             EventKind::FileDiscovered { output } => {
                 self.row(&ev);
                 self.note_output(&ev, output);
@@ -199,16 +204,6 @@ impl ExportModel {
                 self.run_row(&ev, RowState::Done { passed });
                 self.note_output(&ev, &output);
                 self.finished_at(now);
-            }
-            EventKind::FileSkipped {
-                kind: SkipKind::NormalLayer,
-                code: None,
-                ..
-            } => {
-                // A used layer shows only in the RNM section; one an RNM-* code explains stays visible.
-                if let Some(p) = ev.path.as_deref() {
-                    self.drop_queued(p);
-                }
             }
             EventKind::FileSkipped { kind, reason, .. } => {
                 let state = match kind {
@@ -264,6 +259,30 @@ impl ExportModel {
     fn finished_at(&mut self, now: Instant) {
         if let Some(p) = self.pace.as_mut() {
             p.finished(now);
+        }
+    }
+
+    /// Note HF9: job key `k` is a texture outside the run: its own key, or an Also phase's `<folder>/<key>`.
+    fn outside(&self, k: &str) -> bool {
+        let k = k.to_lowercase();
+        self.outside_run.contains(&k)
+            || k.split_once('/')
+                .is_some_and(|(_, rest)| self.outside_run.contains(rest))
+    }
+
+    /// Note HF9: drop the rows that never started whose texture is outside the run. A queued row of a texture in the
+    /// run stays, to end as "not run".
+    pub(crate) fn drop_unstarted(&mut self) {
+        let before = self.rows.len();
+        let outside: Vec<bool> = self.rows.iter().map(|r| self.outside(&r.job_key)).collect();
+        let mut i = 0;
+        self.rows.retain(|r| {
+            i += 1;
+            r.state != RowState::Queued || !outside[i - 1]
+        });
+        if self.rows.len() != before {
+            self.index_stale = true;
+            self.revision = REV.fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -521,4 +540,31 @@ pub fn warning_line(w: &Warning) -> String {
         format!("{:?}", w.severity).to_lowercase(),
         w.message
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Note HF9 (review round 1, Minor 2): only queued rows of textures outside the run go; a queued row of one in
+    /// the run stays to end as "not run".
+    #[test]
+    fn drop_unstarted_drops_only_rows_outside_the_run() {
+        let row = |k: &str| Row {
+            job_key: k.into(),
+            path: k.into(),
+            state: RowState::Queued,
+            warnings: vec![],
+        };
+        let mut m = ExportModel {
+            rows: vec![row("g/A"), row("g/b"), row("Mod Vanilla/g/a")],
+            outside_run: ["g/a".to_string()].into(),
+            ..Default::default()
+        };
+        // The discovered rows use the same rule (final review M6): an Also phase's row gets none either.
+        assert!(m.outside("Mod Vanilla/g/A") && m.outside("g/a") && !m.outside("g/b"));
+        m.drop_unstarted();
+        let left: Vec<&str> = m.rows.iter().map(|r| r.job_key.as_str()).collect();
+        assert_eq!(left, ["g/b"]);
+    }
 }

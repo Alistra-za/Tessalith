@@ -1,5 +1,5 @@
-//! The vanilla envmap (shader type 1, slot 4 → t4) reads cube +Z as world up (Note IC1, DS13), on the installed CS
-//! (`SDC_CS_SHADERS`); run alone with --test-threads=1.
+//! The vanilla envmap (shader type 1, slot 4 → t4) reads cube +Z as world up (Note IC1, DS13), on the bundled CS
+//! shaders (Note GT); run alone with --test-threads=1.
 mod common;
 
 use nif::material::MaterialState;
@@ -68,13 +68,9 @@ fn scene(pitch: f32) -> Scene {
 
 #[test]
 fn render_envmap_reads_cube_plus_z_as_up() {
-    let Ok(shaders) = std::env::var("SDC_CS_SHADERS") else {
-        println!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
     let cache = tempfile::tempdir().unwrap();
-    let fp = render3d::locate::fingerprint(std::path::Path::new(&shaders), None).unwrap();
-    let mut r = Renderer::new(fp, cache.path().to_path_buf()).unwrap();
+    let mut r =
+        Renderer::with_source(render3d::ShaderSource::Bundled, cache.path().to_path_buf()).unwrap();
     let (red, green, blue) = ([255, 0, 0, 255], [0, 255, 0, 255], [0, 0, 255, 255]);
     let black = common::dds_rgba8(1, 1, &[[0, 0, 0, 255]]);
     let load = |r: &mut Renderer, c: Vec<u8>| {

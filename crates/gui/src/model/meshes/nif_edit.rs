@@ -415,13 +415,6 @@ pub fn op_label(op: &Op, m: &NifModel) -> String {
         Op::SetKeys { at, .. } => ("Edit keys".into(), at),
         Op::AddController { at, .. } => ("Add controller".into(), at),
         Op::RemoveController { at } => ("Remove controller".into(), at),
-        Op::AddSequence { at, name, .. } => (format!("Add clip {name}"), at),
-        Op::RemoveSequence { at, name, .. } => (format!("Remove clip {name}"), at),
-        Op::RenameSequence {
-            at, name, new_name, ..
-        } => (format!("Rename clip {name} to {new_name}"), at),
-        Op::SetSequenceTiming { at, name, .. } => (format!("Set clip timing {name}"), at),
-        Op::ConvertChainToClips { at, name } => (format!("Convert to clip {name}"), at),
     };
     match &at.shape {
         Some(s) => format!("{s}: {what}"),
@@ -526,11 +519,6 @@ pub fn op_name(op: &Op) -> String {
         Op::SetKeys { .. } => "Edit keys".into(),
         Op::AddController { .. } => "Add controller".into(),
         Op::RemoveController { .. } => "Remove controller".into(),
-        Op::AddSequence { .. } => "Add clip".into(),
-        Op::RemoveSequence { .. } => "Remove clip".into(),
-        Op::RenameSequence { .. } => "Rename clip".into(),
-        Op::SetSequenceTiming { .. } => "Set clip timing".into(),
-        Op::ConvertChainToClips { .. } => "Convert to clip".into(),
     }
 }
 
@@ -557,11 +545,6 @@ fn anchor_mut(op: &mut Op) -> &mut Anchor {
         | Op::RemoveExtra { at }
         | Op::AddController { at, .. }
         | Op::RemoveController { at }
-        | Op::AddSequence { at, .. }
-        | Op::RemoveSequence { at, .. }
-        | Op::RenameSequence { at, .. }
-        | Op::SetSequenceTiming { at, .. }
-        | Op::ConvertChainToClips { at, .. }
         | Op::SetKeys { at, .. } => at,
     }
 }
@@ -663,7 +646,14 @@ impl NifEdit {
         let had_doc = saved.is_some();
         let (saved, owns_autosave, open_lines, recovered) =
             recover_autosave(saved, &doc_path, &edit_mod, autosave, data_path);
+        let mut open_lines = open_lines;
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
+        if doc.dropped_clip_ops > 0 {
+            open_lines.push(format!(
+                "{data_path}: {} clip edit(s) dropped: NIF Edit no longer edits clips.",
+                doc.dropped_clip_ops
+            ));
+        }
         let changed = doc.source.sha256 != id.sha256;
         if changed {
             doc.source = id; // saved with the next change; the statuses carry the conflicts
@@ -1180,13 +1170,26 @@ impl NifEdit {
     /// Note GD5 (a), (b), (d): the export folder changed while this edit is touched (GD13). The document stays in
     /// memory and moves to `root` (or to `autosave` with none) unsaved: the switch writes nothing, the next save writes there.
     /// It takes the export record of `root`'s saved document (that record describes `root`'s file). Returns the
-    /// lines for Messages; Err (nothing moved) when `root`'s saved document does not load, so it is never overwritten.
+    /// lines for Messages; Err (nothing moved, the reason as the row shows it) when `root`'s saved document does not
+    /// load, so it is never overwritten, or when `root` holds the source copy (Note HS12).
     pub fn retarget(&mut self, root: Option<&Path>) -> Result<Vec<String>, String> {
+        // Note HS12: an export there would replace the source copy (pick_source skips that folder as well)
+        if let Some(r) = root.filter(|r| same_dir(Path::new(&self.source_copy.root), r)) {
+            return Err(format!(
+                "{} holds the mesh this edit applies to ({}); an export there would replace it. Choose another \
+                 export folder.",
+                r.display(),
+                self.source_copy.origin
+            ));
+        }
+        let cannot = |r: &Path, e: String| {
+            format!("could not open the edit document in {}: {e}", r.display())
+        };
         let (edit_mod, doc_path, export_path) = match root {
             Some(r) => (
                 r.to_path_buf(),
-                edit_doc::doc_path(r, &self.data_path)?,
-                edit_doc::export_path(r, &self.data_path)?,
+                edit_doc::doc_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
+                edit_doc::export_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
             ),
             None => (
                 PathBuf::new(),
@@ -1195,7 +1198,7 @@ impl NifEdit {
             ),
         };
         let theirs = match root {
-            Some(_) => edit_doc::load(&doc_path)?,
+            Some(r) => edit_doc::load(&doc_path).map_err(|e| cannot(r, e))?,
             None => None,
         };
         let mut lines = vec![];
@@ -1249,24 +1252,6 @@ impl NifEdit {
         self.drag = merge.clone().map(|k| (k, n + usize::from(lead)));
         let label = ops.first().map(op_name).unwrap_or_default();
         self.history.record(self.doc.to_text(), &label, merge);
-        // Note CU1: a rename of the picked clip keeps it picked (the block stays; its name follows)
-        if let Playing::Clip(seq) = self.playing {
-            for op in &ops {
-                if let Op::RenameSequence {
-                    name,
-                    nth,
-                    new_name,
-                    ..
-                } = op
-                {
-                    if nif::edit::clip_key(&self.patched, &self.model, seq)
-                        == Some((name.clone(), *nth))
-                    {
-                        self.playing_name = Some(new_name.clone());
-                    }
-                }
-            }
-        }
         let mut old: Vec<DocOp> = match same_drag {
             true => self.doc.ops.split_off(self.doc.ops.len() - tail),
             false => vec![],
@@ -1343,24 +1328,7 @@ impl NifEdit {
         self.restore(t)
     }
 
-    /// The later SetSequenceTiming ops on the clip op `i` adds (AddSequence, Convert): reverting `i` drops them too
-    /// (Note GD8, CR6). Clip names are unique on a manager ignoring ASCII case, so the name finds the clip.
-    // shortcut: a Rename between the two leaves the timing op to conflict after the revert; follow renames if users
-    // rename and retime a new clip and then revert it.
-    pub fn timing_dependents(&self, i: usize) -> Vec<usize> {
-        let added = match self.doc.ops.get(i).map(|d| &d.op) {
-            Some(Op::AddSequence { name, .. } | Op::ConvertChainToClips { name, .. }) => name,
-            _ => return vec![],
-        };
-        (i + 1..self.doc.ops.len())
-            .filter(|&k| {
-                matches!(&self.doc.ops[k].op, Op::SetSequenceTiming { name, .. }
-                    if name.eq_ignore_ascii_case(added))
-            })
-            .collect()
-    }
-
-    /// Drops op `i`, and the clip timing that goes with it (one undo step).
+    /// Drops op `i` (one undo step).
     pub fn revert(&mut self, i: usize) {
         if i >= self.doc.ops.len() {
             return;
@@ -1368,9 +1336,6 @@ impl NifEdit {
         self.drag = None;
         let label = format!("Revert: {}", op_name(&self.doc.ops[i].op));
         self.history.record(self.doc.to_text(), &label, None);
-        for k in self.timing_dependents(i).into_iter().rev() {
-            self.doc.ops.remove(k);
-        }
         self.doc.ops.remove(i);
         self.reapply();
         self.save();
@@ -2519,10 +2484,8 @@ impl MeshesModel {
                     e.retarget_fail = None;
                     e.refresh_blocked();
                 }
-                Err(err) => {
+                Err(why) => {
                     e.retarget_fail = key;
-                    let folder = root.as_deref().unwrap_or(Path::new("")).display();
-                    let why = format!("could not open the edit document in {folder}: {err}");
                     if e.retarget_error.as_ref() != Some(&why) {
                         e.retarget_error = Some(why);
                         e.refresh_blocked();

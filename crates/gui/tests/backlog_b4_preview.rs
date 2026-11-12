@@ -119,11 +119,14 @@ fn a_cube_dds_previews_all_six_faces() {
     }
 }
 
-/// T16: with mips left out (`first_level > 0`) each face still starts at its own chain.
+/// T16: with mips left out (`first_level > 0`) each face still starts at its own chain. DT22: the cross is 4 faces
+/// wide, so the shown mip's cross fits the cap (16), not just its face.
 #[test]
 fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
     let d = tempfile::tempdir().unwrap();
-    let out = dds_preview(&cube_file(d.path(), 8, 4), 4).unwrap();
+    let out = dds_preview(&cube_file(d.path(), 8, 4), 16).unwrap();
+    let (w, h) = out.result.source.dims[out.result.source.first_level];
+    assert!(4 * w <= 16 && 3 * h <= 16);
     assert_eq!(out.result.source.first_level, 1);
     assert_eq!(out.result.levels.len(), 6 * 3);
     assert_eq!(out.decoded_mip(0).unwrap().len(), 12 * 16);
@@ -134,6 +137,20 @@ fn a_cube_dds_preview_from_a_lower_mip_keeps_each_faces_own_levels() {
             reds(out.decoded_mip(0).unwrap())
         );
     }
+}
+
+/// DT22: a cube DDS whose smallest face is above a quarter of the cap is refused, and the reason names the user's own
+/// limit, not the quarter.
+#[test]
+fn a_cube_dds_with_no_face_within_a_quarter_of_the_cap_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let Err(err) = dds_preview(&cube_file(d.path(), 8, 1), 16) else {
+        panic!("refused");
+    };
+    assert_eq!(
+        err,
+        "8x8 (the smallest mip) is above the preview limit of 16 (each cube face must fit a quarter of it)"
+    );
 }
 
 /// T16: a cut-off cube is an error, never a panic.

@@ -45,7 +45,32 @@ fn request(dir: &Path) -> BatchRequest {
 }
 
 fn session(cache: &Path) -> Session {
-    Session::new().unwrap().with_disk_cache(cache.to_path_buf())
+    Session::new()
+        .unwrap()
+        .with_disk_cache(cache.to_path_buf(), u64::MAX)
+}
+
+/// Note HV2: a session prunes the store to the size it is given, at start.
+#[test]
+fn a_session_prunes_to_the_given_size_at_start() {
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    let cache = d.path().join("cache");
+    plan(&session(&cache), d.path());
+    let size = |f: &std::path::PathBuf| std::fs::metadata(f).unwrap().len();
+    let before = entries(&cache);
+    let total: u64 = before.iter().map(size).sum();
+    assert!(before.len() > 1);
+
+    let _keeps = Session::new()
+        .unwrap()
+        .with_disk_cache(cache.clone(), total);
+    assert_eq!(entries(&cache).len(), before.len(), "at the limit: kept");
+    let _prunes = Session::new()
+        .unwrap()
+        .with_disk_cache(cache.clone(), total - 1);
+    let left: u64 = entries(&cache).iter().map(size).sum();
+    assert!(left < total && left > 0, "{left} of {total}");
 }
 
 fn plan(s: &Session, dir: &Path) -> Plan {

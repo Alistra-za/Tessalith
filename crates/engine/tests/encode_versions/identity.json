@@ -450,14 +450,14 @@
   "textures/rnm/iron_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 32,
-    "payload_sha256@avx2": "cc37aadb0db1dd57198f90c2244837a2efaadc07f63f5d6b2f5c0a21b4c498a7",
+    "payload_sha256@avx2": "07c8fe7460a326996db3a1266b406efa409491c90d3f521414298b8ea95b7216",
     "subtype": "pbr_normal",
     "width": 32
   },
   "textures/rnm/iron_rmaos.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 32,
-    "payload_sha256@avx2": "0f63ff3a63dbe2bc95e5c0eb6620b8e2e5b5fc1e11b24c419f5a75d3c9a81f33",
+    "payload_sha256@avx2": "352d73b15abfebe56490ad1aec8f846e084f32daf2d2735509a4efe22c8559b3",
     "subtype": "rmaos",
     "width": 32
   },
@@ -625,7 +625,7 @@
   "vanilla/textures/rnm/iron_n.dds": {
     "format": "Bc7 { srgb: false }",
     "height": 32,
-    "payload_sha256@avx2": "cc37aadb0db1dd57198f90c2244837a2efaadc07f63f5d6b2f5c0a21b4c498a7",
+    "payload_sha256@avx2": "07c8fe7460a326996db3a1266b406efa409491c90d3f521414298b8ea95b7216",
     "subtype": "normal",
     "width": 32
   }

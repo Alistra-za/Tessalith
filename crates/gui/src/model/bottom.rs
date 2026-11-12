@@ -159,8 +159,6 @@ pub enum At {
 pub enum Fix {
     /// Note DU3: remove the set entry that matches no file.
     RemoveMissing(sets::Missing),
-    /// GEN-STALE (CO70): open the Generate dialog for this generated item's map; its own Generate writes.
-    Regenerate(String),
     /// CHAN-NORMAL-LENGTH (Note DP): set `channels.reconstruct_z` on this item.
     RebuildZ(String),
     /// IN-UNREADABLE (Y4): open the folder that holds the skipped entry.
@@ -465,7 +463,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status == ItemStatus::NeedsDecision)
+        .filter(|i| i.status == ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         // Note FM35: the alpha question is one line on the type it opens on.
         let alpha = items::alpha_asked(i).map(code_text::alpha_confirm_text);
@@ -475,7 +473,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             .map(|d| match d {
                 Decision::Subtype { .. } => "sub-type".into(),
                 Decision::AlphaMeaning => alpha.clone().unwrap_or_else(|| "alpha".into()),
-                Decision::CubeLayout => "cube layout".into(),
+                Decision::NotACubeSource => {
+                    format!("not a cube source ({})", engine::cube::plan::CUBE_SOURCES)
+                }
                 // Note FB8: the sentence names the action; the code is on the hover.
                 Decision::Acknowledge(c) => code_text::code_line(*c).into(),
             })
@@ -507,7 +507,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         });
     }
     for a in pbr_export::export_asks(m) {
-        // A project-wide ask (a photo crop) belongs to no set.
+        // A project-wide ask belongs to no set.
         let at = if a.set_id.is_empty() {
             At::Project
         } else {
@@ -521,7 +521,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status != ItemStatus::NeedsDecision)
+        .filter(|i| i.status != ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         for w in i.warnings.iter().filter(|w| counts_toward_badge(w)) {
             let at = At::Texture(i.key.clone());
@@ -538,18 +538,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             out.push(Problem {
                 fix,
                 ..row(Level::Warning, at, w.message.clone(), Some(w.code))
-            });
-        }
-        // Note FC3 (CO70): a stale generated map is a Warning row with Regenerate; GEN-REPLACED stays on hover.
-        if let Some(reason) = m.generated_info(&i.key).and_then(|g| g.stale) {
-            out.push(Problem {
-                fix: Some(Fix::Regenerate(i.key.clone())),
-                ..row(
-                    Level::Warning,
-                    At::Texture(i.key.clone()),
-                    reason,
-                    Some(Code::GenStale),
-                )
             });
         }
     }
@@ -573,7 +561,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         }
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
-    for v in views.iter().filter(|v| !m.record_ignored(v)) {
+    for v in views.iter().filter(|v| !m.renames_outputs(v)) {
         let Some(map) = v.txst.as_ref().filter(|t| !t.is_base()) else {
             continue;
         };
@@ -619,16 +607,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             ),
         };
         out.push(row(Level::Warning, set_at(&key, &id), text, None));
-    }
-    for (k, ws) in &m.rnm_notes {
-        let at = views
-            .iter()
-            .find(|v| v.key == *k)
-            .map_or(At::Project, |v| set_at(&v.key, &v.id));
-        for w in ws.iter().filter(|w| counts_toward_badge(w)) {
-            let (at, text) = (at.clone(), w.message.clone());
-            out.push(row(Level::Warning, at, text, Some(w.code)));
-        }
     }
     // Note FC3 (Y4): an entry of the folder the plan could not read, with its folder to open.
     for w in &m.unreadable {
@@ -689,7 +667,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for i in m
         .items
         .iter()
-        .filter(|i| i.status != ItemStatus::NeedsDecision)
+        .filter(|i| i.status != ItemStatus::NeedsDecision && m.item_in_run(i))
     {
         for w in m.check_warnings(&i.key).iter().filter(|w| check_row(w)) {
             let at = At::Texture(i.key.clone());
@@ -848,7 +826,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note HG: a mapped set whose record is in no winning copy of a non-empty scan; the mapping and paths stay. An
     // empty scan says nothing (a scan that has not run is not a record that went away).
     if !m.known.records.is_empty() {
-        for v in views.iter().filter(|v| !m.record_ignored(v)) {
+        for v in views.iter().filter(|v| !m.renames_outputs(v)) {
             let Some(map) = v
                 .txst
                 .as_ref()

@@ -263,6 +263,34 @@ fn filled_analysis_loads_once_across_replans() {
     assert_eq!(s.cache().loads(), loads + 3, "a changed target reloads");
 }
 
+/// Note FM31: the checks read `AnalysisCache::analysis`, so a filled job answers with the filled image's analysis (FM31).
+#[test]
+fn a_filled_job_reads_the_filled_analysis() {
+    use engine::presets::AlphaContent;
+    use engine::session::Session;
+    let d = tempfile::tempdir().unwrap();
+    rgb(d.path(), "x.png");
+    checker(d.path(), "x_opacity.png", 3, 252);
+    let s = Session::new().unwrap();
+    let p = s
+        .plan_and_keep(
+            req(d.path(), Target::Cs, &[DIFFUSE]),
+            &Reporter::new(Arc::new(NullSink), "fill-analysis"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let j = job(&p, "x.png");
+    assert!(j.fill.is_some());
+    let filled = s.cache().analysis(j).expect("the filled entry");
+    assert_ne!(filled.alpha, AlphaContent::None);
+    let mut plain = j.clone();
+    plain.fill = None;
+    assert_eq!(
+        s.cache().analysis(&plain).unwrap().alpha,
+        AlphaContent::None
+    );
+}
+
 /// Final review I1: a raw map the user typed to convert alone (`[files] subtype`, no `helper.*`) fills nothing.
 #[test]
 fn raw_map_typed_to_convert_alone_fills_nothing() {

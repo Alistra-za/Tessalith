@@ -1,7 +1,7 @@
 //! Note FC3: every result the user must act on is a Problems row with its action as the row's button; checks are one
-//! count, not amber. The rows whose fixtures live elsewhere are pinned there: GEN-STALE in `generate_from_normal.rs`,
-//! CHK-GREEN-GUESS in `checks.rs`, the post-Rebuild-Z row in `bottom_panel.rs`, the cube layout in `cubemap_gui.rs`,
-//! the dropped fill in `packing_fills.rs` and the cleared format in `encoding_follows_type.rs`.
+//! count, not amber. The rows whose fixtures live elsewhere are pinned there: CHK-GREEN-GUESS in `checks.rs`, the
+//! post-Rebuild-Z row in `bottom_panel.rs`, the cube layout in `cubemap_gui.rs`, the dropped fill in
+//! `packing_fills.rs` and the cleared format in `encoding_follows_type.rs`.
 mod support;
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -413,7 +413,7 @@ fn a_path_blocker_offers_fix_path() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_ready(d.path());
     let (id, key) = rock_id(&m);
-    m.set_json_value(&id, "rename", Some(serde_json::json!("sub\\name")));
+    m.set_json_value(&id, "rename", Some(serde_json::json!("..\\name")));
     assert!(m.wait_idle(Duration::from_secs(60)));
     let row = problems(&m)
         .iter()
@@ -437,7 +437,7 @@ fn a_path_blocker_offers_fix_path() {
         .expect("a focused text field");
     assert_eq!(
         focused.accesskit_node().value().as_deref(),
-        Some("sub\\name")
+        Some("..\\name")
     );
     // Fix round 1: the request is one-shot, so the group it opened can be collapsed again and stays collapsed.
     h.get_by_label("Advanced TruePBR settings").click();
@@ -446,7 +446,7 @@ fn a_path_blocker_offers_fix_path() {
     }
     assert!(
         !h.query_all_by_role(egui::accesskit::Role::TextInput)
-            .any(|n| n.accesskit_node().value().as_deref() == Some("sub\\name")),
+            .any(|n| n.accesskit_node().value().as_deref() == Some("..\\name")),
         "the Advanced group collapsed"
     );
 }
@@ -519,7 +519,7 @@ fn the_problems_row_names_the_type() {
 }
 
 /// Note FM35: the three lines the alpha question used to take (the Undecided sentence, the "carries data the format
-/// would drop" acknowledgement and its button) are the one row, and the texture panel has one line and one dropdown.
+/// would drop" acknowledgement and its button) are the one row, and the texture panel has one dropdown (Note HI13).
 #[test]
 fn one_line_replaces_the_three_alpha_lines() {
     let d = tempfile::tempdir().unwrap();
@@ -553,8 +553,14 @@ fn one_line_replaces_the_three_alpha_lines() {
     ] {
         assert_eq!(h.query_all_by_label(l).count(), 0, "{l}");
     }
-    // The row and the panel's box each say it once; the row's hover keeps the code.
-    assert!(h.query_all_by_label_contains(LEAF_LINE).count() >= 2);
+    // The row says it (the panel's box asks it as an Alpha row, Note HI13); the row's hover keeps the code.
+    // Exactly one line says it; the row itself is also named "landscape/leaf.png: Alpha: …".
+    let lines: Vec<_> = h
+        .query_all_by_label_contains(LEAF_LINE)
+        .filter(|n| n.accesskit_node().role() == egui::accesskit::Role::Label)
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(lines.len(), 1, "{lines:?}");
     // Final review (GUI M5): one dropdown each, with distinct names.
     assert_eq!(h.query_all_by_label("Alpha type: Cutout").count(), 1);
     assert_eq!(
@@ -567,6 +573,24 @@ fn one_line_replaces_the_three_alpha_lines() {
         .cloned()
         .unwrap();
     assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
+}
+
+/// Note HI7: a Problems row lays out right to left; its Confirm still reads after the dropdown.
+#[test]
+fn problems_confirm_reads_after_its_dropdown() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(leaf_asks_its_alpha(d.path()));
+    h.run();
+    let dropdown = h.get_by_label("Problems alpha type: Cutout").rect();
+    let confirm = h.get_by_label("Problems confirm alpha").rect();
+    assert!(
+        confirm.min.x > dropdown.max.x,
+        "Confirm {confirm:?} before the dropdown {dropdown:?}"
+    );
+    assert!(
+        (confirm.center().y - dropdown.center().y).abs() < 4.0,
+        "one line"
+    );
 }
 
 /// Note FM35: a type picked in the dropdown is the write the five buttons made (`alpha.policy` in the texture's own
@@ -590,11 +614,11 @@ fn picking_a_type_in_the_row_writes_what_the_old_buttons_wrote() {
         .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
 }
 
-/// Note FM35: a texture a mesh decided is Ready, not asked. A mesh `remove` is the case that keeps `mesh:alpha` (a
-/// non-remove mesh type is written into the project at once, `auto_record`), so the panel's Alpha row is the one
-/// dropdown, on `Remove`, with the source beside it.
+/// Note FM35: a texture a mesh decided is Ready, not asked. Note HR2: a mesh `remove` is written into the project at
+/// once like any mesh verdict (`auto_record`), so the panel's Alpha row is the one dropdown, on `Remove`. (The
+/// `mesh:alpha` hint text is pinned in `fields.rs`.)
 #[test]
-fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
+fn a_mesh_remove_is_recorded_and_not_asked() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.decide(
@@ -625,7 +649,7 @@ fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
         ),
         (
             engine::config::AlphaPolicy::Remove,
-            "mesh:alpha".to_string()
+            "project_file".to_string()
         )
     );
     assert!(item.decisions.is_empty(), "{:?}", item.decisions);
@@ -636,9 +660,8 @@ fn a_mesh_decided_alpha_is_not_asked_and_the_panel_row_names_the_mesh() {
     assert!(!problems(h.state())
         .iter()
         .any(|p| p.at == At::Texture(LEAF.into()) && p.level == Level::Decide));
-    // The Alpha row's dropdown is on the mesh's type and its hint says where it came from.
+    // The Alpha row's dropdown is on the mesh's type.
     assert!(h
         .query_all_by_role(egui::accesskit::Role::ComboBox)
         .any(|n| n.accesskit_node().value().as_deref() == Some("Remove")));
-    h.get_by_label("from the meshes that use this texture");
 }

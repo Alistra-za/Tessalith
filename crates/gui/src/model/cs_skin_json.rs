@@ -325,6 +325,8 @@ pub struct PendingCsSkin {
     pub notes: Vec<String>,
     /// Paths (as in `files`) refused this run: not orphans.
     pub refused: Vec<String>,
+    /// Note HF9: a run that leaves sets out (a scope or an excluded group) reports no orphans.
+    pub scoped: bool,
 }
 
 /// One file per planned set (P4). `None` when no set plans one and nothing is recorded; with a record it is `Some`, so
@@ -334,13 +336,15 @@ pub(super) fn prepare(m: &AppModel) -> Option<PendingCsSkin> {
     let plan = plan(m);
     let mut p = PendingCsSkin {
         root: m.output_root(),
+        scoped: !m.reports_orphans(),
         ..Default::default()
     };
     if plan.rows.is_empty() {
         return (!doc.cs_skin_shas().is_empty()).then_some(p);
     }
     let mut seen = BTreeSet::new();
-    for r in &plan.rows {
+    // Note HF9: only the sets in the run write their files.
+    for r in plan.rows.iter().filter(|r| m.in_run_id(&r.id)) {
         p.notes.extend(r.notes.iter().cloned());
         let Some(rel) = data_rel(&p.root, &r.json) else {
             p.notes.push(format!(
@@ -443,7 +447,10 @@ pub(super) fn finish(
         ));
     }
     let this_run = p.files.iter().map(|f| &f.rel).chain(&p.refused);
-    for path in orphans(&out, &p.root, this_run) {
+    for path in orphans(&out, &p.root, this_run)
+        .into_iter()
+        .filter(|_| !p.scoped)
+    {
         notes.push(format!(
             "{}: no Advanced skin set writes this CS skin JSON any more; the file was left in place",
             path.display()

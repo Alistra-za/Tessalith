@@ -103,7 +103,7 @@ fn a_missing_remove_entry_is_removed() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     std::fs::write(m.root.clone().unwrap().join(GONE), "notes").unwrap();
-    m.edit_docs("t", None, true, |_, s| s.remove_member(ROCK, GONE));
+    m.edit_docs("t", None, true, |_, s| s.add_remove_line(ROCK, GONE));
     idle(&mut m);
     assert_eq!(missing_of(&m, ROCK), vec![Missing::File(GONE.into())]);
     m.remove_missing(ROCK, &Missing::File(GONE.into())).unwrap();
@@ -127,7 +127,7 @@ fn with_deleted(dir: &Path, remove: bool) -> (AppModel, usize) {
     let mut m = pbr_opened(dir);
     m.edit_docs("t", None, true, |_, s| {
         if remove {
-            s.remove_member(ROCK, DELETED)
+            s.add_remove_line(ROCK, DELETED)
         } else {
             s.add_member(ROCK, DELETED)
         }

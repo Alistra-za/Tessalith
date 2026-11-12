@@ -1,9 +1,9 @@
 //! The centre panel for two or more textures or sets (M6 Track F3a, design §3-4). Drawing only: every edit is a
 //! model call, made after drawing.
 use super::columns::AMBER;
-use super::settings_panel::{combo, editor, Options, RowEdit, GROUPS};
+use super::settings_panel::{combo, editor, field_label, Options, RowEdit, GROUPS};
 use crate::model::bulk::{BulkField, BulkOp};
-use crate::model::fields::{group_of, FieldView};
+use crate::model::fields::{field_help, group_of, FieldView};
 use crate::model::sets::SlotKind;
 use crate::model::{AppModel, Selection};
 use eframe::egui;
@@ -174,7 +174,7 @@ fn row(
     formats: &Options,
 ) -> Option<RowEdit> {
     let mut edit = None;
-    ui.label(r.label);
+    field_label(ui, false, r.label, field_help(r.field));
     let view = FieldView {
         field: r.field,
         label: r.label,

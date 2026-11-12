@@ -75,15 +75,14 @@ impl Worst {
 #[test]
 #[ignore]
 fn replay_matches_capture_per_mrt() {
-    let (Ok(root), Ok(shaders)) = (std::env::var("SDC_GOLDEN"), std::env::var("SDC_CS_SHADERS"))
-    else {
-        println!("skipped: set SDC_GOLDEN and SDC_CS_SHADERS");
+    let Ok(root) = std::env::var("SDC_GOLDEN") else {
+        println!("skipped: set SDC_GOLDEN");
         return;
     };
     let root = Path::new(&root);
     let cache = tempfile::tempdir().unwrap();
-    let fp = render3d::locate::fingerprint(Path::new(&shaders), None).unwrap();
-    let mut ren = Renderer::new(fp, cache.path().to_path_buf()).unwrap();
+    let fp = render3d::ShaderSource::Bundled;
+    let mut ren = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let noise = Noise::load(
         &root.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
     )

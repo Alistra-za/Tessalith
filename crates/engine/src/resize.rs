@@ -291,6 +291,7 @@ mod tests {
             domain,
             roughness_r_squared: false,
             nonfinite_samples: 0,
+            source_coverage: None,
         }
     }
     fn close(a: f32, b: f64) -> bool {
@@ -337,11 +338,11 @@ mod tests {
                 source: None,
                 pack: None,
                 bake: None,
-                rnm: None,
                 derive: None,
                 shader: None,
                 cube: None,
                 fill: None,
+                unknown_suffix: false,
             }
         };
         let mut jobs = vec![

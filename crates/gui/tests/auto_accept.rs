@@ -165,6 +165,8 @@ fn a_recording_after_a_user_edit_is_its_own_step() {
     let root = d.path().join("textures");
     rgb(&root, "a/x.png", [90, 60, 30]);
     rgb(&root, "a/x_mask.png", [200, 200, 200]);
+    // Note GY1: a set mate, so the former helper is not a lone unknown suffix that waits for a type.
+    rgb(&root, "a/x_mask_n.png", [128, 128, 255]);
     let toml = "[files.\"a/x_mask.png\"]\nhelper.role = \"opacity\"\n";
     std::fs::write(root.join("sdc.toml"), toml).unwrap();
     let mut m = support::opened_as_the_app(root, d.path().join("export"));
@@ -404,6 +406,49 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
     assert_eq!(
         (cw.profile.alpha.policy, cw.profile.alpha.threshold),
         (AlphaPolicy::Cutout, 100)
+    );
+}
+
+/// Note HR2: a mesh `remove` on a varying alpha is recorded like any mesh verdict; an Undo stays undone; the CLI
+/// plans the same from the text with no evidence.
+#[test]
+fn a_mesh_remove_is_recorded_and_stays_undone() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    varying(&root, "a/wall.png");
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    assert_eq!(value(&m, "a/wall.png", "alpha.policy"), None);
+    let none = MeshAlpha {
+        blend: false,
+        test: false,
+        threshold: 0,
+    };
+    m.mesh_alpha = [("textures/a/wall".to_string(), vec![none])].into();
+    m.scan_store_unsettled = true;
+    m.replan();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        value(&m, "a/wall.png", "alpha.policy"),
+        Some(json!("remove"))
+    );
+    assert_eq!(value(&m, "a/wall.png", "alpha.threshold"), None);
+    assert_eq!(
+        auto_row(&m).expect("the row").detail.as_deref(),
+        Some("wall.png: remove")
+    );
+    let w = m.item("a/wall.png").unwrap().job.clone().unwrap();
+    let p = cli_plan(&root, &text(&m));
+    let cw = cli_job(&p, "wall.png");
+    assert_eq!(
+        (cw.profile.alpha.policy, cw.profile.format),
+        (AlphaPolicy::Remove, w.profile.format)
+    );
+    m.undo();
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        value(&m, "a/wall.png", "alpha.policy"),
+        None,
+        "the Undo stays undone"
     );
 }
 

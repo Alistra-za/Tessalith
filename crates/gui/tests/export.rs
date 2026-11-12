@@ -36,8 +36,11 @@ fn undecided_textures_open_review_first_and_its_export_skips_them() {
         })
         .collect();
     assert_eq!(skipped.len(), n);
-    assert!(d.path().join("export/landscape/rock01_rmaos.dds").exists());
-    assert!(!d.path().join("export/landscape/leaf.dds").exists());
+    assert!(d
+        .path()
+        .join("export/textures/landscape/rock01_rmaos.dds")
+        .exists());
+    assert!(!d.path().join("export/textures/landscape/leaf.dds").exists());
 }
 
 #[test]

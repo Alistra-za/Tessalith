@@ -65,10 +65,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         PackUnusedInput => "A packing input isn't used by this set — remove it or change the recipe",
         PackRecipeConflict => "The packing recipe doesn't fit this set — change the recipe",
         PackRecipeUnbuildable => "The packing recipe can't be built from this set — add the maps it needs",
-        RnmNoBase => "A normal layer has no base normal map — add the base",
-        RnmIgnoredEye => "Eye normal layers are ignored here — remove the layer",
-        RnmMaskOrphan => "A layer mask has no layer to apply to — remove it or add the layer",
-        RnmLayerShadowed => "A normal layer is hidden by another — remove one of them",
         ShaderUnavailable => "The chosen shader isn't available — pick another shader",
         ShaderExtraMap => "This set has a map its shader doesn't read — remove it or change the shader",
         ShaderMissingMap => "This set lacks a map its shader needs — add it or change the shader",
@@ -82,7 +78,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         ChkParallax => "The parallax height looks wrong for this map — check the height map",
         ChkParallaxScale => "The parallax scale looks too strong or too weak for this set — adjust it",
         ChkLowDetail => "This texture has little detail for its size — consider Resize: Half",
-        ChkUvGutter => "UV islands sit too close together for the mip levels — widen the gaps or use fewer mips",
         DeriveDdsSource => "A DDS source can't be converted to vanilla — use the original image",
         DeriveNoAlbedo => "This set has no albedo so it can't be converted — add the albedo",
         DerivePathConflict => "A converted file lands on another file's output — rename one of them",
@@ -90,12 +85,27 @@ pub fn code_sentence(code: Code) -> &'static str {
         CubeFaces => "A cubemap's faces are missing or differ in size — fix the six faces",
         CubeNoMips => "A cubemap without mips sparkles on curved surfaces — turn mips on",
         // Note FC3: the Info results that are rows, since the user acts on them.
-        GenStale => "This generated map no longer matches its normal map or set — regenerate it",
         DeriveNifSuggest => "This converted set needs NIF values set by hand — hover the row for them",
         ChkGreenGuess => "This normal map's green channel looks flipped — treat it as OpenGL if its lighting looks inverted",
         // The other Info results: no row, no sentence.
         _ => "",
     }
+}
+
+/// Note GU2: the engine's reason a cube-typed image is no cube source (so the two cannot drift), else a plain line.
+pub fn not_a_cube(job: Option<&engine::policy::ResolvedJob>) -> String {
+    let s = match job.map(|j| &j.status) {
+        Some(engine::policy::JobStatus::Unresolved { reasons, .. }) if !reasons.is_empty() => {
+            reasons.join("; ")
+        }
+        _ => format!(
+            "not a cube source: it must be {}",
+            engine::cube::plan::CUBE_SOURCES
+        ),
+    };
+    let mut c = s.chars();
+    c.next()
+        .map_or(String::new(), |f| f.to_uppercase().chain(c).collect())
 }
 
 /// [`code_sentence`], or a plain line for a code with none (a place that has no engine message to fall back on).

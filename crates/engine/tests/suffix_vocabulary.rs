@@ -83,6 +83,7 @@ fn resolve_img(
         members: vec![0],
         suffixes,
         shared_skin: false,
+        shares: vec![],
     };
     let a = analyse(img, info);
     resolve_file(
@@ -117,13 +118,21 @@ fn vocabulary_splits_to_skyrim_roles() {
         assert_eq!(s(stem), ("iron".into(), None, None), "{stem}");
         assert_eq!(vocab_of(stem).unwrap().role, VocabRole::Colour, "{stem}");
     }
-    for stem in ["iron_normal", "iron_NRM", "iron_normalgl", "iron_normaldx"] {
+    // `_norm` is an alias of `_n`, green convention unstated like `_normal`.
+    for stem in [
+        "iron_norm",
+        "iron_normal",
+        "iron_NRM",
+        "iron_normalgl",
+        "iron_normaldx",
+    ] {
         assert_eq!(s(stem), ("iron".into(), Some("n".into()), None), "{stem}");
     }
     assert_eq!(
         vocab_of("iron_normal").unwrap().role,
         VocabRole::Normal(None)
     );
+    assert_eq!(vocab_of("iron_norm").unwrap().role, VocabRole::Normal(None));
     assert_eq!(
         vocab_of("iron_NormalGL").unwrap().role,
         VocabRole::Normal(Some(GreenConvention::Opengl))

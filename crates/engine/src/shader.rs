@@ -787,13 +787,7 @@ pub fn pick_for_set(
         .map_or(&[][..], Vec::as_slice);
     let subtypes: Vec<Subtype> = jobs
         .in_set(&set.key)
-        .filter(|j| {
-            !matches!(
-                j.status,
-                crate::policy::JobStatus::PackingInput { .. }
-                    | crate::policy::JobStatus::NormalLayer { .. }
-            )
-        })
+        .filter(|j| !matches!(j.status, crate::policy::JobStatus::PackingInput { .. }))
         .map(|j| j.profile.subtype)
         .collect();
     let game_paths: Vec<&str> = set
@@ -813,6 +807,8 @@ pub fn pick_for_set(
             alpha: crate::presets::AlphaContent::None,
             is_float: false,
             advanced_skin: false,
+            // Only `is_pbr_set` reads this context, and it never asks whether a file waits.
+            may_wait: false,
         }),
         gras: set.members.iter().any(|&m| {
             let f = &files[m];
@@ -1754,11 +1750,11 @@ mod tests {
             source: None,
             pack: None,
             bake: None,
-            rnm: None,
             derive: None,
             shader: None,
             cube: None,
             fill: None,
+            unknown_suffix: false,
         }
     }
 

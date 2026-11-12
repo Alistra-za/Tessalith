@@ -206,6 +206,58 @@ hair = true
     assert_eq!(ids, ["a/one", "a/uno"]);
 }
 
+/// Note HS13: with no entry at `from`, the order list and other sets' borrows follow the retarget.
+#[test]
+fn retarget_with_no_entry_moves_the_order_and_other_sets_borrows() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        "[project]\norder = [\"a/x\", \"a/y\", \"a/w\"]\n\n[[sets]]\nid = \"b/z\"\nborrow = { slot2 = \"a/x\" }\n",
+    )
+    .unwrap();
+    let mut s = SetsDoc::open(d.path());
+    s.retarget_auto("a/x", "a/q");
+    assert_eq!(s.order(), ["a/q", "a/y", "a/w"]);
+    let e = s.entries();
+    assert_eq!(e[0].borrow.get(&2).map(String::as_str), Some("a/q"));
+    assert_eq!(e.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), ["b/z"]);
+}
+
+/// Note HS13: an entry already at `to` stays; the order list (one place for the merged id) and borrows move.
+#[test]
+fn retarget_onto_an_existing_entry_moves_the_order_and_borrows() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        "[project]\norder = [\"a/one\", \"a/uno\", \"c/three\"]\n\n[[sets]]\nid = \"a/one\"\nparallax = true\n\n\
+         [[sets]]\nid = \"a/uno\"\nhair = true\n\n[[sets]]\nid = \"c/three\"\nborrow = { slot6 = \"a/one\" }\n",
+    )
+    .unwrap();
+    let mut s = SetsDoc::open(d.path());
+    s.retarget_auto("a/one", "a/uno");
+    let e = s.entries();
+    let ids: Vec<&str> = e.iter().map(|e| e.id.as_str()).collect();
+    assert_eq!(ids, ["a/one", "a/uno", "c/three"]);
+    assert_eq!(s.order(), ["a/uno", "c/three"]);
+    let c = e.iter().find(|e| e.id == "c/three").unwrap();
+    assert_eq!(c.borrow.get(&6).map(String::as_str), Some("a/uno"));
+}
+
+/// Pin: a created set is never retargeted, so the document and its revision stay as they were.
+#[test]
+fn retarget_leaves_a_created_set_alone() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        "[project]\norder = [\"a/x\"]\n\n[[sets]]\nid = \"a/x\"\ncreated = true\n",
+    )
+    .unwrap();
+    let mut s = SetsDoc::open(d.path());
+    let (text, rev) = (s.text(), s.rev());
+    s.retarget_auto("a/x", "a/q");
+    assert_eq!((s.text(), s.rev()), (text, rev));
+}
+
 #[test]
 fn a_delete_section_is_written_last_with_only_its_keys() {
     let mut s = sdc_gui::pgp::settings::Settings::new();
@@ -272,7 +324,7 @@ type H = Harness<'static, (AppModel, State)>;
 fn harness(m: AppModel, preview: bool) -> H {
     let state = State {
         set3d: if preview {
-            SetPreview::new(None, None, None, DEFAULT_CAP)
+            SetPreview::new(None, DEFAULT_CAP)
         } else {
             SetPreview::default()
         },

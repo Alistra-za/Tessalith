@@ -60,7 +60,7 @@ fn version_lists_the_encoders() {
     let out = text(&o.stdout);
     // The engine version, then one line per encoder; the hashes change, so only the labels are pinned.
     let labels = [
-        "sdc 2.1.0",
+        concat!("sdc ", env!("CARGO_PKG_VERSION")),
         "bc7enc_rdo ",
         "ispc_texture_compressor ",
         "ispc ",

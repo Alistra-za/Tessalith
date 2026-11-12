@@ -1,6 +1,6 @@
 # Editing a NIF
 
-How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers and clips are on [NIF animation](GUI-NIF-Animation.md).
+How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers are on [NIF animation](GUI-NIF-Animation.md); existing clips play there.
 
 ## Before you start
 
@@ -9,21 +9,21 @@ How to edit a mesh's shader, alpha, controllers and extra data in the Meshes vie
 
 ## Editing a NIF
 
-**Edit** (next to the NIF's name in the Meshes view) opens the edit panel for the selected NIF; click it again to close the panel. The panel shows the file's data path and `Source: <where it came from>`. Edits never change the source file. They are kept in a small edit document in `.sdc\nif-edits` under the export folder, and the export (from Review) writes a copy there. The export folder is the Textures one, once you have chosen it for the project (**Export to ▾** in the header, or **Choose the export folder…** in Review); there is no default. Until you choose one the edit works, the edit panel says "Skipped until an export folder is chosen", Review's export says "No export folder chosen", and the edit document is kept in `%LOCALAPPDATA%\sdc\nif-edits` (one file per NIF); the first save into a chosen folder moves it there. Tessalith never edits a NIF from an `sdc NIF Edits` folder ([upgrading from 1.1](../../CHANGELOG.md#200)), or from any folder that holds its edit document for that NIF. <!-- D:GQ3 -->
+**Edit** (next to the NIF's name in the Meshes view) opens the edit panel for the selected NIF; click it again to close the panel. A NIF with a saved edit gets a chip in the mesh list: **Edit pending**, **Edited** (exported and unchanged) or **Edit conflict**. The panel shows the file's data path and `Source: <where it came from>`. Edits never change the source file. They are kept in a small edit document in `.sdc\nif-edits` under the export folder, and the export (from Review) writes a copy there. The export folder is the Textures one, once you have chosen it for the project (**Export to ▾** in the header, or **Choose the export folder…** in Review); there is no default. Until you choose one the edit works, the edit panel says "Skipped until an export folder is chosen", Review's export says "No export folder chosen", and the edit document is kept in `%LOCALAPPDATA%\sdc\nif-edits` (one file per NIF); the first save into a chosen folder moves it there. Tessalith never edits a NIF from an `sdc NIF Edits` folder, or from any folder that holds its edit document for that NIF. <!-- D:GQ3 -->
 
 **Cards.** In edit mode the shape cards get a **Root** card first, then one card per shape. Click a card's header to select it; the tabs below edit it, and a line under the tab strip names it ("Editing: BodyMesh (BSTriShape)"). **Show only this shape** hides the other shapes in the 3D view. A change to the shader type, a flag, the alpha or a texture path shows on its card at once.
 
 ## Tabs
 
-- **Shader** edits the BSLightingShaderProperty of the selected shape. The texture slots come first (type a path, **Browse**, or pick from the scanned textures; **Check that files exist** and **Filter textures** help). They count from 1 like the set editor's, with the NIF's own index on hover, and a True PBR set uses the set editor's names for slots 3 and 7 ("Emissive / Skin", "Coat normal / Fuzz"). Then come the shader type, glossiness, specular, emissive, UV scale and offset and the per-type fields, then the SLSF1 and SLSF2 flag lists, closed until you open them (a list with a flag warning starts open).
-- **Alpha** edits the NiAlphaProperty: **Blend**, source and destination, **Test**, function, threshold, plus **Add alpha** and **Remove alpha**. "Shown as the engine draws it" and "Shown as CS evaluates it (alpha ≥ threshold)" say how the preview treats the test. A blend pair the engine mapping does not cover is drawn as stored and marked "Not verified in game".
+- **Shader** edits the BSLightingShaderProperty of the selected shape: texture slots (counted from 1 like the set editor; a True PBR set uses the set editor's names for slots 3 and 7), shader type, the per-type fields and the SLSF1 and SLSF2 flag lists. A list with a flag warning starts open.
+- **Alpha** edits the NiAlphaProperty. A blend pair the engine mapping does not cover is drawn as stored and marked **Not verified in game**.
 - **Controllers** lists the shape's controllers (alpha, shader float and colour, texture transform) with their start, stop, frequency, phase, cycle and the animated value, and edits their keys ([NIF animation](GUI-NIF-Animation.md#the-controllers-tab)). Controllers of other classes are read-only.
 - **Extra data** lists the extra data of the root or the selected shape: BSXFlags bits, string, integer, boolean and float values, BSInvMarker. **Add to root**, **Add to shape** and **Remove** change the list. Each row shows its own warnings under it, for example "BSXFlags must be named BSX". A **Known** list above the type and name fills in an entry the game or a plugin reads, with its type, name and a starting value. On a shape: **AnisotropicAlphaMaterial** (Community Shaders see-through look; starts at 3, woven fabric). On the root: **BSX**, **INV**, **HDT Skinned Mesh Physics Object** (type the physics xml path in **Value**; Add stays off until you do) and **Prn (unconfirmed)** (the skeleton node the item attaches to; not checked against a source yet). An entry that goes on the other owner is greyed ("Goes on the root", "Goes on a shape"), and so is one this owner already has ("Already on this root"). **Custom…** keeps free typing for anything else. BODYTRI is not offered: BodySlide and Outfit Studio write it. **Heel height (RaceMenu)** (shapes only; on the root: "The game ignores heel height here. Put it on a shape.") raises the actor so heels stand on the ground. It starts at the shape's stored value, **Calculate** fills it from the lowest point of the shape in bind pose (rounded to 0.1, still editable), and **Set heel height** writes it: the shape's HH_OFFSET is changed in place or added, and an SDTA the shape already has gets the same height in its NPC entry (a new SDTA only when **Also write SDTA** is ticked). It says when an earlier shape's heel height wins, and for `_0`/`_1` files it reminds you to apply the same value to the other weight file. Heel data anywhere but on a shape, and on a shape after the first shape in the scene that has some, warns under its row. A negative height says it lowers the actor. When the shape's HH_OFFSET is not a number the editor can set (another type), Set heel height stays off until that row is removed.
 
 ## Shared blocks
 
 The panel says when a block has more than one user.
-- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. On the Controllers tab you click **Split alpha** first. If a clip also drives that alpha, it cannot be split yet.
+- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. On the Controllers tab you click **Split alpha** first. Split alpha also works on an alpha a clip drives: both alphas keep following the clip.
 - A shared texture set: "Shared by N shapes: editing makes a copy for this shape."
 - A shared shader: "Shared by N shapes: shader edits change all of them." A texture path edit on a shared shader is refused, because it would change the other shapes.
 - A shared interpolator: a value edit is a conflict ("This interpolator is shared by N controllers"), and the value row is greyed. A key edit copies the interpolator and its keys first, so the other controller's curve does not change.
@@ -38,9 +38,9 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 ## Pending edits, undo and source changes
 
-**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. Reverting a new or converted clip also removes the later timing edits of that clip, and its row says so: "(Revert also removes its clip timing)". A row in red did not apply, with the reason. The list is closed until a row turns red, which opens it; click its title to open or close it.
+**Pending edits (N).** Every edit is a row in this list under the file name, named in words ("BodyMesh: SLSF1 flags"). A slider drag is one row. **Revert** removes that edit. A row in red did not apply, with the reason.
 
-**Undo.** While an edit is open in the Meshes view, the header **Undo** and **Redo**, the command palette and **Ctrl+Z** / **Ctrl+Y** act on the NIF edit. With no edit open they act on the Textures history. The header buttons say which: **Undo** for the Textures history, **Undo NIF edit: Set shader type** (the step's name) for the NIF one, and the hover names the history. The panel has no Undo or Redo of its own; each pending edit keeps its **Revert**. A slider drag is one step.
+**Undo.** While an edit is open in the Meshes view, the header **Undo** and **Redo**, the command palette and **Ctrl+Z** / **Ctrl+Y** act on the NIF edit. With no edit open they act on the Textures history. The header buttons say which: **Undo** for the Textures history, **Undo NIF edit: Set shader type** (the step's name) for the NIF one, and the hover names the history.
 
 **Source changed.** If the source NIF changes on disk (a mod update), the edits are re-applied by name and role, not by position. The panel says "Source changed: N applied, M conflicts". A conflicting edit has **Take source** (drop your edit) and **Keep mine** (keep it on top of the new source).
 
@@ -56,11 +56,11 @@ While an edit is open, a right-click on the 3D view (a click, not a drag) opens 
 
 ### Changing the export folder
 
-Changing the export folder while you have edits open keeps them in memory, unsaved; the next save or export goes to the new folder. If the new folder already holds saved edits for that NIF, your open edit replaces them: the first save there moves them aside to `<name>.<seconds>.toml` beside it, never overwriting them, and Messages names the kept file. The same happens when a newer autosave of the NIF opens instead of a folder's saved edits, and to an autosave this session did not open. The edits saved in the old folder stay there, and Messages names that file. If the edit document in the new folder cannot be opened, the folder change waits: the edit stays blocked with "could not open the edit document in <folder>: <reason>", each save goes to the autosave in `%LOCALAPPDATA%\sdc\nif-edits`, and nothing is written to the old folder, until you choose a folder that works or go back to the old one. With no edits yet, the NIF's edits in the new folder open instead.
+Open edits stay in memory and the next save goes to the new folder. If that folder already holds saved edits for the NIF, your open edit wins: the old saved edits are moved aside to `<name>.<seconds>.toml` beside them, never overwritten, and Messages names the file. If the new folder's edit document can't be opened, the edit stays blocked and saves go to the autosave in `%LOCALAPPDATA%\sdc\nif-edits` until you pick a folder that works. Once the NIF is edited, a folder that holds the mesh the edit applies to is refused, so an export never replaces its source: the folder is not taken, and the NIF's row is blocked with the reason until you pick another one. <!-- D:HS12 -->
 
 ### After an export
 
-After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller or clip), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
+After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
 
 ### A file Tessalith did not write
 
@@ -68,8 +68,24 @@ If the file at the destination is not the one Tessalith last wrote, its Review r
 
 ## PGPatcher and the game
 
-The toggle reads **In game** and **Source** with or without an edit open; while editing, In game is simulated and Source is your edited NIF, as their hovers say ([In game and Source while editing](GUI-NIF-Animation.md#in-game-and-source-while-editing)). Once you have exported, the amber line "PGPatcher output predates your edit: re-run PGPatcher." shows: the game still loads PGPatcher's copy, which was made from the unedited NIF, until you re-run PGPatcher. If the edit preview cannot be shown, the line "Your edit could not be shown. Switch to In game or Source to retry." says so; edits you make meanwhile still count.
+The toggle reads **In game** and **Source** with or without an edit open; while editing, In game is simulated and Source is your edited NIF, as their hovers say ([below](#in-game-and-source-while-editing)). Once you have exported, the amber line "PGPatcher output predates your edit: re-run PGPatcher." shows: the game still loads PGPatcher's copy, which was made from the unedited NIF, until you re-run PGPatcher. If the edit preview cannot be shown, the line "Your edit could not be shown. Switch to In game or Source to retry." says so; edits you make meanwhile still count.
 
+### In game and Source while editing
+
+In game runs Tessalith's PGPatcher simulation on your edited NIF and shows still materials (the clock pauses). It follows PGPatcher 2.3.1: loose JSON only, no modrules priority, read at the last scan. The JSON is read in the background when the edit opens, and a folder scan has no MO2 instance, so In game says no JSON was read. PGPatcher's real output, made from the unedited NIF, is not shown while you edit. For the selected shape a line says what happened:
+
+- No JSON matches it, it is already PBR, or a file is not applied (amber, with the reason; the next file can still match).
+- PGPatcher skips it (`PG_IGNORE`, amber).
+- The shape carries a `PG_STOCK` block (amber): PGPatcher reverts such a shape to its recorded stock state first, and the preview shows it as loaded.
+- **IMPORTANT** A match key such as `match_diffuse` or `nif_filter` that isn't a string, in any JSON the instance loads, crashes PGPatcher 2.3: the run stops, so every shape shows one red line per such file, even shapes PGPatcher would leave alone. The set preview in the Textures view shows the same lines.
+- PGPatcher makes the shape PBR while it has an Env map scale controller (red): that crashes the game.
+
+The simulation leaves out:
+
+- JSON inside BSAs, and PGPatcher's own mod priority (`modrules.json`; the MO2 order stands in);
+- plugin alternate textures (TXST), and the plugin and mesh-blocklist rules that decide which meshes PGPatcher patches;
+- complex-material and parallax competition, and shapes with no texture set;
+- JSON changed on disk since it was read (rescan), and the `PG_STOCK` revert.
 ## Not supported
 
 - A Skyrim LE NIF opens without a 3D preview ("LE mesh: no 3D preview").

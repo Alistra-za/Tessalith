@@ -58,6 +58,13 @@ impl AppModel {
             .collect()
     }
 
+    /// DECISIONS Z11: keep the sub-types before this plan chain, compared when it settles.
+    pub(super) fn keep_type_base(&mut self) {
+        if self.type_base.is_none() {
+            self.type_base = Some(self.subtypes());
+        }
+    }
+
     /// Forget the cleanup state: an undo, redo, open or reload restores a state as it was (its plans never clean
     /// up), and a note or pending cleanup of before no longer applies.
     pub(super) fn reset_type_follow(&mut self) {

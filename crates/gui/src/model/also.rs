@@ -54,6 +54,12 @@ impl AppModel {
         v || c
     }
 
+    /// Note HF9: the ticks run on a whole-project export only (owner: "Also export can be left to a whole project
+    /// export"), so they neither open Review for a scoped one nor gate it.
+    pub fn also_runs(&self) -> bool {
+        self.also_on() && self.export_scope().is_none()
+    }
+
     /// One `[export]` edit, one undo step, planned again (the PBR folder is the plan's output root, TA10).
     fn edit_export(&mut self, label: &str, f: impl FnOnce(&mut ProjectDoc)) {
         // So the plan on screen and the NIF root match the running export (the finishers use roots captured at its
@@ -190,7 +196,7 @@ impl AppModel {
 
     /// Task 13 M3: a PBR grass set is not skipped, so the CM folder gets its complex-grass stack (Review's CM text).
     pub fn also_grass(&self) -> bool {
-        let skip = self.also_config().skip;
+        let skip = self.also_run_config().skip;
         sets::views(self).iter().any(|v| {
             v.shader
                 .as_ref()
@@ -199,10 +205,24 @@ impl AppModel {
         })
     }
 
+    /// `also_config` with the excluded groups' sets added to `skip` (Note HF11): the rebased `write_only` already keeps
+    /// their files out, and the list keeps `also_grass` and any later reader of `skip` right.
+    fn also_run_config(&self) -> ExportConfig {
+        let mut cfg = self.also_config();
+        cfg.skip.extend(
+            self.sets_doc
+                .iter()
+                .flat_map(|d| d.groups())
+                .filter(|g| g.excluded)
+                .flat_map(|g| g.sets),
+        );
+        cfg
+    }
+
     /// What `run_also` needs besides the request: the config, the location and TA13's `scanned`.
     pub fn also_spec(&self) -> AlsoSpec {
         AlsoSpec {
-            cfg: self.also_config(),
+            cfg: self.also_run_config(),
             location: self.also_location(),
             scanned: !self.mesh_votes.is_empty(),
         }
@@ -211,7 +231,7 @@ impl AppModel {
     /// `sdc.toml`'s writability as Review's gate reads it, with a tick on: taken when Review opens and again before
     /// its Export runs (P9), never per frame (ui-rules 9.4).
     pub(super) fn also_toml_unwritable(&self) -> Option<String> {
-        if !self.also_on() {
+        if !self.also_runs() {
             return None;
         }
         self.sdc_toml_writable()

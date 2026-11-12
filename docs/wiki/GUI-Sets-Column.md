@@ -1,145 +1,70 @@
 # Sets column
 
-The second column of the Textures view: one card per material set, its filter, and how to move textures between sets, reorder and delete them. Selecting a set opens the set editor in the centre.
+For anyone grouping textures into material sets: reading a set card, finding a set, and moving textures and sets around. Selecting a set opens the [Set editor](GUI-Set-Editor.md) in the centre.
 
-## Sets (between Textures and the centre)
+## Reading a set card
 
-Textures are grouped into material sets, one **card** per set. The column is editable: it changes which textures belong to which set.
+One card per material set. A status pill shows what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set on a target that writes none, "PBR Landscape", "skin"), with a red dot when it blocks export, amber when it isn't ready and green when it is. Hover the pill for what the set writes and the state of each packed output. **⚠ n** opens the set's problems, and the shader combo sits on its own row. Click empty card area to open the set.
 
-A set whose files are all DDS inputs Tessalith does not re-encode (a released mod's) is listed too, and its files are not *Not in a set*. It is a "vanilla" set with empty slots and no PGPatcher JSON entry: its DDS files fill no slot and give no match, and it is not in the TruePBR panel or the JSON editor. Re-encoding its diffuse (**Re-encode this file**) makes it a full set, with its JSON entry when it is a PBR set; re-encoding only another of its files does not.
+Under it is one chip per slot of the shader, lettered by the slot's suffix. On an Advanced skin set the RMAOS chip reads RFAOS, and the letter sits bottom-left on every chip. <!-- D:HE1 --> A small thumbnail on a chip's corner is a [helper](Texture-Packing.md#helper-textures) feeding that slot. An amber outline marks a slot borrowed from another set, and a red **?** a borrow whose set is gone or a file that is gone. Right-click a **?** for **Remove from set** (or **Delete set** when nothing is left); each one is also a Problems row.
 
-## Set cards
-
-A card's first row has:
-
-- the set's **position number**: its place in the full order, 1 to N (a filter never renumbers it);
-- the **≡** reorder handle;
-- the set's name;
-- a status **pill**: a dot plus what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set on a target that writes none, "PBR Landscape" or "skin"). The dot is red when the set blocks export, amber when it is not ready, green when it is ready. Every set has one, including a set you created that has no key yet;
-- at the right, "⚠ n" when the set has problems. It opens the set's problems.
-
-Hover the pill for the long text: what the set writes ("PBR Landscape → CS + PGPatcher JSON", "→ CS JSON", "→ PGPatcher JSON (no CS records yet)", "PBR Landscape (no JSON yet)"), a file with no match, a blocking problem, and the recipe status (run, conflict, disabled, failed) of each packed output.
-
-The **shader** combo has its own row under the first row, at the right, as wide as its value (cut with `…` only when the card is too narrow, and it leaves at least 48 points free on its left; hover shows the whole value). The left of that row is free card area: a click there opens the set. Under it is one **slot chip** per slot of the shader, lettered by the slot's suffix (D, N, RMAOS, P, G, SK, CNR, F, S); on an Advanced skin set the RMAOS chip, like that slot's title everywhere in the GUI, reads RFAOS. The letter sits bottom-left on every chip. <!-- D:HE1 -->
-
-| Chip | Meaning |
-|---|---|
-| Thumbnail with the letter | A filled slot: the member's 32-point thumbnail. Click selects, double-click expands, drag moves it, right-click opens the [slot menu](#slot-menus). |
-| Dim box with a dimmed letter | An empty slot. |
-| Small thumbnail on the chip's corner | A **helper badge**: a [helper](GUI-Helpers-RNM-and-Cubemaps.md#helper-textures) that feeds this slot's file, so you see which output it goes into. It sits centred on the chip's top-right corner, half outside the chip. A filled chip carries one, and so does an output with no source file of its own, such as an RMAOS built from helpers only. A second helper on the same chip takes the top-left corner. Hover shows the file and its fills line (`eye_rough.png`, "fills RMAOS R"). Click selects the helper and opens the helper panel. Right-click opens the same member menu as the helper's tile. A helper that fills two slots has a badge on both chips. With more helpers than the corner holds, the last cell reads **+K**; hover lists them. A padlock keeps its corner, and a badge takes the next free one. |
-| Amber outline | Borrowed from another set (hover says which). It cannot be dragged out. |
-| Red **?** | A borrow whose set is gone, a set whose files are gone, or a named file that exists but isn't a texture this project reads. A deleted file's line clears itself, with an Info line in Messages. |
-
-Right-click a **?** chip for **Remove from set**: it takes that line (an `add`/`remove` path or a borrow) out of `sdc-project.toml` as one undo step. When none of the set's files is left it offers **Delete set** instead. Each such line is also a row in Problems with the same button. A member's own chip has **Remove from set** in its menu too; a borrowed chip uses the slot's **Clear**. While `sdc-project.toml` is read-only they are off, and their hover says why.
-
-What fits no chip follows in a trailing row of plain thumbnails. Each one has a short tag bottom-left and names its role on hover, so you can tell why it is there. The tag is the slot letter when its slot is taken, `unused` for a helper that fills nothing, the first fill ("M G") for a helper whose target has no chip, and the file's tail (`_m`) for any other member. A tag wider than the tile is cut with `…`; hover has the whole text.
-
-- a helper that fills nothing, dimmed, with "unused: …" on hover;
-- a helper whose target has no chip on the card;
-- a `_m` env mask, and a second member of a kind the card already shows.
-
-A helper with a badge is not repeated there, unless its badge folded into **+K** or found no free corner.
-
-The open set's card is highlighted. When the column's width changes with one set open, the card scrolls into view. When the column is too narrow to leave the name at least 80 points beside the pill and the "⚠ n" and "ⓘ n" buttons, those move to a second row under the name. A short name that fits whole in less than 80 points keeps one row.
-
-A name that still doesn't fit is cut in the middle, so you keep the folder and the leaf (`architecture/…/stonewall`). In a very narrow column it shrinks to `…/stonewall`, and if even that doesn't fit beside the position number and the handle, the name gets a row of its own. While you search, a cut title keeps the folder that holds the match (`…/stone/cobble`), so you see why the card is listed. Hover shows the full id. The "Drop here to start a new set" hint wraps instead of being cut. It is grey, and turns the accent colour while you drag over it.
-
-The column lays out only the cards on screen, so it stays smooth with hundreds of sets. Tab and a screen reader still reach every card: one scrolled out of view is a stop named "Set {name}, position n of N", and Tab to it scrolls it into view. A context menu or shader list open on a card closes when the card scrolls away, and the scroll bar's thumb changes length as card heights are learned.
-
-## Filter
-
-Under the heading:
-
-- a *Search sets* box. It matches the set's id or its label (folded like set ids), never its key;
-- the pills *Not ready n*, *Ready n* and *No JSON n*. *Not ready* is every set that is not ready, *No JSON* is a set that writes no JSON;
-- **Filter ▾**, which lists *Any* and the shaders, each with a count ("PBR 2"). It reads **Filter (1) ▾** while one is chosen.
-
-Every number is the sets shown with that pill or shader on: the sets that pass the search and the other filters, plus that one. A selected pill's number is the list you are looking at. A zero is greyed but still works, and a shader no set uses stays listed, so the list is the same whatever the project holds. A selected pill is painted as usual, zero or not.
-
-The filters combine. A filter only hides: the open set and a multi-selection stay selected, the editor and the bulk panel stay, and the heading says "2 selected (1 hidden by filter)".
-
-- **Go to set** from the Problems tab on a hidden set selects it and leaves the filter on. A line under the filter then says "{id} is hidden by the Sets filter" and wraps if the column is narrow. **Clear filter** sits on the row below, so a long id never pushes it out of reach.
-- When nothing matches, the column says "No sets match the filter (n hidden)" and offers **Clear filter**.
-- Dragging and **Move up** / **Move down** are off while any Sets filter is on: the handle and the two entries are greyed out ("Clear the filter to reorder sets, or use Move to…"). **Move to…** stays on, because it names the target number, and it counts a hidden set it passes.
-- A set you create while a filter is on stays shown until the filter changes; the column says "1 new set shown".
-
-When a filter changes, the list starts at its top, so the first match is the first card. A **Go to set** that is waiting still wins.
-
-The pills and the shader are remembered in `gui.toml` with the window layout. The search text is not.
-
-## Editing sets
-
-- **Drag a texture** from the Textures column onto a set to move it there, or onto empty space to start a new set. Dropping onto a slot that already holds a texture asks **Replace** or **Cancel**. While you drag, a small thumbnail follows the pointer and the tile you took dims; tiles and member chips outline on hover, and more strongly while pressed.
-- **Drop a file from Explorer** on a slot row of the set editor to fill that slot, when the file is a texture of the open folder and its sub-type fits. Files are never copied.
-- **Share** lets a set borrow a texture from another set; **Duplicate** copies it into the set. Both ask before replacing a filled slot. A shared `_rmaos` is never variance-baked ([Variance bake](Texture-Packing.md#variance-bake)).
-- **Reorder** by dragging the **≡** handle, or with **Move up** / **Move down** in the set's menu. A drag reaches only the cards on screen: the wheel does not scroll during a drag, and the edge does not scroll by itself. For a long move use **Move to…** ([below](#move-to)).
-- **Right-click** a set for its menu: a **Rename** submenu, **Edit match…**, **Remove member**, **Delete set**, **Move up**, **Move down** and **Move to…**, plus share and duplicate. Right-clicking a member that fills a slot opens that [slot's menu](#slot-menus) instead.
-  - The **Rename** submenu has **Rename…** (the set's name), **Rename outputs…** (F2; the files the set writes) and **Rename inputs…** (read the source files under other names); see [Renaming](GUI-Bulk-and-Rename.md#renaming).
-  - **Delete set** asks nothing. It is one undo step, and a toast "Deleted set name (N members)" has an **Undo** button, which works while nothing else was done since (otherwise use Undo in the header). The textures stay. Only a set you created can be deleted: an automatic set would regroup from the file names at once. A set whose files are all gone still shows, as missing, so you can delete its entry.
-- **Fill from names…** in a set's menu finds the textures in the set's folder that are named like its diffuse (or the set) plus a suffix the engine knows (`_n`, `_p`, `_g`, `_rmaos`, `_cnr`, `_s`, …, and exporter tails such as `_normal`) and are not in the set yet. A dialog lists each file with the slot it would fill, all ticked. A filled slot says "replaces <file>"; a pinned slot says "locked" and cannot be ticked. **Fill** (or **Enter**) moves the ticked files in as one undo step. **Esc** or **Cancel** closes it; a click outside does nothing.
-- **Map to target…** (**Change mapping…** once mapped) writes the set's files where a record, a mesh or a texture file of your target mod points ([below](#mapping-to-a-target)).
+A set whose files are all DDS inputs Tessalith doesn't re-encode, such as a released mod's, is listed as "vanilla" with empty slots and no JSON entry. **Re-encode this file** on its diffuse makes it a full set.
 
 ![A set card's right-click menu.](../img/gui/GUI-Sets-Column/set-card-menu.png)
 
-### Move to
+The card's right-click menu holds **Export set** ([Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project); with two or more sets selected it reads **Export n sets**), **Rename**, **Edit match…** ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#matching)), **Remove member**, **Delete set**, **Move to group** ([Groups](#groups)), **Move up**, **Move down**, **Move to…**, and **Map to target…** (**Change mapping…** once mapped; [Set editor](GUI-Set-Editor.md#mapping-to-a-target)). Right-clicking a member that fills a slot opens that slot's menu instead: [Slot menus](GUI-Set-Editor.md#slot-menus). The **Rename** submenu is [Renaming](GUI-Bulk-and-Rename.md#renaming).
 
-**Move to…** in the set's right-click menu opens a dialog with a box ("Number or name"):
+## Finding a set
 
-- Type a position, and the list shows that one set. Type text, and it lists the sets whose name or label holds it, in order.
-- Up and Down move the highlight. Enter or a click moves the set to the highlighted row's place; moving down takes the target's place, and the target shifts up one. Esc or **Cancel** closes.
-- A number outside 1 to N says "Positions are 1 to N", and text that matches nothing says "Nothing matches"; Enter then does nothing. A number is only a position, never part of a name.
-- Picking the set's own place closes the dialog and changes nothing. A set a filter hides shows "(hidden by filter)".
+The search box matches a set's id or label, never its key. The pills *Not ready*, *Ready* and *No JSON* and **Filter ▾** (by shader) narrow the list, and they combine. A filter only hides: the selection, the editor and the bulk panel stay. **Go to set** from Problems on a hidden set tells you it is hidden and offers **Clear filter**. The pills and the shader are remembered in `gui.toml`, the search text isn't.
 
-The moved set scrolls into view and keeps the selection.
+## Groups
 
-## Mapping to a target
+Fold the sets you've finished into a group, so the column shows only what you're working on. A group is a header row with its name, how many sets it holds and the worst status among them (red blocks export, amber isn't ready, green is ready), and its sets sit indented under it. <!-- D:HF6 -->
 
-**Map to target…** in a set's menu ties the set to something that already exists, so its files are written where that thing points: a texture set record (`TXST`) of your plugins, or a mesh or a texture file of your target mod. A mapped set's menu has **Change mapping…** and **Remove mapping**, which puts the outputs back on their default names. It is greyed with "Scan your mods first" until a [scan](Mod-Scanning.md) with texture set records is available and no target mod is set. It is also greyed for a PGPatcher PBR set that has an albedo, on Community Shaders, with no target mod ("PGPatcher PBR sets name their outputs in the JSON; use Rename outputs"). <!-- D:HG8,HL4 -->
+- **Make one:** right-click a set, or a selection, then **Move to group** → **New group…** and type a name. Names are unique, upper or lower case alike; a taken name stays in the dialog with the reason. A group is gone when its last set leaves it.
+- **Fold it:** click the header. Whether it's folded is kept per project in `gui.toml` and is not an undo step.
+- **Join one:** **Move to group** → the group, or drag a set by its **≡** handle onto the header. Dragging a texture onto a header does nothing. <!-- D:HF8 -->
+- **Header menu:** **Export group**, **Exclude from export** (**Include in export** takes it back; the header then carries an *Excluded* tag; both are explained in [Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project)), **Rename…**, **Ungroup** (the sets stay) and **Select all sets**.
+- **With a filter on,** a header shows only while a set in it passes, and reads `2 of 7`. A filter never folds or opens a group, and a set with no card isn't counted.
+- **Revealing a set opens its group:** a click on a texture, **Go to set** in Problems and **Move to…** unfold the group the set is in. <!-- D:HF7 -->
 
-- **The target mod** is the mod folder you're working on. The dialog's top row shows it, read only, with **Choose…** and **Clear**. A folder that is your export folder, sits inside it or holds it is refused with the reason in red. Tessalith only reads the target and never writes into it. It is stored as `[project] target_mod` in `sdc-project.toml`, and only the GUI reads it. <!-- D:HL1 -->
-- **Three kinds of row.** With a target mod the list has a kind column: **Record** (a texture set record of the target's plugins), **Mesh** (the texture paths of a mesh's shapes) and **File** (a texture file base, such as `textures/…/arch`, with its suffixes grouped). With no target mod the list is every winning record of the scan. A mesh or file mapping is stored as `base` in `[sets.txst]`; a slot the source lacks goes to the base's folder, with the file's default name on the base's name. Only loose files are listed: a BSA-packed target gives its records only, and a target that isn't in the scan gives none ("Records come from the MO2 scan; this mod isn't in it", or "...this folder has no plugin" for a plain texture folder). <!-- D:HL3 -->
-- **`used by (N)`** counts the target's records and its distinct mesh paths (meshes sharing a colour path count once) that name the row's colour path, the row's own mesh or record included, so you see what a file replaces. <!-- D:HL2 -->
-- **The picker** lists records by EDID, with FormID, plugin and colour path; when an override wins, the winning plugin follows the defining one. Typed words must all appear in the EDID, plugin, FormID or colour path. Up and Down move the highlight. A picked row lists each of the set's files with the path it will write, or "keeps its own path"; for a mesh or file row it lists the slot paths. **Map** stores the mapping, and so does Enter while no widget has focus (not in the search box, not on a focused button); a click outside does not. **Cancel** or Esc closes with nothing changed. <!-- D:HG8 -->
-- **The record is keyed by plugin and FormID**, not EDID, which a plugin may repeat. The FormID is the plugin's own without its first two digits (`0x05000814` is `0x814`), and the plugin is the one that defines the record, so an override in another plugin finds the same record. <!-- D:HG8 -->
-- **Where it is stored.** `[sets.txst]` in `sdc-project.toml` holds the key, the EDID and a copy of the record's paths, so a new scan never moves an output by itself. Mapping to another record, or removing the mapping, turns every cleared fill back on.
-- **The card** shows `Record: Arch_skinbody_elf (0x814, Arch_Resources.esp)`; its hover lists `slotN: path`, adding "(from the record)" where the set writes none itself.
+## Moving textures between sets
 
-A file in a slot the record names is written at the record's path, ahead of **Rename outputs**. A file with no slot in the record (`_wet`, `_detail_n`, a slot the record leaves empty) keeps its path, and no type or format changes. A record path outside the project's `textures/` folder, or not `.dds`, is never written. Two sets writing one record path give the duplicate-output row, so each needs its own record. A file already at a record's path that Tessalith did not write is kept and reported as `OUT-UNKNOWN-EXISTING` until you delete it or choose overwrite ([how](Validation-and-Output.md#re-runs-and-if-changed)). <!-- D:HG5,HG6 -->
+- Drag a texture from the Textures column onto a card to move it there, or onto empty space to start a new set. A filled slot asks **Replace** or **Cancel**.
+- A texture dragged from another set asks **Move it here**, **Share (borrow its finished output)** or **Duplicate the source for this set**. A shared `_rmaos` is never variance-baked: [Packing PBR maps](Texture-Packing.md#variance-and-gloss-bake).
+- A helper (an AO, a roughness, an opacity map) dragged onto another set asks the same, but **Share (use this file here too, no copy)** writes no file: that set packs or fills from the helper as if it were its own. A pick or setting on the helper (what it fills, read from, invert) applies everywhere it is used. A helper in no set can be shared too: drag its row from the Textures column. It then feeds only the sets that share it, and the question has no Duplicate. A set with no texture of its own can't take a share. The shared rows and **Stop sharing** are on [Set editor](GUI-Set-Editor.md#shared-helpers). <!-- D:HH5 -->
+- **Fill from names…** finds files in the set's folder named like its diffuse plus a suffix the engine knows (`_n`, `_p`, `_rmaos`, exporter tails like `_normal`). A dialog lists each with the slot it fills, all ticked; **Fill** moves the ticked ones in as one undo step.
 
-An empty slot of a mapped set reads one of three ways:
+## Reordering and deleting sets
 
-| Row | Meaning |
-|---|---|
-| Amber, borrowed | The record's path is written by another set in the project. Nothing is added to `sdc-project.toml`, and one `_n` is written. A skin set that takes its normal this way also takes that set's `_wet` and `_detail_n`. <!-- D:HG7 --> |
-| Grey **From record: body_s.dds** | No set writes the path. The slot counts as supplied: no missing-map warning, and the file is not checked. |
-| **empty** | The record names nothing for the slot. |
+Drag the **≡** handle, or use **Move up** and **Move down**. They are off while a Sets filter is on, because a hidden set would shift the numbers. **Move to…** stays on and takes a position or a name; it is also how you make a long move, since a drag only reaches the cards on screen.
 
-A file the set has, an explicit borrow and a pin win over a fill. A record's colour map is never borrowed. **Clear** on a filled slot turns the fill off, and its missing-map warning returns; **From {set}** in the slot's menu turns it back on, or **Use the record's slot** once no set writes that path. <!-- D:HG7,HG9 -->
+**Delete set** works on every set and asks nothing: it is one undo step, and the toast (`Deleted set {name} (3 textures now in no set)`) has an **Undo** button. The textures are not deleted. They go to *no set* and the automatic set does not come back, so a delete sticks after a new plan or a reopen. A set with no files left just goes. <!-- D:HF1 -->
 
-After a scan, a mapped set whose stored paths differ from the record's winning copy gets a Problems row "Record {EDID} changed" with **Use new paths**. A record missing from a non-empty scan gets an Info row, and the mapping stays; an empty scan says nothing. <!-- D:HG8 --> `sdc convert` does not read `sdc-project.toml`, so it has no mappings or fills: an `_rfaos` bakes without the shared normal, and a shared set's maps type as `normal` and `backlight_tint`.
+## Textures in no set
 
-## Slot menus
+**Remove member** puts a texture in no set, whichever way it got into the set: grouped by name, moved in, or the only one in the set. A packed map can't be removed, because it follows its raw maps. <!-- D:HF1 -->
 
-Right-clicking a slot row in the set editor, or a member chip on a card, opens a menu for that slot:
+- A no-set texture is on no card and Tessalith writes nothing for it, so a stray `_f`, `_ao` or `_mask` file stops showing up as a set of its own (or as `mouth_ao~2`).
+- It stays in the Textures column, and its row reads **No set** where a type would be. Its warnings and questions count for nothing: no Problems row, no Review row, no number in the status bar, and Export doesn't stop to ask about it.
+- A same-named file in a set (`rock.png` in no set, `rock.tga` in a set) is no longer `IN-DUPLICATE`: the no-set file writes nothing, so it can't clash.
+- To put it back, drag it onto a card, or onto the empty space to start a new set. Right-click it in the Textures column for **Back to its automatic set**: that is the only way to bring back a big automatic set once Undo has gone.
+- If the file is deleted from disk, its entry clears itself and Messages says so.
 
-- The slot commands *From this set*, *Path* and *Clear*. Each is one undo step. On a borrowed slot, *From this set* and *Clear* both drop the borrow and any slot command stored with it. <!-- D:HC7 -->
-- *From another set*: links the slot to a map of another set. The link writes that map's output path when it has one (a TruePBR set's packed output), otherwise the `textures\...` path its export writes (the source's folder with the output's name, so `leaf_normal.png` links as `leaf_n.dds`). A map with neither is greyed out, so a link never points at nothing. A link needs the same slot kind, so the shared slots (glow / skin_sk, coat / fuzz) never offer the other kind.
-- *Pin this slot (always use this file)* / *Unpin this slot* (hover: "Pinned slots refuse other files (sdc.toml pin)"). A pinned slot shows a lock icon and keeps its fill in Tessalith; the Slot commands window has a box per slot named *Pin slot N (always use this file)*, with "locked" on hover.
-  - It refuses a drag in or out and the slot commands. Bulk edits skip it with the reason *slot locked*, or *slot locked in <set>* when the fill is borrowed from another set.
-  - Automatic re-typing leaves it alone (Tessalith writes no sub-type into it). You can still change the texture's sub-type by hand.
-  - Pinning the Diffuse slot of an Advanced Skin set also stops the automatic Advanced Skin reading: the diffuse, and packing, read as they would without that shader, unless its sub-type is already written as `skin_albedo`.
-  - Pinning or unpinning re-plans, so the cards update. The pin is saved in `sdc-project.toml` and is never written to the PGPatcher JSON.
-- *Keep the original texture* / *Let PGPatcher replace the texture* (hover: "PGPatcher lock: lock_<slot> in the JSON"), on a set that writes a PGPatcher entry (a TruePBR set under Community Shaders). It turns the slot's PGPatcher lock key on or off (`lock_diffuse`, `lock_normal`, `lock_emissive`, `lock_parallax`, `lock_rmaos`, `lock_cnr`, `lock_subsurface`), the same key as in the Texture locks group, as one undo step. PGPatcher then leaves the mesh's own texture in that slot.
-  - The card shows a grey padlock over the dimmed thumbnail, captioned *kept by PGPatcher*. Its hover says "Kept by PGPatcher (lock_<slot>): the mesh's original texture is used here" and, with a mod scan, lists the textures the set's meshes have in that slot ("…" until it is read). The member thumbnail shows a small grey padlock.
-  - On a set that writes no PGPatcher entry, a stored lock key shows "lock stored, not written (no PGPatcher entry)".
-  - The file is still exported, and Tessalith stops writing its own path for that slot. A slot command (`slotN`) on the same slot still wins in PGPatcher, so a warning says "slotN overrides the lock (PGPatcher applies slotN last)".
-  - The cubemap is not offered: PGPatcher's `lock_cubemap` clears that slot (the Texture locks group calls it *Clear cubemap*).
-- *Show in Explorer*: the source file of the texture that fills the slot, selected in Explorer. A set pill's own menu has a *Show in Explorer* submenu that lists its members.
-
-![The menu of a member chip on a set card.](../img/gui/GUI-Sets-Column/member-menu.png)
-
-![The menu of the RMAOS row in the set editor.](../img/gui/GUI-Sets-Column/slot-menu.png)
+The list is `no_set` under `[project]` in `sdc-project.toml`. An older `remove` line there still means what it did, a one-file set that exports.
 
 ## Where set edits are saved
 
-Set edits are saved in `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, shader choices, output names, slot pins and the PGPatcher settings. If it cannot be parsed, the sets and the JSON go read-only (a banner says why, and Problems has a red row naming the line, with **Open in editor** and **Reload**) while `sdc.toml` editing carries on.
+Set edits go to `sdc-project.toml`, next to `sdc.toml`: the set order, created sets, moves, borrows, helper shares, shader choices, output names, slot pins and the PGPatcher settings. If it can't be parsed, the sets and the JSON go read-only, a banner says why, and Problems has a red row with **Open in editor** and **Reload**. Editing `sdc.toml` carries on. On the command line: [CLI reference](CLI-Reference.md#does-the-cli-use-my-gui-edits).
+
+Set groups are one `[[groups]]` table each. `sets` holds set ids, like `[project] order`, and `excluded` is only there while it's `true`:
+
+```toml
+[[groups]]
+name = "Armor"
+sets = ["armor/steel", "armor/iron"]
+excluded = true
+```
+
+A group sits where its first set sits in the column, and its other sets follow it, in order. Names are unique, upper or lower case alike. A set with no card (a lone file waiting for a type, or a set whose files are all in no set) isn't shown or counted in its group, and being in a group never gives it a card. Whether a group is collapsed is kept per project in `gui.toml`, not in this file.

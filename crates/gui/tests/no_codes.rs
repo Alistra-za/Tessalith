@@ -192,18 +192,6 @@ fn the_settings_panel_and_the_set_editor_say_it_in_words() {
     // Move the pointer off the panel, or whatever sits under it after the select shows its own hover.
     h.hover_at(egui::pos2(1.0, 1.0));
     h.run();
-
-    // A set's layer note (RNM-*).
-    h.state_mut().rnm_notes.insert(
-        set.key.clone(),
-        vec![Warning::new(Code::RnmNoBase, "layer has no base")],
-    );
-    h.state_mut().select_set(&set.key);
-    h.run();
-    h.run();
-    let words = code_sentence(Code::RnmNoBase);
-    assert!(h.query_all_by_label(words).count() >= 1, "{words}");
-    assert_eq!(h.query_all_by_label_contains("RNM-NO-BASE").count(), 0);
 }
 
 /// C12 in the settings grid: the Alpha combo's options carry the same hints as the Decide… menu.

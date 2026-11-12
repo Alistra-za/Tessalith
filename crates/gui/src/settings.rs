@@ -24,10 +24,10 @@ pub struct GuiSettings {
     /// The 3D view's settings window (TruePBR settings…) is open (AG132).
     pub set_settings_open: bool,
     pub advanced_open: bool,
+    /// Note HV2: the most the analysis disk cache may hold, in MB; unset means [`ANALYSIS_CACHE_MB`]. Read at start.
+    pub analysis_cache_mb: Option<u32>,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.
     pub meshes: MeshesSettings,
-    /// The Meshes view's 3D panel (plan B Task B8), `[render3d]` in the file.
-    pub render3d: Render3dSettings,
     /// The window and arrangement the app comes back to, `[layout]` in the file (DECISIONS AG3).
     #[serde(deserialize_with = "layout::lenient")]
     pub layout: LayoutSettings,
@@ -39,7 +39,14 @@ pub struct GuiSettings {
     /// Note HC4: the kinds of Problems row a user hid, by project root (lower case, `/`): code names.
     #[serde(skip_serializing_if = "std::collections::BTreeMap::is_empty")]
     pub problems_hidden: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
+    /// Note HF4: the set groups a user collapsed, by project root and group name (`model::input_name::match_key`). A
+    /// group that is open is not stored.
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub group_collapsed: std::collections::BTreeSet<String>,
 }
+
+/// The analysis disk cache's limit when `analysis_cache_mb` is unset (Note HV2), in MB.
+pub const ANALYSIS_CACHE_MB: u32 = 500;
 
 /// `[checks]`: one switch per artist check; an off check's results are hidden everywhere. All on.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,7 +55,6 @@ pub struct ChecksSettings {
     pub low_detail: bool,
     pub green: bool,
     pub parallax: bool,
-    pub uv: bool,
 }
 
 impl Default for ChecksSettings {
@@ -57,16 +63,8 @@ impl Default for ChecksSettings {
             low_detail: true,
             green: true,
             parallax: true,
-            uv: true,
         }
     }
-}
-
-/// `[render3d]`: the Community Shaders `Shaders` folder last used, re-checked on start and on focus.
-#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
-#[serde(default)]
-pub struct Render3dSettings {
-    pub shaders: Option<render3d::locate::Fingerprint>,
 }
 
 /// `[meshes]`: the MO2 instance and profile the Meshes view scans, or the folder chosen instead.
@@ -131,7 +129,6 @@ impl GuiSettings {
         ] {
             *p = p.take().filter(ok);
         }
-        s.render3d.shaders = s.render3d.shaders.take().filter(|f| ok(&f.root));
         let text = toml::to_string_pretty(&s).map_err(std::io::Error::other)?;
         engine::dds::write_atomic(path, text.as_bytes())?;
         Ok(unreadable.then_some(kept))
@@ -157,6 +154,10 @@ impl GuiSettings {
         let kept = self.save(path)?;
         *base = Some((self.clone(), engine::policy::SourceStamp::of(path)));
         Ok(kept)
+    }
+    /// The analysis disk cache's limit in bytes (Note HV2). A MB here is 1024 x 1024 bytes.
+    pub fn analysis_cache_bytes(&self) -> u64 {
+        u64::from(self.analysis_cache_mb.unwrap_or(ANALYSIS_CACHE_MB)) * 1024 * 1024
     }
     pub fn push_recent(&mut self, p: PathBuf) {
         self.recent.retain(|r| r != &p);

@@ -17,7 +17,7 @@ pub struct HelperReport {
     pub set_key: String,
     pub role: HelperRole,
     pub role_hand_set: bool,
-    /// Where it really went: packed channels, an alpha fill, the base normals a layer blends into.
+    /// Where it really went: packed channels or an alpha fill.
     pub fills: Vec<FillTarget>,
     pub fills_hand_set: bool,
     /// The alpha targets planned in its set (Ruling 4) and the channels of the packed recipes valid there.
@@ -27,22 +27,16 @@ pub struct HelperReport {
     pub not_used: Option<String>,
     pub read: Option<HelperRead>,
     pub invert: bool,
-    /// A normal-type role's `rnm.target` in effect: hand-set, else its name's prefix, else `_n` falling back to `_cnr`
-    /// (Note W4). `None` for other roles.
-    pub rnm_target: Option<crate::config::RnmTarget>,
-    /// The outputs it fills.
+    /// The outputs it fills: its own set's first, then those of the sets that share it (Note HH1).
     pub outputs: Vec<PathBuf>,
+    /// Note HH1: the keys of the sets that share the file, sorted.
+    pub shared_with: Vec<String>,
+    /// Note HH7: the keys of the sets in `shared_with` whose jobs it lands in (a packed channel or an alpha fill).
+    pub used_by: Vec<String>,
 }
 
 /// The texts that say why a helper's own job converts nothing.
-const NOT_USED: [Code; 6] = [
-    Code::PackUnusedInput,
-    Code::InPackingInput,
-    Code::RnmNoBase,
-    Code::RnmMaskOrphan,
-    Code::RnmIgnoredEye,
-    Code::RnmLayerShadowed,
-];
+const NOT_USED: [Code; 2] = [Code::PackUnusedInput, Code::InPackingInput];
 
 fn file_name(p: &Path) -> String {
     p.file_name()
@@ -81,7 +75,7 @@ fn packed_kinds(ctx: &ResolveCtx, set: &str, planned: &[RecipeKind]) -> Vec<Reci
     }
 }
 
-/// Every helper of every set, by set key then file name. Call after `plan_rnm`, so layers have their bases.
+/// Every helper of every set, by set key then file name.
 pub fn reports(
     ctx: &ResolveCtx,
     sets: &[TextureSet],
@@ -93,22 +87,56 @@ pub fn reports(
     let mut out = vec![];
     let mut sets: Vec<&TextureSet> = sets.iter().collect();
     sets.sort_by(|a, b| a.key.cmp(&b.key));
-    for set in sets {
+    // Where `f` went among `jobs`: packed channels and alpha fills.
+    let went_in = |jobs: &[&ResolvedJob], f: &InputFile| {
+        let mut went: Vec<(FillTarget, PathBuf)> = vec![];
+        for j in jobs {
+            if let Some(pk) = &j.pack {
+                for (c, ch) in pk.channels.iter().enumerate() {
+                    if matches!(ch, ChannelSource::Source { path, .. } if *path == f.path) {
+                        let t = FillTarget::Packed {
+                            suffix: pk.kind.suffix(),
+                            channel: c as u8,
+                        };
+                        went.push((t, j.output.clone()));
+                    }
+                }
+            }
+            if j.fill.as_ref().is_some_and(|x| x.source.path == f.path) {
+                if let Some(a) = AlphaTarget::ALL
+                    .into_iter()
+                    .find(|&a| accepts(a, j.profile.subtype))
+                {
+                    went.push((FillTarget::Alpha(a), j.output.clone()));
+                }
+            }
+        }
+        went
+    };
+    for &set in &sets {
         let in_set: Vec<&ResolvedJob> = index.in_set(&set.key).collect();
-        let mut members: Vec<&InputFile> = set
+        let mut members: Vec<(usize, &InputFile)> = set
             .members
             .iter()
-            .map(|&i| &files[i])
-            .filter(|f| f.kind == InputKind::Image)
+            .map(|&i| (i, &files[i]))
+            .filter(|(_, f)| f.kind == InputKind::Image)
             .collect();
-        members.sort_by_key(|f| file_name(&f.path));
-        for f in members {
+        members.sort_by_key(|(_, f)| file_name(&f.path));
+        for (i, f) in members {
             let sel = helper_requested(ctx, f);
+            // Note HH1: the sets that share it (sorted, as `sets` is) and their jobs.
+            let sharing: Vec<&TextureSet> = sets
+                .iter()
+                .copied()
+                .filter(|s| s.shares.contains(&i))
+                .collect();
+            let shared_jobs: Vec<&ResolvedJob> =
+                sharing.iter().flat_map(|s| index.in_set(&s.key)).collect();
             // A recipe's job has its first source as `input` (Note M8); it is not that source's own job.
             let own = index
                 .by_input(&f.path)
                 .find(|j| j.pack.is_none() && j.derive.is_none());
-            let packed_role = in_set.iter().find_map(|j| {
+            let packed_role = in_set.iter().chain(&shared_jobs).find_map(|j| {
                 let pack = j
                     .pack
                     .iter()
@@ -123,12 +151,6 @@ pub fn reports(
                 (Some(HelperRole::NotHelper), _) => continue,
                 (Some(r), _) => r,
                 (None, Some(JobStatus::PackingInput { role })) => HelperRole::Raw(*role),
-                (None, Some(JobStatus::NormalLayer { term })) => {
-                    HelperRole::Layer(crate::rnm::LayerTermId {
-                        prefix: None,
-                        ..*term
-                    })
-                }
                 // Converted as an ordinary file (a sub-type was named): no helper.
                 (None, Some(_)) => continue,
                 // Consumed by a recipe or a fill, or failed or cancelled before it had a job.
@@ -137,110 +159,48 @@ pub fn reports(
                     None => continue,
                 },
             };
-            let mut went: Vec<(FillTarget, PathBuf)> = vec![];
-            // A layer attached to a base whose RNM is switched off: the reason it fills nothing.
-            let mut rnm_off: Option<String> = None;
-            for j in &in_set {
-                if let Some(pk) = &j.pack {
-                    for (c, ch) in pk.channels.iter().enumerate() {
-                        if matches!(ch, ChannelSource::Source { path, .. } if *path == f.path) {
-                            let t = FillTarget::Packed {
-                                suffix: pk.kind.suffix(),
-                                channel: c as u8,
-                            };
-                            went.push((t, j.output.clone()));
-                        }
-                    }
-                }
-                if j.fill.as_ref().is_some_and(|x| x.source.path == f.path) {
-                    if let Some(a) = AlphaTarget::ALL
-                        .into_iter()
-                        .find(|&a| accepts(a, j.profile.subtype))
-                    {
-                        went.push((FillTarget::Alpha(a), j.output.clone()));
-                    }
-                }
-                let layer = j.rnm.as_ref().is_some_and(|r| {
-                    r.layers.iter().any(|l| {
-                        l.file.path == f.path || l.mask.as_ref().is_some_and(|m| m.path == f.path)
-                    })
-                });
-                if let (true, Some(base)) = (layer, j.profile.subtype.rnm_base()) {
-                    if j.active_rnm().is_some() {
-                        went.push((FillTarget::Rnm(base), j.output.clone()));
-                    } else if !j.profile.rnm.enabled {
-                        rnm_off.get_or_insert_with(|| {
-                            format!(
-                                "RNM is off for {} (rnm.enabled = false)",
-                                file_name(&j.output)
-                            )
-                        });
-                    }
-                }
-            }
-            let options: Vec<FillTarget> = if role.is_normal() {
-                vec![]
-            } else {
-                let alpha = AlphaTarget::ALL.into_iter().filter(|&a| {
-                    in_set
-                        .iter()
-                        .any(|j| j.input != f.path && plain(j) && accepts(a, j.profile.subtype))
-                });
-                let planned: Vec<RecipeKind> = in_set
+            let went = went_in(&in_set, f);
+            let alpha = AlphaTarget::ALL.into_iter().filter(|&a| {
+                in_set
                     .iter()
-                    .filter_map(|j| j.pack.as_ref().map(|p| p.kind))
-                    .collect();
-                let packed = packed_kinds(ctx, &set.key, &planned)
-                    .into_iter()
-                    .flat_map(|k| {
-                        channels(k).map(move |channel| FillTarget::Packed {
-                            suffix: k.suffix(),
-                            channel,
-                        })
-                    });
-                alpha.map(FillTarget::Alpha).chain(packed).collect()
-            };
-            let not_used = if !went.is_empty() {
-                None
-            } else if sel.fills.as_ref().is_some_and(|v| v.is_empty()) {
-                Some("no targets chosen".to_string())
-            } else {
-                // Its own job's reason, else a shadowed layer's note on its base, else RNM off on its base, else the alpha
-                // planner's.
-                let name = file_name(&f.path);
-                own.into_iter()
-                    .flat_map(|j| &j.warnings)
-                    .find(|w| NOT_USED.contains(&w.code))
-                    .or_else(|| {
-                        in_set.iter().flat_map(|j| &j.warnings).find(|w| {
-                            w.code == Code::RnmLayerShadowed && w.message.starts_with(&name)
-                        })
-                    })
-                    .map(|w| w.message.clone())
-                    .or(rnm_off)
-                    .or_else(|| fills.not_used.get(&f.path).cloned())
-            };
-            let rnm_target = role.is_normal().then(|| {
-                use crate::config::RnmTarget;
-                use crate::rnm::plan::{base_kind, effective_target};
-                let prefix = own.and_then(|j| match j.status {
-                    JobStatus::NormalLayer { term } => term.prefix,
-                    _ => None,
-                });
-                let has = |k: RnmTarget| in_set.iter().any(|j| base_kind(j) == Some(k));
-                effective_target(
-                    prefix,
-                    crate::policy::rnm_target_requested(ctx, f),
-                    has(RnmTarget::N),
-                    has(RnmTarget::Cnr),
-                )
+                    .any(|j| j.input != f.path && plain(j) && accepts(a, j.profile.subtype))
             });
+            let planned: Vec<RecipeKind> = in_set
+                .iter()
+                .filter_map(|j| j.pack.as_ref().map(|p| p.kind))
+                .collect();
+            let packed = packed_kinds(ctx, &set.key, &planned)
+                .into_iter()
+                .flat_map(|k| {
+                    channels(k).map(move |channel| FillTarget::Packed {
+                        suffix: k.suffix(),
+                        channel,
+                    })
+                });
+            let options: Vec<FillTarget> = alpha.map(FillTarget::Alpha).chain(packed).collect();
+            let used_by: Vec<String> = sharing
+                .iter()
+                .filter(|s| !went_in(&index.in_set(&s.key).collect::<Vec<_>>(), f).is_empty())
+                .map(|s| s.key.clone())
+                .collect();
             let mut outputs: Vec<PathBuf> = vec![];
-            for (_, o) in &went {
+            for (_, o) in went.iter().chain(&went_in(&shared_jobs, f)) {
                 if !outputs.contains(o) {
                     outputs.push(o.clone());
                 }
             }
+            let not_used = if !outputs.is_empty() {
+                None
+            } else if sel.fills.as_ref().is_some_and(|v| v.is_empty()) {
+                Some("no targets chosen".to_string())
+            } else {
+                // Its own job's reason, else the alpha planner's.
+                own.into_iter()
+                    .flat_map(|j| &j.warnings)
+                    .find(|w| NOT_USED.contains(&w.code))
+                    .map(|w| w.message.clone())
+                    .or_else(|| fills.not_used.get(&f.path).cloned())
+            };
             out.push(HelperReport {
                 path: f.path.clone(),
                 set_key: set.key.clone(),
@@ -257,8 +217,9 @@ pub fn reports(
                 not_used,
                 read: sel.read,
                 invert: sel.invert,
-                rnm_target,
                 outputs,
+                shared_with: sharing.iter().map(|s| s.key.clone()).collect(),
+                used_by,
             });
         }
     }

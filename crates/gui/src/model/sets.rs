@@ -5,8 +5,8 @@ use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
 use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
-    active_matches, check_file_name, check_rel_path, derive_match_diffuse, extra_match_refusal,
-    is_path_key, output_rel, prefix_of, slot_match_path, slot_suffixes, strip_lead,
+    active_matches, check_file_name, check_rel_path, derive_match_diffuse, is_path_key, output_rel,
+    prefix_of, slot_match_path, slot_suffixes, strip_lead,
 };
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
@@ -355,8 +355,10 @@ pub struct SetView {
     /// The Rmaos slot holds (or, empty, would hold) an RFAOS pack: the slot reads RFAOS, not RMAOS (Note HE1).
     pub rfaos: bool,
     pub created: bool,
-    /// `add`/`remove` entries of `sdc-project.toml` that match no file (Review focus 1).
+    /// `add`/`remove`/`share` entries of `sdc-project.toml` that match no file (Review focus 1).
     pub missing: Vec<Missing>,
+    /// Note HH7: item keys of the helpers of other sets (or of no set) this set shares (`SetEntry::share`).
+    pub shared_helpers: Vec<String>,
     /// Slots whose finished output this set owns while another set borrows it.
     pub owns: Vec<SlotKind>,
     pub derived_match: Option<String>,
@@ -378,7 +380,62 @@ pub struct SetView {
     pub recipes: Vec<engine::events::RecipeReport>,
 }
 
+/// The joined tails a set's member names carry past the base (Note GW1): `_detail_n` in a Landscape, PBR Landscape
+/// or Advanced skin set, `_wet` in an Advanced skin set only, and `_detail` / `_detailnorm` in those and in a plain
+/// set that joined one (`Detail`). A lone `rock_detail` is its own set with no tail, as in the engine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Tails {
+    Plain,
+    Detail,
+    Landscape,
+    Skin,
+}
+
 impl SetView {
+    /// The tails this set's member names read (see [`Tails`]).
+    pub fn tails(&self) -> Tails {
+        if self.skin || self.shared {
+            Tails::Skin
+        } else if self.landscape_host() {
+            Tails::Landscape
+        } else if self.joined_detail() {
+            Tails::Detail
+        } else {
+            Tails::Plain
+        }
+    }
+
+    /// The engine's detail host rule for landscape (`api::detail_host`): the pick or the saved choice is Landscape or
+    /// PBR Landscape, or the first member's path says landscape.
+    fn landscape_host(&self) -> bool {
+        let is = |s: Shader| matches!(s, Shader::Landscape | Shader::PbrLandscape);
+        self.shader.as_ref().is_some_and(|p| is(p.shader))
+            || self.shader_choice.is_some_and(is)
+            || self.members.first().is_some_and(|k| {
+                engine::suggest::landscape_path(&k.replace('\\', "/").to_lowercase())
+            })
+    }
+
+    /// A member is `<another member's base>_detail` or `_detailnorm`: the engine joined it (`group_sets_with`).
+    fn joined_detail(&self) -> bool {
+        let stems: Vec<String> = self
+            .members
+            .iter()
+            .filter_map(|k| Path::new(k).file_stem())
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .collect();
+        let bases: Vec<String> = stems
+            .iter()
+            .map(|s| engine::group::split_suffix_with(s, &BTreeMap::new()).base)
+            .collect();
+        stems.iter().any(|s| {
+            engine::group::DETAIL_SPELLINGS.iter().any(|sp| {
+                s.strip_suffix(&format!("_{sp}"))
+                    .is_some_and(|b| bases.iter().any(|o| o == b))
+            })
+        })
+    }
+
     pub(crate) fn new(key: String, id: String, members: Vec<String>) -> SetView {
         SetView {
             key,
@@ -396,6 +453,7 @@ impl SetView {
             rfaos: false,
             created: false,
             missing: vec![],
+            shared_helpers: vec![],
             owns: vec![],
             derived_match: None,
             prefix: None,
@@ -670,6 +728,7 @@ fn kept_member_is_shared_map(key: &str, aliases: &BTreeMap<String, String>) -> b
         members: vec![],
         suffixes: [SKIN_WET, SKIN_DETAIL].map(String::from).into(),
         shared_skin: false,
+        shares: vec![],
     };
     let stem = Path::new(key)
         .file_stem()
@@ -708,6 +767,20 @@ pub(super) fn entry_of<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a SetE
 
 fn dir_of(key: &str) -> &str {
     key.rsplit_once('/').map_or("", |(d, _)| d)
+}
+
+/// The automatic set id file `item_key` takes from its name: its folder and base name (`a/rock01_n.png` → `a/rock01`).
+fn auto_id(item_key: &str) -> String {
+    let stem = Path::new(item_key)
+        .file_stem()
+        .unwrap_or_default()
+        .to_string_lossy();
+    let (dir, base) = (dir_of(item_key), base_of(&stem));
+    if dir.is_empty() {
+        base
+    } else {
+        format!("{dir}/{base}")
+    }
 }
 
 /// The stem the diffuse's output has when it mirrors its source (DECISIONS N2): the source stem, without a colour
@@ -759,9 +832,14 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
 /// `finish_view` the diffuse's `job.profile.subtype` and its key (`mirrored_stem`). The keys are compared apart
 /// (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets document (in the
-/// views key). `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
-pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>) {
-    (slot_of(i), i.job.as_ref().map(|j| j.profile.subtype))
+/// views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`). `output_suffix` and
+/// `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
+pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>, bool) {
+    (
+        slot_of(i),
+        i.job.as_ref().map(|j| j.profile.subtype),
+        i.waiting,
+    )
 }
 
 /// Order: the saved `order` first (ids compared folded, the first listing of an id wins), then the rest by id. The
@@ -791,15 +869,26 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         .unwrap_or_default();
     let order = m.sets_doc.as_ref().map(|d| d.order()).unwrap_or_default();
 
-    let mut views: Vec<SetView> = m.sets.iter().map(|s| base_view(m, &root, s)).collect();
+    let (shown, hidden): (Vec<&SetItem>, Vec<&SetItem>) = m
+        .sets
+        .iter()
+        .partition(|s| !card_hidden(m, &entries, &root, s));
+    let hidden: Vec<String> = hidden.iter().map(|s| set_id(&root, &s.key)).collect();
+    let mut views: Vec<SetView> = shown.iter().map(|s| base_view(m, &root, s)).collect();
     // Created sets that have no members yet, and entries whose files have all gone (spec §7.1: shown as missing,
-    // never silently dropped).
+    // never silently dropped). Note GY5: an entry that says nothing about a hidden set is neither.
     for e in &entries {
-        if !views.iter().any(|v| same_id(&v.id, &e.id)) {
+        if !views.iter().any(|v| same_id(&v.id, &e.id)) && !hidden.iter().any(|h| same_id(h, &e.id))
+        {
             views.push(SetView::new(String::new(), e.id.clone(), vec![]));
         }
     }
     sort_by_saved_order(&mut views, &order);
+    // Note HF4: a group's members come straight after its first member, so `index`, Move up, Move down and Move to
+    // see what is on screen.
+    if let Some(d) = m.sets_doc.as_ref() {
+        super::set_groups::pull_groups(&mut views, &d.groups());
+    }
     // Entry data: created flag, settings, missing members, borrowed slots.
     let own_slots: Vec<(String, BTreeMap<SlotKind, SlotFill>)> = views
         .iter()
@@ -827,6 +916,56 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         v.owns = owns_of(v, &owners);
     }
     views
+}
+
+/// Note HF1: the set has a member and every one that is not a packed output is in no set (a packed output follows
+/// its raw maps). Such a set has no card, whatever its entry holds.
+fn all_no_set(m: &AppModel, s: &SetItem) -> bool {
+    let mut any = false;
+    for k in &s.members {
+        if m.item(k).is_some_and(|i| i.kind == ItemKind::Packed) {
+            continue;
+        }
+        if !m.is_no_set(k) {
+            return false;
+        }
+        any = true;
+    }
+    any
+}
+
+/// Note GY5: a set whose only member waits for a type has no card, unless the user created it or set something on it
+/// (its sets-doc entry holds more than its id: a shader back to Auto or the last lock removed leaves only the id).
+/// Note HF1: nor has a set whose files are all in no set.
+fn card_hidden(m: &AppModel, entries: &[SetEntry], root: &Path, s: &SetItem) -> bool {
+    all_no_set(m, s)
+        || matches!(s.members.as_slice(), [k] if m.item(k).is_some_and(|i| i.waiting))
+            && entry_of(entries, &set_id(root, &s.key)).is_none_or(|e| {
+                *e == SetEntry {
+                    id: e.id.clone(),
+                    ..Default::default()
+                }
+            })
+}
+
+/// Note GY5: whether the plan's set `key` has a card, without building the views (a plan's selection pruning).
+pub(crate) fn has_card(m: &AppModel, key: &str) -> bool {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    m.sets
+        .iter()
+        .find(|s| s.key == key)
+        .is_some_and(|s| !card_hidden(m, &entries, &m.sets_root(), s))
+}
+
+/// Note GY5: how many of the plan's sets have a card (the status line's count; run per plan and per undo, not per
+/// frame).
+pub(crate) fn carded_sets(m: &AppModel) -> usize {
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let root = m.sets_root();
+    m.sets
+        .iter()
+        .filter(|s| !card_hidden(m, &entries, &root, s))
+        .count()
 }
 
 /// Whether set-line key `key` (project-relative, possibly without an extension) names something on disk under `root`.
@@ -925,11 +1064,19 @@ fn entry_view(
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
-    for f in e.add.iter().chain(&e.remove) {
+    for f in e.add.iter().chain(&e.remove).chain(&e.share) {
         if !m.items.iter().any(|i| path_key_matches(f, &i.key)) {
             v.missing.push(Missing::File(f.clone()));
         }
     }
+    v.shared_helpers = e
+        .share
+        .iter()
+        .filter_map(|f| m.items.iter().find(|i| path_key_matches(f, &i.key)))
+        .map(|i| i.key.clone())
+        // The engine ignores a share of a member (Note HH1).
+        .filter(|k| !v.members.contains(k))
+        .collect();
     for (slot, from) in &e.borrow {
         let borrow = |empty| Missing::Borrow {
             slot: *slot,
@@ -1046,19 +1193,24 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     // shortcut: the lookups below are linear in the sets per scope set; a partial over many sets (a bulk edit)
     // builds every view instead. Index the sets by key if a big bulk edit's frame shows in a profile.
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let root = m.sets_root();
+    let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
+    // Note GY5: a scope set whose card comes or goes changes the list itself.
+    let card_moves = scope.iter().filter_map(|k| set_of(k)).any(|s| {
+        let shown = views.iter().any(|v| v.key == s.key);
+        shown == card_hidden(m, &entries, &root, s)
+    });
     // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
     // project with many mapped sets shows it in a profile.
-    if scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
+    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
         *views = build_views(m);
         return;
     }
-    let root = m.sets_root();
     let scope_ids: Vec<String> = views
         .iter()
         .filter(|v| scope.contains(&v.key))
         .map(|v| v.id.clone())
         .collect();
-    let set_of = |key: &str| m.sets.iter().find(|s| s.key == key);
     // A set's own slots by id, from the plan (what `build_views` reads before any borrow).
     let own = |from: &str| {
         let v = views.iter().find(|v| same_id(&v.id, from))?;
@@ -1202,6 +1354,19 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             edits.push(SetEdit::Remove { file: f.clone() });
         }
     }
+    // Note HF1: the no-set files, last, so each leaves the set the other edits put it in.
+    if let Some(d) = &m.sets_doc {
+        edits.extend(d.no_set().into_iter().map(|file| SetEdit::NoSet { file }));
+    }
+    // Note HH: shares after that, so each names its set in its final shape.
+    for e in entries.iter() {
+        for f in &e.share {
+            edits.push(SetEdit::Share {
+                file: f.clone(),
+                to: e.id.clone(),
+            });
+        }
+    }
     let mut paths = BTreeMap::new();
     let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
@@ -1240,7 +1405,8 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
             let k = item_output_key_in(&owners, it).unwrap_or(OutputKey::File(it.key.clone()));
             !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
-        .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+        // Note HQ6: explicit paths are under the export folder, job keys under the plan's output root.
+        .map(|it| m.export_key(&it.job_key))
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -1294,7 +1460,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
             continue;
         };
-        if v.pbr && m.target == Target::Cs {
+        if m.renames_outputs(v) {
             continue;
         }
         for key in &v.members {
@@ -1304,10 +1470,10 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             }
             // Note HG: the default output of the file as it is now, never the last plan's `job_key`, which a record
             // mapping or an earlier name may have moved.
-            let Some(from) = defaults.as_ref().and_then(|d| d.key(item)) else {
+            let Some(from) = defaults.as_ref().and_then(|d| d.key(item, &v.members)) else {
                 continue;
             };
-            let Some(rel) = renamed_output(&from, name, v.skin || v.shared) else {
+            let Some(rel) = renamed_output(&from, name, v.tails()) else {
                 continue;
             };
             let k = if item.kind == ItemKind::Packed {
@@ -1321,7 +1487,7 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             } else {
                 OutputKey::File(item.key.clone())
             };
-            out.push((k, rel));
+            out.push((k, m.export_rel(&rel)));
         }
     }
     out
@@ -1330,7 +1496,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
 /// Note HG: the default output key (`/`, lower case, relative to the export root) of every file when no output path
 /// is sent for it, from what is true now and as the engine accepts it: one `apply_read_as` over all the project's
 /// files with the project's `[inputs]` (so a refused alias leaves its file as it is, as in the plan), then
-/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input`. No output
+/// `canonicalise_outputs`. A packed output is named after its first source by `pack::plan::virtual_input` (a shared
+/// or joined helper's after the set member it stands in for). No output
 /// name or record mapping can reach it. Built once per `output_name_paths` pass.
 pub struct DefaultOutputs<'a> {
     out_root: &'a Path,
@@ -1378,38 +1545,57 @@ impl<'a> DefaultOutputs<'a> {
         })
     }
 
-    /// `item`'s default output key; `None` for a packed output without a job or a known first source.
-    pub fn key(&self, item: &TextureItem) -> Option<String> {
+    /// `item`'s default output key, `members` being its set's; `None` for a packed output without a job or a known
+    /// first source.
+    pub fn key(&self, item: &TextureItem, members: &[String]) -> Option<String> {
+        use engine::pack::plan::{files_stem, virtual_input, virtual_stem};
         let output = if item.kind == ItemKind::Packed {
-            let pk = item.job.as_ref()?.pack.as_ref()?;
+            let job = item.job.as_ref()?;
+            let pk = job.pack.as_ref()?;
             let first = pk.sources.first()?.path.strip_prefix(self.root).ok()?;
             let first = self
                 .files
                 .get(first.to_string_lossy().replace('\\', "/").as_str())?;
-            engine::pack::plan::virtual_input(first, pk.kind).output
+            // Note HS2: a shared or joined helper stands in for the set's member its output is named after (Note
+            // HH2), so the output takes that member's folder and name, not the helper's.
+            let stem = files_stem(job, pk.kind).to_lowercase();
+            let named = |f: &&engine::discover::InputFile| {
+                virtual_stem(&f.rel, pk.kind).to_lowercase() == stem
+            };
+            let anchor = Some(first)
+                .filter(named)
+                .or_else(|| members.iter().filter_map(|k| self.files.get(k)).find(named))
+                .unwrap_or(first);
+            virtual_input(anchor, pk.kind).output
         } else {
             self.files.get(&item.key)?.output.clone()
         };
         Some(engine::manifest::output_key(self.out_root, &output))
     }
 }
-/// What follows the base name of a member `stem` of a set (`skin`: an Advanced skin set): its Skyrim suffix or exporter
-/// term (`_n`, `_roughness`), and in a skin set the joined `_wet` and `_detail_n`, as the engine reads them
-/// (`group::member_split`). `""` for the colour member.
-pub fn member_tail(stem: &str, skin: bool) -> &str {
-    use engine::group::{member_split, TextureSet, SKIN_DETAIL, SKIN_WET};
-    // `member_split` reads only the set's suffixes: a skin set may hold both joined members.
+/// What follows the base name of a member `stem` of a set: its Skyrim suffix or exporter term (`_n`, `_roughness`),
+/// and the joined `_wet`, `_detail_n`, `_detail` and `_detailnorm` of the sets that take them ([`Tails`]), as the engine reads them (`group::member_split`, with the preset's suffix `aliases`). `""` for the colour member.
+pub fn member_tail<'a>(stem: &'a str, tails: Tails, aliases: &BTreeMap<String, String>) -> &'a str {
+    use engine::group::{member_split, TextureSet, DETAIL_SPELLINGS, SKIN_DETAIL, SKIN_WET};
+    // `member_split` reads only the set's suffixes: a skin set may hold every joined member.
+    let mut suffixes: BTreeSet<String> = BTreeSet::new();
+    if tails != Tails::Plain {
+        suffixes.extend(DETAIL_SPELLINGS.map(String::from));
+    }
+    if matches!(tails, Tails::Landscape | Tails::Skin) {
+        suffixes.insert(SKIN_DETAIL.into());
+    }
+    if tails == Tails::Skin {
+        suffixes.insert(SKIN_WET.into());
+    }
     let set = TextureSet {
         key: String::new(),
         members: vec![],
-        suffixes: if skin {
-            [SKIN_WET, SKIN_DETAIL].map(String::from).into()
-        } else {
-            BTreeSet::new()
-        },
+        suffixes,
         shared_skin: false,
+        shares: vec![],
     };
-    let base = member_split(stem, &set, &BTreeMap::new()).base;
+    let base = member_split(stem, &set, aliases).base;
     // The base is a prefix of `stem`, so the cut is on a char boundary.
     &stem[base.len().min(stem.len())..]
 }
@@ -1417,16 +1603,39 @@ pub fn member_tail(stem: &str, skin: bool) -> &str {
 /// `job_key` (an output path relative to the export root) with its base name replaced by `name`: the folder and the
 /// suffix stay (`armor/wall_n.dds`, `steel` → `armor/steel_n.dds`; in a skin set `x_wet.dds` → `steel_wet.dds`).
 /// Applying it twice gives the same path, because `check_output_name` refuses a name that ends in a suffix.
-pub fn renamed_output(job_key: &str, name: &str, skin: bool) -> Option<PathBuf> {
+pub fn renamed_output(job_key: &str, name: &str, tails: Tails) -> Option<PathBuf> {
     let p = Path::new(job_key);
     let stem = p.file_stem()?.to_string_lossy();
     // Everything after the base stays: a Skyrim suffix, or an exporter term an output keeps (`_roughness` on a
     // target that packs nothing), so two members never land on one name.
-    let file = format!("{name}{}.dds", member_tail(&stem, skin));
+    let file = format!("{name}{}.dds", member_tail(&stem, tails, &BTreeMap::new()));
     Some(match p.parent() {
         Some(d) if !d.as_os_str().is_empty() => d.join(file),
         _ => PathBuf::from(file),
     })
+}
+
+/// The prefix PBR set `v` gets with `rename` in place of its own (Note HJ5): a file name or a whole path.
+pub fn renamed_prefix(v: &SetView, rename: &str) -> Result<String, String> {
+    let mut s = v.settings.clone();
+    s.insert("rename".into(), Value::String(rename.to_string()));
+    prefix_of(&s, v.derived_match.as_deref().unwrap_or("")).map_err(|e| e.0)
+}
+
+/// The `rename` PBR set `v` stores for `typed` (Note HJ5, HJ6): its last component alone when that gives the same
+/// prefix, so a set whose folder stays keeps the `Key` form (HJ4); else the whole path, with `\`. The folder is
+/// compared ignoring ASCII case, as Windows and PGPatcher do (a Case change over a whole path keeps it).
+pub fn rename_value(v: &SetView, typed: &str) -> Result<String, String> {
+    let full = renamed_prefix(v, typed)?;
+    let last = typed.rsplit(['\\', '/']).next().unwrap_or(typed);
+    // `last` ends both prefixes, so ignoring case here ignores it in the folder only.
+    Ok(
+        if renamed_prefix(v, last).is_ok_and(|p| p.eq_ignore_ascii_case(&full)) {
+            last.to_string()
+        } else {
+            typed.replace('/', "\\")
+        },
+    )
 }
 
 /// F3b: whether `name` can be an output base name. A name ending in a map suffix (`wall_n`) is refused: the
@@ -1435,7 +1644,7 @@ pub fn check_output_name(name: &str) -> Result<(), String> {
     check_named(name, "output name")
 }
 
-/// `check_output_name` for a named field (the PGPatcher `rename` box shares it).
+/// `check_output_name` for a named field (a PGPatcher `rename`'s last component shares it).
 pub fn check_named(name: &str, field: &str) -> Result<(), String> {
     check_file_name(name, field).map_err(|e| e.0)?;
     let base = base_of(name);
@@ -1443,6 +1652,16 @@ pub fn check_named(name: &str, field: &str) -> Result<(), String> {
         return Err(format!(
             "{field}: ends in {}, a map suffix; each output keeps its own ({name:?})",
             &name[base.len()..]
+        ));
+    }
+    // Note GW1: `_detail` and `_detailnorm` are tails in the sets that joined them.
+    let lower = name.to_lowercase();
+    if let Some(sp) = engine::group::DETAIL_SPELLINGS
+        .iter()
+        .find(|sp| lower.ends_with(&format!("_{sp}")))
+    {
+        return Err(format!(
+            "{field}: ends in _{sp}, a map suffix; each output keeps its own ({name:?})"
         ));
     }
     Ok(())
@@ -1617,7 +1836,7 @@ pub(crate) mod linear {
                 let k = item_output_key(&views, it).unwrap_or(OutputKey::File(it.key.clone()));
                 !explicit(&k)
             })
-            .map(|it| it.job_key.replace('\\', "/").to_lowercase())
+            .map(|it| m.export_key(&it.job_key))
             .collect();
         let mut seen = BTreeSet::new();
         let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -1851,6 +2070,52 @@ fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Opti
 }
 
 impl AppModel {
+    /// Note HF1: the texture `item_key` is in no set (`[project] no_set`): not on a card, written nowhere, its
+    /// warnings and questions counted by nothing.
+    pub fn is_no_set(&self, item_key: &str) -> bool {
+        self.sets_doc.as_ref().is_some_and(|d| {
+            d.no_set_keys()
+                .iter()
+                .any(|k| engine::sets::no_set_names(k, item_key))
+        })
+    }
+
+    /// The plan's set keys whose files are all in no set, per view key.
+    pub(super) fn no_set_sets(&self) -> Arc<HashSet<String>> {
+        super::cached(
+            self,
+            |c| c.no_set_sets.clone(),
+            |c, v| c.no_set_sets = Some(v),
+            || {
+                Arc::new(
+                    self.sets
+                        .iter()
+                        .filter(|s| all_no_set(self, s))
+                        .map(|s| s.key.clone())
+                        .collect(),
+                )
+            },
+        )
+    }
+
+    /// Notes HF1, HF9: whether set `set_key` takes part in the run: false for a no-set texture's set; with an export
+    /// scope, true only for its sets; otherwise false for an excluded group's sets. Every gate and count that reads a
+    /// texture's questions or files asks this.
+    pub fn in_run(&self, set_key: &str) -> bool {
+        if self.no_set_sets().contains(set_key) {
+            return false;
+        }
+        match self.export_scope() {
+            Some(s) => s.keys.contains(set_key),
+            None => !self.excluded_sets().contains(set_key),
+        }
+    }
+
+    /// Note HF1: whether `item`'s questions, warnings and file count: it is not in no set and its set is in the run.
+    pub fn item_in_run(&self, item: &TextureItem) -> bool {
+        !self.is_no_set(&item.key) && item.set_key.as_deref().is_none_or(|k| self.in_run(k))
+    }
+
     pub(super) fn view_of(&self, id: &str) -> Option<SetView> {
         views(self).iter().find(|v| same_id(&v.id, id)).cloned()
     }
@@ -1861,11 +2126,17 @@ impl AppModel {
         self.set_of_item(item)
     }
 
-    fn set_of_item(&self, item: &str) -> Option<SetView> {
+    /// The one check from a texture to its set: a no-set texture has none, because its set has no view.
+    pub(crate) fn set_of_item(&self, item: &str) -> Option<SetView> {
         views(self)
             .iter()
             .find(|v| v.members.iter().any(|k| k == item))
             .cloned()
+    }
+
+    /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
+    pub(crate) fn set_key_of_item(&self, item: &str) -> Option<String> {
+        self.set_of_item(item).map(|v| v.key)
     }
 
     pub(crate) fn sets_editable(&self) -> bool {
@@ -2056,6 +2327,12 @@ impl AppModel {
         if let Err(why) = lock_refusal(&target, incoming) {
             return DropOutcome::Refused(why);
         }
+        // Note HH5: a no-set helper can be shared, so it asks too; every other no-set texture moves.
+        if from.is_none() && self.is_no_set(item) && self.is_shareable_helper(item) {
+            return DropOutcome::AskChoice {
+                from: "no set".into(),
+            };
+        }
         // A texture that belongs to a real set (more than itself, or one the user touched) asks what to do. An entry
         // holding only its id (left by a rename back) is no edit.
         if let Some(f) = &from {
@@ -2084,6 +2361,12 @@ impl AppModel {
             Ok(t) => t,
             Err(e) => return DropOutcome::Refused(e),
         };
+        if choice == DropChoice::Share && self.is_shareable_helper(item) {
+            return match self.share_helper(item, &target) {
+                Ok(()) => DropOutcome::Joined,
+                Err(e) => DropOutcome::Refused(e),
+            };
+        }
         let slot = self.item(item).and_then(slot_of);
         let from = self.set_of_item(item).map(|f| f.id);
         let share_from = (choice == DropChoice::Share)
@@ -2127,6 +2410,64 @@ impl AppModel {
             .flatten();
         let existing = self.occupant(&target, slot, share_from)?;
         self.apply_choice(item, &target, slot, choice, existing)
+    }
+
+    /// Note HH5: a helper with a raw-map role, which a set can read without owning it (a `share` line).
+    pub(crate) fn is_shareable_helper(&self, item: &str) -> bool {
+        self.item(item).is_some_and(|i| {
+            i.kind == ItemKind::Helper
+                && i.helper
+                    .as_ref()
+                    .is_some_and(|h| matches!(h.role, engine::helper::HelperRole::Raw(_)))
+        })
+    }
+
+    /// Note HH5: `target` reads helper `item` as its own, as one step; nothing is copied or moved.
+    fn share_helper(&mut self, item: &str, target: &SetView) -> Result<(), String> {
+        // Its own set, or for a no-set file the set its name puts it in, which it rejoins on the way back.
+        // shortcut: the automatic set is found by name only (`dir/base`), so a renamed one still gets the line, which
+        // the views and the engine ignore once it is a member again; upgrade if that line confuses a user.
+        let automatic = auto_id(item);
+        let own = match self.set_of_item(item) {
+            Some(f) => f.id == target.id,
+            None => self.is_no_set(item) && same_id(&automatic, &target.id),
+        };
+        if own {
+            return Ok(());
+        }
+        // The engine has nothing to read it into (a share into a memberless set is stale).
+        if target.members.is_empty() {
+            return Err(format!(
+                "{} has no texture of its own; move one in first",
+                target.id
+            ));
+        }
+        let name = self.item(item).map_or(item.to_string(), |i| i.name.clone());
+        let (id, file) = (target.id.clone(), item.to_string());
+        self.edit_docs(
+            &format!("Share {name} with {id}"),
+            None,
+            true,
+            move |_, d| d.add_share(&id, &file),
+        );
+        Ok(())
+    }
+
+    /// Note HH: set `set` stops sharing helper `file`, as one step.
+    pub fn stop_sharing(&mut self, set: &str, file: &str) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
+        let name = self.item(file).map_or(file.to_string(), |i| i.name.clone());
+        if !v.shared_helpers.iter().any(|k| k == file) {
+            return Err(format!("{} does not share {name}", v.id));
+        }
+        let (id, file) = (v.id, file.to_string());
+        self.edit_docs(&format!("Stop sharing {name}"), None, true, move |_, d| {
+            d.remove_share(&id, &file)
+        });
+        Ok(())
     }
 
     /// Why `choice` cannot bring `item` into `target`, if it cannot (whatever the slot holds).
@@ -2229,18 +2570,7 @@ impl AppModel {
             return Err(PACKED_MOVE.into());
         }
         self.leaves_locked(item)?;
-        let stem = Path::new(item)
-            .file_stem()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into_owned();
-        let base = base_of(&stem);
-        let dir = dir_of(item);
-        let first = if dir.is_empty() {
-            base
-        } else {
-            format!("{dir}/{base}")
-        };
+        let first = auto_id(item);
         let taken = self.taken_ids();
         let mut id = first.clone();
         let mut n = 2;
@@ -2357,16 +2687,11 @@ impl AppModel {
         if !self.sets_editable() {
             return false;
         }
-        let mut ids: Vec<String> = set_views(self).into_iter().map(|v| v.id).collect();
-        let Some(from) = ids.iter().position(|i| same_id(i, id)) else {
+        let before: Vec<String> = set_views(self).into_iter().map(|v| v.id).collect();
+        // Note HF4: the column's order after the groups pull their members together; no visible move, no step.
+        let Some(ids) = super::set_groups::moved_order(&before, &self.groups(), id, to) else {
             return false;
         };
-        let moved = ids.remove(from);
-        let to = to.min(ids.len());
-        if to == from {
-            return false;
-        }
-        ids.insert(to, moved);
         self.edit_docs("Reorder sets", None, true, move |_, s| s.set_order(&ids));
         true
     }
@@ -2394,6 +2719,24 @@ impl AppModel {
         if !own_original && self.taken_ids().contains(&fold_id(&new_id)) {
             return Err(format!("a set {new_id} already exists"));
         }
+        // Note HS11: the engine still makes a file's automatic set, card or not (deleted, or emptied by a move), when
+        // it applies the rename, so it refuses the rename and the set's entry is left naming no files. A created set's
+        // rename is not sent to the engine as a Rename. A file's id follows its input name (`[inputs] read_as`).
+        // shortcut: the id is predicted with `base_of` (no preset aliases, no `_detail` join); upgrade to
+        // `engine::group::group_sets_with` over the file list if it mis-predicts.
+        if !own_original
+            && !v.created
+            && self.items.iter().any(|i| {
+                let read = self
+                    .read_as_of(&i.key)
+                    .map_or_else(|| i.key.clone(), |a| a.replace('\\', "/"));
+                i.kind != ItemKind::Packed && same_id(&auto_id(&read), &new_id)
+            })
+        {
+            return Err(format!(
+                "{new_id} is still the automatic set of a file; pick another name"
+            ));
+        }
         let (a, b) = (v.id.clone(), new_id);
         // TA31: the Also export opt-out (`[export] skip`, set ids) follows, in the same step.
         self.edit_docs(&format!("Rename {a}"), None, true, move |p, s| {
@@ -2403,34 +2746,66 @@ impl AppModel {
         Ok(())
     }
 
-    /// Delete a set the user created, or the entry of a set whose files have all gone (DECISIONS P2–P3: neither
-    /// comes back from the file names); false (nothing done) for a live automatic set.
-    pub fn delete_set(&mut self, id: &str) -> bool {
-        if !self.sets_editable()
-            || !self
-                .view_of(id)
-                .is_some_and(|v| v.created || v.key.is_empty())
-        {
-            return false;
+    /// Note HF1: the no-set textures among `keys` go back to the sets their names make, as one undo step.
+    pub fn back_to_automatic_set(&mut self, keys: &[String]) -> Result<(), String> {
+        if let Some(why) = self.sets_read_only_reason() {
+            return Err(why);
         }
+        let keys: Vec<String> = keys.iter().filter(|k| self.is_no_set(k)).cloned().collect();
+        if keys.is_empty() {
+            return Ok(());
+        }
+        self.edit_docs("Back to its automatic set", None, true, move |_, s| {
+            for k in &keys {
+                s.set_no_set(k, false);
+            }
+        });
+        Ok(())
+    }
+
+    /// Note HF1: delete any set. Its textures (not the packed outputs, which follow their raw maps) go to no set and
+    /// the automatic set does not come back; an entry with no files just goes. Returns how many textures went to no
+    /// set, or `None` (nothing done) when there is no such set or the project file takes no edit.
+    fn delete_counted(&mut self, id: &str) -> Option<usize> {
+        if !self.sets_editable() {
+            return None;
+        }
+        let v = self.view_of(id)?;
+        let files: Vec<String> = v
+            .members
+            .iter()
+            .filter(|k| !self.is_packed(k))
+            .cloned()
+            .collect();
+        let n = files.len();
         let i = id.to_string();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
-            s.delete_set(&i)
+            s.delete_set(&i, &files)
         });
-        true
+        self.prune_collapsed();
+        Some(n)
+    }
+
+    /// `delete_counted`, as done or not.
+    pub fn delete_set(&mut self, id: &str) -> bool {
+        self.delete_counted(id).is_some()
     }
 
     /// Note FC5 (supersedes AG13's confirm): the set menu's Delete set: no question, one undo step and a toast
-    /// `Deleted set {id} ({n} members)` with Undo.
-    pub fn delete_set_with_toast(&mut self, id: &str, members: usize) {
-        if !self.delete_set(id) {
+    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1).
+    pub fn delete_set_with_toast(&mut self, id: &str) {
+        let Some(n) = self.delete_counted(id) else {
             return;
-        }
+        };
         let step = (self.history.undo.len(), self.history.pushes);
-        let s = if members == 1 { "" } else { "s" };
+        let text = match n {
+            0 => format!("Deleted set {id}"),
+            1 => format!("Deleted set {id} (1 texture now in no set)"),
+            n => format!("Deleted set {id} ({n} textures now in no set)"),
+        };
         self.messages.notify_with(
             super::messages::Severity::Info,
-            format!("Deleted set {id} ({members} member{s})"),
+            text,
             Some(super::messages::ToastAction::UndoDeleteSet(step.0, step.1)),
         );
     }
@@ -2447,9 +2822,8 @@ impl AppModel {
         }
     }
 
-    /// Take `item` out of set `id` (it becomes a set of its own, or returns to the automatic grouping when it was
-    /// moved in). Refused for a packed map (it follows its raw maps) and for the only member of a set that it is in
-    /// by automatic grouping (it already is a set of its own; the engine would rename it `<stem>~2`).
+    /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
+    /// in, the only member). Refused for a packed map (it follows its raw maps).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -2462,13 +2836,6 @@ impl AppModel {
         };
         if !v.members.iter().any(|k| k == item) {
             return Err(format!("{item} is not in {}", v.id));
-        }
-        let moved_in = self.sets_doc.as_ref().is_some_and(|d| {
-            entry_of(&d.entries(), &v.id)
-                .is_some_and(|e| e.add.iter().any(|f| crate::sets_doc::names_file(f, item)))
-        });
-        if v.members.len() == 1 && !moved_in {
-            return Err(format!("{item} is the only texture in {}", v.id));
         }
         self.leaves_locked(item)?;
         let (i, it) = (v.id.clone(), item.to_string());
@@ -2513,6 +2880,26 @@ impl AppModel {
             self.messages.log(
                 super::messages::Severity::Info,
                 format!("{id}: {f} no longer exists, so it was cleared from the set"),
+            );
+        }
+        // Note HF1: a no-set file gone from disk takes its entry with it.
+        let gone_no_set: Vec<String> = self
+            .sets_doc
+            .as_ref()
+            .map(|d| d.no_set())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|k| !key_on_disk(&root, k))
+            .collect();
+        for k in gone_no_set {
+            let Some(doc) = self.sets_doc.as_mut() else {
+                return;
+            };
+            doc.set_no_set(&k, false);
+            cleared = true;
+            self.messages.log(
+                super::messages::Severity::Info,
+                format!("{k} no longer exists, so it was cleared from the textures in no set"),
             );
         }
         if cleared {
@@ -2688,9 +3075,10 @@ impl AppModel {
         (own == Some(serde_json::json!(Subtype::SkinAlbedo))).then(|| (item.clone(), was, false))
     }
 
-    /// F3b D2/D3: rename set `set`'s outputs to base name `name` (`None` restores the names that mirror the sources).
-    /// A PBR set on CS writes its PGPatcher `rename` key (V3: a file name; the outputs and the JSON follow the
-    /// prefix); any other set writes `output_name`. A re-plan follows; inside `batch_edit` it joins the batch.
+    /// F3b D2/D3: rename set `set`'s outputs to `name` (`None` restores the names that mirror the sources). Only a
+    /// PBR set on CS takes a name (Note HJ1): it writes its PGPatcher `rename` key, a file name or a whole path
+    /// (HJ5; `rename_value`); the outputs and the JSON follow the prefix. Any other set refuses a name; `None` still
+    /// clears an old `output_name` (HJ2). A re-plan follows; inside `batch_edit` it joins the batch.
     pub fn set_output_name(&mut self, set: &str, name: Option<&str>) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -2699,20 +3087,22 @@ impl AppModel {
             return Err(format!("no set {set}"));
         };
         let name = name.map(strip_lead).filter(|n| !n.is_empty());
-        if let Some(n) = name {
-            check_output_name(n)?;
-        }
-        let (id, name) = (v.id.clone(), name.map(str::to_string));
-        if v.pbr && self.target == Target::Cs {
-            let value = name.map(Value::String);
+        let id = v.id.clone();
+        if self.renames_outputs(&v) {
+            let value = name
+                .map(|n| rename_value(&v, n).map(Value::String))
+                .transpose()?;
             self.edit_docs("Rename outputs", None, true, move |_, d| {
                 d.set_value(&id, "rename", value);
                 d.set_output_name(&id, None);
             });
-        } else {
+        } else if name.is_none() {
+            // An old `output_name` (HJ2) can still be cleared.
             self.edit_docs("Rename outputs", None, true, move |_, d| {
-                d.set_output_name(&id, name.as_deref())
+                d.set_output_name(&id, None)
             });
+        } else {
+            return Err("output names are for PGPatcher PBR sets".into());
         }
         Ok(())
     }
@@ -2783,13 +3173,6 @@ impl AppModel {
             Some(Value::String(t)) if is_path_key(key) => Some(Value::from(strip_lead(&t))),
             v => v,
         };
-        // DECISIONS AN2: a renamed set takes no extra match; the controls show the reason.
-        if self.view_of(set).is_some_and(|view| {
-            let derived = view.derived_match.as_deref().unwrap_or("");
-            extra_match_refusal(&view.settings, derived, key, v.as_ref()).is_some()
-        }) {
-            return;
-        }
         let (s_id, k) = (set.to_string(), key.to_string());
         let merge = Some(format!("{set}:{key}"));
         self.edit_docs(&format!("Change {key}"), merge, replan, move |_, d| {

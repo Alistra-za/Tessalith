@@ -37,6 +37,8 @@ pub struct Work {
     /// Source samples (any channel) that were NaN or infinite and were replaced before processing.
     /// Task 37 surfaces a non-zero count as a warning.
     pub nonfinite_samples: u64,
+    /// Note HR6: the alpha-test coverage just before a resize, the reference for a resized cutout; else `None`.
+    pub source_coverage: Option<f64>,
 }
 
 pub fn domain_for(p: &Profile) -> Domain {
@@ -202,6 +204,16 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
                 for c in &mut px[..3] {
                     *c = *c * 2.0 - 1.0;
                 }
+                // Note IA1: inverting a stored channel (1 − v) negates its decoded value.
+                match p.channels.msn_source {
+                    MsnSource::Skyrim => {}
+                    MsnSource::SwapGb => px.swap(1, 2),
+                    MsnSource::InvertB => px[2] = -px[2],
+                    MsnSource::InvertGb => {
+                        px[1] = -px[1];
+                        px[2] = -px[2];
+                    }
+                }
             }
             Domain::SignedRg => {
                 for c in &mut px[..2] {
@@ -232,19 +244,25 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
             }
         }
     }
+    let resized = crate::resize::target_dims((img.width, img.height), p) != (img.width, img.height);
+    let source_coverage = (resized && alpha_present && p.coverage_enabled()).then(|| {
+        let alpha = img.px.iter().map(|q| q[3]);
+        crate::coverage::coverage_fraction(alpha, p.alpha.threshold, p.alpha.compare)
+    });
     let mut work = Work {
         img,
         alpha_present,
         domain,
         roughness_r_squared: p.subtype.is_roughness_member(),
         nonfinite_samples,
+        source_coverage,
     };
     crate::resize::resize_work(&mut work, p); // (6)
     work
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::presets::PresetRegistry;
 
@@ -386,6 +404,28 @@ mod tests {
     }
 
     #[test]
+    fn msn_source_reaches_the_skyrim_layout() {
+        // Note IA1: a baker's model-space map, decoded to [-1, 1], then G and B swapped or inverted.
+        let px = [0.25, 0.75, 1.0, 1.0];
+        for (src, want) in [
+            (MsnSource::Skyrim, [-0.5, 0.5, 1.0]),
+            (MsnSource::SwapGb, [-0.5, 1.0, 0.5]),
+            (MsnSource::InvertB, [-0.5, 0.5, -1.0]),
+            (MsnSource::InvertGb, [-0.5, -0.5, -1.0]),
+        ] {
+            let mut p = profile(Subtype::Msn);
+            p.channels.msn_source = src;
+            let w = preprocess(Rgba32F::new(1, 1, px), &p);
+            assert_eq!(&w.img.px[0][..3], &want, "{src:?}");
+        }
+        // Only `msn` reads it: a tangent-space normal decodes as before.
+        let mut p = profile(Subtype::Normal);
+        let plain = preprocess(Rgba32F::new(1, 1, px), &p).img.px[0];
+        p.channels.msn_source = MsnSource::InvertGb;
+        assert_eq!(preprocess(Rgba32F::new(1, 1, px), &p).img.px[0], plain);
+    }
+
+    #[test]
     fn msn_and_flow_decode_without_normal_handling() {
         // msn: all three channels *2-1; no flip, no Z rebuild, no clamp even if the profile asks.
         let mut p = profile(Subtype::Msn);
@@ -432,6 +472,46 @@ mod tests {
         // `remove` drops alpha first, so nothing is invisible.
         p.alpha.policy = AlphaPolicy::Remove;
         assert_eq!(preprocess(src(), &p).img.px[1], [0.0, 0.0, 0.0, 1.0]);
+    }
+
+    /// Note HR6: an 8x8 cutout with 8 of 64 texels passing `ge 128`.
+    pub(crate) fn sparse_cutout() -> Rgba32F {
+        let mut img = Rgba32F::new(8, 8, [0.5, 0.5, 0.5, 0.0]);
+        for y in (0..8).step_by(2) {
+            for x in (0..8).step_by(4) {
+                img.at_mut(x, y)[3] = 1.0;
+            }
+        }
+        img
+    }
+
+    /// Note HR6: `cutout` at threshold 128 (`ge`), no resize, floor 1 so a `resize` mode applies to small images.
+    pub(crate) fn cutout_profile() -> Profile {
+        let mut p = profile(Subtype::Diffuse);
+        p.alpha.policy = AlphaPolicy::Cutout;
+        p.alpha.threshold = 128;
+        p.alpha.compare = AlphaCompare::Ge;
+        p.resize = ResizeMode::None;
+        p.resize_floor = 1;
+        p
+    }
+
+    /// Note HR6: the coverage is recorded just before a resize, and only when one happens and coverage applies.
+    #[test]
+    fn a_resize_records_the_source_coverage() {
+        let mut p = cutout_profile();
+        p.resize = ResizeMode::Half;
+        let w = preprocess(sparse_cutout(), &p);
+        assert_eq!((w.img.width, w.img.height), (4, 4));
+        assert_eq!(w.source_coverage, Some(0.125));
+        p.alpha.policy = AlphaPolicy::Blend;
+        assert_eq!(preprocess(sparse_cutout(), &p).source_coverage, None);
+        let p = cutout_profile();
+        assert_eq!(preprocess(sparse_cutout(), &p).source_coverage, None);
+        // The automatic power-of-two step is a resize too.
+        let w = preprocess(Rgba32F::new(6, 6, [0.5, 0.5, 0.5, 1.0]), &p);
+        assert_ne!((w.img.width, w.img.height), (6, 6));
+        assert_eq!(w.source_coverage, Some(1.0));
     }
 
     #[test]

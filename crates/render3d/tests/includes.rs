@@ -1,5 +1,12 @@
 use render3d::includes::expand;
+use render3d::ShaderSource;
 use std::fs;
+use std::path::Path;
+
+/// `expand` of `rel` in the folder `r`.
+fn folder(r: &Path, rel: &str) -> std::io::Result<render3d::includes::Expanded> {
+    expand(&ShaderSource::Folder(r.to_path_buf()), rel)
+}
 
 #[test]
 fn expands_relative_to_root_and_includer() {
@@ -17,7 +24,7 @@ fn expands_relative_to_root_and_includer() {
     )
     .unwrap();
     fs::write(r.join("Common/B.hlsli"), "float b;\n").unwrap();
-    let e = expand(&r.join("Lighting.hlsl"), &[r.to_path_buf()]).unwrap();
+    let e = folder(r, "Lighting.hlsl").unwrap();
     let ia = e.text.find("float a;").unwrap();
     let ib = e.text.find("float b;").unwrap();
     let im = e.text.find("float main_marker;").unwrap();
@@ -34,7 +41,7 @@ fn missing_include_left_for_compiler() {
         "#if 0\n#include \"Nope/Gone.hlsli\"\n#endif\nfloat x;\n",
     )
     .unwrap();
-    let e = expand(&d.path().join("x.hlsl"), &[d.path().to_path_buf()]).unwrap();
+    let e = folder(d.path(), "x.hlsl").unwrap();
     assert!(e.text.contains("#include \"Nope/Gone.hlsli\""));
 }
 
@@ -42,23 +49,13 @@ fn missing_include_left_for_compiler() {
 fn include_cycle_is_capped() {
     let d = tempfile::tempdir().unwrap();
     fs::write(d.path().join("a.hlsli"), "#include \"a.hlsli\"\n").unwrap();
-    assert!(expand(&d.path().join("a.hlsli"), &[d.path().to_path_buf()]).is_err());
+    assert!(folder(d.path(), "a.hlsli").is_err());
 }
 
-/// Real-CS check; skips cleanly when the folder is absent.
+/// The bundled CS Lighting.hlsl expands with no include left.
 #[test]
-#[ignore]
-fn real_cs_lighting_expands() {
-    let Some(root) = std::env::var_os("SDC_CS_SHADERS").map(std::path::PathBuf::from) else {
-        eprintln!("skipped: set SDC_CS_SHADERS");
-        return;
-    };
-    let f = root.join("Lighting.hlsl");
-    if !f.is_file() {
-        eprintln!("skip: CS not present");
-        return;
-    }
-    let e = expand(&f, std::slice::from_ref(&root)).unwrap();
+fn bundled_cs_lighting_expands() {
+    let e = expand(&ShaderSource::Bundled, "Lighting.hlsl").unwrap();
     let left: Vec<&str> = e
         .text
         .lines()
@@ -77,9 +74,7 @@ fn real_cs_lighting_expands() {
         e.text.len(),
         left.len()
     );
-    for l in &left {
-        eprintln!("UNEXPANDED: {l}");
-    }
+    assert!(left.is_empty(), "unexpanded: {left:?}");
 }
 
 #[test]
@@ -93,7 +88,7 @@ fn spaced_and_tabbed_include_directives_expand() {
     .unwrap();
     fs::write(r.join("x.hlsli"), "\u{feff}float x;\n").unwrap();
     fs::write(r.join("y.hlsli"), b"float y;\n\xff\n").unwrap();
-    let e = expand(&r.join("m.hlsl"), &[r.to_path_buf()]).unwrap();
+    let e = folder(r, "m.hlsl").unwrap();
     assert_eq!(e.files.len(), 3);
     assert!(e.text.contains("float x;") && e.text.contains("float y;"));
     assert!(!e.text.contains('\u{feff}'));

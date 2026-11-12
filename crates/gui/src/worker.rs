@@ -87,46 +87,6 @@ pub enum WorkerMsg {
         id: u64,
         image: Option<Arc<crate::model::heatmap::HeatImage>>,
     },
-    /// The preview overlay of job `generation` (`AppModel::uv_overlay_job`), ready to upload; `None` when the job
-    /// panicked.
-    Overlay {
-        generation: u64,
-        image: Option<Arc<eframe::egui::ColorImage>>,
-    },
-    /// The UV coverage of scan path `tex` at written size `size` (`AppModel::uv_coverage`, Check all); a failed read
-    /// is a `Coverage` with an error line (K18). The overlay image is built later, for the expanded item only (CL44).
-    /// A cancelled read sends nothing; a stale `generation` (a clear or a new folder since) is dropped.
-    UvCoverage {
-        generation: u64,
-        tex: String,
-        size: [u32; 2],
-        coverage: Arc<crate::model::uv_coverage::Coverage>,
-    },
-    /// "Check all UV coverage" run `run` has read `done` of `total` textures; `finished` once the run has ended
-    /// (cancelled runs end with `done < total`).
-    UvProgress {
-        run: u64,
-        done: usize,
-        total: usize,
-        finished: bool,
-    },
-    /// The scan-has-rows probe of the scan DB as it was at `stamp`.
-    ScanHasRows {
-        stamp: crate::model::cs_pbr::Stamp,
-        rows: bool,
-    },
-    /// The RNM blended thumbnail of job `id` (`AppModel::rnm_preview_frame`); the reason when the blend failed.
-    RnmPreview {
-        id: u64,
-        image: Result<Arc<crate::model::rnm_preview::RnmThumb>, String>,
-    },
-    /// A Generate-from-normal job `id` ended (`AppModel::gen_frame` previews, `gen_generate` writes); a stale id is
-    /// dropped on landing.
-    Generated {
-        id: u64,
-        preview: bool,
-        result: Result<Arc<crate::model::from_normal::GenResult>, String>,
-    },
     /// Source sizes read from file headers (`AppModel::kick_dims`).
     Dims(Vec<(crate::model::out_size::DimKey, Option<(u32, u32)>)>),
     Encoded {
@@ -145,7 +105,7 @@ pub enum WorkerMsg {
     },
     /// Meshes view: the scan ended. The error keeps its kind (`PgpRunning`, `Cancelled`, a database error).
     Scanned(Result<modscan::scan::Report, modscan::ScanError>),
-    /// Meshes view 3D panel (plan B Task B8): a reply of the render thread or the CS locate worker.
+    /// Meshes view 3D panel (plan B Task B8): a reply of the render thread.
     Viewport3d(crate::model::viewport3d::V3Reply),
     /// A Save report write ended (AG130): the path and the error, if any.
     ReportSaved {
@@ -414,7 +374,7 @@ pub fn spawn_source(
                 session
                     .preview_source_face(&job, face, max, &cancel)
                     .map(Arc::new)
-                    .map_err(|e| format!("{e:?}"))
+                    .map_err(|e| e.to_string())
             },
             |e| WorkerMsg::Source {
                 token,
@@ -454,7 +414,7 @@ pub fn spawn_encode(
                             .decode_if_cpu_path(),
                         )
                     })
-                    .map_err(|e| format!("{e:?}"))
+                    .map_err(|e| e.to_string())
             },
             |e| WorkerMsg::Encoded {
                 token,

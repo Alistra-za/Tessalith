@@ -95,7 +95,8 @@ fn right_click_keeps_a_selected_entry_and_replaces_an_unselected_one() {
 #[test]
 fn the_tile_menu_is_a_list_with_counts_and_reasons() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
+    // ROCK is a PGPatcher PBR set, so Rename outputs is offered (Note HJ1).
+    let mut m = pbr_opened(d.path());
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
     assert_eq!(m.menu_title(false), "2 textures selected");
@@ -115,7 +116,8 @@ fn the_tile_menu_is_a_list_with_counts_and_reasons() {
             (MenuAction::ResetAll, "Reset all settings for 2 selected…"),
             // F3b D5: the rename entries are appended.
             (MenuAction::RenameInputs, "Rename inputs…  F2"),
-            (MenuAction::RenameOutputs, "Rename outputs…"),
+            // One of the two sets qualifies, so the label is singular and carries the count (Note HJ1).
+            (MenuAction::RenameOutputs, "Rename output (1)…"),
         ]
     );
     assert_eq!(

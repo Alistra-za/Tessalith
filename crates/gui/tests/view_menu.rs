@@ -19,7 +19,7 @@ fn menu<'a>(width: f32) -> Harness<'a, Viewport3d> {
             |ui, v: &mut Viewport3d| {
                 sdc_gui::ui::viewport3d::show(ui, v);
             },
-            Viewport3d::with_state(V3State::NotFound),
+            Viewport3d::with_state(V3State::Ready),
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();

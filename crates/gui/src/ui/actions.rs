@@ -495,12 +495,13 @@ pub static ACTIONS: &[Action] = &[
     // Sets
     a(
         "rename",
-        "Rename the outputs of the selected sets, or the inputs of the selected textures",
+        "Rename the outputs of the selected PGPatcher PBR sets, or the inputs of the selected textures",
         Sets,
         &[key(Key::F2)],
         |m, _| {
             use crate::model::rename::RenameMode;
-            let sets = !m.selected_sets().is_empty();
+            // Note HJ1: no PGPatcher PBR set in the selection → Inputs.
+            let sets = !m.selected_sets().is_empty() && !m.rename_keys(RenameMode::Outputs).is_empty();
             m.open_rename(if sets {
                 RenameMode::Outputs
             } else {
@@ -875,7 +876,7 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
     }
 }
 
-/// The "Keyboard" table of docs/wiki/GUI-Keyboard.md, from [`actions`]: one row per action with a key.
+/// The "All shortcuts" table of docs/wiki/GUI-Guide.md, from [`actions`]: one row per action with a key.
 pub fn markdown_table() -> String {
     let mut s = String::from("| Area | Keys | Action |\n|---|---|---|\n");
     for area in Area::ALL {

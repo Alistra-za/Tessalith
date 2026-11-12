@@ -638,6 +638,32 @@ fn unresolved_files_are_skipped_with_exit_1() {
     assert!(fx.dds("textures/a/wall_i.dds").exists());
 }
 
+/// Note GY1: a lone file with an unknown suffix waits for a type: exit 1, and the console names the file and the
+/// `--set` that assigns one. Assigning it converts it.
+#[test]
+fn an_unknown_suffix_exits_1_and_names_the_fix() {
+    let fx = Fx::new();
+    fx.rgb("rock_bump.png");
+    let o = fx.convert(&["--accept-suggestions", "high"]);
+    assert_eq!(code(&o), 1);
+    let log = text(&o.stderr);
+    assert!(
+        log.lines()
+            .any(|l| l.contains("rock_bump.png") && l.contains("--set file:<path>.subtype=")),
+        "{log}"
+    );
+    assert!(!fx.dds("textures/a/rock_bump.dds").exists());
+    // R1: the hint's form, with the file's path as written in the docs, works as typed.
+    let o = fx.convert(&[
+        "--accept-suggestions",
+        "high",
+        "--set",
+        "file:textures/a/rock_bump.png.subtype=diffuse",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert!(fx.dds("textures/a/rock_bump.dds").exists());
+}
+
 /// DECISIONS S-mips-13: an unscoped filter the `_n` cannot use is an Info line on the console, not an error.
 #[test]
 fn unscoped_kaiser_prints_a_colour_only_line() {
@@ -1369,6 +1395,40 @@ fn also_in_sdc_toml_writes_three_folders_under_o() {
     assert_eq!(done, 3);
 }
 
+/// Note HQ1 (fix round 1): the Also folders go beside each other in `-o` itself, not below the output root a
+/// `textures` input moves to, and each folder keeps the `textures` folder.
+#[test]
+fn also_from_a_textures_root_writes_its_folders_in_o() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    fx.write("in/textures/sdc.toml", ALSO_ALL);
+    let o = fx
+        .sdc()
+        .args(["convert", "--json", "--recursive"])
+        .args(HI)
+        .arg("-o")
+        .arg(fx.p("out"))
+        .arg(fx.p("in/textures"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let folders: Vec<String> = std::fs::read_dir(fx.p("out"))
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    let pbr = folders
+        .iter()
+        .find(|f| f.ends_with(" PBR"))
+        .unwrap_or_else(|| panic!("no PBR folder in {folders:?}"));
+    assert!(fx
+        .dds(&format!("{pbr}/textures/pbr/arm/steel.dds"))
+        .exists());
+    assert!(
+        !text(&o.stderr).contains("not written by this export"),
+        "{}",
+        text(&o.stderr)
+    );
+}
 #[test]
 fn the_cli_and_the_engine_write_the_same_bytes() {
     use engine::also::{run_also, AlsoSpec};

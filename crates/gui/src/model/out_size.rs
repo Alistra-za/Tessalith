@@ -106,6 +106,9 @@ pub type DimKey = (std::path::PathBuf, Option<(u64, u64)>);
 /// Reads one source size from its header (`source_dims`).
 pub type DimsReader = fn(&std::path::Path) -> Option<(u32, u32)>;
 
+/// The folder total's key: plan, sets-document and scope revision (`item_in_run` reads all three).
+type FolderKey = (u64, u64, u64);
+
 /// Per-item sizes by plan revision (`AppModel::items_rev`): the source dimensions are read once per file and
 /// kept; the sizes are rebuilt when the revision moves.
 #[derive(Default)]
@@ -113,7 +116,7 @@ pub struct SizeCache {
     rev: Option<u64>,
     /// By file and the stamp the plan read it at: a changed file is read again.
     dims: HashMap<DimKey, Option<(u32, u32)>>,
-    folder: Option<(u64, (u64, usize))>,
+    folder: Option<(FolderKey, (u64, usize))>,
     sizes: HashMap<String, Option<SizeEst>>,
     /// Files sent to the header worker so far (tests).
     pub reads: u32,
@@ -240,9 +243,9 @@ impl AppModel {
     }
 
     /// The folder's total: every texture that is written, or will be once decided (a job that is Ready or
-    /// NeedsDecision). Cached by plan revision.
+    /// NeedsDecision) and is in the run. Cached by plan, sets-document and scope revision (`item_in_run` reads all three).
     pub fn folder_size(&mut self) -> (u64, usize) {
-        let rev = self.items_rev();
+        let rev = (self.items_rev(), self.doc_rev(), self.scope_rev);
         if let Some((r, t)) = self.sizes.folder {
             if r == rev {
                 return t;
@@ -253,6 +256,7 @@ impl AppModel {
             .iter()
             .filter(|i| {
                 i.job.is_some()
+                    && self.item_in_run(i)
                     && matches!(
                         i.status,
                         crate::model::items::ItemStatus::Ready

@@ -25,14 +25,18 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut mode, RenameMode::Inputs, "Inputs")
                 .on_hover_text("Read the files under new names (sdc.toml [inputs]); the files on disk are not touched.");
-            ui.selectable_value(&mut mode, RenameMode::Outputs, "Outputs")
-                .on_hover_text("Give each set's outputs a new base name; every output keeps its folder and suffix.");
+            // Note HJ1: absent, not greyed, when no selected set is a PGPatcher PBR set.
+            if d.mode == RenameMode::Outputs || !model.rename_keys(RenameMode::Outputs).is_empty() {
+                ui.selectable_value(&mut mode, RenameMode::Outputs, "Outputs")
+                    .on_hover_text("Give each set's outputs a new base name or folder (its PGPatcher rename); every output keeps its suffix.");
+            }
         });
         ui.label(
-            egui::RichText::new(match d.mode {
-                RenameMode::Inputs if d.recipe.path => "The folders and the base name change; the map suffix (_n, _normal…) and the extension stay.",
-                RenameMode::Inputs => "Only the base name changes (the part before _n, _normal…). Tick Whole path to change the folders too.",
-                RenameMode::Outputs => "A TruePBR set on Community Shaders renames through its PGPatcher rename.",
+            egui::RichText::new(match (d.mode, d.recipe.path) {
+                (RenameMode::Inputs, true) => "The folders and the base name change; the map suffix (_n, _normal…) and the extension stay.",
+                (RenameMode::Inputs, false) => "Only the base name changes (the part before _n, _normal…). Tick Whole path to change the folders too.",
+                (RenameMode::Outputs, true) => "The folders and the base name change; the suffix and the extension stay. A new folder is written as PGPatcher slot commands.",
+                (RenameMode::Outputs, false) => "Only the base name changes. Tick Whole path to change the folders too. A new folder is written as PGPatcher slot commands.",
             })
             .small()
             .weak(),
@@ -53,11 +57,15 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
                 ui.end_row();
                 ui.checkbox(&mut d.recipe.regex, "Regex")
                     .on_hover_text("$1 or ${name} in Replace for a capture group");
-                if d.mode == RenameMode::Inputs {
-                    ui.checkbox(&mut d.recipe.path, "Whole path").on_hover_text(
-                        "Find, Replace, Prefix and Suffix work on the folders and the base name",
-                    );
-                }
+                // Note HJ5: in Outputs mode the path is the output's, under the export folder.
+                ui.checkbox(&mut d.recipe.path, "Whole path").on_hover_text(match d.mode {
+                    RenameMode::Inputs => {
+                        "Find, Replace, Prefix, Suffix and Case work on the folders and the base name"
+                    }
+                    RenameMode::Outputs => {
+                        "Find, Replace, Prefix, Suffix and Case work on the output's folders under the export folder and its base name"
+                    }
+                });
                 egui::ComboBox::from_id_salt("rename-case")
                     .selected_text(case_label(d.recipe.case))
                     .show_ui(ui, |ui| {

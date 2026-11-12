@@ -230,8 +230,9 @@ fn toast_undo_after_another_edit_leaves_everything() {
         m.messages
             .toasts()
             .iter()
-            .any(|t| t.text.contains("already undone or edited since")),
-        "it says why nothing happened"
+            .any(|t| t.text
+                == "The restored edits were already undone or edited since: press Ctrl+Z to undo or Ctrl+Y to redo"),
+        "it says why nothing happened and which keys step through the edits"
     );
 }
 

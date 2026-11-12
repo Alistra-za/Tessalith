@@ -3,9 +3,6 @@
 /// Column `i` is the cube-space axis that world axis `i` samples.
 pub const WORLD_TO_CUBE: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]; // identity, determinant +1
 
-/// World up in cube space (column 2).
-pub const UP: [f32; 3] = [0.0, 0.0, 1.0];
-
 pub fn to_cube(w: [f32; 3]) -> [f32; 3] {
     let m = WORLD_TO_CUBE;
     std::array::from_fn(|r| m[r][0] * w[0] + m[r][1] * w[1] + m[r][2] * w[2])
@@ -53,7 +50,6 @@ mod tests {
         for (w, face, _, _) in TABLE {
             assert_eq!(dir_to_face(to_cube(w)).0, face, "{w:?}");
         }
-        assert_eq!(UP, to_cube(U));
     }
 
     #[test]

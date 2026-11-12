@@ -1,15 +1,17 @@
 //! The Review tab (layout v2 B2, C2, C5; R1–R4, R11): blockers and undecided textures side by side, what the export
 //! writes, and one Export button. Not a dialog: Enter does nothing here (N3).
-use super::settings_panel::{alpha_dropdown, subtype_label, unclear_layouts};
+use super::settings_panel::{alpha_question, subtype_label};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
-use crate::model::code_text::{ack_label, ack_label_for_texture, alpha_confirm_text, code_line};
+use crate::model::code_text::{
+    ack_label, ack_label_for_texture, alpha_confirm_text, code_line, not_a_cube,
+};
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
-use engine::config::{CubeLayout, Subtype, Target};
+use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
 
@@ -23,8 +25,6 @@ pub enum RowPick {
     Select(String),
     Decide(String, Subtype),
     Answer(String, Answer),
-    /// Note FC3 (DT35): the cube layout picked from the row's `Set layout ▾`.
-    Layout(String, CubeLayout),
 }
 
 pub fn apply(model: &mut AppModel, pick: RowPick) {
@@ -32,27 +32,7 @@ pub fn apply(model: &mut AppModel, pick: RowPick) {
         RowPick::Select(k) => model.select_item(&k),
         RowPick::Decide(k, st) => model.decide_undecided_row(&k, st),
         RowPick::Answer(k, a) => model.answer_undecided_row(&k, a),
-        RowPick::Layout(k, l) => model.set_field(&k, "cubemap.layout", serde_json::json!(l)),
     }
-}
-
-/// Note FC3 (supersedes DT35's hint): the cube layout question answered on the row, `Set layout ▾`, with the layouts
-/// the settings panel's picker offers for an unclear image.
-pub const SET_LAYOUT: &str = "Set layout ▾";
-
-fn layout_menu(ui: &mut egui::Ui, key: &str, why: &str) -> Option<RowPick> {
-    let mut pick = None;
-    ui.menu_button(SET_LAYOUT, |ui| {
-        for (l, label) in unclear_layouts() {
-            if ui.button(*label).clicked() {
-                pick = Some(RowPick::Layout(key.to_string(), *l));
-                ui.close();
-            }
-        }
-    })
-    .response
-    .on_disabled_hover_text(why);
-    pick
 }
 
 /// One undecided texture's row: the name link and the Problems row's fix buttons on one line (`Set type: X ✓ ▾`, the
@@ -87,7 +67,9 @@ pub fn undecided_row(
             Decision::Acknowledge(code) => {
                 Some((code_line(*code).to_string(), Some(code.as_str())))
             }
-            Decision::CubeLayout | Decision::Subtype { .. } => None,
+            // Note GU2: no menu, only what a cube source is; the type picker on the row is the way out.
+            Decision::NotACubeSource => Some((not_a_cube(item.job.as_ref()), None)),
+            Decision::Subtype { .. } => None,
         })
         .collect();
     if !sentences.is_empty() {
@@ -124,8 +106,8 @@ fn split_button(ui: &mut egui::Ui, text: &str) -> (egui::Response, egui::Respons
 }
 
 /// A Problems row's fix buttons (A1), one set per open question of the texture `key`: the suggestion's one-click
-/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown (Note FM35), Acknowledge. All
-/// disabled with `off` as hover.
+/// accept with ▾ for the type picker, or a plain Set type… (Note FB9), the alpha dropdown and Confirm (Note FM35, HI8),
+/// Acknowledge. All disabled with `off` as hover.
 pub fn fix_buttons(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -156,16 +138,21 @@ fn fix_buttons_on(
             match d {
                 // Note FB9 (owner amendment A): `[Set type: {suggestion} ✓] ▾`, the main part accepts, ▾ opens the
                 // picker; without a suggestion the plain "Set type…" opens it.
-                Decision::Subtype { suggested } => {
+                // A not-a-cube source has only this answer too: a different sub-type (no suggestion).
+                d @ (Decision::Subtype { .. } | Decision::NotACubeSource) => {
+                    let suggested = match d {
+                        Decision::Subtype { suggested } => *suggested,
+                        _ => None,
+                    };
                     let opener = match suggested {
                         Some(st) => {
-                            let (accept, arrow) = split_button(ui, &accept_text(*st));
+                            let (accept, arrow) = split_button(ui, &accept_text(st));
                             if accept
                                 .on_hover_text("Use the suggested type")
                                 .on_disabled_hover_text(why)
                                 .clicked()
                             {
-                                pick = Some(RowPick::Decide(key.to_string(), *st));
+                                pick = Some(RowPick::Decide(key.to_string(), st));
                             }
                             // ▾ is what the plain button was: the picker, so it keeps its name.
                             arrow.widget_info(|| {
@@ -183,24 +170,19 @@ fn fix_buttons_on(
                     let id = egui::Id::new(("set-type-picker", key));
                     let kind = TypeKind::SetType;
                     let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
-                    let (t, s) = (model.target, *suggested);
+                    let (t, s) = (model.target, suggested);
                     if let Some(st) = type_picker::show(ui, id, &opener, None, s, kind, t, grass) {
                         pick = Some(RowPick::Decide(key.to_string(), st));
                     }
                 }
                 // Note FM35 (supersedes FI11's Decide… menu): the row's line names the type, and this dropdown opens
-                // on it; Enter on the row confirms it.
+                // on it; Enter on the row confirms it, as Confirm does (Note HI8).
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
                         let id = egui::Id::new(("problems-alpha", key));
-                        if let Some(p) = alpha_dropdown(ui, id, shown, why, surface) {
+                        if let Some(p) = alpha_question(ui, id, shown, why, surface) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
-                    }
-                }
-                Decision::CubeLayout => {
-                    if let Some(p) = layout_menu(ui, key, why) {
-                        pick = Some(p);
                     }
                 }
                 Decision::Acknowledge(code) => {
@@ -598,8 +580,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let json = m.review_json();
     let nif_rows = m.nif_review_rows();
     // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
-    let also_on = m.also_on() || m.target == Target::Cs;
-    let also_err = if m.also_on() {
+    // Note HF10: none for a scope, which Also never runs on.
+    let also_on = (m.also_on() || m.target == Target::Cs) && m.export_scope().is_none();
+    let also_err = if m.also_runs() {
         m.also_gate().err()
     } else {
         None
@@ -865,6 +848,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
         _ => also_section(ui, m, also_err.as_deref(), &mut act),
     };
+    // Note HF9: a scoped review says what it exports above the columns.
+    if let Some(s) = m.export_scope() {
+        ui.add(egui::Label::new(egui::RichText::new(&s.label).strong()).truncate());
+    }
     if ui.ctx().content_rect().width() < STACK_BELOW {
         // Note FB10: one scrolling column, the sections one under another.
         ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();

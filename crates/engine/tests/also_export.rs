@@ -90,11 +90,12 @@ impl Drop for HookVar {
 
 #[test]
 fn a_failed_pbr_encode_is_encoded_again_in_vanilla_not_copied() {
+    // No underscore in the name: a lone `cup_panic_hook` would wait for a type (Note GY1).
     let (_d, m, loc) = project(|m| {
         cup(m);
-        gradient(&m.join("textures/clutter/cup_panic_hook.png"));
+        gradient(&m.join("textures/clutter/cuppanichook.png"));
     });
-    let key = "textures/clutter/cup_panic_hook.dds";
+    let key = "textures/clutter/cuppanichook.dds";
     let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
     // A clean export copies it; then its source changes and the PBR encode fails, leaving a stale PBR file and record.
     also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]))
@@ -102,12 +103,12 @@ fn a_failed_pbr_encode_is_encoded_again_in_vanilla_not_copied() {
         .unwrap();
     assert!(record(&van, key).raw.get("copied_from").is_some());
     png(
-        &m.join("textures/clutter/cup_panic_hook.png"),
+        &m.join("textures/clutter/cuppanichook.png"),
         16,
         16,
         [250, 10, 10, 255],
     );
-    std::env::set_var("SDC_TEST_PANIC_ON", "cup_panic_hook.png");
+    std::env::set_var("SDC_TEST_PANIC_ON", "cuppanichook.png");
     let _hook = HookVar("SDC_TEST_PANIC_ON");
     let sink = Arc::new(ClearHookOnPbrDone(VecSink::default()));
     let s = also_with(
@@ -553,15 +554,6 @@ fn same_identity_fails_when_any_compared_field_differs() {
             Box::new(|j| j.status = JobStatus::Blocked { codes: vec![] }),
         ),
         (
-            "rnm",
-            Box::new(|j| {
-                j.rnm = Some(engine::rnm::RnmJob {
-                    layers: vec![],
-                    ao: None,
-                })
-            }),
-        ),
-        (
             "bake",
             Box::new(|j| {
                 j.bake = Some(engine::bake::BakeJob {
@@ -569,7 +561,6 @@ fn same_identity_fails_when_any_compared_field_differs() {
                     normal_profile: j.profile.clone(),
                     shift: 0,
                     stamp: None,
-                    rnm: None,
                     fit: None,
                 })
             }),
@@ -1279,4 +1270,56 @@ fn a_curves_member_changes_the_vanilla_diffuse() {
         std::fs::read(loc.join("Mod Vanilla/textures/arm/steel.dds")).unwrap()
     };
     assert_ne!(diffuse(false), diffuse(true));
+}
+
+/// Note GV2: a `_curves_generated` file (written by Tessalith 2.x) is still a source; the Also export reads it as the
+/// set's `_curves`. A pin of existing behaviour: the engine no longer writes such files.
+#[test]
+fn curves_generated_reaches_also() {
+    let diffuse = |curves: bool| {
+        let (_d, m, loc) = project(|m| {
+            steel(m);
+            if curves {
+                png(
+                    &m.join("textures/pbr/arm/steel_curves_generated.png"),
+                    16,
+                    16,
+                    [240, 240, 240, 255],
+                );
+            }
+        });
+        let (s, _ev) = also(request(&m, &loc), &spec(&loc, &[AlsoTarget::Vanilla]));
+        assert_eq!(s.unwrap().exit_code(), 0);
+        std::fs::read(loc.join("Mod Vanilla/textures/arm/steel.dds")).unwrap()
+    };
+    assert_ne!(diffuse(false), diffuse(true));
+}
+
+/// Note HQ6 (fix round 1): an Also export of a project opened at its `textures` folder writes under each folder's
+/// `textures\`, and its walk finds every file the phases wrote (job keys get the prefix, `_sdc` below the folder is
+/// skipped), so no file it wrote is noted as not written, on the first run or an up-to-date one.
+#[test]
+fn a_textures_root_notes_none_of_its_own_files() {
+    let (_d, m, loc) = project(|m| {
+        steel(m);
+        cup(m);
+    });
+    let root = m.join("textures");
+    for run in 0..2 {
+        let s = also(request(&root, &loc), &spec(&loc, BOTH)).0.unwrap();
+        assert!(
+            !s.notes.iter().any(|n| n.ends_with(NOT_WRITTEN)),
+            "run {run}: {:?}",
+            s.notes
+        );
+    }
+    let all: Vec<String> = std::fs::read_dir(&loc)
+        .unwrap()
+        .flat_map(|e| dds_files(&e.unwrap().path()))
+        .collect();
+    assert!(
+        all.iter().any(|f| f == "textures/pbr/arm/steel.dds"),
+        "{all:?}"
+    );
+    assert!(all.iter().all(|f| f.starts_with("textures/")), "{all:?}");
 }

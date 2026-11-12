@@ -47,7 +47,8 @@ pub struct ResolveCtx<'a> {
     /// M6 (DECISIONS Note S): set key → the set's shader pick. Empty during pass 1 (`NO_SHADERS`).
     pub shaders: &'a BTreeMap<String, crate::shader::ShaderPick>,
     /// M6 Track E (DECISIONS Note U5): `shader::colour_mesh_key` → the alpha property of each scanned shape that uses
-    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence.
+    /// the colour member (`BatchRequest::mesh_alpha`). Empty (`NO_MESH_ALPHA`) = no evidence. A key there also means a
+    /// scanned mesh uses that file in slot 0 (Note GY6).
     pub mesh_alpha: &'a BTreeMap<String, Vec<crate::shader::MeshAlpha>>,
 }
 
@@ -76,6 +77,8 @@ pub struct SubtypeDecision {
     /// `--accept-suggestions high`.
     pub decided: bool,
     pub suggestions: Vec<Suggestion>,
+    /// Note GY1: the name is an unknown suffix alone in its set and nothing decided it (`suggest::unknown_suffix`).
+    pub waits: bool,
 }
 
 /// A suffix alias in use for one file (spec §3.7, DECISIONS Note G).
@@ -340,12 +343,6 @@ pub fn subtype_requested(ctx: &ResolveCtx, input: &InputFile) -> bool {
             }
     })
 }
-/// M6 Track F2 (DECISIONS Note W3): the `rnm.target` a layer file asked for, by the highest-precedence override that
-/// reaches it (`[files]`, then unscoped, file-glob and path `--set`); `None` = the default from its name.
-pub fn rnm_target_requested(ctx: &ResolveCtx, input: &InputFile) -> Option<RnmTarget> {
-    selector_value(ctx, input, crate::overrides::RNM_TARGET_FIELD)
-        .and_then(crate::overrides::rnm_target_value)
-}
 
 /// The value of the per-file selector `field` from the highest-precedence override that reaches `input`
 /// (`[files]`, then unscoped, file-glob and path `--set`; a sub-type scope is refused at parse time).
@@ -364,7 +361,7 @@ fn selector_value<'a>(ctx: &ResolveCtx<'a>, input: &InputFile, field: &str) -> O
         .map(|o| &o.value)
 }
 
-/// Note DY: what the `helper.*` selectors hand-set for `input`, each field as [`rnm_target_requested`] reads its key.
+/// Note DY: what the `helper.*` selectors hand-set for `input`, each field as [`selector_value`] reads its key.
 pub fn helper_requested(ctx: &ResolveCtx, input: &InputFile) -> crate::helper::HelperSel {
     use crate::helper::*;
     let v = |field| selector_value(ctx, input, field);
@@ -379,8 +376,18 @@ pub fn helper_requested(ctx: &ResolveCtx, input: &InputFile) -> crate::helper::H
 }
 
 pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
+    decide_subtype_with(ctx, f, false)
+}
+
+/// [`decide_subtype`] for a file the plugin scanner may name as a GRAS model's diffuse (`resolve_file_with`).
+fn decide_subtype_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> SubtypeDecision {
     // An invalid chain is reported by `layered_profile`; here it only contributes no rules.
     let chain = preset_chain(ctx, f).unwrap_or_default();
+    // Note GY6: a scanned mesh that uses the file in slot 0, or a GRAS model, says it is a diffuse, as a path does.
+    let mesh_diffuse = gras_diffuse
+        || crate::shader::colour_mesh_key(&f.input.game_path, &f.input.output, None)
+            .is_some_and(|k| ctx.mesh_alpha.contains_key(&k));
+    let may_wait = f.set.members.len() == 1 && !mesh_diffuse;
     let mut suggestions = suggest(&SuggestContext {
         target: ctx.target,
         suffix: f.suffix,
@@ -389,6 +396,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
         alpha: f.analysis.alpha,
         is_float: f.info.is_float,
         advanced_skin: set_is_advanced_skin(ctx, f.set, f.input),
+        may_wait,
     });
     if let Some((alias, canonical, preset)) = alias_parts(ctx, f) {
         for s in &mut suggestions {
@@ -431,6 +439,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                 provenance,
                 decided: true,
                 suggestions,
+                waits: false,
             };
         }
     }
@@ -445,6 +454,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                     provenance,
                     decided: true,
                     suggestions,
+                    waits: false,
                 };
             }
         }
@@ -456,6 +466,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::AnalysisFact("cube-dds".into()),
             decided: true,
             suggestions,
+            waits: false,
         };
     }
     // Note DV1: an inferred plain diffuse (`diffuse`, or `pbr_albedo` in a PBR set) of a chosen Advanced Skin set.
@@ -469,24 +480,37 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::Shader(crate::shader::Shader::AdvancedSkin.id().into()),
             decided: true,
             suggestions,
+            waits: false,
         };
     }
     // S-shader-4: the set's shader re-types a member (eye `_n` → msn, landscape colour → landscape_diffuse).
     if let Some(p) = ctx.shaders.get(&f.set.key) {
         let id = p.shader.id();
-        // Note GI (R5): a landscape set's `_noise` is its projected noise, whatever origin the pick has.
-        if matches!(
+        // Note GI (R5): a landscape set's `_noise` is its projected noise, whatever origin the pick has. Note GW1:
+        // likewise its `_detail`, `_detailnorm` and `_detail_n` are its detail normal.
+        let landscape = matches!(
             p.shader,
             crate::shader::Shader::Landscape | crate::shader::Shader::PbrLandscape
-        ) && suggestions
+        );
+        let retyped = if !landscape {
+            None
+        } else if suggestions
             .first()
             .is_some_and(|s| s.subtype == Subtype::ProjectedNoise)
         {
+            Some(Subtype::ProjectedNoise)
+        } else {
+            f.suffix
+                .is_some_and(crate::group::is_detail_suffix)
+                .then_some(Subtype::DetailNormal)
+        };
+        if let Some(subtype) = retyped {
             return SubtypeDecision {
-                subtype: Subtype::ProjectedNoise,
+                subtype,
                 provenance: Provenance::Shader(id.into()),
                 decided: true,
                 suggestions,
+                waits: false,
             };
         }
         if let Some((st, why)) = suggestions
@@ -499,6 +523,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                     provenance: Provenance::Shader(id.into()),
                     decided: true,
                     suggestions,
+                    waits: false,
                 };
             }
             suggestions.insert(
@@ -519,6 +544,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
                 provenance: Provenance::Suggestion,
                 decided,
                 suggestions,
+                waits: false,
             }
         }
         None => SubtypeDecision {
@@ -526,6 +552,7 @@ pub fn decide_subtype(ctx: &ResolveCtx, f: &FileFacts) -> SubtypeDecision {
             provenance: Provenance::Suggestion,
             decided: false,
             suggestions,
+            waits: crate::suggest::unknown_suffix(f.suffix, &f.input.game_path, may_wait),
         },
     }
 }
@@ -667,18 +694,33 @@ fn layered_profile_with(
     // Owner O1: a varying alpha the meshes drop (and no explicit layer keeps) is opaque colour, so rules match it as
     // alpha `none` (Compact's BC1 rules). Known before the rules: the mesh layer itself is applied below. A rule that
     // sets the policy, matched on the source's real alpha, is explicit and keeps the mesh out (fix round 1).
+    // Note HR1: a winning `[files]` or `--set` `remove` on such a file is opaque colour to the rules too.
     let real_alpha = (!ignore_alpha_rules).then_some(f.analysis.alpha);
+    let ranked = ranked_overrides(ctx, f.input, &forms);
+    let override_remove = st.alpha_from_mesh()
+        && f.analysis.alpha == AlphaContent::Varying
+        && ranked
+            .iter()
+            .rev()
+            .find(|o| o.field == "alpha.policy" && override_applies(ctx, o, Some(st), f, &forms))
+            .is_some_and(|o| o.value == "remove");
     let mesh_remove = f.analysis.alpha == AlphaContent::Varying
         && matches!(mesh, Some((AlphaPolicy::Remove, _)))
         && !alpha_policy_explicit(ctx, &prov)
-        && !ranked_overrides(ctx, f.input, &forms)
-            .into_iter()
+        && !ranked
+            .iter()
             .any(|o| o.field == "alpha.policy" && override_applies(ctx, o, Some(st), f, &forms))
         && !rule_sources(ctx, &chain).into_iter().any(|(_, rules)| {
             matching(rules, f, Some(st), real_alpha)
                 .any(|(_, r)| r.overrides.pointer("/alpha/policy").is_some())
         });
-    let rule_alpha = real_alpha.map(|a| if mesh_remove { AlphaContent::None } else { a });
+    let rule_alpha = real_alpha.map(|a| {
+        if mesh_remove || override_remove {
+            AlphaContent::None
+        } else {
+            a
+        }
+    });
     for (src, rules) in rule_sources(ctx, &chain) {
         for (i, r) in matching(rules, f, Some(st), rule_alpha) {
             apply(
@@ -861,20 +903,10 @@ fn layered_profile_with(
             Provenance::AnalysisFact("two-channel-dds".into()),
         );
     }
-    // DECISIONS Note W6: only a base normal reads `rnm`, so another sub-type keeps the default (and its hash).
-    if st.rnm_base().is_none() && !profile.rnm.is_default() {
-        profile.rnm = crate::config::RnmSpec::default();
-        prov.retain(|k, _| !k.starts_with("rnm."));
-    }
     // DECISIONS DS4: only a cubemap reads `cubemap`, so another sub-type keeps the default (and its hash).
     if st != Subtype::Cubemap && !profile.cubemap.is_default() {
         profile.cubemap = CubemapSpec::default();
         prov.retain(|k, _| !k.starts_with("cubemap."));
-    }
-    // An order that resolves to the default order is the default (no re-encode); any other is stored normalised.
-    if profile.rnm.order.is_some() {
-        let eff = profile.rnm.effective_order();
-        profile.rnm.order = (eff != crate::config::LayerId::ORDER).then_some(eff);
     }
     // Last: `filter_allowed` reads the final format, content, category and alpha policy.
     let dropped = unscoped_filter_falls_back(&mut profile, &mut prov, &sources);
@@ -893,7 +925,6 @@ fn cube_style_layer(
     let style = doc
         .pointer("/cubemap/style")
         .and_then(|v| serde_json::from_value::<CubeStyle>(v.clone()).ok());
-    let photo = doc.pointer("/cubemap/layout").and_then(Value::as_str) == Some("photo");
     let mut fill = |field: &str, value: Value| {
         if !field_explicit(ctx, prov, field) {
             let patch = to_patch(field, &value);
@@ -920,10 +951,6 @@ fn cube_style_layer(
         if let Some(s) = saturation {
             fill("cubemap.saturation", json!(s));
         }
-    }
-    // DS16: a single photo is soft by nature, so it blurs heavily unless `cubemap.blur` is explicit.
-    if photo {
-        fill("cubemap.blur", json!(0.6));
     }
     fill("color.tag", json!(ColorTag::Unorm));
 }
@@ -1233,11 +1260,6 @@ pub enum JobStatus {
     PackingInput {
         role: RawMap,
     },
-    /// An RNM normal layer or mask (M6 Track F2 spec §2.2): never converted on its own; `rnm::plan::plan_rnm`
-    /// attaches it to its base normal's job or tags it `RNM-*`.
-    NormalLayer {
-        term: crate::rnm::LayerTermId,
-    },
     /// Blocking codes not acknowledged with `--allow`.
     Blocked {
         codes: Vec<Code>,
@@ -1277,9 +1299,6 @@ pub struct ResolvedJob {
     /// M6 (DECISIONS Note S): the shader picked for this job's set; `None` for a job not made by `plan`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shader: Option<crate::shader::ShaderPick>,
-    /// M6 Track F2: a base normal's RNM layers (`rnm::plan::plan_rnm`); `None` for every other job.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rnm: Option<crate::rnm::RnmJob>,
     /// Track A (DECISIONS Note CN11): how a derived output is built from a PBR set's inputs; `None` for every other
     /// job. For a derived job `input` is `derive.sources[0].path`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1292,14 +1311,21 @@ pub struct ResolvedJob {
     /// before analysis and again at load (`helper::apply_fill`); `None` for every other job.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fill: Option<crate::helper::FillJob>,
+    /// Note GY1: `SubtypeDecision::waits` as `resolve_decided` saw it. Not serialised: the JSON stays as it was.
+    #[serde(skip)]
+    pub unknown_suffix: bool,
 }
 
+/// Note GY1: the reason of a file that waits for a type (`suggest::unknown_suffix`).
+pub const UNKNOWN_SUFFIX: &str =
+    "unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry";
+
 impl ResolvedJob {
-    /// The RNM layers the encode blends: `rnm` while `profile.rnm.enabled` and it lists a layer.
-    pub fn active_rnm(&self) -> Option<&crate::rnm::RnmJob> {
-        self.rnm
-            .as_ref()
-            .filter(|r| self.profile.rnm.enabled && !r.layers.is_empty())
+    /// Note GY1: an unknown suffix, alone in its set, with no type assigned: unresolved, no suggestion, no set card.
+    pub fn waits_for_type(&self) -> bool {
+        self.unknown_suffix
+            && self.suggestions.is_empty()
+            && matches!(self.status, JobStatus::Unresolved { .. })
     }
 }
 
@@ -1609,7 +1635,6 @@ fn cube_checks(p: &Profile, add: &mut impl FnMut(Code, String)) {
         ("midtones", Some(c.midtones), 0.1..=10.0),
         ("saturation", Some(c.saturation), 0.0..=2.0),
         ("highlight_clamp", c.highlight_clamp, 1.0..=f64::MAX),
-        ("horizon", Some(c.horizon), -45.0..=45.0),
     ];
     for (key, v, range) in ranges {
         if let Some(v) = v.filter(|v| !range.contains(v)) {
@@ -1803,26 +1828,6 @@ pub fn check_profile(p: &Profile, f: &FileFacts, alpha_explicit: bool) -> Vec<Wa
             format!("resize_floor {} outside 1..=16384", p.resize_floor),
         );
     }
-    // M6 Track F2 (DECISIONS Note W7): layer strengths and the AO power, on a base normal.
-    if st.rnm_base().is_some() {
-        for id in crate::config::LayerId::ORDER {
-            let s = p.rnm.layer(id).strength;
-            if !(0.0..=2.0).contains(&s) {
-                add(
-                    CfgInvalid,
-                    format!("rnm.{}.strength {s} outside 0..=2", id.id()),
-                );
-            }
-        }
-        let pw = p.rnm.ao_power();
-        if !(0.1..=8.0).contains(&pw) {
-            add(
-                CfgInvalid,
-                format!("rnm.bent.ao_power {pw} outside 0.1..=8"),
-            );
-        }
-    }
-
     // An explicit `legacy` header needs a legacy FourCC: BC1/BC3/BC4/BC5 UNORM only. `auto` falls back to DX10.
     if p.header == HeaderForm::Legacy
         && resolve_header(p.format, p.srgb_tag(), HeaderForm::Legacy) != ResolvedHeader::Legacy
@@ -2287,36 +2292,11 @@ fn packing_input_job(
         source: None,
         pack: None,
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,
         fill: None,
-    }
-}
-
-/// M6 Track F2 (spec §2.2): the job of a normal-layer file. Nothing is written; the profile is the built-in
-/// `generic_data` placeholder and is never used.
-fn normal_layer_job(ctx: &ResolveCtx, f: &FileFacts, term: crate::rnm::LayerTerm) -> ResolvedJob {
-    ResolvedJob {
-        input: f.input.path.clone(),
-        output: f.input.output.clone(),
-        game_path: f.input.game_path.clone(),
-        set_key: f.set.key.clone(),
-        profile: ctx.registry.base_profile(ctx.target, Subtype::GenericData),
-        provenance: BTreeMap::new(),
-        suggestions: vec![],
-        warnings: vec![],
-        status: JobStatus::NormalLayer { term: term.into() },
-        suffix_alias: None,
-        source: None,
-        pack: None,
-        bake: None,
-        rnm: None,
-        derive: None,
-        shader: None,
-        cube: None,
-        fill: None,
+        unknown_suffix: false,
     }
 }
 
@@ -2329,7 +2309,7 @@ pub fn resolve_file(ctx: &ResolveCtx, f: &FileFacts) -> ResolvedJob {
 /// design §5, ruling R11): when nothing explicit chose its sub-type and its analysis passes the detection tests, its
 /// top suggestion becomes a high-confidence `complex_grass`, on either target (Note AZ reverses ruling R1).
 pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) -> ResolvedJob {
-    let mut d = decide_subtype(ctx, f);
+    let mut d = decide_subtype_with(ctx, f, gras_diffuse);
     // Note DY (rulings 12, 13): a hand-set helper role on an image wins over its name and a requested sub-type;
     // `none` makes it an ordinary file.
     let role = (f.input.kind == crate::discover::InputKind::Image)
@@ -2338,25 +2318,6 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
     match role {
         Some(crate::helper::HelperRole::Raw(r)) => {
             return packing_input_job(ctx, f, &r.id(), r, true)
-        }
-        Some(crate::helper::HelperRole::Layer(t)) => {
-            let stem = f
-                .input
-                .rel
-                .file_stem()
-                .unwrap_or_default()
-                .to_string_lossy();
-            let prefix = match crate::rnm::split_layer(&stem) {
-                Some((
-                    _,
-                    Vocab {
-                        role: VocabRole::NormalLayer(n),
-                        ..
-                    },
-                )) => n.prefix,
-                _ => None,
-            };
-            return normal_layer_job(ctx, f, crate::rnm::LayerTerm { prefix, ..t.into() });
         }
         Some(crate::helper::HelperRole::NotHelper) => {
             if gras_diffuse {
@@ -2387,42 +2348,6 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
     ) && crate::pack::plan::skin_f_candidate(ctx, f.set, f.input)
     {
         return packing_input_job(ctx, f, "f", RawMap::Fuzz, false);
-    }
-    // M6 Track F2 (DECISIONS Note W2): a layer file is hidden unless a rule or --set names its sub-type.
-    if let Some(Vocab {
-        role: VocabRole::NormalLayer(term),
-        ..
-    }) = vocab_for(f)
-    {
-        if !matches!(
-            d.provenance,
-            Provenance::User | Provenance::Rule(_) | Provenance::ProjectFile
-        ) {
-            // Note GI (X13, R6): a landscape set's `_detail` is its own detail normal, unless `rnm.target` or an
-            // `n_`/`cnr_` name prefix targets a base by hand.
-            let landscape = ctx.shaders.get(&f.set.key).map(|p| p.shader).filter(|s| {
-                matches!(
-                    s,
-                    crate::shader::Shader::Landscape | crate::shader::Shader::PbrLandscape
-                )
-            });
-            match landscape {
-                Some(s)
-                    if term.layer == LayerId::Detail
-                        && !term.mask
-                        && term.prefix.is_none()
-                        && rnm_target_requested(ctx, f.input).is_none() =>
-                {
-                    d = SubtypeDecision {
-                        subtype: Subtype::DetailNormal,
-                        provenance: Provenance::Shader(s.id().into()),
-                        decided: true,
-                        suggestions: d.suggestions,
-                    };
-                }
-                _ => return normal_layer_job(ctx, f, *term),
-            }
-        }
     }
     if gras_diffuse {
         suggest_grass(ctx, f, &mut d);
@@ -2460,8 +2385,12 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     let suffix_alias = alias_use(ctx, f);
     let mut reasons = vec![];
     let mut needs = vec![];
+    // Note GY1: `--allow SUG-LOW-CONFIDENCE` accepts a suggestion; with none there is nothing to accept.
+    let no_pick = !d.decided && d.suggestions.is_empty();
+    // A suggestion added after `decide_subtype` (the grass auto-tag) settles a waiting file.
+    let unknown_suffix = no_pick && d.waits;
     if !d.decided {
-        if !allowed(ctx, f, Code::SugLowConfidence) {
+        if no_pick || !allowed(ctx, f, Code::SugLowConfidence) {
             needs.push(Need::Subtype);
         }
         reasons.push(match d.suggestions.first() {
@@ -2471,6 +2400,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                 s.confidence,
                 s.reason
             ),
+            None if unknown_suffix => UNKNOWN_SUFFIX.into(),
             None => "no sub-type could be suggested; set one".into(),
         });
     }
@@ -2520,11 +2450,11 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
                     source: None,
                     pack: None,
                     bake: None,
-                    rnm: None,
                     derive: None,
                     shader: None,
                     cube: None,
                     fill: None,
+                    unknown_suffix,
                 };
             }
         };
@@ -2609,7 +2539,7 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
     // triggers LOSS-ALPHA-DATA against the default `remove`), then blocking codes.
     let status = if !errors.is_empty() {
         JobStatus::Error { codes: errors }
-    } else if !reasons.is_empty() && !allowed(ctx, f, Code::SugLowConfidence) {
+    } else if !reasons.is_empty() && (no_pick || !allowed(ctx, f, Code::SugLowConfidence)) {
         JobStatus::Unresolved { reasons, needs }
     } else if !blocking.is_empty() {
         JobStatus::Blocked { codes: blocking }
@@ -2630,10 +2560,10 @@ pub fn resolve_decided(ctx: &ResolveCtx, f: &FileFacts, d: SubtypeDecision) -> R
         source: None,
         pack: None,
         bake: None,
-        rnm: None,
         derive: None,
         shader: None,
         cube: None,
         fill: None,
+        unknown_suffix,
     }
 }

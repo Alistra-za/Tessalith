@@ -35,6 +35,26 @@ pub struct DocOp {
     pub status: OpStatus,
 }
 
+/// The `Op` variants clip editing used (serde names); a saved document may still hold them.
+const REMOVED_CLIP_OPS: [&str; 5] = [
+    "AddSequence",
+    "RemoveSequence",
+    "RenameSequence",
+    "SetSequenceTiming",
+    "ConvertChainToClips",
+];
+
+/// `[ops.op.<Variant>]` (a table with one key) or the bare string `op = "<Variant>"`.
+fn is_clip_op(o: &toml::Value) -> bool {
+    match o.get("op") {
+        Some(toml::Value::Table(t)) => {
+            t.len() == 1 && t.keys().any(|k| REMOVED_CLIP_OPS.contains(&k.as_str()))
+        }
+        Some(toml::Value::String(s)) => REMOVED_CLIP_OPS.contains(&s.as_str()),
+        _ => false,
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EditDoc {
     pub version: u32,
@@ -42,6 +62,9 @@ pub struct EditDoc {
     #[serde(default)]
     pub export: ExportRec,
     pub ops: Vec<DocOp>,
+    /// Clip ops `from_text` removed from the loaded text (Note GR2); the next save writes the document without them.
+    #[serde(skip)]
+    pub dropped_clip_ops: usize,
 }
 
 impl EditDoc {
@@ -51,6 +74,7 @@ impl EditDoc {
             source,
             export: ExportRec::default(),
             ops: Vec::new(),
+            dropped_clip_ops: 0,
         }
     }
 
@@ -58,8 +82,27 @@ impl EditDoc {
         toml::to_string_pretty(self).expect("edit doc serialises")
     }
 
+    /// Clip ops (removed, Note GR2) are dropped here and counted in `dropped_clip_ops`.
     pub fn from_text(t: &str) -> Result<EditDoc, String> {
-        let d: EditDoc = toml::from_str(t).map_err(|e| e.to_string())?;
+        let mut v: toml::Table = toml::from_str(t).map_err(|e| e.to_string())?;
+        let mut dropped = 0;
+        if let Some(toml::Value::Array(ops)) = v.get_mut("ops") {
+            let before = ops.len();
+            ops.retain(|o| !is_clip_op(o));
+            dropped = before - ops.len();
+        }
+        // Re-parse text, not the table, so a bad field reports its line.
+        // shortcut: after a drop the line numbers are the filtered text's (the quoted line still shows the fault); keep
+        // the spans by blanking the clip tables in the original text if a user reports a wrong line.
+        let filtered;
+        let text = if dropped == 0 {
+            t
+        } else {
+            filtered = toml::to_string(&v).map_err(|e| e.to_string())?;
+            &filtered
+        };
+        let mut d: EditDoc = toml::from_str(text).map_err(|e| e.to_string())?;
+        d.dropped_clip_ops = dropped;
         if d.version > 1 {
             return Err(format!(
                 "This edit file was written by a newer sdc (version {}).",

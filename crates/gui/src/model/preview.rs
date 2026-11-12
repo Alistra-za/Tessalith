@@ -217,8 +217,9 @@ fn classify(item: &TextureItem) -> Previewable {
     }
 }
 
-fn status_notice(item: &TextureItem) -> Option<String> {
-    (item.status == ItemStatus::NeedsDecision).then(|| SUGGESTED.to_string())
+/// Note HF3: a no-set texture asks no question, so it carries no "suggested settings" notice.
+fn status_notice(m: &AppModel, item: &TextureItem) -> Option<String> {
+    (item.status == ItemStatus::NeedsDecision && m.item_in_run(item)).then(|| SUGGESTED.to_string())
 }
 
 /// Profile plus, for a packed output, its recipe and sources (with their stamps), plus the job's bake, derive,
@@ -227,12 +228,12 @@ fn signature(job: &ResolvedJob) -> String {
     let p = sha256_json(&job.profile).unwrap_or_default();
     let head = match &job.pack {
         Some(pk) => format!("{p}:{}", pack_key(pk).unwrap_or_default()),
-        None => format!("{p}:{:?}:{:?}", job.source, job.active_rnm()),
+        None => format!("{p}:{:?}", job.source),
     };
     format!("{head}:{}", extra_inputs_key(job))
 }
 
-/// What a job reads besides its profile, `source` and RNM layers: the bake's `_n`, the derive's and cube's files
+/// What a job reads besides its profile, `source`: the bake's `_n`, the derive's and cube's files
 /// and the fill's helper, each with its settings and stamp (Debug: plain structs, no maps, so equal jobs match).
 /// Shared with the set preview's signature (Note FA1).
 pub fn extra_inputs_key(job: &ResolvedJob) -> String {
@@ -396,11 +397,22 @@ pub fn dds_preview(path: &std::path::Path, max: u32) -> Result<PreviewOut, Strin
         }
     };
     let dims: Vec<(u32, u32)> = f.levels.iter().map(|(w, h, _)| (*w, *h)).collect();
-    let first_level = engine::session::first_level_within(&dims, max);
+    // DT22: a cube's cross is 4 faces wide, so its face gets a quarter of the cap.
+    let cap = if f.is_cubemap {
+        cube_cross::face_cap(max)
+    } else {
+        max
+    };
+    let first_level = engine::session::first_level_within(&dims, cap);
     // `first_level_within` falls back to the last mip; a short chain can end above the limit (trace-debug #16).
-    if let Some(&(w, h)) = dims.get(first_level).filter(|(w, h)| *w.max(h) > max) {
+    if let Some(&(w, h)) = dims.get(first_level).filter(|(w, h)| *w.max(h) > cap) {
+        let cube = if f.is_cubemap {
+            " (each cube face must fit a quarter of it)"
+        } else {
+            ""
+        };
         return Err(format!(
-            "{w}x{h} (the smallest mip) is above the preview limit of {max}"
+            "{w}x{h} (the smallest mip) is above the preview limit of {max}{cube}"
         ));
     }
     // T16: a cube keeps all six faces' levels from `first_level` (face-major), so the cross builds (Note DT16).
@@ -555,7 +567,7 @@ impl AppModel {
                 self.start_dds(path);
             }
             Previewable::Job(job) => {
-                let notice = status_notice(item);
+                let notice = status_notice(self, item);
                 self.set_base_notice(notice);
                 self.preview.profile_sig = Some(signature(&job));
                 self.start_source();
@@ -592,7 +604,7 @@ impl AppModel {
         let Some(item) = self.item(&key) else {
             return;
         };
-        let notice = status_notice(item);
+        let notice = status_notice(self, item);
         match classify(item) {
             Previewable::Dds => {
                 if item.stamp != self.preview.dds_stamp {
@@ -878,11 +890,9 @@ mod tests {
                 normal_profile: profile,
                 shift: 1,
                 stamp: stamped(2),
-                rnm: None,
                 fit: None,
             }),
             shader: None,
-            rnm: None,
             derive: Some(DeriveJob {
                 kind: DeriveKind::LegacyN,
                 landscape: false,
@@ -923,6 +933,7 @@ mod tests {
                 invert: false,
                 assigned: true,
             }),
+            unknown_suffix: false,
         }
     }
 

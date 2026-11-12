@@ -1,7 +1,7 @@
 //! Note DY17: the helper panel's edits. Each writes one `helper.*` selector of the helper file's own `[files]` entry in
 //! `sdc.toml` as one undo step, then plans again; a read-only `sdc.toml` takes none (`AppModel::edit`). Note HN: it
 //! also holds the read-only dock mapping (which chip and channel a fill lands on).
-use super::sets::{SetView, SlotKind};
+use super::sets::{SetView, SlotKind, Tails};
 use super::AppModel;
 use engine::helper::report::HelperReport;
 use engine::helper::{FillTarget, HelperRead, HelperRole};
@@ -19,9 +19,8 @@ pub fn set_base(h: &HelperReport) -> String {
 }
 
 /// A fill as the user reads it, the same on the badge, the panel and the Textures row: the chip and channel it
-/// writes ("RMAOS R", "CNR alpha", "D alpha", "N layer"). Note HP.
+/// writes ("RMAOS R", "CNR alpha", "D alpha"). Note HP.
 pub fn fill_text(t: FillTarget) -> String {
-    use engine::config::RnmTarget as R;
     use engine::helper::AlphaTarget as A;
     match t {
         FillTarget::Alpha(a) => {
@@ -37,14 +36,12 @@ pub fn fill_text(t: FillTarget) -> String {
         FillTarget::Packed { suffix, .. } => {
             format!("{} {}", suffix.to_uppercase(), fill_channel(t))
         }
-        FillTarget::Rnm(R::Cnr) => "CNR layer".into(),
-        FillTarget::Rnm(_) => "N layer".into(),
     }
 }
 
 /// The file a fill target lands in: the stem of the planned output that ends in the target's suffix (so it matches
 /// the `Show …` button), else the outputs' (or the set's) base name plus the suffix when the target did not land.
-pub fn target_file(h: &HelperReport, t: FillTarget) -> String {
+pub fn target_file(h: &HelperReport, t: FillTarget, tails: Tails) -> String {
     use engine::helper::AlphaTarget as A;
     let suffix = match t {
         FillTarget::Alpha(A::Diffuse) => None,
@@ -53,8 +50,6 @@ pub fn target_file(h: &HelperReport, t: FillTarget) -> String {
         FillTarget::Alpha(A::S) => Some("s"),
         FillTarget::Alpha(A::Cnr) => Some("cnr"),
         FillTarget::Packed { suffix, .. } => Some(suffix),
-        FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some("cnr"),
-        FillTarget::Rnm(_) => Some("n"),
     };
     let stems = || h.outputs.iter().filter_map(|o| o.file_stem()?.to_str());
     let named = suffix
@@ -64,7 +59,8 @@ pub fn target_file(h: &HelperReport, t: FillTarget) -> String {
     // set reads `steel` beside the rows that read `steel_rmaos R`.
     let any = || {
         stems().next().map(|s| {
-            let tail = super::sets::member_tail(s, true).len();
+            // Planned output stems are already canonical: no aliases to read.
+            let tail = super::sets::member_tail(s, tails, &std::collections::BTreeMap::new()).len();
             &s[..s.len() - tail]
         })
     };
@@ -76,17 +72,7 @@ pub fn target_file(h: &HelperReport, t: FillTarget) -> String {
     }
 }
 
-/// The `helper.fills` entries of the report's fills: layer blends (`Rnm`) are reports only, never written.
-pub fn written_fills(h: &HelperReport) -> Vec<FillTarget> {
-    h.fills
-        .iter()
-        .copied()
-        .filter(|t| !matches!(t, FillTarget::Rnm(_)))
-        .collect()
-}
-
-/// Note HN: the slot chip a fill target lands on. A `_m` target has no chip (CD8). Both `Rnm` blends sit on the
-/// normal chip unless they aim at `_cnr` (the rule `target_file` uses).
+/// Note HN: the slot chip a fill target lands on. A `_m` target has no chip (CD8).
 pub fn fill_slot(t: FillTarget) -> Option<SlotKind> {
     use engine::helper::AlphaTarget as A;
     match t {
@@ -100,12 +86,10 @@ pub fn fill_slot(t: FillTarget) -> Option<SlotKind> {
             "p" => Some(SlotKind::Height),
             _ => None,
         },
-        FillTarget::Rnm(engine::config::RnmTarget::Cnr) => Some(SlotKind::Coat),
-        FillTarget::Rnm(_) => Some(SlotKind::Normal),
     }
 }
 
-/// The channel a fill target writes: `alpha`, `R`/`G`/`B`/`A`, or `layer` for a blended normal layer.
+/// The channel a fill target writes: `alpha` or `R`/`G`/`B`/`A`.
 pub fn fill_channel(t: FillTarget) -> &'static str {
     match t {
         FillTarget::Alpha(_) => "alpha",
@@ -114,7 +98,6 @@ pub fn fill_channel(t: FillTarget) -> &'static str {
             // the clamp keeps a release build from indexing past A
             ["R", "G", "B", "A"][usize::from(channel.min(3))]
         }
-        FillTarget::Rnm(_) => "layer",
     }
 }
 
@@ -148,6 +131,14 @@ pub fn docked(model: &AppModel, v: &SetView) -> Vec<Docked> {
 }
 
 impl AppModel {
+    /// The tails of the set a helper report belongs to (`SetView::tails`), `Plain` when the set is not listed.
+    pub fn helper_tails(&self, h: &HelperReport) -> Tails {
+        super::sets::views(self)
+            .iter()
+            .find(|s| s.key == h.set_key)
+            .map_or(Tails::Plain, |s| s.tails())
+    }
+
     /// Note DY18b: a helper's current list. A hand-set list is its `sdc.toml` `helper.fills`, so a target that did not
     /// land is not lost; otherwise the engine's reported fills.
     pub fn current_fills(&self, key: &str, h: &HelperReport) -> Vec<FillTarget> {
@@ -158,7 +149,7 @@ impl AppModel {
             .and_then(|v| engine::helper::fills_value(&v));
         match hand {
             Some(v) if h.fills_hand_set => v,
-            _ => written_fills(h),
+            _ => h.fills.clone(),
         }
     }
 
@@ -202,7 +193,6 @@ impl AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use engine::config::RnmTarget as R;
     use engine::helper::AlphaTarget as A;
 
     #[test]
@@ -216,9 +206,6 @@ mod tests {
             (FillTarget::Alpha(A::Cnr), "CNR alpha"),
             (FillTarget::Alpha(A::Diffuse), "D alpha"),
             (FillTarget::Alpha(A::N), "N alpha"),
-            (FillTarget::Rnm(R::N), "N layer"),
-            (FillTarget::Rnm(R::Both), "N layer"),
-            (FillTarget::Rnm(R::Cnr), "CNR layer"),
         ] {
             assert_eq!(fill_text(t), want, "{t:?}");
         }

@@ -1,17 +1,14 @@
-//! The 3D viewport of the Meshes view (plan B Task B8): the selected NIF drawn with the user's Community Shaders
-//! `Lighting.hlsl` by `render3d` (D3D11), and the CS-folder locate flow (00 §6.4).
+//! The 3D viewport of the Meshes view (plan B Task B8): the selected NIF drawn with the Community Shaders
+//! `Lighting.hlsl` bundled in the exe, under CS's default settings, by `render3d` (D3D11; Note GT). Nothing is
+//! located: the user's CS is never read.
 //!
 //! The `Renderer` lives on one long-lived worker thread (D3D11's immediate context is single-threaded); this model
-//! sends it commands and drains its replies (`WorkerMsg::Viewport3d`) on the UI thread. Locating CS hashes every
-//! shader file, so it runs on a short-lived worker too. The model holds pixels, never egui textures: `ui::viewport3d`
-//! uploads a frame when its id changes.
-use crate::model::meshes::ScanTarget;
+//! sends it commands and drains its replies (`WorkerMsg::Viewport3d`) on the UI thread. The model holds pixels,
+//! never egui textures: `ui::viewport3d` uploads a frame when its id changes.
 use crate::worker::{spawn_guarded, WorkerMsg};
 use nif::material::{MaterialState, SkinPreview};
 use render3d::builtin::Builtin;
-use render3d::cs_settings::{self, CsSettings};
 use render3d::device::Gpu;
-use render3d::locate::{self, Change, Fingerprint};
 use render3d::scene::{Background, Camera, PointLight, Scene, AUTO_DISTANCE, AUTO_PITCH, AUTO_YAW};
 #[cfg(feature = "test-hooks")]
 use render3d::FrameTiming;
@@ -26,21 +23,12 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-/// Panel text when no CS install is found (00 §6.4).
-pub const NOT_FOUND: &str = "Community Shaders not found";
-pub const CHOOSE_FOLDER: &str = "Choose folder…";
-pub const USE_NEW: &str = "Use new";
-pub const KEEP_OLD: &str = "Keep old";
-/// The one-line notice for a hash-only change.
-pub const UPDATED_NOTICE: &str = "Community Shaders updated — recompiling shaders…";
 /// The CS-features toggle (on by default). Off compiles without CS feature defines (P0: no `ENABLE_LL`).
 pub const FEATURES_LABEL: &str = "Community Shaders features";
 /// The View menu's deferred toggle (v2 D8, on by default): opaque shapes through CS's deferred pass.
 pub const DEFERRED_LABEL: &str = "Accurate (deferred)";
-/// Notice prefix when a CS settings file did not parse (CS may be writing it): the previous settings stay (C10).
-pub const SETTINGS_KEPT: &str = "Community Shaders settings not read, keeping the previous ones";
 
-/// `DynamicCubemaps` → `Dynamic Cubemaps`, `LODBlending` → `LOD Blending` (Info.ini short names as CS's menu
+/// `DynamicCubemaps` → `Dynamic Cubemaps`, `LODBlending` → `LOD Blending` (CS feature short names as CS's menu
 /// spells them).
 fn spaced(name: &str) -> String {
     let c: Vec<char> = name.chars().collect();
@@ -57,7 +45,7 @@ fn spaced(name: &str) -> String {
     out
 }
 
-/// The panel's off-in-preview line: the user's loaded CS features this preview does not compile
+/// The panel's off-in-preview line: the bundled CS's visual features this preview does not compile
 /// (`Renderer::off_in_preview`); `None` when nothing is off (D-P31).
 pub fn off_line(off: &[String]) -> Option<String> {
     if off.is_empty() {
@@ -69,23 +57,8 @@ pub fn off_line(off: &[String]) -> Option<String> {
 /// Accessible name of the drawn frame.
 pub const FRAME_LABEL: &str = "3D preview";
 
-/// The popup text for a moved or renamed CS install. A side shows its owning mod, else its folder.
-pub fn moved_text(old: &Fingerprint, new: &Fingerprint) -> String {
-    let name = |f: &Fingerprint| {
-        f.owner_mod
-            .clone()
-            .unwrap_or_else(|| f.root.display().to_string())
-    };
-    format!(
-        "Community Shaders moved/updated: {} → {}. Use the new location?",
-        name(old),
-        name(new)
-    )
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub enum V3State {
-    NotFound,
     Ready,
     Rendering,
     Error(String),
@@ -589,19 +562,15 @@ impl DebugView {
 
 /// The status line when render3d cannot draw the selected debug view any more (`DebugSupport(false)`).
 pub const DEBUG_UNSUPPORTED: &str =
-    "These Community Shaders have no debug-view anchor in Lighting.hlsl: back to Lit";
+    "Lighting.hlsl has no debug-view anchor for this view: back to Lit";
 
 /// Commands to the render thread.
 pub enum V3Cmd {
-    SetShaders(Fingerprint),
     /// The "Community Shaders features" toggle (`Renderer::set_features_on`): no reload, changed shapes recompile.
     SetFeatures(bool),
     /// The "Accurate (deferred)" toggle (`Renderer::set_deferred`): no reload; every shape re-permutes in the
     /// background while its old draw stays.
     SetDeferred(bool),
-    /// New user CS settings (`Renderer::set_settings`, C11): a cbuffer rewrite, recompiles only when the defines
-    /// change, never a reload.
-    SetSettings(CsSettings),
     Load {
         id: u64,
         spec: Arc<MeshSpec>,
@@ -659,12 +628,15 @@ pub enum V3Cmd {
     },
     /// A finished background compile, sent by the pool into the render loop's own queue.
     Compiled(CompileDone),
+    /// Test seam: the next render fails as a lost device, so the render thread rebuilds it and replays its logs.
+    #[cfg(feature = "test-hooks")]
+    LoseDevice,
     /// The model is gone: end the loop (the pool's sink holds a sender to the loop's queue, so the channel no
     /// longer closes by itself).
     Quit,
 }
 
-/// Replies from the render thread and the locate worker.
+/// Replies from the render thread.
 #[derive(Debug)]
 pub enum V3Reply {
     /// The renderer exists: adapter name, and whether it is WARP (software).
@@ -715,22 +687,9 @@ pub enum V3Reply {
         path: String,
         result: Result<(), String>,
     },
-    /// A locate answer; `generation` tells a stale one (started before a later locate or "Choose folder…").
-    /// `settings`: the user's CS settings read in the same worker, whenever a `Shaders` folder was found.
-    Located {
-        generation: u64,
-        result: Result<Option<Fingerprint>, String>,
-        settings: Option<CsSettings>,
-    },
-    Chosen {
-        generation: u64,
-        result: Result<Fingerprint, String>,
-        settings: Option<CsSettings>,
-    },
     /// `Renderer::off_in_preview()`, after the thread starts and after each settings or features change.
     OffInPreview(Vec<String>),
-    /// `Renderer::debug_supported()`: after the thread starts, after `SetShaders`, and `false` when a `SetDebug` was
-    /// refused.
+    /// `Renderer::debug_supported()`: after the thread starts, and `false` when a `SetDebug` was refused.
     DebugSupport(bool),
     /// `Renderer::projected_missing()` after each applied `SetProjectedLayer`.
     ProjectedMissing(Vec<String>),
@@ -745,21 +704,16 @@ pub fn default_cache_dir() -> Option<PathBuf> {
 pub const SPINNER_DELAY: Duration = Duration::from_millis(300);
 
 pub struct Viewport3d {
-    pub picker: super::picker::Picker,
     pub state: V3State,
     pub orbit: Orbit,
     /// Background and light controls; changing one re-renders (never reloads).
     pub look: Look,
     pub report: Option<LoadReport>,
-    /// The moved/renamed question (`Change::Moved`).
-    pub popup: Option<Change>,
     pub features_on: bool,
-    /// The user's loaded CS features this preview leaves off (`V3Reply::OffInPreview`), for the panel line.
+    /// The bundled CS's visual features this preview leaves off (`V3Reply::OffInPreview`), for the panel line.
     pub off_in_preview: Vec<String>,
     pub notice: Option<String>,
-    /// The CS shaders in use (the `Shaders` folder), as saved in `gui.toml`.
-    pub shaders: Option<Fingerprint>,
-    /// The last frame; kept while CS moves or disappears until the user answers.
+    /// The last frame.
     pub frame: Option<Arc<Frame>>,
     /// Render-thread timing of the last frame; the ignored perf gates read it.
     #[cfg(feature = "test-hooks")]
@@ -823,24 +777,11 @@ pub struct Viewport3d {
     reconf_sent: u64,
     reconf_done: u64,
     next_id: u64,
-    locating: bool,
     /// Since when `busy()` has held without a break (for `show_spinner`).
     busy_since: Option<Instant>,
-    locate_gen: u64,
-    /// The last scan target `locate` was given, so "Choose folder…" reads settings through the same target.
-    scan_target: Option<ScanTarget>,
-    declined: Option<PathBuf>,
-    shaders_changed: bool,
-    /// This session's locate (or the user) has confirmed `shaders`: until then the saved fingerprint may be stale,
-    /// and compiling with it would cache new-source bytecode under the old hash.
-    confirmed: bool,
-    /// The CS settings last applied: sent to the render thread, or given to it when it starts.
-    settings: CsSettings,
-    /// Hash of the malformed-settings failure already shown: a dismissed notice stays gone while the file is unchanged.
-    failed_hash: Option<String>,
-    /// The new location's settings, held while a Moved popup is open and applied by "Use new".
-    popup_settings: Option<CsSettings>,
     thread: Option<Sender<V3Cmd>>,
+    /// Where the render thread reads shader text: the bundle, or a test's stand-in folder.
+    source: render3d::ShaderSource,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
     #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
@@ -849,20 +790,16 @@ pub struct Viewport3d {
 }
 
 impl Viewport3d {
-    /// `saved` is `[render3d] shaders` from `gui.toml`.
-    pub fn new(saved: Option<Fingerprint>) -> Viewport3d {
+    pub fn new() -> Viewport3d {
         let (tx, rx) = channel();
         Viewport3d {
-            picker: super::picker::Picker::default(),
             state: V3State::Ready,
             orbit: Orbit::default(),
             look: Look::default(),
             report: None,
-            popup: None,
             features_on: true,
             off_in_preview: vec![],
             notice: None,
-            shaders: saved,
             frame: None,
             #[cfg(feature = "test-hooks")]
             timing: None,
@@ -902,17 +839,9 @@ impl Viewport3d {
             render_sent: 0,
             render_done: 0,
             next_id: 0,
-            locating: false,
             busy_since: None,
-            locate_gen: 0,
-            scan_target: None,
-            declined: None,
-            shaders_changed: false,
-            confirmed: false,
-            settings: CsSettings::default(),
-            failed_hash: None,
-            popup_settings: None,
             thread: None,
+            source: render3d::ShaderSource::Bundled,
             #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
@@ -920,21 +849,25 @@ impl Viewport3d {
         }
     }
 
-    /// For UI tests: nothing saved, the given state.
+    /// For UI tests: the given state.
     pub fn with_state(state: V3State) -> Viewport3d {
-        let mut v = Viewport3d::new(None);
+        let mut v = Viewport3d::new();
         v.state = state;
         v
     }
 
-    /// The generation of the latest locate or "Choose folder…" (older answers are ignored).
-    pub fn locate_generation(&self) -> u64 {
-        self.locate_gen
+    /// Test seam: the render thread reads the shaders in `folder` (a stand-in) instead of the bundled tree.
+    #[cfg(feature = "test-hooks")]
+    pub fn use_shader_folder(&mut self, folder: PathBuf) {
+        self.source = render3d::ShaderSource::Folder(folder);
     }
 
-    /// The CS settings last applied.
-    pub fn settings(&self) -> &CsSettings {
-        &self.settings
+    /// Test seam: the render thread's next render fails as a lost device (a rebuild follows).
+    #[cfg(feature = "test-hooks")]
+    pub fn lose_device_for_test(&mut self) {
+        if let Some(t) = &self.thread {
+            let _ = t.send(V3Cmd::LoseDevice);
+        }
     }
 
     /// Test seam: stands in for the render thread; the returned receiver gets the commands.
@@ -964,25 +897,14 @@ impl Viewport3d {
         self.loaded
     }
 
-    /// Whether this session has confirmed the shaders (a locate answer, "Use new", "Keep old" or a chosen folder);
-    /// no render thread starts and nothing is sent before that.
-    pub fn shaders_confirmed(&self) -> bool {
-        self.confirmed
-    }
-
-    pub fn locating(&self) -> bool {
-        self.locating
-    }
-
     /// One drawn frame of the clock (v2 B3): advances it when playing. True when its time changed.
     pub fn tick(&mut self, dt: f32) -> bool {
         self.clock.as_mut().is_some_and(|c| c.advance(dt))
     }
 
-    /// A load, a render, a material edit, a locate or a background compile is in flight.
+    /// A load, a render, a material edit or a background compile is in flight.
     pub fn busy(&self) -> bool {
-        self.locating
-            || self.pending_load.is_some()
+        self.pending_load.is_some()
             || self.render_done < self.render_sent
             || self.edits_done < self.edits_sent
             || self.reconf_done < self.reconf_sent
@@ -1020,181 +942,9 @@ impl Viewport3d {
         now.duration_since(since) >= SPINNER_DELAY
     }
 
-    /// The fingerprint to save in `gui.toml`, when it changed since the last call.
-    pub fn take_shaders_changed(&mut self) -> Option<Fingerprint> {
-        std::mem::take(&mut self.shaders_changed)
-            .then(|| self.shaders.clone())
-            .flatten()
-    }
-
     fn id(&mut self) -> u64 {
         self.next_id += 1;
         self.next_id
-    }
-
-    /// Look for CS (on start and on window focus): the target's mods first, then the saved folder. Off the UI thread.
-    pub fn locate(&mut self, target: Option<ScanTarget>) {
-        if self.locating {
-            return;
-        }
-        self.scan_target.clone_from(&target);
-        self.locating = true;
-        self.locate_gen += 1;
-        let generation = self.locate_gen;
-        let saved = self.shaders.clone();
-        spawn_guarded(self.tx.clone(), "locate", move |tx| {
-            let result = locate_shaders(target.as_ref(), saved.as_ref());
-            // Small files (~60 KB): a full re-read and hash on every locate (03 §3.4), same generation.
-            let settings = match &result {
-                Ok(Some(f)) => Some(read_cs_settings(target.as_ref(), f)),
-                _ => None,
-            };
-            let _ = tx.send(WorkerMsg::Viewport3d(V3Reply::Located {
-                generation,
-                result,
-                settings,
-            }));
-        });
-    }
-
-    /// "Choose folder…": a CS mod folder or its `Shaders` folder.
-    pub fn choose_folder(&mut self, folder: PathBuf) {
-        self.locating = true;
-        self.locate_gen += 1;
-        let generation = self.locate_gen;
-        let target = self.scan_target.clone();
-        spawn_guarded(self.tx.clone(), "locate", move |tx| {
-            let result = chosen_root(&folder)
-                .and_then(|root| locate::fingerprint(&root, None).map_err(|e| e.to_string()));
-            let settings = result
-                .as_ref()
-                .ok()
-                .map(|f| read_cs_settings(target.as_ref(), f));
-            let _ = tx.send(WorkerMsg::Viewport3d(V3Reply::Chosen {
-                generation,
-                result,
-                settings,
-            }));
-        });
-    }
-
-    /// A locate result: same → nothing; hash only → notice and recompile; first find → adopt; moved → popup
-    /// (unless this new location was declined this session); none → the panel says so (the last frame stays).
-    pub fn on_located(&mut self, r: Result<Option<Fingerprint>, String>) {
-        self.locating = false;
-        let found = match r {
-            Ok(f) => f,
-            Err(e) => {
-                // An IO error (MO2 copying files, say) is not "not found": keep the state, say why, retry on focus.
-                self.notice = Some(format!("Looking for Community Shaders failed: {e}"));
-                return;
-            }
-        };
-        match locate::compare(self.shaders.as_ref(), found.clone()) {
-            Change::Same => {
-                self.confirmed = true;
-                if self.state == V3State::NotFound {
-                    self.state = V3State::Ready;
-                }
-            }
-            Change::Updated => {
-                self.notice = Some(UPDATED_NOTICE.into());
-                if let Some(f) = found {
-                    self.adopt(f);
-                }
-            }
-            Change::Moved { new, .. } if self.shaders.is_none() => self.adopt(new),
-            Change::Moved { old, new } => {
-                if self.declined.as_ref() != Some(&new.root) {
-                    self.popup = Some(Change::Moved { old, new });
-                }
-            }
-            Change::NotFound { .. } => self.state = V3State::NotFound,
-        }
-    }
-
-    /// The CS settings read with a locate answer (C10). If a file did not parse, the previous settings stay and
-    /// the notice says why. A new hash goes to the render thread; with no thread yet, it starts with these.
-    pub fn on_settings(&mut self, s: CsSettings) {
-        if s.parse_failed {
-            if self.failed_hash.as_ref() == Some(&s.hash) {
-                return;
-            }
-            self.failed_hash = Some(s.hash.clone());
-            self.notice = Some(format!("{SETTINGS_KEPT}: {}", s.notes.join("; ")));
-            return;
-        }
-        self.failed_hash = None;
-        if self
-            .notice
-            .as_deref()
-            .is_some_and(|n| n.starts_with(SETTINGS_KEPT))
-        {
-            self.notice = None;
-        }
-        if s.hash == self.settings.hash {
-            return;
-        }
-        self.settings = s.clone();
-        if let Some(t) = &self.thread {
-            self.reconf_sent += 1;
-            let _ = t.send(V3Cmd::SetSettings(s));
-        }
-    }
-
-    fn on_chosen(&mut self, r: Result<Fingerprint, String>) {
-        self.locating = false;
-        match r {
-            Ok(f) => {
-                self.declined = None;
-                self.adopt(f);
-            }
-            Err(e) => self.notice = Some(e),
-        }
-    }
-
-    /// "Use new" in the popup.
-    pub fn use_new(&mut self) {
-        if let Some(Change::Moved { new, .. }) = self.popup.take() {
-            let s = self.popup_settings.take();
-            self.adopt(new);
-            if let Some(s) = s {
-                self.on_settings(s);
-            }
-        }
-    }
-
-    /// "Keep old": keep drawing with the old folder and don't ask about this new one again this session.
-    pub fn keep_old(&mut self) {
-        if let Some(Change::Moved { new, .. }) = self.popup.take() {
-            self.declined = Some(new.root);
-            self.popup_settings = None;
-            // The user accepts the saved fingerprint (Keep old is offered only while the old folder exists).
-            self.confirmed = true;
-        }
-    }
-
-    fn adopt(&mut self, f: Fingerprint) {
-        self.popup = None;
-        self.popup_settings = None;
-        self.confirmed = true;
-        self.shaders = Some(f.clone());
-        self.shaders_changed = true;
-        if matches!(self.state, V3State::NotFound) {
-            self.state = V3State::Ready;
-        }
-        if let Some(t) = &self.thread {
-            let _ = t.send(V3Cmd::SetShaders(f));
-            self.reload_pending();
-        }
-    }
-
-    /// The thread reloads the current mesh after a shaders or features change.
-    fn reload_pending(&mut self) {
-        if self.pending_load.is_none() {
-            self.pending_load = self.loaded;
-        }
-        self.last_sent = None;
     }
 
     /// The "Community Shaders features" toggle (C8). The render thread recomputes the defines. Shapes whose
@@ -1388,13 +1138,13 @@ impl Viewport3d {
     }
 
     /// The shipped render thread: its command sender.
-    fn spawn_render_thread(&self, shaders: Fingerprint, cache: PathBuf) -> Sender<V3Cmd> {
+    fn spawn_render_thread(&self, cache: PathBuf) -> Sender<V3Cmd> {
         let (ctx, crx) = channel();
         let features = self.features_on;
-        let settings = self.settings.clone();
+        let source = self.source.clone();
         let me = ctx.clone();
         spawn_guarded(self.tx.clone(), "viewport3d", move |tx| {
-            render_loop(crx, me, tx, shaders, cache, features, settings)
+            render_loop(crx, me, tx, source, cache, features)
         });
         ctx
     }
@@ -1403,16 +1153,16 @@ impl Viewport3d {
         if self.thread.is_some() {
             return true;
         }
-        let (Some(shaders), Some(cache)) = (self.shaders.clone(), self.cache_dir.clone()) else {
+        let Some(cache) = self.cache_dir.clone() else {
             return false;
         };
         #[cfg(feature = "test-hooks")]
         let ctx = match self.fake_thread.take() {
             Some(t) => t,
-            None => self.spawn_render_thread(shaders, cache),
+            None => self.spawn_render_thread(cache),
         };
         #[cfg(not(feature = "test-hooks"))]
-        let ctx = self.spawn_render_thread(shaders, cache);
+        let ctx = self.spawn_render_thread(cache);
         self.load_variant_sent = Variant::Source; // a new thread starts at the default
         if self.debug != DebugView::Lit && ctx.send(V3Cmd::SetDebug(self.debug)).is_ok() {
             self.reconf_sent += 1;
@@ -1525,13 +1275,13 @@ impl Viewport3d {
 
     /// The panel wants a `w × h` frame of the current content and orbit: loads and renders only what changed.
     pub fn request_frame(&mut self, w: u32, h: u32) {
-        if self.state == V3State::NotFound || matches!(self.state, V3State::Error(_)) {
+        if matches!(self.state, V3State::Error(_)) {
             return;
         }
         if self.content.as_ref().is_some_and(Content::le_mesh) {
             return;
         }
-        if self.content.is_none() || w == 0 || h == 0 || !self.confirmed || !self.ensure_thread() {
+        if self.content.is_none() || w == 0 || h == 0 || !self.ensure_thread() {
             return;
         }
         let Some(thread) = self.thread.clone() else {
@@ -1607,30 +1357,18 @@ impl Viewport3d {
     /// Drain replies. True when anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = false;
-        for d in self.picker.take() {
-            changed = true;
-            if let Some(p) = d.path {
-                self.popup = None;
-                self.choose_folder(p);
-            }
-        }
         while let Ok(msg) = self.rx.try_recv() {
             changed = true;
             match msg {
                 WorkerMsg::Viewport3d(r) => self.handle(r),
-                WorkerMsg::Panicked { what, message } => {
-                    if what == "locate" {
-                        self.locating = false;
-                        self.notice = Some(format!("internal error in locate: {message}"));
-                    } else {
-                        self.thread = None;
-                        self.pending_load = None;
-                        self.render_done = self.render_sent;
-                        self.edits_done = self.edits_sent;
-                        self.reconf_done = self.reconf_sent;
-                        self.state =
-                            V3State::Error(format!("internal error in the 3D preview: {message}"));
-                    }
+                WorkerMsg::Panicked { message, .. } => {
+                    self.thread = None;
+                    self.pending_load = None;
+                    self.render_done = self.render_sent;
+                    self.edits_done = self.edits_sent;
+                    self.reconf_done = self.reconf_sent;
+                    self.state =
+                        V3State::Error(format!("internal error in the 3D preview: {message}"));
                 }
                 _ => {}
             }
@@ -1675,9 +1413,6 @@ impl Viewport3d {
                     self.report = Some(report);
                     self.bounds = bounds;
                     self.last_sent = None;
-                    if self.notice.as_deref() == Some(UPDATED_NOTICE) {
-                        self.notice = None;
-                    }
                 } else if self.loaded == Some(id) && self.pending_load.is_none() {
                     // Reloaded after a device rebuild: same mesh, fresh report.
                     self.report = Some(report);
@@ -1781,32 +1516,6 @@ impl Viewport3d {
                     self.swap_errors.push(format!("{path}: {e}"));
                 }
             }
-            V3Reply::Located {
-                generation,
-                result,
-                settings,
-            } if generation == self.locate_gen => {
-                self.on_located(result);
-                if let Some(s) = settings {
-                    // A Moved popup is still open: the new location's settings wait for "Use new".
-                    if self.popup.is_none() {
-                        self.on_settings(s);
-                    } else {
-                        self.popup_settings = Some(s);
-                    }
-                }
-            }
-            V3Reply::Chosen {
-                generation,
-                result,
-                settings,
-            } if generation == self.locate_gen => {
-                self.on_chosen(result);
-                if let Some(s) = settings {
-                    self.on_settings(s);
-                }
-            }
-            V3Reply::Located { .. } | V3Reply::Chosen { .. } => {}
             V3Reply::OffInPreview(off) => self.off_in_preview = off,
             V3Reply::DebugSupport(on) => {
                 self.debug_support = on;
@@ -1822,87 +1531,9 @@ impl Viewport3d {
     }
 }
 
-/// The `Shaders` folder for a folder the user picked: the folder itself when it holds `Lighting.hlsl`, else its
-/// `Shaders` subfolder.
-pub fn chosen_root(folder: &Path) -> Result<PathBuf, String> {
-    if folder.join("Lighting.hlsl").is_file() {
-        return Ok(folder.to_path_buf());
-    }
-    let s = folder.join("Shaders");
-    if s.join("Lighting.hlsl").is_file() {
-        return Ok(s);
-    }
-    Err(format!(
-        "{} has no Lighting.hlsl (choose the Community Shaders mod folder or its Shaders folder).",
-        folder.display()
-    ))
-}
-
-/// The target's loose origins as `(name, root, priority)`: MO2 = game Data −1, mods by modlist order, overwrite
-/// `i32::MAX`; a folder target is one origin.
-fn target_origins(target: Option<&ScanTarget>) -> Vec<(String, PathBuf, i32)> {
-    match target {
-        Some(ScanTarget::Mo2 { root, profile }) => {
-            modscan::mo2::Instance::load(root, Some(profile))
-                .ok()
-                .and_then(|i| modscan::mo2::loose_origins(&i).ok())
-                .map(|(o, _)| {
-                    o.into_iter()
-                        .map(|o| (o.name, o.root, o.priority))
-                        .collect()
-                })
-                .unwrap_or_default()
-        }
-        Some(ScanTarget::Folder(f)) => {
-            let name = f
-                .file_name()
-                .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
-            vec![(name, f.clone(), 0)]
-        }
-        None => vec![],
-    }
-}
-
-/// The user's CS settings for the located `Shaders` folder (03 §3.4, C12). They come through the target's
-/// origins (overwrite wins), also for a chosen folder; from the Data folder above `Shaders` only when no origin
-/// has a settings file (no target, or none there). Never fails: problems become notes.
-pub fn read_cs_settings(target: Option<&ScanTarget>, found: &Fingerprint) -> CsSettings {
-    // Through the target's origins whatever folder the shaders came from (a chosen copy of CS still has its
-    // settings in MO2's overwrite); the Data folder above `Shaders` only when no origin has a settings file.
-    let origins = target_origins(target);
-    let through_target = Some(origins.as_slice())
-        .filter(|o| !o.is_empty())
-        .map(|o| locate::settings_paths(Some(o), &found.root))
-        .filter(|p| p.user.is_some() || p.default.is_some() || p.info_ini.is_some());
-    let paths = through_target.unwrap_or_else(|| locate::settings_paths(None, &found.root));
-    cs_settings::read_settings(&paths)
-}
-
-/// Finds the CS `Shaders` folder: a folder the user chose (no owning mod) while it still holds `Lighting.hlsl`;
-/// else the highest-priority mod of the target providing `Shaders/Lighting.hlsl`; else the saved folder if it is
-/// still there. Fingerprints it (reads every shader file).
-pub fn locate_shaders(
-    target: Option<&ScanTarget>,
-    saved: Option<&Fingerprint>,
-) -> Result<Option<Fingerprint>, String> {
-    let fp = |root: &Path, owner: Option<String>| {
-        locate::fingerprint(root, owner)
-            .map(Some)
-            .map_err(|e| e.to_string())
-    };
-    if let Some(s) = saved.filter(|s| s.owner_mod.is_none()) {
-        if s.root.join("Lighting.hlsl").is_file() {
-            return fp(&s.root, None);
-        }
-    }
-    let origins = target_origins(target);
-    if let Some((name, root)) = locate::find_in_mods(&origins) {
-        return fp(&root.join("Shaders"), Some(name));
-    }
-    match saved {
-        Some(s) if s.root.join("Lighting.hlsl").is_file() => fp(&s.root, s.owner_mod.clone()),
-        _ => Ok(None),
+impl Default for Viewport3d {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -2039,7 +1670,7 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
 }
 
 /// The render thread's texture state (P1-B A/B): the variant the load resolver's bytes count as, and the swaps and
-/// flips made since the content's own load. A reload (shaders, features or device change) loads the content's own
+/// flips made since the content's own load. A device rebuild loads the content's own
 /// bytes again, so they are applied again, exactly as `edits` are. A device rebuild drops the renderer's texture
 /// cache, so the log holds both variants of every path swapped.
 #[derive(Default)]
@@ -2150,21 +1781,19 @@ fn render_loop(
     rx: Receiver<V3Cmd>,
     self_tx: Sender<V3Cmd>,
     tx: &Sender<WorkerMsg>,
-    shaders: Fingerprint,
+    source: render3d::ShaderSource,
     cache: PathBuf,
     features: bool,
-    settings: CsSettings,
 ) {
     let send = |r: V3Reply| {
         let _ = tx.send(WorkerMsg::Viewport3d(r));
     };
-    let make = |shaders: Fingerprint, features: bool| -> Result<Renderer, String> {
-        let mut r = Renderer::new(shaders, cache.clone())?;
+    let make = |features: bool| -> Result<Renderer, String> {
+        let mut r = Renderer::with_source(source.clone(), cache.clone())?;
         r.set_async_compile(true);
         // AU3: render3d's fill (GUI suggestions item 3): colour slots only, so a missing normal no longer tints.
         r.set_missing_texture(Some([255, 0, 255, 255]));
         r.set_features_on(features);
-        r.set_settings(settings.clone());
         Ok(r)
     };
     let loaded = |r: &Renderer, id: u64, report: LoadReport| {
@@ -2175,7 +1804,7 @@ fn render_loop(
         });
         send(V3Reply::Shapes(r.shapes()));
     };
-    let mut r = match make(shaders, features) {
+    let mut r = match make(features) {
         Ok(r) => r,
         Err(e) => return send(V3Reply::Failed(e)),
     };
@@ -2224,9 +1853,10 @@ fn render_loop(
     let mut backdrop_told = false;
     // The deferred failure last reported (`Renderer::deferred_error`), so a late fallback is told once.
     let mut deferred_told: Option<String> = None;
-    // The look's deferred choice (the last SetDeferred): a shaders, features or settings change retries it after a
-    // fallback (D-P36). A failed retry is told by the check after render only when its error is new.
+    // The look's deferred choice (the last SetDeferred): a features change retries it after a fallback (D-P36). A failed retry is told by the check after render only when its error is new.
     let mut want_deferred = false;
+    #[cfg(feature = "test-hooks")]
+    let mut lose_device = false;
     // A material-object layer not applied yet: it waits for content, whose texture map resolves its textures.
     let mut layer_due: Vec<Option<ProjectedLayer>> = vec![];
     // The skin card's picks (Note GN): applied after every load of `last`.
@@ -2241,23 +1871,18 @@ fn render_loop(
         // A settings or features change: cbuffers rewritten, programs maybe swapped or queued; no reload.
         let mut restyled = false;
         let mut debug_changed = false;
-        let mut reshaded = false;
         let mut pending: Vec<(u64, ShapeId, MaterialState)> = vec![];
         let mut tex_cmds: Vec<TexCmd> = vec![];
         for c in std::iter::once(first).chain(rx.try_iter()) {
             let content = match c {
                 V3Cmd::Quit => return,
-                V3Cmd::Compiled(done) => {
-                    compiled_changed |= r.apply_compiled(done);
+                #[cfg(feature = "test-hooks")]
+                V3Cmd::LoseDevice => {
+                    lose_device = true;
                     None
                 }
-                V3Cmd::SetShaders(f) => {
-                    r.set_shaders(f);
-                    if want_deferred && !r.deferred() {
-                        let _ = r.set_deferred(true);
-                    }
-                    reload = true;
-                    reshaded = true;
+                V3Cmd::Compiled(done) => {
+                    compiled_changed |= r.apply_compiled(done);
                     None
                 }
                 V3Cmd::SetFeatures(on) => {
@@ -2277,15 +1902,6 @@ fn render_loop(
                     if let Err(e) = r.set_deferred(on) {
                         deferred_told = Some(e.clone());
                         send(V3Reply::Notice(e));
-                    }
-                    restyled = true;
-                    ack.0 += 1;
-                    None
-                }
-                V3Cmd::SetSettings(s) => {
-                    r.set_settings(s);
-                    if want_deferred && !r.deferred() {
-                        let _ = r.set_deferred(true);
                     }
                     restyled = true;
                     ack.0 += 1;
@@ -2486,9 +2102,6 @@ fn render_loop(
         if let (false, Some((lid, _))) = (late.is_empty(), &last) {
             send(V3Reply::LateWarnings(*lid, late));
         }
-        if reshaded {
-            send(V3Reply::DebugSupport(r.debug_supported()));
-        }
         if restyled {
             send(V3Reply::OffInPreview(r.off_in_preview()));
         }
@@ -2514,6 +2127,10 @@ fn render_loop(
         let mut scene = look.scene(camera, r.bounds());
         scene.time = time;
         let mut result = r.render(&scene, w, h);
+        #[cfg(feature = "test-hooks")]
+        if std::mem::take(&mut lose_device) {
+            result = Err(format!("{}: test", render3d::device::DEVICE_REMOVED));
+        }
         if let Err(e) = &result {
             if e.starts_with(render3d::device::DEVICE_REMOVED) {
                 // Device lost (TDR, driver update): a new device (maybe WARP), the content again, one retry.
@@ -2531,7 +2148,7 @@ fn render_loop(
                 send(V3Reply::Notice(format!("Studio backdrop unavailable: {e}")));
             }
         }
-        // A shaders, features or settings change can turn deferred off during render (late fallback).
+        // A features change can turn deferred off during render (late fallback).
         if let Some(e) = r.deferred_error() {
             if deferred_told.as_deref() != Some(e) {
                 send(V3Reply::Notice(e.to_owned()));

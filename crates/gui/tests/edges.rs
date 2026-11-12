@@ -97,7 +97,7 @@ fn export_after_a_change_plans_again_and_then_exports() {
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert_eq!(m.export.summary.as_ref().unwrap().failed, 0);
-    let out = std::fs::read(d.path().join("export/landscape/rock01.dds")).unwrap();
+    let out = std::fs::read(d.path().join("export/textures/landscape/rock01.dds")).unwrap();
     let dds = engine::dds::read_dds(&out).unwrap();
     assert_eq!((dds.levels[0].0, dds.levels[0].1), (32, 32));
 }
@@ -111,7 +111,7 @@ fn a_dds_input_changed_on_disk_is_flagged_and_its_preview_read_again() {
     export_through(&mut m);
     assert!(m.wait_idle(Duration::from_secs(120)));
     let root = m.root.clone().unwrap();
-    let dds = d.path().join("export/landscape/rock01.dds");
+    let dds = d.path().join("export/textures/landscape/rock01.dds");
     std::fs::copy(&dds, root.join("landscape/stored.dds")).unwrap();
     m.open_folder(root.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
@@ -132,7 +132,7 @@ fn a_dds_input_changed_on_disk_is_flagged_and_its_preview_read_again() {
     m.expand("landscape/stored.dds");
     assert!(m.wait_idle(Duration::from_secs(60)));
     std::fs::copy(
-        d.path().join("export/landscape/small.dds"),
+        d.path().join("export/textures/landscape/small.dds"),
         root.join("landscape/stored.dds"),
     )
     .unwrap();
@@ -647,4 +647,32 @@ fn a_scan_database_error_after_a_good_read_is_logged_again() {
         .filter(|e| e.text.starts_with("Scan database"))
         .count();
     assert_eq!(n, 2);
+}
+
+/// Note U (closed by HR4): a mesh-evidence read error is a Messages warning, and the evidence is kept.
+/// Pin of existing behaviour.
+#[test]
+fn a_mesh_evidence_read_error_warns_and_keeps_the_evidence() {
+    let d = tempfile::tempdir().unwrap();
+    let db = d.path().join("scan.db");
+    std::fs::write(&db, b"not a database").unwrap();
+    let mut m = AppModel::placeholder(GuiSettings::default());
+    m.mesh_votes = [(
+        "textures/a/wall".to_string(),
+        vec![engine::shader::Shader::PbrGrass],
+    )]
+    .into();
+    m.scan_db = Some(db);
+    m.refresh_mesh_votes(false);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.mesh_votes.len(), 1, "kept");
+    let n = m
+        .messages
+        .entries()
+        .filter(|e| {
+            e.text.starts_with("Scan database:")
+                && e.text.contains("keeping the previous mesh evidence")
+        })
+        .count();
+    assert_eq!(n, 1);
 }

@@ -1611,6 +1611,79 @@ fn a_set_with_raw_twins_takes_an_input_name_and_a_bulk_rename() {
     assert!(plan.can_apply(), "{problems:?}");
 }
 
+/// A member named by a preset's `[suffix_aliases] zz9 = "n"` keeps its alias under a new input name and a suffix
+/// rename, and its output is read through the alias, as the engine reads it.
+#[test]
+fn an_aliased_member_keeps_its_alias_under_an_input_name_and_a_suffix_rename() {
+    use image::{ImageBuffer, Rgb};
+    use sdc_gui::model::rename::RenameMode;
+    let d = tempfile::tempdir().unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(d.path().join("rock.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(d.path().join("rock_zz9.png"))
+        .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(d.path().join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(d.path().to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let p = tempfile::tempdir().unwrap();
+    std::fs::write(
+        p.path().join("mine.toml"),
+        "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n\n\
+         [suffix_aliases]\nzz9 = \"n\"\n",
+    )
+    .unwrap();
+    m.user_presets = Some(p.path().to_path_buf());
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.suffix_aliases.get("zz9").map(String::as_str), Some("n"));
+    let v = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.members.iter().any(|k| k == "rock.png"))
+        .expect("the rock set")
+        .clone();
+    assert!(
+        v.members.iter().any(|k| k == "rock_zz9.png"),
+        "one set holds both: {:?}",
+        v.members
+    );
+    // The input name box.
+    let plan = m.input_name_plan(&v.id, "new");
+    let plan = plan.unwrap_or_else(|e| panic!("{e}"));
+    let row = plan
+        .rows
+        .iter()
+        .find(|r| r.key == "rock_zz9.png")
+        .expect("the alias row");
+    assert_eq!(row.new, "new_zz9.png");
+    assert_eq!(row.output, "new_n.dds");
+    // `Rename inputs…` with a suffix.
+    m.click_set(&v.key, false, false);
+    m.open_rename(RenameMode::Inputs);
+    let Some(sdc_gui::model::Dialog::Rename(dlg)) = m.dialog.as_ref() else {
+        panic!("the rename dialog")
+    };
+    let mut dlg = dlg.clone();
+    dlg.recipe.suffix = "_v2".into();
+    let plan = sdc_gui::model::rename::plan_rename(&m, &dlg);
+    let row = plan
+        .rows
+        .iter()
+        .find(|r| r.key == "rock_zz9.png")
+        .expect("the alias row");
+    assert_eq!(row.new, "rock_v2_zz9.png");
+    assert_eq!(row.kind, Some(("_zz9".into(), "_zz9".into())));
+    assert_eq!(row.output, "rock_v2_n.dds");
+    let problems: Vec<_> = plan.rows.iter().map(|r| &r.problem).collect();
+    assert!(plan.can_apply(), "{problems:?}");
+}
+
 /// `Rename…` (the set) and `Rename outputs…` change what the files are written as; the input name box keeps showing
 /// the name the files are read under.
 #[test]
