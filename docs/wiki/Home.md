@@ -12,7 +12,7 @@ It builds for two targets: `cs` (the default) for Community Shaders including Tr
 - **Pick a target, or make smaller files:** [Presets and targets](Presets-and-Targets.md).
 - **Ship PBR, Vanilla and Complex material from one source:** [Set shaders and Also export](Set-Shaders.md).
 - **Write the PGPatcher JSON:** [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
-- **Set up Advanced skin, landscape or grass:** [Skin and Advanced skin](Skin.md), [PBR Landscape, grass, XPMF and CS PBR records](PBR-Landscape.md).
+- **Set up Advanced skin, landscape or grass:** [PBR Landscape, Advanced skin, grass, XPMF and CS PBR records](PBR-Landscape.md).
 - **Make a cubemap:** [Cubemaps](Cubemaps.md).
 - **Check the result before release:** [Previews](Previews.md), [Validation and output](Validation-and-Output.md).
 - **Learn the window:** [GUI guide](GUI-Guide.md).

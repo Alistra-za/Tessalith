@@ -103,7 +103,7 @@ These keys set the shape's alpha blending and testing in the NIF. A key that's o
 
 After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.json`. `<name>` is the **JSON name:** field in the JSON editor, which defaults to the folder name.
 
-- Only sets that exported fully go in. Advanced skin sets have no entry ([Skin](Skin.md)).
+- Only sets that exported fully go in. Advanced skin sets have no entry ([Advanced skin](PBR-Landscape.md#advanced-skin)).
 - On a partial or excluding run ([Exporting part of the project](GUI-Review-and-Export.md#exporting-part-of-the-project)), a set the run left out keeps its entry while its DDS files are in the export folder. One whose files aren't there (never exported, or the folder was emptied) is left out, with a "not exported yet" note in the Files tab. <!-- D:HF12 -->
 - **IMPORTANT** Tessalith never overwrites a JSON it didn't write without asking you first. An identical file is left alone without a prompt.
 

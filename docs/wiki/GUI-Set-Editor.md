@@ -4,7 +4,7 @@ For anyone filling a material set's slots, wiring packed channels, or pointing a
 
 ## The set editor
 
-Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a vanilla set) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Skin](Skin.md), [PBR Landscape](PBR-Landscape.md)). **Advanced** has the same sections as the [Advanced drawer](GUI-Texture-Panel.md#advanced-drawer).
+Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a vanilla set) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Advanced skin](PBR-Landscape.md#advanced-skin), [PBR Landscape](PBR-Landscape.md)). **Advanced** has the same sections as the [Advanced drawer](GUI-Texture-Panel.md#advanced-drawer).
 
 ![The set editor.](../img/gui/GUI-Set-Editor/set-editor.png)
 
@@ -26,7 +26,7 @@ Right-click a slot row, or a member chip on a card.
 
 - **Clear**, **From this set** and **Path** are one undo step each. On a borrowed slot, From this set and Clear both drop the borrow. <!-- D:HC7 -->
 - **From another set** links the slot to a map of another set. It needs the same slot kind.
-- **Pin this slot (always use this file)** keeps the slot's file as it is. A pinned slot refuses drags and slot commands, bulk edits skip it (*slot locked*), and automatic re-typing leaves it alone. Pinning the diffuse of an Advanced skin set has a side effect: [Skin](Skin.md). The pin is saved in `sdc-project.toml`, never in the PGPatcher JSON.
+- **Pin this slot (always use this file)** keeps the slot's file as it is. A pinned slot refuses drags and slot commands, bulk edits skip it (*slot locked*), and automatic re-typing leaves it alone. Pinning the diffuse of an Advanced skin set has a side effect: [Texture types](Texture-Types.md#suffixes). The pin is saved in `sdc-project.toml`, never in the PGPatcher JSON.
 - **Keep the original texture** / **Let PGPatcher replace the texture** toggles the slot's PGPatcher lock (`lock_diffuse`, `lock_normal`, `lock_emissive`, `lock_parallax`, `lock_rmaos`, `lock_cnr`, `lock_subsurface`) on a set that writes a PGPatcher entry. PGPatcher then leaves the mesh's own texture in that slot. The file is still exported, and the card shows a padlock, *kept by PGPatcher*. A `slotN` command on the same slot wins ("slotN overrides the lock"). There is no cubemap lock, because `lock_cubemap` would clear the slot.
 - **Show in Explorer** selects the source file.
 

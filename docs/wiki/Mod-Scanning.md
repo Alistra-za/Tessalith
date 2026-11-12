@@ -70,7 +70,7 @@ Select a mesh to see its copy (**In game**, or **Source** for a PGPatcher-patche
 - A **Texture set** dropdown appears when a plugin record gives the shape alternate textures (or, on a Skin Tint shape, an armor addon gives it a skin texture). Pick one to see it on the shape in the 3D view; nothing is saved. The game matches alternate textures by the 3D index, so the card lists a TXST under that index whatever shape name the record stores, and **Plugin overrides** flags a swap whose index no shape has. <!-- D:GO2 --> <!-- D:GO4 -->
 - A texture that belongs to the open folder has **Open in Textures**.
 
-A Face Tint or Skin Tint shape also has an **Advanced Skin preview** card, for trying Community Shaders' extra skin textures in the 3D view (the textures themselves are on [Skin](Skin.md)). <!-- D:GN1 --> Nothing here is saved: the picks reset when another mesh is shown and when **Edit** opens or closes. <!-- D:GN4 -->
+A Face Tint or Skin Tint shape also has an **Advanced Skin preview** card, for trying Community Shaders' extra skin textures in the 3D view (the textures themselves are on [Advanced skin](PBR-Landscape.md#advanced-skin)). <!-- D:GN1 --> Nothing here is saved: the picks reset when another mesh is shown and when **Edit** opens or closes. <!-- D:GN4 -->
 
 ## Scan errors
 

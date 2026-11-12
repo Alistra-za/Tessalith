@@ -151,9 +151,9 @@ used_by = ["Mod-Scanning.md"]
 
 [[shot]]
 id = "skin-card"
-page = "Skin"
+page = "PBR-Landscape"
 scenario = "skin_card"
-used_by = ["Skin.md"]
+used_by = ["PBR-Landscape.md"]
 
 [[shot]]
 id = "landscape-card"

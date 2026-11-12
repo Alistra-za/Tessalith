@@ -6,7 +6,7 @@
 
 Making textures
 
-- [Texture types and naming](Texture-Types.md)
+- [Texture types, naming and normal maps](Texture-Types.md)
 - [Packing PBR maps and helpers](Texture-Packing.md)
 - [Set shaders and Also export](Set-Shaders.md)
 - [Cubemaps](Cubemaps.md)
@@ -15,8 +15,7 @@ Making textures
 Community Shaders materials
 
 - [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md)
-- [Skin and Advanced skin](Skin.md)
-- [PBR Landscape, grass, XPMF and CS PBR records](PBR-Landscape.md)
+- [PBR Landscape, Advanced skin, grass, XPMF and CS PBR records](PBR-Landscape.md)
 
 Checking before release
 

@@ -1,6 +1,6 @@
 # Texture types and naming
 
-For anyone naming source files: this page says what each file becomes (set, sub-type, format, colour tag, alpha) and what the artist checks are telling you. Packing raw maps is on [Texture packing](Texture-Packing.md); shaders and the extra exports are on [Set shaders](Set-Shaders.md).
+For anyone naming source files: this page says what each file becomes (set, sub-type, format, colour tag, alpha), how normal maps are read, and what the artist checks are telling you. Packing raw maps is on [Texture packing](Texture-Packing.md); shaders and the extra exports are on [Set shaders](Set-Shaders.md).
 
 ## Which files Tessalith reads
 
@@ -68,20 +68,8 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | `_e`, or a file under `textures\cubemaps\` | `cubemap`; the face suffixes `_posx` to `_negz` (or `_px` to `_nz`) are cut off first | High |
 
 - **A PBR set** (under `cs`) has a `pbr` folder in its path, or an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or a raw roughness, glossiness, metallic or AO map.
-- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. A pinned Diffuse slot turns it off ([Skin](Skin.md)). In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself.
+- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. A pinned Diffuse slot turns it off ([Advanced skin](PBR-Landscape.md#advanced-skin)). In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself.
 - **A name that fits none of the above** is read as a colour map when the set has other files (`rock_nm.png` becomes a diffuse); alone, it [waits for a type](#how-files-form-a-set). Rename it, add an `[inputs]` alias, or set `subtype`.
-
-### Detail names
-
-The three detail spellings all mean the set's detail normal. What the file becomes depends on the set:
-
-| Set | The detail file becomes |
-|---|---|
-| Landscape or PBR Landscape (a `landscape` folder in the path, or the set's shader) | `detail_normal` |
-| Advanced skin (`cs` only) | `skin_detail` |
-
-- **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or [XPMF profile](PBR-Landscape.md#projected-noise-and-detail-normal) looks for that name.
-- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. `iron_detail_n.png` there keeps its own set stem, as a normal in set `iron_detail`.
 
 ### Exporter names
 
@@ -107,7 +95,7 @@ Names that texturing tools commonly export are understood too:
 | `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by [Also export](Set-Shaders.md#also-export-as-vanilla-and-cm) |
 | `_cavity` | Raw cavity | read only by Also export |
 
-**Green direction.** Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doesn't say which way its green points, so Tessalith assumes DirectX, doesn't flip, and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> A map from Substance or Blender is often OpenGL: name it `_normalgl`, or set `channels.green_convention = "opengl"` on the file (the GUI's note has a **Treat as OpenGL (flip green)** button for it). A file named `_n` is taken as DirectX.
+Which way a normal's green points is under [Green direction](#green-direction).
 
 Your own suffixes go in a preset's `suffix_aliases`: see [Suffix aliases](Presets-and-Targets.md#suffix-aliases).
 
@@ -154,12 +142,60 @@ One row per sub-type. **vanilla** says whether the sub-type exists under the Van
 
 - **Default alpha is a start.** Analysis decides: no alpha channel resolves to `remove`; alpha is opaque when its minimum is 251 or more, or when fewer than 0.1 % of texels are below 251 and no connected group of them is larger than 16 texels (stray noise from a re-encode). <!-- D:FM34 --> A colour map whose alpha really varies is undecided unless scanned meshes answer.
 - **Exact opaque** means opaque alpha decodes as exactly 255 in BC7, not 254. PGPatcher and ENB read the alpha of `_m`, so it is on for those, and turning it off on a BC7 `_m` is blocked (`ALPHA-EXACT-OFF-M`).
-- **Normal maps are never BC4 or BC5:** the game would decode Z as −1 and lose the alpha (`FMT-BC5-NORMAL`, blocking).
 - **HDR formats** (BC6H, RGBA16F) exist only under `cs`; an emissive becomes BC6H only from a float source above 1.0.
 
 ### sRGB or UNORM
 
 Under `cs`, PBR colour maps (`pbr_albedo`, `pbr_emissive` as BC7, `pbr_subsurface`, `pbr_fuzz`) are tagged `_SRGB` (`TAG-UNORM-PBR` if not) and everything else is UNORM, `diffuse` and `skin_albedo` included (`TAG-SRGB-NONPBR`). Vanilla tags nothing `_SRGB` (`TAG-SRGB-VANILLA`), and neither does anything under a `lod` folder, because LOD shaders reject it (`TAG-SRGB-LOD`). A wrong tag makes the texture look too dark or washed out.
+
+## Normal maps
+
+Everything Tessalith does with a normal map: which way its green points, model-space normals, detail normals, formats and mips. Each normal sub-type (`normal`, `landscape_normal`, `pbr_normal`, `detail_normal`, `msn`, `coat_normal`, `skin_wet`, `skin_detail`) has its row in [the sub-type table](#sub-types-what-each-file-becomes).
+
+### Green direction
+
+Skyrim reads DirectX normals. A file named only `_normal`, `_nrm` or `_norm` doesn't say which way its green points, so Tessalith assumes DirectX, doesn't flip, and notes `IN-GREEN-UNSTATED`. <!-- D:AW1 --> A map from Substance or Blender is often OpenGL: name it `_normalgl`, or set `channels.green_convention = "opengl"` on the file (the GUI's note has a **Treat as OpenGL (flip green)** button for it). A file named `_n` is taken as DirectX. The **Green direction** check flags a map that looks OpenGL: [Artist checks](#artist-checks).
+
+### Formats and mips
+
+- **Normal maps are never BC4 or BC5,** `skin_detail` aside: the game would decode Z as −1 and lose the alpha (`FMT-BC5-NORMAL`, blocking).
+- **Mips are renormalised to unit length.** In a PBR set the detail each mip loses goes into the roughness instead: [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). The keys are `mips.normal` and `mips.normal_base` ([Mipmaps](Project-Config.md#mipmaps)); why it's done is on [Research](Research.md#why-renormalise-normal-mips).
+
+### Model-space normals (MSN)
+
+An `_msn` stores each normal in the model's own frame instead of relative to the surface. Vanilla skin and eyes use it. It only fits the mesh and UVs it was baked for, and it handles deformation badly, so I'd pick a tangent-space `_n` for anything morphed (RaceMenu bodies and faces) and keep `_msn` for meshes that never deform.
+
+- **Axis layout.** Skyrim reads R as X, G as Z and B as Y. A bake from another tool needs a swap or an invert to match, which the next section covers.
+- **Naming.** `_msn` is typed `msn` and wins over `_n`. The Eye shader re-types an eye's `_n` to `msn`. It goes in texture-set slot 2 (normal).
+- **The `_s` companion.** An `_s` in a set with `_msn` is `msn_specular`: BC4, red only, in slot 8. The game reads its red as glossiness. An `_msn` without an `_s` gives `SET-MISSING-COMPANION` (info), except under Eye.
+- **The NIF flag.** The mesh needs the `Model_Space_Normals` flag (except for eye envmap), or the game reads the map as tangent space. The [NIF editor](GUI-NIF-Edit.md) names slot 8 "Model-space specular" when it's set.
+- **Encoding.** BC7, alpha removed, no green flip, no Z rebuild: Tessalith keeps the vectors as you baked them.
+
+#### Baking an MSN for Skyrim
+
+Tell Tessalith which baker made the map and it makes the change when it encodes. The **Baked in** row appears on an `_msn` file and is saved per file (key `channels.msn_source`, see [Project config](Project-Config.md#channels)). Unset means the map is already Skyrim MSN and is stored as it is, the list is non exhaustive, I do not have access to every baking program, these are the ones I've looked at. <!-- D:IA2 -->
+
+| Source | Change to reach Skyrim MSN | **Baked in** |
+|---|---|---|
+| Blender object-space bake | Swap G and B | Blender object-space (swap G and B) |
+| Marmoset default (right-handed) | Invert B | Marmoset right-handed or Substance (invert B) |
+| Substance (DirectX and OpenGL give the same MSN) | Invert B | Marmoset right-handed or Substance (invert B) |
+| Marmoset left-handed | Invert G and B | Marmoset left-handed (invert G and B) |
+| Already Skyrim MSN | None | Skyrim MSN (no change) |
+
+Tessalith doesn't detect the baker or warn about a wrong choice: a wrong guess would silently ruin the map, so it applies exactly what you pick.
+
+### Detail names
+
+The three detail spellings all mean the set's detail normal. What the file becomes depends on the set:
+
+| Set | The detail file becomes |
+|---|---|
+| Landscape or PBR Landscape (a `landscape` folder in the path, or the set's shader) | `detail_normal` |
+| Advanced skin (`cs` only) | `skin_detail` |
+
+- **The output keeps your spelling:** `iron_detailnorm.png` writes `iron_detailnorm.dds`, because the shader or [XPMF profile](PBR-Landscape.md#projected-noise-and-detail-normal) looks for that name.
+- **Any other set** leaves `iron_detail.png` and `iron_detailnorm.png` as undecided members of set `iron`: pick a sub-type on the file. `iron_detail_n.png` there keeps its own set stem, as a normal in set `iron_detail`.
 
 ## Alpha
 

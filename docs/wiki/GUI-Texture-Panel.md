@@ -20,7 +20,7 @@ Every row writes one key of the texture's `[files]` entry. The values each key t
 | Enable parallax (complex `_m` only) | `alpha.parallax`: ticked keeps the `_m` alpha as parallax height, unticked writes alpha 0 |
 | Coverage, 1-bit alpha, Exact opaque alpha | `mips.coverage`, `encoder.bc1_alpha`, `alpha.exact_opaque` |
 | Normal handling, Normal base level | `mips.normal`, `mips.normal_base` |
-| Baked in (`msn` only) | `channels.msn_source`: [Skin](Skin.md#model-space-normals-msn) |
+| Baked in (`msn` only) | `channels.msn_source`: [Texture types](Texture-Types.md#model-space-normals-msn) |
 | Mipmaps: Levels, Filter, Edge | `mips.levels`, `mips.filter`, `mips.edge` |
 | Format, Effort | `format`, `encoder.effort` |
 | Input content, DDS tag (under Compression) | `color.content`, `color.tag` |
