@@ -23,7 +23,7 @@ pub mod filter;
 pub mod grass;
 pub mod group;
 pub mod helper;
-pub mod image;
+pub use texcore::image;
 pub mod load;
 pub mod manifest;
 pub(crate) mod migrate;

@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp"]
+members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp", "crates/texcore"]
 
 [workspace.package]
 version = "3.0.0"
@@ -35,6 +35,7 @@ lz4_flex = { version = "0.14.0", default-features = false, features = ["frame", 
 rusqlite = { version = "0.40.2", features = ["bundled"] }
 crc32fast = "1.5.2"
 flate2 = "1"
+texcore = { path = "crates/texcore" }
 
 [profile.dev]
 opt-level = 1
@@ -45,6 +46,10 @@ debug = "line-tables-only"
 opt-level = 2
 
 [profile.dev.package.encoders-sys]
+opt-level = 3
+
+# Per-texel helpers every stage calls; they were same-crate calls in engine (Note HX).
+[profile.dev.package.texcore]
 opt-level = 3
 
 [profile.release]

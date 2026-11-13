@@ -1,0 +1,22 @@
+[package]
+name = "texcore"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+schemars.workspace = true
+thiserror.workspace = true
+half.workspace = true
+bcdec_rs.workspace = true
+rayon.workspace = true
+image = { workspace = true, optional = true }
+bytemuck = { version = "1", features = ["extern_crate_alloc"], optional = true }
+
+[features]
+# Image loading, off by default so a consumer that only reads DDS files does not build the `image` crate.
+load = ["dep:image", "dep:bytemuck"]
