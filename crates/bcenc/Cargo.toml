@@ -10,3 +10,6 @@ description = "rgbcx's block encoders in Rust (port of bc7enc_rdo commit b943862
 # No dependencies: the C++ in encoders-sys is the reference, used by the tests only.
 [dev-dependencies]
 encoders-sys.workspace = true
+# The corpus tests (tests/corpus.rs) read PNGs and compare images in parallel.
+image.workspace = true
+rayon.workspace = true

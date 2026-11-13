@@ -465,6 +465,8 @@ name = "bcenc"
 version = "3.0.0"
 dependencies = [
  "encoders-sys",
+ "image",
+ "rayon",
 ]
 
 [[package]]
