@@ -164,9 +164,41 @@ hits! {
     Factors3Solved,
     LsSels3Singular,
     LsSels3Solved,
+    LsSels3SkipTransparent,
     // find_sels3
     Sels3Better,
     Sels3EarlyOut,
+    // encode_bc1_alpha
+    AlphaNoMask,
+    AlphaAllTransparent,
+    AlphaFit,
+    AlphaSkipStats,
+    AlphaSkipCov,
+    AlphaAxisFlipR,
+    AlphaAxisFlipG,
+    AlphaAxisScaled,
+    AlphaAxisDefault,
+    AlphaSkipDot,
+    AlphaDotLow,
+    AlphaDotHigh,
+    AlphaLsExact,
+    AlphaLsPassesExhausted,
+    AlphaLsSingular,
+    AlphaLsSolved,
+    AlphaLsSame,
+    AlphaLsWorse,
+    AlphaLsBetter,
+    AlphaSearchExact,
+    AlphaSearchRoundsExhausted,
+    AlphaStepOutOfRange,
+    AlphaStepBetter,
+    AlphaSearchNoGain,
+    // bc1_alpha_find_sels
+    AlphaSelTransparent,
+    AlphaSelBetter,
+    // bc4_encode_alpha (encode_bc4_hq's cut)
+    CutDefault,
+    CutGiven,
 }
 
 #[cfg(test)]

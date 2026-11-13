@@ -190,7 +190,7 @@ fn single_colour_ends(avg: [i32; 3]) -> Ends {
 
 /// The 3-colour single-colour match of the block average (`g_bc1_match*_half[avg]`), stored as
 /// [`single_colour_ends`] stores the 4-colour one.
-fn single_colour_ends3(avg: [i32; 3]) -> Ends {
+pub(super) fn single_colour_ends3(avg: [i32; 3]) -> Ends {
     let t = single_tables();
     let (r, g, b) = (
         &t.match5_half[avg[0] as usize],
@@ -205,7 +205,7 @@ fn single_colour_ends3(avg: [i32; 3]) -> Ends {
 
 /// Rounds a least-squares result to endpoint codes. The C++ calls `precise_round_565(xl, xh, trial_h*, trial_l*)`:
 /// the low fit becomes the high endpoint and the high fit the low one.
-fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
+pub(super) fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
     let (from_xl, from_xh) = precise_round_565(xl, xh);
     Ends {
         l: from_xh,
@@ -576,8 +576,9 @@ fn bc1_encode4(e: &Ends, sels: &[u8; 16]) -> [u8; 8] {
 }
 
 /// `bc1_encode3`: a 3-colour block (colour 0 <= colour 1) from the endpoints and 3-colour selectors; swapping the
-/// endpoints swaps selectors 0 and 1. Equal endpoints stay equal (a 3-colour block).
-fn bc1_encode3(e: &Ends, sels: &[u8; 16]) -> [u8; 8] {
+/// endpoints swaps selectors 0 and 1 (selector 3, black or transparent, stays 3). Equal endpoints stay equal (a
+/// 3-colour block).
+pub(super) fn bc1_encode3(e: &Ends, sels: &[u8; 16]) -> [u8; 8] {
     let mut lc16 = pack_unscaled_color(&e.l);
     let mut hc16 = pack_unscaled_color(&e.h);
 

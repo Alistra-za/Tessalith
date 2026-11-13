@@ -42,6 +42,44 @@ pub fn bc1_encode_block(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool
 }
 
 /// The alpha half of `rgbcx::encode_bc3_hq`: the BC4 search with the alpha-test guard at `cut` (BC4_SDC_GUARD128).
+/// A `cut` of 0 is 128, as `encode_bc4_hq` reads bits 8..15 of its flags (sdc patch "bc4 guard cut").
 pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8] {
+    let cut = if cut != 0 {
+        hits::hit!(hits::Hit::CutGiven);
+        cut
+    } else {
+        hits::hit!(hits::Hit::CutDefault);
+        128
+    };
     bc4::search(alpha, search_radius, Some(cut))
+}
+
+/// `rgbcx::encode_bc1_alpha(18, ..)` in `cBC1Dual` mode: BC1 with one-bit alpha, bit i of `transparent` marking
+/// texel i transparent. No bit set is [`bc1_encode_block`]`(px, true, perceptual)`; every bit set is the
+/// all-transparent block; otherwise a 3-colour block fitted to the opaque texels, masked texels on selector 3. The
+/// RGB of a masked texel and every alpha value are never read. `perceptual` as in [`bc1_encode_block`].
+pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
+    let weights = if perceptual {
+        bc1::PERCEPTUAL
+    } else {
+        bc1::PLAIN
+    };
+    bc1::alpha::encode_alpha(px, transparent, weights)
+}
+
+/// `rgbcx::encode_bc3_hq(18, .., search_radius, BC4_USE_ALL_MODES | BC4_SDC_SEARCH | BC4_SDC_GUARD128 | cut << 8)`
+/// with the shim's weights: bytes 0..8 are [`bc4_encode_alpha`] of the alpha channel, bytes 8..16
+/// [`bc1_encode_block`]`(px, false, perceptual)` (`encode_bc1(level, .., false, false)`; `perceptual` reaches only
+/// this half).
+pub fn bc3_encode_block(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: u8,
+    perceptual: bool,
+) -> [u8; 16] {
+    let alpha: [u8; 16] = std::array::from_fn(|i| px[i][3]);
+    let mut out = [0u8; 16];
+    out[..8].copy_from_slice(&bc4_encode_alpha(&alpha, search_radius, cut));
+    out[8..].copy_from_slice(&bc1_encode_block(px, false, perceptual));
+    out
 }

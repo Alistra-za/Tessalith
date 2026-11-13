@@ -315,12 +315,11 @@ pub(crate) fn ls_endpoints3_ordered(
 
 /// The selector form of `compute_least_squares_endpoints3_rgb` with `use_black = false` (every caller on the
 /// reachable path passes the literal `false`, so its skip of near-black texels never runs): the least-squares low and
-/// high colours for 3-colour selectors `sels`. `None` when the normal matrix is singular (the C++ returns false).
-/// Returns (xl, xh).
+/// high colours for 3-colour selectors `sels`, over the texels not on selector 3. `None` when the normal matrix is
+/// singular (the C++ returns false). Returns (xl, xh).
 ///
-/// The C++ also skips texels on selector 3 (black). The selectors here always come from [`super::sels::find_sels3`],
-/// which never picks 3 on the reachable path, through a call that wrote all 16 (see `try_3color_block`), so that skip
-/// never runs and is not ported.
+/// Selector 3 (transparent black) comes only from `encode_bc1_alpha`, which gives it to every masked texel; those
+/// texels add nothing to the sums or the totals. `try_3color_block`'s selectors never hold 3.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32; 3], [f32; 3])> {
     const S_TRAN: [i32; 3] = [0, 2, 1];
@@ -329,7 +328,11 @@ pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32
     let mut total = [0i32; 3];
     for i in 0..16 {
         let sel = sels[i] as usize;
-        debug_assert!(sel < 3, "3-colour selector {sel}");
+        debug_assert!(sel <= 3, "3-colour selector {sel}");
+        if sel == 3 {
+            hit!(Hit::LsSels3SkipTransparent);
+            continue;
+        }
 
         weight_accum += WEIGHT_VALS3[sel];
 
@@ -400,9 +403,9 @@ fn clamp_code(x: i32, max: i32) -> i32 {
 ///
 /// `(int)(x * 31.0f)` truncates toward zero like `as i32`. The values are finite and far inside `i32`: the
 /// least-squares inputs are bounded by the factors (4-colour: |iz| <= 3/255 * 144 / 1, as a non-zero det is an
-/// integer; 3-colour: det = 16 n0 n1 + 4 n2 (n0 + n1) is 0 or at least 60, z <= 64, so |iz| <= 2/255 * 64 / 60) times
-/// the sums (<= 3 * 16 * 255), the bounding-box inputs are clamped to 0..1, so `as i32` never saturates and no NaN
-/// reaches it (cvttss2si would give 0x80000000 there).
+/// integer; 3-colour: det = 16 n0 n1 + 4 n2 (n0 + n1) over the texels not on selector 3 is 0 or at least 4, z <= 64,
+/// so |iz| <= 2/255 * 64 / 4) times the sums (<= 3 * 16 * 255), the bounding-box inputs are clamped to 0..1, so
+/// `as i32` never saturates and no NaN reaches it (cvttss2si would give 0x80000000 there).
 pub(crate) fn precise_round_565(xl: &[f32; 3], xh: &[f32; 3]) -> ([i32; 3], [i32; 3]) {
     let mut trial_lr = (xl[0] * 31.0) as i32;
     let mut trial_lg = (xl[1] * 63.0) as i32;

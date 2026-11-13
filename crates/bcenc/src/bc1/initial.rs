@@ -9,7 +9,7 @@ use super::fit::{precise_round_565, to_5, to_6};
 use super::{BlockStats, Ends};
 
 /// `maximum(a, b)`: `(a > b) ? a : b`.
-fn maximum(a: f32, b: f32) -> f32 {
+pub(super) fn maximum(a: f32, b: f32) -> f32 {
     if a > b {
         a
     } else {

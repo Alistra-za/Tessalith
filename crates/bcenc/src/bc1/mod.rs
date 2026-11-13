@@ -1,9 +1,11 @@
 //! BC1: the total-ordering tables and the two-decoder ("dual", NVIDIA plus AMD) palettes of rgbcx's `cBC1Dual` mode
 //! (Note HY2), and the encode at level 18 with four- and three-colour blocks and plain or perceptual weights (Notes HY3,
-//! HY4). `tables` is generated from the vendored text by `tools/gen-bcenc-tables.py`; `palette` ports the palette and
-//! single-colour code; `encode` drives the encode, `initial` picks the starting endpoints, `fit` holds the
-//! least-squares fits and rounding, `sels` the selector searches.
+//! HY4) and with one-bit alpha (Note HY5). `tables` is generated from the vendored text by
+//! `tools/gen-bcenc-tables.py`; `palette` ports the palette and single-colour code; `encode` drives the encode,
+//! `initial` picks the starting endpoints, `fit` holds the least-squares fits and rounding, `sels` the selector
+//! searches; `alpha` is the one-bit-alpha encode.
 
+pub(crate) mod alpha;
 pub(crate) mod encode;
 mod fit;
 mod initial;

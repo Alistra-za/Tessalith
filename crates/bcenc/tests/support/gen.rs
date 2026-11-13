@@ -781,6 +781,84 @@ fn midpoint_ends(r: &mut Rng, i: usize, b5: &[u8], b6: &[u8]) -> [[u8; 4]; 16] {
     }
 }
 
+/// Transparency masks for BC1 one-bit alpha (bit i marks texel i transparent), deterministic in `seed`: 0 and 0xFFFF;
+/// each single bit; each single cleared bit; each row and column of the 4x4 block and their complements; the two
+/// checkerboards; then `n` random sparse masks (1..=4 bits) and `n` random dense ones (12..=15 bits).
+pub fn alpha_masks(seed: u64, n: usize) -> Vec<u16> {
+    let mut r = Rng(seed | 1);
+    let mut out = vec![0u16, 0xFFFF];
+    out.extend((0..16).map(|i| 1u16 << i));
+    out.extend((0..16).map(|i| !(1u16 << i)));
+    for k in 0..4 {
+        let row = 0xFu16 << (4 * k);
+        let col = 0x1111u16 << k;
+        out.extend([row, !row, col, !col]);
+    }
+    out.extend([0x5A5A, 0xA5A5]);
+    let mut random = |bits: std::ops::RangeInclusive<u64>| {
+        let k = r.below(bits.end() - bits.start() + 1) + bits.start();
+        let mut m = 0u16;
+        while (m.count_ones() as u64) < k {
+            m |= 1 << r.below(16);
+        }
+        m
+    };
+    for _ in 0..n {
+        out.push(random(1..=4));
+    }
+    for _ in 0..n {
+        out.push(random(12..=15));
+    }
+    out
+}
+
+/// A block and transparency mask on which `encode_bc1_alpha`'s endpoint search runs all 64 rounds with the error still
+/// falling (plain weights), found by a hill climb on the round count. One least-squares pass is taken; after the first
+/// search round the endpoints are (6, 0, 5) and (30, 50, 31). From there the low endpoint's green climbs about a code
+/// per round (to 55) while the high one's falls (to 3), the two greens crossing, and every round is strictly better
+/// (error 505,470 after round 1, 267,192 after round 64).
+pub const LONG_WALK: ([[u8; 4]; 16], u16) = (
+    [
+        [240, 240, 241, 255],
+        [253, 13, 223, 255],
+        [157, 16, 215, 255],
+        [157, 13, 215, 255],
+        [157, 22, 215, 255],
+        [249, 6, 118, 255],
+        [253, 13, 223, 255],
+        [18, 235, 197, 255],
+        [37, 0, 0, 255],
+        [252, 6, 126, 255],
+        [232, 0, 122, 255],
+        [21, 255, 163, 255],
+        [20, 228, 2, 255],
+        [161, 16, 74, 255],
+        [253, 13, 224, 255],
+        [253, 13, 223, 255],
+    ],
+    0x6042,
+);
+
+/// BC3 alpha blocks: [`bc4_classes`], then for each cut in `CUTS` `per_class` blocks of the values cut - 1, cut and
+/// cut + 1 only (odd blocks with some texels at 0 or 255), where the alpha-test guard decides.
+pub fn alpha_classes(seed: u64, per_class: usize) -> Vec<[u8; 16]> {
+    let mut out = bc4_classes(seed, per_class);
+    let mut r = Rng(seed.rotate_left(17) | 1);
+    for cut in CUTS {
+        for i in 0..per_class {
+            let mixed = i % 2 == 1;
+            out.push(std::array::from_fn(|_| {
+                if mixed && r.below(4) == 0 {
+                    [0u8, 255][r.below(2) as usize]
+                } else {
+                    (cut as i32 + r.below(3) as i32 - 1).clamp(0, 255) as u8
+                }
+            }));
+        }
+    }
+    out
+}
+
 /// A 5:6:5 code expanded to 8 bits per channel, as both decoders expand it.
 fn expand565(r: i32, g: i32, b: i32) -> [u8; 3] {
     [
