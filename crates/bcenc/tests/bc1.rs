@@ -3,10 +3,15 @@
 //! `encode_bc1_solid_block`, so the solid tests also prove the single-colour tables (`equals_1` with three-colour off,
 //! `half` too with it on).
 use bcenc::bc1::palette::{dual_err, dual_palette};
+use bcenc::bc1::{PERCEPTUAL, PLAIN};
 use bcenc::bc1_encode_block;
 
+#[path = "support/bc1_block.rs"]
+mod bc1_block;
 #[path = "support/gen.rs"]
 mod gen;
+
+use bc1_block::{colours, sel};
 
 /// The `(allow_3color, perceptual)` combinations.
 const MODES: [(bool, bool); 4] = [(false, false), (false, true), (true, false), (true, true)];
@@ -24,19 +29,6 @@ fn same(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
 
 fn solid(r: u8, g: u8, b: u8) -> [[u8; 4]; 16] {
     [[r, g, b, 255]; 16]
-}
-
-/// The two 16-bit colours of a block: (colour 0, colour 1).
-fn colours(b: &[u8; 8]) -> (u16, u16) {
-    (
-        u16::from_le_bytes([b[0], b[1]]),
-        u16::from_le_bytes([b[2], b[3]]),
-    )
-}
-
-/// The 2-bit selector of texel `i` as the block stores it.
-fn sel(b: &[u8; 8], i: usize) -> u32 {
-    (u32::from_le_bytes([b[4], b[5], b[6], b[7]]) >> (2 * i)) & 3
 }
 
 #[test]
@@ -194,7 +186,7 @@ fn bc1_three_colour_block_never_uses_black_for_a_black_texel() {
         let code = |c: u16| [(c >> 11) as i32, ((c >> 5) & 63) as i32, (c & 31) as i32];
         let (l, h) = (code(c0), code(c1));
         let p = dual_palette(true, l[0], l[1], l[2], h[0], h[1], h[2]);
-        let w = if perceptual { [54, 183, 19] } else { [1, 1, 1] };
+        let w = if perceptual { PERCEPTUAL } else { PLAIN };
         let black = dual_err(&p, w, 3, k);
         for s in 0..3 {
             assert!(

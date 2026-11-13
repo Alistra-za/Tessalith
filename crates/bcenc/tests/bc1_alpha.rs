@@ -3,8 +3,12 @@
 //! path of the C++.
 use bcenc::{bc1_encode_block, bc1_encode_block_alpha};
 
+#[path = "support/bc1_block.rs"]
+mod bc1_block;
 #[path = "support/gen.rs"]
 mod gen;
+
+use bc1_block::{colours, sel};
 
 /// Both outputs, the mask, the flag and the texels on a mismatch, so the block can be replayed.
 fn same(px: &[[u8; 4]; 16], mask: u16, perceptual: bool) -> [u8; 8] {
@@ -27,14 +31,6 @@ fn garbage_under(px: &[[u8; 4]; 16], mask: u16, r: &mut gen::Rng) -> [[u8; 4]; 1
         }
     }
     out
-}
-
-/// The two 16-bit colours of a block: (colour 0, colour 1).
-fn colours(b: &[u8; 8]) -> (u16, u16) {
-    (
-        u16::from_le_bytes([b[0], b[1]]),
-        u16::from_le_bytes([b[2], b[3]]),
-    )
 }
 
 #[test]
@@ -171,10 +167,9 @@ fn bc1_alpha_solid_opaque_texels_on_the_565_grid_pack_equal_colours() {
         let b = same(&px, mask, perceptual);
         let c = (12u16 << 11) | (37 << 5) | 25;
         assert_eq!(colours(&b), (c, c));
-        let sels = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
         for i in 0..16 {
             let want = if mask & (1 << i) != 0 { 3 } else { 0 };
-            assert_eq!((sels >> (2 * i)) & 3, want, "texel {i}");
+            assert_eq!(sel(&b, i), want, "texel {i}");
         }
     }
 }
@@ -207,7 +202,6 @@ fn bc1_alpha_orders_endpoints_for_three_colour_mode() {
         for perceptual in [false, true] {
             let out = same(&px, mask, perceptual);
             assert_eq!(colours(&out), (c0, c1), "{a:?} then {b:?}");
-            let sels = u32::from_le_bytes([out[4], out[5], out[6], out[7]]);
             for i in 0..16 {
                 let want = if mask & (1 << i) != 0 {
                     3
@@ -216,7 +210,7 @@ fn bc1_alpha_orders_endpoints_for_three_colour_mode() {
                 } else {
                     sb
                 };
-                assert_eq!((sels >> (2 * i)) & 3, want, "{a:?} then {b:?}, texel {i}");
+                assert_eq!(sel(&out, i), want, "{a:?} then {b:?}, texel {i}");
             }
         }
     }
@@ -230,6 +224,29 @@ fn bc1_alpha_endpoint_search_runs_all_64_rounds() {
     for perceptual in [false, true] {
         same(&px, mask, perceptual);
     }
+}
+
+/// [`gen::DEFAULT_AXIS_TIE`] (task 5 reviews): two distinct opaque colours tie on the default axis, so the texel order
+/// picks the low endpoint (rgbcx.cpp 2122-2126, strict `<`). Texels 0 = (100, 100, 100) and 1 = (85, 109, 93) both dot
+/// to 102,400; texel 2 = (93, 112, 104) dots to 107,938 and is the high endpoint, (11, 28, 13), either way. As given,
+/// the low endpoint is texel 0's (12, 25, 12); with texels 0 and 1 exchanged it is texel 1's (10, 27, 11). The refits
+/// and endpoint steps then start from different places and, with plain weights, end on different blocks. With
+/// perceptual weights both orders end on the same colours.
+#[test]
+fn bc1_alpha_texel_order_breaks_a_tie_on_the_default_axis() {
+    let (px, mask) = gen::DEFAULT_AXIS_TIE;
+    let mut exchanged = px;
+    exchanged.swap(0, 1);
+
+    let as_given = same(&px, mask, false);
+    assert_eq!(colours(&as_given), (0x5B6C, 0x632C));
+    assert_eq!([0, 1, 2].map(|i| sel(&as_given, i)), [1, 0, 0]);
+    let other = same(&exchanged, mask, false);
+    assert_eq!(colours(&other), (0x4B8B, 0x634C));
+    assert_eq!([0, 1, 2].map(|i| sel(&other, i)), [2, 1, 1]);
+
+    assert_eq!(colours(&same(&px, mask, true)), (0x5B6C, 0x632C));
+    assert_eq!(colours(&same(&exchanged, mask, true)), (0x5B6C, 0x632C));
 }
 
 /// A least-squares pass whose result is the current endpoints swapped (task 5 reviews), traced and explained from the
@@ -251,10 +268,9 @@ fn bc1_alpha_least_squares_pass_returns_the_endpoints_swapped() {
     }
     let b = same(&px, 0x7FFE, false);
     assert_eq!(colours(&b), (0x30A2, 0x30A3));
-    let sels = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
     for i in 0..16 {
         let want = if i == 0 || i == 15 { 2 } else { 3 };
-        assert_eq!((sels >> (2 * i)) & 3, want, "texel {i}");
+        assert_eq!(sel(&b, i), want, "texel {i}");
     }
 }
 
@@ -277,14 +293,13 @@ fn bc1_alpha_improving_step_reverses_the_packed_order() {
     }
     let b = same(&px, 0xFECF, false);
     assert_eq!(colours(&b), (0xD8B4, 0xE0B3));
-    let sels = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
     for i in 0..16 {
         let want = match i {
             4 | 8 => 2,
             5 => 1,
             _ => 3,
         };
-        assert_eq!((sels >> (2 * i)) & 3, want, "texel {i}");
+        assert_eq!(sel(&b, i), want, "texel {i}");
     }
 }
 

@@ -152,22 +152,26 @@ pub struct SingleTables {
 /// The tables, built once.
 pub fn single_tables() -> &'static SingleTables {
     static TABLES: OnceLock<SingleTables> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        let mut expand5 = [0u8; 32];
-        for (i, e) in expand5.iter_mut().enumerate() {
-            *e = ((i << 3) | (i >> 2)) as u8;
-        }
-        let mut expand6 = [0u8; 64];
-        for (i, e) in expand6.iter_mut().enumerate() {
-            *e = ((i << 2) | (i >> 4)) as u8;
-        }
-        SingleTables {
-            match5_equals_1: single_colour_table_dual(&expand5, false),
-            match6_equals_1: single_colour_table_dual(&expand6, false),
-            match5_half: single_colour_table_dual(&expand5, true),
-            match6_half: single_colour_table_dual(&expand6, true),
-        }
-    })
+    TABLES.get_or_init(build_single_tables)
+}
+
+/// What [`single_tables`] builds. The coverage test calls it too: the branch counters are per thread, and the one
+/// build may run on another test's thread.
+pub(crate) fn build_single_tables() -> SingleTables {
+    let mut expand5 = [0u8; 32];
+    for (i, e) in expand5.iter_mut().enumerate() {
+        *e = ((i << 3) | (i >> 2)) as u8;
+    }
+    let mut expand6 = [0u8; 64];
+    for (i, e) in expand6.iter_mut().enumerate() {
+        *e = ((i << 2) | (i >> 4)) as u8;
+    }
+    SingleTables {
+        match5_equals_1: single_colour_table_dual(&expand5, false),
+        match6_equals_1: single_colour_table_dual(&expand6, false),
+        match5_half: single_colour_table_dual(&expand5, true),
+        match6_half: single_colour_table_dual(&expand6, true),
+    }
 }
 
 /// `prepare_bc1_single_color_table_dual`. Error = squared NVIDIA error + squared AMD error of the interpolated

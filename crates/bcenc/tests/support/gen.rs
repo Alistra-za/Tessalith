@@ -195,6 +195,21 @@ pub const LONG_WALK: ([[u8; 4]; 16], u16) = (
     0x6042,
 );
 
+/// A block and transparency mask on which two distinct opaque colours tie on `encode_bc1_alpha`'s default axis
+/// (306, 601, 117) while that axis is in use, so the texel order picks the low endpoint (strict `<`, rgbcx.cpp
+/// 2122-2126). Texels 0 and 1 differ by (15, -9, 7), and 306 * 15 - 601 * 9 + 117 * 7 = 0: both dot to 102,400,
+/// texel 2 to 107,938. Two such colours alone always get a scaled axis that separates them
+/// (`two_opaque_colours_never_tie_on_the_default_alpha_axis`); the third colour turns the green-blue covariance
+/// positive (6), so green's extent is not negated, the start vector (15, 12, 11) points away from the principal axis
+/// and four power steps leave `k` at 1.86, below the 2 that rgbcx asks for (2105-2113).
+pub const DEFAULT_AXIS_TIE: ([[u8; 4]; 16], u16) = {
+    let mut px = [[0, 0, 0, 0]; 16];
+    px[0] = [100, 100, 100, 255];
+    px[1] = [85, 109, 93, 255];
+    px[2] = [93, 112, 104, 255];
+    (px, 0xFFF8)
+};
+
 /// BC3 alpha blocks: [`bc4_classes`], then for each cut in `CUTS` `per_class` blocks of the values cut - 1, cut and
 /// cut + 1 only (odd blocks with some texels at 0 or 255), where the alpha-test guard decides.
 pub fn alpha_classes(seed: u64, per_class: usize) -> Vec<[u8; 16]> {

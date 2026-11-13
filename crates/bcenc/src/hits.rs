@@ -1,6 +1,7 @@
-//! Branch counters for the ported code. `hit!(Hit::X)` marks one branch; it adds 1 to a counter in the crate's own
-//! unit tests (`#[cfg(test)]`) and expands to nothing everywhere else, so the engine and the integration tests carry
-//! no counters. `coverage_tests` asserts every variant is taken, so a branch no generator reaches is found.
+//! Branch counters for the ported code. `hit!(Hit::X)` marks one branch; it adds 1 to a counter of the running thread
+//! in the crate's own unit tests (`#[cfg(test)]`) and expands to nothing everywhere else, so the engine and the
+//! integration tests carry no counters. `coverage_tests` asserts every variant is taken, so a branch no generator
+//! reaches is found.
 #![cfg_attr(not(test), allow(dead_code))]
 
 /// Declares `Hit` and `Hit::ALL` from one list, so a new branch is named once.
@@ -201,27 +202,24 @@ hits! {
     CutGiven,
 }
 
+// One set of counters per thread: a test reads only what its own thread took, so the other unit tests, which run
+// beside it and call the same code, cannot hide a branch its inputs stopped reaching.
 #[cfg(test)]
-static COUNTS: [std::sync::atomic::AtomicU64; Hit::COUNT] =
-    [const { std::sync::atomic::AtomicU64::new(0) }; Hit::COUNT];
+thread_local! {
+    static COUNTS: [std::cell::Cell<u64>; Hit::COUNT] =
+        const { [const { std::cell::Cell::new(0) }; Hit::COUNT] };
+}
 
 #[cfg(test)]
 pub(crate) fn bump(h: Hit) {
-    COUNTS[h as usize].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    COUNTS.with(|c| c[h as usize].set(c[h as usize].get() + 1));
 }
 
-/// Every variant with its count so far.
+/// Every variant with the calling thread's count so far. A test compares two calls (`coverage_tests::since`): the
+/// test harness may run several tests on one thread.
 #[cfg(test)]
 pub(crate) fn counts() -> Vec<(Hit, u64)> {
-    Hit::ALL
-        .iter()
-        .map(|&h| {
-            (
-                h,
-                COUNTS[h as usize].load(std::sync::atomic::Ordering::Relaxed),
-            )
-        })
-        .collect()
+    COUNTS.with(|c| Hit::ALL.iter().map(|&h| (h, c[h as usize].get())).collect())
 }
 
 /// Counts one taken branch (tests of this crate only; nothing otherwise).

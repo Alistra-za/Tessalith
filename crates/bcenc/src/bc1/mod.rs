@@ -8,18 +8,19 @@
 pub(crate) mod alpha;
 pub(crate) mod encode;
 mod fit;
-// For `coverage_tests`, which checks the class generators' restated rounding against the port's.
+// For `coverage_tests`, which checks the class generators' restated rounding against the port's and builds the
+// total-ordering tables on its own thread.
 #[cfg(test)]
-pub(crate) use fit::{precise_round_565, to_5, to_6};
+pub(crate) use fit::{build_order_tables, precise_round_565, to_5, to_6};
 mod initial;
 pub mod palette;
 mod sels;
 pub mod tables;
 
 /// The R, G, B error weights with perceptual off: plain squared error.
-pub(crate) const PLAIN: [i32; 3] = [1, 1, 1];
+pub const PLAIN: [i32; 3] = [1, 1, 1];
 /// The weights `set_bc1_perceptual(true)` stores (sdc patch "bc1 perceptual"): Rec.709 luma scaled to 256.
-pub(crate) const PERCEPTUAL: [i32; 3] = [54, 183, 19];
+pub const PERCEPTUAL: [i32; 3] = [54, 183, 19];
 
 /// The weights the shim's `Bc1Weights` sets around a call: [`PERCEPTUAL`] or [`PLAIN`].
 pub(crate) fn weights(perceptual: bool) -> [i32; 3] {

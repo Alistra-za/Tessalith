@@ -277,6 +277,8 @@ pub fn colour_classes(seed: u64, per_class: usize) -> Vec<[[u8; 4]; 16]> {
 fn blue_pair(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
     let (red, green) = (r.byte(), r.byte());
     let (b1, b2) = (r.byte(), r.byte());
+    // An equal draw (1 in 256) would give a solid block: move it half the range away instead.
+    let b2 = if b2 == b1 { b1 ^ 0x80 } else { b2 };
     let k = r.below(15) as usize + 1;
     let mut v: Vec<[u8; 4]> = (0..16)
         .map(|t| [red, green, if t < k { b2 } else { b1 }, 255])
@@ -627,6 +629,8 @@ fn perpendicular_ties(r: &mut Rng) -> [[u8; 4]; 16] {
     }
     let mut t = first_t;
     let fits = |c: [i32; 3]| c.iter().all(|x| (0..=255).contains(x));
+    // Ends at t = 0 at the latest: `base` is in 78..=177 and each channel of `p` is at most 32 either way (two
+    // products of a `d` up to 16 and an `e` up to 1), so `base + p` and `base - p` fit.
     while !(fits(at(t, 1)) && fits(at(t, -1))) {
         t -= t.signum();
     }

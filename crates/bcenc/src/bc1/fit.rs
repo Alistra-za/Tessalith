@@ -176,31 +176,35 @@ pub(crate) struct OrderTables {
 /// The total-ordering half of `init`, built once.
 pub(crate) fn order_tables() -> &'static OrderTables {
     static TABLES: OnceLock<OrderTables> = OnceLock::new();
-    TABLES.get_or_init(|| {
-        let mut t = OrderTables {
-            hash: [0; 4096],
-            factors: [[0.0; 3]; N4],
-            hash3: [0; 256],
-            factors3: [[0.0; 3]; N3],
-        };
-        for (i, o) in UNIQUE_TOTAL_ORDERS4.iter().enumerate() {
-            let h = Hist4(*o);
-            if !h.any_16() {
-                let index = h.0[0] as usize | ((h.0[1] as usize) << 4) | ((h.0[2] as usize) << 8);
-                t.hash[index] = i as u16;
-            }
-            t.factors[i] = compute_selector_factors4(&h);
+    TABLES.get_or_init(build_order_tables)
+}
+
+/// What [`order_tables`] builds. The coverage test calls it too: the branch counters are per thread, and the one
+/// build may run on another test's thread.
+pub(crate) fn build_order_tables() -> OrderTables {
+    let mut t = OrderTables {
+        hash: [0; 4096],
+        factors: [[0.0; 3]; N4],
+        hash3: [0; 256],
+        factors3: [[0.0; 3]; N3],
+    };
+    for (i, o) in UNIQUE_TOTAL_ORDERS4.iter().enumerate() {
+        let h = Hist4(*o);
+        if !h.any_16() {
+            let index = h.0[0] as usize | ((h.0[1] as usize) << 4) | ((h.0[2] as usize) << 8);
+            t.hash[index] = i as u16;
         }
-        for (i, o) in UNIQUE_TOTAL_ORDERS3.iter().enumerate() {
-            let h = Hist3(*o);
-            if !h.any_16() {
-                let index = h.0[0] as usize | ((h.0[1] as usize) << 4);
-                t.hash3[index] = i as u16;
-            }
-            t.factors3[i] = compute_selector_factors3(&h);
+        t.factors[i] = compute_selector_factors4(&h);
+    }
+    for (i, o) in UNIQUE_TOTAL_ORDERS3.iter().enumerate() {
+        let h = Hist3(*o);
+        if !h.any_16() {
+            let index = h.0[0] as usize | ((h.0[1] as usize) << 4);
+            t.hash3[index] = i as u16;
         }
-        t
-    })
+        t.factors3[i] = compute_selector_factors3(&h);
+    }
+    t
 }
 
 /// The table form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1 scale) of
