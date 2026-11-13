@@ -1,4 +1,5 @@
 //! Every `hit!` branch of the ported code is taken by the class generators.
+use crate::bc1::encode::encode4;
 use crate::bc1::palette::{dual_palette, single_tables};
 use crate::hits::counts;
 use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
@@ -23,6 +24,16 @@ fn every_ported_branch_is_taken() {
         dual_palette(three, 3, 40, 5, 20, 9, 31);
     }
     single_tables();
+    // BC1 four-colour: the colour classes, plus every grey and the solid colours at the ends of the range.
+    // Every texel on one selector at the total-ordering lookup is rare: 1500 per class reach all three ported arms.
+    for px in gen::colour_classes(0xC0DE_0002, 1500) {
+        encode4(&px, [1, 1, 1]);
+    }
+    for v in [0u8, 1, 2, 3, 4, 127, 128, 251, 252, 253, 254, 255] {
+        for g in [0u8, 1, 2, 3, 4, 127, 128, 251, 252, 253, 254, 255] {
+            encode4(&[[v, g, v, 255]; 16], [1, 1, 1]);
+        }
+    }
     let never: Vec<_> = counts()
         .into_iter()
         .filter(|&(_, n)| n == 0)

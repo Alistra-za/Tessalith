@@ -29,6 +29,13 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
     out
 }
 
+/// `rgbcx::encode_bc1(18, .., allow_3color = false, false)` with plain weights, for the tests until the public BC1
+/// entry point exists.
+#[doc(hidden)]
+pub fn bc1_encode4_for_tests(px: &[[u8; 4]; 16]) -> [u8; 8] {
+    bc1::encode::encode4(px, [1, 1, 1])
+}
+
 /// The alpha half of `rgbcx::encode_bc3_hq`: the BC4 search with the alpha-test guard at `cut` (BC4_SDC_GUARD128).
 pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8] {
     bc4::search(alpha, search_radius, Some(cut))
