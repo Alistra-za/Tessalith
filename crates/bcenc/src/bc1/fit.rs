@@ -46,11 +46,12 @@ impl Hist4 {
     /// `hist4::lookup_total_ordering_index`.
     pub(crate) fn lookup_total_ordering_index(&self) -> usize {
         let h = &self.0;
-        // Not ported: the C++ first tests m_hist[0] == 16 (TOTAL_ORDER_4_0_16). Every texel on the low endpoint with a
-        // non-zero error never reaches this lookup at level 18 (no generated block takes it, Note HY3); were it
-        // reached, the hash below would give a wrong ordering, which the assertion catches in test builds.
-        debug_assert_ne!(h[0], 16, "unported arm: every texel on selector 0");
-        if h[1] == 16 {
+        if h[0] == 16 {
+            // Rare: the bounding-box round ties an equal-endpoint principal-axis round with every texel on its low
+            // endpoint (`bc1_four_colour_block_with_every_texel_on_the_low_endpoint`).
+            hit!(Hit::Hist16Sel0);
+            TOTAL_ORDER_4_16[0]
+        } else if h[1] == 16 {
             hit!(Hit::Hist16Sel1);
             TOTAL_ORDER_4_16[1]
         } else if h[2] == 16 {

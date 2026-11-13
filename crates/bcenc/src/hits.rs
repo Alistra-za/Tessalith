@@ -113,6 +113,7 @@ hits! {
     InitAxisScaled,
     InitAxisDefault,
     // bc1 fit
+    Hist16Sel0,
     Hist16Sel1,
     Hist16Sel2,
     Hist16Sel3,

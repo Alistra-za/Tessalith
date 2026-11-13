@@ -27,6 +27,20 @@ fn bc1_four_colour_equals_rgbcx_on_block_classes() {
     }
 }
 
+/// The block the task 3 review built (Note HY3): the principal-axis round ends on equal endpoints, the bounding-box
+/// round ties it with every texel on the low endpoint, and the tie goes to the later round. So the total-ordering
+/// lookup sees the histogram [16, 0, 0, 0] with a non-zero error (`hist4::lookup_total_ordering_index`'s first arm).
+#[test]
+fn bc1_four_colour_block_with_every_texel_on_the_low_endpoint() {
+    let (a, b, c, d) = (
+        [20, 87, 33, 255],
+        [13, 95, 33, 255],
+        [14, 88, 29, 255],
+        [18, 90, 36, 255],
+    );
+    same4(&[a, b, c, c, c, c, c, c, c, d, d, d, d, d, d, d]);
+}
+
 #[test]
 fn bc1_four_colour_solid_blocks_equal_rgbcx_on_a_sample() {
     // Every grey, every colour with channels in the edge set, then random colours up to 20 000.

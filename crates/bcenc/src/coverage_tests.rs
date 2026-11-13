@@ -34,6 +34,15 @@ fn every_ported_branch_is_taken() {
             encode4(&[[v, g, v, 255]; 16], [1, 1, 1]);
         }
     }
+    // Every texel on the low endpoint at the total-ordering lookup (the block of
+    // `bc1_four_colour_block_with_every_texel_on_the_low_endpoint`).
+    let (a, b, c, d) = (
+        [20, 87, 33, 255],
+        [13, 95, 33, 255],
+        [14, 88, 29, 255],
+        [18, 90, 36, 255],
+    );
+    encode4(&[a, b, c, c, c, c, c, c, c, d, d, d, d, d, d, d], [1, 1, 1]);
     let never: Vec<_> = counts()
         .into_iter()
         .filter(|&(_, n)| n == 0)
