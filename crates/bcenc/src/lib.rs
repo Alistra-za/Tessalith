@@ -1,7 +1,9 @@
 //! `bcenc`: rgbcx's block encoders in Rust. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain, `crates/encoders-sys/vendor/bc7enc_rdo/LICENSE`). The vendored C++ in `encoders-sys` is the
 //! specification and the reference every test compares with. No dependencies, no `unsafe`, no global state.
-//! The engine still encodes through rgbcx (Note HY1).
+//! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7).
+
+use std::num::NonZeroU8;
 
 mod hits;
 
@@ -60,8 +62,21 @@ pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: 
 /// `rgbcx::encode_bc3_hq(18, .., search_radius, BC4_USE_ALL_MODES | BC4_SDC_SEARCH | BC4_SDC_GUARD128 | cut << 8)`
 /// with the shim's weights: bytes 0..8 are [`bc4_encode_alpha`] of the alpha channel, bytes 8..16
 /// [`bc1_encode_block`]`(px, false, perceptual)` (`encode_bc1(level, .., false, false)`; `perceptual` reaches only
-/// this half).
+/// this half). `cut` is the least alpha that passes the texture's alpha test; it cannot be 0, which rgbcx's flags
+/// would read as 128 (Note HY7).
 pub fn bc3_encode_block(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: NonZeroU8,
+    perceptual: bool,
+) -> [u8; 16] {
+    bc3_encode_block_raw_cut(px, search_radius, cut.get(), perceptual)
+}
+
+/// [`bc3_encode_block`] with the cut as rgbcx's flags carry it, where 0 is 128 ([`bc4_encode_alpha`]). For the tests,
+/// which compare every value of the cut with rgbcx.
+#[doc(hidden)]
+pub fn bc3_encode_block_raw_cut(
     px: &[[u8; 4]; 16],
     search_radius: u32,
     cut: u8,

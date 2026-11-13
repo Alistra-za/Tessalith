@@ -9,8 +9,8 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 | `texcore` | crates/texcore | DDS reader/writer, pixel decoders, sRGB and game-gamma curves, cube maths, image loading (feature `load`). No C or C++; never depends on `engine` (Note HX) |
 | `sdc-gui` | crates/gui | egui + wgpu GUI (`tessalith.exe`); kittest tests |
 | `sdc` | crates/cli | CLI (`sdc.exe`) |
-| `bcenc` | crates/bcenc | rgbcx's block encoders in Rust (BC4, BC5 so far); no dependencies; `encoders-sys` is its test reference (Note HY) |
-| `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed |
+| `bcenc` | crates/bcenc | rgbcx's block encoders in Rust (BC1, BC3, BC4, BC5), which the engine encodes those formats with; no dependencies; `encoders-sys` is its test reference (Note HY) |
+| `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed. rgbcx is the reference for `bcenc`'s tests; the engine no longer calls its block encoders |
 | `modscan`, `vfs`, `esp`, `nif`, `render3d`, `pgpsim` | crates/… | MO2 scan store, BSA reading, plugin/NIF parsing, 3D preview, PGPatcher simulation |
 
 A sibling "NIF team" owns `modscan`, `vfs`, `esp`, `nif`, `render3d` and `pgpsim`. It works on `nif/*` branches; the owner merges `nif/main` into `main`. Change those crates only when the task says so. Record what you changed in a DECISIONS note and in a line for the NIF team's handoff file (see CLAUDE.local.md).

@@ -1,7 +1,9 @@
 //! `bcenc`'s BC3 encode equals the vendored rgbcx (`encode_bc3_hq(18, .., rad, BC4_USE_ALL_MODES | BC4_SDC_SEARCH |
 //! BC4_SDC_GUARD128 | cut << 8)` through `encoders_sys`, plain or perceptual weights) on the alpha classes paired with
-//! the colour classes.
-use bcenc::{bc1_encode_block, bc3_encode_block, bc4_encode_alpha};
+//! the colour classes. The comparisons go through `bc3_encode_block_raw_cut`, which takes the cut as rgbcx's flags do
+//! (0 is 128); `bc3_encode_block`, the engine's entry, takes it as a `NonZeroU8` and is checked against that.
+use bcenc::{bc1_encode_block, bc3_encode_block, bc3_encode_block_raw_cut, bc4_encode_alpha};
+use std::num::NonZeroU8;
 
 #[path = "support/gen.rs"]
 mod gen;
@@ -13,7 +15,7 @@ const CUTS: [u8; 5] = [0, 1, 128, 201, 255];
 
 /// Both outputs, the arguments and the texels on a mismatch, so the block can be replayed.
 fn same(px: &[[u8; 4]; 16], rad: u32, cut: u8, perceptual: bool) -> [u8; 16] {
-    let got = bc3_encode_block(px, rad, cut, perceptual);
+    let got = bc3_encode_block_raw_cut(px, rad, cut, perceptual);
     let want = encoders_sys::bc3_encode_block(px, rad, cut, perceptual);
     assert_eq!(
         got, want,
@@ -121,6 +123,25 @@ fn bc3_is_bc4_alpha_then_four_colour_bc1() {
                 b[8..],
                 bc1_encode_block(px, false, perceptual),
                 "texels {px:?}"
+            );
+        }
+    }
+}
+
+/// The engine's entry point: every non-zero cut gives the bytes rgbcx gives for that cut.
+#[test]
+fn bc3_with_a_non_zero_cut_equals_rgbcx() {
+    let blocks = paired(
+        &gen::alpha_classes(0xBC30_0007, 1),
+        &gen::colour_classes(0xBC30_0008, 1),
+    );
+    for cut in 1..=255u8 {
+        let px = &blocks[cut as usize % blocks.len()];
+        for perceptual in [false, true] {
+            assert_eq!(
+                bc3_encode_block(px, 5, NonZeroU8::new(cut).unwrap(), perceptual),
+                same(px, 5, cut, perceptual),
+                "cut {cut}, texels {px:?}"
             );
         }
     }

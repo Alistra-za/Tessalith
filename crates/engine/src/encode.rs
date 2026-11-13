@@ -5,10 +5,16 @@
 use crate::config::*;
 use crate::grass::{unit_err, CS_GRASS_THRESHOLD, GRASS_GUARD_MARGIN};
 use crate::quantize::EncoderInput;
+// BC1, BC3, BC4 and BC5 blocks come from `bcenc`, the Rust port of rgbcx, byte-equal to it (Note HY7). These names
+// take precedence over the rgbcx functions of the same names in the `encoders_sys` glob below.
+use bcenc::{
+    bc1_encode_block, bc1_encode_block_alpha, bc3_encode_block, bc4_encode_block, bc5_encode_block,
+};
 use encoders_sys::bc7_fixup::{force_opaque_rotated, force_zero_alpha};
 use encoders_sys::*;
 use rayon::prelude::*;
 use std::borrow::Cow;
+use std::num::NonZeroU8;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -60,9 +66,15 @@ pub fn alpha_cut(a: &AlphaSpec) -> u8 {
         AlphaCompare::Gt => a.threshold.saturating_add(1),
         AlphaCompare::Ge => a.threshold,
     };
-    // The encoder reads cutoff 0 as "use 128", so a 0 here would silently guard the wrong test.
+    // rgbcx read cutoff 0 as "use 128", so a 0 here would silently guard the wrong test.
     debug_assert!(cut >= 1, "alpha threshold {} gives cutoff 0", a.threshold);
     cut
+}
+
+/// An [`alpha_cut`] as the BC3 encoder takes it (Note HY7). A 0, which policy rules out, stays the 128 that rgbcx
+/// made of it, so no input changes its bytes.
+fn bc3_cut(cut: u8) -> NonZeroU8 {
+    NonZeroU8::new(cut).unwrap_or(NonZeroU8::new(128).unwrap())
 }
 
 pub fn radius(r: SearchRadius) -> u32 {
@@ -133,13 +145,11 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                         blk.copy_from_slice(&bc1_encode_block_alpha(src, mask, e.perceptual))
                     }
                     // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
-                    Format::Bc1 => {
-                        blk.copy_from_slice(&bc1_encode_block(src, true, false, e.perceptual))
-                    }
+                    Format::Bc1 => blk.copy_from_slice(&bc1_encode_block(src, true, e.perceptual)),
                     Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
                         src,
                         radius(e.bc45_search_radius),
-                        alpha_cut(&p.alpha),
+                        bc3_cut(alpha_cut(&p.alpha)),
                         e.perceptual,
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
@@ -366,6 +376,14 @@ fn grass_corner_ok(blk: &[u8], t: usize) -> bool {
 mod tests {
     use super::*;
     use crate::presets::PresetRegistry;
+
+    #[test]
+    fn bc3_cut_keeps_every_cut_and_reads_0_as_128() {
+        for cut in 1..=255u8 {
+            assert_eq!(bc3_cut(cut).get(), cut);
+        }
+        assert_eq!(bc3_cut(0).get(), 128);
+    }
 
     #[test]
     fn alpha_cut_is_the_least_passing_alpha() {

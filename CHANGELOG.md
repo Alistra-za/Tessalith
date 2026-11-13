@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- BC1, BC3, BC4 and BC5 textures encode faster. Converting 300 test textures took about 28% less time as BC1 or BC3 and about 16% less as BC4 or BC5. The files are byte for byte what 3.0.0 writes: Tessalith now runs its own Rust port of the rgbcx encoder (`bcenc`), and the original stays in the build as the reference the port is tested against.
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
 
 ## 3.0.0

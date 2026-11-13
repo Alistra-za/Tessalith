@@ -9,6 +9,8 @@ build = "build.rs"
 
 [dependencies]
 encoders-sys.workspace = true
+# The BC1, BC3, BC4 and BC5 block encoders (Note HY7).
+bcenc.workspace = true
 texcore = { workspace = true, features = ["load"] }
 serde.workspace = true
 # float_roundtrip: a cached Analysis must read back bit for bit (Note DZ).
@@ -36,5 +38,4 @@ test-hooks = []
 
 [dev-dependencies]
 tempfile.workspace = true
-bcenc.workspace = true
 engine = { path = ".", features = ["test-hooks"] }

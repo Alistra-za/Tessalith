@@ -4,6 +4,7 @@
 //! "skipped" and passes. The tests write nothing.
 use rayon::prelude::*;
 use std::fmt::Write as _;
+use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -228,7 +229,7 @@ fn corpus_bc3_equals_rgbcx() {
             cmp(
                 d,
                 || format!("radius {RADIUS}, cut {CUT}, perceptual {perceptual}"),
-                &bcenc::bc3_encode_block(px, RADIUS, CUT, perceptual),
+                &bcenc::bc3_encode_block(px, RADIUS, NonZeroU8::new(CUT).unwrap(), perceptual),
                 &encoders_sys::bc3_encode_block(px, RADIUS, CUT, perceptual),
             );
         }
