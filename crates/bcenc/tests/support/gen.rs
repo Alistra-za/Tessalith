@@ -126,7 +126,7 @@ pub fn bc4_classes(seed: u64, per_class: usize) -> Vec<[u8; 16]> {
 }
 
 /// The number of classes [`colour_classes`] returns `per_class` blocks of.
-pub const COLOUR_CLASSES: usize = 19;
+pub const COLOUR_CLASSES: usize = 25;
 
 fn rgb(r: &mut Rng) -> [u8; 3] {
     [r.byte(), r.byte(), r.byte()]
@@ -158,8 +158,10 @@ fn pick(r: &mut Rng, colours: &[[u8; 3]]) -> [[u8; 4]; 16] {
 /// quarter of them one step wide); one channel varying; 1..=15 pure-black texels in an otherwise random block;
 /// saturated colours (channels 0 or 255); narrow clusters (range 1..=8 per channel); full noise; two clusters;
 /// smooth 2D gradients; near-solid blocks (1..=8 changes of one step on a random, exact-565, near-black or black
-/// colour); colours of
-/// one BC1 palette that both decoders agree on.
+/// colour); colours of one BC1 palette that both decoders agree on. Then six classes that aim at paths a reasoned
+/// block reached and random ones missed: narrow clusters of 2..=4 colours with random multiplicities, grouped or
+/// shuffled; two-value grey blocks, shuffled; near-grey blocks; texels that differ only perpendicular to the
+/// principal axis; r, g, b all varying with a zero covariance term; endpoints on the 565 rounding boundaries.
 pub fn colour_classes(seed: u64, per_class: usize) -> Vec<[[u8; 4]; 16]> {
     let mut r = Rng(seed | 1);
     let mut out = Vec::with_capacity(per_class * COLOUR_CLASSES);
@@ -347,7 +349,305 @@ pub fn colour_classes(seed: u64, per_class: usize) -> Vec<[[u8; 4]; 16]> {
         }
         out.push(pick(&mut r, &colours));
     }
+    for i in 0..per_class {
+        out.push(narrow_cluster(&mut r, i));
+    }
+    for _ in 0..per_class {
+        out.push(two_value_grey(&mut r));
+    }
+    for _ in 0..per_class {
+        out.push(near_grey(&mut r));
+    }
+    for _ in 0..per_class {
+        out.push(perpendicular_ties(&mut r));
+    }
+    for i in 0..per_class {
+        out.push(zero_covariance(&mut r, i));
+    }
+    let (b5, b6) = (rounding_boundaries(31), rounding_boundaries(63));
+    for i in 0..per_class {
+        out.push(midpoint_ends(&mut r, i, &b5, &b6));
+    }
     out
+}
+
+fn shuffle<T>(r: &mut Rng, v: &mut [T]) {
+    for i in (1..v.len()).rev() {
+        v.swap(i, r.below(i as u64 + 1) as usize);
+    }
+}
+
+/// `n` (1..=16) positive counts that sum to 16, uniform over the ways to cut 16 texels into `n` runs.
+fn split16(r: &mut Rng, n: usize) -> Vec<usize> {
+    let mut cuts = vec![0usize, 16];
+    while cuts.len() < n + 1 {
+        let c = r.below(15) as usize + 1;
+        if !cuts.contains(&c) {
+            cuts.push(c);
+        }
+    }
+    cuts.sort_unstable();
+    cuts.windows(2).map(|w| w[1] - w[0]).collect()
+}
+
+/// The 8-bit value of a 5-bit code (or 6-bit, for `max == 63`) as both decoders expand it.
+fn expand_ch(code: i32, max: i32) -> i32 {
+    if max == 63 {
+        (code << 2) | (code >> 4)
+    } else {
+        (code << 3) | (code >> 2)
+    }
+}
+
+/// 2..=4 distinct colours, each within +-8 per channel of a base (random, an exact 565 colour, or one step from the
+/// midpoint of two adjacent codes), with random multiplicities that sum to 16. Even `i`: the texels grouped by
+/// colour; odd `i`: shuffled.
+fn narrow_cluster(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
+    // Three shapes in rotation: random multiplicities; skewed (one or two heavy colours and single-texel outliers);
+    // and the shape of the review's counterexample (see `review_shaped`).
+    let shape = (i / 6) % 3;
+    if shape == 2 {
+        return review_shaped(r, i);
+    }
+    let base: [i32; 3] = match i % 3 {
+        0 => rgb(r).map(i32::from),
+        1 => expand565(r.below(32) as i32, r.below(64) as i32, r.below(32) as i32).map(i32::from),
+        _ => std::array::from_fn(|c| {
+            let max = if c == 1 { 63 } else { 31 };
+            let code = r.below(max as u64) as i32;
+            (expand_ch(code, max) + expand_ch(code + 1, max)) / 2 + r.below(3) as i32 - 1
+        }),
+    };
+    let n = r.below(3) as usize + 2;
+    // Skewed blocks: one or two heavy colours (within +-4 of the base, so they share a 565 cell with it) and
+    // single-texel outliers (+-8); the others cut 16 texels into random runs.
+    let skewed = shape == 1;
+    let heavy = if skewed { r.below(2) as usize + 1 } else { 0 };
+    let mut colours: Vec<[u8; 3]> = Vec::new();
+    for k in 0..n {
+        let range = if k < heavy { 9 } else { 17 };
+        for _ in 0..20 {
+            let c: [u8; 3] = std::array::from_fn(|ch| {
+                clamp8(base[ch] + r.below(range) as i32 - range as i32 / 2)
+            });
+            if !colours.contains(&c) {
+                colours.push(c);
+                break;
+            }
+        }
+    }
+    let counts = if skewed {
+        let n = colours.len();
+        let h = heavy.min(n - 1);
+        let mut counts = vec![1; n];
+        // The heavy colours (the first `h`) share the remaining texels, 1.. each.
+        let rest = 16 - n;
+        let first = r.below(rest as u64 + 1) as usize;
+        counts[0] += if h == 1 { rest } else { first };
+        if h == 2 {
+            counts[1] += rest - first;
+        }
+        counts
+    } else {
+        split16(r, n)
+    };
+    let mut v: Vec<[u8; 4]> = Vec::with_capacity(16);
+    for (c, &k) in colours.iter().zip(&counts) {
+        v.extend(std::iter::repeat_n(texel(*c), k));
+    }
+    // A repeated colour (rare, from clamping) leaves fewer than `n`; fill with the first.
+    v.resize(16, texel(colours[0]));
+    if i % 2 == 1 {
+        shuffle(r, &mut v);
+    }
+    std::array::from_fn(|k| v[k])
+}
+
+/// The shape of the review's counterexample: four colours about an exact 565 base, at offsets that sit on rounding
+/// boundaries of the 565 codes (half a code step, 4 for red and blue, 2 for green, and their neighbours), two heavy
+/// colours (7 and 7 texels, or another split of 14) and two single texels; 0..=2 offsets change by one step, so the
+/// block stays near the shape without being the review's block. Even `i`: grouped; odd `i`: shuffled.
+fn review_shaped(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
+    const SHAPE: [[i32; 3]; 4] = [[4, -2, 0], [-3, 6, 0], [-2, -1, -4], [2, 1, 3]];
+    // The shape reaches the all-texels-on-one-selector arm only on some bases (an exhaustive search over the exact
+    // 565 colours found red codes = 1 or 2 mod 4, blue codes = 0 mod 4 and green codes 16, 22, 32, 48 or 58, where the
+    // code spacing puts the offsets on the same side of the boundaries as in the review's block). Three blocks in four
+    // use such a base, the rest any exact colour.
+    const GREEN: [i32; 5] = [16, 22, 32, 48, 58];
+    let base = if r.below(4) != 0 {
+        expand565(
+            r.below(7) as i32 * 4 + 1 + r.below(2) as i32,
+            GREEN[r.below(5) as usize],
+            r.below(7) as i32 * 4 + 4,
+        )
+    } else {
+        expand565(
+            r.below(29) as i32 + 1,
+            r.below(61) as i32 + 1,
+            r.below(29) as i32 + 1,
+        )
+    }
+    .map(i32::from);
+    let mut off = SHAPE;
+    for _ in 0..r.below(3) {
+        off[r.below(4) as usize][r.below(3) as usize] += r.below(2) as i32 * 2 - 1;
+    }
+    let colours: Vec<[u8; 3]> = off
+        .iter()
+        .map(|o| std::array::from_fn(|ch| clamp8(base[ch] + o[ch])))
+        .collect();
+    let c = if r.next() & 1 == 0 {
+        7
+    } else {
+        r.below(13) as usize + 1
+    };
+    let counts = [1, 1, c, 14 - c];
+    let mut v: Vec<[u8; 4]> = Vec::with_capacity(16);
+    for (col, &k) in colours.iter().zip(&counts) {
+        v.extend(std::iter::repeat_n(texel(*col), k));
+    }
+    if i % 2 == 1 {
+        shuffle(r, &mut v);
+    }
+    std::array::from_fn(|k| v[k])
+}
+
+/// A grey block of two values `g` and `g + d` (`d` 1 or 2), 1..=15 texels on `g`, shuffled (texel 0 on either value).
+fn two_value_grey(r: &mut Rng) -> [[u8; 4]; 16] {
+    let d = r.below(2) as u8 + 1;
+    let g = r.below(256 - d as u64) as u8;
+    let low = r.below(15) as usize + 1;
+    let mut v: Vec<u8> = (0..16).map(|k| if k < low { g } else { g + d }).collect();
+    shuffle(r, &mut v);
+    std::array::from_fn(|k| [v[k], v[k], v[k], 255])
+}
+
+/// A grey block (solid or a ramp) with one channel of 1..=3 texels off by 1 or 2.
+fn near_grey(r: &mut Rng) -> [[u8; 4]; 16] {
+    let g0 = r.byte() as i32;
+    let g1 = if r.next() & 1 == 0 {
+        g0
+    } else {
+        r.byte() as i32
+    };
+    let mut v: [[u8; 4]; 16] = std::array::from_fn(|k| {
+        let g = clamp8(g0 + (g1 - g0) * k as i32 / 15);
+        [g, g, g, 255]
+    });
+    let ch = r.below(3) as usize;
+    for _ in 0..r.below(3) + 1 {
+        let t = &mut v[r.below(16) as usize];
+        let delta = r.below(2) as i32 + 1;
+        t[ch] = clamp8(t[ch] as i32 + if r.next() & 1 == 0 { delta } else { -delta });
+    }
+    v
+}
+
+/// Colours on one axis `d` plus texels displaced only perpendicular to it (by multiples of `d x e`), so several
+/// distinct colours project to the same point of the principal axis.
+fn perpendicular_ties(r: &mut Rng) -> [[u8; 4]; 16] {
+    let base: [i32; 3] = std::array::from_fn(|_| r.below(100) as i32 + 78);
+    let d: [i32; 3] = std::array::from_fn(|_| r.below(33) as i32 - 16);
+    let e: [i32; 3] = std::array::from_fn(|_| r.below(3) as i32 - 1);
+    let p = [
+        d[1] * e[2] - d[2] * e[1],
+        d[2] * e[0] - d[0] * e[2],
+        d[0] * e[1] - d[1] * e[0],
+    ];
+    let n = r.below(6) as usize + 3;
+    let pool: Vec<[u8; 3]> = (0..n)
+        .map(|_| {
+            let (t, s) = (r.below(7) as i32 - 3, r.below(3) as i32 - 1);
+            std::array::from_fn(|c| clamp8(base[c] + t * d[c] + s * p[c]))
+        })
+        .collect();
+    pick(r, &pool)
+}
+
+/// r, g and b all vary. Kind 0: cov(r, b) = 0, kind 1: cov(g, b) = 0 (a symmetric cross of the two channels about a
+/// centre, the third channel free); kind 2: b varies by +-1 while r and g vary widely, so var(b) is the smallest by far.
+fn zero_covariance(r: &mut Rng, kind: usize) -> [[u8; 4]; 16] {
+    let centre: [i32; 3] = std::array::from_fn(|_| r.below(160) as i32 + 48);
+    let mut v: Vec<[u8; 4]> = Vec::with_capacity(16);
+    if kind % 3 == 2 {
+        for _ in 0..16 {
+            v.push([
+                r.byte(),
+                clamp8(centre[1] + r.below(81) as i32 - 40),
+                clamp8(centre[2] + r.below(3) as i32 - 1),
+                255,
+            ]);
+        }
+    } else {
+        let (x, free) = if kind.is_multiple_of(3) {
+            (0, 1)
+        } else {
+            (1, 0)
+        };
+        let (amp_x, amp_z) = (r.below(40) as i32 + 1, r.below(40) as i32 + 1);
+        let nx = r.below(7) as usize + 1;
+        let nz = r.below(8 - nx as u64) as usize + 1;
+        let w = r.below(24) as i32 + 1;
+        let mut dev: Vec<[i32; 2]> = Vec::new();
+        for _ in 0..nx {
+            dev.push([amp_x, 0]);
+            dev.push([-amp_x, 0]);
+        }
+        for _ in 0..nz {
+            dev.push([0, amp_z]);
+            dev.push([0, -amp_z]);
+        }
+        dev.resize(16, [0, 0]);
+        shuffle(r, &mut dev);
+        for dv in dev {
+            let mut c = centre;
+            c[x] += dv[0];
+            c[2] += dv[1];
+            c[free] += r.below(2 * w as u64 + 1) as i32 - w;
+            v.push(texel(c.map(clamp8)));
+        }
+    }
+    std::array::from_fn(|k| v[k])
+}
+
+/// The 8-bit values around each place where rounding to a code of `max` (31 or 63) changes: the midpoint of two
+/// adjacent expanded codes (rgbcx's `g_midpoint5/6`) and the plain rounding boundary of `v * max / 255`; for each,
+/// the value below, at and above it.
+fn rounding_boundaries(max: i32) -> Vec<u8> {
+    let mut out = Vec::new();
+    for c in 0..max {
+        let mid2 = expand_ch(c, max) + expand_ch(c + 1, max);
+        let plain = (2 * c + 1) * 255 / (2 * max);
+        for m in [mid2 / 2, (mid2 + 1) / 2, plain, plain + 1] {
+            for d in -1..=1 {
+                out.push(clamp8(m + d));
+            }
+        }
+    }
+    out
+}
+
+/// Two-colour (even `i`) and gradient (odd `i`) blocks whose minimum or maximum in each channel sits at a rounding
+/// boundary of its 5-bit or 6-bit code, the other end of the channel random.
+fn midpoint_ends(r: &mut Rng, i: usize, b5: &[u8], b6: &[u8]) -> [[u8; 4]; 16] {
+    let (mut a, mut b) = ([0i32; 3], [0i32; 3]);
+    for c in 0..3 {
+        let list = if c == 1 { b6 } else { b5 };
+        let edge = list[r.below(list.len() as u64) as usize] as i32;
+        let other = r.byte() as i32;
+        if r.next() & 1 == 0 {
+            (a[c], b[c]) = (edge, other);
+        } else {
+            (a[c], b[c]) = (other, edge);
+        }
+    }
+    if i.is_multiple_of(2) {
+        let pts = [a.map(clamp8), b.map(clamp8)];
+        pick(r, &pts)
+    } else {
+        let n = r.below(15) as usize + 2;
+        on_line(r, a, b, n)
+    }
 }
 
 /// A 5:6:5 code expanded to 8 bits per channel, as both decoders expand it.

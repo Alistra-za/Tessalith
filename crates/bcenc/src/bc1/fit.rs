@@ -155,9 +155,9 @@ pub(crate) fn ls_endpoints4_ordered(
     (xl, xh)
 }
 
-/// The selector form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1
-/// scale, as the 3/255 factor puts it) for selectors `sels` (rgbcx's linear order). `None` when every texel has one selector (the C++ returns
-/// false). Returns (xl, xh).
+/// The selector form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1 scale,
+/// as the 3/255 factor puts it) for selectors `sels` (rgbcx's linear order). `None` when every texel has one
+/// selector (the C++ returns false). Returns (xl, xh).
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(crate) fn ls_endpoints4(
     px: &[[u8; 4]; 16],

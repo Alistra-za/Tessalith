@@ -80,6 +80,7 @@ hits! {
     RoundTaken,
     RoundWorse,
     OrderingsRun,
+    OrderingsSkippedExact,
     OrderingsExact,
     OrderingsNoGain,
     OrderingSingle,

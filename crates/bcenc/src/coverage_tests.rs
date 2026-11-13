@@ -25,7 +25,8 @@ fn every_ported_branch_is_taken() {
     }
     single_tables();
     // BC1 four-colour: the colour classes, plus every grey and the solid colours at the ends of the range.
-    // Every texel on one selector at the total-ordering lookup is rare: 1500 per class reach all three ported arms.
+    // Every texel on one selector at the total-ordering lookup is rare: 1500 per class reach all four arms (the
+    // review-shaped narrow clusters take the selector 0 arm).
     for px in gen::colour_classes(0xC0DE_0002, 1500) {
         encode4(&px, [1, 1, 1]);
     }
@@ -34,15 +35,6 @@ fn every_ported_branch_is_taken() {
             encode4(&[[v, g, v, 255]; 16], [1, 1, 1]);
         }
     }
-    // Every texel on the low endpoint at the total-ordering lookup (the block of
-    // `bc1_four_colour_block_with_every_texel_on_the_low_endpoint`).
-    let (a, b, c, d) = (
-        [20, 87, 33, 255],
-        [13, 95, 33, 255],
-        [14, 88, 29, 255],
-        [18, 90, 36, 255],
-    );
-    encode4(&[a, b, c, c, c, c, c, c, c, d, d, d, d, d, d, d], [1, 1, 1]);
     let never: Vec<_> = counts()
         .into_iter()
         .filter(|&(_, n)| n == 0)

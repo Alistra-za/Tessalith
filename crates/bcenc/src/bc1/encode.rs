@@ -20,23 +20,7 @@ use super::initial::pick_initial;
 use super::palette::single_tables;
 use super::sels::find_sels4;
 use super::tables::{BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
-
-/// A block's two endpoints as 5:6:5 codes, r, g, b: `l` is rgbcx's `lr, lg, lb` (linear selector 0), `h` its
-/// `hr, hg, hb` (linear selector 3).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Ends {
-    pub l: [i32; 3],
-    pub h: [i32; 3],
-}
-
-/// What `encode_bc1` gathers from the texels before it picks endpoints.
-pub(crate) struct BlockStats {
-    pub min: [i32; 3],
-    pub max: [i32; 3],
-    pub avg: [i32; 3],
-    pub total: [i32; 3],
-    pub grayscale: bool,
-}
+use super::{BlockStats, Ends};
 
 /// `encode_bc1(18, .., allow_3color = false, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with
 /// R, G, B error weights `weights`.
@@ -97,14 +81,7 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
             let trial = match ls_endpoints4(px, &round_sels, s.total) {
                 // All selectors equal - treat it as a solid block which should always be equal or better.
                 None => single_colour_ends(s.avg),
-                // precise_round_565(xl, xh, trial_h*, trial_l*): the low fit becomes the high endpoint.
-                Some((xl, xh)) => {
-                    let (from_xl, from_xh) = precise_round_565(&xl, &xh);
-                    Ends {
-                        l: from_xh,
-                        h: from_xl,
-                    }
-                }
+                Some((xl, xh)) => round_ls(&xl, &xh),
             };
 
             if round_ends == trial {
@@ -151,6 +128,8 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
                 break;
             }
         }
+    } else {
+        hit!(Hit::OrderingsSkippedExact);
     }
 
     // 256 endpoint search rounds.
@@ -174,6 +153,16 @@ fn single_colour_ends(avg: [i32; 3]) -> Ends {
     Ends {
         l: [r.hi as i32, g.hi as i32, b.hi as i32],
         h: [r.lo as i32, g.lo as i32, b.lo as i32],
+    }
+}
+
+/// Rounds a least-squares result to endpoint codes. The C++ calls `precise_round_565(xl, xh, trial_h*, trial_l*)`:
+/// the low fit becomes the high endpoint and the high fit the low one.
+fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
+    let (from_xl, from_xh) = precise_round_565(xl, xh);
+    Ends {
+        l: from_xh,
+        h: from_xl,
     }
 }
 
@@ -248,12 +237,7 @@ fn total_orderings(
         } else {
             hit!(Hit::OrderingFit);
             let (xl, xh) = ls_endpoints4_ordered(s.total, tables.factors[s_index], s_index, &sums);
-            // precise_round_565(xl, xh, trial_h*, trial_l*): the low fit becomes the high endpoint.
-            let (from_xl, from_xh) = precise_round_565(&xl, &xh);
-            Ends {
-                l: from_xh,
-                h: from_xl,
-            }
+            round_ls(&xl, &xh)
         };
 
         let mut trial_sels = [0u8; 16];

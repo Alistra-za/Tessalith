@@ -6,8 +6,8 @@
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 
-use super::encode::Ends;
 use super::palette::{dual_err, dual_palette};
+use super::Ends;
 
 /// `bc1_find_sels4` (sdc patch: `bc1_find_sels4_dual` under `cBC1Dual`): per texel the selector (rgbcx's linear
 /// order) with the least NVIDIA plus AMD error; the first minimum wins except that selector 3 wins a tie, and a

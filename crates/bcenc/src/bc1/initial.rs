@@ -5,8 +5,8 @@
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 
-use super::encode::{BlockStats, Ends};
 use super::fit::{precise_round_565, to_5, to_6};
+use super::{BlockStats, Ends};
 
 /// `maximum(a, b)`: `(a > b) ? a : b`.
 fn maximum(a: f32, b: f32) -> f32 {

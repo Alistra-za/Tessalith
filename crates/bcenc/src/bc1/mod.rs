@@ -10,3 +10,20 @@ mod initial;
 pub mod palette;
 mod sels;
 pub mod tables;
+
+/// A block's two endpoints as 5:6:5 codes, r, g, b: `l` is rgbcx's `lr, lg, lb` (linear selector 0), `h` its
+/// `hr, hg, hb` (linear selector 3).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct Ends {
+    pub l: [i32; 3],
+    pub h: [i32; 3],
+}
+
+/// What `encode_bc1` gathers from the texels before it picks endpoints.
+pub(crate) struct BlockStats {
+    pub min: [i32; 3],
+    pub max: [i32; 3],
+    pub avg: [i32; 3],
+    pub total: [i32; 3],
+    pub grayscale: bool,
+}
