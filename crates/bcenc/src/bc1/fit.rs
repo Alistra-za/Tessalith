@@ -1,8 +1,9 @@
 //! The BC1 endpoint fits: histograms and their total-ordering index, the least-squares endpoints (from selectors and
 //! from a total ordering's prefix sums) and the rounding to 5:6:5. A port of rgbcx from bc7enc_rdo commit b943862
-//! with Tessalith's patches (MIT or public domain): `to_5`, `to_6`, `hist4`, `compute_selector_factors4`, the 4-colour
-//! half of `init` (`g_total_ordering4_hash`, `g_selector_factors4`), both `compute_least_squares_endpoints4_rgb` and
-//! `precise_round_565` (Note HY3).
+//! with Tessalith's patches (MIT or public domain): `to_5`, `to_6`, `hist4`, `hist3`, `compute_selector_factors4`,
+//! `compute_selector_factors3`, the total-ordering half of `init` (`g_total_ordering4_hash`, `g_selector_factors4`,
+//! `g_total_ordering3_hash`, `g_selector_factors3`), both `compute_least_squares_endpoints4_rgb`, both
+//! `compute_least_squares_endpoints3_rgb` (with `use_black = false`) and `precise_round_565` (Notes HY3, HY4).
 //!
 //! Float maths follows the C++ operation by operation in `f32` (MSVC `/fp:precise`, x64 SSE2, no FMA). No float here
 //! can be NaN or out of `i32` range where it is cast: see [`precise_round_565`].
@@ -12,7 +13,7 @@
 use crate::hits::{hit, Hit};
 use std::sync::OnceLock;
 
-use super::tables::{N4, UNIQUE_TOTAL_ORDERS4};
+use super::tables::{N3, N4, UNIQUE_TOTAL_ORDERS3, UNIQUE_TOTAL_ORDERS4};
 
 /// `to_5`: an 8-bit value to the nearest 5-bit code.
 pub(crate) fn to_5(v: u32) -> i32 {
@@ -96,21 +97,91 @@ fn compute_selector_factors4(h: &Hist4) -> [f32; 3] {
     [z11 * det, -z10 * det, z00 * det]
 }
 
-/// The tables `init` builds for 4-colour blocks.
+/// `TOTAL_ORDER_3_0_16` .. `TOTAL_ORDER_3_2_16`: the 3-colour orderings whose histogram has all 16 texels on one
+/// selector.
+pub(crate) const TOTAL_ORDER_3_16: [usize; 3] = [12, 15, 89];
+
+/// `g_weight_vals3`: per 3-colour selector, the packed (z00, z10, z11) contributions, times 4.
+const WEIGHT_VALS3: [u32; 3] = [0x000004, 0x040000, 0x010101];
+
+/// `hist3`: how many texels use each 3-colour selector (0 low endpoint, 1 high endpoint, 2 midpoint).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Hist3(pub [u8; 3]);
+
+impl Hist3 {
+    /// `hist3::any_16`.
+    fn any_16(&self) -> bool {
+        let h = &self.0;
+        h[0] == 16 || h[1] == 16 || h[2] == 16
+    }
+
+    /// `hist3::lookup_total_ordering_index`.
+    pub(crate) fn lookup_total_ordering_index(&self) -> usize {
+        let h = &self.0;
+        if h[0] == 16 {
+            hit!(Hit::Hist3Sel0);
+            TOTAL_ORDER_3_16[0]
+        } else if h[1] == 16 {
+            hit!(Hit::Hist3Sel1);
+            TOTAL_ORDER_3_16[1]
+        } else if h[2] == 16 {
+            hit!(Hit::Hist3Sel2);
+            TOTAL_ORDER_3_16[2]
+        } else {
+            hit!(Hit::Hist3Hashed);
+            // Must sum to 16, so m_hist[2] isn't needed.
+            order_tables().hash3[h[0] as usize | ((h[1] as usize) << 4)] as usize
+        }
+    }
+}
+
+/// `compute_selector_factors3`: as [`compute_selector_factors4`] for a 3-colour histogram, scaled by 2/255.
+#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+fn compute_selector_factors3(h: &Hist3) -> [f32; 3] {
+    let mut weight_accum: u32 = 0;
+    for sel in 0..3 {
+        weight_accum += WEIGHT_VALS3[sel] * h.0[sel] as u32;
+    }
+
+    let z00 = ((weight_accum >> 16) & 0xFF) as f32;
+    let z10 = ((weight_accum >> 8) & 0xFF) as f32;
+    let z11 = (weight_accum & 0xFF) as f32;
+    let z01 = z10;
+
+    let mut det = z00 * z11 - z01 * z10;
+    // As in compute_selector_factors4: det is an exact integer, so float and double `fabs` compare the same.
+    if det.abs() < 1e-8 {
+        hit!(Hit::Factors3Singular);
+        det = 0.0;
+    } else {
+        hit!(Hit::Factors3Solved);
+        det = (2.0f32 / 255.0f32) / det;
+    }
+
+    [z11 * det, -z10 * det, z00 * det]
+}
+
+/// The total-ordering tables `init` builds.
 pub(crate) struct OrderTables {
     /// `g_total_ordering4_hash`: histogram (h0 | h1 << 4 | h2 << 8) to its total-ordering index.
     pub hash: [u16; 4096],
     /// `g_selector_factors4`: [`compute_selector_factors4`] of every total ordering.
     pub factors: [[f32; 3]; N4],
+    /// `g_total_ordering3_hash`: 3-colour histogram (h0 | h1 << 4) to its total-ordering index.
+    pub hash3: [u16; 256],
+    /// `g_selector_factors3`: [`compute_selector_factors3`] of every 3-colour total ordering.
+    pub factors3: [[f32; 3]; N3],
 }
 
-/// The 4-colour half of `init`, built once.
+/// The total-ordering half of `init`, built once.
 pub(crate) fn order_tables() -> &'static OrderTables {
     static TABLES: OnceLock<OrderTables> = OnceLock::new();
     TABLES.get_or_init(|| {
         let mut t = OrderTables {
             hash: [0; 4096],
             factors: [[0.0; 3]; N4],
+            hash3: [0; 256],
+            factors3: [[0.0; 3]; N3],
         };
         for (i, o) in UNIQUE_TOTAL_ORDERS4.iter().enumerate() {
             let h = Hist4(*o);
@@ -119,6 +190,14 @@ pub(crate) fn order_tables() -> &'static OrderTables {
                 t.hash[index] = i as u16;
             }
             t.factors[i] = compute_selector_factors4(&h);
+        }
+        for (i, o) in UNIQUE_TOTAL_ORDERS3.iter().enumerate() {
+            let h = Hist3(*o);
+            if !h.any_16() {
+                let index = h.0[0] as usize | ((h.0[1] as usize) << 4);
+                t.hash3[index] = i as u16;
+            }
+            t.factors3[i] = compute_selector_factors3(&h);
         }
         t
     })
@@ -203,6 +282,91 @@ pub(crate) fn ls_endpoints4(
     Some((xl, xh))
 }
 
+/// The table form of `compute_least_squares_endpoints3_rgb`: as [`ls_endpoints4_ordered`] for 3-colour ordering `s`,
+/// whose texels run low endpoint, midpoint, high endpoint along the axis (selectors 0, 2, 1). `iz` is
+/// `g_selector_factors3[s]`. Returns (xl, xh).
+pub(crate) fn ls_endpoints3_ordered(
+    total: [i32; 3],
+    iz: [f32; 3],
+    s: usize,
+    sums: &[[u32; 17]; 3],
+) -> ([f32; 3], [f32; 3]) {
+    let [iz00, iz10, iz11] = iz;
+    let iz01 = iz10;
+
+    // Compensates for BC1 3-color ordering, which is selector 0, 2, 1
+    let o = &UNIQUE_TOTAL_ORDERS3[s];
+    let f1 = o[0] as usize;
+    let f2 = o[0] as usize + o[2] as usize;
+    let mut xl = [0.0f32; 3];
+    let mut xh = [0.0f32; 3];
+    for c in 0..3 {
+        let sum = &sums[c];
+        // uint32_t in the C++. The prefix sums never decrease, so no difference wraps.
+        let uq00 = (sum[16] - sum[f2]) * 2 + (sum[f2] - sum[f1]);
+        // `(float)(total * 2 - uq00)`: int * 2 converted to uint32_t for the subtraction, then to float. uq00 is at
+        // most 2 * total, so it never wraps; wrapping_sub keeps the C++ type either way.
+        let q10 = ((total[c] * 2) as u32).wrapping_sub(uq00) as f32;
+        xl[c] = iz00 * uq00 as f32 + iz01 * q10;
+        xh[c] = iz10 * uq00 as f32 + iz11 * q10;
+    }
+    (xl, xh)
+}
+
+/// The selector form of `compute_least_squares_endpoints3_rgb` with `use_black = false` (every caller on the
+/// reachable path passes the literal `false`, so its skip of near-black texels never runs): the least-squares low and
+/// high colours for 3-colour selectors `sels`. `None` when the normal matrix is singular (the C++ returns false).
+/// Returns (xl, xh).
+///
+/// The C++ also skips texels on selector 3 (black). The selectors here always come from [`super::sels::find_sels3`],
+/// which never picks 3 on the reachable path, through a call that wrote all 16 (see `try_3color_block`), so that skip
+/// never runs and is not ported.
+#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32; 3], [f32; 3])> {
+    const S_TRAN: [i32; 3] = [0, 2, 1];
+    let mut uq00 = [0i32; 3];
+    let mut weight_accum: u32 = 0;
+    let mut total = [0i32; 3];
+    for i in 0..16 {
+        let sel = sels[i] as usize;
+        debug_assert!(sel < 3, "3-colour selector {sel}");
+
+        weight_accum += WEIGHT_VALS3[sel];
+
+        let tsel = S_TRAN[sel];
+        for c in 0..3 {
+            uq00[c] += tsel * px[i][c] as i32;
+            total[c] += px[i][c] as i32;
+        }
+    }
+
+    // int in the C++; at most 2 * 16 * 255.
+    let q10: [i32; 3] = std::array::from_fn(|c| total[c] * 2 - uq00[c]);
+
+    let z00 = ((weight_accum >> 16) & 0xFF) as f32;
+    let z10 = ((weight_accum >> 8) & 0xFF) as f32;
+    let z11 = (weight_accum & 0xFF) as f32;
+    let z01 = z10;
+
+    let mut det = z00 * z11 - z01 * z10;
+    if det.abs() < 1e-8 {
+        hit!(Hit::LsSels3Singular);
+        return None;
+    }
+    hit!(Hit::LsSels3Solved);
+
+    det = (2.0f32 / 255.0f32) / det;
+
+    let iz00 = z11 * det;
+    let iz01 = -z01 * det;
+    let iz10 = -z10 * det;
+    let iz11 = z00 * det;
+
+    let xl = std::array::from_fn(|c| iz00 * uq00[c] as f32 + iz01 * q10[c] as f32);
+    let xh = std::array::from_fn(|c| iz10 * uq00[c] as f32 + iz11 * q10[c] as f32);
+    Some((xl, xh))
+}
+
 /// `g_midpoint5`: the rounding thresholds between adjacent 5-bit codes (0..1 scale); the last never rounds up.
 #[rustfmt::skip]
 const MIDPOINT5: [f32; 32] = [
@@ -235,7 +399,8 @@ fn clamp_code(x: i32, max: i32) -> i32 {
 /// r, g, b; the callers that pass least-squares results store the first as the high endpoint, as the C++ does.
 ///
 /// `(int)(x * 31.0f)` truncates toward zero like `as i32`. The values are finite and far inside `i32`: the
-/// least-squares inputs are bounded by the factors (|iz| <= 3/255 * 144 / 1, as a non-zero det is an integer) times
+/// least-squares inputs are bounded by the factors (4-colour: |iz| <= 3/255 * 144 / 1, as a non-zero det is an
+/// integer; 3-colour: det = 16 n0 n1 + 4 n2 (n0 + n1) is 0 or at least 60, z <= 64, so |iz| <= 2/255 * 64 / 60) times
 /// the sums (<= 3 * 16 * 255), the bounding-box inputs are clamped to 0..1, so `as i32` never saturates and no NaN
 /// reaches it (cvttss2si would give 0x80000000 there).
 pub(crate) fn precise_round_565(xl: &[f32; 3], xh: &[f32; 3]) -> ([i32; 3], [i32; 3]) {
@@ -296,6 +461,29 @@ mod tests {
         for (i, o) in UNIQUE_TOTAL_ORDERS4.iter().enumerate() {
             if !TOTAL_ORDER_4_16.contains(&i) {
                 let index = o[0] as usize | ((o[1] as usize) << 4) | ((o[2] as usize) << 8);
+                assert_eq!(hash[index] as usize, i, "histogram {o:?}");
+            }
+        }
+    }
+
+    /// rgbcx's constants as written: `TOTAL_ORDER_3_1_16` (15) is the histogram with every texel on selector 2 and
+    /// `TOTAL_ORDER_3_2_16` (89) the one on selector 1, so `hist3::lookup_total_ordering_index` returns 15 for
+    /// selector 1 and 89 for selector 2. The port keeps that pairing.
+    #[test]
+    fn the_single_selector_3_colour_orderings_are_the_16_count_histograms() {
+        let want = [[16, 0, 0], [0, 0, 16], [0, 16, 0]];
+        for (&s, want) in TOTAL_ORDER_3_16.iter().zip(want) {
+            assert_eq!(UNIQUE_TOTAL_ORDERS3[s], want, "ordering {s}");
+        }
+    }
+
+    /// Reads the hash directly, as above.
+    #[test]
+    fn every_3_colour_histogram_hashes_back_to_its_ordering() {
+        let hash = &order_tables().hash3;
+        for (i, o) in UNIQUE_TOTAL_ORDERS3.iter().enumerate() {
+            if !TOTAL_ORDER_3_16.contains(&i) {
+                let index = o[0] as usize | ((o[1] as usize) << 4);
                 assert_eq!(hash[index] as usize, i, "histogram {o:?}");
             }
         }

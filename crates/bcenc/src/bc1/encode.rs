@@ -1,30 +1,38 @@
-//! BC1 four-colour encode at rgbcx level 18. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
-//! (MIT or public domain): `encode_bc1(void*, const uint8_t*, flags, total_orderings_to_try, ..)` for level 18's flags
-//! with 3-colour blocks off, `encode_bc1_solid_block` (4-colour result), `encode_bc1_endpoint_search` and
-//! `bc1_encode4` (Note HY3).
+//! BC1 encode at rgbcx level 18. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches (MIT or
+//! public domain): `encode_bc1(void*, const uint8_t*, flags, total_orderings_to_try, total_orderings_to_try3, ..)` for
+//! level 18's flags, `encode_bc1_solid_block`, `try_3color_block`, `encode_bc1_endpoint_search`, `bc1_encode4` and
+//! `bc1_encode3` (Notes HY3, HY4).
 //!
 //! Level 18 is `cEncodeBC1TwoLeastSquaresPasses | cEncodeBC1UseFullMSEEval | cEncodeBC1UseLikelyTotalOrderings |
 //! cEncodeBC1Use6PowerIters | cEncodeBC1Iterative | (256 << cEncodeBC1EndpointSearchRoundsShift) |
-//! cEncodeBC1TryAllInitialEndponts` with `total_orderings_to_try = MAX_TOTAL_ORDERINGS4`; the engine encodes in
-//! `cBC1Dual` mode and never passes forced selectors. Those flags are constants here: each flag test of the C++ is
-//! resolved to the arm level 18 takes.
+//! cEncodeBC1TryAllInitialEndponts`, plus `cEncodeBC1Use3ColorBlocks` when `allow_3color`, with
+//! `total_orderings_to_try = MAX_TOTAL_ORDERINGS4` and `total_orderings_to_try3 = 32`. The engine encodes in `cBC1Dual`
+//! mode, never passes forced selectors and never sets `allow_transparent_texels_for_black`, so
+//! `cEncodeBC1Use3ColorBlocksForBlackPixels` is never set. Those flags are constants here: each flag test of the C++ is
+//! resolved to the arm level 18 takes; `allow_3color` is the one flag left.
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 
 use super::fit::{
-    ls_endpoints4, ls_endpoints4_ordered, order_tables, precise_round_565, Hist4, TOTAL_ORDER_4_16,
+    ls_endpoints3, ls_endpoints3_ordered, ls_endpoints4, ls_endpoints4_ordered, order_tables,
+    precise_round_565, Hist3, Hist4, TOTAL_ORDER_3_16, TOTAL_ORDER_4_16,
 };
 use super::initial::pick_initial;
 use super::palette::single_tables;
-use super::sels::find_sels4;
-use super::tables::{BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
+use super::sels::{find_sels3, find_sels4};
+use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends};
 
-/// `encode_bc1(18, .., allow_3color = false, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with
-/// R, G, B error weights `weights`.
-pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
+/// `MAX_TOTAL_ORDERINGS3` (rgbcx.h).
+const MAX_TOTAL_ORDERINGS3: usize = 32;
+/// Level 18's `total_orderings3`.
+const TOTAL_ORDERINGS3: usize = 32;
+
+/// `encode_bc1(18, .., allow_3color, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with R, G, B
+/// error weights `weights`.
+pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) -> [u8; 8] {
     let (fr, fg, fb) = (px[0][0], px[0][1], px[0][2]);
 
     let mut j = 15;
@@ -37,10 +45,11 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
 
     if j == 0 {
         hit!(Hit::Bc1Solid);
-        return solid_block(fr as usize, fg as usize, fb as usize);
+        return solid_block(fr as usize, fg as usize, fb as usize, allow_3color);
     }
 
-    // `any_black_pixels` is only read by the 3-colour paths, which level 18 without allow_3color never enters.
+    // `any_black_pixels` is not computed: every read of it is ANDed with cEncodeBC1Use3ColorBlocksForBlackPixels
+    // (never set here), or ORed into `needs_block_error`, which level 18's flags already make true.
     let mut s = BlockStats {
         min: [fr as i32, fg as i32, fb as i32],
         max: [fr as i32, fg as i32, fb as i32],
@@ -64,6 +73,8 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
         l: [0; 3],
         h: [0; 3],
     };
+    // `orig_l*`, `orig_h*`: the initial endpoints of the round taken, where `try_3color_block` starts.
+    let mut orig = ends;
     let mut sels = [0u8; 16];
 
     // needs_block_error is true at level 18 (likely total orderings, full MSE, endpoint search).
@@ -72,6 +83,7 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
     // cEncodeBC1TryAllInitialEndponts: two rounds, the second with cEncodeBC1BoundingBox.
     for round in 0..2 {
         let mut round_ends = pick_initial(px, round == 1, &s);
+        let orig_round = round_ends;
         let mut round_sels = [0u8; 16];
 
         let mut round_err = find_sels4(px, weights, &round_ends, &mut round_sels, u32::MAX);
@@ -107,6 +119,7 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
             hit!(Hit::RoundTaken);
             cur_err = round_err;
             ends = round_ends;
+            orig = orig_round;
             sels = round_sels;
         } else {
             hit!(Hit::RoundWorse);
@@ -132,13 +145,31 @@ pub(crate) fn encode4(px: &[[u8; 4]; 16], weights: [i32; 3]) -> [u8; 8] {
         hit!(Hit::OrderingsSkippedExact);
     }
 
+    // `results.m_3color`.
+    let mut three = false;
+
+    // cEncodeBC1Use3ColorBlocks (cEncodeBC1Use3ColorBlocksForBlackPixels is never set, so
+    // `try_3color_block_useblack` never runs).
+    if allow_3color {
+        if cur_err != 0 {
+            hit!(Hit::Try3Run);
+            three = try_3color_block(px, weights, &s, orig, &mut cur_err, &mut ends, &mut sels);
+        } else {
+            hit!(Hit::Try3SkippedExact);
+        }
+    }
+
     // 256 endpoint search rounds.
     if cur_err != 0 {
         hit!(Hit::SearchRun);
-        endpoint_search(px, weights, &mut ends, &mut sels, cur_err);
+        endpoint_search(px, weights, three, &mut ends, &mut sels, cur_err);
     }
 
-    bc1_encode4(&ends, &sels)
+    if three {
+        bc1_encode3(&ends, &sels)
+    } else {
+        bc1_encode4(&ends, &sels)
+    }
 }
 
 /// The 4-colour single-colour match of the block average (`g_bc1_match*_equals_1[avg]`): `m_hi` as the low
@@ -156,6 +187,21 @@ fn single_colour_ends(avg: [i32; 3]) -> Ends {
     }
 }
 
+/// The 3-colour single-colour match of the block average (`g_bc1_match*_half[avg]`), stored as
+/// [`single_colour_ends`] stores the 4-colour one.
+fn single_colour_ends3(avg: [i32; 3]) -> Ends {
+    let t = single_tables();
+    let (r, g, b) = (
+        &t.match5_half[avg[0] as usize],
+        &t.match6_half[avg[1] as usize],
+        &t.match5_half[avg[2] as usize],
+    );
+    Ends {
+        l: [r.hi as i32, g.hi as i32, b.hi as i32],
+        h: [r.lo as i32, g.lo as i32, b.lo as i32],
+    }
+}
+
 /// Rounds a least-squares result to endpoint codes. The C++ calls `precise_round_565(xl, xh, trial_h*, trial_l*)`:
 /// the low fit becomes the high endpoint and the high fit the low one.
 fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
@@ -166,27 +212,13 @@ fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
     }
 }
 
-/// One iteration of `encode_bc1`'s total-ordering loop: sort the texels along the current endpoints' axis, then try
-/// the `MAX_TOTAL_ORDERINGS4` orderings `g_best_total_orderings4` lists for the current selector histogram, keeping
-/// a strictly better one.
+/// The prefix sums `encode_bc1` and `try_3color_block` build for their total-ordering loops: the texels sorted by
+/// their dot product with the current endpoints' axis (the texel index breaks ties), `sums[c][i]` the sum of channel
+/// `c` over the first `i` of them and `sums[c][16]` the block total.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-fn total_orderings(
-    px: &[[u8; 4]; 16],
-    weights: [i32; 3],
-    s: &BlockStats,
-    ends: &mut Ends,
-    sels: &mut [u8; 16],
-    cur_err: &mut u32,
-) {
-    let mut h = Hist4::default();
-    for i in 0..16 {
-        h.0[sels[i] as usize] += 1;
-    }
-
-    let orig_total_order_index = h.lookup_total_ordering_index();
-
-    let (lr, lg, lb) = (ends.l[0], ends.l[1], ends.l[2]);
-    let (hr, hg, hb) = (ends.h[0], ends.h[1], ends.h[2]);
+fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] {
+    let (lr, lg, lb) = (e.l[0], e.l[1], e.l[2]);
+    let (hr, hg, hb) = (e.h[0], e.h[1], e.h[2]);
     let (r0, g0, b0) = (
         (lr << 3) | (lr >> 2),
         (lg << 2) | (lg >> 4),
@@ -222,8 +254,31 @@ fn total_orderings(
     }
 
     for c in 0..3 {
-        sums[c][16] = s.total[c] as u32;
+        sums[c][16] = total[c] as u32;
     }
+    sums
+}
+
+/// One iteration of `encode_bc1`'s total-ordering loop: sort the texels along the current endpoints' axis, then try
+/// the `MAX_TOTAL_ORDERINGS4` orderings `g_best_total_orderings4` lists for the current selector histogram, keeping
+/// a strictly better one.
+#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+fn total_orderings(
+    px: &[[u8; 4]; 16],
+    weights: [i32; 3],
+    s: &BlockStats,
+    ends: &mut Ends,
+    sels: &mut [u8; 16],
+    cur_err: &mut u32,
+) {
+    let mut h = Hist4::default();
+    for &sel in sels.iter() {
+        h.0[sel as usize] += 1;
+    }
+
+    let orig_total_order_index = h.lookup_total_ordering_index();
+
+    let sums = sorted_sums(px, ends, s.total);
 
     let tables = order_tables();
     // clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4) with MAX_TOTAL_ORDERINGS4 passed.
@@ -252,6 +307,113 @@ fn total_orderings(
     }
 }
 
+/// `try_3color_block` at level 18 without forced selectors: fit a 3-colour block from `start` (the 4-colour round's
+/// initial endpoints) with two least-squares passes and the 32 likely total orderings, and take it into `ends`,
+/// `sels` and `cur_err` when its error is strictly below `cur_err`. Returns whether it did (`results.m_3color`).
+///
+/// Every selector array this reads was written in full by [`find_sels3`]: the first search and the ordering searches
+/// pass `UINT32_MAX` (a block's error is far below it), and a least-squares search's selectors are kept only when its
+/// total is below the cutoff it was given, which means it never stopped early.
+#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+fn try_3color_block(
+    px: &[[u8; 4]; 16],
+    weights: [i32; 3],
+    s: &BlockStats,
+    start: Ends,
+    cur_err: &mut u32,
+    ends: &mut Ends,
+    sels: &mut [u8; 16],
+) -> bool {
+    let mut e = start;
+    let mut trial_sels = [0u8; 16];
+    let mut trial_err = find_sels3(px, weights, &e, &mut trial_sels, u32::MAX);
+
+    if trial_err != 0 {
+        hit!(Hit::Try3Fit);
+        // cEncodeBC1TwoLeastSquaresPasses.
+        for _trials in 0..2 {
+            let trial = match ls_endpoints3(px, &trial_sels) {
+                None => single_colour_ends3(s.avg),
+                Some((xl, xh)) => round_ls(&xl, &xh),
+            };
+
+            if e == trial {
+                hit!(Hit::Ls3PassSame);
+                break;
+            }
+
+            let mut trial_sels2 = [0u8; 16];
+            let trial_err2 = find_sels3(px, weights, &trial, &mut trial_sels2, trial_err);
+
+            if trial_err2 < trial_err {
+                hit!(Hit::Ls3PassBetter);
+                trial_err = trial_err2;
+                e = trial;
+                trial_sels = trial_sels2;
+            } else {
+                hit!(Hit::Ls3PassWorse);
+                break;
+            }
+        }
+    } else {
+        hit!(Hit::Try3StartExact);
+    }
+
+    // cEncodeBC1UseLikelyTotalOrderings is set and total_orderings_to_try3 (32) is not 0.
+    if trial_err != 0 {
+        hit!(Hit::Orderings3Run);
+        let mut h = Hist3::default();
+        for &sel in trial_sels.iter() {
+            h.0[sel as usize] += 1;
+        }
+
+        let orig_total_order_index = h.lookup_total_ordering_index();
+
+        let sums = sorted_sums(px, &e, s.total);
+
+        let tables = order_tables();
+        // std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3); cEncodeBC1Exhaustive is level 19 only.
+        let q_total = TOTAL_ORDERINGS3.min(MAX_TOTAL_ORDERINGS3);
+        for q in 0..q_total {
+            let s_index = BEST_TOTAL_ORDERINGS3[orig_total_order_index][q] as usize;
+
+            let trial = if TOTAL_ORDER_3_16.contains(&s_index) {
+                hit!(Hit::Ordering3Single);
+                single_colour_ends3(s.avg)
+            } else {
+                hit!(Hit::Ordering3Fit);
+                let (xl, xh) =
+                    ls_endpoints3_ordered(s.total, tables.factors3[s_index], s_index, &sums);
+                round_ls(&xl, &xh)
+            };
+
+            // UINT32_MAX here, unlike the 4-colour loop, which passes cur_err.
+            let mut trial_sels2 = [0u8; 16];
+            let trial_err2 = find_sels3(px, weights, &trial, &mut trial_sels2, u32::MAX);
+
+            if trial_err2 < trial_err {
+                hit!(Hit::Ordering3Better);
+                trial_err = trial_err2;
+                e = trial;
+                trial_sels = trial_sels2;
+            }
+        }
+    } else {
+        hit!(Hit::Orderings3SkippedExact);
+    }
+
+    if trial_err < *cur_err {
+        hit!(Hit::Try3Taken);
+        *ends = e;
+        *sels = trial_sels;
+        *cur_err = trial_err;
+        true
+    } else {
+        hit!(Hit::Try3Rejected);
+        false
+    }
+}
+
 /// `s_adjacent_voxels`: a step in r, g, b, and the index of the opposite step.
 const ADJACENT_VOXELS: [[i8; 4]; 16] = [
     [1, 0, 0, 3],
@@ -272,13 +434,14 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
     [0, 1, -1, 14],
 ];
 
-/// `encode_bc1_endpoint_search` for a 4-colour block with 256 rounds: step one endpoint by one code in one of 16
-/// directions (rounds 0..15 the high endpoint, 16..31 the low, repeating), keep a strictly better result, never
-/// undo the last improving step, and stop 33 rounds after the last improvement. A skipped round skips that stop
-/// test too, as in the C++.
+/// `encode_bc1_endpoint_search` with 256 rounds: step one endpoint by one code in one of 16 directions (rounds 0..15
+/// the high endpoint, 16..31 the low, repeating), keep a strictly better result, never undo the last improving step,
+/// and stop 33 rounds after the last improvement. A skipped round skips that stop test too, as in the C++. `three`
+/// is `results.m_3color`: the trials are then scored as 3-colour blocks (`use_black` false, see [`find_sels3`]).
 fn endpoint_search(
     px: &[[u8; 4]; 16],
     weights: [i32; 3],
+    three: bool,
     ends: &mut Ends,
     sels: &mut [u8; 16],
     mut cur_err: u32,
@@ -310,7 +473,13 @@ fn endpoint_search(
         }
 
         let mut trial_sels = [0u8; 16];
-        let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, cur_err);
+        let trial_err = if three {
+            hit!(Hit::SearchThree);
+            find_sels3(px, weights, &trial, &mut trial_sels, cur_err)
+        } else {
+            hit!(Hit::SearchFour);
+            find_sels4(px, weights, &trial, &mut trial_sels, cur_err)
+        };
 
         if trial_err < cur_err {
             hit!(Hit::SearchBetter);
@@ -405,41 +574,106 @@ fn bc1_encode4(e: &Ends, sels: &[u8; 16]) -> [u8; 8] {
     }
 }
 
-/// `encode_bc1_solid_block` with `allow_3color = false`: the 4-colour single-colour match of each channel, every
-/// texel on the 2/3 entry; equal endpoints are made distinct as in [`bc1_encode4`].
-fn solid_block(fr: usize, fg: usize, fb: usize) -> [u8; 8] {
-    let t = single_tables();
-    let mut mask = 0xAAu32;
+/// `bc1_encode3`: a 3-colour block (colour 0 <= colour 1) from the endpoints and 3-colour selectors; swapping the
+/// endpoints swaps selectors 0 and 1. Equal endpoints stay equal (a 3-colour block).
+fn bc1_encode3(e: &Ends, sels: &[u8; 16]) -> [u8; 8] {
+    let mut lc16 = pack_unscaled_color(&e.l);
+    let mut hc16 = pack_unscaled_color(&e.h);
 
-    let (r, g, b) = (
-        &t.match5_equals_1[fr],
-        &t.match6_equals_1[fg],
-        &t.match5_equals_1[fb],
-    );
-    let mut max16 = ((r.hi as i32) << 11) | ((g.hi as i32) << 5) | b.hi as i32;
-    let mut min16 = ((r.lo as i32) << 11) | ((g.lo as i32) << 5) | b.lo as i32;
+    let invert_flag = lc16 > hc16;
+    if invert_flag {
+        hit!(Hit::Pack3Swap);
+        std::mem::swap(&mut lc16, &mut hc16);
+    } else {
+        hit!(Hit::Pack3InOrder);
+    }
 
-    if min16 == max16 {
-        // Always forbid 3 color blocks
-        mask = 0;
-
-        // Make l > h
-        if min16 > 0 {
-            hit!(Hit::SolidEqual);
-            min16 -= 1;
-        } else {
-            hit!(Hit::SolidEqualBlack);
-            // l = h = 0
-            max16 = 1;
-            min16 = 0;
-            mask = 0x55;
+    let mut packed_sels = 0u32;
+    if invert_flag {
+        const SEL_TRANS_INV: [u32; 4] = [1, 0, 2, 3];
+        for (i, &s) in sels.iter().enumerate() {
+            packed_sels |= SEL_TRANS_INV[s as usize] << (i * 2);
+        }
+    } else {
+        for (i, &s) in sels.iter().enumerate() {
+            packed_sels |= (s as u32) << (i * 2);
         }
     }
 
-    if max16 < min16 {
-        hit!(Hit::SolidSwap);
-        std::mem::swap(&mut max16, &mut min16);
-        mask ^= 0x55;
+    block_bytes(
+        lc16,
+        hc16,
+        [
+            packed_sels as u8,
+            (packed_sels >> 8) as u8,
+            (packed_sels >> 16) as u8,
+            (packed_sels >> 24) as u8,
+        ],
+    )
+}
+
+/// `encode_bc1_solid_block`. With `allow_3color`, the 3-colour (`half`, every texel on the midpoint) match of each
+/// channel when its summed table error is strictly lower, endpoints ordered for a 3-colour block; otherwise the
+/// 4-colour (`equals_1`, every texel on the 2/3 entry) match, equal endpoints made distinct as in [`bc1_encode4`].
+fn solid_block(fr: usize, fg: usize, fb: usize, allow_3color: bool) -> [u8; 8] {
+    let t = single_tables();
+    let mut mask = 0xAAu32;
+    let mut max16 = -1i32;
+    let mut min16 = 0i32;
+
+    if allow_3color {
+        let err4 = t.match5_equals_1[fr].e as u32
+            + t.match6_equals_1[fg].e as u32
+            + t.match5_equals_1[fb].e as u32;
+        let err3 =
+            t.match5_half[fr].e as u32 + t.match6_half[fg].e as u32 + t.match5_half[fb].e as u32;
+
+        if err3 < err4 {
+            hit!(Hit::SolidThree);
+            let (r, g, b) = (&t.match5_half[fr], &t.match6_half[fg], &t.match5_half[fb]);
+            max16 = ((r.hi as i32) << 11) | ((g.hi as i32) << 5) | b.hi as i32;
+            min16 = ((r.lo as i32) << 11) | ((g.lo as i32) << 5) | b.lo as i32;
+
+            if max16 > min16 {
+                hit!(Hit::SolidThreeSwap);
+                std::mem::swap(&mut max16, &mut min16);
+            }
+        } else {
+            hit!(Hit::SolidThreeLoses);
+        }
+    }
+
+    if max16 == -1 {
+        let (r, g, b) = (
+            &t.match5_equals_1[fr],
+            &t.match6_equals_1[fg],
+            &t.match5_equals_1[fb],
+        );
+        max16 = ((r.hi as i32) << 11) | ((g.hi as i32) << 5) | b.hi as i32;
+        min16 = ((r.lo as i32) << 11) | ((g.lo as i32) << 5) | b.lo as i32;
+
+        if min16 == max16 {
+            // Always forbid 3 color blocks
+            mask = 0;
+
+            // Make l > h
+            if min16 > 0 {
+                hit!(Hit::SolidEqual);
+                min16 -= 1;
+            } else {
+                hit!(Hit::SolidEqualBlack);
+                // l = h = 0
+                max16 = 1;
+                min16 = 0;
+                mask = 0x55;
+            }
+        }
+
+        if max16 < min16 {
+            hit!(Hit::SolidSwap);
+            std::mem::swap(&mut max16, &mut min16);
+            mask ^= 0x55;
+        }
     }
 
     block_bytes(max16 as u32, min16 as u32, [mask as u8; 4])

@@ -126,7 +126,7 @@ pub fn bc4_classes(seed: u64, per_class: usize) -> Vec<[u8; 16]> {
 }
 
 /// The number of classes [`colour_classes`] returns `per_class` blocks of.
-pub const COLOUR_CLASSES: usize = 25;
+pub const COLOUR_CLASSES: usize = 29;
 
 fn rgb(r: &mut Rng) -> [u8; 3] {
     [r.byte(), r.byte(), r.byte()]
@@ -161,7 +161,9 @@ fn pick(r: &mut Rng, colours: &[[u8; 3]]) -> [[u8; 4]; 16] {
 /// colour); colours of one BC1 palette that both decoders agree on. Then six classes that aim at paths a reasoned
 /// block reached and random ones missed: narrow clusters of 2..=4 colours with random multiplicities, grouped or
 /// shuffled; two-value grey blocks, shuffled; near-grey blocks; texels that differ only perpendicular to the
-/// principal axis; r, g, b all varying with a zero covariance term; endpoints on the 565 rounding boundaries.
+/// principal axis; r, g, b all varying with a zero covariance term; endpoints on the 565 rounding boundaries. Last, four
+/// classes for three-colour blocks: black and near-black texels; two exact 565 colours with their midpoint; texels on a
+/// short line near its thirds and half; near-solid exact 565 colours with texels moved by half a code.
 pub fn colour_classes(seed: u64, per_class: usize) -> Vec<[[u8; 4]; 16]> {
     let mut r = Rng(seed | 1);
     let mut out = Vec::with_capacity(per_class * COLOUR_CLASSES);
@@ -368,7 +370,135 @@ pub fn colour_classes(seed: u64, per_class: usize) -> Vec<[[u8; 4]; 16]> {
     for i in 0..per_class {
         out.push(midpoint_ends(&mut r, i, &b5, &b6));
     }
+    // The three-colour classes (Note HY4), after the four-colour ones so their blocks stay as they were.
+    for i in 0..per_class {
+        out.push(with_black(&mut r, i));
+    }
+    for i in 0..per_class {
+        out.push(ends_and_midpoint(&mut r, i));
+    }
+    for i in 0..per_class {
+        out.push(along_short_line(&mut r, i));
+    }
+    for _ in 0..per_class {
+        out.push(near_565_half_step(&mut r));
+    }
     out
+}
+
+/// Two 565 codes 0..=6 codes apart per channel (low, high).
+fn ends_pair(r: &mut Rng) -> ([i32; 3], [i32; 3]) {
+    let lo: [i32; 3] = [r.below(26) as i32, r.below(58) as i32, r.below(26) as i32];
+    let hi: [i32; 3] = std::array::from_fn(|c| lo[c] + r.below(7) as i32);
+    (lo, hi)
+}
+
+/// The midpoint of two 565 codes as AMD decodes it (NVIDIA's differs by one on some pairs).
+fn midpoint_colour(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
+    let (ea, eb) = (
+        expand565(a[0], a[1], a[2]).map(i32::from),
+        expand565(b[0], b[1], b[2]).map(i32::from),
+    );
+    std::array::from_fn(|c| (ea[c] + eb[c] + 1) >> 1)
+}
+
+/// 1..=8 black or near-black texels (every channel 0..=3, a third of them pure black) in a two-colour (even `i`) or
+/// noisy (odd `i`) block, half of the time dark: the black-texel blocks of Review Focus 3, with three-colour on.
+fn with_black(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
+    let dark = r.next() & 1 == 0;
+    let colour = |r: &mut Rng| -> [u8; 3] {
+        if dark {
+            std::array::from_fn(|_| r.below(64) as u8)
+        } else {
+            rgb(r)
+        }
+    };
+    let mut v = if i.is_multiple_of(2) {
+        let c = [colour(r), colour(r)];
+        pick(r, &c)
+    } else {
+        std::array::from_fn(|_| texel(colour(r)))
+    };
+    for _ in 0..r.below(8) + 1 {
+        let black: [u8; 3] = if r.below(3) == 0 {
+            [0, 0, 0]
+        } else {
+            std::array::from_fn(|_| r.below(4) as u8)
+        };
+        v[r.below(16) as usize] = texel(black);
+    }
+    v
+}
+
+/// Two exact 565 colours and the colour on their midpoint, where a three-colour block can be exact and a four-colour
+/// one cannot: `i % 3` 0 the three colours, 1 the midpoint off by one in one channel, 2 the midpoint only with one
+/// endpoint (the three-colour fit then has to find the other).
+fn ends_and_midpoint(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
+    let (lo, hi) = ends_pair(r);
+    let (ea, eb) = (
+        expand565(lo[0], lo[1], lo[2]),
+        expand565(hi[0], hi[1], hi[2]),
+    );
+    let mut m = midpoint_colour(lo, hi);
+    if i % 3 == 1 {
+        let c = r.below(3) as usize;
+        m[c] += if r.next() & 1 == 0 { 1 } else { -1 };
+    }
+    let m = m.map(clamp8);
+    let colours: Vec<[u8; 3]> = if i % 3 == 2 {
+        vec![ea, m]
+    } else {
+        vec![ea, eb, m]
+    };
+    pick(r, &colours)
+}
+
+/// Texels on a short line between two exact 565 colours at fractions near the thirds and the half (1/3, 2/5, 1/2,
+/// 3/5, 2/3), plus the endpoints, so the three- and four-colour errors are close: the three-colour block wins on some
+/// and loses narrowly on others. Odd `i` add +-1 noise.
+fn along_short_line(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
+    const FRACTIONS: [(i32, i32); 7] = [(0, 1), (1, 3), (2, 5), (1, 2), (3, 5), (2, 3), (1, 1)];
+    let (lo, hi) = ends_pair(r);
+    let (ea, eb) = (
+        expand565(lo[0], lo[1], lo[2]).map(i32::from),
+        expand565(hi[0], hi[1], hi[2]).map(i32::from),
+    );
+    let used: Vec<(i32, i32)> = (0..r.below(3) + 2)
+        .map(|_| FRACTIONS[r.below(7) as usize])
+        .collect();
+    std::array::from_fn(|_| {
+        let (n, d) = used[r.below(used.len() as u64) as usize];
+        texel(std::array::from_fn(|c| {
+            let v = ea[c] + ((eb[c] - ea[c]) * n + d / 2) / d;
+            let noise = if i % 2 == 1 { r.below(3) as i32 - 1 } else { 0 };
+            clamp8(v + noise)
+        }))
+    })
+}
+
+/// A near-solid block on an exact 565 colour with 1..=3 texels moved by about half a code (3..=5 in red or blue, 2 or
+/// 3 in green) in one channel each, all the same way. The bounding-box round's inset is negative there (range < 8), so
+/// its far endpoint lands a whole code away, and every texel can end on the other endpoint in a three-colour block
+/// (`bc1_three_colour_block_with_every_texel_on_the_high_endpoint`).
+fn near_565_half_step(r: &mut Rng) -> [[u8; 4]; 16] {
+    let base = expand565(
+        r.below(30) as i32 + 1,
+        r.below(62) as i32 + 1,
+        r.below(30) as i32 + 1,
+    );
+    let mut v = [texel(base); 16];
+    let sign = if r.next() & 1 == 0 { 1 } else { -1 };
+    for _ in 0..r.below(3) + 1 {
+        let t = &mut v[r.below(16) as usize];
+        let c = r.below(3) as usize;
+        let d = if c == 1 {
+            r.below(2) as i32 + 2
+        } else {
+            r.below(3) as i32 + 3
+        };
+        t[c] = clamp8(t[c] as i32 + sign * d);
+    }
+    v
 }
 
 fn shuffle<T>(r: &mut Rng, v: &mut [T]) {

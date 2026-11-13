@@ -129,6 +129,44 @@ hits! {
     SelsBetter,
     SelsTieHigh,
     SelsEarlyOut,
+    // bc1 three-colour: solid_block
+    SolidThree,
+    SolidThreeSwap,
+    SolidThreeLoses,
+    // encode
+    Try3Run,
+    Try3SkippedExact,
+    // try_3color_block
+    Try3Fit,
+    Try3StartExact,
+    Ls3PassSame,
+    Ls3PassBetter,
+    Ls3PassWorse,
+    Orderings3Run,
+    Orderings3SkippedExact,
+    Ordering3Single,
+    Ordering3Fit,
+    Ordering3Better,
+    Try3Taken,
+    Try3Rejected,
+    // endpoint_search
+    SearchThree,
+    SearchFour,
+    // bc1_encode3
+    Pack3Swap,
+    Pack3InOrder,
+    // fit
+    Hist3Sel0,
+    Hist3Sel1,
+    Hist3Sel2,
+    Hist3Hashed,
+    Factors3Singular,
+    Factors3Solved,
+    LsSels3Singular,
+    LsSels3Solved,
+    // find_sels3
+    Sels3Better,
+    Sels3EarlyOut,
 }
 
 #[cfg(test)]
