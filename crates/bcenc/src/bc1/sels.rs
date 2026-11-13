@@ -613,7 +613,7 @@ mod tests {
 
         // Equal endpoints: every entry the same colour, so a texel of that colour gets selector 0 and any other
         // texel 3 (4-colour) or 0 (3-colour).
-        let mut seen_flat = 0;
+        let mut seen_flat = [0, 0];
         for px in &blocks {
             for k in 0..32 {
                 let c = [(k * 7) % 32, (k * 5 + 3) % 64, (k * 11 + 1) % 32];
@@ -627,7 +627,7 @@ mod tests {
                     if (1..entries).any(|j| entry_colour(&p, j) != Some(col)) {
                         continue;
                     }
-                    seen_flat += 1;
+                    seen_flat[usize::from(four)] += 1;
                     let mut b = *px;
                     b[5] = col;
                     b[9] = col;
@@ -639,13 +639,16 @@ mod tests {
                         K::f3(&t, &e, &mut got, u32::MAX);
                     }
                     for (i, &g) in got.iter().enumerate() {
-                        let want = if b[i] == col || !four { 0 } else { 3 };
+                        let want = if b[i][..3] == col[..3] || !four { 0 } else { 3 };
                         assert_eq!(g, want, "texel {i} {b:?} {e:?} four {four}");
                     }
                 }
             }
         }
-        assert!(seen_flat > 0, "no equal-endpoint case held its premise");
+        assert!(
+            seen_flat.iter().all(|&n| n > 0),
+            "3-colour or 4-colour equal endpoints never held their premise: {seen_flat:?}"
+        );
 
         // Two-colour blocks against the scalar searches.
         for px in &blocks {
@@ -734,6 +737,10 @@ mod tests {
                         if dec == [1, 1] && wi < 2 {
                             let full = scalar::find_sels4(px, *w, e, &mut want, u32::MAX);
                             assert_eq!(K::f4(&t, e, &mut got, u32::MAX), 2 * full);
+                            assert_eq!(got, want, "{px:?} {e:?} {w:?}");
+                            let full3 = scalar::find_sels3(px, *w, e, &mut want, u32::MAX);
+                            assert_eq!(K::f3(&t, e, &mut got, u32::MAX), 2 * full3);
+                            assert_eq!(got, want, "{px:?} {e:?} {w:?}");
                         }
                     }
                 }
@@ -748,13 +755,13 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "decoder weights")]
     fn decoder_weights_above_the_bound_are_refused() {
         Texels::new(&[[0; 4]; 16], PLAIN, [3, 2]);
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "channel weights")]
     fn channel_weights_above_the_bound_are_refused() {
         Texels::new(&[[0; 4]; 16], [200, 100, 1], DUAL);
     }

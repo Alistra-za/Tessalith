@@ -762,3 +762,8 @@ ARCHIVED (wording before the edit; superseded in part by Note HS13, 2026-11-10)
 
 ARCHIVED (wording before the edit; superseded in part by Note HS10, 2026-11-10)
 - **IB11 The output is `<same file name>.png` in a `dilated` folder beside the input (`--out` overrides), same bit depth and channel layout.** The name stays so Tessalith still reads the suffix. An existing output is kept and reported unless `--overwrite`; an output that would replace its own input is refused. Exit codes as `sdc uv` (IB6): 0 all written; 1 an input wrote nothing (no mask, size mismatch, float, no valid texel, exists); 2 no image matches; 3 a write failed. One stdout line per file: path, kind, mask, filled texel count.
+
+## Note HY — bcenc, rgbcx's block encoders in Rust (main team, 2026-11-13)
+
+ARCHIVED (wording before the edit; superseded in part by Note HY9, 2026-11-13)
+- **HY1 `bcenc` holds the Rust BC4-family search; the C++ is the reference.** `crates/bcenc` has no dependencies and no `unsafe`. `bcenc::bc4` is the BC4 search that lived in `encoders-sys/tests/support/bc4ref.rs` (moved; behaviour unchanged, branch counters added), and `bc4_encode_block`, `bc5_encode_block` and `bc4_encode_alpha` (BC3's alpha half, with the cut) wrap it. They are proven byte-equal to `encoders_sys` on generated block classes at radii 4, 5 and 10 (`crates/bcenc/tests/bc4.rs`) and, in the `#[ignore]` test, on 20.02 million blocks at radius 5 (57.9 s on 16 threads, 0 mismatches). The vendored C++ stays the specification and is never edited. A `hit!` counter marks each branch and compiles to nothing outside the crate's unit tests; `every_ported_branch_is_taken` fails if a generator stops reaching one.

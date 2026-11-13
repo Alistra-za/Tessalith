@@ -1,7 +1,7 @@
 //! Test inputs for the BC4-family and BC1 tests: a deterministic xorshift `Rng`, the mixed `blocks` set, the BC4 and
 //! BC3-alpha classes and the BC1 transparency masks; the BC1 colour classes live in `bc1_classes.rs` and are
-//! re-exported here. Shared by `crates/bcenc/tests`, the crate's unit tests (the crate-level `gen` module, through `#[path]`) and the
-//! encoders-sys and engine BC4 reference tests. No crate dependencies.
+//! re-exported here. Shared by `crates/bcenc/tests`, the crate's unit tests (the crate-level `gen` module, through
+//! `#[path]`) and the encoders-sys and engine BC4 reference tests. No crate dependencies.
 #![allow(dead_code)]
 
 #[path = "bc1_classes.rs"]
