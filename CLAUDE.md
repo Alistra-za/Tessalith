@@ -6,6 +6,7 @@ Tessalith converts source images into DDS textures for Skyrim SE/AE. It has a GU
 | Package | Path | What it is |
 |---|---|---|
 | `engine` | crates/engine | Planning, policy, presets, packing, bake, mips, encode, DDS write, manifest |
+| `texcore` | crates/texcore | DDS reader/writer, pixel decoders, sRGB and game-gamma curves, cube maths, image loading (feature `load`); no C or C++, never depends on `engine`. `render3d` and outside programs build on it without `engine`; `engine` re-exports each item at its old path |
 | `sdc-gui` | crates/gui | egui + wgpu GUI (`tessalith.exe`); kittest tests |
 | `sdc` | crates/cli | CLI (`sdc.exe`) |
 | `encoders-sys` | crates/encoders-sys | FFI to vendored encoders (bc7e, ISPC TC, rgbcx); objects are vendored, no ISPC compiler needed |
@@ -37,7 +38,7 @@ Build folders fill the drive fast: one reaches 50–170 GB.
 - **Tests never touch the real user data folders**: `%LOCALAPPDATA%\sdc` (scan.db, logs) and `%APPDATA%\sdc` (gui.toml, presets). Use temp dirs.
 - **Tests that need the owner's game or mod data** stay `#[ignore]` or gated on an `SDC_*` environment variable.
 - **No game or mod assets in the repo**: no `.dds`, `.bsa`, `.esp` or real textures. Fixtures are generated in tests. The one exception is the pinned CS shader source in `crates/render3d/shaders/cs/` (Note GT).
-- **Files the user edits are written with `engine::dds::write_atomic`**, which flushes before the rename. That covers `sdc.toml`, `sdc-project.toml`, `gui.toml`, presets and exported JSON. DDS outputs use it too (owner decision, Note BC10).
+- **Files the user edits are written with `engine::dds::write_atomic`**, which flushes before the rename (it lives in `texcore::dds`; the engine re-exports it). That covers `sdc.toml`, `sdc-project.toml`, `gui.toml`, presets and exported JSON. DDS outputs use it too (owner decision, Note BC10).
 - **Never overwrite a file Tessalith did not write.** This matters most next to PGPatcher's outputs. Exports check the recorded hash first, as the PGPatcher, CS PBR and complex-material JSON exports do.
 - **Version:** the workspace version is the engine version, and it is part of every output's identity. Bump it only on purpose. An engine change that alters a type's output bytes or validation verdict sets that type's arm in `engine::manifest::encode_version` to the new engine version (Note DM). New `Profile` fields are `#[serde(default, skip_serializing_if = ...)]`. A release commit sets `RELEASED_ENGINE_VERSION` to the released version. The version follows semantic versioning (Note DM8): MAJOR breaks existing use, MINOR adds a backward-compatible feature, PATCH fixes a bug.
 - **Schemas:** after adding a code, shader or config field, regenerate with `sdc presets schema all --out schema` and commit only real diffs. A `///` doc comment on an enum variant turns that schema into `oneOf`, so use `//` there.
