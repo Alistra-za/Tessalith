@@ -23,6 +23,9 @@ pub const PLAIN: [i32; 3] = [1, 1, 1];
 /// The weights `set_bc1_perceptual(true)` stores (sdc patch "bc1 perceptual"): Rec.709 luma scaled to 256.
 pub const PERCEPTUAL: [i32; 3] = [54, 183, 19];
 
+/// How much each decoder's error counts, NVIDIA then AMD. (1, 1) is rgbcx's `cBC1Dual`: today's bytes.
+pub(crate) const DUAL: [i32; 2] = [1, 1];
+
 /// The weights the shim's `Bc1Weights` sets around a call: [`PERCEPTUAL`] or [`PLAIN`].
 pub(crate) fn weights(perceptual: bool) -> [i32; 3] {
     if perceptual {

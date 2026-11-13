@@ -4,11 +4,9 @@ use crate::bc1::encode::encode;
 use crate::bc1::palette::{build_single_tables, dual_palette};
 use crate::bc1::{build_order_tables, precise_round_565, to_5, to_6};
 use crate::bc1::{PERCEPTUAL, PLAIN};
+use crate::gen;
 use crate::hits::{counts, Hit};
 use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
-
-#[path = "../tests/support/gen.rs"]
-mod gen;
 
 /// How often this thread took each branch since `before` (an earlier [`counts`]). The counters are per thread, so
 /// the tests running beside this one add nothing; taking the difference also leaves out a test that ran earlier on

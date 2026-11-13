@@ -22,9 +22,9 @@ use super::fit::{
 use super::initial::pick_initial;
 use super::palette::single_tables;
 use super::seen::Seen;
-use super::sels::{find_sels3, find_sels4};
+use super::sels::{find_sels3, find_sels4, Texels};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
-use super::{BlockStats, Ends};
+use super::{BlockStats, Ends, DUAL};
 
 /// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
 const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
@@ -71,6 +71,9 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
 
     s.avg = s.total.map(|t| (t + 8) >> 4);
 
+    // The texels prepared once for every selector search of the block (errors in kernel units, see `sels.rs`).
+    let texels = Texels::new(px, weights, DUAL);
+
     let mut ends = Ends {
         l: [0; 3],
         h: [0; 3],
@@ -95,7 +98,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
 
         // The start is recorded, never skipped: its result is needed.
         seen4.insert(&round_ends);
-        let mut round_err = find_sels4(px, weights, &round_ends, &mut round_sels, u32::MAX);
+        let mut round_err = find_sels4(&texels, &round_ends, &mut round_sels, u32::MAX);
 
         // cEncodeBC1TwoLeastSquaresPasses.
         for _ls_pass in 0..2 {
@@ -114,7 +117,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
             // here (measured on 16 textures: 39% of the blocks take such a pair).
             let repeat = seen4.insert(&trial);
             let mut trial_sels = [0u8; 16];
-            let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, round_err);
+            let trial_err = find_sels4(&texels, &trial, &mut trial_sels, round_err);
 
             if trial_err < round_err {
                 hit!(Hit::LsPassBetter);
@@ -148,7 +151,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
             let orig_err = cur_err;
             total_orderings(
                 px,
-                weights,
+                &texels,
                 &s,
                 &mut seen4,
                 &mut ends,
@@ -178,7 +181,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
             hit!(Hit::Try3Run);
             three = try_3color_block(
                 px,
-                weights,
+                &texels,
                 &s,
                 seen3,
                 orig,
@@ -200,7 +203,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
         };
         endpoint_search(
             px,
-            weights,
+            &texels,
             three,
             search_seen,
             &mut ends,
@@ -218,11 +221,12 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
 
 /// Shadow check of a skipped repeat (unit tests only): scores the skipped 4-colour pair in full and asserts its error
 /// is not below `bound`, the error it would have had to beat. This runs on every skip of every block the unit tests
-/// encode, so the argument in `seen.rs` is checked on each.
+/// encode, so the argument in `seen.rs` is checked on each. `bound` and the score are in kernel units; `u32::MAX`
+/// stays a cutoff and is never scaled.
 #[cfg(test)]
-fn shadow4(px: &[[u8; 4]; 16], weights: [i32; 3], trial: &Ends, bound: u32) {
+fn shadow4(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
     let mut scratch = [0u8; 16];
-    let err = find_sels4(px, weights, trial, &mut scratch, u32::MAX);
+    let err = find_sels4(t, trial, &mut scratch, u32::MAX);
     assert!(
         err >= bound,
         "skipped 4-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
@@ -231,9 +235,9 @@ fn shadow4(px: &[[u8; 4]; 16], weights: [i32; 3], trial: &Ends, bound: u32) {
 
 /// [`shadow4`] for a 3-colour pair.
 #[cfg(test)]
-fn shadow3(px: &[[u8; 4]; 16], weights: [i32; 3], trial: &Ends, bound: u32) {
+fn shadow3(px: &[[u8; 4]; 16], t: &Texels, trial: &Ends, bound: u32) {
     let mut scratch = [0u8; 16];
-    let err = find_sels3(px, weights, trial, &mut scratch, u32::MAX);
+    let err = find_sels3(t, trial, &mut scratch, u32::MAX);
     assert!(
         err >= bound,
         "skipped 3-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
@@ -333,7 +337,7 @@ fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] 
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 fn total_orderings(
     px: &[[u8; 4]; 16],
-    weights: [i32; 3],
+    texels: &Texels,
     s: &BlockStats,
     seen: &mut Seen,
     ends: &mut Ends,
@@ -371,12 +375,12 @@ fn total_orderings(
         if seen.insert(&trial) {
             hit!(Hit::OrderingRepeat);
             #[cfg(test)]
-            shadow4(px, weights, &trial, *cur_err);
+            shadow4(px, texels, &trial, *cur_err);
             continue;
         }
 
         let mut trial_sels = [0u8; 16];
-        let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, *cur_err);
+        let trial_err = find_sels4(texels, &trial, &mut trial_sels, *cur_err);
 
         if trial_err < *cur_err {
             hit!(Hit::OrderingBetter);
@@ -391,14 +395,14 @@ fn total_orderings(
 /// initial endpoints) with two least-squares passes and the 32 likely total orderings, and take it into `ends`,
 /// `sels` and `cur_err` when its error is strictly below `cur_err`. Returns whether it did (`results.m_3color`).
 ///
-/// Every selector array this reads was written in full by [`find_sels3`]: the first search and the ordering searches
-/// pass `UINT32_MAX` (a block's error is far below it), and a least-squares search's selectors are kept only when its
-/// total is below the cutoff it was given, which means it never stopped early.
+/// Every selector array this reads was written by [`find_sels3`] because its total was below the cutoff the search was
+/// given (the first search passes `UINT32_MAX`, a block's error is far below it), and a search writes `sels` only
+/// then. The searches return full totals, so a trial's error is its whole block error, not a partial one.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 #[allow(clippy::too_many_arguments)] // The C++ call's own list, plus the block's set of scored pairs.
 fn try_3color_block(
     px: &[[u8; 4]; 16],
-    weights: [i32; 3],
+    texels: &Texels,
     s: &BlockStats,
     seen: &mut Seen,
     start: Ends,
@@ -409,7 +413,7 @@ fn try_3color_block(
     let mut e = start;
     seen.insert(&e);
     let mut trial_sels = [0u8; 16];
-    let mut trial_err = find_sels3(px, weights, &e, &mut trial_sels, u32::MAX);
+    let mut trial_err = find_sels3(texels, &e, &mut trial_sels, u32::MAX);
 
     if trial_err != 0 {
         hit!(Hit::Try3Fit);
@@ -428,7 +432,7 @@ fn try_3color_block(
             // Recorded, never skipped (the pass's result is the next pass's input).
             seen.insert(&trial);
             let mut trial_sels2 = [0u8; 16];
-            let trial_err2 = find_sels3(px, weights, &trial, &mut trial_sels2, trial_err);
+            let trial_err2 = find_sels3(texels, &trial, &mut trial_sels2, trial_err);
 
             if trial_err2 < trial_err {
                 hit!(Hit::Ls3PassBetter);
@@ -478,13 +482,15 @@ fn try_3color_block(
             if seen.insert(&trial) {
                 hit!(Hit::Ordering3Repeat);
                 #[cfg(test)]
-                shadow3(px, weights, &trial, trial_err);
+                shadow3(px, texels, &trial, trial_err);
                 continue;
             }
 
-            // UINT32_MAX here, unlike the 4-colour loop, which passes cur_err.
+            // The C++ passes UINT32_MAX here, unlike the 4-colour loop, which passes cur_err. The cutoff is
+            // `trial_err` instead: the trial is taken only when its total is below `trial_err` and its selectors are
+            // read only then (they go into a fresh array per trial), so the search need not build them otherwise.
             let mut trial_sels2 = [0u8; 16];
-            let trial_err2 = find_sels3(px, weights, &trial, &mut trial_sels2, u32::MAX);
+            let trial_err2 = find_sels3(texels, &trial, &mut trial_sels2, trial_err);
 
             if trial_err2 < trial_err {
                 hit!(Hit::Ordering3Better);
@@ -536,8 +542,9 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
 /// it did when it was scored and rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour
 /// blocks (`use_black` false, see [`find_sels3`]).
 fn endpoint_search(
-    px: &[[u8; 4]; 16],
-    weights: [i32; 3],
+    // Read only by the shadow checks (the searches take `texels`).
+    #[cfg_attr(not(test), allow(unused_variables))] px: &[[u8; 4]; 16],
+    texels: &Texels,
     three: bool,
     seen: &mut Seen,
     ends: &mut Ends,
@@ -577,20 +584,20 @@ fn endpoint_search(
             hit!(Hit::SearchRepeat);
             #[cfg(test)]
             if three {
-                shadow3(px, weights, &trial, cur_err);
+                shadow3(px, texels, &trial, cur_err);
             } else {
-                shadow4(px, weights, &trial, cur_err);
+                shadow4(px, texels, &trial, cur_err);
             }
             None
         } else if three {
             hit!(Hit::SearchThree);
             let mut trial_sels = [0u8; 16];
-            let err = find_sels3(px, weights, &trial, &mut trial_sels, cur_err);
+            let err = find_sels3(texels, &trial, &mut trial_sels, cur_err);
             Some((err, trial_sels))
         } else {
             hit!(Hit::SearchFour);
             let mut trial_sels = [0u8; 16];
-            let err = find_sels4(px, weights, &trial, &mut trial_sels, cur_err);
+            let err = find_sels4(texels, &trial, &mut trial_sels, cur_err);
             Some((err, trial_sels))
         };
 

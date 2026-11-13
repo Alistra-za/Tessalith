@@ -126,10 +126,6 @@ hits! {
     LsSelsSolved,
     RoundClampRb,
     RoundClampG,
-    // bc1 find_sels4
-    SelsBetter,
-    SelsTieHigh,
-    SelsEarlyOut,
     // bc1 three-colour: solid_block
     SolidThree,
     SolidThreeSwap,
@@ -166,9 +162,6 @@ hits! {
     LsSels3Singular,
     LsSels3Solved,
     LsSels3SkipTransparent,
-    // find_sels3
-    Sels3Better,
-    Sels3EarlyOut,
     // encode_bc1_alpha
     AlphaNoMask,
     AlphaAllTransparent,
