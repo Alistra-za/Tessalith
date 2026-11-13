@@ -14,6 +14,7 @@ mod fit;
 pub(crate) use fit::{build_order_tables, precise_round_565, to_5, to_6};
 mod initial;
 pub mod palette;
+mod seen;
 mod sels;
 pub mod tables;
 

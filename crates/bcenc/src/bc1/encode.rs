@@ -21,6 +21,7 @@ use super::fit::{
 };
 use super::initial::pick_initial;
 use super::palette::single_tables;
+use super::seen::Seen;
 use super::sels::{find_sels3, find_sels4};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends};
@@ -81,12 +82,19 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     // needs_block_error is true at level 18 (likely total orderings, full MSE, endpoint search).
     let mut cur_err = u32::MAX;
 
+    // The endpoint pairs scored so far in this block, one set per block type (see `seen.rs` for why a repeat can be
+    // skipped). The 3-colour set exists only when 3-colour blocks are allowed: BC3's colour half never clears it.
+    let mut seen4 = Seen::new();
+    let mut seen3 = allow_3color.then(Seen::new);
+
     // cEncodeBC1TryAllInitialEndponts: two rounds, the second with cEncodeBC1BoundingBox.
     for round in 0..2 {
         let mut round_ends = pick_initial(px, round == 1, &s);
         let orig_round = round_ends;
         let mut round_sels = [0u8; 16];
 
+        // The start is recorded, never skipped: its result is needed.
+        seen4.insert(&round_ends);
         let mut round_err = find_sels4(px, weights, &round_ends, &mut round_sels, u32::MAX);
 
         // cEncodeBC1TwoLeastSquaresPasses.
@@ -102,11 +110,17 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
                 break;
             }
 
+            // Recorded, never skipped: `round_err` starts fresh in each round, so a pair round 0 scored can be taken
+            // here (about 4 blocks in 10).
+            let repeat = seen4.insert(&trial);
             let mut trial_sels = [0u8; 16];
             let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, round_err);
 
             if trial_err < round_err {
                 hit!(Hit::LsPassBetter);
+                if repeat {
+                    hit!(Hit::LsRepeatTaken);
+                }
                 round_ends = trial;
                 round_err = trial_err;
                 round_sels = trial_sels;
@@ -132,7 +146,15 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
         hit!(Hit::OrderingsRun);
         for _iter_index in 0..2 {
             let orig_err = cur_err;
-            total_orderings(px, weights, &s, &mut ends, &mut sels, &mut cur_err);
+            total_orderings(
+                px,
+                weights,
+                &s,
+                &mut seen4,
+                &mut ends,
+                &mut sels,
+                &mut cur_err,
+            );
             if cur_err == 0 || cur_err == orig_err {
                 if cur_err == 0 {
                     hit!(Hit::OrderingsExact);
@@ -151,19 +173,40 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
 
     // cEncodeBC1Use3ColorBlocks (cEncodeBC1Use3ColorBlocksForBlackPixels is never set, so
     // `try_3color_block_useblack` never runs).
-    if allow_3color {
+    if let Some(seen3) = seen3.as_mut() {
         if cur_err != 0 {
             hit!(Hit::Try3Run);
-            three = try_3color_block(px, weights, &s, orig, &mut cur_err, &mut ends, &mut sels);
+            three = try_3color_block(
+                px,
+                weights,
+                &s,
+                seen3,
+                orig,
+                &mut cur_err,
+                &mut ends,
+                &mut sels,
+            );
         } else {
             hit!(Hit::Try3SkippedExact);
         }
     }
 
-    // 256 endpoint search rounds.
+    // 256 endpoint search rounds, over the set of the block type the search scores.
     if cur_err != 0 {
         hit!(Hit::SearchRun);
-        endpoint_search(px, weights, three, &mut ends, &mut sels, cur_err);
+        let search_seen = match seen3.as_mut() {
+            Some(seen3) if three => seen3,
+            _ => &mut seen4,
+        };
+        endpoint_search(
+            px,
+            weights,
+            three,
+            search_seen,
+            &mut ends,
+            &mut sels,
+            cur_err,
+        );
     }
 
     if three {
@@ -171,6 +214,30 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     } else {
         bc1_encode4(&ends, &sels)
     }
+}
+
+/// Shadow check of a skipped repeat (unit tests only): scores the skipped 4-colour pair in full and asserts its error
+/// is not below `bound`, the error it would have had to beat. This runs on every skip of every block the unit tests
+/// encode, so the argument in `seen.rs` is checked on each.
+#[cfg(test)]
+fn shadow4(px: &[[u8; 4]; 16], weights: [i32; 3], trial: &Ends, bound: u32) {
+    let mut scratch = [0u8; 16];
+    let err = find_sels4(px, weights, trial, &mut scratch, u32::MAX);
+    assert!(
+        err >= bound,
+        "skipped 4-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
+    );
+}
+
+/// [`shadow4`] for a 3-colour pair.
+#[cfg(test)]
+fn shadow3(px: &[[u8; 4]; 16], weights: [i32; 3], trial: &Ends, bound: u32) {
+    let mut scratch = [0u8; 16];
+    let err = find_sels3(px, weights, trial, &mut scratch, u32::MAX);
+    assert!(
+        err >= bound,
+        "skipped 3-colour repeat {trial:?} scores {err}, below {bound}, for {px:?}"
+    );
 }
 
 /// The 4-colour single-colour match of the block average (`g_bc1_match*_equals_1[avg]`): `m_hi` as the low
@@ -268,6 +335,7 @@ fn total_orderings(
     px: &[[u8; 4]; 16],
     weights: [i32; 3],
     s: &BlockStats,
+    seen: &mut Seen,
     ends: &mut Ends,
     sels: &mut [u8; 16],
     cur_err: &mut u32,
@@ -296,6 +364,17 @@ fn total_orderings(
             round_ls(&xl, &xh)
         };
 
+        // A pair scored before in this block cannot beat `*cur_err`: it was taken (its error is at least `*cur_err`,
+        // which only falls) or rejected against an error that was at least `*cur_err`; and a trial is taken only
+        // when strictly lower (see `seen.rs`). `*cur_err` at the start of the first pass is at most every earlier
+        // 4-colour error of the block (the lower of the two rounds).
+        if seen.insert(&trial) {
+            hit!(Hit::OrderingRepeat);
+            #[cfg(test)]
+            shadow4(px, weights, &trial, *cur_err);
+            continue;
+        }
+
         let mut trial_sels = [0u8; 16];
         let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, *cur_err);
 
@@ -316,16 +395,19 @@ fn total_orderings(
 /// pass `UINT32_MAX` (a block's error is far below it), and a least-squares search's selectors are kept only when its
 /// total is below the cutoff it was given, which means it never stopped early.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+#[allow(clippy::too_many_arguments)] // The C++ call's own list, plus the block's set of scored pairs.
 fn try_3color_block(
     px: &[[u8; 4]; 16],
     weights: [i32; 3],
     s: &BlockStats,
+    seen: &mut Seen,
     start: Ends,
     cur_err: &mut u32,
     ends: &mut Ends,
     sels: &mut [u8; 16],
 ) -> bool {
     let mut e = start;
+    seen.insert(&e);
     let mut trial_sels = [0u8; 16];
     let mut trial_err = find_sels3(px, weights, &e, &mut trial_sels, u32::MAX);
 
@@ -343,6 +425,8 @@ fn try_3color_block(
                 break;
             }
 
+            // Recorded, never skipped (the pass's result is the next pass's input).
+            seen.insert(&trial);
             let mut trial_sels2 = [0u8; 16];
             let trial_err2 = find_sels3(px, weights, &trial, &mut trial_sels2, trial_err);
 
@@ -387,6 +471,16 @@ fn try_3color_block(
                     ls_endpoints3_ordered(s.total, tables.factors3[s_index], s_index, &sums);
                 round_ls(&xl, &xh)
             };
+
+            // A pair scored before in this block cannot be strictly below `trial_err`: `trial_err` only falls, it
+            // started at most the error of every pair this function scored before (the start, the least-squares
+            // trials), and each was taken or rejected against an error at least `trial_err` (see `seen.rs`).
+            if seen.insert(&trial) {
+                hit!(Hit::Ordering3Repeat);
+                #[cfg(test)]
+                shadow3(px, weights, &trial, trial_err);
+                continue;
+            }
 
             // UINT32_MAX here, unlike the 4-colour loop, which passes cur_err.
             let mut trial_sels2 = [0u8; 16];
@@ -443,6 +537,7 @@ fn endpoint_search(
     px: &[[u8; 4]; 16],
     weights: [i32; 3],
     three: bool,
+    seen: &mut Seen,
     ends: &mut Ends,
     sels: &mut [u8; 16],
     mut cur_err: u32,
@@ -473,25 +568,42 @@ fn endpoint_search(
             trial.h[2] = (trial.h[2] + delta[2]).clamp(0, 31);
         }
 
-        let mut trial_sels = [0u8; 16];
-        let trial_err = if three {
+        // A pair scored before in this block (for this block type) cannot be strictly below `cur_err`, which only
+        // falls and began at most the error of everything scored before (see `seen.rs`). The step is not scored,
+        // but the stop test below still runs, as after a rejected trial.
+        let scored = if seen.insert(&trial) {
+            hit!(Hit::SearchRepeat);
+            #[cfg(test)]
+            if three {
+                shadow3(px, weights, &trial, cur_err);
+            } else {
+                shadow4(px, weights, &trial, cur_err);
+            }
+            None
+        } else if three {
             hit!(Hit::SearchThree);
-            find_sels3(px, weights, &trial, &mut trial_sels, cur_err)
+            let mut trial_sels = [0u8; 16];
+            let err = find_sels3(px, weights, &trial, &mut trial_sels, cur_err);
+            Some((err, trial_sels))
         } else {
             hit!(Hit::SearchFour);
-            find_sels4(px, weights, &trial, &mut trial_sels, cur_err)
+            let mut trial_sels = [0u8; 16];
+            let err = find_sels4(px, weights, &trial, &mut trial_sels, cur_err);
+            Some((err, trial_sels))
         };
 
-        if trial_err < cur_err {
-            hit!(Hit::SearchBetter);
-            cur_err = trial_err;
+        if let Some((trial_err, trial_sels)) = scored {
+            if trial_err < cur_err {
+                hit!(Hit::SearchBetter);
+                cur_err = trial_err;
 
-            forbidden_direction = v[3] as i32 | (i & 16);
+                forbidden_direction = v[3] as i32 | (i & 16);
 
-            *ends = trial;
-            *sels = trial_sels;
+                *ends = trial;
+                *sels = trial_sels;
 
-            prev_improvement_index = i;
+                prev_improvement_index = i;
+            }
         }
 
         if i - prev_improvement_index > 32 {

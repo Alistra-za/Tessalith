@@ -197,6 +197,11 @@ hits! {
     // bc1_alpha_find_sels
     AlphaSelTransparent,
     AlphaSelBetter,
+    // bc1 repeats
+    OrderingRepeat,
+    Ordering3Repeat,
+    SearchRepeat,
+    LsRepeatTaken,
     // bc4_encode_alpha (encode_bc4_hq's cut)
     CutDefault,
     CutGiven,
