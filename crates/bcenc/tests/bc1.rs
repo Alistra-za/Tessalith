@@ -63,6 +63,7 @@ fn bc1_ignores_alpha() {
 /// The block the task 3 review built (Note HY3): the principal-axis round ends on equal endpoints, the bounding-box
 /// round ties it with every texel on the low endpoint, and the tie goes to the later round. So the total-ordering
 /// lookup sees the histogram [16, 0, 0, 0] with a non-zero error (`hist4::lookup_total_ordering_index`'s first arm).
+/// It runs in all four flag combinations; the four-colour pass is the one that reaches the arm.
 #[test]
 fn bc1_four_colour_block_with_every_texel_on_the_low_endpoint() {
     let (a, b, c, d) = (

@@ -25,8 +25,9 @@ use super::sels::{find_sels3, find_sels4};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends};
 
-/// `MAX_TOTAL_ORDERINGS3` (rgbcx.h).
-const MAX_TOTAL_ORDERINGS3: usize = 32;
+/// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
+const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
+const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 /// Level 18's `total_orderings3`.
 const TOTAL_ORDERINGS3: usize = 32;
 

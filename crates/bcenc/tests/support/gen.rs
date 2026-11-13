@@ -403,7 +403,8 @@ fn midpoint_colour(a: [i32; 3], b: [i32; 3]) -> [i32; 3] {
 }
 
 /// 1..=8 black or near-black texels (every channel 0..=3, a third of them pure black) in a two-colour (even `i`) or
-/// noisy (odd `i`) block, half of the time dark: the black-texel blocks of Review Focus 3, with three-colour on.
+/// noisy (odd `i`) block, half of the time dark: a three-colour block's fourth palette entry is black, so these are
+/// the texels that entry would fit but may not be given (no transparent black).
 fn with_black(r: &mut Rng, i: usize) -> [[u8; 4]; 16] {
     let dark = r.next() & 1 == 0;
     let colour = |r: &mut Rng| -> [u8; 3] {
