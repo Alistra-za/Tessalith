@@ -146,8 +146,7 @@ impl ValidationMips {
 cfg_enum!(NormalMips, "snake_case" { Renormalize, RenormalizeBake });
 cfg_enum!(NormalBase, "lowercase" { Renormalize, Keep });
 cfg_enum!(CoverageMode, "lowercase" { Auto, On, Off });
-cfg_enum!(Format, "lowercase" { Bc1, Bc3, Bc4, Bc5, Bc6hUf16 = "bc6h_uf16", Bc7, Rgba8, Rgb8, R8, Rg8, Rgba16f });
-cfg_enum!(HeaderForm, "lowercase" { Auto, Dx10, Legacy });
+pub use texcore::dds::{Format, HeaderForm};
 // bc7e quality level. `max` is sdc patch 0002 (veryslow's search plus a fully refined, wider partition ranking,
 // uber 4, two least-squares passes and a quantised endpoint search); the vendored objects always carry it
 // (docs/research/bc7e-tuning.md).
@@ -451,51 +450,6 @@ impl Subtype {
 
     pub fn id(self) -> String {
         serde_id(self)
-    }
-}
-
-impl Format {
-    pub fn id(self) -> String {
-        serde_id(self)
-    }
-    /// The DDS pixel format this format and tag are written as (DECISIONS S4: `rgba8` is B8G8R8A8; Note FM38: `rgb8` is
-    /// the legacy 24-bit B8G8R8).
-    pub fn pixel_format(self, srgb: bool) -> crate::dds::DdsPixelFormat {
-        use crate::dds::DdsPixelFormat as P;
-        match self {
-            Format::Bc1 => P::Bc1 { srgb },
-            Format::Bc3 => P::Bc3 { srgb },
-            Format::Bc4 => P::Bc4,
-            Format::Bc5 => P::Bc5,
-            Format::Bc6hUf16 => P::Bc6hUf16,
-            Format::Bc7 => P::Bc7 { srgb },
-            Format::Rgba8 => P::Bgra8 { srgb },
-            Format::Rgb8 => P::Rgb8,
-            Format::R8 => P::R8,
-            Format::Rg8 => P::Rg8,
-            Format::Rgba16f => P::Rgba16f,
-        }
-    }
-    /// Bytes per 4x4 block, or `None` for an uncompressed format.
-    pub fn block_bytes(self) -> Option<usize> {
-        self.pixel_format(false).block_bytes()
-    }
-    /// Bytes per texel of an uncompressed format (0 for a block format).
-    pub fn bytes_per_pixel(self) -> usize {
-        self.pixel_format(false).bytes_per_pixel()
-    }
-    pub fn is_block(self) -> bool {
-        self.block_bytes().is_some()
-    }
-    /// Float formats: no `_SRGB`/UNORM tag (`n/a`), the `Hdr` domain, `cs` only (DECISIONS S4).
-    pub fn is_hdr(self) -> bool {
-        matches!(self, Format::Bc6hUf16 | Format::Rgba16f)
-    }
-    pub fn has_alpha(self) -> bool {
-        matches!(
-            self,
-            Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8 | Format::Rgba16f
-        )
     }
 }
 

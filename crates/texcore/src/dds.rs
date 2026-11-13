@@ -1,9 +1,128 @@
 //! DDS container (spec §5.7): the engine's own writer, and the reader Validate uses to re-parse what was written.
-use crate::config::{Format, HeaderForm};
 use std::io::Write;
 use std::ops::Range;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
+
+// The two enums below are what `config.rs` used to build with its `cfg_enum!` macro. Their serialised form and JSON
+// schema are pinned by `schema/` and the `schemas` test: keep the derives, the `rename_all`, the `bc6h_uf16`
+// rename and the variant order, and use `//` (never `///`) on them, because a doc comment on a variant turns the
+// schema into `oneOf`.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum Format {
+    Bc1,
+    Bc3,
+    Bc4,
+    Bc5,
+    #[serde(rename = "bc6h_uf16")]
+    Bc6hUf16,
+    Bc7,
+    Rgba8,
+    Rgb8,
+    R8,
+    Rg8,
+    Rgba16f,
+}
+
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    schemars::JsonSchema,
+)]
+#[serde(rename_all = "lowercase")]
+pub enum HeaderForm {
+    Auto,
+    Dx10,
+    Legacy,
+}
+
+/// The serde string a unit enum variant serialises as (its id).
+fn serde_id<T: serde::Serialize>(v: T) -> String {
+    serde_json::to_value(v)
+        .unwrap()
+        .as_str()
+        .unwrap()
+        .to_owned()
+}
+
+impl Format {
+    pub fn id(self) -> String {
+        serde_id(self)
+    }
+    /// The DDS pixel format this format and tag are written as (DECISIONS S4: `rgba8` is B8G8R8A8; Note FM38: `rgb8` is
+    /// the legacy 24-bit B8G8R8).
+    pub fn pixel_format(self, srgb: bool) -> DdsPixelFormat {
+        use DdsPixelFormat as P;
+        match self {
+            Format::Bc1 => P::Bc1 { srgb },
+            Format::Bc3 => P::Bc3 { srgb },
+            Format::Bc4 => P::Bc4,
+            Format::Bc5 => P::Bc5,
+            Format::Bc6hUf16 => P::Bc6hUf16,
+            Format::Bc7 => P::Bc7 { srgb },
+            Format::Rgba8 => P::Bgra8 { srgb },
+            Format::Rgb8 => P::Rgb8,
+            Format::R8 => P::R8,
+            Format::Rg8 => P::Rg8,
+            Format::Rgba16f => P::Rgba16f,
+        }
+    }
+    /// Bytes per 4x4 block, or `None` for an uncompressed format.
+    #[inline]
+    pub fn block_bytes(self) -> Option<usize> {
+        self.pixel_format(false).block_bytes()
+    }
+    /// Bytes per texel of an uncompressed format (0 for a block format).
+    #[inline]
+    pub fn bytes_per_pixel(self) -> usize {
+        self.pixel_format(false).bytes_per_pixel()
+    }
+    #[inline]
+    pub fn is_block(self) -> bool {
+        self.block_bytes().is_some()
+    }
+    /// Float formats: no `_SRGB`/UNORM tag (`n/a`), the `Hdr` domain, `cs` only (DECISIONS S4).
+    pub fn is_hdr(self) -> bool {
+        matches!(self, Format::Bc6hUf16 | Format::Rgba16f)
+    }
+    pub fn has_alpha(self) -> bool {
+        matches!(
+            self,
+            Format::Bc1 | Format::Bc3 | Format::Bc7 | Format::Rgba8 | Format::Rgba16f
+        )
+    }
+}
+
+/// `p` as an absolute path (the current directory for an empty or relative one); `p` itself when that fails.
+pub fn absolute_or_same(p: &Path) -> PathBuf {
+    let p = if p.as_os_str().is_empty() {
+        Path::new(".")
+    } else {
+        p
+    };
+    std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
+}
 
 pub const DDSD_CAPS: u32 = 0x1;
 pub const DDSD_HEIGHT: u32 = 0x2;
@@ -123,17 +242,20 @@ pub struct DdsDesc {
 /// Bytes in one mip level: whole blocks for a block format, `w * h * bytes_per_pixel` otherwise, or `None` if
 /// that overflows `usize`. A dimension of 1..=3 is already one block, so no explicit clamp is needed; a zero
 /// dimension gives 0 (and is rejected by `dds_bytes`).
+#[inline]
 pub fn checked_level_size(format: Format, w: u32, h: u32) -> Option<usize> {
     format.pixel_format(false).checked_level_size(w, h)
 }
 
 /// `checked_level_size`, saturating to `usize::MAX` on overflow so it never panics and never equals a real
 /// buffer length.
+#[inline]
 pub fn level_size(format: Format, w: u32, h: u32) -> usize {
     checked_level_size(format, w, h).unwrap_or(usize::MAX)
 }
 
 /// Levels in a full mip chain down to 1x1 for `w` x `h` (both non-zero): `floor(log2(max(w, h))) + 1`.
+#[inline]
 pub fn full_chain_len(w: u32, h: u32) -> usize {
     (u32::BITS - w.max(h).leading_zeros()) as usize
 }
@@ -395,11 +517,7 @@ pub fn same_file(src: &Path, out: &Path) -> bool {
             Some(dir.join(p.file_name()?))
         })
     };
-    let lexical = |p: &Path| {
-        crate::overrides::absolute_or_same(p)
-            .to_string_lossy()
-            .to_lowercase()
-    };
+    let lexical = |p: &Path| absolute_or_same(p).to_string_lossy().to_lowercase();
     match (canon(src), canon(out)) {
         (Some(a), Some(b)) => {
             a.to_string_lossy().to_lowercase() == b.to_string_lossy().to_lowercase()
@@ -512,6 +630,7 @@ pub enum DdsPixelFormat {
 
 impl DdsPixelFormat {
     /// Bytes per 4x4 block, or `None` for an uncompressed format.
+    #[inline]
     pub fn block_bytes(self) -> Option<usize> {
         use DdsPixelFormat::*;
         match self {
@@ -521,6 +640,7 @@ impl DdsPixelFormat {
         }
     }
 
+    #[inline]
     pub fn bytes_per_pixel(self) -> usize {
         use DdsPixelFormat::*;
         match self {
@@ -535,6 +655,7 @@ impl DdsPixelFormat {
     }
 
     /// Bytes in a `w` x `h` level, or `None` when the size overflows `usize`.
+    #[inline]
     pub fn checked_level_size(self, w: u32, h: u32) -> Option<usize> {
         match self.block_bytes() {
             Some(b) => (w.div_ceil(4) as usize)
@@ -547,6 +668,7 @@ impl DdsPixelFormat {
     }
 
     /// Bytes in a `w` x `h` level; `usize::MAX` when the size overflows (never panics, never matches a real length).
+    #[inline]
     pub fn level_size(self, w: u32, h: u32) -> usize {
         self.checked_level_size(w, h).unwrap_or(usize::MAX)
     }
