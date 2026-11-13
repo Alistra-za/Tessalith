@@ -73,7 +73,7 @@ hits! {
     NoGuard,
     GuardPassed,
     GuardFallback,
-    // bc1 encode4
+    // bc1 encode
     Bc1Solid,
     LsPassSame,
     LsPassBetter,

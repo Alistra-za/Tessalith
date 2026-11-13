@@ -1,12 +1,14 @@
 //! `bcenc`: rgbcx's block encoders in Rust. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain, `crates/encoders-sys/vendor/bc7enc_rdo/LICENSE`). The vendored C++ in `encoders-sys` is the
-//! specification and the reference every test compares with. No dependencies, no `unsafe`, no global state.
+//! specification and the reference every test compares with. No dependencies, no `unsafe`, no mutable global state
+//! (two sets of tables are built once in a `OnceLock`).
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7).
 
 use std::num::NonZeroU8;
 
 mod hits;
 
+#[doc(hidden)]
 pub mod bc4;
 
 #[doc(hidden)]

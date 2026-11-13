@@ -694,17 +694,18 @@ fn bc7_weights_change_the_profile_hash_only_when_set() {
     assert_eq!(h(&p), h(&weighted(None)));
 }
 
-/// The engine's BC4 and BC3 paths (default preset, its radius) end to end against the reference.
+/// The engine's BC4 and BC3 paths (default preset, its radius) end to end against rgbcx, the C++ that the engine's
+/// encoder `bcenc` ports (Note HY7): every block, alpha and colour.
 #[test]
-fn engine_bc4_bytes_equal_reference() {
+fn engine_bc4_and_bc3_bytes_equal_rgbcx() {
     let mut r = gen::Rng(0x1234_5678_9ABC_DEF1);
     let img: Vec<[u8; 4]> = (0..64)
         .map(|_| [r.byte(), r.byte(), r.byte(), r.byte()])
         .collect();
     let gathered = encoders_sys::gather_blocks(&img, 8, 8);
-    for (fmt, st, ch, bs) in [
-        (Format::Bc4, Subtype::Height, 0, 8),
-        (Format::Bc3, Subtype::Diffuse, 3, 16),
+    for (fmt, st, bs) in [
+        (Format::Bc4, Subtype::Height, 8),
+        (Format::Bc3, Subtype::Diffuse, 16),
     ] {
         let mut p = PresetRegistry::builtin()
             .unwrap()
@@ -721,12 +722,13 @@ fn engine_bc4_bytes_equal_reference() {
         )
         .unwrap();
         for (b, src) in gathered.chunks(16).enumerate() {
-            let v: [u8; 16] = std::array::from_fn(|t| src[t][ch]);
-            assert_eq!(
-                out[b * bs..b * bs + 8],
-                bcenc::bc4::search(&v, rad, (fmt == Format::Bc3).then_some(128)),
-                "{fmt:?} block {b}"
-            );
+            let src: &[[u8; 4]; 16] = src.try_into().unwrap();
+            let want = if fmt == Format::Bc4 {
+                encoders_sys::bc4_encode_block(src, 0, rad).to_vec()
+            } else {
+                encoders_sys::bc3_encode_block(src, rad, 128, p.encoder.perceptual).to_vec()
+            };
+            assert_eq!(out[b * bs..(b + 1) * bs], want[..], "{fmt:?} block {b}");
         }
     }
 }

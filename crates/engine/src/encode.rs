@@ -5,11 +5,8 @@
 use crate::config::*;
 use crate::grass::{unit_err, CS_GRASS_THRESHOLD, GRASS_GUARD_MARGIN};
 use crate::quantize::EncoderInput;
-// BC1, BC3, BC4 and BC5 blocks come from `bcenc`, the Rust port of rgbcx, byte-equal to it (Note HY7). These names
-// take precedence over the rgbcx functions of the same names in the `encoders_sys` glob below.
-use bcenc::{
-    bc1_encode_block, bc1_encode_block_alpha, bc3_encode_block, bc4_encode_block, bc5_encode_block,
-};
+// BC1, BC3, BC4 and BC5 blocks come from `bcenc`, the Rust port of rgbcx, byte-equal to it (Note HY7). Its calls
+// below are written `bcenc::..`: the `encoders_sys` glob still holds rgbcx's functions of the same names.
 use encoders_sys::bc7_fixup::{force_opaque_rotated, force_zero_alpha};
 use encoders_sys::*;
 use rayon::prelude::*;
@@ -142,23 +139,28 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                             .iter()
                             .enumerate()
                             .fold(0u16, |m, (i, t)| m | (u16::from(t[3] < 128) << i));
-                        blk.copy_from_slice(&bc1_encode_block_alpha(src, mask, e.perceptual))
+                        blk.copy_from_slice(&bcenc::bc1_encode_block_alpha(src, mask, e.perceptual))
                     }
                     // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
-                    Format::Bc1 => blk.copy_from_slice(&bc1_encode_block(src, true, e.perceptual)),
-                    Format::Bc3 => blk.copy_from_slice(&bc3_encode_block(
+                    Format::Bc1 => {
+                        blk.copy_from_slice(&bcenc::bc1_encode_block(src, true, e.perceptual))
+                    }
+                    Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block(
                         src,
                         radius(e.bc45_search_radius),
                         bc3_cut(alpha_cut(&p.alpha)),
                         e.perceptual,
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
-                    Format::Bc4 => {
-                        blk.copy_from_slice(&bc4_encode_block(src, 0, radius(e.bc45_search_radius)))
-                    }
-                    Format::Bc5 => {
-                        blk.copy_from_slice(&bc5_encode_block(src, radius(e.bc45_search_radius)))
-                    }
+                    Format::Bc4 => blk.copy_from_slice(&bcenc::bc4_encode_block(
+                        src,
+                        0,
+                        radius(e.bc45_search_radius),
+                    )),
+                    Format::Bc5 => blk.copy_from_slice(&bcenc::bc5_encode_block(
+                        src,
+                        radius(e.bc45_search_radius),
+                    )),
                     Format::Bc7
                     | Format::Bc6hUf16
                     | Format::Rgba8

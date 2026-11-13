@@ -60,8 +60,8 @@ pub(crate) fn find_sels4(
 /// error; a later selector replaces the best only when strictly better. `use_black` is false on every reachable call
 /// (`try_3color_block` passes the literal `false`; the endpoint search passes `any_black_pixels &&
 /// cEncodeBC1Use3ColorBlocksForBlackPixels`, a flag level 18 sets only when `allow_transparent_texels_for_black` is
-/// true, which this call never passes), so the loop stops at selector 2. As soon as the running total reaches `cur_err` it returns that
-/// partial total, with `sels` written only for the texels before it.
+/// true, which this call never passes), so the loop stops at selector 2. As soon as the running total reaches
+/// `cur_err` it returns that partial total, with `sels` written only for the texels before it.
 pub(crate) fn find_sels3(
     px: &[[u8; 4]; 16],
     w: [i32; 3],

@@ -337,6 +337,7 @@ pub fn upstream(v: &[u8; 16], radius: u32) -> [u8; 8] {
 
 /// The measured search (probe variant v4; v5 with `guard = Some(cut)`, which falls back to the upstream block when it
 /// would flip more texels across the alpha-test cutoff `cut`, 128 by default). Never worse than [`upstream`] in SSE.
+/// `cut` is the cutoff itself: reading a 0 as 128, as rgbcx's flags do, is `bc4_encode_alpha`'s job.
 pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let rad = radius as i32;
     let base = v0(v, rad);

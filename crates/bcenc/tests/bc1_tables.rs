@@ -202,7 +202,7 @@ fn single_colour_entries_equal_dual_err() {
                     }
                 }
             }
-            // The C++ clamps the stored error to 255; the port does not, so no error may exceed it.
+            // The C++ clamps the stored error to 255 and the port keeps that clamp; no entry reaches it.
             assert!(
                 lowest <= 255,
                 "{name}[{i}]: error {lowest} would be clamped"

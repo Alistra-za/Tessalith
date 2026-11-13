@@ -383,7 +383,7 @@ fn the_mesh_beats_the_shader_default_and_its_threshold_is_clamped() {
 }
 
 /// Note FM: the threshold a mesh gives a BC3 cutout reaches the encoder's alpha guard as its cutoff (`gt` 200 passes
-/// from 201), so the written alpha block equals the reference guarded at 201, which differs from the default guard.
+/// from 201), so the written alpha block equals rgbcx's guarded at 201, which differs from the default guard.
 #[test]
 fn a_mesh_threshold_reaches_the_bc3_guard() {
     let d = tempfile::tempdir().unwrap();
@@ -409,14 +409,10 @@ fn a_mesh_threshold_reaches_the_bc3_guard() {
     let gathered = encoders_sys::gather_blocks(&img, 64, 64);
     let mut not_default = 0;
     for (b, src) in gathered.chunks(16).enumerate() {
-        let v: [u8; 16] = std::array::from_fn(|t| src[t][3]);
-        assert_eq!(
-            out[b * 16..b * 16 + 8],
-            bcenc::bc4::search(&v, rad, Some(201)),
-            "block {b}"
-        );
-        not_default += (bcenc::bc4::search(&v, rad, Some(201))
-            != bcenc::bc4::search(&v, rad, Some(128))) as u32;
+        let src: &[[u8; 4]; 16] = src.try_into().unwrap();
+        let guarded = |cut| encoders_sys::bc3_encode_block(src, rad, cut, false);
+        assert_eq!(out[b * 16..b * 16 + 8], guarded(201)[..8], "block {b}");
+        not_default += (guarded(201)[..8] != guarded(128)[..8]) as u32;
     }
     assert!(not_default > 0, "no block tells 201 from 128");
 }
