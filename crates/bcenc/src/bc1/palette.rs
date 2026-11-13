@@ -226,9 +226,8 @@ fn single_colour_table_dual(expand: &[u8], half: bool) -> [MatchEntry; 256] {
                 }
             }
         }
-        // The C++ clamps this to UINT8_MAX; no entry reaches it (checked by
-        // `single_colour_entries_equal_dual_err`), so the clamp is not ported.
-        entry.e = lowest_e as u8;
+        // The C++ clamp. No entry reaches 255 today (`single_colour_entries_equal_dual_err` asserts it).
+        entry.e = lowest_e.min(u8::MAX as i32) as u8;
     }
     table
 }
