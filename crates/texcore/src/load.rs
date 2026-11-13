@@ -88,12 +88,28 @@ const PNG_METADATA_BUDGET: u64 = 64 << 20;
 /// The explicit MAX_DIM header check bounds the image, so the crate's default 512 MiB allocation cap (which
 /// rejects valid 16384 px images) is lifted. A PNG keeps a bound: `max_alloc` is also what its iCCP inflates
 /// under (png 0.18 `decompress_to_vec_bounded`), parsed before any size is known (audit 2026-10-15 item 1).
-pub fn lift_limits<R: std::io::BufRead + std::io::Seek>(reader: &mut image::ImageReader<R>) {
+fn lift_limits<R: std::io::BufRead + std::io::Seek>(reader: &mut image::ImageReader<R>) {
     let mut limits = image::Limits::no_limits();
     if reader.format() == Some(image::ImageFormat::Png) {
         limits.max_alloc = Some(PNG_METADATA_BUDGET);
     }
     reader.limits(limits);
+}
+
+/// Width, height and decoded bytes per texel of an image file, from its header, by the decoder its content picks
+/// (the one [`load_image`] decodes with). `None` when the header cannot be read or a side exceeds [`MAX_DIM`]; a DDS
+/// or PSD is not read here. A caller sizes a decode with this instead of opening an `image` reader itself: a second
+/// crate that opens one compiles every decoder a second time (Note HX8).
+pub fn decoded_header(path: &Path) -> Option<(u32, u32, u8)> {
+    let mut reader = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?;
+    lift_limits(&mut reader);
+    let decoder = reader.into_decoder().ok()?;
+    let (w, h) = decoder.dimensions();
+    // A hostile header must not overflow a caller's size product; the load refuses a file this large anyway.
+    (w.max(h) <= MAX_DIM).then(|| (w, h, decoder.color_type().bytes_per_pixel()))
 }
 
 /// Decode with the `image` decoder `reader` picked, MAX_DIM-checked from its header first.
