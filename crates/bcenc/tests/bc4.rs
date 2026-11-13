@@ -15,10 +15,10 @@ fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
 }
 
 /// Both outputs and the replay data on a mismatch.
-fn same<const N: usize>(got: [u8; N], want: [u8; N], what: &str, v: &[u8; 16]) {
+fn same<const N: usize>(got: [u8; N], want: [u8; N], what: &str, input: &dyn std::fmt::Debug) {
     assert_eq!(
         got, want,
-        "{what}: texels {v:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+        "{what}: texels {input:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
     );
 }
 
@@ -52,11 +52,11 @@ fn bc5_equals_rgbcx_on_block_classes() {
             p[t][1] = w[t];
         }
         for rad in RADII {
-            let got = bc5_encode_block(&p, rad);
-            let want = encoders_sys::bc5_encode_block(&p, rad);
-            assert_eq!(
-                got, want,
-                "bc5 radius {rad}: ch0 {v:?} ch1 {w:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+            same(
+                bc5_encode_block(&p, rad),
+                encoders_sys::bc5_encode_block(&p, rad),
+                &format!("bc5 radius {rad}"),
+                &(v, w),
             );
         }
     }

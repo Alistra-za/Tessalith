@@ -82,6 +82,7 @@ pub fn bc4_classes(seed: u64, per_class: usize) -> Vec<[u8; 16]> {
         out.push(std::array::from_fn(|_| c[r.below(3) as usize]));
     }
     for i in 0..per_class {
+        // All 16 steps in both directions need `per_class >= 32`.
         let step = (i % 16 + 1) as i32;
         let up = (i / 16) % 2 == 0;
         let start = r.below(256) as i32;

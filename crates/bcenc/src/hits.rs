@@ -3,8 +3,22 @@
 //! no counters. `coverage_tests` asserts every variant is taken, so a branch no generator reaches is found.
 #![cfg_attr(not(test), allow(dead_code))]
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum Hit {
+/// Declares `Hit` and `Hit::ALL` from one list, so a new branch is named once.
+macro_rules! hits {
+    ($($name:ident,)*) => {
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub(crate) enum Hit {
+            $($name,)*
+        }
+
+        impl Hit {
+            pub(crate) const ALL: &'static [Hit] = &[$(Hit::$name,)*];
+            pub(crate) const COUNT: usize = Hit::ALL.len();
+        }
+    };
+}
+
+hits! {
     // Best::try_pair
     PairExactTexel,
     PairEarlyOut,
@@ -48,47 +62,6 @@ pub(crate) enum Hit {
     NoGuard,
     GuardPassed,
     GuardFallback,
-}
-
-impl Hit {
-    pub(crate) const ALL: [Hit; Hit::COUNT] = [
-        Hit::PairExactTexel,
-        Hit::PairEarlyOut,
-        Hit::PairImproved,
-        Hit::V0Solid,
-        Hit::V0EqualEnds,
-        Hit::V0SwapMode0,
-        Hit::V0SwapMode1,
-        Hit::Inner6NoExtreme,
-        Hit::Inner6NoInner,
-        Hit::Inner6Pair,
-        Hit::Inner6Skip,
-        Hit::LsFixedTexel,
-        Hit::LsSingular,
-        Hit::LsPair,
-        Hit::LsModeSkip,
-        Hit::LsNoGain,
-        Hit::LsRoundsExhausted,
-        Hit::RefitSolid,
-        Hit::RefitEqualEnds,
-        Hit::RefitSwap,
-        Hit::RefitOtherBetter,
-        Hit::RefitOtherKept,
-        Hit::TrimNoExtreme,
-        Hit::TrimNoInner,
-        Hit::TrimPair,
-        Hit::TrimSkip,
-        Hit::TrimRefit,
-        Hit::TrimNoRefit,
-        Hit::TrimReplaced,
-        Hit::TrimKept,
-        Hit::LocalPair,
-        Hit::LocalModeSkip,
-        Hit::NoGuard,
-        Hit::GuardPassed,
-        Hit::GuardFallback,
-    ];
-    pub(crate) const COUNT: usize = 35;
 }
 
 #[cfg(test)]

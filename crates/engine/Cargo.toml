@@ -37,4 +37,4 @@ test-hooks = []
 [dev-dependencies]
 tempfile.workspace = true
 bcenc.workspace = true
-engine ={ path = ".", features = ["test-hooks"] }
+engine = { path = ".", features = ["test-hooks"] }

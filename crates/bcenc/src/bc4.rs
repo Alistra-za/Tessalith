@@ -1,10 +1,10 @@
-//! Reference BC4 block search (docs/research/bc4-family.md): a Rust port of `rgbcx::encode_bc4_hq` plus the measured
-//! additions (6-value search on the inner range, least-squares refits, trimmed inner ranges, a local search).
+//! The BC4 block search (docs/research/bc4-family.md): a port of `rgbcx::encode_bc4_hq` (rgbcx from bc7enc_rdo commit
+//! b943862, MIT or public domain) with Tessalith's `BC4_SDC_SEARCH` and `BC4_SDC_GUARD128` patches, which are the
+//! measured additions (6-value search on the inner range, least-squares refits, trimmed inner ranges, a local search).
 //! Everything starts from the upstream result and replaces it only on a strictly lower SSE, so ties keep its bytes.
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
-//! A port of `rgbcx::encode_bc4_hq` (rgbcx from bc7enc_rdo commit b943862, with Tessalith's `BC4_SDC_SEARCH` and
-//! `BC4_SDC_GUARD128` patches). The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
+//! The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
 
