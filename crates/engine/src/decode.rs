@@ -134,9 +134,9 @@ fn quads(v: Vec<u8>) -> Vec<[u8; 4]> {
 
 /// Decode a `w` x `h` level to RGBA8 (LDR) or RGB f32 (HDR).
 ///
-/// BC1 decodes as an NVIDIA GPU does, with a Rust port of rgbcx's decoder (Notes FM17, HX1); the other block formats use `bcdec_rs`. BC4 gives
-/// `[r, r, r, 255]` and BC5 `[r, g, 0, 255]` (unsigned), BC6H gives RGB floats, half and float formats drop
-/// alpha. sRGB tags are not applied.
+/// BC1 decodes as an NVIDIA GPU does, with a Rust port of rgbcx's decoder (Notes FM17, HX1); the other block
+/// formats use `bcdec_rs`. BC4 gives `[r, r, r, 255]` and BC5 `[r, g, 0, 255]` (unsigned), BC6H gives RGB floats,
+/// half and float formats drop alpha. sRGB tags are not applied.
 pub fn decode_level(fmt: DdsPixelFormat, w: u32, h: u32, data: &[u8]) -> Result<Decoded, DdsError> {
     decode(fmt, w, h, data, false)
 }
