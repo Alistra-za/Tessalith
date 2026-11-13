@@ -9,13 +9,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU, HX
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS
@@ -23,7 +23,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
@@ -1416,3 +1416,7 @@ Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube'
 
 - **IC1 render3d reads cube +Z as world up.** A black type 1 sphere (envmap scale 1, glossiness 1, white ambient, no direct light) with +Z red and −Z blue reads red on its upper half and blue on its lower half from the side, red at the centre from above and blue from below. render3d's world, camera and CS's envmap lookup all agree with DS13. Test `render_envmap_reads_cube_plus_z_as_up`.
 - **IC2 The spike's flip was a byte-order slip.** `Format::Rgba8` UNORM is DXGI 87, B8G8R8A8 (Note S4), so `dds_bytes_cube` expects BGRA texels. The spike passed RGBA, which swaps red and blue, so a red +Z face showed as blue. Pack BGRA for `Format::Rgba8`; the test builds its cube that way and first checks that an all-red cube draws red. Packed RGBA, as in the spike, the all-red cube draws blue and the test fails.
+
+## Note HX — texcore, the encoder-free base crate (main team, 2026-11-12)
+
+- **HX1 BC1 at the NVIDIA model is decoded in Rust.** `engine::decode::bc1_block_nvidia` is a port of rgbcx's `unpack_bc1` (`cBC1NVidia`, with alpha), and `decode_level` uses it instead of the FFI. It is proven equal to `encoders_sys::bc1_decode_block(.., Bc1Model::Nvidia)` on all 2^32 endpoint pairs with all four selectors (`rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs`, `#[ignore]`, 12.5 s wall on this machine) and on the structured set plus one million random blocks that runs in every test run (`rust_bc1_nvidia_equals_rgbcx_on_structured_blocks`). The FFI `bc1_decode_block` stays in `encoders-sys` as the reference those tests compare with. FM17's decoder model is unchanged.
