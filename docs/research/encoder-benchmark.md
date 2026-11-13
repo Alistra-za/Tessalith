@@ -650,7 +650,7 @@ Tessalith encodes BC1, BC3, BC4 and BC5 with `bcenc`, a Rust port of its patched
 - **A pair is scored against all 16 texels at once.** Finding each texel's nearest palette entry and summing the error is SSE2 integer code over the whole block, in BC1 and in BC4.
 - **BC4 searches each mode once.** rgbcx searches the 8-value and the 6-value candidates, then searches one mode's candidates again when it refits. The port keeps the first search's result.
 
-Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (16 textures of 1024² from installed Skyrim mods), `bcenc` at c81ae94e against the vendored C++ on the [benchmark machine](#benchmark-machine-and-tools), with the arguments the engine passes (`crates/bcenc/examples/speed.rs`):
+Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (16 textures of 1024² from installed Skyrim mods), `bcenc` at c81ae94e against the vendored C++ on the [benchmark machine](#benchmark-machine-and-tools), with the arguments the engine passes (`crates/bcenc/examples/speed.rs`). The one-bit-alpha row has no real mask to use, so it marks a texel transparent when its green is below 64:
 
 | Format | rgbcx (C++) | `bcenc` | `bcenc` / C++ |
 |---|--:|--:|--:|
@@ -663,7 +663,7 @@ Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (
 
 The port before the three changes (945ad68c) took 0.69 of the C++ time on BC1 and BC3 and 0.82 on BC4 and BC5.
 
-`sdc convert` of 300 PNGs with the format forced, Tessalith 3.0.0 against c81ae94e, in seconds (reading, mips and writing included):
+`sdc convert` of 300 PNGs with the format forced, Tessalith 3.0.0 against c81ae94e, in seconds (reading, mips and writing included; a test job ran at idle priority beside both builds):
 
 | Forced format | 3.0.0 | c81ae94e |
 |---|--:|--:|
@@ -678,7 +678,7 @@ Compared with the C++ block by block, 0 mismatches in each:
 - **The plain port (017fbc68):** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons.
 - **c81ae94e:** 100 million generated BC1 blocks, every solid colour, 50 million one-bit-alpha blocks, 50 million BC3 blocks and 20 million BC4 blocks.
 
-A sampling profile of c81ae94e on the same blocks shows where the rest of the time goes. BC1: the least-squares endpoint fits of the selector orderings 38%, scoring texels and building palettes 33%, the table of scored pairs 14%. BC4: scoring texels 62%, building palettes 16%.
+A sampling profile of c81ae94e on the same blocks shows where the rest of the time goes. BC1: the least-squares endpoint fits and their rounding to 5:6:5 38%, scoring texels and building palettes 33%, the table of scored pairs 14%. BC4: scoring texels 62%, building palettes 16%.
 
 ### Encoder maintenance (October 2026)
 

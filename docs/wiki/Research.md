@@ -18,7 +18,7 @@ For modders who ask why Tessalith picked a format, encoder or filter. One bullet
 - **texconv and Compressonator don't encode.** texconv was the weakest BC7 encoder at every setting, and Compressonator is unmaintained and writes BC7 headers with required flags missing. texconv is the test oracle only.
 - **BC1 and BC3:** rgbcx level 18 led BC1 (38.47 dB, all encoders within 0.66 dB).
 - **BC1 Dual:** rgbcx scores BC1 selectors against NVIDIA and AMD decoding together. It beat the Ideal target on all 93 textures on both vendors at 1.6 times the encode time, so BC1 and BC3 colour always use it and there's no decoder setting ([numbers](../research/encoder-benchmark.md#bc1-dual-nvidia-and-amd-scored-together-2026-11-02-note-fm17)). <!-- D:FM17 -->
-- **The format picks the encoder:** rgbcx for BC1, BC3, BC4 and BC5 (Tessalith runs its own Rust port of it, which writes the same bytes in about a fifth of the time: [numbers](../research/encoder-benchmark.md#encode-time-of-the-rust-port-of-rgbcx-2026-11-13-note-hy)), ISPC for BC6H, bc7e for BC7. Uncompressed formats run none. <!-- D:FM15 -->
+- **The format picks the encoder:** rgbcx for BC1, BC3, BC4 and BC5 (Tessalith runs its own Rust port of it, which writes the same bytes in a fifth of the time or less: [numbers](../research/encoder-benchmark.md#encode-time-of-the-rust-port-of-rgbcx-2026-11-13-note-hy)), ISPC for BC6H, bc7e for BC7. Uncompressed formats run none. <!-- D:FM15 -->
 - **Perceptual weighting is off,** and locked off except for colour maps whose alpha isn't data. It raised normal-map angular error by 37% and cost 1.6 dB on packed data.
 - **No RDO.** It only shrinks archives (42.25 dB fell to 39.51 dB at λ = 1 in one published run) and never reduces GPU memory.
 
