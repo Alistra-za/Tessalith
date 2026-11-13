@@ -34,9 +34,7 @@ fn bc1_four_colour_ignores_alpha() {
     let mut blocks = gen::colour_classes(0xBC10_0004, 40);
     // Solid RGB with mixed alpha takes the solid path whatever the alpha.
     for _ in 0..200 {
-        let mut px = solid(rng.byte(), rng.byte(), rng.byte());
-        px.iter_mut().for_each(|t| t[3] = rng.byte());
-        blocks.push(px);
+        blocks.push(solid(rng.byte(), rng.byte(), rng.byte()));
     }
     for px in blocks {
         let opaque = px.map(|t| [t[0], t[1], t[2], 255]);
@@ -124,7 +122,7 @@ fn bc1_four_colour_solid_blocks_equal_rgbcx_on_every_colour() {
 /// 100 million class blocks over 16 threads, generated in batches so memory stays small. Run with `-- --ignored`;
 /// a mismatch stops the thread with the replay data.
 #[test]
-#[ignore = "100 million blocks, about 11 minutes on 16 threads"]
+#[ignore = "100 million blocks, 7 to 11 minutes on 16 threads"]
 fn bc1_four_colour_equals_rgbcx_on_100_million_blocks() {
     const THREADS: u64 = 16;
     const PER_CLASS: usize = 1_000; // 25 classes x 1000 = 25 000 blocks per batch
