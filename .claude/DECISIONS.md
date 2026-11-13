@@ -29,9 +29,9 @@ A new note goes at the end of this file and adds its letter to the index line of
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX
 
 ## Digest
 
@@ -1419,7 +1419,7 @@ Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube'
 
 ## Note HX — texcore, the encoder-free base crate (main team, 2026-11-12)
 
-- **HX1 BC1 at the NVIDIA model is decoded in Rust.** `engine::decode::bc1_block_nvidia` is a port of rgbcx's `unpack_bc1` (`cBC1NVidia`, with alpha), and `decode_level` uses it instead of the FFI. It is proven equal to `encoders_sys::bc1_decode_block(.., Bc1Model::Nvidia)` on all 2^32 endpoint pairs with all four selectors (`rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs`, `#[ignore]`, 12.5 s wall on this machine) and on the structured set plus one million random blocks that runs in every test run (`rust_bc1_nvidia_equals_rgbcx_on_structured_blocks`). The FFI `bc1_decode_block` stays in `encoders-sys` as the reference those tests compare with. FM17's decoder model is unchanged.
+- **HX1 BC1 at the NVIDIA model is decoded in Rust.** `texcore::decode::bc1_block_nvidia` (re-exported as `engine::decode::bc1_block_nvidia`) is a port of rgbcx's `unpack_bc1` (`cBC1NVidia`, with alpha), and `decode_level` uses it instead of the FFI. It is proven equal to `encoders_sys::bc1_decode_block(.., Bc1Model::Nvidia)` on all 2^32 endpoint pairs with all four selectors (`rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs`, `#[ignore]`, 12.5 s wall on this machine) and on the structured set plus one million random blocks that runs in every test run (`rust_bc1_nvidia_equals_rgbcx_on_structured_blocks`). The FFI `bc1_decode_block` stays in `encoders-sys` as the reference those tests compare with. FM17's decoder model is unchanged.
 - **HX2 The crate `texcore` is the encoder-free base.** `crates/texcore` holds `image` (`Rgba32F`, `SourceInfo`, `luma`, `pot_dims`) and `transfer` (the sRGB pair, `GAME_GAMMA` and the game-gamma pair); it never depends on `engine` or `encoders-sys`, and its `load` feature (off by default, on in engine) gates the `image` and `bytemuck` crates. Engine keeps every old path by re-export: `pub use texcore::image;` in `lib.rs`, and `pub use` lines in `ops.rs` (the curves) and `resize.rs` (`pot_dims`), so `engine::image::…`, `engine::ops::srgb_to_linear` and `engine::resize::pot_dims` still resolve. The dev profile builds texcore at `opt-level = 3`, because these per-texel helpers were same-crate calls in engine and are `#[inline]` for the same reason.
 - **HX3 The DDS container and the decoders live in texcore.** `texcore::dds` (the reader, writer, `DdsPixelFormat`, `write_atomic`, `same_file`, `absolute_or_same`) and `texcore::decode` moved from engine, and `engine::dds`, `engine::decode`, `engine::config::{Format, HeaderForm}` are re-exports. `Format` and `HeaderForm` are now plain enums in `texcore::dds` with the derives, `rename_all`, `bc6h_uf16` rename, variant order and doc-comment-free variants the `cfg_enum!` macro gave them; `schema/` regenerated with `sdc presets schema all` is byte-identical, and the `schemas`, `encode_versions` and `golden` tests pass unchanged.
 - **HX4 Image loading and the PSD reader live in texcore behind `load`.** `texcore::load` (`load_image`, `analyse`, `lift_limits`, `dds_header_size`, `dds_header_facts` and the rest) and its private `psd` module moved from engine; `engine::load` is `pub use texcore::load;`, so `engine::load::…` still resolves. With `load` off, texcore builds without the `image` and `bytemuck` crates; engine turns the feature on and no longer names `bytemuck` itself.
