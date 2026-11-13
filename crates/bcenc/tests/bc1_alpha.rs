@@ -78,6 +78,35 @@ fn bc1_alpha_ignores_the_masked_texels() {
     }
 }
 
+/// The mask alone says which texels are transparent; the alpha channel is read nowhere (rgbcx.cpp 2056-2065 test the
+/// mask only). So an opaque texel with alpha 0 still counts: 16 texels of the exact 5:6:5 colour (99, 150, 206) with
+/// alpha 0 and only texel 0 unmasked give that colour on both endpoints (0x64B9), texel 0 on selector 0 and the rest on
+/// 3. Then random alpha on every texel of the class blocks changes no byte.
+#[test]
+fn bc1_alpha_reads_the_mask_not_the_alpha_channel() {
+    for perceptual in [false, true] {
+        assert_eq!(
+            same(&[[99, 150, 206, 0]; 16], 0xFFFE, perceptual),
+            [0xB9, 0x64, 0xB9, 0x64, 0xFC, 0xFF, 0xFF, 0xFF]
+        );
+    }
+    let mut r = gen::Rng(0xA1FA_000D);
+    let masks = gen::alpha_masks(0xA1FA_000E, 4);
+    let blocks = gen::colour_classes(0xA1FA_000F, 2);
+    for perceptual in [false, true] {
+        for (i, px) in blocks.iter().enumerate() {
+            let mask = masks[i % masks.len()];
+            let mut any = *px;
+            any.iter_mut().for_each(|t| t[3] = r.byte());
+            assert_eq!(
+                same(&any, mask, perceptual),
+                same(px, mask, perceptual),
+                "alpha changed the block: mask {mask:#06x}, texels {any:?}"
+            );
+        }
+    }
+}
+
 /// Mask 0 is `encode_bc1(level, .., true, false)` (rgbcx.cpp 2040-2044): the plain encode with three-colour blocks.
 #[test]
 fn bc1_alpha_with_no_bit_equals_the_plain_encode() {
@@ -278,9 +307,10 @@ fn bc1_alpha_single_opaque_texel() {
 }
 
 /// 50 million blocks over 16 threads, each block with a mask drawn from [`gen::alpha_masks`] or (every third block)
-/// uniform at random, garbage under it on odd blocks, half with each weight set; generated in batches so memory stays small. Run with `-- --ignored`.
+/// uniform at random, garbage under it on odd blocks, half with each weight set; generated in batches so memory stays
+/// small. Run with `-- --ignored`.
 #[test]
-#[ignore = "50 million blocks, several minutes on 16 threads"]
+#[ignore = "50 million blocks, about 20 seconds on 16 threads"]
 fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
     const THREADS: u64 = 16;
     const PER_THREAD: usize = 3_125_000; // 16 x 3.125 million = 50 million

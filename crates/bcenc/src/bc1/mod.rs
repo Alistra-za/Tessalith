@@ -18,6 +18,15 @@ pub(crate) const PLAIN: [i32; 3] = [1, 1, 1];
 /// The weights `set_bc1_perceptual(true)` stores (sdc patch "bc1 perceptual"): Rec.709 luma scaled to 256.
 pub(crate) const PERCEPTUAL: [i32; 3] = [54, 183, 19];
 
+/// The weights the shim's `Bc1Weights` sets around a call: [`PERCEPTUAL`] or [`PLAIN`].
+pub(crate) fn weights(perceptual: bool) -> [i32; 3] {
+    if perceptual {
+        PERCEPTUAL
+    } else {
+        PLAIN
+    }
+}
+
 /// A block's two endpoints as 5:6:5 codes, r, g, b: `l` is rgbcx's `lr, lg, lb` (linear selector 0), `h` its
 /// `hr, hg, hb` (linear selector 3).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

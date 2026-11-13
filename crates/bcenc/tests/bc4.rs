@@ -64,13 +64,14 @@ fn bc5_equals_rgbcx_on_block_classes() {
 
 #[test]
 fn bc3_alpha_half_equals_rgbcx_for_each_cut() {
-    // bc3_encode_block's first 8 bytes are the alpha block; colour texels stay mid-grey.
+    // bc3_encode_block's first 8 bytes are the alpha block; colour texels stay mid-grey. Cut 0 is rgbcx's "use 128"
+    // (rgbcx.cpp 3488).
     for v in gen::bc4_classes(0xB4B4_0003, 300) {
         let mut p = [[128u8; 4]; 16];
         for i in 0..16 {
             p[i][3] = v[i];
         }
-        for cut in gen::CUTS {
+        for cut in gen::CUTS.into_iter().chain([0]) {
             for rad in RADII {
                 let want: [u8; 8] = encoders_sys::bc3_encode_block(&p, rad, cut, false)[..8]
                     .try_into()

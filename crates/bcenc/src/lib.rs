@@ -33,12 +33,7 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
 /// ignored). `allow_3color` lets the encoder pick a three-colour block; `perceptual` weights the colour error by
 /// Rec.709 luma (rgbcx's `set_bc1_perceptual`).
 pub fn bc1_encode_block(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
-    let weights = if perceptual {
-        bc1::PERCEPTUAL
-    } else {
-        bc1::PLAIN
-    };
-    bc1::encode::encode(px, allow_3color, weights)
+    bc1::encode::encode(px, allow_3color, bc1::weights(perceptual))
 }
 
 /// The alpha half of `rgbcx::encode_bc3_hq`: the BC4 search with the alpha-test guard at `cut` (BC4_SDC_GUARD128).
@@ -59,12 +54,7 @@ pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8
 /// all-transparent block; otherwise a 3-colour block fitted to the opaque texels, masked texels on selector 3. The
 /// RGB of a masked texel and every alpha value are never read. `perceptual` as in [`bc1_encode_block`].
 pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
-    let weights = if perceptual {
-        bc1::PERCEPTUAL
-    } else {
-        bc1::PLAIN
-    };
-    bc1::alpha::encode_alpha(px, transparent, weights)
+    bc1::alpha::encode_alpha(px, transparent, bc1::weights(perceptual))
 }
 
 /// `rgbcx::encode_bc3_hq(18, .., search_radius, BC4_USE_ALL_MODES | BC4_SDC_SEARCH | BC4_SDC_GUARD128 | cut << 8)`

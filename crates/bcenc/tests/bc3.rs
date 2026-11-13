@@ -51,6 +51,58 @@ fn bc3_equals_rgbcx_on_block_classes() {
     }
 }
 
+/// Every cut from 1 to 255 is told apart from its neighbour. Most blocks encode to the same bytes at cut c and c + 1
+/// (the guard only acts when the search would move more texels across the cut than the mode-loop block does), so a
+/// wrong cut by one would pass a test on arbitrary blocks. For each c this draws blocks with 1 to 6 texels exactly on c
+/// and the rest within a random range of it until three give different alpha bytes at c and c + 1 (radius 5), and
+/// compares every drawn block with rgbcx at both cuts, the three at every radius and at cut 0 too.
+#[test]
+fn bc3_equals_rgbcx_for_every_cut() {
+    const WANTED: usize = 3;
+    const TRIES: usize = 4000;
+    let colour = gen::colour_classes(0xBC30_0005, 1);
+    let mut r = gen::Rng(0xBC30_0006);
+    let mut n = 0usize;
+    for cut in 1..=254u8 {
+        let mut found = 0;
+        for _ in 0..TRIES {
+            let range = r.below(120) + 4;
+            let on_cut = r.below(6) as usize + 1;
+            let alpha: [u8; 16] = std::array::from_fn(|i| {
+                if i < on_cut {
+                    cut
+                } else {
+                    let v = cut as i32 + r.below(2 * range + 1) as i32 - range as i32;
+                    v.clamp(0, 255) as u8
+                }
+            });
+            let c = &colour[n % colour.len()];
+            let px: [[u8; 4]; 16] = std::array::from_fn(|k| [c[k][0], c[k][1], c[k][2], alpha[k]]);
+            let perceptual = n % 2 == 1;
+            n += 1;
+            same(&px, 5, cut, perceptual);
+            same(&px, 5, cut + 1, perceptual);
+            if bc4_encode_alpha(&alpha, 5, cut) != bc4_encode_alpha(&alpha, 5, cut + 1) {
+                for rad in RADII {
+                    same(&px, rad, cut, perceptual);
+                    same(&px, rad, cut + 1, perceptual);
+                    same(&px, rad, 0, perceptual);
+                }
+                found += 1;
+                if found == WANTED {
+                    break;
+                }
+            }
+        }
+        assert_eq!(
+            found,
+            WANTED,
+            "blocks whose alpha bytes differ between cut {cut} and {}",
+            cut + 1
+        );
+    }
+}
+
 /// The two halves are the BC1 colour encode without three-colour blocks and the BC4 alpha search, and a cut of 0 is a
 /// cut of 128 (rgbcx.cpp 3527-3528, 3488).
 #[test]
@@ -77,7 +129,7 @@ fn bc3_is_bc4_alpha_then_four_colour_bc1() {
 /// 50 million blocks over 16 threads at radius 5, the cut and the weight set changing from block to block, in
 /// batches so memory stays small. Run with `-- --ignored`.
 #[test]
-#[ignore = "50 million blocks, several minutes on 16 threads"]
+#[ignore = "50 million blocks, about 7 minutes on 16 threads"]
 fn bc3_equals_rgbcx_on_50_million_blocks() {
     const THREADS: u64 = 16;
     const PER_THREAD: usize = 3_125_000; // 16 x 3.125 million = 50 million
