@@ -140,8 +140,9 @@ fn pair_scalar(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> 
 /// `unsafe` block for the call from plain code. Integer code only.
 ///
 /// Bounds (intrinsics wrap silently): a distance is at most 255, so as an `i16` lane at most 255; a `pmaddwd` lane
-/// adds two squares, at most 2 x 255^2 = 130,050; the four `i32` lanes then hold at most 4 x 130,050 and the total at
-/// most 16 x 255^2 = 1,040,400, far below 2^31, so every addition is exact and the `as u32` reads it back exactly.
+/// adds two squares, at most 2 x 255^2 = 130,050; adding the low and the high half gives four `i32` lanes of four
+/// squares each, at most 260,100; their sum is at most 16 x 255^2 = 1,040,400, far below 2^31, so every addition is
+/// exact and the `as u32` reads it back exactly.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2 {
     use core::arch::x86_64::*;
@@ -169,13 +170,15 @@ mod sse2 {
         for dj in &d[1..] {
             m = _mm_min_epu8(m, *dj);
         }
-        // Sum of squares: the 16 distances (0..=255, so non-negative as i16) squared and added in pairs, then the
-        // four i32 lanes (each at most 2 x 255^2 = 130,050) added together: the total is at most 1,040,400.
+        // Sum of squares: the 16 distances (0..=255, so non-negative as i16) squared and added in pairs (at most
+        // 130,050 a lane), low and high half added (four lanes of at most 260,100), then the four lanes added
+        // together: the total is at most 1,040,400.
         let zero = _mm_setzero_si128();
         let (lo, hi) = (_mm_unpacklo_epi8(m, zero), _mm_unpackhi_epi8(m, zero));
         let s = _mm_add_epi32(_mm_madd_epi16(lo, lo), _mm_madd_epi16(hi, hi));
         let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0b01_00_11_10>(s));
         let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0b00_00_00_01>(s));
+        debug_assert!((0..=1_040_400).contains(&_mm_cvtsi128_si32(s)));
         let err = _mm_cvtsi128_si32(s) as u32;
         if err >= best {
             return None;
@@ -487,7 +490,9 @@ mod tests {
         let (mut eight, mut six, mut taken, mut refused) = (0usize, 0usize, 0usize, 0usize);
         for v in gen::bc4_classes(0xB4B4_0005, 30) {
             let mut best = u32::MAX;
-            // The best falls step by step, so later pairs meet a low `best`.
+            // The best falls step by step, so later pairs meet a low `best`. Where the kernel is compiled in, `pair`
+            // has already compared itself with `pair_scalar` (its shadow check); the assert below says what is proven
+            // and is the check on a target without the kernel.
             for (e0, e1) in pairs_for(&v) {
                 let p = pal(e0, e1);
                 let (a, b) = (pair(&v, &p, best), pair_scalar(&v, &p, best));
