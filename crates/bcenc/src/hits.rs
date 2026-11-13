@@ -28,6 +28,8 @@ hits! {
     V0EqualEnds,
     V0SwapMode0,
     V0SwapMode1,
+    V0SixValueWins,
+    V0EightValueKept,
     // inner6
     Inner6NoExtreme,
     Inner6NoInner,
@@ -42,8 +44,8 @@ hits! {
     LsRoundsExhausted,
     // refit_both
     RefitSolid,
-    RefitEqualEnds,
-    RefitSwap,
+    RefitOtherSixValue,
+    RefitOtherEightValue,
     RefitOtherBetter,
     RefitOtherKept,
     // trimmed6

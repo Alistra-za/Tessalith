@@ -214,20 +214,23 @@ pub fn clampi(x: i32) -> u8 {
     x.clamp(0, 255) as u8
 }
 
-/// Port of `rgbcx::encode_bc4_hq(.., rad, BC4_USE_ALL_MODES)`.
-pub fn v0(v: &[u8; 16], rad: i32) -> Best {
+/// rgbcx's candidates (`rgbcx::encode_bc4_hq(.., rad, BC4_USE_ALL_MODES)`) searched per mode, each on its own fresh
+/// best: `[0]` the 8-value mode (e0 > e1), `[1]` the 6-value mode. For a solid block `[0]` is the exact block and `[1]`
+/// is `Best::new()`.
+pub fn v0_modes(v: &[u8; 16], rad: i32) -> [Best; 2] {
     let (mn, mx) = minmax(v);
     if mn == mx {
         hit!(Hit::V0Solid);
-        return Best {
+        let exact = Best {
             err: 0,
             e0: mn,
             e1: mn,
             sels: [0; 16],
         };
+        return [exact, Best::new()];
     }
-    let mut b = Best::new();
-    for mode in 0..2 {
+    let mut m = [Best::new(); 2];
+    for (mode, b) in m.iter_mut().enumerate() {
         for lo in -rad..=rad {
             for hi in -rad..=rad {
                 let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
@@ -241,6 +244,60 @@ pub fn v0(v: &[u8; 16], rad: i32) -> Best {
                     } else {
                         hit!(Hit::V0SwapMode1);
                     }
+                    std::mem::swap(&mut e0, &mut e1);
+                }
+                b.try_pair(v, e0, e1);
+            }
+        }
+    }
+    m
+}
+
+/// What rgbcx returns: `modes[1]` when its error is strictly lower, else `modes[0]`.
+///
+/// Why this equals one loop over both modes' candidates on a single best (the reference `v0_reference`): that loop runs
+/// the 8-value candidates on a fresh best, then the 6-value ones on the same best, and takes a pair only when strictly
+/// lower. While the 6-value candidates run, the best is the 8-value one until a 6-value pair is strictly below it, and
+/// from then on only strictly lower pairs replace it, so the loop ends on the first 6-value pair that reaches the
+/// 6-value mode's least error, which is also `modes[1]` (a fresh best takes the first pair reaching the mode's least
+/// error). If no 6-value pair is strictly below the 8-value best, the 8-value best stays, which is `modes[0]`. A tie
+/// keeps `modes[0]`.
+fn v0_pick(modes: &[Best; 2]) -> Best {
+    if modes[1].err < modes[0].err {
+        hit!(Hit::V0SixValueWins);
+        modes[1]
+    } else {
+        hit!(Hit::V0EightValueKept);
+        modes[0]
+    }
+}
+
+/// Port of `rgbcx::encode_bc4_hq(.., rad, BC4_USE_ALL_MODES)`.
+pub fn v0(v: &[u8; 16], rad: i32) -> Best {
+    v0_pick(&v0_modes(v, rad))
+}
+
+/// Today's `v0`: both modes' candidates on one best. The reference for `v0_pick`.
+#[cfg(test)]
+fn v0_reference(v: &[u8; 16], rad: i32) -> Best {
+    let (mn, mx) = minmax(v);
+    if mn == mx {
+        return Best {
+            err: 0,
+            e0: mn,
+            e1: mn,
+            sels: [0; 16],
+        };
+    }
+    let mut b = Best::new();
+    for mode in 0..2 {
+        for lo in -rad..=rad {
+            for hi in -rad..=rad {
+                let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
+                if e0 == e1 {
+                    continue;
+                }
+                if (mode == 0 && e0 <= e1) || (mode == 1 && e0 > e1) {
                     std::mem::swap(&mut e0, &mut e1);
                 }
                 b.try_pair(v, e0, e1);
@@ -331,25 +388,31 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
 
 /// Refit the best of each mode, not only the overall best: `ls_refine` on `b`, then a fresh search of rgbcx's own
 /// candidates in the other mode, `ls_refine` on that, keeping the strictly better.
-pub fn refit_both(v: &[u8; 16], b: &mut Best, rad: i32) {
+///
+/// The other mode's search is the one `v0_modes` already ran: the same candidates, in the same order, with the same
+/// skip of equal ends, on a fresh best, so its result is `modes[1]` (6-value) when `b` is in the 8-value mode and
+/// `modes[0]` otherwise. `ls_refine` of `b` changes `b` only, and the mode is read after it, as before. In the unit
+/// tests `rad` lets the old search run and be compared.
+pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2], #[cfg(test)] rad: i32) {
     ls_refine(v, b);
     let (mn, mx) = minmax(v);
     if mn != mx {
-        let mut o = Best::new();
         let mode8 = b.e0 > b.e1;
-        for lo in -rad..=rad {
-            for hi in -rad..=rad {
-                let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
-                if e0 == e1 {
-                    hit!(Hit::RefitEqualEnds);
-                    continue;
-                }
-                if (e0 > e1) == mode8 {
-                    hit!(Hit::RefitSwap);
-                    std::mem::swap(&mut e0, &mut e1);
-                }
-                o.try_pair(v, e0, e1);
-            }
+        let mut o = if mode8 {
+            hit!(Hit::RefitOtherSixValue);
+            modes[1]
+        } else {
+            hit!(Hit::RefitOtherEightValue);
+            modes[0]
+        };
+        #[cfg(test)]
+        {
+            let r = other_mode_reference(v, mode8, rad);
+            assert_eq!(
+                (o.err, o.e0, o.e1, o.sels),
+                (r.err, r.e0, r.e1, r.sels),
+                "{v:?} {mode8} {rad}"
+            );
         }
         ls_refine(v, &mut o);
         if o.err < b.err {
@@ -361,6 +424,27 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, rad: i32) {
     } else {
         hit!(Hit::RefitSolid);
     }
+}
+
+/// Today's second loop of `refit_both`: rgbcx's candidates in the mode opposite to `mode8`, on a fresh best. The
+/// reference for the per-mode results of `v0_modes`.
+#[cfg(test)]
+fn other_mode_reference(v: &[u8; 16], mode8: bool, rad: i32) -> Best {
+    let (mn, mx) = minmax(v);
+    let mut o = Best::new();
+    for lo in -rad..=rad {
+        for hi in -rad..=rad {
+            let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
+            if e0 == e1 {
+                continue;
+            }
+            if (e0 > e1) == mode8 {
+                std::mem::swap(&mut e0, &mut e1);
+            }
+            o.try_pair(v, e0, e1);
+        }
+    }
+    o
 }
 
 /// 6-value mode with near-extreme texels left to the palette's 0/255: inner range = values in (t, 255 - t).
@@ -440,10 +524,14 @@ pub fn upstream(v: &[u8; 16], radius: u32) -> [u8; 8] {
 /// `cut` is the cutoff itself: reading a 0 as 128, as rgbcx's flags do, is `bc4_encode_alpha`'s job.
 pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let rad = radius as i32;
-    let base = v0(v, rad);
+    let modes = v0_modes(v, rad);
+    let base = v0_pick(&modes);
     let mut b = base;
     inner6(v, &mut b, rad);
-    refit_both(v, &mut b, rad);
+    #[cfg(test)]
+    refit_both(v, &mut b, &modes, rad);
+    #[cfg(not(test))]
+    refit_both(v, &mut b, &modes);
     trimmed6(v, &mut b);
     local(v, &mut b);
     if let Some(cut) = guard {
@@ -482,6 +570,68 @@ mod tests {
             }
         }
         out
+    }
+
+    #[test]
+    fn v0_from_the_two_modes_equals_the_shared_search() {
+        let (mut six, mut eight, mut solid) = (0usize, 0usize, 0usize);
+        for v in gen::bc4_classes(0xB4B4_0006, 200) {
+            for rad in [0, 1, 4, 5, 10] {
+                let (a, b) = (v0(&v, rad), v0_reference(&v, rad));
+                assert_eq!(
+                    (a.err, a.e0, a.e1, a.sels),
+                    (b.err, b.e0, b.e1, b.sels),
+                    "{v:?} radius {rad}"
+                );
+                if minmax(&v).0 == minmax(&v).1 {
+                    solid += 1;
+                } else if a.e0 > a.e1 {
+                    eight += 1;
+                } else {
+                    six += 1;
+                }
+            }
+        }
+        assert!(
+            six > 0 && eight > 0 && solid > 0,
+            "a kind was never reached: 6-value {six}, 8-value {eight}, solid {solid}"
+        );
+    }
+
+    #[test]
+    fn each_mode_equals_the_other_mode_search() {
+        let (mut eight, mut six) = (0usize, 0usize);
+        for v in gen::bc4_classes(0xB4B4_0007, 200) {
+            if v.iter().all(|&x| x == v[0]) {
+                continue;
+            }
+            for rad in [0, 1, 4, 5, 10] {
+                let m = v0_modes(&v, rad);
+                for mode8 in [false, true] {
+                    // `other_mode_reference(.., mode8, ..)` searches the mode opposite to `mode8`.
+                    let (a, b) = (m[usize::from(mode8)], other_mode_reference(&v, mode8, rad));
+                    assert_eq!(
+                        (a.err, a.e0, a.e1, a.sels),
+                        (b.err, b.e0, b.e1, b.sels),
+                        "{v:?} radius {rad} {mode8}"
+                    );
+                    if mode8 {
+                        six += 1;
+                    } else {
+                        eight += 1;
+                    }
+                }
+            }
+        }
+        assert!(eight > 0 && six > 0, "8-value {eight}, 6-value {six}");
+    }
+
+    #[test]
+    fn a_tie_between_the_modes_keeps_the_8_value_block() {
+        // Values 0 and 255 only: both modes reach error 0; `v0` must return e0 > e1.
+        let v: [u8; 16] = std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 });
+        let b = v0(&v, 5);
+        assert!(b.err == 0 && b.e0 > b.e1);
     }
 
     #[test]
