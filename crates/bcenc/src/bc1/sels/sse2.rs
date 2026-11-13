@@ -1,10 +1,10 @@
 //! The selector kernel: all 16 texels of a candidate at once, in SSE2 integer intrinsics (the maths, and why it is a sum
 //! of products, are in the module doc of `sels.rs`). Compiled only where the target has SSE2 (the `cfg` on `mod sse2`),
 //! so the `target_feature(enable = "sse2")` functions here are always callable; Rust still wants an `unsafe` block for
-//! the call from plain code, and `Texels::new` and `find_sels4`/`find_sels3` carry the only ones. Integer code only.
+//! the call from plain code, and `Texels::masked` and the three searches of this module carry them. Integer code only.
 //!
 //! Intrinsics and `as i16` wrap silently, so the bounds below are what keep the integers exact. They hold for channel
-//! weights `w[c]` in 1..=256 summing to at most 256 and decoder weights summing to `W <= 4`, which `sels::Texels::new`
+//! weights `w[c]` in 1..=256 summing to at most 256 and decoder weights summing to `W <= 4`, which `sels::Texels::masked`
 //! enforces:
 //! - `|x| <= (256 * 255 + 1) / 2 = 32,640`, so `x` fits `i16`; the three `|x|` of one texel sum to at most 32,642.
 //! - `s = dec[0] * a + dec[1] * b <= 4 * 255 = 1,020`, so `|m| = 2 * W * s <= 8,160`, which fits `i16`.

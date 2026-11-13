@@ -85,6 +85,14 @@ impl Best {
         hit!(Hit::PairImproved);
         *self = Best { err, e0, e1, sels };
     }
+    /// `try_pair` for the test references: the scalar loop and no branch counters, so the references add nothing to
+    /// what `every_ported_branch_is_taken` counts.
+    #[cfg(test)]
+    fn try_pair_reference(&mut self, v: &[u8; 16], e0: u8, e1: u8) {
+        if let Some((err, sels)) = pair_scalar(v, &pal(e0, e1), self.err) {
+            *self = Best { err, e0, e1, sels };
+        }
+    }
 }
 
 /// The block's error under palette `p` with the nearest palette value per texel (the first nearest one), and the
@@ -300,7 +308,7 @@ fn v0_reference(v: &[u8; 16], rad: i32) -> Best {
                 if (mode == 0 && e0 <= e1) || (mode == 1 && e0 > e1) {
                     std::mem::swap(&mut e0, &mut e1);
                 }
-                b.try_pair(v, e0, e1);
+                b.try_pair_reference(v, e0, e1);
             }
         }
     }
@@ -455,7 +463,7 @@ fn other_mode_reference(v: &[u8; 16], mode8: bool, rad: i32) -> Best {
             if (e0 > e1) == mode8 {
                 std::mem::swap(&mut e0, &mut e1);
             }
-            o.try_pair(v, e0, e1);
+            o.try_pair_reference(v, e0, e1);
         }
     }
     o

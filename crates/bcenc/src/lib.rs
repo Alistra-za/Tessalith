@@ -2,7 +2,7 @@
 //! (MIT or public domain, `crates/encoders-sys/vendor/bc7enc_rdo/LICENSE`). The vendored C++ in `encoders-sys` is the
 //! specification and the reference every test compares with. No dependencies, no mutable global state (two sets of
 //! tables are built once in a `OnceLock`). `unsafe` has one use: calling a `#[target_feature(enable = "sse2")]`
-//! function of a module compiled only where the target has SSE2 (`bc1/sels/sse2.rs`), each call with a `// SAFETY:`
+//! function of a module compiled only where the target has SSE2 (`bc1/sels/sse2.rs` and `mod sse2` in `bc4.rs`), each call with a `// SAFETY:`
 //! comment; Rust asks for the block even though the feature is always on there. A target without SSE2 runs portable
 //! code instead, which the unit tests run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7).
