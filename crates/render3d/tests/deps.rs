@@ -71,3 +71,36 @@ fn render3d_normal_dependencies_exclude_engine_and_encoders() {
     }
     assert!(closure.contains("texcore"));
 }
+
+/// `cargo metadata` unifies features across the workspace, where the engine turns texcore's `load` on. `cargo tree
+/// -p render3d` resolves them for render3d alone, which is how another program builds it.
+#[test]
+fn render3d_alone_builds_without_the_image_crate() {
+    let out = std::process::Command::new(env!("CARGO"))
+        .args([
+            "tree",
+            "--offline",
+            "-p",
+            "render3d",
+            "-e",
+            "normal",
+            "--prefix",
+            "none",
+            "--manifest-path",
+        ])
+        .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
+        .output()
+        .expect("run cargo tree");
+    assert!(
+        out.status.success(),
+        "cargo tree failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tree = String::from_utf8_lossy(&out.stdout);
+    for banned in ["image", "bytemuck", "engine", "encoders-sys"] {
+        assert!(
+            !tree.lines().any(|l| l.split(' ').next() == Some(banned)),
+            "render3d alone pulls in `{banned}`: texcore's `load` feature must stay off for it (Note HX6)"
+        );
+    }
+}

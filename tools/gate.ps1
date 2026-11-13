@@ -4,7 +4,7 @@
   Runs the full gate on the current checkout and prints PASS or FAIL per step.
 .DESCRIPTION
   Each step's output goes to <Out>\<step>.txt, ending in "exit N". Exits 1 if a step fails, 2 if it didn't start.
-  Set CARGO_TARGET_DIR first (CLAUDE.md, Disk). A failed fmt or clippy step skips the tests, which take about an hour.
+  Set CARGO_TARGET_DIR first (CLAUDE.md, Disk). A failed fmt, clippy or render3d-alone step skips the tests, which take about an hour.
 .EXAMPLE
   tools\gate.ps1 -Out .claude\scratch\gate
 #>
@@ -34,7 +34,7 @@ Step clippy-all { cargo clippy --offline --workspace --all-targets -- -D warning
 Step clippy { cargo clippy --offline --workspace -- -D warnings }
 Step render3d-alone { cargo check --offline -p render3d }
 if ($failed) {
-    'Tests skipped: fix fmt and clippy first.'
+    'Tests skipped: fix fmt, clippy and the render3d check first.'
 } else {
     Step test { cargo test --offline --workspace --no-fail-fast -- --skip render_ --test-threads=4 }
     Step render { cargo test --offline --workspace --no-fail-fast -- render_ --test-threads=1 }
