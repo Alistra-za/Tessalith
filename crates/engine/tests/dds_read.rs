@@ -6,6 +6,110 @@ use engine::encode::{encode_level, EncodeCtx};
 use engine::presets::PresetRegistry;
 use engine::quantize::EncoderInput;
 
+fn bc1_block(c0: u16, c1: u16, sel: [u8; 4]) -> [u8; 8] {
+    let (a, b) = (c0.to_le_bytes(), c1.to_le_bytes());
+    [a[0], a[1], b[0], b[1], sel[0], sel[1], sel[2], sel[3]]
+}
+
+#[test]
+fn rust_bc1_nvidia_equals_rgbcx_on_structured_blocks() {
+    let same = |blk: [u8; 8]| {
+        assert_eq!(
+            engine::decode::bc1_block_nvidia(&blk),
+            bc1_decode_block(&blk, Bc1Model::Nvidia),
+            "block {blk:02x?}"
+        )
+    };
+    // Equal endpoints: the mode test is a strict c0 > c1.
+    for c in 0..=u16::MAX {
+        same(bc1_block(c, c, [0xE4; 4]));
+    }
+    // Every endpoint pair of one channel, the other two at each corner, so both modes occur.
+    let others = [(0u16, 0u16), (31, 0), (0, 31), (31, 31), (13, 13)];
+    for (r0, r1) in (0..32u16).flat_map(|a| (0..32u16).map(move |b| (a, b))) {
+        for (o0, o1) in others {
+            same(bc1_block(
+                r0 << 11 | o0 << 6 | o0,
+                r1 << 11 | o1 << 6 | o1,
+                [0xE4; 4],
+            ));
+            same(bc1_block(
+                o0 << 11 | o0 << 6 | r0,
+                o1 << 11 | o1 << 6 | r1,
+                [0xE4; 4],
+            ));
+        }
+    }
+    for (g0, g1) in (0..64u16).flat_map(|a| (0..64u16).map(move |b| (a, b))) {
+        for (o0, o1) in others {
+            same(bc1_block(
+                o0 << 11 | g0 << 5 | o0,
+                o1 << 11 | g1 << 5 | o1,
+                [0xE4; 4],
+            ));
+        }
+    }
+    // One million blocks of eight random bytes (xorshift64, seed 0x9E3779B97F4A7C15).
+    let mut s = 0x9E37_79B9_7F4A_7C15u64;
+    for _ in 0..1_000_000 {
+        s ^= s << 13;
+        s ^= s >> 7;
+        s ^= s << 17;
+        same(s.to_le_bytes());
+    }
+}
+
+/// Every endpoint pair (2^32 blocks). Run once per change to the decoder:
+/// `cargo test --offline -p engine -p sdc --test dds_read -- --ignored rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs`
+#[test]
+#[ignore = "2^32 blocks; run by hand"]
+fn rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs() {
+    use rayon::prelude::*;
+    (0..=u16::MAX).into_par_iter().for_each(|c0| {
+        for c1 in 0..=u16::MAX {
+            let blk = bc1_block(c0, c1, [0xE4; 4]);
+            assert_eq!(
+                engine::decode::bc1_block_nvidia(&blk),
+                bc1_decode_block(&blk, Bc1Model::Nvidia),
+                "block {blk:02x?}"
+            );
+        }
+    });
+}
+
+/// Prints ns per block for both decoders over 4,000,000 random blocks (same xorshift64 stream as above).
+#[test]
+#[ignore = "timing; run by hand with --release and --nocapture"]
+fn bc1_nvidia_decode_timing() {
+    use std::hint::black_box;
+    use std::time::Instant;
+    const N: usize = 4_000_000;
+    let mut s = 0x9E37_79B9_7F4A_7C15u64;
+    let blocks: Vec<[u8; 8]> = (0..N)
+        .map(|_| {
+            s ^= s << 13;
+            s ^= s >> 7;
+            s ^= s << 17;
+            s.to_le_bytes()
+        })
+        .collect();
+    let t = Instant::now();
+    let mut sum = 0u64;
+    for b in &blocks {
+        sum += u64::from(engine::decode::bc1_block_nvidia(black_box(b))[5][1]);
+    }
+    let rust = t.elapsed().as_nanos() as f64 / N as f64;
+    black_box(sum);
+    let t = Instant::now();
+    let mut sum = 0u64;
+    for b in &blocks {
+        sum += u64::from(bc1_decode_block(black_box(b), Bc1Model::Nvidia)[5][1]);
+    }
+    let c = t.elapsed().as_nanos() as f64 / N as f64;
+    black_box(sum);
+    println!("rust {rust:.2} ns/block, rgbcx {c:.2} ns/block");
+}
+
 fn put(b: &mut [u8], off: usize, v: u32) {
     b[off..off + 4].copy_from_slice(&v.to_le_bytes());
 }

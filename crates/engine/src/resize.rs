@@ -11,46 +11,7 @@ use crate::mips;
 use crate::ops::Work;
 use rayon::prelude::*;
 
-/// The largest power of two ≤ `v` (`v` ≥ 1).
-fn floor_pow2(v: u64) -> u64 {
-    1 << v.ilog2()
-}
-
-/// The power-of-two size of a `w`×`h` image (spec B4). The longer side L rounds up to the next power of two when it
-/// is within 5 % of it, else down. The shorter side is first scaled with it (Ss = S × L' / L), then rounds up when
-/// within 15 % of the next power of two, else down (owner, 2026-11-02: 1024×768 becomes 1024×512, 2000×900 becomes
-/// 2048×1024); never below 1. Axes keep their orientation.
-pub fn pot_dims((w, h): (u32, u32)) -> (u32, u32) {
-    let (l, s) = (u64::from(w.max(h).max(1)), u64::from(w.min(h).max(1)));
-    let lp = if l.is_power_of_two() {
-        l
-    } else {
-        let down = floor_pow2(l);
-        if 100 * l >= 95 * 2 * down {
-            2 * down
-        } else {
-            down
-        }
-    };
-    // Ss = num / den, compared in integers.
-    let (num, den) = (s * lp, l);
-    let sp = if num < den {
-        1
-    } else {
-        let down = floor_pow2(num / den);
-        if down * den == num || 100 * num < 85 * 2 * down * den {
-            down
-        } else {
-            2 * down
-        }
-    };
-    let (lp, sp) = (lp as u32, sp as u32);
-    if w >= h {
-        (lp, sp)
-    } else {
-        (sp, lp)
-    }
-}
+pub use texcore::image::pot_dims;
 
 /// `half`, `quarter` and `eighth` halve both sides (integer division, never below 1) up to 1, 2 or 3 times, each
 /// time only while the longer side / 2 stays at or above `floor`, so the shape never changes.
@@ -362,33 +323,6 @@ mod tests {
             .collect();
         assert_eq!(dim.len(), 1);
         assert_ne!(dim[0].message, "from check_profile");
-    }
-
-    /// Note FM29 (spec B4): the long side rounds up within 5 %, the short side at its scale within 15 %.
-    #[test]
-    fn pot_rule_examples() {
-        for ((w, h), out) in [
-            ((1000, 1000), (1024, 1024)),
-            ((2000, 1000), (2048, 1024)),
-            ((2000, 900), (2048, 1024)),
-            ((4096, 1000), (4096, 1024)),
-            ((900, 900), (512, 512)),
-            ((973, 973), (1024, 1024)),
-            ((972, 972), (512, 512)),
-            ((1024, 768), (1024, 512)),
-            ((768, 1024), (512, 1024)),
-            ((1024, 880), (1024, 1024)),
-            ((1024, 860), (1024, 512)),
-            ((3, 5), (2, 4)),
-            ((4096, 1), (4096, 1)),
-            ((1, 1), (1, 1)),
-            ((512, 256), (512, 256)),
-        ] {
-            assert_eq!(pot_dims((w, h)), out, "{w}x{h}");
-        }
-        // The short side scales below 1: it stays 1.
-        assert_eq!(pot_dims((4000, 1)), (4096, 1));
-        assert_eq!(pot_dims((900, 1)), (512, 1));
     }
 
     #[test]

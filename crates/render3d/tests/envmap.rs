@@ -7,14 +7,14 @@ use nif::props::LightingTrailer;
 use render3d::scene::{Camera, DirLight, Scene};
 use render3d::{Renderer, ShapeId};
 
-/// A 2×2 cube through the engine's writer, faces in DDS order +X −X +Y −Y +Z −Z. `Format::Rgba8` UNORM is
+/// A 2×2 cube through texcore's writer, faces in DDS order +X −X +Y −Y +Z −Z. `Format::Rgba8` UNORM is
 /// B8G8R8A8 (DXGI 87, Note S4), so each texel is given as RGBA and packed as BGRA (Note IC2).
 fn cube(faces: [[u8; 4]; 6]) -> Vec<u8> {
-    use engine::dds::{dds_bytes_cube, DdsDesc, ResolvedHeader};
+    use texcore::dds::{dds_bytes_cube, DdsDesc, ResolvedHeader};
     let desc = DdsDesc {
         width: 2,
         height: 2,
-        format: engine::config::Format::Rgba8,
+        format: texcore::dds::Format::Rgba8,
         srgb: false,
         header: ResolvedHeader::Dx10,
     };

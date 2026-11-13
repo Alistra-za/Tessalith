@@ -9,13 +9,13 @@ A new note goes at the end of this file and adds its letter to the index line of
 
 ## Index
 
-- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW
+- Engine policy (formats, alpha gate, versions, writes): Answers, A, B, D, E, F, I, K, L, M, O, R, S, T, W, Y, AC, AG, AK, AV, AW, AX, AZ, BB, BC, BF, BJ, BL, BQ, BV, DB, DC, DM, DS, DY, FA, FF, FL, GJ, FM, FQ, FV, FZ, HB, HE, GU, GV, GW, GY, HF, IB, HR, HS, HW, HX
 - Analysis and alpha: A, E, L, M, S, T, U, X, Y, AH, AK, BC, CL, CN, DQ, DS, DU, DV, DW, DZ, FC, FM, GY, HR, HV
 - Mips and resize: E, R, S, W, X, Y, CL, FM, HR
-- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW
+- Encoders: F, O, S, T, BZ, CB, CP, FE, FF, FJ, FM, FQ, FZ, HW, HX
 - Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS
 - Bake: E, M, R, W, Y, AL, BP, CL, CO, DP, FM, FN, FO, FV, HD, GV, GW
-- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU
+- Cubemaps: DL, DN, DS, DT, FA, FC, FM, FO, FQ, FT, FY, GU, HX
 - Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS
@@ -23,15 +23,15 @@ A new note goes at the end of this file and adds its letter to the index line of
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS
-- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS
+- GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX
 
 ## Digest
 
@@ -225,7 +225,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 
 ### Cubemaps
 
-- Cube maths lives in the engine; separate cube entry points, no `DdsDesc.cube` field. [DS1, DS2]
+- Cube maths lives in `texcore::cube` (engine re-exports it); separate cube entry points, no `DdsDesc.cube` field. [DS1, DS2, HX5]
 - `Subtype::Cubemap` with a `cubemap` section and styles; an auto face below 4 is `CFG-INVALID`; the auto face size stops at 4096. [DS4, DS20, DS21]
 - Raw-face layouts and cube DDS input; one rule for "under the cubemaps folder". [DS7, DS23]
 - Cube transfer is Community Shaders' game gamma. [DS11]
@@ -1416,3 +1416,14 @@ Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube'
 
 - **IC1 render3d reads cube +Z as world up.** A black type 1 sphere (envmap scale 1, glossiness 1, white ambient, no direct light) with +Z red and −Z blue reads red on its upper half and blue on its lower half from the side, red at the centre from above and blue from below. render3d's world, camera and CS's envmap lookup all agree with DS13. Test `render_envmap_reads_cube_plus_z_as_up`.
 - **IC2 The spike's flip was a byte-order slip.** `Format::Rgba8` UNORM is DXGI 87, B8G8R8A8 (Note S4), so `dds_bytes_cube` expects BGRA texels. The spike passed RGBA, which swaps red and blue, so a red +Z face showed as blue. Pack BGRA for `Format::Rgba8`; the test builds its cube that way and first checks that an all-red cube draws red. Packed RGBA, as in the spike, the all-red cube draws blue and the test fails.
+
+## Note HX — texcore, the encoder-free base crate (main team, 2026-11-12)
+
+- **HX1 BC1 at the NVIDIA model is decoded in Rust.** `texcore::decode::bc1_block_nvidia` (re-exported as `engine::decode::bc1_block_nvidia`) is a port of rgbcx's `unpack_bc1` (`cBC1NVidia`, with alpha), and `decode_level` uses it instead of the FFI. It is proven equal to `encoders_sys::bc1_decode_block(.., Bc1Model::Nvidia)` on all 2^32 endpoint pairs with all four selectors (`rust_bc1_nvidia_equals_rgbcx_on_all_endpoint_pairs`, `#[ignore]`, 12.5 s wall on this machine) and on the structured set plus one million random blocks that runs in every test run (`rust_bc1_nvidia_equals_rgbcx_on_structured_blocks`). The FFI `bc1_decode_block` stays in `encoders-sys` as the reference those tests compare with. FM17's decoder model is unchanged.
+- **HX2 The crate `texcore` is the encoder-free base.** `crates/texcore` holds `image` (`Rgba32F`, `SourceInfo`, `luma`, `pot_dims`) and `transfer` (the sRGB pair, `GAME_GAMMA` and the game-gamma pair); it never depends on `engine` or `encoders-sys`, and its `load` feature (off by default, on in engine) gates the `image` and `bytemuck` crates. Engine keeps every old path by re-export: `pub use texcore::image;` in `lib.rs`, and `pub use` lines in `ops.rs` (the curves) and `resize.rs` (`pot_dims`), so `engine::image::…`, `engine::ops::srgb_to_linear` and `engine::resize::pot_dims` still resolve. The dev profile builds texcore at `opt-level = 3`, because these per-texel helpers were same-crate calls in engine and are `#[inline]` for the same reason.
+- **HX3 The DDS container and the decoders live in texcore.** `texcore::dds` (the reader, writer, `DdsPixelFormat`, `write_atomic`, `same_file`, `absolute_or_same`) and `texcore::decode` moved from engine, and `engine::dds`, `engine::decode`, `engine::config::{Format, HeaderForm}` are re-exports. `Format` and `HeaderForm` are now plain enums in `texcore::dds` with the derives, `rename_all`, `bc6h_uf16` rename, variant order and doc-comment-free variants the `cfg_enum!` macro gave them; `schema/` regenerated with `sdc presets schema all` is byte-identical, and the `schemas`, `encode_versions` and `golden` tests pass unchanged.
+- **HX4 Image loading and the PSD reader live in texcore behind `load`.** `texcore::load` (`load_image`, `analyse`, `decoded_header`, `dds_header_size`, `dds_header_facts` and the rest) and its private `psd` module moved from engine; `engine::load` is `pub use texcore::load;`, so `engine::load::…` still resolves. With `load` off, texcore builds without the `image` and `bytemuck` crates; engine turns the feature on and no longer names `bytemuck` itself.
+- **HX5 The cube maths lives in texcore (amends DS1).** `texcore::cube` holds `FACES`, `cube_dir`, `Cube`, `dir_at`, `dir_to_face` (all hot ones `#[inline]`) and the modules `sample` (`build` is `pub`), `latlong`, `rgbe` and `world`; there is one copy, and engine and render3d both use it. `engine::cube` re-exports all of them, keeps `CubeJob`, `CubeSource` and the pipeline stages (`checks`, `filter`, `layout`, `marker`, `plan`, `run`), so `engine::cube::…` paths are unchanged.
+- **HX6 `render3d` depends on texcore, not on the engine.** Its normal and build dependency closure holds `texcore` and neither `engine` nor `encoders-sys`, so other programs can build the 3D preview alone; its source uses `texcore::{dds, decode, image, transfer, cube}` and its tests also `texcore::load` (a dev-dependency with `load` on). `crates/render3d/tests/deps.rs` reads `cargo metadata` and fails if either crate returns, and the `render3d-alone` step (`cargo check -p render3d`) in `tools/gate.ps1` and CI builds it alone. A `nif/*` branch that added an `engine::` use in render3d must take the texcore path for it after merging main, or `tests/deps.rs` fails; if texcore lacks the item, move it into texcore.
+- **HX7 What texcore may depend on, and who uses it.** texcore depends only on pure-Rust crates already in `Cargo.lock`, never on `engine`, `encoders-sys` or any C or C++ build. Programs outside this workspace (the owner's FaceGen Composer and Texalith) depend on `texcore` and `render3d` directly. An item such an outside program needs from `engine` moves into texcore with an engine re-export, and is not copied.
+- **HX8 Engine code reads images only through texcore; what the split costs.** No engine source opens an `image` reader itself: `bake::decode_peak` sizes a decode with `texcore::load::decoded_header`. A release build shares no generic code between crates, so a second crate that opens a reader compiles every `image` decoder again; that made `sdc.exe` 600 KB larger until the call moved. Measured on 2026-11-12 (Ryzen 7 9800X3D, release, both from `cargo build --release -p sdc`; the shipped 3.0.0 exe is built with `-p sdc-gui -p sdc` and is not the baseline here): `sdc.exe` is 15,876,096 bytes against 15,852,032 for commit 1665ad28. Built the release way, `tessalith.exe` is 43,151,872 bytes against 43,123,200 and `sdc.exe` 16,274,432 against 16,250,368 (0.07% and 0.15% larger). 300 PNGs of `textures-10k` (278 converted) give 278 DDS files whose SHA-256 equal 3.0.0's. Five alternating runs took 49.5 to 50.7 s (median 50.1) against 49.8 to 51.7 s (median 50.9) for 3.0.0, so the speed is the same. `bc1_block_nvidia` takes 9.84 ns per block against 16.79 ns for rgbcx through the FFI (`bc1_nvidia_decode_timing`, `--release`), so the Rust decoder stays. A clean release build of `render3d` alone compiles 60 crates in 14 s, against 116 crates in 56 s on 3.0.0, where it pulled in `engine`, `encoders-sys` and `image`. To find where an exe grew, link with `-C link-arg=/MAP:<file>` and sum the code per object.

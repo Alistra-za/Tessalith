@@ -224,8 +224,8 @@ pub fn dalc_to_sh(six: &[[f32; 3]; 6]) -> [[f32; 4]; 3] {
     sh.map(|r| r.map(|v| v as f32))
 }
 
-// The IEC 61966-2-1 transfer curves live in the engine (one copy).
-pub use engine::ops::{linear_to_srgb, srgb_to_linear};
+// The IEC 61966-2-1 transfer curves live in texcore (one copy).
+pub use texcore::transfer::{linear_to_srgb, srgb_to_linear};
 
 /// Camera state for one frame. The world is drawn **camera-relative** (the engine's convention:
 /// Lighting.hlsl takes `viewDirection = −normalize(WorldPosition)`), so `view_proj` has no translation and

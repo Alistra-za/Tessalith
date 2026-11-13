@@ -79,15 +79,7 @@ impl KeyIndex {
     }
 }
 
-/// `p` as an absolute path (the current directory for an empty or relative one); `p` itself when that fails.
-pub(crate) fn absolute_or_same(p: &Path) -> PathBuf {
-    let p = if p.as_os_str().is_empty() {
-        Path::new(".")
-    } else {
-        p
-    };
-    std::path::absolute(p).unwrap_or_else(|_| p.to_path_buf())
-}
+pub(crate) use texcore::dds::absolute_or_same;
 
 /// `input`'s path relative to `root`, '/'-separated: the folder of `input.path` relative to `root`, then the file
 /// name of `input.rel` (for a packed output, its virtual name; for an `[inputs]` alias, the real name). `None` when `input` is not under `root`.

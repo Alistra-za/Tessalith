@@ -3,7 +3,7 @@
 //! slot uses, so no `_SRGB` view is ever forced).
 use crate::compile::SrvKind;
 use crate::device::Gpu;
-use engine::dds::{read_dds, DdsPixelFormat};
+use texcore::dds::{read_dds, DdsPixelFormat};
 use windows::Win32::Graphics::Direct3D::{
     D3D11_SRV_DIMENSION_BUFFER, D3D11_SRV_DIMENSION_TEXTURE2D, D3D11_SRV_DIMENSION_TEXTURE2DARRAY,
     D3D11_SRV_DIMENSION_TEXTURECUBE,
@@ -753,7 +753,7 @@ mod tests {
             expand_legacy(DdsPixelFormat::Rgb8, &[1, 2, 3, 10, 20, 30]),
             Some(vec![3, 2, 1, 255, 30, 20, 10, 255])
         );
-        // Two texels of L, A, and the same bytes through the engine's decode.
+        // Two texels of L, A, and the same bytes through texcore's decode.
         let la = [7, 200, 9, 0];
         assert_eq!(
             expand_legacy(DdsPixelFormat::La8, &la),
@@ -761,8 +761,8 @@ mod tests {
         );
         let want = vec![[7, 7, 7, 200], [9, 9, 9, 0]];
         assert_eq!(
-            engine::decode::decode_level(DdsPixelFormat::La8, 2, 1, &la).unwrap(),
-            engine::decode::Decoded::Ldr(want)
+            texcore::decode::decode_level(DdsPixelFormat::La8, 2, 1, &la).unwrap(),
+            texcore::decode::Decoded::Ldr(want)
         );
         for f in [
             DdsPixelFormat::R16,

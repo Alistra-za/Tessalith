@@ -1,10 +1,87 @@
-//! Decode one DDS level for validation and inspection (`bcdec_rs`; BC1 optionally through rgbcx at a decoder
-//! model, spec §5.8).
+//! Decode one DDS level for validation and inspection (`bcdec_rs`; BC1 at the NVIDIA decoder model with a Rust
+//! port of rgbcx's decoder, spec §5.8, Notes FM17, HX1).
 //!
 //! The output size is derived from `data.len()`: every function checks that `data` holds the whole level (with
 //! checked arithmetic) before allocating, so a hostile `w`/`h` cannot force a large allocation.
 use crate::dds::{DdsError, DdsPixelFormat};
-use encoders_sys::{bc1_decode_block, Bc1Model};
+
+// Port of rgbcx's `interp_*_nv` helpers (bc7enc_rdo/rgbcx.cpp, MIT or public domain). C's `int` division
+// truncates toward zero, and so does Rust's `/` on `i32`.
+fn interp_5_nv(v0: i32, v1: i32) -> i32 {
+    ((2 * v0 + v1) * 22) / 8
+}
+fn interp_6_nv(c0: i32, c1: i32) -> i32 {
+    let gdiff = c1 - c0;
+    (256 * c0 + (gdiff / 4) + 128 + gdiff * 80) / 256
+}
+fn interp_half_5_nv(v0: i32, v1: i32) -> i32 {
+    ((v0 + v1) * 33) / 8
+}
+fn interp_half_6_nv(c0: i32, c1: i32) -> i32 {
+    let gdiff = c1 - c0;
+    (256 * c0 + gdiff / 4 + 128 + gdiff * 128) / 256
+}
+
+/// Decode one BC1 block to 16 RGBA texels (row-major) at the NVIDIA decoder model: a port of
+/// `rgbcx::unpack_bc1(.., set_alpha = true, cBC1NVidia)` (`rgbcx.cpp`: `unpack_bc1_block_colors` and
+/// `unpack_bc1`, the `cBC1NVidia` cases, plus the four `interp_*_nv` helpers). rgbcx is MIT or public domain.
+/// Equal to `encoders_sys::bc1_decode_block(block, Bc1Model::Nvidia)` for every block (Note HX1).
+#[inline]
+pub fn bc1_block_nvidia(block: &[u8; 8]) -> [[u8; 4]; 16] {
+    let l = u32::from(block[0]) | (u32::from(block[1]) << 8);
+    let h = u32::from(block[2]) | (u32::from(block[3]) << 8);
+
+    let cr0 = ((l >> 11) & 31) as i32;
+    let cg0 = ((l >> 5) & 63) as i32;
+    let cb0 = (l & 31) as i32;
+    let r0 = (cr0 << 3) | (cr0 >> 2);
+    let g0 = (cg0 << 2) | (cg0 >> 4);
+    let b0 = (cb0 << 3) | (cb0 >> 2);
+
+    let cr1 = ((h >> 11) & 31) as i32;
+    let cg1 = ((h >> 5) & 63) as i32;
+    let cb1 = (h & 31) as i32;
+    let r1 = (cr1 << 3) | (cr1 >> 2);
+    let g1 = (cg1 << 2) | (cg1 >> 4);
+    let b1 = (cb1 << 3) | (cb1 >> 2);
+
+    // `set_noclamp_rgba` stores each component as a `uint8_t`.
+    let px = |r: i32, g: i32, b: i32, a: i32| [r as u8, g as u8, b as u8, a as u8];
+    let mut c = [[0u8; 4]; 4];
+    c[0] = px(r0, g0, b0, 255);
+    c[1] = px(r1, g1, b1, 255);
+    if l > h {
+        c[2] = px(
+            interp_5_nv(cr0, cr1),
+            interp_6_nv(g0, g1),
+            interp_5_nv(cb0, cb1),
+            255,
+        );
+        c[3] = px(
+            interp_5_nv(cr1, cr0),
+            interp_6_nv(g1, g0),
+            interp_5_nv(cb1, cb0),
+            255,
+        );
+    } else {
+        c[2] = px(
+            interp_half_5_nv(cr0, cr1),
+            interp_half_6_nv(g0, g1),
+            interp_half_5_nv(cb0, cb1),
+            255,
+        );
+        c[3] = px(0, 0, 0, 0);
+    }
+
+    let mut out = [[0u8; 4]; 16];
+    for y in 0..4 {
+        let sel = block[4 + y];
+        for x in 0..4 {
+            out[y * 4 + x] = c[usize::from((sel >> (x * 2)) & 3)];
+        }
+    }
+    out
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Decoded {
@@ -57,9 +134,9 @@ fn quads(v: Vec<u8>) -> Vec<[u8; 4]> {
 
 /// Decode a `w` x `h` level to RGBA8 (LDR) or RGB f32 (HDR).
 ///
-/// BC1 decodes through rgbcx as an NVIDIA GPU does (Note FM17); the other block formats use `bcdec_rs`. BC4 gives
-/// `[r, r, r, 255]` and BC5 `[r, g, 0, 255]` (unsigned), BC6H gives RGB floats, half and float formats drop
-/// alpha. sRGB tags are not applied.
+/// BC1 decodes as an NVIDIA GPU does, with a Rust port of rgbcx's decoder (Notes FM17, HX1); the other block
+/// formats use `bcdec_rs`. BC4 gives `[r, r, r, 255]` and BC5 `[r, g, 0, 255]` (unsigned), BC6H gives RGB floats,
+/// half and float formats drop alpha. sRGB tags are not applied.
 pub fn decode_level(fmt: DdsPixelFormat, w: u32, h: u32, data: &[u8]) -> Result<Decoded, DdsError> {
     decode(fmt, w, h, data, false)
 }
@@ -91,7 +168,7 @@ fn decode(
                 return bcdec_rs::bc1(b, o, 16);
             }
             let blk: &[u8; 8] = b.try_into().expect("8-byte block");
-            for (i, p) in bc1_decode_block(blk, Bc1Model::Nvidia).iter().enumerate() {
+            for (i, p) in bc1_block_nvidia(blk).iter().enumerate() {
                 o[i * 4..i * 4 + 4].copy_from_slice(p);
             }
         }))),
@@ -250,5 +327,49 @@ fn rgba(
             Decoded::Ldr(v) => v.iter().map(|p| p.map(|c| f32::from(c) / 255.0)).collect(),
             Decoded::Hdr(v) => v.iter().map(|p| [p[0], p[1], p[2], 1.0]).collect(),
         }),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::bc1_block_nvidia;
+
+    // Pinned palettes, worked out by hand from the rgbcx formulas. The proof against rgbcx itself is in the
+    // engine's tests (`dds_read.rs`, Note HX1), because this crate cannot link the encoders.
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+    const CLEAR: [u8; 4] = [0, 0, 0, 0];
+
+    #[test]
+    fn bc1_nvidia_four_colour_block_has_the_pinned_palette() {
+        // c0 = 0xFFFF > c1 = 0x0000: four colours. Selector rows pick entry 0, 1, 2, 3 for a whole row each.
+        let out = bc1_block_nvidia(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x55, 0xAA, 0xFF]);
+        for (row, want) in [WHITE, BLACK, [170, 175, 170, 255], [85, 80, 85, 255]]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(out[row * 4..row * 4 + 4], [want; 4], "row {row}");
+        }
+    }
+
+    #[test]
+    fn bc1_nvidia_three_colour_block_has_a_half_tone_and_a_clear_entry() {
+        // c0 = 0x0000 <= c1 = 0xFFFF: three colours and transparent black. 0xE4 picks entries 0..=3 along a row.
+        let out = bc1_block_nvidia(&[0x00, 0x00, 0xFF, 0xFF, 0xE4, 0xE4, 0xE4, 0xE4]);
+        for row in 0..4 {
+            assert_eq!(
+                out[row * 4..row * 4 + 4],
+                [BLACK, WHITE, [127, 128, 127, 255], CLEAR],
+                "row {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn bc1_nvidia_equal_endpoints_use_the_three_colour_mode() {
+        // c0 == c1 == 0xF800 (red): not greater, so entry 3 is transparent black.
+        let red = [255, 0, 0, 255];
+        let out = bc1_block_nvidia(&[0x00, 0xF8, 0x00, 0xF8, 0xE4, 0xE4, 0xE4, 0xE4]);
+        assert_eq!(out[..4], [red, red, red, CLEAR]);
     }
 }

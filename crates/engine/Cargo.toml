@@ -9,6 +9,7 @@ build = "build.rs"
 
 [dependencies]
 encoders-sys.workspace = true
+texcore = { workspace = true, features = ["load"] }
 serde.workspace = true
 # float_roundtrip: a cached Analysis must read back bit for bit (Note DZ).
 serde_json = { workspace = true, features = ["float_roundtrip"] }
@@ -16,8 +17,6 @@ toml.workspace = true
 schemars.workspace = true
 thiserror.workspace = true
 image.workspace = true
-# Reuses the decoded f32 buffer as the texel Vec (load.rs); already in the lock through image.
-bytemuck = { version = "1", features = ["extern_crate_alloc"] }
 half.workspace = true
 bcdec_rs.workspace = true
 rayon.workspace = true

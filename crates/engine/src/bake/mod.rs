@@ -284,24 +284,10 @@ pub fn lengths_from(
 /// `load::load_image`'s peak on `path`, from its header: [`BakeJob::peak_bytes`] of its size and decoded texel width.
 /// 0 when the header cannot be read.
 pub(crate) fn decode_peak(path: &std::path::Path) -> u64 {
-    use ::image::ImageDecoder;
+    // The header read is texcore's: an `image` reader opened here would compile every decoder twice (Note HX8).
     let header = || {
-        let mut r = ::image::ImageReader::open(path)
-            .ok()?
-            .with_guessed_format()
-            .ok()?;
-        crate::load::lift_limits(&mut r);
-        let d = r.into_decoder().ok()?;
-        let (w, h) = d.dimensions();
-        // A hostile header must not overflow the product; the load refuses a file this large anyway (review M1).
-        if w.max(h) > crate::load::MAX_DIM {
-            return None;
-        }
-        Some(BakeJob::peak_bytes(
-            w,
-            h,
-            u64::from(d.color_type().bytes_per_pixel()),
-        ))
+        let (w, h, bytes) = crate::load::decoded_header(path)?;
+        Some(BakeJob::peak_bytes(w, h, u64::from(bytes)))
     };
     // A PSD decodes straight to float RGBA (`psd::load`), with no decoded buffer of its own.
     header()
