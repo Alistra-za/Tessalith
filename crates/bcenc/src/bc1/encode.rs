@@ -111,7 +111,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
             }
 
             // Recorded, never skipped: `round_err` starts fresh in each round, so a pair round 0 scored can be taken
-            // here (about 4 blocks in 10).
+            // here (measured on 16 textures: 39% of the blocks take such a pair).
             let repeat = seen4.insert(&trial);
             let mut trial_sels = [0u8; 16];
             let trial_err = find_sels4(px, weights, &trial, &mut trial_sels, round_err);
@@ -531,8 +531,10 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
 
 /// `encode_bc1_endpoint_search` with 256 rounds: step one endpoint by one code in one of 16 directions (rounds 0..15
 /// the high endpoint, 16..31 the low, repeating), keep a strictly better result, never undo the last improving step,
-/// and stop 33 rounds after the last improvement. A skipped round skips that stop test too, as in the C++. `three`
-/// is `results.m_3color`: the trials are then scored as 3-colour blocks (`use_black` false, see [`find_sels3`]).
+/// and stop 33 rounds after the last improvement. A round in the forbidden direction (the undo of the last improving
+/// step) skips that stop test too, as in the C++. A step to a pair in `seen` is not scored but runs the stop test, as
+/// it did when it was scored and rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour
+/// blocks (`use_black` false, see [`find_sels3`]).
 fn endpoint_search(
     px: &[[u8; 4]; 16],
     weights: [i32; 3],

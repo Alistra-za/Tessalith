@@ -116,9 +116,9 @@ mod tests {
         assert!(pairs.iter().all(|e| s.insert(e)));
     }
 
-    /// Two different pairs whose hash names the same first slot.
-    fn two_pairs_with_one_first_slot() -> (Ends, Ends) {
-        let pair = |k: u32| Ends {
+    /// The pair whose key is `k`.
+    fn pair(k: u32) -> Ends {
+        Ends {
             l: [
                 (k & 31) as i32,
                 ((k >> 5) & 63) as i32,
@@ -129,7 +129,11 @@ mod tests {
                 ((k >> 21) & 63) as i32,
                 ((k >> 27) & 31) as i32,
             ],
-        };
+        }
+    }
+
+    /// Two different pairs whose hash names the same first slot.
+    fn two_pairs_with_one_first_slot() -> (Ends, Ends) {
         let mut first = [None; Seen::SLOTS];
         for k in 0..u32::MAX {
             let e = pair(k);
@@ -150,6 +154,22 @@ mod tests {
         let mut s = Seen::new();
         assert!(!s.insert(&a));
         assert!(!s.insert(&b));
+        assert!(s.insert(&a) && s.insert(&b));
+    }
+
+    #[test]
+    fn a_walk_past_the_last_slot_goes_on_at_the_first() {
+        let last = Seen::SLOTS - 1;
+        let mut in_last = (0..u32::MAX)
+            .map(pair)
+            .filter(|e| Seen::first_slot(e) == last);
+        let (a, b) = (in_last.next().unwrap(), in_last.next().unwrap());
+        let mut s = Seen::new();
+        assert!(!s.insert(&a) && !s.insert(&b));
+        assert!(
+            s.slots[last] != 0 && s.slots[0] != 0,
+            "the second pair sits in slot 0"
+        );
         assert!(s.insert(&a) && s.insert(&b));
     }
 }
