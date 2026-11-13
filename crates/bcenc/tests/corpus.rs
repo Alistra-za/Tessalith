@@ -34,12 +34,12 @@ fn cmp(diffs: &mut Vec<Diff>, mode: impl FnOnce() -> String, got: &[u8], want: &
 }
 
 enum Outcome {
-    Unreadable(PathBuf),
+    /// The file and why `image` could not decode it.
+    Unreadable(PathBuf, String),
     Skipped,
     Done {
         blocks: u64,
         mismatches: u64,
-        report: String,
     },
 }
 
@@ -69,8 +69,9 @@ fn walk(dir: &Path, out: &mut Vec<PathBuf>) {
     }
 }
 
-/// Compare one image. `wanted` decides from the whole image whether it takes part. The blocks are cut by
-/// `encoders_sys::gather_blocks` (edge texels replicated), the same cut the engine uses.
+/// Compare one image and print its mismatches as soon as it is done, so a long run shows them early. `wanted`
+/// decides from the whole image whether it takes part. The blocks are cut by `encoders_sys::gather_blocks` (edge
+/// texels replicated, row by row), the same cut the engine uses.
 fn compare_image(
     path: &Path,
     wanted: fn(&[[u8; 4]]) -> bool,
@@ -78,14 +79,16 @@ fn compare_image(
 ) -> Outcome {
     let img = match image::open(path) {
         Ok(i) => i.to_rgba8(),
-        Err(_) => return Outcome::Unreadable(path.to_path_buf()),
+        Err(e) => return Outcome::Unreadable(path.to_path_buf(), e.to_string()),
     };
     let (w, h) = img.dimensions();
-    let px: Vec<[u8; 4]> = img.pixels().map(|p| p.0).collect();
+    // The decoded image is consumed here and the texels dropped after the cut, so one copy stays alive per image.
+    let px: Vec<[u8; 4]> = img.into_raw().as_chunks::<4>().0.to_vec();
     if w == 0 || h == 0 || !wanted(&px) {
         return Outcome::Skipped;
     }
     let blocks = encoders_sys::gather_blocks(&px, w, h);
+    drop(px);
     let bw = (w as usize).div_ceil(4);
     let (mut count, mut mismatches) = (0u64, 0u64);
     let mut report = String::new();
@@ -112,10 +115,12 @@ fn compare_image(
             }
         }
     }
+    if !report.is_empty() {
+        print!("{report}");
+    }
     Outcome::Done {
         blocks: count,
         mismatches,
-        report,
     }
 }
 
@@ -126,15 +131,15 @@ fn run(name: &str, wanted: fn(&[[u8; 4]]) -> bool, check: impl Fn(&Block, &mut V
     };
     let every = every();
     let started = Instant::now();
-    let mut all = Vec::new();
-    walk(Path::new(&dir), &mut all);
-    all.sort();
+    let mut paths = Vec::new();
+    walk(Path::new(&dir), &mut paths);
+    paths.sort();
     assert!(
-        !all.is_empty(),
+        !paths.is_empty(),
         "no PNG found under {}",
         Path::new(&dir).display()
     );
-    let files: Vec<PathBuf> = all.into_iter().step_by(every).collect();
+    let files: Vec<PathBuf> = paths.into_iter().step_by(every).collect();
     let outcomes: Vec<Outcome> = files
         .par_iter()
         .map(|p| compare_image(p, wanted, &check))
@@ -143,20 +148,18 @@ fn run(name: &str, wanted: fn(&[[u8; 4]]) -> bool, check: impl Fn(&Block, &mut V
     let (mut blocks, mut mismatches) = (0u64, 0u64);
     for o in &outcomes {
         match o {
-            Outcome::Unreadable(p) => {
+            Outcome::Unreadable(p, why) => {
                 unreadable += 1;
-                println!("unreadable: {}", p.display());
+                println!("unreadable: {}: {why}", p.display());
             }
             Outcome::Skipped => skipped += 1,
             Outcome::Done {
                 blocks: b,
                 mismatches: m,
-                report,
             } => {
                 compared += 1;
                 blocks += b;
                 mismatches += m;
-                print!("{report}");
             }
         }
     }
@@ -179,14 +182,14 @@ fn any_transparent(px: &[[u8; 4]]) -> bool {
     px.iter().any(|t| t[3] < 128)
 }
 
-fn all(_: &[[u8; 4]]) -> bool {
+fn every_image(_: &[[u8; 4]]) -> bool {
     true
 }
 
 #[test]
 #[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
 fn corpus_bc1_equals_rgbcx() {
-    run("bc1", all, |px, d| {
+    run("bc1", every_image, |px, d| {
         for perceptual in [false, true] {
             cmp(
                 d,
@@ -220,7 +223,7 @@ fn corpus_bc1_alpha_equals_rgbcx() {
 #[test]
 #[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
 fn corpus_bc3_equals_rgbcx() {
-    run("bc3", all, |px, d| {
+    run("bc3", every_image, |px, d| {
         for perceptual in [false, true] {
             cmp(
                 d,
@@ -235,7 +238,7 @@ fn corpus_bc3_equals_rgbcx() {
 #[test]
 #[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
 fn corpus_bc4_equals_rgbcx() {
-    run("bc4", all, |px, d| {
+    run("bc4", every_image, |px, d| {
         for channel in [0, 3] {
             cmp(
                 d,
@@ -250,7 +253,7 @@ fn corpus_bc4_equals_rgbcx() {
 #[test]
 #[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
 fn corpus_bc5_equals_rgbcx() {
-    run("bc5", all, |px, d| {
+    run("bc5", every_image, |px, d| {
         cmp(
             d,
             || format!("radius {RADIUS}"),
