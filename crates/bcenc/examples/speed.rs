@@ -8,13 +8,15 @@
 //! ```
 //!
 //! Every 4x4 block of level 0 of the PNGs (`image::open(..).to_rgba8()`, cut by `encoders_sys::gather_blocks` as
-//! `tests/corpus.rs` does) is encoded `runs` times by each encoder, one pass of rgbcx then one pass of `bcenc`, in
-//! turn. With no PNG the blocks are `gen::colour_classes(1, 200)`, so the example runs without owner data.
+//! `tests/corpus.rs` does) is encoded `runs` times by each encoder in alternating passes; rgbcx goes first in even
+//! runs and `bcenc` in odd ones, so neither always meets the colder caches. With no PNG the blocks are `gen::colour_classes(1, 200)`, so the example runs without owner data.
 //!
 //! One line per format on stdout: `format  cpp_med_us  rust_med_us  rust/cpp  same_bytes`. The two times are the
-//! median over the runs of one whole pass over all blocks, in microseconds. `same_bytes` compares a 64-bit FNV-1a
+//! median (of an even count, the upper middle one) over the runs of one whole pass over all blocks, in
+//! microseconds. `same_bytes` compares a 64-bit FNV-1a
 //! hash over every output block of the first pass of each encoder (`yes` or `NO`). The process exits with status 1
-//! when any format printed `NO`. The block count goes to stderr.
+//! when any format printed `NO`; the index of the first differing block then goes to stderr, as the block count
+//! does.
 //!
 //! Formats and the arguments the engine passes: `bc1` = `bc1_encode_block(b, true, false)`; `bc1p` = the same
 //! perceptual; `bc1-4` = `allow_3color` false (BC3's colour half); `bc1a` = `bc1_encode_block_alpha(b, mask, false)`
@@ -64,6 +66,7 @@ fn pass<const N: usize>(
     started.elapsed().as_secs_f64() * 1e6
 }
 
+/// The middle value; of an even count, the upper middle one.
 fn median(v: &mut [f64]) -> f64 {
     v.sort_by(f64::total_cmp);
     v[v.len() / 2]
@@ -84,11 +87,20 @@ fn measure<const N: usize>(
     );
     let (mut cpp_hash, mut rust_hash) = (0, 0);
     for run in 0..runs {
-        cpp_t.push(pass(blocks, &cpp, &mut cpp_out));
-        rust_t.push(pass(blocks, &rust, &mut rust_out));
+        if run % 2 == 0 {
+            cpp_t.push(pass(blocks, &cpp, &mut cpp_out));
+            rust_t.push(pass(blocks, &rust, &mut rust_out));
+        } else {
+            rust_t.push(pass(blocks, &rust, &mut rust_out));
+            cpp_t.push(pass(blocks, &cpp, &mut cpp_out));
+        }
         if run == 0 {
             cpp_hash = fnv1a(&cpp_out);
             rust_hash = fnv1a(&rust_out);
+            let (a, b) = (cpp_out.as_chunks::<N>().0, rust_out.as_chunks::<N>().0);
+            if let Some(i) = a.iter().zip(b).position(|(a, b)| a != b) {
+                eprintln!("{name}: the first differing block is block {i}");
+            }
         }
     }
     let (c, r) = (median(&mut cpp_t), median(&mut rust_t));
@@ -129,6 +141,10 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
     let blocks = load(&args[1..]);
+    if blocks.is_empty() {
+        eprintln!("no 4x4 block in the given PNGs");
+        return ExitCode::from(2);
+    }
     eprintln!("{} blocks, {runs} runs", blocks.len());
     let cut = NonZeroU8::new(CUT).unwrap();
     let ok = [
