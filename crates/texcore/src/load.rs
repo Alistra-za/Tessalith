@@ -88,7 +88,7 @@ const PNG_METADATA_BUDGET: u64 = 64 << 20;
 /// The explicit MAX_DIM header check bounds the image, so the crate's default 512 MiB allocation cap (which
 /// rejects valid 16384 px images) is lifted. A PNG keeps a bound: `max_alloc` is also what its iCCP inflates
 /// under (png 0.18 `decompress_to_vec_bounded`), parsed before any size is known (audit 2026-10-15 item 1).
-pub(crate) fn lift_limits<R: std::io::BufRead + std::io::Seek>(reader: &mut image::ImageReader<R>) {
+pub fn lift_limits<R: std::io::BufRead + std::io::Seek>(reader: &mut image::ImageReader<R>) {
     let mut limits = image::Limits::no_limits();
     if reader.format() == Some(image::ImageFormat::Png) {
         limits.max_alloc = Some(PNG_METADATA_BUDGET);
@@ -179,13 +179,13 @@ pub fn image_size(path: &Path) -> Result<(u32, u32), LoadError> {
 
 /// Width and height of a DDS from its first 20 bytes (the offsets `dds::read_dds` uses; that reader needs the
 /// whole payload). `None` when the file cannot be read or is not a DDS. Unchecked against MAX_DIM.
-pub(crate) fn dds_header_size(path: &Path) -> Option<(u32, u32)> {
+pub fn dds_header_size(path: &Path) -> Option<(u32, u32)> {
     dds_header_facts(path).map(|(size, _)| size)
 }
 
 /// [`dds_header_size`] and whether the header says cube (caps2 or the DX10 misc flag, as `dds::read_dds` decides).
 /// The size is the face size; a cube loads as a 6w x h strip (DECISIONS DS7).
-pub(crate) fn dds_header_facts(path: &Path) -> Option<((u32, u32), bool)> {
+pub fn dds_header_facts(path: &Path) -> Option<((u32, u32), bool)> {
     use std::io::Read;
     let mut b = [0u8; 144];
     let n = std::fs::File::open(path).ok()?.read(&mut b).ok()?;

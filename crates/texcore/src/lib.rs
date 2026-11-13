@@ -4,4 +4,8 @@
 pub mod dds;
 pub mod decode;
 pub mod image;
+#[cfg(feature = "load")]
+pub mod load;
+#[cfg(feature = "load")]
+mod psd;
 pub mod transfer;
