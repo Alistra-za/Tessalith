@@ -84,6 +84,8 @@ impl Texels {
 pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     let total = imp::find_sels4(&t.k, e, sels, cutoff);
     #[cfg(test)]
+    assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
+    #[cfg(test)]
     if t.dec == DUAL {
         // rgbcx's search with the same cutoff in its units: `2r < cutoff` exactly when `r < ceil(cutoff / 2)`, and
         // `u32::MAX` stays above every total.
@@ -97,6 +99,8 @@ pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
 /// [`find_sels4`] for a 3-colour block (selectors 0 low endpoint, 1 high endpoint, 2 midpoint).
 pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     let total = imp::find_sels3(&t.k, e, sels, cutoff);
+    #[cfg(test)]
+    assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
     #[cfg(test)]
     if t.dec == DUAL {
         let mut want = [0xEEu8; 16];
@@ -403,6 +407,9 @@ mod portable {
         }
     }
 
+    // The products below fit `u32`: a `_dec` total is at most 16 texels x 256 (the channel weights' sum) x 4 (the
+    // decoder weights' sum) x 255^2 = 1,065,369,600, and times the decoder weights' sum again 4,261,478,400 < 2^32.
+    // `Texels::masked` refuses weights above those sums.
     pub(super) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
         scalar::find_sels3_masked_dec(&t.px, t.mask, t.w, t.dec, e, sels)
             * (t.dec[0] + t.dec[1]) as u32
@@ -896,8 +903,7 @@ mod tests {
 
     fn masked_equals_the_scalar_search<K: Kernel>() {
         let mut rng = gen::Rng(0xA1FA_0003);
-        // Masks of no, some and all texels, and (for the partial ones) searches that gave a transparent texel and an
-        // opaque one: every kind must be reached.
+        // Masks of no, some and all texels: every kind must be reached.
         let (mut none, mut some, mut all) = (0usize, 0usize, 0usize);
         for px in &gen::colour_classes(0xA1FA_0001, 20) {
             for mask in masks() {
@@ -1015,5 +1021,11 @@ mod tests {
     #[should_panic(expected = "channel weights")]
     fn channel_weights_above_the_bound_are_refused() {
         Texels::new(&[[0; 4]; 16], [200, 100, 1], DUAL);
+    }
+
+    #[test]
+    #[should_panic(expected = "transparent mask")]
+    fn a_mask_above_16_bits_is_refused() {
+        Texels::masked(&[[0; 4]; 16], PLAIN, DUAL, 0x1_0000);
     }
 }
