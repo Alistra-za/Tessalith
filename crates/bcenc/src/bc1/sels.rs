@@ -39,12 +39,24 @@ pub(crate) struct Texels {
     w: [i32; 3],
     #[cfg(test)]
     dec: [i32; 2],
+    #[cfg(test)]
+    mask: u32,
 }
 
 impl Texels {
     /// Panics unless every channel weight is in 1..=256 and their sum is at most 256, and both decoder weights are
     /// at least 1 and their sum is at most 4 (the kernel's integer bounds, written beside the kernel).
     pub(crate) fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self {
+        Self::masked(px, w, dec, 0)
+    }
+
+    /// As `new`; texel i is transparent when bit i of `mask` is set (only [`find_sels3_masked`] reads the mask), and
+    /// panics when a bit above the 16th is set. `new` is `masked` with mask 0.
+    pub(crate) fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self {
+        assert!(
+            mask <= 0xFFFF,
+            "transparent mask {mask:#x} has more than 16 bits"
+        );
         assert!(
             w.iter().all(|&w| (1..=256).contains(&w)) && w.iter().sum::<i32>() <= 256,
             "channel weights {w:?} are outside the kernel's bounds"
@@ -54,13 +66,15 @@ impl Texels {
             "decoder weights {dec:?} are outside the kernel's bounds"
         );
         Texels {
-            k: imp::Texels::new(px, w, dec),
+            k: imp::Texels::masked(px, w, dec, mask),
             #[cfg(test)]
             px: *px,
             #[cfg(test)]
             w,
             #[cfg(test)]
             dec,
+            #[cfg(test)]
+            mask,
         }
     }
 }
@@ -88,6 +102,20 @@ pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
         let mut want = [0xEEu8; 16];
         let r = scalar::find_sels3(&t.px, t.w, e, &mut want, cutoff.div_ceil(2));
         check_against_scalar(total, cutoff, r, cutoff.div_ceil(2), sels, &want);
+    }
+    total
+}
+
+/// [`find_sels3`] with no cutoff, for a block built with [`Texels::masked`]: all 16 selectors are written, and a
+/// transparent texel gets selector 3 and adds no error. Returns the opaque texels' error in kernel units.
+pub(crate) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    let total = imp::find_sels3_masked(&t.k, e, sels);
+    #[cfg(test)]
+    if t.dec == DUAL {
+        let mut want = [0xEEu8; 16];
+        let r = scalar::find_sels3_masked(&t.px, t.mask, t.w, e, &mut want);
+        assert_eq!(total, 2 * r, "kernel total");
+        assert_eq!(sels, &want, "kernel selectors");
     }
     total
 }
@@ -213,6 +241,43 @@ mod scalar {
         total_err
     }
 
+    /// `bc1_alpha_find_sels` (sdc patch "bc1 alpha"): per opaque texel the 3-colour selector (0 low endpoint, 1 high
+    /// endpoint, 2 midpoint) with the least NVIDIA plus AMD error, a later selector replacing the best only when
+    /// strictly better; every texel whose bit is set in `mask` gets selector 3 (transparent black) and adds no error.
+    /// No cutoff: all 16 selectors are written. Returns the summed error of the opaque texels. Tests only.
+    #[cfg(test)]
+    #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+    pub(super) fn find_sels3_masked(
+        px: &[[u8; 4]; 16],
+        mask: u32,
+        w: [i32; 3],
+        e: &Ends,
+        sels: &mut [u8; 16],
+    ) -> u32 {
+        let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+
+        let mut total_err: u32 = 0;
+        for i in 0..16 {
+            if mask & (1u32 << i) != 0 {
+                sels[i] = 3;
+                continue;
+            }
+            let mut best_err = dual_err(&p, w, 0, px[i]);
+            let mut best_sel = 0u8;
+            for j in 1..3 {
+                let err = dual_err(&p, w, j, px[i]);
+                if err < best_err {
+                    best_err = err;
+                    best_sel = j as u8;
+                }
+            }
+            sels[i] = best_sel;
+            // uint32_t in the C++; 16 texel errors stay below 16 * 2 * 256 * 255^2 < 2^30.
+            total_err += best_err;
+        }
+        total_err
+    }
+
     /// A texel's weighted error under palette entry `s` with the decoders counted `dec[0]` and `dec[1]` times:
     /// `sum over c of w[c] * (dec[0] * (nv - c)^2 + dec[1] * (amd - c)^2)`. At most `256 * 4 * 255^2`, inside `i32`.
     fn dec_err(p: &DualPalette, w: [i32; 3], dec: [i32; 2], s: usize, c: [u8; 4]) -> u32 {
@@ -278,6 +343,39 @@ mod scalar {
         }
         total_err
     }
+
+    /// [`find_sels3_masked`]'s loop with the decoder weights `dec`.
+    #[allow(clippy::needless_range_loop)] // As `find_sels3_masked`.
+    pub(super) fn find_sels3_masked_dec(
+        px: &[[u8; 4]; 16],
+        mask: u32,
+        w: [i32; 3],
+        dec: [i32; 2],
+        e: &Ends,
+        sels: &mut [u8; 16],
+    ) -> u32 {
+        let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+
+        let mut total_err: u32 = 0;
+        for i in 0..16 {
+            if mask & (1u32 << i) != 0 {
+                sels[i] = 3;
+                continue;
+            }
+            let mut best_err = dec_err(&p, w, dec, 0, px[i]);
+            let mut best_sel = 0u8;
+            for j in 1..3 {
+                let err = dec_err(&p, w, dec, j, px[i]);
+                if err < best_err {
+                    best_err = err;
+                    best_sel = j as u8;
+                }
+            }
+            sels[i] = best_sel;
+            total_err += best_err;
+        }
+        total_err
+    }
 }
 
 /// The kernel's interface over the scalar loops: correct, not tuned, no early exit. No target the workspace builds
@@ -291,12 +389,23 @@ mod portable {
         px: [[u8; 4]; 16],
         w: [i32; 3],
         dec: [i32; 2],
+        mask: u32,
     }
 
     impl Texels {
-        pub(super) fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self {
-            Texels { px: *px, w, dec }
+        pub(super) fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self {
+            Texels {
+                px: *px,
+                w,
+                dec,
+                mask,
+            }
         }
+    }
+
+    pub(super) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+        scalar::find_sels3_masked_dec(&t.px, t.mask, t.w, t.dec, e, sels)
+            * (t.dec[0] + t.dec[1]) as u32
     }
 
     pub(super) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
@@ -380,12 +489,20 @@ mod tests {
         fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self::T;
         fn f4(t: &Self::T, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32;
         fn f3(t: &Self::T, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32;
+        fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self::T;
+        fn f3m(t: &Self::T, e: &Ends, sels: &mut [u8; 16]) -> u32;
     }
     struct Public;
     impl Kernel for Public {
         type T = Texels;
         fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Texels {
             Texels::new(px, w, dec)
+        }
+        fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Texels {
+            Texels::masked(px, w, dec, mask)
+        }
+        fn f3m(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+            find_sels3_masked(t, e, sels)
         }
         fn f4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
             find_sels4(t, e, sels, cutoff)
@@ -398,7 +515,13 @@ mod tests {
     impl Kernel for Portable {
         type T = portable::Texels;
         fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> portable::Texels {
-            portable::Texels::new(px, w, dec)
+            portable::Texels::masked(px, w, dec, 0)
+        }
+        fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> portable::Texels {
+            portable::Texels::masked(px, w, dec, mask)
+        }
+        fn f3m(t: &portable::Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+            portable::find_sels3_masked(t, e, sels)
         }
         fn f4(t: &portable::Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
             portable::find_sels4(t, e, sels, cutoff)
@@ -689,7 +812,9 @@ mod tests {
         ties_and_exact::<Portable>();
     }
 
-    fn largest_errors<K: Kernel>() {
+    /// The inputs that make the largest errors: endpoints, blocks and channel weights.
+    type Largest = ([Ends; 4], [[[u8; 4]; 16]; 3], [[i32; 3]; 6]);
+    fn largest_inputs() -> Largest {
         let max = [31, 63, 31];
         let ends = [
             Ends {
@@ -713,6 +838,11 @@ mod tests {
             [1, 1, 254],
             [86, 85, 85],
         ];
+        (ends, blocks, weights)
+    }
+
+    fn largest_errors<K: Kernel>() {
+        let (ends, blocks, weights) = largest_inputs();
         for px in &blocks {
             for e in &ends {
                 for (wi, w) in weights.iter().enumerate() {
@@ -752,6 +882,127 @@ mod tests {
     fn the_largest_errors_do_not_overflow() {
         largest_errors::<Public>();
         largest_errors::<Portable>();
+    }
+
+    /// The masks the masked tests run: those of `gen::alpha_masks`, none and all.
+    fn masks() -> Vec<u32> {
+        let mut m: Vec<u32> = gen::alpha_masks(0xA1FA_0002, 12)
+            .into_iter()
+            .map(u32::from)
+            .collect();
+        m.extend([0, 0xFFFF]);
+        m
+    }
+
+    fn masked_equals_the_scalar_search<K: Kernel>() {
+        let mut rng = gen::Rng(0xA1FA_0003);
+        // Masks of no, some and all texels, and (for the partial ones) searches that gave a transparent texel and an
+        // opaque one: every kind must be reached.
+        let (mut none, mut some, mut all) = (0usize, 0usize, 0usize);
+        for px in &gen::colour_classes(0xA1FA_0001, 20) {
+            for mask in masks() {
+                for w in [PLAIN, PERCEPTUAL] {
+                    let t = K::masked(px, w, DUAL, mask);
+                    let tds = [[2, 1], [1, 3]].map(|dec| (dec, K::masked(px, w, dec, mask)));
+                    for e in ends_for(px, &mut rng) {
+                        let (mut want, mut got) = ([0xEEu8; 16], [0xEEu8; 16]);
+                        let full = scalar::find_sels3_masked(px, mask, w, &e, &mut want);
+                        assert_eq!(
+                            K::f3m(&t, &e, &mut got),
+                            2 * full,
+                            "{px:?} {e:?} {w:?} {mask:#x}"
+                        );
+                        assert_eq!(got, want, "{px:?} {e:?} {w:?} {mask:#x}");
+                        for (i, &s) in got.iter().enumerate() {
+                            assert!(
+                                s <= 2 || mask & (1 << i) != 0,
+                                "opaque texel {i} got selector 3: {px:?} {e:?} {mask:#x}"
+                            );
+                            assert!(
+                                mask & (1 << i) == 0 || s == 3,
+                                "transparent texel {i} got {s}"
+                            );
+                        }
+                        match mask.count_ones() {
+                            0 => none += 1,
+                            16 => all += 1,
+                            _ => some += 1,
+                        }
+                        for (dec, td) in &tds {
+                            let full =
+                                scalar::find_sels3_masked_dec(px, mask, w, *dec, &e, &mut want);
+                            assert_eq!(
+                                K::f3m(td, &e, &mut got),
+                                (dec[0] + dec[1]) as u32 * full,
+                                "{px:?} {e:?} {w:?} {dec:?} {mask:#x}"
+                            );
+                            assert_eq!(got, want, "{px:?} {e:?} {w:?} {dec:?} {mask:#x}");
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            none > 0 && some > 0 && all > 0,
+            "a kind of mask was never reached: none {none}, some {some}, all {all}"
+        );
+    }
+
+    #[test]
+    fn the_masked_kernel_equals_the_scalar_search() {
+        masked_equals_the_scalar_search::<Public>();
+        masked_equals_the_scalar_search::<Portable>();
+    }
+
+    #[test]
+    fn the_masked_dec_search_with_equal_weights_is_todays_search() {
+        let mut rng = gen::Rng(0xA1FA_0004);
+        for px in &gen::colour_classes(0xA1FA_0001, 20) {
+            for mask in masks() {
+                for w in [PLAIN, PERCEPTUAL] {
+                    for e in ends_for(px, &mut rng) {
+                        let (mut want, mut got) = ([0xEEu8; 16], [0xEEu8; 16]);
+                        let full = scalar::find_sels3_masked(px, mask, w, &e, &mut want);
+                        assert_eq!(
+                            scalar::find_sels3_masked_dec(px, mask, w, [1, 1], &e, &mut got),
+                            full
+                        );
+                        assert_eq!(got, want, "{px:?} {e:?} {w:?} {mask:#x}");
+                    }
+                }
+            }
+        }
+    }
+
+    fn masked_largest_errors<K: Kernel>() {
+        let (ends, blocks, weights) = largest_inputs();
+        let mut reached = [0usize; 3];
+        for px in &blocks {
+            for e in &ends {
+                for w in &weights {
+                    for (kind, mask) in [0u32, 0x5555, 0xFFFF].into_iter().enumerate() {
+                        let t = K::masked(px, *w, [2, 2], mask);
+                        let (mut want, mut got) = ([0xEEu8; 16], [0xEEu8; 16]);
+                        let full =
+                            scalar::find_sels3_masked_dec(px, mask, *w, [2, 2], e, &mut want);
+                        assert_eq!(
+                            K::f3m(&t, e, &mut got),
+                            4 * full,
+                            "{px:?} {e:?} {w:?} {mask:#x}"
+                        );
+                        assert_eq!(got, want, "{px:?} {e:?} {w:?} {mask:#x}");
+                        reached[kind] += 1;
+                    }
+                }
+            }
+        }
+        assert!(reached.iter().all(|&n| n > 0), "{reached:?}");
+    }
+
+    #[test]
+    fn the_masked_largest_errors_do_not_overflow() {
+        masked_largest_errors::<Public>();
+        masked_largest_errors::<Portable>();
     }
 
     #[test]

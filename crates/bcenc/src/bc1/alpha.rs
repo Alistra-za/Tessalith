@@ -2,9 +2,10 @@
 //! domain): `encode_bc1_alpha` and `bc1_alpha_find_sels` (sdc patch "bc1 alpha"), at level 18 (Note HY5).
 //!
 //! `level` reaches only the mask-0 call of `encode_bc1(level, .., true, false)`, which is [`encode`] with three-colour
-//! blocks. The R, G, B weights enter only through [`dual_err`] in [`find_sels`] (rgbcx.cpp 980 and 1012, reached from
-//! `bc1_alpha_find_sels` 2009 and 2019-2022): the statistics, the principal axis, the least-squares fits and the
-//! endpoint steps read no weights.
+//! blocks. The R, G, B weights enter only through the selector search, `bc1_alpha_find_sels` (rgbcx.cpp 980 and 1012,
+//! reached from 2009 and 2019-2022), here [`find_sels3_masked`] on a [`Texels`] built once per block: the statistics,
+//! the principal axis, the least-squares fits and the endpoint steps read no weights. Its errors are in kernel units
+//! (twice rgbcx's, Note HY9); this file only compares them with each other and with 0.
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
@@ -13,40 +14,8 @@ use crate::hits::{hit, Hit};
 use super::encode::{bc1_encode3, encode, round_ls, single_colour_ends3};
 use super::fit::{ls_endpoints3, to_5, to_6};
 use super::initial::maximum;
-use super::palette::{dual_err, dual_palette};
-use super::Ends;
-
-/// `bc1_alpha_find_sels`: per opaque texel the 3-colour selector (0 low endpoint, 1 high endpoint, 2 midpoint) with
-/// the least NVIDIA plus AMD error, a later selector replacing the best only when strictly better; every texel whose
-/// bit is set in `mask` gets selector 3 (transparent black) and adds no error. No cutoff: all 16 selectors are written.
-/// Returns the summed error of the opaque texels.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-fn find_sels(px: &[[u8; 4]; 16], mask: u32, w: [i32; 3], e: &Ends, sels: &mut [u8; 16]) -> u32 {
-    let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
-
-    let mut total_err: u32 = 0;
-    for i in 0..16 {
-        if mask & (1u32 << i) != 0 {
-            hit!(Hit::AlphaSelTransparent);
-            sels[i] = 3;
-            continue;
-        }
-        let mut best_err = dual_err(&p, w, 0, px[i]);
-        let mut best_sel = 0u8;
-        for j in 1..3 {
-            let err = dual_err(&p, w, j, px[i]);
-            if err < best_err {
-                hit!(Hit::AlphaSelBetter);
-                best_err = err;
-                best_sel = j as u8;
-            }
-        }
-        sels[i] = best_sel;
-        // uint32_t in the C++; 16 texel errors stay below 16 * 2 * 256 * 255^2 < 2^30.
-        total_err += best_err;
-    }
-    total_err
-}
+use super::sels::{find_sels3_masked, Texels};
+use super::{Ends, DUAL};
 
 /// `encode_bc1_alpha(18, ..)` with R, G, B error weights `weights`: bit i of `transparent` marks texel i transparent.
 /// Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise a 3-colour
@@ -180,8 +149,9 @@ pub(crate) fn encode_alpha(px: &[[u8; 4]; 16], transparent: u16, weights: [i32; 
         h: [to_5(hi[0] as u32), to_6(hi[1] as u32), to_5(hi[2] as u32)],
     };
 
+    let texels = Texels::masked(px, weights, DUAL, mask);
     let mut sels = [0u8; 16];
-    let mut err = find_sels(px, mask, weights, &ends, &mut sels);
+    let mut err = find_sels3_masked(&texels, &ends, &mut sels);
 
     // Least-squares refits while they improve; the solve skips selector 3, so only opaque texels count.
     // `for (pass = 0; err && (pass < 8); pass++)`.
@@ -214,7 +184,7 @@ pub(crate) fn encode_alpha(px: &[[u8; 4]; 16], transparent: u16, weights: [i32; 
         }
 
         let mut sels2 = [0u8; 16];
-        let err2 = find_sels(px, mask, weights, &trial, &mut sels2);
+        let err2 = find_sels3_masked(&texels, &trial, &mut sels2);
         if err2 >= err {
             hit!(Hit::AlphaLsWorse);
             break;
@@ -258,7 +228,7 @@ pub(crate) fn encode_alpha(px: &[[u8; 4]; 16], transparent: u16, weights: [i32; 
                 h: [e[3], e[4], e[5]],
             };
             let mut sels2 = [0u8; 16];
-            let err2 = find_sels(px, mask, weights, &trial, &mut sels2);
+            let err2 = find_sels3_masked(&texels, &trial, &mut sels2);
             if err2 < err {
                 hit!(Hit::AlphaStepBetter);
                 err = err2;

@@ -187,9 +187,6 @@ hits! {
     AlphaStepOutOfRange,
     AlphaStepBetter,
     AlphaSearchNoGain,
-    // bc1_alpha_find_sels
-    AlphaSelTransparent,
-    AlphaSelBetter,
     // bc1 repeats
     OrderingRepeat,
     Ordering3Repeat,

@@ -24,9 +24,10 @@ type V4 = [__m128i; 4];
 
 /// Row `v` of each field holds texels `4v..4v+3`.
 pub(super) struct Texels {
-    xa: V4, // per texel the i16 pair (x[0], x[1])
-    xb: V4, // per texel the i16 pair (x[2], 0)
-    t: V4,  // per texel t as i32
+    xa: V4,   // per texel the i16 pair (x[0], x[1])
+    xb: V4,   // per texel the i16 pair (x[2], 0)
+    t: V4,    // per texel t as i32
+    keep: V4, // per texel all ones when opaque, zero when transparent (the masked search)
     off: [i32; 3],
     w: [i32; 3],
     dec: [i32; 2],
@@ -34,8 +35,9 @@ pub(super) struct Texels {
 
 impl Texels {
     /// `x[c][i] = w[c] * c_i - off[c]` with `off[c] = (w[c] * 255 + 1) / 2` (centred, so it fits `i16`), and
-    /// `t[i] = W^2 * sum over c of w[c] * c_i^2`.
-    pub(super) fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self {
+    /// `t[i] = W^2 * sum over c of w[c] * c_i^2`; `keep[i]` is zero when bit i of `mask` is set. A transparent
+    /// texel's `x` and `t` are those of its colour, within the same bounds, and the masked search drops its error.
+    pub(super) fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self {
         let ws = dec[0] + dec[1];
         let off = [
             (w[0] * 255 + 1) / 2,
@@ -43,6 +45,7 @@ impl Texels {
             (w[2] * 255 + 1) / 2,
         ];
         let (mut xa, mut xb, mut t) = ([[0i16; 8]; 4], [[0i16; 8]; 4], [[0i32; 4]; 4]);
+        let mut keep = [[0i32; 4]; 4];
         // The index is the texel of several arrays at once.
         #[allow(clippy::needless_range_loop)]
         for i in 0..16 {
@@ -57,13 +60,15 @@ impl Texels {
             (xa[v][2 * l], xa[v][2 * l + 1], xb[v][2 * l]) =
                 (x[0] as i16, x[1] as i16, x[2] as i16);
             t[v][l] = ws * ws * (w[0] * c[0] * c[0] + w[1] * c[1] * c[1] + w[2] * c[2] * c[2]);
+            keep[v][l] = if mask & (1 << i) == 0 { -1 } else { 0 };
         }
         // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
-        let (xa, xb, t) = unsafe { load(&xa, &xb, &t) };
+        let (xa, xb, t, keep) = unsafe { load(&xa, &xb, &t, &keep) };
         Texels {
             xa,
             xb,
             t,
+            keep,
             off,
             w,
             dec,
@@ -73,13 +78,19 @@ impl Texels {
 
 #[target_feature(enable = "sse2")]
 #[inline]
-fn load(xa: &[[i16; 8]; 4], xb: &[[i16; 8]; 4], t: &[[i32; 4]; 4]) -> (V4, V4, V4) {
+fn load(
+    xa: &[[i16; 8]; 4],
+    xb: &[[i16; 8]; 4],
+    t: &[[i32; 4]; 4],
+    keep: &[[i32; 4]; 4],
+) -> (V4, V4, V4, V4) {
     let l16 = |a: &[i16; 8]| _mm_set_epi16(a[7], a[6], a[5], a[4], a[3], a[2], a[1], a[0]);
     let l32 = |a: &[i32; 4]| _mm_set_epi32(a[3], a[2], a[1], a[0]);
     (
         [l16(&xa[0]), l16(&xa[1]), l16(&xa[2]), l16(&xa[3])],
         [l16(&xb[0]), l16(&xb[1]), l16(&xb[2]), l16(&xb[3])],
         [l32(&t[0]), l32(&t[1]), l32(&t[2]), l32(&t[3])],
+        [l32(&keep[0]), l32(&keep[1]), l32(&keep[2]), l32(&keep[3])],
     )
 }
 
@@ -216,6 +227,40 @@ fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
         store(q, sels);
     }
     total
+}
+
+/// [`sels3`] with no cutoff and a block's transparent texels dropped: `keep` zeroes a transparent texel's error and
+/// puts selector 3 in its lane. The total only gets smaller than `sels3`'s, so the bounds of the module doc hold.
+#[target_feature(enable = "sse2")]
+fn sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+    let r = [
+        rest(t, entry(t, &p, 0)),
+        rest(t, entry(t, &p, 1)),
+        rest(t, entry(t, &p, 2)),
+    ];
+    let (zero, two, three) = (_mm_setzero_si128(), _mm_set1_epi32(2), _mm_set1_epi32(3));
+    let mut sum = zero;
+    let mut q = [zero; 4];
+    #[allow(clippy::needless_range_loop)]
+    for v in 0..4 {
+        let least = min32(min32(r[0][v], r[1][v]), r[2][v]);
+        sum = _mm_add_epi32(sum, _mm_and_si128(t.keep[v], _mm_add_epi32(t.t[v], least)));
+        let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least);
+        // As `sels3`: 0 where entry 0 holds the least, else 1 where entry 1 does, else 2; a transparent texel is 3.
+        let first = _mm_andnot_si128(eq(0), _mm_add_epi32(two, eq(1)));
+        q[v] = _mm_or_si128(
+            _mm_and_si128(t.keep[v], first),
+            _mm_andnot_si128(t.keep[v], three),
+        );
+    }
+    store(q, sels);
+    hsum(sum)
+}
+
+pub(super) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
+    unsafe { sels3_masked(t, e, sels) }
 }
 
 pub(super) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
