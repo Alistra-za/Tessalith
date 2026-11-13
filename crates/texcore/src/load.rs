@@ -108,7 +108,7 @@ pub fn decoded_header(path: &Path) -> Option<(u32, u32, u8)> {
     lift_limits(&mut reader);
     let decoder = reader.into_decoder().ok()?;
     let (w, h) = decoder.dimensions();
-    // A hostile header must not overflow a caller's size product; the load refuses a file this large anyway.
+    // A hostile header must not overflow a caller's size product; the load refuses a file this large anyway (review M1).
     (w.max(h) <= MAX_DIM).then(|| (w, h, decoder.color_type().bytes_per_pixel()))
 }
 
