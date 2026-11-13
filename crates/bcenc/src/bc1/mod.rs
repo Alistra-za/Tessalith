@@ -8,6 +8,9 @@
 pub(crate) mod alpha;
 pub(crate) mod encode;
 mod fit;
+// For `coverage_tests`, which checks the class generators' restated rounding against the port's.
+#[cfg(test)]
+pub(crate) use fit::{precise_round_565, to_5, to_6};
 mod initial;
 pub mod palette;
 mod sels;

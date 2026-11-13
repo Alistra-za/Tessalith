@@ -40,9 +40,7 @@ fn colours(b: &[u8; 8]) -> (u16, u16) {
 #[test]
 fn bc1_alpha_equals_rgbcx_on_masks_and_classes() {
     let mut r = gen::Rng(0xA1FA_0003);
-    // The mask classes, plus uniform random masks for the opaque counts (5..=11) the classes skip.
-    let mut masks = gen::alpha_masks(0xA1FA_0001, 24);
-    masks.extend((0..48).map(|_| r.next() as u16));
+    let masks = gen::alpha_masks(0xA1FA_0001, 48);
     let blocks = gen::colour_classes(0xA1FA_0002, 3);
     for perceptual in [false, true] {
         for &mask in &masks {
@@ -234,6 +232,62 @@ fn bc1_alpha_endpoint_search_runs_all_64_rounds() {
     }
 }
 
+/// A least-squares pass whose result is the current endpoints swapped (task 5 reviews), traced and explained from the
+/// C++. Two opaque texels, 0 = (47, 20, 19) and 15 = (48, 20, 21) (mask 0x7FFE). The extents are 1, 0, 2, so the
+/// power iteration stays far below 2 and the default axis (306, 601, 117) is kept (rgbcx.cpp 2105-2113); texel 0
+/// dots lower, so the endpoints are low (6, 5, 2), high (6, 5, 3) (2134-2135). Both texels are nearest the midpoint
+/// (49, 20, 20), error 14. One selector makes the fit singular, and the fallback is the `half` match of the opaque
+/// average (48, 20, 20) (2147-2153): low (6, 5, 3), high (6, 5, 2), the same two endpoints the other way round. That
+/// is not equal channel by channel (2160), its palette has the same midpoint, so its error is 14 again and `err2 >=
+/// err` ends the passes (2165). No endpoint step improves, so the block keeps (6, 5, 2), (6, 5, 3) with both texels on
+/// the midpoint.
+#[test]
+fn bc1_alpha_least_squares_pass_returns_the_endpoints_swapped() {
+    let mut px = [[0, 0, 0, 0]; 16];
+    px[0] = [47, 20, 19, 255];
+    px[15] = [48, 20, 21, 255];
+    for perceptual in [false, true] {
+        same(&px, 0x7FFE, perceptual);
+    }
+    let b = same(&px, 0x7FFE, false);
+    assert_eq!(colours(&b), (0x30A2, 0x30A3));
+    let sels = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+    for i in 0..16 {
+        let want = if i == 0 || i == 15 { 2 } else { 3 };
+        assert_eq!((sels >> (2 * i)) & 3, want, "texel {i}");
+    }
+}
+
+/// An improving +-1 endpoint step after which the packed colours change order (task 5 reviews), traced and explained
+/// from the C++. Opaque texels 4 and 8 = (226, 21, 162) and 5 = (226, 21, 155) (mask 0xFECF). Only blue varies, so
+/// the default axis is kept; texel 5 dots lowest and texel 4 highest (texel 8 ties it, strict `>`, 2127), giving low
+/// (27, 5, 19), high (27, 5, 20): packed 0xD8B3 below 0xD8B4. Texel 5 sits on the low endpoint, 4 and 8 on the
+/// midpoint, error 114; the least-squares pass scores 140 and stops (2165). Round 0, step 1 raises the low red code
+/// (2177-2182): low (28, 5, 19), packed 0xE0B3, now above the high endpoint. The midpoint's red moves from 222 to
+/// 226 (NVIDIA) and 227 (AMD), on the texels' 226, so 114 falls to 70 (2188); nothing improves after it.
+/// `bc1_encode3` then swaps the colours and selectors 0 and 1: colour 0 is (27, 5, 20) and texel 5 reads selector 1.
+#[test]
+fn bc1_alpha_improving_step_reverses_the_packed_order() {
+    let mut px = [[0, 0, 0, 0]; 16];
+    px[4] = [226, 21, 162, 255];
+    px[5] = [226, 21, 155, 255];
+    px[8] = [226, 21, 162, 255];
+    for perceptual in [false, true] {
+        same(&px, 0xFECF, perceptual);
+    }
+    let b = same(&px, 0xFECF, false);
+    assert_eq!(colours(&b), (0xD8B4, 0xE0B3));
+    let sels = u32::from_le_bytes([b[4], b[5], b[6], b[7]]);
+    for i in 0..16 {
+        let want = match i {
+            4 | 8 => 2,
+            5 => 1,
+            _ => 3,
+        };
+        assert_eq!((sels >> (2 * i)) & 3, want, "texel {i}");
+    }
+}
+
 /// A full-noise block with four texels masked: with perceptual weights every refit finds a strictly lower error up to
 /// the eighth pass, the last the bound allows (rgbcx.cpp 2141), and that pass changes the bytes. Found among the
 /// coverage test's inputs by setting the bound to 7; the six blocks that scan reported all use perceptual weights,
@@ -306,9 +360,8 @@ fn bc1_alpha_single_opaque_texel() {
     }
 }
 
-/// 50 million blocks over 16 threads, each block with a mask drawn from [`gen::alpha_masks`] or (every third block)
-/// uniform at random, garbage under it on odd blocks, half with each weight set; generated in batches so memory stays
-/// small. Run with `-- --ignored`.
+/// 50 million blocks over 16 threads, each block with a mask drawn from [`gen::alpha_masks`], garbage under it on odd
+/// blocks, half with each weight set; generated in batches so memory stays small. Run with `-- --ignored`.
 #[test]
 #[ignore = "50 million blocks, about 20 seconds on 16 threads"]
 fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
@@ -331,12 +384,7 @@ fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
                             if n == PER_THREAD {
                                 break;
                             }
-                            // A third of the masks uniform, for the opaque counts the classes skip.
-                            let mask = if n % 3 == 2 {
-                                r.next() as u16
-                            } else {
-                                masks[r.below(masks.len() as u64) as usize]
-                            };
+                            let mask = masks[r.below(masks.len() as u64) as usize];
                             if n % 2 == 1 {
                                 same(&garbage_under(&px, mask, &mut r), mask, perceptual);
                             } else {

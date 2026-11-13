@@ -2,6 +2,7 @@
 //! plain or perceptual weights) on every block class and on solid colours. Solid blocks take rgbcx's
 //! `encode_bc1_solid_block`, so the solid tests also prove the single-colour tables (`equals_1` with three-colour off,
 //! `half` too with it on).
+use bcenc::bc1::palette::{dual_err, dual_palette};
 use bcenc::bc1_encode_block;
 
 #[path = "support/gen.rs"]
@@ -23,6 +24,19 @@ fn same(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
 
 fn solid(r: u8, g: u8, b: u8) -> [[u8; 4]; 16] {
     [[r, g, b, 255]; 16]
+}
+
+/// The two 16-bit colours of a block: (colour 0, colour 1).
+fn colours(b: &[u8; 8]) -> (u16, u16) {
+    (
+        u16::from_le_bytes([b[0], b[1]]),
+        u16::from_le_bytes([b[2], b[3]]),
+    )
+}
+
+/// The 2-bit selector of texel `i` as the block stores it.
+fn sel(b: &[u8; 8], i: usize) -> u32 {
+    (u32::from_le_bytes([b[4], b[5], b[6], b[7]]) >> (2 * i)) & 3
 }
 
 #[test]
@@ -100,6 +114,129 @@ fn bc1_three_colour_block_with_every_texel_on_the_high_endpoint() {
     }
 }
 
+/// An accepted three-colour endpoint-search step that reverses the packed colour order (task 4 Codex review, section
+/// 5), traced and explained from the C++. Eleven texels P = (236, 3, 85), five Q = (236, 3, 148). The four-colour
+/// rounds and orderings end at error 463; `try_3color_block` (rgbcx.cpp 1713-1881) starts from round 1's initial
+/// endpoints and its orderings reach low (29, 1, 3), high (29, 1, 18) with error 342: Q on the high endpoint, P on the
+/// midpoint, blue 86 against 85 (both decoders). 342 < 463, so the block is three-colour. Packed, low 0xE823 is below
+/// high 0xE832. The endpoint search (2589-2652, `m_3color`) takes round 3, step (-1, 0, 0) on the high endpoint
+/// (2617-2619): high (28, 1, 18) packs to 0xE032, now below low. The midpoint's red falls from 239 to 235, one from P's
+/// 236, so each P texel's error drops from 22 to 6, and each Q texel's rises from 20 to 52 (red 231): 342 - 176 + 160
+/// = 326 < 342, accepted (2636). No later step improves, so `bc1_encode3` (1493-1529) swaps the colours and selectors 0
+/// and 1: colour 0 is (28, 1, 18), Q reads selector 0, P stays on 2. Without the crossing step the colours would be
+/// 0xE823, 0xE832 with Q on selector 1. The class `blue_pair` varies this shape.
+#[test]
+fn bc1_three_colour_search_step_crosses_the_packed_order() {
+    let (p, q) = ([236, 3, 85, 255], [236, 3, 148, 255]);
+    let px = [p, q, p, p, q, q, p, p, p, p, p, p, q, p, q, p];
+    for (allow_3color, perceptual) in MODES {
+        same(&px, allow_3color, perceptual);
+    }
+    let b = same(&px, true, false);
+    assert_eq!(colours(&b), (0xE032, 0xE823));
+    for (i, t) in px.iter().enumerate() {
+        assert_eq!(sel(&b, i), if *t == q { 0 } else { 2 }, "texel {i}");
+    }
+}
+
+/// A non-solid block whose first three-colour selectors are all the midpoint, then a singular fit whose single-colour
+/// fallback ties (task 4 Codex review, section 5), traced and explained from the C++. Fifteen texels (111, 89, 122),
+/// texel 4 (111, 90, 122). Round 1 (bounding box, range under 8, so the inset is negative) starts at low (13, 22, 15),
+/// high (14, 22, 15): red 107 and 115 around 111, so every texel is nearest the midpoint (111, 89, 123) and
+/// `try_3color_block`'s first search (rgbcx.cpp 1725) puts all 16 on selector 2. One selector makes the fit singular
+/// (903), and the fallback (1736-1742) is the `half` match of the average: low (27, 22, 15), high (0, 22, 15). Its
+/// midpoint is the same colour (red (222 + 0) / 2 in both decoders), so its error equals the first one (34 plain, 974
+/// perceptual): the search with that cutoff (1753) reaches the cutoff exactly at texel 15 and returns, and the strict
+/// `<` (1755) rejects it. With perceptual weights the three-colour block wins (974 < 1534), keeping the first
+/// endpoints and every texel on the midpoint; accepting the tie would have taken texel 15's unwritten selector.
+#[test]
+fn bc1_three_colour_midpoint_block_with_a_tying_single_colour_fit() {
+    let mut px = [[111, 89, 122, 255]; 16];
+    px[4] = [111, 90, 122, 255];
+    for (allow_3color, perceptual) in MODES {
+        same(&px, allow_3color, perceptual);
+    }
+    let b = same(&px, true, true);
+    // (13, 22, 15) and (14, 22, 15), every texel on the midpoint.
+    assert_eq!(colours(&b), (0x6ACF, 0x72CF));
+    assert!(
+        (0..16).all(|i| sel(&b, i) == 2),
+        "selectors {:02x?}",
+        &b[4..]
+    );
+}
+
+/// A dark three-colour block where black (palette entry 3) is the uniquely nearest entry for a texel, and the encode
+/// does not use it (task 4 Codex review, section 5): every three-colour selector search runs `j <= last` with `last =
+/// use_black ? 3 : 2` (rgbcx.cpp 1075); `try_3color_block` passes `false` (1725, 1753, 1844) and the endpoint search
+/// passes `any_black_pixels && cEncodeBC1Use3ColorBlocksForBlackPixels` (2628), a flag this call never sets. Seven
+/// texels A = (78, 65, 24), eight B = (15, 73, 56) and texel 8 K = (2, 1, 0), found by a search and traced:
+/// `try_3color_block` ends at (17, 16, 0) and (2, 16, 6) (red 140 and 16) with A on the midpoint and B and K on
+/// (2, 16, 6), error 15217 plain (1814827 perceptual) against the four-colour 15315 (1817179), so the block is
+/// three-colour. Black would be far nearer K than (16, 65, 49) is. The test asserts a three-colour block, no texel on
+/// selector 3, and K's error to black below its error to each of the three colours.
+#[test]
+fn bc1_three_colour_block_never_uses_black_for_a_black_texel() {
+    let (a, b, k) = ([78, 65, 24, 255], [15, 73, 56, 255], [2, 1, 0, 255]);
+    let px = [a, a, a, a, b, b, b, b, k, b, b, a, b, b, a, a];
+    for (allow_3color, perceptual) in MODES {
+        same(&px, allow_3color, perceptual);
+    }
+    for perceptual in [false, true] {
+        let out = same(&px, true, perceptual);
+        let (c0, c1) = colours(&out);
+        assert!(c0 <= c1, "a three-colour block: {c0:#06x}, {c1:#06x}");
+        assert!(
+            (0..16).all(|i| sel(&out, i) != 3),
+            "selectors {:02x?}",
+            &out[4..]
+        );
+        let code = |c: u16| [(c >> 11) as i32, ((c >> 5) & 63) as i32, (c & 31) as i32];
+        let (l, h) = (code(c0), code(c1));
+        let p = dual_palette(true, l[0], l[1], l[2], h[0], h[1], h[2]);
+        let w = if perceptual { [54, 183, 19] } else { [1, 1, 1] };
+        let black = dual_err(&p, w, 3, k);
+        for s in 0..3 {
+            assert!(
+                black < dual_err(&p, w, s, k),
+                "entry {s} is as near as black"
+            );
+        }
+    }
+}
+
+/// One block in sixteen positions: fifteen texels on the exact 5:6:5 colour A = (165, 105, 247) = codes (20, 26, 30),
+/// one X = (177, 105, 247) at texel `k` (task 4 Codex review, section 5: the selector search's cutoff equality at
+/// different texels, with zero-error texels after it). With three-colour blocks and perceptual weights,
+/// `try_3color_block` starts from low A, high (22, 26, 30) (red 181): X is 4 from the high endpoint and from the
+/// midpoint 173, so it stays on selector 1 with error 1728 (54 * 16 per decoder). The first fit gives low A, high
+/// (21, 26, 30) (red 173): X again 4 away, error 1728. That search's cutoff is 1728 (rgbcx.cpp 1753), every A texel
+/// is exact on the low endpoint, so the running total reaches the cutoff exactly at texel `k` and returns (1087-1088)
+/// with the texels after `k` at error 0; `<` rejects it (1755). The orderings then reach high (23, 26, 30), whose
+/// midpoint 177 is X itself: error 0, a three-colour block. A traced run showed the three-colour equality at texel `k`
+/// for every `k`, and the four-colour ordering loop's equality (cutoff 108) at `k` too. The A texels are identical, so
+/// no step before the search depends on where X is.
+#[test]
+fn bc1_selector_search_cutoff_equality_at_every_texel() {
+    let a = [165, 105, 247, 255];
+    for k in 0..16 {
+        let mut px = [a; 16];
+        px[k] = [177, 105, 247, 255];
+        for (allow_3color, perceptual) in MODES {
+            same(&px, allow_3color, perceptual);
+        }
+        let b = same(&px, true, true);
+        assert_eq!(colours(&b), (0xA35E, 0xBB5E), "X at {k}");
+        for i in 0..16 {
+            assert_eq!(
+                sel(&b, i),
+                if i == k { 2 } else { 0 },
+                "X at {k}, texel {i}"
+            );
+        }
+    }
+}
+
 /// Every grey, every colour with channels in the edge set, then random colours up to 20 000; each in both modes and
 /// with both weight sets (the solid path reads no weights, so they give the same bytes).
 #[test]
@@ -157,15 +294,18 @@ fn bc1_solid_blocks_equal_rgbcx_on_every_colour() {
     );
 }
 
-/// 100 million class blocks over 16 threads, four per `(allow_3color, perceptual)` combination, generated in batches
-/// so memory stays small; each thread takes exactly its share (the last batch cut short). Run with `-- --ignored`; a
-/// mismatch stops the thread with the replay data.
+/// At least 100 million class blocks over 16 threads, four per `(allow_3color, perceptual)` combination, generated in
+/// whole batches of `PER_CLASS` blocks per class so memory stays small and every class gets the same share. Run with
+/// `-- --ignored`; a mismatch stops the thread with the replay data.
 #[test]
-#[ignore = "100 million blocks, about 15 minutes on 16 threads"]
+#[ignore = "100 million blocks, about 11 minutes on 16 threads"]
 fn bc1_equals_rgbcx_on_100_million_blocks() {
     const THREADS: u64 = 16;
-    const PER_THREAD: usize = 6_250_000; // 16 threads x 6.25 million = 100 million, 25 million per combination
     const PER_CLASS: usize = 1_000;
+    const BATCH: usize = PER_CLASS * gen::COLOUR_CLASSES;
+    // 6.25 million (100 million over 16 threads) rounded up to whole batches.
+    const BATCHES: usize = 6_250_000usize.div_ceil(BATCH);
+    const PER_THREAD: usize = BATCHES * BATCH;
     let start = std::time::Instant::now();
     let totals: Vec<usize> = std::thread::scope(|s| {
         let handles: Vec<_> = (0..THREADS)
@@ -173,17 +313,12 @@ fn bc1_equals_rgbcx_on_100_million_blocks() {
                 let (allow_3color, perceptual) = MODES[(t % 4) as usize];
                 s.spawn(move || {
                     let mut n = 0;
-                    let mut batch = 0u64;
-                    while n < PER_THREAD {
+                    for batch in 0..BATCHES as u64 {
                         let seed = 0x2_0000_0000 + (t * 10_000 + batch) * 0x9E37_79B9;
                         for px in gen::colour_classes(seed, PER_CLASS) {
-                            if n == PER_THREAD {
-                                break;
-                            }
                             same(&px, allow_3color, perceptual);
                             n += 1;
                         }
-                        batch += 1;
                     }
                     n
                 })
@@ -193,12 +328,15 @@ fn bc1_equals_rgbcx_on_100_million_blocks() {
     });
     for (m, mode) in MODES.iter().enumerate() {
         let per_mode: usize = totals.iter().skip(m).step_by(4).sum();
-        assert_eq!(per_mode, 25_000_000, "blocks for {mode:?}");
+        assert_eq!(per_mode, 4 * PER_THREAD, "blocks for {mode:?}");
     }
     let total: usize = totals.iter().sum();
-    assert_eq!(total, 100_000_000);
+    assert_eq!(total, 16 * PER_THREAD);
+    assert!(total >= 100_000_000);
     eprintln!(
-        "{total} blocks (25 million per combination), 0 mismatches, {:.1} s",
+        "{total} blocks ({} per combination, {} per class), 0 mismatches, {:.1} s",
+        4 * PER_THREAD,
+        total / gen::COLOUR_CLASSES,
         start.elapsed().as_secs_f64()
     );
 }

@@ -2,6 +2,7 @@
 use crate::bc1::alpha::encode_alpha;
 use crate::bc1::encode::encode;
 use crate::bc1::palette::{dual_palette, single_tables};
+use crate::bc1::{precise_round_565, to_5, to_6};
 use crate::bc1::{PERCEPTUAL, PLAIN};
 use crate::hits::counts;
 use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
@@ -62,4 +63,27 @@ fn every_ported_branch_is_taken() {
         .map(|(h, _)| h)
         .collect();
     assert!(never.is_empty(), "branches never taken: {never:?}");
+}
+
+/// The class generators' restated rounding (`round_code`, `round_code_midpoint`, which find the 565 rounding
+/// boundaries) is the port's own: `to_5`/`to_6`, and `precise_round_565` of `v / 255`, for every 8-bit value. Inputs
+/// in 0..=1 take neither clamp branch of `precise_round_565`, so this test adds to no counter.
+#[test]
+fn the_class_rounding_is_the_ports() {
+    for v in 0..=255u8 {
+        assert_eq!(gen::round_code(v, 31), to_5(v as u32), "to_5({v})");
+        assert_eq!(gen::round_code(v, 63), to_6(v as u32), "to_6({v})");
+        let x = [v as f32 * (1.0f32 / 255.0f32); 3];
+        let (codes, _) = precise_round_565(&x, &x);
+        assert_eq!(
+            gen::round_code_midpoint(v, 31),
+            codes[0],
+            "5-bit midpoint of {v}"
+        );
+        assert_eq!(
+            gen::round_code_midpoint(v, 63),
+            codes[1],
+            "6-bit midpoint of {v}"
+        );
+    }
 }
