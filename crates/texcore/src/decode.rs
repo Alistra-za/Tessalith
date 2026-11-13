@@ -329,3 +329,47 @@ fn rgba(
         }),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::bc1_block_nvidia;
+
+    // Pinned palettes, worked out by hand from the rgbcx formulas. The proof against rgbcx itself is in the
+    // engine's tests (`dds_read.rs`, Note HX1), because this crate cannot link the encoders.
+    const WHITE: [u8; 4] = [255, 255, 255, 255];
+    const BLACK: [u8; 4] = [0, 0, 0, 255];
+    const CLEAR: [u8; 4] = [0, 0, 0, 0];
+
+    #[test]
+    fn bc1_nvidia_four_colour_block_has_the_pinned_palette() {
+        // c0 = 0xFFFF > c1 = 0x0000: four colours. Selector rows pick entry 0, 1, 2, 3 for a whole row each.
+        let out = bc1_block_nvidia(&[0xFF, 0xFF, 0x00, 0x00, 0x00, 0x55, 0xAA, 0xFF]);
+        for (row, want) in [WHITE, BLACK, [170, 175, 170, 255], [85, 80, 85, 255]]
+            .into_iter()
+            .enumerate()
+        {
+            assert_eq!(out[row * 4..row * 4 + 4], [want; 4], "row {row}");
+        }
+    }
+
+    #[test]
+    fn bc1_nvidia_three_colour_block_has_a_half_tone_and_a_clear_entry() {
+        // c0 = 0x0000 <= c1 = 0xFFFF: three colours and transparent black. 0xE4 picks entries 0..=3 along a row.
+        let out = bc1_block_nvidia(&[0x00, 0x00, 0xFF, 0xFF, 0xE4, 0xE4, 0xE4, 0xE4]);
+        for row in 0..4 {
+            assert_eq!(
+                out[row * 4..row * 4 + 4],
+                [BLACK, WHITE, [127, 128, 127, 255], CLEAR],
+                "row {row}"
+            );
+        }
+    }
+
+    #[test]
+    fn bc1_nvidia_equal_endpoints_use_the_three_colour_mode() {
+        // c0 == c1 == 0xF800 (red): not greater, so entry 3 is transparent black.
+        let red = [255, 0, 0, 255];
+        let out = bc1_block_nvidia(&[0x00, 0xF8, 0x00, 0xF8, 0xE4, 0xE4, 0xE4, 0xE4]);
+        assert_eq!(out[..4], [red, red, red, CLEAR]);
+    }
+}
