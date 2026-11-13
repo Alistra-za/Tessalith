@@ -337,7 +337,7 @@ fn diag_arch_head_on_bundled_cs() {
         println!("saved {}", png.display());
     }
     let rfaos = find("textures/arch/skin/light/head_rfaos.dds").unwrap();
-    let (img, _, meta) = engine::load::load_image_meta(&rfaos).unwrap();
+    let (img, _, meta) = texcore::load::load_image_meta(&rfaos).unwrap();
     let n = img.px.len() as f64;
     let m = |c: usize| img.px.iter().map(|p| p[c] as f64).sum::<f64>() / n;
     println!(

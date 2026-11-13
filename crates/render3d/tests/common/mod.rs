@@ -98,7 +98,7 @@ pub fn cache_files(dir: &Path) -> usize {
 }
 
 /// An uncompressed RGBA8 DDS, one mip, legacy header with masks R 0xff, G 0xff00, B 0xff0000, A 0xff000000
-/// (`engine::dds::read_dds` reads it as `Rgba8 { srgb: false }`, dds.rs:533). `texels` row by row, top first.
+/// (`texcore::dds::read_dds` reads it as `Rgba8 { srgb: false }`, dds.rs:533). `texels` row by row, top first.
 pub fn dds_rgba8(w: u32, h: u32, texels: &[[u8; 4]]) -> Vec<u8> {
     assert_eq!(texels.len(), (w * h) as usize);
     let mut b = vec![0u8; 128];

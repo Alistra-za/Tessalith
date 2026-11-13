@@ -32,6 +32,7 @@ function Step([string]$Name, [scriptblock]$Run) {
 Step fmt { cargo fmt --all --check }
 Step clippy-all { cargo clippy --offline --workspace --all-targets -- -D warnings }
 Step clippy { cargo clippy --offline --workspace -- -D warnings }
+Step render3d-alone { cargo check --offline -p render3d }
 if ($failed) {
     'Tests skipped: fix fmt and clippy first.'
 } else {

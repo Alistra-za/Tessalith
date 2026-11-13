@@ -29,6 +29,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy --workspace -- -D warnings
+      # render3d and texcore alone, image loading off: other programs build them this way (Note HX6).
+      - run: cargo check -p render3d
       # No ISPC compiler is needed: the encoder objects are vendored (crates/encoders-sys/vendor).
       # Tests that need owner data are #[ignore]d or skip without SDC_BENCH_ROOT and similar variables.
       # The render3d and gui GPU tests use the WARP software adapter or skip when no adapter is found,

@@ -26,15 +26,15 @@ pub const AMBIENT_SCALE: f32 = 0.3;
 
 /// World direction (unit, Z-up) -> image coordinates `(u, v)` in 0..1 (`v` = 0 at +Z), turned by [`YAW`].
 pub fn dir_to_uv(d: [f32; 3]) -> (f32, f32) {
-    engine::cube::latlong::dir_to_uv(d, YAW)
+    texcore::cube::latlong::dir_to_uv(d, YAW)
 }
 
 /// Inverse of [`dir_to_uv`].
 pub fn uv_to_dir(u: f32, v: f32) -> [f32; 3] {
-    engine::cube::latlong::uv_to_dir(u, v, YAW)
+    texcore::cube::latlong::uv_to_dir(u, v, YAW)
 }
 
-pub use engine::cube::rgbe::{decode_rgbe, Hdr};
+pub use texcore::cube::rgbe::{decode_rgbe, Hdr};
 
 /// One cell of the ≤ 64×32 solid-angle box-downsample: world direction of its centre, solid-angle weight, mean
 /// radiance.
@@ -113,8 +113,8 @@ pub fn ambient6(img: &Hdr) -> [[f32; 3]; 6] {
 /// Side of the environment cube (v2 D5): the captured Dynamic Cubemaps cube is 256², 9 mips.
 pub const ENV_SIZE: u32 = 256;
 
-/// CS's GetSamplingVector, see [`engine::cube::cube_dir`] (moved to the engine, Note DS1).
-pub use engine::cube::cube_dir;
+/// CS's GetSamplingVector, see [`texcore::cube::cube_dir`] (lives in texcore, Notes DS1, HX5).
+pub use texcore::cube::cube_dir;
 
 /// Per texel of a `size` cube (face-major): the yaw-free part of [`dir_to_uv`] of its [`cube_dir`], the azimuth term
 /// `atan2(y, x) + YAW` and `v`.
@@ -198,8 +198,8 @@ pub fn specular_chain(
     faces: &[Vec<[f32; 4]>; 6],
     size: u32,
 ) -> Result<[Vec<Vec<[f32; 4]>>; 6], String> {
-    use engine::cube::Cube;
-    use engine::image::Rgba32F;
+    use texcore::cube::Cube;
+    use texcore::image::Rgba32F;
     let boxed = faces
         .iter()
         .map(|f| mip_chain(f, size))
@@ -238,7 +238,7 @@ pub fn specular_chain(
                         let (f, j) = (i / per_face, (i % per_face) as u32);
                         // CS's getSamplingVector: the texel's corner (ThreadID / size, no + 0.5), Note GM2.
                         let at = |c: u32| c as f32 / n as f32;
-                        let dir = engine::cube::dir_at(f, at(j % n), at(j / n));
+                        let dir = texcore::cube::dir_at(f, at(j % n), at(j / n));
                         *p = prefilter(src, dir, r, wt);
                     }
                 });
@@ -252,7 +252,7 @@ pub fn specular_chain(
 }
 
 /// One texel of [`specular_chain`]: SpecularIrradianceCS.hlsl `main` with N = V = `n`.
-fn prefilter(src: &[engine::cube::Cube], n: [f32; 3], r: f32, wt: f32) -> [f32; 4] {
+fn prefilter(src: &[texcore::cube::Cube], n: [f32; 3], r: f32, wt: f32) -> [f32; 4] {
     const SAMPLES: u32 = 16;
     let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
     let cross = |a: [f32; 3], b: [f32; 3]| {
@@ -298,8 +298,8 @@ fn prefilter(src: &[engine::cube::Cube], n: [f32; 3], r: f32, wt: f32) -> [f32; 
         let lo = mip.floor() as usize;
         let hi = (lo + 1).min(last);
         let (a, b) = (
-            engine::cube::sample::fetch(&src[lo], li),
-            engine::cube::sample::fetch(&src[hi], li),
+            texcore::cube::sample::fetch(&src[lo], li),
+            texcore::cube::sample::fetch(&src[hi], li),
         );
         let f = mip - lo as f32;
         for k in 0..3 {

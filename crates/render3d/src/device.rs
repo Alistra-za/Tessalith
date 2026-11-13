@@ -361,7 +361,7 @@ fn srgb8(bits: u16) -> u8 {
         return 0;
     }
     let l = v.clamp(0.0, 1.0);
-    let s = engine::ops::linear_to_srgb(l);
+    let s = texcore::transfer::linear_to_srgb(l);
     (s * 255.0).round() as u8
 }
 
