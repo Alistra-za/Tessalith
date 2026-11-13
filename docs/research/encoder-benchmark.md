@@ -642,6 +642,44 @@ Tessalith 1.x could hand BC7 and BC6H to the user's own NVTT 3.2.5 `nvcompress` 
 - Uncompressed DDS input works only with a legacy header. nvcompress reads DX10 B8G8R8A8 and RGBA16F as garbage (RGB PSNR 5.05 dB); a legacy BGRA header, or FourCC 113 for RGBA16F, gives a payload byte-identical to the PNG feed.
 - The no-argument run exits 1, and a truncated input exits 1 with no output.
 
+### Encode time of the Rust port of rgbcx (2026-11-13, Note HY)
+
+Tessalith encodes BC1, BC3, BC4 and BC5 with `bcenc`, a Rust port of its patched rgbcx. The port runs the same search and writes the same bytes. Three changes make it faster, and each gives the C++ result for every block:
+
+- **A repeated pair of BC1 endpoints is scored once.** rgbcx's level-18 search reaches the same two endpoint colours many times in one block, by different routes. The port keeps the pairs it has scored for the block and skips a repeat.
+- **A pair is scored against all 16 texels at once.** Finding each texel's nearest palette entry and summing the error is SSE2 integer code over the whole block, in BC1 and in BC4.
+- **BC4 searches each mode once.** rgbcx searches the 8-value and the 6-value candidates, then searches one mode's candidates again when it refits. The port keeps the first search's result.
+
+Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (16 textures of 1024² from installed Skyrim mods), `bcenc` at c81ae94e against the vendored C++ on the [benchmark machine](#benchmark-machine-and-tools), with the arguments the engine passes (`crates/bcenc/examples/speed.rs`):
+
+| Format | rgbcx (C++) | `bcenc` | `bcenc` / C++ |
+|---|--:|--:|--:|
+| BC1 | 27.20 | 5.38 | 0.20 |
+| BC1, perceptual | 26.87 | 5.34 | 0.20 |
+| BC1, one-bit alpha | 14.97 | 3.02 | 0.20 |
+| BC3 | 25.34 | 4.85 | 0.19 |
+| BC4 | 30.07 | 1.84 | 0.06 |
+| BC5 | 58.24 | 3.67 | 0.06 |
+
+The port before the three changes (945ad68c) took 0.69 of the C++ time on BC1 and BC3 and 0.82 on BC4 and BC5.
+
+`sdc convert` of 300 PNGs with the format forced, Tessalith 3.0.0 against c81ae94e, in seconds (reading, mips and writing included):
+
+| Forced format | 3.0.0 | c81ae94e |
+|---|--:|--:|
+| BC1 | 63.0 | 15.7 |
+| BC3 | 61.8 | 15.1 |
+| BC4 | 21.3 | 5.5 |
+| BC5 | 26.4 | 6.0 |
+
+Every DDS has the same SHA-256 from both builds, in these four configurations and seven more (perceptual, one-bit alpha, cutout, a BC3 alpha cut, the `vanilla-compact` preset).
+
+Compared with the C++ block by block, 0 mismatches in each:
+- **The plain port (017fbc68):** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons.
+- **c81ae94e:** 100 million generated BC1 blocks, every solid colour, 50 million one-bit-alpha blocks, 50 million BC3 blocks and 20 million BC4 blocks.
+
+A sampling profile of c81ae94e on the same blocks shows where the rest of the time goes. BC1: the least-squares endpoint fits of the selector orderings 38%, scoring texels and building palettes 33%, the table of scored pairs 14%. BC4: scoring texels 62%, building palettes 16%.
+
 ### Encoder maintenance (October 2026)
 
 | Encoder | Status |
