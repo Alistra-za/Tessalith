@@ -386,14 +386,15 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
     hit!(Hit::LsRoundsExhausted);
 }
 
-/// Refit the best of each mode, not only the overall best: `ls_refine` on `b`, then a fresh search of rgbcx's own
-/// candidates in the other mode, `ls_refine` on that, keeping the strictly better.
+/// Refit the best of each mode, not only the overall best: `ls_refine` on `b`, then the other mode's best from
+/// `modes` (what `v0_modes` returned for this block), `ls_refine` on that, keeping the strictly better.
 ///
-/// The other mode's search is the one `v0_modes` already ran: the same candidates, in the same order, with the same
-/// skip of equal ends, on a fresh best, so its result is `modes[1]` (6-value) when `b` is in the 8-value mode and
-/// `modes[0]` otherwise. `ls_refine` of `b` changes `b` only, and the mode is read after it, as before. In the unit
-/// tests `rad` lets the old search run and be compared.
-pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2], #[cfg(test)] rad: i32) {
+/// The C++ searches rgbcx's candidates in the other mode again here. That search is the one `v0_modes` already ran:
+/// the same candidates, in the same order, with the same skip of equal ends, on a fresh best, so its result is
+/// `modes[1]` (6-value) when `b` is in the 8-value mode and `modes[0]` otherwise. `ls_refine` of `b` changes `b`
+/// only, and the mode is read after it, as before. In the unit tests `search` compares both entries of `modes` with
+/// the old search (`check_modes`).
+pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2]) {
     ls_refine(v, b);
     let (mn, mx) = minmax(v);
     if mn != mx {
@@ -405,15 +406,6 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2], #[cfg(test)] ra
             hit!(Hit::RefitOtherEightValue);
             modes[0]
         };
-        #[cfg(test)]
-        {
-            let r = other_mode_reference(v, mode8, rad);
-            assert_eq!(
-                (o.err, o.e0, o.e1, o.sels),
-                (r.err, r.e0, r.e1, r.sels),
-                "{v:?} {mode8} {rad}"
-            );
-        }
         ls_refine(v, &mut o);
         if o.err < b.err {
             hit!(Hit::RefitOtherBetter);
@@ -426,7 +418,29 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2], #[cfg(test)] ra
     }
 }
 
-/// Today's second loop of `refit_both`: rgbcx's candidates in the mode opposite to `mode8`, on a fresh best. The
+/// The shadow check of `search`: each entry of `modes` against the old second loop of `refit_both`, which searched
+/// the mode opposite to `mode8`. Unit tests only, so every block they search is checked. A solid block has no such
+/// loop.
+#[cfg(test)]
+fn check_modes(v: &[u8; 16], modes: &[Best; 2], rad: i32) {
+    let (mn, mx) = minmax(v);
+    if mn == mx {
+        return;
+    }
+    for mode8 in [false, true] {
+        let (a, r) = (
+            modes[usize::from(mode8)],
+            other_mode_reference(v, mode8, rad),
+        );
+        assert_eq!(
+            (a.err, a.e0, a.e1, a.sels),
+            (r.err, r.e0, r.e1, r.sels),
+            "{v:?} {mode8} {rad}"
+        );
+    }
+}
+
+/// The old second loop of `refit_both`: rgbcx's candidates in the mode opposite to `mode8`, on a fresh best. The
 /// reference for the per-mode results of `v0_modes`.
 #[cfg(test)]
 fn other_mode_reference(v: &[u8; 16], mode8: bool, rad: i32) -> Best {
@@ -529,8 +543,7 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let mut b = base;
     inner6(v, &mut b, rad);
     #[cfg(test)]
-    refit_both(v, &mut b, &modes, rad);
-    #[cfg(not(test))]
+    check_modes(v, &modes, rad);
     refit_both(v, &mut b, &modes);
     trimmed6(v, &mut b);
     local(v, &mut b);
@@ -600,7 +613,7 @@ mod tests {
 
     #[test]
     fn each_mode_equals_the_other_mode_search() {
-        let (mut eight, mut six) = (0usize, 0usize);
+        let mut blocks = 0usize;
         for v in gen::bc4_classes(0xB4B4_0007, 200) {
             if v.iter().all(|&x| x == v[0]) {
                 continue;
@@ -615,15 +628,14 @@ mod tests {
                         (b.err, b.e0, b.e1, b.sels),
                         "{v:?} radius {rad} {mode8}"
                     );
-                    if mode8 {
-                        six += 1;
-                    } else {
-                        eight += 1;
-                    }
                 }
             }
+            blocks += 1;
         }
-        assert!(eight > 0 && six > 0, "8-value {eight}, 6-value {six}");
+        assert!(
+            blocks > 0,
+            "the classes held no block of two or more values"
+        );
     }
 
     #[test]
