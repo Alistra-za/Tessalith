@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp", "crates/texcore"]
+members = ["crates/encoders-sys", "crates/engine", "crates/cli", "crates/gui", "crates/nif", "crates/vfs", "crates/modscan", "crates/render3d", "crates/pgpsim", "crates/esp", "crates/texcore", "crates/bcenc"]
 
 [workspace.package]
 version = "3.0.0"
@@ -29,6 +29,7 @@ ctrlc = "3"
 humantime = "2"
 cc = "1"
 encoders-sys = { path = "crates/encoders-sys" }
+bcenc = { path = "crates/bcenc" }
 engine = { path = "crates/engine" }
 encoding_rs = "0.8.42"
 lz4_flex = { version = "0.14.0", default-features = false, features = ["frame", "std"] }
@@ -46,6 +47,10 @@ debug = "line-tables-only"
 opt-level = 2
 
 [profile.dev.package.encoders-sys]
+opt-level = 3
+
+# The block searches run per 4x4 block in tests that cover millions of blocks (Note HY).
+[profile.dev.package.bcenc]
 opt-level = 3
 
 # Per-texel helpers every stage calls; they were same-crate calls in engine (Note HX).

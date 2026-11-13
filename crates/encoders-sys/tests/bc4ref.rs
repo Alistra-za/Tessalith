@@ -1,12 +1,12 @@
 //! Pins the BC4 reference search (docs/research/bc4-family.md): `upstream` to the upstream rgbcx path, `search` to its
 //! never-worse rule and to the patched C++ (BC3/BC4/BC5 entry points). The engine's end-to-end check is in
 //! `crates/engine/tests/encode.rs`.
+use bcenc::bc4::{search, upstream};
 use encoders_sys::{bc3_encode_block, bc4_encode_block, bc5_encode_block};
-use support::bc4ref::{blocks, search, upstream};
+use gen::blocks;
 
-mod support {
-    pub mod bc4ref;
-}
+#[path = "../../bcenc/tests/support/gen.rs"]
+mod gen;
 fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
     let mut p = [[7u8; 4]; 16];
     for i in 0..16 {

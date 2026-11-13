@@ -461,6 +461,13 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f09c37bc0e9f0924b7dae9988265ef3c76c88538f41a3b06caf4bed07cee5226"
 
 [[package]]
+name = "bcenc"
+version = "3.0.0"
+dependencies = [
+ "encoders-sys",
+]
+
+[[package]]
 name = "bit-set"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1076,6 +1083,7 @@ name = "encoders-sys"
 version = "3.0.0"
 dependencies = [
  "bcdec_rs",
+ "bcenc",
  "cc",
  "half",
  "hex",
@@ -1108,6 +1116,7 @@ name = "engine"
 version = "3.0.0"
 dependencies = [
  "bcdec_rs",
+ "bcenc",
  "encoders-sys",
  "engine",
  "flate2",

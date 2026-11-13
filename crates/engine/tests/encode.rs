@@ -7,10 +7,9 @@ use engine::presets::PresetRegistry;
 use engine::quantize::{to_encoder_input, EncoderInput};
 use std::sync::{atomic::AtomicBool, Arc};
 
-// Shared with the encoders-sys BC4 reference test; this file uses only `Rng` and `search`.
-#[allow(dead_code)]
-#[path = "../../encoders-sys/tests/support/bc4ref.rs"]
-mod bc4ref;
+// The BC4 test inputs, shared with the bcenc tests; this file uses only `Rng`.
+#[path = "../../bcenc/tests/support/gen.rs"]
+mod gen;
 
 fn profile(st: Subtype) -> Profile {
     PresetRegistry::builtin()
@@ -698,7 +697,7 @@ fn bc7_weights_change_the_profile_hash_only_when_set() {
 /// The engine's BC4 and BC3 paths (default preset, its radius) end to end against the reference.
 #[test]
 fn engine_bc4_bytes_equal_reference() {
-    let mut r = bc4ref::Rng(0x1234_5678_9ABC_DEF1);
+    let mut r = gen::Rng(0x1234_5678_9ABC_DEF1);
     let img: Vec<[u8; 4]> = (0..64)
         .map(|_| [r.byte(), r.byte(), r.byte(), r.byte()])
         .collect();
@@ -725,7 +724,7 @@ fn engine_bc4_bytes_equal_reference() {
             let v: [u8; 16] = std::array::from_fn(|t| src[t][ch]);
             assert_eq!(
                 out[b * bs..b * bs + 8],
-                bc4ref::search(&v, rad, (fmt == Format::Bc3).then_some(128)),
+                bcenc::bc4::search(&v, rad, (fmt == Format::Bc3).then_some(128)),
                 "{fmt:?} block {b}"
             );
         }

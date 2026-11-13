@@ -97,7 +97,7 @@ v4 roughly doubles the BC4 search time: 1.7 to 2.1× the upstream FFI and 2.1 to
 
 ## Search radius (rounds 1 and 2)
 
-The probe measured radius 5 only. `crates/encoders-sys/tests/support/bc4ref.rs` holds the reference (`upstream`, `search`); the example takes `--radius`. Mean over rounds 1-2 images, v4 against the upstream search at the same radius (images at 99 dB excluded, as in the summary; radius 5 reproduces the summary's v4/v5 means). No block is worse than upstream at any radius.
+The probe measured radius 5 only. `crates/bcenc/src/bc4.rs` holds the reference (`upstream`, `search`); the example takes `--radius`. Mean over rounds 1-2 images, v4 against the upstream search at the same radius (images at 99 dB excluded, as in the summary; radius 5 reproduces the summary's v4/v5 means). No block is worse than upstream at any radius.
 
 | radius | set | upstream dB | v4 dB | v4 Δ | v5 Δ |
 |---|---|---|---|---|---|

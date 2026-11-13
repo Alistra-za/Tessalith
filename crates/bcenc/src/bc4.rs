@@ -3,9 +3,14 @@
 //! Everything starts from the upstream result and replaces it only on a strictly lower SSE, so ties keep its bytes.
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
-//! Also holds [`Rng`] and [`blocks`], the test inputs shared by the encoders-sys and engine BC4 reference tests.
+//! A port of `rgbcx::encode_bc4_hq` (rgbcx from bc7enc_rdo commit b943862, with Tessalith's `BC4_SDC_SEARCH` and
+//! `BC4_SDC_GUARD128` patches). The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
+
+// `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
+#[cfg_attr(not(test), allow(unused_imports))]
+use crate::hits::{hit, Hit};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.
 pub fn pal(e0: u8, e1: u8) -> [u8; 8] {
@@ -84,16 +89,19 @@ impl Best {
                     be = e;
                     bj = j as u8;
                     if e == 0 {
+                        hit!(Hit::PairExactTexel);
                         break;
                     }
                 }
             }
             err += be;
             if err >= self.err {
+                hit!(Hit::PairEarlyOut);
                 return;
             }
             sels[i] = bj;
         }
+        hit!(Hit::PairImproved);
         *self = Best { err, e0, e1, sels };
     }
 }
@@ -110,6 +118,7 @@ pub fn clampi(x: i32) -> u8 {
 pub fn v0(v: &[u8; 16], rad: i32) -> Best {
     let (mn, mx) = minmax(v);
     if mn == mx {
+        hit!(Hit::V0Solid);
         return Best {
             err: 0,
             e0: mn,
@@ -123,9 +132,15 @@ pub fn v0(v: &[u8; 16], rad: i32) -> Best {
             for hi in -rad..=rad {
                 let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
                 if e0 == e1 {
+                    hit!(Hit::V0EqualEnds);
                     continue;
                 }
                 if (mode == 0 && e0 <= e1) || (mode == 1 && e0 > e1) {
+                    if mode == 0 {
+                        hit!(Hit::V0SwapMode0);
+                    } else {
+                        hit!(Hit::V0SwapMode1);
+                    }
                     std::mem::swap(&mut e0, &mut e1);
                 }
                 b.try_pair(v, e0, e1);
@@ -138,17 +153,22 @@ pub fn v0(v: &[u8; 16], rad: i32) -> Best {
 /// The 6-value-mode search rgbcx cannot reach: endpoints around the inner range, so 0 and 255 come from the palette.
 pub fn inner6(v: &[u8; 16], b: &mut Best, rad: i32) {
     if !v.iter().any(|&x| x == 0 || x == 255) {
+        hit!(Hit::Inner6NoExtreme);
         return;
     }
     let inner: Vec<u8> = v.iter().copied().filter(|&x| x != 0 && x != 255).collect();
     let (Some(&imn), Some(&imx)) = (inner.iter().min(), inner.iter().max()) else {
+        hit!(Hit::Inner6NoInner);
         return;
     };
     for lo in -rad..=rad {
         for hi in -rad..=rad {
             let (e0, e1) = (clampi(imn as i32 + lo), clampi(imx as i32 + hi));
             if e0 <= e1 {
+                hit!(Hit::Inner6Pair);
                 b.try_pair(v, e0, e1);
+            } else {
+                hit!(Hit::Inner6Skip);
             }
         }
     }
@@ -178,10 +198,13 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
                 bb += wb * wb;
                 av += wa * x;
                 bv += wb * x;
+            } else {
+                hit!(Hit::LsFixedTexel);
             }
         }
         let det = aa * bb - ab * ab;
         if det.abs() < 1e-9 {
+            hit!(Hit::LsSingular);
             return;
         }
         let a = (av * bb - bv * ab) / det;
@@ -191,14 +214,19 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
             for dc in -1..=1 {
                 let (e0, e1) = (clampi(a.round() as i32 + da), clampi(c.round() as i32 + dc));
                 if (e0 > e1) == mode8 {
+                    hit!(Hit::LsPair);
                     b.try_pair(v, e0, e1);
+                } else {
+                    hit!(Hit::LsModeSkip);
                 }
             }
         }
         if b.err >= before {
+            hit!(Hit::LsNoGain);
             return;
         }
     }
+    hit!(Hit::LsRoundsExhausted);
 }
 
 /// Refit the best of each mode, not only the overall best: `ls_refine` on `b`, then a fresh search of rgbcx's own
@@ -213,9 +241,11 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, rad: i32) {
             for hi in -rad..=rad {
                 let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
                 if e0 == e1 {
+                    hit!(Hit::RefitEqualEnds);
                     continue;
                 }
                 if (e0 > e1) == mode8 {
+                    hit!(Hit::RefitSwap);
                     std::mem::swap(&mut e0, &mut e1);
                 }
                 o.try_pair(v, e0, e1);
@@ -223,8 +253,13 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, rad: i32) {
         }
         ls_refine(v, &mut o);
         if o.err < b.err {
+            hit!(Hit::RefitOtherBetter);
             *b = o;
+        } else {
+            hit!(Hit::RefitOtherKept);
         }
+    } else {
+        hit!(Hit::RefitSolid);
     }
 }
 
@@ -232,6 +267,7 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, rad: i32) {
 pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
     for t in [2u8, 6, 12, 24, 48] {
         if !v.iter().any(|&x| x <= t || x >= 255 - t) {
+            hit!(Hit::TrimNoExtreme);
             continue;
         }
         let inner: Vec<u8> = v
@@ -240,6 +276,7 @@ pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
             .filter(|&x| x > t && x < 255 - t)
             .collect();
         let (Some(&imn), Some(&imx)) = (inner.iter().min(), inner.iter().max()) else {
+            hit!(Hit::TrimNoInner);
             continue;
         };
         let mut c = *b;
@@ -247,15 +284,24 @@ pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
             for hi in -2..=2 {
                 let (e0, e1) = (clampi(imn as i32 + lo), clampi(imx as i32 + hi));
                 if e0 <= e1 {
+                    hit!(Hit::TrimPair);
                     c.try_pair(v, e0, e1);
+                } else {
+                    hit!(Hit::TrimSkip);
                 }
             }
         }
         if c.e0 <= c.e1 {
+            hit!(Hit::TrimRefit);
             ls_refine(v, &mut c);
+        } else {
+            hit!(Hit::TrimNoRefit);
         }
         if c.err < b.err {
+            hit!(Hit::TrimReplaced);
             *b = c;
+        } else {
+            hit!(Hit::TrimKept);
         }
     }
 }
@@ -267,7 +313,10 @@ pub fn local(v: &[u8; 16], b: &mut Best) {
         for d1 in -3..=3 {
             let (e0, e1) = (clampi(c0 + d0), clampi(c1 + d1));
             if (e0 > e1) == m8 {
+                hit!(Hit::LocalPair);
                 b.try_pair(v, e0, e1);
+            } else {
+                hit!(Hit::LocalModeSkip);
             }
         }
     }
@@ -298,59 +347,13 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     local(v, &mut b);
     if let Some(cut) = guard {
         if flips(v, &b, cut) > flips(v, &base, cut) {
+            hit!(Hit::GuardFallback);
             b = base;
+        } else {
+            hit!(Hit::GuardPassed);
         }
+    } else {
+        hit!(Hit::NoGuard);
     }
     b.bytes()
-}
-
-pub struct Rng(pub u64);
-impl Rng {
-    pub fn next(&mut self) -> u64 {
-        self.0 ^= self.0 << 13;
-        self.0 ^= self.0 >> 7;
-        self.0 ^= self.0 << 17;
-        self.0
-    }
-    pub fn byte(&mut self) -> u8 {
-        (self.next() >> 24) as u8
-    }
-}
-
-/// Uniform, two-level 0/255 plus noise, ramps and near-constant blocks, in rotation.
-pub fn blocks(n: usize) -> Vec<[u8; 16]> {
-    let mut r = Rng(0x9E37_79B9_7F4A_7C15);
-    (0..n)
-        .map(|i| {
-            let mut v = [0u8; 16];
-            match i % 4 {
-                0 => v.iter_mut().for_each(|x| *x = r.byte()),
-                1 => v.iter_mut().for_each(|x| {
-                    let base = if r.next() & 1 == 0 { 0i32 } else { 255 };
-                    let noise = if r.next().is_multiple_of(3) {
-                        (r.byte() % 9) as i32
-                    } else {
-                        0
-                    };
-                    *x = (if base == 0 {
-                        base + noise
-                    } else {
-                        base - noise
-                    }) as u8;
-                }),
-                2 => {
-                    let (a, b) = (r.byte() as i32, r.byte() as i32);
-                    for (k, x) in v.iter_mut().enumerate() {
-                        *x = (a + (b - a) * k as i32 / 15) as u8;
-                    }
-                }
-                _ => {
-                    let c = r.byte();
-                    v.iter_mut()
-                        .for_each(|x| *x = c.saturating_add(r.byte() % 3).saturating_sub(1))
-                }
-            }
-            v
-        })
-        .collect()
 }

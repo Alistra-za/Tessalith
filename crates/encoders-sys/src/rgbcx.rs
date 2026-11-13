@@ -112,7 +112,7 @@ pub fn bc4_encode_block(px: &[[u8; 4]; 16], channel: usize, search_radius: u32) 
 
 /// `rgbcx::BC4_USE_ALL_MODES` (8-value and 6-value modes).
 pub const BC4_USE_ALL_MODES: u32 = 3;
-/// `rgbcx::BC4_SDC_SEARCH` (sdc patch): the extra endpoint search after the mode loop (`tests/support/bc4ref.rs` `search`).
+/// `rgbcx::BC4_SDC_SEARCH` (sdc patch): the extra endpoint search after the mode loop (`bcenc::bc4::search`).
 /// `bc3/4/5_encode_block` set it. It requires [`BC4_USE_ALL_MODES`]: the search assumes both modes are allowed and the
 /// C++ does not check ([`bc4_encode_block_flags`] debug-asserts it).
 pub const BC4_SDC_SEARCH: u32 = 4;

@@ -13,10 +13,9 @@ use image::{ImageBuffer, Rgb, Rgba};
 use std::path::Path;
 use std::sync::Arc;
 
-// Shared with the encoders-sys BC4 reference test; this file uses only `Rng` and `search`.
-#[allow(dead_code)]
-#[path = "../../encoders-sys/tests/support/bc4ref.rs"]
-mod bc4ref;
+// The BC4 test inputs, shared with the bcenc tests; this file uses only `Rng`.
+#[path = "../../bcenc/tests/support/gen.rs"]
+mod gen;
 
 const WALL: &str = "textures/a/wall";
 const BLEND: MeshAlpha = MeshAlpha {
@@ -394,7 +393,7 @@ fn a_mesh_threshold_reaches_the_bc3_guard() {
     assert_eq!(prof.alpha.threshold, 200);
     assert_eq!(alpha_cut(&prof.alpha), 201);
     prof.format = Format::Bc3;
-    let mut r = bc4ref::Rng(0x0DDB_1A5E_5BAD_5EED);
+    let mut r = gen::Rng(0x0DDB_1A5E_5BAD_5EED);
     let img: Vec<[u8; 4]> = (0..64 * 64)
         .map(|_| [r.byte(), r.byte(), r.byte(), r.byte()])
         .collect();
@@ -413,11 +412,11 @@ fn a_mesh_threshold_reaches_the_bc3_guard() {
         let v: [u8; 16] = std::array::from_fn(|t| src[t][3]);
         assert_eq!(
             out[b * 16..b * 16 + 8],
-            bc4ref::search(&v, rad, Some(201)),
+            bcenc::bc4::search(&v, rad, Some(201)),
             "block {b}"
         );
-        not_default +=
-            (bc4ref::search(&v, rad, Some(201)) != bc4ref::search(&v, rad, Some(128))) as u32;
+        not_default += (bcenc::bc4::search(&v, rad, Some(201))
+            != bcenc::bc4::search(&v, rad, Some(128))) as u32;
     }
     assert!(not_default > 0, "no block tells 201 from 128");
 }

@@ -59,6 +59,7 @@ To build only one of them, use `cargo build --release -p sdc` or `cargo build --
 |---|---|
 | `crates/engine` | The conversion engine: discovery, grouping, config, packing, mips, encoding, validation. |
 | `crates/texcore` | The encoder-free base: DDS reader and writer, pixel decoders, colour curves, cube maths, image loading. `engine` and `render3d` build on it. |
+| `crates/bcenc` | rgbcx's block encoders in Rust (BC4 and BC5 so far). No dependencies; tests compare it with `encoders-sys`. |
 | `crates/encoders-sys` | Native encoders: bc7e and bc7enc_rdo's rgbcx, ISPC Texture Compressor (BC6H). |
 | `crates/cli` | The `sdc` program. |
 | `crates/gui` | The GUI, `tessalith.exe` (Cargo package `sdc-gui`). |

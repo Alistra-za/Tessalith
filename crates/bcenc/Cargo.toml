@@ -1,0 +1,12 @@
+[package]
+name = "bcenc"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+description = "rgbcx's block encoders in Rust (port of bc7enc_rdo commit b943862 with Tessalith's patches)"
+
+# No dependencies: the C++ in encoders-sys is the reference, used by the tests only.
+[dev-dependencies]
+encoders-sys.workspace = true

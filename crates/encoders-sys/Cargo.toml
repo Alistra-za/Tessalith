@@ -19,3 +19,4 @@ sha2.workspace = true
 hex.workspace = true
 bcdec_rs.workspace = true
 half.workspace = true
+bcenc.workspace = true
