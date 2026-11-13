@@ -58,6 +58,16 @@ hits! {
     // local
     LocalPair,
     LocalModeSkip,
+    // bc1 palette
+    PaletteThree,
+    PaletteFour,
+    // bc1 single-colour tables
+    SingleHalf,
+    SingleFull,
+    Single5,
+    Single6,
+    SingleImproved,
+    SingleTieEqualEnds,
     // search guard
     NoGuard,
     GuardPassed,

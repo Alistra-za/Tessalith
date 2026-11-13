@@ -7,6 +7,9 @@ mod hits;
 
 pub mod bc4;
 
+#[doc(hidden)]
+pub mod bc1;
+
 #[cfg(test)]
 mod coverage_tests;
 

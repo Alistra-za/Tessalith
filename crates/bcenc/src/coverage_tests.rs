@@ -1,4 +1,5 @@
 //! Every `hit!` branch of the ported code is taken by the class generators.
+use crate::bc1::palette::{dual_palette, single_tables};
 use crate::hits::counts;
 use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
 
@@ -17,6 +18,11 @@ fn every_ported_branch_is_taken() {
             }
         }
     }
+    // The BC1 palettes and the single-colour tables (built once, on first use).
+    for three in [false, true] {
+        dual_palette(three, 3, 40, 5, 20, 9, 31);
+    }
+    single_tables();
     let never: Vec<_> = counts()
         .into_iter()
         .filter(|&(_, n)| n == 0)
