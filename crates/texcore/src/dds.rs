@@ -1,4 +1,4 @@
-//! DDS container (spec §5.7): the engine's own writer, and the reader Validate uses to re-parse what was written.
+//! DDS container (spec §5.7): the writer the engine uses, and the reader Validate uses to re-parse what was written.
 use std::io::Write;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
