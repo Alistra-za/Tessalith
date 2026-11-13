@@ -21,7 +21,6 @@ macro_rules! hits {
 
 hits! {
     // Best::try_pair
-    PairExactTexel,
     PairEarlyOut,
     PairImproved,
     // v0

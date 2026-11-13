@@ -78,31 +78,128 @@ impl Best {
     /// Try one endpoint pair exactly as rgbcx does (first minimum per texel, early out, strict improvement).
     pub fn try_pair(&mut self, v: &[u8; 16], e0: u8, e1: u8) {
         let p = pal(e0, e1);
-        let mut err = 0u32;
-        let mut sels = [0u8; 16];
-        for i in 0..16 {
-            let (mut be, mut bj) = (u32::MAX, 0u8);
-            for (j, &pj) in p.iter().enumerate() {
-                let d = pj as i32 - v[i] as i32;
-                let e = (d * d) as u32;
-                if e < be {
-                    be = e;
-                    bj = j as u8;
-                    if e == 0 {
-                        hit!(Hit::PairExactTexel);
-                        break;
-                    }
-                }
-            }
-            err += be;
-            if err >= self.err {
-                hit!(Hit::PairEarlyOut);
-                return;
-            }
-            sels[i] = bj;
-        }
+        let Some((err, sels)) = pair(v, &p, self.err) else {
+            hit!(Hit::PairEarlyOut);
+            return;
+        };
         hit!(Hit::PairImproved);
         *self = Best { err, e0, e1, sels };
+    }
+}
+
+/// The block's error under palette `p` with the nearest palette value per texel (the first nearest one), and the
+/// selectors; `None` when the error is not below `best`. The SSE2 kernel where the target has it, the scalar loop
+/// elsewhere; in the unit tests every call also runs the scalar loop and asserts the same result.
+///
+/// Why the kernel equals the loop: squaring keeps the order of absolute differences, so the first least square is the
+/// first least difference; the loop returns early exactly when its running total reaches `best`, because the total only
+/// grows and ends at the block's total, so "not below `best`" is the same test on the full total.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
+    let r = sse2::pair(v, p, best);
+    #[cfg(test)]
+    assert_eq!(r, pair_scalar(v, p, best), "{v:?} {p:?} {best}");
+    r
+}
+
+#[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
+    pair_scalar(v, p, best)
+}
+
+/// rgbcx's loop: per texel the first nearest palette value, the running total, an early return once it reaches `best`.
+/// The kernel's test reference, and what a target without SSE2 runs.
+#[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
+fn pair_scalar(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
+    let mut err = 0u32;
+    let mut sels = [0u8; 16];
+    for i in 0..16 {
+        let (mut be, mut bj) = (u32::MAX, 0u8);
+        for (j, &pj) in p.iter().enumerate() {
+            let d = pj as i32 - v[i] as i32;
+            let e = (d * d) as u32;
+            if e < be {
+                be = e;
+                bj = j as u8;
+                if e == 0 {
+                    break;
+                }
+            }
+        }
+        err += be;
+        if err >= best {
+            return None;
+        }
+        sels[i] = bj;
+    }
+    Some((err, sels))
+}
+
+/// The pair kernel: all 16 texels against all 8 palette values at once, in SSE2 integer intrinsics. Compiled only where
+/// the target has SSE2, so its `target_feature(enable = "sse2")` function is always callable; Rust still wants an
+/// `unsafe` block for the call from plain code. Integer code only.
+///
+/// Bounds (intrinsics wrap silently): a distance is at most 255, so as an `i16` lane at most 255; a `pmaddwd` lane
+/// adds two squares, at most 2 x 255^2 = 130,050; the four `i32` lanes then hold at most 4 x 130,050 and the total at
+/// most 16 x 255^2 = 1,040,400, far below 2^31, so every addition is exact and the `as u32` reads it back exactly.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod sse2 {
+    use core::arch::x86_64::*;
+
+    #[target_feature(enable = "sse2")]
+    fn pair_sse2(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
+        let half = |a: &[u8]| i64::from_le_bytes([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]]);
+        let x = _mm_set_epi64x(half(&v[8..]), half(&v[..8]));
+        // |x - q| per byte: one of the two saturating differences is 0, the other is the distance.
+        let dist = |j: usize| {
+            let q = _mm_set1_epi8(p[j] as i8);
+            _mm_or_si128(_mm_subs_epu8(x, q), _mm_subs_epu8(q, x))
+        };
+        let d = [
+            dist(0),
+            dist(1),
+            dist(2),
+            dist(3),
+            dist(4),
+            dist(5),
+            dist(6),
+            dist(7),
+        ];
+        let mut m = d[0];
+        for dj in &d[1..] {
+            m = _mm_min_epu8(m, *dj);
+        }
+        // Sum of squares: the 16 distances (0..=255, so non-negative as i16) squared and added in pairs, then the
+        // four i32 lanes (each at most 2 x 255^2 = 130,050) added together: the total is at most 1,040,400.
+        let zero = _mm_setzero_si128();
+        let (lo, hi) = (_mm_unpacklo_epi8(m, zero), _mm_unpackhi_epi8(m, zero));
+        let s = _mm_add_epi32(_mm_madd_epi16(lo, lo), _mm_madd_epi16(hi, hi));
+        let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0b01_00_11_10>(s));
+        let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0b00_00_00_01>(s));
+        let err = _mm_cvtsi128_si32(s) as u32;
+        if err >= best {
+            return None;
+        }
+        // From the last palette value to the first, so the first nearest one is what stays.
+        let mut sel = zero;
+        for j in (0..8).rev() {
+            let eq = _mm_cmpeq_epi8(d[j], m);
+            sel = _mm_or_si128(
+                _mm_and_si128(eq, _mm_set1_epi8(j as i8)),
+                _mm_andnot_si128(eq, sel),
+            );
+        }
+        let mut sels = [0u8; 16];
+        sels[..8].copy_from_slice(&(_mm_cvtsi128_si64(sel) as u64).to_le_bytes());
+        sels[8..].copy_from_slice(
+            &(_mm_cvtsi128_si64(_mm_unpackhi_epi64(sel, sel)) as u64).to_le_bytes(),
+        );
+        Some((err, sels))
+    }
+
+    pub(super) fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
+        // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
+        unsafe { pair_sse2(v, p, best) }
     }
 }
 
@@ -357,4 +454,98 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
         hit!(Hit::NoGuard);
     }
     b.bytes()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::gen;
+
+    /// The endpoint pairs tried for a block: every pair with both ends on a stride of 5, then every pair within 3 of
+    /// the block's least and greatest value.
+    fn pairs_for(v: &[u8; 16]) -> Vec<(u8, u8)> {
+        let mut out = Vec::new();
+        for e0 in (0..=255u8).step_by(5) {
+            for e1 in (0..=255u8).step_by(5) {
+                out.push((e0, e1));
+            }
+        }
+        let (mn, mx) = minmax(v);
+        let near = |c: u8| (c.saturating_sub(3)..=c.saturating_add(3)).collect::<Vec<u8>>();
+        for e0 in near(mx) {
+            for e1 in near(mn) {
+                out.push((e0, e1));
+                out.push((e1, e0));
+            }
+        }
+        out
+    }
+
+    #[test]
+    fn the_pair_kernel_equals_the_scalar_one() {
+        // Both palette kinds and both outcomes must be reached, or the test proves less than it looks.
+        let (mut eight, mut six, mut taken, mut refused) = (0usize, 0usize, 0usize, 0usize);
+        for v in gen::bc4_classes(0xB4B4_0005, 30) {
+            let mut best = u32::MAX;
+            // The best falls step by step, so later pairs meet a low `best`.
+            for (e0, e1) in pairs_for(&v) {
+                let p = pal(e0, e1);
+                let (a, b) = (pair(&v, &p, best), pair_scalar(&v, &p, best));
+                assert_eq!(a, b, "{v:?} {e0} {e1} {best}");
+                if e0 > e1 {
+                    eight += 1;
+                } else {
+                    six += 1;
+                }
+                match a {
+                    Some((err, _)) => {
+                        best = err;
+                        taken += 1;
+                    }
+                    None => refused += 1,
+                }
+            }
+        }
+        assert!(
+            eight > 0 && six > 0 && taken > 0 && refused > 0,
+            "a kind was never reached: 8-value {eight}, 6-value {six}, taken {taken}, refused {refused}"
+        );
+    }
+
+    #[test]
+    fn the_pair_kernel_is_exact_at_the_largest_errors() {
+        // Blocks of the extremes against palettes that sit far from them: distances up to 255 in every texel, totals
+        // up to 16 x 254^2 = 1,032,256 and ties between palette values.
+        let blocks: [[u8; 16]; 4] = [
+            [0; 16],
+            [255; 16],
+            std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 }),
+            std::array::from_fn(|i| (i * 17) as u8),
+        ];
+        let mut largest = 0;
+        for v in &blocks {
+            for (e0, e1) in [
+                (255, 254),
+                (254, 255),
+                (1, 0),
+                (0, 1),
+                (255, 0),
+                (0, 255),
+                (7, 7),
+            ] {
+                let p = pal(e0, e1);
+                for best in [u32::MAX, 1_040_400, 1_032_256, 1_032_255, 1, 0] {
+                    let (a, b) = (pair(v, &p, best), pair_scalar(v, &p, best));
+                    assert_eq!(a, b, "{v:?} {e0} {e1} {best}");
+                    if let Some((err, _)) = a {
+                        largest = largest.max(err);
+                    }
+                }
+            }
+        }
+        assert!(
+            largest >= 1_000_000,
+            "no case came near the largest total: {largest}"
+        );
+    }
 }
