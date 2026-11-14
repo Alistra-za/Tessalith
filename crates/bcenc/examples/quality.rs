@@ -12,7 +12,7 @@
 //!   decoded by `bc1_decode_block` under `Bc1Model::Nvidia` and `Bc1Model::Amd`.
 //! - Error: the squared R, G, B error over the image's own `w x h` texels (the padding texels of an edge block are not
 //!   counted); `mse = sse / (w * h * 3)`; PSNR `10 log10(65025 / mse)`, 99 dB when `mse <= 1e-12` (the definition of
-//!   `engine::validate::psnr`; the example cannot depend on `engine`).
+//!   `engine::validate::psnr_from_mse`; the example cannot depend on `engine`).
 //! - A variant's mean is the mean of the per-image dB; the pooled figure is the PSNR of the summed squared error over
 //!   all images and is printed on a second line.
 //! - Paired delta against `--baseline`: the per-image dB difference, its mean and the 95% Student-t half-width
@@ -99,7 +99,7 @@ struct Image {
     blocks: Vec<Block>,
 }
 
-/// The source texels of `blocks[i]` are cut by `gather_blocks`; `flat` is its flat output of 16 texels per block.
+/// Groups the flat texels `gather_blocks` returns (16 per block, row-major inside a block) into 4x4 blocks.
 fn to_blocks(flat: &[[u8; 4]]) -> Vec<Block> {
     flat.as_chunks::<16>().0.to_vec()
 }
@@ -139,9 +139,11 @@ fn read_dds(path: &Path, w: usize, h: usize) -> Result<Vec<[u8; 8]>, String> {
     }
     let (dh, dw) = (u32_at(12), u32_at(16));
     if (dw, dh) != (Some(w as u32), Some(h as u32)) {
+        let show = |v: Option<u32>| v.map_or("missing".to_string(), |v| v.to_string());
         return Err(format!(
-            "{name}: size {:?}x{:?} differs from the PNG's {w}x{h}",
-            dw, dh
+            "{name}: size {}x{} differs from the PNG's {w}x{h}",
+            show(dw),
+            show(dh)
         ));
     }
     let four_cc = b.get(84..88).unwrap_or_default();
@@ -294,8 +296,10 @@ fn run(args: &Args) -> Result<(), String> {
             });
         }
     });
-    if let Some(e) = errors.into_inner().expect("lock").first() {
-        return Err(e.clone());
+    let mut errors = errors.into_inner().expect("lock");
+    if !errors.is_empty() {
+        errors.sort();
+        return Err(errors.join("\nquality: "));
     }
     let rows: Vec<Vec<Cell>> = results
         .into_inner()
@@ -310,13 +314,19 @@ fn run(args: &Args) -> Result<(), String> {
     let mut csv = String::from("image,variant,psnr_nvidia,psnr_amd,seconds\n");
     for (img, row) in images.iter().zip(&rows) {
         for (c, name) in names.iter().enumerate() {
+            // A reference was not encoded here: its seconds field stays empty.
+            let seconds = if c < args.variants.len() {
+                format!("{:.3}", row[c].seconds)
+            } else {
+                String::new()
+            };
             csv += &format!(
-                "{},{},{:.4},{:.4},{:.3}\n",
+                "{},{},{:.4},{:.4},{}\n",
                 img.stem,
                 name,
                 db(img, &row[c], 0),
                 db(img, &row[c], 1),
-                row[c].seconds
+                seconds
             );
         }
     }
@@ -336,12 +346,16 @@ fn run(args: &Args) -> Result<(), String> {
     let mean = |c: usize, d: usize| mean_ci(&per_image(c, d)).0;
     println!("images: {}", images.len());
     for (c, name) in names.iter().enumerate() {
-        let secs: f64 = rows.iter().map(|r| r[c].seconds).sum();
+        let secs = if c < args.variants.len() {
+            let s: f64 = rows.iter().map(|r| r[c].seconds).sum();
+            format!("; encode {s:.1} s")
+        } else {
+            String::new()
+        };
         println!(
-            "{name}: nvidia {:.4} dB, amd {:.4} dB (mean of per-image dB); encode {:.1} s",
+            "{name}: nvidia {:.4} dB, amd {:.4} dB (mean of per-image dB){secs}",
             mean(c, 0),
-            mean(c, 1),
-            secs
+            mean(c, 1)
         );
         let pooled =
             |d: usize| psnr_from_mse(rows.iter().map(|r| r[c].sse[d]).sum::<f64>() / texels);

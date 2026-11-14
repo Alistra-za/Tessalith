@@ -35,7 +35,7 @@ pub fn bc1_encode_block(
     )
 }
 
-/// Like [`bc1_encode_block`] at rgbcx level `level` (0..=[`RGBCX_MAX_LEVEL`]); the engine ships level 18 only, the lower
+/// Like [`bc1_encode_block`] at rgbcx level `level` (0..=[`RGBCX_MAX_LEVEL`]) with `transparent_black` fixed off; the engine ships level 18 only, the lower
 /// levels are for measuring (`bcenc`'s quality example) and for the tests of `bcenc`'s faster search.
 pub fn bc1_encode_block_level(
     px: &[[u8; 4]; 16],

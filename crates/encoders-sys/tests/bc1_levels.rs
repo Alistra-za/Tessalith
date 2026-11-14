@@ -45,6 +45,9 @@ fn blocks() -> Vec<Block> {
     v
 }
 
+/// A pin of the refactor, not a guard: the old alpha and BC3 wrappers now call the level functions, so those two
+/// parts compare a function with itself, and the BC1 part only catches a `transparent_black` slip. The level-18 bytes
+/// are guarded by the existing tests of the old wrappers (which now run through the level functions).
 #[test]
 fn level_18_is_the_old_wrapper() {
     for b in blocks() {
@@ -119,6 +122,18 @@ fn the_bc3_level_moves_only_the_colour() {
             }
         }
     }
+}
+
+#[test]
+#[should_panic(expected = "level 19")]
+fn the_alpha_level_above_18_panics() {
+    bc1_encode_block_alpha_level(&[[0; 4]; 16], 0, 19, false);
+}
+
+#[test]
+#[should_panic(expected = "level 19")]
+fn the_bc3_level_above_18_panics() {
+    bc3_encode_block_level(&[[0; 4]; 16], 5, 128, 19, false);
 }
 
 #[test]
