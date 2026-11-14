@@ -99,4 +99,4 @@ The drawer at the right edge holds what isn't per texture or is rarely needed: t
 
 ### BC1/BC3 search
 
-Pick **Fast (preview)** in the **BC1/BC3 search** row when you only want a quick look: the BC1 encoder, and the colour half of BC3, then takes a fraction of the time and the result is a little less exact. **Default** is the full search. The row is locked on any other format ("BC1 and BC3 only"), because no other encoder reads it. The `fast-preview` preset sets it for you.
+**BC1/BC3 search** is `encoder.bc1_search`. Pick **Fast (preview)** for a quick look: BC1, and the colour of BC3, encode in a fraction of the time and come out a little less exact. **Default** is the full search. The row is locked on any other format ("BC1 and BC3 only"), because no other encoder reads it. The `fast-preview` preset sets it for you.

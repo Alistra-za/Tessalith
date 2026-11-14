@@ -434,11 +434,15 @@ fn the_bc1_search_row_edits_a_bc1_texture() {
     m.select_item(K);
     let mut h = harness(m);
     h.run();
-    assert!(
-        h.query_all_by_role(Role::ComboBox)
-            .any(|n| n.accesskit_node().value().as_deref() == Some("Fast (preview)")),
-        "no combo shows Fast (preview)"
-    );
+    // A combo's accessible text is its value and it has no label of its own, so the row's combo is the one on the
+    // "BC1/BC3 search" label's line (the BC4/BC5 radius combo offers the same "Fast (preview)" label).
+    let row_y = h.get_by_label("BC1/BC3 search").rect().center().y;
+    let on_row: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| n.rect().min.y <= row_y && row_y <= n.rect().max.y)
+        .map(|n| n.accesskit_node().value())
+        .collect();
+    assert_eq!(on_row, [Some("Fast (preview)".to_string())]);
 }
 
 /// M6 Track D spec §3: the GUI loads the user presets folder and the inspector lists what it loaded.
