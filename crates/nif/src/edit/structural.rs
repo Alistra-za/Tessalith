@@ -45,7 +45,7 @@ pub(crate) fn set_shader_type(
     new_type: u32,
 ) -> Result<Vec<String>, String> {
     if new_type == 20 || new_type > 21 {
-        return Err("shader type 20 is not a Skyrim type".into());
+        return Err(format!("shader type {new_type} is not a Skyrim type"));
     }
     if new_type == 21 && m.bsver != 100 {
         return Err("Type 21 needs a Skyrim SE NIF".into());
@@ -60,119 +60,154 @@ pub(crate) fn set_shader_type(
     if old_type == new_type {
         return Ok(vec![]);
     }
-    let mut notes = vec![];
-    if new_type == 21 {
-        let mut out = body
-            .get(..p + 56)
-            .ok_or("shader block shorter than its fixed fields")?
-            .to_vec();
-        let v1 = lt.slsf2 & SLSF2_TRUE_PBR != 0;
-        let (features, params) = if v1 {
-            let c = pbr2::from_v1(old_type, lt.slsf2, &lt.params);
-            for &(i, from, to) in &c.clamped {
-                notes.push(format!(
-                    "{} clamped from {from} to {to}",
-                    pbr2::PARAM_NAMES[i]
-                ));
-            }
-            (c.features, c.params)
-        } else {
-            (0, pbr2::PBR2_DEFAULTS)
-        };
-        if v1 {
-            let names = (0..pbr2::FEATURE_NAMES.len())
-                .filter(|b| features >> b & 1 != 0)
-                .map(|b| pbr2::FEATURE_NAMES[b])
-                .collect::<Vec<_>>();
-            let list = if names.is_empty() {
-                "none".to_string()
-            } else {
-                names.join(", ")
-            };
-            notes.insert(0, format!("Converted from v1 PBR: {list}"));
-        }
-        put_u32(&mut out, 0, 21);
-        let (s1, s2) = (lt.slsf1, lt.slsf2);
-        let (n1, n2) = (
-            s1 & !pbr2::BANNED_SLSF1,
-            s2 & !(pbr2::V1_SLSF2 | pbr2::BANNED_SLSF2),
-        );
-        for (old, new, names) in [(s1, n1, &SLSF1_NAMES), (s2, n2, &SLSF2_NAMES)] {
-            for (b, name) in names.iter().enumerate() {
-                if (old & !new) >> b & 1 != 0 {
-                    notes.push(format!("{name} flag cleared: type 21 doesn't use it"));
-                }
-            }
-        }
-        put_u32(&mut out, p, n1);
-        put_u32(&mut out, p + 4, n2);
-        out.extend(pbr2::VERSION.to_le_bytes());
-        out.extend(features.to_le_bytes());
-        out.extend(params.iter().flat_map(|f| f.to_le_bytes()));
-        doc.set_block(lsp, out);
-        return Ok(notes);
-    }
-    if old_type == 21 {
-        let LightingTrailer::Pbr2 {
-            features, params, ..
-        } = &lt.params.trailer
-        else {
-            return Err("not a readable type 21 shader property".into());
-        };
-        let mut out = body
-            .get(..p + 56)
-            .ok_or("shader block shorter than its fixed fields")?
-            .to_vec();
-        put_u32(&mut out, 0, new_type);
-        let pbr = matches!(new_type, 0 | 11);
-        let v = pbr2::to_v1(*features, params);
-        // the vanilla values of a non-PBR shape: `MaterialState::builtin_default`
-        let (gloss, spec, strength, le1, le2) = if pbr {
-            (
-                v.glossiness,
-                v.specular_color,
-                v.specular_strength,
-                v.lighting_effect_1,
-                v.lighting_effect_2,
-            )
-        } else {
-            (80.0, [1.0; 3], 1.0, 0.3, 2.0)
-        };
-        // the v1 PBR flags, and the stale multi-layer flag, go; a PBR target sets what the features mean
-        let mut s2 = lt.slsf2 & !(pbr2::V1_SLSF2 | 1 << 24);
-        if pbr {
-            s2 |= v.slsf2_set;
-            if !v.dropped.is_empty() {
-                notes.push(format!("Dropped: {}", v.dropped.join(", ")));
-            }
-        }
-        put_u32(&mut out, p + 4, s2);
-        out.extend(
-            [gloss, spec[0], spec[1], spec[2], strength, le1, le2]
-                .iter()
-                .flat_map(|f| f.to_le_bytes()),
-        );
-        let mut t = trailer_defaults(new_type);
-        if let (11, Some(mlp)) = (new_type, v.mlp.filter(|_| pbr)) {
-            t[..4].copy_from_slice(&mlp);
-        }
-        out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
-        doc.set_block(lsp, out);
-        return Ok(notes);
-    }
-    let head = body
-        .get(..p + 84)
-        .ok_or("shader block shorter than its fixed fields")?;
-    let mut out = head.to_vec();
-    out[..4].copy_from_slice(&new_type.to_le_bytes());
-    if trailer_defaults(old_type).len() == trailer_defaults(new_type).len() {
-        out.extend_from_slice(&body[p + 84..]);
+    let (out, notes) = if new_type == 21 {
+        to_21(body, p, lt)?
+    } else if old_type == 21 {
+        from_21(body, p, lt, new_type)?
     } else {
-        let t = trailer_defaults(new_type);
-        out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
-    }
+        let head = body
+            .get(..p + 84)
+            .ok_or("shader block shorter than its fixed fields")?;
+        let mut out = head.to_vec();
+        out[..4].copy_from_slice(&new_type.to_le_bytes());
+        if trailer_defaults(old_type).len() == trailer_defaults(new_type).len() {
+            out.extend_from_slice(&body[p + 84..]);
+        } else {
+            let t = trailer_defaults(new_type);
+            out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
+        }
+        (out, vec![])
+    };
     doc.set_block(lsp, out);
     Ok(notes)
+}
+
+/// The block bytes up to the end of the refraction field (the head both type-21 conversions keep), with the new type.
+fn head_to_refraction(body: &[u8], p: usize, new_type: u32) -> Result<Vec<u8>, String> {
+    let mut out = body
+        .get(..p + 56)
+        .ok_or("shader block shorter than its fixed fields")?
+        .to_vec();
+    put_u32(&mut out, 0, new_type);
+    Ok(out)
+}
+
+/// A v1 shape as type 21: only a type 0 or 11 shape with SLSF2 bit 23 is v1 PBR (Note ID13); anything else gets the
+/// defaults and no features.
+fn to_21(
+    body: &[u8],
+    p: usize,
+    lt: &crate::props::Lighting,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    let mut out = head_to_refraction(body, p, 21)?;
+    let mut notes = vec![];
+    let v1 = matches!(lt.shader_type, 0 | 11) && lt.slsf2 & SLSF2_TRUE_PBR != 0;
+    let (features, params) = if v1 {
+        let c = pbr2::from_v1(lt.shader_type, lt.slsf2, &lt.params);
+        let names = (0..pbr2::FEATURE_NAMES.len())
+            .filter(|b| c.features >> b & 1 != 0)
+            .map(|b| pbr2::FEATURE_NAMES[b])
+            .collect::<Vec<_>>();
+        let list = if names.is_empty() {
+            "none".to_string()
+        } else {
+            names.join(", ")
+        };
+        notes.push(format!("Converted from v1 PBR: {list}"));
+        for &(i, from, to) in &c.clamped {
+            notes.push(format!(
+                "{} clamped from {from} to {to}",
+                pbr2::PARAM_NAMES[i]
+            ));
+        }
+        (c.features, c.params)
+    } else {
+        (0, pbr2::PBR2_DEFAULTS)
+    };
+    let (s1, s2) = (lt.slsf1, lt.slsf2);
+    let (n1, n2) = (
+        s1 & !pbr2::BANNED_SLSF1,
+        s2 & !(pbr2::V1_SLSF2 | pbr2::BANNED_SLSF2),
+    );
+    for (old, new, names) in [(s1, n1, &SLSF1_NAMES), (s2, n2, &SLSF2_NAMES)] {
+        for (b, name) in names.iter().enumerate() {
+            if (old & !new) >> b & 1 != 0 {
+                notes.push(format!("{name} flag cleared: type 21 doesn't use it"));
+            }
+        }
+    }
+    put_u32(&mut out, p, n1);
+    put_u32(&mut out, p + 4, n2);
+    out.extend(pbr2::VERSION.to_le_bytes());
+    out.extend(features.to_le_bytes());
+    out.extend(params.iter().flat_map(|f| f.to_le_bytes()));
+    Ok((out, notes))
+}
+
+/// A type-21 shape as `new_type`: type 0 or 11 become v1 PBR by `pbr2::to_v1`, any other type plain vanilla. Type 0
+/// has no trailer, so when `to_v1` chose the type-11 form (two-layer, fuzz, glint) only the flags that form shares
+/// with type 0 (PBR 23, subsurface 26) stay, and the features the trailer carried are dropped and named (Note ID11).
+fn from_21(
+    body: &[u8],
+    p: usize,
+    lt: &crate::props::Lighting,
+    new_type: u32,
+) -> Result<(Vec<u8>, Vec<String>), String> {
+    let LightingTrailer::Pbr2 {
+        features, params, ..
+    } = &lt.params.trailer
+    else {
+        return Err("not a readable type 21 shader property".into());
+    };
+    let mut out = head_to_refraction(body, p, new_type)?;
+    let mut notes = vec![];
+    let pbr = matches!(new_type, 0 | 11);
+    let mut v = pbr2::to_v1(*features, params);
+    // the v1 PBR flags, and the stale multi-layer flag, go; a PBR target sets what the features mean
+    let mut s2 = lt.slsf2 & !(pbr2::V1_SLSF2 | 1 << 24);
+    if pbr {
+        if new_type == 0 && (v.mlp.is_some() || v.slsf2_set & 1 << 24 != 0) {
+            v.slsf2_set &= SLSF2_TRUE_PBR | 1 << 26;
+            v.mlp = None;
+            let kept = if v.slsf2_set & 1 << 26 != 0 {
+                pbr2::feat::SUBSURFACE
+            } else {
+                0
+            };
+            v.dropped = (0..pbr2::FEATURE_NAMES.len())
+                .filter(|b| features & !kept & (1 << b) != 0)
+                .map(|b| pbr2::FEATURE_NAMES[b])
+                .collect();
+        }
+        s2 |= v.slsf2_set;
+        if !v.dropped.is_empty() {
+            notes.push(format!("Dropped: {}", v.dropped.join(", ")));
+        }
+    }
+    put_u32(&mut out, p + 4, s2);
+    // the vanilla values of a non-PBR shape: `MaterialState::builtin_default`
+    let (gloss, spec, strength, le1, le2) = if pbr {
+        (
+            v.glossiness,
+            v.specular_color,
+            v.specular_strength,
+            v.lighting_effect_1,
+            v.lighting_effect_2,
+        )
+    } else {
+        (80.0, [1.0; 3], 1.0, 0.3, 2.0)
+    };
+    out.extend(
+        [gloss, spec[0], spec[1], spec[2], strength, le1, le2]
+            .iter()
+            .flat_map(|f| f.to_le_bytes()),
+    );
+    let mut t = trailer_defaults(new_type);
+    if let (11, Some(mlp)) = (new_type, v.mlp) {
+        t[..4].copy_from_slice(&mlp);
+    }
+    out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
+    Ok((out, notes))
 }
 
 fn patch(doc: &mut NifDoc, block: u32, at: usize, v: i32) -> Result<(), String> {

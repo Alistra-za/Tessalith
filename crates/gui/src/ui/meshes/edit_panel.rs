@@ -364,15 +364,7 @@ fn apply(m: &mut MeshesModel, act: Act) {
         pushed = true;
     }
     if let (true, Some(e)) = (pushed, &mut m.edit) {
-        // Note ID10: what the ops just pushed did beyond their field (a type 21 conversion), after the flag notice
-        let done = e
-            .notes
-            .iter()
-            .filter(|n| n.0 >= before)
-            .map(|n| n.1.as_str());
-        let lines: Vec<&str> = act.notice.as_deref().into_iter().chain(done).collect();
-        e.notice =
-            (!lines.is_empty()).then(|| lines.join(". ").trim_end_matches('.').to_string() + ".");
+        e.notice = e.notice_for(before, act.notice);
     }
     if let (true, Some(e)) = (act.flush, &mut m.edit) {
         e.flush();

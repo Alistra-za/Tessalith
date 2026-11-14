@@ -151,6 +151,7 @@ pub struct Applied {
     pub outcomes: Vec<Outcome>,
     /// What an op did beyond its field, as `(op index, one sentence)`: a shader type change to or from 21 reports
     /// its clamps, cleared flags and dropped features (Note ID10).
+    #[cfg_attr(feature = "serde", serde(default))]
     pub notes: Vec<(usize, String)>,
 }
 

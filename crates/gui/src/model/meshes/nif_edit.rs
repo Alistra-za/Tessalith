@@ -1287,6 +1287,23 @@ impl NifEdit {
         }
     }
 
+    /// The notice after a push that began with `before` ops: the caller's flag notice, then what the pushed ops did
+    /// beyond their field (Note ID10).
+    pub fn notice_for(&self, before: usize, flag: Option<String>) -> Option<String> {
+        // a merged push replaces the last op instead of adding one: its notes sit at that op's index
+        let from = if self.doc.ops.len() > before {
+            before
+        } else {
+            self.doc.ops.len().saturating_sub(1)
+        };
+        let done = self
+            .notes
+            .iter()
+            .filter(|n| n.0 >= from)
+            .map(|n| format!("{}.", n.1));
+        let lines: Vec<String> = flag.into_iter().chain(done).collect();
+        (!lines.is_empty()).then(|| lines.join(" "))
+    }
     /// The ops of the drag with merge key `merge` while it runs (empty otherwise): their bases are the values from
     /// before the drag.
     pub fn drag_ops(&self, merge: &str) -> &[DocOp] {

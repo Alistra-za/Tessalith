@@ -386,9 +386,10 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 base: Value::U32(lt.shader_type),
             }];
             // Note CS: the flags the new type needs change in the same undo step.
-            // Type 21 conversions clear their own flags (`set_shader_type`): a fix op here would conflict.
-            let own = t == 21 || lt.shader_type == 21;
-            let fixes = if own {
+            // Note ID13: a conversion to 21 clears both flag words itself, one from 21 rewrites SLSF2 only; a fix op
+            // on a word it rewrote would conflict, but the SLSF1 fix on the way out still applies.
+            let (to21, from21) = (t == 21, lt.shader_type == 21);
+            let fixes = if to21 {
                 vec![]
             } else {
                 type_flag_errors(t, lt.slsf1)
@@ -406,7 +407,8 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 });
             }
             // Note DJ: a leftover multi-layer parallax flag crashes an Environment Map shader.
-            if let Some((mask, value, n)) = type_slsf2_fix(t, lt.slsf2).filter(|_| !own) {
+            if let Some((mask, value, n)) = type_slsf2_fix(t, lt.slsf2).filter(|_| !to21 && !from21)
+            {
                 ops.push(Op::SetBits {
                     at: at.clone(),
                     field: Field::Slsf2,

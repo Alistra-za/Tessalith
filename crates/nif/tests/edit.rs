@@ -288,9 +288,9 @@ fn shader_type_20_is_refused() {
         let r = apply(&b, &[op]).unwrap();
         assert_eq!(
             r.outcomes,
-            vec![Outcome::Refused(
-                "shader type 20 is not a Skyrim type".into()
-            )]
+            vec![Outcome::Refused(format!(
+                "shader type {t} is not a Skyrim type"
+            ))]
         );
         assert_eq!(r.bytes, b);
     }
@@ -305,6 +305,9 @@ fn v1_shape(shader_type: u32, slsf1: u32, slsf2: u32, trailer: &[f32]) -> Vec<u8
         let at = h.offsets()[1] + rel;
         b[at..at + 4].copy_from_slice(&v.to_le_bytes());
     }
+    // texture set ref: block 2 (the type-21 scenes use the same one)
+    let at = h.offsets()[1] + 40;
+    b[at..at + 4].copy_from_slice(&2i32.to_le_bytes());
     b
 }
 
@@ -353,12 +356,13 @@ fn to_21_writes_180_plus_4n() {
         assert_eq!(h.sizes[blk as usize] as usize, 180 + 4 * n);
         assert_eq!(pbr2_of(&r.bytes).0, 2);
         assert!(read_model(&r.bytes).unwrap().problems.is_empty());
+        assert_eq!(lighting(&r.bytes).texture_set, lighting(&b).texture_set);
     }
 }
 
 #[test]
 fn to_21_clears_v1_and_banned_bits() {
-    let slsf1 = (1u32 << 31) | (1 << 21) | (1 << 7) | 1; // skin tint, env mapping: banned; Specular stays
+    let slsf1 = (1u32 << 31) | (1 << 21) | (1 << 7) | 1; // FaceGen_RGB_Tint, Environment_Mapping: banned; Specular stays
     let slsf2 = 1 | PBR | (1 << 12) | (1 << 25) | (1 << 1) | (1 << 24); // ZBuffer_Write stays
     let b = v1_shape(0, slsf1, slsf2, &[]);
     let (op, _) = type_op(&b, 21);
@@ -367,7 +371,6 @@ fn to_21_clears_v1_and_banned_bits() {
     assert_eq!((l.slsf1, l.slsf2), ((1 << 31) | 1, 1));
     let n = notes_of(&r);
     for name in [
-        "Skin tint",
         "Environment_Mapping",
         "LOD_Landscape",
         "Unused01 (TruePBR)",
@@ -377,7 +380,7 @@ fn to_21_clears_v1_and_banned_bits() {
         "FaceGen_RGB_Tint",
     ] {
         let hit = n.iter().filter(|s| s.contains(name)).count();
-        assert_eq!(hit, usize::from(name != "Skin tint"), "{name}: {n:?}");
+        assert_eq!(hit, 1, "{name}: {n:?}");
     }
     assert!(
         !n.iter()
@@ -408,17 +411,90 @@ fn to_21_from_v1_converts() {
     let r = apply(&b, &[op]).unwrap();
     assert_eq!(pbr2_of(&r.bytes), (2, 0, nif::pbr2::PBR2_DEFAULTS));
     assert!(notes_of(&r).is_empty(), "{:?}", notes_of(&r));
+    assert_eq!(lighting(&r.bytes).texture_set, 2);
+}
+
+#[test]
+fn to_21_from_a_type_1_shape_with_the_pbr_bit_is_not_v1_pbr() {
+    // v1 PBR is type 0 or 11 with SLSF2 23; a type 1 shape with the bit is vanilla (Note ID13)
+    let b = v1_shape(1, 1 << 31, 1 | PBR, &[1.0]);
+    let (op, _) = type_op(&b, 21);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    assert_eq!(pbr2_of(&r.bytes), (2, 0, nif::pbr2::PBR2_DEFAULTS));
+    assert_eq!(
+        notes_of(&r),
+        vec!["Unused01 (TruePBR) flag cleared: type 21 doesn't use it".to_string()]
+    );
+}
+
+/// 21 -> 0 with features the type-11 form carries: a clean type 0, nothing of the trailer forms left, one note.
+fn from_21_to_0_drops(features: u32, want: &str) {
+    let b = scenes::lsp21_shape(features, &nif::pbr2::PBR2_DEFAULTS);
+    let (op, blk) = type_op(&b, 0);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let l = lighting(&r.bytes);
+    assert_eq!(l.shader_type, 0);
+    let (fit, mlp, soft, back, colored) = (1 << 12, 1 << 24, 1 << 25, 1 << 27, 1 << 30);
+    assert_eq!(
+        l.slsf2 & (fit | mlp | soft | back | colored),
+        0,
+        "{:#x}",
+        l.slsf2
+    );
+    assert_eq!(l.slsf2 & PBR, PBR);
+    assert_eq!(Header::parse(&r.bytes).unwrap().sizes[blk as usize], 100);
+    assert_eq!(l.params.trailer, nif::props::LightingTrailer::None);
+    assert_eq!(notes_of(&r), vec![want.to_string()]);
+}
+
+#[test]
+fn from_21_to_0_with_two_layer_is_clean_vanilla() {
+    use nif::pbr2::feat::*;
+    from_21_to_0_drops(TWO_LAYER, "Dropped: Two-layer coat");
+    from_21_to_0_drops(
+        TWO_LAYER | COLORED_COAT | COAT_NORMAL,
+        "Dropped: Two-layer coat, Coloured coat, Coat normal",
+    );
+}
+
+#[test]
+fn from_21_to_0_with_fuzz_is_clean_vanilla() {
+    from_21_to_0_drops(nif::pbr2::feat::FUZZ, "Dropped: Fuzz");
+}
+
+#[test]
+fn from_21_to_0_with_glint_is_clean_vanilla() {
+    from_21_to_0_drops(nif::pbr2::feat::GLINT, "Dropped: Glint");
+}
+
+#[test]
+fn from_21_to_0_keeps_subsurface_and_drops_the_fuzz_beside_it() {
+    use nif::pbr2::feat::*;
+    let b = scenes::lsp21_shape(SUBSURFACE | FUZZ | THIN_SURFACE, &nif::pbr2::PBR2_DEFAULTS);
+    let (op, _) = type_op(&b, 0);
+    let r = apply(&b, &[op]).unwrap();
+    let l = lighting(&r.bytes);
+    assert_eq!(l.slsf2 & !1, PBR | 1 << 26);
+    assert_eq!(
+        notes_of(&r),
+        vec!["Dropped: Fuzz, Thin surface".to_string()]
+    );
 }
 
 #[test]
 fn to_21_refused_on_le() {
-    // the same scene with the header saying Skyrim LE (BS 83): only the version word differs
-    let mut b = scenes::lsp_shape(0, &[]);
-    let at = b
-        .windows(4)
-        .position(|w| w == 100u32.to_le_bytes())
-        .unwrap();
-    b[at..at + 4].copy_from_slice(&83u32.to_le_bytes());
+    // the same scene with the header saying Skyrim LE (BS 83)
+    let mut n = builder::Nif::new(100);
+    let s = n.string("S");
+    n.block("BSTriShape", scenes::bstri_named(s, 1, -1));
+    n.block(
+        "BSLightingShaderProperty",
+        scenes::lsp_body(0, &[], -1, &[]),
+    );
+    n.bsver = 83;
+    let b = n.bytes();
     let m = read_model(&b).unwrap();
     assert_ne!(m.bsver, 100);
     let at = shader_anchor(&b);
@@ -452,6 +528,8 @@ fn from_21_to_0_restores_vanilla_body() {
     assert_eq!(h.sizes[blk as usize], 100); // 180 - 80
     let l = lighting(&r.bytes);
     assert_eq!(l.shader_type, 0);
+    assert_eq!(l.texture_set, 2);
+    assert_eq!(l.texture_set, lighting(&b).texture_set);
     assert_eq!(l.slsf2, 1 | PBR);
     let q = l.params;
     assert_eq!(

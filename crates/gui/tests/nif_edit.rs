@@ -9094,6 +9094,80 @@ fn pick_21_shows_notes() {
 }
 
 #[test]
+fn leaving_21_still_pushes_the_slsf1_type_fix_in_the_same_undo_step() {
+    // a foreign type-21 shape with the skin tint flag: Environment Map needs it off (Note CS); `set_shader_type`
+    // changes only SLSF2 on the way out of 21, so the SLSF1 fix applies cleanly (Note ID13)
+    let mut b = scenes::lsp21_shape(0, &nif::pbr2::PBR2_DEFAULTS);
+    let hd = nif::header::Header::parse(&b).unwrap();
+    let (rel, _) = nif::fields::locate(&hd, &b, 1, Field::Slsf1).unwrap();
+    let at = hd.offsets()[1] + rel;
+    b[at..at + 4].copy_from_slice(&((1u32 << 31) | (1 << 21)).to_le_bytes());
+    let mut m = direct(b);
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .click();
+    h.run_steps(3);
+    h.get_by_label("Environment Map (1)").click();
+    h.run_steps(3);
+    let m = h.state_mut();
+    let got = ops(m);
+    assert_eq!(got.len(), 2, "{got:?}");
+    let l = &m.edit.as_ref().unwrap().model.lighting[&1].lighting;
+    assert_eq!((l.shader_type, l.slsf1), (1, 1 << 31));
+    assert!(m.undo_edit());
+    assert!(ops(m).is_empty(), "type and flag are one undo step");
+}
+
+/// A v1 PBR shape "S" whose glossiness 80 clamps on conversion to type 21.
+fn clamping_shape() -> MeshesModel {
+    let mut b = scenes::lsp_shape(0, &[]);
+    let hd = nif::header::Header::parse(&b).unwrap();
+    let (rel, _) = nif::fields::locate(&hd, &b, 1, Field::Slsf2).unwrap();
+    let at = hd.offsets()[1] + rel;
+    b[at..at + 4].copy_from_slice(&(1u32 | (1 << 23)).to_le_bytes());
+    let mut m = direct(b);
+    select(&mut m, "S");
+    m
+}
+
+#[test]
+fn a_merged_op_keeps_its_notes_in_the_notice() {
+    let mut m = clamping_shape();
+    let e = m.edit.as_mut().unwrap();
+    let b = shape_named(e, "S");
+    let at = nif::edit::anchor_role(&e.model, Some(b), nif::edit::Role::Shader).unwrap();
+    let op = Op::SetField {
+        at,
+        field: Field::ShaderType,
+        value: Value::U32(21),
+        base: Value::U32(0),
+    };
+    e.push(vec![op.clone()], Some("k".into()));
+    let before = e.doc.ops.len();
+    e.push(vec![op], Some("k".into()));
+    assert_eq!(
+        e.doc.ops.len(),
+        before,
+        "the second push merged into the first"
+    );
+    let n = e.notice_for(before, None).expect("the merged op's notes");
+    assert!(n.contains("Specular level clamped from 80 to 1"), "{n}");
+}
+
+#[test]
+fn a_flag_notice_without_notes_is_left_as_it_was() {
+    let m = clamping_shape();
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        e.notice_for(0, Some("no full stop".into())).as_deref(),
+        Some("no full stop")
+    );
+    assert_eq!(e.notice_for(0, None), None);
+}
+
+#[test]
 fn flags_that_need_another_type_are_greyed_with_the_reason() {
     let mut m = direct(typed(0, 0));
     select(&mut m, "S");
