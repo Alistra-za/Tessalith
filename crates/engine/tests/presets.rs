@@ -1732,14 +1732,12 @@ fn a_layer_role_is_refused() {
 #[test]
 fn fast_preview_searches_bc1_fast() {
     let r = PresetRegistry::builtin().unwrap();
-    for id in [
-        "sdc-base",
-        "cs-quality",
-        "cs-compact",
-        "vanilla-quality",
-        "vanilla-compact",
-        "fast-preview",
-    ] {
+    // `selectable` leaves out the hidden base profile; a built-in preset added later is checked here at once.
+    let mut ids: Vec<String> = r.selectable().iter().map(|p| p.id.clone()).collect();
+    ids.push("sdc-base".to_string());
+    assert!(ids.contains(&"fast-preview".to_string()), "{ids:?}");
+    for id in &ids {
+        assert!(r.is_builtin(id), "{id}");
         let want = if id == "fast-preview" {
             Bc1Search::Fast
         } else {

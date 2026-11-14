@@ -543,8 +543,9 @@ mod tests {
         assert_eq!(out[..16], top[..], "the top block is left alone");
     }
 
-    /// A 64 x 64 image of noise on top and a gradient below, as the encoder's blocks. With `holes`, every other
-    /// 16-pixel run of rows 0..32 is transparent (alpha 0, the rest 255), so some blocks are opaque and some not.
+    /// A 64 x 64 image of noise on top and a gradient below, as the encoder's blocks. With `holes`, the texels of
+    /// rows 0..32 with `(x + 2 y) % 5 == 0` are transparent (alpha 0, the rest 255): most noise blocks then hold
+    /// some transparent texels, and the gradient blocks stay opaque.
     fn search_px(holes: bool) -> Vec<[u8; 4]> {
         let mut s = 0x9E37_79B9u32;
         let mut next = move || {
@@ -554,7 +555,7 @@ mod tests {
         let px: Vec<[u8; 4]> = (0..64u32 * 64)
             .map(|i| {
                 let (x, y) = (i % 64, i / 64);
-                let a = if holes && y < 32 && (x / 4 + y / 4) % 2 == 0 && x % 8 < 4 {
+                let a = if holes && y < 32 && (x + 2 * y) % 5 == 0 {
                     0
                 } else {
                     255
@@ -591,19 +592,39 @@ mod tests {
         blk.try_into().unwrap()
     }
 
+    /// The transparent-texel mask of a one-bit-alpha block, bit `j` for texel `j`.
+    fn alpha_mask(px: &[[u8; 4]; 16]) -> u16 {
+        px.iter()
+            .enumerate()
+            .fold(0u16, |m, (j, t)| m | (u16::from(t[3] < 128) << j))
+    }
+
+    /// The `holes` fixture holds opaque blocks and blocks with some, but not all, texels transparent.
+    fn assert_mixed_masks(b: &[[u8; 4]]) {
+        let masks: Vec<u16> = b
+            .chunks(BLOCK_TEXELS)
+            .map(|c| alpha_mask(texels(c)))
+            .collect();
+        assert!(masks.contains(&0), "no opaque block");
+        assert!(
+            masks.iter().filter(|&&m| m != 0 && m != 0xFFFF).count() > masks.len() / 4,
+            "too few mixed blocks"
+        );
+    }
+
     #[test]
     fn default_bc1_search_bytes_are_unchanged() {
         let b = search_blocks(false);
         let bh = search_blocks(true);
-        let cut = bc3_cut(alpha_cut(
-            &search_profile(Format::Bc3, Bc1Search::Default).alpha,
-        ));
+        assert_mixed_masks(&bh);
+        let p3 = search_profile(Format::Bc3, Bc1Search::Default);
+        let cut = bc3_cut(alpha_cut(&p3.alpha));
+        let rad = radius(p3.encoder.bc45_search_radius);
         let bc1 = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Default));
-        let bc3 = encode_blocks(&b, &search_profile(Format::Bc3, Bc1Search::Default));
+        let bc3 = encode_blocks(&b, &p3);
         let mut p1a = search_profile(Format::Bc1, Bc1Search::Default);
         p1a.encoder.bc1_alpha = true;
         let bc1a = encode_blocks(&bh, &p1a);
-        let mut opaque = 0;
         for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
             let px = texels(blk);
             assert_eq!(
@@ -613,35 +634,30 @@ mod tests {
             );
             assert_eq!(
                 bc3[i * 16..][..16],
-                encoders_sys::bc3_encode_block(px, radius(SearchRadius::Default), cut.get(), true),
+                encoders_sys::bc3_encode_block(px, rad, cut.get(), true),
                 "bc3 {i}"
             );
         }
         for (i, blk) in bh.chunks(BLOCK_TEXELS).enumerate() {
             let px = texels(blk);
-            let mask = px
-                .iter()
-                .enumerate()
-                .fold(0u16, |m, (j, t)| m | (u16::from(t[3] < 128) << j));
-            opaque += usize::from(mask == 0);
+            let mask = alpha_mask(px);
             assert_eq!(
                 bc1a[i * 8..][..8],
                 encoders_sys::bc1_encode_block_alpha(px, mask, true),
-                "bc1 alpha {i}"
+                "bc1 alpha {i} mask {mask:#06x}"
             );
         }
-        assert!(opaque > 0 && opaque < bh.len() / BLOCK_TEXELS, "{opaque}");
     }
 
     #[test]
     fn fast_bc1_and_bc3_are_rgbcx_at_the_fast_level() {
         let b = search_blocks(false);
         let lvl = bcenc::BC1_FAST_LEVEL;
-        let cut = bc3_cut(alpha_cut(
-            &search_profile(Format::Bc3, Bc1Search::Fast).alpha,
-        ));
+        let p3 = search_profile(Format::Bc3, Bc1Search::Fast);
+        let cut = bc3_cut(alpha_cut(&p3.alpha));
+        let rad = radius(p3.encoder.bc45_search_radius);
         let bc1 = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Fast));
-        let bc3 = encode_blocks(&b, &search_profile(Format::Bc3, Bc1Search::Fast));
+        let bc3 = encode_blocks(&b, &p3);
         let dflt = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Default));
         assert_ne!(bc1, dflt, "the fixture must tell the levels apart");
         for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
@@ -653,13 +669,7 @@ mod tests {
             );
             assert_eq!(
                 bc3[i * 16..][..16],
-                encoders_sys::bc3_encode_block_level(
-                    px,
-                    radius(SearchRadius::Default),
-                    cut.get(),
-                    lvl,
-                    true
-                ),
+                encoders_sys::bc3_encode_block_level(px, rad, cut.get(), lvl, true),
                 "bc3 {i}"
             );
         }
@@ -668,6 +678,7 @@ mod tests {
     #[test]
     fn fast_one_bit_alpha_is_rgbcx_at_the_fast_level() {
         let b = search_blocks(true);
+        assert_mixed_masks(&b);
         let mut p = search_profile(Format::Bc1, Bc1Search::Fast);
         p.encoder.bc1_alpha = true;
         let out = encode_blocks(&b, &p);
@@ -677,10 +688,7 @@ mod tests {
         assert_ne!(out, dflt, "the fixture must tell the levels apart");
         for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
             let px = texels(blk);
-            let mask = px
-                .iter()
-                .enumerate()
-                .fold(0u16, |m, (j, t)| m | (u16::from(t[3] < 128) << j));
+            let mask = alpha_mask(px);
             assert_eq!(
                 out[i * 8..][..8],
                 encoders_sys::bc1_encode_block_alpha_level(px, mask, bcenc::BC1_FAST_LEVEL, true),

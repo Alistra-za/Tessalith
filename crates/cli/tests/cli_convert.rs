@@ -1774,6 +1774,8 @@ fn set_bc1_search_fast_converts() {
     let rec: Value = serde_json::from_str(&manifest_lines(&fx.p("out"))[0]).unwrap();
     assert_eq!(rec["validation"]["passed"], true, "{rec}");
     assert!(rec["validation"]["levels"].as_u64().unwrap() >= 1, "{rec}");
+    // What gets written records the setting: the profile that encoded the file carries `fast`.
+    assert_eq!(rec["profile"]["encoder"]["bc1_search"], "fast", "{rec}");
 }
 
 #[test]
@@ -1790,5 +1792,5 @@ fn set_bc1_search_rejects_an_unknown_value() {
     ]);
     assert_eq!(code(&o), 2, "{}", text(&o.stderr));
     let err = text(&o.stderr);
-    assert!(err.contains("default") && err.contains("fast"), "{err}");
+    assert!(err.contains("`default`") && err.contains("`fast`"), "{err}");
 }
