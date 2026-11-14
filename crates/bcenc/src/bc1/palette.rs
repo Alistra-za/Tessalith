@@ -2,6 +2,11 @@
 //! Tessalith's patches (MIT or public domain): `interp_5_nv`, `interp_6_nv`, `interp_half_5_nv`, `interp_half_6_nv`,
 //! `interp_5_6_amd`, `interp_half_5_6_amd`, `bc1_get_dual_palette`, `bc1_dual_err` and
 //! `prepare_bc1_single_color_table_dual` (as `init` calls it for the four single-colour tables).
+//!
+//! The interpolated entries of a palette (the two thirds and the midpoint of a channel, for both decoders) are read
+//! from two tables, `PAL5` (32 x 32 code pairs, 8 KB) and `PAL6` (64 x 64, 32 KB), built at compile time by
+//! `build_pal` from the same `interp_*` functions that computed them per candidate, so the maths has one source
+//! (Note HY14).
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
@@ -9,34 +14,34 @@ use crate::hits::{hit, Hit};
 use std::sync::OnceLock;
 
 /// `interp_5_nv`: the NVIDIA 2/3 interpolation of two 5-bit codes.
-pub(crate) fn interp_5_nv(v0: i32, v1: i32) -> i32 {
+pub(crate) const fn interp_5_nv(v0: i32, v1: i32) -> i32 {
     ((2 * v0 + v1) * 22) / 8
 }
 
 /// `interp_6_nv`: the NVIDIA 2/3 interpolation of two expanded 6-bit values.
-pub(crate) fn interp_6_nv(c0: i32, c1: i32) -> i32 {
+pub(crate) const fn interp_6_nv(c0: i32, c1: i32) -> i32 {
     let gdiff = c1 - c0;
     (256 * c0 + (gdiff / 4) + 128 + gdiff * 80) / 256
 }
 
 /// `interp_half_5_nv`: the NVIDIA midpoint of two 5-bit codes.
-pub(crate) fn interp_half_5_nv(v0: i32, v1: i32) -> i32 {
+pub(crate) const fn interp_half_5_nv(v0: i32, v1: i32) -> i32 {
     ((v0 + v1) * 33) / 8
 }
 
 /// `interp_half_6_nv`: the NVIDIA midpoint of two expanded 6-bit values.
-pub(crate) fn interp_half_6_nv(c0: i32, c1: i32) -> i32 {
+pub(crate) const fn interp_half_6_nv(c0: i32, c1: i32) -> i32 {
     let gdiff = c1 - c0;
     (256 * c0 + gdiff / 4 + 128 + gdiff * 128) / 256
 }
 
 /// `interp_5_6_amd`: the AMD 2/3 interpolation of two expanded values.
-pub(crate) fn interp_5_6_amd(c0: i32, c1: i32) -> i32 {
+pub(crate) const fn interp_5_6_amd(c0: i32, c1: i32) -> i32 {
     (c0 * 43 + c1 * 21 + 32) >> 6
 }
 
 /// `interp_half_5_6_amd`: the AMD midpoint of two expanded values.
-pub(crate) fn interp_half_5_6_amd(c0: i32, c1: i32) -> i32 {
+pub(crate) const fn interp_half_5_6_amd(c0: i32, c1: i32) -> i32 {
     (c0 + c1 + 1) >> 1
 }
 
@@ -51,9 +56,124 @@ pub struct DualPalette {
     pub b: [[i32; 4]; 2],
 }
 
-/// `bc1_get_dual_palette`: `l*` and `h*` are the unexpanded 5/6/5-bit endpoint codes.
+/// The interpolated entries of one channel for every pair of codes, indexed `(l << bits) | h`. Entry `[0]` is the
+/// 4-colour entry 1 (`interp(l, h)`, two thirds low), `[1]` the 4-colour entry 2 (`interp(h, l)`), `[2]` the 3-colour
+/// midpoint and `[3]` zeros (unused; it makes an entry 8 bytes). Each is `[nvidia, amd]`. `bits` is 5 (red, blue) or 6
+/// (green), `N` is `1 << (2 * bits)`. NVIDIA interpolates the 5-bit codes themselves and AMD the expanded values; for
+/// green both interpolate the expanded values.
+const fn build_pal<const N: usize>(bits: u32) -> [[[u8; 2]; 4]; N] {
+    assert!(N == 1 << (2 * bits));
+    let mut t = [[[0u8; 2]; 4]; N];
+    let mut i = 0;
+    while i < N {
+        let (l, h) = ((i >> bits) as i32, (i & ((1 << bits) - 1)) as i32);
+        let (e0, e3) = if bits == 5 {
+            ((l << 3) | (l >> 2), (h << 3) | (h >> 2))
+        } else {
+            ((l << 2) | (l >> 4), (h << 2) | (h >> 4))
+        };
+        let v = if bits == 5 {
+            [
+                [interp_5_nv(l, h), interp_5_6_amd(e0, e3)],
+                [interp_5_nv(h, l), interp_5_6_amd(e3, e0)],
+                [interp_half_5_nv(l, h), interp_half_5_6_amd(e0, e3)],
+            ]
+        } else {
+            [
+                [interp_6_nv(e0, e3), interp_5_6_amd(e0, e3)],
+                [interp_6_nv(e3, e0), interp_5_6_amd(e3, e0)],
+                [interp_half_6_nv(e0, e3), interp_half_5_6_amd(e0, e3)],
+            ]
+        };
+        let mut e = 0;
+        while e < 3 {
+            let mut k = 0;
+            while k < 2 {
+                // A value that does not fit a byte fails the build.
+                assert!(v[e][k] >= 0 && v[e][k] <= 255);
+                t[i][e][k] = v[e][k] as u8;
+                k += 1;
+            }
+            e += 1;
+        }
+        i += 1;
+    }
+    t
+}
+
+/// The red and blue entries, `(l << 5) | h`.
+static PAL5: [[[u8; 2]; 4]; 1024] = build_pal(5);
+/// The green entries, `(l << 6) | h`.
+static PAL6: [[[u8; 2]; 4]; 4096] = build_pal(6);
+
+/// `bc1_get_dual_palette`: `l*` and `h*` are the unexpanded 5/6/5-bit endpoint codes. The interpolated entries come
+/// from [`PAL5`] and [`PAL6`], the expanded endpoints are computed. A code outside 5:6:5 panics (Note HY14).
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub fn dual_palette(
+    three: bool,
+    lr: i32,
+    lg: i32,
+    lb: i32,
+    hr: i32,
+    hg: i32,
+    hb: i32,
+) -> DualPalette {
+    // Without this a high code of 32 or more would read another pair's table entry; a negative code fails it too.
+    assert!(
+        ((lr | lb | hr | hb) as u32) < 32 && ((lg | hg) as u32) < 64,
+        "dual_palette: endpoint codes outside 5:6:5 (r {lr}..{hr}, g {lg}..{hg}, b {lb}..{hb})"
+    );
+    let (r0, g0, b0) = (
+        (lr << 3) | (lr >> 2),
+        (lg << 2) | (lg >> 4),
+        (lb << 3) | (lb >> 2),
+    );
+    let (r3, g3, b3) = (
+        (hr << 3) | (hr >> 2),
+        (hg << 2) | (hg >> 4),
+        (hb << 3) | (hb >> 2),
+    );
+    let er = &PAL5[((lr << 5) | hr) as usize];
+    let eg = &PAL6[((lg << 6) | hg) as usize];
+    let eb = &PAL5[((lb << 5) | hb) as usize];
+    let mut p = DualPalette {
+        r: [[r0, 0, 0, 0]; 2],
+        g: [[g0, 0, 0, 0]; 2],
+        b: [[b0, 0, 0, 0]; 2],
+    };
+    if three {
+        hit!(Hit::PaletteThree);
+        // High endpoint at 1, the midpoint (table entry 2) at 2, black at 3 (already 0).
+        for k in 0..2 {
+            p.r[k][1] = r3;
+            p.g[k][1] = g3;
+            p.b[k][1] = b3;
+            p.r[k][2] = er[2][k] as i32;
+            p.g[k][2] = eg[2][k] as i32;
+            p.b[k][2] = eb[2][k] as i32;
+        }
+    } else {
+        hit!(Hit::PaletteFour);
+        // The two thirds (table entries 0 and 1) at 1 and 2, the high endpoint at 3.
+        for k in 0..2 {
+            p.r[k][1] = er[0][k] as i32;
+            p.g[k][1] = eg[0][k] as i32;
+            p.b[k][1] = eb[0][k] as i32;
+            p.r[k][2] = er[1][k] as i32;
+            p.g[k][2] = eg[1][k] as i32;
+            p.b[k][2] = eb[1][k] as i32;
+            p.r[k][3] = r3;
+            p.g[k][3] = g3;
+            p.b[k][3] = b3;
+        }
+    }
+    p
+}
+
+/// `bc1_get_dual_palette` as it was computed per call, before the tables: the reference of the table test.
+#[cfg(test)]
+#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+pub(crate) fn dual_palette_computed(
     three: bool,
     lr: i32,
     lg: i32,
@@ -83,7 +203,6 @@ pub fn dual_palette(
         p.b[k][0] = b0;
     }
     if three {
-        hit!(Hit::PaletteThree);
         for k in 0..2 {
             p.r[k][1] = r3;
             p.g[k][1] = g3;
@@ -99,7 +218,6 @@ pub fn dual_palette(
         p.g[1][2] = interp_half_5_6_amd(g0, g3);
         p.b[1][2] = interp_half_5_6_amd(b0, b3);
     } else {
-        hit!(Hit::PaletteFour);
         for k in 0..2 {
             p.r[k][3] = r3;
             p.g[k][3] = g3;
@@ -234,4 +352,32 @@ fn single_colour_table_dual(expand: &[u8], half: bool) -> [MatchEntry; 256] {
         entry.e = lowest_e.min(u8::MAX as i32) as u8;
     }
     table
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tables_equal_the_interpolation_for_every_code_pair() {
+        for three in [false, true] {
+            for lg in 0..64 {
+                for hg in 0..64 {
+                    // Every 6-bit pair in green; red and blue take every 5-bit pair between them, swapped.
+                    let (l5, h5) = (lg >> 1, hg >> 1);
+                    assert_eq!(
+                        dual_palette(three, l5, lg, h5, h5, hg, l5),
+                        dual_palette_computed(three, l5, lg, h5, h5, hg, l5),
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "endpoint codes outside 5:6:5")]
+    fn an_out_of_range_code_panics() {
+        // Index 32 is inside PAL5 (it would read the pair (1, 0)), so only the assertion can panic.
+        dual_palette(false, 0, 0, 0, 32, 0, 0);
+    }
 }
