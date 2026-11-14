@@ -140,3 +140,26 @@ fn floats_extra_reads_its_values() {
     let h = Header::parse(&bad).unwrap();
     assert!(read_extra(&h, &bad, 0).is_err());
 }
+
+#[test]
+fn floats_extra_refuses_a_hostile_count_and_trailing_bytes() {
+    let mut n = builder::Nif::new(100);
+    let nm = n.string("PBRFuzz");
+    let mut hostile = scenes::floats_extra(nm, &[1.0]);
+    hostile[4..8].copy_from_slice(&0xFFFF_FFFFu32.to_le_bytes());
+    let b = one_block_nif("NiFloatsExtraData", hostile);
+    let h = Header::parse(&b).unwrap();
+    assert!(matches!(
+        read_extra(&h, &b, 0),
+        Err(NifError::BlockSize { .. })
+    ));
+    // declared size larger than name + count + 4n
+    let mut long = scenes::floats_extra(nm, &[1.0, 2.0]);
+    long.extend([0u8; 4]);
+    let b = one_block_nif("NiFloatsExtraData", long);
+    let h = Header::parse(&b).unwrap();
+    assert!(matches!(
+        read_extra(&h, &b, 0),
+        Err(NifError::BlockSize { .. })
+    ));
+}

@@ -87,8 +87,8 @@ pub fn read_extra(h: &Header, b: &[u8], block: usize) -> Result<Extra, NifError>
                         block: block as u32,
                         kind: text::label(&kind).into_owned(),
                         declared: size,
-                        consumed: (c.pos() - start) as u32
-                            + n.saturating_mul(4).min(u32::MAX as usize) as u32,
+                        consumed: ((c.pos() - start) as u32)
+                            .saturating_add(n.saturating_mul(4).min(u32::MAX as usize) as u32),
                     });
                 }
                 ExtraValue::Floats((0..n).map(|_| c.f32()).collect::<Result<_, _>>()?)
