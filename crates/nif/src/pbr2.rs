@@ -8,6 +8,8 @@ pub const BLOCK_EXTRA: usize = 80;
 /// Number of PBR parameters in the payload.
 pub const PARAM_COUNT: usize = 25;
 
+use crate::props::{LightingParams, LightingTrailer};
+
 /// The PBR feature bits (spec section 3), as masks.
 pub mod feat {
     pub const SUBSURFACE: u32 = 1;
@@ -191,4 +193,170 @@ pub struct Pbr2Extra {
     pub thin: Option<Vec<f32>>,
     /// `PBRFuzz`: expected 2 floats (fuzz roughness, green-channel switch).
     pub fuzz: Option<Vec<f32>>,
+}
+
+/// What [`from_v1`] makes of a v1 shape.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToV2 {
+    /// The feature bits (`feat`) CS's load-time remap of the v1 flags gives.
+    pub features: u32,
+    pub params: [f32; PARAM_COUNT],
+    /// Each value that was outside its range, as `(parameter, from, to)`.
+    pub clamped: Vec<(usize, f32, f32)>,
+}
+
+const SLSF2_FIT_SLOPE: u32 = 1 << 12;
+const SLSF2_PBR: u32 = 1 << 23;
+const SLSF2_MLP: u32 = 1 << 24;
+const SLSF2_SOFT: u32 = 1 << 25;
+const SLSF2_SUBSURFACE: u32 = 1 << 26;
+const SLSF2_BACK: u32 = 1 << 27;
+const SLSF2_COLORED: u32 = 1 << 30;
+
+/// The v2 features and parameters a v1 PBR shape means (design: v1 to v2 conversion table). The flag precedence is
+/// `render3d::pbr_flags`'s: two-layer (SLSF2 24), else hair (27), else subsurface (26) with fuzz (25) or glint (12).
+/// A shape without SLSF2 23 is not PBR: no features, and the shared three parameters only. The type-11 trailer
+/// feeds the coat, fuzz and glint rows; any other shape keeps their defaults.
+pub fn from_v1(shader_type: u32, slsf2: u32, p: &LightingParams) -> ToV2 {
+    use feat::*;
+    let has = |m: u32| slsf2 & m != 0;
+    let mut v = PBR2_DEFAULTS;
+    let mut features = 0;
+    (v[0], v[1], v[2]) = (p.specular_strength, p.glossiness, p.lighting_effect_2);
+    let t = match (shader_type, &p.trailer) {
+        (
+            11,
+            LightingTrailer::MultiLayer {
+                inner_thickness,
+                refraction_scale,
+                inner_texture_scale,
+                ..
+            },
+        ) => Some([
+            *inner_thickness,
+            *refraction_scale,
+            inner_texture_scale[0],
+            inner_texture_scale[1],
+        ]),
+        _ => None,
+    };
+    if has(SLSF2_PBR) {
+        let c = p.specular_color;
+        if has(SLSF2_MLP) {
+            features = TWO_LAYER;
+            features |= if has(SLSF2_SOFT) {
+                INTERLAYER_PARALLAX
+            } else {
+                0
+            };
+            features |= if has(SLSF2_BACK) { COAT_NORMAL } else { 0 };
+            features |= if has(SLSF2_COLORED) { COLORED_COAT } else { 0 };
+            v[7..=9].copy_from_slice(&c);
+            v[10] = p.lighting_effect_1;
+            if let Some(t) = t {
+                (v[11], v[12]) = (t[0], t[1]);
+            }
+        } else if has(SLSF2_BACK) {
+            features = HAIR;
+        } else {
+            if has(SLSF2_SUBSURFACE) {
+                features |= SUBSURFACE;
+                v[3..=5].copy_from_slice(&c);
+                v[6] = p.lighting_effect_1;
+            }
+            if has(SLSF2_SOFT) {
+                features |= FUZZ;
+                if let Some(t) = t {
+                    v[13..=16].copy_from_slice(&t);
+                }
+            } else if has(SLSF2_FIT_SLOPE) {
+                features |= GLINT;
+                if let Some(t) = t {
+                    v[17..=20].copy_from_slice(&[t[0], 40.0 - t[1], t[2], t[3]]);
+                }
+            }
+        }
+    }
+    let mut clamped = Vec::new();
+    for (i, x) in v.iter_mut().enumerate() {
+        let to = clamp_param(i, *x);
+        if to.to_bits() != x.to_bits() {
+            clamped.push((i, *x, to));
+            *x = to;
+        }
+    }
+    ToV2 {
+        features,
+        params: v,
+        clamped,
+    }
+}
+
+/// What [`to_v1`] makes of a v2 shape: the SLSF2 bits to set, the lighting fields, and the type-11 trailer floats
+/// (`None`: type 0, no trailer).
+#[derive(Debug, Clone, PartialEq)]
+pub struct ToV1 {
+    pub slsf2_set: u32,
+    pub glossiness: f32,
+    pub specular_color: [f32; 3],
+    pub specular_strength: f32,
+    pub lighting_effect_1: f32,
+    pub lighting_effect_2: f32,
+    pub mlp: Option<[f32; 4]>,
+    /// Features with no v1 form, by name.
+    pub dropped: Vec<&'static str>,
+}
+
+/// The v1 PBR shape that stands for v2 `features` and `params`, by the same table in reverse. An approximation for
+/// tree A's preview (design, settled item 5): thin surface and foliage have no v1 form and are dropped. Fuzz wins
+/// the trailer over glint, as `from_v1` does.
+pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
+    use feat::*;
+    let (has, p) = (|m: u32| features & m != 0, params);
+    let mut r = ToV1 {
+        slsf2_set: SLSF2_PBR,
+        glossiness: p[1],
+        specular_color: [1.0; 3],
+        specular_strength: p[0],
+        lighting_effect_1: 0.0,
+        lighting_effect_2: p[2],
+        mlp: None,
+        dropped: Vec::new(),
+    };
+    if has(TWO_LAYER) {
+        r.slsf2_set |= SLSF2_MLP;
+        for (bit, flag) in [
+            (INTERLAYER_PARALLAX, SLSF2_SOFT),
+            (COAT_NORMAL, SLSF2_BACK),
+            (COLORED_COAT, SLSF2_COLORED),
+        ] {
+            if has(bit) {
+                r.slsf2_set |= flag;
+            }
+        }
+        r.specular_color = [p[7], p[8], p[9]];
+        r.lighting_effect_1 = p[10];
+        r.mlp = Some([p[11], p[12], 0.0, 0.0]);
+    } else if has(HAIR) {
+        r.slsf2_set |= SLSF2_BACK;
+    } else {
+        if has(SUBSURFACE) {
+            r.slsf2_set |= SLSF2_SUBSURFACE;
+            r.specular_color = [p[3], p[4], p[5]];
+            r.lighting_effect_1 = p[6];
+        }
+        if has(FUZZ) {
+            r.slsf2_set |= SLSF2_SOFT;
+            r.mlp = Some([p[13], p[14], p[15], p[16]]);
+        } else if has(GLINT) {
+            r.slsf2_set |= SLSF2_FIT_SLOPE;
+            r.mlp = Some([p[17], 40.0 - p[18], p[19], p[20]]);
+        }
+    }
+    for (bit, name) in [(THIN_SURFACE, "Thin surface"), (FOLIAGE, "Foliage")] {
+        if has(bit) {
+            r.dropped.push(name);
+        }
+    }
+    r
 }

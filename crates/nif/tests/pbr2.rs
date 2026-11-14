@@ -105,3 +105,229 @@ fn clamp_gives_a_value_param_error_accepts() {
         }
     }
 }
+
+// --- v1 <-> v2 conversion (Task 5) ---
+use nif::pbr2::{from_v1, to_v1, ToV1};
+use nif::props::{LightingParams, LightingTrailer};
+
+const PBR: u32 = 1 << 23;
+
+fn v1(
+    strength: f32,
+    gloss: f32,
+    colour: [f32; 3],
+    le1: f32,
+    le2: f32,
+    t: Option<[f32; 4]>,
+) -> LightingParams {
+    LightingParams {
+        uv_offset: [0.0; 2],
+        uv_scale: [1.0; 2],
+        emissive_color: [0.0; 3],
+        emissive_multiple: 1.0,
+        texture_clamp_mode: 3,
+        alpha: 1.0,
+        refraction_strength: 0.0,
+        glossiness: gloss,
+        specular_color: colour,
+        specular_strength: strength,
+        lighting_effect_1: le1,
+        lighting_effect_2: le2,
+        trailer: match t {
+            Some(t) => LightingTrailer::MultiLayer {
+                inner_thickness: t[0],
+                refraction_scale: t[1],
+                inner_texture_scale: [t[2], t[3]],
+                envmap_strength: 0.0,
+            },
+            None => LightingTrailer::None,
+        },
+        pbr2_extra: None,
+    }
+}
+
+#[test]
+fn plain_v1_maps_to_defaults_plus_three() {
+    let r = from_v1(0, PBR, &v1(0.8, 0.05, [0.2, 0.3, 0.4], 0.7, 0.5, None));
+    let mut want = PBR2_DEFAULTS;
+    (want[0], want[1], want[2]) = (0.8, 0.05, 0.5);
+    assert_eq!((r.features, r.params), (0, want));
+    assert!(r.clamped.is_empty());
+}
+
+#[test]
+fn two_layer_type_11_maps_coat() {
+    let f2 = PBR | 1 << 24 | 1 << 25 | 1 << 27 | 1 << 30;
+    let r = from_v1(
+        11,
+        f2,
+        &v1(
+            1.0,
+            0.04,
+            [0.1, 0.2, 0.3],
+            0.6,
+            1.0,
+            Some([0.3, 0.06, 0.0, 0.0]),
+        ),
+    );
+    assert_eq!(
+        r.features,
+        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT
+    );
+    assert_eq!(r.params[7..=10], [0.1, 0.2, 0.3, 0.6]);
+    assert_eq!(r.params[11..=12], [0.3, 0.06]);
+    // type 0 has no trailer: the coat roughness and level stay default
+    let r = from_v1(
+        0,
+        PBR | 1 << 24,
+        &v1(1.0, 0.04, [0.1, 0.2, 0.3], 0.6, 1.0, None),
+    );
+    assert_eq!(r.features, TWO_LAYER);
+    assert_eq!(r.params[11..=12], PBR2_DEFAULTS[11..=12]);
+    // 24 wins over 26, 27 (hair) and 12
+    let r = from_v1(
+        0,
+        PBR | 1 << 24 | 1 << 26 | 1 << 12,
+        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, None),
+    );
+    assert_eq!(r.features, TWO_LAYER);
+}
+
+#[test]
+fn subsurface_maps_colour_and_opacity() {
+    let r = from_v1(
+        0,
+        PBR | 1 << 26,
+        &v1(1.0, 0.04, [0.9, 0.5, 0.4], 0.35, 1.0, None),
+    );
+    assert_eq!(r.features, SUBSURFACE);
+    assert_eq!(r.params[3..=6], [0.9, 0.5, 0.4, 0.35]);
+    assert_eq!(r.params[7..=10], PBR2_DEFAULTS[7..=10]);
+}
+
+#[test]
+fn fuzz_from_trailer() {
+    let r = from_v1(
+        11,
+        PBR | 1 << 25,
+        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
+    );
+    assert_eq!(r.features, FUZZ);
+    assert_eq!(r.params[13..=16], [0.2, 0.4, 0.6, 0.8]);
+    // 25 wins over 12, and subsurface can sit beside it
+    let r = from_v1(
+        11,
+        PBR | 1 << 25 | 1 << 12 | 1 << 26,
+        &v1(1.0, 0.04, [0.5; 3], 0.5, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
+    );
+    assert_eq!(r.features, FUZZ | SUBSURFACE);
+    assert_eq!(r.params[3..=6], [0.5; 4]);
+}
+
+#[test]
+fn glint_inverts_log_density() {
+    let r = from_v1(
+        11,
+        PBR | 1 << 12,
+        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([1.5, 10.0, 0.02, 3.0])),
+    );
+    assert_eq!(r.features, GLINT);
+    assert_eq!(r.params[17..=20], [1.5, 30.0, 0.02, 3.0]);
+}
+
+#[test]
+fn hair_alone() {
+    let r = from_v1(
+        11,
+        PBR | 1 << 27 | 1 << 26 | 1 << 25,
+        &v1(0.5, 0.04, [1.0; 3], 0.0, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
+    );
+    assert_eq!(r.features, HAIR);
+    assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
+}
+
+#[test]
+fn out_of_range_is_clamped_and_reported() {
+    let r = from_v1(0, PBR, &v1(1.0, 2.0, [1.0; 3], 0.0, 1.0, None));
+    assert_eq!(r.params[1], 1.0);
+    assert_eq!(r.clamped, [(1, 2.0, 1.0)]);
+    // a glint trailer of zeros (log density 40 - 0 is fine, scale 0 is below 1, roughness 0 below 0.005)
+    let r = from_v1(
+        11,
+        PBR | 1 << 12,
+        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([0.0; 4])),
+    );
+    assert_eq!(r.params[17..=20], [1.0, 40.0, 0.005, 0.0]);
+    assert_eq!(r.clamped, [(17, 0.0, 1.0), (19, 0.0, 0.005)]);
+    // a NaN takes the default
+    let r = from_v1(0, PBR, &v1(f32::NAN, 0.04, [1.0; 3], 0.0, 1.0, None));
+    assert_eq!(r.params[0], PBR2_DEFAULTS[0]);
+    assert_eq!(r.clamped.len(), 1);
+}
+
+fn params_for(features: u32) -> [f32; PARAM_COUNT] {
+    let mut p = PBR2_DEFAULTS;
+    (p[0], p[1], p[2]) = (0.7, 0.2, 1.3);
+    for (bit, rows) in [
+        (TWO_LAYER, 7..=12),
+        (SUBSURFACE, 3..=6),
+        (FUZZ, 13..=16),
+        (GLINT, 17..=20),
+    ] {
+        if features & bit != 0 {
+            for i in rows {
+                p[i] = 0.1 + 0.05 * i as f32;
+            }
+        }
+    }
+    if features & GLINT != 0 {
+        (p[17], p[18], p[19]) = (1.5, 25.0, 0.1); // inside the glint ranges
+    }
+    p
+}
+fn lp(r: &ToV1) -> LightingParams {
+    v1(
+        r.specular_strength,
+        r.glossiness,
+        r.specular_color,
+        r.lighting_effect_1,
+        r.lighting_effect_2,
+        r.mlp,
+    )
+}
+
+#[test]
+fn to_v1_round_trips_reversible_subset() {
+    for f in [
+        0,
+        SUBSURFACE,
+        FUZZ,
+        GLINT,
+        FUZZ | SUBSURFACE,
+        GLINT | SUBSURFACE,
+        HAIR,
+        TWO_LAYER,
+        TWO_LAYER | COLORED_COAT,
+        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT,
+    ] {
+        let p = params_for(f);
+        let r = to_v1(f, &p);
+        assert!(r.dropped.is_empty());
+        assert_eq!(r.slsf2_set & PBR, PBR);
+        let back = from_v1(if r.mlp.is_some() { 11 } else { 0 }, r.slsf2_set, &lp(&r));
+        assert_eq!((back.features, back.params), (f, p), "{f:#x}");
+        assert!(back.clamped.is_empty());
+    }
+}
+
+#[test]
+fn to_v1_drops_thin_and_foliage() {
+    let r = to_v1(THIN_SURFACE | FOLIAGE | SUBSURFACE, &PBR2_DEFAULTS);
+    assert_eq!(r.dropped, ["Thin surface", "Foliage"]);
+    assert_eq!(r.slsf2_set, PBR | 1 << 26);
+    let r = to_v1(THIN_SURFACE, &PBR2_DEFAULTS);
+    assert_eq!(
+        (r.dropped.as_slice(), r.slsf2_set),
+        (&["Thin surface"][..], PBR)
+    );
+}
