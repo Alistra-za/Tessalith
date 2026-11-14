@@ -1,4 +1,4 @@
-use encoders_sys::{bc6h_compress_rows, Bc6hLevel};
+use encoders_sys::{bc6h_compress_rows, bc6h_compress_rows_on, ispc_target, Bc6hLevel, IspcTarget};
 use half::f16;
 use sha2::{Digest, Sha256};
 
@@ -81,48 +81,91 @@ fn hdr_image() -> Vec<[u16; 4]> {
     px
 }
 
+/// AVX2 path, recorded on Windows, ISPC 1.31.0, 2026-10-31.
+const RECORDED: [(Bc6hLevel, &str); 5] = [
+    (
+        Bc6hLevel::Veryfast,
+        "f803b49eba0cad2880b811f039f65567133a4b7e8e281d0df42541522afb57a5",
+    ),
+    (
+        Bc6hLevel::Fast,
+        "fc9954432343d094bca7a2e7bddad47486fc3c00a14c5335a1bfe4810b14fcb1",
+    ),
+    (
+        Bc6hLevel::Basic,
+        "5b5dd790d10d4ebe36482cd6a5e4f956fe7ec9429cc9e58b8fb4405a61b030f8",
+    ),
+    (
+        Bc6hLevel::Slow,
+        "49804dcc003a5cb1a8eab90dcbbd1151e0f7ebfd68c070181fe17cb7226b1e6f",
+    ),
+    (
+        Bc6hLevel::Veryslow,
+        "cc6fbdc096496cd67c9b728eb3809f6899c6e73ea634498925afbf3d2b85ecb6",
+    ),
+];
+
+/// SSE2, SSE4 and AVX write the same BC6H bytes.
+const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
+    (
+        Bc6hLevel::Veryfast,
+        "2429f2f010d831a5e8392d7452e8b7e5defb334e943a97076fae0786d76c248b",
+    ),
+    (
+        Bc6hLevel::Fast,
+        "c8461152e349acb1cb294667a7e501a9536a1ba22687546dd1912432eac63319",
+    ),
+    (
+        Bc6hLevel::Basic,
+        "f0f5ba2c1fd6abb65db043cfd1e1b7b9373805b5383d1b595bc7e9c785c5e1fe",
+    ),
+    (
+        Bc6hLevel::Slow,
+        "c428819ef65ec8801744c9b4324ad1c4d46808540dfd0c37a298559a35b9e340",
+    ),
+    (
+        Bc6hLevel::Veryslow,
+        "ef6c0258b03cbd489f8ae998b3f9890f4e6b8866e0d2fc1a9ec6fd403e2fa997",
+    ),
+];
+
+fn recorded(target: IspcTarget) -> [(Bc6hLevel, &'static str); 5] {
+    match target {
+        IspcTarget::Avx2 => RECORDED,
+        _ => RECORDED_PRE_AVX2,
+    }
+}
+
 /// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
-/// ISPC dispatches per CPU and its target paths differ, so the hashes are those of the AVX2 path (recorded on
-/// Windows, ISPC 1.31.0, 2026-10-31); a CPU without AVX2 skips. `SDC_RECORD_LEVEL_HASHES=1` prints them.
+/// The ISPC target paths differ (AVX2 against the three older ones), so each target has its own hashes; a CPU
+/// checks the targets it supports. `SDC_RECORD_LEVEL_HASHES=1` prints them.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
-    const RECORDED: [(Bc6hLevel, &str); 5] = [
-        (
-            Bc6hLevel::Veryfast,
-            "f803b49eba0cad2880b811f039f65567133a4b7e8e281d0df42541522afb57a5",
-        ),
-        (
-            Bc6hLevel::Fast,
-            "fc9954432343d094bca7a2e7bddad47486fc3c00a14c5335a1bfe4810b14fcb1",
-        ),
-        (
-            Bc6hLevel::Basic,
-            "5b5dd790d10d4ebe36482cd6a5e4f956fe7ec9429cc9e58b8fb4405a61b030f8",
-        ),
-        (
-            Bc6hLevel::Slow,
-            "49804dcc003a5cb1a8eab90dcbbd1151e0f7ebfd68c070181fe17cb7226b1e6f",
-        ),
-        (
-            Bc6hLevel::Veryslow,
-            "cc6fbdc096496cd67c9b728eb3809f6899c6e73ea634498925afbf3d2b85ecb6",
-        ),
-    ];
-    if !std::is_x86_feature_detected!("avx2") {
-        eprintln!("skipped: the hashes are for ISPC's AVX2 path");
-        return;
-    }
     let px = hdr_image();
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
-    for (level, want) in RECORDED {
-        let mut out = vec![0u8; 16 * 16 * 16];
-        bc6h_compress_rows(&px, 64, 64, &mut out, level);
-        let got = hex::encode(Sha256::digest(&out));
-        if record {
-            println!("{level:?} {got}");
-        } else {
-            assert_eq!(got, want, "{level:?}");
+    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
+        for (level, want) in recorded(target) {
+            let mut out = vec![0u8; 16 * 16 * 16];
+            bc6h_compress_rows_on(&px, 64, 64, &mut out, level, target);
+            let got = hex::encode(Sha256::digest(&out));
+            if record {
+                println!("{target:?} {level:?} {got}");
+            } else {
+                assert_eq!(got, want, "{target:?} {level:?}");
+            }
         }
+    }
+}
+
+#[test]
+fn the_plain_call_encodes_on_the_process_target() {
+    let px = hdr_image();
+    for (level, _) in RECORDED {
+        let mut plain = vec![0u8; 16 * 16 * 16];
+        let mut on = vec![0u8; 16 * 16 * 16];
+        bc6h_compress_rows(&px, 64, 64, &mut plain, level);
+        bc6h_compress_rows_on(&px, 64, 64, &mut on, level, ispc_target());
+        assert_eq!(plain, on, "{level:?}");
     }
 }
 

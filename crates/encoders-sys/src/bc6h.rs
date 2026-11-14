@@ -1,3 +1,4 @@
+use crate::target::{forced, ispc_target, IspcTarget};
 use crate::{ffi, init};
 
 /// ISPC TC BC6H effort levels. The discriminants index `g_bc6` in the shim, which has no range check.
@@ -24,6 +25,23 @@ pub fn bc6h_compress_rows(
     out: &mut [u8],
     level: Bc6hLevel,
 ) {
+    bc6h_compress_rows_on(rgba_f16, width, rows, out, level, ispc_target());
+}
+
+/// `bc6h_compress_rows` on one ISPC code path instead of the CPU dispatch. Every plain encode goes through it with `ispc_target()`.
+/// Panics when the CPU cannot run `target`.
+pub fn bc6h_compress_rows_on(
+    rgba_f16: &[[u16; 4]],
+    width: u32,
+    rows: u32,
+    out: &mut [u8],
+    level: Bc6hLevel,
+    target: IspcTarget,
+) {
+    assert!(
+        target.supported(),
+        "this CPU cannot run the {target:?} BC6H path"
+    );
     assert!(
         width > 0 && width.is_multiple_of(4) && rows.is_multiple_of(4),
         "width and rows must be a multiple of 4"
@@ -49,7 +67,7 @@ pub fn bc6h_compress_rows(
     // SAFETY: `rgba_f16` holds `width * rows` RGBA16F texels (8 bytes each) and `stride` is the
     // row pitch in bytes, so the shim reads only within the slice; `out` holds `(width/4)*(rows/4)`
     // 16-byte blocks, the number ISPC TC writes; `level` comes from the closed `Bc6hLevel` enum
-    // (0..=5), which the shim indexes without a range check.
+    // (0..=5), which the shim indexes without a range check; `target` was checked above.
     unsafe {
         ffi::sdc_bc6h_compress(
             rgba_f16.as_ptr() as *const u16,
@@ -58,6 +76,7 @@ pub fn bc6h_compress_rows(
             stride,
             out.as_mut_ptr(),
             level as i32,
+            forced(target),
         )
     };
 }

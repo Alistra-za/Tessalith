@@ -18,6 +18,7 @@ extern "C" {
         perceptual: i32,
         exact: i32,
         t: *const i32,
+        target: i32,
     );
     pub fn sdc_bc1_encode(
         dst: *mut u8,
@@ -54,5 +55,6 @@ extern "C" {
         stride_bytes: i32,
         dst: *mut u8,
         level: i32,
+        target: i32,
     );
 }

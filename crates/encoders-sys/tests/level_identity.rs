@@ -15,8 +15,9 @@
 //! recorded change is intended (needs a DECISIONS note).
 
 use encoders_sys::{
-    bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned, gather_blocks,
-    Bc7Level, Bc7Params, Bc7Target, Bc7Tune,
+    bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
+    bc7e_compress_blocks_tuned_on, gather_blocks, ispc_target, Bc7Level, Bc7Params, Bc7Tune,
+    IspcTarget,
 };
 use sha2::{Digest, Sha256};
 
@@ -432,27 +433,31 @@ fn normal() -> Vec<[u8; 4]> {
     })
 }
 
-fn hash(level: Bc7Level, perceptual: bool, exact_opaque: bool, target: Bc7Target) -> String {
+fn hash_by(encode: impl Fn(&[[u8; 4]], &mut [u8])) -> String {
+    let mut h = Sha256::new();
+    for img in [colour(), cutout(), smooth(), normal()] {
+        let blocks = gather_blocks(&img, W, W);
+        let mut out = vec![0u8; blocks.len()];
+        encode(&blocks, &mut out);
+        h.update(&out);
+    }
+    hex::encode(h.finalize())
+}
+
+fn hash(level: Bc7Level, perceptual: bool, exact_opaque: bool, target: IspcTarget) -> String {
     let p = Bc7Params {
         level,
         perceptual,
         exact_opaque,
     };
-    let mut h = Sha256::new();
-    for img in [colour(), cutout(), smooth(), normal()] {
-        let blocks = gather_blocks(&img, W, W);
-        let mut out = vec![0u8; blocks.len()];
-        bc7e_compress_blocks_on(&blocks, &mut out, p, target);
-        h.update(&out);
-    }
-    hex::encode(h.finalize())
+    hash_by(|px, out| bc7e_compress_blocks_on(px, out, p, target))
 }
 
 #[test]
 fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     let mut diffs = vec![];
-    for target in Bc7Target::ALL.into_iter().filter(|t| t.supported()) {
+    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
         for (li, level) in LEVELS.iter().enumerate() {
             for perceptual in [false, true] {
                 for exact in [false, true] {
@@ -477,6 +482,45 @@ fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
         diffs.is_empty(),
         "bc7e output changed for shipped levels (goldens would change):\n{}",
         diffs.join("\n")
+    );
+}
+
+#[test]
+fn tuning_with_no_overrides_matches_the_level_on_every_target() {
+    let p = Bc7Params {
+        level: Bc7Level::Veryslow,
+        perceptual: false,
+        exact_opaque: false,
+    };
+    let blocks = gather_blocks(&colour(), W, W);
+    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
+        let mut a = vec![0u8; blocks.len()];
+        let mut b = vec![0u8; blocks.len()];
+        bc7e_compress_blocks_on(&blocks, &mut a, p, target);
+        bc7e_compress_blocks_tuned_on(&blocks, &mut b, p, Bc7Tune::default(), target);
+        assert_eq!(a, b, "{target:?}");
+    }
+}
+
+/// The engine calls the plain functions. They must encode on `ispc_target()`, whatever ISPC would dispatch to.
+/// No pin is read here, so the test cannot fail for the reason HW4 describes.
+#[test]
+fn the_plain_calls_encode_on_the_process_target() {
+    let p = Bc7Params {
+        level: Bc7Level::Veryslow,
+        perceptual: false,
+        exact_opaque: false,
+    };
+    let want = hash_by(|px, out| bc7e_compress_blocks_on(px, out, p, ispc_target()));
+    assert_eq!(
+        hash_by(|px, out| bc7e_compress_blocks(px, out, p)),
+        want,
+        "plain"
+    );
+    assert_eq!(
+        hash_by(|px, out| bc7e_compress_blocks_tuned(px, out, p, Bc7Tune::default())),
+        want,
+        "tuned"
     );
 }
 

@@ -37,6 +37,14 @@ SDC_BC7E_TARGET(sse4)
 SDC_BC7E_TARGET(avx)
 SDC_BC7E_TARGET(avx2)
 
+// The texture compressor's per-target BC6H kernels, which ispc_texcomp.cpp's CompressBlocksBC6H reaches through the
+// dispatcher with the same two structs. They need no init.
+#define SDC_BC6H_TARGET(t) void CompressBlocksBC6H_ispc_##t(rgba_surface*, uint8_t*, bc6h_enc_settings*);
+SDC_BC6H_TARGET(sse2)
+SDC_BC6H_TARGET(sse4)
+SDC_BC6H_TARGET(avx)
+SDC_BC6H_TARGET(avx2)
+
 // Must run exactly once (Rust guards it with Once): rgbcx::init writes global state.
 void sdc_init(int bc1_mode) {
     rgbcx::init(static_cast<rgbcx::bc1_approx_mode>(bc1_mode));
@@ -59,13 +67,12 @@ void sdc_init(int bc1_mode) {
     g_bc6[5].fast_mode = true;
 }
 
-// `target` < 0 lets ISPC dispatch on the CPU; 0..=3 forces the sse2, sse4, avx or avx2 code path (tests only).
+// `target` < 0 lets ISPC dispatch on the CPU; 0..=3 forces the sse2, sse4, avx or avx2 code path (BC7 and BC6H alike).
 // The caller checks the CPU supports the target and never forces the one the dispatcher uses, so the
 // per-target init below never rewrites tables a dispatched encode is reading.
-void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int level, int perceptual, int exact,
-                       int target) {
+static void bc7e_blocks_on(int target, uint32_t n, uint64_t* blocks, const uint32_t* px,
+                           const ispc::bc7e_compress_block_params* p) {
     static std::once_flag inited[4];
-    const ispc::bc7e_compress_block_params* p = &g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0];
     switch (target) {
     case 0: std::call_once(inited[0], bc7e_compress_block_init_sse2); bc7e_compress_blocks_sse2(n, blocks, px, p); break;
     case 1: std::call_once(inited[1], bc7e_compress_block_init_sse4); bc7e_compress_blocks_sse4(n, blocks, px, p); break;
@@ -75,12 +82,17 @@ void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int lev
     }
 }
 
+void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int level, int perceptual, int exact,
+                       int target) {
+    bc7e_blocks_on(target, n, blocks, px, &g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0]);
+}
+
 // Measurement only (the BC7 tuning study, docs/research/bc7e-tuning.md): the level's parameters with some fields overridden. A negative
 // override keeps the level's value. `t` is 14 ints: partitions_to_try (modes 0/1/3, 2 and 7 together),
 // uber_level, refinement_passes, pbit_search, weights r g b a, max_partitions for modes 1/3/7, mode 0, mode 2,
 // then the patch-0002 flags endpoint_search and refine_partitions, and one spare.
 void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, int level, int perceptual, int exact,
-                             const int32_t* t) {
+                             const int32_t* t, int target) {
     ispc::bc7e_compress_block_params p = g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0];
     if (t[0] >= 0) {
         p.m_opaque_settings.m_max_mode13_partitions_to_try = t[0];
@@ -102,7 +114,7 @@ void sdc_bc7e_compress_tuned(uint32_t n, uint64_t* blocks, const uint32_t* px, i
     if (t[10] >= 0) p.m_max_partitions_mode[2] = t[10];
     if (t[11] >= 0) p.m_endpoint_search = t[11] != 0;
     if (t[12] >= 0) p.m_refine_partitions = t[12] != 0;
-    ispc::bc7e_compress_blocks(n, blocks, px, &p);
+    bc7e_blocks_on(target, n, blocks, px, &p);
 }
 
 // `perceptual` != 0 weights the BC1 colour error by Rec.709 luma for this one call (rgbcx's per-thread weights).
@@ -148,13 +160,20 @@ void sdc_bc4_block_values(uint32_t l, uint32_t h, uint8_t* out8) {
     rgbcx::bc4_block::get_block_values(out8, l, h);
 }
 
-void sdc_bc6h_compress(const uint16_t* rgba16f, int32_t width, int32_t rows, int32_t stride_bytes, uint8_t* dst, int level) {
+void sdc_bc6h_compress(const uint16_t* rgba16f, int32_t width, int32_t rows, int32_t stride_bytes, uint8_t* dst, int level,
+                       int target) {
     rgba_surface s;
     s.ptr = reinterpret_cast<uint8_t*>(const_cast<uint16_t*>(rgba16f));
     s.width = width;
     s.height = rows;
     s.stride = stride_bytes;
-    CompressBlocksBC6H(&s, dst, &g_bc6[level]);
+    switch (target) {
+    case 0: CompressBlocksBC6H_ispc_sse2(&s, dst, &g_bc6[level]); break;
+    case 1: CompressBlocksBC6H_ispc_sse4(&s, dst, &g_bc6[level]); break;
+    case 2: CompressBlocksBC6H_ispc_avx(&s, dst, &g_bc6[level]); break;
+    case 3: CompressBlocksBC6H_ispc_avx2(&s, dst, &g_bc6[level]); break;
+    default: CompressBlocksBC6H(&s, dst, &g_bc6[level]); break;
+    }
 }
 
 }  // extern "C"
