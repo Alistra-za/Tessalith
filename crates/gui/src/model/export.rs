@@ -363,14 +363,21 @@ impl ExportModel {
     }
 }
 
-/// Note JA6: the export's kept outputs in GUI words (no `--ev`), or `None` when it kept none. One of the export notes,
-/// so the Files tab and the Markdown report show it.
+/// Note JA6: the export's kept outputs in GUI words (no `--ev`), naming only the counts above 0, or `None` when it kept
+/// none. One of the export notes, so the Files tab and the Markdown report show it.
 pub fn kept_note(s: &BatchSummary) -> Option<String> {
-    (s.kept_older_encode > 0 || s.kept_lower_target > 0).then(|| {
+    let parts: Vec<String> = [
+        (s.kept_older_encode, "from an older encode version"),
+        (s.kept_lower_target, "at a higher quality target"),
+    ]
+    .into_iter()
+    .filter(|(n, _)| *n > 0)
+    .map(|(n, why)| format!("{n} kept {why}"))
+    .collect();
+    (!parts.is_empty()).then(|| {
         format!(
-            "{} kept from an older encode version, {} kept at a higher quality target: tick Re-encode every output \
-             to encode them again",
-            s.kept_older_encode, s.kept_lower_target
+            "{}: tick Re-encode every output (Export to ▾) to encode them again",
+            parts.join(", ")
         )
     })
 }

@@ -20,14 +20,17 @@ impl HumanSink {
     }
 }
 
-/// `, {k} kept from an older encode version (--ev re-encodes), {t} kept at a higher target`, or nothing when both are 0.
+/// `, {k} kept from an older encode version (--ev re-encodes), {t} kept at a higher target`, naming only the counts
+/// above 0 (nothing when both are 0).
 fn kept_clause((older, lower): (u64, u64)) -> String {
-    if older == 0 && lower == 0 {
-        return String::new();
+    let mut s = String::new();
+    if older > 0 {
+        s += &format!(", {older} kept from an older encode version (--ev re-encodes)");
     }
-    format!(
-        ", {older} kept from an older encode version (--ev re-encodes), {lower} kept at a higher target"
-    )
+    if lower > 0 {
+        s += &format!(", {lower} kept at a higher target");
+    }
+    s
 }
 
 impl Default for HumanSink {

@@ -484,7 +484,7 @@ fn a_failed_plain_export_leaves_no_row_queued() {
     assert!(open.is_empty(), "still open: {open:?}");
 }
 
-// ---- Note JA11: the header's Re-encode every output box and the kept counts ----
+// ---- Notes JA11, JA12: Export to ▾'s Re-encode every output item and the kept counts ----
 
 fn ui_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
     let mut h = egui_kittest::Harness::builder()
@@ -504,7 +504,7 @@ fn export_and_wait(m: &mut AppModel) -> engine::api::BatchSummary {
 
 #[test]
 fn the_reencode_box_reencodes_recorded_outputs_only() {
-    use egui_kittest::kittest::Queryable;
+    use egui_kittest::kittest::{NodeT as _, Queryable};
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
@@ -540,17 +540,37 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
     assert!(leaf.exists(), "{}", leaf.display());
     std::fs::write(&leaf, b"not written by Tessalith").unwrap();
 
-    // Tick the box as a user does, by its label.
+    // Tick the item as a user does: open Export to ▾, then click it by its label.
     let mut h = ui_harness(m);
+    let item = |h: &egui_kittest::Harness<'static, AppModel>| {
+        h.get_by_role_and_label(
+            eframe::egui::accesskit::Role::CheckBox,
+            sdc_gui::ui::header::REENCODE_TEXT,
+        )
+        .accesskit_node()
+        .toggled()
+    };
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
     h.get_by_role_and_label(
         eframe::egui::accesskit::Role::CheckBox,
         sdc_gui::ui::header::REENCODE_TEXT,
     )
     .click();
     h.run();
+    assert!(h.state().reencode_all);
+    // egui 0.36: the menu (CloseOnClickOutside) stays open after the tick, and the item reads ticked.
+    assert_eq!(
+        item(&h),
+        Some(eframe::egui::accesskit::Toggled::True),
+        "the menu stays open, ticked"
+    );
+    let s = export_and_wait(h.state_mut());
+    // JA12: one-shot, the pass that read it cleared it; the open menu shows it unticked.
+    h.run();
+    assert!(!h.state().reencode_all);
+    assert_eq!(item(&h), Some(eframe::egui::accesskit::Toggled::False));
     let m = h.state_mut();
-    assert!(m.reencode_all);
-    let s = export_and_wait(m);
     // Every recorded output is encoded again; the unrecorded one is kept and reported.
     assert_eq!(
         (s.converted, s.up_to_date),
@@ -579,7 +599,9 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
 #[test]
 fn the_export_summary_shows_kept_counts() {
     use egui_kittest::kittest::Queryable;
-    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output to encode them again";
+    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode them again";
+    // A zero count is not named.
+    const LOWER_ONLY: &str = "1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode them again";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     // Nothing kept: no line.
@@ -589,6 +611,16 @@ fn the_export_summary_shows_kept_counts() {
     }));
     assert!(
         !m.export.notes.iter().any(|n| n.contains("kept from")),
+        "{:?}",
+        m.export.notes
+    );
+    m.end_export_with(Ok(engine::api::BatchSummary {
+        up_to_date: 3,
+        kept_lower_target: 1,
+        ..Default::default()
+    }));
+    assert!(
+        m.export.notes.iter().any(|n| n == LOWER_ONLY),
         "{:?}",
         m.export.notes
     );

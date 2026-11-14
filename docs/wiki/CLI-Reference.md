@@ -219,10 +219,12 @@ error <input>: <CODE> <message>
 info  <input>: CFG-FILTER-IGNORED <message>
 done: N converted, N up to date, N skipped (N on purpose), N failed, N failed validation, N cancelled
 done: ..., N cancelled, N kept from an older encode version (--ev re-encodes), N kept at a higher target
+done: ..., N cancelled, N kept at a higher target
 ```
 
 - Codes of severity warning and above are printed, plus the info code `CFG-FILTER-IGNORED`; other info codes are recorded but not printed. Paths use forward slashes.
-- The `done` line gains the two kept counts when `if-changed` kept any output ([why](#re-runs-and-if-changed)). Kept outputs also count under "up to date". With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
+- The `done` line gains a kept count for each kind `if-changed` kept at least one output of, and names no count of 0 ([why](#re-runs-and-if-changed)). Kept outputs also count under "up to date".
+- With `[export] also`, only the PBR folder's `done` line shows kept counts. The Vanilla and CM folders' `done` lines never do, even when outputs there were kept. With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
 - A file with a validation error is still written. It prints as `ok ... [VALIDATION FAILED]`, counts under "failed validation", and makes `sdc convert` exit 4 if nothing worse happened.
@@ -237,8 +239,8 @@ done: ..., N cancelled, N kept from an older encode version (--ev re-encodes), N
 | failed | Files that failed to load, resolve, encode or write. |
 | failed validation | Files written whose validation reported an error. |
 | cancelled | Files not started because you pressed Ctrl-C. |
-| kept from an older encode version | Of up to date: the outputs kept as "older encode version" ([below](#re-runs-and-if-changed)). Shown only when a kept count is above 0. |
-| kept at a higher target | Of up to date: the outputs kept as "lower target" ([below](#re-runs-and-if-changed)). Shown only when a kept count is above 0. |
+| kept from an older encode version | Of up to date: the outputs kept as "older encode version" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
+| kept at a higher target | Of up to date: the outputs kept as "lower target" ([below](#re-runs-and-if-changed)). Shown only when above 0. |
 
 ### Re-runs and if-changed
 
@@ -275,7 +277,7 @@ Notice: a comma list means all of its words, so `cutout,mips` is a cutout output
 | a format id (`bc1`, `bc7`, ...) | Its format is that one, spelled as `format=` takes it ([the ids](Project-Config.md#fields)). |
 | `alpha` | It stores alpha: the alpha policy isn't `remove` and the format has an alpha channel (BC1 only with 1-bit alpha). A `data` alpha, such as a parallax height, counts. |
 | `cutout` | It has `alpha` and the game alpha-tests it: a `cutout` or `cutout_blend` policy, or `blend` written as 1-bit-alpha BC1. |
-| `mips` | The written file has more than one mip level, as its manifest record says. |
+| `mips` | The written file has more than one mip level, as its manifest record says. A record that doesn't say how many levels the file has counts as having mips, so `--ev` encodes it again rather than keep it by mistake. |
 | a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#sub-types-what-each-file-becomes)). |
 
 - Case doesn't matter and spaces around a word are trimmed: `" BC1 , Mips "` works.

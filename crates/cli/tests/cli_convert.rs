@@ -1859,10 +1859,9 @@ fn ev_reencodes_an_older_encode_version() {
     let err = text(&o.stderr);
     assert!(
         err.lines().any(|l| {
+            // A zero count is not named.
             l.starts_with("done: ")
-            && l.contains(
-                ", 1 kept from an older encode version (--ev re-encodes), 0 kept at a higher target"
-            )
+                && l.ends_with(" cancelled, 1 kept from an older encode version (--ev re-encodes)")
         }),
         "{err}"
     );
@@ -1908,9 +1907,10 @@ fn a_lower_effort_is_kept_and_a_higher_one_reencodes() {
     let o = fx.convert(&with(&args, &["--set", "encoder.effort=fast"]));
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     assert_eq!(counts(&o), (0, 1));
+    // Only the count above 0 is named.
     assert!(
-        text(&o.stderr).contains(
-            ", 0 kept from an older encode version (--ev re-encodes), 1 kept at a higher target"
+        text(&o.stderr).lines().any(
+            |l| l.starts_with("done: ") && l.ends_with(" cancelled, 1 kept at a higher target")
         ),
         "{}",
         text(&o.stderr)

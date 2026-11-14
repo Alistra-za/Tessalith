@@ -567,8 +567,8 @@ pub struct AppModel {
     pub last_recipe: rename::Recipe,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
-    /// Note JA11: the header's **Re-encode every output** box. Off at start and never saved: the next export encodes
-    /// every output that has a record again (`OnExisting::Reencode`).
+    /// Note JA11: **Re-encode every output** in the Export to ▾ menu. Off at start and never saved: the next export
+    /// encodes every output that has a record again (`OnExisting::Reencode`), and clears it as it starts (JA12).
     pub reencode_all: bool,
     pub preview: preview::PreviewModel,
     pub view: view::ViewState,
@@ -2333,8 +2333,9 @@ impl AppModel {
             return;
         };
         self.nif_export_queued = false;
-        // Note JA11: the box re-encodes what has a record and keeps a file without one; `ev` stays `Off`.
-        req.on_existing = if self.reencode_all {
+        // Note JA11: the item re-encodes what has a record and keeps a file without one; `ev` stays `Off`. JA12: it
+        // is one-shot, cleared as the pass starts, so a tick hidden in the closed menu never carries over.
+        req.on_existing = if std::mem::take(&mut self.reencode_all) {
             engine::api::OnExisting::Reencode
         } else {
             engine::api::OnExisting::IfChanged
