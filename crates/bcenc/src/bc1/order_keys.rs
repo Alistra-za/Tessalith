@@ -227,6 +227,8 @@ mod tests {
 
     #[test]
     fn every_3_colour_ordering_matches_the_reference() {
+        // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
+        // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
         let tables = order_tables();
         let rows = rows3();
@@ -254,6 +256,8 @@ mod tests {
 
     #[test]
     fn every_ordering_matches_the_reference() {
+        // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
+        // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
         let axes = axes();
         let tables = order_tables();
