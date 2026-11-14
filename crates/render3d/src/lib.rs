@@ -32,7 +32,7 @@ pub use includes::{ShaderSource, Tree};
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
-pub use parse::{parse, ParsedNif, ParsedShape, ShapeId};
+pub use parse::{parse, parse_in, ParsedNif, ParsedShape, ShapeId};
 pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
 #[cfg(feature = "test-hooks")]
 pub use replay::{load_fixture, Replay, ReplayOut};
@@ -44,11 +44,12 @@ use device::{Gpu, Target};
 use draw::{cbuffers, create_program, FrameInputs, Program, ShapeDraw};
 use material::{perm_material, pipe, projected_eligible, write_material, write_skin_flags};
 use nif::material::{MaterialState, SkinPreview};
-use permutation::{defines, Defines, Stage};
+use permutation::{defines, Defines, Pbr, Stage};
 pub use scene::Background;
 use scene::{LightValues, PointValues, Scene, View, ViewValues};
 use source::{ExpandedSource, SourceSet};
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -740,19 +741,21 @@ impl Renderer {
     fn rewrite_static(&mut self) {
         let ll = self.linear_lighting();
         let fixed = self.fixed_pipeline;
+        let tree = self.tree();
         for s in self.shapes.values_mut() {
             if s.status != ShapeStatus::Drawing {
                 continue;
             }
             if let Some(d) = s.draw.as_mut() {
+                let m = material::drawn(&s.material, tree);
                 let fv = values_for(
                     &self.settings,
                     self.features_on,
                     self.head_part,
                     &d.fields,
-                    &s.material,
+                    &m,
                 );
-                d.rewrite_material(&s.material, ll, &fv, fixed, self.projected.as_ref());
+                d.rewrite_material(&m, ll, &fv, fixed, self.projected.as_ref());
             }
         }
     }
@@ -1176,7 +1179,7 @@ impl Renderer {
         m: &MaterialState,
         rep: &mut LoadReport,
     ) -> Result<(Vec<(u32, ID3D11ShaderResourceView)>, Bound), String> {
-        let pbr = m.is_pbr();
+        let pbr = material::own_pbr(m) != Pbr::None;
         let msn = m.slsf1 & (1 << 12) != 0;
         let mut real: HashMap<u32, ID3D11ShaderResourceView> = HashMap::new();
         let mut missing: HashSet<u32> = HashSet::new();
@@ -1271,7 +1274,7 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) {
-        let (pbr, msn) = (m.is_pbr(), m.slsf1 & (1 << 12) != 0);
+        let (pbr, msn) = (material::own_pbr(m) != Pbr::None, m.slsf1 & (1 << 12) != 0);
         for (slot, path) in m.slots.iter().enumerate() {
             if !path.norm.is_empty()
                 && textures::register_for_slot(m.shader_type, pbr, msn, slot).is_some()
@@ -1462,8 +1465,9 @@ impl Renderer {
         }
     }
 
-    /// Starts building shape `id` for `m` (already stored as its material): swaps now when the program is at
-    /// hand, else queues one job (deduplicated) and marks the shape `Pending`. The old draw, if any, stays.
+    /// Starts building shape `id` for `m` (already stored as its material; drawn as `material::drawn` on this tree,
+    /// Note ID33): swaps now when the program is at hand, else queues one job (deduplicated) and marks the shape
+    /// `Pending`. The old draw, if any, stays.
     fn begin(
         &mut self,
         id: ShapeId,
@@ -1471,6 +1475,7 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) {
+        let m = &*material::drawn(m, self.tree());
         self.resolve_textures(m, textures, rep);
         let wanted = match self.wanted(m) {
             Ok(w) => w,
@@ -1517,7 +1522,7 @@ impl Renderer {
             let Some(w) = self.shapes.get_mut(id).and_then(|s| s.wanted.take()) else {
                 continue;
             };
-            let m = self.shapes[id].material.clone();
+            let m = material::drawn(&self.shapes[id].material, self.tree()).into_owned();
             match self.lookup(&w) {
                 Lookup::Ready(p) => self.swap(*id, &p, &m, &mut LoadReport::default()),
                 Lookup::Failed(e) => self.fail(*id, e, true),
@@ -1831,17 +1836,18 @@ impl Renderer {
                 .get(&id)
                 .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?;
             let features: Vec<&str> = self.features.iter().map(String::as_str).collect();
-            let kind = classify(
-                &state.material,
-                &m,
-                &features,
-                self.deferred && !self.fixed_pipeline,
+            // Both as this tree draws them (Note ID33).
+            let tree = self.tree();
+            let (old, new) = (
+                material::drawn(&state.material, tree),
+                material::drawn(&m, tree),
             );
+            let kind = classify(&old, &new, &features, self.deferred && !self.fixed_pipeline);
             // `classify` cannot see the layer: an edit that makes it apply or stop applying (type 0 ↔ 14, SLSF2.24)
             // changes PROJECTED_UV without any other define.
             let kind = if self.projected.is_some()
                 && kind != EditKind::Same
-                && projected_eligible(&state.material) != projected_eligible(&m)
+                && projected_eligible(&old) != projected_eligible(&new)
             {
                 EditKind::Permutation
             } else {
@@ -1867,6 +1873,10 @@ impl Renderer {
             return Ok(kind);
         }
         if kind == EditKind::Same && !rebuild {
+            // The source can differ in what this tree does not draw (a type-21 payload on tree A): keep it for a switch.
+            if let Some(state) = self.shapes.get_mut(&id) {
+                state.material = m;
+            }
             return Ok(kind);
         }
         let evicted = &mut self.evicted_missing;
@@ -1914,6 +1924,7 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) -> Result<(), String> {
+        let m = &*material::drawn(m, self.tree());
         if kind == EditKind::Textures {
             self.resolve_textures(m, textures, rep);
             let name = self.shapes[&id].name.clone();
@@ -2042,8 +2053,8 @@ impl Renderer {
                 if p.norm != path {
                     continue;
                 }
-                let Some(reg) = textures::register_for_slot(m.shader_type, m.is_pbr(), msn, slot)
-                else {
+                let pbr = material::own_pbr(m) != Pbr::None;
+                let Some(reg) = textures::register_for_slot(m.shader_type, pbr, msn, slot) else {
                     continue;
                 };
                 let Some(view) = d.srvs.iter().find(|(r, _)| *r == reg).map(|(_, v)| v) else {
@@ -2067,8 +2078,16 @@ impl Renderer {
         for (id, reg, kind) in self.texture_targets(path) {
             let (shader_type, pbr, name) = {
                 let s = &self.shapes[&id];
-                let b = s.draw.as_ref().map_or(&s.material, |d| &d.built);
-                (b.shader_type, b.is_pbr(), s.name.clone())
+                // `built` is drawn already (Note ID33)
+                let b = match s.draw.as_ref() {
+                    Some(d) => Cow::Borrowed(&d.built),
+                    None => material::drawn(&s.material, self.tree()),
+                };
+                (
+                    b.shader_type,
+                    material::own_pbr(&b) != Pbr::None,
+                    s.name.clone(),
+                )
             };
             let real = match entry.current() {
                 Some(t) if t.kind != kind => {
@@ -2096,12 +2115,13 @@ impl Renderer {
         self.tex_cache.insert(path.to_string(), entry);
         let ll = self.linear_lighting();
         let fixed = self.fixed_pipeline;
+        let tree = self.tree();
         let mut touched = vec![];
         for (id, reg, srv, real) in plan {
             let Some(s) = self.shapes.get_mut(&id) else {
                 continue;
             };
-            let material = s.material.clone();
+            let material = material::drawn(&s.material, tree).into_owned();
             let applied = s.status == ShapeStatus::Drawing;
             let Some(d) = s.draw.as_mut() else {
                 continue;
@@ -2135,7 +2155,7 @@ impl Renderer {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_diag(&mut self, id: ShapeId) -> Option<DrawDiag> {
-        let m = self.shapes.get(&id)?.material.clone();
+        let m = material::drawn(&self.shapes.get(&id)?.material, self.tree()).into_owned();
         let w = self.wanted(&m).ok()?;
         let reflection = match self.programs.get(&w.key) {
             Some(Ok(p)) => Some(p.ps.reflection.clone()),

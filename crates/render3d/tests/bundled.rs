@@ -206,11 +206,17 @@ fn tree_a_unchanged() {
 /// (`CS_SKIN` includes `Skin/Skin.hlsli`, which `Lighting.hlsl` reads only under that define).
 #[test]
 fn tree_b_lighting_compiles() {
-    use render3d::permutation::{defines, Material, Stage};
+    use render3d::permutation::{defines, Material, Pbr, Stage};
     let m = |shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool| Material {
         shader_type,
         slsf1,
         slsf2,
+        pbr: if slsf2 & (1 << 23) != 0 {
+            Pbr::V1
+        } else {
+            Pbr::None
+        },
+        pbr2_glint: false,
         skinned,
         alpha_test: false,
         has_vertex_colors: false,

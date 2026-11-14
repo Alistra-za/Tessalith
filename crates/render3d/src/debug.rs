@@ -58,11 +58,13 @@ impl DebugOutput {
         }
     }
 
-    /// TruePBR: Exact for all. Non-PBR: Albedo and NormalWorld Exact; Roughness StandIn("1 − specular mask"); Metallic
+    /// TruePBR (v1 or type 21, as the material is: [`DebugOutput::availability_in`] asks per tree): Exact for all.
+    /// Non-PBR: Albedo and NormalWorld Exact; Roughness StandIn("1 − specular mask"); Metallic
     /// None (CS's non-PBR material has no metallic term); Ao StandIn("vertex AO"), None for shader types 4, 5, 6 and
     /// 16 (FaceGen, FaceGen tint, Hair, Eye: vertexAO is the constant 1, L:2673, 2689).
     pub fn availability(self, m: &MaterialState) -> Availability {
-        if self == DebugOutput::Lit || m.is_pbr() {
+        use crate::material::{own_pbr, Pbr};
+        if self == DebugOutput::Lit || own_pbr(m) != Pbr::None {
             return Availability::Exact;
         }
         match self {
@@ -74,6 +76,11 @@ impl DebugOutput {
             DebugOutput::Ao if matches!(m.shader_type, 4 | 5 | 6 | 16) => Availability::None,
             DebugOutput::Ao => Availability::StandIn("vertex AO"),
         }
+    }
+
+    /// [`DebugOutput::availability`] of what `tree`'s shaders draw for `m` (`material::drawn`, Note ID33).
+    pub fn availability_in(self, m: &MaterialState, tree: crate::Tree) -> Availability {
+        self.availability(&crate::material::drawn(m, tree))
     }
 }
 
@@ -259,5 +266,31 @@ mod tests {
         }
         assert_eq!(DebugOutput::Lit.define(), Option::None);
         assert_eq!(DebugOutput::Ao.define(), Some(5));
+    }
+
+    /// Note ID33: type 21 is PBR on both trees (tree A draws its v1 stand-in); a v1 shape is vanilla on tree B.
+    #[test]
+    fn availability_follows_the_tree() {
+        use crate::Tree;
+        use Availability::*;
+        let mut v1 = MaterialState::builtin_default();
+        v1.slsf2 |= nif::material::SLSF2_TRUE_PBR;
+        let mut t21 = MaterialState::builtin_default();
+        t21.shader_type = 21;
+        t21.params.trailer = nif::props::LightingTrailer::Pbr2 {
+            version: 2,
+            features: 0,
+            params: nif::pbr2::PBR2_DEFAULTS,
+        };
+        let m = DebugOutput::Metallic;
+        assert_eq!(m.availability(&t21), Exact, "type 21 is PBR");
+        assert_eq!(m.availability_in(&t21, Tree::A), Exact);
+        assert_eq!(m.availability_in(&t21, Tree::B), Exact);
+        assert_eq!(m.availability_in(&v1, Tree::A), Exact);
+        assert_eq!(
+            m.availability_in(&v1, Tree::B),
+            None,
+            "v1 draws vanilla on B"
+        );
     }
 }

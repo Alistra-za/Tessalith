@@ -1,11 +1,24 @@
 //! NIF material → CS Lighting.hlsl permutation defines (plan 04 §1.2, corrected by real captures:
 //! tools/rdc-out/p04/answers.md Q4, controller ruling RB7).
 
+/// How a drawn material uses TruePBR (Note ID33): not at all, the v1 form (SLSF2 bit 23 on tree A) or CS 2.0's type 21
+/// (tree B). [`crate::material::pbr_mode`] picks it per tree.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Pbr {
+    None,
+    V1,
+    V2,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Material {
     pub shader_type: u32,
     pub slsf1: u32,
     pub slsf2: u32,
+    /// TRUE_PBR and its technique and define rules; set from the drawn material ([`crate::material::perm_material`]).
+    pub pbr: Pbr,
+    /// With `pbr == V2`: the Glint feature bit is set, so the pixel shader compiles `GLINT`.
+    pub pbr2_glint: bool,
     pub skinned: bool,
     /// The shape has an NiAlphaProperty (blend or test): CS sets DoAlphaTest for both (answers.md Q4.2).
     pub alpha_test: bool,
@@ -52,14 +65,14 @@ fn technique(shader_type: u32) -> &'static [&'static str] {
 
 pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) -> Defines {
     let ps = stage == Stage::Pixel;
-    let pbr = ps && bit(m.slsf2, 23);
+    let pbr_material = m.pbr != Pbr::None;
+    let pbr = ps && pbr_material;
     let mut out: Vec<&str> = vec![if ps { "PSHADER" } else { "VSHADER" }];
     let vs_cleared = matches!(m.shader_type, 2 | 3 | 4 | 5 | 6 | 13 | 14 | 15);
     if ps || !vs_cleared {
         // CS drops the EnvMap/Parallax/MLP technique for TruePBR on both stages (captured Arch_Eye_Moisture:
         // type 11 + SLSF2.23 → PS key 100009 and VS desc 2, technique 0). Keeping them collides with the PBR
         // samplers (Lighting.hlsl:360-371: s4/s5 overlap, SampParallaxSampler redefinition).
-        let pbr_material = bit(m.slsf2, 23);
         out.extend(technique(m.shader_type).iter().filter(|t| {
             !(pbr_material && matches!(**t, "ENVMAP" | "PARALLAX" | "MULTI_LAYER_PARALLAX"))
         }));
@@ -95,8 +108,14 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     }
     // TruePBR: CS enables glint from its remapped Glint flag (Fit_Slope without MLP/Soft/Back; 01 §3.1, P1 spec
     // §2.2); SLSF2.21 is cleared at load. Vanilla: Anisotropic_Lighting (SLSF2.21) → ANISO_LIGHTING.
-    // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019).
-    if pbr && (crate::material::remapped_glint(m.slsf2) || (m.projected && m.projected_glint)) {
+    // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019). Type 21 has its own
+    // Glint feature bit (Note ID33).
+    let own_glint = match m.pbr {
+        Pbr::V1 => crate::material::remapped_glint(m.slsf2),
+        Pbr::V2 => m.pbr2_glint,
+        Pbr::None => false,
+    };
+    if pbr && (own_glint || (m.projected && m.projected_glint)) {
         out.push("GLINT");
     } else if ps && !pbr && bit(m.slsf2, 21) {
         out.push("ANISO_LIGHTING");

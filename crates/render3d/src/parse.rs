@@ -38,8 +38,20 @@ pub struct ParsedNif {
     pub head_part: bool,
 }
 
-/// Scans the NIF and decodes the geometry of every BSLightingShaderProperty shape, in block order.
+/// [`parse_in`] for tree A.
 pub fn parse(nif_bytes: &[u8]) -> ParsedNif {
+    parse_in(nif_bytes, crate::Tree::A)
+}
+
+/// The warning of a type-21 shape on tree A, which draws its `to_v1` stand-in (Note ID33).
+pub const APPROXIMATE: &str = "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading";
+
+/// Scans the NIF and decodes the geometry of every BSLightingShaderProperty shape, in block order. A type-21 shape is
+/// always kept as read (Note ID33): on tree A with the [`APPROXIMATE`] warning (`material::drawn` draws its v1
+/// stand-in); on tree B, when it breaks a CS 2.0 rule, hidden with its first Error as the warning, as CS does not draw it.
+/// shortcut: `hidden` is decided here, so a renderer switched to the other tree keeps this tree's verdict; parse again
+/// after a tree switch to upgrade.
+pub fn parse_in(nif_bytes: &[u8], tree: crate::Tree) -> ParsedNif {
     let mut out = ParsedNif::default();
     let scan = match nif::scan::scan(nif_bytes) {
         Ok(s) => s,
@@ -64,6 +76,7 @@ pub fn parse(nif_bytes: &[u8]) -> ParsedNif {
     let graph = nif::graph::read_graph(&header, nif_bytes);
     out.warnings
         .extend(graph.problems.iter().map(|p| format!("NIF: {p}")));
+    let mut model: Option<Option<nif::model::NifModel>> = None;
     for row in &scan.shapes {
         let id = ShapeId(row.block);
         let label: Arc<str> = row
@@ -102,11 +115,23 @@ pub fn parse(nif_bytes: &[u8]) -> ParsedNif {
         let world = nif::graph::world(&graph, row.block, &mesh.transform);
         let mut material = MaterialState::from_lighting(&row.head, lighting, slots, row.alpha);
         if lighting.shader_type == 21 {
-            // shortcut: the draw path does not know type 21 yet, so the shape is kept but hidden; the plan's
-            // preview task removes this (Note ID1)
-            material.hidden = true;
-            out.warnings
-                .push("CS PBR 2.0 shape: preview comes in a later build".into());
+            match tree {
+                crate::Tree::A => out.warnings.push(format!("{short}: {APPROXIMATE}")),
+                crate::Tree::B => {
+                    // read once, only for a type-21 shape on tree B
+                    let m = model.get_or_insert_with(|| nif::model::read_model(nif_bytes).ok());
+                    let first = m.as_ref().and_then(|m| {
+                        let shader = u32::try_from(row.head.shader).ok()?;
+                        nif::edit::validate::type_21_warnings(m, shader)
+                            .into_iter()
+                            .find(|w| w.level == nif::edit::validate::Level::Error)
+                    });
+                    if let Some(w) = first {
+                        material.hidden = true;
+                        out.warnings.push(format!("{short}: {}", w.text));
+                    }
+                }
+            }
         }
         out.shapes.push(ParsedShape {
             id,

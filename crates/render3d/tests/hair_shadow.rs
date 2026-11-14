@@ -223,13 +223,15 @@ fn render_a_card_toward_the_light_shadows_the_hair() {
 /// with fxc only, no device.
 #[test]
 fn only_vanilla_hair_reads_the_scene_depth() {
-    use render3d::permutation::{defines, Material, Stage};
+    use render3d::permutation::{defines, Material, Pbr, Stage};
     let features = render3d::cs_settings::preview_defines(render3d::cs_settings::defaults(), true);
     let features: Vec<&str> = features.iter().map(String::as_str).collect();
     let plain = |shader_type| Material {
         shader_type,
         slsf1: 0,
         slsf2: 0,
+        pbr: Pbr::None,
+        pbr2_glint: false,
         skinned: false,
         alpha_test: false,
         has_vertex_colors: false,
@@ -263,10 +265,12 @@ fn only_vanilla_hair_reads_the_scene_depth() {
         };
         let pbr = Material {
             slsf2: (1 << 23) | (1 << 21),
+            pbr: Pbr::V1,
             ..all
         };
         let pbr_projected = Material {
             slsf2: 1 << 23,
+            pbr: Pbr::V1,
             projected_glint: true,
             ..projected
         };

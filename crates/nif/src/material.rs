@@ -219,9 +219,14 @@ impl MaterialState {
         self.skin_preview = (p != NO_SKIN_PREVIEW).then(|| Box::new(p));
     }
 
-    /// SLSF2 bit 23, the TruePBR marker.
+    /// SLSF2 bit 23, the TruePBR (v1) marker.
     pub fn is_pbr(&self) -> bool {
         self.slsf2 & SLSF2_TRUE_PBR != 0
+    }
+
+    /// Shader type 21, CS TruePBR 2.0 (Note ID1).
+    pub fn is_pbr2(&self) -> bool {
+        self.shader_type == 21
     }
 
     /// The NiAlphaProperty enables blending (flags bit 0).

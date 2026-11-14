@@ -1,5 +1,5 @@
 use render3d::compile::Compiled;
-use render3d::permutation::{defines, runtime_bits, Defines, Material, Stage};
+use render3d::permutation::{defines, runtime_bits, Defines, Material, Pbr, Stage};
 use render3d::source::SourceSet;
 use std::path::Path;
 
@@ -23,6 +23,12 @@ fn m(shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool) -> Material {
         shader_type,
         slsf1,
         slsf2,
+        pbr: if slsf2 & (1 << 23) != 0 {
+            Pbr::V1
+        } else {
+            Pbr::None
+        },
+        pbr2_glint: false,
         skinned,
         alpha_test: false,
         has_vertex_colors: false,

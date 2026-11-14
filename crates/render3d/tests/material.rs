@@ -1,13 +1,14 @@
 //! CS's TruePBR load remap (01 §3.1-3.4) and the material cbuffer fields, writer-level (no GPU).
 use nif::material::MaterialState;
+use nif::pbr2::Pbr2Extra;
 use nif::props::LightingTrailer;
 use render3d::cbuffer::CbWriter;
 use render3d::compile::{CbLayout, CbVar, VarKind};
 use render3d::material::{
-    pbr_flags, perm_material, remapped_glint, write_material, Bound, PBR_COAT_NORMAL,
-    PBR_COLORED_COAT, PBR_FUZZ, PBR_GLINT, PBR_HAIR_MARSCHNER, PBR_HAS_DISPLACEMENT,
-    PBR_HAS_EMISSIVE, PBR_HAS_FEATURES0, PBR_HAS_FEATURES1, PBR_INTERLAYER_PARALLAX,
-    PBR_SUBSURFACE, PBR_TWO_LAYER,
+    pbr2_flags, pbr_flags, perm_material, remapped_glint, write_material, Bound, PBR_COAT_NORMAL,
+    PBR_COLORED_COAT, PBR_FOLIAGE, PBR_FUZZ, PBR_GLINT, PBR_HAIR_MARSCHNER, PBR_HAS_DISPLACEMENT,
+    PBR_HAS_EMISSIVE, PBR_HAS_FEATURES0, PBR_HAS_FEATURES1, PBR_HAS_FUZZ_ROUGHNESS_TEXTURE,
+    PBR_INTERLAYER_PARALLAX, PBR_SUBSURFACE, PBR_THIN_SURFACE, PBR_TWO_LAYER,
 };
 use render3d::permutation::{defines, Stage};
 use render3d::scene::srgb_to_linear;
@@ -157,6 +158,8 @@ const FIELDS: &[(&str, u32)] = &[
     ("EnvmapData", 16),
     ("EmitColor", 12),
     ("emissiveMult", 4),
+    ("LightingEffectParams", 16),
+    ("MaterialObjectRGBScale", 16),
 ];
 
 fn writer() -> CbWriter {
@@ -497,6 +500,211 @@ fn pbr_bit_meaning_agrees_with_pbr_flags() {
     }
     assert_eq!(pbr_bit_meaning(1 << 24, 24), None, "not PBR");
     assert_eq!(pbr_bit_meaning(1 << 23, 5), None);
+}
+
+/// A type-21 material as decoded (the v1 lighting fields 0), with `features`, `params` and the extra data.
+fn t21(features: u32, params: [f32; 25], extra: Option<Pbr2Extra>) -> MaterialState {
+    let mut m = MaterialState::builtin_default();
+    m.shader_type = 21;
+    m.params.glossiness = 0.0;
+    m.params.specular_color = [0.0; 3];
+    m.params.specular_strength = 0.0;
+    m.params.lighting_effect_1 = 0.0;
+    m.params.lighting_effect_2 = 0.0;
+    m.params.trailer = LightingTrailer::Pbr2 {
+        version: 2,
+        features,
+        params,
+    };
+    m.params.pbr2_extra = extra;
+    m
+}
+
+fn extra(thin: Option<&[f32]>, fuzz: Option<&[f32]>) -> Option<Pbr2Extra> {
+    Some(Pbr2Extra {
+        thin: thin.map(<[f32]>::to_vec),
+        fuzz: fuzz.map(<[f32]>::to_vec),
+    })
+}
+
+/// Parameter i = 0.01·(i + 1): every member's source is visible in its value.
+fn distinct() -> [f32; 25] {
+    std::array::from_fn(|i| 0.01 * (i + 1) as f32)
+}
+
+/// Note ID33: the v2 feature bits map to CS's `PBR::Flags` (tree B PBRMath.hlsli:24-39).
+#[test]
+fn pbr2_flags_table() {
+    use nif::pbr2::feat;
+    let none = bound(&[]);
+    let rows: &[(u32, Option<Pbr2Extra>, u32, &str)] = &[
+        (0, None, 0, "no features"),
+        (feat::SUBSURFACE, None, PBR_SUBSURFACE, "subsurface"),
+        (feat::TWO_LAYER, None, PBR_TWO_LAYER, "two-layer"),
+        (
+            feat::TWO_LAYER | feat::COLORED_COAT,
+            None,
+            PBR_TWO_LAYER | PBR_COLORED_COAT,
+            "coloured coat",
+        ),
+        (
+            feat::TWO_LAYER | feat::INTERLAYER_PARALLAX,
+            None,
+            PBR_TWO_LAYER | PBR_INTERLAYER_PARALLAX,
+            "interlayer parallax",
+        ),
+        (
+            feat::TWO_LAYER | feat::COAT_NORMAL,
+            None,
+            PBR_TWO_LAYER | PBR_COAT_NORMAL,
+            "coat normal",
+        ),
+        (feat::FUZZ, None, PBR_FUZZ, "fuzz"),
+        (feat::HAIR, None, PBR_HAIR_MARSCHNER, "hair"),
+        (feat::GLINT, None, PBR_GLINT, "glint"),
+        (feat::THIN_SURFACE, None, PBR_THIN_SURFACE, "thin surface"),
+        (
+            feat::FOLIAGE,
+            None,
+            PBR_FOLIAGE | PBR_THIN_SURFACE,
+            "foliage implies thin surface",
+        ),
+        (
+            feat::FUZZ,
+            extra(None, Some(&[0.3, 1.0])),
+            PBR_FUZZ | PBR_HAS_FUZZ_ROUGHNESS_TEXTURE,
+            "PBRFuzz[1] = 1: fuzz roughness from slot 3",
+        ),
+        (
+            feat::FUZZ,
+            extra(None, Some(&[0.3, 0.0])),
+            PBR_FUZZ,
+            "PBRFuzz[1] = 0",
+        ),
+        (
+            feat::FUZZ,
+            extra(None, Some(&[0.3, 1.0, 0.0])),
+            PBR_FUZZ,
+            "3 floats: CS ignores the block",
+        ),
+        (
+            feat::HAIR,
+            extra(None, Some(&[0.3, 1.0])),
+            PBR_HAIR_MARSCHNER,
+            "ignored on hair (spec section 7)",
+        ),
+    ];
+    for (features, x, want, what) in rows {
+        assert_eq!(pbr2_flags(*features, x.as_ref(), &none), *want, "{what}");
+    }
+    // The Has-bits come from the bound registers, as in v1.
+    assert_eq!(
+        pbr2_flags(feat::SUBSURFACE, None, &bound(&[0, 1, 4, 5, 6, 9, 12])),
+        PBR_SUBSURFACE
+            | PBR_HAS_EMISSIVE
+            | PBR_HAS_DISPLACEMENT
+            | PBR_HAS_FEATURES0
+            | PBR_HAS_FEATURES1
+    );
+}
+
+/// Note ID33: the CS 2.0 cbuffer packing, member by member (tree B Lighting.hlsl:536, 545, 566-570).
+#[test]
+fn write_pbr2_packs_params() {
+    use nif::pbr2::feat;
+    let p = distinct();
+    let w = written(&t21(feat::SUBSURFACE, p, None), &[12], false);
+    assert_eq!(flags(&w), PBR_SUBSURFACE | PBR_HAS_FEATURES0);
+    assert_eq!(floats(&w, "PBRParams1"), [p[0], p[2], p[1]]);
+    assert_eq!(floats(&w, "PBRParams2"), [p[3], p[4], p[5], p[6]]);
+    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.0; 4]);
+    assert_eq!(
+        floats(&w, "LightingEffectParams"),
+        [p[21], p[22], p[23], p[24]]
+    );
+    assert_eq!(
+        floats(&w, "MaterialObjectRGBScale"),
+        [1.0, 1.0, 1.0, -1.0],
+        "no PBRFuzz: fuzz roughness from the base roughness"
+    );
+    assert_eq!(floats(&w, "SpecularColor"), [0.0; 4], "no SPECULAR");
+
+    let w = written(&t21(feat::TWO_LAYER, p, None), &[], false);
+    assert_eq!(floats(&w, "PBRParams2"), [p[7], p[8], p[9], p[10]]);
+    assert_eq!(
+        floats(&w, "MultiLayerParallaxData"),
+        [p[11], p[12], 0.0, 0.0]
+    );
+
+    let fuzz = |f: &[f32]| t21(feat::FUZZ, p, extra(None, Some(f)));
+    let w = written(&fuzz(&[0.25, 0.0]), &[], false);
+    assert_eq!(floats(&w, "PBRParams2"), [0.0; 4]);
+    assert_eq!(
+        floats(&w, "MultiLayerParallaxData"),
+        [p[13], p[14], p[15], p[16]]
+    );
+    assert_eq!(floats(&w, "MaterialObjectRGBScale"), [1.0, 1.0, 1.0, 0.25]);
+    let w = written(&fuzz(&[1.5, 0.0]), &[], false);
+    assert_eq!(
+        floats(&w, "MaterialObjectRGBScale")[3],
+        1.0,
+        "clamped to 0-1"
+    );
+    let w = written(&fuzz(&[-0.5, 0.0]), &[], false);
+    assert_eq!(
+        floats(&w, "MaterialObjectRGBScale")[3],
+        -0.5,
+        "negative kept"
+    );
+    let w = written(&fuzz(&[0.25]), &[], false);
+    assert_eq!(floats(&w, "MaterialObjectRGBScale")[3], -1.0, "wrong count");
+
+    let w = written(&t21(feat::GLINT, p, None), &[], false);
+    assert_eq!(
+        floats(&w, "MultiLayerParallaxData"),
+        [p[17], 40.0 - p[18], p[19], p[20]],
+        "y = 40 − log density, as CS packs every glint"
+    );
+
+    // PBR emissive rule, as v1.
+    let mut e = t21(0, p, None);
+    e.params.emissive_color = [0.5, 0.25, 1.0];
+    e.params.emissive_multiple = 2.0;
+    assert_eq!(
+        floats(&written(&e, &[], false), "EmitColor"),
+        [1.0, 0.5, 2.0]
+    );
+
+    // Pin of the v1 and vanilla writes these members kept (tree A byte identity).
+    let mut v = pbr(&[]);
+    v.params.lighting_effect_1 = 0.3;
+    v.params.lighting_effect_2 = 2.0;
+    let w = written(&v, &[], false);
+    assert_eq!(floats(&w, "LightingEffectParams"), [0.3, 2.0, 0.0, 0.0]);
+    assert_eq!(floats(&w, "MaterialObjectRGBScale"), [1.0, 1.0, 1.0, 0.0]);
+}
+
+/// Note ID33: PBRThinSurface with 4 floats replaces parameters 21-24; a wrong count, two-layer or hair ignore it.
+#[test]
+fn thin_surface_override_wins() {
+    use nif::pbr2::feat;
+    let p = distinct();
+    let thin = [0.9, 0.8, 0.7, 2.5];
+    let lep = |features: u32, t: &[f32]| {
+        floats(
+            &written(&t21(features, p, extra(Some(t), None)), &[], false),
+            "LightingEffectParams",
+        )
+    };
+    let ts = feat::THIN_SURFACE | feat::SUBSURFACE;
+    assert_eq!(lep(ts, &thin), thin);
+    assert_eq!(
+        lep(ts, &thin[..3]),
+        [p[21], p[22], p[23], p[24]],
+        "3 floats"
+    );
+    assert_eq!(lep(feat::TWO_LAYER, &thin), [p[21], p[22], p[23], p[24]]);
+    assert_eq!(lep(feat::HAIR, &thin), [p[21], p[22], p[23], p[24]]);
 }
 
 /// v2 D6c: the stand-in's VS-only TexcoordOffset (b1) is read from the vertex stage; the pixel-stage hook has no such

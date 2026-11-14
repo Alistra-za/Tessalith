@@ -606,6 +606,15 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
     out
 }
 
+/// The CS 2.0 rules of the type-21 shader `block` alone, in `validate`'s order and without fixes; empty for any other
+/// block. The preview hides a shape on the first Error (Note ID33).
+pub fn type_21_warnings(m: &NifModel, block: u32) -> Vec<Warning> {
+    m.lighting
+        .get(&block)
+        .filter(|l| l.lighting.shader_type == 21)
+        .map_or_else(Vec::new, |l| type_21(m, block, l, None))
+}
+
 /// The CS 2.0 rules for one type-21 shader (spec sections 2-8, Note ID4): what makes CS log the block and not draw the
 /// shape is an Error (text starts with [`WONT_DRAW`]); what CS only ignores is a Warn.
 fn type_21(m: &NifModel, block: u32, l: &LightingModel, shader_at: Option<Anchor>) -> Vec<Warning> {
