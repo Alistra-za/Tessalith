@@ -4460,6 +4460,39 @@ fn in_the_meshes_view_sized(
     (d, h)
 }
 
+/// Note ID29 (Review Focus 3): the "CS PBR 2.0 (experimental)" setting switches both 3D panels' shader tree and
+/// leaves the open NIF edit alone.
+#[test]
+fn toggling_cs_pbr2_switches_tree_keeps_edits() {
+    use render3d::Tree;
+    use sdc_gui::model::viewport3d::V3Cmd;
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    let model = support::opened(&t.path().join("mod"));
+    let (_d, mut h) = in_the_meshes_view(model, 2);
+    let cmds = h.state_mut().meshes.v3.attach_test_thread();
+    let sets = h.state_mut().state.set3d.v3.attach_test_thread();
+    let before = h.state().meshes.edit.as_ref().unwrap().doc.ops.len();
+    assert_eq!(before, 2);
+    h.state_mut().model.set_cs_pbr2(true);
+    h.run_steps(3);
+    let sent: Vec<V3Cmd> = cmds.try_iter().collect();
+    assert!(
+        sent.iter().any(|c| matches!(c, V3Cmd::SetTree(Tree::B))),
+        "SetTree(B) sent to the Meshes panel"
+    );
+    assert!(sets
+        .try_iter()
+        .any(|c| matches!(c, V3Cmd::SetTree(Tree::B))));
+    assert_eq!(nif(&h), (2, false), "the edit op list is unchanged");
+    h.state_mut().model.set_cs_pbr2(false);
+    h.run_steps(3);
+    assert!(cmds
+        .try_iter()
+        .any(|c| matches!(c, V3Cmd::SetTree(Tree::A))));
+    assert_eq!(nif(&h), (2, false));
+}
+
 /// Beyond the brief's list: with no Textures history, Ctrl+Z and the header still undo the NIF step.
 #[test]
 fn ctrl_z_undoes_a_nif_edit_with_an_empty_textures_history() {

@@ -1696,6 +1696,23 @@ fn the_features_toggle_sends_set_features_and_no_load() {
     assert!(!v.busy());
 }
 
+/// Note ID29: a tree change reaches a running render thread once, as one reconfiguration; the same tree sends nothing.
+#[test]
+fn set_tree_sends_set_tree_once() {
+    let (_d, mut v, cmds) = confirmed();
+    v.set_tree(render3d::Tree::A);
+    assert!(cmds.try_recv().is_err(), "tree A is the start");
+    v.set_tree(render3d::Tree::B);
+    v.set_tree(render3d::Tree::B);
+    let sent: Vec<v3::V3Cmd> = cmds.try_iter().collect();
+    assert_eq!(sent.len(), 1);
+    assert!(matches!(sent[0], v3::V3Cmd::SetTree(render3d::Tree::B)));
+    assert_eq!(v.tree(), render3d::Tree::B);
+    assert!(v.busy(), "awake until the render thread answers");
+    v.handle(v3::V3Reply::Reconfigured(1));
+    assert!(!v.busy());
+}
+
 #[test]
 fn the_panel_stays_awake_until_the_refresh_after_the_last_shapes_is_read() {
     let (_d, mut v, _cmds) = loaded_mesh();

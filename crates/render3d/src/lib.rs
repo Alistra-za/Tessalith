@@ -646,6 +646,48 @@ impl Renderer {
         &self.settings
     }
 
+    /// The embedded shader tree in use (a test folder counts as A).
+    pub fn tree(&self) -> Tree {
+        self.source.tree().unwrap_or(Tree::A)
+    }
+
+    /// Switches to the embedded shader tree `tree` (Note ID29): the source, its expansion memo, the old-LL probe,
+    /// the CS settings (that tree's defaults), the composite, the prefilter and the compiled results all start
+    /// over, then every shape is re-permuted (`begin_all`; the old draws stay while programs compile). The disk
+    /// cache is content-addressed and shared. The same tree again does nothing.
+    pub fn set_tree(&mut self, tree: Tree) {
+        if self.source.tree() == Some(tree) {
+            return;
+        }
+        self.source = match tree {
+            Tree::A => ShaderSource::Bundled,
+            Tree::B => ShaderSource::BundledB,
+        };
+        self.sources = SourceSet::new(self.source.clone());
+        self.old_ll = std::cell::OnceCell::new();
+        self.settings = cs_settings::defaults_in(tree).clone();
+        self.composite = None;
+        self.prefilter = None;
+        self.compiled.clear();
+        // Jobs of the old tree: the unsent ones go, the pool drops the sent ones.
+        self.load_epoch.fetch_add(1, Ordering::Relaxed);
+        self.jobs.clear();
+        self.inflight.clear();
+        let mut f: Vec<String> = self
+            .features
+            .iter()
+            .filter(|d| !settings_define(d))
+            .cloned()
+            .collect();
+        f.extend(cs_settings::preview_defines(
+            &self.settings,
+            self.features_on,
+        ));
+        self.features = f;
+        self.encode_srgb = self.linear_lighting();
+        self.begin_all();
+    }
+
     /// The "Community Shaders features" toggle (C8): off drops every settings define (LL included) and the sRGB
     /// encode; applied through `apply_settings_defines`.
     pub fn set_features_on(&mut self, on: bool) {

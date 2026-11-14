@@ -17,7 +17,7 @@ pub enum ShaderSource {
 
 impl ShaderSource {
     /// The embedded tree this source reads, `None` for a test folder.
-    fn tree(&self) -> Option<Tree> {
+    pub(crate) fn tree(&self) -> Option<Tree> {
         match self {
             ShaderSource::Bundled => Some(Tree::A),
             ShaderSource::BundledB => Some(Tree::B),

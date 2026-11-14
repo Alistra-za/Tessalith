@@ -116,6 +116,51 @@ fn feature_names_equal_the_pinned_features_folder() {
     assert_eq!(stems, names);
 }
 
+/// Note ID29: tree B's `Features/*.ini` stems (PBR2Test1). Gated on `SDC_CS_SHADERS_B` (read-only owner data).
+#[test]
+fn feature_names_b_equal_the_pbr2_features_folder() {
+    let Ok(root) = std::env::var("SDC_CS_SHADERS_B") else {
+        eprintln!("SDC_CS_SHADERS_B unset: skipped");
+        return;
+    };
+    let mut stems: Vec<String> = std::fs::read_dir(Path::new(&root).join("Features"))
+        .unwrap()
+        .map(|e| e.unwrap().path())
+        .filter(|p| p.extension().is_some_and(|x| x == "ini"))
+        .map(|p| p.file_stem().unwrap().to_string_lossy().into_owned())
+        .collect();
+    stems.sort();
+    let mut names: Vec<&str> = render3d::cs_settings::FEATURE_NAMES_B.to_vec();
+    names.sort();
+    assert_eq!(stems, names);
+}
+
+/// Note ID29: the JSON is one file in both trees (ID27), so what differs is the feature set each tree loads, and
+/// with it the feature defines: tree B has no VanillaFresnel feature (nor `VANILLA_FRESNEL` in its shaders).
+#[test]
+fn defaults_differ_per_tree() {
+    use render3d::cs_settings::{defaults_in, FEATURE_NAMES, FEATURE_NAMES_B};
+    use render3d::Tree;
+    let (a, b) = (defaults_in(Tree::A), defaults_in(Tree::B));
+    let set = |n: &[&str]| n.iter().map(|s| s.to_string()).collect::<BTreeSet<_>>();
+    assert_eq!(a.loaded, set(FEATURE_NAMES));
+    assert_eq!(b.loaded, set(FEATURE_NAMES_B));
+    assert_eq!(a.merged, b.merged, "one SettingsDefault.json (ID27)");
+    assert!(preview_defines(a, true).contains(&"VANILLA_FRESNEL".to_string()));
+    assert_eq!(
+        preview_defines(b, true),
+        [
+            "CS_HAIR",
+            "CS_SKIN",
+            "DYNAMIC_CUBEMAPS",
+            "ENABLE_LL",
+            "EXTENDED_MATERIALS",
+            "EXTENDED_TRANSLUCENCY"
+        ]
+    );
+    assert!(std::ptr::eq(a, defaults()), "`defaults()` is tree A's");
+}
+
 /// T-S1: a key the settings lack is left out of `merged`, and `feature_data` fills it from the built-in table.
 #[test]
 fn a_key_the_settings_lack_keeps_the_builtin_constant() {

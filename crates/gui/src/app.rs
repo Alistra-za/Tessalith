@@ -354,6 +354,14 @@ impl eframe::App for SdcApp {
         // Note GH9: the 3D view's menu reads these and leaves its click for the next frame.
         self.meshes.export_running = self.model.export.running.is_some();
         self.meshes.cs_pbr2 = self.model.settings.cs_pbr2;
+        // Note ID29: both 3D panels follow the setting's shader tree; a thread not started yet starts on it.
+        let tree = if self.model.settings.cs_pbr2 {
+            render3d::Tree::B
+        } else {
+            render3d::Tree::A
+        };
+        self.meshes.v3.set_tree(tree);
+        self.state.set3d.v3.set_tree(tree);
         if std::mem::take(&mut self.meshes.pick_export_folder_request) {
             self.model.pick_export_folder(&ctx);
         }

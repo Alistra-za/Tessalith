@@ -573,6 +573,9 @@ pub enum V3Cmd {
     /// The "Accurate (deferred)" toggle (`Renderer::set_deferred`): no reload; every shape re-permutes in the
     /// background while its old draw stays.
     SetDeferred(bool),
+    /// The "CS PBR 2.0 (experimental)" setting (Note ID29): `Renderer::set_tree`; every shape re-permutes in the
+    /// background while its old draw stays. Nothing reloads.
+    SetTree(render3d::Tree),
     Load {
         id: u64,
         spec: Arc<MeshSpec>,
@@ -784,6 +787,8 @@ pub struct Viewport3d {
     thread: Option<Sender<V3Cmd>>,
     /// Where the render thread reads shader text: the bundle, or a test's stand-in folder.
     source: render3d::ShaderSource,
+    /// The embedded shader tree the render thread uses (Note ID29): follows `GuiSettings.cs_pbr2`.
+    tree: render3d::Tree,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
     #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
@@ -844,6 +849,7 @@ impl Viewport3d {
             busy_since: None,
             thread: None,
             source: render3d::ShaderSource::Bundled,
+            tree: render3d::Tree::A,
             #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
@@ -960,6 +966,33 @@ impl Viewport3d {
             self.reconf_sent += 1;
             let _ = t.send(V3Cmd::SetFeatures(on));
         }
+    }
+
+    /// The shader tree (Note ID29): a running render thread switches at once (shapes recompile in the background,
+    /// nothing reloads); a thread started later starts on it. A test's stand-in folder is left alone.
+    pub fn set_tree(&mut self, tree: render3d::Tree) {
+        if self.tree == tree {
+            return;
+        }
+        self.tree = tree;
+        if matches!(
+            self.source,
+            render3d::ShaderSource::Bundled | render3d::ShaderSource::BundledB
+        ) {
+            self.source = match tree {
+                render3d::Tree::A => render3d::ShaderSource::Bundled,
+                render3d::Tree::B => render3d::ShaderSource::BundledB,
+            };
+        }
+        if let Some(t) = &self.thread {
+            if t.send(V3Cmd::SetTree(tree)).is_ok() {
+                self.reconf_sent += 1;
+            }
+        }
+    }
+
+    pub fn tree(&self) -> render3d::Tree {
+        self.tree
     }
 
     /// The "Accurate (deferred)" toggle (v2 D8): the render thread re-permutes every shape in the background while
@@ -1889,6 +1922,15 @@ fn render_loop(
                 }
                 V3Cmd::SetFeatures(on) => {
                     r.set_features_on(on);
+                    if want_deferred && !r.deferred() {
+                        let _ = r.set_deferred(true);
+                    }
+                    restyled = true;
+                    ack.0 += 1;
+                    None
+                }
+                V3Cmd::SetTree(tree) => {
+                    r.set_tree(tree);
                     if want_deferred && !r.deferred() {
                         let _ = r.set_deferred(true);
                     }

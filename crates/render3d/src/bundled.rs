@@ -16,11 +16,6 @@ fn table(tree: Tree) -> &'static [(&'static str, &'static [u8])] {
     }
 }
 
-/// The bytes of `rel` in tree A.
-pub(crate) fn read(rel: &str) -> Option<&'static [u8]> {
-    read_in(Tree::A, rel)
-}
-
 /// The bytes of `rel` in `tree`, folding ASCII case and `\` to `/` as the Windows folder the tree came from did.
 pub(crate) fn read_in(tree: Tree, rel: &str) -> Option<&'static [u8]> {
     let key = rel.replace('\\', "/").to_ascii_lowercase();
@@ -37,9 +32,13 @@ pub(crate) fn names_in(tree: Tree) -> impl Iterator<Item = &'static str> {
 
 #[cfg(test)]
 mod tests {
-    use super::read;
+    use super::{read_in, Tree};
 
-    // Unit test: `read` is crate-private.
+    fn read(rel: &str) -> Option<&'static [u8]> {
+        read_in(Tree::A, rel)
+    }
+
+    // Unit test: `read_in` is crate-private.
     #[test]
     fn lookup_folds_case_and_slashes() {
         let a = read("common\\COLOR.hlsli").unwrap();
