@@ -28,7 +28,7 @@ pub mod textures;
 pub use builtin::{builtin_mesh, Builtin};
 pub use composite::Composite;
 pub use debug::{Availability, DebugOutput};
-pub use includes::ShaderSource;
+pub use includes::{ShaderSource, Tree};
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
@@ -2736,10 +2736,22 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
         .collect()
 }
 
-/// Every path in the embedded CS tree, for the test that it holds only the include closure.
+/// Every path in the embedded CS tree A, for the test that it holds only the include closure.
 #[cfg(feature = "test-hooks")]
 pub fn bundled_names() -> Vec<&'static str> {
-    bundled::names().collect()
+    bundled::names_in(Tree::A).collect()
+}
+
+/// Every path in the embedded tree `tree`.
+#[cfg(feature = "test-hooks")]
+pub fn bundled_names_in(tree: Tree) -> Vec<&'static str> {
+    bundled::names_in(tree).collect()
+}
+
+/// The embedded bytes of `rel` in `tree` (`None` when absent).
+#[cfg(feature = "test-hooks")]
+pub fn bundled_read_in(tree: Tree, rel: &str) -> Option<&'static [u8]> {
+    bundled::read_in(tree, rel)
 }
 
 /// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a

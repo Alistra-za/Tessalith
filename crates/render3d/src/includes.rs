@@ -5,16 +5,27 @@ use std::path::PathBuf;
 /// owner's CS for comparisons).
 #[derive(Clone, Debug, Default)]
 pub enum ShaderSource {
+    /// Tree A: the pinned CS 1.9.0 closure (Note GT).
     #[default]
     Bundled,
+    /// Tree B: the CS 2.0 (TruePBR type 21) closure (Note ID).
+    BundledB,
     #[cfg(feature = "test-hooks")]
     Folder(PathBuf),
+}
+
+/// Which embedded shader tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tree {
+    A,
+    B,
 }
 
 impl ShaderSource {
     fn read(&self, rel: &str) -> Option<Vec<u8>> {
         match self {
             ShaderSource::Bundled => crate::bundled::read(rel).map(<[u8]>::to_vec),
+            ShaderSource::BundledB => crate::bundled::read_in(Tree::B, rel).map(<[u8]>::to_vec),
             #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => std::fs::read(root.join(rel)).ok(),
         }
@@ -23,6 +34,7 @@ impl ShaderSource {
     fn has(&self, rel: &str) -> bool {
         match self {
             ShaderSource::Bundled => crate::bundled::read(rel).is_some(),
+            ShaderSource::BundledB => crate::bundled::read_in(Tree::B, rel).is_some(),
             #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => root.join(rel).is_file(),
         }
@@ -31,7 +43,7 @@ impl ShaderSource {
     /// What error messages and `Expanded::files` call `rel`: the bundle's `rel` itself, or a test folder's path.
     pub(crate) fn path_of(&self, rel: &str) -> PathBuf {
         match self {
-            ShaderSource::Bundled => PathBuf::from(rel),
+            ShaderSource::Bundled | ShaderSource::BundledB => PathBuf::from(rel),
             #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => root.join(rel),
         }

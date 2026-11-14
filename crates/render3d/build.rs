@@ -1,4 +1,5 @@
-//! Embeds `shaders/cs` (the pinned Community Shaders closure, Note GT) as a table sorted by lowercased path.
+//! Embeds `shaders/cs` (tree A, the pinned Community Shaders closure, Note GT) and `shaders/cs2` (tree B, CS 2.0,
+//! Note ID) as tables sorted by lowercased path.
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
@@ -20,18 +21,22 @@ fn walk(dir: &Path, root: &Path, out: &mut Vec<(String, PathBuf)>) {
 
 fn main() {
     let manifest = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
-    let root = manifest.join("shaders").join("cs");
     println!("cargo:rerun-if-changed=shaders/cs");
+    println!("cargo:rerun-if-changed=shaders/cs2");
     println!("cargo:rerun-if-changed=build.rs");
-    let mut files = Vec::new();
-    walk(&root, &root, &mut files);
-    files.sort();
-    let mut src = String::from("pub static FILES: &[(&str, &[u8])] = &[\n");
-    for (key, path) in &files {
-        let abs = path.to_string_lossy().replace('\\', "/");
-        writeln!(src, "    ({key:?}, include_bytes!({abs:?})),").unwrap();
+    let mut src = String::new();
+    for (name, dir) in [("FILES", "cs"), ("FILES_B", "cs2")] {
+        let root = manifest.join("shaders").join(dir);
+        let mut files = Vec::new();
+        walk(&root, &root, &mut files);
+        files.sort();
+        writeln!(src, "pub static {name}: &[(&str, &[u8])] = &[").unwrap();
+        for (key, path) in &files {
+            let abs = path.to_string_lossy().replace('\\', "/");
+            writeln!(src, "    ({key:?}, include_bytes!({abs:?})),").unwrap();
+        }
+        src.push_str("];\n");
     }
-    src.push_str("];\n");
     let out = PathBuf::from(std::env::var_os("OUT_DIR").unwrap()).join("bundled.rs");
     std::fs::write(out, src).unwrap();
 }
