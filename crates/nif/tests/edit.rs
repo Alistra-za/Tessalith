@@ -283,7 +283,7 @@ fn shader_type_5_to_6_keeps_the_tint_floats() {
 #[test]
 fn shader_type_20_is_refused() {
     let b = read("TestNifFile_Skinned_SE.nif");
-    for t in [20, 21, 1000] {
+    for t in [20, 22, 1000] {
         let (op, _) = type_op(&b, t);
         let r = apply(&b, &[op]).unwrap();
         assert_eq!(
@@ -294,6 +294,261 @@ fn shader_type_20_is_refused() {
         );
         assert_eq!(r.bytes, b);
     }
+}
+
+/// Shape "S" (0) on a BSLSP (1) of `shader_type` with the given flags, and `trailer` floats.
+fn v1_shape(shader_type: u32, slsf1: u32, slsf2: u32, trailer: &[f32]) -> Vec<u8> {
+    let mut b = scenes::lsp_shape(shader_type, trailer);
+    let h = Header::parse(&b).unwrap();
+    for (f, v) in [(Field::Slsf1, slsf1), (Field::Slsf2, slsf2)] {
+        let (rel, _) = locate(&h, &b, 1, f).unwrap();
+        let at = h.offsets()[1] + rel;
+        b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    b
+}
+
+fn lighting(b: &[u8]) -> nif::props::Lighting {
+    read_model(b).unwrap().lighting[&1].lighting.clone()
+}
+
+fn pbr2_of(b: &[u8]) -> (u32, u32, [f32; 25]) {
+    match lighting(b).params.trailer {
+        nif::props::LightingTrailer::Pbr2 {
+            version,
+            features,
+            params,
+        } => (version, features, params),
+        t => panic!("not type 21: {t:?}"),
+    }
+}
+
+fn notes_of(r: &Applied) -> Vec<String> {
+    r.notes.iter().map(|n| n.1.clone()).collect()
+}
+
+const PBR: u32 = 1 << 23;
+
+#[test]
+fn to_21_writes_180_plus_4n() {
+    for n in [0usize, 2] {
+        let b = scenes::lsp_shape(0, &[]);
+        let b = if n == 0 {
+            b
+        } else {
+            // two extra-data refs (to no block): the block grows by 4 each
+            let mut nf = builder::Nif::new(100);
+            let s = nf.string("S");
+            nf.block("BSTriShape", scenes::bstri_named(s, 1, -1));
+            nf.block(
+                "BSLightingShaderProperty",
+                scenes::lsp_body(0, &[-1, -1], -1, &[]),
+            );
+            nf.bytes()
+        };
+        let (op, blk) = type_op(&b, 21);
+        let r = apply(&b, &[op]).unwrap();
+        assert_eq!(r.outcomes, vec![Outcome::Applied], "{n}");
+        let h = Header::parse(&r.bytes).unwrap();
+        assert_eq!(h.sizes[blk as usize] as usize, 180 + 4 * n);
+        assert_eq!(pbr2_of(&r.bytes).0, 2);
+        assert!(read_model(&r.bytes).unwrap().problems.is_empty());
+    }
+}
+
+#[test]
+fn to_21_clears_v1_and_banned_bits() {
+    let slsf1 = (1u32 << 31) | (1 << 21) | (1 << 7) | 1; // skin tint, env mapping: banned; Specular stays
+    let slsf2 = 1 | PBR | (1 << 12) | (1 << 25) | (1 << 1) | (1 << 24); // ZBuffer_Write stays
+    let b = v1_shape(0, slsf1, slsf2, &[]);
+    let (op, _) = type_op(&b, 21);
+    let r = apply(&b, &[op]).unwrap();
+    let l = lighting(&r.bytes);
+    assert_eq!((l.slsf1, l.slsf2), ((1 << 31) | 1, 1));
+    let n = notes_of(&r);
+    for name in [
+        "Skin tint",
+        "Environment_Mapping",
+        "LOD_Landscape",
+        "Unused01 (TruePBR)",
+        "Fit_Slope",
+        "Soft_Lighting",
+        "Multi_Layer_Parallax",
+        "FaceGen_RGB_Tint",
+    ] {
+        let hit = n.iter().filter(|s| s.contains(name)).count();
+        assert_eq!(hit, usize::from(name != "Skin tint"), "{name}: {n:?}");
+    }
+    assert!(
+        !n.iter()
+            .any(|s| s.contains("ZBuffer_Write") || s.contains("Specular flag")),
+        "{n:?}"
+    );
+}
+
+#[test]
+fn to_21_from_v1_converts() {
+    let slsf2 = 1 | PBR | (1 << 24) | (1 << 25); // two-layer with parallax
+    let b = v1_shape(11, 1 << 31, slsf2, &[0.5, 0.75, 2.0, 3.0, 1.0]);
+    let p = lighting(&b).params;
+    let want = nif::pbr2::from_v1(11, slsf2, &p);
+    let (op, _) = type_op(&b, 21);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let (v, f, params) = pbr2_of(&r.bytes);
+    assert_eq!((v, f, params), (2, want.features, want.params));
+    assert_ne!(f, 0);
+    assert_eq!(
+        notes_of(&r)[0],
+        "Converted from v1 PBR: Two-layer coat, Interlayer parallax"
+    );
+    // a shape that is not v1 PBR gets the defaults and no features
+    let b = v1_shape(0, 1 << 31, 1, &[]);
+    let (op, _) = type_op(&b, 21);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(pbr2_of(&r.bytes), (2, 0, nif::pbr2::PBR2_DEFAULTS));
+    assert!(notes_of(&r).is_empty(), "{:?}", notes_of(&r));
+}
+
+#[test]
+fn to_21_refused_on_le() {
+    // the same scene with the header saying Skyrim LE (BS 83): only the version word differs
+    let mut b = scenes::lsp_shape(0, &[]);
+    let at = b
+        .windows(4)
+        .position(|w| w == 100u32.to_le_bytes())
+        .unwrap();
+    b[at..at + 4].copy_from_slice(&83u32.to_le_bytes());
+    let m = read_model(&b).unwrap();
+    assert_ne!(m.bsver, 100);
+    let at = shader_anchor(&b);
+    let base = current(&b, at.block, Field::ShaderType);
+    let op = Op::SetField {
+        at,
+        field: Field::ShaderType,
+        value: Value::U32(21),
+        base,
+    };
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(
+        r.outcomes,
+        vec![Outcome::Refused("Type 21 needs a Skyrim SE NIF".into())]
+    );
+    assert_eq!(r.bytes, b);
+}
+
+#[test]
+fn from_21_to_0_restores_vanilla_body() {
+    let mut p = nif::pbr2::PBR2_DEFAULTS;
+    p[0] = 0.5; // roughness scale -> specular strength
+    p[1] = 0.25; // specular level -> glossiness
+    p[2] = 3.0; // displacement scale -> lighting effect 2
+    let b = scenes::lsp21_shape(nif::pbr2::feat::THIN_SURFACE, &p);
+    let (op, blk) = type_op(&b, 0);
+    assert_eq!(current(&b, blk, Field::ShaderType), Value::U32(21));
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let h = Header::parse(&r.bytes).unwrap();
+    assert_eq!(h.sizes[blk as usize], 100); // 180 - 80
+    let l = lighting(&r.bytes);
+    assert_eq!(l.shader_type, 0);
+    assert_eq!(l.slsf2, 1 | PBR);
+    let q = l.params;
+    assert_eq!(
+        (
+            q.glossiness,
+            q.specular_color,
+            q.specular_strength,
+            q.lighting_effect_1,
+            q.lighting_effect_2
+        ),
+        (0.25, [1.0; 3], 0.5, 0.0, 3.0)
+    );
+    assert_eq!(q.trailer, nif::props::LightingTrailer::None);
+    assert_eq!(notes_of(&r), vec!["Dropped: Thin surface".to_string()]);
+    // a non-PBR target is plain vanilla
+    let (op, _) = type_op(&b, 1);
+    let r = apply(&b, &[op]).unwrap();
+    let l = lighting(&r.bytes);
+    assert_eq!(l.slsf2, 1);
+    let q = l.params;
+    assert_eq!(
+        (
+            q.glossiness,
+            q.specular_color,
+            q.specular_strength,
+            q.lighting_effect_1,
+            q.lighting_effect_2
+        ),
+        (80.0, [1.0; 3], 1.0, 0.3, 2.0)
+    );
+    assert_eq!(
+        q.trailer,
+        nif::props::LightingTrailer::EnvMap { scale: 1.0 }
+    );
+    assert!(notes_of(&r).is_empty());
+}
+
+#[test]
+fn from_21_to_11_sets_v1_marker_and_mlp() {
+    use nif::pbr2::feat::*;
+    let mut p = nif::pbr2::PBR2_DEFAULTS;
+    p[7..=9].copy_from_slice(&[0.5, 0.25, 0.125]);
+    p[10] = 0.75;
+    p[11] = 0.5;
+    p[12] = 0.25;
+    let b = scenes::lsp21_shape(TWO_LAYER | COAT_NORMAL, &p);
+    let (op, blk) = type_op(&b, 11);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let l = lighting(&r.bytes);
+    assert_eq!(l.slsf2, 1 | PBR | (1 << 24) | (1 << 27));
+    assert_eq!(
+        (l.params.specular_color, l.params.lighting_effect_1),
+        ([0.5, 0.25, 0.125], 0.75)
+    );
+    assert_eq!(
+        l.params.trailer,
+        nif::props::LightingTrailer::MultiLayer {
+            inner_thickness: 0.5,
+            refraction_scale: 0.25,
+            inner_texture_scale: [0.0, 0.0],
+            envmap_strength: 1.0
+        }
+    );
+    assert_eq!(
+        Header::parse(&r.bytes).unwrap().sizes[blk as usize],
+        100 + 20
+    );
+    assert!(notes_of(&r).is_empty());
+}
+
+#[test]
+fn notes_report_clamps() {
+    // the shape's glossiness 80 is the specular level (0..1), and a negative lighting effect 2 the displacement
+    let mut b = v1_shape(0, 1 << 31, 1 | PBR, &[]);
+    let h = Header::parse(&b).unwrap();
+    let (rel, _) = locate(&h, &b, 1, Field::LightingEffect2).unwrap();
+    let at = h.offsets()[1] + rel;
+    b[at..at + 4].copy_from_slice(&(-1.5f32).to_le_bytes());
+    let (op, _) = type_op(&b, 21);
+    let r = apply(&b, &[op]).unwrap();
+    let n = notes_of(&r);
+    assert_eq!(n[0], "Converted from v1 PBR: none");
+    assert!(
+        n.contains(&"Specular level clamped from 80 to 1".to_string()),
+        "{n:?}"
+    );
+    assert!(
+        n.contains(&"Displacement scale clamped from -1.5 to 0".to_string()),
+        "{n:?}"
+    );
+    assert_eq!(
+        r.notes.iter().map(|x| x.0).collect::<Vec<_>>(),
+        vec![0; n.len()]
+    );
+    let (_, _, params) = pbr2_of(&r.bytes);
+    assert_eq!((params[1], params[2]), (1.0, 0.0));
 }
 
 #[test]

@@ -9049,6 +9049,51 @@ fn a_type_change_off_11_clears_the_mlp_flag_in_the_same_undo_step() {
     assert!(ops(m).is_empty(), "type and flag are one undo step");
 }
 #[test]
+fn pick_21_shows_notes() {
+    // Note ID10: a v1 PBR shape (glossiness 80 is out of the specular level's range) converts to type 21; the notice
+    // says what changed, and undo restores the shape
+    let mut b = scenes::lsp_shape(0, &[]);
+    let hd = nif::header::Header::parse(&b).unwrap();
+    for (f, v) in [
+        (Field::Slsf1, (1u32 << 31) | (1 << 7)),
+        (Field::Slsf2, 1 | (1 << 23)),
+    ] {
+        let (rel, _) = nif::fields::locate(&hd, &b, 1, f).unwrap();
+        let at = hd.offsets()[1] + rel;
+        b[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    let mut m = direct(b);
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .click();
+    h.run_steps(3);
+    h.get_by_label("CS TruePBR 2.0 (21)").scroll_to_me();
+    h.run();
+    h.get_by_label("CS TruePBR 2.0 (21)").click();
+    h.run_steps(3);
+    let m = h.state_mut();
+    let e = m.edit.as_ref().unwrap();
+    let l = &e.model.lighting[&1].lighting;
+    assert_eq!((l.shader_type, l.slsf1, l.slsf2), (21, 1 << 31, 1));
+    let n = e.notice.clone().expect("the conversion's notes");
+    assert!(n.contains("Specular level clamped from 80 to 1"), "{n}");
+    assert!(n.contains("Environment_Mapping flag cleared"), "{n}");
+    assert_eq!(ops(m).len(), 1, "no separate flag op");
+    h.get_by_label_contains("Specular level clamped from 80 to 1");
+    let m = h.state_mut();
+    assert!(m.undo_edit());
+    assert!(ops(m).is_empty());
+    assert_eq!(
+        m.edit.as_ref().unwrap().model.lighting[&1]
+            .lighting
+            .shader_type,
+        0
+    );
+}
+
+#[test]
 fn flags_that_need_another_type_are_greyed_with_the_reason() {
     let mut m = direct(typed(0, 0));
     select(&mut m, "S");

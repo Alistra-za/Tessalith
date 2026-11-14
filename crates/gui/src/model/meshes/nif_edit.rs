@@ -139,6 +139,8 @@ pub struct NifEdit {
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
     pub notice: Option<String>,
+    /// Note ID10: what each op did beyond its field, `(op index, sentence)`, from the last `reapply`.
+    pub notes: Vec<(usize, String)>,
     /// The last export's result line, and whether it is an error.
     pub export_note: Option<(String, bool)>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
@@ -707,6 +709,7 @@ impl NifEdit {
             blocked_rev: 0,
             problems: Arc::default(),
             notice: None,
+            notes: Vec::new(),
             export_note: None,
             cleanup_note: None,
             retarget_error: None,
@@ -950,6 +953,7 @@ impl NifEdit {
                 Outcome::Applied | Outcome::ReAnchored { .. } => OpStatus::Applied,
             };
         }
+        self.notes = a.notes;
         self.patched = Arc::new(a.bytes);
         // Note GD2: the export's bytes once per change, so the Review row can count what the cleanup drops
         match nif::edit::compact(&self.patched, self.source_blocks) {

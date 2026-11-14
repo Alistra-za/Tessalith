@@ -149,6 +149,9 @@ pub enum Outcome {
 pub struct Applied {
     pub bytes: Vec<u8>,
     pub outcomes: Vec<Outcome>,
+    /// What an op did beyond its field, as `(op index, one sentence)`: a shader type change to or from 21 reports
+    /// its clamps, cleared flags and dropped features (Note ID10).
+    pub notes: Vec<(usize, String)>,
 }
 
 fn owned(role: &Role) -> bool {
@@ -362,14 +365,21 @@ pub fn apply(src: &[u8], ops: &[Op]) -> Result<Applied, NifError> {
     NifDoc::open(src)?;
     let mut bytes = src.to_vec();
     let mut outcomes = Vec::with_capacity(ops.len());
-    for op in ops {
-        let (next, outcome) = step(&bytes, op);
-        if let Some(n) = next {
-            bytes = n;
+    let mut notes = Vec::new();
+    for (i, op) in ops.iter().enumerate() {
+        let mut n = Vec::new();
+        let (next, outcome) = step(&bytes, op, &mut n);
+        if let Some(b) = next {
+            bytes = b;
+            notes.extend(n.into_iter().map(|s| (i, s)));
         }
         outcomes.push(outcome);
     }
-    Ok(Applied { bytes, outcomes })
+    Ok(Applied {
+        bytes,
+        outcomes,
+        notes,
+    })
 }
 
 fn anchor_of(op: &Op) -> &Anchor {
@@ -487,7 +497,7 @@ fn field_block(m: &NifModel, block: u32, field: Field) -> u32 {
     }
 }
 
-fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
+fn step(cur: &[u8], op: &Op, notes: &mut Vec<String>) -> (Option<Vec<u8>>, Outcome) {
     let refused = |s: String| (None, Outcome::Refused(s));
     let at = anchor_of(op);
     let m = match read_model(cur) {
@@ -619,7 +629,7 @@ fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
                 return refused(format!("{value:?} does not fit {field:?}"));
             }
             if let (Field::ShaderType, Value::U32(t)) = (field, value) {
-                let r = structural::set_shader_type(&mut doc, &m, block, *t);
+                let r = structural::set_shader_type(&mut doc, &m, block, *t).map(|n| *notes = n);
                 return finish(doc, r, outcome);
             }
             value.bytes()

@@ -366,6 +366,10 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
             .selected_text(&shown)
             .show_ui(ui, |ui| {
                 for (i, n) in SHADER_TYPES.iter().enumerate() {
+                    // Note ID10: type 21 is a Skyrim SE type; on another NIF the combo does not offer it
+                    if i == 21 && e.model.bsver != 100 && lt.shader_type != 21 {
+                        continue;
+                    }
                     ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
                 }
             })
@@ -382,7 +386,13 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 base: Value::U32(lt.shader_type),
             }];
             // Note CS: the flags the new type needs change in the same undo step.
-            let fixes = type_flag_errors(t, lt.slsf1);
+            // Type 21 conversions clear their own flags (`set_shader_type`): a fix op here would conflict.
+            let own = t == 21 || lt.shader_type == 21;
+            let fixes = if own {
+                vec![]
+            } else {
+                type_flag_errors(t, lt.slsf1)
+            };
             let mut notice: Vec<_> = fixes.iter().map(|f| f.3).collect();
             if !fixes.is_empty() {
                 let mask = fixes.iter().fold(0, |a, f| a | f.0);
@@ -396,7 +406,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 });
             }
             // Note DJ: a leftover multi-layer parallax flag crashes an Environment Map shader.
-            if let Some((mask, value, n)) = type_slsf2_fix(t, lt.slsf2) {
+            if let Some((mask, value, n)) = type_slsf2_fix(t, lt.slsf2).filter(|_| !own) {
                 ops.push(Op::SetBits {
                     at: at.clone(),
                     field: Field::Slsf2,

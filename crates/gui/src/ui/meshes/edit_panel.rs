@@ -358,12 +358,21 @@ fn apply(m: &mut MeshesModel, act: Act) {
     let push = if same_slot { None } else { act.push };
     // the typed path first: the click that ended the typing came after it
     let mut pushed = false;
+    let before = m.edit.as_ref().map_or(0, |e| e.doc.ops.len());
     for (ops, merge) in [act.path, push].into_iter().flatten() {
         m.edit_push(ops, merge);
         pushed = true;
     }
     if let (true, Some(e)) = (pushed, &mut m.edit) {
-        e.notice = act.notice;
+        // Note ID10: what the ops just pushed did beyond their field (a type 21 conversion), after the flag notice
+        let done = e
+            .notes
+            .iter()
+            .filter(|n| n.0 >= before)
+            .map(|n| n.1.as_str());
+        let lines: Vec<&str> = act.notice.as_deref().into_iter().chain(done).collect();
+        e.notice =
+            (!lines.is_empty()).then(|| lines.join(". ").trim_end_matches('.').to_string() + ".");
     }
     if let (true, Some(e)) = (act.flush, &mut m.edit) {
         e.flush();

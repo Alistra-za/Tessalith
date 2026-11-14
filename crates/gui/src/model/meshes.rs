@@ -35,7 +35,7 @@ pub use nif_edit::NifReviewRow;
 pub use worklist::{NifLevel, NifProblem, NifTab};
 
 /// BSLightingShaderProperty shader type names, by number (`skyrim_conventions.md` §8, from nif.xml).
-pub const SHADER_TYPES: [&str; 21] = [
+pub const SHADER_TYPES: [&str; 22] = [
     "Default",
     "Environment Map",
     "Glow Shader",
@@ -57,6 +57,7 @@ pub const SHADER_TYPES: [&str; 21] = [
     "LOD Landscape Noise",
     "Multitexture Landscape LOD Blend",
     "FO4 Dismemberment",
+    "CS TruePBR 2.0",
 ];
 
 /// `Environment Map (1)`; an unknown number shows as `type N`.
