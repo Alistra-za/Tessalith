@@ -206,9 +206,9 @@ nearly every image, but two of the four criteria fail. The default stays as it i
 ### Setup
 
 - **Objects.** The vendored Windows objects with patch 0002 (commit `79dcbb2`), ISPC dispatch on this
-  machine's CPU (the avx2 path). `sdc-bench bc7-tune --variants base,ep --repeats 5`: the fastest of 5 runs
-  is kept, rayon on all cores, on a machine with other builds running. `base` and `ep` run back to back per
-  image.
+  machine's CPU, then the avx2 path (the objects had four targets).
+  `sdc-bench bc7-tune --variants base,ep --repeats 5`: the fastest of 5 runs is kept, rayon on all cores, on a
+  machine with other builds running. `base` and `ep` run back to back per image.
 - **Sample.** Drawn from the owner's set of 10,000 PNGs, taken from installed mods and not redistributable.
   The set is not in the repo, and paths are relative to its root. Every PNG is listed in sorted order, and
   the list is split into two pools:
@@ -277,6 +277,8 @@ they do not.
   bc7e output depends on the CPU the encode runs on.
 - `crates/encoders-sys/tests/level_identity.rs` now pins every level per target (commit `6ef3bbf`).
   Patch 0002 leaves levels 0 to 6 byte-identical on all four targets (commit `79dcbb2`).
+- A fifth code path, avx512, was added on 2026-11-13. It encodes differently from the avx2 path too, and
+  `level_identity.rs` pins it in a row of its own: [The AVX-512 ISPC path](avx512-ispc.md).
 - The study's quality deltas are unaffected, since each one compares two variants built from the same
   objects.
 

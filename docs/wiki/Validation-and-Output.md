@@ -55,7 +55,7 @@ The thresholds are fixed; only `validation.mips` is a setting.
 
 ## The manifest
 
-Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
+Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2`, `avx`, `sse4` or `sse2`), the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
 
 ## Re-runs and if-changed
 
@@ -70,6 +70,8 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 - the resolved settings (by hash).
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.
+
+The CPU is not on that list. BC7 and BC6H bytes differ between a CPU with AVX-512, one with AVX2 and an older one, at equal quality (PSNR within 0.002 dB). A file is not re-encoded because the CPU changed: move a project to another PC and only files that are stale for another reason are encoded again, so one output folder can hold files from both CPUs. Each record's `isa` says which. <!-- D:HZ2 -->
 
 An existing output with no manifest record is never overwritten by `if-changed`: it is kept and reported as `OUT-UNKNOWN-EXISTING`. Tessalith never overwrites a file it can't show it wrote. The command line can replace it: [CLI reference](CLI-Reference.md#re-runs-and-if-changed).
 

@@ -17,7 +17,7 @@ cc.workspace = true
 [features]
 # Caps `ispc_target()` at AVX2, so tests encode on one ISPC path on every CPU; `SDC_TEST_AVX512=1` lifts the cap.
 # Off by default and never enabled by a release build; the dev-dependency below turns it on for `cargo test`,
-# examples and benches (resolver 2 keeps dev-dependency features out of `cargo build`). DECISIONS Notes K and <ID>.
+# examples and benches (resolver 2 keeps dev-dependency features out of `cargo build`). DECISIONS Notes K and HZ.
 test-hooks = []
 
 [dev-dependencies]

@@ -72,29 +72,37 @@ The bc7e BC7 encoder and the ISPC Texture Compressor are written in ISPC. Buildi
 
 Every vendored file is listed with its SHA-256 hash in `crates/encoders-sys/vendor/SHA256SUMS`. `crates/encoders-sys/vendor/README-VENDOR.md` says where each piece comes from.
 
+#### Which ISPC path tests run on
+
+The objects hold five ISPC targets: SSE2, SSE4, AVX, AVX2 and AVX-512 (`avx512skx-x16`). ISPC's dispatcher picks the highest one the CPU has, and BC7 and BC6H bytes differ between the AVX-512 path, the AVX2 path and the older paths.
+
+- Test builds encode on the AVX2 path at most, so tests and pinned hashes give the same result on every machine. `encoders-sys`'s `test-hooks` feature sets this cap, and `cargo build` never turns it on.
+- Set `SDC_TEST_AVX512=1` to lift the cap. Only then are the AVX-512 pins (`level_identity` and `bc6h` in `crates/encoders-sys/tests`) checked, and only on a CPU with AVX-512. `tools\gate.ps1` does this in its `avx512` step.
+
 #### tools\regen-ispc.ps1
 
-Use this script only to check the vendored objects or to change the ISPC sources. It requires ISPC 1.31.0 exactly and refuses any other version.
+Use this script only to check the vendored objects or to change the ISPC sources. It needs two compilers and refuses any other version: ISPC 1.31.0 builds every file except the two AVX-512 objects, and ISPC 1.32.0 builds `bc7e_avx512skx.obj` and `kernel_avx512skx.obj`, because it fixes an AVX-512 miscompile of 1.31.0 (ISPC issue 3891). Without `-Ispc512` the check reports those two objects as `SKIP`; `-Update` needs both compilers.
 
 ```powershell
 # Rebuild into a temporary folder and compare with the vendored objects
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe
 
 # Rebuild and replace the vendored objects and headers
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Update
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe -Update
 
 # With -Update: replace only the bc7e objects, leave the ISPC Texture Compressor objects alone
-.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Update -Bc7eOnly
+.\tools\regen-ispc.ps1 -Ispc C:\tools\ispc-1.31.0\bin\ispc.exe -Ispc512 C:\tools\ispc-1.32.0\bin\ispc.exe -Update -Bc7eOnly
 ```
 
 | Parameter | Default | Meaning |
 |---|---|---|
 | `-Ispc` | `ispc.exe` (from `PATH`) | Path to the ISPC 1.31.0 compiler. |
+| `-Ispc512` | none | Path to the ISPC 1.32.0 compiler, for the two AVX-512 objects. Required by `-Update`. |
 | `-Bc7eSource` | `crates\encoders-sys\vendor\bc7e\bc7e.ispc` | The bc7e source to compile. |
 | `-Update` | off | Copy the rebuilt objects and headers into `vendor\ispc-objs`. |
 | `-Bc7eOnly` | off | With `-Update`, replace only the bc7e objects. |
 
-The script compiles for x86-64 Windows with the targets SSE2, SSE4, AVX and AVX2, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH` or `DIFF` for each object and exits with 0 when every object matches.
+The script compiles for x86-64 Windows with the five targets, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH`, `DIFF` or `SKIP` for each object and exits with 0 when every object reports `MATCH` or `SKIP`.
 
 #### tools\hash-vendor.ps1
 
@@ -105,7 +113,7 @@ After you change anything under `crates\encoders-sys\vendor`, run `.\tools\hash-
 - Licence: GPL-3.0-or-later. By contributing you agree your change is under it. Do not copy code from projects without a compatible licence.
 - Design decisions are recorded in [.claude/DECISIONS.md](.claude/DECISIONS.md) as numbered notes. A change that alters behaviour adds or amends a note, and updates the wiki pages it touches.
 - Output changes: a change that alters written bytes needs a line in [CHANGELOG.md](CHANGELOG.md) (and [docs/presets-changelog.md](docs/presets-changelog.md) for presets).
-- A pub item in `sdc-gui` (or a counter it reads) that only tests use goes behind `#[cfg(feature = "test-hooks")]`; the crate's own dev-dependency turns the feature on for tests, and a release build never does.
+- A pub item in `sdc-gui` (or a counter it reads) that only tests use goes behind `#[cfg(feature = "test-hooks")]`; the crate's own dev-dependency turns the feature on for tests, and a release build never does. `encoders-sys` has the same feature: in a test build it keeps BC7 and BC6H on the AVX2 path at most, and `SDC_TEST_AVX512=1` lifts that.
 - A new GUI test file, `crates/gui/tests/<name>.rs`, gets its `#[path]` and `mod` lines in `crates/gui/tests/it/main.rs`. That file's header says when a test file needs a `[[test]]` entry in `crates/gui/Cargo.toml` instead.
 - No game assets in PRs: no `.dds`, `.nif`, `.bsa`, `.esp` or textures from Skyrim or from mods you do not own. Make small test fixtures yourself.
 
