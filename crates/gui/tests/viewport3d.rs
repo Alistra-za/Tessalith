@@ -1696,7 +1696,7 @@ fn the_features_toggle_sends_set_features_and_no_load() {
     assert!(!v.busy());
 }
 
-/// Note ID29: a tree change reaches a running render thread once, as one reconfiguration; the same tree sends nothing.
+/// Note ID31: a tree change reaches a running render thread once, as one reconfiguration; the same tree sends nothing.
 #[test]
 fn set_tree_sends_set_tree_once() {
     let (_d, mut v, cmds) = confirmed();
@@ -1711,6 +1711,39 @@ fn set_tree_sends_set_tree_once() {
     assert!(v.busy(), "awake until the render thread answers");
     v.handle(v3::V3Reply::Reconfigured(1));
     assert!(!v.busy());
+}
+
+/// Note ID31: a test's stand-in folder is never replaced by a tree change, running thread or not.
+#[test]
+fn set_tree_leaves_a_stand_in_folder_and_sends_nothing() {
+    let (_d, mut v, cmds) = confirmed();
+    v.use_shader_folder(std::path::PathBuf::from("standin"));
+    v.set_tree(render3d::Tree::B);
+    assert!(cmds.try_recv().is_err(), "the folder source has no tree");
+    assert!(matches!(
+        v.source_for_test(),
+        render3d::ShaderSource::Folder(_)
+    ));
+}
+
+/// Note ID31 (pin): a render thread not started yet reads the tree's source, so the box on at startup starts on B.
+#[test]
+fn set_tree_before_the_thread_starts_picks_the_bundled_b_source() {
+    let mut v = Viewport3d::new();
+    assert!(matches!(
+        v.source_for_test(),
+        render3d::ShaderSource::Bundled
+    ));
+    v.set_tree(render3d::Tree::B);
+    assert!(matches!(
+        v.source_for_test(),
+        render3d::ShaderSource::BundledB
+    ));
+    v.set_tree(render3d::Tree::A);
+    assert!(matches!(
+        v.source_for_test(),
+        render3d::ShaderSource::Bundled
+    ));
 }
 
 #[test]

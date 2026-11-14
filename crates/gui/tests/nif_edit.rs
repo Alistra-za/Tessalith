@@ -4460,7 +4460,7 @@ fn in_the_meshes_view_sized(
     (d, h)
 }
 
-/// Note ID29 (Review Focus 3): the "CS PBR 2.0 (experimental)" setting switches both 3D panels' shader tree and
+/// Note ID31 (Review Focus 3): the "CS PBR 2.0 (experimental)" setting switches both 3D panels' shader tree and
 /// leaves the open NIF edit alone.
 #[test]
 fn toggling_cs_pbr2_switches_tree_keeps_edits() {
@@ -4472,8 +4472,8 @@ fn toggling_cs_pbr2_switches_tree_keeps_edits() {
     let (_d, mut h) = in_the_meshes_view(model, 2);
     let cmds = h.state_mut().meshes.v3.attach_test_thread();
     let sets = h.state_mut().state.set3d.v3.attach_test_thread();
-    let before = h.state().meshes.edit.as_ref().unwrap().doc.ops.len();
-    assert_eq!(before, 2);
+    let before = h.state().meshes.edit.as_ref().unwrap().doc.clone();
+    assert_eq!(before.ops.len(), 2);
     h.state_mut().model.set_cs_pbr2(true);
     h.run_steps(3);
     let sent: Vec<V3Cmd> = cmds.try_iter().collect();
@@ -4484,13 +4484,15 @@ fn toggling_cs_pbr2_switches_tree_keeps_edits() {
     assert!(sets
         .try_iter()
         .any(|c| matches!(c, V3Cmd::SetTree(Tree::B))));
-    assert_eq!(nif(&h), (2, false), "the edit op list is unchanged");
+    assert_eq!(nif(&h), (2, false));
+    let doc = |h: &AppH| h.state().meshes.edit.as_ref().unwrap().doc.clone();
+    assert_eq!(doc(&h), before, "the edit op list is unchanged");
     h.state_mut().model.set_cs_pbr2(false);
     h.run_steps(3);
     assert!(cmds
         .try_iter()
         .any(|c| matches!(c, V3Cmd::SetTree(Tree::A))));
-    assert_eq!(nif(&h), (2, false));
+    assert_eq!(doc(&h), before);
 }
 
 /// Beyond the brief's list: with no Textures history, Ctrl+Z and the header still undo the NIF step.

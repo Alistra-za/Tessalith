@@ -573,7 +573,7 @@ pub enum V3Cmd {
     /// The "Accurate (deferred)" toggle (`Renderer::set_deferred`): no reload; every shape re-permutes in the
     /// background while its old draw stays.
     SetDeferred(bool),
-    /// The "CS PBR 2.0 (experimental)" setting (Note ID29): `Renderer::set_tree`; every shape re-permutes in the
+    /// The "CS PBR 2.0 (experimental)" setting (Note ID31): `Renderer::set_tree`; every shape re-permutes in the
     /// background while its old draw stays. Nothing reloads.
     SetTree(render3d::Tree),
     Load {
@@ -787,7 +787,7 @@ pub struct Viewport3d {
     thread: Option<Sender<V3Cmd>>,
     /// Where the render thread reads shader text: the bundle, or a test's stand-in folder.
     source: render3d::ShaderSource,
-    /// The embedded shader tree the render thread uses (Note ID29): follows `GuiSettings.cs_pbr2`.
+    /// The embedded shader tree the render thread uses (Note ID31): follows `GuiSettings.cs_pbr2`.
     tree: render3d::Tree,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
     #[cfg(feature = "test-hooks")]
@@ -901,6 +901,11 @@ impl Viewport3d {
     }
 
     #[cfg(feature = "test-hooks")]
+    pub fn source_for_test(&self) -> &render3d::ShaderSource {
+        &self.source
+    }
+
+    #[cfg(feature = "test-hooks")]
     pub fn loaded_for_test(&self) -> Option<u64> {
         self.loaded
     }
@@ -968,22 +973,23 @@ impl Viewport3d {
         }
     }
 
-    /// The shader tree (Note ID29): a running render thread switches at once (shapes recompile in the background,
+    /// The shader tree (Note ID31): a running render thread switches at once (shapes recompile in the background,
     /// nothing reloads); a thread started later starts on it. A test's stand-in folder is left alone.
     pub fn set_tree(&mut self, tree: render3d::Tree) {
         if self.tree == tree {
             return;
         }
         self.tree = tree;
-        if matches!(
+        if !matches!(
             self.source,
             render3d::ShaderSource::Bundled | render3d::ShaderSource::BundledB
         ) {
-            self.source = match tree {
-                render3d::Tree::A => render3d::ShaderSource::Bundled,
-                render3d::Tree::B => render3d::ShaderSource::BundledB,
-            };
+            return;
         }
+        self.source = match tree {
+            render3d::Tree::A => render3d::ShaderSource::Bundled,
+            render3d::Tree::B => render3d::ShaderSource::BundledB,
+        };
         if let Some(t) = &self.thread {
             if t.send(V3Cmd::SetTree(tree)).is_ok() {
                 self.reconf_sent += 1;
@@ -1920,19 +1926,21 @@ fn render_loop(
                     compiled_changed |= r.apply_compiled(done);
                     None
                 }
-                V3Cmd::SetFeatures(on) => {
-                    r.set_features_on(on);
-                    if want_deferred && !r.deferred() {
-                        let _ = r.set_deferred(true);
+                c @ (V3Cmd::SetFeatures(_) | V3Cmd::SetTree(_)) => {
+                    match c {
+                        V3Cmd::SetFeatures(on) => r.set_features_on(on),
+                        V3Cmd::SetTree(tree) => r.set_tree(tree),
+                        _ => {}
                     }
-                    restyled = true;
-                    ack.0 += 1;
-                    None
-                }
-                V3Cmd::SetTree(tree) => {
-                    r.set_tree(tree);
+                    // Both rebuild the composite: retry the look's deferred choice, and tell a failure once
+                    // (Note ID32), as `SetDeferred` does.
                     if want_deferred && !r.deferred() {
-                        let _ = r.set_deferred(true);
+                        if let Err(e) = r.set_deferred(true) {
+                            if deferred_told.as_deref() != Some(e.as_str()) {
+                                deferred_told = Some(e.clone());
+                                send(V3Reply::Notice(e));
+                            }
+                        }
                     }
                     restyled = true;
                     ack.0 += 1;

@@ -477,6 +477,8 @@ impl Renderer {
     }
 
     fn build(gpu: Gpu, source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
+        // Note ID32: the settings start as the source's own tree's (a folder: tree A's).
+        let tree = source.tree().unwrap_or(Tree::A);
         let sd = D3D11_SAMPLER_DESC {
             Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
             AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
@@ -583,8 +585,8 @@ impl Renderer {
             sources: SourceSet::new(source.clone()),
             source,
             cache_dir,
-            features: cs_settings::preview_defines(cs_settings::defaults(), true),
-            settings: cs_settings::defaults().clone(),
+            features: cs_settings::preview_defines(cs_settings::defaults_in(tree), true),
+            settings: cs_settings::defaults_in(tree).clone(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
             programs: HashMap::new(),
@@ -654,7 +656,8 @@ impl Renderer {
     /// Switches to the embedded shader tree `tree` (Note ID29): the source, its expansion memo, the old-LL probe,
     /// the CS settings (that tree's defaults), the composite, the prefilter and the compiled results all start
     /// over, then every shape is re-permuted (`begin_all`; the old draws stay while programs compile). The disk
-    /// cache is content-addressed and shared. The same tree again does nothing.
+    /// cache is content-addressed and shared. The same tree again does nothing. A test's stand-in folder is
+    /// replaced by the bundled tree (`tree()` calls the folder A).
     pub fn set_tree(&mut self, tree: Tree) {
         if self.source.tree() == Some(tree) {
             return;
@@ -673,18 +676,7 @@ impl Renderer {
         self.load_epoch.fetch_add(1, Ordering::Relaxed);
         self.jobs.clear();
         self.inflight.clear();
-        let mut f: Vec<String> = self
-            .features
-            .iter()
-            .filter(|d| !settings_define(d))
-            .cloned()
-            .collect();
-        f.extend(cs_settings::preview_defines(
-            &self.settings,
-            self.features_on,
-        ));
-        self.features = f;
-        self.encode_srgb = self.linear_lighting();
+        self.refresh_settings_defines();
         self.begin_all();
     }
 
@@ -713,6 +705,16 @@ impl Renderer {
     /// `preview_defines`. Unchanged as a set (`program_key` sorts defines) -> the static block of every drawing
     /// shape is rewritten in place; changed -> every shape through [`Renderer::begin`].
     fn apply_settings_defines(&mut self) {
+        if self.refresh_settings_defines() {
+            self.begin_all();
+        } else {
+            self.rewrite_static();
+        }
+    }
+
+    /// The settings defines recomputed from `settings` and `features_on` (the other defines kept), and the display
+    /// encode that follows `ENABLE_LL`. True when the define list changed.
+    fn refresh_settings_defines(&mut self) -> bool {
         let mut f: Vec<String> = self
             .features
             .iter()
@@ -729,11 +731,7 @@ impl Renderer {
         // Linear Lighting draws in linear working space: encode for display (was the GUI's apply_features).
         self.features = f;
         self.encode_srgb = self.linear_lighting();
-        if old == new {
-            self.rewrite_static();
-        } else {
-            self.begin_all();
-        }
+        old != new
     }
 
     /// New FeatureData values on every `Drawing` shape: the cbuffer-edit path of `apply_in_place` with the
