@@ -184,7 +184,7 @@ fn two_layer_type_11_maps_coat() {
     );
     assert_eq!(r.features, TWO_LAYER);
     assert_eq!(r.params[11..=12], PBR2_DEFAULTS[11..=12]);
-    // 24 wins over 26, 27 (hair) and 12
+    // 24 wins over 26 and 12
     let r = from_v1(
         0,
         PBR | 1 << 24 | 1 << 26 | 1 << 12,
@@ -323,11 +323,46 @@ fn to_v1_round_trips_reversible_subset() {
 #[test]
 fn to_v1_drops_thin_and_foliage() {
     let r = to_v1(THIN_SURFACE | FOLIAGE | SUBSURFACE, &PBR2_DEFAULTS);
-    assert_eq!(r.dropped, ["Thin surface", "Foliage"]);
+    assert_eq!(r.dropped, ["Foliage", "Thin surface"]);
     assert_eq!(r.slsf2_set, PBR | 1 << 26);
     let r = to_v1(THIN_SURFACE, &PBR2_DEFAULTS);
     assert_eq!(
         (r.dropped.as_slice(), r.slsf2_set),
         (&["Thin surface"][..], PBR)
     );
+}
+
+#[test]
+fn to_v1_names_every_feature_its_form_cannot_carry() {
+    for (f, want) in [
+        (TWO_LAYER | SUBSURFACE, &["Subsurface"][..]),
+        (TWO_LAYER | FUZZ, &["Fuzz"]),
+        (TWO_LAYER | GLINT | SUBSURFACE, &["Subsurface", "Glint"]),
+        (HAIR | SUBSURFACE | FUZZ, &["Subsurface", "Fuzz"]),
+        (HAIR | TWO_LAYER, &["Hair"]),
+        (FUZZ | GLINT, &["Glint"]),
+        (FUZZ | GLINT | SUBSURFACE, &["Glint"]),
+        (COLORED_COAT | HAIR, &["Coloured coat"]),
+        (
+            TWO_LAYER | COAT_NORMAL | FOLIAGE | THIN_SURFACE,
+            &["Foliage", "Thin surface"],
+        ),
+    ] {
+        let p = to_v1(f, &PBR2_DEFAULTS);
+        assert_eq!(p.dropped, want, "{f:#x}");
+    }
+}
+
+#[test]
+fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
+    let f2 = 1 << 24 | 1 << 25 | 1 << 26 | 1 << 27 | 1 << 12 | 1 << 30;
+    let r = from_v1(11, f2, &v1(0.8, 0.05, [0.2; 3], 0.7, 0.5, Some([0.3; 4])));
+    assert_eq!(r.features, 0);
+    assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
+}
+
+#[test]
+fn negative_zero_is_not_a_clamp() {
+    let r = from_v1(0, PBR, &v1(-0.0, 0.04, [1.0; 3], 0.0, 1.0, None));
+    assert!(r.clamped.is_empty());
 }

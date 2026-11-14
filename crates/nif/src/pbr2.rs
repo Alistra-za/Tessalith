@@ -1,5 +1,6 @@
 // crates/nif/src/pbr2.rs
 //! CS TruePBR 2.0 (shader type 21): the 25 PBR parameters of the payload (spec section 4, in file order).
+use crate::props::{LightingParams, LightingTrailer};
 
 /// What the payload's PBR Version word must be (spec section 2).
 pub const VERSION: u32 = 2;
@@ -7,8 +8,6 @@ pub const VERSION: u32 = 2;
 pub const BLOCK_EXTRA: usize = 80;
 /// Number of PBR parameters in the payload.
 pub const PARAM_COUNT: usize = 25;
-
-use crate::props::{LightingParams, LightingTrailer};
 
 /// The PBR feature bits (spec section 3), as masks.
 pub mod feat {
@@ -50,6 +49,20 @@ pub const PBR2_DEFAULTS: [f32; PARAM_COUNT] = [
     1.5, 40.0, 0.015, 2.0,  // glint scale, log density, roughness, randomization
     0.75, // subsurface balance
     0.5, 0.5, 1.0, // thin surface: front, back specular weight, back roughness scale
+];
+
+/// Name of each feature bit 0-9, in bit order.
+pub const FEATURE_NAMES: [&str; 10] = [
+    "Subsurface",
+    "Two-layer coat",
+    "Coloured coat",
+    "Interlayer parallax",
+    "Coat normal",
+    "Fuzz",
+    "Hair",
+    "Glint",
+    "Foliage",
+    "Thin surface",
 ];
 
 /// Name of each of the 25 parameters, in file order.
@@ -205,6 +218,7 @@ pub struct ToV2 {
     pub clamped: Vec<(usize, f32, f32)>,
 }
 
+// The SLSF2 bits of the v1 PBR remap, as `render3d::pbr_flags` reads them; all are in `V1_SLSF2` except 24.
 const SLSF2_FIT_SLOPE: u32 = 1 << 12;
 const SLSF2_PBR: u32 = 1 << 23;
 const SLSF2_MLP: u32 = 1 << 24;
@@ -212,6 +226,13 @@ const SLSF2_SOFT: u32 = 1 << 25;
 const SLSF2_SUBSURFACE: u32 = 1 << 26;
 const SLSF2_BACK: u32 = 1 << 27;
 const SLSF2_COLORED: u32 = 1 << 30;
+// They can't drift from the v1 flag mask: all but 24 are in it, and 24 is the one it leaves out.
+const _: () = assert!(
+    (SLSF2_FIT_SLOPE | SLSF2_PBR | SLSF2_SOFT | SLSF2_SUBSURFACE | SLSF2_BACK | SLSF2_COLORED)
+        & !V1_SLSF2
+        == 0
+        && V1_SLSF2 & SLSF2_MLP == 0
+);
 
 /// The v2 features and parameters a v1 PBR shape means (design: v1 to v2 conversion table). The flag precedence is
 /// `render3d::pbr_flags`'s: two-layer (SLSF2 24), else hair (27), else subsurface (26) with fuzz (25) or glint (12).
@@ -280,7 +301,7 @@ pub fn from_v1(shader_type: u32, slsf2: u32, p: &LightingParams) -> ToV2 {
     let mut clamped = Vec::new();
     for (i, x) in v.iter_mut().enumerate() {
         let to = clamp_param(i, *x);
-        if to.to_bits() != x.to_bits() {
+        if to != *x && !(x.is_nan() && to.is_nan()) {
             clamped.push((i, *x, to));
             *x = to;
         }
@@ -303,13 +324,14 @@ pub struct ToV1 {
     pub lighting_effect_1: f32,
     pub lighting_effect_2: f32,
     pub mlp: Option<[f32; 4]>,
-    /// Features with no v1 form, by name.
+    /// Set features the v1 shape can't carry, by [`FEATURE_NAMES`], in bit order.
     pub dropped: Vec<&'static str>,
 }
 
 /// The v1 PBR shape that stands for v2 `features` and `params`, by the same table in reverse. An approximation for
-/// tree A's preview (design, settled item 5): thin surface and foliage have no v1 form and are dropped. Fuzz wins
-/// the trailer over glint, as `from_v1` does.
+/// tree A's preview (design, settled item 5). Every set feature the chosen v1 form can't carry goes to `dropped`:
+/// thin surface and foliage always, subsurface, fuzz and glint under two-layer, anything but hair under hair, and
+/// glint beside fuzz (fuzz wins the trailer, as in `from_v1`).
 pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
     use feat::*;
     let (has, p) = (|m: u32| features & m != 0, params);
@@ -353,10 +375,18 @@ pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
             r.mlp = Some([p[17], 40.0 - p[18], p[19], p[20]]);
         }
     }
-    for (bit, name) in [(THIN_SURFACE, "Thin surface"), (FOLIAGE, "Foliage")] {
-        if has(bit) {
-            r.dropped.push(name);
-        }
-    }
+    let kept = if has(TWO_LAYER) {
+        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT
+    } else if has(HAIR) {
+        HAIR
+    } else {
+        SUBSURFACE | if has(FUZZ) { FUZZ } else { GLINT }
+    };
+    r.dropped = FEATURE_NAMES
+        .iter()
+        .enumerate()
+        .filter(|&(bit, _)| features & !kept & (1 << bit) != 0)
+        .map(|(_, &name)| name)
+        .collect();
     r
 }
