@@ -15,10 +15,7 @@
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 
-use super::fit::{
-    ls_endpoints3, ls_endpoints3_ordered, ls_endpoints4, order_tables, precise_round_565, Hist3,
-    Hist4, TOTAL_ORDER_3_16,
-};
+use super::fit::{ls_endpoints3, ls_endpoints4, order_tables, precise_round_565, Hist3, Hist4};
 use super::initial::pick_initial;
 use super::order_keys;
 use super::palette::single_tables;
@@ -28,10 +25,12 @@ use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends, DUAL};
 
 /// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
-const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
+pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
 const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
-/// Level 18's `total_orderings3`.
+/// Level 18's `total_orderings3`: the 32 entries of a row are the 32 orderings it tries (`std::min(32,
+/// MAX_TOTAL_ORDERINGS3)`, see `order_keys::keys3`).
 const TOTAL_ORDERINGS3: usize = 32;
+const _: () = assert!(TOTAL_ORDERINGS3 == MAX_TOTAL_ORDERINGS3);
 
 /// `encode_bc1(18, .., allow_3color, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with R, G, B
 /// error weights `weights`.
@@ -454,31 +453,26 @@ fn try_3color_block(
 
         let sums = sorted_sums(px, &e, s.total);
 
-        let tables = order_tables();
-        // std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3); cEncodeBC1Exhaustive is level 19 only.
-        let q_total = TOTAL_ORDERINGS3.min(MAX_TOTAL_ORDERINGS3);
-        for q in 0..q_total {
-            let s_index = BEST_TOTAL_ORDERINGS3[orig_total_order_index][q] as usize;
-
-            let trial = if TOTAL_ORDER_3_16.contains(&s_index) {
-                hit!(Hit::Ordering3Single);
-                single_colour_ends3(s.avg)
-            } else {
-                hit!(Hit::Ordering3Fit);
-                let (xl, xh) =
-                    ls_endpoints3_ordered(s.total, tables.factors3[s_index], s_index, &sums);
-                round_ls(&xl, &xh)
-            };
-
+        // The pairs of all 32 orderings are fitted first, then scored in order (see `order_keys`).
+        let keys = order_keys::keys3(
+            s.total,
+            &sums,
+            &BEST_TOTAL_ORDERINGS3[orig_total_order_index],
+            order_tables(),
+            Seen::key(&single_colour_ends3(s.avg)),
+        );
+        for &key in &keys {
             // A pair scored before in this block cannot be strictly below `trial_err`: `trial_err` only falls, it
             // started at most the error of every pair this function scored before (the start, the least-squares
             // trials), and each was taken or rejected against an error at least `trial_err` (see `seen.rs`).
-            if seen.insert(&trial) {
+            if seen.insert_key(key) {
                 hit!(Hit::Ordering3Repeat);
                 #[cfg(test)]
-                shadow3(px, texels, &trial, trial_err);
+                shadow3(px, texels, &Seen::ends_of(key), trial_err);
                 continue;
             }
+
+            let trial = Seen::ends_of(key);
 
             // The C++ passes UINT32_MAX here, unlike the 4-colour loop, which passes cur_err. The cutoff is
             // `trial_err` instead: the trial is taken only when its total is below `trial_err` and its selectors are

@@ -1,10 +1,11 @@
 //! The ordering kernel: the rounded least-squares fit of each of a pass's 128 orderings, R, G and B in lanes 0, 1 and 2
 //! of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum 0, so it adds nothing to the key). Compiled only
 //! where the target has SSE2 (the `cfg` on `mod sse2`), so the `target_feature(enable = "sse2")` functions here are
-//! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` carries
-//! it (as does the test-only `round_key_of`). This is the crate's one float kernel: the scalar code it replaces (`order_keys::scalar`, which runs
-//! `ls_endpoints4_ordered` and `precise_round_565` through `round_ls`) is its reference, and every real call in the
-//! unit tests also runs that code and asserts the same 128 keys.
+//! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` and
+//! `keys3` carry it (as does the test-only `round_key_of`). This is the crate's one float kernel: the scalar code it
+//! replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered` or `ls_endpoints3_ordered` and
+//! `precise_round_565` through `round_ls`) is its reference, and every real call in the unit tests also runs that code
+//! and asserts the same keys (128 for `keys4`, 32 for `keys3`).
 //!
 //! Why it gives the scalar code's bits, step by step:
 //! - Integers. With `S` the prefix sums of one channel, `S[16]` the block total (`sorted_sums` stores it there) and
@@ -12,7 +13,11 @@
 //!   `uq00 = (S[f2] - S[f1]) + 2 (S[f3] - S[f2]) + 3 (S[16] - S[f3])` expands to `3 total - (S[f1] + S[f2] + S[f3])`,
 //!   and its `q10 = 3 total - uq00` is `S[f1] + S[f2] + S[f3]`. The kernel builds `q10` as that sum of three prefix
 //!   sums and `uq00` as three times the total minus it. Each prefix sum is at most `16 x 255 = 4,080`, so `q10`, `uq00`
-//!   and `3 total` are at most `12,240`, and no 32-bit lane wraps. Only integers are rearranged.
+//!   and `3 total` are at most `12,240`, and no 32-bit lane wraps. Only integers are rearranged. The 3-colour fit
+//!   (`keys3`) has two positions, `f1 = o0` and `f2 = o0 + o2` (BC1's 3-colour order along the axis is selector 0, 2,
+//!   1): the scalar `uq00 = 2 (S[16] - S[f2]) + (S[f2] - S[f1])` expands to `2 total - (S[f1] + S[f2])`, and its
+//!   `q10 = 2 total - uq00` is `S[f1] + S[f2]`, at most `8,160`. `q10` is two prefix sums and `uq00` is two times the
+//!   total minus it.
 //! - Conversions. Every integer below `2^24` converts to `f32` exactly, from `u32` (the scalar `as f32`) and from `i32`
 //!   (`_mm_cvtepi32_ps`) alike, so both sides start from the same floats.
 //! - The fit. `xl = iz00 * uq00 + iz01 * q10` and `xh = iz10 * uq00 + iz11 * q10` (`iz01 = iz10`) are two
@@ -21,9 +26,8 @@
 //!   product, with the scale (31, 63, 31, 0), as the scalar `x * 31.0` and `x * 63.0`.
 //! - Truncation. `|iz|` is at most `3/255 x 144` (a non-zero determinant is an integer at least 1, an entry of the
 //!   matrix at most 144), so each product is at most `3/255 x 144 x 12,240 = 20,736`, `|x|` at most 41,472 and
-//!   `|x x 63|` at most 2,612,736:
-//!   far inside `i32`, where `_mm_cvttps_epi32` truncates toward zero exactly as `as i32` does (the doc of
-//!   `precise_round_565` bounds the same values). No value is NaN.
+//!   `|x x 63|` at most 2,612,736: far inside `i32`, where `_mm_cvttps_epi32` truncates toward zero exactly as `as i32`
+//!   does (the doc of `precise_round_565` bounds the same values). No value is NaN.
 //! - Clamp. Per lane, a negative code becomes 0 and one above the maximum the maximum. `precise_round_565` clamps a
 //!   group (the four red and blue codes, or the two green ones) when any of it is out of range, but `clamp_code` leaves
 //!   a code in range alone, so its result is the per-lane clamp.
@@ -41,10 +45,12 @@
 //! ordering is single-colour exactly when one of its four counts is 16; the counts sum to 16, so that is when bit 4 of
 //! their OR is set. That this picks exactly the orderings of `TOTAL_ORDER_4_16` is checked over all 969 orderings by
 //! `every_ordering_matches_the_reference`, which also compares the kernel with the reference at the largest sums (a
-//! block of 255s).
+//! block of 255s). `keys3` does the same with `TOTAL_ORDER_3_16` (`compute_selector_factors3` stores 0 likewise), three
+//! counts, and `every_3_colour_ordering_matches_the_reference` over all 153 orderings.
 
+use super::super::encode::MAX_TOTAL_ORDERINGS3;
 use super::super::fit::{OrderTables, MIDPOINT5, MIDPOINT6};
-use super::super::tables::{MAX_TOTAL_ORDERINGS4, UNIQUE_TOTAL_ORDERS4};
+use super::super::tables::{MAX_TOTAL_ORDERINGS4, UNIQUE_TOTAL_ORDERS3, UNIQUE_TOTAL_ORDERS4};
 use core::arch::x86_64::*;
 
 /// `order_keys::keys4` on SSE2 vectors.
@@ -71,6 +77,38 @@ pub(super) fn keys4(
         let uq00 = _mm_sub_epi32(t3, q10);
         let fitted = fit_key(q10, uq00, tables.factors[s]);
         *key = if (o0 | o1 | o2 | o3) & 16 != 0 {
+            single_key
+        } else {
+            fitted
+        };
+    }
+    keys
+}
+
+/// `order_keys::keys3` on SSE2 vectors: the same fit with two positions. `f1 = o0` and `f2 = o0 + o2` (BC1's 3-colour
+/// order along the axis is selector 0, 2, 1), `q10 = S[f1] + S[f2]` and `uq00 = 2 total - q10`.
+#[target_feature(enable = "sse2")]
+pub(super) fn keys3(
+    total: [i32; 3],
+    sums: &[[u32; 17]; 3],
+    row: &[u8; MAX_TOTAL_ORDERINGS3],
+    tables: &OrderTables,
+    single_key: u32,
+) -> [u32; MAX_TOTAL_ORDERINGS3] {
+    let v: [__m128i; 17] = std::array::from_fn(|i| {
+        _mm_set_epi32(0, sums[2][i] as i32, sums[1][i] as i32, sums[0][i] as i32)
+    });
+    let t2 = _mm_set_epi32(0, total[2] * 2, total[1] * 2, total[0] * 2);
+
+    let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
+    for (key, &s) in keys.iter_mut().zip(row) {
+        let s = s as usize;
+        let [o0, o1, o2] = UNIQUE_TOTAL_ORDERS3[s];
+        let (f1, f2) = (o0 as usize, (o0 + o2) as usize);
+        let q10 = _mm_add_epi32(v[f1], v[f2]);
+        let uq00 = _mm_sub_epi32(t2, q10);
+        let fitted = fit_key(q10, uq00, tables.factors3[s]);
+        *key = if (o0 | o1 | o2) & 16 != 0 {
             single_key
         } else {
             fitted

@@ -290,6 +290,7 @@ pub(crate) fn ls_endpoints4(
 /// The table form of `compute_least_squares_endpoints3_rgb`: as [`ls_endpoints4_ordered`] for 3-colour ordering `s`,
 /// whose texels run low endpoint, midpoint, high endpoint along the axis (selectors 0, 2, 1). `iz` is
 /// `g_selector_factors3[s]`. Returns (xl, xh).
+#[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
 pub(crate) fn ls_endpoints3_ordered(
     total: [i32; 3],
     iz: [f32; 3],

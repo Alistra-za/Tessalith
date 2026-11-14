@@ -9,6 +9,7 @@
 //! and selectors) feeds back into them. So each trial gets the pair it had when it was fitted inside the loop, and the
 //! loop scores the pairs in the same order with the same `Seen` and error as before.
 
+use super::encode::MAX_TOTAL_ORDERINGS3;
 use super::fit::OrderTables;
 use super::tables::MAX_TOTAL_ORDERINGS4;
 
@@ -41,6 +42,35 @@ pub(crate) fn keys4(
     keys
 }
 
+/// [`keys4`] for the 3-colour pass of `try_3color_block`: the [`Seen`] key of the endpoint pair of each ordering
+/// `row[q]`: `single_key` when the ordering is one of `TOTAL_ORDER_3_16`, else the key of `round_ls` of
+/// `ls_endpoints3_ordered(total, tables.factors3[row[q]], row[q], sums)`.
+///
+/// The row's 32 entries are the 32 orderings level 18 tries: the C++ loops to
+/// `std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3)` with 32 passed and `MAX_TOTAL_ORDERINGS3` 32.
+///
+/// [`Seen`]: super::seen::Seen
+pub(crate) fn keys3(
+    total: [i32; 3],
+    sums: &[[u32; 17]; 3],
+    row: &[u8; MAX_TOTAL_ORDERINGS3],
+    tables: &OrderTables,
+    single_key: u32,
+) -> [u32; MAX_TOTAL_ORDERINGS3] {
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    let keys = {
+        // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
+        let keys = unsafe { sse2::keys3(total, sums, row, tables, single_key) };
+        // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
+        #[cfg(test)]
+        assert_eq!(keys, scalar::keys3(total, sums, row, tables, single_key));
+        keys
+    };
+    #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+    let keys = scalar::keys3(total, sums, row, tables, single_key);
+    keys
+}
+
 // The kernel the encode uses where the target has SSE2 (`x86_64-pc-windows-msvc`, the workspace's target, always).
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2;
@@ -54,7 +84,11 @@ mod scalar {
     use crate::hits::{hit, Hit};
 
     use super::super::encode::round_ls;
-    use super::super::fit::{ls_endpoints4_ordered, OrderTables, TOTAL_ORDER_4_16};
+    use super::super::encode::MAX_TOTAL_ORDERINGS3;
+    use super::super::fit::{
+        ls_endpoints3_ordered, ls_endpoints4_ordered, OrderTables, TOTAL_ORDER_3_16,
+        TOTAL_ORDER_4_16,
+    };
     use super::super::seen::Seen;
     use super::super::tables::MAX_TOTAL_ORDERINGS4;
 
@@ -80,13 +114,37 @@ mod scalar {
         }
         keys
     }
+
+    /// [`super::keys3`], one ordering at a time.
+    pub(super) fn keys3(
+        total: [i32; 3],
+        sums: &[[u32; 17]; 3],
+        row: &[u8; MAX_TOTAL_ORDERINGS3],
+        tables: &OrderTables,
+        single_key: u32,
+    ) -> [u32; MAX_TOTAL_ORDERINGS3] {
+        let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
+        for (key, &s_index) in keys.iter_mut().zip(row) {
+            let s_index = s_index as usize;
+            *key = if TOTAL_ORDER_3_16.contains(&s_index) {
+                hit!(Hit::Ordering3Single);
+                single_key
+            } else {
+                hit!(Hit::Ordering3Fit);
+                let (xl, xh) =
+                    ls_endpoints3_ordered(total, tables.factors3[s_index], s_index, sums);
+                Seen::key(&round_ls(&xl, &xh))
+            };
+        }
+        keys
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::super::encode::sorted_sums;
-    use super::super::fit::{order_tables, TOTAL_ORDER_4_16};
-    use super::super::tables::N4;
+    use super::super::fit::{order_tables, TOTAL_ORDER_3_16, TOTAL_ORDER_4_16};
+    use super::super::tables::{N3, N4};
     use super::super::Ends;
     use super::*;
 
@@ -120,10 +178,9 @@ mod tests {
         std::array::from_fn(|c| px.iter().map(|t| t[c] as i32).sum())
     }
 
-    #[test]
-    fn every_ordering_matches_the_reference() {
-        const SINGLE: u32 = 0xDEAD_BEEF;
-        let axes = [
+    /// Three axes to sort the texels along.
+    fn axes() -> [Ends; 3] {
+        [
             Ends {
                 l: [0, 0, 0],
                 h: [31, 63, 31],
@@ -136,7 +193,48 @@ mod tests {
                 l: [31, 0, 0],
                 h: [0, 63, 31],
             },
-        ];
+        ]
+    }
+
+    /// Rows that together hold every 3-colour ordering index.
+    fn rows3() -> Vec<[u8; MAX_TOTAL_ORDERINGS3]> {
+        (0..N3)
+            .collect::<Vec<_>>()
+            .chunks(MAX_TOTAL_ORDERINGS3)
+            .map(|c| std::array::from_fn(|q| c.get(q).map_or(0, |&s| s as u8)))
+            .collect()
+    }
+
+    #[test]
+    fn every_3_colour_ordering_matches_the_reference() {
+        const SINGLE: u32 = 0xDEAD_BEEF;
+        let tables = order_tables();
+        let rows = rows3();
+        for px in blocks() {
+            let total = total(&px);
+            for axis in &axes() {
+                let sums = sorted_sums(&px, axis, total);
+                for row in &rows {
+                    let keys = keys3(total, &sums, row, tables, SINGLE);
+                    assert_eq!(
+                        keys,
+                        scalar::keys3(total, &sums, row, tables, SINGLE),
+                        "{px:?} along {axis:?}"
+                    );
+                    for (q, &s) in row.iter().enumerate() {
+                        if TOTAL_ORDER_3_16.contains(&(s as usize)) {
+                            assert_eq!(keys[q], SINGLE, "ordering {s}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_ordering_matches_the_reference() {
+        const SINGLE: u32 = 0xDEAD_BEEF;
+        let axes = axes();
         let tables = order_tables();
         let rows = rows4();
         for px in blocks() {
