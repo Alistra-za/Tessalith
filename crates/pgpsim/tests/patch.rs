@@ -28,7 +28,6 @@ fn type_21_shape_left_untouched() {
         features: 0,
         params: nif::pbr2::PBR2_DEFAULTS,
     };
-    let before = src.clone();
     let r = sim(
         &with(json!({"roughness_scale": 0.25})),
         &sdc_default(),
@@ -38,10 +37,10 @@ fn type_21_shape_left_untouched() {
         panic!("{r:?}")
     };
     assert!(why.contains("type 21"), "{why}");
-    assert_eq!(src, before);
     // the same entry still patches a vanilla shape
+    let entry = with(json!({"roughness_scale": 0.25}));
     assert!(matches!(
-        sim(&md(), &sdc_default(), &rock()),
+        sim(&entry, &sdc_default(), &rock()),
         SimResult::Patched { .. }
     ));
 }

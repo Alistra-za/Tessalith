@@ -599,7 +599,7 @@ mod type21 {
             slots: vec![],
             ..S::default()
         };
-        assert!(!bad.warnings().is_empty());
+        assert!(bad.warnings().iter().any(|w| w.text.starts_with(WONT)));
         let orphan = S {
             shader_ref: -1,
             ..bad

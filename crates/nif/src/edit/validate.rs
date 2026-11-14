@@ -92,7 +92,7 @@ pub const EYE_ENV_TYPE: &str =
 /// 1-based slot 6 of the set editor, Note GH7) is fully metallic.
 pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic";
 /// Start of every type-21 Error (Note ID4): CS 2.0 logs the block and draws nothing. The text varies per field and
-/// parameter, so [`new_errors`] matches the prefix instead of listing each text in [`ALWAYS_BLOCK`].
+/// parameter, so [`always_blocks`] matches the prefix instead of listing each text in [`ALWAYS_BLOCK`].
 pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
 /// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.
 pub const TYPE_22: &str = "CS 2.0 won't draw this shape: type 22 is runtime only";
@@ -894,7 +894,7 @@ pub fn always_blocks(w: &Warning) -> bool {
 }
 
 /// Errors in `edited` that `source` does not already have (R14): an untouched source error never blocks export,
-/// except [`ALWAYS_BLOCK`], which crash or black out in game (B-P39, Note CS).
+/// except what [`always_blocks`] keeps blocking: those crash or black out in game (B-P39, Note CS).
 pub fn new_errors(source: &[Warning], edited: &[Warning]) -> Vec<Warning> {
     edited
         .iter()
