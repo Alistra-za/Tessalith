@@ -3,8 +3,8 @@
 //! blocks and plain or perceptual weights (Notes HY3, HY4) and with one-bit alpha (Note HY5). `tables` is generated
 //! from the vendored text by `tools/gen-bcenc-tables.py`; `palette` ports the palette and single-colour code; `params`
 //! holds each level's search depth; `encode` drives the encode, `initial` picks the starting endpoints, `fit` holds the
-//! least-squares fits and rounding, `order_keys` fits a whole 4- or 3-colour total-ordering pass at once (Note HY13), `sels`
-//! the selector searches; `alpha` is the one-bit-alpha encode.
+//! least-squares fits and rounding, `order_keys` fits a whole 4- or 3-colour total-ordering pass at once (Note HY13),
+//! `sels` the selector searches; `alpha` is the one-bit-alpha encode.
 
 pub(crate) mod alpha;
 pub(crate) mod encode;
