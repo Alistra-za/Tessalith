@@ -19,17 +19,16 @@ const MODES: [(bool, bool); 4] = [(false, false), (false, true), (true, false), 
 
 /// Both outputs, the flags and the texels on a mismatch, so the block can be replayed.
 fn same(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
-    let got = bc1_encode_block(px, allow_3color, perceptual);
-    let want = encoders_sys::bc1_encode_block(px, allow_3color, false, perceptual);
-    assert_eq!(
-        got, want,
-        "bc1, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
-    got
+    same_with(px, allow_3color, perceptual, Bc1Search::Default)
 }
 
-/// [`same`] for `bc1_encode_block_with(.., search)` against rgbcx at the level `search` stands for.
-fn same_with(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool, search: Bc1Search) {
+/// `bc1_encode_block_with(.., search)` against rgbcx at the level `search` stands for (level 18 for `Default`).
+fn same_with(
+    px: &[[u8; 4]; 16],
+    allow_3color: bool,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 8] {
     let got = bc1_encode_block_with(px, allow_3color, perceptual, search);
     let want = match search {
         Bc1Search::Default => encoders_sys::bc1_encode_block(px, allow_3color, false, perceptual),
@@ -39,8 +38,11 @@ fn same_with(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool, search: B
     };
     assert_eq!(
         got, want,
-        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}
+  bcenc {got:?}
+  rgbcx {want:?}"
     );
+    got
 }
 
 fn solid(r: u8, g: u8, b: u8) -> [[u8; 4]; 16] {

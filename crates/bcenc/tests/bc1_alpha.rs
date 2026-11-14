@@ -2,10 +2,7 @@
 //! plain or perceptual weights) on every mask class over the colour classes, and on one hand-built block per early
 //! path of the C++. `Bc1Search::Fast` equals rgbcx's `encode_bc1_alpha(BC1_FAST_LEVEL, ..)` on the mask classes and,
 //! in the `#[ignore]` twin, on the same long run.
-use bcenc::{
-    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_with, Bc1Search,
-    BC1_FAST_LEVEL,
-};
+use bcenc::{bc1_encode_block, bc1_encode_block_alpha_with, Bc1Search, BC1_FAST_LEVEL};
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
@@ -16,17 +13,11 @@ use bc1_block::{colours, sel};
 
 /// Both outputs, the mask, the flag and the texels on a mismatch, so the block can be replayed.
 fn same(px: &[[u8; 4]; 16], mask: u16, perceptual: bool) -> [u8; 8] {
-    let got = bc1_encode_block_alpha(px, mask, perceptual);
-    let want = encoders_sys::bc1_encode_block_alpha(px, mask, perceptual);
-    assert_eq!(
-        got, want,
-        "bc1 alpha, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
-    got
+    same_with(px, mask, perceptual, Bc1Search::Default)
 }
 
-/// [`same`] for `bc1_encode_block_alpha_with(.., search)` against rgbcx at the level `search` stands for.
-fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search) {
+/// `bc1_encode_block_alpha_with(.., search)` against rgbcx at the level `search` stands for (level 18 for `Default`).
+fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search) -> [u8; 8] {
     let got = bc1_encode_block_alpha_with(px, mask, perceptual, search);
     let want = match search {
         Bc1Search::Default => encoders_sys::bc1_encode_block_alpha(px, mask, perceptual),
@@ -36,8 +27,11 @@ fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search)
     };
     assert_eq!(
         got, want,
-        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}
+  bcenc {got:?}
+  rgbcx {want:?}"
     );
+    got
 }
 
 /// `px` with every masked texel replaced by random RGB and alpha 0, as a real cut-out texture holds them: nothing
