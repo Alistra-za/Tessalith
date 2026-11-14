@@ -119,9 +119,10 @@ pub fn weighting_value(p: &Profile) -> Value {
 }
 
 /// The rarely changed fields the Advanced drawer edits (M3a spec §2.5).
-pub const ADVANCED_FIELDS: [(&str, &str); 6] = [
+pub const ADVANCED_FIELDS: [(&str, &str); 7] = [
     (WEIGHTING, "BC7 weighting"),
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
+    ("encoder.bc1_search", "BC1/BC3 search"),
     ("header", "DDS header"),
     ("resize", "Resize"),
     ("resize_relative_to", "Relative to"),
@@ -328,6 +329,9 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "encoder.bc45_search_radius" if !matches!(p.format, Format::Bc4 | Format::Bc5) => {
             Some("BC4 and BC5 only")
         }
+        "encoder.bc1_search" if !matches!(p.format, Format::Bc1 | Format::Bc3) => {
+            Some("BC1 and BC3 only")
+        }
         // Note CP (fix round 1, I2): the Advanced drawer shows the row everywhere; lock it where it does nothing.
         WEIGHTING => hidden_reason(p, WEIGHTING),
         "mips.edge" if p.mips.filter == MipFilter::Box => {
@@ -432,6 +436,7 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
         "encoder.bc45_search_radius" => "How widely the BC4 and BC5 encoder searches for endpoints. Maximum searches a radius of 10, Fast a radius of 4.",
+        "encoder.bc1_search" => "How hard the BC1 encoder searches, for BC1 and the colour of BC3. Fast takes a fraction of the time and is a little less exact; use it for previews.",
         "header" => "The form of the DDS header. Auto writes a legacy header for BC1, BC3 and RGBA8 without the _SRGB tag, and the DX10 header for everything else.",
         "resize" => "Halves both sides once, twice or three times, while the longer side stays at or above the size floor.",
         "resize_relative_to" => "What Resize is measured from: this texture's own size, or the size of the set's map in a texture-set slot.",
@@ -506,6 +511,7 @@ pub(crate) fn unset_default(field: &str) -> Value {
         "resize_relative_to" => Value::from("self"),
         "resize_floor" => Value::from(DEFAULT_RESIZE_FLOOR),
         "encoder.bc1_alpha" => Value::from(false),
+        "encoder.bc1_search" => Value::from("default"),
         MSN_SOURCE => Value::from("skyrim"),
         _ => Value::Null,
     }

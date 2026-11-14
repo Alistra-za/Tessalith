@@ -807,6 +807,50 @@ fn the_bulk_notice_clears_on_undo_and_on_selection_change() {
     assert_eq!(m.bulk.report, None, "a new selection starts clean");
 }
 
+/// Plan C Task 5: a bulk write of the BC1/BC3 search writes BC1 and BC3 textures and skips the rest.
+#[test]
+fn a_bulk_bc1_search_skips_other_formats() {
+    use engine::config::Format;
+    use engine::policy::allowed_encodings;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    // Plain diffuses (not landscape ones, which refuse BC1), under the target that takes BC1.
+    decide_all(&mut m);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    for (k, f) in [
+        (ROCK, Format::Bc1),
+        (LEAF, Format::Bc3),
+        (NORMAL, Format::Bc7),
+    ] {
+        let st = m.item(k).unwrap().job.as_ref().unwrap().profile.subtype;
+        let (f, t) = *allowed_encodings(st, m.target)
+            .iter()
+            .find(|(g, _)| *g == f)
+            .unwrap_or_else(|| panic!("fixture: {k} takes {f:?}"));
+        m.set_format(k, f, t);
+        idle(&mut m);
+    }
+    let format_of = |m: &AppModel, k: &str| m.item(k).unwrap().job.as_ref().unwrap().profile.format;
+    assert_eq!(format_of(&m, NORMAL), Format::Bc7, "fixture: a BC7 texture");
+    let ks = strings(&[ROCK, LEAF, NORMAL]);
+    let plan = plan_bulk_edit(&m, &ks, "encoder.bc1_search", &BulkOp::Set(json!("fast")));
+    assert_eq!(plan[0].1, Change::Write);
+    assert_eq!(plan[1].1, Change::Write);
+    assert_eq!(plan[2].1, Change::Skip("BC1 and BC3 only".into()));
+    m.apply_bulk_edit(&ks, "encoder.bc1_search", BulkOp::Set(json!("fast")));
+    idle(&mut m);
+    assert_eq!(file(&m, ROCK, "encoder.bc1_search"), Some(json!("fast")));
+    assert_eq!(file(&m, LEAF, "encoder.bc1_search"), Some(json!("fast")));
+    assert_eq!(file(&m, NORMAL, "encoder.bc1_search"), None);
+    assert_eq!(
+        m.bulk.report.as_deref(),
+        Some("BC1/BC3 search: written to 2 of 3; locked on 1 of 3: BC1 and BC3 only")
+    );
+    // shortcut: the bulk panel lists `FIELDS` only, so there is no "— mixed" combo for this Advanced-drawer row to pin;
+    // the drawer edits one texture. Upgrade when the bulk panel lists advanced rows.
+}
+
 /// Review C8: a write that reaches some textures and not others leaves the row mixed, at once (the plan is still
 /// running and the jobs are the old ones) and after the plan lands.
 #[test]

@@ -96,3 +96,7 @@ The drawer at the right edge holds what isn't per texture or is rarely needed: t
 ### Resize and size floor
 
 **Resize** is `resize` (None, Half, Quarter, Eighth), **Relative to** is `resize_relative_to` (the texture's own size or one of the set's slots) and **Size floor** is `resize_floor`: the longer side a halving never goes below. A resized texture shows a `DIM-RESIZED` note. Values: [Project config](Project-Config.md#fields).
+
+### BC1/BC3 search
+
+Pick **Fast (preview)** in the **BC1/BC3 search** row when you only want a quick look: the BC1 encoder, and the colour half of BC3, then takes a fraction of the time and the result is a little less exact. **Default** is the full search. The row is locked on any other format ("BC1 and BC3 only"), because no other encoder reads it. The `fast-preview` preset sets it for you.

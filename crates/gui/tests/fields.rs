@@ -673,6 +673,47 @@ fn value_of_agrees_with_the_field_views() {
     assert!(unserialised > 0, "no key exercised unset_default");
 }
 
+/// Plan C Task 5: the BC1/BC3 search row sits after the BC4/BC5 radius row, reads "default" while the profile does
+/// not serialise it, and is locked outside BC1 and BC3.
+#[test]
+fn the_bc1_search_row_follows_the_radius_row_and_defaults() {
+    let at = |f: &str| ADVANCED_FIELDS.iter().position(|(k, _)| *k == f).unwrap();
+    assert_eq!(
+        ADVANCED_FIELDS[at("encoder.bc1_search")].1,
+        "BC1/BC3 search"
+    );
+    assert_eq!(
+        at("encoder.bc1_search"),
+        at("encoder.bc45_search_radius") + 1
+    );
+    let reg = PresetRegistry::builtin().unwrap();
+    let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
+    // `value_of` reads a key the profile does not serialise through `unset_default`.
+    assert_eq!(
+        sdc_gui::ui::presets::value_of(&p, "encoder.bc1_search"),
+        serde_json::json!("default")
+    );
+    for (format, locked) in [
+        (Format::Bc1, false),
+        (Format::Bc3, false),
+        (Format::Bc7, true),
+        (Format::Bc4, true),
+    ] {
+        p.format = format;
+        assert_eq!(
+            field_lock(Target::Cs, &p, "encoder.bc1_search").is_some(),
+            locked,
+            "{format:?}"
+        );
+    }
+    p.format = Format::Bc7;
+    assert_eq!(
+        field_lock(Target::Cs, &p, "encoder.bc1_search"),
+        Some("BC1 and BC3 only")
+    );
+    assert!(field_help("encoder.bc1_search").is_some());
+}
+
 /// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.
 #[test]
 fn every_field_row_has_help() {

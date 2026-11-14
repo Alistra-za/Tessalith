@@ -360,6 +360,10 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
                 opt(json!("fast"), "Fast (preview)"),
             ]
         }
+        "encoder.bc1_search" => vec![
+            opt(json!("default"), "Default"),
+            opt(json!("fast"), "Fast (preview)"),
+        ],
         "header" => vec![
             opt(json!("auto"), "Auto"),
             opt(json!("dx10"), "DX10 extended header"),

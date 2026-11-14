@@ -358,12 +358,28 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
         [
             "encoder.bc7_weights",
             "encoder.bc45_search_radius",
+            "encoder.bc1_search",
             "header",
             "resize",
             "resize_relative_to",
             "resize_floor"
         ]
     );
+    let search = views
+        .iter()
+        .find(|v| v.field == "encoder.bc1_search")
+        .unwrap();
+    let bc1_or_bc3 = matches!(
+        job.profile.format,
+        engine::config::Format::Bc1 | engine::config::Format::Bc3
+    );
+    assert_eq!(
+        search.lock.is_none(),
+        bc1_or_bc3,
+        "{:?}",
+        job.profile.format
+    );
+    assert_eq!(search.value, serde_json::json!("default"));
     let header = views.iter().find(|v| v.field == "header").unwrap();
     assert_eq!(header.value, serde_json::json!("dx10"));
     assert!(header.edited);
@@ -372,6 +388,57 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
         .find(|v| v.field == "encoder.bc45_search_radius")
         .unwrap();
     assert!(radius.lock.is_some(), "a colour map is not BC4/BC5");
+}
+
+/// Plan C Task 5: the BC1/BC3 search row edits a BC1 texture: `fast` lands in the entry, the row is not locked and
+/// its combo reads "Fast (preview)".
+#[test]
+fn the_bc1_search_row_edits_a_bc1_texture() {
+    use engine::config::Format;
+    use sdc_gui::model::fields::advanced_field_views;
+    const K: &str = "landscape/rock01.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    // A plain diffuse: a landscape diffuse refuses BC1.
+    m.decide(
+        K,
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    // Vanilla takes BC1 on a colour map; the CS target does not.
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let pair = {
+        let p = &m.item(K).unwrap().job.as_ref().unwrap().profile;
+        *engine::policy::allowed_encodings(p.subtype, m.target)
+            .iter()
+            .find(|(f, _)| *f == Format::Bc1)
+            .expect("fixture: a BC1 pair for a colour map")
+    };
+    m.set_format(K, pair.0, pair.1);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_field(K, "encoder.bc1_search", serde_json::json!("fast"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let job = m.item(K).unwrap().job.clone().unwrap();
+    assert_eq!(job.profile.format, Format::Bc1);
+    let views = advanced_field_views(m.target, &job);
+    let v = views
+        .iter()
+        .find(|v| v.field == "encoder.bc1_search")
+        .unwrap();
+    assert_eq!(v.value, serde_json::json!("fast"));
+    assert!(v.edited);
+    assert_eq!(v.lock, None);
+    assert_eq!(v.label, "BC1/BC3 search");
+
+    m.settings.advanced_open = true;
+    m.select_item(K);
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_role(Role::ComboBox)
+            .any(|n| n.accesskit_node().value().as_deref() == Some("Fast (preview)")),
+        "no combo shows Fast (preview)"
+    );
 }
 
 /// M6 Track D spec §3: the GUI loads the user presets folder and the inspector lists what it loaded.
