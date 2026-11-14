@@ -17,16 +17,13 @@ use crate::hits::{hit, Hit};
 
 use super::fit::{ls_endpoints3, ls_endpoints4, order_tables, precise_round_565, Hist3, Hist4};
 use super::initial::pick_initial;
-use super::order_keys;
+use super::order_keys::{self, MAX_TOTAL_ORDERINGS3};
 use super::palette::single_tables;
 use super::seen::Seen;
 use super::sels::{find_sels3, find_sels4, Texels};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends, DUAL};
 
-/// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
-pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
-const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 /// Level 18's `total_orderings3`: the 32 entries of a row are the 32 orderings it tries (`std::min(32,
 /// MAX_TOTAL_ORDERINGS3)`, see `order_keys::keys3`).
 const TOTAL_ORDERINGS3: usize = 32;

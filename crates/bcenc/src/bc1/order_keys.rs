@@ -1,7 +1,8 @@
-//! The endpoint pairs of one 4-colour total-ordering pass, fitted all at once (Note HY13). A pass of
-//! `total_orderings` tries the 128 orderings of one row of `BEST_TOTAL_ORDERINGS4`; [`keys4`] returns, for each, the
+//! The endpoint pairs of one total-ordering pass, fitted all at once (Note HY13). A 4-colour pass of
+//! `total_orderings` tries the 128 orderings of one row of `BEST_TOTAL_ORDERINGS4`, a 3-colour pass of
+//! `try_3color_block` the 32 of one row of `BEST_TOTAL_ORDERINGS3`; [`keys4`] and [`keys3`] return, for each, the
 //! pair the trial scores, as its [`Seen`] key: the single-colour pair's key for an ordering with all 16 texels on one
-//! selector (`TOTAL_ORDER_4_16`), else the key of the rounded least-squares fit of the ordering.
+//! selector (`TOTAL_ORDER_4_16`, `TOTAL_ORDER_3_16`), else the key of the rounded least-squares fit of the ordering.
 //!
 //! Why fitting the whole row before scoring it changes nothing: a trial's pair depends only on the ordering index, the
 //! pass's prefix sums, the block's totals and its average (through the single-colour pair). All four are fixed before
@@ -9,9 +10,12 @@
 //! and selectors) feeds back into them. So each trial gets the pair it had when it was fitted inside the loop, and the
 //! loop scores the pairs in the same order with the same `Seen` and error as before.
 
-use super::encode::MAX_TOTAL_ORDERINGS3;
 use super::fit::OrderTables;
-use super::tables::MAX_TOTAL_ORDERINGS4;
+use super::tables::{BEST_TOTAL_ORDERINGS3, MAX_TOTAL_ORDERINGS4};
+
+/// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
+pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
+const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 
 /// The [`Seen`] key of the endpoint pair of each ordering `row[q]` of one pass: `single_key` when the ordering is one
 /// of `TOTAL_ORDER_4_16`, else the key of `round_ls` of `ls_endpoints4_ordered(total, tables.factors[row[q]], row[q],
@@ -47,7 +51,8 @@ pub(crate) fn keys4(
 /// `ls_endpoints3_ordered(total, tables.factors3[row[q]], row[q], sums)`.
 ///
 /// The row's 32 entries are the 32 orderings level 18 tries: the C++ loops to
-/// `std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3)` with 32 passed and `MAX_TOTAL_ORDERINGS3` 32.
+/// `std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3)` with 32 passed and `MAX_TOTAL_ORDERINGS3` 32
+/// (`cEncodeBC1Exhaustive` is level 19 only, so the `std::min` bound is what level 18 uses).
 ///
 /// [`Seen`]: super::seen::Seen
 pub(crate) fn keys3(
@@ -75,8 +80,8 @@ pub(crate) fn keys3(
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2;
 
-/// The per-trial code `total_orderings` ran before the kernel, one ordering at a time: the kernel's reference, and
-/// what a target without SSE2 runs.
+/// The per-trial code `total_orderings` and `try_3color_block` ran before the kernel, one ordering at a time: the
+/// kernel's reference, and what a target without SSE2 runs.
 #[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
 mod scalar {
     // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
@@ -84,13 +89,13 @@ mod scalar {
     use crate::hits::{hit, Hit};
 
     use super::super::encode::round_ls;
-    use super::super::encode::MAX_TOTAL_ORDERINGS3;
     use super::super::fit::{
         ls_endpoints3_ordered, ls_endpoints4_ordered, OrderTables, TOTAL_ORDER_3_16,
         TOTAL_ORDER_4_16,
     };
     use super::super::seen::Seen;
     use super::super::tables::MAX_TOTAL_ORDERINGS4;
+    use super::MAX_TOTAL_ORDERINGS3;
 
     /// [`super::keys4`], one ordering at a time.
     pub(super) fn keys4(

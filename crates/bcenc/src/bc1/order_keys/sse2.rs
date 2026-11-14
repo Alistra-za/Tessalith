@@ -1,4 +1,5 @@
-//! The ordering kernel: the rounded least-squares fit of each of a pass's 128 orderings, R, G and B in lanes 0, 1 and 2
+//! The ordering kernel: the rounded least-squares fit of each of a pass's orderings (128 in the 4-colour pass, 32 in the
+//! 3-colour pass), R, G and B in lanes 0, 1 and 2
 //! of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum 0, so it adds nothing to the key). Compiled only
 //! where the target has SSE2 (the `cfg` on `mod sse2`), so the `target_feature(enable = "sse2")` functions here are
 //! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` and
@@ -27,7 +28,12 @@
 //! - Truncation. `|iz|` is at most `3/255 x 144` (a non-zero determinant is an integer at least 1, an entry of the
 //!   matrix at most 144), so each product is at most `3/255 x 144 x 12,240 = 20,736`, `|x|` at most 41,472 and
 //!   `|x x 63|` at most 2,612,736: far inside `i32`, where `_mm_cvttps_epi32` truncates toward zero exactly as `as i32`
-//!   does (the doc of `precise_round_565` bounds the same values). No value is NaN.
+//!   does (the doc of `precise_round_565` bounds the same values). No value is NaN. The 3-colour fit is inside the same
+//!   limit: its matrix entries (`4 h0 + h2`, `h2`, `4 h1 + h2` for `WEIGHT_VALS3`, with `h0 + h1 + h2 = 16`) are at
+//!   most 64, so `|iz|` is at most `2/255 x 64` (the scale is 2/255 and a non-zero determinant is an integer at least
+//!   1; `precise_round_565` states the tighter `/ 4`). Its inputs are `q10` and `uq00`, at most `2 x 16 x 255 = 8,160`,
+//!   so each product is at most `2/255 x 64 x 8,160 = 4,096`, `|x|` at most 8,192 and `|x x 63|` at most 516,096,
+//!   under the 4-colour limit above.
 //! - Clamp. Per lane, a negative code becomes 0 and one above the maximum the maximum. `precise_round_565` clamps a
 //!   group (the four red and blue codes, or the two green ones) when any of it is out of range, but `clamp_code` leaves
 //!   a code in range alone, so its result is the per-lane clamp.
@@ -48,9 +54,9 @@
 //! block of 255s). `keys3` does the same with `TOTAL_ORDER_3_16` (`compute_selector_factors3` stores 0 likewise), three
 //! counts, and `every_3_colour_ordering_matches_the_reference` over all 153 orderings.
 
-use super::super::encode::MAX_TOTAL_ORDERINGS3;
 use super::super::fit::{OrderTables, MIDPOINT5, MIDPOINT6};
 use super::super::tables::{MAX_TOTAL_ORDERINGS4, UNIQUE_TOTAL_ORDERS3, UNIQUE_TOTAL_ORDERS4};
+use super::MAX_TOTAL_ORDERINGS3;
 use core::arch::x86_64::*;
 
 /// `order_keys::keys4` on SSE2 vectors.
@@ -62,10 +68,7 @@ pub(super) fn keys4(
     tables: &OrderTables,
     single_key: u32,
 ) -> [u32; MAX_TOTAL_ORDERINGS4] {
-    // Prefix sum `i` of the three channels as one vector. Every sum is at most 4,080, so `as i32` is exact.
-    let v: [__m128i; 17] = std::array::from_fn(|i| {
-        _mm_set_epi32(0, sums[2][i] as i32, sums[1][i] as i32, sums[0][i] as i32)
-    });
+    let v = prefix_vectors(sums);
     let t3 = _mm_set_epi32(0, total[2] * 3, total[1] * 3, total[0] * 3);
 
     let mut keys = [0u32; MAX_TOTAL_ORDERINGS4];
@@ -95,9 +98,7 @@ pub(super) fn keys3(
     tables: &OrderTables,
     single_key: u32,
 ) -> [u32; MAX_TOTAL_ORDERINGS3] {
-    let v: [__m128i; 17] = std::array::from_fn(|i| {
-        _mm_set_epi32(0, sums[2][i] as i32, sums[1][i] as i32, sums[0][i] as i32)
-    });
+    let v = prefix_vectors(sums);
     let t2 = _mm_set_epi32(0, total[2] * 2, total[1] * 2, total[0] * 2);
 
     let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
@@ -115,6 +116,15 @@ pub(super) fn keys3(
         };
     }
     keys
+}
+
+/// Prefix sum `i` of the three channels as one vector. Every sum is at most 4,080, so `as i32` is exact.
+#[target_feature(enable = "sse2")]
+#[inline]
+fn prefix_vectors(sums: &[[u32; 17]; 3]) -> [__m128i; 17] {
+    std::array::from_fn(|i| {
+        _mm_set_epi32(0, sums[2][i] as i32, sums[1][i] as i32, sums[0][i] as i32)
+    })
 }
 
 /// The key of the rounded fit of one ordering with factors `iz` (iz00, iz10, iz11), from its `q10` and `uq00`.
