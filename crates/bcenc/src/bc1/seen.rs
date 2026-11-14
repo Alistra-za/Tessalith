@@ -29,7 +29,12 @@ impl Seen {
 
     /// Records `e`. True when it was recorded before.
     pub(crate) fn insert(&mut self, e: &Ends) -> bool {
-        let stored = Self::key(e) as u64 + 1;
+        self.insert_key(Self::key(e))
+    }
+
+    /// [`Seen::insert`] for the pair whose key is `key`.
+    pub(crate) fn insert_key(&mut self, key: u32) -> bool {
+        let stored = key as u64 + 1;
         let mut i = Self::first_slot_of(stored);
         // At most `MOST` of the `SLOTS` slots are ever full (the const assert below), so the walk reaches an empty slot.
         loop {
@@ -46,11 +51,27 @@ impl Seen {
     }
 
     /// The pair as 32 bits, one key per pair: 5 + 6 + 5 bits for each endpoint (`l` low, `h` high).
-    fn key(e: &Ends) -> u32 {
+    pub(crate) fn key(e: &Ends) -> u32 {
         debug_assert!(e.l[0] < 32 && e.l[1] < 64 && e.l[2] < 32);
         debug_assert!(e.h[0] < 32 && e.h[1] < 64 && e.h[2] < 32);
         debug_assert!(e.l.iter().chain(e.h.iter()).all(|&v| v >= 0));
         (e.l[0] | e.l[1] << 5 | e.l[2] << 11 | e.h[0] << 16 | e.h[1] << 21 | e.h[2] << 27) as u32
+    }
+
+    /// The pair whose key is `key`: the inverse of [`Seen::key`].
+    pub(crate) fn ends_of(key: u32) -> Ends {
+        Ends {
+            l: [
+                (key & 31) as i32,
+                ((key >> 5) & 63) as i32,
+                ((key >> 11) & 31) as i32,
+            ],
+            h: [
+                ((key >> 16) & 31) as i32,
+                ((key >> 21) & 63) as i32,
+                ((key >> 27) & 31) as i32,
+            ],
+        }
     }
 
     /// A multiplicative hash of the stored value onto 10 bits.
@@ -116,30 +137,37 @@ mod tests {
         assert!(pairs.iter().all(|e| s.insert(e)));
     }
 
-    /// The pair whose key is `k`.
-    fn pair(k: u32) -> Ends {
-        Ends {
-            l: [
-                (k & 31) as i32,
-                ((k >> 5) & 63) as i32,
-                ((k >> 11) & 31) as i32,
-            ],
-            h: [
-                ((k >> 16) & 31) as i32,
-                ((k >> 21) & 63) as i32,
-                ((k >> 27) & 31) as i32,
-            ],
+    #[test]
+    fn a_key_and_its_pair_round_trip() {
+        // Every low half with a few high halves, and the reverse.
+        for half in 0..=0xFFFFu32 {
+            for other in [0u32, 0xFFFF, 0x5A3C, 0x8001] {
+                for k in [half | other << 16, other | half << 16] {
+                    assert_eq!(Seen::key(&Seen::ends_of(k)), k);
+                }
+            }
         }
+    }
+
+    #[test]
+    fn insert_key_is_insert() {
+        let e = Ends {
+            l: [3, 40, 5],
+            h: [20, 9, 31],
+        };
+        let mut s = Seen::new();
+        assert!(!s.insert_key(Seen::key(&e)));
+        assert!(s.insert(&e) && s.insert_key(Seen::key(&e)));
     }
 
     /// Two different pairs whose hash names the same first slot.
     fn two_pairs_with_one_first_slot() -> (Ends, Ends) {
         let mut first = [None; Seen::SLOTS];
         for k in 0..u32::MAX {
-            let e = pair(k);
+            let e = Seen::ends_of(k);
             let slot = Seen::first_slot(&e);
             match first[slot] {
-                Some(other) => return (pair(other), e),
+                Some(other) => return (Seen::ends_of(other), e),
                 None => first[slot] = Some(k),
             }
         }
@@ -161,7 +189,7 @@ mod tests {
     fn a_walk_past_the_last_slot_goes_on_at_the_first() {
         let last = Seen::SLOTS - 1;
         let mut in_last = (0..u32::MAX)
-            .map(pair)
+            .map(Seen::ends_of)
             .filter(|e| Seen::first_slot(e) == last);
         let (a, b) = (in_last.next().unwrap(), in_last.next().unwrap());
         let mut s = Seen::new();

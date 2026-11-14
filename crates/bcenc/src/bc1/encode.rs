@@ -16,14 +16,15 @@
 use crate::hits::{hit, Hit};
 
 use super::fit::{
-    ls_endpoints3, ls_endpoints3_ordered, ls_endpoints4, ls_endpoints4_ordered, order_tables,
-    precise_round_565, Hist3, Hist4, TOTAL_ORDER_3_16, TOTAL_ORDER_4_16,
+    ls_endpoints3, ls_endpoints3_ordered, ls_endpoints4, order_tables, precise_round_565, Hist3,
+    Hist4, TOTAL_ORDER_3_16,
 };
 use super::initial::pick_initial;
+use super::order_keys;
 use super::palette::single_tables;
 use super::seen::Seen;
 use super::sels::{find_sels3, find_sels4, Texels};
-use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4, MAX_TOTAL_ORDERINGS4};
+use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4};
 use super::{BlockStats, Ends, DUAL};
 
 /// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
@@ -288,7 +289,7 @@ pub(super) fn round_ls(xl: &[f32; 3], xh: &[f32; 3]) -> Ends {
 /// their dot product with the current endpoints' axis (the texel index breaks ties), `sums[c][i]` the sum of channel
 /// `c` over the first `i` of them and `sums[c][16]` the block total.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] {
+pub(super) fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] {
     let (lr, lg, lb) = (e.l[0], e.l[1], e.l[2]);
     let (hr, hg, hb) = (e.h[0], e.h[1], e.h[2]);
     let (r0, g0, b0) = (
@@ -333,8 +334,7 @@ fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u32; 17]; 3] 
 
 /// One iteration of `encode_bc1`'s total-ordering loop: sort the texels along the current endpoints' axis, then try
 /// the `MAX_TOTAL_ORDERINGS4` orderings `g_best_total_orderings4` lists for the current selector histogram, keeping
-/// a strictly better one.
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+/// a strictly better one. The pairs of all 128 are fitted first ([`order_keys::keys4`]), then scored in order.
 fn total_orderings(
     px: &[[u8; 4]; 16],
     texels: &Texels,
@@ -353,32 +353,26 @@ fn total_orderings(
 
     let sums = sorted_sums(px, ends, s.total);
 
-    let tables = order_tables();
-    // clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4) with MAX_TOTAL_ORDERINGS4 passed.
-    let q_total = MAX_TOTAL_ORDERINGS4.clamp(1, MAX_TOTAL_ORDERINGS4);
-    for q in 0..q_total {
-        let s_index = BEST_TOTAL_ORDERINGS4[orig_total_order_index][q] as usize;
-
-        let trial = if TOTAL_ORDER_4_16.contains(&s_index) {
-            hit!(Hit::OrderingSingle);
-            single_colour_ends(s.avg)
-        } else {
-            hit!(Hit::OrderingFit);
-            let (xl, xh) = ls_endpoints4_ordered(s.total, tables.factors[s_index], s_index, &sums);
-            round_ls(&xl, &xh)
-        };
-
+    let keys = order_keys::keys4(
+        s.total,
+        &sums,
+        &BEST_TOTAL_ORDERINGS4[orig_total_order_index],
+        order_tables(),
+        Seen::key(&single_colour_ends(s.avg)),
+    );
+    for &key in &keys {
         // A pair scored before in this block cannot beat `*cur_err`: it was taken (its error is at least `*cur_err`,
         // which only falls) or rejected against an error that was at least `*cur_err`; and a trial is taken only
         // when strictly lower (see `seen.rs`). `*cur_err` at the start of the first pass is at most every earlier
         // 4-colour error of the block (the lower of the two rounds).
-        if seen.insert(&trial) {
+        if seen.insert_key(key) {
             hit!(Hit::OrderingRepeat);
             #[cfg(test)]
-            shadow4(px, texels, &trial, *cur_err);
+            shadow4(px, texels, &Seen::ends_of(key), *cur_err);
             continue;
         }
 
+        let trial = Seen::ends_of(key);
         let mut trial_sels = [0u8; 16];
         let trial_err = find_sels4(texels, &trial, &mut trial_sels, *cur_err);
 

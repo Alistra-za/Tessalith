@@ -210,6 +210,7 @@ pub(crate) fn build_order_tables() -> OrderTables {
 /// The table form of `compute_least_squares_endpoints4_rgb`: the least-squares low and high colours (0..1 scale) of
 /// total ordering `s`, from the prefix sums of the texels sorted along the current axis. `iz` is
 /// `g_selector_factors4[s]`. Returns (xl, xh).
+#[cfg(any(test, not(all(target_arch = "x86_64", target_feature = "sse2"))))]
 pub(crate) fn ls_endpoints4_ordered(
     total: [i32; 3],
     iz: [f32; 3],
@@ -376,7 +377,7 @@ pub(crate) fn ls_endpoints3(px: &[[u8; 4]; 16], sels: &[u8; 16]) -> Option<([f32
 
 /// `g_midpoint5`: the rounding thresholds between adjacent 5-bit codes (0..1 scale); the last never rounds up.
 #[rustfmt::skip]
-const MIDPOINT5: [f32; 32] = [
+pub(super) const MIDPOINT5: [f32; 32] = [
     0.015686, 0.047059, 0.078431, 0.111765, 0.145098, 0.176471, 0.207843, 0.241176, 0.274510, 0.305882, 0.337255,
     0.370588, 0.403922, 0.435294, 0.466667, 0.5, 0.533333, 0.564706, 0.596078, 0.629412, 0.662745, 0.694118, 0.725490,
     0.758824, 0.792157, 0.823529, 0.854902, 0.888235, 0.921569, 0.952941, 0.984314, 1e+37,
@@ -384,7 +385,7 @@ const MIDPOINT5: [f32; 32] = [
 
 /// `g_midpoint6`: the same for 6-bit codes.
 #[rustfmt::skip]
-const MIDPOINT6: [f32; 64] = [
+pub(super) const MIDPOINT6: [f32; 64] = [
     0.007843, 0.023529, 0.039216, 0.054902, 0.070588, 0.086275, 0.101961, 0.117647, 0.133333, 0.149020, 0.164706,
     0.180392, 0.196078, 0.211765, 0.227451, 0.245098, 0.262745, 0.278431, 0.294118, 0.309804, 0.325490, 0.341176,
     0.356863, 0.372549, 0.388235, 0.403922, 0.419608, 0.435294, 0.450980, 0.466667, 0.482353, 0.500000, 0.517647,
