@@ -9,11 +9,11 @@
 //! endpoint-search rounds (the `cEncodeBC1EndpointSearchRoundsShift` field), and the 4- and 3-colour orderings
 //! (`total_orderings_to_try`, `total_orderings_to_try3`). `cEncodeBC1UseFullMSEEval` (levels 13, 15, 18) is not one
 //! of them: under `cBC1Dual` every selector search is the dual one, which ignores it, and it is not needed to make
-//! `needs_block_error` true. `cEncodeBC1Use3ColorBlocks` is set when `allow_3color`. The engine encodes in `cBC1Dual` mode, never passes forced
-//! selectors and never sets `allow_transparent_texels_for_black`, so `cEncodeBC1Use3ColorBlocksForBlackPixels` is never
-//! set. Each flag test of the C++ is resolved to the arm these levels take or reads the level's `Params`;
-//! `allow_3color` is the one flag left. The level is a const generic: each level is its own code, with constant loop
-//! bounds.
+//! `needs_block_error` true. `cEncodeBC1Use3ColorBlocks` is set when `allow_3color`. The engine encodes in `cBC1Dual`
+//! mode, never passes forced selectors and never sets `allow_transparent_texels_for_black`, so
+//! `cEncodeBC1Use3ColorBlocksForBlackPixels` is never set. Each flag test of the C++ is resolved to the arm these
+//! levels take or reads the level's `Params`; `allow_3color` is the one flag left. The level is a const generic: each
+//! level is its own code, with constant loop bounds.
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
@@ -36,6 +36,7 @@ pub(crate) fn encode_level(
     allow_3color: bool,
     weights: [i32; 3],
 ) -> [u8; 8] {
+    // A const generic needs a literal per level; `every_level_is_rgbcx` fails when `LEVELS` gains one without an arm.
     match level {
         10 => encode::<10>(px, allow_3color, weights),
         12 => encode::<12>(px, allow_3color, weights),

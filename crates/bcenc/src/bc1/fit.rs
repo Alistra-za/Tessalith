@@ -48,8 +48,9 @@ impl Hist4 {
     pub(crate) fn lookup_total_ordering_index(&self) -> usize {
         let h = &self.0;
         if h[0] == 16 {
-            // Rare: the bounding-box round ties an equal-endpoint principal-axis round with every texel on its low
-            // endpoint (`bc1_four_colour_block_with_every_texel_on_the_low_endpoint`).
+            // Rare: every texel on selector 0. Round 0's least-squares passes reach it at every level, 18 included
+            // (`hist4_all_sel0` in the coverage tests); so does the bounding-box round when it ties an equal-endpoint
+            // principal-axis round (`bc1_four_colour_block_with_every_texel_on_the_low_endpoint`).
             hit!(Hit::Hist16Sel0);
             TOTAL_ORDER_4_16[0]
         } else if h[1] == 16 {

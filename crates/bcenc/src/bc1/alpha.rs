@@ -19,9 +19,9 @@ use super::sels::{find_sels3_masked, Texels};
 use super::{Ends, DUAL};
 
 /// `encode_bc1_alpha(LEVEL, ..)` with R, G, B error weights `weights`: bit i of `transparent` marks texel i
-/// transparent. Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise a 3-colour
-/// block fitted to the opaque texels (principal axis, extreme texels, up to 8 least-squares refits, then up to 64
-/// rounds of +-1 endpoint steps), masked texels on selector 3.
+/// transparent. Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise
+/// a 3-colour block fitted to the opaque texels (principal axis, extreme texels, up to 8 least-squares refits, then up
+/// to 64 rounds of +-1 endpoint steps), masked texels on selector 3.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 pub(crate) fn encode_alpha<const LEVEL: u32>(
     px: &[[u8; 4]; 16],

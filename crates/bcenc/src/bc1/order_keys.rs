@@ -1,9 +1,9 @@
-//! The endpoint pairs of one total-ordering pass, fitted all at once (Note HY13). A 4-colour pass of
-//! `total_orderings` tries the level's first `orderings4` (at most 128) orderings of one row of
-//! `BEST_TOTAL_ORDERINGS4`, a 3-colour pass of `try_3color_block` the first `orderings3` (at most 32) of one row of
-//! `BEST_TOTAL_ORDERINGS3` (Note HY15); [`keys4`] and [`keys3`] return, for each, the
-//! pair the trial scores, as its [`Seen`] key: the single-colour pair's key for an ordering with all 16 texels on one
-//! selector (`TOTAL_ORDER_4_16`, `TOTAL_ORDER_3_16`), else the key of the rounded least-squares fit of the ordering.
+//! The endpoint pairs of one total-ordering pass, fitted all at once (Note HY13). A 4-colour pass of `total_orderings`
+//! tries the level's first `orderings4` (at most 128) orderings of one row of `BEST_TOTAL_ORDERINGS4`, a 3-colour pass
+//! of `try_3color_block` the first `orderings3` (at most 32) of one row of `BEST_TOTAL_ORDERINGS3` (Note HY15);
+//! [`keys4`] and [`keys3`] return, for each, the pair the trial scores, as its [`Seen`] key: the single-colour pair's
+//! key for an ordering with all 16 texels on one selector (`TOTAL_ORDER_4_16`, `TOTAL_ORDER_3_16`), else the key of
+//! the rounded least-squares fit of the ordering.
 //!
 //! Why fitting the whole row before scoring it changes nothing: a trial's pair depends only on the ordering index, the
 //! pass's prefix sums, the block's totals and its average (through the single-colour pair). All four are fixed before

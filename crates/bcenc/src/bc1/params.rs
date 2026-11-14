@@ -37,7 +37,8 @@ pub(crate) const fn params(level: u32) -> Params {
         // ((((32 + MAX_TOTAL_ORDERINGS4) / 2) + 32) / 2) with MAX_TOTAL_ORDERINGS4 128.
         15 => (6, 2, 1, 56, 32, 32),
         18 => (6, 2, 2, MAX_TOTAL_ORDERINGS4, 32, 256),
-        _ => panic!("bcenc encodes BC1 at rgbcx levels 10, 12, 13, 15 and 18 only"),
+        // A `const fn` cannot format `LEVELS` into the message, so it names the constant.
+        _ => panic!("bcenc encodes BC1 only at the rgbcx levels in `bc1::LEVELS`"),
     };
     Params {
         power_iters,
@@ -131,7 +132,7 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "levels 10, 12, 13, 15 and 18 only")]
+    #[should_panic(expected = "only at the rgbcx levels in `bc1::LEVELS`")]
     fn another_level_panics() {
         params(11);
     }

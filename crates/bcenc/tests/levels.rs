@@ -16,7 +16,9 @@ fn blocks() -> Vec<[[u8; 4]; 16]> {
     let mut b = gen::colour_classes(0xC0_0001, 300);
     for v in 0..=255u8 {
         b.push([[v, v, v, 255]; 16]);
-        let w = v.saturating_add(1);
+    }
+    for v in 0..255u8 {
+        let w = v + 1;
         b.push(std::array::from_fn(|i| {
             let g = if i % 3 == 0 { w } else { v };
             [g, g, g, 255]
@@ -61,12 +63,14 @@ fn opaque_alpha_at_every_level_is_rgbcx() {
     }
 }
 
-/// rgbcx's `encode_bc3_hq(level, ..)` is the BC4 alpha search, then `encode_bc1(level, .., false, false)`.
+/// rgbcx's `encode_bc3_hq(level, ..)` is the BC4 alpha search, then `encode_bc1(level, .., false, false)`. The alpha
+/// half does not depend on the level; it is checked at every radius and cut on alpha classes over colour classes, so
+/// it is not trivial. The colour half does not depend on the radius or the cut; it is checked once per block, on those
+/// blocks and on [`blocks`] (alpha 255).
 #[test]
 fn bc3_at_every_level_is_rgbcx() {
-    // Alpha blocks of every class over the colour classes, so the alpha half is not trivial.
     let alpha = gen::alpha_classes(0xC0_0002, 10);
-    let blocks: Vec<[[u8; 4]; 16]> = gen::colour_classes(0xC0_0003, 30)
+    let with_alpha: Vec<[[u8; 4]; 16]> = gen::colour_classes(0xC0_0003, 30)
         .iter()
         .enumerate()
         .map(|(i, c)| {
@@ -74,11 +78,19 @@ fn bc3_at_every_level_is_rgbcx() {
             std::array::from_fn(|k| [c[k][0], c[k][1], c[k][2], a[k]])
         })
         .collect();
+    let opaque = blocks();
     for level in LEVELS {
         for perceptual in [false, true] {
-            for px in &blocks {
+            for px in with_alpha.iter().chain(&opaque) {
+                let want = encoders_sys::bc3_encode_block_level(px, 5, 128, level, perceptual);
+                assert_eq!(
+                    want[8..],
+                    bc1_encode_block_level(px, level, false, perceptual),
+                    "bc3 colour, level {level}, perceptual {perceptual}: texels {px:?}"
+                );
+            }
+            for px in &with_alpha {
                 let a: [u8; 16] = std::array::from_fn(|k| px[k][3]);
-                let colour = bc1_encode_block_level(px, level, false, perceptual);
                 for rad in [4, 5, 10] {
                     for cut in [1u8, 128, 255] {
                         let want =
@@ -87,11 +99,6 @@ fn bc3_at_every_level_is_rgbcx() {
                             want[..8],
                             bc4_encode_alpha(&a, rad, cut),
                             "bc3 alpha, level {level}, radius {rad}, cut {cut}: texels {px:?}"
-                        );
-                        assert_eq!(
-                            want[8..],
-                            colour,
-                            "bc3 colour, level {level}, perceptual {perceptual}: texels {px:?}"
                         );
                     }
                 }

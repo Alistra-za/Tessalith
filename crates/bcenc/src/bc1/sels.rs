@@ -207,7 +207,7 @@ mod scalar {
     /// texel the 3-colour selector (0 low endpoint, 1 high endpoint, 2 midpoint; never 3, black) with the least
     /// NVIDIA plus AMD error; a later selector replaces the best only when strictly better. `use_black` is false on
     /// every reachable call (`try_3color_block` passes the literal `false`; the endpoint search passes
-    /// `any_black_pixels && cEncodeBC1Use3ColorBlocksForBlackPixels`, a flag level 18 sets only when
+    /// `any_black_pixels && cEncodeBC1Use3ColorBlocksForBlackPixels`, a flag every level sets only when
     /// `allow_transparent_texels_for_black` is true, which this call never passes), so the loop stops at selector 2.
     /// As soon as the running total reaches `cur_err` it returns that partial total, with `sels` written only for
     /// the texels before it. Tests only.
