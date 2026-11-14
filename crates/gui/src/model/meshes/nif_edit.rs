@@ -382,6 +382,11 @@ pub fn field_label(f: Field) -> String {
         Field::StopTime => "Stop".into(),
         Field::Variable => "Controlled variable".into(),
         Field::InterpValue(n) => format!("Interpolator value {}", n + 1),
+        Field::PbrVersion => "PBR version".into(),
+        Field::PbrFeatures => "PBR features".into(),
+        Field::PbrParam(i) => nif::pbr2::PARAM_NAMES
+            .get(i as usize)
+            .map_or_else(|| format!("PBR parameter {i}"), |s| s.to_string()),
     }
 }
 

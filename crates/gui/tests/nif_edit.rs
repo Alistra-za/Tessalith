@@ -11619,3 +11619,12 @@ fn a_pending_texture_row_gives_the_nif_index_on_hover() {
     h.run_steps(30);
     h.get_by_label("NIF texture index 1");
 }
+
+#[test]
+fn pbr_field_labels() {
+    assert_eq!(field_label(Field::PbrVersion), "PBR version");
+    assert_eq!(field_label(Field::PbrFeatures), "PBR features");
+    assert_eq!(field_label(Field::PbrParam(0)), "Roughness scale");
+    assert_eq!(field_label(Field::PbrParam(3)), "Subsurface colour R");
+    assert_eq!(field_label(Field::PbrParam(25)), "PBR parameter 25");
+}

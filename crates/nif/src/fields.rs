@@ -30,6 +30,12 @@ pub enum Field {
     StopTime,
     Variable,
     InterpValue(u8),
+    /// Type 21 only: PBR Version word.
+    PbrVersion,
+    /// Type 21 only: PBR Features bit field.
+    PbrFeatures,
+    /// Type 21 only: parameter `i` (0..25) of the PBR payload.
+    PbrParam(u8),
 }
 
 /// F32 holds the bit pattern so edits are exact.
@@ -176,7 +182,34 @@ fn lsp(h: &Header, b: &[u8], block: usize, f: Field) -> Result<Found, NifError> 
     let bs = h.offsets()[block];
     let p = read_net(h, b, block)?.end - bs;
     let idx = |n: u8, max: u8| n < max;
+    let t = b
+        .get(bs..bs + 4)
+        .ok_or(NifError::Truncated { at: bs, need: 4 })?;
+    let t = u32::from_le_bytes(t.try_into().unwrap());
+    // Type 21 keeps its PBR payload where the vanilla block has glossiness, specular and the trailer; those
+    // fields must not resolve there, and the PBR fields must not resolve anywhere else.
+    let vanilla = matches!(
+        f,
+        Field::Glossiness
+            | Field::SpecularColor(_)
+            | Field::SpecularStrength
+            | Field::LightingEffect1
+            | Field::LightingEffect2
+            | Field::Trailer(_)
+    );
+    let pbr_field = matches!(
+        f,
+        Field::PbrVersion | Field::PbrFeatures | Field::PbrParam(_)
+    );
+    if (t == 21 && vanilla) || (t != 21 && pbr_field) {
+        return Ok(None);
+    }
     Ok(match f {
+        Field::PbrVersion => Some((p + 56, Ty::U32)),
+        Field::PbrFeatures => Some((p + 60, Ty::U32)),
+        Field::PbrParam(i) if idx(i, crate::pbr2::PARAM_NAMES.len() as u8) => {
+            Some((p + 64 + 4 * i as usize, Ty::F32))
+        }
         Field::ShaderType => Some((0, Ty::U32)),
         Field::Slsf1 => Some((p, Ty::U32)),
         Field::Slsf2 => Some((p + 4, Ty::U32)),
@@ -192,13 +225,7 @@ fn lsp(h: &Header, b: &[u8], block: usize, f: Field) -> Result<Found, NifError> 
         Field::SpecularStrength => Some((p + 72, Ty::F32)),
         Field::LightingEffect1 => Some((p + 76, Ty::F32)),
         Field::LightingEffect2 => Some((p + 80, Ty::F32)),
-        Field::Trailer(n) => {
-            let t = b
-                .get(bs..bs + 4)
-                .ok_or(NifError::Truncated { at: bs, need: 4 })?;
-            let t = u32::from_le_bytes(t.try_into().unwrap());
-            idx(n, trailer_len(t)).then(|| (p + 84 + 4 * n as usize, Ty::F32))
-        }
+        Field::Trailer(n) => idx(n, trailer_len(t)).then(|| (p + 84 + 4 * n as usize, Ty::F32)),
         _ => None,
     })
 }

@@ -2977,3 +2977,68 @@ fn an_empty_manager_on_the_root_chain_is_an_error_unless_the_source_has_it() {
         .iter()
         .any(|e| e.text == EMPTY_MANAGER && e.level == Level::Error));
 }
+
+fn lsp21_input() -> Vec<u8> {
+    let mut p = nif::pbr2::PBR2_DEFAULTS;
+    p[0] = 0.25;
+    builder::scenes::lsp21_shape(0x201, &p)
+}
+
+#[test]
+fn pbr_fields_locate_on_type_21() {
+    let b = lsp21_input();
+    let h = Header::parse(&b).unwrap();
+    let blk = read_model(&b).unwrap().shapes[0].shader.unwrap() as usize;
+    let p = 16; // type word + net with no extra data (16 + 4N, N = 0)
+    let (rel, v) = locate(&h, &b, blk, Field::PbrVersion).unwrap();
+    assert_eq!((rel, v), (p + 56, Value::U32(2)));
+    let (rel, v) = locate(&h, &b, blk, Field::PbrFeatures).unwrap();
+    assert_eq!((rel, v), (p + 60, Value::U32(0x201)));
+    let (rel, v) = locate(&h, &b, blk, Field::PbrParam(0)).unwrap();
+    assert_eq!((rel, v), (p + 64, Value::F32(0.25f32.to_bits())));
+    let (rel, _) = locate(&h, &b, blk, Field::PbrParam(24)).unwrap();
+    assert_eq!(rel, p + 160);
+    assert!(locate(&h, &b, blk, Field::PbrParam(25)).is_err());
+}
+
+#[test]
+fn vanilla_fields_refuse_type_21() {
+    let b = lsp21_input();
+    let h = Header::parse(&b).unwrap();
+    let at = shader_anchor(&b);
+    let blk = at.block as usize;
+    for f in [
+        Field::Glossiness,
+        Field::SpecularColor(0),
+        Field::SpecularColor(2),
+        Field::SpecularStrength,
+        Field::LightingEffect1,
+        Field::LightingEffect2,
+        Field::Trailer(0),
+    ] {
+        assert!(locate(&h, &b, blk, f).is_err(), "{f:?}");
+        let op = Op::SetField {
+            at: at.clone(),
+            field: f,
+            value: Value::F32(1.0f32.to_bits()),
+            base: Value::F32(0),
+        };
+        let r = apply(&b, &[op]).unwrap();
+        assert!(
+            matches!(r.outcomes[0], Outcome::Conflict(_) | Outcome::Refused(_)),
+            "{f:?}: {:?}",
+            r.outcomes[0]
+        );
+        assert_eq!(r.bytes, b, "{f:?} changed the bytes");
+    }
+}
+
+#[test]
+fn pbr_fields_refuse_type_0() {
+    let b = read("TestNifFile_Skinned_SE.nif");
+    let h = Header::parse(&b).unwrap();
+    let at = shader_anchor(&b);
+    for f in [Field::PbrVersion, Field::PbrFeatures, Field::PbrParam(0)] {
+        assert!(locate(&h, &b, at.block as usize, f).is_err(), "{f:?}");
+    }
+}
