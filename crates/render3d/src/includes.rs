@@ -1,4 +1,5 @@
 //! Textual #include expansion so D3DCompile sees one buffer; CS includes are root-relative ("Common/x.hlsli").
+pub use crate::bundled::Tree;
 use std::path::PathBuf;
 
 /// Where shader text is read from: the tree embedded in the exe. Tests can also read a folder (stand-ins, the
@@ -14,29 +15,32 @@ pub enum ShaderSource {
     Folder(PathBuf),
 }
 
-/// Which embedded shader tree.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Tree {
-    A,
-    B,
-}
-
 impl ShaderSource {
-    fn read(&self, rel: &str) -> Option<Vec<u8>> {
+    /// The embedded tree this source reads, `None` for a test folder.
+    fn tree(&self) -> Option<Tree> {
         match self {
-            ShaderSource::Bundled => crate::bundled::read(rel).map(<[u8]>::to_vec),
-            ShaderSource::BundledB => crate::bundled::read_in(Tree::B, rel).map(<[u8]>::to_vec),
+            ShaderSource::Bundled => Some(Tree::A),
+            ShaderSource::BundledB => Some(Tree::B),
             #[cfg(feature = "test-hooks")]
-            ShaderSource::Folder(root) => std::fs::read(root.join(rel)).ok(),
+            ShaderSource::Folder(_) => None,
+        }
+    }
+
+    fn read(&self, rel: &str) -> Option<Vec<u8>> {
+        match (self.tree(), self) {
+            (Some(t), _) => crate::bundled::read_in(t, rel).map(<[u8]>::to_vec),
+            #[cfg(feature = "test-hooks")]
+            (None, ShaderSource::Folder(root)) => std::fs::read(root.join(rel)).ok(),
+            _ => None,
         }
     }
 
     fn has(&self, rel: &str) -> bool {
-        match self {
-            ShaderSource::Bundled => crate::bundled::read(rel).is_some(),
-            ShaderSource::BundledB => crate::bundled::read_in(Tree::B, rel).is_some(),
+        match (self.tree(), self) {
+            (Some(t), _) => crate::bundled::read_in(t, rel).is_some(),
             #[cfg(feature = "test-hooks")]
-            ShaderSource::Folder(root) => root.join(rel).is_file(),
+            (None, ShaderSource::Folder(root)) => root.join(rel).is_file(),
+            _ => false,
         }
     }
 

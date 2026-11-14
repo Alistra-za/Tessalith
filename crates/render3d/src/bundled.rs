@@ -1,7 +1,13 @@
-//! The pinned Community Shaders tree (`shaders/cs`, Note GT) embedded in the exe by `build.rs`.
+//! The two pinned Community Shaders trees embedded in the exe by `build.rs`: A (`shaders/cs`, Note GT) and B
+//! (`shaders/cs2`, CS TruePBR 2.0, Note ID).
 include!(concat!(env!("OUT_DIR"), "/bundled.rs"));
 
-use crate::includes::Tree;
+/// Which embedded shader tree.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tree {
+    A,
+    B,
+}
 
 fn table(tree: Tree) -> &'static [(&'static str, &'static [u8])] {
     match tree {

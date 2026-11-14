@@ -184,6 +184,17 @@ fn tree_b_skin_is_advanced_skin() {
 #[test]
 fn tree_a_unchanged() {
     assert_eq!(render3d::bundled_names().len(), 58);
+    // Every name and byte of tree A: `shaders/cs` stays what Note GT pinned.
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for n in render3d::bundled_names() {
+        h.update(n.as_bytes());
+        h.update(render3d::bundled_read_in(render3d::Tree::A, n).unwrap());
+    }
+    assert_eq!(
+        hex::encode(h.finalize()),
+        "489f2b076b3192cf82a08b04c3d485d8c2e894991c4950fca29c1dbbe06a1008"
+    );
     let skin = render3d::bundled_read_in(render3d::Tree::A, "Skin/Skin.hlsli").unwrap();
     assert_eq!(
         git_blob_sha1(skin),
@@ -191,15 +202,16 @@ fn tree_a_unchanged() {
     );
 }
 
-/// Compiles tree B's `Lighting.hlsl` with the default PS and VS permutations and with `TRUE_PBR`. Not GPU (GT5).
+/// Compiles tree B's `Lighting.hlsl` (not GPU, GT5): the default and `TRUE_PBR` permutations, and the Skin path
+/// (`CS_SKIN` includes `Skin/Skin.hlsli`, which `Lighting.hlsl` reads only under that define).
 #[test]
 fn tree_b_lighting_compiles() {
     use render3d::permutation::{defines, Material, Stage};
-    let m = |slsf2: u32| Material {
-        shader_type: 0,
-        slsf1: 0,
+    let m = |shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool| Material {
+        shader_type,
+        slsf1,
         slsf2,
-        skinned: false,
+        skinned,
         alpha_test: false,
         has_vertex_colors: false,
         specular_strength: 1.0,
@@ -210,15 +222,104 @@ fn tree_b_lighting_compiles() {
     let src = SourceSet::new(ShaderSource::BundledB)
         .get(Path::new("Lighting.hlsl"))
         .unwrap();
+    // Skin.hlsli's own code reached the compiler's input (the expander follows every include).
+    assert!(src.text.contains("SSSSTransmittance"));
     let cache = tempfile::tempdir().unwrap();
-    for (name, slsf2, stage, target) in [
-        ("ps default", 0, Stage::Pixel, "ps_5_0"),
-        ("vs default", 0, Stage::Vertex, "vs_5_0"),
-        ("ps TRUE_PBR", 1 << 23, Stage::Pixel, "ps_5_0"),
-    ] {
-        let d = defines(&m(slsf2), stage, &[], false);
+    let has = |d: &render3d::permutation::Defines, n: &str| d.0.iter().any(|x| x.0 == n);
+    // (name, material, stage, target, features, defines that must be set, defines that must not be)
+    let pbr = m(0, 0, 1 << 23, false);
+    let skin = m(5, 1 << 12, 0, true);
+    type Row<'a> = (
+        &'a str,
+        Material,
+        Stage,
+        &'a str,
+        &'a [&'a str],
+        &'a [&'a str],
+        &'a [&'a str],
+    );
+    let rows: [Row; 7] = [
+        (
+            "ps default",
+            m(0, 0, 0, false),
+            Stage::Pixel,
+            "ps_5_0",
+            &[],
+            &[],
+            &["TRUE_PBR", "CS_SKIN"],
+        ),
+        (
+            "vs default",
+            m(0, 0, 0, false),
+            Stage::Vertex,
+            "vs_5_0",
+            &[],
+            &[],
+            &["TRUE_PBR", "CS_SKIN"],
+        ),
+        (
+            "ps TRUE_PBR",
+            pbr,
+            Stage::Pixel,
+            "ps_5_0",
+            &[],
+            &["TRUE_PBR"],
+            &["CS_SKIN"],
+        ),
+        // CS builds no TRUE_PBR define for the vertex stage; this is the PBR shape's vertex program.
+        (
+            "vs PBR shape",
+            pbr,
+            Stage::Vertex,
+            "vs_5_0",
+            &[],
+            &[],
+            &["TRUE_PBR"],
+        ),
+        (
+            "ps TRUE_PBR CS_SKIN",
+            pbr,
+            Stage::Pixel,
+            "ps_5_0",
+            &["CS_SKIN"],
+            &["TRUE_PBR", "CS_SKIN"],
+            &[],
+        ),
+        (
+            "ps skin CS_SKIN",
+            skin,
+            Stage::Pixel,
+            "ps_5_0",
+            &["CS_SKIN"],
+            &["CS_SKIN"],
+            &[],
+        ),
+        (
+            "vs skin CS_SKIN",
+            skin,
+            Stage::Vertex,
+            "vs_5_0",
+            &["CS_SKIN"],
+            &["CS_SKIN"],
+            &[],
+        ),
+    ];
+    for (name, mat, stage, target, features, set, unset) in rows {
+        let d = defines(&mat, stage, features, false);
+        for n in set {
+            assert!(has(&d, n), "{name}: {n} missing in {:?}", d.0);
+        }
+        for n in unset {
+            assert!(!has(&d, n), "{name}: {n} unexpected in {:?}", d.0);
+        }
         let c = render3d::compile::compile(&src, &d, target, cache.path())
             .unwrap_or_else(|e| panic!("{name}: {e}"));
         assert!(!c.reflection.cbuffers.is_empty(), "{name}");
+        // The Skin code survived preprocessing: the same shape without CS_SKIN compiles to other bytecode.
+        if name == "ps skin CS_SKIN" {
+            let plain = defines(&mat, stage, &[], false);
+            let p = render3d::compile::compile(&src, &plain, target, cache.path()).unwrap();
+            assert!(c.bytecode != p.bytecode, "{name}: CS_SKIN changed nothing");
+        }
     }
 }
