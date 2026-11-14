@@ -26,6 +26,7 @@ enum Action {
     ClearField(String, &'static str),
     RemoveUnmatched(String),
     Live(bool),
+    CsPbr2(bool),
     Checks(ChecksSettings),
     CacheMb(u32),
     AlsoRecipe(LegacyParams),
@@ -90,6 +91,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
             Action::ClearField(k, f) => model.clear_field(&k, f),
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::Live(on) => model.set_live(on),
+            Action::CsPbr2(on) => model.set_cs_pbr2(on),
             Action::Checks(c) => model.set_checks(c),
             Action::CacheMb(mb) => model.set_analysis_cache_mb(mb),
             Action::AlsoRecipe(p) => model.set_also_settings(|c| c.legacy = p),
@@ -337,6 +339,14 @@ fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Actio
             .changed()
         {
             actions.push(Action::Live(live));
+        }
+        let mut pbr2 = model.settings.cs_pbr2;
+        if ui
+            .checkbox(&mut pbr2, "CS PBR 2.0 (experimental)")
+            .on_hover_text("For Community Shaders builds with TruePBR 2.0 (shader type 21). Shows type 21 in the NIF editor, previews with the CS 2.0 shaders and writes the CS 2.0 texture-set keys.")
+            .changed()
+        {
+            actions.push(Action::CsPbr2(pbr2));
         }
     });
 }

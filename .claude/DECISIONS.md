@@ -21,7 +21,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS
-- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, ID
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, ID
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS
@@ -1474,3 +1474,4 @@ Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube'
 - **ID17 AddController on a type-21 shader refuses a refused variable with <label> isn't animated by CS 2.0.** The no-effect variables (float 9 and 10, colour 0) can still be added, since the validator only Warns on them; the label is the editor's `var_label`.
 - **ID18 `apply_anim` ignores float 9, float 10 and colour 0 on a type-21 base, and float 8 has no constant there.** CS 2.0 runs those controllers with no visible change. Float 11, 12, 20-23 and colour 1 animate as before; a v1 base is unchanged.
 - **ID19 An undo of the pick restores the source bytes.** The unlink is part of the pick op, which re-applies from the source, so removing it gives the source back (GUI history test). A clip block is matched with `anim::bound_cbs`, by ref or by strings, so a block bound by name also leaves the clip.
+- **ID20 `GuiSettings.cs_pbr2` is the "CS PBR 2.0 (experimental)" box in the Advanced drawer's Preview section.** It is per user (gui.toml, `#[serde(default)]`, off), not per project; `AppModel::set_cs_pbr2` only saves it, and the NIF editor, preview tree and exports read it in later tasks. The box's AccessKit name is its label, and drawing it saves nothing.

@@ -51,6 +51,31 @@ fn the_analysis_cache_limit_is_500_mb_until_set() {
     assert_eq!(s.analysis_cache_bytes(), u64::from(u32::MAX) << 20);
 }
 
+/// Note ID20: `cs_pbr2` is off on a fresh install and in a gui.toml written before it existed.
+#[test]
+fn cs_pbr2_defaults_off_and_old_toml_loads() {
+    assert!(!GuiSettings::default().cs_pbr2);
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    std::fs::write(&p, "live_encode = true\nadvanced_open = true\n").unwrap();
+    let (s, err) = GuiSettings::load(&p);
+    assert_eq!(err, None);
+    assert!(s.live_encode && !s.cs_pbr2);
+}
+
+#[test]
+fn cs_pbr2_round_trips() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("sdc/gui.toml");
+    let mut m = sdc_gui::model::AppModel::placeholder(GuiSettings::default());
+    m.settings_path = Some(p.clone());
+    m.set_cs_pbr2(true);
+    assert!(m.settings.cs_pbr2);
+    assert!(GuiSettings::load(&p).0.cs_pbr2);
+    m.set_cs_pbr2(false);
+    assert!(!GuiSettings::load(&p).0.cs_pbr2);
+}
+
 #[test]
 fn recent_keeps_ten() {
     let mut s = GuiSettings::default();
