@@ -429,6 +429,23 @@ Tessalith 2.0's BC1 encode (`encoders_sys::bc1_encode_block` as the engine calls
 
 Dual is the best BC1 encoder measured on both vendors' decoders. NVTT 3 `-highest` is second, 0.13 dB behind. A throwaway engine example (not kept) produced the scores.
 
+#### Fast BC1 search (2026-11-13)
+
+`encoder.bc1_search = fast` runs the BC1 search at a lower rgbcx level. Five levels of `bcenc` (the Rust port of rgbcx) were scored with `crates/bcenc/examples/quality.rs` on the `rgb_real` images (93), Dual endpoints, 3-colour blocks on, decoded with rgbcx's NVIDIA and AMD models. Mean RGB PSNR is the mean of per-image dB; Δ is the paired difference against level 18 [95% CI] with wins/losses over the 93 images; seconds are the encode time of all 93 images on a busy 8-core machine.
+
+| Encoder | NVIDIA (dB) | AMD (dB) | Δ NVIDIA | Δ AMD | Encode (s) |
+|---|--:|--:|---|---|--:|
+| rgbcx L18 (`default`) | 39.51 | 39.74 | | | 305.6 |
+| rgbcx L15 | 39.48 | 39.72 | -0.025 [±0.005] 1/92 | -0.026 [±0.006] 1/92 | 145.6 |
+| rgbcx L13 | 39.45 | 39.69 | -0.055 [±0.009] 0/93 | -0.057 [±0.010] 1/92 | 105.6 |
+| rgbcx L12 (`fast`) | 39.41 | 39.65 | -0.097 [±0.018] 0/93 | -0.099 [±0.020] 0/93 | 83.3 |
+| rgbcx L10 | 39.37 | 39.61 | -0.134 [±0.025] 0/93 | -0.137 [±0.028] 0/93 | 44.0 |
+| NVTT 3 `-highest` | 39.38 | 39.62 | | | not timed |
+
+The rule: the fastest level whose mean beats NVTT 3 `-highest` on both decoders. Level 10 falls 0.004 dB short on NVIDIA and 0.011 dB on AMD, so level 12 is the pick (Note HY16). Every faster level loses to level 18 on nearly every image, but only by 0.1 dB at level 12.
+
+Per block, in the Rust encoder (`bcenc` `speed` example, 1,048,576 blocks), the fast level takes about 0.35 of level 18's time on BC1 blocks and 0.33 on BC3 blocks. These figures come from a busy machine and the quiet run replaces them.
+
 ### Luma-weighted BC1 error (2026-10-31)
 
 rgbcx's BC1 error is equal-weight RGB SSE. It is summed at 14 places in 5 functions of `rgbcx.cpp` (`bc1_find_sels4_fasterr`, `_check2_err`, `_fullerr`, the forced-selector path and `bc1_find_sels3_fullerr`), and under cBC1Dual in `bc1_dual_err`. Weighting only those sums leaves the PCA axis, the least-squares fits and the cluster orderings unweighted. Tessalith ships it as `encoder.perceptual` on BC1 and BC3 colour (Rec.709, FM42; `vanilla-compact` turns it on).

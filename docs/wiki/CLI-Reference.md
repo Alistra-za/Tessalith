@@ -263,6 +263,9 @@ sdc convert src --recursive --accept-suggestions high --target vanilla --preset 
 # A quick look at the result while you iterate
 sdc convert src --recursive --accept-suggestions high --preset fast-preview -o preview-out
 
+# Faster BC1 and BC3 encodes on a normal preset (about 0.1 dB less colour PSNR)
+sdc convert src --recursive --accept-suggestions high --set encoder.bc1_search=fast
+
 # Rebuild everything, 8 threads, 6 GiB budget
 sdc convert src --recursive --accept-suggestions high --on-existing overwrite --jobs 8 --mem-budget 6G
 
