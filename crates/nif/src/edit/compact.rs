@@ -30,7 +30,8 @@ enum Refs {
 }
 
 /// Kinds an op appends that hold no refs.
-const NO_REFS: [&[u8]; 10] = [
+const NO_REFS: [&[u8]; 11] = [
+    b"NiFloatsExtraData",
     b"NiFloatData",
     b"NiPosData",
     b"BSShaderTextureSet",

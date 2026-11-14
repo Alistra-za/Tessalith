@@ -126,7 +126,12 @@ fn row(
     root: bool,
     animated: bool,
 ) {
-    let editable = x.value.is_some();
+    // NiFloatsExtraData (PBRThinSurface, PBRFuzz) is read only: shown as kind + size like the other unlisted kinds
+    let value = x
+        .value
+        .as_ref()
+        .filter(|v| !matches!(v, ExtraValue::Floats(_)));
+    let editable = value.is_some();
     egui::Sides::new().shrink_left().truncate().show(
         ui,
         |ui| {
@@ -152,7 +157,7 @@ fn row(
             }
         },
     );
-    let Some(v) = &x.value else {
+    let Some(v) = value else {
         ui.weak(format!("{} · {} bytes", x.kind, x.size));
         return;
     };
@@ -231,6 +236,7 @@ fn row(
             act.flush |= r.drag_stopped() || r.lost_focus();
         }
         ExtraValue::Inv { rot, zoom } => inv(ui, act, rot, *zoom, root, |a, n| edit(a, n, true)),
+        ExtraValue::Floats(_) => unreachable!("filtered out above"),
     }
 }
 

@@ -2,8 +2,10 @@
 //! Small property blocks, decoded fully and checked against the declared block size (plan 01 Q2, nif.xml
 //! 6581-6685, 6307-6319, 3972-3978). BSVER 83 and 100 share these layouts.
 use crate::cursor::Cursor;
+use crate::extra::ExtraValue;
 use crate::header::Header;
 use crate::path::{canon_texture, TexPath};
+use crate::pbr2::Pbr2Extra;
 use crate::text::lossy;
 use crate::NifError;
 use std::sync::Arc;
@@ -119,6 +121,38 @@ pub struct LightingParams {
     pub lighting_effect_1: f32,
     pub lighting_effect_2: f32,
     pub trailer: LightingTrailer,
+    /// Type 21 only: the PBRThinSurface / PBRFuzz blocks on the extra-data list (`None` when there are none).
+    #[cfg_attr(
+        feature = "serde",
+        serde(default, skip_serializing_if = "Option::is_none")
+    )]
+    pub pbr2_extra: Option<Pbr2Extra>,
+}
+
+/// The PBRThinSurface and PBRFuzz blocks among the extra data of the type-21 shader property `block`; `None` when it
+/// has neither. A block that does not decode as NiFloatsExtraData is skipped.
+fn read_pbr2_extra(h: &Header, b: &[u8], block: usize) -> Option<Pbr2Extra> {
+    let net = crate::net::read_net(h, b, block).ok()?;
+    let mut x = Pbr2Extra::default();
+    for &r in &net.extra {
+        let Ok(i) = usize::try_from(r) else { continue };
+        if i >= h.sizes.len() || h.kind(i) != b"NiFloatsExtraData" {
+            continue;
+        }
+        let Ok(e) = crate::extra::read_extra(h, b, i) else {
+            continue;
+        };
+        let Some(ExtraValue::Floats(v)) = e.value else {
+            continue;
+        };
+        // the first block of a name wins
+        match e.name.as_deref() {
+            Some(b"PBRThinSurface") if x.thin.is_none() => x.thin = Some(v),
+            Some(b"PBRFuzz") if x.fuzz.is_none() => x.fuzz = Some(v),
+            _ => {}
+        }
+    }
+    (x != Pbr2Extra::default()).then_some(x)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -290,6 +324,11 @@ pub fn decode_lighting(h: &Header, b: &[u8], block: usize) -> Result<Lighting, N
             lighting_effect_1,
             lighting_effect_2,
             trailer,
+            pbr2_extra: if shader_type == 21 {
+                read_pbr2_extra(h, b, block)
+            } else {
+                None
+            },
         },
     })
 }

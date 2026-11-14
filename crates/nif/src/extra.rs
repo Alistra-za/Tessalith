@@ -16,6 +16,8 @@ pub enum ExtraValue {
         rot: [u16; 3],
         zoom: u32,
     },
+    /// NiFloatsExtraData (read only: not in [`EDITABLE`]); the count is kept as written.
+    Floats(Vec<f32>),
 }
 
 pub const EDITABLE: [&str; 6] = [
@@ -53,7 +55,7 @@ pub struct Extra {
     pub kind: std::sync::Arc<str>,
     /// Raw bytes, shared with every block that names the same entry ([`Header::string_arc`]).
     pub name: Option<std::sync::Arc<[u8]>>,
-    /// `None` for every type outside [`EDITABLE`].
+    /// `None` for every type outside [`EDITABLE`] except NiFloatsExtraData ([`ExtraValue::Floats`]).
     pub value: Option<ExtraValue>,
     pub size: u32,
 }
@@ -74,9 +76,23 @@ pub fn read_extra(h: &Header, b: &[u8], block: usize) -> Result<Extra, NifError>
         return Err(geo("block runs past the file"));
     }
     let mut c = Cursor::new(&b[..end], start);
-    let (name, value) = if EDITABLE.contains(&&*kind) {
+    let (name, value) = if EDITABLE.contains(&&*kind) || &*kind == "NiFloatsExtraData" {
         let name = c.i32()?;
         let v = match &*kind {
+            "NiFloatsExtraData" => {
+                let n = c.u32()? as usize;
+                // a huge count must fail on the block size, not allocate
+                if n > (end - c.pos()) / 4 {
+                    return Err(NifError::BlockSize {
+                        block: block as u32,
+                        kind: text::label(&kind).into_owned(),
+                        declared: size,
+                        consumed: (c.pos() - start) as u32
+                            + n.saturating_mul(4).min(u32::MAX as usize) as u32,
+                    });
+                }
+                ExtraValue::Floats((0..n).map(|_| c.f32()).collect::<Result<_, _>>()?)
+            }
             "BSXFlags" => ExtraValue::Bsx(c.u32()?),
             "NiStringExtraData" => {
                 let i = c.i32()?;
@@ -148,6 +164,13 @@ pub fn encode_extra(name: i32, v: &ExtraValue, str_index: i32) -> (&'static str,
             }
             o.extend(zoom.to_le_bytes());
             EDITABLE[5]
+        }
+        ExtraValue::Floats(v) => {
+            o.extend((v.len() as u32).to_le_bytes());
+            for x in v {
+                o.extend(x.to_le_bytes());
+            }
+            "NiFloatsExtraData"
         }
     };
     (kind, o)

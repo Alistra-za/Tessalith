@@ -91,6 +91,44 @@ pub fn lsp21_shape(features: u32, params: &[f32; 25]) -> Vec<u8> {
     n.bytes()
 }
 
+/// NiFloatsExtraData body: name (string index), count, floats.
+pub fn floats_extra(name: i32, v: &[f32]) -> Vec<u8> {
+    W::default().i32(name).u32(v.len() as u32).fs(v).0
+}
+
+/// [`lsp21_shape`] with a PBRThinSurface block (`thin`) and a PBRFuzz block (`fuzz`) attached to the shader property;
+/// the extras are blocks 3 and 4.
+pub fn lsp21_shape_extras(thin: Option<&[f32]>, fuzz: Option<&[f32]>) -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = n.string("S");
+    let (tn, fnm) = (n.string("PBRThinSurface"), n.string("PBRFuzz"));
+    let refs: Vec<i32> = [thin.map(|_| 3), fuzz.map(|_| 3 + thin.is_some() as i32)]
+        .into_iter()
+        .flatten()
+        .collect();
+    n.block("BSTriShape", tri_shape(s, 1));
+    n.block(
+        "BSLightingShaderProperty",
+        lsp21_body(
+            &refs,
+            -1,
+            0x8000_0000,
+            1,
+            2,
+            0x201,
+            &nif::pbr2::PBR2_DEFAULTS,
+        ),
+    );
+    n.block("BSShaderTextureSet", texset(&["textures\\a_d.dds"]));
+    if let Some(t) = thin {
+        n.block("NiFloatsExtraData", floats_extra(tn, t));
+    }
+    if let Some(f) = fuzz {
+        n.block("NiFloatsExtraData", floats_extra(fnm, f));
+    }
+    n.bytes()
+}
+
 /// Index of the first block of that type.
 pub fn block_of(h: &Header, kind: &str) -> usize {
     (0..h.sizes.len())

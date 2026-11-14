@@ -40,3 +40,14 @@ pub const PARAM_NAMES: [&str; 25] = [
     "Thin-surface back specular weight",
     "Thin-surface back roughness scale",
 ];
+
+/// The two optional NiFloatsExtraData blocks of a type-21 shader (spec section 7), found by name on the property's
+/// extra-data list. The floats stay as written: a wrong count is the validator's to report (Note ID2).
+#[derive(Debug, Clone, PartialEq, Default)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Pbr2Extra {
+    /// `PBRThinSurface`: expected 4 floats (subsurface balance, front and back specular weight, back roughness scale).
+    pub thin: Option<Vec<f32>>,
+    /// `PBRFuzz`: expected 2 floats (fuzz roughness, green-channel switch).
+    pub fuzz: Option<Vec<f32>>,
+}

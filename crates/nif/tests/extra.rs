@@ -122,3 +122,21 @@ fn string_extra_null_index_is_empty_but_dangling_is_an_error() {
         );
     }
 }
+
+#[test]
+fn floats_extra_reads_its_values() {
+    let mut n = builder::Nif::new(100);
+    let nm = n.string("PBRFuzz");
+    n.block("NiFloatsExtraData", scenes::floats_extra(nm, &[-1.0, 1.0]));
+    let b = n.bytes();
+    let h = Header::parse(&b).unwrap();
+    let e = read_extra(&h, &b, 0).unwrap();
+    assert_eq!(e.name.as_deref(), Some(&b"PBRFuzz"[..]));
+    assert_eq!(e.value, Some(ExtraValue::Floats(vec![-1.0, 1.0])));
+    // a count that disagrees with the block size is refused, like every other extra
+    let mut bad = scenes::floats_extra(nm, &[1.0]);
+    bad[4] = 2;
+    let bad = one_block_nif("NiFloatsExtraData", bad);
+    let h = Header::parse(&bad).unwrap();
+    assert!(read_extra(&h, &bad, 0).is_err());
+}
