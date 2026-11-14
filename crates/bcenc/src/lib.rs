@@ -5,7 +5,8 @@
 //! function of a module compiled only where the target has SSE2 (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and
 //! `mod sse2` in `bc4.rs`), each call with a `// SAFETY:` comment; Rust asks for the block even though the feature is
 //! always on there. A target without SSE2 runs portable code instead, which the unit tests run on every target.
-//! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7).
+//! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
+//! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16).
 
 use std::num::NonZeroU8;
 
@@ -26,6 +27,37 @@ pub(crate) mod gen;
 #[cfg(test)]
 mod coverage_tests;
 
+/// How hard the BC1 colour search works: the rgbcx level of BC1, of one-bit alpha with no bit set and of BC3's colour
+/// half. BC4, BC5, BC3's alpha half and the masked path of one-bit alpha do not depend on it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Bc1Search {
+    /// rgbcx level 18, the bytes of [`bc1_encode_block`], [`bc1_encode_block_alpha`] and [`bc3_encode_block`].
+    #[default]
+    Default,
+    /// rgbcx level [`BC1_FAST_LEVEL`]: the fastest level whose mean RGB PSNR still beats NVTT 3 `-highest` on both
+    /// decoders (Note HY16).
+    Fast,
+}
+
+/// The rgbcx level of [`Bc1Search::Fast`] (Note HY16).
+#[doc(hidden)]
+pub const BC1_FAST_LEVEL: u32 = 12;
+
+// The fast level is one `bcenc` encodes at, and not the default's.
+const _: () = {
+    let mut found = false;
+    let mut i = 0;
+    while i < bc1::LEVELS.len() {
+        found |= bc1::LEVELS[i] == BC1_FAST_LEVEL;
+        i += 1;
+    }
+    assert!(found, "BC1_FAST_LEVEL is not in bc1::LEVELS");
+    assert!(
+        BC1_FAST_LEVEL != 18,
+        "BC1_FAST_LEVEL is the default's level"
+    );
+};
+
 /// `rgbcx::encode_bc4_hq(.., BC4_USE_ALL_MODES | BC4_SDC_SEARCH)` for one channel of a 4x4 block.
 /// Panics if `channel >= 4`.
 pub fn bc4_encode_block(px: &[[u8; 4]; 16], channel: usize, search_radius: u32) -> [u8; 8] {
@@ -44,9 +76,24 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
 
 /// `rgbcx::encode_bc1(18, .., allow_3color, false)` in `cBC1Dual` mode for one 4x4 block of RGBA texels (alpha is
 /// ignored). `allow_3color` lets the encoder pick a three-colour block; `perceptual` weights the colour error by
-/// Rec.709 luma (rgbcx's `set_bc1_perceptual`).
+/// Rec.709 luma (rgbcx's `set_bc1_perceptual`). [`bc1_encode_block_with`] at [`Bc1Search::Default`].
 pub fn bc1_encode_block(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
-    bc1::encode::encode::<18>(px, allow_3color, bc1::weights(perceptual))
+    bc1_encode_block_with(px, allow_3color, perceptual, Bc1Search::Default)
+}
+
+/// [`bc1_encode_block`] at the rgbcx level `search` stands for: `encode_bc1(18, ..)` for [`Bc1Search::Default`],
+/// `encode_bc1(BC1_FAST_LEVEL, ..)` for [`Bc1Search::Fast`].
+pub fn bc1_encode_block_with(
+    px: &[[u8; 4]; 16],
+    allow_3color: bool,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 8] {
+    let w = bc1::weights(perceptual);
+    match search {
+        Bc1Search::Default => bc1::encode::encode::<18>(px, allow_3color, w),
+        Bc1Search::Fast => bc1::encode::encode::<BC1_FAST_LEVEL>(px, allow_3color, w),
+    }
 }
 
 /// [`bc1_encode_block`] at rgbcx level `level`, one of [`bc1::LEVELS`] (`rgbcx::encode_bc1(level, .., allow_3color,
@@ -80,22 +127,50 @@ pub fn bc4_encode_alpha(alpha: &[u8; 16], search_radius: u32, cut: u8) -> [u8; 8
 /// texel i transparent. No bit set is [`bc1_encode_block`]`(px, true, perceptual)`; every bit set is the
 /// all-transparent block; otherwise a 3-colour block fitted to the opaque texels, masked texels on selector 3. The
 /// RGB of a masked texel and every alpha value are never read. `perceptual` as in [`bc1_encode_block`].
+/// [`bc1_encode_block_alpha_with`] at [`Bc1Search::Default`].
 pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
-    bc1::alpha::encode_alpha::<18>(px, transparent, bc1::weights(perceptual))
+    bc1_encode_block_alpha_with(px, transparent, perceptual, Bc1Search::Default)
+}
+
+/// [`bc1_encode_block_alpha`] at the rgbcx level `search` stands for (`encode_bc1_alpha(level, ..)`); only a
+/// `transparent` of 0, the plain encode, depends on it.
+pub fn bc1_encode_block_alpha_with(
+    px: &[[u8; 4]; 16],
+    transparent: u16,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 8] {
+    let w = bc1::weights(perceptual);
+    match search {
+        Bc1Search::Default => bc1::alpha::encode_alpha::<18>(px, transparent, w),
+        Bc1Search::Fast => bc1::alpha::encode_alpha::<BC1_FAST_LEVEL>(px, transparent, w),
+    }
 }
 
 /// `rgbcx::encode_bc3_hq(18, .., search_radius, BC4_USE_ALL_MODES | BC4_SDC_SEARCH | BC4_SDC_GUARD128 | cut << 8)`
 /// with the shim's weights: bytes 0..8 are [`bc4_encode_alpha`] of the alpha channel, bytes 8..16
 /// [`bc1_encode_block`]`(px, false, perceptual)` (`encode_bc1(level, .., false, false)`; `perceptual` reaches only
 /// this half). `cut` is the least alpha that passes the texture's alpha test; it cannot be 0, which rgbcx's flags
-/// would read as 128 (Note HY7).
+/// would read as 128 (Note HY7). [`bc3_encode_block_with`] at [`Bc1Search::Default`].
 pub fn bc3_encode_block(
     px: &[[u8; 4]; 16],
     search_radius: u32,
     cut: NonZeroU8,
     perceptual: bool,
 ) -> [u8; 16] {
-    bc3_encode_block_raw_cut(px, search_radius, cut.get(), perceptual)
+    bc3_encode_block_with(px, search_radius, cut, perceptual, Bc1Search::Default)
+}
+
+/// [`bc3_encode_block`] with its colour half at the rgbcx level `search` stands for (`encode_bc3_hq(level, ..)`); the
+/// alpha half does not depend on it.
+pub fn bc3_encode_block_with(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: NonZeroU8,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 16] {
+    bc3_raw_cut_with(px, search_radius, cut.get(), perceptual, search)
 }
 
 /// [`bc3_encode_block`] with the cut as rgbcx's flags carry it, where 0 is 128 ([`bc4_encode_alpha`]). For the tests,
@@ -107,9 +182,20 @@ pub fn bc3_encode_block_raw_cut(
     cut: u8,
     perceptual: bool,
 ) -> [u8; 16] {
+    bc3_raw_cut_with(px, search_radius, cut, perceptual, Bc1Search::Default)
+}
+
+/// [`bc3_encode_block_with`] with the cut as rgbcx's flags carry it.
+fn bc3_raw_cut_with(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: u8,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 16] {
     let alpha: [u8; 16] = std::array::from_fn(|i| px[i][3]);
     let mut out = [0u8; 16];
     out[..8].copy_from_slice(&bc4_encode_alpha(&alpha, search_radius, cut));
-    out[8..].copy_from_slice(&bc1_encode_block(px, false, perceptual));
+    out[8..].copy_from_slice(&bc1_encode_block_with(px, false, perceptual, search));
     out
 }

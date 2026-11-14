@@ -1,7 +1,11 @@
 //! `bcenc`'s BC1 one-bit-alpha encode equals the vendored rgbcx (`encode_bc1_alpha(18, ..)` through `encoders_sys`,
 //! plain or perceptual weights) on every mask class over the colour classes, and on one hand-built block per early
-//! path of the C++.
-use bcenc::{bc1_encode_block, bc1_encode_block_alpha};
+//! path of the C++. `Bc1Search::Fast` equals rgbcx's `encode_bc1_alpha(BC1_FAST_LEVEL, ..)` on the mask classes and,
+//! in the `#[ignore]` twin, on the same long run.
+use bcenc::{
+    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_with, Bc1Search,
+    BC1_FAST_LEVEL,
+};
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
@@ -19,6 +23,21 @@ fn same(px: &[[u8; 4]; 16], mask: u16, perceptual: bool) -> [u8; 8] {
         "bc1 alpha, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
     );
     got
+}
+
+/// [`same`] for `bc1_encode_block_alpha_with(.., search)` against rgbcx at the level `search` stands for.
+fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search) {
+    let got = bc1_encode_block_alpha_with(px, mask, perceptual, search);
+    let want = match search {
+        Bc1Search::Default => encoders_sys::bc1_encode_block_alpha(px, mask, perceptual),
+        Bc1Search::Fast => {
+            encoders_sys::bc1_encode_block_alpha_level(px, mask, BC1_FAST_LEVEL, perceptual)
+        }
+    };
+    assert_eq!(
+        got, want,
+        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+    );
 }
 
 /// `px` with every masked texel replaced by random RGB and alpha 0, as a real cut-out texture holds them: nothing
@@ -44,6 +63,24 @@ fn bc1_alpha_equals_rgbcx_on_masks_and_classes() {
                 same(px, mask, perceptual);
                 let g = garbage_under(px, mask, &mut r);
                 same(&g, mask, perceptual);
+            }
+        }
+    }
+}
+
+/// `Bc1Search::Fast` on every mask class (mask 0, the only one the level reaches, among them) over the colour classes,
+/// with and without garbage under the mask.
+#[test]
+fn fast_alpha_is_rgbcx_at_the_fast_level() {
+    let mut r = gen::Rng(0xA1FA_0013);
+    let masks = gen::alpha_masks(0xA1FA_0011, 48);
+    let blocks = gen::colour_classes(0xA1FA_0012, 3);
+    for perceptual in [false, true] {
+        for &mask in &masks {
+            for px in &blocks {
+                same_with(px, mask, perceptual, Bc1Search::Fast);
+                let g = garbage_under(px, mask, &mut r);
+                same_with(&g, mask, perceptual, Bc1Search::Fast);
             }
         }
     }
@@ -380,6 +417,17 @@ fn bc1_alpha_single_opaque_texel() {
 #[test]
 #[ignore = "50 million blocks, about 20 seconds on 16 threads"]
 fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
+    fifty_million_blocks(Bc1Search::Default);
+}
+
+/// [`bc1_alpha_equals_rgbcx_on_50_million_blocks`] at `Bc1Search::Fast`, on the same blocks and masks.
+#[test]
+#[ignore = "50 million blocks, fast search"]
+fn bc1_alpha_equals_rgbcx_on_50_million_blocks_fast() {
+    fifty_million_blocks(Bc1Search::Fast);
+}
+
+fn fifty_million_blocks(search: Bc1Search) {
     const THREADS: u64 = 16;
     const PER_THREAD: usize = 3_125_000; // 16 x 3.125 million = 50 million
     const PER_CLASS: usize = 1_000;
@@ -401,9 +449,10 @@ fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
                             }
                             let mask = masks[r.below(masks.len() as u64) as usize];
                             if n % 2 == 1 {
-                                same(&garbage_under(&px, mask, &mut r), mask, perceptual);
+                                let g = garbage_under(&px, mask, &mut r);
+                                same_with(&g, mask, perceptual, search);
                             } else {
-                                same(&px, mask, perceptual);
+                                same_with(&px, mask, perceptual, search);
                             }
                             n += 1;
                         }
@@ -418,7 +467,7 @@ fn bc1_alpha_equals_rgbcx_on_50_million_blocks() {
     let total: usize = totals.iter().sum();
     assert_eq!(total, 50_000_000);
     eprintln!(
-        "{total} blocks (25 million per weight set), 0 mismatches, {:.1} s",
+        "{total} blocks (25 million per weight set, {search:?}), 0 mismatches, {:.1} s",
         start.elapsed().as_secs_f64()
     );
 }

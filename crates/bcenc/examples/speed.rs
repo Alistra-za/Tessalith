@@ -21,12 +21,15 @@
 //! Formats and the arguments the engine passes: `bc1` = `bc1_encode_block(b, true, false)`; `bc1p` = the same
 //! perceptual; `bc1-4` = `allow_3color` false (BC3's colour half); `bc1a` = `bc1_encode_block_alpha(b, mask, false)`
 //! with bit i of `mask` set when texel i's green is below 64; `bc3` = radius 5, cut 128; `bc4` = channel 0, radius 5;
-//! `bc5` = radius 5.
+//! `bc5` = radius 5. Then the fast search (`Bc1Search::Fast`) against rgbcx at `BC1_FAST_LEVEL`: `bc1-fast` = `bc1`
+//! and `bc3-fast` = `bc3` through the `_with` functions.
 
 use std::hint::black_box;
 use std::num::NonZeroU8;
 use std::process::ExitCode;
 use std::time::Instant;
+
+use bcenc::{Bc1Search, BC1_FAST_LEVEL};
 
 #[path = "../tests/support/gen.rs"]
 mod gen;
@@ -106,7 +109,7 @@ fn measure<const N: usize>(
     let (c, r) = (median(&mut cpp_t), median(&mut rust_t));
     let same = cpp_hash == rust_hash;
     println!(
-        "{name:<5} {c:>12.0} {r:>12.0} {:>8.3}  {}",
+        "{name:<8} {c:>12.0} {r:>12.0} {:>8.3}  {}",
         r / c,
         if same { "yes" } else { "NO" }
     );
@@ -196,6 +199,20 @@ fn main() -> ExitCode {
             runs,
             |b| encoders_sys::bc5_encode_block(b, RADIUS),
             |b| bcenc::bc5_encode_block(b, RADIUS),
+        ),
+        measure(
+            "bc1-fast",
+            &blocks,
+            runs,
+            |b| encoders_sys::bc1_encode_block_level(b, BC1_FAST_LEVEL, true, false),
+            |b| bcenc::bc1_encode_block_with(b, true, false, Bc1Search::Fast),
+        ),
+        measure(
+            "bc3-fast",
+            &blocks,
+            runs,
+            |b| encoders_sys::bc3_encode_block_level(b, RADIUS, CUT, BC1_FAST_LEVEL, false),
+            |b| bcenc::bc3_encode_block_with(b, RADIUS, cut, false, Bc1Search::Fast),
         ),
     ];
     if ok.iter().all(|&s| s) {

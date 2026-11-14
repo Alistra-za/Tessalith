@@ -21,7 +21,9 @@
 //!   variant under the name `<name>`. `beats <name>` is `yes` when the variant's unrounded mean is strictly above the
 //!   reference's on both decoders.
 //!
-//! Variants: `cpp:<level>`, rgbcx's BC1 encoder at that level as the engine calls it (`allow_3color`, not perceptual).
+//! Variants: `cpp:<level>`, rgbcx's BC1 encoder at that level as the engine calls it (`allow_3color`, not perceptual);
+//! `rust:default` and `rust:fast`, `bcenc::bc1_encode_block_with` with that `Bc1Search`, called the same way (the bytes
+//! of `cpp:18` and `cpp:<BC1_FAST_LEVEL>`).
 //! Images are encoded on `available_parallelism()` threads; `seconds` is the wall time of one image's encode on its
 //! thread, so it is rough when other jobs run.
 
@@ -46,10 +48,17 @@ fn encoder(name: &str) -> Option<Encoder> {
             bc1_encode_block_level(px, level, true, false)
         }));
     }
-    None
+    let search = match name {
+        "rust:default" => bcenc::Bc1Search::Default,
+        "rust:fast" => bcenc::Bc1Search::Fast,
+        _ => return None,
+    };
+    Some(Box::new(move |px| {
+        bcenc::bc1_encode_block_with(px, true, false, search)
+    }))
 }
 
-const KNOWN: &str = "cpp:<level 0..=18>";
+const KNOWN: &str = "cpp:<level 0..=18>, rust:default, rust:fast";
 
 /// PSNR in dB for a mean squared error over 8-bit values (99 dB when it is zero), as `engine::validate::psnr_from_mse`.
 fn psnr_from_mse(mse: f64) -> f64 {
@@ -464,7 +473,30 @@ mod tests {
         assert!(encoder("cpp:18").is_some());
         assert!(encoder("cpp:19").is_none());
         assert!(encoder("cpp:x").is_none());
-        assert!(encoder("rust:fast").is_none());
+        assert!(encoder("rust:slow").is_none());
+    }
+
+    /// `rust:default` is `cpp:18` and `rust:fast` is `cpp:<BC1_FAST_LEVEL>`, block for block.
+    #[test]
+    fn rust_variants_are_their_cpp_levels() {
+        let pairs = [
+            ("rust:default", "cpp:18".to_string()),
+            ("rust:fast", format!("cpp:{}", bcenc::BC1_FAST_LEVEL)),
+        ];
+        let blocks: Vec<Block> = (0..64u32)
+            .map(|s| {
+                std::array::from_fn(|i| {
+                    let v = (s * 97 + i as u32 * 31).wrapping_mul(2_654_435_761) >> 8;
+                    [v as u8, (v >> 8) as u8, (v >> 16) as u8, 255]
+                })
+            })
+            .collect();
+        for (rust, cpp) in pairs {
+            let (r, c) = (encoder(rust).expect(rust), encoder(&cpp).expect("cpp"));
+            for b in &blocks {
+                assert_eq!(r(b), c(b), "{rust} against {cpp}: texels {b:?}");
+            }
+        }
     }
 
     #[test]

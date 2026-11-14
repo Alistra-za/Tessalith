@@ -1,7 +1,9 @@
 //! `bcenc` equals the vendored rgbcx on real images. Each test walks level 0 of every PNG under the folder named by
 //! `SDC_BCENC_CORPUS` (read recursively, sorted by path) in 4x4 blocks and compares the bytes of both encoders per
 //! block. `SDC_BCENC_CORPUS_EVERY=n` takes every n-th file (default 1). With the variable unset a test prints
-//! "skipped" and passes. The tests write nothing.
+//! "skipped" and passes. The tests write nothing. The `*_fast` tests compare `Bc1Search::Fast` with rgbcx at
+//! `BC1_FAST_LEVEL`.
+use bcenc::{Bc1Search, BC1_FAST_LEVEL};
 use rayon::prelude::*;
 use std::fmt::Write as _;
 use std::num::NonZeroU8;
@@ -231,6 +233,56 @@ fn corpus_bc3_equals_rgbcx() {
                 || format!("radius {RADIUS}, cut {CUT}, perceptual {perceptual}"),
                 &bcenc::bc3_encode_block(px, RADIUS, NonZeroU8::new(CUT).unwrap(), perceptual),
                 &encoders_sys::bc3_encode_block(px, RADIUS, CUT, perceptual),
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
+fn corpus_bc1_equals_rgbcx_fast() {
+    run("bc1_fast", every_image, |px, d| {
+        for perceptual in [false, true] {
+            cmp(
+                d,
+                || format!("fast, allow_3color true, perceptual {perceptual}"),
+                &bcenc::bc1_encode_block_with(px, true, perceptual, Bc1Search::Fast),
+                &encoders_sys::bc1_encode_block_level(px, BC1_FAST_LEVEL, true, perceptual),
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
+fn corpus_bc1_alpha_equals_rgbcx_fast() {
+    run("bc1_alpha_fast", any_transparent, |px, d| {
+        let mask = px
+            .iter()
+            .enumerate()
+            .fold(0u16, |m, (i, t)| m | (u16::from(t[3] < 128) << i));
+        for perceptual in [false, true] {
+            cmp(
+                d,
+                || format!("fast, mask {mask:#06x}, perceptual {perceptual}"),
+                &bcenc::bc1_encode_block_alpha_with(px, mask, perceptual, Bc1Search::Fast),
+                &encoders_sys::bc1_encode_block_alpha_level(px, mask, BC1_FAST_LEVEL, perceptual),
+            );
+        }
+    });
+}
+
+#[test]
+#[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
+fn corpus_bc3_equals_rgbcx_fast() {
+    run("bc3_fast", every_image, |px, d| {
+        let cut = NonZeroU8::new(CUT).unwrap();
+        for perceptual in [false, true] {
+            cmp(
+                d,
+                || format!("fast, radius {RADIUS}, cut {CUT}, perceptual {perceptual}"),
+                &bcenc::bc3_encode_block_with(px, RADIUS, cut, perceptual, Bc1Search::Fast),
+                &encoders_sys::bc3_encode_block_level(px, RADIUS, CUT, BC1_FAST_LEVEL, perceptual),
             );
         }
     });

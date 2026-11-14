@@ -2,7 +2,11 @@
 //! BC4_SDC_GUARD128 | cut << 8)` through `encoders_sys`, plain or perceptual weights) on the alpha classes paired with
 //! the colour classes. The comparisons go through `bc3_encode_block_raw_cut`, which takes the cut as rgbcx's flags do
 //! (0 is 128); `bc3_encode_block`, the engine's entry, takes it as a `NonZeroU8` and is checked against that.
-use bcenc::{bc1_encode_block, bc3_encode_block, bc3_encode_block_raw_cut, bc4_encode_alpha};
+//! `bc3_encode_block_with(.., Bc1Search::Fast)` equals rgbcx's `encode_bc3_hq(BC1_FAST_LEVEL, ..)`.
+use bcenc::{
+    bc1_encode_block, bc3_encode_block, bc3_encode_block_raw_cut, bc3_encode_block_with,
+    bc4_encode_alpha, Bc1Search, BC1_FAST_LEVEL,
+};
 use std::num::NonZeroU8;
 
 #[path = "support/gen.rs"]
@@ -22,6 +26,22 @@ fn same(px: &[[u8; 4]; 16], rad: u32, cut: u8, perceptual: bool) -> [u8; 16] {
         "bc3, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
     );
     got
+}
+
+/// [`same`] at `search`. `Bc1Search::Fast` goes through `bc3_encode_block_with`, which takes the cut as a `NonZeroU8`,
+/// so a cut of 0 is passed to it as the 128 rgbcx reads it as.
+fn same_with(px: &[[u8; 4]; 16], rad: u32, cut: u8, perceptual: bool, search: Bc1Search) {
+    if search == Bc1Search::Default {
+        same(px, rad, cut, perceptual);
+        return;
+    }
+    let nz = NonZeroU8::new(cut).unwrap_or(NonZeroU8::new(128).unwrap());
+    let got = bc3_encode_block_with(px, rad, nz, perceptual, search);
+    let want = encoders_sys::bc3_encode_block_level(px, rad, cut, BC1_FAST_LEVEL, perceptual);
+    assert_eq!(
+        got, want,
+        "bc3 {search:?}, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+    );
 }
 
 /// Alpha block `i` of `alpha` under colour block `i % colour.len()`.
@@ -47,6 +67,25 @@ fn bc3_equals_rgbcx_on_block_classes() {
             for rad in RADII {
                 for cut in CUTS {
                     same(px, rad, cut, perceptual);
+                }
+            }
+        }
+    }
+}
+
+/// `Bc1Search::Fast` on the alpha classes over the colour classes, at every radius the engine uses and cuts 1, 128
+/// and 255.
+#[test]
+fn fast_bc3_is_rgbcx_at_the_fast_level() {
+    let blocks = paired(
+        &gen::alpha_classes(0xBC30_0011, 30),
+        &gen::colour_classes(0xBC30_0012, 10),
+    );
+    for perceptual in [false, true] {
+        for px in &blocks {
+            for rad in RADII {
+                for cut in [1u8, 128, 255] {
+                    same_with(px, rad, cut, perceptual, Bc1Search::Fast);
                 }
             }
         }
@@ -152,6 +191,17 @@ fn bc3_with_a_non_zero_cut_equals_rgbcx() {
 #[test]
 #[ignore = "50 million blocks, about 7 minutes on 16 threads"]
 fn bc3_equals_rgbcx_on_50_million_blocks() {
+    fifty_million_blocks(Bc1Search::Default);
+}
+
+/// [`bc3_equals_rgbcx_on_50_million_blocks`] at `Bc1Search::Fast`, on the same blocks.
+#[test]
+#[ignore = "50 million blocks, fast search"]
+fn bc3_equals_rgbcx_on_50_million_blocks_fast() {
+    fifty_million_blocks(Bc1Search::Fast);
+}
+
+fn fifty_million_blocks(search: Bc1Search) {
     const THREADS: u64 = 16;
     const PER_THREAD: usize = 3_125_000; // 16 x 3.125 million = 50 million
     let start = std::time::Instant::now();
@@ -171,7 +221,8 @@ fn bc3_equals_rgbcx_on_50_million_blocks() {
                             if n == PER_THREAD {
                                 break;
                             }
-                            same(px, 5, CUTS[n % CUTS.len()], (n / CUTS.len()) % 2 == 1);
+                            let cut = CUTS[n % CUTS.len()];
+                            same_with(px, 5, cut, (n / CUTS.len()) % 2 == 1, search);
                             n += 1;
                         }
                         batch += 1;
@@ -185,7 +236,7 @@ fn bc3_equals_rgbcx_on_50_million_blocks() {
     let total: usize = totals.iter().sum();
     assert_eq!(total, 50_000_000);
     eprintln!(
-        "{total} blocks at radius 5, 0 mismatches, {:.1} s",
+        "{total} blocks at radius 5 ({search:?}), 0 mismatches, {:.1} s",
         start.elapsed().as_secs_f64()
     );
 }

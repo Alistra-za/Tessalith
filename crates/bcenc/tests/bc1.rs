@@ -1,10 +1,11 @@
 //! `bcenc`'s BC1 encode equals the vendored rgbcx (`encode_bc1(18, .., allow_3color, false)` through `encoders_sys`,
 //! plain or perceptual weights) on every block class and on solid colours. Solid blocks take rgbcx's
 //! `encode_bc1_solid_block`, so the solid tests also prove the single-colour tables (`equals_1` with three-colour off,
-//! `half` too with it on).
+//! `half` too with it on). `Bc1Search::Fast` equals rgbcx at `BC1_FAST_LEVEL` on the same classes and, in its
+//! `#[ignore]` twins, on the same long runs.
 use bcenc::bc1::palette::{dual_err, dual_palette};
 use bcenc::bc1::{PERCEPTUAL, PLAIN};
-use bcenc::bc1_encode_block;
+use bcenc::{bc1_encode_block, bc1_encode_block_with, Bc1Search, BC1_FAST_LEVEL};
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
@@ -27,6 +28,21 @@ fn same(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool) -> [u8; 8] {
     got
 }
 
+/// [`same`] for `bc1_encode_block_with(.., search)` against rgbcx at the level `search` stands for.
+fn same_with(px: &[[u8; 4]; 16], allow_3color: bool, perceptual: bool, search: Bc1Search) {
+    let got = bc1_encode_block_with(px, allow_3color, perceptual, search);
+    let want = match search {
+        Bc1Search::Default => encoders_sys::bc1_encode_block(px, allow_3color, false, perceptual),
+        Bc1Search::Fast => {
+            encoders_sys::bc1_encode_block_level(px, BC1_FAST_LEVEL, allow_3color, perceptual)
+        }
+    };
+    assert_eq!(
+        got, want,
+        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
+    );
+}
+
 fn solid(r: u8, g: u8, b: u8) -> [[u8; 4]; 16] {
     [[r, g, b, 255]; 16]
 }
@@ -37,6 +53,35 @@ fn bc1_equals_rgbcx_on_block_classes() {
     for (allow_3color, perceptual) in MODES {
         for px in &blocks {
             same(px, allow_3color, perceptual);
+        }
+    }
+}
+
+/// `Bc1Search::Fast` is rgbcx's `encode_bc1(BC1_FAST_LEVEL, ..)` on every class in every mode.
+#[test]
+fn fast_is_rgbcx_at_the_fast_level() {
+    let blocks = gen::colour_classes(0xBC10_0005, 300);
+    for (allow_3color, perceptual) in MODES {
+        for px in &blocks {
+            same_with(px, allow_3color, perceptual, Bc1Search::Fast);
+        }
+    }
+}
+
+/// `Bc1Search::Default` (and `Bc1Search::default()`) is `bc1_encode_block`, rgbcx level 18. A pin of the wrapper: it
+/// passes as long as `Default` stays level 18.
+#[test]
+fn default_is_the_old_function() {
+    assert_eq!(Bc1Search::default(), Bc1Search::Default);
+    let blocks = gen::colour_classes(0xBC10_0006, 30);
+    for (allow_3color, perceptual) in MODES {
+        for px in &blocks {
+            assert_eq!(
+                bc1_encode_block_with(px, allow_3color, perceptual, Bc1Search::default()),
+                bc1_encode_block(px, allow_3color, perceptual),
+                "allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}"
+            );
+            same_with(px, allow_3color, perceptual, Bc1Search::Default);
         }
     }
 }
@@ -261,6 +306,17 @@ fn bc1_solid_blocks_equal_rgbcx_on_a_sample() {
 #[test]
 #[ignore = "all 2^24 solid colours, both modes"]
 fn bc1_solid_blocks_equal_rgbcx_on_every_colour() {
+    every_solid_colour(Bc1Search::Default);
+}
+
+/// [`bc1_solid_blocks_equal_rgbcx_on_every_colour`] at `Bc1Search::Fast`.
+#[test]
+#[ignore = "all 2^24 solid colours, both modes, fast search"]
+fn bc1_solid_blocks_equal_rgbcx_on_every_colour_fast() {
+    every_solid_colour(Bc1Search::Fast);
+}
+
+fn every_solid_colour(search: Bc1Search) {
     let start = std::time::Instant::now();
     let total: u32 = std::thread::scope(|s| {
         let handles: Vec<_> = (0..16u32)
@@ -269,8 +325,8 @@ fn bc1_solid_blocks_equal_rgbcx_on_every_colour() {
                     let mut n = 0;
                     for c in t << 20..(t + 1) << 20 {
                         let px = solid((c >> 16) as u8, (c >> 8) as u8, c as u8);
-                        same(&px, true, false);
-                        same(&px, false, false);
+                        same_with(&px, true, false, search);
+                        same_with(&px, false, false, search);
                         n += 1;
                     }
                     n
@@ -281,7 +337,7 @@ fn bc1_solid_blocks_equal_rgbcx_on_every_colour() {
     });
     assert_eq!(total, 1 << 24);
     eprintln!(
-        "{total} solid colours in both modes, 0 mismatches, {:.1} s",
+        "{total} solid colours in both modes ({search:?}), 0 mismatches, {:.1} s",
         start.elapsed().as_secs_f64()
     );
 }
@@ -292,6 +348,17 @@ fn bc1_solid_blocks_equal_rgbcx_on_every_colour() {
 #[test]
 #[ignore = "100 million blocks, about 11 minutes on 16 threads"]
 fn bc1_equals_rgbcx_on_100_million_blocks() {
+    hundred_million_blocks(Bc1Search::Default);
+}
+
+/// [`bc1_equals_rgbcx_on_100_million_blocks`] at `Bc1Search::Fast`, on the same blocks.
+#[test]
+#[ignore = "100 million blocks, fast search"]
+fn bc1_equals_rgbcx_on_100_million_blocks_fast() {
+    hundred_million_blocks(Bc1Search::Fast);
+}
+
+fn hundred_million_blocks(search: Bc1Search) {
     const THREADS: u64 = 16;
     const PER_CLASS: usize = 1_000;
     const BATCH: usize = PER_CLASS * gen::COLOUR_CLASSES;
@@ -308,7 +375,7 @@ fn bc1_equals_rgbcx_on_100_million_blocks() {
                     for batch in 0..BATCHES as u64 {
                         let seed = 0x2_0000_0000 + (t * 10_000 + batch) * 0x9E37_79B9;
                         for px in gen::colour_classes(seed, PER_CLASS) {
-                            same(&px, allow_3color, perceptual);
+                            same_with(&px, allow_3color, perceptual, search);
                             n += 1;
                         }
                     }
@@ -326,7 +393,7 @@ fn bc1_equals_rgbcx_on_100_million_blocks() {
     assert_eq!(total, 16 * PER_THREAD);
     assert!(total >= 100_000_000);
     eprintln!(
-        "{total} blocks ({} per combination, {} per class), 0 mismatches, {:.1} s",
+        "{total} blocks ({} per combination, {} per class, {search:?}), 0 mismatches, {:.1} s",
         4 * PER_THREAD,
         total / gen::COLOUR_CLASSES,
         start.elapsed().as_secs_f64()
