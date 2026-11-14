@@ -739,9 +739,9 @@ fn type_21(m: &NifModel, block: u32, l: &LightingModel, shader_at: Option<Anchor
 
     // spec section 8: only the shared fields can be animated
     for c in l.prop.ctrls.iter().filter_map(|c| m.ctrls.get(c)) {
-        let (offered, no_effect) = match &*c.class {
-            LSCF => (&pbr2::FLOAT_VARS[..], &pbr2::NO_EFFECT_FLOAT_VARS[..]),
-            LSCC => (&pbr2::COLOR_VARS[..], &pbr2::NO_EFFECT_COLOR_VARS[..]),
+        let (float, no_effect) = match &*c.class {
+            LSCF => (true, &pbr2::NO_EFFECT_FLOAT_VARS[..]),
+            LSCC => (false, &pbr2::NO_EFFECT_COLOR_VARS[..]),
             _ => continue,
         };
         let Some(v) = c.var else { continue };
@@ -752,7 +752,7 @@ fn type_21(m: &NifModel, block: u32, l: &LightingModel, shader_at: Option<Anchor
                 var_label(&c.class, v, lt.slsf2)
             );
             push(Level::Warn, tgt, t, None);
-        } else if !offered.contains(&v) {
+        } else if pbr2::var_refused_on_21(float, v) {
             let t = err(&format!(
                 "controller variable {v} of {} is not one CS 2.0 reads",
                 c.class

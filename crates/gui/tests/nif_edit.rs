@@ -11747,3 +11747,38 @@ fn pbr_field_labels() {
     assert_eq!(field_label(Field::PbrParam(3)), "Subsurface colour R");
     assert_eq!(field_label(Field::PbrParam(25)), "PBR parameter 25");
 }
+
+/// Task 7, Review Focus 2: undo of a pick that unlinked controllers and edited a clip gives the source bytes back
+/// (the history re-applies the ops left, here none, to the pristine source).
+#[test]
+fn undoing_a_type_21_pick_that_unlinked_controllers_restores_the_source() {
+    let src = scenes::idle_clip_vars("Idle", [8, 20]);
+    let mut m = direct(src.clone());
+    let e = m.edit.as_ref().unwrap();
+    let shape = shape_named(e, "S");
+    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
+    m.edit_push(
+        vec![Op::SetField {
+            at,
+            field: Field::ShaderType,
+            value: Value::U32(21),
+            base: Value::U32(0),
+        }],
+        None,
+    );
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(e.doc.ops.len(), 1);
+    assert_eq!(e.doc.ops[0].status, OpStatus::Applied);
+    assert_ne!(*e.patched, src);
+    assert!(
+        e.notes
+            .iter()
+            .any(|(_, n)| n.starts_with("Unlinked the Env map scale controller")),
+        "{:?}",
+        e.notes
+    );
+    assert!(m.undo_edit());
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.ops.is_empty());
+    assert_eq!(*e.patched, src);
+}

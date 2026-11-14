@@ -3379,3 +3379,124 @@ fn pbr_fields_refuse_type_0() {
         assert!(locate(&h, &b, at.block as usize, f).is_err(), "{f:?}");
     }
 }
+
+/// Note ID16: the sequence's controlled-block count.
+fn cb_count(b: &[u8], seq: usize) -> usize {
+    let h = Header::parse(b).unwrap();
+    nif::clips::read_sequence_out(&h, b, seq)
+        .unwrap()
+        .blocks
+        .len()
+}
+
+/// The controller block's next and target refs are -1; the block is still there.
+fn assert_unlinked(b: &[u8], ctrl: usize) {
+    let c = block_bytes_of(b, ctrl);
+    let m = (-1i32).to_le_bytes();
+    assert_eq!((&c[..4], &c[22..26]), (&m[..], &m[..]), "controller {ctrl}");
+}
+
+fn pick_21(b: &[u8]) -> Applied {
+    let (op, _) = type_op(b, 21);
+    apply(b, &[op]).unwrap()
+}
+
+/// Task 7: picking 21 unlinks the controllers CS 2.0 refuses (PGPatcher PR-882 style) and keeps the others in order.
+#[test]
+fn pick_21_unlinks_env_scale_keeps_uv() {
+    let b = scenes::idle_clip_vars("Idle", [8, 20]);
+    assert_eq!(cb_count(&b, 13), 2);
+    let r = pick_21(&b);
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let m = read_model(&r.bytes).unwrap();
+    assert!(m.problems.is_empty(), "{:?}", m.problems);
+    assert_eq!(m.lighting[&3].prop.ctrls, vec![5]);
+    assert_unlinked(&r.bytes, 4);
+    assert_eq!(cb_count(&r.bytes, 13), 1);
+    assert_eq!(nblocks(&r.bytes), nblocks(&b));
+    let note = "Unlinked the Env map scale controller from clip Idle";
+    assert!(
+        r.notes.iter().any(|(i, n)| *i == 0 && n == note),
+        "{:?}",
+        r.notes
+    );
+}
+
+/// A clip whose only controlled blocks were refused ends empty, and its manager keeps it.
+#[test]
+fn pick_21_can_empty_a_clip() {
+    let b = scenes::idle_clip_vars("Idle", [8, 7]);
+    let r = pick_21(&b);
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    let m = read_model(&r.bytes).unwrap();
+    assert!(m.problems.is_empty(), "{:?}", m.problems);
+    assert!(m.lighting[&3].prop.ctrls.is_empty());
+    assert_eq!(m.lighting[&3].prop.net.controller, -1);
+    assert_eq!(cb_count(&r.bytes, 13), 0);
+    let h = Header::parse(&r.bytes).unwrap();
+    let man = nif::ctrl::read_manager(&h, &r.bytes, 14).unwrap();
+    assert_eq!(man.sequences, vec![13]);
+    assert_eq!(nblocks(&r.bytes), nblocks(&b));
+}
+
+/// Controllers CS 2.0 reads stay linked, in order, with their clip blocks.
+#[test]
+fn pick_21_keeps_allowed_controllers_and_the_no_effect_ones() {
+    for vars in [[11, 20], [9, 21]] {
+        let b = scenes::idle_clip_vars("Idle", vars);
+        let r = pick_21(&b);
+        let m = read_model(&r.bytes).unwrap();
+        assert_eq!(m.lighting[&3].prop.ctrls, vec![4, 5], "{vars:?}");
+        assert_eq!(cb_count(&r.bytes, 13), 2, "{vars:?}");
+        assert!(r.notes.iter().all(|(_, n)| !n.starts_with("Unlinked")));
+    }
+}
+
+/// A free (unmanaged) chain is relinked the same way, with no clip to edit.
+#[test]
+fn pick_21_unlinks_a_free_controller() {
+    let b = scenes::keyed_pair(scenes::Share::No, [1, 2]);
+    // var 11 -> var 20 becomes var 8 -> var 20: patch the first controller's variable
+    let mut d = nif::write::NifDoc::open(&b).unwrap();
+    d.patch(2, 30, &8u32.to_le_bytes()).unwrap();
+    let b = d.bytes();
+    let r = pick_21(&b);
+    let m = read_model(&r.bytes).unwrap();
+    assert_eq!(m.lighting[&1].prop.ctrls, vec![3]);
+    assert_unlinked(&r.bytes, 2);
+    assert!(
+        r.notes
+            .iter()
+            .any(|(_, n)| n == "Unlinked the Env map scale controller"),
+        "{:?}",
+        r.notes
+    );
+}
+
+#[test]
+fn add_var_8_on_21_refused() {
+    let b = scenes::animated(Some(1), 0);
+    let on21 = pick_21(&b).bytes;
+    let keys = lin(&[(0.0, 1.0), (1.0, 2.0)]);
+    let op = add(
+        prop_anchor(&on21, Role::Shader),
+        LSCF,
+        Some(8),
+        keys.clone(),
+        1.0,
+    );
+    let r = apply(&on21, &[op]).unwrap();
+    assert_eq!(
+        r.outcomes,
+        vec![Outcome::Refused(
+            "Env map scale isn't animated by CS 2.0".into()
+        )]
+    );
+    assert_eq!(r.bytes, on21);
+    // a variable CS 2.0 reads is still added
+    let op = add(prop_anchor(&on21, Role::Shader), LSCF, Some(20), keys, 1.0);
+    assert_eq!(
+        apply(&on21, &[op]).unwrap().outcomes,
+        vec![Outcome::Applied]
+    );
+}

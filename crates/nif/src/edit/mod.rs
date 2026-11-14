@@ -630,7 +630,8 @@ fn step(cur: &[u8], op: &Op, notes: &mut Vec<String>) -> (Option<Vec<u8>>, Outco
                 return refused(format!("{value:?} does not fit {field:?}"));
             }
             if let (Field::ShaderType, Value::U32(t)) = (field, value) {
-                let r = structural::set_shader_type(&mut doc, &m, block, *t).map(|n| *notes = n);
+                let r =
+                    structural::set_shader_type(&mut doc, cur, &m, block, *t).map(|n| *notes = n);
                 return finish(doc, r, outcome);
             }
             value.bytes()

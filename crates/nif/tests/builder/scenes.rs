@@ -416,19 +416,27 @@ pub fn managed_clip_special_idle() -> Vec<u8> {
 /// NiControllerSequence `name` (13; one CB per controller, bound by ref; Loop, 1, 0..1) ; NiControllerManager (14)
 /// listing it, with NiMultiTargetTransformController (15, targets [2]) and NiDefaultAVObjectPalette (16, "S" -> 2).
 pub fn idle_clip(name: &str) -> Vec<u8> {
+    idle_clip_vars(name, [11, 20])
+}
+
+/// `idle_clip` with the two controllers on variables `vars` (the clip's strings follow).
+pub fn idle_clip_vars(name: &str, vars: [u32; 2]) -> Vec<u8> {
     let mut n = Nif::new(100);
     let s = |n: &mut Nif, x: &str| n.string(x);
     let (root, bsx, sh) = (s(&mut n, "Root"), s(&mut n, "BSX"), s(&mut n, "S"));
     let (seq_name, prop) = (s(&mut n, name), s(&mut n, "BSLightingShaderProperty"));
     let ct = s(&mut n, "BSLightingShaderPropertyFloatController");
-    let (id11, id20) = (s(&mut n, "11"), s(&mut n, "20"));
+    let (id11, id20) = (
+        s(&mut n, &vars[0].to_string()),
+        s(&mut n, &vars[1].to_string()),
+    );
     let (start, end) = (s(&mut n, "start"), s(&mut n, "end"));
     let w = W::default().i32(root).u32(1).i32(1).i32(14);
     n.block("NiNode", avobj(w).u32(1).i32(2).u32(0).0);
     n.block("BSXFlags", W::default().i32(bsx).u32(1).0);
     n.block("BSTriShape", bstri_named(sh, 3, -1));
     n.block("BSLightingShaderProperty", lsp_body(0, &[], 4, &[]));
-    for (next, blend, var) in [(5, 6, 11), (-1, 7, 20)] {
+    for (next, blend, var) in [(5, 6, vars[0]), (-1, 7, vars[1])] {
         n.block(
             "BSLightingShaderPropertyFloatController",
             ctrl_body(next, 0x68, 3, W::default().i32(blend).u32(var)),

@@ -1,6 +1,6 @@
 //! Structural ops: shader type re-emit and alpha add/remove/split (spec §5, plan A9). Removal is unlink: the
 //! block stays as an orphan. New blocks are appended; refs inside opaque blocks are never rewritten.
-use super::validate::{ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
+use super::validate::{var_label, ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
 use super::{Anchor, Op, Outcome, Role};
 use crate::clips::{
     encode_mttc, encode_palette, encode_sequence, read_mttc, read_palette, read_sequence_out,
@@ -40,6 +40,7 @@ fn put_u32(out: &mut [u8], at: usize, v: u32) {
 /// payload: to it the v1 shape converts by `pbr2::from_v1`, from it by `pbr2::to_v1` (Note ID10).
 pub(crate) fn set_shader_type(
     doc: &mut NifDoc,
+    cur: &[u8],
     m: &NifModel,
     lsp: u32,
     new_type: u32,
@@ -60,7 +61,7 @@ pub(crate) fn set_shader_type(
     if old_type == new_type {
         return Ok(vec![]);
     }
-    let (out, notes) = if new_type == 21 {
+    let (out, mut notes) = if new_type == 21 {
         to_21(body, p, lt)?
     } else if old_type == 21 {
         from_21(body, p, lt, new_type)?
@@ -79,7 +80,116 @@ pub(crate) fn set_shader_type(
         (out, vec![])
     };
     doc.set_block(lsp, out);
+    if new_type == 21 {
+        notes.extend(unlink_refused(doc, cur, m, lsp)?);
+    }
     Ok(notes)
+}
+
+/// Going to type 21: unlinks each controller of the shader's chain whose variable CS 2.0 refuses, as PGPatcher PR-882
+/// does (Note ID16). The chain is relinked past it, its next and target become -1, and the controlled blocks that
+/// name it leave every clip. No block is deleted; managers, MTTC, palettes and BSX stay. One note per controller and
+/// clip. Only the lighting shader float and colour controllers are checked.
+pub(crate) fn unlink_refused(
+    doc: &mut NifDoc,
+    cur: &[u8],
+    m: &NifModel,
+    lsp: u32,
+) -> Result<Vec<String>, String> {
+    let l = m
+        .lighting
+        .get(&lsp)
+        .ok_or("not a readable shader property")?;
+    let prop = &l.prop;
+    let refused: Vec<u32> = prop
+        .ctrls
+        .iter()
+        .copied()
+        .filter(|c| {
+            m.ctrls.get(c).is_some_and(|c| {
+                let float = &*c.class == LSCF;
+                (float || &*c.class == LSCC)
+                    && c.var.is_some_and(|v| pbr2::var_refused_on_21(float, v))
+            })
+        })
+        .collect();
+    if refused.is_empty() {
+        return Ok(vec![]);
+    }
+    whole_chain(m, prop)?;
+    if let Some(&c) = refused.iter().find(|&&c| owners(m, c).len() > 1) {
+        let label = ctrl_label(m, c, l.lighting.slsf2);
+        return Err(format!(
+            "The {label} controller is shared by several properties: it cannot be unlinked for type 21."
+        ));
+    }
+    let kept: Vec<u32> = prop
+        .ctrls
+        .iter()
+        .copied()
+        .filter(|c| !refused.contains(c))
+        .collect();
+    patch(
+        doc,
+        prop.block,
+        ctrl_ref_at(doc, prop),
+        kept.first().map_or(-1, |&c| c as i32),
+    )?;
+    for (k, &c) in kept.iter().enumerate() {
+        patch(doc, c, 0, kept.get(k + 1).map_or(-1, |&n| n as i32))?;
+    }
+    for &c in &refused {
+        patch(doc, c, 0, -1)?; // next
+        patch(doc, c, 22, -1)?; // target
+    }
+    let h = enc(Header::parse(cur))?;
+    let mut notes = vec![];
+    let mut cut: Vec<(u32, Vec<usize>)> = vec![];
+    for s in &m.sequences {
+        let mut drop: Vec<usize> = refused
+            .iter()
+            .flat_map(|&c| crate::anim::bound_cbs(m, &h, s, c))
+            .collect();
+        if drop.is_empty() {
+            continue;
+        }
+        drop.sort_unstable();
+        drop.dedup();
+        cut.push((s.block, drop));
+    }
+    for (seq, drop) in &cut {
+        let mut out = enc(read_sequence_out(&h, cur, *seq as usize))?;
+        let mut k = 0;
+        out.blocks.retain(|_| {
+            k += 1;
+            !drop.contains(&(k - 1))
+        });
+        doc.set_block(*seq, enc(encode_sequence(&out))?);
+    }
+    for &c in &refused {
+        let label = ctrl_label(m, c, l.lighting.slsf2);
+        let clips: Vec<String> = m
+            .sequences
+            .iter()
+            .filter(|s| !crate::anim::bound_cbs(m, &h, s, c).is_empty())
+            .map(|s| s.name.as_deref().unwrap_or("(unnamed)").to_string())
+            .collect();
+        if clips.is_empty() {
+            notes.push(format!("Unlinked the {label} controller"));
+        }
+        for name in clips {
+            notes.push(format!("Unlinked the {label} controller from clip {name}"));
+        }
+    }
+    Ok(notes)
+}
+
+/// The label of controller `c`'s variable, as the editor shows it ("Variable N" when it has none).
+fn ctrl_label(m: &NifModel, c: u32, slsf2: u32) -> String {
+    m.ctrls
+        .get(&c)
+        .and_then(|c| c.var.map(|v| var_label(&c.class, v, slsf2)))
+        .unwrap_or_else(|| "controller".into())
 }
 
 /// The block bytes up to the end of the refraction field (the head both type-21 conversions keep), with the new type.
@@ -816,6 +926,15 @@ pub(crate) fn ctrl_op(
                 .lighting
                 .get(&block)
                 .is_some_and(|l| l.lighting.slsf2 & SLSF2_TRUE_PBR != 0);
+            if let (Some(v), true) = (var, shader) {
+                let l = m.lighting.get(&block).map(|l| &l.lighting);
+                if l.is_some_and(|l| l.shader_type == 21)
+                    && pbr2::var_refused_on_21(class == LSCF, *v)
+                {
+                    let label = var_label(class, *v, l.map_or(0, |l| l.slsf2));
+                    return Err(format!("{label} isn't animated by CS 2.0"));
+                }
+            }
             if class == LSCF && *var == Some(8) && pbr {
                 return Err(ENV_SCALE_PBR.into());
             }

@@ -40,6 +40,18 @@ pub const COLOR_VARS: [u32; 1] = [1];
 /// Colour controller variables CS 2.0 runs but shows no change for (specular colour).
 pub const NO_EFFECT_COLOR_VARS: [u32; 1] = [0];
 
+/// True when CS 2.0 refuses controller variable `var` of the lighting shader float (`float`) or colour controller
+/// class (Note ID16): neither one it acts on nor one it runs without a visible change. The validator, the pick of
+/// type 21 and AddController all ask this one question.
+pub fn var_refused_on_21(float: bool, var: u32) -> bool {
+    let (offered, no_effect) = if float {
+        (&FLOAT_VARS[..], &NO_EFFECT_FLOAT_VARS[..])
+    } else {
+        (&COLOR_VARS[..], &NO_EFFECT_COLOR_VARS[..])
+    };
+    !offered.contains(&var) && !no_effect.contains(&var)
+}
+
 /// Default of each of the 25 parameters.
 pub const PBR2_DEFAULTS: [f32; PARAM_COUNT] = [
     1.0, 0.04, 1.0, // roughness scale, specular level, displacement scale
