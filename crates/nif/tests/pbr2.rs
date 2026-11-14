@@ -1,7 +1,8 @@
 //! The CS 2.0 rules (spec sections 3 and 4) as pure functions.
 use nif::pbr2::{
-    allowed_with, clamp_param, feat::*, feature_errors, param_error, PARAM_COUNT, PARAM_RANGE,
-    PBR2_DEFAULTS,
+    allowed_with, clamp_param, feat::*, feature_errors, param_error, BITS_ABOVE_9,
+    COAT_NEEDS_TWO_LAYER, FUZZ_GLINT, HAIR_ALONE, PARAM_COUNT, PARAM_RANGE, PBR2_DEFAULTS,
+    TWO_LAYER_EXCLUDES,
 };
 
 #[test]
@@ -20,36 +21,46 @@ fn clean_feature_sets_have_no_error() {
 
 #[test]
 fn hair_must_be_alone() {
-    assert_eq!(feature_errors(HAIR | SUBSURFACE).len(), 1);
-    assert_eq!(feature_errors(HAIR | GLINT | FUZZ | THIN_SURFACE).len(), 2); // + fuzz excludes glint
+    assert_eq!(feature_errors(HAIR | SUBSURFACE), [HAIR_ALONE]);
+    assert_eq!(
+        feature_errors(HAIR | GLINT | FUZZ | THIN_SURFACE),
+        [HAIR_ALONE, FUZZ_GLINT]
+    ); // + fuzz excludes glint
 }
 
 #[test]
 fn coat_children_need_two_layer() {
     for f in [COLORED_COAT, INTERLAYER_PARALLAX, COAT_NORMAL] {
-        assert_eq!(feature_errors(f).len(), 1, "{f:#x}");
+        assert_eq!(feature_errors(f), [COAT_NEEDS_TWO_LAYER], "{f:#x}");
         assert!(feature_errors(f | TWO_LAYER).is_empty());
     }
     // all three without two-layer is still the one rule
-    assert_eq!(feature_errors(COLORED_COAT | COAT_NORMAL).len(), 1);
+    assert_eq!(
+        feature_errors(COLORED_COAT | COAT_NORMAL),
+        [COAT_NEEDS_TWO_LAYER]
+    );
 }
 
 #[test]
 fn two_layer_excludes_sss_fuzz_glint_foliage_thin() {
     for f in [SUBSURFACE, FUZZ, GLINT, FOLIAGE, THIN_SURFACE] {
-        assert_eq!(feature_errors(TWO_LAYER | f).len(), 1, "{f:#x}");
+        assert_eq!(
+            feature_errors(TWO_LAYER | f),
+            [TWO_LAYER_EXCLUDES],
+            "{f:#x}"
+        );
     }
 }
 
 #[test]
 fn fuzz_excludes_glint() {
-    assert_eq!(feature_errors(FUZZ | GLINT).len(), 1);
+    assert_eq!(feature_errors(FUZZ | GLINT), [FUZZ_GLINT]);
 }
 
 #[test]
 fn bits_above_9_invalid() {
-    assert_eq!(feature_errors(1 << 10).len(), 1);
-    assert_eq!(feature_errors(0xFFFF_FC00).len(), 1);
+    assert_eq!(feature_errors(1 << 10), [BITS_ABOVE_9]);
+    assert_eq!(feature_errors(0xFFFF_FC00), [BITS_ABOVE_9]);
 }
 
 #[test]

@@ -94,6 +94,8 @@ pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders
 /// Start of every type-21 Error (Note ID4): CS 2.0 logs the block and draws nothing. The text varies per field and
 /// parameter, so [`new_errors`] matches the prefix instead of listing each text in [`ALWAYS_BLOCK`].
 pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
+/// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.
+pub const TYPE_22: &str = "CS 2.0 won't draw this shape: type 22 is runtime only";
 /// A v1 PBR flag (SLSF2 12, 23, 25, 26, 27, 30) on a type-21 shader: CS 2.0 doesn't read it. A Warn, never blocks.
 pub const V1_FLAG: &str = "v1 PBR flag: CS 2.0 doesn't use it";
 /// Errors that block export even when the source already has them: each one crashes or blacks out in game.
@@ -284,8 +286,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             );
         }
         if lt.shader_type == 22 {
-            let t = format!("{WONT_DRAW}type 22 is runtime only");
-            push(Level::Error, fld(block, Field::ShaderType), &t, None);
+            push(Level::Error, fld(block, Field::ShaderType), TYPE_22, None);
         }
         if p.emissive_color.iter().any(|&c| c != 0.0) && lt.slsf1 & SLSF1_OWN_EMIT == 0 {
             let t = "No effect in game: Own_Emit is off";
@@ -404,7 +405,8 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
                 push(Level::Warn, tgt, &t, None);
             }
         }
-        if t21 {
+        // S-P2: a shader no shape uses is never drawn, so its rules cannot block export
+        if t21 && !l.prop.users.is_empty() {
             for w in type_21(m, block, l, shader_at.clone()) {
                 push(w.level, w.target, &w.text, w.fix);
             }
@@ -885,6 +887,12 @@ pub fn demote_source(source: &[Warning], edited: &mut [Warning]) {
     }
 }
 
+/// An Error that blocks export even when the source already has it: an [`ALWAYS_BLOCK`] text, or any type-21 Error
+/// (text starts with [`WONT_DRAW`]; the texts name the field, so they cannot all be listed).
+pub fn always_blocks(w: &Warning) -> bool {
+    ALWAYS_BLOCK.contains(&w.text.as_str()) || w.text.starts_with(WONT_DRAW)
+}
+
 /// Errors in `edited` that `source` does not already have (R14): an untouched source error never blocks export,
 /// except [`ALWAYS_BLOCK`], which crash or black out in game (B-P39, Note CS).
 pub fn new_errors(source: &[Warning], edited: &[Warning]) -> Vec<Warning> {
@@ -892,8 +900,7 @@ pub fn new_errors(source: &[Warning], edited: &[Warning]) -> Vec<Warning> {
         .iter()
         .filter(|w| {
             w.level == Level::Error
-                && (ALWAYS_BLOCK.contains(&w.text.as_str())
-                    || w.text.starts_with(WONT_DRAW)
+                && (always_blocks(w)
                     || !source
                         .iter()
                         .any(|s| s.target == w.target && s.text == w.text))

@@ -61,6 +61,8 @@ mod type21 {
         ctrls: Vec<(&'static str, u32)>,
         thin: Option<Vec<f32>>,
         fuzz: Option<Vec<f32>>,
+        /// The shape's shader ref: 1 uses the shader block, -1 leaves it an orphan.
+        shader_ref: i32,
     }
 
     impl Default for S {
@@ -83,6 +85,7 @@ mod type21 {
                 ctrls: vec![],
                 thin: None,
                 fuzz: None,
+                shader_ref: 1,
             }
         }
     }
@@ -102,7 +105,7 @@ mod type21 {
             if self.fuzz.is_some() {
                 refs.push(extra_at + self.thin.is_some() as i32);
             }
-            n.block("BSTriShape", scenes::tri_shape(s, 1));
+            n.block("BSTriShape", scenes::tri_shape(s, self.shader_ref));
             n.block(
                 "BSLightingShaderProperty",
                 scenes::lsp21_body(
@@ -547,6 +550,7 @@ mod type21 {
 
     #[test]
     fn type_21_skips_vanilla_glossiness_checks() {
+        // A pin of existing behaviour: glossiness reads 0.0 on type 21, so this passes with or without the skip.
         // a clean type-21 shape reads glossiness and specular strength as 0 and has no trailer words to range
         let m = read_model(&S::default().bytes()).unwrap();
         assert_eq!(m.lighting[&SHADER].lighting.shader_type, 21);
@@ -566,15 +570,59 @@ mod type21 {
         let w = warnings(&n.bytes());
         let x = only_text(&w, "type 22 is runtime only");
         assert_eq!(x.level, Level::Error);
+        assert_eq!(x.text, nif::edit::validate::TYPE_22);
         assert!(x.text.starts_with(WONT));
         assert_eq!(new_errors(&w, &w).len(), 1);
     }
 
     #[test]
     fn a_vanilla_shape_gets_no_type_21_rule() {
-        // type 0 with a v1 PBR flag: no v1-flag warning, no slot error
-        let w = warnings(&scenes::lsp_shape(0, &[]));
-        assert!(w.iter().all(|x| !x.text.contains("CS 2.0")), "{w:#?}");
+        // a type-0 shader with v1 PBR flags gets no type-21 rule (no v1-flag Warn, no "CS 2.0" Error)
+        let b = put(
+            scenes::lsp_shape(0, &[]),
+            1,
+            Field::Slsf2,
+            Value::U32(1 | 1 << 23 | 1 << 12),
+        );
+        let w = warnings(&b);
+        assert!(
+            w.iter()
+                .all(|x| !x.text.contains("CS 2.0") && x.text != nif::edit::validate::V1_FLAG),
+            "{w:#?}"
+        );
+    }
+
+    #[test]
+    fn an_unused_shader_gets_no_type_21_rule() {
+        let bad = S {
+            version: 1,
+            slots: vec![],
+            ..S::default()
+        };
+        assert!(!bad.warnings().is_empty());
+        let orphan = S {
+            shader_ref: -1,
+            ..bad
+        };
+        assert_eq!(orphan.warnings(), vec![]);
+    }
+
+    #[test]
+    fn an_untouched_source_error_still_blocks_after_demote_source() {
+        let mut slots = S::default().slots;
+        slots[4] = "textures\\x.dds"; // the reserved environment slot
+        let src = S {
+            slots,
+            ..S::default()
+        }
+        .warnings();
+        let mut edited = src.clone();
+        nif::edit::validate::demote_source(&src, &mut edited);
+        let n = new_errors(&src, &edited);
+        assert_eq!(n.len(), 1, "{edited:#?}");
+        assert_eq!(n[0].level, Level::Error);
+        assert!(n[0].text.starts_with(WONT));
+        assert!(nif::edit::validate::always_blocks(&n[0]));
     }
 }
 

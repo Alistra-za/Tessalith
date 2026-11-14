@@ -142,13 +142,13 @@ pub fn clamp_param(i: usize, v: f32) -> f32 {
     }
 }
 
-const BITS_ABOVE_9: &str = "feature bits above 9 are invalid";
-const HAIR_ALONE: &str = "hair must be the only feature";
-const COAT_NEEDS_TWO_LAYER: &str =
+pub const BITS_ABOVE_9: &str = "feature bits above 9 are invalid";
+pub const HAIR_ALONE: &str = "hair must be the only feature";
+pub const COAT_NEEDS_TWO_LAYER: &str =
     "colored coat, interlayer parallax and coat normal need two-layer coat";
-const TWO_LAYER_EXCLUDES: &str =
+pub const TWO_LAYER_EXCLUDES: &str =
     "two-layer coat can't be combined with subsurface, fuzz, glint, foliage or thin surface";
-const FUZZ_GLINT: &str = "fuzz and glint exclude each other";
+pub const FUZZ_GLINT: &str = "fuzz and glint exclude each other";
 
 /// The spec section 3 rules `features` breaks, one text per broken rule.
 pub fn feature_errors(features: u32) -> Vec<&'static str> {
