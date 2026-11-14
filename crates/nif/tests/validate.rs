@@ -37,6 +37,547 @@ fn none(w: &[Warning], text: &str) {
     assert!(w.iter().all(|x| x.text != text), "{text:?} in {w:#?}");
 }
 
+/// Shader type 21 (CS TruePBR 2.0): the shape is block 0, the shader block 1, the texture set block 2.
+mod type21 {
+    use super::*;
+    use nif::pbr2::{feat, BANNED_SLSF1, BANNED_SLSF2, PBR2_DEFAULTS, V1_SLSF2};
+
+    const WONT: &str = "CS 2.0 won't draw this shape: ";
+    const LSCF: &str = "BSLightingShaderPropertyFloatController";
+    const LSCC: &str = "BSLightingShaderPropertyColorController";
+    const SHADER: u32 = 1;
+
+    /// What a scene holds; `Default` is a clean type-21 shape.
+    struct S {
+        bsver: u32,
+        slsf1: u32,
+        slsf2: u32,
+        version: u32,
+        features: u32,
+        params: [f32; 25],
+        /// Texture slots; slots past the end are absent.
+        slots: Vec<&'static str>,
+        /// Controller chain on the shader: (class, variable).
+        ctrls: Vec<(&'static str, u32)>,
+        thin: Option<Vec<f32>>,
+        fuzz: Option<Vec<f32>>,
+    }
+
+    impl Default for S {
+        fn default() -> S {
+            S {
+                bsver: 100,
+                slsf1: 0x8000_0000,
+                slsf2: 1,
+                version: 2,
+                features: 0,
+                params: PBR2_DEFAULTS,
+                slots: vec![
+                    "textures\\a_d.dds",
+                    "textures\\a_n.dds",
+                    "",
+                    "",
+                    "",
+                    "textures\\a_rmaos.dds",
+                ],
+                ctrls: vec![],
+                thin: None,
+                fuzz: None,
+            }
+        }
+    }
+
+    impl S {
+        fn bytes(&self) -> Vec<u8> {
+            let mut n = builder::Nif::new(self.bsver);
+            let s = n.string("S");
+            let (tn, fnm) = (n.string("PBRThinSurface"), n.string("PBRFuzz"));
+            // blocks: 0 shape, 1 shader, 2 texture set, then the controllers, then the extras
+            let first_ctrl = if self.ctrls.is_empty() { -1 } else { 3 };
+            let extra_at = 3 + self.ctrls.len() as i32;
+            let mut refs = vec![];
+            if self.thin.is_some() {
+                refs.push(extra_at);
+            }
+            if self.fuzz.is_some() {
+                refs.push(extra_at + self.thin.is_some() as i32);
+            }
+            n.block("BSTriShape", scenes::tri_shape(s, 1));
+            n.block(
+                "BSLightingShaderProperty",
+                scenes::lsp21_body(
+                    &refs,
+                    first_ctrl,
+                    self.slsf1,
+                    self.slsf2,
+                    self.version,
+                    self.features,
+                    &self.params,
+                ),
+            );
+            n.block("BSShaderTextureSet", scenes::texset(&self.slots));
+            for (i, (class, var)) in self.ctrls.iter().enumerate() {
+                let next = if i + 1 < self.ctrls.len() {
+                    4 + i as i32
+                } else {
+                    -1
+                };
+                let tail = builder::W::default().i32(-1).u32(*var);
+                n.block(class, scenes::ctrl_body(next, 0x48, 1, tail));
+            }
+            if let Some(t) = &self.thin {
+                n.block("NiFloatsExtraData", scenes::floats_extra(tn, t));
+            }
+            if let Some(f) = &self.fuzz {
+                n.block("NiFloatsExtraData", scenes::floats_extra(fnm, f));
+            }
+            n.bytes()
+        }
+        fn warnings(&self) -> Vec<Warning> {
+            warnings(&self.bytes())
+        }
+    }
+
+    fn only_text(w: &[Warning], text: &str) -> Warning {
+        let hits: Vec<_> = w.iter().filter(|x| x.text.contains(text)).collect();
+        assert_eq!(hits.len(), 1, "{text:?} in {w:#?}");
+        hits[0].clone()
+    }
+
+    #[test]
+    fn clean_type_21_has_no_warning() {
+        assert_eq!(S::default().warnings(), vec![]);
+        // a clean shape with features, a thin block and a fuzz block
+        let s = S {
+            features: feat::FUZZ | feat::THIN_SURFACE,
+            thin: Some(vec![0.7, 0.5, 0.5, 1.0]),
+            fuzz: Some(vec![-1.0, 0.0]),
+            ..S::default()
+        };
+        assert_eq!(s.warnings(), vec![]);
+    }
+
+    #[test]
+    fn version_other_than_2_is_an_error_with_a_fix() {
+        let w = S {
+            version: 1,
+            ..S::default()
+        }
+        .warnings();
+        let x = only_text(&w, "version");
+        assert_eq!(x.level, Level::Error);
+        assert!(x.text.starts_with(WONT));
+        assert_eq!(
+            x.target,
+            Target::Field {
+                block: 1,
+                field: Field::PbrVersion
+            }
+        );
+        assert!(matches!(
+            x.fix,
+            Some(Op::SetField {
+                field: Field::PbrVersion,
+                value: Value::U32(2),
+                base: Value::U32(1),
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn each_feature_rule_is_an_error_without_a_fix() {
+        for f in [
+            feat::HAIR | feat::SUBSURFACE,
+            feat::COAT_NORMAL,
+            feat::TWO_LAYER | feat::FUZZ,
+            feat::FUZZ | feat::GLINT,
+            1 << 10,
+        ] {
+            let w = S {
+                features: f,
+                // slots 3 and 6 filled, so the rules that need them stay quiet
+                slots: [
+                    "textures\\a_d.dds",
+                    "textures\\a_n.dds",
+                    "",
+                    "textures\\a_p.dds",
+                    "",
+                    "textures\\a_rmaos.dds",
+                    "textures\\a_i.dds",
+                ]
+                .to_vec(),
+                ..S::default()
+            }
+            .warnings();
+            let want = nif::pbr2::feature_errors(f);
+            assert_eq!(w.len(), want.len(), "{f:#x}: {w:#?}");
+            for (x, text) in w.iter().zip(&want) {
+                assert_eq!(x.level, Level::Error);
+                assert_eq!(x.text, format!("{WONT}{text}"));
+                assert_eq!(
+                    x.target,
+                    Target::Field {
+                        block: 1,
+                        field: Field::PbrFeatures
+                    }
+                );
+                assert!(x.fix.is_none());
+            }
+        }
+    }
+
+    #[test]
+    fn param_out_of_range_is_an_error_with_a_clamp_fix() {
+        let mut p = PBR2_DEFAULTS;
+        p[18] = 50.0;
+        let w = S {
+            params: p,
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(w.len(), 1, "{w:#?}");
+        assert_eq!(w[0].level, Level::Error);
+        assert!(w[0].text.starts_with(WONT), "{}", w[0].text);
+        assert_eq!(
+            w[0].target,
+            Target::Field {
+                block: 1,
+                field: Field::PbrParam(18)
+            }
+        );
+        let want = Value::F32(40.0f32.to_bits());
+        let base = Value::F32(50.0f32.to_bits());
+        assert!(
+            matches!(&w[0].fix, Some(Op::SetField { field: Field::PbrParam(18), value, base: b, .. }) if *value == want && *b == base),
+            "{:?}",
+            w[0].fix
+        );
+        // the fix, applied, leaves nothing
+        let b = S {
+            params: p,
+            ..S::default()
+        }
+        .bytes();
+        let out = apply(&b, &[w[0].fix.clone().unwrap()]).unwrap();
+        assert_eq!(warnings(&out.bytes), vec![]);
+    }
+
+    #[test]
+    fn nan_param_does_not_panic() {
+        let mut p = PBR2_DEFAULTS;
+        p[0] = f32::NAN;
+        p[1] = f32::NEG_INFINITY;
+        let w = S {
+            params: p,
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(
+            w.iter().filter(|x| x.level == Level::Error).count(),
+            2,
+            "{w:#?}"
+        );
+        // NaN clamps to the default, which is in range
+        let Some(Op::SetField { value, .. }) = &w[0].fix else {
+            panic!("{w:#?}")
+        };
+        assert_eq!(*value, Value::F32(PBR2_DEFAULTS[0].to_bits()));
+    }
+
+    #[test]
+    fn banned_flags_are_an_error_that_clears_them() {
+        let w = S {
+            // 10, 17, 18 and 21 also trip the vanilla type-flag rules, which don't apply on 21
+            slsf1: 0x8000_0000 | 1 << 7 | 1 << 10 | 1 << 17 | 1 << 18 | 1 << 21 | 1 << 28,
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(w.len(), 1, "{w:#?}");
+        assert_eq!(w[0].level, Level::Error);
+        assert!(w[0].text.starts_with(WONT));
+        assert_eq!(
+            w[0].target,
+            Target::Field {
+                block: 1,
+                field: Field::Slsf1
+            }
+        );
+        assert!(matches!(
+            w[0].fix,
+            Some(Op::SetBits { field: Field::Slsf1, mask, value: 0, .. }) if mask == (1 << 7 | 1 << 10 | 1 << 17 | 1 << 18 | 1 << 21 | 1 << 28)
+        ));
+        let w = S {
+            slsf2: 1 | 1 << 24 | 1 << 6,
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(w.len(), 1, "{w:#?}");
+        assert!(matches!(
+            w[0].fix,
+            Some(Op::SetBits { field: Field::Slsf2, mask, value: 0, .. }) if mask == (1 << 24 | 1 << 6)
+        ));
+        // every banned bit is caught
+        for bit in (0..32).filter(|b| BANNED_SLSF1 >> b & 1 != 0) {
+            let w = S {
+                slsf1: 1 << bit,
+                ..S::default()
+            }
+            .warnings();
+            assert!(w.iter().any(|x| x.level == Level::Error), "slsf1 {bit}");
+        }
+        for bit in (0..32).filter(|b| BANNED_SLSF2 >> b & 1 != 0) {
+            let w = S {
+                slsf2: 1 << bit,
+                ..S::default()
+            }
+            .warnings();
+            assert!(w.iter().any(|x| x.level == Level::Error), "slsf2 {bit}");
+        }
+    }
+
+    #[test]
+    fn v1_flags_are_a_warning_that_never_blocks() {
+        let w = S {
+            slsf2: 1 | 1 << 23 | 1 << 12,
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(w.len(), 1, "{w:#?}");
+        assert_eq!(w[0].level, Level::Warn);
+        assert_eq!(w[0].text, "v1 PBR flag: CS 2.0 doesn't use it");
+        assert!(matches!(
+            w[0].fix,
+            Some(Op::SetBits { field: Field::Slsf2, mask, value: 0, .. }) if mask == (1 << 23 | 1 << 12)
+        ));
+        assert!(new_errors(&w, &w).is_empty());
+        for bit in (0..32).filter(|b| V1_SLSF2 >> b & 1 != 0) {
+            let w = S {
+                slsf2: 1 << bit,
+                ..S::default()
+            }
+            .warnings();
+            assert_eq!(
+                w.iter().map(|x| x.level).collect::<Vec<_>>(),
+                [Level::Warn],
+                "slsf2 {bit}"
+            );
+        }
+    }
+
+    /// An Error on a texture slot (target index), text starting with the prefix, and always blocking.
+    fn slot_error(w: &[Warning], slot: u32) {
+        let x = w
+            .iter()
+            .filter(|x| x.target == Target::Slot { set: 2, slot })
+            .collect::<Vec<_>>();
+        assert_eq!(x.len(), 1, "slot {slot} in {w:#?}");
+        assert_eq!(x[0].level, Level::Error);
+        assert!(x[0].text.starts_with(WONT));
+        assert!(x[0].fix.is_none());
+        assert_eq!(
+            new_errors(w, w)
+                .iter()
+                .filter(|e| e.target == x[0].target)
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn reserved_slots_must_be_empty() {
+        for slot in [4usize, 8] {
+            let mut slots = vec![
+                "textures\\a_d.dds",
+                "textures\\a_n.dds",
+                "",
+                "",
+                "",
+                "textures\\a_rmaos.dds",
+                "",
+                "",
+                "",
+            ];
+            slots[slot] = "textures\\x.dds";
+            slot_error(
+                &S {
+                    slots,
+                    ..S::default()
+                }
+                .warnings(),
+                slot as u32,
+            );
+        }
+    }
+
+    #[test]
+    fn required_slots_must_not_be_empty() {
+        for slot in [0usize, 1, 5] {
+            let mut slots = S::default().slots;
+            slots[slot] = "";
+            slot_error(
+                &S {
+                    slots,
+                    ..S::default()
+                }
+                .warnings(),
+                slot as u32,
+            );
+        }
+        // a set that stops before slot 5 reads as empty there
+        let slots = vec!["textures\\a_d.dds", "textures\\a_n.dds"];
+        slot_error(
+            &S {
+                slots,
+                ..S::default()
+            }
+            .warnings(),
+            5,
+        );
+    }
+
+    #[test]
+    fn slot_3_is_needed_by_interlayer_parallax_and_slot_6_by_coat_normal() {
+        let f = feat::TWO_LAYER | feat::INTERLAYER_PARALLAX;
+        slot_error(
+            &S {
+                features: f,
+                ..S::default()
+            }
+            .warnings(),
+            3,
+        );
+        let mut slots = S::default().slots;
+        slots[3] = "textures\\a_p.dds";
+        assert_eq!(
+            S {
+                features: f,
+                slots,
+                ..S::default()
+            }
+            .warnings(),
+            vec![]
+        );
+        let f = feat::TWO_LAYER | feat::COAT_NORMAL;
+        slot_error(
+            &S {
+                features: f,
+                ..S::default()
+            }
+            .warnings(),
+            6,
+        );
+        let mut slots = S::default().slots;
+        slots.push("textures\\a_i.dds");
+        assert_eq!(
+            S {
+                features: f,
+                slots,
+                ..S::default()
+            }
+            .warnings(),
+            vec![]
+        );
+    }
+
+    #[test]
+    fn le_type_21_is_an_error() {
+        let w = S {
+            bsver: 83,
+            ..S::default()
+        }
+        .warnings();
+        let x = only_text(&w, "100");
+        assert_eq!(x.level, Level::Error);
+        assert!(x.text.starts_with(WONT));
+        assert!(x.fix.is_none());
+    }
+
+    #[test]
+    fn extra_data_with_a_wrong_count_is_a_warning() {
+        let w = S {
+            thin: Some(vec![0.5; 3]),
+            fuzz: Some(vec![0.5; 3]),
+            ..S::default()
+        }
+        .warnings();
+        assert_eq!(w.len(), 2, "{w:#?}");
+        for x in &w {
+            assert_eq!(x.level, Level::Warn);
+            assert!(x.text.contains("CS ignores it"), "{}", x.text);
+            assert!(x.fix.is_none());
+        }
+        assert!(w[0].text.contains("PBRThinSurface") && w[1].text.contains("PBRFuzz"));
+        assert!(new_errors(&w, &w).is_empty());
+    }
+
+    #[test]
+    fn controller_variables_outside_the_offered_set() {
+        // float: 8 (env map scale) and 13 are not offered; 9 and 10 run but show nothing; 11 is fine
+        for (class, var, level) in [
+            (LSCF, 8, Some(Level::Error)),
+            (LSCF, 13, Some(Level::Error)),
+            (LSCF, 9, Some(Level::Warn)),
+            (LSCF, 10, Some(Level::Warn)),
+            (LSCF, 11, None),
+            (LSCF, 0, None),
+            (LSCC, 1, None),
+            (LSCC, 0, Some(Level::Warn)),
+            (LSCC, 5, Some(Level::Error)),
+        ] {
+            let w = S {
+                ctrls: vec![(class, var)],
+                ..S::default()
+            }
+            .warnings();
+            let got: Vec<_> = w
+                .iter()
+                .filter(|x| x.target == Target::Block { block: 3 })
+                .collect();
+            assert!(got.len() <= 1, "{class} {var}: {w:#?}");
+            assert_eq!(got.first().map(|x| x.level), level, "{class} {var}: {w:#?}");
+            if level == Some(Level::Error) {
+                assert!(got[0].text.starts_with(WONT));
+            }
+            if level == Some(Level::Warn) {
+                assert!(got[0].text.contains("runs, but CS 2.0 shows no change"));
+            }
+        }
+    }
+
+    #[test]
+    fn type_21_skips_vanilla_glossiness_checks() {
+        // a clean type-21 shape reads glossiness and specular strength as 0 and has no trailer words to range
+        let m = read_model(&S::default().bytes()).unwrap();
+        assert_eq!(m.lighting[&SHADER].lighting.shader_type, 21);
+        let w = S::default().warnings();
+        assert!(w.iter().all(|x| !x.text.contains("is outside")), "{w:#?}");
+    }
+
+    #[test]
+    fn type_22_is_an_error() {
+        let mut n = builder::Nif::new(100);
+        let s = n.string("S");
+        n.block("BSTriShape", scenes::tri_shape(s, 1));
+        n.block(
+            "BSLightingShaderProperty",
+            scenes::lsp_body(22, &[], -1, &[]),
+        );
+        let w = warnings(&n.bytes());
+        let x = only_text(&w, "type 22 is runtime only");
+        assert_eq!(x.level, Level::Error);
+        assert!(x.text.starts_with(WONT));
+        assert_eq!(new_errors(&w, &w).len(), 1);
+    }
+
+    #[test]
+    fn a_vanilla_shape_gets_no_type_21_rule() {
+        // type 0 with a v1 PBR flag: no v1-flag warning, no slot error
+        let w = warnings(&scenes::lsp_shape(0, &[]));
+        assert!(w.iter().all(|x| !x.text.contains("CS 2.0")), "{w:#?}");
+    }
+}
+
 #[test]
 fn clean_scene_has_no_warnings() {
     assert_eq!(warnings(&scenes::lsp_shape(0, &[])), vec![]);

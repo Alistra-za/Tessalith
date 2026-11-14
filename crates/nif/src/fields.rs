@@ -207,7 +207,7 @@ fn lsp(h: &Header, b: &[u8], block: usize, f: Field) -> Result<Found, NifError> 
     Ok(match f {
         Field::PbrVersion => Some((p + 56, Ty::U32)),
         Field::PbrFeatures => Some((p + 60, Ty::U32)),
-        Field::PbrParam(i) if idx(i, crate::pbr2::PARAM_NAMES.len() as u8) => {
+        Field::PbrParam(i) if idx(i, crate::pbr2::PARAM_COUNT as u8) => {
             Some((p + 64 + 4 * i as usize, Ty::F32))
         }
         Field::ShaderType => Some((0, Ty::U32)),
