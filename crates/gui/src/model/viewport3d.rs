@@ -165,6 +165,8 @@ pub type SkinPreviews = BTreeMap<ShapeId, SkinEntry>;
 
 /// What the panel draws: a NIF read through a [`MeshSpec`] (the Meshes view), a parsed NIF whose shape materials
 /// the caller set (the set preview's simulated PGPatcher patch, P1-A), or a built-in shape.
+// `MaterialState` holds the type-21 payload (25 floats) inline; a content value is built once per load.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Content {
     Mesh(Arc<MeshSpec>),

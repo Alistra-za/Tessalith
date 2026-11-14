@@ -28,6 +28,69 @@ pub fn lsp_body(shader_type: u32, extra: &[i32], controller: i32, trailer: &[f32
         .0
 }
 
+/// BSLightingShaderProperty body of shader type 21 (spec section 2): `180 + 4N` bytes. The head ends at refraction;
+/// then PBR version, PBR features and the 25 parameters. Its texture set ref is block 2 (see [`lsp21_shape`]).
+pub fn lsp21_body(
+    extra: &[i32],
+    controller: i32,
+    slsf1: u32,
+    slsf2: u32,
+    version: u32,
+    features: u32,
+    params: &[f32; 25],
+) -> Vec<u8> {
+    let w = W::default().u32(21);
+    w.raw(&nif::net::encode_net(-1, extra, controller))
+        .u32(slsf1)
+        .u32(slsf2)
+        .fs(&[0.0, 0.0, 1.0, 1.0]) // uv offset, scale
+        .i32(2) // texture set
+        .fs(&[0.0, 0.0, 0.0, 1.0]) // emissive color, multiple
+        .u32(3) // clamp
+        .fs(&[1.0, 0.0]) // alpha, refraction
+        .u32(version)
+        .u32(features)
+        .fs(params)
+        .0
+}
+
+/// One triangle (positions only) on a BSTriShape named by string `name`, shader ref `shader`, so a preview draws it.
+pub fn tri_shape(name: i32, shader: i32) -> Vec<u8> {
+    avobj(net(name))
+        .fs(&[0.0; 4])
+        .i32(-1)
+        .i32(shader)
+        .i32(-1)
+        .u64((1 << 44) | 4) // Vertex, 16-byte records
+        .u16(1)
+        .u16(3)
+        .u32(3 * 16 + 6)
+        .fs(&[0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0])
+        .u16(0)
+        .u16(1)
+        .u16(2)
+        .u32(0) // particle data
+        .0
+}
+
+/// A one-shape NIF (bsver 100): triangle shape "S" (0) -> type-21 BSLSP (1, no extra data, SLSF1 0x8000_0000, SLSF2 1)
+/// -> texture set (2) with slots 0, 1 and 5 filled.
+pub fn lsp21_shape(features: u32, params: &[f32; 25]) -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = n.string("S");
+    n.block("BSTriShape", tri_shape(s, 1));
+    n.block(
+        "BSLightingShaderProperty",
+        lsp21_body(&[], -1, 0x8000_0000, 1, 2, features, params),
+    );
+    let mut slots = [""; 9];
+    slots[0] = "textures\\a_d.dds";
+    slots[1] = "textures\\a_n.dds";
+    slots[5] = "textures\\a_rmaos.dds";
+    n.block("BSShaderTextureSet", texset(&slots));
+    n.bytes()
+}
+
 /// Index of the first block of that type.
 pub fn block_of(h: &Header, kind: &str) -> usize {
     (0..h.sizes.len())

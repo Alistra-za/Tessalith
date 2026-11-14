@@ -1,4 +1,6 @@
 //! `parse`: pure NIF → per-shape data, keyed by block index.
+#[path = "../../nif/tests/builder/mod.rs"]
+mod builder;
 use nif::scan::{scan, Shader};
 use render3d::{parse, ParsedNif, ShapeId};
 
@@ -75,6 +77,26 @@ fn skipped_shape_messages_use_a_short_label() {
         );
         assert!(label.ends_with('…'));
     }
+}
+
+/// Note ID1: until the preview draws type 21 (a later task) the shape is kept, hidden, with a warning.
+#[test]
+fn parse_hides_type_21_until_the_preview_supports_it() {
+    let p = parse(&builder::scenes::lsp21_shape(
+        0x201,
+        &nif::pbr2::PBR2_DEFAULTS,
+    ));
+    assert!(p.errors.is_empty(), "{:?}", p.errors);
+    assert_eq!(p.shapes.len(), 1, "{:?}", p.skipped);
+    assert_eq!(p.shapes[0].material.shader_type, 21);
+    assert!(p.shapes[0].material.hidden);
+    assert!(
+        p.warnings
+            .iter()
+            .any(|w| w == "CS PBR 2.0 shape: preview comes in a later build"),
+        "{:?}",
+        p.warnings
+    );
 }
 
 #[test]

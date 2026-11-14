@@ -58,6 +58,22 @@ fn bstrishape_links_shader_texset_alpha() {
 }
 
 #[test]
+fn scan_reads_type_21_as_lighting() {
+    let b = builder::scenes::lsp21_shape(0x201, &nif::pbr2::PBR2_DEFAULTS);
+    let s = scan(&b).unwrap();
+    assert!(s.problems.is_empty(), "{:?}", s.problems);
+    assert_eq!(s.shapes.len(), 1);
+    match &s.shapes[0].shader {
+        Shader::Lighting(l, slots) => {
+            assert_eq!(l.shader_type, 21);
+            assert_eq!(slots[0].norm, "textures/a_d.dds");
+            assert_eq!(slots[5].norm, "textures/a_rmaos.dds");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
 fn nitrishape_le_layout_and_flag() {
     let mut n = Nif::new(83);
     let shape = avobj(net(-1))

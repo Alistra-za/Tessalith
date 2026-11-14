@@ -33,6 +33,13 @@ pub enum LightingTrailer {
         left_center: [f32; 3],
         right_center: [f32; 3],
     },
+    /// Shader type 21 (CS TruePBR 2.0): PBR version, feature bits and the 25 parameters (`crate::pbr2`). Read
+    /// structurally; whether the values are valid is a later layer's job (Note ID1).
+    Pbr2 {
+        version: u32,
+        features: u32,
+        params: [f32; 25],
+    },
 }
 
 impl LightingTrailer {
@@ -90,6 +97,8 @@ impl LightingTrailer {
                 "Right eye Y",
                 "Right eye Z",
             ],
+            // the parameters are named by `crate::pbr2::PARAM_NAMES`, not as trailer fields
+            LightingTrailer::Pbr2 { .. } => &[],
         }
     }
 }
@@ -213,12 +222,32 @@ pub fn decode_lighting(h: &Header, b: &[u8], block: usize) -> Result<Lighting, N
     let texture_clamp_mode = c.u32()?;
     let alpha = c.f32()?;
     let refraction_strength = c.f32()?;
-    let glossiness = c.f32()?;
-    let specular_color = c.f32s::<3>()?;
-    let specular_strength = c.f32()?;
-    let lighting_effect_1 = c.f32()?;
-    let lighting_effect_2 = c.f32()?;
+    // Type 21 (CS TruePBR 2.0) replaces everything after refraction with the PBR payload (Note ID1).
+    let (glossiness, specular_color, specular_strength, lighting_effect_1, lighting_effect_2) =
+        if shader_type == 21 {
+            (0.0, [0.0; 3], 0.0, 0.0, 0.0)
+        } else {
+            (c.f32()?, c.f32s::<3>()?, c.f32()?, c.f32()?, c.f32()?)
+        };
     let trailer = match shader_type {
+        21 => {
+            // version, features and 25 floats; a shorter block would hit the cursor's end first, so report the
+            // size mismatch the same way `finish` does
+            const PAYLOAD: usize = 4 + 4 + 4 * 25;
+            if end - c.pos() != PAYLOAD {
+                return Err(NifError::BlockSize {
+                    block: block as u32,
+                    kind: crate::text::label(&lossy(h.kind(block))).into_owned(),
+                    declared: h.sizes[block],
+                    consumed: (c.pos() - start + PAYLOAD) as u32,
+                });
+            }
+            LightingTrailer::Pbr2 {
+                version: c.u32()?,
+                features: c.u32()?,
+                params: c.f32s::<25>()?,
+            }
+        }
         1 => LightingTrailer::EnvMap { scale: c.f32()? },
         5 => LightingTrailer::SkinTint(c.f32s::<3>()?),
         6 => LightingTrailer::HairTint(c.f32s::<3>()?),

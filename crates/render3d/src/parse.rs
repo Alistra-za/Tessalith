@@ -100,12 +100,20 @@ pub fn parse(nif_bytes: &[u8]) -> ParsedNif {
             ));
         }
         let world = nif::graph::world(&graph, row.block, &mesh.transform);
+        let mut material = MaterialState::from_lighting(&row.head, lighting, slots, row.alpha);
+        if lighting.shader_type == 21 {
+            // shortcut: the draw path does not know type 21 yet, so the shape is kept but hidden; the plan's
+            // preview task removes this (Note ID1)
+            material.hidden = true;
+            out.warnings
+                .push("CS PBR 2.0 shape: preview comes in a later build".into());
+        }
         out.shapes.push(ParsedShape {
             id,
             name: label,
             world,
             mesh: Arc::new(mesh),
-            material: MaterialState::from_lighting(&row.head, lighting, slots, row.alpha),
+            material,
         });
     }
     out

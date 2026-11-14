@@ -279,7 +279,8 @@ fn color(
 /// The trailer floats of a shader type, named, in file order (`Field::Trailer(n)`).
 fn trailer_fields(t: &LightingTrailer) -> Vec<(String, f32)> {
     let v: Vec<f32> = match t {
-        LightingTrailer::None => vec![],
+        // type 21's parameters are not trailer fields (a later task gives it its own editor rows)
+        LightingTrailer::None | LightingTrailer::Pbr2 { .. } => vec![],
         LightingTrailer::EnvMap { scale } => vec![*scale],
         LightingTrailer::SkinTint(c) | LightingTrailer::HairTint(c) => c.to_vec(),
         LightingTrailer::ParallaxOcc { max_passes, scale } => vec![*max_passes, *scale],

@@ -16,6 +16,7 @@ pub mod material;
 pub mod model;
 pub mod net;
 pub mod path;
+pub mod pbr2;
 pub mod props;
 pub mod scan;
 pub mod shape_head;

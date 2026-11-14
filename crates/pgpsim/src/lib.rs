@@ -43,6 +43,8 @@ pub enum Badge {
     NotPreviewed(&'static str),
 }
 
+// `MaterialState` holds the type-21 payload (25 floats) inline; a result is built once per shape.
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimResult {
     NoMatch,

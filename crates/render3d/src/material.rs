@@ -345,7 +345,8 @@ fn write_trailer(w: &mut CbWriter, p: &LightingParams, has_env_mask: bool) {
         LightingTrailer::SparkleSnow(s) => {
             w.set("SparkleParams", s);
         }
-        LightingTrailer::None => {}
+        // shortcut: a type-21 shape is hidden for now (parse), so it writes nothing; upgrade with the v2 preview
+        LightingTrailer::None | LightingTrailer::Pbr2 { .. } => {}
     }
 }
 

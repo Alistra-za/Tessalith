@@ -22,14 +22,14 @@ A new note goes at the end of this file and adds its letter to the index line of
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS
 - GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV
-- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, ID
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX
 - GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
-- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX
+- nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR, ID
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, ID, HX
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ
 
@@ -1452,3 +1452,7 @@ Source: Texalith's cubemap spike drew an envmapped ball whose top read the cube'
 - **HZ5 HW4 is still open, and one of its four tests now checks more.** `bc6h::shipped_levels_are_byte_identical_to_the_recorded_objects` checked the AVX2 path only and skipped on a CPU without AVX2. It now also checks the forced SSE2, SSE4 and AVX paths against five hashes recorded on an AMD Zen 5 CPU, and a CPU without AVX2 checks its own paths. So if HW4's cause is the CPU vendor, this test can fail there in more rows. `level_identity` already checks its forced rows this way; it gains the AVX-512 row, read only with the cap lifted. The two engine tests encode on the same path as before on every CPU (the cap keeps them on the AVX2 path on a CPU with AVX-512). The new plain-call tests read no pin. The AVX-512 pins were recorded on an AMD Zen 5 CPU only; whether an Intel AVX-512 CPU writes the same bytes is not known.
 - **HZ6 `engine::manifest::dispatched_isa()` returns `encoders_sys::ispc_target().name()`**, so the name in a record and the path that encoded it come from one place.
 - **HZ7 Two BC7 probe tests return early on the AVX-512 path.** `encoders-sys` `tests/bc7_fixup.rs` `bc7e_opaque_noise_rotated_blocks_fixed_losslessly` and `engine` `tests/encode.rs` `exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else` look for blocks that bc7e writes from their noise input on the AVX2 path and does not write on the AVX-512 path, so they return when `ispc_target()` is `Avx512`. No guarantee broke: the fix is path-independent Rust, and on the probe inputs the AVX-512 path emits no block that needs it (the raw bc7e output decoded alpha 255 with 0 blocks needing the rotated-slot fix). The engine-equals-raw-plus-fix check was confirmed once by hand on that path; the two neighbour tests `exact_opaque_covers_rotated_mode4_and_mode5_on_opaque_noise` and `remove_guarantee_holds_on_task41_noise_with_exact_opaque_off` pass there, but their inputs may give the AVX-512 path no rotated block either.
+
+## Note ID — CS TruePBR 2.0 (type 21) (NIF team, 2026-11-14)
+
+- **ID1 `nif` decodes a type-21 BSLightingShaderProperty structurally, and `Pbr2` lives in the trailer.** `decode_lighting` reads the shared head through refraction, then `version: u32`, `features: u32` and 25 parameters, and checks the size (180 + 4N; the vanilla 100 + 4N body is a `BlockSize` error). Any version, feature bits and values decode, even NaN: whether they are valid is a later layer's job. The glossiness, specular colour, specular strength and lighting-effect fields do not exist on type 21 and stay 0.0. The payload is `LightingTrailer::Pbr2 { version, features, params }`, so every exhaustive match on the trailer has to decide what to do with it: `names()` gives no trailer field names, the `render3d` constant buffer and the Meshes editor's `trailer_fields` write and draw nothing for it. `nif::pbr2` holds the 25 names and the spec defaults. Until the preview draws type 21, `render3d::parse` keeps the shape with `material.hidden` set and the warning "CS PBR 2.0 shape: preview comes in a later build". `modscan` keeps `SCHEMA_VERSION` 10: a type-21 NIF scanned before this change stays an unread row until the file changes.
