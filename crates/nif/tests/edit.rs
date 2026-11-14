@@ -3007,21 +3007,25 @@ fn vanilla_fields_refuse_type_21() {
     let h = Header::parse(&b).unwrap();
     let at = shader_anchor(&b);
     let blk = at.block as usize;
-    for f in [
-        Field::Glossiness,
-        Field::SpecularColor(0),
-        Field::SpecularColor(2),
-        Field::SpecularStrength,
-        Field::LightingEffect1,
-        Field::LightingEffect2,
-        Field::Trailer(0),
+    let bs = h.offsets()[blk];
+    // The vanilla offsets (block-relative, p = 16 here); each lands inside the PBR payload on type 21.
+    for (f, rel) in [
+        (Field::Glossiness, 72),
+        (Field::SpecularColor(0), 76),
+        (Field::SpecularColor(2), 84),
+        (Field::SpecularStrength, 88),
+        (Field::LightingEffect1, 92),
+        (Field::LightingEffect2, 96),
+        (Field::Trailer(0), 100),
     ] {
         assert!(locate(&h, &b, blk, f).is_err(), "{f:?}");
+        // base = the word actually stored there, so only the guard can turn the op away
+        let raw = u32::from_le_bytes(b[bs + rel..bs + rel + 4].try_into().unwrap());
         let op = Op::SetField {
             at: at.clone(),
             field: f,
             value: Value::F32(1.0f32.to_bits()),
-            base: Value::F32(0),
+            base: Value::F32(raw),
         };
         let r = apply(&b, &[op]).unwrap();
         assert!(
