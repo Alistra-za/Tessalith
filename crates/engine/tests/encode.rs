@@ -270,6 +270,10 @@ fn only_rotated_blocks_fixed(out: &[u8], raw: &[u8], what: &str) -> usize {
 /// unconditional; fix batch 41), whatever the alpha policy; every other block keeps bc7e's bytes.
 #[test]
 fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
+    if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
+        eprintln!("skipped: AVX2-path probe");
+        return;
+    }
     for policy in [AlphaPolicy::Remove, AlphaPolicy::Data] {
         let mut p = profile(Subtype::Diffuse);
         p.format = Format::Bc7;

@@ -75,14 +75,29 @@ impl Fx {
     }
 
     fn convert_to(&self, out: &str, extra: &[&str]) -> Output {
-        self.sdc()
-            .args(["convert", "--json", "--recursive"])
+        self.convert_cmd(out, extra).output().unwrap()
+    }
+
+    /// `convert_to` with the child's ISPC cap chosen: `lift` sets `SDC_TEST_AVX512=1`, otherwise the variable is
+    /// removed (a lifted test run sets it for this process, and the child would inherit it).
+    fn convert_to_on(&self, out: &str, extra: &[&str], lift: bool) -> Output {
+        let mut c = self.convert_cmd(out, extra);
+        if lift {
+            c.env("SDC_TEST_AVX512", "1");
+        } else {
+            c.env_remove("SDC_TEST_AVX512");
+        }
+        c.output().unwrap()
+    }
+
+    fn convert_cmd(&self, out: &str, extra: &[&str]) -> Command {
+        let mut c = self.sdc();
+        c.args(["convert", "--json", "--recursive"])
             .args(extra)
             .arg("-o")
             .arg(self.p(out))
-            .arg(self.p("in"))
-            .output()
-            .unwrap()
+            .arg(self.p("in"));
+        c
     }
 
     fn dds(&self, rel: &str) -> PathBuf {
@@ -1474,6 +1489,103 @@ fn the_cli_and_the_engine_write_the_same_bytes() {
     };
     assert!(dds(&a).len() >= 5, "{:?}", dds(&a).keys());
     assert_eq!(dds(&a), dds(&b));
+}
+
+// ---- AVX-512 ISPC plan: a test build encodes on AVX2 at most unless `SDC_TEST_AVX512=1` ----
+
+/// The lines of `<out>/_sdc/manifest.jsonl`.
+fn manifest_lines(out: &Path) -> Vec<String> {
+    std::fs::read_to_string(out.join("_sdc/manifest.jsonl"))
+        .unwrap()
+        .lines()
+        .map(str::to_string)
+        .collect()
+}
+
+/// The `isa` of each manifest line.
+fn isas(lines: &[String]) -> Vec<String> {
+    lines
+        .iter()
+        .map(|l| {
+            let v: Value = serde_json::from_str(l).unwrap();
+            v["isa"].as_str().unwrap().to_string()
+        })
+        .collect()
+}
+
+#[test]
+fn sdc_encodes_on_avx2_unless_the_cap_is_lifted() {
+    use encoders_sys::IspcTarget;
+    use std::collections::BTreeSet;
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    let o = fx.convert_to_on("out", &HI, false);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let o = fx.convert_to_on("out2", &HI, true);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let (capped, lifted) = (
+        isas(&manifest_lines(&fx.p("out"))),
+        isas(&manifest_lines(&fx.p("out2"))),
+    );
+    assert!(!capped.is_empty() && !lifted.is_empty());
+    assert!(
+        !capped.iter().any(|i| i == "avx512"),
+        "a capped sdc encoded on AVX-512: {capped:?}"
+    );
+    if IspcTarget::Avx512.supported() {
+        // The bytes are not compared: this small fixture may encode alike on both paths; `level_identity` pins the
+        // difference.
+        assert!(lifted.iter().all(|i| i == "avx512"), "{lifted:?}");
+    } else {
+        let (a, b) = (read_all(&fx.p("out")), read_all(&fx.p("out2")));
+        assert!(!a.is_empty());
+        assert_eq!(a, b);
+        assert_eq!(
+            capped.iter().collect::<BTreeSet<_>>(),
+            lifted.iter().collect::<BTreeSet<_>>()
+        );
+    }
+}
+
+/// `--on-existing if-changed` does not compare the `isa`: outputs written on AVX-512 stay as they are when the next
+/// run is capped, and keep their records.
+#[test]
+fn a_rerun_on_the_other_path_keeps_every_output() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    let out = fx.p("out");
+    let o = fx.convert_to_on("out", &HI, true);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    // The bytes alone could not tell a re-encode from a kept file on this fixture: the modified time can.
+    let state = || {
+        let bytes = read_all(&out);
+        let times = bytes
+            .keys()
+            .map(|k| {
+                let t = std::fs::metadata(out.join(k)).unwrap().modified().unwrap();
+                (k.clone(), t)
+            })
+            .collect::<BTreeMap<_, _>>();
+        (times, bytes)
+    };
+    // The latest manifest line of each output.
+    let latest = || {
+        manifest_lines(&out)
+            .into_iter()
+            .map(|l| {
+                let v: Value = serde_json::from_str(&l).unwrap();
+                (v["output"].as_str().unwrap().to_string(), l)
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let ((times, bytes), records) = (state(), latest());
+    assert!(!bytes.is_empty() && !records.is_empty());
+    let o = fx.convert_to_on("out", &HI, false);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let (times2, bytes2) = state();
+    assert_eq!(times2, times, "an output was written again");
+    assert!(bytes2 == bytes, "an output's bytes changed");
+    assert_eq!(latest(), records);
 }
 
 #[test]

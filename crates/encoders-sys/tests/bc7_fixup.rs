@@ -169,6 +169,10 @@ fn random_rotated_blocks_decode_opaque_with_rgb_unchanged() {
 /// 4/5 blocks whose alpha decodes below 255; the fix makes every texel 255 with RGB bit-identical.
 #[test]
 fn bc7e_opaque_noise_rotated_blocks_fixed_losslessly() {
+    if encoders_sys::ispc_target() == encoders_sys::IspcTarget::Avx512 {
+        eprintln!("skipped: AVX2-path probe");
+        return;
+    }
     let mut next = xorshift(0x1234_5678_9ABC_DEF1);
     let px: Vec<[u8; 4]> = (0..128 * 128)
         .map(|_| {
