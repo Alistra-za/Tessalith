@@ -674,9 +674,9 @@ The port before the three changes (945ad68c) took 0.69 of the C++ time on BC1 an
 
 Every DDS has the same SHA-256 from both builds, in these four configurations and seven more (perceptual, one-bit alpha, cutout, a BC3 alpha cut, the `vanilla-compact` preset).
 
-Compared with the C++ block by block, 0 mismatches in each:
-- **The plain port (017fbc68):** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons.
-- **c81ae94e:** 100 million generated BC1 blocks, every solid colour, 50 million one-bit-alpha blocks, 50 million BC3 blocks and 20 million BC4 blocks.
+Compared with the C++ block by block, c81ae94e has 0 mismatches in each:
+- **Real textures:** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons. The port before the three changes (017fbc68) passed the same run.
+- **Generated blocks:** 100 million BC1 blocks, every solid colour, 50 million one-bit-alpha blocks, 50 million BC3 blocks and 20 million BC4 blocks.
 
 A sampling profile of c81ae94e on the same blocks shows where the rest of the time goes. BC1: the least-squares endpoint fits and their rounding to 5:6:5 38%, scoring texels and building palettes 33%, the table of scored pairs 14%. BC4: scoring texels 62%, building palettes 16%.
 
