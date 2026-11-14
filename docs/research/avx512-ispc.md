@@ -6,7 +6,7 @@ Short answer:
 - **About 1.5 times as fast.** The `avx512skx-x16` path takes 0.613 to 0.809 of the AVX2 time over 24 configurations, geometric mean 0.673, on one thread. With all 16 logical CPUs busy (measured with the ISPC 1.31.0 build of the path) the ratio was 0.595 to 0.719, mean 0.662.
 - **Different bytes, equal quality.** 0.3% to 8.7% of the blocks differ, PSNR moves by at most 0.002 dB, and neither path is better.
 - **Two compilers.** ISPC 1.32.0 builds the two AVX-512 objects, because it fixes an AVX-512 miscompile in 1.31.0. ISPC 1.31.0 builds every other file, so the SSE2, SSE4, AVX and AVX2 objects stay the files that were vendored before.
-- **Not measured:** an Intel CPU with AVX-512, and a quiet machine.
+- **Not measured:** an Intel CPU with AVX-512. The tables ran under load; a later run with no build or test running gave the same picture ([Re-checked on the branch](#re-checked-on-the-branch)).
 
 ## Method
 
@@ -144,14 +144,20 @@ Headers after line-2 normalisation (the output path becomes the bare file name).
 
 ## Re-checked on the branch
 
-The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs after vendoring the objects (commit `1e5865dd`) and again after the CLI tests (commit `9c0b09f1`). Another session was building and measuring during both runs, so these ratios are rougher than the tables'.
+The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs after vendoring the objects (commit `1e5865dd`) and again after the CLI tests (commit `9c0b09f1`). Another session was building and measuring during both runs, so those ratios are rougher than the tables'. The last column is one run with `--all --rounds 3` on the finished branch, started and ended with no build or test running on the machine (CPU load 19% at the start).
 
-| Configuration | `1e5865dd` | `9c0b09f1` |
-|---|---:|---:|
-| BC7 veryslow, linear | 0.602 | 0.655 |
-| BC7 fast, linear | 0.669 | |
-| BC6H veryslow + peak | 0.758 | |
-| BC6H fast | 0.717 | |
+| Configuration | `1e5865dd` | `9c0b09f1` | finished branch, no build running |
+|---|---:|---:|---:|
+| BC7 veryslow, linear | 0.602 | 0.655 | 0.640 |
+| BC7 veryslow, linear, exact_opaque | | | 0.629 |
+| BC7 veryslow, perceptual | | | 0.596 |
+| BC7 fast, linear | 0.669 | | 0.668 |
+| BC7 max, linear | | | 0.623 |
+| BC6H veryslow + peak | 0.758 | | 0.717 |
+| BC6H veryslow | | | 0.725 |
+| BC6H fast | 0.717 | | 0.693 |
+
+- In that last run the eight ratios have a geometric mean of 0.660; the same eight rows of the [Speed](#speed) table give 0.666. BC7 takes 0.60 to 0.67 of the AVX2 time (1.5 to 1.7 times as fast), BC6H 0.69 to 0.73 (1.4 times).
 
 - Every printed hash equalled the [Bytes and quality](#bytes-and-quality) table: the AVX2 path gave the AVX2 hash and the dispatched path the AVX-512 hash.
 - `level_identity`'s AVX-512 row differs from its AVX2 row in all 32 cells (8 levels × 4 parameter combinations).
@@ -159,7 +165,7 @@ The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs afte
 ## Not measured
 
 - **An Intel CPU with AVX-512.** The AVX-512 pins were recorded on this AMD Zen 5 CPU only. Whether `vrcp14ps` gives the same bits on Intel is not known, so an Intel CPU may write other AVX-512 bytes (Note HW suspects the same of `vrcpps` on the AVX2 path).
-- **A quiet machine.** Every round ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table; the branch's unpinned runs scatter more.
+- **The pinned method without load.** The tables' rounds (one thread pinned at High priority) all ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table; the run without a build used the example's unpinned thread instead.
 - **The dispatcher's choice on a CPU without AVX-512.** It can't be run here; a CI runner whose CPU lacks AVX-512 shows it, because `level_identity` encodes through the dispatcher there and compares with the AVX2 row.
 
 ## How to repeat it
