@@ -6,7 +6,7 @@ Short answer:
 - **About 1.5 times as fast.** The `avx512skx-x16` path takes 0.613 to 0.809 of the AVX2 time over 24 configurations, geometric mean 0.673, on one thread. With all 16 logical CPUs busy (measured with the ISPC 1.31.0 build of the path) the ratio was 0.595 to 0.719, mean 0.662.
 - **Different bytes, equal quality.** 0.3% to 8.7% of the blocks differ, PSNR moves by at most 0.002 dB, and neither path is better.
 - **Two compilers.** ISPC 1.32.0 builds the two AVX-512 objects, because it fixes an AVX-512 miscompile in 1.31.0. ISPC 1.31.0 builds every other file, so the SSE2, SSE4, AVX and AVX2 objects stay the files that were vendored before.
-- **Not measured:** an Intel CPU with AVX-512. The tables ran under load; a later run with no build or test running gave the same picture ([Re-checked on the branch](#re-checked-on-the-branch)).
+- **Not measured:** an Intel CPU with AVX-512. The tables ran under load; a later run with no build running, but one unrelated single-thread job, gave the same picture ([Re-checked on the branch](#re-checked-on-the-branch)).
 
 ## Method
 
@@ -144,9 +144,9 @@ Headers after line-2 normalisation (the output path becomes the bare file name).
 
 ## Re-checked on the branch
 
-The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs after vendoring the objects (commit `1e5865dd`) and again after the CLI tests (commit `9c0b09f1`). Another session was building and measuring during both runs, so those ratios are rougher than the tables'. The last column is one run with `--all --rounds 3` on the finished branch, started and ended with no build or test running on the machine (CPU load 19% at the start).
+The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs after vendoring the objects (commit `1e5865dd`) and again after the CLI tests (commit `9c0b09f1`). Another session was building and measuring during both runs, so those ratios are rougher than the tables'. The last column is one run with `--all --rounds 3` on the finished branch, with no build or test running, but with another session's single-thread timing job busy on one core for at least the first part of the run. The two paths alternate in each round, so the job slowed both, but the example's thread is not pinned: read these ratios with that caveat. A run on a machine with nothing else running is still to be done.
 
-| Configuration | `1e5865dd` | `9c0b09f1` | finished branch, no build running |
+| Configuration | `1e5865dd` | `9c0b09f1` | finished branch, one other job running |
 |---|---:|---:|---:|
 | BC7 veryslow, linear | 0.602 | 0.655 | 0.640 |
 | BC7 veryslow, linear, exact_opaque | | | 0.629 |
@@ -165,7 +165,7 @@ The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs afte
 ## Not measured
 
 - **An Intel CPU with AVX-512.** The AVX-512 pins were recorded on this AMD Zen 5 CPU only. Whether `vrcp14ps` gives the same bits on Intel is not known, so an Intel CPU may write other AVX-512 bytes (Note HW suspects the same of `vrcpps` on the AVX2 path).
-- **The pinned method without load.** The tables' rounds (one thread pinned at High priority) all ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table; the run without a build used the example's unpinned thread instead.
+- **A machine with nothing else running.** The tables' rounds (one thread pinned at High priority) all ran under load. The two pinned measurements agree within 0.011 per configuration in the [Speed](#speed) table. The branch's last run had no build beside it but one other single-thread job, and used the example's unpinned thread.
 - **The dispatcher's choice on a CPU without AVX-512.** It can't be run here; a CI runner whose CPU lacks AVX-512 shows it, because `level_identity` encodes through the dispatcher there and compares with the AVX2 row.
 
 ## How to repeat it
