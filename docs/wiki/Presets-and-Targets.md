@@ -123,4 +123,4 @@ To see what a preset resolves to, use `presets show`: [CLI reference](CLI-Refere
 
 A file in the user presets folder that fails to load is skipped with `CFG-PRESET-SKIPPED` (a warning naming the file and the reason) and the run continues.
 
-After you change a preset, only textures whose resolved settings changed are re-encoded on the next `if-changed` run ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)).
+After you change a preset, the next `if-changed` run re-encodes only the textures whose resolved settings changed; a quality target set lower keeps the existing files ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)).

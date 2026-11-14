@@ -20,6 +20,16 @@ Export can't write into the folder it reads. With no export folder chosen, Revie
 
 Discarding edits, a crash or a read-only `sdc-project.toml` never makes the next export ask about Tessalith's own JSON. <!-- D:FC11 -->
 
+## Encoding every output again
+
+Export encodes only what changed ([what counts as changed](Validation-and-Output.md#re-runs-and-if-changed)). After a Tessalith update that changes how a texture type is encoded, or to rebuild a mod from scratch, tick **Re-encode every output** left of **Save**, then **Export**.
+
+- Every output the export folder's manifest records is encoded again.
+- A file there that Tessalith has no record of is still kept and reported as `OUT-UNKNOWN-EXISTING` ([why](Validation-and-Output.md#re-runs-and-if-changed)).
+- The box starts unticked each time Tessalith opens and isn't saved. It applies to every export, **Export set** and **Export group** too, until you untick it. <!-- D:JA11,JA12 -->
+
+When an export keeps outputs instead, its **Notes** in the Files tab say how many, for example `2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output to encode them again`.
+
 ## Exporting part of the project
 
 Use these when you're tuning one set and don't want to wait for the whole mod, or when finished sets should stop being rewritten.

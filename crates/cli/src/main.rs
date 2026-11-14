@@ -19,7 +19,7 @@ mod verbs;
 use args::*;
 use clap::Parser;
 use engine::also::{run_also, AlsoSpec};
-use engine::api::{CancelToken, Engine, EngineError};
+use engine::api::{CancelToken, Engine, EngineError, EvScope};
 use engine::events::{new_batch_id, EventSink, JsonLinesSink, Reporter};
 use engine::session::AnalysisCache;
 use std::process::ExitCode;
@@ -53,6 +53,17 @@ fn convert(a: ConvertArgs) -> Result<i32, EngineError> {
         .map_err(EngineError::Usage)?
         .unwrap_or(0);
     req.on_existing = a.on_existing.into();
+    // Note JA7: clap's `requires` can't refuse `--ev` with a mode that has a default, so the check is here.
+    if a.ev && !matches!(a.on_existing, OnExistingArg::IfChanged) {
+        return Err(EngineError::Usage(
+            "--ev applies only with --on-existing if-changed".into(),
+        ));
+    }
+    req.ev = match (a.ev, a.property.is_empty()) {
+        (false, _) => EvScope::Off,
+        (true, true) => EvScope::All,
+        (true, false) => EvScope::matching(a.property).map_err(EngineError::Usage)?,
+    };
     req.dry_run = a.dry_run;
     // Before planning, so a Ctrl-C during a long scan is not lost. A failed install is not fatal, but it is
     // reported: without the handler Ctrl-C ends the process at once, as for any console program.

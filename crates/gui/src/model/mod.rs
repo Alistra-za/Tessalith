@@ -567,6 +567,9 @@ pub struct AppModel {
     pub last_recipe: rename::Recipe,
     pub expanded: Option<String>,
     pub export: export::ExportModel,
+    /// Note JA11: the header's **Re-encode every output** box. Off at start and never saved: the next export encodes
+    /// every output that has a record again (`OnExisting::Reencode`).
+    pub reencode_all: bool,
     pub preview: preview::PreviewModel,
     pub view: view::ViewState,
     /// The largest texture side the GPU takes; set from the renderer at start-up (M3a spec §6.5).
@@ -860,6 +863,7 @@ impl AppModel {
             last_recipe: Default::default(),
             expanded: None,
             export: export::ExportModel::default(),
+            reencode_all: false,
             preview,
             view: view::ViewState::default(),
             gpu_max_dim: 16384,
@@ -1853,6 +1857,7 @@ impl AppModel {
                     messages::Severity::Info
                 };
                 self.messages.notify(sev, export_finished_text(&summary));
+                self.export.notes.extend(export::kept_note(&summary));
                 completed = summary.cancelled.is_empty();
                 self.export.summary = Some(summary);
             }
@@ -2328,7 +2333,12 @@ impl AppModel {
             return;
         };
         self.nif_export_queued = false;
-        req.on_existing = engine::api::OnExisting::IfChanged;
+        // Note JA11: the box re-encodes what has a record and keeps a file without one; `ev` stays `Off`.
+        req.on_existing = if self.reencode_all {
+            engine::api::OnExisting::Reencode
+        } else {
+            engine::api::OnExisting::IfChanged
+        };
         req.low_detail = if self.settings.checks.low_detail {
             engine::api::LowDetailMode::Warn
         } else {

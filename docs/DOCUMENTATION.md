@@ -95,6 +95,11 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
 - CHANGELOG.md has one section per version, newest first, with one line per user-visible change.
 - **The changelog is where history goes.** When a doc page loses an "earlier versions…" sentence, check that the change is in the changelog, and add it if it's missing.
 - Unreleased changes collect under `## Unreleased` until a release commit names the version.
+- **A change to a texture type's output names the command that picks it up (Note JA10).** `if-changed` keeps outputs written by an older encode version unless the run has `--ev`, so the entry is how users learn to re-encode them. An entry for a change that moves an `encode_version` arm or `BC1_ENCODE_ID` ends with the `sdc convert` command, scoped with `--property` to what the change touched, and says those outputs are otherwise kept. Two examples:
+  - a fix to alpha mipmaps: `sdc convert … --on-existing if-changed --ev --property cutout,mips`;
+  - a BC1 encoder change: `sdc convert … --on-existing if-changed --ev --property bc1 --property bc3`.
+  
+  The words are listed in [CLI-Reference](wiki/CLI-Reference.md#property-words).
 
 ## 7. DECISIONS.md: live rulings only
 DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only rulings that are in force. Three files hold the record:

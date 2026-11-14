@@ -483,3 +483,132 @@ fn a_failed_plain_export_leaves_no_row_queued() {
         .collect();
     assert!(open.is_empty(), "still open: {open:?}");
 }
+
+// ---- Note JA11: the header's Re-encode every output box and the kept counts ----
+
+fn ui_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    h
+}
+
+fn export_and_wait(m: &mut AppModel) -> engine::api::BatchSummary {
+    m.export_clicked();
+    assert!(m.export.running.is_some(), "{:?}", m.dialog);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    m.export.summary.clone().unwrap()
+}
+
+#[test]
+fn the_reencode_box_reencodes_recorded_outputs_only() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    let first = export_and_wait(&mut m);
+    assert!(first.converted >= 2 && first.failed == 0, "{first:?}");
+
+    // Off at start: the second export finds every output up to date.
+    assert!(!m.reencode_all);
+    let s = export_and_wait(&mut m);
+    assert_eq!((s.converted, s.up_to_date), (0, first.converted), "{s:?}");
+
+    // `leaf.dds` loses its record and its bytes are replaced: a file Tessalith can't show it wrote.
+    // The opened folder is a `textures` folder, so its outputs and their manifest are under `<export>/textures`.
+    let base = m.export_root().join("textures");
+    let manifest = base.join("_sdc/manifest.jsonl");
+    let mut leaf = None;
+    let lines: Vec<String> = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .lines()
+        .filter(|l| {
+            let v: serde_json::Value = serde_json::from_str(l).unwrap();
+            let out = v["output"].as_str().unwrap().to_string();
+            let is_leaf = out.ends_with("leaf.dds");
+            if is_leaf {
+                leaf = Some(out);
+            }
+            !is_leaf
+        })
+        .map(str::to_string)
+        .collect();
+    std::fs::write(&manifest, lines.join("\n") + "\n").unwrap();
+    let leaf = base.join(leaf.expect("a record for leaf.dds"));
+    assert!(leaf.exists(), "{}", leaf.display());
+    std::fs::write(&leaf, b"not written by Tessalith").unwrap();
+
+    // Tick the box as a user does, by its label.
+    let mut h = ui_harness(m);
+    h.get_by_role_and_label(
+        eframe::egui::accesskit::Role::CheckBox,
+        sdc_gui::ui::header::REENCODE_TEXT,
+    )
+    .click();
+    h.run();
+    let m = h.state_mut();
+    assert!(m.reencode_all);
+    let s = export_and_wait(m);
+    // Every recorded output is encoded again; the unrecorded one is kept and reported.
+    assert_eq!(
+        (s.converted, s.up_to_date),
+        (first.converted - 1, 0),
+        "{s:?}"
+    );
+    assert_eq!(std::fs::read(&leaf).unwrap(), b"not written by Tessalith");
+    let row = m
+        .export
+        .rows
+        .iter()
+        .find(|r| r.job_key.ends_with("leaf.dds"))
+        .expect("a row for leaf.dds");
+    assert!(
+        matches!(row.state, RowState::Skipped(SkipKind::UnknownExisting, _)),
+        "{row:?}"
+    );
+    assert!(
+        row.warnings
+            .iter()
+            .any(|w| w.code == Code::OutUnknownExisting),
+        "{row:?}"
+    );
+}
+
+#[test]
+fn the_export_summary_shows_kept_counts() {
+    use egui_kittest::kittest::Queryable;
+    const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output to encode them again";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    // Nothing kept: no line.
+    m.end_export_with(Ok(engine::api::BatchSummary {
+        up_to_date: 3,
+        ..Default::default()
+    }));
+    assert!(
+        !m.export.notes.iter().any(|n| n.contains("kept from")),
+        "{:?}",
+        m.export.notes
+    );
+    m.end_export_with(Ok(engine::api::BatchSummary {
+        up_to_date: 3,
+        kept_older_encode: 2,
+        kept_lower_target: 1,
+        ..Default::default()
+    }));
+    assert!(
+        m.export.notes.iter().any(|n| n == KEPT),
+        "{:?}",
+        m.export.notes
+    );
+    assert!(m.export.to_markdown().contains(KEPT));
+    // GUI words: the line never names the CLI flag.
+    assert!(!m.export.notes.iter().any(|n| n.contains("--ev")));
+    // The Files tab shows it.
+    m.bottom.open = true;
+    m.bottom.tab = sdc_gui::model::bottom::BottomTab::Files;
+    let h = ui_harness(m);
+    h.get_by_label(KEPT);
+}

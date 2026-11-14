@@ -141,12 +141,12 @@ fn the_header_is_one_row_in_the_spec_order() {
     assert_one_row_in_the_spec_order(&h);
 }
 
-/// Note CD2: the header is one row from about 1280 pt (measured after Note FI16 took Mode out and FI5 fixed the Undo
-/// slot width); narrower, Save wraps onto the second line.
+/// Note JA12 (re-measures CD2): the header is one row from about 1450 pt, measured with the Re-encode every output box
+/// beside Save (one row at 1445, wrapped at 1440); narrower, Save wraps onto the second line.
 #[test]
-fn the_header_is_one_row_from_1280() {
+fn the_header_is_one_row_from_1450() {
     let d = tempfile::tempdir().unwrap();
-    for (w, one_row) in [(1280.0, true), (1260.0, false)] {
+    for (w, one_row) in [(1450.0, true), (1430.0, false)] {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         let open = h.get_by_label("Open").rect().center().y;
         let save = h.get_by_label("Save").rect();
@@ -168,6 +168,10 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
         ("Export to", h.get_by_label_contains("Export to: ").rect()),
+        (
+            "Re-encode",
+            h.get_by_label(sdc_gui::ui::header::REENCODE_TEXT).rect(),
+        ),
         ("Save", h.get_by_label("Save").rect()),
         ("Export", h.get_by_label(&header_export_label(h)).rect()),
     ];
@@ -193,7 +197,8 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         );
     }
     // Export ends the row at the right edge, only the panel margin past it.
-    assert!(1600.0 - order[8].1.right() <= 16.5, "{:?}", order[8].1);
+    let export = order[order.len() - 1].1;
+    assert!(1600.0 - export.right() <= 16.5, "{export:?}");
 }
 
 /// Task 12 (Note CN, owner answer 5): with an "Also export as" tick on, the header is the same one row, and the

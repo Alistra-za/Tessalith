@@ -4,12 +4,30 @@ use engine::events::{EngineEvent, EventKind, EventSink, SkipKind};
 use std::io::Write;
 use std::sync::{Arc, Mutex};
 
-pub struct HumanSink(Mutex<std::io::Stderr>);
+pub struct HumanSink {
+    err: Mutex<std::io::Stderr>,
+    /// Note JA6: the counts of the run-level `OUT-KEPT-OLDER-ENCODE` and `OUT-KEPT-LOWER-TARGET` events, which come
+    /// before `batch_done` (it carries no kept counts); the done line reads and clears them, once per phase.
+    kept: Mutex<(u64, u64)>,
+}
 
 impl HumanSink {
     pub fn new() -> Self {
-        HumanSink(Mutex::new(std::io::stderr()))
+        HumanSink {
+            err: Mutex::new(std::io::stderr()),
+            kept: Mutex::new((0, 0)),
+        }
     }
+}
+
+/// `, {k} kept from an older encode version (--ev re-encodes), {t} kept at a higher target`, or nothing when both are 0.
+fn kept_clause((older, lower): (u64, u64)) -> String {
+    if older == 0 && lower == 0 {
+        return String::new();
+    }
+    format!(
+        ", {older} kept from an older encode version (--ev re-encodes), {lower} kept at a higher target"
+    )
 }
 
 impl Default for HumanSink {
@@ -43,7 +61,20 @@ pub fn skip_line(code: Option<Code>, reason: &str) -> String {
 impl EventSink for HumanSink {
     fn emit(&self, ev: &EngineEvent) {
         let path = ev.path.as_deref().unwrap_or_default();
+        let kept = || self.kept.lock().unwrap_or_else(|e| e.into_inner());
         let line = match &ev.kind {
+            EventKind::Warning(w)
+                if matches!(w.code, Code::OutKeptOlderEncode | Code::OutKeptLowerTarget) =>
+            {
+                let n = w.data["count"].as_u64().unwrap_or(0);
+                let mut k = kept();
+                if w.code == Code::OutKeptOlderEncode {
+                    k.0 += n;
+                } else {
+                    k.1 += n;
+                }
+                None
+            }
             EventKind::FileDone { output, validation } => Some(format!(
                 "ok    {path} -> {output}{}",
                 if validation.passed {
@@ -88,13 +119,14 @@ impl EventSink for HumanSink {
                 validation_failed,
                 cancelled,
             } => Some(format!(
-                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {validation_failed} failed validation, {} cancelled",
-                cancelled.len()
+                "done: {converted} converted, {up_to_date} up to date, {skipped} skipped ({skipped_intentional} on purpose), {failed} failed, {validation_failed} failed validation, {} cancelled{}",
+                cancelled.len(),
+                kept_clause(std::mem::take(&mut *kept()))
             )),
             _ => None,
         };
         if let Some(l) = line {
-            let _ = writeln!(self.0.lock().unwrap_or_else(|e| e.into_inner()), "{l}");
+            let _ = writeln!(self.err.lock().unwrap_or_else(|e| e.into_inner()), "{l}");
         }
     }
 }

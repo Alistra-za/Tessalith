@@ -1794,3 +1794,252 @@ fn set_bc1_search_rejects_an_unknown_value() {
     let err = text(&o.stderr);
     assert!(err.contains("`default`") && err.contains("`fast`"), "{err}");
 }
+
+// ---- Note JA: `--ev` and `--property` on `--on-existing if-changed` ----
+
+/// Marks the latest manifest record of each output whose path ends in one of `names` as written by an older encode
+/// version (`0.9.0`), as an earlier Tessalith would have left it.
+fn older_encode(fx: &Fx, names: &[&str]) {
+    let path = fx.dds("_sdc/manifest.jsonl");
+    let mut marked = 0;
+    let lines: Vec<String> = std::fs::read_to_string(&path)
+        .unwrap()
+        .lines()
+        .map(|l| {
+            let mut v: Value = serde_json::from_str(l).unwrap();
+            if names
+                .iter()
+                .any(|n| v["output"].as_str().unwrap().ends_with(n))
+            {
+                v["encode_version"] = "0.9.0".into();
+                marked += 1;
+            }
+            v.to_string()
+        })
+        .collect();
+    assert!(marked >= names.len(), "no record for {names:?}");
+    std::fs::write(&path, lines.join("\n") + "\n").unwrap();
+}
+
+/// `args` then `extra`.
+fn with<'a>(args: &[&'a str], extra: &[&'a str]) -> Vec<&'a str> {
+    args.iter().chain(extra).copied().collect()
+}
+
+/// `(converted, up_to_date)` of the run's `batch_done`.
+fn counts(o: &Output) -> (u64, u64) {
+    let d = batch_done(o);
+    (
+        d["converted"].as_u64().unwrap(),
+        d["up_to_date"].as_u64().unwrap(),
+    )
+}
+
+/// The warning events with `code`.
+fn coded(o: &Output, code: &str) -> Vec<Value> {
+    events(o)
+        .into_iter()
+        .filter(|e| e["kind"] == "warning" && e["code"] == code)
+        .collect()
+}
+
+#[test]
+fn ev_reencodes_an_older_encode_version() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&DIFFUSE);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    older_encode(&fx, &["wall.dds"]);
+    let wall = std::fs::read(fx.dds("textures/a/wall.dds")).unwrap();
+
+    // Without --ev the output is kept, counted on the done line and in one run-level event.
+    let o = fx.convert(&DIFFUSE);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (0, 1));
+    let err = text(&o.stderr);
+    assert!(
+        err.lines().any(|l| {
+            l.starts_with("done: ")
+            && l.contains(
+                ", 1 kept from an older encode version (--ev re-encodes), 0 kept at a higher target"
+            )
+        }),
+        "{err}"
+    );
+    assert_eq!(coded(&o, "OUT-KEPT-OLDER-ENCODE").len(), 1, "{err}");
+    assert_eq!(std::fs::read(fx.dds("textures/a/wall.dds")).unwrap(), wall);
+
+    // With --ev it is encoded again, and the next run finds it current.
+    let o = fx.convert(&with(&DIFFUSE, &["--ev"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (1, 0));
+    let o = fx.convert(&with(&DIFFUSE, &["--ev"]));
+    assert_eq!(counts(&o), (0, 1));
+    assert!(coded(&o, "OUT-KEPT-OLDER-ENCODE").is_empty());
+    assert!(
+        !text(&o.stderr).contains(" kept "),
+        "nothing kept, no clause: {}",
+        text(&o.stderr)
+    );
+}
+
+#[test]
+fn the_encoder_version_alias_is_ev() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    assert_eq!(code(&fx.convert(&DIFFUSE)), 0);
+    older_encode(&fx, &["wall.dds"]);
+    let o = fx.convert(&with(&DIFFUSE, &["--encoder-version"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (1, 0));
+}
+
+#[test]
+fn a_lower_effort_is_kept_and_a_higher_one_reencodes() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let args = with(&DIFFUSE, &["--set", "format=bc7"]);
+    let o = fx.convert(&args);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let rec: Value = serde_json::from_str(&manifest_lines(&fx.p("out"))[0]).unwrap();
+    let effort = rec["profile"]["encoder"]["effort"].as_str().unwrap();
+    assert!(effort != "fast" && effort != "max", "{rec}");
+
+    let o = fx.convert(&with(&args, &["--set", "encoder.effort=fast"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (0, 1));
+    assert!(
+        text(&o.stderr).contains(
+            ", 0 kept from an older encode version (--ev re-encodes), 1 kept at a higher target"
+        ),
+        "{}",
+        text(&o.stderr)
+    );
+    assert_eq!(coded(&o, "OUT-KEPT-LOWER-TARGET").len(), 1);
+
+    let o = fx.convert(&with(&args, &["--set", "encoder.effort=max"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (1, 0));
+}
+
+#[test]
+fn ev_with_skip_or_overwrite_is_a_usage_error() {
+    for mode in ["skip", "overwrite"] {
+        let fx = Fx::new();
+        fx.rgb("wall.png");
+        let o = fx.convert(&with(&DIFFUSE, &["--ev", "--on-existing", mode]));
+        assert_eq!(code(&o), 2, "{mode}: {}", text(&o.stderr));
+        assert!(
+            text(&o.stderr).contains("--ev applies only with --on-existing if-changed"),
+            "{mode}: {}",
+            text(&o.stderr)
+        );
+        assert!(
+            !fx.p("out").exists(),
+            "{mode}: nothing is planned or written"
+        );
+    }
+}
+
+#[test]
+fn ev_property_reencodes_only_matching_outputs() {
+    let fx = Fx::new();
+    fx.rgb("a.png");
+    fx.rgb("b.png");
+    // `a` is BC1 with one mip level, `b` BC7 with a full chain. Every run passes the same settings.
+    let args = with(
+        &DIFFUSE,
+        &[
+            "--set",
+            "file:**/a.png.format=bc1",
+            "--set",
+            "file:**/a.png.mips.levels=none",
+            "--set",
+            "file:**/b.png.format=bc7",
+        ],
+    );
+    let o = fx.convert(&args);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (2, 0));
+    assert_eq!(fx.mip_count("textures/a/a.dds"), 1);
+    assert!(fx.mip_count("textures/a/b.dds") > 1);
+    let both = || older_encode(&fx, &["a.dds", "b.dds"]);
+
+    // One word: only the BC1 output; the BC7 one is kept and counted by format.
+    both();
+    let o = fx.convert(&with(&args, &["--ev", "--property", "bc1"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (1, 1));
+    assert!(
+        text(&o.stderr).contains(", 1 kept from an older encode version"),
+        "{}",
+        text(&o.stderr)
+    );
+    let kept = coded(&o, "OUT-KEPT-OLDER-ENCODE");
+    assert_eq!(kept.len(), 1);
+    assert_eq!(
+        kept[0]["data"]["by_format"],
+        serde_json::json!({ "bc7": 1 })
+    );
+
+    // A comma list is AND: `a` is BC1 without mips, `b` has mips but is not BC1, so both are kept.
+    both();
+    let o = fx.convert(&with(&args, &["--ev", "--property", "bc1,mips"]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (0, 2));
+
+    // A repeated flag is OR.
+    let o = fx.convert(&with(
+        &args,
+        &["--ev", "--property", "bc1", "--property", "bc7"],
+    ));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(counts(&o), (2, 0));
+}
+
+#[test]
+fn property_without_ev_is_a_usage_error() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&with(&DIFFUSE, &["--property", "bc1"]));
+    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
+    assert!(text(&o.stderr).contains("--ev"), "{}", text(&o.stderr));
+    assert!(!fx.p("out").exists());
+}
+
+#[test]
+fn an_unknown_property_lists_the_valid_words() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&with(&DIFFUSE, &["--ev", "--property", "cutuot"]));
+    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    for w in ["cutuot", "cutout", "bc7"] {
+        assert!(err.contains(w), "{w}: {err}");
+    }
+}
+
+#[test]
+fn a_never_true_property_list_is_a_usage_error() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&with(&DIFFUSE, &["--ev", "--property", "bc1,bc3"]));
+    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
+    assert!(
+        text(&o.stderr).contains("repeat --property for alternatives"),
+        "{}",
+        text(&o.stderr)
+    );
+}
+
+#[test]
+fn property_words_are_trimmed_and_case_blind() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&with(&DIFFUSE, &["--ev", "--property", " BC1 , Mips "]));
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    for bad in ["bc1,,mips", ""] {
+        let o = fx.convert(&with(&DIFFUSE, &["--ev", "--property", bad]));
+        assert_eq!(code(&o), 2, "{bad:?}: {}", text(&o.stderr));
+    }
+}

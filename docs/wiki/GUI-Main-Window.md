@@ -22,7 +22,7 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 
 - **Undo** and **Redo** go up to 200 steps (**Ctrl+Z**, **Ctrl+Y**). Undoing back to the last save clears the unsaved dot in the title.
 - **MO2…** picks the scan source: [Mod scanning](Mod-Scanning.md). **Preset** picks the preset the folder converts with and saves it as `preset` in `sdc.toml`; its last entry, **Presets…**, opens the **Presets** tab where the Mode is set: [Presets and targets](Presets-and-Targets.md).
-- **Save** (**Ctrl+S**) writes `sdc.toml` and `sdc-project.toml`. **Export** is on [Review and Export](GUI-Review-and-Export.md#the-export-button).
+- **Save** (**Ctrl+S**) writes `sdc.toml` and `sdc-project.toml`. **Export** is on [Review and Export](GUI-Review-and-Export.md#the-export-button), and so is the **Re-encode every output** box left of **Save** ([what it does](GUI-Review-and-Export.md#encoding-every-output-again)).
 
 ### Export to
 

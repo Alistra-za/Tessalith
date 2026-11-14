@@ -188,7 +188,9 @@ Plans the batch, then encodes every file whose status is ready.
 | `-o, --output <dir>` | `.\sdc-out` | Output root ([layout](Validation-and-Output.md#where-the-files-go)). With `[export] also` in the project `sdc.toml`, the folder the PBR, Vanilla and CM folders go in. |
 | `--jobs <n>` | `0` (all cores) | Worker threads. |
 | `--mem-budget <size>` | 50% of RAM | Memory budget for files in flight. Bytes, or a `G`/`M` suffix (binary): `8G`, `512M`. |
-| `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists ([below](#re-runs-and-if-changed)). |
+| `--on-existing if-changed\|skip\|overwrite` | `if-changed` | What to do when an output exists: `if-changed` encodes it again only when something changed, `skip` keeps it, `overwrite` encodes it again ([below](#re-runs-and-if-changed)). |
+| `--ev` (alias `--encoder-version`) | off | With `if-changed`, also encode again the outputs written by an older encode version ([after an update](#re-encoding-after-an-update)). |
+| `--property <words>` | none | With `--ev`, only the outputs that have every word of the list. Repeatable: any list may match ([the words](#property-words)). |
 | `--dry-run` | off | Plan and report, write nothing. |
 
 The GUI always runs with the defaults (all cores, 50% of RAM). These two flags are the only way to change them.
@@ -216,9 +218,11 @@ blocking <input>: <CODE> <message>
 error <input>: <CODE> <message>
 info  <input>: CFG-FILTER-IGNORED <message>
 done: N converted, N up to date, N skipped (N on purpose), N failed, N failed validation, N cancelled
+done: ..., N cancelled, N kept from an older encode version (--ev re-encodes), N kept at a higher target
 ```
 
 - Codes of severity warning and above are printed, plus the info code `CFG-FILTER-IGNORED`; other info codes are recorded but not printed. Paths use forward slashes.
+- The `done` line gains the two kept counts when `if-changed` kept any output ([why](#re-runs-and-if-changed)). Kept outputs also count under "up to date". With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
 - A file with a validation error is still written. It prints as `ok ... [VALIDATION FAILED]`, counts under "failed validation", and makes `sdc convert` exit 4 if nothing worse happened.
@@ -233,18 +237,50 @@ done: N converted, N up to date, N skipped (N on purpose), N failed, N failed va
 | failed | Files that failed to load, resolve, encode or write. |
 | failed validation | Files written whose validation reported an error. |
 | cancelled | Files not started because you pressed Ctrl-C. |
+| kept from an older encode version | Of up to date: the outputs kept as "older encode version" ([below](#re-runs-and-if-changed)). Shown only when a kept count is above 0. |
+| kept at a higher target | Of up to date: the outputs kept as "lower target" ([below](#re-runs-and-if-changed)). Shown only when a kept count is above 0. |
 
 ### Re-runs and if-changed
 
 `--on-existing` decides what happens to an output that already exists. The rules that make an output "up to date" are on [Validation and output](Validation-and-Output.md#re-runs-and-if-changed).
 
-| `--on-existing` | Current record | Changed record | No record |
-|---|---|---|---|
-| `if-changed` (default) | kept (up to date) | re-encoded | kept, `OUT-UNKNOWN-EXISTING` |
-| `skip` | kept | kept | kept |
-| `overwrite` | re-encoded | re-encoded | re-encoded |
+| `--on-existing` | Current record | Changed record | Older encode version | Lower target | No record |
+|---|---|---|---|---|---|
+| `if-changed` (default) | kept (up to date) | re-encoded | kept: older encode version (re-encoded with `--ev`) | kept: lower target | kept, `OUT-UNKNOWN-EXISTING` |
+| `skip` | kept | kept | kept | kept | kept |
+| `overwrite` | re-encoded | re-encoded | re-encoded | re-encoded | re-encoded |
 
 - An existing output with no manifest record is kept under `if-changed`, reported as `OUT-UNKNOWN-EXISTING`, and the run exits 1. `--on-existing overwrite` replaces it.
+- What "older encode version" and "lower target" mean, and why those outputs are kept: [Validation and output](Validation-and-Output.md#re-runs-and-if-changed). `overwrite` encodes a lower-target output at the lower target.
+- `--ev` with `--on-existing skip` or `overwrite` exits 2: `--ev applies only with --on-existing if-changed`. <!-- D:JA7 -->
+
+#### Re-encoding after an update
+
+`if-changed` keeps the outputs of an older encode version ([what that is](Validation-and-Output.md#re-runs-and-if-changed)) and counts them on the `done` line. Add `--ev` to encode them again, and `--property` to encode only the outputs the update touched; the update's changelog entry gives the words.
+
+```powershell
+# A BC1 encoder change: only BC1 and BC3 outputs
+sdc convert src --recursive --accept-suggestions high --on-existing if-changed --ev --property bc1 --property bc3
+
+# A fix to alpha mipmaps: only cutout outputs that have mips
+sdc convert src --recursive --accept-suggestions high --on-existing if-changed --ev --property cutout,mips
+```
+
+Notice: a comma list means all of its words, so `cutout,mips` is a cutout output that also has mips. A second `--property` adds an alternative, so `--property bc1 --property bc3` is BC1 or BC3. `--ev` alone encodes every output of an older encode version. `--property` without `--ev` exits 2.
+
+#### Property words
+
+| Word | An output has it when |
+|---|---|
+| a format id (`bc1`, `bc7`, ...) | Its format is that one, spelled as `format=` takes it ([the ids](Project-Config.md#fields)). |
+| `alpha` | It stores alpha: the alpha policy isn't `remove` and the format has an alpha channel (BC1 only with 1-bit alpha). A `data` alpha, such as a parallax height, counts. |
+| `cutout` | It has `alpha` and the game alpha-tests it: a `cutout` or `cutout_blend` policy, or `blend` written as 1-bit-alpha BC1. |
+| `mips` | The written file has more than one mip level, as its manifest record says. |
+| a texture type (`diffuse`, `normal`, ...) | Its texture type is that one, spelled as `--set subtype=` takes it ([the types](Texture-Types.md#sub-types-what-each-file-becomes)). |
+
+- Case doesn't matter and spaces around a word are trimmed: `" BC1 , Mips "` works.
+- An unknown or empty word exits 2 and lists the valid words.
+- A list with two formats or two texture types exits 2, because one output never has both: `bc1,bc3` is refused with `repeat --property for alternatives`. <!-- D:JA8 -->
 
 ### Cancelling
 

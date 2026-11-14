@@ -1,6 +1,6 @@
 //! Command-line arguments (spec §8) and their translation into an engine `BatchRequest`.
 use clap::{Args, Parser, Subcommand, ValueEnum};
-use engine::api::{BatchRequest, OnExisting};
+use engine::api::{BatchRequest, OnExisting, PropertyGroup};
 use engine::codes::Code;
 use engine::config::Target;
 use engine::overrides::parse_set;
@@ -190,8 +190,20 @@ pub struct ConvertArgs {
     /// Memory budget, e.g. 8G or 512M (default 50% of RAM).
     #[arg(long)]
     pub mem_budget: Option<String>,
+    /// What to do with an output that already exists: if-changed encodes it again when its sources or settings changed
+    /// (a lowered quality target keeps it; see --ev), skip keeps it, overwrite encodes it again, even a file Tessalith
+    /// has no record of.
     #[arg(long, value_enum, default_value = "if-changed")]
     pub on_existing: OnExistingArg,
+    /// With --on-existing if-changed, also re-encode an output written by an older encode version (a Tessalith update
+    /// that changes that type of output). Without it such outputs are kept and counted.
+    #[arg(long = "ev", visible_alias = "encoder-version")]
+    pub ev: bool,
+    /// With --ev, re-encode only outputs that have every listed property (comma-separated); repeat the flag for
+    /// alternatives. Words: a format (bc1, bc3, bc7, ...), alpha, cutout, mips, or a texture type (as --set subtype=
+    /// takes it).
+    #[arg(long = "property", requires = "ev")]
+    pub property: Vec<PropertyGroup>,
     #[arg(long)]
     pub dry_run: bool,
 }

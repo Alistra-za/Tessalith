@@ -59,21 +59,25 @@ Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per fil
 
 ## Re-runs and if-changed
 
-Re-runs default to `if-changed`. For each output that already exists, Tessalith looks up its manifest record. The output is up to date, and left alone, only if all of these match:
+Re-runs default to `if-changed`. For each output that already exists, Tessalith reads its manifest record and encodes the output again when any of these changed:
 
-- the encoder versions (and the rgbcx patch for BC3/BC4/BC5);
-- the output file's size and modified time;
-- the BC1 encode target, for BC1 and BC3;
-- the record passed validation;
-- the texture type's encode version (bumped only when a release changes that type's output);
-- every source file's content (by SHA-256), including packing sources and the baked normal map;
-- the resolved settings (by hash).
+- a source file's content (by SHA-256), including packing sources and the baked normal map;
+- the output file's size or modified time, so touching or replacing an output by hand counts;
+- a resolved setting, other than a quality target set lower;
+- the record failed validation.
 
-So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.
+So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 -->
 
-The CPU is not on that list. BC7 and BC6H bytes differ between a CPU with AVX-512, one with AVX2 and an older one. AVX-512 against AVX2, the one pair measured, is at equal quality (PSNR within 0.002 dB). A file is not re-encoded because the CPU changed: move a project to another PC and only files that are stale for another reason are encoded again, so one output folder can hold files from both CPUs. Each record's `isa` says which ISPC path BC7 and BC6H encode on (BC1, BC3, BC4 and BC5 are encoded in Rust, with the same bytes on every CPU). <!-- D:HZ2 -->
+Two kinds of output are kept and counted instead. Every run says how many: the CLI on its `done` line and, with `--json`, by format ([the log](CLI-Reference.md#reading-the-log)); the GUI in the export's **Notes**.
+
+- **Encoded at a higher quality target.** The settings now ask for a lower `encoder.effort`, `encoder.bc45_search_radius` or `encoder.bc1_search` than the output was encoded at, so the file is already better than asked. A raised target encodes it again. <!-- D:JA5 -->
+- **Written by an older encode version.** A Tessalith release that changes how a texture type is encoded (an encoder change or a fix) leaves the outputs of that type at an older encode version. They are encoded again only with `--ev`, and `--ev --property <words>` limits that to what the release names, for example `--ev --property cutout,mips` for a fix to alpha mipmaps ([the words](CLI-Reference.md#property-words)). The changelog entry of such a release ends with the command to run. <!-- D:JA2,JA8 -->
+
+The CPU is not on either list. BC7 and BC6H bytes differ between a CPU with AVX-512, one with AVX2 and an older one. AVX-512 against AVX2, the one pair measured, is at equal quality (PSNR within 0.002 dB). A file is not re-encoded because the CPU changed: move a project to another PC and only files that are stale for another reason are encoded again, so one output folder can hold files from both CPUs. Each record's `isa` says which ISPC path BC7 and BC6H encode on (BC1, BC3, BC4 and BC5 are encoded in Rust, with the same bytes on every CPU). <!-- D:HZ2 -->
 
 An existing output with no manifest record is never overwritten by `if-changed`: it is kept and reported as `OUT-UNKNOWN-EXISTING`. Tessalith never overwrites a file it can't show it wrote. The command line can replace it: [CLI reference](CLI-Reference.md#re-runs-and-if-changed).
+
+In the GUI, **Re-encode every output** encodes every recorded output again: [Review and Export](GUI-Review-and-Export.md#encoding-every-output-again).
 
 ## Installing the output
 

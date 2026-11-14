@@ -1,5 +1,6 @@
 //! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · the column eyes,
-//! then Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
+//! then Export to ▾ · Re-encode every output · Save · Export at the right edge; then the status line and banner. Drawn in
+//! both views (C7).
 use super::meshes::UndoTarget;
 use crate::model::picker::{self, PickerPurpose};
 use crate::model::{also, AppModel};
@@ -21,6 +22,10 @@ const NOT_CHOSEN_TEXT: &str = "Export to: not chosen ▾";
 const PATH_MIN_CHARS: usize = 12;
 /// Why the export folder cannot change now.
 pub const EXPORT_RUNNING_HOVER: &str = "An export is running: change the folder after it ends";
+/// The header box that makes the next export encode every recorded output again (Notes JA11, JA12).
+pub const REENCODE_TEXT: &str = "Re-encode every output";
+const REENCODE_HOVER: &str =
+    "Encode every output again, even when nothing changed. Files Tessalith has no record of are kept.";
 
 pub(super) fn target_name(t: Target) -> &'static str {
     match t {
@@ -76,7 +81,7 @@ pub fn draw(
 }
 
 /// A4, left to right: Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · the eyes (Textures view only),
-/// then Export to ▾ · Save · Export pushed to the right edge.
+/// then Export to ▾ · Re-encode every output · Save · Export pushed to the right edge.
 fn row(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -101,11 +106,14 @@ fn row(
     right_end(ui, model);
 }
 
-/// Export to ▾, Save and Export against the row's right edge; Save and Export two rows tall (A4).
+/// Export to ▾, Re-encode every output, Save and Export against the row's right edge; Save and Export two rows tall
+/// (A4). The box sits left of Save so Save stays next to Export (Notes CD1, JA12).
 fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
     let gap = ui.spacing().item_spacing.x;
     let h = 2.0 * ui.spacing().interact_size.y;
     let save_w = button_width(ui, "Save");
+    // The box and Save, as one width: everything after Export to ▾ but Export.
+    let box_save = checkbox_width(ui, REENCODE_TEXT) + gap + save_w;
     let glyph = button_width(ui, "0") - 2.0 * ui.spacing().button_padding.x;
     // Note FI5: with a project open the menu reads `Export to: {folder} ▾` or `Export to: not chosen ▾`; with none it
     // is `More ▾` (the folder in `gui.toml` is not this project's, and nothing exports without a project).
@@ -120,11 +128,11 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
         (Some(_), None) => (NOT_CHOSEN_TEXT, 0.0, None),
         (Some(_), Some(p)) => ("Export to:  ▾", PATH_MIN_CHARS as f32 * glyph, Some(p)),
     };
-    let fixed = button_width(ui, lead) + gap + save_w + gap + EXPORT_WIDTH;
+    let fixed = button_width(ui, lead) + gap + box_save + gap + EXPORT_WIDTH;
     fit(ui, fixed + min_path);
     let mut chars =
         (((room(ui) - fixed - gap) / glyph).floor().max(0.0) as usize).max(PATH_MIN_CHARS);
-    let others = gap + save_w + gap + EXPORT_WIDTH;
+    let others = gap + box_save + gap + EXPORT_WIDTH;
     let text = match path {
         None => lead.to_string(),
         Some(p) => loop {
@@ -138,6 +146,9 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
     };
     push_right(ui, button_width(ui, &text) + others);
     export_to_menu(ui, model, text, full);
+    // Note JA11: read when the next export starts; a tick during an export changes nothing until then.
+    ui.checkbox(&mut model.reencode_all, REENCODE_TEXT)
+        .on_hover_text(REENCODE_HOVER);
     // Note FC8: a focused text field may hold the only unsaved edit, so Save is live while one has the focus.
     let r = ui.add_enabled(
         model.is_dirty() || super::actions::text_field_focused(ui.ctx()),
@@ -352,6 +363,17 @@ fn fit(ui: &mut egui::Ui, width: f32) {
     if ui.max_rect().right() - ui.cursor().min.x < width {
         ui.end_row();
     }
+}
+
+/// The width a checkbox with `text` takes: the box, its gap and the text (egui 0.36 `Checkbox`, no frame margin).
+fn checkbox_width(ui: &egui::Ui, text: &str) -> f32 {
+    let galley = egui::WidgetText::from(text).into_galley(
+        ui,
+        Some(egui::TextWrapMode::Extend),
+        f32::INFINITY,
+        egui::FontSelection::Default,
+    );
+    ui.spacing().icon_width + ui.spacing().icon_spacing + galley.size().x
 }
 
 /// The width a button with `text` takes.
