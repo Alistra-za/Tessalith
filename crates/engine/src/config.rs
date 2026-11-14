@@ -152,6 +152,14 @@ pub use texcore::dds::{Format, HeaderForm};
 // (docs/research/bc7e-tuning.md).
 cfg_enum!(Effort, "lowercase" { Ultrafast, Veryfast, Fast, Basic, Veryslow, Slowest, Max });
 cfg_enum!(SearchRadius, "lowercase" { Default, Max, Fast });
+// BC1 search depth (Note HY17): `default` is rgbcx level 18; `fast` is bcenc's fast level. No `///` on a variant: it
+// would turn the schema into `oneOf`.
+cfg_enum!(#[derive(Default)] Bc1Search, "lowercase" { #[default] Default, Fast });
+impl Bc1Search {
+    pub fn is_default(&self) -> bool {
+        *self == Bc1Search::Default
+    }
+}
 // BC7 linear error weights for bc7e (DECISIONS Note CP): alpha priority. `linear` is bc7e's own 1,1,1,1 (the plain
 // call): it overrides an inherited weighting.
 cfg_enum!(Bc7Weights, "lowercase" { Linear, Alpha2, Alpha8, Alpha16 });
@@ -549,6 +557,11 @@ pub struct EncoderSpec {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub bc1_alpha: bool,
     pub bc45_search_radius: SearchRadius,
+    /// BC1 search depth: `default` is rgbcx level 18, `fast` the fast level. It reaches BC1, BC3's colour half and the
+    /// fully opaque blocks of one-bit-alpha BC1; every other format ignores it. Not serialised at `default`, so existing
+    /// profile hashes hold (Note HY17).
+    #[serde(default, skip_serializing_if = "Bc1Search::is_default")]
+    pub bc1_search: Bc1Search,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -1017,5 +1030,58 @@ mod tests {
             (Some("eighth"), Some(256), Some("clamp"))
         );
         assert_eq!(serde_json::from_value::<Profile>(v).unwrap(), q);
+    }
+
+    fn quality_profile() -> Profile {
+        crate::presets::PresetRegistry::builtin()
+            .unwrap()
+            .profile("cs-quality", Target::Cs, Subtype::Diffuse)
+            .unwrap()
+    }
+
+    /// `encoder.bc1_search` is not serialised at `default`: a profile written before the field existed reads as
+    /// `Default` and hashes as the in-code profile does.
+    #[test]
+    fn old_profiles_keep_their_hash() {
+        let p = quality_profile();
+        let v = serde_json::to_value(&p).unwrap();
+        assert!(v["encoder"].get("bc1_search").is_none(), "{v}");
+        let old: Profile = serde_json::from_value(v).unwrap();
+        assert_eq!(old.encoder.bc1_search, Bc1Search::Default);
+        assert_eq!(
+            crate::manifest::profile_sha256(&old).unwrap(),
+            crate::manifest::profile_sha256(&p).unwrap()
+        );
+        let mut fast = p.clone();
+        fast.encoder.bc1_search = Bc1Search::Fast;
+        assert_ne!(
+            crate::manifest::profile_sha256(&fast).unwrap(),
+            crate::manifest::profile_sha256(&p).unwrap()
+        );
+        let v = serde_json::to_value(&fast).unwrap();
+        assert_eq!(v["encoder"]["bc1_search"], "fast");
+    }
+
+    #[test]
+    fn an_explicit_default_is_not_written() {
+        let spec: EncoderSpec = toml::from_str(
+            "effort = \"fast\"\nperceptual = false\nbc45_search_radius = \"default\"\nbc1_search = \"default\"\n",
+        )
+        .unwrap();
+        assert_eq!(spec.bc1_search, Bc1Search::Default);
+        assert!(serde_json::to_value(&spec)
+            .unwrap()
+            .get("bc1_search")
+            .is_none());
+    }
+
+    #[test]
+    fn an_unknown_value_names_the_choices() {
+        let e = toml::from_str::<EncoderSpec>(
+            "effort = \"fast\"\nperceptual = false\nbc45_search_radius = \"default\"\nbc1_search = \"slow\"\n",
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(e.contains("`default`") && e.contains("`fast`"), "{e}");
     }
 }

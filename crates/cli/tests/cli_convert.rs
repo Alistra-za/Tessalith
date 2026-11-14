@@ -1750,3 +1750,45 @@ fn an_export_table_without_also_stays_plain_or_fails_as_config() {
         assert!(!fx.p("out").exists());
     }
 }
+
+/// Note HY17: `--set encoder.bc1_search=fast` reaches the BC1 encoder and the file is validated as any other.
+#[test]
+fn set_bc1_search_fast_converts() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&[
+        "--target",
+        "vanilla",
+        "--set",
+        "subtype=diffuse",
+        "--set",
+        "format=bc1",
+        "--set",
+        "encoder.bc1_search=fast",
+    ]);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    assert_eq!(
+        fx.format("textures/a/wall.dds"),
+        DdsPixelFormat::Bc1 { srgb: false }
+    );
+    let rec: Value = serde_json::from_str(&manifest_lines(&fx.p("out"))[0]).unwrap();
+    assert_eq!(rec["validation"]["passed"], true, "{rec}");
+    assert!(rec["validation"]["levels"].as_u64().unwrap() >= 1, "{rec}");
+}
+
+#[test]
+fn set_bc1_search_rejects_an_unknown_value() {
+    let fx = Fx::new();
+    fx.rgb("wall.png");
+    let o = fx.convert(&[
+        "--set",
+        "subtype=diffuse",
+        "--set",
+        "format=bc1",
+        "--set",
+        "encoder.bc1_search=slow",
+    ]);
+    assert_eq!(code(&o), 2, "{}", text(&o.stderr));
+    let err = text(&o.stderr);
+    assert!(err.contains("default") && err.contains("fast"), "{err}");
+}

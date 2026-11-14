@@ -171,6 +171,13 @@
       ],
       "type": "object"
     },
+    "Bc1Search": {
+      "enum": [
+        "default",
+        "fast"
+      ],
+      "type": "string"
+    },
     "Bc7Weights": {
       "enum": [
         "linear",
@@ -813,6 +820,10 @@
         "bc1_alpha": {
           "description": "BC1 with 1-bit alpha (DECISIONS Note FM): texels below the alpha-test cutoff become transparent black. Off by\ndefault and never set automatically; not serialised when off.",
           "type": "boolean"
+        },
+        "bc1_search": {
+          "$ref": "#/$defs/Bc1Search",
+          "description": "BC1 search depth: `default` is rgbcx level 18, `fast` the fast level. It reaches BC1, BC3's colour half and the\nfully opaque blocks of one-bit-alpha BC1; every other format ignores it. Not serialised at `default`, so existing\nprofile hashes hold (Note HY17)."
         },
         "bc45_search_radius": {
           "$ref": "#/$defs/SearchRadius"

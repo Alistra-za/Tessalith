@@ -74,6 +74,14 @@ fn bc3_cut(cut: u8) -> NonZeroU8 {
     NonZeroU8::new(cut).unwrap_or(NonZeroU8::new(128).unwrap())
 }
 
+/// The BC1 search depth `bcenc` encodes with (Note HY17).
+fn bc1_search(s: Bc1Search) -> bcenc::Bc1Search {
+    match s {
+        Bc1Search::Default => bcenc::Bc1Search::Default,
+        Bc1Search::Fast => bcenc::Bc1Search::Fast,
+    }
+}
+
 pub fn radius(r: SearchRadius) -> u32 {
     match r {
         SearchRadius::Default => BC45_RADIUS_DEFAULT,
@@ -139,17 +147,26 @@ fn encode_band(b: &[[u8; 4]], o: &mut [u8], p: &Profile) {
                             .iter()
                             .enumerate()
                             .fold(0u16, |m, (i, t)| m | (u16::from(t[3] < 128) << i));
-                        blk.copy_from_slice(&bcenc::bc1_encode_block_alpha(src, mask, e.perceptual))
+                        blk.copy_from_slice(&bcenc::bc1_encode_block_alpha_with(
+                            src,
+                            mask,
+                            e.perceptual,
+                            bc1_search(e.bc1_search),
+                        ))
                     }
                     // FM42: `perceptual` weights the BC1 colour error by Rec.709 luma (BC3's colour block too).
-                    Format::Bc1 => {
-                        blk.copy_from_slice(&bcenc::bc1_encode_block(src, true, e.perceptual))
-                    }
-                    Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block(
+                    Format::Bc1 => blk.copy_from_slice(&bcenc::bc1_encode_block_with(
+                        src,
+                        true,
+                        e.perceptual,
+                        bc1_search(e.bc1_search),
+                    )),
+                    Format::Bc3 => blk.copy_from_slice(&bcenc::bc3_encode_block_with(
                         src,
                         radius(e.bc45_search_radius),
                         bc3_cut(alpha_cut(&p.alpha)),
                         e.perceptual,
+                        bc1_search(e.bc1_search),
                     )),
                     // Every single-channel sub-type (envmask, height, msn_specular) keeps its map in R.
                     Format::Bc4 => blk.copy_from_slice(&bcenc::bc4_encode_block(
@@ -524,5 +541,162 @@ mod tests {
         guard_grass_corner(&mut out, &blocks, 4, 8, &p);
         assert!(grass_corner_ok(&out[16..], 12));
         assert_eq!(out[..16], top[..], "the top block is left alone");
+    }
+
+    /// A 64 x 64 image of noise on top and a gradient below, as the encoder's blocks. With `holes`, every other
+    /// 16-pixel run of rows 0..32 is transparent (alpha 0, the rest 255), so some blocks are opaque and some not.
+    fn search_px(holes: bool) -> Vec<[u8; 4]> {
+        let mut s = 0x9E37_79B9u32;
+        let mut next = move || {
+            s = s.wrapping_mul(1664525).wrapping_add(1013904223);
+            (s >> 24) as u8
+        };
+        let px: Vec<[u8; 4]> = (0..64u32 * 64)
+            .map(|i| {
+                let (x, y) = (i % 64, i / 64);
+                let a = if holes && y < 32 && (x / 4 + y / 4) % 2 == 0 && x % 8 < 4 {
+                    0
+                } else {
+                    255
+                };
+                if y < 32 {
+                    [next(), next(), next(), a]
+                } else {
+                    [(x * 4) as u8, (y * 4) as u8, ((x + y) * 2) as u8, a]
+                }
+            })
+            .collect();
+        px
+    }
+
+    fn search_blocks(holes: bool) -> Vec<[u8; 4]> {
+        gather_blocks(&search_px(holes), 64, 64)
+    }
+
+    fn search_profile(format: Format, search: Bc1Search) -> Profile {
+        let mut p = bc7_exact_profile();
+        p.format = format;
+        p.encoder.perceptual = true;
+        p.encoder.bc1_search = search;
+        p
+    }
+
+    fn encode_blocks(b: &[[u8; 4]], p: &Profile) -> Vec<u8> {
+        let mut out = vec![0u8; b.len() / BLOCK_TEXELS * p.format.block_bytes().unwrap()];
+        encode_band(b, &mut out, p);
+        out
+    }
+
+    fn texels(blk: &[[u8; 4]]) -> &[[u8; 4]; 16] {
+        blk.try_into().unwrap()
+    }
+
+    #[test]
+    fn default_bc1_search_bytes_are_unchanged() {
+        let b = search_blocks(false);
+        let bh = search_blocks(true);
+        let cut = bc3_cut(alpha_cut(
+            &search_profile(Format::Bc3, Bc1Search::Default).alpha,
+        ));
+        let bc1 = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Default));
+        let bc3 = encode_blocks(&b, &search_profile(Format::Bc3, Bc1Search::Default));
+        let mut p1a = search_profile(Format::Bc1, Bc1Search::Default);
+        p1a.encoder.bc1_alpha = true;
+        let bc1a = encode_blocks(&bh, &p1a);
+        let mut opaque = 0;
+        for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
+            let px = texels(blk);
+            assert_eq!(
+                bc1[i * 8..][..8],
+                encoders_sys::bc1_encode_block(px, true, false, true),
+                "bc1 {i}"
+            );
+            assert_eq!(
+                bc3[i * 16..][..16],
+                encoders_sys::bc3_encode_block(px, radius(SearchRadius::Default), cut.get(), true),
+                "bc3 {i}"
+            );
+        }
+        for (i, blk) in bh.chunks(BLOCK_TEXELS).enumerate() {
+            let px = texels(blk);
+            let mask = px
+                .iter()
+                .enumerate()
+                .fold(0u16, |m, (j, t)| m | (u16::from(t[3] < 128) << j));
+            opaque += usize::from(mask == 0);
+            assert_eq!(
+                bc1a[i * 8..][..8],
+                encoders_sys::bc1_encode_block_alpha(px, mask, true),
+                "bc1 alpha {i}"
+            );
+        }
+        assert!(opaque > 0 && opaque < bh.len() / BLOCK_TEXELS, "{opaque}");
+    }
+
+    #[test]
+    fn fast_bc1_and_bc3_are_rgbcx_at_the_fast_level() {
+        let b = search_blocks(false);
+        let lvl = bcenc::BC1_FAST_LEVEL;
+        let cut = bc3_cut(alpha_cut(
+            &search_profile(Format::Bc3, Bc1Search::Fast).alpha,
+        ));
+        let bc1 = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Fast));
+        let bc3 = encode_blocks(&b, &search_profile(Format::Bc3, Bc1Search::Fast));
+        let dflt = encode_blocks(&b, &search_profile(Format::Bc1, Bc1Search::Default));
+        assert_ne!(bc1, dflt, "the fixture must tell the levels apart");
+        for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
+            let px = texels(blk);
+            assert_eq!(
+                bc1[i * 8..][..8],
+                encoders_sys::bc1_encode_block_level(px, lvl, true, true),
+                "bc1 {i}"
+            );
+            assert_eq!(
+                bc3[i * 16..][..16],
+                encoders_sys::bc3_encode_block_level(
+                    px,
+                    radius(SearchRadius::Default),
+                    cut.get(),
+                    lvl,
+                    true
+                ),
+                "bc3 {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn fast_one_bit_alpha_is_rgbcx_at_the_fast_level() {
+        let b = search_blocks(true);
+        let mut p = search_profile(Format::Bc1, Bc1Search::Fast);
+        p.encoder.bc1_alpha = true;
+        let out = encode_blocks(&b, &p);
+        let mut d = p.clone();
+        d.encoder.bc1_search = Bc1Search::Default;
+        let dflt = encode_blocks(&b, &d);
+        assert_ne!(out, dflt, "the fixture must tell the levels apart");
+        for (i, blk) in b.chunks(BLOCK_TEXELS).enumerate() {
+            let px = texels(blk);
+            let mask = px
+                .iter()
+                .enumerate()
+                .fold(0u16, |m, (j, t)| m | (u16::from(t[3] < 128) << j));
+            assert_eq!(
+                out[i * 8..][..8],
+                encoders_sys::bc1_encode_block_alpha_level(px, mask, bcenc::BC1_FAST_LEVEL, true),
+                "block {i} mask {mask:#06x}"
+            );
+        }
+    }
+
+    #[test]
+    fn bc1_search_changes_nothing_on_other_formats() {
+        let input = EncoderInput::Ldr(search_px(false));
+        let enc = |f, s| {
+            encode_level(&input, 64, 64, &search_profile(f, s), &EncodeCtx::default()).unwrap()
+        };
+        for f in [Format::Bc7, Format::Bc4, Format::Bc5, Format::Rgba8] {
+            assert_eq!(enc(f, Bc1Search::Default), enc(f, Bc1Search::Fast), "{f:?}");
+        }
     }
 }

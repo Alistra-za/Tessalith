@@ -341,6 +341,7 @@ pub const FIELD_PATHS: &[&str] = &[
     "encoder.bc7_weights",
     "encoder.bc1_alpha",
     "encoder.bc45_search_radius",
+    "encoder.bc1_search",
     "validation.mips",
     "packing.enabled",
     "packing.roughness_default",

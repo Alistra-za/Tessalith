@@ -1726,3 +1726,30 @@ fn a_layer_role_is_refused() {
     }
     ConfigFile::parse("[files.\"a.png\"]\nhelper.role = \"opacity\"\n", "sdc.toml").unwrap();
 }
+
+/// Note HY17: `fast-preview` searches BC1 and BC3 colour with rgbcx's fast level, on every sub-type and target; no
+/// other built-in preset does.
+#[test]
+fn fast_preview_searches_bc1_fast() {
+    let r = PresetRegistry::builtin().unwrap();
+    for id in [
+        "sdc-base",
+        "cs-quality",
+        "cs-compact",
+        "vanilla-quality",
+        "vanilla-compact",
+        "fast-preview",
+    ] {
+        let want = if id == "fast-preview" {
+            Bc1Search::Fast
+        } else {
+            Bc1Search::Default
+        };
+        for t in [Target::Cs, Target::Vanilla] {
+            for st in Subtype::ALL {
+                let p = r.profile(id, t, st).unwrap();
+                assert_eq!(p.encoder.bc1_search, want, "{id} {t:?} {st:?}");
+            }
+        }
+    }
+}
