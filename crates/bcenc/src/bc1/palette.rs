@@ -107,8 +107,7 @@ static PAL5: [[[u8; 2]; 4]; 1024] = build_pal(5);
 static PAL6: [[[u8; 2]; 4]; 4096] = build_pal(6);
 
 /// `bc1_get_dual_palette`: `l*` and `h*` are the unexpanded 5/6/5-bit endpoint codes. The interpolated entries come
-/// from [`PAL5`] and [`PAL6`], the expanded endpoints are computed. A code outside 5:6:5 panics (Note HY14).
-#[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
+/// from `PAL5` and `PAL6`, the expanded endpoints are computed. A code outside 5:6:5 panics (Note HY14).
 pub fn dual_palette(
     three: bool,
     lr: i32,
@@ -379,5 +378,32 @@ mod tests {
     fn an_out_of_range_code_panics() {
         // Index 32 is inside PAL5 (it would read the pair (1, 0)), so only the assertion can panic.
         dual_palette(false, 0, 0, 0, 32, 0, 0);
+    }
+
+    // Each case below keeps its table index inside the table (or, for a low code, lets the bounds check panic with a
+    // different message), so only the assertion's own message satisfies `expected`.
+    #[test]
+    #[should_panic(expected = "endpoint codes outside 5:6:5")]
+    fn a_high_green_code_of_64_panics() {
+        // Index 64 is inside PAL6.
+        dual_palette(false, 0, 0, 0, 0, 64, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "endpoint codes outside 5:6:5")]
+    fn a_high_blue_code_of_32_panics() {
+        dual_palette(false, 0, 0, 0, 0, 0, 32);
+    }
+
+    #[test]
+    #[should_panic(expected = "endpoint codes outside 5:6:5")]
+    fn a_low_red_code_of_32_panics() {
+        dual_palette(false, 32, 0, 0, 0, 0, 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "endpoint codes outside 5:6:5")]
+    fn a_negative_code_panics() {
+        dual_palette(false, 0, 0, 0, -1, 0, 0);
     }
 }
