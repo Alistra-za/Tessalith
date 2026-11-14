@@ -187,11 +187,15 @@ fn main() -> Result<(), Box<dyn Error>> {
         .first()
         .filter(|a| !a.starts_with("--"))
         .ok_or("usage: ispc_speed <list file> [--all] [--rounds N]")?;
-    let all = args.iter().any(|a| a == "--all");
-    let rounds: usize = match args.iter().position(|a| a == "--rounds") {
-        Some(i) => args.get(i + 1).ok_or("--rounds needs a number")?.parse()?,
-        None => 1,
-    };
+    let (mut all, mut rounds) = (false, 1usize);
+    let mut rest = args[1..].iter();
+    while let Some(a) = rest.next() {
+        match a.as_str() {
+            "--all" => all = true,
+            "--rounds" => rounds = rest.next().ok_or("--rounds needs a number")?.parse()?,
+            other => return Err(format!("unknown argument {other:?}").into()),
+        }
+    }
     if !IspcTarget::Avx2.supported() {
         println!("ISPC: this CPU has no AVX2; nothing to compare");
         return Ok(());

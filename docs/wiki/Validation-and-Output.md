@@ -71,7 +71,7 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. A new Tessalith version re-encodes only the texture types whose output changed. Touching or replacing an output by hand also re-encodes it.
 
-The CPU is not on that list. BC7 and BC6H bytes differ between a CPU with AVX-512, one with AVX2 and an older one, at equal quality (PSNR within 0.002 dB). A file is not re-encoded because the CPU changed: move a project to another PC and only files that are stale for another reason are encoded again, so one output folder can hold files from both CPUs. Each record's `isa` says which. <!-- D:HZ2 -->
+The CPU is not on that list. BC7 and BC6H bytes differ between a CPU with AVX-512, one with AVX2 and an older one. AVX-512 against AVX2, the one pair measured, is at equal quality (PSNR within 0.002 dB). A file is not re-encoded because the CPU changed: move a project to another PC and only files that are stale for another reason are encoded again, so one output folder can hold files from both CPUs. Each record's `isa` says which ISPC path BC7 and BC6H encode on (BC1, BC3, BC4 and BC5 are encoded in Rust, with the same bytes on every CPU). <!-- D:HZ2 -->
 
 An existing output with no manifest record is never overwritten by `if-changed`: it is kept and reported as `OUT-UNKNOWN-EXISTING`. Tessalith never overwrites a file it can't show it wrote. The command line can replace it: [CLI reference](CLI-Reference.md#re-runs-and-if-changed).
 

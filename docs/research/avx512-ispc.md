@@ -171,6 +171,6 @@ The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs afte
    cargo run --offline --release -p encoders-sys --example ispc_speed -- files.txt --all --rounds 3
    ```
 
-3. Each configuration prints one line: `ISPC <name> blocks=<n> avx2=<s> <hash> best=<target> <s> <hash> ratio=<best / avx2>`. Without `--all` it runs four configurations (BC7 veryslow and fast linear, BC6H veryslow + peak and fast); `--all` adds the other four of the tables.
+3. Each configuration prints one line: `ISPC <name> blocks=<n> avx2=<µs per block> <hash> best=<target> <µs per block> <hash> ratio=<best / avx2>`. Without `--all` it runs four configurations (BC7 veryslow and fast linear, BC6H veryslow + peak and fast); `--all` adds the other four of the tables.
 
 The example runs on one unpinned thread at normal priority and takes the ratio of the median times, so its ratios scatter more than the tables'. The hashes must match exactly. On a CPU without AVX-512, `best` is `avx2` and the ratio is about 1.

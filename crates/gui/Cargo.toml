@@ -97,7 +97,7 @@ image.workspace = true
 windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Gdi", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging", "Win32_System_SystemInformation"] }
 
 [features]
-# Test seams and the counters they read (DECISIONS Notes FM27 and GJ2). Off by default and never enabled by a release
+# Test seams and the counters they read (DECISIONS Notes FM27, GJ2 and HZ). Off by default and never enabled by a release
 # build; the dev-dependency below turns it on for `cargo test` and `--all-targets` (resolver 2 keeps dev-dependency
 # features out of `cargo build`). The engine does the same. It forwards the NIF-side crates' own seams and the encoders'
 # AVX2 cap.

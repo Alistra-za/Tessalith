@@ -87,7 +87,7 @@ void sdc_bc7e_compress(uint32_t n, uint64_t* blocks, const uint32_t* px, int lev
     bc7e_blocks_on(target, n, blocks, px, &g_bc7[level][perceptual ? 1 : 0][exact ? 1 : 0]);
 }
 
-// Measurement only (the BC7 tuning study, docs/research/bc7e-tuning.md): the level's parameters with some fields overridden. A negative
+// For the BC7 tuning study (docs/research/bc7e-tuning.md) and the engine's `encoder.bc7_weights` call: the level's parameters with some fields overridden. A negative
 // override keeps the level's value. `t` is 14 ints: partitions_to_try (modes 0/1/3, 2 and 7 together),
 // uber_level, refinement_passes, pbit_search, weights r g b a, max_partitions for modes 1/3/7, mode 0, mode 2,
 // then the patch-0002 flags endpoint_search and refine_partitions, and one spare.

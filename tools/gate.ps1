@@ -6,7 +6,8 @@
   Each step's output goes to <Out>\<step>.txt, ending in "exit N". Exits 1 if a step fails, 2 if it didn't start.
   Set CARGO_TARGET_DIR first (CLAUDE.md, Disk). A failed fmt, clippy or render3d-alone step skips the tests, which take about an hour.
   Test builds encode on AVX2 at most; the avx512 step re-runs the ISPC pins (level_identity, bc6h, target) with
-  SDC_TEST_AVX512=1, so on an AVX-512 CPU they check the AVX-512 path too.
+  SDC_TEST_AVX512=1, so on an AVX-512 CPU they check the AVX-512 path too. The script clears SDC_TEST_AVX512 in the
+  process that runs it, so run it in a child shell if the caller's value matters.
 .EXAMPLE
   tools\gate.ps1 -Out .claude\scratch\gate
 #>

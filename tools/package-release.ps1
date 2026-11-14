@@ -4,6 +4,8 @@
 #   tools\package-release.ps1                      build, stage, zip
 #   tools\package-release.ps1 -Suffix alpha.1      names it Tessalith-0.8.0-alpha.1-win-x64.zip
 #   tools\package-release.ps1 -NoBuild -TargetDir <dir holding tessalith.exe and sdc.exe>
+# Warning for -NoBuild: the exes must come from a plain `cargo build --release`. After `cargo test --release` or a build with
+# --tests, --examples or --all-targets the folder holds exes with the test-hooks AVX2 cap on (DECISIONS Note HZ3).
 param(
     [switch]$NoBuild,
     [switch]$AllowDirty,

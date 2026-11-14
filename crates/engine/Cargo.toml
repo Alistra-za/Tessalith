@@ -33,7 +33,7 @@ flate2.workspace = true
 [features]
 # Env-driven test hooks (SDC_TEST_PANIC_ON, SDC_TEST_PANIC_ON_PLAN, SDC_TEST_FAIL_VALIDATION, SDC_TEST_CANCEL_ON, SDC_TEST_ENCODE_INPUT_DIR) and the encoders' AVX2 cap. Off by default and never enabled by a
 # release build; the dev-dependency below turns it on for `cargo test` (resolver 2 keeps dev-dependency
-# features out of `cargo build`). DECISIONS Note K.
+# features out of `cargo build`). DECISIONS Notes K and HZ.
 test-hooks = ["encoders-sys/test-hooks"]
 
 [dev-dependencies]
