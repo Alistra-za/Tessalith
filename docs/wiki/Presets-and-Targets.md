@@ -32,7 +32,7 @@ What a target changes lives with the thing it changes:
 | `cs-compact` | `cs` | Smaller files: BC1 for opaque colour maps at full size, other maps at half size, BC4/BC5 search radius `fast`. |
 | `vanilla-quality` | `vanilla` | Bethesda shaders. No `_SRGB`, no BC6H. `diffuse` and `glow` use perceptual encoding in BC1, BC3 and BC7. <!-- D:FM43 --> |
 | `vanilla-compact` | `vanilla` | The vanilla version of `cs-compact`, with perceptual BC1. |
-| `fast-preview` | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, BC1 search `fast`, PSNR validation on the smallest mip only. |
+| `fast-preview` | none (uses the batch target) | bc7e `fast`, BC4/BC5 search radius `fast`, BC1 search `fast`, PSNR validation on the smallest mip only. <!-- D:HY17 --> |
 
 The preset is chosen from the first of these that is set:
 
