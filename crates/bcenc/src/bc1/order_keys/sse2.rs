@@ -1,12 +1,11 @@
 //! The ordering kernel: the rounded least-squares fit of each of a pass's orderings (128 in the 4-colour pass, 32 in the
-//! 3-colour pass), R, G and B in lanes 0, 1 and 2
-//! of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum 0, so it adds nothing to the key). Compiled only
-//! where the target has SSE2 (the `cfg` on `mod sse2`), so the `target_feature(enable = "sse2")` functions here are
-//! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` and
-//! `keys3` carry it (as does the test-only `round_key_of`). This is the crate's one float kernel: the scalar code it
-//! replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered` or `ls_endpoints3_ordered` and
-//! `precise_round_565` through `round_ls`) is its reference, and every real call in the unit tests also runs that code
-//! and asserts the same keys (128 for `keys4`, 32 for `keys3`).
+//! 3-colour pass), R, G and B in lanes 0, 1 and 2 of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum
+//! 0, so it adds nothing to the key). Compiled only where the target has SSE2 (the `cfg` on `mod sse2`), so the
+//! `target_feature(enable = "sse2")` functions here are always callable; Rust still wants an `unsafe` block for the
+//! call from plain code, and `order_keys::keys4` and `keys3` carry it (as does the test-only `round_key_of`). This is
+//! the crate's one float kernel: the scalar code it replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered`
+//! or `ls_endpoints3_ordered` and `precise_round_565` through `round_ls`) is its reference, and every real call in the
+//! unit tests also runs that code and asserts the same keys (128 for `keys4`, 32 for `keys3`).
 //!
 //! Why it gives the scalar code's bits, step by step:
 //! - Integers. With `S` the prefix sums of one channel, `S[16]` the block total (`sorted_sums` stores it there) and
