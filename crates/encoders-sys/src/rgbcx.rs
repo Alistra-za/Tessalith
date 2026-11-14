@@ -26,6 +26,41 @@ pub fn bc1_encode_block(
     transparent_black: bool,
     perceptual: bool,
 ) -> [u8; 8] {
+    bc1_encode(
+        px,
+        RGBCX_MAX_LEVEL,
+        allow_3color,
+        transparent_black,
+        perceptual,
+    )
+}
+
+/// Like [`bc1_encode_block`] at rgbcx level `level` (0..=[`RGBCX_MAX_LEVEL`]); the engine ships level 18 only, the lower
+/// levels are for measuring (`bcenc`'s quality example) and for the tests of `bcenc`'s faster search.
+pub fn bc1_encode_block_level(
+    px: &[[u8; 4]; 16],
+    level: u32,
+    allow_3color: bool,
+    perceptual: bool,
+) -> [u8; 8] {
+    check_level(level);
+    bc1_encode(px, level, allow_3color, false, perceptual)
+}
+
+fn check_level(level: u32) {
+    assert!(
+        level <= RGBCX_MAX_LEVEL,
+        "rgbcx level {level} is above the top level {RGBCX_MAX_LEVEL}"
+    );
+}
+
+fn bc1_encode(
+    px: &[[u8; 4]; 16],
+    level: u32,
+    allow_3color: bool,
+    transparent_black: bool,
+    perceptual: bool,
+) -> [u8; 8] {
     init();
     let src = bytes(px);
     let mut out = [0u8; 8];
@@ -35,7 +70,7 @@ pub fn bc1_encode_block(
         ffi::sdc_bc1_encode(
             out.as_mut_ptr(),
             src.as_ptr(),
-            RGBCX_MAX_LEVEL,
+            level,
             allow_3color as i32,
             transparent_black as i32,
             perceptual as i32,
@@ -48,6 +83,18 @@ pub fn bc1_encode_block(
 /// bit set gives exactly `bc1_encode_block(px, true, false, perceptual)`; otherwise a 3-colour block fitted to the
 /// opaque texels, with selector 3 (transparent black) on the masked texels only.
 pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: bool) -> [u8; 8] {
+    bc1_encode_block_alpha_level(px, transparent, RGBCX_MAX_LEVEL, perceptual)
+}
+
+/// Like [`bc1_encode_block_alpha`] at rgbcx level `level`. The level reaches the opaque case (no bit set) only; the
+/// masked path does not depend on it.
+pub fn bc1_encode_block_alpha_level(
+    px: &[[u8; 4]; 16],
+    transparent: u16,
+    level: u32,
+    perceptual: bool,
+) -> [u8; 8] {
+    check_level(level);
     init();
     let src = bytes(px);
     let mut out = [0u8; 8];
@@ -57,7 +104,7 @@ pub fn bc1_encode_block_alpha(px: &[[u8; 4]; 16], transparent: u16, perceptual: 
         ffi::sdc_bc1_encode_alpha(
             out.as_mut_ptr(),
             src.as_ptr(),
-            RGBCX_MAX_LEVEL,
+            level,
             transparent as u32,
             perceptual as i32,
         )
@@ -74,6 +121,18 @@ pub fn bc3_encode_block(
     cut: u8,
     perceptual: bool,
 ) -> [u8; 16] {
+    bc3_encode_block_level(px, search_radius, cut, RGBCX_MAX_LEVEL, perceptual)
+}
+
+/// Like [`bc3_encode_block`] with the colour half at rgbcx level `level`; the alpha half does not depend on it.
+pub fn bc3_encode_block_level(
+    px: &[[u8; 4]; 16],
+    search_radius: u32,
+    cut: u8,
+    level: u32,
+    perceptual: bool,
+) -> [u8; 16] {
+    check_level(level);
     init();
     let src = bytes(px);
     let mut out = [0u8; 16];
@@ -82,7 +141,7 @@ pub fn bc3_encode_block(
         ffi::sdc_bc3_encode(
             out.as_mut_ptr(),
             src.as_ptr(),
-            RGBCX_MAX_LEVEL,
+            level,
             search_radius,
             cut as u32,
             perceptual as i32,

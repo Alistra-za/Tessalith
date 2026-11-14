@@ -13,3 +13,8 @@ encoders-sys.workspace = true
 # The corpus tests (tests/corpus.rs) read PNGs and compare images in parallel.
 image.workspace = true
 rayon.workspace = true
+
+# The quality tool's unit tests run with `cargo test -p bcenc` (plan D adds its verdict tests there).
+[[example]]
+name = "quality"
+test = true
