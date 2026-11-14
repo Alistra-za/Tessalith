@@ -1,12 +1,13 @@
-//! The ordering kernel: the rounded least-squares fit of each of a pass's orderings (128 in the 4-colour pass, 32 in the
-//! 3-colour pass), R, G and B in lanes 0, 1 and 2
+//! The ordering kernel: the rounded least-squares fit of each of a pass's orderings (the level's `orderings4`, at most
+//! 128, in the 4-colour pass, its `orderings3`, at most 32, in the 3-colour pass), R, G and B in lanes 0, 1 and 2
 //! of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum 0, so it adds nothing to the key). Compiled only
 //! where the target has SSE2 (the `cfg` on `mod sse2`), so the `target_feature(enable = "sse2")` functions here are
 //! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` and
 //! `keys3` carry it (as does the test-only `round_key_of`). This is the crate's one float kernel: the scalar code it
 //! replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered` or `ls_endpoints3_ordered` and
 //! `precise_round_565` through `round_ls`) is its reference, and every real call in the unit tests also runs that code
-//! and asserts the same keys (128 for `keys4`, 32 for `keys3`).
+//! and asserts the same keys (all `MAX_TOTAL_ORDERINGS4` of `keys4`, `MAX_TOTAL_ORDERINGS3` of `keys3`, the unfitted
+//! tail 0 on both sides).
 //!
 //! Why it gives the scalar code's bits, step by step:
 //! - Integers. With `S` the prefix sums of one channel, `S[16]` the block total (`sorted_sums` stores it there) and
@@ -55,24 +56,26 @@
 //! counts, and `every_3_colour_ordering_matches_the_reference` over all 153 orderings.
 
 use super::super::fit::{OrderTables, MIDPOINT5, MIDPOINT6};
+use super::super::params::params;
 use super::super::tables::{MAX_TOTAL_ORDERINGS4, UNIQUE_TOTAL_ORDERS3, UNIQUE_TOTAL_ORDERS4};
 use super::MAX_TOTAL_ORDERINGS3;
 use core::arch::x86_64::*;
 
 /// `order_keys::keys4` on SSE2 vectors.
 #[target_feature(enable = "sse2")]
-pub(super) fn keys4(
+pub(super) fn keys4<const LEVEL: u32>(
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u16; MAX_TOTAL_ORDERINGS4],
     tables: &OrderTables,
     single_key: u32,
 ) -> [u32; MAX_TOTAL_ORDERINGS4] {
+    let n = const { params(LEVEL).orderings4 };
     let v = prefix_vectors(sums);
     let t3 = _mm_set_epi32(0, total[2] * 3, total[1] * 3, total[0] * 3);
 
     let mut keys = [0u32; MAX_TOTAL_ORDERINGS4];
-    for (key, &s) in keys.iter_mut().zip(row) {
+    for (key, &s) in keys.iter_mut().zip(row).take(n) {
         let s = s as usize;
         let [o0, o1, o2, o3] = UNIQUE_TOTAL_ORDERS4[s];
         let (f1, f2, f3) = (o0 as usize, (o0 + o1) as usize, (o0 + o1 + o2) as usize);
@@ -91,18 +94,19 @@ pub(super) fn keys4(
 /// `order_keys::keys3` on SSE2 vectors: the same fit with two positions. `f1 = o0` and `f2 = o0 + o2` (BC1's 3-colour
 /// order along the axis is selector 0, 2, 1), `q10 = S[f1] + S[f2]` and `uq00 = 2 total - q10`.
 #[target_feature(enable = "sse2")]
-pub(super) fn keys3(
+pub(super) fn keys3<const LEVEL: u32>(
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u8; MAX_TOTAL_ORDERINGS3],
     tables: &OrderTables,
     single_key: u32,
 ) -> [u32; MAX_TOTAL_ORDERINGS3] {
+    let n = const { params(LEVEL).orderings3 };
     let v = prefix_vectors(sums);
     let t2 = _mm_set_epi32(0, total[2] * 2, total[1] * 2, total[0] * 2);
 
     let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
-    for (key, &s) in keys.iter_mut().zip(row) {
+    for (key, &s) in keys.iter_mut().zip(row).take(n) {
         let s = s as usize;
         let [o0, o1, o2] = UNIQUE_TOTAL_ORDERS3[s];
         let (f1, f2) = (o0 as usize, (o0 + o2) as usize);

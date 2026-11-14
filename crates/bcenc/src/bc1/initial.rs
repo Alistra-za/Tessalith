@@ -1,11 +1,12 @@
 //! The initial endpoints of a BC1 block. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
-//! (MIT or public domain): `encode_bc1_pick_initial`, the arms level 18 reaches (Note HY3).
+//! (MIT or public domain): `encode_bc1_pick_initial`, the arms the ported levels reach (Notes HY3, HY15).
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 
 use super::fit::{precise_round_565, to_5, to_6};
+use super::params::params;
 use super::{BlockStats, Ends};
 
 /// `maximum(a, b)`: `(a > b) ? a : b`.
@@ -28,10 +29,15 @@ fn clampf(value: f32, low: f32, high: f32) -> f32 {
     }
 }
 
-/// `encode_bc1_pick_initial` with level 18's flags: the grey arm for an all-grey block, else the principal-axis arm
-/// with 6 power iterations (round 0) or the float bounding box (`bounding_box`, round 1, where `encode_bc1` adds
-/// `cEncodeBC1BoundingBox`). The 2D least-squares and integer bounding-box arms need flags level 18 never sets.
-pub(crate) fn pick_initial(px: &[[u8; 4]; 16], bounding_box: bool, s: &BlockStats) -> Ends {
+/// `encode_bc1_pick_initial` with the level's flags: the grey arm for an all-grey block, else the principal-axis arm
+/// with the level's power iterations (round 0) or the float bounding box (`bounding_box`, round 1, where `encode_bc1`
+/// adds `cEncodeBC1BoundingBox`). The 2D least-squares and integer bounding-box arms need flags no ported level sets.
+pub(crate) fn pick_initial<const LEVEL: u32>(
+    px: &[[u8; 4]; 16],
+    bounding_box: bool,
+    s: &BlockStats,
+) -> Ends {
+    let p = const { params(LEVEL) };
     let (min, max, avg) = (s.min, s.max, s.avg);
     if s.grayscale {
         let fr = px[0][0] as u32;
@@ -127,8 +133,8 @@ pub(crate) fn pick_initial(px: &[[u8; 4]; 16], bounding_box: bool, s: &BlockStat
         // |icov| <= 16 * 255^2 < 2^24, so the conversion is exact.
         let cov: [f32; 6] = std::array::from_fn(|i| icov[i] as f32 * (1.0f32 / 255.0f32));
 
-        // cEncodeBC1Use6PowerIters is set at level 18.
-        for _ in 0..6 {
+        // 6 with cEncodeBC1Use6PowerIters, else 4.
+        for _ in 0..p.power_iters {
             let r = xr * cov[0] + xg * cov[1] + xb * cov[2];
             let g = xr * cov[1] + xg * cov[3] + xb * cov[4];
             let b = xr * cov[2] + xg * cov[4] + xb * cov[5];
@@ -138,7 +144,7 @@ pub(crate) fn pick_initial(px: &[[u8; 4]; 16], bounding_box: bool, s: &BlockStat
         }
 
         // The power iteration grows the vector by at most the covariance trace (< 3 * 16 * 255^2 / 255) per step,
-        // so k stays finite (< 1e27) and |x * m| <= 2048: the casts below never leave i32.
+        // so after at most 6 steps k stays finite (< 1e27) and |x * m| <= 2048: the casts below never leave i32.
         let k = maximum(maximum(xr.abs(), xg.abs()), xb.abs());
         if k >= 2.0 {
             hit!(Hit::InitAxisScaled);

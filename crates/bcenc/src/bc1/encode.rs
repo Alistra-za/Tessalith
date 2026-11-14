@@ -1,15 +1,19 @@
-//! BC1 encode at rgbcx level 18. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches (MIT or
-//! public domain): `encode_bc1(void*, const uint8_t*, flags, total_orderings_to_try, total_orderings_to_try3, ..)` for
-//! level 18's flags, `encode_bc1_solid_block`, `try_3color_block`, `encode_bc1_endpoint_search`, `bc1_encode4` and
-//! `bc1_encode3` (Notes HY3, HY4).
+//! BC1 encode at an rgbcx level of [`LEVELS`]. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
+//! (MIT or public domain): `encode_bc1(void*, const uint8_t*, flags, total_orderings_to_try, total_orderings_to_try3,
+//! ..)` for those levels' flags, `encode_bc1_solid_block`, `try_3color_block`, `encode_bc1_endpoint_search`,
+//! `bc1_encode4` and `bc1_encode3` (Notes HY3, HY4, HY15).
 //!
-//! Level 18 is `cEncodeBC1TwoLeastSquaresPasses | cEncodeBC1UseFullMSEEval | cEncodeBC1UseLikelyTotalOrderings |
-//! cEncodeBC1Use6PowerIters | cEncodeBC1Iterative | (256 << cEncodeBC1EndpointSearchRoundsShift) |
-//! cEncodeBC1TryAllInitialEndponts`, plus `cEncodeBC1Use3ColorBlocks` when `allow_3color`, with
-//! `total_orderings_to_try = MAX_TOTAL_ORDERINGS4` and `total_orderings_to_try3 = 32`. The engine encodes in `cBC1Dual`
-//! mode, never passes forced selectors and never sets `allow_transparent_texels_for_black`, so
-//! `cEncodeBC1Use3ColorBlocksForBlackPixels` is never set. Those flags are constants here: each flag test of the C++ is
-//! resolved to the arm level 18 takes; `allow_3color` is the one flag left.
+//! Every level is `cEncodeBC1TwoLeastSquaresPasses | cEncodeBC1UseLikelyTotalOrderings` plus flags that set six
+//! numbers, the level's [`Params`](super::params::Params): power iterations (`cEncodeBC1Use6PowerIters`),
+//! initial-endpoint rounds (`cEncodeBC1TryAllInitialEndponts`), ordering passes (`cEncodeBC1Iterative`),
+//! endpoint-search rounds (the `cEncodeBC1EndpointSearchRoundsShift` field), and the 4- and 3-colour orderings
+//! (`total_orderings_to_try`, `total_orderings_to_try3`). `cEncodeBC1UseFullMSEEval` (levels 13, 15, 18) is not one
+//! of them: under `cBC1Dual` every selector search is the dual one, which ignores it, and it is not needed to make
+//! `needs_block_error` true. `cEncodeBC1Use3ColorBlocks` is set when `allow_3color`. The engine encodes in `cBC1Dual` mode, never passes forced
+//! selectors and never sets `allow_transparent_texels_for_black`, so `cEncodeBC1Use3ColorBlocksForBlackPixels` is never
+//! set. Each flag test of the C++ is resolved to the arm these levels take or reads the level's `Params`;
+//! `allow_3color` is the one flag left. The level is a const generic: each level is its own code, with constant loop
+//! bounds.
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
@@ -17,21 +21,39 @@ use crate::hits::{hit, Hit};
 
 use super::fit::{ls_endpoints3, ls_endpoints4, order_tables, precise_round_565, Hist3, Hist4};
 use super::initial::pick_initial;
-use super::order_keys::{self, MAX_TOTAL_ORDERINGS3};
+use super::order_keys;
 use super::palette::single_tables;
+use super::params::params;
 use super::seen::Seen;
 use super::sels::{find_sels3, find_sels4, Texels};
 use super::tables::{BEST_TOTAL_ORDERINGS3, BEST_TOTAL_ORDERINGS4};
-use super::{BlockStats, Ends, DUAL};
+use super::{BlockStats, Ends, DUAL, LEVELS};
 
-/// Level 18's `total_orderings3`: the 32 entries of a row are the 32 orderings it tries (`std::min(32,
-/// MAX_TOTAL_ORDERINGS3)`, see `order_keys::keys3`).
-const TOTAL_ORDERINGS3: usize = 32;
-const _: () = assert!(TOTAL_ORDERINGS3 == MAX_TOTAL_ORDERINGS3);
+/// [`encode`] at a level given at run time, one of [`LEVELS`]. Panics on any other level.
+pub(crate) fn encode_level(
+    px: &[[u8; 4]; 16],
+    level: u32,
+    allow_3color: bool,
+    weights: [i32; 3],
+) -> [u8; 8] {
+    match level {
+        10 => encode::<10>(px, allow_3color, weights),
+        12 => encode::<12>(px, allow_3color, weights),
+        13 => encode::<13>(px, allow_3color, weights),
+        15 => encode::<15>(px, allow_3color, weights),
+        18 => encode::<18>(px, allow_3color, weights),
+        _ => panic!("BC1 level {level} is not one of {LEVELS:?}"),
+    }
+}
 
-/// `encode_bc1(18, .., allow_3color, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with R, G, B
+/// `encode_bc1(LEVEL, .., allow_3color, allow_transparent_texels_for_black = false)` in `cBC1Dual` mode with R, G, B
 /// error weights `weights`.
-pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) -> [u8; 8] {
+pub(crate) fn encode<const LEVEL: u32>(
+    px: &[[u8; 4]; 16],
+    allow_3color: bool,
+    weights: [i32; 3],
+) -> [u8; 8] {
+    let p = const { params(LEVEL) };
     let (fr, fg, fb) = (px[0][0], px[0][1], px[0][2]);
 
     let mut j = 15;
@@ -48,7 +70,8 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     }
 
     // `any_black_pixels` is not computed: every read of it is ANDed with cEncodeBC1Use3ColorBlocksForBlackPixels
-    // (never set here), or ORed into `needs_block_error`, which level 18's flags already make true.
+    // (never set here), or ORed into `needs_block_error`, which cEncodeBC1UseLikelyTotalOrderings (set at every level)
+    // already makes true.
     let mut s = BlockStats {
         min: [fr as i32, fg as i32, fb as i32],
         max: [fr as i32, fg as i32, fb as i32],
@@ -79,7 +102,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     let mut orig = ends;
     let mut sels = [0u8; 16];
 
-    // needs_block_error is true at level 18 (likely total orderings, full MSE, endpoint search).
+    // needs_block_error is true at every level (likely total orderings).
     let mut cur_err = u32::MAX;
 
     // The endpoint pairs scored so far in this block, one set per block type (see `seen.rs` for why a repeat can be
@@ -87,9 +110,9 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     let mut seen4 = Seen::new();
     let mut seen3 = allow_3color.then(Seen::new);
 
-    // cEncodeBC1TryAllInitialEndponts: two rounds, the second with cEncodeBC1BoundingBox.
-    for round in 0..2 {
-        let mut round_ends = pick_initial(px, round == 1, &s);
+    // The level's rounds: with cEncodeBC1TryAllInitialEndponts two, the second with cEncodeBC1BoundingBox; else one.
+    for round in 0..p.rounds {
+        let mut round_ends = pick_initial::<LEVEL>(px, round == 1, &s);
         let orig_round = round_ends;
         let mut round_sels = [0u8; 16];
 
@@ -110,8 +133,8 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
                 break;
             }
 
-            // Recorded, never skipped: `round_err` starts fresh in each round, so a pair round 0 scored can be taken
-            // here (measured on 16 textures: 39% of the blocks take such a pair).
+            // Recorded, never skipped: `round_err` starts fresh in each round, so with two rounds a pair round 0
+            // scored can be taken here (measured at level 18 on 16 textures: 39% of the blocks take such a pair).
             let repeat = seen4.insert(&trial);
             let mut trial_sels = [0u8; 16];
             let trial_err = find_sels4(&texels, &trial, &mut trial_sels, round_err);
@@ -141,12 +164,12 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
         }
     }
 
-    // cEncodeBC1UseLikelyTotalOrderings, with cEncodeBC1Iterative: up to two passes.
+    // cEncodeBC1UseLikelyTotalOrderings: the level's passes (two with cEncodeBC1Iterative, else one).
     if cur_err != 0 {
         hit!(Hit::OrderingsRun);
-        for _iter_index in 0..2 {
+        for _iter_index in 0..p.passes {
             let orig_err = cur_err;
-            total_orderings(
+            total_orderings::<LEVEL>(
                 px,
                 &texels,
                 &s,
@@ -176,7 +199,7 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
     if let Some(seen3) = seen3.as_mut() {
         if cur_err != 0 {
             hit!(Hit::Try3Run);
-            three = try_3color_block(
+            three = try_3color_block::<LEVEL>(
                 px,
                 &texels,
                 &s,
@@ -191,14 +214,15 @@ pub(crate) fn encode(px: &[[u8; 4]; 16], allow_3color: bool, weights: [i32; 3]) 
         }
     }
 
-    // 256 endpoint search rounds, over the set of the block type the search scores.
-    if cur_err != 0 {
+    // The level's endpoint search rounds, over the set of the block type the search scores
+    // (`(flags & cEncodeBC1EndpointSearchRoundsMask) && cur_err`).
+    if p.search_rounds != 0 && cur_err != 0 {
         hit!(Hit::SearchRun);
         let search_seen = match seen3.as_mut() {
             Some(seen3) if three => seen3,
             _ => &mut seen4,
         };
-        endpoint_search(
+        endpoint_search::<LEVEL>(
             px,
             &texels,
             three,
@@ -329,9 +353,9 @@ pub(super) fn sorted_sums(px: &[[u8; 4]; 16], e: &Ends, total: [i32; 3]) -> [[u3
 }
 
 /// One iteration of `encode_bc1`'s total-ordering loop: sort the texels along the current endpoints' axis, then try
-/// the `MAX_TOTAL_ORDERINGS4` orderings `g_best_total_orderings4` lists for the current selector histogram, keeping
-/// a strictly better one. The pairs of all 128 are fitted first ([`order_keys::keys4`]), then scored in order.
-fn total_orderings(
+/// the level's first `orderings4` of the orderings `g_best_total_orderings4` lists for the current selector histogram,
+/// keeping a strictly better one. Their pairs are fitted first ([`order_keys::keys4`]), then scored in order.
+fn total_orderings<const LEVEL: u32>(
     px: &[[u8; 4]; 16],
     texels: &Texels,
     s: &BlockStats,
@@ -349,18 +373,21 @@ fn total_orderings(
 
     let sums = sorted_sums(px, ends, s.total);
 
-    let keys = order_keys::keys4(
+    let p = const { params(LEVEL) };
+    let keys = order_keys::keys4::<LEVEL>(
         s.total,
         &sums,
         &BEST_TOTAL_ORDERINGS4[orig_total_order_index],
         order_tables(),
         Seen::key(&single_colour_ends(s.avg)),
     );
-    for &key in &keys {
+    // rgbcx tries the first `orderings4` entries of the row; `keys4` fills only those.
+    for &key in &keys[..p.orderings4] {
         // A pair scored before in this block cannot beat `*cur_err`: it was taken (its error is at least `*cur_err`,
         // which only falls) or rejected against an error that was at least `*cur_err`; and a trial is taken only
         // when strictly lower (see `seen.rs`). `*cur_err` at the start of the first pass is at most every earlier
-        // 4-colour error of the block (the lower of the two rounds).
+        // 4-colour error of the block: it is the taken round's final error, at most every error that round scored,
+        // and with two rounds at most the other round's too (the lower of the two is taken).
         if seen.insert_key(key) {
             hit!(Hit::OrderingRepeat);
             #[cfg(test)]
@@ -381,16 +408,17 @@ fn total_orderings(
     }
 }
 
-/// `try_3color_block` at level 18 without forced selectors: fit a 3-colour block from `start` (the 4-colour round's
-/// initial endpoints) with two least-squares passes and the 32 likely total orderings, and take it into `ends`,
-/// `sels` and `cur_err` when its error is strictly below `cur_err`. Returns whether it did (`results.m_3color`).
+/// `try_3color_block` without forced selectors: fit a 3-colour block from `start` (the 4-colour round's initial
+/// endpoints) with two least-squares passes and the level's first `orderings3` likely total orderings (32 or 8), and
+/// take it into `ends`, `sels` and `cur_err` when its error is strictly below `cur_err`. Returns whether it did
+/// (`results.m_3color`).
 ///
 /// Every selector array this reads was written by [`find_sels3`] because its total was below the cutoff the search was
 /// given (the first search passes `UINT32_MAX`, a block's error is far below it), and a search writes `sels` only
 /// then. The searches return full totals, so a trial's error is its whole block error, not a partial one.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
 #[allow(clippy::too_many_arguments)] // The C++ call's own list, plus the block's set of scored pairs.
-fn try_3color_block(
+fn try_3color_block<const LEVEL: u32>(
     px: &[[u8; 4]; 16],
     texels: &Texels,
     s: &BlockStats,
@@ -400,6 +428,7 @@ fn try_3color_block(
     ends: &mut Ends,
     sels: &mut [u8; 16],
 ) -> bool {
+    let p = const { params(LEVEL) };
     let mut e = start;
     seen.insert(&e);
     let mut trial_sels = [0u8; 16];
@@ -438,7 +467,7 @@ fn try_3color_block(
         hit!(Hit::Try3StartExact);
     }
 
-    // cEncodeBC1UseLikelyTotalOrderings is set and total_orderings_to_try3 (32) is not 0.
+    // cEncodeBC1UseLikelyTotalOrderings is set and total_orderings_to_try3 is not 0 (`params.rs` asserts it).
     if trial_err != 0 {
         hit!(Hit::Orderings3Run);
         let mut h = Hist3::default();
@@ -450,15 +479,16 @@ fn try_3color_block(
 
         let sums = sorted_sums(px, &e, s.total);
 
-        // The pairs of all 32 orderings are fitted first, then scored in order (see `order_keys`).
-        let keys = order_keys::keys3(
+        // The pairs of the level's first `orderings3` orderings of the row are fitted first, then scored in order (see
+        // `order_keys`); `keys3` fills only those.
+        let keys = order_keys::keys3::<LEVEL>(
             s.total,
             &sums,
             &BEST_TOTAL_ORDERINGS3[orig_total_order_index],
             order_tables(),
             Seen::key(&single_colour_ends3(s.avg)),
         );
-        for &key in &keys {
+        for &key in &keys[..p.orderings3] {
             // A pair scored before in this block cannot be strictly below `trial_err`: `trial_err` only falls, it
             // started at most the error of every pair this function scored before (the start, the least-squares
             // trials), and each was taken or rejected against an error at least `trial_err` (see `seen.rs`).
@@ -520,13 +550,14 @@ const ADJACENT_VOXELS: [[i8; 4]; 16] = [
     [0, 1, -1, 14],
 ];
 
-/// `encode_bc1_endpoint_search` with 256 rounds: step one endpoint by one code in one of 16 directions (rounds 0..15
-/// the high endpoint, 16..31 the low, repeating), keep a strictly better result, never undo the last improving step,
-/// and stop 33 rounds after the last improvement. A round in the forbidden direction (the undo of the last improving
-/// step) skips that stop test too, as in the C++. A step to a pair in `seen` is not scored but runs the stop test, as
-/// it did when it was scored and rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour
-/// blocks (`use_black` false, see [`find_sels3`]).
-fn endpoint_search(
+/// `encode_bc1_endpoint_search` with the level's `search_rounds` rounds (20, 32 or 256): step one endpoint by one code
+/// in one of 16 directions (rounds 0..15 the high endpoint, 16..31 the low, repeating), keep a strictly better result,
+/// never undo the last improving step, and stop 33 rounds after the last improvement (which only 256 rounds can
+/// reach). A round in the forbidden direction (the undo of the last improving step) skips that stop test too, as in
+/// the C++. A step to a pair in `seen` is not scored but runs the stop test, as it did when it was scored and
+/// rejected. `three` is `results.m_3color`: the trials are then scored as 3-colour blocks (`use_black` false, see
+/// [`find_sels3`]).
+fn endpoint_search<const LEVEL: u32>(
     // Read only by the shadow checks (the searches take `texels`).
     #[cfg_attr(not(test), allow(unused_variables))] px: &[[u8; 4]; 16],
     texels: &Texels,
@@ -536,10 +567,11 @@ fn endpoint_search(
     sels: &mut [u8; 16],
     mut cur_err: u32,
 ) {
+    let p = const { params(LEVEL) };
     let mut prev_improvement_index = 0i32;
     let mut forbidden_direction = -1i32;
 
-    for i in 0..256i32 {
+    for i in 0..p.search_rounds {
         if forbidden_direction == (i & 31) {
             hit!(Hit::SearchForbidden);
             continue;
@@ -563,8 +595,9 @@ fn endpoint_search(
         }
 
         // A pair scored before in this block (for this block type) cannot be strictly below `cur_err`, which only
-        // falls and began at most the error of everything scored before (see `seen.rs`). The step is not scored,
-        // but the stop test below still runs, as after a rejected trial.
+        // falls and began at most the error of everything scored before (the block's best so far, see `seen.rs`,
+        // whatever the level's rounds, passes and orderings were). The step is not scored, but the stop test below
+        // still runs, as after a rejected trial.
         let scored = if seen.insert(&trial) {
             hit!(Hit::SearchRepeat);
             #[cfg(test)]

@@ -1,6 +1,7 @@
 //! The endpoint pairs of one total-ordering pass, fitted all at once (Note HY13). A 4-colour pass of
-//! `total_orderings` tries the 128 orderings of one row of `BEST_TOTAL_ORDERINGS4`, a 3-colour pass of
-//! `try_3color_block` the 32 of one row of `BEST_TOTAL_ORDERINGS3`; [`keys4`] and [`keys3`] return, for each, the
+//! `total_orderings` tries the level's first `orderings4` (at most 128) orderings of one row of
+//! `BEST_TOTAL_ORDERINGS4`, a 3-colour pass of `try_3color_block` the first `orderings3` (at most 32) of one row of
+//! `BEST_TOTAL_ORDERINGS3` (Note HY15); [`keys4`] and [`keys3`] return, for each, the
 //! pair the trial scores, as its [`Seen`] key: the single-colour pair's key for an ordering with all 16 texels on one
 //! selector (`TOTAL_ORDER_4_16`, `TOTAL_ORDER_3_16`), else the key of the rounded least-squares fit of the ordering.
 //!
@@ -17,15 +18,19 @@ use super::tables::{BEST_TOTAL_ORDERINGS3, MAX_TOTAL_ORDERINGS4};
 pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
 const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 
-/// The [`Seen`] key of the endpoint pair of each ordering `row[q]` of one pass: `single_key` when the ordering is one
-/// of `TOTAL_ORDER_4_16`, else the key of `round_ls` of `ls_endpoints4_ordered(total, tables.factors[row[q]], row[q],
-/// sums)`. `total` is the block's channel sums and `sums` the pass's prefix sums (`sorted_sums`).
+/// The [`Seen`] key of the endpoint pair of each ordering `row[q]` of one pass, for `q` below the level's
+/// `orderings4`: `single_key` when the ordering is one of `TOTAL_ORDER_4_16`, else the key of `round_ls` of
+/// `ls_endpoints4_ordered(total, tables.factors[row[q]], row[q], sums)`. The entries from `orderings4` on are 0 and
+/// are not keys: the caller reads `..orderings4`. `total` is the block's channel sums and `sums` the pass's prefix sums
+/// (`sorted_sums`).
 ///
-/// The row's 128 entries are the 128 orderings level 18 tries: the C++ loops to
-/// `clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4)` with `MAX_TOTAL_ORDERINGS4` passed.
+/// The row's first `orderings4` entries are the orderings the level tries: the C++ loops to
+/// `clampi(total_orderings_to_try, MIN_TOTAL_ORDERINGS, MAX_TOTAL_ORDERINGS4)`, which is `orderings4` at every level
+/// (`params.rs` asserts it is inside the clamp). The level is a const generic so that the count is a constant in each
+/// instance.
 ///
 /// [`Seen`]: super::seen::Seen
-pub(crate) fn keys4(
+pub(crate) fn keys4<const LEVEL: u32>(
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u16; MAX_TOTAL_ORDERINGS4],
@@ -35,27 +40,31 @@ pub(crate) fn keys4(
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
         // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys4(total, sums, row, tables, single_key) };
+        let keys = unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
-        assert_eq!(keys, scalar::keys4(total, sums, row, tables, single_key));
+        assert_eq!(
+            keys,
+            scalar::keys4::<LEVEL>(total, sums, row, tables, single_key)
+        );
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys4(total, sums, row, tables, single_key);
+    let keys = scalar::keys4::<LEVEL>(total, sums, row, tables, single_key);
     keys
 }
 
 /// [`keys4`] for the 3-colour pass of `try_3color_block`: the [`Seen`] key of the endpoint pair of each ordering
-/// `row[q]`: `single_key` when the ordering is one of `TOTAL_ORDER_3_16`, else the key of `round_ls` of
-/// `ls_endpoints3_ordered(total, tables.factors3[row[q]], row[q], sums)`.
+/// `row[q]`, for `q` below the level's `orderings3` (the rest 0, not read): `single_key` when the ordering is one of
+/// `TOTAL_ORDER_3_16`, else the key of `round_ls` of `ls_endpoints3_ordered(total, tables.factors3[row[q]], row[q],
+/// sums)`.
 ///
-/// The row's 32 entries are the 32 orderings level 18 tries: the C++ loops to
-/// `std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3)` with 32 passed and `MAX_TOTAL_ORDERINGS3` 32
-/// (`cEncodeBC1Exhaustive` is level 19 only, so the `std::min` bound is what level 18 uses).
+/// The row's first `orderings3` entries are the orderings the level tries: the C++ loops to
+/// `std::min(total_orderings_to_try, MAX_TOTAL_ORDERINGS3)`, which is `orderings3` (8 or 32, `MAX_TOTAL_ORDERINGS3`
+/// 32) (`cEncodeBC1Exhaustive` is level 19 only, so the `std::min` bound is what the ported levels use).
 ///
 /// [`Seen`]: super::seen::Seen
-pub(crate) fn keys3(
+pub(crate) fn keys3<const LEVEL: u32>(
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u8; MAX_TOTAL_ORDERINGS3],
@@ -65,14 +74,17 @@ pub(crate) fn keys3(
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
         // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys3(total, sums, row, tables, single_key) };
+        let keys = unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
-        assert_eq!(keys, scalar::keys3(total, sums, row, tables, single_key));
+        assert_eq!(
+            keys,
+            scalar::keys3::<LEVEL>(total, sums, row, tables, single_key)
+        );
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys3(total, sums, row, tables, single_key);
+    let keys = scalar::keys3::<LEVEL>(total, sums, row, tables, single_key);
     keys
 }
 
@@ -93,20 +105,22 @@ mod scalar {
         ls_endpoints3_ordered, ls_endpoints4_ordered, OrderTables, TOTAL_ORDER_3_16,
         TOTAL_ORDER_4_16,
     };
+    use super::super::params::params;
     use super::super::seen::Seen;
     use super::super::tables::MAX_TOTAL_ORDERINGS4;
     use super::MAX_TOTAL_ORDERINGS3;
 
     /// [`super::keys4`], one ordering at a time.
-    pub(super) fn keys4(
+    pub(super) fn keys4<const LEVEL: u32>(
         total: [i32; 3],
         sums: &[[u32; 17]; 3],
         row: &[u16; MAX_TOTAL_ORDERINGS4],
         tables: &OrderTables,
         single_key: u32,
     ) -> [u32; MAX_TOTAL_ORDERINGS4] {
+        let n = const { params(LEVEL).orderings4 };
         let mut keys = [0u32; MAX_TOTAL_ORDERINGS4];
-        for (key, &s_index) in keys.iter_mut().zip(row) {
+        for (key, &s_index) in keys.iter_mut().zip(row).take(n) {
             let s_index = s_index as usize;
             *key = if TOTAL_ORDER_4_16.contains(&s_index) {
                 hit!(Hit::OrderingSingle);
@@ -121,15 +135,16 @@ mod scalar {
     }
 
     /// [`super::keys3`], one ordering at a time.
-    pub(super) fn keys3(
+    pub(super) fn keys3<const LEVEL: u32>(
         total: [i32; 3],
         sums: &[[u32; 17]; 3],
         row: &[u8; MAX_TOTAL_ORDERINGS3],
         tables: &OrderTables,
         single_key: u32,
     ) -> [u32; MAX_TOTAL_ORDERINGS3] {
+        let n = const { params(LEVEL).orderings3 };
         let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
-        for (key, &s_index) in keys.iter_mut().zip(row) {
+        for (key, &s_index) in keys.iter_mut().zip(row).take(n) {
             let s_index = s_index as usize;
             *key = if TOTAL_ORDER_3_16.contains(&s_index) {
                 hit!(Hit::Ordering3Single);
@@ -220,10 +235,11 @@ mod tests {
             for axis in &axes() {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
-                    let keys = keys3(total, &sums, row, tables, SINGLE);
+                    // Level 18 fits the whole row.
+                    let keys = keys3::<18>(total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
-                        scalar::keys3(total, &sums, row, tables, SINGLE),
+                        scalar::keys3::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
                     for (q, &s) in row.iter().enumerate() {
@@ -247,10 +263,11 @@ mod tests {
             for axis in &axes {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
-                    let keys = keys4(total, &sums, row, tables, SINGLE);
+                    // Level 18 fits the whole row.
+                    let keys = keys4::<18>(total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
-                        scalar::keys4(total, &sums, row, tables, SINGLE),
+                        scalar::keys4::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
                     for (q, &s) in row.iter().enumerate() {

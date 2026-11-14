@@ -1,12 +1,16 @@
 //! The endpoint pairs `encode` has already scored in one block, so none is scored twice (Note HY8).
 //!
-//! Why skipping a repeat cannot change a byte: in `total_orderings`, in the 3-colour ordering loop and in
-//! `endpoint_search` the error a trial must beat only falls, and when each starts it is at most the error of every
-//! pair scored before it in the block for that block type. A pair scored before was either taken, so its error is at
-//! least the present best, or rejected against an error that was at least the present best, so it can never be
-//! strictly lower now, and a trial is taken only when strictly lower. Round 1's least-squares passes are different:
+//! Why skipping a repeat cannot change a byte, at every level (Note HY15): in `total_orderings`, in the 3-colour
+//! ordering loop and in `endpoint_search` the error a trial must beat only falls, and when each starts it is at most
+//! the error of every pair scored before it in the block for that block type. A pair scored before was either taken,
+//! so its error is at least the present best, or rejected against an error that was at least the present best, so it
+//! can never be strictly lower now, and a trial is taken only when strictly lower. The argument needs nothing of the
+//! level's `Params`: with one round `cur_err` is that round's final error, at most every error it scored; with one
+//! ordering pass the pass starts from that error; the 3-colour set is `try_3color_block`'s own; the search starts from
+//! the block's best, whatever its number of rounds. The least-squares passes of a second round are different:
 //! `round_err` starts fresh in each round, so a pair round 0 scored can be taken there (they record but never skip).
 
+use super::params::{most, most3, params, LEVELS};
 use super::Ends;
 
 /// The endpoint pairs already scored in one block, for one block type (4-colour or 3-colour).
@@ -17,9 +21,20 @@ pub(crate) struct Seen {
 
 impl Seen {
     pub(crate) const SLOTS: usize = 1024;
-    /// The most pairs one block can score for one block type: 2 round starts, 4 least-squares trials, 2 x 128
-    /// ordering trials and 256 search steps.
-    pub(crate) const MOST: usize = 518;
+    /// The most pairs one block can score for one block type, over every level: the most of [`most`] (518 at level
+    /// 18: 2 round starts, 4 least-squares trials, 2 x 128 ordering trials and 256 search steps).
+    pub(crate) const MOST: usize = {
+        let mut m = 0;
+        let mut i = 0;
+        while i < LEVELS.len() {
+            let n = most(params(LEVELS[i]));
+            if n > m {
+                m = n;
+            }
+            i += 1;
+        }
+        m
+    };
 
     pub(crate) fn new() -> Self {
         Seen {
@@ -85,8 +100,17 @@ impl Seen {
     }
 }
 
-// The table is about half full at worst, so a probe always reaches an empty slot. The hash takes 10 bits.
+// The table is about half full at worst, so a probe always reaches an empty slot. The hash takes 10 bits. Both block
+// types' sets stay within `MOST` at every level.
 const _: () = assert!(Seen::MOST < Seen::SLOTS);
+const _: () = {
+    let mut i = 0;
+    while i < LEVELS.len() {
+        let p = params(LEVELS[i]);
+        assert!(most(p) <= Seen::MOST && most3(p) <= Seen::MOST);
+        i += 1;
+    }
+};
 const _: () = assert!(Seen::SLOTS == 1 << 10);
 
 #[cfg(test)]

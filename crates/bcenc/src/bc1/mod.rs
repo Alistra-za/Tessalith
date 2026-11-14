@@ -1,9 +1,10 @@
 //! BC1: the total-ordering tables and the two-decoder ("dual", NVIDIA plus AMD) palettes of rgbcx's `cBC1Dual` mode
-//! (Note HY2), and the encode at level 18 with four- and three-colour blocks and plain or perceptual weights (Notes HY3,
-//! HY4) and with one-bit alpha (Note HY5). `tables` is generated from the vendored text by
-//! `tools/gen-bcenc-tables.py`; `palette` ports the palette and single-colour code; `encode` drives the encode,
-//! `initial` picks the starting endpoints, `fit` holds the least-squares fits and rounding, `order_keys` fits a whole
-//! 4-colour total-ordering pass at once (Note HY13), `sels` the selector searches; `alpha` is the one-bit-alpha encode.
+//! (Note HY2), and the encode at rgbcx levels 10, 12, 13, 15 and 18 (`params`, Note HY15) with four- and three-colour
+//! blocks and plain or perceptual weights (Notes HY3, HY4) and with one-bit alpha (Note HY5). `tables` is generated
+//! from the vendored text by `tools/gen-bcenc-tables.py`; `palette` ports the palette and single-colour code; `params`
+//! holds each level's search depth; `encode` drives the encode, `initial` picks the starting endpoints, `fit` holds the
+//! least-squares fits and rounding, `order_keys` fits a whole 4-colour total-ordering pass at once (Note HY13), `sels`
+//! the selector searches; `alpha` is the one-bit-alpha encode.
 
 pub(crate) mod alpha;
 pub(crate) mod encode;
@@ -11,10 +12,16 @@ mod fit;
 // For `coverage_tests`, which checks the class generators' restated rounding against the port's and builds the
 // total-ordering tables on its own thread.
 #[cfg(test)]
-pub(crate) use fit::{build_order_tables, precise_round_565, to_5, to_6};
+pub(crate) use fit::{build_order_tables, order_tables, precise_round_565, to_5, to_6};
 mod initial;
 mod order_keys;
 pub mod palette;
+mod params;
+// Read by `examples/quality.rs` and the integration tests, outside the crate.
+#[doc(hidden)]
+pub use params::LEVELS;
+#[cfg(test)]
+pub(crate) use params::{params, Params};
 mod seen;
 mod sels;
 pub mod tables;

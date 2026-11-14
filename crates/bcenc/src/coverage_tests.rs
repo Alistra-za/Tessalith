@@ -1,9 +1,9 @@
 //! Every `hit!` branch of the ported code is taken by the class generators.
 use crate::bc1::alpha::encode_alpha;
-use crate::bc1::encode::encode;
-use crate::bc1::palette::{build_single_tables, dual_palette};
-use crate::bc1::{build_order_tables, precise_round_565, to_5, to_6};
-use crate::bc1::{PERCEPTUAL, PLAIN};
+use crate::bc1::encode::{encode, encode_level};
+use crate::bc1::palette::{build_single_tables, dual_palette, single_tables};
+use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6};
+use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
 use crate::gen;
 use crate::hits::{counts, Hit};
 use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
@@ -53,12 +53,10 @@ fn every_ported_branch_is_taken() {
     for allow_3color in [false, true] {
         for weights in [PLAIN, PERCEPTUAL] {
             for px in &blocks {
-                encode(px, allow_3color, weights);
+                encode::<18>(px, allow_3color, weights);
             }
-            for v in [0u8, 1, 2, 3, 4, 127, 128, 251, 252, 253, 254, 255] {
-                for g in [0u8, 1, 2, 3, 4, 127, 128, 251, 252, 253, 254, 255] {
-                    encode(&[[v, g, v, 255]; 16], allow_3color, weights);
-                }
+            for px in &solids() {
+                encode::<18>(px, allow_3color, weights);
             }
         }
     }
@@ -68,17 +66,145 @@ fn every_ported_branch_is_taken() {
     for weights in [PLAIN, PERCEPTUAL] {
         for px in blocks.iter().step_by(7) {
             for &mask in &masks {
-                encode_alpha(px, mask, weights);
+                encode_alpha::<18>(px, mask, weights);
             }
         }
     }
-    encode_alpha(&gen::LONG_WALK.0, gen::LONG_WALK.1, PLAIN);
+    encode_alpha::<18>(&gen::LONG_WALK.0, gen::LONG_WALK.1, PLAIN);
     let never: Vec<_> = since(&before)
         .into_iter()
         .filter(|&(_, n)| n == 0)
         .map(|(h, _)| h)
         .collect();
     assert!(never.is_empty(), "branches never taken: {never:?}");
+}
+
+/// The greys and the solid colours at the ends of the range, green apart from red and blue.
+fn solids() -> Vec<[[u8; 4]; 16]> {
+    const ENDS: [u8; 12] = [0, 1, 2, 3, 4, 127, 128, 251, 252, 253, 254, 255];
+    ENDS.iter()
+        .flat_map(|&v| ENDS.map(|g| [[v, g, v, 255]; 16]))
+        .collect()
+}
+
+/// Two blocks that reach a total-ordering lookup with every texel on one selector through round 0's least-squares
+/// passes, so a level with one round reaches it too (the classes reach those arms only through round 1, found by a
+/// search over clusters of 2..=4 nearby colours and traced through the port):
+/// - `hist4_all_sel0`, perceptual weights: the principal-axis start (29, 59, 27) to (30, 60, 27) scores 82,176 with
+///   the 13 texels of (247, 239, 222) on selector 1. Their least-squares fit puts both endpoints near that colour and
+///   rounds to (30, 59, 27) and (31, 60, 27); the low one is exactly (247, 239, 222), and green weighted 183 keeps the
+///   three other texels nearest it too, so all 16 sit on selector 0 at 29,208 and the trial is taken. The next pass
+///   sees one selector, fits the single-colour pair of the average (both endpoints (30, 59, 27)), and that only ties.
+///   So the 4-colour lookup sees [16, 0, 0, 0] with a non-zero error (`Hist16Sel0`), with or without 3-colour blocks.
+/// - `hist3_all_sel1`, plain weights, 3-colour blocks: `try_3color_block` starts from round 0's (11, 41, 5) to
+///   (12, 43, 5) at 3,040; its first least-squares trial, (10, 42, 5) to (11, 44, 5), scores 1,412, and the second,
+///   (10, 42, 6) to (11, 43, 5), 1,156 with every texel on selector 1, the endpoint (90, 174, 41), and is taken. So
+///   the 3-colour lookup sees [0, 16, 0] with a non-zero error (`Hist3Sel1`).
+fn one_round_blocks() -> [[[u8; 4]; 16]; 2] {
+    let (a, b, c) = (
+        [247, 239, 222, 255],
+        [241, 239, 222, 255],
+        [244, 243, 222, 255],
+    );
+    let hist4_all_sel0 = [a, a, a, a, b, a, a, a, a, a, a, a, a, a, c, b];
+    let (p, q, r, s) = (
+        [88, 174, 43, 255],
+        [90, 174, 37, 255],
+        [96, 176, 41, 255],
+        [90, 167, 41, 255],
+    );
+    let hist3_all_sel1 = [p, p, q, p, r, p, p, q, p, q, p, s, p, p, r, r];
+    [hist4_all_sel0, hist3_all_sel1]
+}
+
+/// The branches a level's search depth rules out, each with the reason from the code.
+fn never_at(p: Params) -> Vec<Hit> {
+    let mut never = Vec::new();
+    if p.rounds == 1 {
+        // One round: it starts with `cur_err` at `u32::MAX`, so `round_err <= cur_err` always holds; round 1 (the
+        // bounding box) never runs. A least-squares trial is a repeat only of the round's start (the first trial
+        // differs from it, and a second trial equal to the first breaks as `LsPassSame`), and the start's error is
+        // above `round_err` once a trial was taken, so the repeat is never taken.
+        never.extend([
+            Hit::RoundWorse,
+            Hit::LsRepeatTaken,
+            Hit::InitBox,
+            Hit::InitBoxSwapR,
+            Hit::InitBoxSwapG,
+        ]);
+    }
+    if p.search_rounds == 0 {
+        // No endpoint search: its gate needs `search_rounds != 0`.
+        never.extend([
+            Hit::SearchRun,
+            Hit::SearchForbidden,
+            Hit::SearchLow,
+            Hit::SearchHigh,
+            Hit::SearchBetter,
+            Hit::SearchStop,
+            Hit::SearchThree,
+            Hit::SearchFour,
+            Hit::SearchRepeat,
+        ]);
+    } else if p.search_rounds <= 32 {
+        // `i` is below `search_rounds` and `prev_improvement_index` at least 0, so `i - prev_improvement_index` is at
+        // most 31 and the stop test (`> 32`) never fires.
+        never.push(Hit::SearchStop);
+    }
+    never
+}
+
+/// At every level the encode equals rgbcx, with the shadow checks of every `Seen` skip running (HY8's argument holds
+/// for any `Params`, Note HY15), and takes the branches level 18 takes except those its search depth rules out.
+#[test]
+fn every_level_matches_rgbcx_with_its_skips_checked() {
+    // The once-built tables, on this thread before the first count: a build inside the first pass would count there.
+    for three in [false, true] {
+        dual_palette(three, 3, 40, 5, 20, 9, 31);
+    }
+    build_single_tables();
+    build_order_tables();
+    single_tables();
+    order_tables();
+    let blocks = gen::colour_classes(0xC0DE_0002, 1500);
+    let solids = solids();
+    let named = one_round_blocks();
+    let mut passes = Vec::new();
+    for level in LEVELS {
+        let before = counts();
+        for allow_3color in [false, true] {
+            for perceptual in [false, true] {
+                let weights = if perceptual { PERCEPTUAL } else { PLAIN };
+                for px in blocks.iter().chain(&solids).chain(&named) {
+                    assert_eq!(
+                        encode_level(px, level, allow_3color, weights),
+                        encoders_sys::bc1_encode_block_level(px, level, allow_3color, perceptual),
+                        "level {level}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}"
+                    );
+                }
+            }
+        }
+        passes.push((level, since(&before)));
+    }
+    let h18 = &passes.iter().find(|(l, _)| *l == 18).unwrap().1;
+    let mut wrong = Vec::new();
+    for (level, hl) in &passes {
+        let never = never_at(params(*level));
+        for &(hit, n) in hl {
+            if never.contains(&hit) {
+                if n > 0 {
+                    wrong.push(format!(
+                        "level {level} took {hit:?}, which its search depth rules out"
+                    ));
+                }
+            } else if taken(h18, hit) > 0 && n == 0 {
+                wrong.push(format!(
+                    "level {level} never took {hit:?}, which level 18 takes"
+                ));
+            }
+        }
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// The class generators' restated rounding (`round_code`, `round_code_midpoint`, which find the 565 rounding
@@ -134,7 +260,7 @@ fn two_opaque_colours_never_tie_on_the_default_alpha_axis() {
                     let px: [[u8; 4]; 16] = std::array::from_fn(|i| colour(i < n_a));
                     // Texels n_a + n_b and up are transparent.
                     let mask = (0xFFFFu32 << (n_a + n_b)) as u16;
-                    encode_alpha(&px, mask, PLAIN);
+                    encode_alpha::<18>(&px, mask, PLAIN);
                     cases += 1;
                 }
             }
@@ -153,8 +279,8 @@ fn the_default_axis_tie_block_keeps_the_default_axis() {
     let mut swapped = px;
     swapped.swap(0, 1);
     let before = counts();
-    encode_alpha(&px, mask, PLAIN);
-    encode_alpha(&swapped, mask, PERCEPTUAL);
+    encode_alpha::<18>(&px, mask, PLAIN);
+    encode_alpha::<18>(&swapped, mask, PERCEPTUAL);
     let grew = since(&before);
     assert_eq!(taken(&grew, Hit::AlphaAxisDefault), 2);
     assert_eq!(taken(&grew, Hit::AlphaAxisScaled), 0);

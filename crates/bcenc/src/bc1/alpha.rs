@@ -1,11 +1,12 @@
 //! BC1 with one-bit alpha. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches (MIT or public
-//! domain): `encode_bc1_alpha` and `bc1_alpha_find_sels` (sdc patch "bc1 alpha"), at level 18 (Note HY5).
+//! domain): `encode_bc1_alpha` and `bc1_alpha_find_sels` (sdc patch "bc1 alpha") (Note HY5).
 //!
-//! `level` reaches only the mask-0 call of `encode_bc1(level, .., true, false)`, which is [`encode`] with three-colour
-//! blocks. The R, G, B weights enter only through the selector search, `bc1_alpha_find_sels` (rgbcx.cpp 980 and 1012,
-//! reached from 2009 and 2019-2022), here [`find_sels3_masked`] on a [`Texels`] built once per block: the statistics,
-//! the principal axis, the least-squares fits and the endpoint steps read no weights. Its errors are in kernel units
-//! (twice rgbcx's, Note HY9); this file only compares them with each other and with 0.
+//! `level` reaches only the mask-0 call of `encode_bc1(level, .., true, false)`, which is [`encode`] at that level with
+//! three-colour blocks (`LEVEL`, Note HY15); the masked path does not depend on it. The R, G, B weights enter only
+//! through the selector search, `bc1_alpha_find_sels` (rgbcx.cpp 980 and 1012, reached from 2009 and 2019-2022), here
+//! [`find_sels3_masked`] on a [`Texels`] built once per block: the statistics, the principal axis, the least-squares
+//! fits and the endpoint steps read no weights. Its errors are in kernel units (twice rgbcx's, Note HY9); this file
+//! only compares them with each other and with 0.
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
@@ -17,17 +18,21 @@ use super::initial::maximum;
 use super::sels::{find_sels3_masked, Texels};
 use super::{Ends, DUAL};
 
-/// `encode_bc1_alpha(18, ..)` with R, G, B error weights `weights`: bit i of `transparent` marks texel i transparent.
-/// Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise a 3-colour
+/// `encode_bc1_alpha(LEVEL, ..)` with R, G, B error weights `weights`: bit i of `transparent` marks texel i
+/// transparent. Mask 0 is the plain encode with three-colour blocks, mask 0xFFFF the all-transparent block; otherwise a 3-colour
 /// block fitted to the opaque texels (principal axis, extreme texels, up to 8 least-squares refits, then up to 64
 /// rounds of +-1 endpoint steps), masked texels on selector 3.
 #[allow(clippy::needless_range_loop)] // Index loops mirror the C++ they port.
-pub(crate) fn encode_alpha(px: &[[u8; 4]; 16], transparent: u16, weights: [i32; 3]) -> [u8; 8] {
+pub(crate) fn encode_alpha<const LEVEL: u32>(
+    px: &[[u8; 4]; 16],
+    transparent: u16,
+    weights: [i32; 3],
+) -> [u8; 8] {
     // `transparent_mask &= 0xFFFF` is the u16 here.
     let mask = transparent as u32;
     if mask == 0 {
         hit!(Hit::AlphaNoMask);
-        return encode(px, true, weights);
+        return encode::<LEVEL>(px, true, weights);
     }
 
     if mask == 0xFFFF {
