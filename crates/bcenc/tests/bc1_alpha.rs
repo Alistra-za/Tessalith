@@ -2,7 +2,10 @@
 //! plain or perceptual weights) on every mask class over the colour classes, and on one hand-built block per early
 //! path of the C++. `Bc1Search::Fast` equals rgbcx's `encode_bc1_alpha(BC1_FAST_LEVEL, ..)` on the mask classes and,
 //! in the `#[ignore]` twin, on the same long run.
-use bcenc::{bc1_encode_block, bc1_encode_block_alpha_with, Bc1Search, BC1_FAST_LEVEL};
+use bcenc::{
+    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_with, Bc1Search,
+    BC1_FAST_LEVEL,
+};
 
 #[path = "support/bc1_block.rs"]
 mod bc1_block;
@@ -27,9 +30,7 @@ fn same_with(px: &[[u8; 4]; 16], mask: u16, perceptual: bool, search: Bc1Search)
     };
     assert_eq!(
         got, want,
-        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}
-  bcenc {got:?}
-  rgbcx {want:?}"
+        "bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
     );
     got
 }
@@ -464,4 +465,22 @@ fn fifty_million_blocks(search: Bc1Search) {
         "{total} blocks (25 million per weight set, {search:?}), 0 mismatches, {:.1} s",
         start.elapsed().as_secs_f64()
     );
+}
+
+/// `bc1_encode_block_alpha` is `bc1_encode_block_alpha_with(.., Bc1Search::Default)`, which is rgbcx level 18.
+#[test]
+fn default_alpha_is_the_old_function() {
+    let blocks = gen::colour_classes(0xBC10_00A6, 10);
+    for perceptual in [false, true] {
+        for px in &blocks {
+            for mask in [0x0000, 0x0001, 0x8000, 0x00FF, 0xA5A5, 0xFFFE] {
+                assert_eq!(
+                    bc1_encode_block_alpha_with(px, mask, perceptual, Bc1Search::Default),
+                    bc1_encode_block_alpha(px, mask, perceptual),
+                    "mask {mask:#06x}, perceptual {perceptual}: texels {px:?}"
+                );
+                same_with(px, mask, perceptual, Bc1Search::Default);
+            }
+        }
+    }
 }

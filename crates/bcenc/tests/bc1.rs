@@ -38,9 +38,7 @@ fn same_with(
     };
     assert_eq!(
         got, want,
-        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}
-  bcenc {got:?}
-  rgbcx {want:?}"
+        "bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
     );
     got
 }
