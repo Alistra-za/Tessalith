@@ -313,7 +313,10 @@ fn a_twin_kept_for_an_older_encode_is_not_copied() {
     also(request(&m, &loc), &sp).0.unwrap();
     let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
     let f = "textures/clutter/cup.dds";
-    assert!(record(&van, f).raw.get("copied_from").is_some());
+    let copy = record(&van, f);
+    assert!(copy.raw.get("copied_from").is_some());
+    // The copy's record is the twin's (Note CN33): it holds the PBR job's profile hash.
+    assert_eq!(copy.profile_sha256, record(&pbr, f).profile_sha256);
     let mut rec: ManifestRecord = serde_json::from_value(record(&pbr, f).raw).unwrap();
     rec.encode_version = Some("0.9.0".into());
     Manifest::at(&pbr).append(&rec).unwrap();
@@ -333,6 +336,14 @@ fn a_twin_kept_for_an_older_encode_is_not_copied() {
         record(&van, f).raw.get("copied_from").is_none(),
         "the Vanilla output is encoded, not a copy of the kept twin"
     );
+    // Why it is encoded: the copy's record names the PBR job's profile, not the Vanilla job's, so its own verdict is
+    // stale (a profile change beyond a quality target), not kept.
+    assert_ne!(
+        record(&van, f).profile_sha256,
+        copy.profile_sha256,
+        "the Vanilla job's profile is not the twin's"
+    );
+    assert_eq!(phase(&s, Phase::Vanilla).kept_older_encode, 0, "{s:#?}");
     assert_eq!(s.combined().kept_older_encode, 1);
     assert_eq!(s.exit_code(), 0);
     let failed = keys_of(&ev, |k| matches!(k, EventKind::FileFailed { .. }));
@@ -348,13 +359,12 @@ fn a_1x_bc1_target_re_copies_the_plain_sets() {
     also(req.clone(), &spec(&loc, &[AlsoTarget::Vanilla]))
         .0
         .unwrap();
-    // The earlier export is made to look like a 1.x one (encoded against a decoder model, no encode version): its PBR
-    // record says so, and this export must re-encode cup.dds and copy it again. (A current encode version with the
-    // old target alone is only an older encode, kept without `--ev`: Note JA.)
+    // The earlier export is made to look like a 1.x one (no encode version): its PBR record says so, and this export
+    // must re-encode cup.dds and copy it again. (A 1.x BC1 target alone, `bc1_model` naming a decoder model on a
+    // record with an encode version, is only an older encode, kept without `--ev`: Note JA, the `currency` table.)
     let pbr = loc.join("Mod PBR");
     let mut rec: ManifestRecord =
         serde_json::from_value(record(&pbr, "textures/clutter/cup.dds").raw).unwrap();
-    rec.bc1_model = Some("ideal".into());
     rec.encode_version = None;
     Manifest::at(&pbr).append(&rec).unwrap();
     let s = also(req, &spec(&loc, &[AlsoTarget::Vanilla])).0.unwrap();

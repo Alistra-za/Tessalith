@@ -207,7 +207,20 @@ pub enum EvScope {
     #[default]
     Off,
     All,
-    Matching(Vec<PropertyGroup>),
+    Matching(PropertyGroups),
+}
+
+/// The groups of `EvScope::Matching`: never empty, sorted and deduplicated. The field is private, so
+/// `EvScope::matching` (which deserialisation goes through too) is the only way to build one. Serialised and
+/// `Debug`-printed as the bare list.
+#[derive(Clone, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(transparent)]
+pub struct PropertyGroups(Vec<PropertyGroup>);
+
+impl std::fmt::Debug for PropertyGroups {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Debug::fmt(&self.0, f)
+    }
 }
 
 /// `EvScope` as read, before `EvScope::matching` checks it.
@@ -238,7 +251,7 @@ impl EvScope {
         }
         groups.sort();
         groups.dedup();
-        Ok(EvScope::Matching(groups))
+        Ok(EvScope::Matching(PropertyGroups(groups)))
     }
 
     /// Whether an older-encode-version output with profile `p` and recorded mip count `levels` is re-encoded.
@@ -246,7 +259,7 @@ impl EvScope {
         match self {
             EvScope::Off => false,
             EvScope::All => true,
-            EvScope::Matching(groups) => groups.iter().any(|g| g.holds(p, levels)),
+            EvScope::Matching(groups) => groups.0.iter().any(|g| g.holds(p, levels)),
         }
     }
 }
@@ -396,6 +409,11 @@ mod tests {
             assert_eq!(req(a), req(b));
         }
         assert_ne!(req(EvScope::Off), req(EvScope::All));
+        // `PropertyGroups` prints as the bare list, so the hashed `Debug` form is the one before it existed.
+        assert_eq!(
+            format!("{:?}", EvScope::matching(vec![group("bc1")]).unwrap()),
+            "Matching([PropertyGroup([Format(Bc1)])])"
+        );
     }
 
     #[test]

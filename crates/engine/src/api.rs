@@ -35,7 +35,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
-pub use crate::ev_scope::{EvScope, Property, PropertyGroup};
+pub use crate::ev_scope::{EvScope, Property, PropertyGroup, PropertyGroups};
 
 /// What `run` does when a ready file's output already exists (spec §3.2 `output.on_existing`, §8). It is a batch
 /// setting, not a `Profile` field.
@@ -1084,13 +1084,17 @@ fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
 /// share one); `None` for the formats that do not read it.
 fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
     use encoders_sys::Bc6hLevel as L;
-    const BC6H: [L; 5] = [L::Veryfast, L::Fast, L::Basic, L::Veryslow, L::VeryslowPeak];
     match f {
         Format::Bc7 => Some(crate::encode::bc7_level(effort) as u8),
-        Format::Bc6hUf16 => {
-            let level = crate::encode::bc6h_level(effort);
-            BC6H.iter().position(|l| *l == level).map(|i| i as u8)
-        }
+        // Exhaustive, so a new level fails to compile instead of reading as "not applicable".
+        Format::Bc6hUf16 => Some(match crate::encode::bc6h_level(effort) {
+            L::Veryfast => 0,
+            L::Fast => 1,
+            L::Basic => 2,
+            L::Slow => 3,
+            L::Veryslow => 4,
+            L::VeryslowPeak => 5,
+        }),
         _ => None,
     }
 }
@@ -3460,9 +3464,12 @@ impl Engine {
                                             *older_by_subtype
                                                 .entry(job.profile.subtype)
                                                 .or_default() += 1;
-                                            why.push(
-                                                "written by an older encode version (--ev re-encodes it)",
-                                            );
+                                            why.push(match req.ev {
+                                                EvScope::Matching(_) => {
+                                                    "written by an older encode version (outside the --property scope)"
+                                                }
+                                                _ => "written by an older encode version (--ev re-encodes it)",
+                                            });
                                         }
                                         if lower_target {
                                             summary.kept_lower_target += 1;
@@ -3565,30 +3572,43 @@ fn kept_warnings(
     by_format: &BTreeMap<Format, u32>,
     by_subtype: &BTreeMap<Subtype, u32>,
 ) -> Vec<Warning> {
+    let outputs = |n: u32| {
+        if n == 1 {
+            "1 output was".to_string()
+        } else {
+            format!("{n} outputs were")
+        }
+    };
     let mut out = vec![];
     if s.kept_older_encode > 0 {
         let n = s.kept_older_encode;
+        // The message lists the formats in `Format` order; the data maps come out sorted by id (serde_json has no
+        // `preserve_order` here).
         let per = by_format
             .iter()
             .map(|(f, k)| format!("{} {k}", f.id()))
             .collect::<Vec<_>>()
             .join(", ");
         let how = match ev {
+            EvScope::Off => {
+                "; --ev re-encodes them, --ev --property <words> only the matching ones"
+            }
             EvScope::Matching(_) => "; they are outside the --property scope",
-            _ => "; --ev re-encodes them, --ev --property <words> only the matching ones",
+            // Unreachable: under `All` an output of an older encode version is re-encoded, never kept.
+            EvScope::All => "",
         };
-        let ids = |m: Vec<(String, u32)>| m.into_iter().collect::<BTreeMap<_, _>>();
         out.push(
             Warning::new(
                 Code::OutKeptOlderEncode,
                 format!(
-                    "{n} outputs were written by an older encode version and kept ({per}){how}"
+                    "{} written by an older encode version and kept ({per}){how}",
+                    outputs(n)
                 ),
             )
             .with_data(serde_json::json!({
                 "count": n,
-                "by_format": ids(by_format.iter().map(|(f, k)| (f.id(), *k)).collect()),
-                "by_subtype": ids(by_subtype.iter().map(|(t, k)| (t.id(), *k)).collect()),
+                "by_format": by_format.iter().map(|(f, k)| (f.id(), *k)).collect::<BTreeMap<_, _>>(),
+                "by_subtype": by_subtype.iter().map(|(t, k)| (t.id(), *k)).collect::<BTreeMap<_, _>>(),
             })),
         );
     }
@@ -3598,7 +3618,8 @@ fn kept_warnings(
             Warning::new(
                 Code::OutKeptLowerTarget,
                 format!(
-                    "{n} outputs were encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+                    "{} encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them",
+                    outputs(n)
                 ),
             )
             .with_data(serde_json::json!({ "count": n })),
