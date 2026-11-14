@@ -11879,12 +11879,12 @@ fn type_21_not_offered_on_le() {
 fn type_21_tab_shows_features_and_base_params() {
     let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
     h.run_steps(2);
-    h.get_by_label("PBR version 2");
+    h.get_by_role_and_label(AkRole::Label, "PBR version 2");
     for n in nif::pbr2::FEATURE_NAMES {
         h.get_by_role_and_label(AkRole::CheckBox, n);
     }
     for n in &nif::pbr2::PARAM_NAMES[..3] {
-        h.get_by_label(n);
+        h.get_by_role_and_label(AkRole::SpinButton, n);
     }
     // groups of features that are off stay out; the v1 fields have no place on type 21
     for gone in [
@@ -11896,11 +11896,12 @@ fn type_21_tab_shows_features_and_base_params() {
         "Lighting effect 1",
         "Lighting effect 2",
     ] {
-        assert!(h.query_by_label(gone).is_none(), "{gone}");
+        let q = h.query_by_role_and_label(AkRole::SpinButton, gone);
+        assert!(q.is_none(), "{gone}");
     }
     // shared fields stay
-    h.get_by_label("UV offset U");
-    h.get_by_label("Shader alpha");
+    h.get_by_role_and_label(AkRole::SpinButton, "UV offset U");
+    h.get_by_role_and_label(AkRole::SpinButton, "Shader alpha");
     assert!(ops(h.state()).is_empty(), "drawing records nothing");
 }
 
@@ -11931,7 +11932,9 @@ fn two_layer_disables_subsurface_checkbox() {
 fn toggling_fuzz_pushes_setbits() {
     let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
     h.run_steps(2);
-    assert!(h.query_by_label("Fuzz weight").is_none());
+    assert!(h
+        .query_by_role_and_label(AkRole::SpinButton, "Fuzz weight")
+        .is_none());
     click_scrolled(&mut h, AkRole::CheckBox, "Fuzz");
     let got = ops(h.state());
     assert!(
@@ -11949,7 +11952,7 @@ fn toggling_fuzz_pushes_setbits() {
     );
     assert_eq!(pbr2_of(h.state()).0, 32);
     h.run_steps(2);
-    h.get_by_label("Fuzz weight");
+    h.get_by_role_and_label(AkRole::SpinButton, "Fuzz weight");
 }
 
 #[test]
@@ -11980,18 +11983,18 @@ fn box_off_type_21_params_read_only() {
     ));
     h.run_steps(2);
     for n in ["Roughness scale", "Fuzz weight"] {
-        assert!(h.get_by_label(n).accesskit_node().is_disabled(), "{n}");
+        let d = h.get_by_role_and_label(AkRole::SpinButton, n);
+        assert!(d.accesskit_node().is_disabled(), "{n}");
     }
     for n in nif::pbr2::FEATURE_NAMES {
         let c = h.get_by_role_and_label(AkRole::CheckBox, n);
         assert!(c.accesskit_node().is_disabled(), "{n}");
     }
     // the shared fields stay editable
-    assert!(!h
-        .get_by_label("Shader alpha")
-        .accesskit_node()
-        .is_disabled());
-    assert!(!h.get_by_label("UV offset U").accesskit_node().is_disabled());
+    for n in ["Shader alpha", "UV offset U"] {
+        let d = h.get_by_role_and_label(AkRole::SpinButton, n);
+        assert!(!d.accesskit_node().is_disabled(), "{n}");
+    }
     assert!(ops(h.state()).is_empty());
 }
 
@@ -12175,24 +12178,108 @@ fn controllers_tab_type_21_var_list() {
     h.get_by_label_contains("Runs, but CS 2.0 shows no change");
 }
 
+/// The Add controller row set to Colour with its variable list open, on the Controllers tab of `m`.
+fn colour_var_list(m: MeshesModel) -> Harness<'static, MeshesModel> {
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    let class = h.get_by_role_and_label(AkRole::ComboBox, "Add controller class");
+    class.scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller class")
+        .click();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::Button, "Colour").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller variable")
+        .click();
+    h.run_steps(3);
+    h
+}
+
+fn y_of(h: &Harness<'static, MeshesModel>, label: &str) -> f32 {
+    h.get_by_label(label).rect().min.y
+}
+
+const NO_EFFECT: &str = "Runs, but CS 2.0 shows no change";
+
 #[test]
-fn add_controller_on_type_21_offers_the_colour_vars_it_reads() {
+fn add_controller_colour_vars_on_type_21_run_emissive_first_and_hover_specular() {
+    let mut m = direct(ctrl21_scene());
+    select(&mut m, "S");
+    let mut h = colour_var_list(m);
+    assert!(
+        y_of(&h, "Emissive colour (1)") < y_of(&h, "Specular colour (0)"),
+        "CS 2.0 reads 1, so it comes first"
+    );
+    h.get_by_label("Specular colour (0)").hover();
+    h.run_steps(30);
+    h.get_by_label_contains(NO_EFFECT);
+}
+
+#[test]
+fn add_controller_colour_vars_on_a_v1_shape_have_no_no_effect_hover() {
+    // control for the test above: only type 21 marks colour 0 (pin of the v1 list, [0, 1])
+    let mut m = direct(scenes::lsp_shape(0, &[]));
+    select(&mut m, "S");
+    let mut h = colour_var_list(m);
+    h.get_by_label("Emissive colour (1)");
+    h.get_by_label("Specular colour (0)").hover();
+    h.run_steps(30);
+    assert!(h.query_by_label_contains(NO_EFFECT).is_none());
+}
+
+#[test]
+fn type_21_no_effect_controller_value_is_a_dash() {
     let mut m = direct(ctrl21_scene());
     select(&mut m, "S");
     let mut h = view(m);
     h.run_steps(2);
     tab(&mut h, "Controllers");
-    h.get_by_role_and_label(AkRole::ComboBox, "Add controller class")
-        .scroll_to_me();
-    h.run_steps(3);
-    h.get_by_role_and_label(AkRole::ComboBox, "Add controller class")
-        .click();
-    h.run_steps(3);
-    h.get_by_label("Colour").click();
-    h.run_steps(3);
-    h.get_by_role_and_label(AkRole::ComboBox, "Add controller variable")
-        .click();
-    h.run_steps(3);
-    h.get_by_label("Emissive colour (1)");
-    h.get_by_label("Specular colour (0)");
+    // the var-9 row has no value to edit; the var-11 row keeps its drag value
+    h.get_by_role_and_label(AkRole::Label, "\u{2014}");
+    let q = h.query_by_role_and_label(AkRole::SpinButton, "Glossiness value");
+    assert!(q.is_none());
+    h.get_by_role_and_label(AkRole::SpinButton, "Emissive multiple value");
+}
+
+#[test]
+fn a_v1_controller_value_is_never_a_dash() {
+    // control: variable 9 on a v1 shape keeps its value (pin of existing behaviour)
+    let mut m = direct(ctrl_scene_vars(0x82, [9, 11]));
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    assert!(h
+        .query_by_role_and_label(AkRole::Label, "\u{2014}")
+        .is_none());
+    h.get_by_role_and_label(AkRole::SpinButton, "Glossiness value");
+}
+
+#[test]
+fn the_shape_card_names_type_21_slots_like_the_editor() {
+    let mut m = direct(scenes::lsp21_shape(0, &nif::pbr2::PBR2_DEFAULTS));
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    h.get_by_label("slot 1 (Base colour):");
+    h.get_by_label("slot 6 (RMAOS):");
+    assert!(h.query_by_label("slot 1 (diffuse):").is_none());
+    assert!(h.query_by_label("slot 6 (env mask):").is_none());
+}
+
+#[test]
+fn a_param_drag_stays_inside_param_range() {
+    // Specular level is 0-1: a typed 5 lands on 1
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    h.run_steps(2);
+    edit_number(&mut h, "Specular level", "5");
+    let got = ops(h.state());
+    assert_eq!(got.len(), 1, "{got:?}");
+    let Op::SetField { field, value, .. } = &got[0] else {
+        panic!("{got:?}")
+    };
+    assert_eq!(*field, Field::PbrParam(1));
+    assert_eq!(*value, Value::F32(1.0f32.to_bits()));
 }

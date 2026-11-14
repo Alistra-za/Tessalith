@@ -26,34 +26,38 @@ const TEST_REF: &str = "BSNiAlphaPropertyTestRefController";
 /// The values the Variable combo offers on a float controller.
 const FLOAT_VARS: [u32; 10] = [0, 8, 9, 10, 11, 12, 20, 21, 22, 23];
 const COLOR_VARS: [u32; 2] = [0, 1];
+const CYCLES: [&str; 3] = ["Loop", "Reverse", "Clamp"];
 const NO_EFFECT_HOVER: &str = "Runs, but CS 2.0 shows no change";
 
-/// The variables the combo offers on type 21 (Note ID21): what CS 2.0 acts on, then what it runs without a visible
-/// change (`no_effect`, which carry a hover). Everything else is refused by the validator.
-fn offered_21(float: bool) -> (Vec<u32>, &'static [u32]) {
-    use nif::pbr2::{COLOR_VARS, FLOAT_VARS, NO_EFFECT_COLOR_VARS, NO_EFFECT_FLOAT_VARS};
-    let (acts, no_effect) = match float {
-        true => (&FLOAT_VARS[..], &NO_EFFECT_FLOAT_VARS[..]),
-        false => (&COLOR_VARS[..], &NO_EFFECT_COLOR_VARS[..]),
+/// The variables the combo offers on type 21 (Note ID21, ID24): what CS 2.0 acts on, then what it runs without a
+/// visible change (the second slice, which carries a hover). Everything else is refused by the validator.
+fn vars_21(float: bool) -> (&'static [u32], &'static [u32]) {
+    use nif::pbr2::{
+        COLOR_VARS as COLOR_VARS_21, FLOAT_VARS as FLOAT_VARS_21,
+        NO_EFFECT_COLOR_VARS as NO_EFFECT_COLOR, NO_EFFECT_FLOAT_VARS as NO_EFFECT_FLOAT,
     };
-    (acts.iter().chain(no_effect).copied().collect(), no_effect)
+    match float {
+        true => (&FLOAT_VARS_21, &NO_EFFECT_FLOAT),
+        false => (&COLOR_VARS_21, &NO_EFFECT_COLOR),
+    }
 }
 
-/// The shape's shader type, 0 without a lit shader.
-fn shape_type(e: &NifEdit, shape: &ShapeModel) -> u32 {
+/// (acts-on, no-effect) variables a Variable combo offers: type 21's lists, else the shared one with no hover items.
+fn offered_vars(t21: bool, float: bool) -> (&'static [u32], &'static [u32]) {
+    match (t21, float) {
+        (true, _) => vars_21(float),
+        (false, true) => (&FLOAT_VARS, &[]),
+        (false, false) => (&COLOR_VARS, &[]),
+    }
+}
+
+/// The shape's (shader type, SLSF2), (0, 0) without a lit shader: the variable labels, the PBR guard (B-P39) and the
+/// type-21 lists read them.
+fn shape_shader(e: &NifEdit, shape: &ShapeModel) -> (u32, u32) {
     shape
         .shader
         .and_then(|b| e.model.lighting.get(&b))
-        .map_or(0, |l| l.lighting.shader_type)
-}
-const CYCLES: [&str; 3] = ["Loop", "Reverse", "Clamp"];
-
-/// The shape's shader flags, 0 without a lit shader: the variable labels and the PBR guard (B-P39) read them.
-fn shape_slsf2(e: &NifEdit, shape: &ShapeModel) -> u32 {
-    shape
-        .shader
-        .and_then(|b| e.model.lighting.get(&b))
-        .map_or(0, |l| l.lighting.slsf2)
+        .map_or((0, 0), |l| (l.lighting.shader_type, l.lighting.slsf2))
 }
 
 /// The class without its Bethesda prefix, for the small grey tag beside a row's title.
@@ -177,8 +181,8 @@ fn chain(
     prop: &PropModel,
     clock: Option<Clock>,
 ) {
-    let slsf2 = shape_slsf2(e, shape);
-    let t21 = shape_type(e, shape) == 21;
+    let (shader_type, slsf2) = shape_shader(e, shape);
+    let t21 = shader_type == 21;
     let users = prop.users.len();
     let mut locked = false;
     // D9: only a shared alpha must split before an add (clip controllers included, C4). A shared shader adds in
@@ -362,7 +366,14 @@ fn row(
         .and_then(|i| u32::try_from(i).ok())
         .and_then(|i| e.model.interps.get(&i))
         .filter(|i| i.known);
-    if let Some(i) = interp {
+    // Note ID25: on type 21 a variable CS 2.0 runs without a visible change has no value to show.
+    let (_, no_effect) = vars_21(&*c.class != LSCC);
+    if t21 && interp.is_some() && c.var.is_some_and(|v| no_effect.contains(&v)) {
+        ui.horizontal(|ui| {
+            row_label(ui, "Value");
+            ui.weak("\u{2014}").on_hover_text(NO_EFFECT_HOVER);
+        });
+    } else if let Some(i) = interp {
         let axes = if &*c.class == LSCC {
             ["R", "G", "B"]
         } else {
@@ -900,7 +911,8 @@ fn add_row(
     owner: Owner,
     prop: &PropModel,
 ) {
-    let slsf2 = shape_slsf2(e, shape);
+    let (shader_type, slsf2) = shape_shader(e, shape);
+    let t21 = shader_type == 21;
     let id = egui::Id::new(("meshes-edit-ctrl-add", prop.block));
     let (mut class_idx, mut var): (usize, u32) = ui.data(|d| d.get_temp(id)).unwrap_or((0, 20));
     if owner == Owner::Shader {
@@ -935,27 +947,21 @@ fn add_row(
             var = 20;
         }
         // Note ID21: on type 21 a remembered variable CS 2.0 refuses falls back to the default of its class.
-        let t21 = shape_type(e, shape) == 21;
-        if t21 && nif::pbr2::var_refused_on_21(class_idx == 0, var) {
-            var = if class_idx == 0 { 20 } else { 1 };
+        let float = class_idx == 0;
+        if t21 && nif::pbr2::var_refused_on_21(float, var) {
+            var = if float { 20 } else { 1 };
         }
         ui.horizontal(|ui| {
             row_label(ui, "Variable");
-            let (on21, no_effect) = offered_21(class_idx == 0);
-            let no_effect = if t21 { no_effect } else { &[] };
-            let (class, offered): (&str, &[u32]) = match (class_idx, t21) {
-                (_, true) if class_idx == 0 => (LSCF, &on21),
-                (_, true) => (LSCC, &on21),
-                (0, false) => (LSCF, &FLOAT_VARS),
-                _ => (LSCC, &COLOR_VARS),
-            };
+            let (acts, no_effect) = offered_vars(t21, float);
+            let class = if float { LSCF } else { LSCC };
             let shown = format!("{} ({var})", var_label(class, var, slsf2));
             let r = egui::ComboBox::from_id_salt(id.with("var"))
                 .width(fit_width(ui, 180.0))
                 .truncate()
                 .selected_text(&shown)
                 .show_ui(ui, |ui| {
-                    for &o in offered {
+                    for &o in acts.iter().chain(no_effect) {
                         let text = format!("{} ({o})", var_label(class, o, slsf2));
                         if env_blocked(class_idx, o) {
                             ui.add_enabled(false, egui::Button::selectable(false, text))
@@ -1135,13 +1141,7 @@ fn variable(
 ) {
     ui.horizontal(|ui| {
         row_label(ui, "Variable");
-        let (on21, no_effect) = offered_21(&*c.class != LSCC);
-        let offered: &[u32] = match (t21, &*c.class == LSCC) {
-            (true, _) => &on21,
-            (false, true) => &COLOR_VARS,
-            (false, false) => &FLOAT_VARS,
-        };
-        let no_effect = if t21 { no_effect } else { &[] };
+        let (acts, no_effect) = offered_vars(t21, &*c.class != LSCC);
         let mut pick = v;
         let shown = var_label(&c.class, v, slsf2);
         // Phase A ruling R8 lifted (v2 B7): a managed controller's clips follow the new variable.
@@ -1151,8 +1151,8 @@ fn variable(
             .selected_text(&shown)
             .show_ui(ui, |ui| {
                 // A value outside the list stays selectable, so the current one is never lost.
-                let extra = (!offered.contains(&v)).then_some(v);
-                for &o in extra.iter().chain(offered) {
+                let extra = (!acts.contains(&v) && !no_effect.contains(&v)).then_some(v);
+                for &o in extra.iter().chain(acts).chain(no_effect) {
                     let text = format!("{} ({o})", var_label(&c.class, o, slsf2));
                     // B-P40: as in the Add picker. A current 8 stays shown (selected text) with its Error.
                     if &*c.class == LSCF && o == 8 && slsf2 & SLSF2_TRUE_PBR != 0 {
