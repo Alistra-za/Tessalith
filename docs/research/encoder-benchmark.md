@@ -444,7 +444,7 @@ Dual is the best BC1 encoder measured on both vendors' decoders. NVTT 3 `-highes
 
 The rule: the fastest level whose mean beats NVTT 3 `-highest` on both decoders. Level 10 falls 0.003 dB short on NVIDIA and 0.011 dB on AMD, so level 12 is the pick (Note HY16). Every faster level loses to level 18 on nearly every image, but only by 0.1 dB at level 12.
 
-Per block, in the Rust encoder (`bcenc` `speed` example, 1,048,576 blocks), the fast level takes about 0.35 of level 18's time on BC1 blocks and 0.33 on BC3 blocks. These figures come from a busy machine and the quiet run replaces them. They differ from the rgbcx seconds above because the Rust port saves different amounts at each level than rgbcx does.
+Per block, in the Rust encoder (`bcenc` `speed` example, 1,048,576 blocks, quiet machine, two passes), the fast level takes 0.375 and 0.353 of level 18's time on BC1 blocks and 0.357 and 0.322 on BC3 blocks. The Rust encoder at level 12 takes 0.199 and 0.203 of rgbcx's time at level 12 on BC1 blocks and 0.242 and 0.241 on BC3 blocks. The fast-to-default ratios differ from the rgbcx seconds above because the Rust port saves different amounts at each level than rgbcx does.
 
 ### Luma-weighted BC1 error (2026-10-31)
 

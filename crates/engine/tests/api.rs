@@ -1440,7 +1440,7 @@ fn a_lower_target_is_kept_and_raising_it_back_is_current() {
     assert_eq!(w[0].data, serde_json::json!({ "count": 1 }));
     assert_eq!(
         w[0].message,
-        "1 output was encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+        "1 output was encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes it"
     );
     assert!(warnings(&ev, Code::OutKeptOlderEncode).is_empty());
     // The run-level lines come before batch_done.
@@ -1492,7 +1492,7 @@ fn an_older_encode_version_is_kept_without_ev_and_re_encoded_with_it() {
     );
     assert_eq!(
         w[0].message,
-        "1 output was written by an older encode version and kept (bc7 1); --ev re-encodes them, --ev --property <words> only the matching ones"
+        "1 output was written by an older encode version and kept (bc7 1); --ev re-encodes it, --ev --property <words> only the matching ones"
     );
 
     let mut req = request_all_ready(d.path());

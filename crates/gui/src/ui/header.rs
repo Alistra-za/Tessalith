@@ -778,7 +778,7 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
         tick = also_items(ui, model, running);
         // Note JA11: read when the next export starts, which clears it (JA12); a tick during an export waits for the
         // next one.
-        let why = model.project.is_none().then_some("Open a folder first");
+        let why = model.root.is_none().then_some("Open a folder first");
         let r = ui.add_enabled(
             why.is_none(),
             egui::Checkbox::new(&mut reencode, REENCODE_TEXT),

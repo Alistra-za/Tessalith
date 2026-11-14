@@ -3,6 +3,12 @@
 One entry per built-in preset version. A version changes when anything the preset resolves to changes; the workspace
 version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
 
+## Unreleased
+
+- `fast-preview` sets `encoder.bc1_search = "fast"`: BC1 and BC3 colour search at rgbcx level 12 instead of 18, about a
+  third of the time for about 0.1 dB of colour PSNR. The preset's version stays 3.0.0. Outputs it wrote with 3.0.0 are
+  kept on the next run, not re-encoded.
+
 ## 2026-11-12 — sdc 3.0.0 (every preset 3.0.0)
 
 - All six built-in presets move to 3.0.0. The version alone re-encodes nothing: `if-changed` compares an output's

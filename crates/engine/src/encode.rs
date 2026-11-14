@@ -544,7 +544,7 @@ mod tests {
     }
 
     /// A 64 x 64 image of noise on top and a gradient below, as the encoder's blocks. With `holes`, the texels of
-    /// rows 0..32 with `(x + 2 y) % 5 == 0` are transparent (alpha 0, the rest 255): most noise blocks then hold
+    /// rows 0..32 with `(x + 2 y) % 5 == 0` are transparent (alpha 0, the rest 255): every noise block then holds
     /// some transparent texels, and the gradient blocks stay opaque.
     fn search_px(holes: bool) -> Vec<[u8; 4]> {
         let mut s = 0x9E37_79B9u32;

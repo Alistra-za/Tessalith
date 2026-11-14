@@ -601,7 +601,7 @@ fn the_export_summary_shows_kept_counts() {
     use egui_kittest::kittest::Queryable;
     const KEPT: &str = "2 kept from an older encode version, 1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode them again";
     // A zero count is not named.
-    const LOWER_ONLY: &str = "1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode them again";
+    const LOWER_ONLY: &str = "1 kept at a higher quality target: tick Re-encode every output (Export to ▾) to encode it again";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     // Nothing kept: no line.
@@ -624,6 +624,8 @@ fn the_export_summary_shows_kept_counts() {
         "{:?}",
         m.export.notes
     );
+    // The next export starts from a fresh `ExportModel` (`start_export_pass`), so a note of the last one is not carried.
+    m.export = sdc_gui::model::export::ExportModel::default();
     m.end_export_with(Ok(engine::api::BatchSummary {
         up_to_date: 3,
         kept_older_encode: 2,
@@ -632,6 +634,12 @@ fn the_export_summary_shows_kept_counts() {
     }));
     assert!(
         m.export.notes.iter().any(|n| n == KEPT),
+        "{:?}",
+        m.export.notes
+    );
+    // Notes are rebuilt per export: the earlier line is gone.
+    assert!(
+        !m.export.notes.iter().any(|n| n == LOWER_ONLY),
         "{:?}",
         m.export.notes
     );

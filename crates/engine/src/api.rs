@@ -3589,13 +3589,14 @@ fn kept_warnings(
             .map(|(f, k)| format!("{} {k}", f.id()))
             .collect::<Vec<_>>()
             .join(", ");
+        let them = if n == 1 { "it" } else { "them" };
         let how = match ev {
             EvScope::Off => {
-                "; --ev re-encodes them, --ev --property <words> only the matching ones"
+                format!("; --ev re-encodes {them}, --ev --property <words> only the matching ones")
             }
-            EvScope::Matching(_) => "; they are outside the --property scope",
+            EvScope::Matching(_) => "; they are outside the --property scope".to_string(),
             // Unreachable: under `All` an output of an older encode version is re-encoded, never kept.
-            EvScope::All => "",
+            EvScope::All => String::new(),
         };
         out.push(
             Warning::new(
@@ -3614,11 +3615,12 @@ fn kept_warnings(
     }
     if s.kept_lower_target > 0 {
         let n = s.kept_lower_target;
+        let them = if n == 1 { "it" } else { "them" };
         out.push(
             Warning::new(
                 Code::OutKeptLowerTarget,
                 format!(
-                    "{} encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them",
+                    "{} encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes {them}",
                     outputs(n)
                 ),
             )
@@ -4413,6 +4415,29 @@ mod tests {
         image::GrayImage::new(31, 20).save(&grow).unwrap();
         job.input = grow;
         assert_eq!(job_bytes(&job), input_bytes(31, 20) + 31 * 20 * 64);
+    }
+
+    /// The kept lines end "it" after a count of 1 and "them" after more (the singular case is pinned in
+    /// `tests/api.rs`).
+    #[test]
+    fn the_kept_lines_say_them_for_more_than_one() {
+        let s = BatchSummary {
+            kept_older_encode: 2,
+            kept_lower_target: 3,
+            ..Default::default()
+        };
+        let by_format = BTreeMap::from([(Format::Bc7, 2)]);
+        let by_subtype = BTreeMap::from([(Subtype::Diffuse, 2)]);
+        let w = kept_warnings(&s, &EvScope::Off, &by_format, &by_subtype);
+        let msg = |c: Code| w.iter().find(|w| w.code == c).unwrap().message.clone();
+        assert_eq!(
+            msg(Code::OutKeptOlderEncode),
+            "2 outputs were written by an older encode version and kept (bc7 2); --ev re-encodes them, --ev --property <words> only the matching ones"
+        );
+        assert_eq!(
+            msg(Code::OutKeptLowerTarget),
+            "3 outputs were encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+        );
     }
 
     /// Note JA (carry 13, review M2/I2, ruling O2 kept): the owner's if-changed rule, one good BC7 diffuse record and

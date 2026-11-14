@@ -17,7 +17,7 @@ mod initial;
 mod order_keys;
 pub mod palette;
 mod params;
-// Read by `examples/quality.rs` and the integration tests, outside the crate.
+// Read by the integration tests (`tests/levels.rs`) and `lib.rs`'s `BC1_FAST_LEVEL` assert.
 #[doc(hidden)]
 pub use params::LEVELS;
 #[cfg(test)]

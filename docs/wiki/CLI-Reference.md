@@ -224,7 +224,8 @@ done: ..., N cancelled, N kept at a higher target
 
 - Codes of severity warning and above are printed, plus the info code `CFG-FILTER-IGNORED`; other info codes are recorded but not printed. Paths use forward slashes.
 - The `done` line gains a kept count for each kind `if-changed` kept at least one output of, and names no count of 0 ([why](#re-runs-and-if-changed)). Kept outputs also count under "up to date".
-- With `[export] also`, only the PBR folder's `done` line shows kept counts. The Vanilla and CM folders' `done` lines never do, even when outputs there were kept. With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
+- With `[export] also`, only the PBR folder's `done` line shows kept counts. The Vanilla and CM folders' `done` lines never do, even when outputs there were kept.
+- With `--json`, the `OUT-KEPT-OLDER-ENCODE` event splits its count by format and texture type.
 - A set-level warning prints with the set id as its label: `warning textures/armor/iron/iron: SHADER-MISSING-MAP …`.
 - Raw maps consumed by a packed output get no line of their own.
 - A file with a validation error is still written. It prints as `ok ... [VALIDATION FAILED]`, counts under "failed validation", and makes `sdc convert` exit 4 if nothing worse happened.

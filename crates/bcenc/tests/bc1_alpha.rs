@@ -467,7 +467,8 @@ fn fifty_million_blocks(search: Bc1Search) {
     );
 }
 
-/// `bc1_encode_block_alpha` is `bc1_encode_block_alpha_with(.., Bc1Search::Default)`, which is rgbcx level 18.
+/// `bc1_encode_block_alpha` is `bc1_encode_block_alpha_with(.., Bc1Search::Default)`, which is rgbcx level 18. A pin of
+/// the wrapper: it passes as long as `Default` stays level 18.
 #[test]
 fn default_alpha_is_the_old_function() {
     let blocks = gen::colour_classes(0xBC10_00A6, 10);

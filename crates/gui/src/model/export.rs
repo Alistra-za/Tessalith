@@ -374,9 +374,11 @@ pub fn kept_note(s: &BatchSummary) -> Option<String> {
     .filter(|(n, _)| *n > 0)
     .map(|(n, why)| format!("{n} kept {why}"))
     .collect();
+    let total = s.kept_older_encode + s.kept_lower_target;
+    let them = if total == 1 { "it" } else { "them" };
     (!parts.is_empty()).then(|| {
         format!(
-            "{}: tick Re-encode every output (Export to ▾) to encode them again",
+            "{}: tick Re-encode every output (Export to ▾) to encode {them} again",
             parts.join(", ")
         )
     })
