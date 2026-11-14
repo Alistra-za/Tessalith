@@ -129,21 +129,51 @@ const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     ),
 ];
 
+/// AVX-512 path, recorded on Windows with the ISPC 1.32.0 objects, on an AMD Zen 5 CPU, 2026-11-13. A test build
+/// encodes on it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
+const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
+    (
+        Bc6hLevel::Veryfast,
+        "67d2ab6a029a5e5b9427d3dfb7fe3c53191e5f027aa007f6259ff06a8c664e0d",
+    ),
+    (
+        Bc6hLevel::Fast,
+        "78ba22294b12f7c5007b8c4278b7e2b151585df449b340473b27d9574afa600f",
+    ),
+    (
+        Bc6hLevel::Basic,
+        "7692eb5302bce30784beab86b66a816c9f61fdff29711a585fc09dbd18a9a3d7",
+    ),
+    (
+        Bc6hLevel::Slow,
+        "d5dfe402130641019849baa55c36446db813a448651762b3d2412efcc2db45b0",
+    ),
+    (
+        Bc6hLevel::Veryslow,
+        "9070edcbe36791762996eacf2c9cbc8ff62f672ba66f17f13be70c1cda4e5fec",
+    ),
+];
+
 fn recorded(target: IspcTarget) -> [(Bc6hLevel, &'static str); 5] {
     match target {
+        IspcTarget::Sse2 | IspcTarget::Sse4 | IspcTarget::Avx => RECORDED_PRE_AVX2,
         IspcTarget::Avx2 => RECORDED,
-        _ => RECORDED_PRE_AVX2,
+        IspcTarget::Avx512 => RECORDED_AVX512,
     }
 }
 
 /// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
-/// The ISPC target paths differ (AVX2 against the three older ones), so each target has its own hashes; a CPU
-/// checks the targets it supports. `SDC_RECORD_LEVEL_HASHES=1` prints them.
+/// The ISPC target paths differ (AVX-512, AVX2 and the three older ones), so each target has its own hashes; a CPU
+/// checks the targets it supports, up to `ispc_target()` (AVX2 in a test build unless `SDC_TEST_AVX512=1`).
+/// `SDC_RECORD_LEVEL_HASHES=1` prints them.
 #[test]
 fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
     let px = hdr_image();
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
-    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
+    for target in IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+    {
         for (level, want) in recorded(target) {
             let mut out = vec![0u8; 16 * 16 * 16];
             bc6h_compress_rows_on(&px, 64, 64, &mut out, level, target);

@@ -1087,6 +1087,7 @@ dependencies = [
  "bcdec_rs",
  "bcenc",
  "cc",
+ "encoders-sys",
  "half",
  "hex",
  "image",

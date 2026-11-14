@@ -2,13 +2,15 @@
 //! vendored bc7e source or objects (a new patch, a rebuilt object) must keep every existing level's output
 //! for every flag combination; only a level added behind a new flag may encode differently.
 //!
-//! ISPC builds one code path per target (sse2, sse4, avx, avx2) and dispatches on the CPU at run time, and the
-//! paths do not encode bit-identically (fast-math, FMA). So the hashes are pinned per target: the test drives
-//! every target this CPU can run through `bc7e_compress_blocks_on` (the best one through the dispatcher itself).
-//! A CPU without some target skips only that target's rows.
+//! ISPC builds one code path per target (sse2, sse4, avx, avx2, avx512skx) and dispatches on the CPU at run time,
+//! and the paths do not encode bit-identically (fast-math, FMA). So the hashes are pinned per target: the test drives
+//! every target this CPU can run, up to `ispc_target()`, through `bc7e_compress_blocks_on` (the best one through the
+//! dispatcher itself). A CPU without some target skips only that target's rows; a test build caps `ispc_target()`
+//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`.
 //!
 //! The hashes were recorded on Windows with the vendored objects (ISPC 1.31.0, bc7enc_rdo b943862 + patch
-//! 0001; level 7 from the patch-0002 objects), over four deterministic 64x64 images (opaque colour, cutout,
+//! 0001; level 7 from the patch-0002 objects; the AVX-512 row with the ISPC 1.32.0 objects, on an AMD Zen 5 CPU,
+//! 2026-11-13), over four deterministic 64x64 images (opaque colour, cutout,
 //! smooth alpha, normal-like) at every level, with and without perceptual weighting and the exact-opaque flag.
 //! The first recording (2026-10-18, one hash per level) came from a Linux CPU's dispatch path and never
 //! matched a Windows machine. Run with `SDC_RECORD_LEVEL_HASHES=1` to print the current hashes when a
@@ -34,7 +36,7 @@ const LEVELS: [Bc7Level; 8] = [
 
 /// [target][level][perceptual][exact_opaque] over the four images concatenated. Levels 0 to 6 are the shipped
 /// levels; level 7 (`Max`, patch 0002) is checked only when the vendored objects carry the patch.
-const RECORDED: [[[[&str; 2]; 2]; 8]; 4] = [
+const RECORDED: [[[[&str; 2]; 2]; 8]; 5] = [
     [
         [
             [
@@ -363,6 +365,88 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 4] = [
             ],
         ],
     ],
+    [
+        [
+            [
+                "161ab2e5f585de6da11427b447ed36476ed3f5147a1124df3fa0deb784c1a072",
+                "b881a24015297d24578b14362056ba2df728960ec0c96722c2f8a1a31fa49c47",
+            ],
+            [
+                "f54a165f5bbbe253afb9687655837f39911588c1d595329ed6255aea14fcee0c",
+                "8e3b2218d2051477806e0cea65b72d112f853dd5ab64d8f90029d4a1a801a528",
+            ],
+        ],
+        [
+            [
+                "53be319f8d02937391ddeb038c5b2141f07c512c5a4fe5549f94c72be8986abc",
+                "115a2842d1377f7f487075f08603b7611aedb5534136ac477fe6d2de624e93fa",
+            ],
+            [
+                "92b9a447c92c02cb3691ce330b66809143617a15180fd0f5fcb07d11c8a0c977",
+                "6626bb735da78e7e7e2a949b79c262ac3498414c9786ecc44b2189032a9fe21f",
+            ],
+        ],
+        [
+            [
+                "0bb4c55238aa500f57e28f7ac2148bdd9b5d30c3fcfaeef0e7090830f0f7d3f0",
+                "cea4032ff41e01d49ccdd230c0da83ce613b20bc6264e84d11b4ae20d1d0d474",
+            ],
+            [
+                "92b9a447c92c02cb3691ce330b66809143617a15180fd0f5fcb07d11c8a0c977",
+                "6626bb735da78e7e7e2a949b79c262ac3498414c9786ecc44b2189032a9fe21f",
+            ],
+        ],
+        [
+            [
+                "07d69b0788f991bca33616e5bb010bba8a02aba2f766e2aade5392da904b88bf",
+                "c0e38117aa766a19d7a0aeafe35e5083e8cd8ba4809371965057f706426fdffe",
+            ],
+            [
+                "b04c92749a7b090c89f0461213e30f3bebe0482f07b9f543a91dfb8eeadd2c9c",
+                "1cf039b7ed5679fbebe418baa80ea7da6ab91cbbbf11d164640508a7db7baffc",
+            ],
+        ],
+        [
+            [
+                "ad888a6f0e35ad62ace6b25f125aadca445dec122c7f4c93fba11273ca0e06e6",
+                "ceacff11419a34b4113a569af0880b4d112f9513e5b9a6cdd228494af937c224",
+            ],
+            [
+                "0e70556c62a1319afed89a66ec1783edc6908fc2f6dcd03ccd22e214e023fa4c",
+                "c1938b3d7201e865592f706aa0310a7e5c5f756bce3e98828244e5d99397d672",
+            ],
+        ],
+        [
+            [
+                "c3a65a596fb588fffa7be0b46899f6190b9e952d165d8d7ad60fb1639b5f8bb4",
+                "c545353ae392fa5b9591586c39ea2eed15e21091f6fb02f36577b9e7d9c30442",
+            ],
+            [
+                "c86e22b73cb4aeb5d699020c3453a608e98d17f8f0f80a9da785c2f4ad7c33b9",
+                "5506727bca762a07c520651f4e53f2f48b39a2c4f2c5370a0bb677e09cf12bf2",
+            ],
+        ],
+        [
+            [
+                "8ad30a5f94b5af494394c2b23cf4fe446c3adb549ea184afd6ba7834e65b8d4d",
+                "c66d11b3425b8cc2a445c24855d7578f69638a85af1924efb1d1aa278d2852a4",
+            ],
+            [
+                "97593615c5a512a699205e9915054d50b35835535be177a2eabafaa214555a46",
+                "2f26c85827841404b98ed29bedb6e1ab529e88c55de67db1cb07c10a5780c398",
+            ],
+        ],
+        [
+            [
+                "074d1a25165b56c00abed3d91fa883e4a377d2b06e4962804d82f80369dd7be7",
+                "b5bb8e9ba12e6a01a549d4572d581602a3d4532c3014fc3c5ffe2b30209d0150",
+            ],
+            [
+                "efae54e07383553c234b5ddd5e365614a307fc3102e78859ca3de57e77f00553",
+                "abd22cb53191227ccb601cfa1e86cf6d146ac452097ef9a920b47a9bc5ecf6aa",
+            ],
+        ],
+    ],
 ];
 
 /// A small deterministic generator (xorshift) so the images never depend on a crate.
@@ -457,7 +541,10 @@ fn hash(level: Bc7Level, perceptual: bool, exact_opaque: bool, target: IspcTarge
 fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     let mut diffs = vec![];
-    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
+    for target in IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+    {
         for (li, level) in LEVELS.iter().enumerate() {
             for perceptual in [false, true] {
                 for exact in [false, true] {
@@ -493,13 +580,24 @@ fn tuning_with_no_overrides_matches_the_level_on_every_target() {
         exact_opaque: false,
     };
     let blocks = gather_blocks(&colour(), W, W);
-    for target in IspcTarget::ALL.into_iter().filter(|t| t.supported()) {
+    for target in IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+    {
         let mut a = vec![0u8; blocks.len()];
         let mut b = vec![0u8; blocks.len()];
         bc7e_compress_blocks_on(&blocks, &mut a, p, target);
         bc7e_compress_blocks_tuned_on(&blocks, &mut b, p, Bc7Tune::default(), target);
         assert_eq!(a, b, "{target:?}");
     }
+}
+
+#[test]
+fn the_avx512_row_is_not_the_avx2_row() {
+    assert_ne!(
+        RECORDED[IspcTarget::Avx512 as usize],
+        RECORDED[IspcTarget::Avx2 as usize]
+    );
 }
 
 /// The engine calls the plain functions. They must encode on `ispc_target()`, whatever ISPC would dispatch to.

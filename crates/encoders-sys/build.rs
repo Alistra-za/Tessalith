@@ -35,7 +35,7 @@ fn main() {
         .file(root.join("shim/sdc_shim.cpp"))
         .file(v.join("bc7enc_rdo/rgbcx.cpp"))
         .file(v.join("ispctc/ispc_texcomp.cpp"));
-    for s in ["", "_sse2", "_sse4", "_avx", "_avx2"] {
+    for s in ["", "_sse2", "_sse4", "_avx", "_avx2", "_avx512skx"] {
         b.object(bc7e.join(format!("bc7e{s}.obj")));
         b.object(tc.join(format!("kernel{s}.obj")));
     }

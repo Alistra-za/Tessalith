@@ -5,14 +5,17 @@
 | bc7enc_rdo/ (rgbcx.* with the rgbcx BC4 round-to-nearest, BC4 search, BC1 dual, BC4 guard cut, BC1 alpha and BC1 perceptual patches, bc7e.ispc pristine) | https://github.com/richgel999/bc7enc_rdo | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 | rgbcx: MIT or Unlicense; bc7e.ispc: Apache-2.0 |
 | ispctc/ (kernel.ispc with patches/0001-bc6h-peak-mode.patch) | https://github.com/GameTechDev/ISPCTextureCompressor | 79ddbc9 + patch 0001 | MIT (kernel.ispc modified; change notice at the top) |
 | bc7e/ (bc7e.ispc, patches/0001-exact-opaque-alpha.patch, patches/0002-sdc-max-level.patch) | bc7enc_rdo/bc7e.ispc + sdc patches 0001 and 0002 | b9438627eef73a1157e84201b6fa6eb2ffd6d9f0 + patches 0001, 0002 | Apache-2.0 (modified; change notices at the top of the file) |
-| ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18) with ISPC 1.31.0: `-O2 --target=sse2,sse4,avx,avx2 --opt=fast-math --opt=disable-assertions` | — | Apache-2.0 |
-| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patch 0001, rebuilt on Windows 2026-10-31) with ISPC 1.31.0: `-O2 --target=sse2,sse4,avx,avx2 --opt=fast-math` | — | MIT |
+| ispc-objs/bc7e/ | built from bc7e/bc7e.ispc (pristine + patches 0001 and 0002, rebuilt on Windows 2026-10-18, fifth target added 2026-11-13): `-O2 --target=sse2,sse4,avx,avx2,avx512skx-x16 --opt=fast-math --opt=disable-assertions`; `bc7e_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | Apache-2.0 |
+| ispc-objs/ispctc/ | built from ispctc/kernel.ispc (with patch 0001, rebuilt on Windows 2026-10-31, fifth target added 2026-11-13): `-O2 --target=sse2,sse4,avx,avx2,avx512skx-x16 --opt=fast-math`; `kernel_avx512skx.obj` with ISPC 1.32.0, every other file with ISPC 1.31.0 | — | MIT |
 
-All objects are produced by `tools/regen-ispc.ps1` (ISPC 1.31.0, which also passes
-`--arch=x86-64 --target-os=windows`, runs with the repo root as working directory and a
-repo-relative source path, and normalises line 2 of the generated headers), so a rebuild on any
-machine is byte-identical. Run `tools/regen-ispc.ps1` to check (exit 0 = all MATCH); after `-Update`,
-run `tools/hash-vendor.ps1`.
+All objects are produced by `tools/regen-ispc.ps1` for the five ISPC targets, with two compilers: ISPC 1.31.0
+(`-Ispc`) builds every file except the two `_avx512skx` objects, which ISPC 1.32.0 (`-Ispc512`) builds because it
+fixes an AVX-512 miscompile of 1.31.0 (ISPC issue 3891). The script also passes `--arch=x86-64 --target-os=windows`,
+runs with the repo root as working directory and a repo-relative source path, and normalises line 2 of the generated
+headers, so a rebuild on any machine is byte-identical. Run `tools/regen-ispc.ps1 -Ispc <1.31.0> -Ispc512 <1.32.0>`
+to check (exit 0 = all MATCH: with ISPC 1.31.0 and `-Ispc512` ISPC 1.32.0 it matches 14/14; without `-Ispc512`,
+12 MATCH and the two `_avx512skx` objects SKIP); after `-Update` (which
+needs both compilers), run `tools/hash-vendor.ps1`.
 
 Provenance of the first objects: the bc7e objects are byte-identical to the ones the bench measured
 (`<bench>/build/bc7enc_rdo`). The ISPC TC objects were rebuilt from `ispctc/kernel.ispc`
@@ -46,8 +49,9 @@ Measurements: docs/research/bc7e-tuning.md.
 (2026-10-18) with `tools/regen-ispc.ps1 -Update -Bc7eOnly` and `tools/hash-vendor.ps1`; a second `regen-ispc.ps1` run
 matches 12/12. `build.rs` requires both `m_exact_opaque_alpha` (patch 0001) and `m_endpoint_search` in the header and stops the
 build without either (Note FM), so `effort = "max"` and `alpha.exact_opaque` always work. Levels 0 to 6 encode byte-identically to the patch-0001 objects on each of the four ISPC
-targets (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2/sse4/avx paths and its avx2
-path encode differently; engine goldens 95/95).
+targets of the time (`tests/level_identity.rs`, which pins every level per target because ISPC's sse2/sse4/avx paths,
+its avx2 path and its avx512skx path encode differently; engine goldens 95/95). The fifth target's row was recorded
+when it was added; a test build reads it only with the AVX2 cap lifted (`SDC_TEST_AVX512=1`).
 
 ISPC TC patch 0001 "BC6H peak mode" (`ispctc/patches/0001-bc6h-peak-mode.patch`, 2026-10-31) changes `ispctc/kernel.ispc`
 (`git diff main -- crates/encoders-sys/vendor/ispctc/kernel.ispc` at the time). It adds a peak-preserving BC6H mode that is
@@ -60,8 +64,10 @@ source luminance ranks after every candidate that keeps it. A second search then
 lifted to at least 2^-12 of its texel's largest channel; it is ranked against the unlifted block too, and the better of
 the two results is kept. The shim builds the
 profile as veryslow plus `fast_mode` (`g_bc6[5]`, `Bc6hLevel::VeryslowPeak`). The five upstream profiles encode
-byte-identically to the pre-patch objects: `encoders-sys` `tests/bc6h.rs` pins their AVX2-path output, recorded from the
-pre-patch objects. Rebuilt with `tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not
+byte-identically to the pre-patch objects: `encoders-sys` `tests/bc6h.rs` pins their output per path, in three lists:
+`RECORDED` the AVX2 path (recorded from the pre-patch objects), `RECORDED_PRE_AVX2` the SSE2, SSE4 and AVX paths
+together (they write the same bytes), and `RECORDED_AVX512` the AVX-512 path, read only with the test builds' AVX2 cap
+lifted (`SDC_TEST_AVX512=1`). Rebuilt with `tools/regen-ispc.ps1 -Update` and `tools/hash-vendor.ps1`; the bc7e objects did not
 change and a second `regen-ispc.ps1` run matches 12/12. Why and measurements: .claude/DECISIONS.md (Note FE, "BC6H
 peak-preserving mode") and docs/research/encoder-benchmark.md ("BC6H (HDR)").
 
