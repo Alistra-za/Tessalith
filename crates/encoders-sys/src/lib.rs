@@ -4,13 +4,15 @@ mod bc7;
 pub mod bc7_fixup;
 mod ffi;
 mod rgbcx;
+mod target;
 
 pub use bc6h::*;
 pub use bc7::{
-    bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned, Bc7Level, Bc7Params,
-    Bc7Target, Bc7Tune,
+    bc7e_compress_blocks, bc7e_compress_blocks_on, bc7e_compress_blocks_tuned,
+    bc7e_compress_blocks_tuned_on, Bc7Level, Bc7Params, Bc7Tune,
 };
 pub use rgbcx::*;
+pub use target::{ispc_target, IspcTarget};
 
 use std::sync::Once;
 

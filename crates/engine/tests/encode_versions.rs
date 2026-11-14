@@ -509,6 +509,14 @@ fn run_target(
 
 #[test]
 fn encode_inputs_are_pinned_or_their_type_was_bumped() {
+    if engine::manifest::dispatched_isa() == "avx512" {
+        assert!(
+            std::env::var("SDC_TEST_AVX512").as_deref() == Ok("1"),
+            "this test binary was built without encoders-sys/test-hooks: the BC7 and BC6H pins need the AVX2 path"
+        );
+        eprintln!("skipped: identity.json holds no AVX-512 pins");
+        return;
+    }
     let d = tempfile::tempdir().unwrap();
     let mut sets = vec![];
     for st in Subtype::ALL {

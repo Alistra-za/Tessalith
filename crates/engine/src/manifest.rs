@@ -85,28 +85,10 @@ pub fn engine_commit() -> &'static str {
     env!("SDC_GIT_COMMIT")
 }
 
-/// The instruction set the ISPC dispatcher runs bc7e and the texture compressor at on this CPU. The kernels are
-/// built for sse2, sse4, avx and avx2 and `encoders-sys` does not expose the choice, so it is derived from the
-/// CPU features each ISPC target requires; the AVX2 target also needs FMA and F16C. This mirrors the ISPC
-/// runtime's own CPUID check and may differ from it in rare cases.
+/// The instruction set bc7e and the texture compressor run at on this CPU. The name comes from `encoders-sys`,
+/// which owns the choice of ISPC target.
 pub fn dispatched_isa() -> &'static str {
-    #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
-    {
-        if is_x86_feature_detected!("avx2")
-            && is_x86_feature_detected!("fma")
-            && is_x86_feature_detected!("f16c")
-        {
-            return "avx2";
-        }
-        if is_x86_feature_detected!("avx") {
-            return "avx";
-        }
-        // ISPC's sse4 target needs SSE4.2 (review m9).
-        if is_x86_feature_detected!("sse4.2") {
-            return "sse4";
-        }
-    }
-    "sse2"
+    encoders_sys::ispc_target().name()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

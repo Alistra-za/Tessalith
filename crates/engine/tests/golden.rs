@@ -1,6 +1,7 @@
 //! Golden tests (spec §11.1): each case generates its fixtures, runs the full `Engine::plan` + `Engine::run` and
 //! asserts the format, `_SRGB` tag, header form, mip count, alpha-policy outcome and warning codes. Nothing is
-//! committed but this file and no byte hashes are asserted (those belong to the `pinned-isa` CI job).
+//! committed but this file and no byte hashes are asserted (byte pins live in `encode_versions/identity.json` and in
+//! `encoders-sys`'s `level_identity` and `bc6h` tests).
 mod cube_support;
 use engine::api::*;
 use engine::codes::{Code, Severity, Warning};

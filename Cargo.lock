@@ -1087,8 +1087,10 @@ dependencies = [
  "bcdec_rs",
  "bcenc",
  "cc",
+ "encoders-sys",
  "half",
  "hex",
+ "image",
  "sha2",
  "thiserror 2.0.21",
 ]

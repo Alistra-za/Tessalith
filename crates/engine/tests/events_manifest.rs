@@ -229,7 +229,7 @@ fn manifest_appends_and_last_record_wins() {
     assert_eq!(all.len(), 1);
     assert_eq!(all["x_n.dds"].source_sha256, "bb");
     assert!(m.path().ends_with("_sdc/manifest.jsonl"));
-    assert!(["sse2", "sse4", "avx", "avx2"].contains(&dispatched_isa()));
+    assert!(["sse2", "sse4", "avx", "avx2", "avx512"].contains(&dispatched_isa()));
 }
 
 #[test]

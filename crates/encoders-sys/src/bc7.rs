@@ -1,3 +1,4 @@
+use crate::target::{forced, ispc_target, IspcTarget};
 use crate::{ffi, init};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -22,65 +23,25 @@ pub struct Bc7Params {
     pub exact_opaque: bool,
 }
 
-/// ISPC code path of the bc7e objects. The dispatcher picks the best one the CPU runs, and the paths do not
-/// encode bit-identically, so a pinned output hash is only meaningful per target.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bc7Target {
-    Sse2 = 0,
-    Sse4 = 1,
-    Avx = 2,
-    Avx2 = 3,
-}
-
-impl Bc7Target {
-    pub const ALL: [Bc7Target; 4] = [Self::Sse2, Self::Sse4, Self::Avx, Self::Avx2];
-
-    /// The target ISPC's dispatcher picks on this CPU.
-    pub fn best() -> Bc7Target {
-        *Self::ALL.iter().rev().find(|t| t.supported()).unwrap()
-    }
-
-    /// Whether this CPU can run the target (ISPC 1.31: sse4 is SSE4.2; avx2 also needs FMA, F16C, BMI1/2).
-    pub fn supported(self) -> bool {
-        match self {
-            Self::Sse2 => true,
-            Self::Sse4 => std::arch::is_x86_feature_detected!("sse4.2"),
-            Self::Avx => std::arch::is_x86_feature_detected!("avx"),
-            Self::Avx2 => {
-                std::arch::is_x86_feature_detected!("avx2")
-                    && std::arch::is_x86_feature_detected!("fma")
-                    && std::arch::is_x86_feature_detected!("f16c")
-                    && std::arch::is_x86_feature_detected!("bmi1")
-                    && std::arch::is_x86_feature_detected!("bmi2")
-            }
-        }
-    }
-}
-
 /// Compress `pixels.len() / 16` blocks. `pixels` holds 16 texels per block (see `gather_blocks`).
 pub fn bc7e_compress_blocks(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params) {
-    compress(pixels, out, p, -1);
+    bc7e_compress_blocks_on(pixels, out, p, ispc_target());
 }
 
-/// `bc7e_compress_blocks` on one ISPC code path instead of the CPU dispatch (tests pin output per target).
+/// `bc7e_compress_blocks` on one ISPC code path instead of the CPU dispatch. Every plain encode goes through it with `ispc_target()`.
 /// The best supported target goes through the dispatcher, which already runs that path; forcing it would
 /// re-run its table init under concurrent encodes. Panics when the CPU cannot run `target`.
 pub fn bc7e_compress_blocks_on(
     pixels: &[[u8; 4]],
     out: &mut [u8],
     p: Bc7Params,
-    target: Bc7Target,
+    target: IspcTarget,
 ) {
     assert!(
         target.supported(),
         "this CPU cannot run the {target:?} bc7e path"
     );
-    let forced = if target == Bc7Target::best() {
-        -1
-    } else {
-        target as i32
-    };
-    compress(pixels, out, p, forced);
+    compress(pixels, out, p, forced(target));
 }
 
 fn compress(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, target: i32) {
@@ -123,6 +84,22 @@ pub struct Bc7Tune {
 
 /// `bc7e_compress_blocks` with `tune` applied over the level's parameters.
 pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Params, tune: Bc7Tune) {
+    bc7e_compress_blocks_tuned_on(pixels, out, p, tune, ispc_target());
+}
+
+/// `bc7e_compress_blocks_tuned` on one ISPC code path (see `bc7e_compress_blocks_on`). Panics when the CPU cannot
+/// run `target`.
+pub fn bc7e_compress_blocks_tuned_on(
+    pixels: &[[u8; 4]],
+    out: &mut [u8],
+    p: Bc7Params,
+    tune: Bc7Tune,
+    target: IspcTarget,
+) {
+    assert!(
+        target.supported(),
+        "this CPU cannot run the {target:?} bc7e path"
+    );
     assert_eq!(pixels.len() % 16, 0, "pixels must hold whole 4x4 blocks");
     let n = pixels.len() / 16;
     assert_eq!(out.len(), n * 16, "out must hold 16 bytes per block");
@@ -139,7 +116,7 @@ pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Para
     }
     let src: Vec<u32> = pixels.iter().map(|c| u32::from_le_bytes(*c)).collect();
     let mut dst = vec![0u64; n * 2];
-    // SAFETY: as in `bc7e_compress_blocks`; `t` is 14 ints, which is what the shim reads.
+    // SAFETY: as in `bc7e_compress_blocks`; `t` is 14 ints, which is what the shim reads; `target` was checked above.
     unsafe {
         ffi::sdc_bc7e_compress_tuned(
             n as u32,
@@ -149,6 +126,7 @@ pub fn bc7e_compress_blocks_tuned(pixels: &[[u8; 4]], out: &mut [u8], p: Bc7Para
             p.perceptual as i32,
             p.exact_opaque as i32,
             t.as_ptr(),
+            forced(target),
         )
     };
     for (i, w) in dst.iter().enumerate() {
