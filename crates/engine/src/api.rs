@@ -35,6 +35,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 
+pub use crate::ev_scope::{EvScope, Property, PropertyGroup};
+
 /// What `run` does when a ready file's output already exists (spec §3.2 `output.on_existing`, §8). It is a batch
 /// setting, not a `Profile` field.
 #[derive(
@@ -42,12 +44,16 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 )]
 #[serde(rename_all = "kebab-case")]
 pub enum OnExisting {
-    /// Re-encode when the manifest shows a different source, profile, engine, encoder or (BC1/BC3) BC1 encode
-    /// mode, or a failed validation; keep an output that has no manifest record (`OUT-UNKNOWN-EXISTING`).
+    /// Re-encode when the source, a settings field other than a quality target, or the validation verdict changed, or
+    /// a quality target rose; keep an output only its encode version or a lower target separates (`--ev` re-encodes
+    /// the first, Note JA) and an output that has no manifest record (`OUT-UNKNOWN-EXISTING`).
     #[default]
     IfChanged,
     Skip,
     Overwrite,
+    // Note JA: encode every output that has a manifest record again; keep one without (`OUT-UNKNOWN-EXISTING`), as
+    // `if-changed` does. The GUI's re-encode box; the CLI has no value for it.
+    Reencode,
 }
 
 /// One batch, as the CLI or GUI hands it to the engine. `output_root` and `on_existing` are the spec §3.2
@@ -115,6 +121,9 @@ pub struct BatchRequest {
     pub cs_txst_sets: BTreeSet<String>,
     pub recursive: bool,
     pub on_existing: OnExisting,
+    /// Which outputs written by an older encode version are re-encoded (`--ev`, `--property`). Read only under
+    /// `OnExisting::IfChanged` (Note JA).
+    pub ev: EvScope,
     /// Worker threads; 0 = one per logical core.
     pub jobs: usize,
     /// Memory budget in bytes for admitting files; 0 = half of physical RAM.
@@ -190,6 +199,7 @@ impl BatchRequest {
             cs_txst_sets: BTreeSet::new(),
             recursive: false,
             on_existing: OnExisting::IfChanged,
+            ev: EvScope::Off,
             jobs: 0,
             mem_budget: 0,
             dry_run: false,
@@ -266,6 +276,7 @@ impl BatchRequest {
             cs_txst_sets,
             recursive,
             on_existing,
+            ev,
             jobs,
             mem_budget,
             dry_run,
@@ -277,7 +288,7 @@ impl BatchRequest {
             // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
             write_only: _,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 32] = [
+        let fields: [&dyn std::fmt::Debug; 33] = [
             inputs,
             output_root,
             target,
@@ -303,6 +314,7 @@ impl BatchRequest {
             cs_txst_sets,
             recursive,
             on_existing,
+            ev,
             jobs,
             mem_budget,
             dry_run,
@@ -507,7 +519,12 @@ pub struct Plan {
 pub struct BatchSummary {
     /// Written outputs, including those whose validation failed.
     pub converted: u32,
+    /// Outputs kept under `if-changed`: current ones and the kept ones counted below.
     pub up_to_date: u32,
+    /// Of `up_to_date`, outputs written by an older encode version and kept (Note JA; `--ev` re-encodes them).
+    pub kept_older_encode: u32,
+    /// Of `up_to_date`, outputs encoded at a higher quality target than asked and kept (Note JA).
+    pub kept_lower_target: u32,
     /// Every `file_skipped` except up-to-date files and raw packing inputs.
     pub skipped: u32,
     /// Of `skipped`, those skipped on purpose: `IN-DDS-SKIPPED` inputs, `PACK-CONFLICT` pre-packed files replaced
@@ -909,47 +926,68 @@ pub(crate) fn encode_current(e: &ManifestEntry, now: &str) -> bool {
     e.encode_version.as_deref() == Some(now)
 }
 
-/// Whether a manifest entry proves the existing output is current (spec §8 `if-changed`, carry 13): same source
-/// (the bytes of every source and the channel each feeds, for a packed output), profile, the sub-type's encode
-/// version (DECISIONS Note DM; a record without one is stale) and encoders, a comparable record (known schema, encoders and preset present) and a passing validation, so a
-/// failed output is re-encoded and reported again rather than counted as up to date
-/// (controller ruling O2). BC1 and BC3 outputs also need the current BC1 encode id ([`BC1_ENCODE_ID`]): a record from
-/// another BC1 target (1.x encoded against one decoder model) is encoded again.
-pub(crate) fn is_up_to_date(
+/// Whether `req`'s `--ev` scope covers the output of `job` recorded by `e`: the `ev` argument of [`currency`]. Only
+/// `OnExisting::IfChanged` reads the scope (Note JA). `mips` reads the record's `validation.levels`, the written
+/// file's header mip count (`ValidationSummary::levels`); a record without it is in scope.
+pub(crate) fn ev_covers(req: &BatchRequest, e: &ManifestEntry, job: &ResolvedJob) -> bool {
+    let levels = e
+        .raw
+        .get("validation")
+        .and_then(|v| v.get("levels"))
+        .and_then(Value::as_u64)
+        .and_then(|n| u32::try_from(n).ok());
+    req.on_existing == OnExisting::IfChanged && req.ev.covers(&job.profile, levels)
+}
+
+/// An `if-changed` verdict on an existing output with a manifest record (Note JA).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Currency {
+    /// Nothing that decides the bytes changed: the output is up to date.
+    Current,
+    /// Kept although an older encode version wrote it (`older_encode`, and the run's `--ev` scope leaves it out) or
+    /// it was encoded at a higher quality target than the job asks (`lower_target`).
+    Kept {
+        older_encode: bool,
+        lower_target: bool,
+    },
+    /// Encode it again.
+    Stale,
+}
+
+/// The if-changed rule (spec §8, carry 13; Note JA, the owner: re-encode when the image changed, not when only our
+/// encoder did; a different encoder type, weighting or a higher quality target re-encodes, a lower one does not).
+///
+/// - Not comparable, so `Stale` whatever `ev` says: no encoders, no preset, a newer schema, or no or an empty
+///   encode version (a 1.x record, Note DM).
+/// - `Stale`: another output stamp (Note Y1), a failed or missing validation (ruling O2), other sources or pack
+///   roles, or another source SHA-256.
+/// - The encode version: another `encode_version` for the sub-type, another encoder tag (the rgbcx patch only for
+///   BC1/BC3/BC4/BC5), or on BC1/BC3 a `bc1_model` other than [`BC1_ENCODE_ID`] (missing counts). With `ev` (the
+///   run's `--ev` scope covers the output) `Stale`, else kept (`older_encode`).
+/// - The profile: the same hash changes nothing. Else the record's own profile (`raw["profile"]`, which must hash to
+///   its `profile_sha256`) with the job's three quality targets (`encoder.effort`, `encoder.bc45_search_radius`,
+///   `encoder.bc1_search`) must hash as the job's profile, or `Stale` (format, weighting or any other field changed);
+///   then a target that rose for the job's format is `Stale` and one that fell keeps it (`lower_target`).
+///
+/// Neither flag: `Current`. The engine version is not compared, nor is the record's `isa`.
+pub(crate) fn currency(
     e: &ManifestEntry,
     job: &ResolvedJob,
     encoders: &EncoderVersions,
-) -> bool {
+    ev: bool,
+) -> Currency {
     let Some(rec) = e.encoders.as_ref() else {
-        return false;
+        return Currency::Stale;
     };
-    // The rgbcx patches change the BC1 colour block (BC1, BC3) and the BC4 blocks (BC3 alpha, BC4, BC5), so other
-    // formats ignore the tag.
-    let rgbcx = matches!(
-        job.profile.format,
-        Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
-    );
     if e.is_newer_schema()
         || e.preset.is_none()
-        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.ispc, &rec.bc7e_patch)
-            != (
-                &encoders.bc7enc_rdo,
-                &encoders.ispctc,
-                &encoders.ispc,
-                &encoders.bc7e_patch,
-            )
-        || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
+        || e.encode_version.as_deref().is_none_or(str::is_empty)
     {
-        return false;
+        return Currency::Stale;
     }
     // Note Y1: metadata only, and before any hashing; a legacy record (no stamp) is stale once.
     if e.output_stamp.is_none() || SourceStamp::of(&job.output) != e.output_stamp {
-        return false;
-    }
-    if matches!(job.profile.format, Format::Bc1 | Format::Bc3)
-        && e.bc1_model.as_deref() != Some(BC1_ENCODE_ID)
-    {
-        return false;
+        return Currency::Stale;
     }
     let passed = e
         .raw
@@ -957,9 +995,8 @@ pub(crate) fn is_up_to_date(
         .and_then(|v| v.get("passed"))
         .and_then(Value::as_bool)
         == Some(true);
-    passed
-        && encode_current(e, encode_version(job.profile.subtype))
-        && current_sources(job).is_some_and(|now| {
+    let same_sources = || {
+        current_sources(job).is_some_and(|now| {
             now.into_iter().eq(e.sources.iter().map(|r| {
                 (
                     r.sha256.clone(),
@@ -969,9 +1006,106 @@ pub(crate) fn is_up_to_date(
                 )
             }))
         })
+    };
+    if !(passed
+        && same_sources()
         && pack_roles_match(e, job)
-        && profile_sha256(&job.profile).is_ok_and(|h| h == e.profile_sha256)
-        && sha256_file(&job.input).is_ok_and(|h| h == e.source_sha256)
+        && sha256_file(&job.input).is_ok_and(|h| h == e.source_sha256))
+    {
+        return Currency::Stale;
+    }
+    // The rgbcx patches change the BC1 colour block (BC1, BC3) and the BC4 blocks (BC3 alpha, BC4, BC5), so other
+    // formats ignore the tag.
+    let format = job.profile.format;
+    let rgbcx = matches!(
+        format,
+        Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
+    );
+    let older_encode = !encode_current(e, encode_version(job.profile.subtype))
+        || (&rec.bc7enc_rdo, &rec.ispctc, &rec.ispc, &rec.bc7e_patch)
+            != (
+                &encoders.bc7enc_rdo,
+                &encoders.ispctc,
+                &encoders.ispc,
+                &encoders.bc7e_patch,
+            )
+        || (rgbcx && rec.rgbcx_patch != encoders.rgbcx_patch)
+        || (matches!(format, Format::Bc1 | Format::Bc3)
+            && e.bc1_model.as_deref() != Some(BC1_ENCODE_ID));
+    if older_encode && ev {
+        return Currency::Stale;
+    }
+    let Some(lower_target) = target_fell(e, &job.profile) else {
+        return Currency::Stale;
+    };
+    if older_encode || lower_target {
+        Currency::Kept {
+            older_encode,
+            lower_target,
+        }
+    } else {
+        Currency::Current
+    }
+}
+
+/// [`currency`]'s profile step: `Some(false)` when the record's profile is the job's or differs only in a quality
+/// target that no format reads or that stayed level, `Some(true)` when a target fell (and none rose), `None` (stale)
+/// otherwise, an unreadable or self-inconsistent record included.
+fn target_fell(e: &ManifestEntry, p: &Profile) -> Option<bool> {
+    let now = profile_sha256(p).ok()?;
+    if now == e.profile_sha256 {
+        return Some(false);
+    }
+    let mut was: Profile = serde_json::from_value(e.raw.get("profile")?.clone()).ok()?;
+    if profile_sha256(&was).ok()? != e.profile_sha256 {
+        return None;
+    }
+    let old = was.encoder.clone();
+    let new = &p.encoder;
+    was.encoder.effort = new.effort;
+    was.encoder.bc45_search_radius = new.bc45_search_radius;
+    was.encoder.bc1_search = new.bc1_search;
+    if profile_sha256(&was).ok()? != now {
+        return None;
+    }
+    let f = p.format;
+    let moves = [
+        effort_rank(f, new.effort).cmp(&effort_rank(f, old.effort)),
+        radius_rank(f, new.bc45_search_radius).cmp(&radius_rank(f, old.bc45_search_radius)),
+        search_rank(f, new.bc1_search).cmp(&search_rank(f, old.bc1_search)),
+    ];
+    if moves.contains(&std::cmp::Ordering::Greater) {
+        return None;
+    }
+    Some(moves.contains(&std::cmp::Ordering::Less))
+}
+
+/// How hard format `f` searches at `effort`: BC7 by its bc7e level, BC6H by its ISPC level (`slowest` and `max`
+/// share one); `None` for the formats that do not read it.
+fn effort_rank(f: Format, effort: Effort) -> Option<u8> {
+    use encoders_sys::Bc6hLevel as L;
+    const BC6H: [L; 5] = [L::Veryfast, L::Fast, L::Basic, L::Veryslow, L::VeryslowPeak];
+    match f {
+        Format::Bc7 => Some(crate::encode::bc7_level(effort) as u8),
+        Format::Bc6hUf16 => {
+            let level = crate::encode::bc6h_level(effort);
+            BC6H.iter().position(|l| *l == level).map(|i| i as u8)
+        }
+        _ => None,
+    }
+}
+
+/// The BC4 search radius of format `f` (BC3's alpha, BC4, BC5), not its declared order; `None` elsewhere.
+fn radius_rank(f: Format, r: SearchRadius) -> Option<u32> {
+    matches!(f, Format::Bc3 | Format::Bc4 | Format::Bc5).then(|| crate::encode::radius(r))
+}
+
+/// The BC1 search depth of format `f` (BC1, BC3's colour): `fast` below `default`; `None` elsewhere.
+fn search_rank(f: Format, s: Bc1Search) -> Option<u8> {
+    matches!(f, Format::Bc1 | Format::Bc3).then_some(match s {
+        Bc1Search::Fast => 0,
+        Bc1Search::Default => 1,
+    })
 }
 
 pub struct Engine {
@@ -3238,25 +3372,30 @@ impl Engine {
         let pool = thread_pool(req.jobs)?;
         // Audit 9 (DECISIONS Note Y3): the if-changed checks hash every source; run them on the pool, then report
         // them below in plan order.
-        let current: Vec<bool> = if req.on_existing == OnExisting::IfChanged {
+        let verdicts: Vec<Currency> = if req.on_existing == OnExisting::IfChanged {
             use rayon::prelude::*;
             pool.install(|| {
                 ready
                     .par_iter()
                     .map(|job| {
-                        !cancel.is_cancelled()
-                            && job.output.exists()
-                            && existing
-                                .get(&output_key(&req.output_root, &job.output))
-                                .is_some_and(|e| is_up_to_date(e, job, &encoders))
+                        let e = existing.get(&output_key(&req.output_root, &job.output));
+                        match e {
+                            Some(e) if !cancel.is_cancelled() && job.output.exists() => {
+                                currency(e, job, &encoders, ev_covers(req, e, job))
+                            }
+                            _ => Currency::Stale,
+                        }
                     })
                     .collect()
             })
         } else {
-            vec![false; ready.len()]
+            vec![Currency::Stale; ready.len()]
         };
+        // Note JA: the outputs kept for an older encode version, per format and per sub-type, for the run's one line.
+        let mut older_by_format: BTreeMap<Format, u32> = BTreeMap::new();
+        let mut older_by_subtype: BTreeMap<Subtype, u32> = BTreeMap::new();
         let mut todo: Vec<(&ResolvedJob, PresetRef)> = vec![];
-        for (job, current) in ready.into_iter().zip(current) {
+        for (job, verdict) in ready.into_iter().zip(verdicts) {
             if cancel.is_cancelled() {
                 summary.cancelled.push(job.input.clone());
                 continue;
@@ -3277,7 +3416,7 @@ impl Engine {
                         summary.skipped_intentional += 1;
                         continue;
                     }
-                    OnExisting::IfChanged => {
+                    OnExisting::IfChanged | OnExisting::Reencode => {
                         match existing.get(&output_key(&req.output_root, &job.output)) {
                             None => {
                                 rep.emit_job(
@@ -3303,21 +3442,50 @@ impl Engine {
                                 );
                                 continue;
                             }
-                            Some(_) if current => {
-                                summary.up_to_date += 1;
-                                rep.emit_job(
-                                    Some(&key(&job.output)),
-                                    Some(&job.set_key),
-                                    Some(&job.input),
-                                    EventKind::FileSkipped {
-                                        kind: SkipKind::UpToDate,
-                                        code: None,
-                                        reason: "up to date".into(),
-                                    },
-                                );
-                                continue;
+                            Some(_) => {
+                                // A kept output's record is left as it is (Note JA).
+                                let reason = match verdict {
+                                    Currency::Stale => None,
+                                    Currency::Current => Some("up to date".to_string()),
+                                    Currency::Kept {
+                                        older_encode,
+                                        lower_target,
+                                    } => {
+                                        let mut why = vec![];
+                                        if older_encode {
+                                            summary.kept_older_encode += 1;
+                                            *older_by_format
+                                                .entry(job.profile.format)
+                                                .or_default() += 1;
+                                            *older_by_subtype
+                                                .entry(job.profile.subtype)
+                                                .or_default() += 1;
+                                            why.push(
+                                                "written by an older encode version (--ev re-encodes it)",
+                                            );
+                                        }
+                                        if lower_target {
+                                            summary.kept_lower_target += 1;
+                                            why.push("encoded at a higher quality target");
+                                        }
+                                        Some(format!("kept: {}", why.join("; ")))
+                                    }
+                                };
+                                if let Some(reason) = reason {
+                                    summary.up_to_date += 1;
+                                    rep.emit_job(
+                                        Some(&key(&job.output)),
+                                        Some(&job.set_key),
+                                        Some(&job.input),
+                                        EventKind::FileSkipped {
+                                            kind: SkipKind::UpToDate,
+                                            code: None,
+                                            reason,
+                                        },
+                                    );
+                                    continue;
+                                }
                             }
-                            Some(_) => {}
                         }
                     }
                 }
@@ -3381,9 +3549,62 @@ impl Engine {
         });
         let mut summary = state.into_inner().unwrap_or_else(|e| e.into_inner());
         summary.cancelled.sort();
+        for w in kept_warnings(&summary, &req.ev, &older_by_format, &older_by_subtype) {
+            rep.emit(None, None, EventKind::Warning(w));
+        }
         rep.emit(None, None, done_event(&summary));
         Ok(summary)
     }
+}
+
+/// Note JA: one run-level line per reason `if-changed` kept outputs, so a run that keeps thousands reports them once.
+/// `by_format` and `by_subtype` count the outputs kept for an older encode version.
+fn kept_warnings(
+    s: &BatchSummary,
+    ev: &EvScope,
+    by_format: &BTreeMap<Format, u32>,
+    by_subtype: &BTreeMap<Subtype, u32>,
+) -> Vec<Warning> {
+    let mut out = vec![];
+    if s.kept_older_encode > 0 {
+        let n = s.kept_older_encode;
+        let per = by_format
+            .iter()
+            .map(|(f, k)| format!("{} {k}", f.id()))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let how = match ev {
+            EvScope::Matching(_) => "; they are outside the --property scope",
+            _ => "; --ev re-encodes them, --ev --property <words> only the matching ones",
+        };
+        let ids = |m: Vec<(String, u32)>| m.into_iter().collect::<BTreeMap<_, _>>();
+        out.push(
+            Warning::new(
+                Code::OutKeptOlderEncode,
+                format!(
+                    "{n} outputs were written by an older encode version and kept ({per}){how}"
+                ),
+            )
+            .with_data(serde_json::json!({
+                "count": n,
+                "by_format": ids(by_format.iter().map(|(f, k)| (f.id(), *k)).collect()),
+                "by_subtype": ids(by_subtype.iter().map(|(t, k)| (t.id(), *k)).collect()),
+            })),
+        );
+    }
+    if s.kept_lower_target > 0 {
+        let n = s.kept_lower_target;
+        out.push(
+            Warning::new(
+                Code::OutKeptLowerTarget,
+                format!(
+                    "{n} outputs were encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+                ),
+            )
+            .with_data(serde_json::json!({ "count": n })),
+        );
+    }
+    out
 }
 
 /// Convert one admitted file under `catch_unwind` and report its outcome. A file that fails or panics after its
@@ -4173,15 +4394,29 @@ mod tests {
         assert_eq!(job_bytes(&job), input_bytes(31, 20) + 31 * 20 * 64);
     }
 
-    /// Carry 13, review M2/I2 and ruling O2: only a comparable, matching, passing record is up to date.
+    /// Note JA (carry 13, review M2/I2, ruling O2 kept): the owner's if-changed rule, one good BC7 diffuse record and
+    /// its variants. Each row gives the verdict without and with `--ev` covering the output.
     #[test]
-    fn up_to_date_needs_a_comparable_matching_passing_record() {
+    fn currency_follows_the_owners_rule() {
         use crate::manifest::MANIFEST_SCHEMA;
+        use Currency::{Current, Kept, Stale};
+        const ENC: Currency = Kept {
+            older_encode: true,
+            lower_target: false,
+        };
+        const TGT: Currency = Kept {
+            older_encode: false,
+            lower_target: true,
+        };
+        const BOTH: Currency = Kept {
+            older_encode: true,
+            lower_target: true,
+        };
         let d = tempfile::tempdir().unwrap();
         let src = d.path().join("rock.png");
         std::fs::write(&src, b"source bytes").unwrap();
         let reg = PresetRegistry::builtin().unwrap();
-        let mut job = ResolvedJob {
+        let job0 = ResolvedJob {
             input: src.clone(),
             output: d.path().join("rock.dds"),
             game_path: "rock".into(),
@@ -4201,119 +4436,117 @@ mod tests {
             fill: None,
             unknown_suffix: false,
         };
-        std::fs::write(&job.output, b"dds").unwrap();
+        assert_eq!(job0.profile.format, Format::Bc7);
+        std::fs::write(&job0.output, b"dds").unwrap();
         let enc = EncoderVersions::current();
-        let entry_for = |job: &ResolvedJob| ManifestEntry {
-            schema: MANIFEST_SCHEMA,
-            output: "rock.dds".into(),
-            source_sha256: sha256_file(&src).unwrap(),
-            sources: vec![],
-            profile_sha256: profile_sha256(&job.profile).unwrap(),
-            engine_version: ENGINE_VERSION.into(),
-            encode_version: Some(crate::manifest::encode_version(job.profile.subtype).into()),
-            encoders: Some(enc.clone()),
-            preset: PresetRef::for_preset(&reg, "cs-quality", None),
-            bc1_model: Some(BC1_ENCODE_ID.into()),
-            output_stamp: SourceStamp::of(&job.output),
-            copied_from: None,
-            raw: serde_json::json!({ "validation": { "passed": true } }),
+        // The record the run writes for `job` when the profile was `job`'s edited by `rec`.
+        let entry = |job: &ResolvedJob, rec: &dyn Fn(&mut Profile)| {
+            let mut p = job.profile.clone();
+            rec(&mut p);
+            ManifestEntry {
+                schema: MANIFEST_SCHEMA,
+                output: "rock.dds".into(),
+                source_sha256: sha256_file(&src).unwrap(),
+                sources: vec![],
+                profile_sha256: profile_sha256(&p).unwrap(),
+                engine_version: ENGINE_VERSION.into(),
+                encode_version: Some(crate::manifest::encode_version(job.profile.subtype).into()),
+                encoders: Some(enc.clone()),
+                preset: PresetRef::for_preset(&reg, "cs-quality", None),
+                bc1_model: Some(BC1_ENCODE_ID.into()),
+                output_stamp: SourceStamp::of(&job.output),
+                copied_from: None,
+                raw: serde_json::json!({
+                    "validation": { "passed": true, "levels": 7 },
+                    "profile": p,
+                }),
+            }
         };
-        let up = |e: &ManifestEntry, job: &ResolvedJob| is_up_to_date(e, job, &enc);
-        let good = entry_for(&job);
-        assert_eq!(job.profile.format, Format::Bc7);
-        assert!(up(&good, &job));
-        let with = |f: &dyn Fn(&mut ManifestEntry)| {
-            let mut e = good.clone();
-            f(&mut e);
-            e
+        type Edit<'a, T> = &'a dyn Fn(&mut T);
+        let same: Edit<Profile> = &|_| {};
+        let as_is: Edit<ManifestEntry> = &|_| {};
+        let mut rows: Vec<(String, ResolvedJob, ManifestEntry, [Currency; 2])> = vec![];
+        let mut row = |what: &str,
+                       job: Edit<Profile>,
+                       rec: Edit<Profile>,
+                       edit: Edit<ManifestEntry>,
+                       want: [Currency; 2]| {
+            let mut j = job0.clone();
+            job(&mut j.profile);
+            let mut e = entry(&j, rec);
+            edit(&mut e);
+            rows.push((what.to_string(), j, e, want));
         };
-        let not_up: [(&str, ManifestEntry); 15] = [
-            (
-                "no encode version, engine 0.9.0",
-                with(&|e| {
+        let fmt = |f: Format| move |p: &mut Profile| p.format = f;
+        let effort = |x: Effort| move |p: &mut Profile| p.encoder.effort = x;
+        let radius = |r: SearchRadius| move |p: &mut Profile| p.encoder.bc45_search_radius = r;
+        let search = |s: Bc1Search| move |p: &mut Profile| p.encoder.bc1_search = s;
+        let both = |a: &dyn Fn(&mut Profile), b: &dyn Fn(&mut Profile), p: &mut Profile| {
+            a(p);
+            b(p)
+        };
+        let ev = |v: &'static str| move |e: &mut ManifestEntry| e.encode_version = Some(v.into());
+
+        row("matching record", same, same, as_is, [Current, Current]);
+        row(
+            "other engine_version",
+            same,
+            same,
+            &|e| e.engine_version = "0.0.0".into(),
+            [Current, Current],
+        );
+        for v in ["0.9.0", "1.0.0", "1.1.0"] {
+            row(
+                &format!("no encode_version, engine {v}"),
+                same,
+                same,
+                &|e| {
                     e.encode_version = None;
-                    e.engine_version = "0.9.0".into()
-                }),
-            ),
-            (
-                "newer encode version",
-                with(&|e| e.encode_version = Some("99.0.0".into())),
-            ),
-            (
-                "older encode version",
-                with(&|e| e.encode_version = Some("0.9.0".into())),
-            ),
-            (
-                "empty encode version",
-                with(&|e| e.encode_version = Some(String::new())),
-            ),
-            ("no encoders", with(&|e| e.encoders = None)),
-            (
-                "other encoders",
-                with(&|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into()),
-            ),
-            ("no preset", with(&|e| e.preset = None)),
-            ("newer schema", with(&|e| e.schema = MANIFEST_SCHEMA + 1)),
-            (
-                "validation failed",
-                with(&|e| e.raw = serde_json::json!({ "validation": { "passed": false } })),
-            ),
-            ("no validation", with(&|e| e.raw = serde_json::json!({}))),
-            (
-                "other profile",
-                with(&|e| e.profile_sha256 = "0".repeat(64)),
-            ),
-            ("other source", with(&|e| e.source_sha256 = "0".repeat(64))),
-            ("no output stamp", with(&|e| e.output_stamp = None)),
-            (
-                "replaced output",
-                with(&|e| e.output_stamp.as_mut().unwrap().size += 1),
-            ),
-            (
-                "several sources",
-                with(&|e| {
-                    e.sources = vec![crate::manifest::SourceRef {
-                        path: "a.png".into(),
-                        sha256: "0".repeat(64),
-                        role: None,
-                        invert: false,
-                        bake: None,
-                        derive: None,
-                        derive_role: None,
-                        cube_face: None,
-                        fill: None,
-                    }]
-                }),
-            ),
-        ];
-        for (what, e) in &not_up {
-            assert!(!up(e, &job), "{what}");
+                    e.engine_version = v.into()
+                },
+                [Stale, Stale],
+            );
         }
-        // Spec: the engine version no longer decides; a matching encode version from another engine is current.
-        assert!(up(&with(&|e| e.engine_version = "0.0.0".into()), &job));
-        // A 1.x record has no encode_version: stale whatever the type's arm is.
-        for v in ["1.0.0", "1.1.0"] {
-            let legacy = with(&|e| {
-                e.encode_version = None;
-                e.engine_version = v.into()
-            });
-            assert!(!up(&legacy, &job), "{v}");
+        row(
+            "no encoders",
+            same,
+            same,
+            &|e| e.encoders = None,
+            [Stale, Stale],
+        );
+        row(
+            "no preset",
+            same,
+            same,
+            &|e| e.preset = None,
+            [Stale, Stale],
+        );
+        row(
+            "newer schema",
+            same,
+            same,
+            &|e| e.schema = MANIFEST_SCHEMA + 1,
+            [Stale, Stale],
+        );
+        for v in ["2.5.0", "99.0.0", "0.9.0"] {
+            row(
+                &format!("encode_version {v}"),
+                same,
+                same,
+                &ev(v),
+                [ENC, Stale],
+            );
         }
-        // The BC1 encode id only matters for the formats whose colour blocks rgbcx encodes as BC1.
-        assert!(up(&with(&|e| e.bc1_model = None), &job));
-        for format in [Format::Bc1, Format::Bc3] {
-            job.profile.format = format;
-            let e = entry_for(&job);
-            assert!(up(&e, &job), "{format:?}");
-            let mut v1 = e.clone();
-            v1.bc1_model = Some("ideal".into());
-            assert!(!up(&v1, &job), "{format:?} 1.x target");
-            let mut old = e.clone();
-            old.bc1_model = None;
-            assert!(!up(&old, &job), "{format:?} unrecorded target");
-        }
-        // The rgbcx patches only change BC1/BC3/BC4/BC5 output; a record from before them stays current for the rest.
-        for format in [
+        row("empty encode_version", same, same, &ev(""), [Stale, Stale]);
+        row(
+            "other ispc",
+            same,
+            same,
+            &|e| e.encoders.as_mut().unwrap().ispc = "1.0.0".into(),
+            [ENC, Stale],
+        );
+        // The rgbcx patches only change BC1/BC3/BC4/BC5 output; a record from before them is current for the rest.
+        for f in [
             Format::Bc1,
             Format::Bc3,
             Format::Bc4,
@@ -4322,20 +4555,251 @@ mod tests {
             Format::Bc7,
             Format::Rgba8,
         ] {
-            job.profile.format = format;
-            let mut old = entry_for(&job);
-            old.encoders.as_mut().unwrap().rgbcx_patch = None;
-            let stale = matches!(
-                format,
-                Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5
+            let want = match f {
+                Format::Bc1 | Format::Bc3 | Format::Bc4 | Format::Bc5 => [ENC, Stale],
+                _ => [Current, Current],
+            };
+            row(
+                &format!("{f:?} without rgbcx_patch"),
+                &fmt(f),
+                same,
+                &|e| e.encoders.as_mut().unwrap().rgbcx_patch = None,
+                want,
             );
-            assert_eq!(up(&old, &job), !stale, "{format:?} pre-patch record");
-            // The tag from before the BC4 search (round-to-nearest only) is stale the same way. The fake hash only
-            // proves that any other tag string is stale, not the real old value format.
-            let mut older = entry_for(&job);
-            older.encoders.as_mut().unwrap().rgbcx_patch =
-                Some("bc4-round-to-nearest@sha256:00".into());
-            assert_eq!(up(&older, &job), !stale, "{format:?} old-tag record");
+            // The fake hash only proves that any other tag string counts, not the real old value format.
+            row(
+                &format!("{f:?} old rgbcx_patch"),
+                &fmt(f),
+                same,
+                &|e| {
+                    e.encoders.as_mut().unwrap().rgbcx_patch =
+                        Some("bc4-round-to-nearest@sha256:00".into())
+                },
+                want,
+            );
+        }
+        // The BC1 encode id only matters for the formats whose colour blocks are encoded as BC1.
+        for f in [Format::Bc1, Format::Bc3] {
+            row(
+                &format!("{f:?} 1.x target"),
+                &fmt(f),
+                same,
+                &|e| e.bc1_model = Some("ideal".into()),
+                [ENC, Stale],
+            );
+            row(
+                &format!("{f:?} unrecorded target"),
+                &fmt(f),
+                same,
+                &|e| e.bc1_model = None,
+                [ENC, Stale],
+            );
+        }
+        row(
+            "BC7 unrecorded target",
+            same,
+            same,
+            &|e| e.bc1_model = None,
+            [Current, Current],
+        );
+        let stale: [(&str, Edit<ManifestEntry>); 7] = [
+            ("other source", &|e| e.source_sha256 = "0".repeat(64)),
+            ("no output stamp", &|e| e.output_stamp = None),
+            ("replaced output", &|e| {
+                e.output_stamp.as_mut().unwrap().size += 1
+            }),
+            ("validation failed", &|e| {
+                e.raw["validation"]["passed"] = false.into()
+            }),
+            ("no validation", &|e| {
+                e.raw.as_object_mut().unwrap().remove("validation");
+            }),
+            ("a packed source changed", &|e| {
+                e.sources = vec![crate::manifest::SourceRef {
+                    path: "a.png".into(),
+                    sha256: "0".repeat(64),
+                    role: None,
+                    invert: false,
+                    bake: None,
+                    derive: None,
+                    derive_role: None,
+                    cube_face: None,
+                    fill: None,
+                }]
+            }),
+            // The record's own profile, but a hash it does not have.
+            ("other profile hash", &|e| e.profile_sha256 = "0".repeat(64)),
+        ];
+        for (what, edit) in stale {
+            row(what, same, same, edit, [Stale, Stale]);
+        }
+        let changed: [(&str, Edit<Profile>); 4] = [
+            ("format", &fmt(Format::Bc3)),
+            ("perceptual", &|p| {
+                p.encoder.perceptual = !p.encoder.perceptual
+            }),
+            ("bc7_weights", &|p| {
+                p.encoder.bc7_weights = Some(Bc7Weights::Alpha8)
+            }),
+            ("alpha.threshold", &|p| p.alpha.threshold = 100),
+        ];
+        for (what, rec) in changed {
+            row(&format!("{what} changed"), same, rec, as_is, [Stale, Stale]);
+        }
+        row(
+            "effort raised on BC7",
+            &effort(Effort::Veryslow),
+            &effort(Effort::Fast),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "effort lowered on BC7",
+            &effort(Effort::Fast),
+            &effort(Effort::Veryslow),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "effort raised on BC1",
+            &|p| both(&fmt(Format::Bc1), &effort(Effort::Max), p),
+            &effort(Effort::Fast),
+            as_is,
+            [Current, Current],
+        );
+        row(
+            "BC6H slowest to max",
+            &|p| both(&fmt(Format::Bc6hUf16), &effort(Effort::Max), p),
+            &effort(Effort::Slowest),
+            as_is,
+            [Current, Current],
+        );
+        row(
+            "BC6H fast to veryslow",
+            &|p| both(&fmt(Format::Bc6hUf16), &effort(Effort::Veryslow), p),
+            &effort(Effort::Fast),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "BC6H veryslow to basic",
+            &|p| both(&fmt(Format::Bc6hUf16), &effort(Effort::Basic), p),
+            &effort(Effort::Veryslow),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "bc1_search to fast on BC7",
+            &search(Bc1Search::Fast),
+            &search(Bc1Search::Default),
+            as_is,
+            [Current, Current],
+        );
+        row(
+            "radius fast to max on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Max), p),
+            &radius(SearchRadius::Fast),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius max to fast on BC4",
+            &|p| both(&fmt(Format::Bc4), &radius(SearchRadius::Fast), p),
+            &radius(SearchRadius::Max),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "bc1_search fast to default on BC1",
+            &|p| both(&fmt(Format::Bc1), &search(Bc1Search::Default), p),
+            &search(Bc1Search::Fast),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "bc1_search default to fast on BC1",
+            &|p| both(&fmt(Format::Bc1), &search(Bc1Search::Fast), p),
+            &search(Bc1Search::Default),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "bc1_search raised and radius lowered on BC3",
+            &|p| {
+                both(&fmt(Format::Bc3), &search(Bc1Search::Default), p);
+                radius(SearchRadius::Fast)(p)
+            },
+            &|p| both(&search(Bc1Search::Fast), &radius(SearchRadius::Max), p),
+            as_is,
+            [Stale, Stale],
+        );
+        row(
+            "radius lowered and effort raised on BC3",
+            &|p| {
+                both(&fmt(Format::Bc3), &radius(SearchRadius::Fast), p);
+                effort(Effort::Max)(p)
+            },
+            &|p| both(&radius(SearchRadius::Max), &effort(Effort::Fast), p),
+            as_is,
+            [TGT, TGT],
+        );
+        row(
+            "bc7_weights unset to linear",
+            &|p| p.encoder.bc7_weights = Some(Bc7Weights::Linear),
+            &|p| p.encoder.bc7_weights = None,
+            as_is,
+            [Stale, Stale],
+        );
+        // The rows below would be a lower target if the record's profile were read as it claims.
+        row(
+            "raw profile a string",
+            &effort(Effort::Fast),
+            &effort(Effort::Veryslow),
+            &|e| e.raw["profile"] = "cs-quality".into(),
+            [Stale, Stale],
+        );
+        row(
+            "a profile that parses but hashes otherwise",
+            &effort(Effort::Fast),
+            &effort(Effort::Veryslow),
+            &|e| e.profile_sha256 = "0".repeat(64),
+            [Stale, Stale],
+        );
+        // A 3.0.0 record has no `bc1_search` (it reads as `default`), and its hash is that of the profile without it.
+        let v300: Edit<ManifestEntry> = &|e| {
+            let p = &mut e.raw["profile"];
+            p["encoder"].as_object_mut().unwrap().remove("bc1_search");
+            let was: Profile = serde_json::from_value(p.clone()).unwrap();
+            e.profile_sha256 = profile_sha256(&was).unwrap();
+        };
+        row(
+            "3.0.0 record against fast on BC1",
+            &|p| both(&fmt(Format::Bc1), &search(Bc1Search::Fast), p),
+            &search(Bc1Search::Fast),
+            v300,
+            [TGT, TGT],
+        );
+        row(
+            "3.0.0 record against fast on BC7",
+            &search(Bc1Search::Fast),
+            &search(Bc1Search::Fast),
+            v300,
+            [Current, Current],
+        );
+        row(
+            "encode version changed and target lowered",
+            &effort(Effort::Fast),
+            &effort(Effort::Veryslow),
+            &ev("0.9.0"),
+            [BOTH, Stale],
+        );
+        for (what, job, e, [without, with]) in &rows {
+            assert_eq!(
+                currency(e, job, &enc, false),
+                *without,
+                "{what}, without ev"
+            );
+            assert_eq!(currency(e, job, &enc, true), *with, "{what}, with ev");
         }
     }
 

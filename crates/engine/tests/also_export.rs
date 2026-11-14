@@ -303,6 +303,42 @@ fn a_1x_twin_without_encode_version_is_re_encoded_and_the_copy_records_the_curre
         engine::manifest::encode_version(r.profile.subtype)
     );
 }
+
+/// Note JA (TA25 kept): a PBR twin if-changed keeps, because an older encode version wrote it and the run has no
+/// `--ev`, is not copied; the Vanilla job goes through the run's verdict on its own record instead.
+#[test]
+fn a_twin_kept_for_an_older_encode_is_not_copied() {
+    let (_d, m, loc) = project(cup);
+    let sp = spec(&loc, &[AlsoTarget::Vanilla]);
+    also(request(&m, &loc), &sp).0.unwrap();
+    let (pbr, van) = (loc.join("Mod PBR"), loc.join("Mod Vanilla"));
+    let f = "textures/clutter/cup.dds";
+    assert!(record(&van, f).raw.get("copied_from").is_some());
+    let mut rec: ManifestRecord = serde_json::from_value(record(&pbr, f).raw).unwrap();
+    rec.encode_version = Some("0.9.0".into());
+    Manifest::at(&pbr).append(&rec).unwrap();
+    let twin = std::fs::read(pbr.join(f)).unwrap();
+    let (s, ev) = also(request(&m, &loc), &sp);
+    let s = s.unwrap();
+    let p = phase(&s, Phase::Pbr);
+    assert_eq!((p.converted, p.kept_older_encode), (0, 1), "{s:#?}");
+    assert_eq!(
+        std::fs::read(pbr.join(f)).unwrap(),
+        twin,
+        "the twin is kept"
+    );
+    assert_eq!(s.copied, 0, "{s:#?}");
+    assert_eq!(phase(&s, Phase::Vanilla).converted, 1, "{s:#?}");
+    assert!(
+        record(&van, f).raw.get("copied_from").is_none(),
+        "the Vanilla output is encoded, not a copy of the kept twin"
+    );
+    assert_eq!(s.combined().kept_older_encode, 1);
+    assert_eq!(s.exit_code(), 0);
+    let failed = keys_of(&ev, |k| matches!(k, EventKind::FileFailed { .. }));
+    assert!(failed.is_empty(), "{failed:?}");
+}
+
 #[test]
 fn a_1x_bc1_target_re_copies_the_plain_sets() {
     let (_d, m, loc) = project(cup);
@@ -312,12 +348,14 @@ fn a_1x_bc1_target_re_copies_the_plain_sets() {
     also(req.clone(), &spec(&loc, &[AlsoTarget::Vanilla]))
         .0
         .unwrap();
-    // The earlier export is made to look like a 1.x one (encoded against a decoder model): its PBR record says so,
-    // and this export must re-encode cup.dds and copy it again.
+    // The earlier export is made to look like a 1.x one (encoded against a decoder model, no encode version): its PBR
+    // record says so, and this export must re-encode cup.dds and copy it again. (A current encode version with the
+    // old target alone is only an older encode, kept without `--ev`: Note JA.)
     let pbr = loc.join("Mod PBR");
     let mut rec: ManifestRecord =
         serde_json::from_value(record(&pbr, "textures/clutter/cup.dds").raw).unwrap();
     rec.bc1_model = Some("ideal".into());
+    rec.encode_version = None;
     Manifest::at(&pbr).append(&rec).unwrap();
     let s = also(req, &spec(&loc, &[AlsoTarget::Vanilla])).0.unwrap();
     assert_eq!(phase(&s, Phase::Pbr).converted, 1, "{s:#?}");

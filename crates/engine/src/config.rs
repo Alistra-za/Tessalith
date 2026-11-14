@@ -459,6 +459,11 @@ impl Subtype {
     pub fn id(self) -> String {
         serde_id(self)
     }
+
+    /// The sub-type whose [`id`](Self::id) is `s`, as `--set subtype=` and `--property` take it.
+    pub fn from_id(s: &str) -> Option<Subtype> {
+        serde_json::from_value(serde_json::Value::String(s.into())).ok()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -752,6 +757,15 @@ mod tests {
             .map(|w| serde_json::to_value(w).unwrap())
             .collect();
         assert_eq!(schema["enum"], serde_json::Value::Array(names));
+    }
+
+    /// `from_id` reads back every `id`, and a removed id (`rfaos`, now `skin_rfaos`) is none.
+    #[test]
+    fn subtype_from_id_round_trips_id() {
+        for st in Subtype::ALL {
+            assert_eq!(Subtype::from_id(&st.id()), Some(st), "{st:?}");
+        }
+        assert_eq!(Subtype::from_id("rfaos"), None);
     }
 
     #[test]

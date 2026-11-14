@@ -1,8 +1,8 @@
 //! Track A (DECISIONS Note CN): "Also export as" Vanilla and Complex Material. One export writes `<name> PBR` (the
 //! plain cs export, byte for byte), `<name> Vanilla` and `<name> CM` side by side, as three engine runs in sequence.
 use crate::api::{
-    is_up_to_date, BatchRequest, BatchSummary, CancelToken, Engine, EngineError, LowDetailMode,
-    OnExisting, Plan,
+    currency, ev_covers, BatchRequest, BatchSummary, CancelToken, Currency, Engine, EngineError,
+    LowDetailMode, OnExisting, Plan,
 };
 use crate::codes::{Code, Warning};
 use crate::config::{GraySource, Profile, RawMap, Target};
@@ -66,6 +66,8 @@ pub struct AlsoSummary {
 fn add(a: &mut BatchSummary, b: &BatchSummary) {
     a.converted += b.converted;
     a.up_to_date += b.up_to_date;
+    a.kept_older_encode += b.kept_older_encode;
+    a.kept_lower_target += b.kept_lower_target;
     a.skipped += b.skipped;
     a.skipped_intentional += b.skipped_intentional;
     a.failed += b.failed;
@@ -641,7 +643,9 @@ fn do_copies(
                     sum.skipped_intentional += 1;
                     continue;
                 }
-                OnExisting::IfChanged
+                // Note JA: `reencode` keeps the `if-changed` copy rule; its PBR twin was just encoded again, so the
+                // copy is redone.
+                OnExisting::IfChanged | OnExisting::Reencode
                     if mine.is_some_and(|e| {
                         e.sources == c.twin.sources
                             && e.source_sha256 == c.twin.source_sha256
@@ -672,7 +676,10 @@ fn do_copies(
                 continue;
             }
         };
-        if req.on_existing == OnExisting::IfChanged {
+        if matches!(
+            req.on_existing,
+            OnExisting::IfChanged | OnExisting::Reencode
+        ) {
             let ours = |_: &[u8]| {
                 mine.is_some_and(|e| e.output_stamp.is_some() && e.output_stamp == dest_stamp)
             };
@@ -986,8 +993,11 @@ fn run_phases(
             })
             .and_then(|t| {
                 let e = pbr_records.get(&output_key(pbr_root, &t.output))?;
-                // TA25: only a current twin is copied, so a failed or stale PBR output is encoded instead.
-                is_up_to_date(e, t, &encoders).then(|| Copy {
+                // TA25: only a current twin is copied, so a failed or stale PBR output is encoded instead. A twin
+                // `if-changed` kept (older encode version, lower target; Note JA) is not copied either: this job
+                // then goes through the run's verdict on its own record.
+                let now = currency(e, t, &encoders, ev_covers(&vreq, e, t));
+                (now == Currency::Current).then(|| Copy {
                     job: j.clone(),
                     twin: e.clone(),
                     twin_output: t.output.clone(),

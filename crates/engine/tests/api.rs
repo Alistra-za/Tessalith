@@ -1327,3 +1327,391 @@ fn a_mixed_set_resolves_once_as_before() {
         Some(engine::shader::Shader::Pbr)
     );
 }
+
+// ---- Note JA: if-changed keeps an output that only its encode version or a lower target separates. ----
+
+/// Rewrites every manifest line through `f(output key, record)`.
+fn edit_records(root: &Path, f: impl Fn(&str, &mut serde_json::Value)) {
+    let m = Manifest::at(root);
+    let text: String = std::fs::read_to_string(m.path())
+        .unwrap()
+        .lines()
+        .map(|l| {
+            let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+            let key = v["output"].as_str().unwrap().to_string();
+            f(&key, &mut v);
+            format!("{v}\n")
+        })
+        .collect();
+    std::fs::write(m.path(), text).unwrap();
+}
+
+/// The warnings with `code`.
+fn warnings(ev: &[EngineEvent], code: Code) -> Vec<engine::codes::Warning> {
+    ev.iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::Warning(w) if w.code == code => Some(w.clone()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// The file names a run wrote, sorted.
+fn written(ev: &[EngineEvent]) -> Vec<String> {
+    let mut v: Vec<String> = ev
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::FileDone { output, .. } => {
+                Some(output.rsplit('/').next().unwrap().to_string())
+            }
+            _ => None,
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+/// (file name, reason) of each up-to-date skip, sorted.
+fn kept_reasons(ev: &[EngineEvent]) -> Vec<(String, String)> {
+    let mut v: Vec<(String, String)> = ev
+        .iter()
+        .filter_map(|e| match &e.kind {
+            EventKind::FileSkipped {
+                kind: SkipKind::UpToDate,
+                reason,
+                ..
+            } => Some((
+                e.job.as_deref()?.rsplit('/').next()?.to_string(),
+                reason.clone(),
+            )),
+            _ => None,
+        })
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn a_lower_target_is_kept_and_raising_it_back_is_current() {
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    let at = |effort: &str| {
+        let mut r = request_all_ready(d.path());
+        r.overrides
+            .push(parse_set(&format!("file:**/iron.png.encoder.effort={effort}")).unwrap());
+        r
+    };
+    let (s, _) = run(at("veryslow"));
+    assert_eq!(s.converted, 3);
+    let root = d.path().join("out/textures");
+    let m = Manifest::at(&root);
+    assert_eq!(
+        m.load().unwrap()["armor/iron.dds"].raw["profile"]["format"],
+        "bc7"
+    );
+    let (records, iron) = (
+        std::fs::read(m.path()).unwrap(),
+        std::fs::read(root.join("armor/iron.dds")).unwrap(),
+    );
+    let (s, ev) = run(at("fast"));
+    assert_eq!(
+        (
+            s.converted,
+            s.up_to_date,
+            s.kept_lower_target,
+            s.kept_older_encode
+        ),
+        (0, 3, 1, 0),
+        "{ev:#?}"
+    );
+    assert_eq!(s.exit_code(), 0);
+    assert_eq!(
+        std::fs::read(m.path()).unwrap(),
+        records,
+        "a kept output's record is not touched"
+    );
+    assert_eq!(std::fs::read(root.join("armor/iron.dds")).unwrap(), iron);
+    assert!(kept_reasons(&ev).contains(&(
+        "iron.dds".into(),
+        "kept: encoded at a higher quality target".into()
+    )));
+    let w = warnings(&ev, Code::OutKeptLowerTarget);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(w[0].data, serde_json::json!({ "count": 1 }));
+    assert_eq!(
+        w[0].message,
+        "1 outputs were encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+    );
+    assert!(warnings(&ev, Code::OutKeptOlderEncode).is_empty());
+    // The run-level lines come before batch_done.
+    assert_eq!(kind(ev.last().unwrap()), "batch_done");
+
+    let (s, ev) = run(at("veryslow"));
+    assert_eq!(
+        (s.converted, s.up_to_date, s.kept_lower_target),
+        (0, 3, 0),
+        "{ev:#?}"
+    );
+    assert!(warnings(&ev, Code::OutKeptLowerTarget).is_empty());
+}
+
+#[test]
+fn an_older_encode_version_is_kept_without_ev_and_re_encoded_with_it() {
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    run(request_all_ready(d.path()));
+    let root = d.path().join("out/textures");
+    edit_records(&root, |key, v| {
+        if key == "armor/iron.dds" {
+            v["encode_version"] = "0.9.0".into();
+        }
+    });
+    let records = std::fs::read(Manifest::at(&root).path()).unwrap();
+    let (s, ev) = run(request_all_ready(d.path()));
+    assert_eq!(
+        (
+            s.converted,
+            s.up_to_date,
+            s.kept_older_encode,
+            s.kept_lower_target
+        ),
+        (0, 3, 1, 0),
+        "{ev:#?}"
+    );
+    assert_eq!(s.exit_code(), 0);
+    assert_eq!(std::fs::read(Manifest::at(&root).path()).unwrap(), records);
+    assert!(kept_reasons(&ev).contains(&(
+        "iron.dds".into(),
+        "kept: written by an older encode version (--ev re-encodes it)".into()
+    )));
+    let w = warnings(&ev, Code::OutKeptOlderEncode);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(
+        w[0].data,
+        serde_json::json!({ "count": 1, "by_format": { "bc7": 1 }, "by_subtype": { "diffuse": 1 } })
+    );
+    assert_eq!(
+        w[0].message,
+        "1 outputs were written by an older encode version and kept (bc7 1); --ev re-encodes them, --ev --property <words> only the matching ones"
+    );
+
+    let mut req = request_all_ready(d.path());
+    req.ev = EvScope::All;
+    let (s, ev) = run(req);
+    assert_eq!((s.converted, s.up_to_date, s.kept_older_encode), (1, 2, 0));
+    assert_eq!(written(&ev), ["iron.dds"]);
+    assert!(warnings(&ev, Code::OutKeptOlderEncode).is_empty());
+}
+
+/// Three diffuse outputs: `a` BC1 with mips, `b` BC7 cutout with mips, `c` BC7 cutout without mips.
+fn property_fixtures(dir: &Path) -> BatchRequest {
+    let t = dir.join("textures/props");
+    std::fs::create_dir_all(&t).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([x as u8 * 4, y as u8 * 4, 90]))
+        .save(t.join("a.png"))
+        .unwrap();
+    for name in ["b.png", "c.png"] {
+        ImageBuffer::from_fn(64, 64, |x, y| {
+            let a = if (x / 8 + y / 8) % 2 == 0 { 255 } else { 0 };
+            Rgba([x as u8 * 4, 30, y as u8 * 4, a])
+        })
+        .save(t.join(name))
+        .unwrap();
+    }
+    let mut r = BatchRequest::new(vec![dir.join("textures")], dir.join("out"), Target::Cs);
+    r.recursive = true;
+    r.accept = AcceptSuggestions::High;
+    r.overrides = [
+        "file:**/*.png.subtype=diffuse",
+        "file:**/a.png.format=bc1",
+        "file:**/b.png.alpha.policy=cutout",
+        "file:**/c.png.alpha.policy=cutout",
+        "file:**/c.png.mips.levels=none",
+    ]
+    .iter()
+    .map(|s| parse_set(s).unwrap())
+    .collect();
+    r
+}
+
+fn scope(groups: &[&str]) -> EvScope {
+    EvScope::matching(groups.iter().map(|g| g.parse().unwrap()).collect()).unwrap()
+}
+
+#[test]
+fn ev_property_reencodes_only_matching_outputs() {
+    let d = tempfile::tempdir().unwrap();
+    let base = property_fixtures(d.path());
+    let (s, ev) = run(base.clone());
+    assert_eq!(s.converted, 3, "{ev:#?}");
+    let root = d.path().join("out/textures");
+    let m = Manifest::at(&root).load().unwrap();
+    assert_eq!(m["props/a.dds"].raw["profile"]["format"], "bc1");
+    assert_eq!(m["props/b.dds"].raw["profile"]["format"], "bc7");
+    assert_eq!(m["props/b.dds"].raw["validation"]["levels"], 7);
+    assert_eq!(m["props/c.dds"].raw["validation"]["levels"], 1);
+    let older = || edit_records(&root, |_, v| v["encode_version"] = "0.9.0".into());
+
+    // AND within one value: only the cutout output with mips.
+    older();
+    let mut req = base.clone();
+    req.ev = scope(&["cutout,mips"]);
+    let (s, ev) = run(req);
+    assert_eq!(written(&ev), ["b.dds"], "{s:#?}");
+    assert_eq!((s.up_to_date, s.kept_older_encode), (2, 2));
+    let w = warnings(&ev, Code::OutKeptOlderEncode);
+    assert_eq!(w.len(), 1, "{w:?}");
+    assert_eq!(
+        w[0].data,
+        serde_json::json!({
+            "count": 2,
+            "by_format": { "bc1": 1, "bc7": 1 },
+            "by_subtype": { "diffuse": 2 }
+        })
+    );
+    assert_eq!(
+        w[0].message,
+        "2 outputs were written by an older encode version and kept (bc1 1, bc7 1); they are outside the --property scope"
+    );
+    assert!(!w[0].message.contains("--ev"));
+
+    // OR across values: the BC1 output and the cutout output with mips.
+    older();
+    let mut req = base.clone();
+    req.ev = scope(&["bc1", "cutout,mips"]);
+    let (s, ev) = run(req);
+    assert_eq!(written(&ev), ["a.dds", "b.dds"], "{s:#?}");
+    assert_eq!((s.up_to_date, s.kept_older_encode), (1, 1));
+    let w = warnings(&ev, Code::OutKeptOlderEncode);
+    assert_eq!(
+        w[0].data,
+        serde_json::json!({ "count": 1, "by_format": { "bc7": 1 }, "by_subtype": { "diffuse": 1 } })
+    );
+    assert!(w[0].message.contains("outside the --property scope"));
+}
+
+/// `mips` reads `validation.levels` of a record in the v3.0.0 shape (only the fields v3.0.0's `ManifestRecord`
+/// declares): at 1 level the output is outside `--property mips`, at 10 inside.
+#[test]
+fn mips_reads_a_record_in_the_3_0_0_shape() {
+    const V300: [&str; 20] = [
+        "schema",
+        "ts",
+        "engine_version",
+        "encode_version",
+        "engine_commit",
+        "encoders",
+        "isa",
+        "preset",
+        "profile",
+        "profile_sha256",
+        "provenance",
+        "source",
+        "source_sha256",
+        "sources",
+        "output",
+        "validation",
+        "bc1_model",
+        "shader",
+        "output_stamp",
+        "copied_from",
+    ];
+    let d = tempfile::tempdir().unwrap();
+    let base = property_fixtures(d.path());
+    run(base.clone());
+    let root = d.path().join("out/textures");
+    for (levels, want) in [(1, vec![]), (10, vec!["b.dds"])] {
+        edit_records(&root, |key, v| {
+            if key == "props/b.dds" {
+                let mut line = serde_json::Map::new();
+                for k in V300 {
+                    if let Some(x) = v.get(k) {
+                        line.insert(k.into(), x.clone());
+                    }
+                }
+                line.insert("encode_version".into(), "0.9.0".into());
+                line["validation"]["levels"] = levels.into();
+                *v = line.into();
+            }
+        });
+        let mut req = base.clone();
+        req.ev = scope(&["mips"]);
+        let (s, ev) = run(req);
+        assert_eq!(written(&ev), want, "levels {levels}: {s:#?}");
+    }
+}
+
+#[test]
+fn reencode_rewrites_recorded_outputs_and_keeps_unknown_ones() {
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    run(request_all_ready(d.path()));
+    let root = d.path().join("out/textures");
+    // iron.dds loses its record and is replaced: Tessalith did not write this file.
+    let m = Manifest::at(&root);
+    let text: String = std::fs::read_to_string(m.path())
+        .unwrap()
+        .lines()
+        .filter(|l| !l.contains("\"armor/iron.dds\""))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    std::fs::write(m.path(), text).unwrap();
+    std::fs::write(root.join("armor/iron.dds"), b"not ours").unwrap();
+    let mut req = request_all_ready(d.path());
+    req.on_existing = OnExisting::Reencode;
+    let (s, ev) = run(req);
+    assert_eq!(written(&ev), ["iron_n.dds", "leaf.dds"], "{s:#?}");
+    assert_eq!((s.converted, s.up_to_date, s.skipped), (2, 0, 1));
+    assert_eq!(warnings(&ev, Code::OutUnknownExisting).len(), 1);
+    assert_eq!(
+        std::fs::read(root.join("armor/iron.dds")).unwrap(),
+        b"not ours"
+    );
+    assert_eq!(s.exit_code(), 1);
+}
+
+/// A 3.0.0 record has no `encoder.bc1_search`: a `fast-preview` output it recorded is kept on BC1 (the search was
+/// `default` then, a higher target) and current on BC7 (BC7 does not read the field).
+#[test]
+fn a_fast_preview_output_from_3_0_0_is_kept() {
+    let d = tempfile::tempdir().unwrap();
+    fixtures(d.path());
+    let req = || {
+        let mut r = request_all_ready(d.path());
+        r.preset = Some("fast-preview".into());
+        r.overrides
+            .push(parse_set("file:**/iron.png.format=bc1").unwrap());
+        r
+    };
+    let (s, _) = run(req());
+    assert_eq!(s.converted, 3);
+    let root = d.path().join("out/textures");
+    // As 3.0.0 wrote it: the profile without the field, and the hash of that profile.
+    edit_records(&root, |_, v| {
+        let p = &mut v["profile"];
+        assert_eq!(p["encoder"]["bc1_search"], "fast");
+        p["encoder"].as_object_mut().unwrap().remove("bc1_search");
+        let was: engine::config::Profile = serde_json::from_value(p.clone()).unwrap();
+        v["profile_sha256"] = engine::manifest::profile_sha256(&was).unwrap().into();
+    });
+    let m = Manifest::at(&root).load().unwrap();
+    assert_eq!(m["armor/iron.dds"].raw["profile"]["format"], "bc1");
+    assert_eq!(m["armor/leaf.dds"].raw["profile"]["format"], "bc7");
+    let (s, ev) = run(req());
+    assert_eq!(
+        (
+            s.converted,
+            s.up_to_date,
+            s.kept_lower_target,
+            s.kept_older_encode
+        ),
+        (0, 3, 1, 0),
+        "{ev:#?}"
+    );
+    let kept: Vec<String> = kept_reasons(&ev)
+        .into_iter()
+        .filter(|(_, r)| r.starts_with("kept"))
+        .map(|(f, _)| f)
+        .collect();
+    assert_eq!(kept, ["iron.dds"]);
+}

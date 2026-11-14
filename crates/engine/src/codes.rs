@@ -21,6 +21,7 @@
 //! and ALPHA-BC1-ONE-BIT (BC1 1-bit alpha on a source with soft alpha, DECISIONS Note FM)
 //! and PACK-SOURCE-RESIZED (a smaller pack, derive or fill source enlarged to the largest, DECISIONS Note FM30).
 //! and FMT-RGB8-ALPHA (a 24-bit RGB output for a texture that keeps its alpha, DECISIONS Note FM38).
+//! and OUT-KEPT-OLDER-ENCODE / OUT-KEPT-LOWER-TARGET (outputs `if-changed` kept, counted per run, DECISIONS Note JA).
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +127,10 @@ codes! {
     InAliasInvalid = "IN-ALIAS-INVALID" => Warning,
     InAliasStale = "IN-ALIAS-STALE" => Info,
     OutUnknownExisting = "OUT-UNKNOWN-EXISTING" => Warning,
+    // Note JA: one run-level line counting the outputs `if-changed` kept although an older encode version wrote them
+    // (`--ev` re-encodes them), and one counting those kept at a higher quality target than asked.
+    OutKeptOlderEncode = "OUT-KEPT-OLDER-ENCODE" => Info,
+    OutKeptLowerTarget = "OUT-KEPT-LOWER-TARGET" => Info,
     PackDefaulted = "PACK-DEFAULTED" => Warning,
     // Note FM30: sources of one aspect ratio but different sizes; the smaller ones are enlarged to the largest.
     PackSourceResized = "PACK-SOURCE-RESIZED" => Info,
@@ -253,7 +258,13 @@ mod tests {
 
     #[test]
     fn codes_count() {
-        assert_eq!(Code::ALL.len(), 91);
+        assert_eq!(Code::ALL.len(), 93);
+        assert_eq!(Code::OutKeptOlderEncode.severity(), Severity::Info);
+        assert_eq!(Code::OutKeptLowerTarget.severity(), Severity::Info);
+        assert_eq!(
+            Code::parse("OUT-KEPT-OLDER-ENCODE"),
+            Some(Code::OutKeptOlderEncode)
+        );
         assert_eq!(Code::ResizeNoReference.severity(), Severity::Info);
         assert_eq!(Code::parse("FMT-RGB8-ALPHA"), Some(Code::FmtRgb8Alpha));
         assert_eq!(Code::FmtRgb8Alpha.severity(), Severity::Blocking);

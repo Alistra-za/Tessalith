@@ -18,6 +18,7 @@ pub mod derive;
 pub mod dilate;
 pub mod discover;
 pub mod encode;
+pub mod ev_scope;
 pub mod events;
 pub mod filter;
 pub mod grass;

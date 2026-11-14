@@ -42,6 +42,15 @@ fn subtype_values_are_checked() {
     assert!(parse_set("subtype:normal.subtype=msn").is_err());
 }
 
+/// The sub-type check reads ids through `Subtype::from_id` (shared with `--property`); its message is unchanged.
+#[test]
+fn an_unknown_set_subtype_keeps_its_message() {
+    assert_eq!(
+        parse_set("subtype=nope").unwrap_err(),
+        "--set 'subtype=nope': unknown sub-type 'nope'"
+    );
+}
+
 /// M2.5: every packing field is settable, unscoped, per sub-type and per (packed) file name.
 #[test]
 fn packing_fields_are_settable() {

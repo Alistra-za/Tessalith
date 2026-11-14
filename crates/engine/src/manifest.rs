@@ -23,6 +23,7 @@ pub const RELEASED_ENGINE_VERSION: &str = "3.0.0";
 /// changes no arm. 2.0.0 re-encodes everything once, so every type started on one version (Note FM9); the arms for
 /// `skin_wet`, `skin_detail`, `rmaos`, `skin_rfaos` and the complex `_m` have moved to 3.0.0 (the 2.1 work ships in 3.0, Note HW1), and with Note HR6
 /// `diffuse`, `pbr_albedo`, `ui_sky` and `skin_albedo`. No `_` arm: a new `Subtype` fails to compile until it gets one.
+/// An output whose record names an older arm is kept by `if-changed` unless the run's `--ev` covers it (Note JA).
 pub const fn encode_version(st: Subtype) -> &'static str {
     match st {
         Subtype::LandscapeDiffuse

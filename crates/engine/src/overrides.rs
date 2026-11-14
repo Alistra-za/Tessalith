@@ -491,7 +491,7 @@ pub fn parse_set(s: &str) -> Result<SetOverride, String> {
         return Err(format!("--set '{s}': unknown field '{key}'"));
     };
     // A sub-type decides the whole profile, so a misspelt one must not be ignored.
-    if field == "subtype" && serde_json::from_value::<Subtype>(value.clone()).is_err() {
+    if field == "subtype" && value.as_str().and_then(Subtype::from_id).is_none() {
         return Err(format!("--set '{s}': unknown sub-type '{raw}'"));
     }
     if field == REENCODE_FIELD && !value.is_boolean() {

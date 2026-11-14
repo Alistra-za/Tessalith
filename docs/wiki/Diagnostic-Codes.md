@@ -127,6 +127,8 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 |---|---|---|---|
 | `ENC-WEIGHTS-IGNORED` | warning | `encoder.bc7_weights` has no effect: the format isn't BC7, or `encoder.perceptual` is on. | Remove `encoder.bc7_weights`, or turn perceptual off. |
 | `OUT-UNKNOWN-EXISTING` | warning | An existing output with no manifest record was kept ([re-runs](Validation-and-Output.md#re-runs-and-if-changed)). | Replace it from the command line: [CLI reference](CLI-Reference.md#re-runs-and-if-changed). |
+| `OUT-KEPT-OLDER-ENCODE` | info | Outputs written by an older encode version were kept. One line per run, with counts per format and texture type. | Add `--ev` to re-encode them, or `--ev --property <words>` for only some: [CLI reference](CLI-Reference.md#re-runs-and-if-changed). |
+| `OUT-KEPT-LOWER-TARGET` | info | Outputs encoded at a higher quality target than the settings now ask for were kept. One line per run. | Nothing to do. `--on-existing overwrite` encodes them again at the lower target. |
 
 ## Packing
 
