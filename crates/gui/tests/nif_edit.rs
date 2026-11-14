@@ -9064,14 +9064,15 @@ fn pick_21_shows_notes() {
     }
     let mut m = direct(b);
     select(&mut m, "S");
+    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
         .click();
     h.run_steps(3);
-    h.get_by_label("CS TruePBR 2.0 (21)").scroll_to_me();
+    h.get_by_label("TruePBR 2.0 (21)").scroll_to_me();
     h.run();
-    h.get_by_label("CS TruePBR 2.0 (21)").click();
+    h.get_by_label("TruePBR 2.0 (21)").click();
     h.run_steps(3);
     let m = h.state_mut();
     let e = m.edit.as_ref().unwrap();
@@ -9104,6 +9105,7 @@ fn leaving_21_still_pushes_the_slsf1_type_fix_in_the_same_undo_step() {
     b[at..at + 4].copy_from_slice(&((1u32 << 31) | (1 << 21)).to_le_bytes());
     let mut m = direct(b);
     select(&mut m, "S");
+    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
@@ -11781,4 +11783,416 @@ fn undoing_a_type_21_pick_that_unlinked_controllers_restores_the_source() {
     let e = m.edit.as_ref().unwrap();
     assert!(e.doc.ops.is_empty());
     assert_eq!(*e.patched, src);
+}
+
+// ---- Note ID21: the editor's shader tab for type 21 ----
+
+const TYPE_21: &str = "TruePBR 2.0 (21)";
+
+/// A type-21 shape "S" with `features` and `params`, selected, the CS PBR 2.0 setting `on`.
+fn t21_model(features: u32, params: &[f32; 25], on: bool) -> MeshesModel {
+    let mut m = direct(scenes::lsp21_shape(features, params));
+    select(&mut m, "S");
+    m.cs_pbr2 = on;
+    m
+}
+
+fn pbr2_of(m: &MeshesModel) -> (u32, [f32; 25]) {
+    match &m.edit.as_ref().unwrap().model.lighting[&1]
+        .lighting
+        .params
+        .trailer
+    {
+        nif::props::LightingTrailer::Pbr2 {
+            features, params, ..
+        } => (*features, *params),
+        t => panic!("not type 21: {t:?}"),
+    }
+}
+
+/// The shader type combo's list open.
+fn open_type_list(h: &mut Harness<'static, MeshesModel>) {
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .click();
+    h.run_steps(3);
+}
+
+fn click_scrolled(h: &mut Harness<'static, MeshesModel>, role: AkRole, label: &str) {
+    h.get_by_role_and_label(role, label).scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(role, label).click();
+    h.run_steps(3);
+}
+
+#[test]
+fn type_21_hidden_when_box_off() {
+    let mut m = direct(scenes::lsp_shape(0, &[]));
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    open_type_list(&mut h);
+    h.get_by_label("Glow Shader (2)");
+    assert!(h.query_by_label_contains("TruePBR 2.0").is_none());
+}
+
+#[test]
+fn type_21_offered_when_box_on() {
+    let mut m = direct(scenes::lsp_shape(0, &[]));
+    select(&mut m, "S");
+    m.cs_pbr2 = true;
+    let mut h = view(m);
+    h.run_steps(2);
+    open_type_list(&mut h);
+    h.get_by_label(TYPE_21).scroll_to_me();
+    h.run();
+    h.get_by_label(TYPE_21).click();
+    h.run_steps(3);
+    let got = ops(h.state());
+    assert!(
+        matches!(
+            &got[..],
+            [Op::SetField {
+                field: Field::ShaderType,
+                value: Value::U32(21),
+                ..
+            }]
+        ),
+        "{got:?}"
+    );
+}
+
+#[test]
+fn type_21_not_offered_on_le() {
+    let mut m = direct(scenes::lsp_shape(0, &[]));
+    select(&mut m, "S");
+    m.cs_pbr2 = true;
+    // an LE NIF (BSVER 83): the model's version is all the combo reads
+    m.edit.as_mut().unwrap().model.bsver = 83;
+    let mut h = view(m);
+    h.run_steps(2);
+    open_type_list(&mut h);
+    h.get_by_label("Glow Shader (2)");
+    assert!(h.query_by_label_contains("TruePBR 2.0").is_none());
+}
+
+#[test]
+fn type_21_tab_shows_features_and_base_params() {
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    h.run_steps(2);
+    h.get_by_label("PBR version 2");
+    for n in nif::pbr2::FEATURE_NAMES {
+        h.get_by_role_and_label(AkRole::CheckBox, n);
+    }
+    for n in &nif::pbr2::PARAM_NAMES[..3] {
+        h.get_by_label(n);
+    }
+    // groups of features that are off stay out; the v1 fields have no place on type 21
+    for gone in [
+        "Subsurface balance",
+        "Fuzz weight",
+        "Glossiness",
+        "Specular strength",
+        "Specular colour R",
+        "Lighting effect 1",
+        "Lighting effect 2",
+    ] {
+        assert!(h.query_by_label(gone).is_none(), "{gone}");
+    }
+    // shared fields stay
+    h.get_by_label("UV offset U");
+    h.get_by_label("Shader alpha");
+    assert!(ops(h.state()).is_empty(), "drawing records nothing");
+}
+
+#[test]
+fn two_layer_disables_subsurface_checkbox() {
+    let mut h = view(t21_model(
+        nif::pbr2::feat::TWO_LAYER,
+        &nif::pbr2::PBR2_DEFAULTS,
+        true,
+    ));
+    h.run_steps(2);
+    let sub = h.get_by_role_and_label(AkRole::CheckBox, "Subsurface");
+    assert!(sub.accesskit_node().is_disabled());
+    let coat = h.get_by_role_and_label(AkRole::CheckBox, "Two-layer coat");
+    assert!(!coat.accesskit_node().is_disabled(), "an on bit can go off");
+    let colored = h.get_by_role_and_label(AkRole::CheckBox, "Coloured coat");
+    assert!(!colored.accesskit_node().is_disabled());
+    h.get_by_role_and_label(AkRole::CheckBox, "Subsurface")
+        .scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::CheckBox, "Subsurface")
+        .hover();
+    h.run_steps(30);
+    h.get_by_label_contains(nif::pbr2::TWO_LAYER_EXCLUDES);
+}
+
+#[test]
+fn toggling_fuzz_pushes_setbits() {
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    h.run_steps(2);
+    assert!(h.query_by_label("Fuzz weight").is_none());
+    click_scrolled(&mut h, AkRole::CheckBox, "Fuzz");
+    let got = ops(h.state());
+    assert!(
+        matches!(
+            &got[..],
+            [Op::SetBits {
+                field: Field::PbrFeatures,
+                mask: 32,
+                value: 32,
+                base: 0,
+                ..
+            }]
+        ),
+        "{got:?}"
+    );
+    assert_eq!(pbr2_of(h.state()).0, 32);
+    h.run_steps(2);
+    h.get_by_label("Fuzz weight");
+}
+
+#[test]
+fn param_edit_pushes_pbrparam_field() {
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    h.run_steps(2);
+    edit_number(&mut h, "Roughness scale", "2.5");
+    let got = ops(h.state());
+    assert_eq!(got.len(), 1, "{got:?}");
+    let Op::SetField {
+        field, value, base, ..
+    } = &got[0]
+    else {
+        panic!("{got:?}")
+    };
+    assert_eq!(*field, Field::PbrParam(0));
+    assert_eq!(*value, Value::F32(2.5f32.to_bits()));
+    assert_eq!(*base, Value::F32(1.0f32.to_bits()));
+    assert_eq!(pbr2_of(h.state()).1[0], 2.5);
+}
+
+#[test]
+fn box_off_type_21_params_read_only() {
+    let mut h = view(t21_model(
+        nif::pbr2::feat::FUZZ,
+        &nif::pbr2::PBR2_DEFAULTS,
+        false,
+    ));
+    h.run_steps(2);
+    for n in ["Roughness scale", "Fuzz weight"] {
+        assert!(h.get_by_label(n).accesskit_node().is_disabled(), "{n}");
+    }
+    for n in nif::pbr2::FEATURE_NAMES {
+        let c = h.get_by_role_and_label(AkRole::CheckBox, n);
+        assert!(c.accesskit_node().is_disabled(), "{n}");
+    }
+    // the shared fields stay editable
+    assert!(!h
+        .get_by_label("Shader alpha")
+        .accesskit_node()
+        .is_disabled());
+    assert!(!h.get_by_label("UV offset U").accesskit_node().is_disabled());
+    assert!(ops(h.state()).is_empty());
+}
+
+#[test]
+fn box_off_type_21_combo_disabled() {
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, false));
+    h.run_steps(2);
+    let c = h.get_by_role_and_label(AkRole::ComboBox, "Shader type");
+    assert!(c.accesskit_node().is_disabled());
+    h.get_by_label(TYPE_21);
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .hover();
+    h.run_steps(30);
+    h.get_by_label_contains("Tick CS PBR 2.0 in Settings to change it");
+}
+
+#[test]
+fn saved_doc_with_type_21_ops_loads_box_off() {
+    // Review Focus 4: a document holding PbrFeatures and PbrParam ops opens and applies with the setting off
+    let mut m = t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true);
+    let e = m.edit.as_ref().unwrap();
+    let at = nif::edit::anchor_role(&e.model, Some(shape_named(e, "S")), Role::Shader).unwrap();
+    m.edit_push(
+        vec![
+            Op::SetBits {
+                at: at.clone(),
+                field: Field::PbrFeatures,
+                mask: 32,
+                value: 32,
+                base: 0,
+            },
+            Op::SetField {
+                at,
+                field: Field::PbrParam(16),
+                value: Value::F32(0.5f32.to_bits()),
+                base: Value::F32(0.0f32.to_bits()),
+            },
+        ],
+        None,
+    );
+    let text = m.edit.as_ref().unwrap().doc.to_text();
+    assert!(
+        text.contains("PbrFeatures") && text.contains("PbrParam"),
+        "{text}"
+    );
+    let d = tempfile::tempdir().unwrap();
+    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    std::fs::write(&p, &text).unwrap();
+    let bytes = scenes::lsp21_shape(0, &nif::pbr2::PBR2_DEFAULTS);
+    let e = NifEdit::open(
+        bytes,
+        copy("A", 1, false),
+        "meshes/x.nif",
+        Some(d.path()),
+        None,
+    )
+    .unwrap();
+    assert_eq!(e.doc.ops.len(), 2);
+    assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
+    let mut m = MeshesModel::empty();
+    m.edit = Some(e);
+    assert!(!m.cs_pbr2);
+    let (features, params) = pbr2_of(&m);
+    assert_eq!((features, params[16]), (32, 0.5));
+}
+
+#[test]
+fn v1_flags_hidden_on_type_21() {
+    use nif::material::{SLSF1_NAMES, SLSF2_NAMES};
+    let mut b = scenes::lsp21_shape(0, &nif::pbr2::PBR2_DEFAULTS);
+    let hd = nif::header::Header::parse(&b).unwrap();
+    let (rel, _) = nif::fields::locate(&hd, &b, 1, Field::Slsf2).unwrap();
+    let at = hd.offsets()[1] + rel;
+    // a foreign NIF: the v1 PBR flag (bit 23) and a banned one (bit 1) are set
+    b[at..at + 4].copy_from_slice(&((1u32 << 23) | (1 << 1) | 1).to_le_bytes());
+    let mut m = direct(b);
+    select(&mut m, "S");
+    m.cs_pbr2 = true;
+    let mut h = view(m);
+    h.run_steps(2);
+    open_flags(&mut h);
+    assert!(h
+        .query_by_role_and_label(AkRole::CheckBox, "Unused01 (TruePBR)")
+        .is_none());
+    for bit in [12, 25, 26, 27, 30] {
+        let n = SLSF2_NAMES[bit];
+        assert!(
+            h.query_by_role_and_label(AkRole::CheckBox, n).is_none(),
+            "{n}"
+        );
+    }
+    // the Warn is under the list, with its Fix
+    let fix = format!("Clear the flag: {}", nif::edit::validate::V1_FLAG);
+    h.get_by_label_contains(&fix);
+    // banned bits stay visible, locked off
+    let banned = h.get_by_role_and_label(AkRole::CheckBox, SLSF2_NAMES[1]);
+    assert!(banned.accesskit_node().is_disabled());
+    let env = h.get_by_role_and_label(AkRole::CheckBox, SLSF1_NAMES[7]);
+    assert!(env.accesskit_node().is_disabled());
+    h.get_by_role_and_label(AkRole::CheckBox, SLSF1_NAMES[7])
+        .scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::CheckBox, SLSF1_NAMES[7])
+        .hover();
+    h.run_steps(30);
+    h.get_by_label_contains("Not allowed on CS 2.0 PBR");
+}
+
+#[test]
+fn type_21_slot_labels() {
+    let want = [
+        "Base colour",
+        "Normal",
+        "Emissive",
+        "Displacement",
+        "Unused (must be empty)",
+        "RMAOS",
+        "Features 1 (fuzz / coat normal)",
+        "Features 0 (subsurface / coat)",
+        "Unused (must be empty)",
+    ];
+    for (i, w) in want.into_iter().enumerate() {
+        assert_eq!(edit_slot_label(21, 0, 0, i), w);
+        assert_eq!(edit_slot_shown(21, 0, 0, i), w);
+        assert_eq!(
+            edit_slot_shown(21, 0, 1 << 23, i),
+            w,
+            "the v1 flag changes nothing"
+        );
+    }
+}
+
+/// Shape "S" (0) -> type-21 shader (1) with a texture set (2) -> float controllers var 9 (3) and var 11 (4).
+fn ctrl21_scene() -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = n.string("S");
+    n.block("BSTriShape", scenes::tri_shape(s, 1));
+    n.block(
+        "BSLightingShaderProperty",
+        scenes::lsp21_body(&[], 3, 0x8000_0000, 1, 2, 0, &nif::pbr2::PBR2_DEFAULTS),
+    );
+    n.block("BSShaderTextureSet", scenes::texset(&["textures\\a_d.dds"]));
+    for (next, var, interp) in [(4, 9, 5), (-1, 11, 6)] {
+        let tail = W::default().i32(interp).u32(var);
+        n.block(
+            "BSLightingShaderPropertyFloatController",
+            scenes::ctrl_body(next, 0x48, 1, tail),
+        );
+    }
+    for v in [0.5, 0.25] {
+        n.block("NiFloatInterpolator", W::default().f(v).i32(-1).0);
+    }
+    n.bytes()
+}
+
+#[test]
+fn controllers_tab_type_21_var_list() {
+    let mut m = direct(ctrl21_scene());
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    h.get_by_role_and_label(AkRole::ComboBox, "Glossiness variable")
+        .click();
+    h.run_steps(3);
+    for offered in [
+        "Refraction strength (0)",
+        "Emissive multiple (11)",
+        "Alpha (12)",
+        "U offset (20)",
+        "V scale (23)",
+        "Glossiness (9)",
+        "Specular strength (10)",
+    ] {
+        h.get_by_label(offered);
+    }
+    assert!(h.query_by_label("Env map scale (8)").is_none());
+    h.get_by_label("Specular strength (10)").hover();
+    h.run_steps(30);
+    h.get_by_label_contains("Runs, but CS 2.0 shows no change");
+}
+
+#[test]
+fn add_controller_on_type_21_offers_the_colour_vars_it_reads() {
+    let mut m = direct(ctrl21_scene());
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller class")
+        .scroll_to_me();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller class")
+        .click();
+    h.run_steps(3);
+    h.get_by_label("Colour").click();
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller variable")
+        .click();
+    h.run_steps(3);
+    h.get_by_label("Emissive colour (1)");
+    h.get_by_label("Specular colour (0)");
 }

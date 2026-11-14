@@ -353,6 +353,7 @@ impl eframe::App for SdcApp {
         }
         // Note GH9: the 3D view's menu reads these and leaves its click for the next frame.
         self.meshes.export_running = self.model.export.running.is_some();
+        self.meshes.cs_pbr2 = self.model.settings.cs_pbr2;
         if std::mem::take(&mut self.meshes.pick_export_folder_request) {
             self.model.pick_export_folder(&ctx);
         }

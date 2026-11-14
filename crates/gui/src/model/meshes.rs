@@ -35,7 +35,7 @@ pub use nif_edit::NifReviewRow;
 pub use worklist::{NifLevel, NifProblem, NifTab};
 
 /// BSLightingShaderProperty shader type names, by number (`skyrim_conventions.md` §8, from nif.xml).
-pub const SHADER_TYPES: [&str; 22] = [
+pub const SHADER_TYPES: [&str; 21] = [
     "Default",
     "Environment Map",
     "Glow Shader",
@@ -57,13 +57,16 @@ pub const SHADER_TYPES: [&str; 22] = [
     "LOD Landscape Noise",
     "Multitexture Landscape LOD Blend",
     "FO4 Dismemberment",
-    "CS TruePBR 2.0",
 ];
+
+/// Shader type 21 (CS TruePBR 2.0), which the combo offers only with the setting on (Note ID21).
+pub const TYPE_21_NAME: &str = "TruePBR 2.0";
 
 /// `Environment Map (1)`; an unknown number shows as `type N`.
 pub fn shader_type_name(t: u32) -> String {
     match SHADER_TYPES.get(t as usize) {
         Some(n) => format!("{n} ({t})"),
+        None if t == 21 => format!("{TYPE_21_NAME} ({t})"),
         None => format!("type {t}"),
     }
 }
@@ -533,6 +536,9 @@ pub struct MeshesModel {
     pub pick_export_folder_request: bool,
     /// Note GH9: a texture export runs (set by the app each frame); `Export this NIF` waits for it.
     pub export_running: bool,
+    /// Note ID21: the "CS PBR 2.0 (experimental)" setting (set by the app each frame); the Shader tab offers type 21
+    /// and edits its features and parameters only while it is on.
+    pub cs_pbr2: bool,
     /// Note GD18: the edit panel's Diff view, set by `show_nif_diff`: the NIF's data path and `nif_diff`'s lines.
     pub nif_diff_view: Option<(String, Vec<String>)>,
     /// Note GD2: Review's Keep / Overwrite answers by lowercase data path, with the hash each was given for.
@@ -642,6 +648,7 @@ impl MeshesModel {
             quick_export_result: None,
             pick_export_folder_request: false,
             export_running: false,
+            cs_pbr2: false,
             nif_diff_view: None,
             nif_answers: HashMap::new(),
             foreign_cache: Default::default(),

@@ -46,6 +46,8 @@ const LABEL_W: f32 = 132.0;
 const SKINNED_HOVER: &str = "Set by the mesh; changing it breaks skinning.";
 const PBR_HOVER: &str = "TruePBR marker: PGPatcher and CS rely on it.";
 const TYPE_HOVER: &str = "Changing the type changes the trailer fields.";
+const TYPE_21_OFF: &str = "Tick CS PBR 2.0 in Settings to change it";
+const BANNED_HOVER: &str = "Not allowed on CS 2.0 PBR";
 const BROWSE_LIMIT: usize = 200;
 
 /// A row's name, painted: the control beside it carries the same name for AccessKit, so the name is one node.
@@ -120,11 +122,33 @@ pub(super) fn float_named(
     field: Field,
     v: f32,
 ) {
+    float_ranged(ui, e, act, at, label, name, field, v, None);
+}
+
+/// [`float_named`] whose drag stays inside `range` (a foreign value outside it is left as it is until edited).
+#[allow(clippy::too_many_arguments)]
+fn float_ranged(
+    ui: &mut egui::Ui,
+    e: &NifEdit,
+    act: &mut Act,
+    at: &Anchor,
+    label: &str,
+    name: &str,
+    field: Field,
+    v: f32,
+    range: Option<(f32, f32)>,
+) {
     ui.horizontal(|ui| {
         row_label(ui, label);
         let mut x = v;
         let speed = (v.abs() as f64 * 0.01).max(0.01);
-        let r = ui.add(egui::DragValue::new(&mut x).speed(speed));
+        let mut d = egui::DragValue::new(&mut x).speed(speed);
+        if let Some((lo, hi)) = range {
+            d = d
+                .range(lo as f64..=hi as f64)
+                .clamp_existing_to_range(false);
+        }
+        let r = ui.add(d);
         set_name(&r, egui::WidgetType::DragValue, name, Some(x as f64), None);
         take_focus(ui, &r, field);
         if r.changed() && x.to_bits() != v.to_bits() {
@@ -361,23 +385,33 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         row_label(ui, "Shader type");
         let mut t = lt.shader_type;
         let shown = shader_type_name(t);
-        let r = egui::ComboBox::from_id_salt("meshes-edit-shader-type")
-            .width(200.0)
-            .selected_text(&shown)
-            .show_ui(ui, |ui| {
-                for (i, n) in SHADER_TYPES.iter().enumerate() {
-                    // Note ID10: type 21 is a Skyrim SE type; on another NIF the combo does not offer it
-                    if i == 21 && e.model.bsver != 100 && lt.shader_type != 21 {
-                        continue;
-                    }
-                    ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
-                }
+        // Note ID21: a type-21 shape's type is changed only with the setting on; the combo says so.
+        let locked = lt.shader_type == 21 && !m.cs_pbr2;
+        let r = ui
+            .add_enabled_ui(!locked, |ui| {
+                egui::ComboBox::from_id_salt("meshes-edit-shader-type")
+                    .width(200.0)
+                    .selected_text(&shown)
+                    .show_ui(ui, |ui| {
+                        for (i, n) in SHADER_TYPES.iter().enumerate() {
+                            ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
+                        }
+                        // Note ID10, ID21: type 21 is a Skyrim SE type, offered with the setting on
+                        if m.cs_pbr2 && e.model.bsver == 100 {
+                            ui.selectable_value(&mut t, 21, shader_type_name(21));
+                        }
+                    })
+                    .response
             })
-            .response;
+            .inner;
         let typ = egui::WidgetType::ComboBox;
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
-        r.on_hover_text(TYPE_HOVER);
+        if locked {
+            r.on_disabled_hover_text(TYPE_21_OFF);
+        } else {
+            r.on_hover_text(TYPE_HOVER);
+        }
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {
                 at: at.clone(),
@@ -440,6 +474,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         act,
     );
 
+    let t21 = lt.shader_type == 21;
     let f = |ui: &mut egui::Ui, act: &mut Act, name: &str, field, v| {
         float(ui, e, act, &at, name, field, v)
     };
@@ -504,45 +539,62 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         Field::Refraction,
         p.refraction_strength,
     );
-    let gloss = if pbr { "Specular level" } else { "Glossiness" };
-    f(ui, act, gloss, Field::Glossiness, p.glossiness);
-    color(
-        ui,
-        e,
-        act,
-        &at,
-        "Specular colour",
-        Field::SpecularColor,
-        p.specular_color,
-    );
-    let strength = if pbr {
-        "Roughness scale"
-    } else {
-        "Specular strength"
-    };
-    f(
-        ui,
-        act,
-        strength,
-        Field::SpecularStrength,
-        p.specular_strength,
-    );
-    f(
-        ui,
-        act,
-        "Lighting effect 1",
-        Field::LightingEffect1,
-        p.lighting_effect_1,
-    );
-    f(
-        ui,
-        act,
-        "Lighting effect 2",
-        Field::LightingEffect2,
-        p.lighting_effect_2,
-    );
-    for (n, (name, v)) in trailer_fields(&p.trailer).into_iter().enumerate() {
-        f(ui, act, &name, Field::Trailer(n as u8), v);
+    // Note ID21: type 21 has none of the v1 specular fields or a trailer; its payload comes after refraction.
+    if let (
+        true,
+        LightingTrailer::Pbr2 {
+            version,
+            features,
+            params,
+        },
+    ) = (t21, &p.trailer)
+    {
+        let enabled = m.cs_pbr2;
+        ui.add_enabled_ui(enabled, |ui| {
+            pbr2_section(ui, e, act, &at, (*version, *features, params));
+        });
+    }
+    if !t21 {
+        let gloss = if pbr { "Specular level" } else { "Glossiness" };
+        f(ui, act, gloss, Field::Glossiness, p.glossiness);
+        color(
+            ui,
+            e,
+            act,
+            &at,
+            "Specular colour",
+            Field::SpecularColor,
+            p.specular_color,
+        );
+        let strength = if pbr {
+            "Roughness scale"
+        } else {
+            "Specular strength"
+        };
+        f(
+            ui,
+            act,
+            strength,
+            Field::SpecularStrength,
+            p.specular_strength,
+        );
+        f(
+            ui,
+            act,
+            "Lighting effect 1",
+            Field::LightingEffect1,
+            p.lighting_effect_1,
+        );
+        f(
+            ui,
+            act,
+            "Lighting effect 2",
+            Field::LightingEffect2,
+            p.lighting_effect_2,
+        );
+        for (n, (name, v)) in trailer_fields(&p.trailer).into_iter().enumerate() {
+            f(ui, act, &name, Field::Trailer(n as u8), v);
+        }
     }
 
     ui.separator();
@@ -571,14 +623,23 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 );
                 for (bit, name) in names.iter().enumerate() {
                     let mask = 1u32 << bit;
+                    // Note ID21: no point leaving flags that type 21 cannot use; a set one shows its Warn and Fix.
+                    if t21 && field == Field::Slsf2 && mask & nif::pbr2::V1_SLSF2 != 0 {
+                        continue;
+                    }
                     let mut on = v & mask != 0;
+                    let banned = match field {
+                        Field::Slsf1 => nif::pbr2::BANNED_SLSF1,
+                        _ => nif::pbr2::BANNED_SLSF2,
+                    };
                     let locked = match field {
+                        _ if t21 && mask & banned != 0 => Some(BANNED_HOVER),
                         Field::Slsf1 if bit == 1 => Some(SKINNED_HOVER),
                         Field::Slsf2 if bit == 23 => Some(PBR_HOVER),
                         Field::Slsf1 => type_flag_lock(lt.shader_type, bit as u32),
                         _ => None,
                     };
-                    let pbr_meaning = if field == Field::Slsf2 {
+                    let pbr_meaning = if field == Field::Slsf2 && !t21 {
                         render3d::pbr_bit_meaning(v, bit as u32)
                     } else {
                         None
@@ -627,6 +688,102 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                     }
                 }
             });
+    }
+}
+
+/// The parameter groups of a type-21 shader (spec section 4): the feature that shows each, and its parameters.
+/// Base has no feature and always shows.
+const PBR2_GROUPS: [(&str, u32, &[usize]); 6] = [
+    ("Base", 0, &[0, 1, 2]),
+    ("Subsurface", nif::pbr2::feat::SUBSURFACE, &[3, 4, 5, 6, 21]),
+    ("Coat", nif::pbr2::feat::TWO_LAYER, &[7, 8, 9, 10, 11, 12]),
+    ("Fuzz", nif::pbr2::feat::FUZZ, &[13, 14, 15, 16]),
+    ("Glint", nif::pbr2::feat::GLINT, &[17, 18, 19, 20]),
+    ("Thin surface", nif::pbr2::feat::THIN_SURFACE, &[22, 23, 24]),
+];
+
+/// The type-21 shader's version, feature bits and parameters (Note ID21). The caller disables the whole section
+/// with the setting off, so every widget here is read-only then.
+fn pbr2_section(
+    ui: &mut egui::Ui,
+    e: &NifEdit,
+    act: &mut Act,
+    at: &Anchor,
+    (version, features, params): (u32, u32, &[f32; 25]),
+) {
+    use nif::pbr2::{allowed_with, feature_errors, FEATURE_NAMES, PARAM_NAMES, PARAM_RANGE};
+    let block = at.block;
+    ui.separator();
+    ui.label(format!("PBR version {version}"));
+    warnings(
+        ui,
+        e,
+        &Target::Field {
+            block,
+            field: Field::PbrVersion,
+        },
+        act,
+    );
+    ui.strong("Features");
+    let now = feature_errors(features);
+    for (bit, name) in FEATURE_NAMES.iter().enumerate() {
+        let mask = 1u32 << bit;
+        let mut on = features & mask != 0;
+        // a bit that would break a rule is greyed, with the rule it would break on hover
+        let blocked = !on && !allowed_with(features, mask);
+        let r = ui.add_enabled(!blocked, egui::Checkbox::new(&mut on, *name));
+        if blocked {
+            let why = feature_errors(features | mask)
+                .into_iter()
+                .find(|t| !now.contains(t))
+                .unwrap_or("not allowed with the other features");
+            r.on_disabled_hover_text(why);
+            continue;
+        }
+        take_focus(ui, &r, Field::PbrFeatures);
+        if r.changed() {
+            act.push = Some((
+                vec![Op::SetBits {
+                    at: at.clone(),
+                    field: Field::PbrFeatures,
+                    mask,
+                    value: if on { mask } else { 0 },
+                    base: features,
+                }],
+                None,
+            ));
+        }
+    }
+    warnings(
+        ui,
+        e,
+        &Target::Field {
+            block,
+            field: Field::PbrFeatures,
+        },
+        act,
+    );
+    ui.strong("Parameters");
+    for (group, feature, indices) in PBR2_GROUPS {
+        if feature != 0 && features & feature == 0 {
+            continue;
+        }
+        ui.label(egui::RichText::new(format!("{group} parameters")).italics());
+        for &i in indices {
+            let name = PARAM_NAMES[i];
+            let field = Field::PbrParam(i as u8);
+            float_ranged(
+                ui,
+                e,
+                act,
+                at,
+                name,
+                name,
+                field,
+                params[i],
+                Some(PARAM_RANGE[i]),
+            );
+        }
     }
 }
 

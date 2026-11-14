@@ -26,6 +26,26 @@ const TEST_REF: &str = "BSNiAlphaPropertyTestRefController";
 /// The values the Variable combo offers on a float controller.
 const FLOAT_VARS: [u32; 10] = [0, 8, 9, 10, 11, 12, 20, 21, 22, 23];
 const COLOR_VARS: [u32; 2] = [0, 1];
+const NO_EFFECT_HOVER: &str = "Runs, but CS 2.0 shows no change";
+
+/// The variables the combo offers on type 21 (Note ID21): what CS 2.0 acts on, then what it runs without a visible
+/// change (`no_effect`, which carry a hover). Everything else is refused by the validator.
+fn offered_21(float: bool) -> (Vec<u32>, &'static [u32]) {
+    use nif::pbr2::{COLOR_VARS, FLOAT_VARS, NO_EFFECT_COLOR_VARS, NO_EFFECT_FLOAT_VARS};
+    let (acts, no_effect) = match float {
+        true => (&FLOAT_VARS[..], &NO_EFFECT_FLOAT_VARS[..]),
+        false => (&COLOR_VARS[..], &NO_EFFECT_COLOR_VARS[..]),
+    };
+    (acts.iter().chain(no_effect).copied().collect(), no_effect)
+}
+
+/// The shape's shader type, 0 without a lit shader.
+fn shape_type(e: &NifEdit, shape: &ShapeModel) -> u32 {
+    shape
+        .shader
+        .and_then(|b| e.model.lighting.get(&b))
+        .map_or(0, |l| l.lighting.shader_type)
+}
 const CYCLES: [&str; 3] = ["Loop", "Reverse", "Clamp"];
 
 /// The shape's shader flags, 0 without a lit shader: the variable labels and the PBR guard (B-P39) read them.
@@ -158,6 +178,7 @@ fn chain(
     clock: Option<Clock>,
 ) {
     let slsf2 = shape_slsf2(e, shape);
+    let t21 = shape_type(e, shape) == 21;
     let users = prop.users.len();
     let mut locked = false;
     // D9: only a shared alpha must split before an add (clip controllers included, C4). A shared shader adds in
@@ -184,7 +205,7 @@ fn chain(
     ui.add_enabled_ui(!locked, |ui| {
         for i in 0..prop.ctrls.len() {
             if let Some((c, at)) = ctrl_anchor(e, shape, owner, prop, i) {
-                ui.group(|ui| row(ui, e, act, c, &at, clock, slsf2));
+                ui.group(|ui| row(ui, e, act, c, &at, clock, (slsf2, t21)));
             }
         }
     });
@@ -226,7 +247,7 @@ fn row(
     c: &TimeCtrl,
     at: &Anchor,
     clock: Option<Clock>,
-    slsf2: u32,
+    (slsf2, t21): (u32, bool),
 ) {
     let managed = e.model.managed(c.block);
     let title = ctrl_title(c, slsf2);
@@ -271,7 +292,7 @@ fn row(
         return;
     }
     if let Some(v) = c.var {
-        variable(ui, e, act, c, at, &title, v, managed, slsf2);
+        variable(ui, e, act, c, at, &title, v, managed, (slsf2, t21));
     }
     let cycle = (c.flags >> 1) & 3;
     ui.horizontal(|ui| {
@@ -913,10 +934,19 @@ fn add_row(
         if env_blocked(class_idx, var) {
             var = 20;
         }
+        // Note ID21: on type 21 a remembered variable CS 2.0 refuses falls back to the default of its class.
+        let t21 = shape_type(e, shape) == 21;
+        if t21 && nif::pbr2::var_refused_on_21(class_idx == 0, var) {
+            var = if class_idx == 0 { 20 } else { 1 };
+        }
         ui.horizontal(|ui| {
             row_label(ui, "Variable");
-            let (class, offered): (&str, &[u32]) = match class_idx {
-                0 => (LSCF, &FLOAT_VARS),
+            let (on21, no_effect) = offered_21(class_idx == 0);
+            let no_effect = if t21 { no_effect } else { &[] };
+            let (class, offered): (&str, &[u32]) = match (class_idx, t21) {
+                (_, true) if class_idx == 0 => (LSCF, &on21),
+                (_, true) => (LSCC, &on21),
+                (0, false) => (LSCF, &FLOAT_VARS),
                 _ => (LSCC, &COLOR_VARS),
             };
             let shown = format!("{} ({var})", var_label(class, var, slsf2));
@@ -931,7 +961,10 @@ fn add_row(
                             ui.add_enabled(false, egui::Button::selectable(false, text))
                                 .on_disabled_hover_text(ENV_SCALE_PBR);
                         } else {
-                            ui.selectable_value(&mut var, o, text);
+                            let item = ui.selectable_value(&mut var, o, text);
+                            if no_effect.contains(&o) {
+                                item.on_hover_text(NO_EFFECT_HOVER);
+                            }
                         }
                     }
                 })
@@ -1098,15 +1131,17 @@ fn variable(
     title: &str,
     v: u32,
     managed: bool,
-    slsf2: u32,
+    (slsf2, t21): (u32, bool),
 ) {
     ui.horizontal(|ui| {
         row_label(ui, "Variable");
-        let offered: &[u32] = if &*c.class == LSCC {
-            &COLOR_VARS
-        } else {
-            &FLOAT_VARS
+        let (on21, no_effect) = offered_21(&*c.class != LSCC);
+        let offered: &[u32] = match (t21, &*c.class == LSCC) {
+            (true, _) => &on21,
+            (false, true) => &COLOR_VARS,
+            (false, false) => &FLOAT_VARS,
         };
+        let no_effect = if t21 { no_effect } else { &[] };
         let mut pick = v;
         let shown = var_label(&c.class, v, slsf2);
         // Phase A ruling R8 lifted (v2 B7): a managed controller's clips follow the new variable.
@@ -1124,7 +1159,10 @@ fn variable(
                         ui.add_enabled(false, egui::Button::selectable(pick == o, text))
                             .on_disabled_hover_text(ENV_SCALE_PBR);
                     } else {
-                        ui.selectable_value(&mut pick, o, text);
+                        let item = ui.selectable_value(&mut pick, o, text);
+                        if no_effect.contains(&o) {
+                            item.on_hover_text(NO_EFFECT_HOVER);
+                        }
                     }
                 }
             })

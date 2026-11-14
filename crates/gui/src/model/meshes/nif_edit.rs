@@ -309,8 +309,24 @@ const PBR_SLOTS: [&str; 9] = [
     "Unused",
 ];
 
+/// CS TruePBR 2.0 (type 21) slot meanings (spec §6); the v1 flag plays no part.
+const PBR2_SLOTS: [&str; 9] = [
+    "Base colour",
+    "Normal",
+    "Emissive",
+    "Displacement",
+    "Unused (must be empty)",
+    "RMAOS",
+    "Features 1 (fuzz / coat normal)",
+    "Features 0 (subsurface / coat)",
+    "Unused (must be empty)",
+];
+
 /// The Shader tab's name of texture-set slot `slot` (spec §7, F§1.3).
 pub fn edit_slot_label(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) -> &'static str {
+    if shader_type == 21 {
+        return PBR2_SLOTS.get(slot).copied().unwrap_or("Unused");
+    }
     if slsf2 & SLSF2_TRUE_PBR != 0 {
         return PBR_SLOTS.get(slot).copied().unwrap_or("Unused");
     }
@@ -347,8 +363,8 @@ pub fn edit_slot_label(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) ->
 /// editor names only the True PBR slots).
 pub fn edit_slot_shown(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) -> &'static str {
     match slot {
-        2 if slsf2 & SLSF2_TRUE_PBR != 0 => "Emissive / Skin",
-        6 if slsf2 & SLSF2_TRUE_PBR != 0 => "Coat normal / Fuzz",
+        2 if shader_type != 21 && slsf2 & SLSF2_TRUE_PBR != 0 => "Emissive / Skin",
+        6 if shader_type != 21 && slsf2 & SLSF2_TRUE_PBR != 0 => "Coat normal / Fuzz",
         _ => edit_slot_label(shader_type, slsf1, slsf2, slot),
     }
 }
