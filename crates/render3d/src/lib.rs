@@ -1317,6 +1317,24 @@ impl Renderer {
         }
     }
 
+    /// A shape only this tree skips (a type-21 shape CS 2.0 refuses on tree B, Note ID38; not one the user hid) comes
+    /// back on `set_tree` through `begin_all`, which has no resolver: its slots are resolved now, as both trees draw
+    /// them. The draw itself is built fresh by `begin` (a swap writes every field), so stale fields cannot survive.
+    fn resolve_skipped(
+        &mut self,
+        m: &MaterialState,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+        rep: &mut LoadReport,
+    ) {
+        if m.hidden {
+            return;
+        }
+        for tree in [Tree::A, Tree::B] {
+            let d = material::drawn(m, tree);
+            self.resolve_textures(&d, textures, rep);
+        }
+    }
+
     /// Builds one shape's draw for material `m` on `program`: textures (already in `tex_cache`), vertex streams
     /// against the VS inputs, zero cbuffers from the reflection, then the material.
     fn build_draw(
@@ -1721,6 +1739,8 @@ impl Renderer {
             );
             if !hidden {
                 self.begin(s.id, &s.material, textures, &mut rep);
+            } else {
+                self.resolve_skipped(&s.material, textures, &mut rep);
             }
         }
         if sync {
@@ -1890,6 +1910,7 @@ impl Renderer {
             (kind, rebuild)
         };
         if material::skipped(&m, self.tree()) {
+            self.resolve_skipped(&m, textures, &mut LoadReport::default());
             if let Some(state) = self.shapes.get_mut(&id) {
                 state.material = m;
                 hide(state);

@@ -369,7 +369,7 @@ fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
 }
 
-/// Note ID38: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes and the preview's
+/// Note ID40: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes and the preview's
 /// tree A draws.
 #[test]
 fn v1_body_is_the_from_21_conversion() {

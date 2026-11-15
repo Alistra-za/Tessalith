@@ -69,7 +69,7 @@ pub fn own_pbr(m: &MaterialState) -> Pbr {
 }
 
 /// The material `tree`'s shaders draw for `m` (Note ID33); `own_pbr(&drawn(m, tree)) == pbr_mode(m, tree)`.
-/// - tree A, type 21: what a conversion to v1 PBR writes (`nif::pbr2::v1_body`, Note ID38; an approximation: tree A
+/// - tree A, type 21: what a conversion to v1 PBR writes (`nif::pbr2::v1_body`, Note ID40; an approximation: tree A
 ///   has no thin-surface or foliage shading): type 11 with a MultiLayer trailer when `to_v1` keeps trailer floats,
 ///   else type 0; the extra data is dropped.
 /// - tree B, a v1 shape: the same material without SLSF2 bit 23, which the vanilla reader ignores.

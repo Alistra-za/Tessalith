@@ -215,7 +215,7 @@ fn tree_a_draws_type_21_as_its_to_v1_shape() {
             inner_thickness: mlp[0],
             refraction_scale: mlp[1],
             inner_texture_scale: [mlp[2], mlp[3]],
-            // what a conversion to type 11 writes (Note ID38)
+            // what a conversion to type 11 writes (Note ID40)
             envmap_strength: nif::edit::trailer_defaults(11)[4],
         }
     );
@@ -344,6 +344,7 @@ fn each_tree_writes_its_own_pbr_block() {
     assert_eq!(cb(&r, 1, "PBRParams1"), [0.7, 1.3, 0.2]);
     assert_eq!(cb(&r, 1, "MultiLayerParallaxData"), glint, "B glint");
     assert_eq!(cb(&r, 1, "LightingEffectParams"), [0.11, 0.22, 0.33, 0.44]);
+    assert_eq!(cb(&r, 2, "LightingEffectParams").len(), 4, "shape 2 draws");
     assert_eq!(flags(&r, 2), 0, "B draws v1 as vanilla");
     // The stored material stays the source: type 21, not the stand-in.
     assert_eq!(r.shapes()[0].material.shader_type, 21);
@@ -404,4 +405,104 @@ fn an_invalid_21_is_skipped_on_tree_b_only() {
     r.set_tree(Tree::A);
     assert_ne!(status(&r, 1), ShapeStatus::Hidden, "A again");
     assert_eq!(status(&r, 3), ShapeStatus::Hidden);
+}
+
+/// Every texture the resolver gives: a 4×4 RGBA8 DDS.
+fn any_texture(_: &str) -> Option<Vec<u8>> {
+    Some(common::dds_rgba8(4, 4, &[[128, 128, 255, 255]; 16]))
+}
+
+/// An invalid type-21 shape with diffuse, normal and RMAOS paths.
+fn refused_with_slots() -> MaterialState {
+    let mut m = t21(feat::HAIR | feat::SUBSURFACE);
+    m.pbr2_error = Some("CS 2.0 won't draw this shape: hair must be the only feature".into());
+    for (slot, path) in [(0, "a_d.dds"), (1, "a_n.dds"), (5, "a_rmaos.dds")] {
+        m.slots[slot] = nif::path::canon_texture(format!("textures\\{path}").as_bytes());
+    }
+    m
+}
+
+/// The draw as a test sees it: the registers bound to a real texture and the PBR block's constants.
+fn draw_of(r: &Renderer) -> (Option<Vec<u32>>, Vec<Vec<f32>>) {
+    let vars = [
+        "PBRFlags",
+        "PBRParams1",
+        "LightingEffectParams",
+        "MultiLayerParallaxData",
+    ];
+    (
+        r.draw_bound(ShapeId(1)),
+        vars.iter().map(|v| cb(r, 1, v)).collect(),
+    )
+}
+
+/// A sync WARP renderer built on `tree`'s bundled shaders (the GUI's start with the box on or off, ID32).
+fn sync_on(tree: Tree) -> (tempfile::TempDir, Renderer) {
+    let cache = tempfile::tempdir().unwrap();
+    let source = match tree {
+        Tree::A => ShaderSource::Bundled,
+        Tree::B => ShaderSource::BundledB,
+    };
+    let r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), source, cache.path().to_path_buf())
+        .unwrap();
+    assert_eq!(r.tree(), tree);
+    (cache, r)
+}
+
+fn load_with_textures(r: &mut Renderer, m: MaterialState) {
+    let mut s = common::plane_shape(1, common::IDENT, [1.0; 3], 0);
+    s.material = m;
+    let rep = r.load_parsed(
+        &ParsedNif {
+            shapes: vec![s],
+            ..Default::default()
+        },
+        &any_texture,
+    );
+    assert!(
+        rep.errors.is_empty() && rep.compile_errors.is_empty(),
+        "{rep:?}"
+    );
+}
+
+/// Note ID38: a shape tree B skipped from its load, or edited while skipped, comes back on `set_tree(A)` with the
+/// same textures and constants as a renderer that loaded it on tree A (`begin_all` has no texture resolver).
+#[test]
+fn a_shape_skipped_on_b_returns_whole_on_a() {
+    let (_ca, mut on_a) = sync_on(Tree::A);
+    load_with_textures(&mut on_a, refused_with_slots());
+    let want = draw_of(&on_a);
+    assert!(
+        want.0.as_ref().is_some_and(|b| b.len() >= 3),
+        "{:?}",
+        want.0
+    );
+
+    let (_cb, mut on_b) = sync_on(Tree::B);
+    load_with_textures(&mut on_b, refused_with_slots());
+    assert_eq!(status(&on_b, 1), ShapeStatus::Hidden);
+    on_b.set_tree(Tree::A);
+    assert_eq!(status(&on_b, 1), ShapeStatus::Drawing);
+    assert_eq!(draw_of(&on_b), want, "loaded skipped on B, then A");
+
+    // Edited while skipped: a parameter and a new diffuse path.
+    let mut edited = refused_with_slots();
+    let LightingTrailer::Pbr2 { params, .. } = &mut edited.params.trailer else {
+        unreachable!()
+    };
+    params[0] = 0.5;
+    params[2] = 0.7;
+    edited.slots[0] = nif::path::canon_texture(b"textures\\b_d.dds");
+    let (_ca2, mut on_a2) = sync_on(Tree::A);
+    load_with_textures(&mut on_a2, edited.clone());
+    let want = draw_of(&on_a2);
+
+    let (_cb2, mut on_b2) = sync_on(Tree::B);
+    load_with_textures(&mut on_b2, refused_with_slots());
+    on_b2
+        .set_material(ShapeId(1), edited, &any_texture)
+        .unwrap();
+    assert_eq!(status(&on_b2, 1), ShapeStatus::Hidden);
+    on_b2.set_tree(Tree::A);
+    assert_eq!(draw_of(&on_b2), want, "edited while skipped on B, then A");
 }

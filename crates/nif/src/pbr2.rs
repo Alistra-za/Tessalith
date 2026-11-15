@@ -416,7 +416,7 @@ pub fn stand_in_type(features: u32, params: &[f32; PARAM_COUNT]) -> u32 {
 
 /// What a type-21 shape with SLSF2 `slsf2` becomes as v1 PBR type `new_type` (0 or 11): the SLSF2 word, the five
 /// lighting fields, the trailer floats after Lighting Effect 2, and the features dropped. `set_shader_type`'s
-/// conversion from 21 writes it and the preview's tree A draws it, so the two agree (Note ID11, ID14, ID38).
+/// conversion from 21 writes it and the preview's tree A draws it, so the two agree (Note ID11, ID14, ID40).
 #[derive(Debug, Clone, PartialEq)]
 pub struct V1Body {
     pub slsf2: u32,
