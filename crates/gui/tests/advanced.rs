@@ -48,12 +48,12 @@ fn the_open_drawer_shows_its_sections() {
     model.select_item("landscape/leaf.png");
     let mut h = harness(model);
     h.run();
-    for label in ["Preview", "Unmatched [files] entries"] {
-        assert!(
-            h.query_all_by_label_contains(label).count() >= 1,
-            "no {label:?} in the drawer"
-        );
-    }
+    assert!(
+        h.query_all_by_label_contains("Unmatched [files] entries")
+            .count()
+            >= 1,
+        "no Unmatched [files] entries in the drawer"
+    );
     // Note FM25 (P17): no Batch section (threads, memory), preview-size combo, 16384 box or Interface section. The
     // drawer's own labels, read as the old exact-list test read them (the header has its own "Batch…" words).
     let panel = eframe::egui::containers::panel::PanelState::load(
@@ -71,13 +71,12 @@ fn the_open_drawer_shows_its_sections() {
         .filter(|n| panel.expand(1.0).contains_rect(n.rect()))
         .filter_map(|n| n.accesskit_node().label())
         .collect();
-    // The positive anchors: the absence asserts below cannot pass on an empty drawer (Note JI3 took the inspector).
-    for anchor in ["Preview", "Unmatched [files] entries"] {
-        assert!(
-            labels.iter().any(|l| l == anchor),
-            "{anchor:?} in {labels:?}"
-        );
-    }
+    // The positive anchor: the absence asserts below cannot pass on an empty drawer (Note JI3 took the inspector, JI1
+    // the Preview, Checks and Cache sections).
+    assert!(
+        labels.iter().any(|l| l == "Unmatched [files] entries"),
+        "the anchor is in {labels:?}"
+    );
     for label in [
         "Batch",
         "Worker threads",
@@ -90,6 +89,22 @@ fn the_open_drawer_shows_its_sections() {
         assert!(
             !labels.iter().any(|l| l == label),
             "{label:?} is gone (FM25): {labels:?}"
+        );
+    }
+    // Note JI1: the app settings are the Settings tab's, not drawn here too.
+    for label in [
+        "Preview",
+        "Live encode",
+        "Checks",
+        "Low detail check",
+        "Green direction check",
+        "Parallax check",
+        "Cache",
+        "Analysis cache limit",
+    ] {
+        assert!(
+            !labels.iter().any(|l| l == label),
+            "{label:?} is the Settings tab's (JI1): {labels:?}"
         );
     }
     // Note JI3, JI4: the rows the texture panel took (its Levels, Size, DDS header and Effort rows, the last over the
@@ -173,55 +188,4 @@ fn remove_drops_an_unmatched_entry() {
         h.query_by_label("Packing fill values").is_none(),
         "the global fill panel is retired"
     );
-}
-
-/// Note HV2: the Cache section's box shows the analysis cache limit, and a typed limit is saved to gui.toml once. A
-/// limit from gui.toml outside the box's range is left as it is by drawing the drawer.
-#[test]
-fn the_cache_limit_box_saves_a_typed_limit() {
-    use eframe::egui::{Event, Key, Modifiers};
-    use sdc_gui::settings::GuiSettings;
-    fn spin<'a>(h: &'a Harness<'static, AppModel>) -> egui_kittest::Node<'a> {
-        h.get_by_role_and_label(Role::SpinButton, "Analysis cache limit")
-    }
-    let d = tempfile::tempdir().unwrap();
-    let mut model = opened(d.path());
-    model.settings.advanced_open = true;
-    let toml = d.path().join("settings").join("gui.toml");
-    model.settings_path = Some(toml.clone());
-    let mut h = harness(model);
-    h.run();
-    assert_eq!(spin(&h).accesskit_node().numeric_value(), Some(500.0));
-
-    h.state_mut().settings.analysis_cache_mb = Some(7);
-    h.run();
-    assert_eq!(spin(&h).accesskit_node().numeric_value(), Some(7.0));
-    assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
-    assert!(!toml.exists(), "drawing saves nothing");
-
-    // Entering the box and leaving it with Enter, nothing typed, keeps the out-of-range limit too.
-    spin(&h).focus();
-    h.run();
-    h.key_press(Key::Enter);
-    h.run();
-    h.run();
-    assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
-    assert!(!toml.exists(), "leaving the box saves nothing");
-
-    spin(&h).focus();
-    h.run();
-    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    h.run();
-    h.event(Event::Text("800".into()));
-    h.run();
-    assert_eq!(
-        h.state().settings.analysis_cache_mb,
-        Some(7),
-        "not while typing"
-    );
-    h.key_press(Key::Enter);
-    h.run();
-    h.run();
-    assert_eq!(h.state().settings.analysis_cache_mb, Some(800));
-    assert_eq!(GuiSettings::load(&toml).0.analysis_cache_mb, Some(800));
 }

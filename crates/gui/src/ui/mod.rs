@@ -32,6 +32,7 @@ pub mod set_editor;
 pub mod set_preview;
 pub mod sets_column;
 pub mod settings_panel;
+pub mod settings_tab;
 pub mod skin_card;
 pub mod slot_commands;
 pub mod status;
@@ -382,6 +383,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
     match model.centre_front() {
         CentreTab::Presets => return presets::view(ui, model),
         CentreTab::Json => return json_editor::view(ui, model),
+        CentreTab::Settings => return settings_tab::view(ui, model),
         CentreTab::Selection => {}
     }
     if model.root.is_none() {

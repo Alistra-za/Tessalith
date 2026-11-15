@@ -1756,10 +1756,10 @@ fn opening_a_folder_shows_the_columns_at_full_opacity_at_once() {
     let d = tempfile::tempdir().unwrap();
     let mut h = small(opened(d.path()));
     h.step();
-    // The header's "Sets" eye and the column heading, both at full alpha on frame 1 and after.
+    // The Sets column's heading at full alpha on frame 1 and after (Note JI1 took the header's "Sets" eye).
     let rest = text_opacity(&h, "Sets");
     assert!(
-        rest.len() == 2 && rest.iter().all(|&x| x == 1.0),
+        rest.len() == 1 && rest.iter().all(|&x| x == 1.0),
         "restored: {rest:?}"
     );
     for _ in 0..6 {

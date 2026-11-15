@@ -1849,8 +1849,8 @@ fn the_texture_settings_checkboxes_have_their_row_names() {
             ],
         );
         let at = format!("at {w}x{h_px}");
-        // The RMAOS settings panel draws two checkbox rows, "Exact opaque alpha" and "Mipmaps" (measured); the two
-        // column toggles ("Textures column", "Sets column") are the other CheckBoxes. All must have a name.
+        // The RMAOS settings panel draws two checkbox rows, "Exact opaque alpha" and "Mipmaps" (measured); the column
+        // toggles left the header for the Settings tab (Note JI1). All must have a name.
         let named = h
             .query_all_by_role_and_label(Role::CheckBox, "Exact opaque alpha")
             .count();

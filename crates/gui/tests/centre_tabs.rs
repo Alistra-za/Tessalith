@@ -19,26 +19,6 @@ fn harness(m: AppModel) -> H {
     h
 }
 
-/// Floating windows on screen: an `egui::Window` is a Middle-order area, and so is a viewport embedded as one.
-fn windows(h: &H) -> usize {
-    h.ctx.memory(|m| {
-        m.areas()
-            .visible_layer_ids()
-            .iter()
-            .filter(|l| l.order == egui::Order::Middle)
-            .count()
-    })
-}
-
-fn assert_in_centre(h: &H, label: &str) {
-    let r = h.get_by_label(label).rect();
-    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
-    assert!(
-        c.expand(0.5).contains_rect(r),
-        "{label} {r:?} is outside the centre {c:?}"
-    );
-}
-
 #[test]
 fn presets_opens_as_a_centre_tab() {
     let d = tempfile::tempdir().unwrap();
@@ -106,19 +86,22 @@ fn json_editor_opens_as_a_centre_tab() {
 
 #[test]
 fn pop_out_and_dock() {
-    for tab in [CentreTab::Presets, CentreTab::Json] {
+    for tab in [CentreTab::Presets, CentreTab::Json, CentreTab::Settings] {
         let d = tempfile::tempdir().unwrap();
         let mut m = pbr_opened(d.path());
         match tab {
             CentreTab::Presets => m.open_presets(),
+            CentreTab::Settings => m.open_settings_tab(),
             _ => m.open_json_editor(),
         }
         let popped = |m: &AppModel| match tab {
             CentreTab::Presets => m.presets_popped,
+            CentreTab::Settings => m.settings_tab_popped,
             _ => m.json_editor_popped,
         };
         let title = match tab {
             CentreTab::Presets => "Presets",
+            CentreTab::Settings => "Settings",
             _ => WINDOW_TITLE,
         };
         let (pop, dock) = (format!("Pop out {title}"), format!("Dock {title}"));
@@ -146,17 +129,24 @@ fn pop_out_and_dock() {
     }
 }
 
-/// Rule 8.4: with Presets docked and the JSON editor popped out, the two views' controls keep distinct names.
+/// Rule 8.4: with Presets docked and the JSON editor and Settings (Note JI1) popped out, the three views' controls
+/// keep distinct names.
 #[test]
 fn docked_and_popped_controls_have_distinct_names() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     m.json_editor_popped = true;
     m.open_json_editor();
+    m.settings_tab_popped = true;
+    m.open_settings_tab();
     m.open_presets();
     let mut h = harness(m);
     h.run();
-    assert_eq!(windows(&h), 1, "the JSON editor is popped out");
+    assert_eq!(
+        windows(&h),
+        2,
+        "the JSON editor and Settings are popped out"
+    );
     let mut names: Vec<String> = h
         .query_all_by_role(Role::Button)
         .filter_map(|n| n.accesskit_node().label())
@@ -172,7 +162,9 @@ fn docked_and_popped_controls_have_distinct_names() {
         [
             "Close PGPatcher JSON",
             "Close Presets",
+            "Close Settings",
             "Dock PGPatcher JSON",
+            "Dock Settings",
             "Pop out Presets"
         ],
         "one of each, no two alike"

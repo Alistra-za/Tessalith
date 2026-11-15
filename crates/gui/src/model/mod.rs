@@ -126,13 +126,14 @@ fn thousands(n: usize) -> String {
 }
 
 /// Note FB7: what the centre column shows: the selection (a texture, a set, the preview, the start screen), or the
-/// docked Presets or TruePBR JSON view.
+/// docked Presets, TruePBR JSON or Settings view (Note JI1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum CentreTab {
     #[default]
     Selection,
     Presets,
     Json,
+    Settings,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -447,6 +448,9 @@ pub struct AppModel {
     /// Note FB7: Pop out shows the view in an OS window of its own; Dock brings it back to the centre.
     pub presets_popped: bool,
     pub json_editor_popped: bool,
+    /// Note JI1: the Settings tab is open (a centre tab, or its own window when popped out, as Presets).
+    pub settings_tab_open: bool,
+    pub settings_tab_popped: bool,
     /// Note FB7: a view was opened docked this frame; the Meshes view, which has no centre column, switches to
     /// Textures to show it.
     pub reveal_centre: bool,
@@ -789,6 +793,8 @@ impl AppModel {
             centre_tab: CentreTab::Selection,
             presets_popped: false,
             json_editor_popped: false,
+            settings_tab_open: false,
+            settings_tab_popped: false,
             reveal_centre: false,
             presets: None,
             accept: AcceptSuggestions::High,
@@ -3781,11 +3787,23 @@ impl AppModel {
         }
     }
 
+    /// "Settings…" (Note JI1): open the Settings tab, in front of the centre or in its own window when popped out.
+    pub fn open_settings_tab(&mut self) {
+        self.settings_tab_open = true;
+        if !self.settings_tab_popped {
+            self.centre_tab = CentreTab::Settings;
+            self.reveal_centre = true;
+        }
+    }
+
     /// The view in front of the centre column: `centre_tab` while that view is open and docked, else the selection.
     pub fn centre_front(&self) -> CentreTab {
         match self.centre_tab {
             CentreTab::Presets if self.presets_open && !self.presets_popped => CentreTab::Presets,
             CentreTab::Json if self.json_editor_open && !self.json_editor_popped => CentreTab::Json,
+            CentreTab::Settings if self.settings_tab_open && !self.settings_tab_popped => {
+                CentreTab::Settings
+            }
             _ => CentreTab::Selection,
         }
     }

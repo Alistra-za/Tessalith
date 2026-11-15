@@ -275,6 +275,8 @@ mod sets_filter;
 mod sets_model;
 #[path = "../settings.rs"]
 mod settings;
+#[path = "../settings_tab.rs"]
+mod settings_tab;
 #[path = "../skin_card.rs"]
 mod skin_card;
 #[path = "../slot_file_drop.rs"]

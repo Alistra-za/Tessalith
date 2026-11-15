@@ -16,7 +16,7 @@ type H = Harness<'static, (AppModel, State, MeshesModel)>;
 const WIDTHS: [f32; 4] = [1440.0, 1024.0, 800.0, 640.0];
 
 /// The controls every Textures header must show (plus "Export to: …", matched by its start).
-const CONTROLS: [&str; 10] = [
+const CONTROLS: [&str; 9] = [
     "Open",
     "Undo",
     "Redo",
@@ -24,8 +24,7 @@ const CONTROLS: [&str; 10] = [
     "Preset",
     "Textures view",
     "Meshes view",
-    "Textures column",
-    "Sets column",
+    "Settings…",
     "Save",
 ];
 
@@ -141,12 +140,13 @@ fn the_header_is_one_row_in_the_spec_order() {
     assert_one_row_in_the_spec_order(&h);
 }
 
-/// Note CD2: the header is one row from about 1280 pt (measured after Note FI16 took Mode out and FI5 fixed the Undo
-/// slot width); narrower, Save wraps onto the second line.
+/// Note CD2: the header is one row at 1280 pt (measured after Note FI16 took Mode out and FI5 fixed the Undo slot
+/// width). Note JI1's Settings… is narrower than the two column eyes it replaced: one row from 1210 pt (measured in
+/// 1 pt steps; 1209 wraps), pinned with 5 pt of slack each side; narrower, Save wraps onto the second line.
 #[test]
 fn the_header_is_one_row_from_1280() {
     let d = tempfile::tempdir().unwrap();
-    for (w, one_row) in [(1280.0, true), (1260.0, false)] {
+    for (w, one_row) in [(1280.0, true), (1215.0, true), (1205.0, false)] {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         let open = h.get_by_label("Open").rect().center().y;
         let save = h.get_by_label("Save").rect();
@@ -167,6 +167,7 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         ("Preset", h.get_by_label("Preset").rect()),
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
+        ("Settings…", h.get_by_label("Settings…").rect()),
         ("Export to", h.get_by_label_contains("Export to: ").rect()),
         ("Save", h.get_by_label("Save").rect()),
         ("Export", h.get_by_label(&header_export_label(h)).rect()),
@@ -193,7 +194,8 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         );
     }
     // Export ends the row at the right edge, only the panel margin past it.
-    assert!(1600.0 - order[8].1.right() <= 16.5, "{:?}", order[8].1);
+    let export = order[order.len() - 1].1;
+    assert!(1600.0 - export.right() <= 16.5, "{export:?}");
 }
 
 /// Task 12 (Note CN, owner answer 5): with an "Also export as" tick on, the header is the same one row, and the
@@ -358,38 +360,80 @@ fn the_header_has_no_mode_control() {
     }
 }
 
-/// Note BH15: the columns' eye toggles keep their accessible names and say whether the column shows.
+/// Note JI1: "Settings…" sits where the column eyes were, right after the view tabs, and opens the Settings tab; the
+/// eyes are gone from the header (they are the Settings tab's Columns group).
 #[test]
-fn the_column_toggles_are_eyes_named_for_their_columns() {
+fn the_settings_button_sits_after_the_view_tabs() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(pbr_opened(d.path()), 1440.0, false);
-    let toggled = |h: &H| h.get_by_label("Textures column").accesskit_node().toggled();
-    assert_eq!(
-        h.get_by_label("Textures column").accesskit_node().role(),
-        Role::CheckBox
-    );
-    assert_eq!(toggled(&h), Some(egui::accesskit::Toggled::True));
-    // R14: the eyes follow the view tabs.
-    let (meshes, eye) = (
+    let header = outer(&h, "header");
+    let (meshes, settings) = (
         h.get_by_label("Meshes view").rect(),
-        h.get_by_label("Textures column").rect(),
+        h.get_by_role_and_label(Role::Button, "Settings…").rect(),
     );
+    assert!(header.contains_rect(settings), "{settings:?}");
     assert!(
-        eye.left() >= meshes.right() && eye.left() - meshes.right() < 24.0,
-        "{meshes:?} {eye:?}"
+        settings.left() >= meshes.right() && settings.left() - meshes.right() < 24.0,
+        "{meshes:?} {settings:?}"
     );
-    h.get_by_label("Textures column").click();
-    h.run_steps(2);
-    assert!(h.state().0.settings.textures_hidden);
-    assert_eq!(toggled(&h), Some(egui::accesskit::Toggled::False));
-    // The visible text is the bare column name.
-    assert!(button_text_is_short(&h));
+    for gone in ["Textures column", "Sets column"] {
+        assert!(
+            !h.query_all_by_label(gone)
+                .any(|n| header.contains_rect(n.rect())),
+            "the header still has {gone}"
+        );
+    }
+    h.get_by_role_and_label(Role::Button, "Settings…").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().0.centre_front(),
+        sdc_gui::model::CentreTab::Settings
+    );
 }
 
-/// The toggles show "Textures" and "Sets" (shorter than the old "… column" labels).
-fn button_text_is_short(h: &H) -> bool {
-    let w = h.get_by_label("Textures column").rect().width();
-    w < 100.0
+/// Note JI1 (survey correction 2): "Settings…" is drawn always: with no folder open and in the Meshes view, where
+/// the eyes it replaces were not.
+#[test]
+fn the_settings_button_shows_with_no_folder_and_in_meshes_view() {
+    let none = AppModel::placeholder(sdc_gui::settings::GuiSettings::default());
+    let d = tempfile::tempdir().unwrap();
+    for (m, meshes_view) in [(none, false), (pbr_opened(d.path()), true)] {
+        let mut h = harness(m, 1440.0, meshes_view);
+        let header = outer(&h, "header");
+        let r = h.get_by_role_and_label(Role::Button, "Settings…").rect();
+        assert!(header.contains_rect(r), "meshes {meshes_view}: {r:?}");
+        assert!(h.query_by_label("Textures column").is_none());
+        // A click puts the tab in front; from the Meshes view it also asks the app to show the centre (Note FB7:
+        // `app.rs` takes `reveal_centre` and switches to Textures; the Textures view's draw clears it itself).
+        h.get_by_role_and_label(Role::Button, "Settings…").click();
+        h.run_steps(3);
+        let m = &h.state().0;
+        assert_eq!(
+            m.centre_front(),
+            sdc_gui::model::CentreTab::Settings,
+            "meshes {meshes_view}"
+        );
+        assert_eq!(m.reveal_centre, meshes_view);
+    }
+}
+
+/// Note JI1: the Preset combo's hover sends a mode change to Settings.
+#[test]
+fn the_preset_hover_names_settings() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(pbr_opened(d.path()), 1440.0, false);
+    h.query_all_by_role(Role::ComboBox)
+        .find(|n| {
+            n.accesskit_node()
+                .value()
+                .or(n.accesskit_node().label())
+                .is_some_and(|v| v.starts_with("default ("))
+        })
+        .expect("the Preset combo")
+        .hover();
+    h.run();
+    h.get_by_label_contains("Change the mode in Settings…");
+    assert!(h.query_by_label_contains("in Presets…").is_none());
 }
 
 /// Note BH9: a running export shows its progress under the Export button, in the header.
@@ -457,7 +501,7 @@ fn pg_json_editor_opens_the_editor_with_the_name_field() {
     );
 }
 
-/// C7: the Meshes view draws the same header (no eyes: they hide Textures-view columns).
+/// C7: the Meshes view draws the same header.
 #[test]
 fn the_meshes_header_never_overlaps() {
     let d = tempfile::tempdir().unwrap();
@@ -468,7 +512,8 @@ fn the_meshes_header_never_overlaps() {
             h.get_by_label(c);
         }
         header_export_label(&h);
-        assert!(h.query_by_label("Textures column").is_none());
+        // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).
+        assert!(outer(&h, "header").contains_rect(h.get_by_label("Settings…").rect()));
         assert!(PanelState::load(&h.ctx, Id::new("meshes-header")).is_none());
         // Note AM: an idle bar with no status holds nothing.
         // The bar is not drawn while it has nothing to show (layout v2 ask).

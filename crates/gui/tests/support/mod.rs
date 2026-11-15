@@ -275,6 +275,29 @@ pub fn in_sets_column<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect
     PanelState::load(&h.ctx, Id::new("sets")).is_some_and(|p| p.outer_rect.contains_rect(r))
 }
 
+/// Floating windows on screen: an `egui::Window` is a Middle-order area, and so is a viewport embedded as one (Note
+/// FB7: a docked centre view opens none).
+pub fn windows<S>(h: &egui_kittest::Harness<'_, S>) -> usize {
+    h.ctx.memory(|m| {
+        m.areas()
+            .visible_layer_ids()
+            .iter()
+            .filter(|l| l.order == eframe::egui::Order::Middle)
+            .count()
+    })
+}
+
+/// The one node labelled `label` lies inside the centre column (Note FB7: a docked view's controls and body).
+pub fn assert_in_centre<S>(h: &egui_kittest::Harness<'_, S>, label: &str) {
+    use egui_kittest::kittest::Queryable;
+    let r = h.get_by_label(label).rect();
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    assert!(
+        c.expand(0.5).contains_rect(r),
+        "{label} {r:?} is outside the centre {c:?}"
+    );
+}
+
 /// The one node labelled `label` outside the Sets column (K11).
 pub fn outside_sets<'a, S>(
     h: &'a egui_kittest::Harness<'_, S>,

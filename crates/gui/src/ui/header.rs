@@ -1,5 +1,5 @@
-//! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · the column eyes,
-//! then Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
+//! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · Settings…, then
+//! Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
 use super::meshes::UndoTarget;
 use crate::model::picker::{self, PickerPurpose};
 use crate::model::{also, AppModel};
@@ -79,8 +79,8 @@ pub fn draw(
     status(ui, model);
 }
 
-/// A4, left to right: Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · the eyes (Textures view only),
-/// then Export to ▾ · Save · Export pushed to the right edge.
+/// A4, left to right: Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · Settings…, then Export to ▾ · Save ·
+/// Export pushed to the right edge.
 fn row(
     ui: &mut egui::Ui,
     model: &mut AppModel,
@@ -99,10 +99,20 @@ fn row(
     preset_combo(ui, model);
     ui.separator();
     view_toggle(ui);
-    if model.root.is_some() && !meshes_view_active(ui.ctx()) {
-        column_toggles(ui, model);
-    }
+    settings_button(ui, model);
     right_end(ui, model);
+}
+
+/// Note JI1: "Settings…" where the column eyes were (they are the Settings tab's Columns group now), after the view
+/// tabs. Drawn always, also with no folder and in the Meshes view (survey correction 2).
+fn settings_button(ui: &mut egui::Ui, model: &mut AppModel) {
+    const TEXT: &str = "Settings…";
+    fit(ui, button_width(ui, TEXT));
+    let r = ui
+        .button(TEXT)
+        .on_hover_text("App settings, and this project's mode, preset and export folder");
+    // Note FC8, HS9: the tab hides the view in front, so a focused field commits first.
+    super::commit_click(ui, &r, model, AppModel::open_settings_tab);
 }
 
 /// Export to ▾, Save and Export against the row's right edge; Save and Export two rows tall (A4).
@@ -361,108 +371,6 @@ fn button_width(ui: &egui::Ui, text: &str) -> f32 {
     galley.size().x + 2.0 * ui.spacing().button_padding.x
 }
 
-/// Which of the Textures and Sets columns are shown at all (BH15: eye toggles). Each column's own arrow collapses it
-/// to a strip.
-fn column_toggles(ui: &mut egui::Ui, model: &mut AppModel) {
-    let st = &mut model.settings;
-    let mut textures = !st.textures_hidden;
-    let mut sets = !st.sets_hidden;
-    let mut changed = eye_toggle(ui, &mut textures, "Textures").changed();
-    changed |= eye_toggle(ui, &mut sets, "Sets").changed();
-    if changed {
-        st.textures_hidden = !textures;
-        st.sets_hidden = !sets;
-        model.save_settings();
-    }
-}
-
-/// An eye and `text`: open while the `text` column shows, struck through while it is hidden. To accessibility it is a
-/// check box named "<text> column" (what tests and screen readers find); the hover says what a click does.
-fn eye_toggle(ui: &mut egui::Ui, on: &mut bool, text: &str) -> egui::Response {
-    let galley = egui::WidgetText::from(text).into_galley(
-        ui,
-        Some(egui::TextWrapMode::Extend),
-        f32::INFINITY,
-        egui::TextStyle::Button,
-    );
-    let pad = ui.spacing().button_padding.x;
-    let size = egui::vec2(
-        pad + EYE_W + 4.0 + galley.size().x + pad,
-        ui.spacing().interact_size.y,
-    );
-    let (rect, mut r) = ui.allocate_exact_size(size, egui::Sense::click());
-    if r.clicked() {
-        *on = !*on;
-        r.mark_changed();
-    }
-    let label = format!("{text} column");
-    let enabled = ui.is_enabled();
-    let shown = *on;
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, shown, &label)
-    });
-    if ui.is_rect_visible(rect) {
-        let v = ui.style().interact(&r);
-        if r.hovered() || r.has_focus() {
-            ui.painter().rect(
-                rect,
-                v.corner_radius,
-                v.weak_bg_fill,
-                v.bg_stroke,
-                egui::StrokeKind::Inside,
-            );
-        }
-        let color = if shown {
-            v.text_color()
-        } else {
-            ui.visuals().weak_text_color()
-        };
-        let eye = egui::pos2(rect.left() + pad + EYE_W / 2.0, rect.center().y);
-        paint_eye(ui.painter(), eye, color, shown);
-        let at = egui::pos2(
-            rect.left() + pad + EYE_W + 4.0,
-            rect.center().y - galley.size().y / 2.0,
-        );
-        ui.painter().galley(at, galley, color);
-    }
-    let verb = if shown { "Hide" } else { "Show" };
-    r.on_hover_text(format!("{verb} the {text} column"))
-}
-
-/// The eye's width.
-const EYE_W: f32 = 14.0;
-
-/// An eye centred on `c`: a lens outline and a pupil when `open`, a lens struck through when not.
-fn paint_eye(painter: &egui::Painter, c: egui::Pos2, color: egui::Color32, open: bool) {
-    let (rx, ry) = (EYE_W / 2.0, 4.5);
-    let n = 12;
-    let edge = |u: f32, sign: f32| {
-        egui::pos2(
-            c.x - rx + 2.0 * rx * u,
-            c.y + sign * ry * (std::f32::consts::PI * u).sin(),
-        )
-    };
-    let lens: Vec<egui::Pos2> = (0..=n)
-        .map(|i| edge(i as f32 / n as f32, -1.0))
-        .chain((1..n).map(|i| edge(1.0 - i as f32 / n as f32, 1.0)))
-        .collect();
-    painter.add(egui::Shape::closed_line(
-        lens,
-        egui::Stroke::new(1.3, color),
-    ));
-    if open {
-        painter.circle_filled(c, 2.3, color);
-    } else {
-        painter.line_segment(
-            [
-                c + egui::vec2(-rx + 1.0, ry + 1.0),
-                c + egui::vec2(rx - 1.0, -ry - 1.0),
-            ],
-            egui::Stroke::new(1.6, color),
-        );
-    }
-}
-
 /// Open ▾ (R14): Open folder… (off while a file dialog is open), then the recent folders.
 fn open_menu(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut open = None;
@@ -603,13 +511,48 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// The project's preset (AM12): the target's default, or a preset of this target (a user preset appears once saved).
-fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
-    let default = format!(
+/// What a Preset combo shows: the project's preset, or `default ({the target's default})`.
+pub(super) fn preset_text(model: &AppModel) -> String {
+    model
+        .project_preset()
+        .unwrap_or_else(|| default_text(model))
+}
+
+fn default_text(model: &AppModel) -> String {
+    format!(
         "default ({})",
         engine::presets::default_preset_for(model.target)
-    );
+    )
+}
+
+/// The Preset menu's entries (AM12): the target's default, then each preset of this target (a user preset appears
+/// once saved); off with no project. The header's combo and the Settings tab's (Note JI1) draw it. The pick (`None` =
+/// the default), only when it differs from the project's preset.
+pub(super) fn preset_entries(ui: &mut egui::Ui, model: &mut AppModel) -> Option<Option<String>> {
+    let default = default_text(model);
     let cur = model.project_preset();
+    let choices = model.preset_choices();
+    let mut picked = None;
+    ui.add_enabled_ui(model.project.is_some(), |ui| {
+        let entry = |ui: &mut egui::Ui, on: bool, text: &str| {
+            ui.selectable_label(on, text)
+                .on_disabled_hover_text("Open a folder first")
+                .clicked()
+        };
+        if entry(ui, cur.is_none(), &default) {
+            picked = Some(None);
+        }
+        for id in &choices {
+            if entry(ui, cur.as_deref() == Some(id.as_str()), id) {
+                picked = Some(Some(id.clone()));
+            }
+        }
+    });
+    picked.filter(|p| *p != cur)
+}
+
+/// The project's preset (AM12), and Presets….
+fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
     let mode = target_name(model.target);
     let gap = ui.spacing().item_spacing.x;
     fit(
@@ -617,27 +560,17 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
         button_width(ui, "Preset") + gap + ui.spacing().combo_width,
     );
     ui.label("Preset");
+    let text = preset_text(model);
+    // Note FC1 (AM14): see the popup below; taken before the menu body borrows the model.
+    let now = ui.ctx().cumulative_pass_nr();
+    let request = model.choose_preset.take().is_some_and(|at| now <= at + 2);
     let mut picked = None;
     let mut presets = false;
-    let has_project = model.project.is_some();
-    let choices = model.preset_choices();
     // K5: the popup always opens, so Presets… is reachable with no folder; only the presets need a project.
     let mut body = |ui: &mut egui::Ui| {
-        ui.add_enabled_ui(has_project, |ui| {
-            let entry = |ui: &mut egui::Ui, on: bool, text: &str| {
-                ui.selectable_label(on, text)
-                    .on_disabled_hover_text("Open a folder first")
-                    .clicked()
-            };
-            if entry(ui, cur.is_none(), &default) {
-                picked = Some(None);
-            }
-            for id in &choices {
-                if entry(ui, cur.as_deref() == Some(id.as_str()), id) {
-                    picked = Some(Some(id.clone()));
-                }
-            }
-        });
+        if let Some(p) = preset_entries(ui, model) {
+            picked = Some(p);
+        }
         ui.separator();
         if ui
             .button("Presets…")
@@ -648,20 +581,18 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
         }
     };
     let combo = egui::ComboBox::from_id_salt("preset")
-        .selected_text(cur.clone().unwrap_or_else(|| default.clone()))
+        .selected_text(text)
         .show_ui(ui, |ui| body(ui))
         .response
         .on_hover_ui(|ui| {
             ui.label(format!(
-                "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Presets…"
+                "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Settings…"
             ));
         });
     // Note FC1 (AM14): a Problems row's `Choose preset…` opens the same menu under the combo, as a popup the header
     // owns (egui 0.36 has no public way to open a combo). A request is taken by the next pass that draws this combo
     // and honoured only within two passes of the click: one left while the combo was not drawn is dropped then, as
     // stale, and never opens the menu later.
-    let now = ui.ctx().cumulative_pass_nr();
-    let request = model.choose_preset.take().is_some_and(|at| now <= at + 2);
     egui::Popup::menu(&combo)
         .id(egui::Id::new("preset_choose_menu"))
         .open_memory(request.then_some(egui::SetOpenCommand::Bool(true)))
@@ -669,7 +600,7 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
     if presets {
         model.open_presets();
     }
-    if let Some(p) = picked.filter(|p| *p != cur) {
+    if let Some(p) = picked {
         model.set_preset(p);
     }
 }
@@ -727,6 +658,18 @@ pub fn meshes_view_active(ctx: &egui::Context) -> bool {
         .unwrap_or(false)
 }
 
+/// Why the export folder cannot be chosen now, or `None`: a file dialog is open, or an export runs (AG129: the
+/// drawer's links point at the export folder, so it stays put meanwhile). Export to ▾ and the Settings tab (Note JI1).
+pub(super) fn export_folder_off(model: &AppModel) -> Option<&'static str> {
+    if model.picker.busy() {
+        Some(picker::BUSY_HOVER)
+    } else if model.export.running.is_some() {
+        Some(EXPORT_RUNNING_HOVER)
+    } else {
+        None
+    }
+}
+
 /// Export to ▾ (A4): `text` shows the folder cut in the middle; the hover and the accessible name keep all of it (K8).
 /// Without a chosen folder (`full` None) it is "Export to: not chosen ▾", or "More ▾" with no project (Note FI5). Entries: Choose export folder…, Open export folder
 /// and, in cs mode, the PGPatcher JSON editor (R14); the Also export ticks and Re-encode every output (JA12).
@@ -740,14 +683,7 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
     // A click inside keeps it open (egui's default closes on any click), so the ticks can be set without reopening;
     // the three entries below close it themselves.
     let r = super::path_picker::menu(ui, &text, |ui| {
-        // AG129: the drawer's links point at the export folder, so it stays put while an export runs.
-        let off = if model.picker.busy() {
-            Some(picker::BUSY_HOVER)
-        } else if model.export.running.is_some() {
-            Some(EXPORT_RUNNING_HOVER)
-        } else {
-            None
-        };
+        let off = export_folder_off(model);
         let r = ui.add_enabled(off.is_none(), egui::Button::new("Choose export folder…"));
         let r = match off {
             Some(why) => r.on_disabled_hover_text(why),

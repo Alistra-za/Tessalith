@@ -340,10 +340,13 @@ fn harness(m: AppModel, preview: bool) -> H {
     h
 }
 
+/// Note JI1: the column ticks are the Settings tab's Columns group (they were the header's eyes).
 #[test]
-fn the_header_checkboxes_hide_columns_and_the_arrows_collapse_and_expand_them() {
+fn the_settings_column_ticks_hide_columns_and_the_arrows_collapse_and_expand_them() {
     let d = tempfile::tempdir().unwrap();
-    let mut h = harness(opened(d.path()), false);
+    let mut m = opened(d.path());
+    m.open_settings_tab();
+    let mut h = harness(m, false);
     h.run();
     h.get_by_label("Textures column").click();
     h.run();

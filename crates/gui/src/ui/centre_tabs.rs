@@ -1,12 +1,12 @@
 //! Note FB7 (review C6, amendment F): Presets and the TruePBR JSON editor are tabs of the centre column, not floating
 //! windows. Pop out shows a view in an OS window of its own (for a second monitor); Dock brings it back.
-use super::{json_editor, presets};
+use super::{json_editor, presets, settings_tab};
 use crate::model::{AppModel, CentreTab};
 use eframe::egui;
 
 /// The views that can be docked or popped out: (tab, title, popped-out window size, body).
 type Body = fn(&mut egui::Ui, &mut AppModel);
-const VIEWS: [(CentreTab, &str, [f32; 2], Body); 2] = [
+const VIEWS: [(CentreTab, &str, [f32; 2], Body); 3] = [
     (
         CentreTab::Presets,
         presets::TITLE,
@@ -19,6 +19,12 @@ const VIEWS: [(CentreTab, &str, [f32; 2], Body); 2] = [
         [980.0, 760.0],
         json_editor::view,
     ),
+    (
+        CentreTab::Settings,
+        settings_tab::TITLE,
+        [720.0, 760.0],
+        settings_tab::view,
+    ),
 ];
 
 /// (open, popped out) of a view; `Selection` has neither.
@@ -27,6 +33,7 @@ fn flags(model: &mut AppModel, tab: CentreTab) -> Option<(&mut bool, &mut bool)>
         CentreTab::Selection => None,
         CentreTab::Presets => Some((&mut model.presets_open, &mut model.presets_popped)),
         CentreTab::Json => Some((&mut model.json_editor_open, &mut model.json_editor_popped)),
+        CentreTab::Settings => Some((&mut model.settings_tab_open, &mut model.settings_tab_popped)),
     }
 }
 

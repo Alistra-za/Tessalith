@@ -147,7 +147,7 @@ pub fn alpha_confirm_text(policy: AlphaPolicy) -> String {
 pub fn change_line(code: Code) -> &'static str {
     match code {
         Code::CfgUnavailable => {
-            "This type isn't available in this mode — set another type, or change the mode in Presets…"
+            "This type isn't available in this mode — set another type, or change the mode in Settings…"
         }
         _ => code_line(code),
     }

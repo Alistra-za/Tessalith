@@ -174,12 +174,13 @@ fn the_alpha_acknowledge_names_its_action() {
     }
 }
 
-/// Fix round 1: the words that live in places the first sweep never opened.
+/// Fix round 1: the words that live in places the first sweep never opened (Note JI1: the checks are the Settings
+/// tab's).
 #[test]
-fn advanced_checks_use_low_detail_and_no_mip_zero() {
+fn settings_checks_use_low_detail_and_no_mip_zero() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.settings.advanced_open = true;
+    m.open_settings_tab();
     let mut h = harness(m);
     h.ctx.global_style_mut(|s| {
         s.interaction.tooltip_delay = 0.0;
@@ -187,7 +188,7 @@ fn advanced_checks_use_low_detail_and_no_mip_zero() {
     });
     h.run();
     assert_eq!(h.query_all_by_label("Low detail check").count(), 1);
-    assert_no_strays(&h, "Advanced");
+    assert_no_strays(&h, "Settings");
     assert!(h
         .query_by_label_contains("Measure whether full size adds anything")
         .is_none());

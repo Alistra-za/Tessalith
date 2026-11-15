@@ -1,9 +1,8 @@
-//! The right-hand Advanced drawer (M3a spec §2.5): the live-encode switch, the checks, the cache limit
-//! and the `[files]` entries that match nothing. Drawing only: every edit is a
-//! call on the model, applied once the drawing is over.
+//! The right-hand Advanced drawer (M3a spec §2.5): the `[files]` entries that match nothing (Note JI1 moved the
+//! live-encode switch, the checks and the cache limit to the Settings tab). Drawing only: every edit is a call on the
+//! model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
 use crate::model::AppModel;
-use crate::settings::ChecksSettings;
 use eframe::egui;
 
 /// The drawer's narrowest width.
@@ -16,9 +15,6 @@ pub struct AdvancedState {}
 /// What a control asks of the model.
 enum Action {
     RemoveUnmatched(String),
-    Live(bool),
-    Checks(ChecksSettings),
-    CacheMb(u32),
 }
 
 /// The drawer: a 24 px "Advanced" strip while closed, the panel while `settings.advanced_open`.
@@ -66,17 +62,12 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, _state: &mut AdvancedState)
 /// The drawer's sections (also the set panel's Advanced tab, layout v2 C6); applies its edits once they are drawn.
 pub fn body(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut actions = vec![];
-    preview_settings(ui, model, &mut actions);
-    checks(ui, model, &mut actions);
-    cache(ui, model, &mut actions);
-    // Note JI3, JI4: the texture fields are the texture panel's now (the search fields through its Effort row).
+    // Note JI3, JI4: the texture fields are the texture panel's now (the search fields through its Effort row); Note
+    // JI1: the preview, checks and cache settings are the Settings tab's.
     unmatched(ui, model, &mut actions);
     for a in actions {
         match a {
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
-            Action::Live(on) => model.set_live(on),
-            Action::Checks(c) => model.set_checks(c),
-            Action::CacheMb(mb) => model.set_analysis_cache_mb(mb),
         }
     }
 }
@@ -173,43 +164,6 @@ pub(super) fn held<T: egui::emath::Numeric>(
     (out, r)
 }
 
-fn preview_settings(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Preview", |ui| {
-        let mut live = model.settings.live_encode;
-        if ui
-            .checkbox(&mut live, "Live encode")
-            .on_hover_text(
-                "Encode the expanded preview after every edit (otherwise use Encode now)",
-            )
-            .changed()
-        {
-            actions.push(Action::Live(live));
-        }
-    });
-}
-
-/// The artist checks' switches (DECISIONS Note CL). Each box's AccessKit name ends in "check", apart from same-text
-/// controls such as the shader's "Parallax" (K22, ui-rules 8.4).
-fn checks(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Checks", |ui| {
-        let now = model.settings.checks;
-        let mut c = now;
-        let boxes: [(&mut bool, &str, &str); 3] = [
-            (&mut c.low_detail, "Low detail", "Low detail check"),
-            (&mut c.green, "Green direction", "Green direction check"),
-            (&mut c.parallax, "Parallax", "Parallax check"),
-        ];
-        for (on, text, name) in boxes {
-            let r = ui.checkbox(on, text);
-            let v = *on;
-            r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, name));
-        }
-        if c != now {
-            actions.push(Action::Checks(c));
-        }
-    });
-}
-
 /// A number widget over a model value that is only written once it settles: the value in flight lives in egui
 /// memory under `id` while it is dragged, so the drag follows the pointer and ends in exactly one edit (one undo
 /// step). `Some(value)` on the frame it settles (a drag ended, a click, a typed value accepted).
@@ -221,63 +175,6 @@ pub(super) fn held_value(
 ) -> (egui::Response, Option<f64>) {
     let (out, r) = held(ui, egui::Id::new(id), current, false, false, add);
     (r, out)
-}
-
-/// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
-/// opens: 5,000 MB is about 150,000 entries.
-const CACHE_MB: (f64, f64) = (50.0, 5_000.0);
-
-/// The analysis disk cache's limit (Note HV2): one number box, in MB. The cache is pruned at start only, so the
-/// hover says when a new limit applies.
-fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    const NAME: &str = "Analysis cache limit";
-    section(ui, "Cache", |ui| {
-        let now = f64::from(
-            model
-                .settings
-                .analysis_cache_mb
-                .unwrap_or(crate::settings::ANALYSIS_CACHE_MB),
-        );
-        // Built only while hovered (ui-rules 9.3).
-        let tip = |ui: &mut egui::Ui| {
-            ui.label(
-                "The most disk space the saved analyses and thumbnails of your textures may use \
-                 (%LOCALAPPDATA%\\sdc\\analysis-cache). They let a folder open without reading every image again. \
-                 Over the limit, the ones unused for longest are deleted when Tessalith starts.",
-            );
-            ui.label(
-                "A new limit applies the next time Tessalith starts. (gui.toml analysis_cache_mb)",
-            );
-        };
-        ui.horizontal(|ui| {
-            // The number box first, as the Also export tab's recipe rows: in a narrow drawer the text is cut, never the box.
-            let mut shown = now;
-            let (r, done) = held_value(ui, "analysis-cache-mb", now, |ui, x| {
-                let r = ui.add(
-                    egui::DragValue::new(x)
-                        .speed(10.0)
-                        // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the
-                        // box, or leaving it, never changes it.
-                        .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
-                        .max_decimals(0)
-                        .suffix(" MB")
-                        .update_while_editing(false),
-                );
-                shown = *x;
-                r
-            });
-            r.widget_info(|| {
-                let mut i = egui::WidgetInfo::drag_value(true, shown);
-                i.label = Some(NAME.to_string());
-                i
-            });
-            r.on_hover_ui(tip);
-            ui.label(NAME).on_hover_ui(tip);
-            if let Some(mb) = done {
-                actions.push(Action::CacheMb(mb.round() as u32));
-            }
-        });
-    });
 }
 
 fn unmatched(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
