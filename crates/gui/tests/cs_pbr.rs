@@ -879,8 +879,10 @@ fn txst_params_name_the_payload_parameters() {
     ];
     assert_eq!(TXST_PARAMS.len(), want.len());
     let mut covered = 0;
+    let colours = ["subsurfaceColor", "coatColor", "fuzzColor"];
     for (&(key, i), (k, name)) in TXST_PARAMS.iter().zip(want) {
-        let width = if COLOR_PARAMS.contains(&i) { 3 } else { 1 };
+        let width = if colours.contains(&key) { 3 } else { 1 };
+        assert_eq!(COLOR_PARAMS.contains(&i), width == 3, "{key}");
         assert_eq!(key, k);
         let top = key.split('.').next().unwrap();
         assert!(field(Kind::Txst, top, true).is_some(), "{key} is a field");

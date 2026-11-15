@@ -104,6 +104,12 @@ pub fn canon_material(p: &str) -> Option<String> {
     (s.starts_with("materials/") && s.ends_with(".csm")).then(|| s.to_string())
 }
 
+/// A `RootMaterialPath` in canonical form (Note IE2): Data-relative when it already is a materials `.csm`
+/// ([`canon_material`]), otherwise relative to `Data\materials`. `None` for an empty or non-`.csm` value.
+pub fn canon_root(r: &str) -> Option<String> {
+    canon_material(r).or_else(|| canon_material(&format!("materials/{}", slashes_lower(r))))
+}
+
 /// PGPatcher's LOD blocklist (`*\lod\*`, `*\dyndolod\*`, `*_lod_*`, `*_lod.*`) on a canonical lower-case path.
 pub fn is_lod_path(norm: &str) -> bool {
     ["/lod/", "/dyndolod/", "_lod_", "_lod."]

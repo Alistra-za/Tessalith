@@ -181,13 +181,15 @@ pub enum CsmError {
     NotFound(String),
     #[error("{0} is not a .csm file under materials")]
     NotMaterial(String),
+    #[error("RootMaterialPath {0} is not a .csm file under materials")]
+    RootPath(String),
 }
 
 /// The most files one material chain holds: the file asked for and its roots.
 pub const MAX_CHAIN: usize = 16;
 
 /// Reads the `.csm` at `path` and its `RootMaterialPath` chain through `read`, which gets canonical paths
-/// (`path::canon_material`). The chain merges root first, so each child's keys win; the allOf rules are checked on
+/// (`path::canon_material`; a root through `path::canon_root`). The chain merges root first, so each child's keys win; the allOf rules are checked on
 /// the merge, and the result holds no `RootMaterialPath`. An error in a root is `Root` naming that root; the file
 /// asked for reports its own errors bare, as `Loop`, `Depth` and `Rule` are (Note IE2).
 pub fn resolve(path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Csm, CsmError> {
@@ -240,11 +242,11 @@ fn load(
         std::str::from_utf8(&bytes).map_err(|e| CsmError::Json(format!("not UTF-8: {e}")))?;
     let mut c = parse(text)?;
     let root = match c.values.remove("RootMaterialPath") {
-        Some(Value::Text(r)) if !r.is_empty() => Some(crate::path::canon_material(&r).ok_or_else(
-            || CsmError::Pattern {
-                key: "RootMaterialPath".into(),
-            },
-        )?),
+        // Data-relative or materials-relative (Note IE2). `parse` passes only `.csm` values, which both forms
+        // accept, so `RootPath` is a guard.
+        Some(Value::Text(r)) if !r.is_empty() => {
+            Some(crate::path::canon_root(&r).ok_or(CsmError::RootPath(r))?)
+        }
         _ => None,
     };
     Ok((c, root))

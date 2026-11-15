@@ -311,7 +311,7 @@ pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
 
 /// Note ID45: each texture-set key `txst_overrides` puts on the type-21 payload: (key, its first parameter in
 /// `nif::pbr2::PARAM_NAMES` order; a colour fills three, `nif::pbr2::COLOR_PARAMS`). A value outside the parameter's
-/// range is passed through as it is. The map lives in `nif::pbr2` (Note IE2).
+/// range is passed through as it is. The map lives in `nif::pbr2` (Note IE3).
 pub use nif::pbr2::TXST_PARAMS;
 
 /// One built-in template (design §4).

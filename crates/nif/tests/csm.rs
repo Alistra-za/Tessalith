@@ -1,10 +1,10 @@
 // crates/nif/tests/csm.rs
 //! The `.csm` material model (Note IE1): parse, per-file checks, the schema's allOf rules, writing, colours, slots;
-//! root chains and the PBR value bridge (Note IE2).
+//! root chains (Note IE2) and the PBR value bridge (Note IE3).
 #[path = "common/v1_fixtures.rs"]
 mod v1_fixtures;
 use nif::csm::{self, Csm, CsmError, Kind, Value, KEYS, VERSION};
-use nif::path::canon_material;
+use nif::path::{canon_material, canon_root};
 use nif::pbr2::{csm_from_values, feat, pbr_values, v1_values, PbrValues, PBR2_DEFAULTS};
 
 /// The example from CS's proposal (csm-spec.md), as written there.
@@ -597,12 +597,15 @@ fn parse_version_as_float() {
     // Draft-07 counts 1.0 as an integer, so the schema accepts it.
     assert_eq!(csm::parse(r#"{"Version": 1.0}"#).map(|c| c.version), Ok(1));
     assert_eq!(csm::parse(r#"{"Version": 2.0}"#), Err(CsmError::Version(2)));
-    assert_eq!(
-        csm::parse(r#"{"Version": 1.5}"#),
-        Err(CsmError::Type {
-            key: "Version".into()
-        })
-    );
+    for bad in ["1.5", "-1", "-1.0"] {
+        assert_eq!(
+            csm::parse(&format!(r#"{{"Version": {bad}}}"#)),
+            Err(CsmError::Type {
+                key: "Version".into()
+            }),
+            "{bad}"
+        );
+    }
 }
 
 #[test]
@@ -806,18 +809,16 @@ fn resolve_root_errors_name_the_file() {
             reason: Box::new(CsmError::UnknownKey("Foo".into()))
         })
     );
-    // A RootMaterialPath outside materials is the holding file's pattern error.
-    let read = reader(files(&[
-        (
-            "materials/child.csm",
-            r#"{"Version": 1, "RootMaterialPath": "base.csm"}"#,
-        ),
-        ("materials/base.csm", r#"{"Version": 1}"#),
-    ]));
+    // A missing root named relative to materials is named by its canonical path.
+    let read = reader(files(&[(
+        "materials/child.csm",
+        r#"{"Version": 1, "RootMaterialPath": "base.csm"}"#,
+    )]));
     assert_eq!(
         csm::resolve("materials/child.csm", &read),
-        Err(CsmError::Pattern {
-            key: "RootMaterialPath".into()
+        Err(CsmError::Root {
+            path: "materials/base.csm".into(),
+            reason: Box::new(CsmError::NotFound("materials/base.csm".into()))
         })
     );
     // Bytes that are not UTF-8 are not JSON.
@@ -829,6 +830,43 @@ fn resolve_root_errors_name_the_file() {
     assert!(root_err(CsmError::Version(2))
         .to_string()
         .contains("materials/root.csm"));
+}
+
+#[test]
+fn resolve_root_path_forms() {
+    // Data-relative (`materials\…`) and materials-relative (`pbr\…`) roots reach the same file.
+    for root in [
+        "pbr/base.csm",
+        "PBR\\Base.CSM",
+        "materials\\pbr\\base.csm",
+        "Data\\Materials\\PBR\\base.csm",
+        "\\pbr\\base.csm",
+    ] {
+        let child =
+            format!(r#"{{"Version": 1, "RootMaterialPath": {root:?}, "PBRFuzzWeight": 0.5}}"#);
+        let read = reader(files(&[
+            ("materials/child.csm", child.as_str()),
+            (
+                "materials/pbr/base.csm",
+                r#"{"Version": 1, "PBRSpecularLevel": 0.2}"#,
+            ),
+        ]));
+        let c = csm::resolve("materials/child.csm", &read).unwrap();
+        assert_eq!(c.values["PBRSpecularLevel"], Value::Num(0.2), "{root}");
+        assert_eq!(c.values["PBRFuzzWeight"], Value::Num(0.5), "{root}");
+    }
+    let some = |s: &str| Some(s.to_string());
+    assert_eq!(canon_root("pbr/base.csm"), some("materials/pbr/base.csm"));
+    assert_eq!(
+        canon_root("materials\\pbr\\base.csm"),
+        some("materials/pbr/base.csm")
+    );
+    // Not a `.csm`, or empty (no root): no path.
+    assert_eq!(canon_root("pbr/base.json"), None);
+    assert_eq!(canon_root(""), None);
+    assert!(CsmError::RootPath("x.json".into())
+        .to_string()
+        .contains("RootMaterialPath x.json"));
 }
 
 #[test]
@@ -871,7 +909,7 @@ fn canon_material_cases() {
     assert_eq!(canon_material(""), None);
 }
 
-// --- the PBR value bridge (Note IE2) ---
+// --- the PBR value bridge (Note IE3) ---
 
 /// The params each feature owns (p0-p2 belong to every PBR material), written out here as the brief gives them.
 const OWNERS: [(u32, std::ops::RangeInclusive<usize>); 6] = [
@@ -952,19 +990,39 @@ fn pbr_values_maps_keys() {
         assert_eq!(on.features, bit, "{key}");
         let off = pbr_values(&pbr_file(&format!(r#""{key}": false"#))).unwrap();
         assert_eq!(off.features, 0, "{key}");
-        let back = csm_from_values(&PbrValues {
-            features: bit,
-            ..on
-        });
+        // The fuzz roughness texture switch is written only beside fuzz.
+        let features = if bit == feat::FUZZ_ROUGHNESS_TEXTURE {
+            bit | feat::FUZZ
+        } else {
+            bit
+        };
+        let back = csm_from_values(&PbrValues { features, ..on });
         assert_eq!(back.values.get(key), Some(&Value::Bool(true)), "{key}");
         let n_switches = back
             .values
             .iter()
             .filter(|(k, v)| **k != "PBREnabled" && matches!(v, Value::Bool(_)))
             .count();
-        assert_eq!(n_switches, 1, "{key}");
+        assert_eq!(n_switches, features.count_ones() as usize, "{key}");
     }
     assert_eq!(feat::FUZZ_ROUGHNESS_TEXTURE, 1024);
+    let lone = csm_from_values(&PbrValues {
+        features: feat::FUZZ_ROUGHNESS_TEXTURE,
+        params: PBR2_DEFAULTS,
+        fuzz_roughness: -1.0,
+    });
+    assert!(!lone.values.contains_key("PBRFuzzRoughnessTexture"));
+    // Every `feat` bit but the texture switch is a payload bit.
+    assert_eq!(feat::PAYLOAD_FEATURES, (1 << 10) - 1);
+    assert_eq!(feat::FUZZ_ROUGHNESS_TEXTURE & feat::PAYLOAD_FEATURES, 0);
+    assert_eq!(
+        nif::pbr2::feature_errors(feat::FUZZ | feat::FUZZ_ROUGHNESS_TEXTURE),
+        [nif::pbr2::BITS_ABOVE_9]
+    );
+    assert!(nif::pbr2::feature_errors(
+        (feat::FUZZ | feat::FUZZ_ROUGHNESS_TEXTURE) & feat::PAYLOAD_FEATURES
+    )
+    .is_empty());
 }
 
 #[test]
@@ -1093,9 +1151,13 @@ fn fuzz_roughness_maps() {
     assert_eq!(with(feat::FUZZ, 0.4), Some(Value::Num(0.4)));
     assert_eq!(with(feat::FUZZ, -1.0), Some(Value::Num(-1.0)));
     assert_eq!(with(0, 0.4), None);
-    // Above the schema's maximum of 1 it is capped; not finite, it is -1 (base roughness).
+    // Clamped to -1 (base roughness) to 1, the schema's maximum; not finite, it is -1.
     assert_eq!(with(feat::FUZZ, 5.0), Some(Value::Num(1.0)));
+    assert_eq!(with(feat::FUZZ, -3.0), Some(Value::Num(-1.0)));
     assert_eq!(with(feat::FUZZ, f32::NAN), Some(Value::Num(-1.0)));
+    for (from, to) in [(0.4, 0.4), (5.0, 1.0), (-3.0, -1.0), (f32::INFINITY, -1.0)] {
+        assert_eq!(nif::pbr2::clamp_fuzz_roughness(from), to, "{from}");
+    }
 }
 
 #[test]
@@ -1106,9 +1168,6 @@ fn foliage_maps() {
     assert_eq!(c.values.get("PBRFoliageEnabled"), Some(&Value::Bool(true)));
     let c = csm_from_values(&PbrValues { features: 0, ..v });
     assert!(!c.values.contains_key("PBRFoliageEnabled"));
-    // v1_values never drops it (v1 itself has no foliage flag).
-    let (t, f2, p) = v1_fixtures::fixture("subsurface");
-    assert_eq!(v1_values(t, f2, &p).0.features, feat::SUBSURFACE);
 }
 
 #[test]

@@ -24,9 +24,12 @@ pub mod feat {
     pub const FOLIAGE: u32 = 256;
     pub const THIN_SURFACE: u32 = 512;
     /// Not a payload bit: the `.csm` switch `PBRFuzzRoughnessTexture` (fuzz roughness from the displacement
-    /// texture's green channel), carried in `PbrValues::features` (Note IE2). `feature_errors` reports it as a bit
-    /// above 9, so a payload check masks it off first.
+    /// texture's green channel), carried in `PbrValues::features` (Note IE3). `feature_errors` reports it as a bit
+    /// above 9, so a payload check masks with [`PAYLOAD_FEATURES`] first.
     pub const FUZZ_ROUGHNESS_TEXTURE: u32 = 1024;
+    /// The payload's feature bits 0-9: `features & PAYLOAD_FEATURES` is what `feature_errors` and the payload
+    /// writers take from `PbrValues::features`.
+    pub const PAYLOAD_FEATURES: u32 = 0x3ff;
 }
 
 /// SLSF1 bits that must be off on a type-21 block (spec section 5): 7, 10, 11, 14, 17, 18, 21, 28.
@@ -191,7 +194,7 @@ pub fn feature_errors(features: u32) -> Vec<&'static str> {
     use feat::*;
     let has = |m: u32| features & m != 0;
     let rules = [
-        (features >> 10 != 0, BITS_ABOVE_9),
+        (features & !PAYLOAD_FEATURES != 0, BITS_ABOVE_9),
         (has(HAIR) && features != HAIR, HAIR_ALONE),
         (
             has(COLORED_COAT | INTERLAYER_PARALLAX | COAT_NORMAL) && !has(TWO_LAYER),
@@ -506,7 +509,7 @@ pub const TXST_PARAMS: &[(&str, usize)] = &[
     ("thinSurfaceBackRoughnessScale", 24),
 ];
 
-/// The PBR values of a `.csm` material (Note IE2): the feature bits (`feat`, with `FUZZ_ROUGHNESS_TEXTURE`), the 25
+/// The PBR values of a `.csm` material (Note IE3): the feature bits (`feat`, with `FUZZ_ROUGHNESS_TEXTURE`), the 25
 /// parameters, and the fuzz roughness (-1: use the base roughness).
 #[derive(Debug, Clone, PartialEq)]
 pub struct PbrValues {
@@ -594,14 +597,26 @@ pub fn pbr_values(c: &Csm) -> Option<PbrValues> {
     })
 }
 
+/// The fuzz roughness a `.csm` gets for `v`: inside -1 (base roughness) to 1, and -1 when it is not finite. The
+/// counterpart of [`clamp_param`], so a caller reports this clamp as it reports a parameter's.
+pub fn clamp_fuzz_roughness(v: f32) -> f32 {
+    if v.is_finite() {
+        v.clamp(-1.0, 1.0)
+    } else {
+        -1.0
+    }
+}
+
 /// The `.csm` that stands for `v`: `PBREnabled`, each switch that is on, p0-p2 and every parameter of a feature that
-/// is on, and `PBRFuzzRoughness` with fuzz. Parameters are clamped to [`PARAM_RANGE`] (a colour to 0-1 by `#rrggbb`)
-/// and the fuzz roughness to at most 1; the caller reports clamps. No texture, generic key or root.
+/// is on. With fuzz on it also holds `PBRFuzzRoughness` and, when set, `PBRFuzzRoughnessTexture`; without fuzz,
+/// neither. Parameters are clamped by [`clamp_param`] (a colour to 0-1 by `#rrggbb`) and the fuzz roughness by
+/// [`clamp_fuzz_roughness`]; the caller reports clamps. No texture, generic key or root.
 pub fn csm_from_values(v: &PbrValues) -> Csm {
     let mut values = BTreeMap::new();
     values.insert("PBREnabled", Value::Bool(true));
+    let fuzz = v.features & feat::FUZZ != 0;
     for (key, bit) in CSM_SWITCHES {
-        if v.features & bit != 0 {
+        if v.features & bit != 0 && (bit != feat::FUZZ_ROUGHNESS_TEXTURE || fuzz) {
             values.insert(key, Value::Bool(true));
         }
     }
@@ -618,12 +633,8 @@ pub fn csm_from_values(v: &PbrValues) -> Csm {
         };
         values.insert(key, value);
     }
-    if v.features & feat::FUZZ != 0 {
-        let r = if v.fuzz_roughness.is_finite() {
-            v.fuzz_roughness.min(1.0)
-        } else {
-            -1.0
-        };
+    if fuzz {
+        let r = clamp_fuzz_roughness(v.fuzz_roughness);
         values.insert("PBRFuzzRoughness", Value::Num(csm::num(r)));
     }
     Csm {
