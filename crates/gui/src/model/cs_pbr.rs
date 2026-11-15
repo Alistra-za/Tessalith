@@ -266,26 +266,27 @@ pub struct Pbr2Override {
 /// type-21 field. A value of the wrong type (or a colour without three numbers) is skipped.
 pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
     use nif::pbr2::feat;
-    const PARAMS: [(&str, usize); 19] = [
-        ("roughnessScale", 0),
-        ("specularLevel", 1),
-        ("displacementScale", 2),
-        ("subsurfaceColor", 3),
-        ("subsurfaceOpacity", 6),
-        ("coatColor", 7),
-        ("coatStrength", 10),
-        ("coatRoughness", 11),
-        ("coatSpecularLevel", 12),
-        ("fuzzColor", 13),
-        ("fuzzWeight", 16),
-        ("glintParameters.screenSpaceScale", 17),
-        ("glintParameters.logMicrofacetDensity", 18),
-        ("glintParameters.microfacetRoughness", 19),
-        ("glintParameters.densityRandomization", 20),
-        ("subsurfaceBalance", 21),
-        ("thinSurfaceSpecularWeight", 22),
-        ("thinSurfaceBackSpecularWeight", 23),
-        ("thinSurfaceBackRoughnessScale", 24),
+    // (key, first parameter, width: 1 = a number, 3 = a colour).
+    const PARAMS: [(&str, usize, usize); 19] = [
+        ("roughnessScale", 0, 1),
+        ("specularLevel", 1, 1),
+        ("displacementScale", 2, 1),
+        ("subsurfaceColor", 3, 3),
+        ("subsurfaceOpacity", 6, 1),
+        ("coatColor", 7, 3),
+        ("coatStrength", 10, 1),
+        ("coatRoughness", 11, 1),
+        ("coatSpecularLevel", 12, 1),
+        ("fuzzColor", 13, 3),
+        ("fuzzWeight", 16, 1),
+        ("glintParameters.screenSpaceScale", 17, 1),
+        ("glintParameters.logMicrofacetDensity", 18, 1),
+        ("glintParameters.microfacetRoughness", 19, 1),
+        ("glintParameters.densityRandomization", 20, 1),
+        ("subsurfaceBalance", 21, 1),
+        ("thinSurfaceSpecularWeight", 22, 1),
+        ("thinSurfaceBackSpecularWeight", 23, 1),
+        ("thinSurfaceBackRoughnessScale", 24, 1),
     ];
     let get = |key: &str| match key.split_once('.') {
         Some((o, k)) => values.get(o).and_then(|g| g.get(k)),
@@ -293,18 +294,15 @@ pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
     };
     let num = |v: &Json| v.as_f64().map(|x| x as f32);
     let mut ov = Pbr2Override::default();
-    for (key, i) in PARAMS {
+    for (key, i, width) in PARAMS {
         let Some(v) = get(key) else { continue };
-        match v.as_array() {
-            Some(c) if c.len() == 3 => {
-                if let Some(c) = c.iter().map(num).collect::<Option<Vec<f32>>>() {
-                    for (j, x) in c.into_iter().enumerate() {
-                        ov.params[i + j] = Some(x);
-                    }
-                }
-            }
-            Some(_) => {}
-            None => ov.params[i] = num(v),
+        let xs: Option<Vec<f32>> = match (width, v.as_array()) {
+            (1, None) => num(v).map(|x| vec![x]),
+            (3, Some(c)) if c.len() == 3 => c.iter().map(num).collect(),
+            _ => None,
+        };
+        for (j, x) in xs.into_iter().flatten().enumerate() {
+            ov.params[i + j] = Some(x);
         }
     }
     for (key, bit) in [

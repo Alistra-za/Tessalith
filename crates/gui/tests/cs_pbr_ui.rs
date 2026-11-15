@@ -130,6 +130,8 @@ fn bool_field_row_toggles() {
     let id = "landscape/rock01";
     model.set_shader(id, Some(engine::shader::Shader::Pbr));
     model.add_cs_block(id, Kind::Txst);
+    // A wrong-typed CS 2.0 key: an unknown key with the box off, a "wrong type" line with it on.
+    model.set_cs_value(id, Kind::Txst, "foliage", Some(serde_json::json!(1)));
     let key = set_views(&model)
         .into_iter()
         .find(|v| v.id == id)
@@ -142,8 +144,16 @@ fn bool_field_row_toggles() {
     h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
     h.run();
     assert!(!has(&h, "Thin surface"), "box off: no CS 2.0 row");
+    assert!(
+        !has(&h, "foliage: wrong type"),
+        "box off: no wrong-type line"
+    );
     h.state_mut().settings.cs_pbr2 = true;
     h.run();
+    assert!(
+        has(&h, "foliage: wrong type"),
+        "box on: the wrong-type line"
+    );
     let value = |h: &Harness<'static, AppModel>| {
         h.state()
             .cs_block(id, Kind::Txst)

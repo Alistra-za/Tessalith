@@ -800,11 +800,24 @@ fn txst_overrides_map_all_keys() {
         }
     );
     assert_eq!(txst_overrides(&Default::default()), Pbr2Override::default());
+    // A value of the wrong shape changes nothing: three numbers under a number key, a number under a colour key.
+    let ov = txst_overrides(
+        json!({"subsurfaceOpacity": [0.1, 0.2, 0.3], "thinSurfaceBackRoughnessScale": [1, 1, 1],
+               "coatColor": 0.5})
+        .as_object()
+        .unwrap(),
+    );
+    assert_eq!(ov, Pbr2Override::default());
 }
 
-/// Note ID44: the 8 CS 2.0 keys exist only with the box on, and a template never touches them.
+/// Note ID44: the 8 CS 2.0 keys exist only with the box on; Note ID46: the owner's hover on the fuzz texture switch.
 #[test]
 fn cs2_fields_follow_the_box() {
+    let n = field_note(Kind::Txst, "fuzzRoughnessTexture").unwrap();
+    assert!(
+        n.contains("green channel") && n.contains("parallax") && n.contains("BC5 or BC1"),
+        "{n}"
+    );
     assert_eq!(fields(Kind::Txst, false), &TXST_FIELDS[..]);
     assert_eq!(fields(Kind::Txst, true)[13..], TXST2_FIELDS[..]);
     assert_eq!(fields(Kind::Mato, true), &MATO_FIELDS[..]);
