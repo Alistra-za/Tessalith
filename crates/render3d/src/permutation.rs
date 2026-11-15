@@ -49,14 +49,16 @@ const fn bit(v: u32, b: u32) -> bool {
     v & (1 << b) != 0
 }
 
-fn technique(shader_type: u32) -> &'static [&'static str] {
-    match shader_type {
+fn technique(m: &Material) -> &'static [&'static str] {
+    match m.shader_type {
         1 => &["ENVMAP"],
         3 => &["PARALLAX"],
         4 => &["FACEGEN"],
         5 => &["FACEGEN_RGB_TINT"],
         6 => &["HAIR"],
-        11 => &["MULTI_LAYER_PARALLAX", "ENVMAP"],
+        // Only with SLSF2.24 (Multi_Layer_Parallax): the game draws a type-11 shape without it with the Default
+        // technique (Note IE8, SOVStairsPiece01 in the PBR2Test1 captures).
+        11 if bit(m.slsf2, 24) => &["MULTI_LAYER_PARALLAX", "ENVMAP"],
         16 => &["EYE"],
         // 2 = Glowmap: runtime technique (cb4 PixelShaderDescriptor >> 24, Lighting.hlsl:2598).
         _ => &[],
@@ -73,7 +75,7 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
         // CS drops the EnvMap/Parallax/MLP technique for TruePBR on both stages (captured Arch_Eye_Moisture:
         // type 11 + SLSF2.23 → PS key 100009 and VS desc 2, technique 0). Keeping them collides with the PBR
         // samplers (Lighting.hlsl:360-371: s4/s5 overlap, SampParallaxSampler redefinition).
-        out.extend(technique(m.shader_type).iter().filter(|t| {
+        out.extend(technique(m).iter().filter(|t| {
             !(pbr_material && matches!(**t, "ENVMAP" | "PARALLAX" | "MULTI_LAYER_PARALLAX"))
         }));
     }

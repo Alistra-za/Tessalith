@@ -34,6 +34,9 @@ fn names(m: &MaterialState, stage: Stage) -> Vec<String> {
 fn defines_per_material() {
     let mut mlp = v1(&[24]);
     mlp.shader_type = 11;
+    // SOVStairsPiece01's type-11 glint shapes: no SLSF2.24 (Note IE8).
+    let mut t11 = v1(&[12]);
+    t11.shader_type = 11;
     // (what, material, mode, PS defines that must be set, PS defines that must not be)
     type Row = (
         &'static str,
@@ -63,6 +66,13 @@ fn defines_per_material() {
             Pbr::None,
             &["MULTI_LAYER_PARALLAX", "ENVMAP"],
             &["TRUE_PBR"],
+        ),
+        (
+            "v1 type 11 without SLSF2.24 draws the Default technique",
+            t11.clone(),
+            Pbr::None,
+            &[],
+            &["MULTI_LAYER_PARALLAX", "ENVMAP", "TRUE_PBR"],
         ),
         (
             ".csm",
@@ -112,6 +122,8 @@ fn defines_per_material() {
     mlp.shader_type = 11;
     let vs = names(&mlp, Stage::Vertex);
     assert!(vs.iter().any(|x| x == "MULTI_LAYER_PARALLAX"), "{vs:?}");
+    let vs = names(&t11, Stage::Vertex);
+    assert!(!vs.iter().any(|x| x == "MULTI_LAYER_PARALLAX"), "{vs:?}");
 }
 
 /// Note IE8: CS 2.0 reads a vanilla shape's Specular, Soft, Rim and Back lighting from cb4 `PixelShaderDescriptor`, so
