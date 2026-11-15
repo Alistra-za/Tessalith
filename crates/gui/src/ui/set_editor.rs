@@ -40,7 +40,7 @@ pub const ROWS_MIN: f32 = 540.0;
 
 const THUMB: f32 = 56.0;
 /// The format and recipe combos (A5).
-const COMBO_W: f32 = 96.0;
+pub(super) const COMBO_W: f32 = 96.0;
 /// The File cell is the stretchy one (it truncates); a Grid column sizes itself from its content, so it gets what the
 /// row's other cells leave of the column, and at least this.
 const FILE_MIN: f32 = 60.0;

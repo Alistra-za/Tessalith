@@ -1140,12 +1140,22 @@ fn the_helper_tick_at_1100_with_the_drawer_open() {
 /// shows every COMBOS entry, so each is expected: a combo that vanished fails here rather than being skipped.
 #[test]
 fn the_note_keeps_its_width_and_the_control_shrinks_first() {
-    for w in [1100.0, 1280.0, 1600.0] {
+    // The control column's offset from the centre's left edge at full room: where the label column ends.
+    let mut full_x = None;
+    for w in [1600.0, 1100.0, 1280.0] {
         let d = tempfile::tempdir().unwrap();
         let h = sized_harness(leaf(d.path()), w, 1600.0);
         let c = centre(&h);
         for name in COMBOS {
             let r = control(&h, Role::ComboBox, name, c);
+            // The control gives way first: the label column keeps its full width, so the control starts at the
+            // same offset at every width (a label shrunk along with the control would move it left).
+            let off = r.min.x - c.min.x;
+            let full = *full_x.get_or_insert(off);
+            assert!(
+                (off - full).abs() < 0.5,
+                "{w}: {name} starts {off} from the centre's left, {full} with room"
+            );
             assert!(
                 c.max.x - r.max.x >= 120.0 - 0.5,
                 "{w}: {name} ends at {} in a centre ending at {}",

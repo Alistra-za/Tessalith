@@ -54,7 +54,7 @@ pub const CONTROL_W: f32 = 200.0;
 /// Note JI3: the note column's least width (hint and ↺); the control column gives way first.
 pub(super) const NOTE_MIN: f32 = 120.0;
 /// Note JI3: the control column's least width before the label column shrinks (the set editor's `COMBO_W`).
-pub(super) const CONTROL_MIN: f32 = 96.0;
+pub(super) const CONTROL_MIN: f32 = super::set_editor::COMBO_W;
 /// Note HI3: the controls' width in the preview's 280 px strip.
 pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
@@ -841,7 +841,7 @@ fn column_widths_at(ui: &egui::Ui, left: f32, trail: f32) -> (f32, f32) {
     let s = ui.spacing();
     let room = ui.clip_rect().right() - left - 2.0 * s.item_spacing.x - NOTE_MIN;
     let control = (room - LABEL_W - trail).clamp(CONTROL_MIN, CONTROL_W);
-    let label = (room - control - trail).clamp(s.interact_size.x, LABEL_W);
+    let label = (room - control - trail).min(LABEL_W).max(s.interact_size.x);
     (label, control)
 }
 
