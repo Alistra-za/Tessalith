@@ -1135,3 +1135,32 @@ fn the_helper_tick_at_1100_with_the_drawer_open() {
     );
     assert!(tick.max.x <= c.max.x, "tick {tick:?} past the centre {c:?}");
 }
+
+/// Note JI3 (spec 3.6): the provenance note keeps NOTE_MIN; the value column shrinks first. The leaf (a BC7 diffuse)
+/// shows every COMBOS entry, so each is expected: a combo that vanished fails here rather than being skipped.
+#[test]
+fn the_note_keeps_its_width_and_the_control_shrinks_first() {
+    for w in [1100.0, 1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let h = sized_harness(leaf(d.path()), w, 1600.0);
+        let c = centre(&h);
+        for name in COMBOS {
+            let r = control(&h, Role::ComboBox, name, c);
+            assert!(
+                c.max.x - r.max.x >= 120.0 - 0.5,
+                "{w}: {name} ends at {} in a centre ending at {}",
+                r.max.x,
+                c.max.x
+            );
+            assert!(r.width() >= 96.0 - 0.5, "{w}: {name} is {} wide", r.width());
+            // With room, the control keeps CONTROL_W: it is the first to shrink, not the only one drawn small.
+            if w >= 1600.0 {
+                assert!(
+                    (r.width() - CONTROL_W).abs() < 0.5,
+                    "{w}: {name} is {} wide",
+                    r.width()
+                );
+            }
+        }
+    }
+}

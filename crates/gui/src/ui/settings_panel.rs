@@ -51,6 +51,10 @@ pub(super) const GROUPS: [&str; 5] = ["Type", "Alpha", "Mipmaps", "Size", "Compr
 pub(super) const LABEL_W: f32 = 150.0;
 /// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
 pub const CONTROL_W: f32 = 200.0;
+/// Note JI3: the note column's least width (hint and ↺); the control column gives way first.
+pub(super) const NOTE_MIN: f32 = 120.0;
+/// Note JI3: the control column's least width before the label column shrinks (the set editor's `COMBO_W`).
+pub(super) const CONTROL_MIN: f32 = 96.0;
 /// Note HI3: the controls' width in the preview's 280 px strip.
 pub const COMPACT_CONTROL_W: f32 = 140.0;
 /// A 4096 px side has 13 mip levels.
@@ -829,14 +833,16 @@ pub(super) fn column_widths_beside(ui: &egui::Ui, trail: f32) -> (f32, f32) {
 }
 
 /// `column_widths_beside` for a grid whose left edge is `left` (the Undecided box lines up with the groups below it).
+///
+/// Note JI3, HI1: the note column (hint and ↺) keeps `NOTE_MIN`, so as the room shrinks the control gives way first,
+/// from `CONTROL_W` to `CONTROL_MIN`, then the label, from `LABEL_W` to `interact_size.x`; only below that does the
+/// note give way. One rule for every caller, so controls keep one x and one width across groups.
 fn column_widths_at(ui: &egui::Ui, left: f32, trail: f32) -> (f32, f32) {
     let s = ui.spacing();
-    let room = ui.clip_rect().right() - left - 4.0 * s.item_spacing.x - 2.0 * s.interact_size.y;
-    let k = (room / (LABEL_W + CONTROL_W)).clamp(0.0, 1.0);
-    let min = s.interact_size.x;
-    let label = (LABEL_W * k).max(min);
-    let control = (CONTROL_W * k).min(room - label - trail);
-    (label, control.max(min))
+    let room = ui.clip_rect().right() - left - 2.0 * s.item_spacing.x - NOTE_MIN;
+    let control = (room - LABEL_W - trail).clamp(CONTROL_MIN, CONTROL_W);
+    let label = (room - control - trail).clamp(s.interact_size.x, LABEL_W);
+    (label, control)
 }
 
 /// An exactly `w` wide cell (rule 3.5): text in it is cut short, and a combo in it is `w` wide. A slider's rail leaves
