@@ -262,3 +262,34 @@ fn rows_min_makes_room_for_the_alpha_cells() {
         confirm.width()
     );
 }
+
+/// The Flags cell's controls share the diffuse row's line with its Format combo (they sat about 18 px lower when the
+/// cell centred them in the row's whole height).
+#[test]
+fn the_slot_alpha_sits_on_the_formats_line() {
+    for asks in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = harness(if asks { leaf(d.path()) } else { rock(d.path()) });
+        h.run_steps(4);
+        let alpha = slot_combo(&h).rect();
+        // The diffuse row's Format combo: the one on the alpha combo's row (it shows a BC format).
+        let format = h
+            .query_all_by_role(Role::ComboBox)
+            .filter(|n| {
+                n.accesskit_node()
+                    .value()
+                    .is_some_and(|v| v.starts_with("BC") || v.starts_with("R8") || v.contains("·"))
+            })
+            .map(|n| n.rect())
+            .min_by(|a, b| {
+                (a.center().y - alpha.center().y)
+                    .abs()
+                    .total_cmp(&(b.center().y - alpha.center().y).abs())
+            })
+            .expect("the diffuse's format combo");
+        assert!(
+            (alpha.center().y - format.center().y).abs() <= 2.0,
+            "asks {asks}: alpha {alpha:?} vs format {format:?}"
+        );
+    }
+}

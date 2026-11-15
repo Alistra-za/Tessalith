@@ -720,7 +720,7 @@ fn row(
     // Flags: Match on this (slots 1/2 of a JSON set), an icon toggle that keeps its full label as its accessible
     // name and leads its hover with it, and the diffuse's alpha type (Note JI5), on one line.
     let flags_w = ui
-        .horizontal(|ui| {
+        .horizontal_top(|ui| {
             if let (Some(n), Some(_)) = (
                 match slot {
                     _ if !shows_json_panel(v, model.target) => None,
