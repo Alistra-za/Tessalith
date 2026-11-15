@@ -214,6 +214,26 @@ fn a_shader_that_failed_to_compile_is_listed_per_shape() {
     assert!(h.query_by_label_contains("Fine: shader failed").is_none());
 }
 
+/// Note IE13: the set preview reads a scanned mesh's own `.csm` through the scan, so a `.csm` that does not resolve is a
+/// row there too, as in the Meshes view.
+#[test]
+fn a_shapes_csm_that_does_not_resolve_is_a_row() {
+    let (_d, mut h) = plain_rock();
+    let mut material = MaterialState::builtin_default();
+    material.csm_path = Some("materials/x.csm".into());
+    material.csm_error = Some(nif::csm::CsmError::NotFound("materials/x.csm".into()).to_string());
+    let s = &mut h.state_mut().1;
+    s.v3.report = Some(render3d::LoadReport::default());
+    s.v3.shapes = vec![ShapeInfo {
+        id: ShapeId(1),
+        name: "Rug".into(),
+        material,
+        status: ShapeStatus::Drawing,
+    }];
+    h.run_steps(4);
+    h.get_by_label("Material file materials\\x.csm not found; drawn vanilla");
+}
+
 #[test]
 fn the_emissive_approximation_label_shows_only_with_an_emissive_material() {
     let (_d, mut h) = plain_rock();
@@ -481,20 +501,39 @@ fn the_mode_toggle_still_calls_set_mode_and_puts_ab_in_use() {
     assert_eq!(h.state().1.mode(), PreviewMode::Encoded);
 }
 
+/// Note IE13: a PBR Landscape set shows the plane's tiling instead of the mesh picker; a PBR set with a texture-set
+/// block keeps the picker (its `.csm` draws on its meshes).
 #[test]
-fn a_texture_set_block_shows_tiling_instead_of_the_mesh_picker() {
+fn a_pbr_landscape_set_shows_tiling_and_a_texture_set_block_keeps_the_mesh_picker() {
+    let combo = |h: &H| {
+        h.query_by_role(eframe::egui::accesskit::Role::ComboBox)
+            .is_some()
+    };
     let d = tempfile::tempdir().unwrap();
-    let mut m = rock_selected(d.path());
-    m.add_cs_block("landscape/rock01", sdc_gui::model::cs_pbr::Kind::Txst);
+    let mut m = pbr_opened(d.path());
+    let key = json_entries(&m)
+        .into_iter()
+        .find(|(v, _)| v.id == "landscape/rock01")
+        .unwrap()
+        .0
+        .key;
+    m.select_set(&key);
+    m.settings.set_view_3d = true;
     let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
     settle(&mut h);
     assert!(
         h.get_all_by_label_contains(TILING).count() >= 1,
         "the slider is drawn"
     );
-    assert!(h
-        .query_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .is_none());
+    assert!(!combo(&h));
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock_selected(d.path());
+    m.add_cs_block("landscape/rock01", sdc_gui::model::cs_pbr::Kind::Txst);
+    let mut h = harness(m, SetPreview::new(None, DEFAULT_CAP));
+    settle(&mut h);
+    assert!(h.query_by_label_contains(TILING).is_none());
+    assert!(combo(&h), "the mesh picker");
 }
 
 /// PBR grass design §4.5: a pbr_grass set says its preview is approximated; a pbr set does not.

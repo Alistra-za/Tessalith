@@ -474,16 +474,29 @@ pub fn txst_csms(m: &AppModel, edids: &[String]) -> BTreeMap<String, SetCsm> {
         let built = built.get_or_insert_with(|| csm_sets(m));
         let c = match built.iter().find(|(w, _)| same_id(&w.id, &e.id)) {
             Some((_, c)) => c.clone(),
-            None => SetCsm {
-                path: csm_path(v.prefix.as_deref().unwrap_or(&v.id)),
-                csm: Csm::default(),
-                warnings: vec![],
-                blocked: Some(format!("{}: {NO_ENTRY}", v.id)),
-            },
+            None => no_entry(v),
         };
         out.insert(edid.clone(), c);
     }
     out
+}
+
+/// What a set that gets a `.csm` but has no PGPatcher entry has: no `.csm` this run, [`NO_ENTRY`] as the reason.
+fn no_entry(v: &SetView) -> SetCsm {
+    SetCsm {
+        path: csm_path(v.prefix.as_deref().unwrap_or(&v.id)),
+        csm: Csm::default(),
+        warnings: vec![],
+        blocked: Some(format!("{}: {NO_ENTRY}", v.id)),
+    }
+}
+
+/// The `cs_txst` block of set `id` in `entries`.
+fn txst_block<'a>(entries: &'a [SetEntry], id: &str) -> Option<&'a CsBlock> {
+    entries
+        .iter()
+        .find(|x| same_id(&x.id, id))
+        .and_then(|x| x.cs_txst.as_ref())
 }
 
 /// Each set that gets a `.csm`, as the export writes it (CS only): the sets with a PGPatcher entry
@@ -497,14 +510,32 @@ pub fn csm_sets(m: &AppModel) -> Vec<(SetView, SetCsm)> {
     super::pbr_export::json_entries(m)
         .into_iter()
         .filter_map(|(v, e)| {
-            let block = entries
-                .iter()
-                .find(|x| same_id(&x.id, &v.id))
-                .and_then(|x| x.cs_txst.as_ref());
-            let c = entry_csm(&v, &e, block)?;
+            let c = entry_csm(&v, &e, txst_block(&entries, &v.id))?;
             Some((v, c))
         })
         .collect()
+}
+
+/// Note IE13: the `.csm` of the set whose view key is `key`, as [`csm_sets`] builds it (unsaved edits included); a set
+/// that gets one but has no PGPatcher entry gets [`NO_ENTRY`] as its block reason. `None` off CS and for a set that gets
+/// none (not PBR, PBR Landscape). The set preview draws it.
+pub fn followed_csm(m: &AppModel, key: &str) -> Option<SetCsm> {
+    if m.target != Target::Cs {
+        return None;
+    }
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    match super::pbr_export::json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.key == key)
+    {
+        Some((v, e)) => entry_csm(&v, &e, txst_block(&entries, &v.id)),
+        None => {
+            let v = super::sets::set_views(m)
+                .into_iter()
+                .find(|v| v.key == key)?;
+            gets_csm(&v).then(|| no_entry(&v))
+        }
+    }
 }
 
 /// What an export about to start writes once it has ended (computed when it starts, like the CS PBR JSON).

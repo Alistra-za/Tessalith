@@ -5,13 +5,14 @@
 //! Part 1: per-member preview encodes → DDS bytes served as `FileSource::Memory`, fresh/stale per member, paused
 //! during an export. Results come back on this module's own channel, so `worker.rs` needs no new message.
 use crate::model::cs_pbr::{self, CsBlock};
+use crate::model::csm_export::SetCsm;
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
 use crate::model::sets::set_views;
 use crate::model::sets::{SetView, SlotFill, SlotKind};
 use crate::model::viewport3d::FileSource;
-use crate::model::viewport3d::{read_file, Content, Viewport3d};
+use crate::model::viewport3d::{read_file, Content, ScanDb, Viewport3d};
 use crate::model::AppModel;
 use crate::model::Selection;
 use crate::pgp::prefix::output_rel;
@@ -962,7 +963,13 @@ impl Encoder {
 
 // ---- Part 2: fingerprint, change classification, mesh candidates, PGPatcher simulation, the panel's model ----
 
+/// No PGPatcher simulation (D3): shown for a set that gets no `.csm` either (not CS, not PBR, PBR Landscape without an
+/// entry); a `.csm` set without an entry shows its `.csm`'s [`CSM_BLOCKED_TAIL`] line instead (Note IE13).
 pub const NEEDS_CS: &str = "PGPatcher preview needs the CS target and a PBR set";
+/// Note IE13: shown for a set that gets a `.csm` (the preview draws it; PGPatcher 2.3.1 does not point meshes at it).
+pub const PGPATCHER_V1: &str = "PGPatcher 2.3.1 writes v1 PBR, which CS 2.0 draws vanilla. A PGPatcher with .csm support is needed for these meshes in game.";
+/// Note IE13: the end of a blocked `.csm`'s line (the preview draws the shapes' own material, as the game would).
+pub const CSM_BLOCKED_TAIL: &str = "the shapes keep the material their NIF names";
 /// PBR grass design §4.5 (owner D5): the object PBR path stands in for CS's `RunGrass.hlsl`.
 pub const GRASS_APPROX: &str = "PBR grass approximated: drawn with the object PBR shader (no wrapped diffuse, wind or grass LOD; micro-shadows still apply).";
 pub const JSON_WINS: &str = "Assumes your Tessalith JSON wins over other mods' PGPatcher configs.";
@@ -1023,8 +1030,8 @@ pub fn followed_set(m: &AppModel) -> Option<String> {
 pub struct SetFingerprint {
     pub set_key: String,
     pub label: String,
-    /// Design §7 (plan ruling R1): the set has a texture-set block or is PBR Landscape (Note BM), so it is shown on
-    /// the plane only.
+    /// Design §7: the set is PBR Landscape (Note BM), so it is shown on the plane only. A PBR set with a texture-set
+    /// block previews on its meshes (Note IE13: its `.csm` draws there).
     pub landscape: bool,
     /// PBR grass design §4.5: the set's pick is `pbr_grass` (the "approximated" badge).
     pub grass: bool,
@@ -1044,10 +1051,7 @@ pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
     Some(SetFingerprint {
         set_key: set_key.into(),
         label: v.id.clone(),
-        landscape: m
-            .cs_block(&v.id, crate::model::cs_pbr::Kind::Txst)
-            .is_some()
-            || crate::model::sets::is_pbr_landscape(&v),
+        landscape: crate::model::sets::is_pbr_landscape(&v),
         grass: crate::model::sets::is_pbr_grass(&v),
         entry,
         prefix: v.prefix.clone(),
@@ -1710,6 +1714,18 @@ pub struct SetPreview {
     /// What `xpmf_doc` and `xpmf_tex` were built from (the project, the followed set, whether it has a `cs_mato`
     /// block, the shown encodes): an idle frame rebuilds nothing.
     xpmf_key: Option<(super::ViewKey, String, bool, u64)>,
+    /// Note IE13: the followed set's `.csm` as the export builds it (`csm_export::followed_csm`; `None`: it gets none).
+    csm: Option<SetCsm>,
+    /// What `csm` was built from (the project's view key, the scan evidence revision, the followed set): an idle check
+    /// builds nothing.
+    csm_from: Option<(super::ViewKey, u64, String)>,
+    /// The lines above the frame about the set's `.csm` ([`PGPATCHER_V1`], a blocked `.csm`'s reason).
+    csm_lines: Vec<String>,
+    /// The scan generation a scene's `ScanDb` carries: bumped by each `requery`, which reopens the UI thread's store.
+    scan_gen: u64,
+    /// Tests: how often `csm` was built.
+    #[cfg(feature = "test-hooks")]
+    pub csm_builds: u32,
 }
 
 impl Default for SetPreview {
@@ -1784,7 +1800,18 @@ impl SetPreview {
             xpmf_cycle: false,
             xpmf_resume: false,
             xpmf_key: None,
+            csm: None,
+            csm_from: None,
+            csm_lines: vec![],
+            scan_gen: 0,
+            #[cfg(feature = "test-hooks")]
+            csm_builds: 0,
         }
+    }
+
+    /// Note IE13: the lines about the followed set's `.csm`, shown above the frame.
+    pub fn csm_lines(&self) -> &[String] {
+        &self.csm_lines
     }
 
     /// Note GE14: the whole-run crash lines; a change re-pushes the scene.
@@ -1948,16 +1975,21 @@ impl SetPreview {
                 self.want_scene = false;
                 self.v3.set_content(None, false);
             }
+            self.csm = None;
+            self.csm_from = None;
+            self.csm_lines.clear();
             self.gone = Some(key.to_string());
             return;
         };
         self.gone = None;
+        // A changed `.csm` is a new load: render3d reads a shape's `.csm` once per load (`SetMaterial` keeps it).
+        let csm_changed = self.sync_csm(m, key);
         let d = classify(self.fp.as_ref(), &fp, &self.default);
         let relock = self
             .fp
             .as_ref()
             .is_some_and(|f| f.landscape != fp.landscape);
-        if d == Delta::default() && !relock {
+        if d == Delta::default() && !relock && !csm_changed {
             // Only the badge differs (pbr <-> pbr_grass): no rebuild, but keep the new fingerprint.
             if self.fp.as_ref().is_some_and(|f| f.grass != fp.grass) {
                 self.fp = Some(fp);
@@ -1986,15 +2018,84 @@ impl SetPreview {
         if d.set || d.requery {
             self.requery();
         }
-        if d.set || d.reload || relock || blocked {
+        if d.set || d.reload || relock || blocked || csm_changed {
             self.want_scene = true;
         } else if d.material {
             self.apply_materials();
         }
     }
 
+    /// Note IE13: builds the followed set's `.csm` again when what it is built from changed (the project's view key,
+    /// which covers the sets document and so an unsaved block edit; the scan evidence; the set). True when it changed.
+    fn sync_csm(&mut self, m: &AppModel, key: &str) -> bool {
+        let from = (m.view_key(), m.evidence_rev, key.to_string());
+        if self.csm_from.as_ref() == Some(&from) {
+            return false;
+        }
+        #[cfg(feature = "test-hooks")]
+        {
+            self.csm_builds += 1;
+        }
+        self.csm_from = Some(from);
+        let csm = crate::model::csm_export::followed_csm(m, key);
+        if csm == self.csm {
+            return false;
+        }
+        self.csm_lines = match &csm {
+            None => vec![],
+            Some(c) => std::iter::once(PGPATCHER_V1.to_string())
+                .chain(
+                    c.blocked
+                        .as_ref()
+                        .map(|why| format!("{why}; {CSM_BLOCKED_TAIL}")),
+                )
+                .collect(),
+        };
+        self.csm = csm;
+        true
+    }
+
+    /// Note IE13: the canonical `materials/…` key of the followed set's `.csm` when it draws (`None`: it gets none, or
+    /// it is blocked and writes none, so the shapes keep their own material).
+    fn drawn_csm(&self) -> Option<String> {
+        let c = self.csm.as_ref().filter(|c| c.blocked.is_none())?;
+        nif::path::canon_material(&c.path)
+    }
+
+    /// Note IE13: every shape PGPatcher patches with the set's entry (the shapes the preview finds by the set's match
+    /// key) draws the set's `.csm`, as a PGPatcher with `.csm` support would point it there. Skipped, unmatched and
+    /// crashed shapes keep their own material, as PGPatcher leaves them.
+    fn with_set_csm(&self, rows: &mut [ShapeRow]) {
+        let Some(key) = self.drawn_csm() else {
+            return;
+        };
+        for r in rows
+            .iter_mut()
+            .filter(|r| matches!(r.outcome, Outcome::Patched { .. }))
+        {
+            r.material.csm_path = Some(key.clone());
+        }
+    }
+
+    /// Note IE13: the set's `.csm` in the scene's file map (its text in memory, ahead of any scan copy), and the game's
+    /// copy of each texture only the `.csm` names (a borrowed slot, a `slotN`); the set's own outputs are the encodes.
+    fn add_set_csm(&self, map: &mut HashMap<String, FileSource>) {
+        let Some(c) = self.csm.as_ref().filter(|c| c.blocked.is_none()) else {
+            return;
+        };
+        let Some((key, src)) = crate::model::csm_export::memory_source(c) else {
+            return;
+        };
+        map.insert(key, src);
+        // Only to list the paths the `.csm` names, as render3d maps them; the drawn material gets them from render3d.
+        let mut named = MaterialState::builtin_default();
+        render3d::material::apply_csm(&mut named, &c.csm);
+        self.add_vfs(map, &[&named]);
+    }
+
     fn requery(&mut self) {
-        // A scan may have run since: reopen lazily, forget cached lookups.
+        // A scan may have run since: reopen lazily, forget cached lookups (the render thread's too, by generation).
+        self.scan_gen += 1;
         self.store_tried.set(false);
         *self.store.borrow_mut() = None;
         self.vfs_cache.borrow_mut().clear();
@@ -2258,6 +2359,7 @@ impl SetPreview {
                     &|p| self.exists(p),
                 );
                 let mut rows = self.crashed(rows, &[src]);
+                self.with_set_csm(&mut rows);
                 let mut row = rows.remove(0);
                 row.material = self.tiled(row.material);
                 return (row.material.clone(), row);
@@ -2294,7 +2396,9 @@ impl SetPreview {
             self.exists(p)
         });
         let sources: Vec<MaterialState> = shapes.into_iter().map(|(_, _, m)| m).collect();
-        self.crashed(rows, &sources)
+        let mut rows = self.crashed(rows, &sources);
+        self.with_set_csm(&mut rows);
+        rows
     }
 
     /// Builds the scene and hands it to the viewport: every shape simulated, its material written into the parsed
@@ -2316,6 +2420,7 @@ impl SetPreview {
                 let (material, row) = self.builtin_scene();
                 let mut textures = memory;
                 self.add_vfs(&mut textures, &[&material]);
+                self.add_set_csm(&mut textures);
                 self.apply_xpmf_textures(&mut textures);
                 let same = self.on_screen == Some(Shown::Builtin(b));
                 self.next += 1;
@@ -2356,15 +2461,26 @@ impl SetPreview {
                     &rows.iter().map(|r| &r.material).collect::<Vec<_>>(),
                 );
                 textures.extend(memory);
+                self.add_set_csm(&mut textures);
                 self.apply_xpmf_textures(&mut textures);
                 let same = self.on_screen == Some(Shown::Nif(c.load_copy_id));
                 self.next += 1;
+                // Note IE13: a shape's own `.csm` (its name field), its roots and the textures it names come from the
+                // scan, as in the Meshes view; the generation is the query's (a `requery` reopens the scan).
+                let scan_db = self
+                    .store_path
+                    .clone()
+                    .filter(|p| p.is_file())
+                    .map(|path| ScanDb {
+                        path,
+                        rev: self.scan_gen,
+                    });
                 self.v3.set_content(
                     Some(Content::Parsed {
                         key: self.next,
                         nif: Arc::new(parsed),
                         textures: Arc::new(textures),
-                        scan_db: None,
+                        scan_db,
                     }),
                     same,
                 );

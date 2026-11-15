@@ -2153,9 +2153,10 @@ fn ground_models_are_whole_tokens() {
     }
 }
 
-/// Design §7 (ruling R1): a texture-set block locks the plane; tiling multiplies the pgpsim `uv_scale` (2 at 2x = 4).
+/// Design §7 (Note IE13): a PBR Landscape set (`pbr_opened`'s rock01) stays on the plane, with or without a texture-set
+/// block; tiling multiplies the pgpsim `uv_scale` (2 at 2x = 4).
 #[test]
-fn a_texture_set_block_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
+fn a_pbr_landscape_set_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
     use sdc_gui::model::cs_pbr::Kind;
     let dir = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(dir.path());
@@ -2182,4 +2183,260 @@ fn a_texture_set_block_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
     assert_eq!(s.rows[0].material.params.uv_scale, [4.0, 4.0]);
     run(&mut s, &m);
     assert_eq!(uv(&s), [4.0, 4.0]);
+}
+
+// ---- Note IE13: the set preview draws the set's `.csm` ----
+
+#[path = "../../nif/tests/builder/mod.rs"]
+mod builder;
+#[path = "../../esp/tests/common/mod.rs"]
+mod esp_fixture;
+#[path = "../../modscan/tests/common/mod.rs"]
+mod scan_fixture;
+
+const ROCK: &str = "landscape/rock01";
+/// The fixture set's `.csm` (prefix `textures\pbr\landscape\rock01`), canonical.
+const ROCK_CSM: &str = "materials/pbr/landscape/rock01.csm";
+
+/// A plain PBR rock01 on CS with fuzz on and a texture-set block holding fuzzWeight 0.6 and roughnessScale 0.45.
+fn fuzzy_rock(dir: &Path) -> AppModel {
+    use sdc_gui::model::cs_pbr::Kind;
+    let mut m = pbr_opened_plain(dir);
+    m.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.6)));
+    m.set_cs_value(ROCK, Kind::Txst, "roughnessScale", Some(json!(0.45)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let key = rock(&m).0.key;
+    m.select_set(&key);
+    m
+}
+
+/// The render thread on the repo's stand-in shaders (WARP): render3d resolves the `.csm` and stores the material it
+/// draws, which `v3.shapes` reports.
+fn real_render(s: &mut SetPreview, cache: &Path) {
+    s.v3.use_shader_folder(PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../render3d/tests/fixtures/standin"
+    )));
+    s.v3.cache_dir = Some(cache.to_path_buf());
+}
+
+/// Polls the preview and its render thread until the loaded shapes are in and nothing is in flight.
+fn drawn(s: &mut SetPreview, m: &AppModel) -> Vec<render3d::ShapeInfo> {
+    let t = Instant::now();
+    loop {
+        poll_once(s, m);
+        s.v3.request_frame(64, 64);
+        if !s.busy() && !s.v3.shapes.is_empty() {
+            return s.v3.shapes.clone();
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(90),
+            "never drew: {:?}",
+            s.v3.shapes
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// An MO2 instance whose mod A has `meshes\landscape\rocks\rock01.nif`: shape "Rock" on a type-0 lighting shader, no
+/// name field, slots 0 and 1 the set's source diffuse and normal (a v1 mesh PGPatcher patches); and shape "Other" whose
+/// own name field is `materials\other.csm` (in mod A: PBR, roughness 0.3) on a texture the set does not match. Scanned.
+fn rock_mesh_scan(root: &Path) -> PathBuf {
+    let mut n = builder::Nif::new(100);
+    let rock = n.string("Rock");
+    let other = n.string("Other");
+    let other_csm = n.string("materials\\other.csm");
+    n.block("BSTriShape", builder::scenes::tri_shape(rock, 1));
+    n.block("BSLightingShaderProperty", builder::scenes::lsp(0, 2));
+    let mut slots = [""; 9];
+    slots[0] = "textures\\landscape\\rock01.dds";
+    slots[1] = "textures\\landscape\\rock01_n.dds";
+    n.block("BSShaderTextureSet", builder::scenes::texset(&slots));
+    n.block("BSTriShape", builder::scenes::tri_shape(other, 4));
+    let mut body = builder::scenes::lsp(0, 5);
+    body[4..8].copy_from_slice(&other_csm.to_le_bytes()); // NiObjectNET name, after the shader type
+    n.block("BSLightingShaderProperty", body);
+    n.block(
+        "BSShaderTextureSet",
+        builder::scenes::texset(&["textures\\other.dds"]),
+    );
+    scan_fixture::put(root, "mods/A/meshes/landscape/rocks/rock01.nif", &n.bytes());
+    scan_fixture::put(
+        root,
+        "mods/A/materials/other.csm",
+        br#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.3}"#,
+    );
+    scan_fixture::put(
+        root,
+        "Game/Data/Skyrim.esm",
+        &esp_fixture::plugin(esp::FLAG_ESM, &[], &[]),
+    );
+    scan_fixture::put(root, "profiles/Default/plugins.txt", b"");
+    let db = root.join("scan.db");
+    let mut st = modscan::store::Store::open(&db).unwrap();
+    let src = modscan::scan::Source::Mo2(modscan::mo2::Instance::load(root, None).unwrap());
+    modscan::scan::run(
+        &src,
+        &mut st,
+        &std::sync::atomic::AtomicBool::new(false),
+        &|_| {},
+        &|| vec![],
+    )
+    .unwrap();
+    db
+}
+
+/// Design §5.5 (Note IE13): a PBR set (not Landscape) with a texture-set block previews on a scanned mesh, no longer
+/// on the plane alone, and the shape that uses its diffuse draws the set's in-memory `.csm`: PBR, its fuzz switch and
+/// its numbers, every texture the `.csm` names served.
+#[test]
+fn set_preview_applies_set_csm() {
+    let inst = scan_fixture::instance_fixture("+A\n");
+    let db = rock_mesh_scan(inst.path());
+    let dir = tempfile::tempdir().unwrap();
+    let m = fuzzy_rock(dir.path());
+    let cache = tempfile::tempdir().unwrap();
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
+    real_render(&mut s, cache.path());
+    run(&mut s, &m);
+    assert!(
+        matches!(s.pick(), Pick::Nif(ref c) if c.nif_path == r"meshes\landscape\rocks\rock01.nif"),
+        "the scanned mesh, not the plane: {:?}",
+        s.pick()
+    );
+    let shapes = drawn(&mut s, &m);
+    let rock = shapes
+        .iter()
+        .find(|x| &*x.name == "Rock")
+        .unwrap_or_else(|| panic!("{shapes:?}"));
+    assert_eq!(rock.material.csm_path.as_deref(), Some(ROCK_CSM));
+    assert_eq!(rock.material.csm_error, None);
+    let pbr = rock.material.pbr.clone().expect("the set's .csm draws PBR");
+    assert_ne!(pbr.features & nif::pbr2::feat::FUZZ, 0, "the set's fuzz");
+    assert_eq!(pbr.params[0], 0.45, "the set's roughnessScale");
+    assert_eq!(pbr.params[16], 0.6, "the set's fuzzWeight");
+    let rep = s.v3.report.clone().expect("a load report");
+    assert!(
+        !rep.missing_textures.iter().any(|t| t.contains("pbr/")),
+        "the .csm's textures are the set's encodes: {:?}",
+        rep.missing_textures
+    );
+    // A shape the set does not match keeps its own name field's `.csm`, read through the scan as in game.
+    let other = shapes
+        .iter()
+        .find(|x| &*x.name == "Other")
+        .unwrap_or_else(|| panic!("{shapes:?}"));
+    assert_eq!(
+        other.material.csm_path.as_deref(),
+        Some("materials/other.csm")
+    );
+    assert_eq!(other.material.csm_error, None);
+    assert_eq!(other.material.pbr.as_ref().map(|p| p.params[0]), Some(0.3));
+    assert!(s.v3.material_problems().is_empty());
+}
+
+/// Design §5.5 (Note IE13): an unsaved block edit reaches the drawn `.csm` without an export, with one rebuild of the
+/// set's `.csm` and one scene push; an idle check builds nothing and pushes nothing.
+#[test]
+fn unsaved_edit_reaches_preview() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    let cache = tempfile::tempdir().unwrap();
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    real_render(&mut s, cache.path());
+    run(&mut s, &m);
+    let before = drawn(&mut s, &m)[0]
+        .material
+        .pbr
+        .clone()
+        .expect("the set's .csm");
+    assert_eq!(before.params[16], 0.6);
+    let builds = s.csm_builds;
+    let key = builtin_key(&s);
+    for _ in 0..3 {
+        poll_once(&mut s, &m);
+    }
+    assert_eq!(s.csm_builds, builds, "an idle check builds nothing");
+    assert_eq!(builtin_key(&s), key, "and pushes nothing");
+    m.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let after = drawn(&mut s, &m)[0]
+        .material
+        .pbr
+        .clone()
+        .expect("still the set's");
+    assert_eq!(after.params[16], 0.2, "the edited fuzz weight is drawn");
+    assert_eq!(after.params[0], 0.45);
+    assert_eq!(s.csm_builds, builds + 1, "one rebuild for the edit");
+    assert_ne!(
+        builtin_key(&s),
+        key,
+        "a new load: render3d reads the .csm per load"
+    );
+}
+
+/// Note IE13: a PBR set on CS shows the PGPatcher line above the frame; a PBR Landscape set (no `.csm`) does not.
+#[test]
+fn pgpatcher_warning_shown() {
+    use egui_kittest::kittest::Queryable;
+    let dir = tempfile::tempdir().unwrap();
+    let m = fuzzy_rock(dir.path());
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert_eq!(s.csm_lines(), [PGPATCHER_V1]);
+    let mut m = m;
+    m.settings.set_view_3d = true;
+    let mut h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(520.0, 1000.0))
+        .build_ui_state(
+            |ui, (m, s): &mut (AppModel, SetPreview)| sdc_gui::ui::set_preview::draw(ui, m, s),
+            (m, s),
+        );
+    h.run_steps(4);
+    h.get_by_label(PGPATCHER_V1);
+    assert!(h.query_by_label(NEEDS_CS).is_none());
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    let key = rock(&m).0.key;
+    m.select_set(&key);
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert!(
+        s.csm_lines().is_empty(),
+        "PBR Landscape: {:?}",
+        s.csm_lines()
+    );
+}
+
+/// Note IE13: a set whose `.csm` is blocked (no RMAOS) writes none, so the shape keeps its own material and the reason
+/// is shown; the set's `.csm` draws again once it is fine.
+#[test]
+fn a_blocked_set_csm_keeps_the_shape_material_with_the_reason() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    m.set_json_value(ROCK, "slot6", Some(json!("")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    let csm = |s: &SetPreview| match s.v3.content() {
+        Some(Content::Builtin { material, .. }) => material.csm_path.clone(),
+        c => panic!("{c:?}"),
+    };
+    assert_eq!(csm(&s), None);
+    assert!(
+        s.csm_lines().iter().any(|l| l.starts_with(ROCK)
+            && l.contains("no .csm written")
+            && l.ends_with("the shapes keep the material their NIF names")),
+        "{:?}",
+        s.csm_lines()
+    );
+    m.set_json_value(ROCK, "slot6", None);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    run(&mut s, &m);
+    assert_eq!(csm(&s).as_deref(), Some(ROCK_CSM));
+    assert_eq!(s.csm_lines(), [PGPATCHER_V1]);
 }
