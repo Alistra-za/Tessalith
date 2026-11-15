@@ -682,7 +682,7 @@ Rules still in force at 2.0, one or two lines each, with the 1.x IDs (in `.claud
 - Documentation is current state only, one home per fact, with hidden `<!-- D:ID -->` ruling markers checked by `tools\doc-markers.ps1`. [FH1, FH5]
 - Agent-facing files live in `.claude/`; mistakes go to `.claude/mistakes/<section>.md`, temporary files to `.claude/scratch/`. [FH6]
 - A DECISIONS.md conflict after a rebase: take the other side's DECISIONS.md and DECISIONS-ARCHIVE.md, note `$base = git rev-parse HEAD`, re-run `tools/decisions-archive.py --apply` with every table in `tools/decisions-archive/`, then `--check --base $base`. `--apply` is idempotent. [FH2, FH4]
-- An encode-version arm moves only when that type's output changes; there is no test-only override table in shipped code, and after an upgrade only a type whose arm moved, or an encoder tag, holds outputs of an older encode version, which `if-changed` keeps and counts and re-encodes with `--ev`. [DM6, DM7, JA]
+- An encode-version arm moves only when that type's output changes; there is no test-only override table in shipped code, and after an upgrade only a type whose arm or encoder tag moved holds outputs of an older encode version, which `if-changed` keeps and counts and re-encodes with `--ev`. [DM6, DM7, JA]
 - `docs/research/` is organised by format. [FM40]
 - Host plugins (Photoshop, GIMP, Paint.NET, chaiNNer, `psdds`) live on branch `host-plugins`, bug fixes only; their docs and wiki pages live on that branch too (FM); `psdds` builds against the workspace `engine` by path. [FG1, FG2, FG3, FG4, FG5, FG6]
 - Tests never reach `%LOCALAPPDATA%` through `SdcApp::new`. [BX]

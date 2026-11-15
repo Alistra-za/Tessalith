@@ -1,7 +1,8 @@
 # Built-in presets changelog
 
-One entry per built-in preset version. A version changes when anything the preset resolves to changes; the workspace
-version changes with it so `--on-existing if-changed` re-encodes (spec §3.6).
+One entry per built-in preset version. A preset's version moves at a release, and its entry lists what the preset
+resolves to differently. The version alone re-encodes nothing: `--on-existing if-changed` compares an output's resolved
+profile and its encode version.
 
 ## Unreleased
 

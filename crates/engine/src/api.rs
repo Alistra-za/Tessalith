@@ -3594,7 +3594,10 @@ fn kept_warnings(
             EvScope::Off => {
                 format!("; --ev re-encodes {them}, --ev --property <words> only the matching ones")
             }
-            EvScope::Matching(_) => "; they are outside the --property scope".to_string(),
+            EvScope::Matching(_) => {
+                let are = if n == 1 { "it is" } else { "they are" };
+                format!("; {are} outside the --property scope")
+            }
             // Unreachable: under `All` an output of an older encode version is re-encoded, never kept.
             EvScope::All => String::new(),
         };
@@ -4437,6 +4440,30 @@ mod tests {
         assert_eq!(
             msg(Code::OutKeptLowerTarget),
             "3 outputs were encoded at a higher quality target than asked and kept; --on-existing overwrite re-encodes them"
+        );
+        // Under `--property` the tail is singular after a count of 1, plural after more.
+        let scope = EvScope::matching(vec![crate::ev_scope::PropertyGroup::new(vec![
+            crate::ev_scope::Property::Cutout,
+        ])
+        .unwrap()])
+        .unwrap();
+        let one = BatchSummary {
+            kept_older_encode: 1,
+            ..Default::default()
+        };
+        let w = kept_warnings(&one, &scope, &by_format, &by_subtype);
+        assert!(
+            w[0].message
+                .ends_with("; it is outside the --property scope"),
+            "{}",
+            w[0].message
+        );
+        let w = kept_warnings(&s, &scope, &by_format, &by_subtype);
+        assert!(
+            w[0].message
+                .ends_with("; they are outside the --property scope"),
+            "{}",
+            w[0].message
         );
     }
 

@@ -502,6 +502,46 @@ fn export_and_wait(m: &mut AppModel) -> engine::api::BatchSummary {
     m.export.summary.clone().unwrap()
 }
 
+/// Notes are rebuilt per export: a kept note of one export is gone from the next, which keeps nothing.
+#[test]
+fn a_kept_note_is_not_carried_into_the_next_export() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    export_and_wait(&mut m);
+    // One record names an older encode version, so the next export keeps its output.
+    let manifest = m.export_root().join("textures/_sdc/manifest.jsonl");
+    let text: String = std::fs::read_to_string(&manifest)
+        .unwrap()
+        .lines()
+        .enumerate()
+        .map(|(i, l)| {
+            let mut v: serde_json::Value = serde_json::from_str(l).unwrap();
+            if i == 0 {
+                v["encode_version"] = "0.9.0".into();
+            }
+            format!("{v}\n")
+        })
+        .collect();
+    std::fs::write(&manifest, text).unwrap();
+    let s = export_and_wait(&mut m);
+    assert_eq!(s.kept_older_encode, 1, "{s:?}");
+    assert!(m
+        .export
+        .notes
+        .iter()
+        .any(|n| n.starts_with("1 kept from an older encode version")));
+    // The next export encodes it again, keeps nothing, and starts with no notes.
+    m.reencode_all = true;
+    let s = export_and_wait(&mut m);
+    assert_eq!(s.kept_older_encode, 0, "{s:?}");
+    assert!(
+        !m.export.notes.iter().any(|n| n.contains(" kept ")),
+        "{:?}",
+        m.export.notes
+    );
+}
+
 #[test]
 fn the_reencode_box_reencodes_recorded_outputs_only() {
     use egui_kittest::kittest::{NodeT as _, Queryable};
@@ -624,8 +664,6 @@ fn the_export_summary_shows_kept_counts() {
         "{:?}",
         m.export.notes
     );
-    // The next export starts from a fresh `ExportModel` (`start_export_pass`), so a note of the last one is not carried.
-    m.export = sdc_gui::model::export::ExportModel::default();
     m.end_export_with(Ok(engine::api::BatchSummary {
         up_to_date: 3,
         kept_older_encode: 2,
@@ -637,13 +675,16 @@ fn the_export_summary_shows_kept_counts() {
         "{:?}",
         m.export.notes
     );
-    // Notes are rebuilt per export: the earlier line is gone.
-    assert!(
-        !m.export.notes.iter().any(|n| n == LOWER_ONLY),
-        "{:?}",
-        m.export.notes
-    );
     assert!(m.export.to_markdown().contains(KEPT));
+    // One output may count for both reasons, so two counts of 1 name no object.
+    let both = engine::api::BatchSummary {
+        kept_older_encode: 1,
+        kept_lower_target: 1,
+        ..Default::default()
+    };
+    assert!(sdc_gui::model::export::kept_note(&both)
+        .unwrap()
+        .ends_with("(Export to ▾) to encode again"));
     // GUI words: the line never names the CLI flag.
     assert!(!m.export.notes.iter().any(|n| n.contains("--ev")));
     // The Files tab shows it.
