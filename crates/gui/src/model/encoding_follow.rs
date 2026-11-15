@@ -1,52 +1,72 @@
-//! Task 9 (owner, 2026-10-13; DECISIONS Z11): encoding follows type. When a texture's sub-type changes, its explicit
-//! format and tag that the new sub-type does not allow are cleared, so the new type's default applies.
-use super::fields::{field_view, format_label};
-use super::sets::locked_items;
+//! Task 9 (owner, 2026-10-13; DECISIONS Z11), Note JD (owner, 2026-11-15): encoding follows type. A texture whose
+//! resolved format and tag its sub-type does not allow (`format_rule::allowed`) is fixed on the settled plan: an
+//! explicit pair is cleared, so the type's default applies; else the best allowed pair is pinned.
+use super::fields::format_label;
+use super::format_rule::{allowed, best};
 use super::{history, AppModel};
-use engine::config::{Category, ColorTag, Format, Subtype, Target};
-use engine::policy::allowed_encodings_for;
+use crate::project::ProjectDoc;
+use engine::config::{ColorTag, Format, Subtype, Target};
 use std::collections::HashMap;
 
-/// What a cleanup did, waiting for the plan that shows the new defaults: the cleared textures as (key, "name: old →
-/// new"), and the lines of the ones kept because a lock holds them.
+/// What a cleanup did, waiting for the plan that shows the new formats.
 #[derive(Debug, Default)]
 pub(super) struct Pending {
-    cleared: Vec<(String, String)>,
-    kept: Vec<String>,
+    fixed: Vec<Fixed>,
+    /// 1 after the first round (clear or pin), 2 after the round that pins what a clear left disallowed.
+    round: u8,
+    /// Folded into a user step, whose Undo takes the fix back with it (JD3).
+    undo: bool,
 }
 
-/// What the cleanup does with one re-typed texture.
+#[derive(Debug)]
+struct Fixed {
+    key: String,
+    /// "name: old type → new type", or "name: <pair> is not valid for <type>".
+    head: String,
+    pinned: bool,
+}
+
+/// What the cleanup does with one texture.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// Nothing explicit, or the new sub-type allows the pair.
+    /// The sub-type allows the pair (or allows nothing: it is not written).
     Keep,
-    /// The explicit pair is not allowed: clear it.
+    /// The explicit pair is not allowed: clear it, so the type's default applies.
     Clear,
-    /// Not allowed, but a lock holds it: report it (the reason).
-    Kept(String),
+    /// Not allowed and nothing explicit to clear: pin the best allowed pair.
+    Pin((Format, ColorTag)),
 }
 
-/// The rule for a texture now of sub-type `st` resolving to `pair`: `explicit` when its `[files]` entry sets the
-/// format or tag; `lock` is a slot lock or a Format field lock; `grayscale` when its category is Grayscale (#31).
-pub fn verdict(
+/// The rule for a texture of sub-type `st` resolving to `pair`: `explicit` when its `[files]` entry sets the format
+/// or tag. Note JD3: no lock keeps a pair the type does not allow.
+pub fn verdict(target: Target, st: Subtype, pair: (Format, ColorTag), explicit: bool) -> Verdict {
+    decide(&allowed(st, target), target, st, pair, explicit)
+}
+
+fn decide(
+    list: &[(Format, ColorTag)],
     target: Target,
     st: Subtype,
-    grayscale: bool,
     pair: (Format, ColorTag),
     explicit: bool,
-    lock: Option<&str>,
 ) -> Verdict {
-    if !explicit || allowed_encodings_for(st, target, grayscale).contains(&pair) {
+    if list.is_empty() || list.contains(&pair) {
         return Verdict::Keep;
     }
-    match lock {
-        Some(why) => Verdict::Kept(why.into()),
-        None => Verdict::Clear,
+    if explicit {
+        return Verdict::Clear;
     }
+    best(st, target, pair).map_or(Verdict::Keep, Verdict::Pin)
 }
 
 fn type_name(st: Subtype) -> String {
     super::labels::subtype_name(st)
+}
+
+fn explicit(doc: &ProjectDoc, key: &str) -> bool {
+    ["format", "color.tag"]
+        .iter()
+        .any(|f| doc.file_value(key, f).is_some())
 }
 
 impl AppModel {
@@ -58,17 +78,16 @@ impl AppModel {
             .collect()
     }
 
-    /// DECISIONS Z11: keep the sub-types before this plan chain, compared when it settles.
+    /// DECISIONS Z11: keep the sub-types before this plan chain; a fix's note names a change between them.
     pub(super) fn keep_type_base(&mut self) {
         if self.type_base.is_none() {
             self.type_base = Some(self.subtypes());
         }
     }
 
-    /// Forget the cleanup state: an undo, redo, open or reload restores a state as it was (its plans never clean
-    /// up), and a note or pending cleanup of before no longer applies.
+    /// Forget the cleanup state: an undo, redo, open or reload restores a state as it was, and a note or pending
+    /// cleanup of before no longer applies. Its plan still runs the rule (Note JD3).
     pub(super) fn reset_type_follow(&mut self) {
-        self.follow_off = true;
         self.encoding_note = None;
         self.type_pending = None;
         self.type_base = None;
@@ -84,75 +103,118 @@ impl AppModel {
         self.type_cleaned = false;
     }
 
-    /// Run from `finish_plan` when a plan chain has settled (the final pass: output paths agree with sub-types).
-    /// Writes the note of a cleanup this plan shows, then compares the sub-types with those before the chain and
-    /// clears the encodings a change left invalid: one edit and one replan. The edit is folded into the user step
-    /// that started the chain, else it is its own step. True when it re-planned. A one-shot guard
-    /// (`type_cleaned`) keeps the cleanup's own plan from cleaning again; it does not use `auto_replans`.
-    pub(super) fn settle_types(&mut self) -> bool {
-        let base = self.type_base.take();
-        if let Some(p) = self.type_pending.take() {
-            self.set_type_note(p);
-        }
-        let cause = std::mem::take(&mut self.type_cause);
-        let off = std::mem::take(&mut self.follow_off);
-        let cleaned = std::mem::take(&mut self.type_cleaned);
-        let (Some(base), false, false) = (base, off, cleaned) else {
-            return false;
-        };
-        let Some(doc) = self.project.as_ref().filter(|p| !p.read_only()) else {
-            return false;
-        };
-        let locked = locked_items(self);
-        let mut pending = Pending::default();
+    /// The fixes this settled plan needs, as (key, verdict, head). Round 1 looks at every texture; round 2 only pins
+    /// a texture round 1 cleared whose default is not allowed either.
+    fn format_fixes(
+        &self,
+        doc: &ProjectDoc,
+        base: &HashMap<String, Subtype>,
+        prev: Option<&Pending>,
+        round: u8,
+    ) -> Vec<(String, Verdict, String)> {
+        let mut lists: HashMap<Subtype, Vec<(Format, ColorTag)>> = HashMap::new();
+        let mut out = vec![];
         for i in &self.items {
-            let (Some(j), Some(&old)) = (&i.job, base.get(&i.key)) else {
-                continue;
-            };
+            let Some(j) = &i.job else { continue };
             let st = j.profile.subtype;
-            if st == old {
+            let e = (j.profile.format, j.profile.color.tag);
+            let list = lists.entry(st).or_insert_with(|| allowed(st, self.target));
+            if list.is_empty() || list.contains(&e) {
                 continue;
             }
-            let e = (j.profile.format, j.profile.color.tag);
-            let explicit = ["format", "color.tag"]
-                .iter()
-                .any(|f| doc.file_value(&i.key, f).is_some());
-            let lock = locked.get(&i.key).cloned().or_else(|| {
-                field_view(self.target, j, "format")
-                    .and_then(|v| v.lock)
-                    .map(str::to_string)
-            });
-            let head = format!("{}: {} → {}", i.name, type_name(old), type_name(st));
-            let grey = j.profile.category == Category::Grayscale;
-            match verdict(self.target, st, grey, e, explicit, lock.as_deref()) {
+            let earlier = prev.and_then(|p| p.fixed.iter().find(|f| f.key == i.key));
+            let ex = explicit(doc, &i.key);
+            if round == 2 && (earlier.is_none_or(|f| f.pinned) || ex) {
+                continue;
+            }
+            let head = earlier
+                .map(|f| f.head.clone())
+                .unwrap_or_else(|| match base.get(&i.key) {
+                    Some(&old) if old != st => {
+                        format!("{}: {} → {}", i.name, type_name(old), type_name(st))
+                    }
+                    _ => format!(
+                        "{}: {} is not valid for {}",
+                        i.name,
+                        format_label(e.0, e.1),
+                        type_name(st)
+                    ),
+                });
+            match decide(list, self.target, st, e, ex) {
                 Verdict::Keep => {}
-                Verdict::Clear => pending.cleared.push((i.key.clone(), head)),
-                Verdict::Kept(why) => pending
-                    .kept
-                    .push(format!("{head}; {} kept ({why})", format_label(e.0, e.1))),
+                v => out.push((i.key.clone(), v, head)),
             }
         }
-        if pending.cleared.is_empty() {
-            if !pending.kept.is_empty() {
-                self.set_type_note(pending);
+        out
+    }
+
+    /// Run from `finish_plan` when a plan chain has settled (the final pass: output paths agree with sub-types).
+    /// Writes the note of a cleanup this plan shows, then fixes every texture whose pair its sub-type does not allow
+    /// (Note JD3): one edit and one replan. The edit is folded into the user step that started the chain, else it is
+    /// its own step. True when it re-planned. The cleanup's own plan (`type_cleaned`) only runs a second, pinning
+    /// round for what the first cleared, so a chain cleans at most twice; it does not use `auto_replans`.
+    pub(super) fn settle_types(&mut self) -> bool {
+        let base = self.type_base.take().unwrap_or_default();
+        let prev = self.type_pending.take();
+        let cause = std::mem::take(&mut self.type_cause);
+        let cleaned = std::mem::take(&mut self.type_cleaned);
+        let round = match (&prev, cleaned) {
+            (Some(p), true) => p.round + 1,
+            _ => 1,
+        };
+        let fixes = match self.project.as_ref().filter(|p| !p.read_only()) {
+            Some(doc) if round <= 2 => self.format_fixes(doc, &base, prev.as_ref(), round),
+            _ => vec![],
+        };
+        if fixes.is_empty() {
+            if let Some(p) = prev {
+                self.set_type_note(p);
             }
             return false;
         }
+        let mut pending = match prev {
+            Some(p) if round == 2 => p,
+            _ => Pending {
+                undo: cause,
+                ..Pending::default()
+            },
+        };
+        pending.round = round;
         let before = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         self.batch = true;
-        for (k, _) in &pending.cleared {
-            // Clearing the format clears the explicit tag too (`clear_field`).
-            self.clear_field(k, "format");
+        for (k, v, head) in fixes {
+            let pinned = match v {
+                // Clearing the format clears the explicit tag too (`clear_field`).
+                Verdict::Clear => {
+                    self.clear_field(&k, "format");
+                    false
+                }
+                Verdict::Pin((f, t)) => {
+                    self.set_format(&k, f, t);
+                    true
+                }
+                Verdict::Keep => continue,
+            };
+            match pending.fixed.iter_mut().find(|f| f.key == k) {
+                Some(f) => f.pinned = pinned,
+                None => pending.fixed.push(Fixed {
+                    key: k,
+                    head,
+                    pinned,
+                }),
+            }
         }
         self.batch = false;
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         if after == before {
+            self.set_type_note(pending);
             return false;
         }
         match self.history.undo.last_mut() {
-            // The user step that started this chain: one undo restores the edit and the cleanup.
-            Some(last) if cause && last.after == before => last.after = after,
-            // A change no step caused (a scan vote, a reload) is its own step.
+            // The user step that started this chain, or the first round's step: one undo restores the edit and
+            // the cleanup.
+            Some(last) if (cause || round == 2) && last.after == before => last.after = after,
+            // A change no step caused (an open, a reload, a scan vote) is its own step.
             _ => self.history.push(history::Command {
                 label: "Encoding follows type".into(),
                 before,
@@ -167,39 +229,45 @@ impl AppModel {
         true
     }
 
-    /// The status-line note: one texture's line, or a count with every line on hover.
+    /// The Problems note: one texture's line, or a count with every line listed.
     fn set_type_note(&mut self, p: Pending) {
-        let mut lines: Vec<String> = p
-            .cleared
+        let lines: Vec<String> = p
+            .fixed
             .iter()
-            .map(|(k, head)| {
-                let default = self
-                    .item(k)
+            .map(|f| {
+                let now = self
+                    .item(&f.key)
                     .and_then(|i| i.job.as_ref())
                     .map(|j| format_label(j.profile.format, j.profile.color.tag))
-                    .unwrap_or_else(|| "the new type's".into());
-                format!("{head}; format reset to the default ({default}).")
+                    .unwrap_or_else(|| "the type's".into());
+                if f.pinned {
+                    format!(
+                        "{}; format set to {now}, the best this type allows.",
+                        f.head
+                    )
+                } else {
+                    format!("{}; format reset to the default ({now}).", f.head)
+                }
             })
             .collect();
-        lines.extend(p.kept.iter().cloned());
         let line = match lines.as_slice() {
+            [] => return,
             [one] => one.clone(),
-            _ => {
-                let mut s = format!(
-                    "Encoding follows type: {} reset to the new type's default format",
-                    textures(p.cleared.len())
-                );
-                if !p.kept.is_empty() {
-                    s.push_str(&format!("; {} kept (locked)", textures(p.kept.len())));
-                }
-                s
-            }
+            _ => format!(
+                "Encoding follows type: {} set to a format their type allows",
+                textures(lines.len())
+            ),
         };
         self.messages
             .log(super::messages::Severity::Info, line.clone());
         self.encoding_note = Some((line, lines.join("\n")));
-        // Note FC3: the note is a Problems row now; its step is the top one until the next push.
-        self.encoding_note_step = self.history.pushes;
+        // Note FC3: the note is a Problems row; its Undo is offered while its step is the top one. Note JD3: a fix no
+        // user step caused offers none, since the rule would fix it again.
+        self.encoding_note_step = if p.undo {
+            self.history.pushes
+        } else {
+            u64::MAX
+        };
         self.invalidate_views();
     }
 }

@@ -99,6 +99,54 @@ fn every_grey_picker_lists_bc4_and_r8_only() {
     }
 }
 
+/// The owner's project: `_sk` typed `skin_sk` and pinned BC7. Opening it resolves the pin away (BC4 from the type),
+/// says so as an Info row, and leaves the project unsaved so Save writes it.
+#[test]
+fn a_bc7_pin_on_a_skin_sk_resolves_to_bc4_on_open() {
+    let d = tempfile::tempdir().unwrap();
+    let m = opened_with(
+        d.path(),
+        Some(
+            "[files.\"landscape/body_sk.png\"]\nsubtype = \"skin_sk\"\nformat = \"bc7\"\ncolor.tag = \"unorm\"\n",
+        ),
+    );
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(own(&m, SK, "format"), None, "the pin is dropped");
+    assert_eq!(own(&m, SK, "color.tag"), None);
+    let (line, _) = m.encoding_note.clone().expect("an info note");
+    assert!(line.contains("body_sk.png"), "{line}");
+    assert!(line.contains("BC4"), "{line}");
+    assert!(m.prompts_unsaved(), "Save writes the fix");
+    // No user step caused it, so its Info row offers no Undo: the rule would only fix it again.
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.text.contains("body_sk.png"))
+        .expect("an Info row");
+    assert_eq!(row.level, sdc_gui::model::bottom::Level::Info);
+    assert!(row.fix.is_none(), "{:?}", row.fix);
+}
+
+/// A project preset layer that gives `skin_sk` BC7 has no `[files]` pin to drop: BC4 is pinned on the texture.
+#[test]
+fn a_layer_that_gives_a_grey_map_bc7_is_answered_with_a_bc4_pin() {
+    let d = tempfile::tempdir().unwrap();
+    let m = opened_with(
+        d.path(),
+        Some(
+            "[subtypes.skin_sk]\nformat = \"bc7\"\n\n[files.\"landscape/body_sk.png\"]\nsubtype = \"skin_sk\"\n",
+        ),
+    );
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(own(&m, SK, "format"), Some(json!("bc4")));
+}
+
 #[test]
 fn a_direct_format_write_of_bc7_on_a_grey_map_is_refused() {
     let d = tempfile::tempdir().unwrap();
@@ -139,4 +187,43 @@ fn copy_settings_never_lands_bc7_on_a_grey_map() {
     idle(&mut m);
     assert_eq!(own(&m, SK, "format"), None);
     assert_eq!(pair(&m, SK).1, Format::Bc4);
+}
+
+/// A texture pinned BC7 as a colour map, then typed `skin_sk`: the pin goes and the type's BC4 applies.
+#[test]
+fn retyping_a_bc7_texture_to_a_grey_type_drops_the_pin() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_with(d.path(), None);
+    m.set_field(SK, "subtype", json!("diffuse"));
+    idle(&mut m);
+    m.set_format(SK, Format::Bc7, ColorTag::Unorm);
+    idle(&mut m);
+    assert_eq!(own(&m, SK, "format"), Some(json!("bc7")));
+    let steps = m.history.undo.len();
+    m.set_field(SK, "subtype", json!("skin_sk"));
+    idle(&mut m);
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(own(&m, SK, "format"), None);
+    assert_eq!(m.history.undo.len(), steps + 1, "one step with the edit");
+}
+
+/// A pair the type does not allow resolves on any type, not only grey ones: a normal pinned BC4 on disk.
+#[test]
+fn a_disallowed_pair_on_any_type_resolves_on_open() {
+    let d = tempfile::tempdir().unwrap();
+    let m = opened_with(
+        d.path(),
+        Some("[files.\"landscape/rock01_normal.png\"]\nsubtype = \"normal\"\nformat = \"bc4\"\n"),
+    );
+    let (st, f, t) = pair(&m, NORMAL);
+    assert_eq!(st, Subtype::Normal);
+    assert!(
+        engine::policy::allowed_encodings_for(st, m.target, false).contains(&(f, t)),
+        "{f:?} {t:?}"
+    );
+    assert_eq!(own(&m, NORMAL, "format"), None);
+    assert!(m.encoding_note.is_some());
 }

@@ -18,6 +18,31 @@ pub fn allowed(st: Subtype, target: Target) -> Vec<(Format, ColorTag)> {
         .collect()
 }
 
+/// The best compressed formats first (owner, 2026-11-15: "resolve to the best compressed version for that map type,
+/// usually bc7"); the rest follow in the engine's list order.
+const BEST: [Format; 5] = [
+    Format::Bc7,
+    Format::Bc5,
+    Format::Bc4,
+    Format::Bc3,
+    Format::Bc1,
+];
+
+/// The pair a disallowed `cur` takes when no layer gives `st` an allowed one (Note JD3): the best compressed format
+/// `allowed` lists, with `cur`'s tag where that format allows it, else the format's first allowed tag. `None` when
+/// nothing is allowed (the sub-type is unavailable under `target`).
+pub fn best(st: Subtype, target: Target, cur: (Format, ColorTag)) -> Option<(Format, ColorTag)> {
+    let list = allowed(st, target);
+    let f = BEST
+        .into_iter()
+        .find(|f| list.iter().any(|(x, _)| x == f))
+        .or_else(|| list.first().map(|p| p.0))?;
+    list.iter()
+        .copied()
+        .find(|&p| p == (f, cur.1))
+        .or_else(|| list.iter().copied().find(|p| p.0 == f))
+}
+
 impl super::AppModel {
     /// The write guard (Note JD2): false when writing `field` = `value` on `item` would leave a (format, tag) pair its
     /// sub-type does not allow. A bare format pairs with the texture's current tag and a lone tag with its current

@@ -123,7 +123,7 @@ fn an_explicit_encoding_the_new_type_allows_is_kept() {
 }
 
 #[test]
-fn a_texture_in_a_locked_slot_is_untouched_and_reported() {
+fn a_texture_in_a_locked_slot_is_reset_too() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, set) = grass_with(d.path(), Some(LINEAR));
     assert_eq!(
@@ -137,10 +137,11 @@ fn a_texture_in_a_locked_slot_is_untouched_and_reported() {
     idle(&mut m);
     m.set_shader(&set, Some(Shader::Pbr));
     idle(&mut m);
-    assert_eq!(file(&m, "format"), Some(json!("bc7")));
-    assert_eq!(file(&m, "color.tag"), Some(json!("unorm")));
+    // Note JD3: a lock no longer keeps a pair the type does not allow.
+    assert_eq!(file(&m, "format"), None);
+    assert_eq!(file(&m, "color.tag"), None);
     let (line, _) = m.encoding_note.clone().expect("a note");
-    assert!(line.contains("slot locked"), "{line}");
+    assert!(line.contains("format reset to the default"), "{line}");
 }
 
 #[test]
@@ -246,43 +247,28 @@ fn several_textures_give_one_count_line_with_each_on_hover() {
     );
 }
 
-/// Review M6: a field-locked Format value is kept and reported, never cleared. No field lock covers `format`
-/// today, so the rule is checked directly.
+/// Note JD3 (supersedes Review M6's lock): an explicit pair the type does not allow is cleared; with nothing explicit
+/// the best allowed pair is pinned (BC7 first, the tag kept where it can be); an allowed pair is kept.
 #[test]
-fn a_field_locked_format_is_kept_and_reported() {
+fn the_verdict_clears_or_pins() {
     use sdc_gui::model::encoding_follow::{verdict, Verdict};
     let t = Target::Cs;
+    let srgb = (Format::Bc7, ColorTag::Srgb);
+    assert_eq!(verdict(t, Subtype::PbrAlbedo, LINEAR, true), Verdict::Clear);
     assert_eq!(
-        verdict(t, Subtype::PbrAlbedo, false, LINEAR, true, None),
-        Verdict::Clear
+        verdict(t, Subtype::PbrAlbedo, LINEAR, false),
+        Verdict::Pin(srgb),
+        "nothing explicit: the best allowed pair"
     );
     assert_eq!(
-        verdict(
-            t,
-            Subtype::PbrAlbedo,
-            false,
-            LINEAR,
-            true,
-            Some("locked here")
-        ),
-        Verdict::Kept("locked here".into())
-    );
-    assert_eq!(
-        verdict(t, Subtype::PbrAlbedo, false, LINEAR, false, None),
-        Verdict::Keep,
-        "nothing explicit"
-    );
-    assert_eq!(
-        verdict(
-            t,
-            Subtype::PbrAlbedo,
-            false,
-            (Format::Bc7, ColorTag::Srgb),
-            true,
-            None
-        ),
+        verdict(t, Subtype::PbrAlbedo, srgb, true),
         Verdict::Keep,
         "still allowed"
+    );
+    assert_eq!(
+        verdict(t, Subtype::SkinSk, LINEAR, false),
+        Verdict::Pin((Format::Bc4, ColorTag::Unorm)),
+        "a grey map's best is BC4"
     );
 }
 
@@ -310,12 +296,7 @@ fn a_skin_wet_clears_an_explicit_r8_grey_or_not() {
     use sdc_gui::model::encoding_follow::{verdict, Verdict};
     let r8 = (Format::R8, ColorTag::Unorm);
     let st = Subtype::SkinWet;
-    for grey in [true, false] {
-        assert_eq!(
-            verdict(Target::Cs, st, grey, r8, true, None),
-            Verdict::Clear
-        );
-    }
+    assert_eq!(verdict(Target::Cs, st, r8, true), Verdict::Clear);
 }
 
 /// Note FC3 (supersedes Z11's status line): a cleared format is an Info row per texture, with Undo while its step is
