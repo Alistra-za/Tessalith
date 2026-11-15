@@ -855,7 +855,7 @@ fn remove_all_waits_while_the_mode_differs() {
     h.hover_at(all.rect().center());
     h.run_steps(4);
     assert_eq!(
-        h.query_all_by_label_contains("Checked in vanilla; the project is now cs")
+        h.query_all_by_label("Checked in vanilla; the project is now cs. Wait for the plan.")
             .count(),
         1
     );
@@ -877,6 +877,126 @@ fn remove_all_waits_while_the_mode_differs() {
     h.get_by_label("Project: 1 saved setting names no file in this mode (cs)");
     let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
     assert!(!all.accesskit_node().is_disabled());
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    assert!(!h
+        .get_by_label("Remove missing/ghost")
+        .accesskit_node()
+        .is_disabled());
+}
+
+fn no_tooltip_delay(h: &mut Harness<'static, AppModel>) {
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+}
+
+/// Note JI6, FB8: the row's kind has a name in Kinds ▾, and no code text reaches the screen.
+#[test]
+fn the_unmatched_kind_has_a_name() {
+    let d = tempfile::tempdir().unwrap();
+    let m = vanilla_with_unmatched(d.path(), false);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Kinds ▾").click();
+    h.run();
+    h.get_by_label("Unmatched [files] entries (1)");
+    assert_eq!(
+        h.query_all_by_label_contains("CFG-FILE-UNMATCHED").count(),
+        0
+    );
+}
+
+/// Note JI6: a read-only sdc.toml (one the engine rejected) turns Remove all off with its reason. The document it
+/// drops holds no entries, so `Entries ▾` offers no Remove at all.
+#[test]
+fn a_read_only_project_offers_no_removal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = vanilla_with_unmatched(d.path(), true);
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
+    let why = m.toml_read_only_reason().expect("read-only");
+    let mut h = harness(m);
+    no_tooltip_delay(&mut h);
+    h.run();
+    scroll_to_end(&mut h);
+    h.get_by_label("Project: 2 saved settings name no file in this mode (vanilla)");
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(all.accesskit_node().is_disabled());
+    h.hover_at(all.rect().center());
+    h.run_steps(4);
+    h.get_by_label(&why);
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    for k in ["landscape/rock01_rmaos", "missing/ghost"] {
+        assert!(
+            h.query_by_label(&format!("Remove {k}")).is_none(),
+            "{k} is offered"
+        );
+    }
+}
+
+/// The plan messages parked by `hold_plan_results`: (partials, full plans).
+fn held(
+    m: &mut AppModel,
+) -> (
+    Vec<sdc_gui::worker::WorkerMsg>,
+    Vec<sdc_gui::worker::WorkerMsg>,
+) {
+    use sdc_gui::worker::WorkerMsg;
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let mut got = vec![];
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        let p = got
+            .iter()
+            .filter(|x| matches!(x, WorkerMsg::Partial { .. }))
+            .count();
+        if p >= 1 && got.len() > p {
+            return got
+                .into_iter()
+                .partition(|x| matches!(x, WorkerMsg::Partial { .. }));
+        }
+        assert!(
+            std::time::Instant::now() < end,
+            "plan messages did not arrive"
+        );
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Ruling 3.3: Remove all waits for the full plan, the only one that replaces the entries, even once an edit's
+/// partial is shown and the other fixes work again.
+#[test]
+fn remove_all_waits_for_the_full_plan_behind_a_partial() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = vanilla_with_unmatched(d.path(), true);
+    m.hold_plan_results = true;
+    m.set_field(
+        "landscape/rock01.png",
+        "alpha.threshold",
+        serde_json::json!(80),
+    );
+    let (partials, _full) = held(&mut m);
+    for x in partials {
+        m.handle_held(x);
+    }
+    m.poll();
+    assert!(m.fix_off().is_none(), "the partial is shown");
+    assert!(m.full_plan_pending());
+    let mut h = harness(m);
+    no_tooltip_delay(&mut h);
+    h.run_steps(2);
+    scroll_to_end(&mut h);
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(all.accesskit_node().is_disabled());
+    h.hover_at(all.rect().center());
+    h.run_steps(4);
+    h.get_by_label("Wait for the plan to finish");
     h.get_by_label("Entries ▾").click();
     h.run_steps(2);
     assert!(!h

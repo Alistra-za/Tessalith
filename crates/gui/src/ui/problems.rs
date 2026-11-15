@@ -128,9 +128,11 @@ fn kinds_menu(ui: &mut egui::Ui, model: &AppModel, hidden_rows: usize) -> Option
                 .split(" — ")
                 .next()
                 .unwrap_or_default();
-            let what = match what {
-                "" | "Tessalith reported a problem" => code.as_str(),
-                w => w,
+            let what = match (code, what) {
+                // Note JI6: no sentence (its row words its own text), so its kind is named here.
+                (Code::CfgFileUnmatched, _) => "Unmatched [files] entries",
+                (_, "" | "Tessalith reported a problem") => code.as_str(),
+                (_, w) => w,
             };
             if ui
                 .checkbox(&mut shown, format!("{what} ({n})"))
@@ -405,6 +407,7 @@ fn unmatched_buttons(
             })
         })
         .or_else(|| off.map(str::to_string))
+        // Ruling 3.3: a partial shown while the full plan (which alone replaces the entries) is still out.
         .or_else(|| {
             m.full_plan_pending()
                 .then(|| "Wait for the plan to finish".to_string())
