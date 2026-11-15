@@ -410,6 +410,7 @@ impl PresetsModel {
             file: None,
         });
         self.refresh();
+        self.note = super::format_rule::fix_preset(self);
     }
 
     /// A new preset on the target's quality preset.
@@ -433,6 +434,7 @@ impl PresetsModel {
             file: None,
         });
         self.refresh();
+        self.note = super::format_rule::fix_preset(self);
     }
 
     fn str_field(&self, key: &str) -> String {
@@ -692,6 +694,8 @@ impl PresetsModel {
             d.table = d.saved.clone();
         }
         self.refresh();
+        // Note JF4: the saved table may hold a format its type does not allow; it is fixed again.
+        self.note = super::format_rule::fix_preset(self);
     }
 
     /// Note JF4: what the last load changed so no format the type does not allow is kept (Info lines), if anything.
@@ -1085,6 +1089,7 @@ impl PresetsModel {
             .to_string();
         std::fs::remove_file(&src).map_err(|e| format!("{src}: {e}"))?;
         self.draft = None;
+        self.note = None;
         self.rescan();
         Ok(())
     }

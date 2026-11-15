@@ -261,3 +261,122 @@ fn the_presets_tab_never_keeps_bc7_on_a_grey_type() {
         "the editor never writes BC7 on a grey type"
     );
 }
+
+#[test]
+fn revert_fixes_again_and_a_new_draft_drops_the_note() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("presets");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("mine.toml"),
+        "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n\n[subtypes.skin_sk]\nformat = \"bc7\"\n",
+    )
+    .unwrap();
+    let mut pm = sdc_gui::model::presets::PresetsModel::new(Some(dir), Target::Cs);
+    pm.select("mine");
+    pm.revert();
+    let p = pm.row(Subtype::SkinSk).unwrap().profile.clone().unwrap();
+    assert!(
+        GREY_OK.contains(&(p.format, p.color.tag)),
+        "revert restores the file's BC7, and it is fixed again: {:?}",
+        (p.format, p.color.tag)
+    );
+    assert!(pm.note().is_some(), "the fix is shown again");
+    pm.new_preset(Target::Cs);
+    assert_eq!(pm.note(), None, "a new preset has nothing fixed");
+}
+
+/// No built-in preset gives any sub-type a pair the GUI does not keep, so opening a healthy project fixes nothing.
+#[test]
+fn every_built_in_default_is_a_pair_the_gui_keeps() {
+    let d = tempfile::tempdir().unwrap();
+    let mut pm =
+        sdc_gui::model::presets::PresetsModel::new(Some(d.path().join("none")), Target::Cs);
+    let ids: Vec<String> = pm
+        .list()
+        .into_iter()
+        .filter(|(_, b)| *b)
+        .map(|(id, _)| id)
+        .collect();
+    assert!(!ids.is_empty());
+    let mut bad = vec![];
+    for id in ids {
+        pm.select(&id);
+        for st in Subtype::ALL {
+            let Some(p) = pm.row(st).and_then(|r| r.profile.as_ref().ok()) else {
+                continue;
+            };
+            let list = sdc_gui::model::format_rule::allowed(st, pm.target);
+            if !list.is_empty() && !list.contains(&(p.format, p.color.tag)) {
+                bad.push(format!("{id} {st:?}: {:?}", (p.format, p.color.tag)));
+            }
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// A healthy project opens with no fix: no history step, no note, nothing unsaved.
+#[test]
+fn a_healthy_grey_map_is_left_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let m = typed_sk(d.path());
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(m.encoding_note, None);
+    assert!(!m.can_undo());
+}
+
+/// Round 2: the own BC7 pin is cleared, the layer still gives BC7, so BC4 is pinned. One step, one Info row.
+#[test]
+fn clear_then_pin_is_one_step_and_one_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_with(
+        d.path(),
+        Some(
+            "[subtypes.skin_sk]\nformat = \"bc7\"\n\n[files.\"landscape/body_sk.png\"]\nsubtype = \"skin_sk\"\nformat = \"bc7\"\n",
+        ),
+    );
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(own(&m, SK, "format"), Some(json!("bc4")));
+    let rows = sdc_gui::model::bottom::problems(&m);
+    assert_eq!(
+        rows.iter()
+            .filter(|p| p.text.contains("body_sk.png"))
+            .count(),
+        1,
+        "{:?}",
+        rows.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
+    // One undo goes straight back to the file's BC7; two steps would stop at the cleared pin.
+    m.undo();
+    assert_eq!(
+        own(&m, SK, "format"),
+        Some(json!("bc7")),
+        "the clear and the pin were one step"
+    );
+}
+
+/// Undo of the open-time fix brings the BC7 pin back for a moment; the rule fixes it again at once.
+#[test]
+fn undoing_the_open_fix_fixes_it_again() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened_with(
+        d.path(),
+        Some("[files.\"landscape/body_sk.png\"]\nsubtype = \"skin_sk\"\nformat = \"bc7\"\n"),
+    );
+    m.undo();
+    idle(&mut m);
+    assert_eq!(
+        pair(&m, SK),
+        (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
+    );
+    assert_eq!(own(&m, SK, "format"), None);
+    // The new fix is a step of its own, so Redo is gone (DECISIONS JF3).
+    assert!(m.can_undo());
+    assert!(!m.can_redo());
+}
