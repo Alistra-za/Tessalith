@@ -38,7 +38,7 @@ pub(crate) fn set_shader_type(
     new_type: u32,
 ) -> Result<(), String> {
     if new_type >= 20 {
-        return Err("shader type 20 is not a Skyrim type".into());
+        return Err(format!("shader type {new_type} is not a Skyrim type"));
     }
     let net = &m
         .lighting

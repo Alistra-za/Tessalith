@@ -90,7 +90,7 @@ pub const EYE_ENV_TYPE: &str =
 /// CM27 / Note GD6: on a PBR material CS's default white RMAOS sets metallic to 1, so an empty NIF slot 5 (index; the
 /// 1-based slot 6 of the set editor, Note GH7) is fully metallic.
 pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic";
-/// Start of every CS 2.0 Error (Note ID4): CS 2.0 logs the block and draws nothing. [`always_blocks`] matches the
+/// Start of every CS 2.0 Error (Note IE7; [`TYPE_22`] is the one left): CS 2.0 logs the block and draws nothing. [`always_blocks`] matches the
 /// prefix.
 pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
 /// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.

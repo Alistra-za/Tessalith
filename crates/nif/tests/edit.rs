@@ -280,7 +280,7 @@ fn shader_type_5_to_6_keeps_the_tint_floats() {
     );
 }
 
-/// 21 too: phase 1's CS 2.0 type is gone (Note IE7).
+/// 21 too: phase 1's CS 2.0 type is gone (Note IE7). The refusal names the type asked for.
 #[test]
 fn shader_type_20_is_refused() {
     let b = read("TestNifFile_Skinned_SE.nif");
@@ -289,9 +289,10 @@ fn shader_type_20_is_refused() {
         let r = apply(&b, &[op]).unwrap();
         assert_eq!(
             r.outcomes,
-            vec![Outcome::Refused(
-                "shader type 20 is not a Skyrim type".into()
-            )]
+            vec![Outcome::Refused(format!(
+                "shader type {t} is not a Skyrim type"
+            ))],
+            "{t}"
         );
         assert_eq!(r.bytes, b);
     }

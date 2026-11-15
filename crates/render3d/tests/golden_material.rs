@@ -110,7 +110,9 @@ struct Pbr2Subject {
 }
 
 /// The CS 2.0 subjects (Note IE7). The captures drew phase 1's type-21 NIFs; those are gone, so each subject is its
-/// own mesh pointed at a `.csm` that carries the same values.
+/// own mesh pointed at a `.csm` that carries the same values. Source: phase 1's manifest `pbr2test1-subjects.tsv`
+/// (outside the repo, beside the captures), copied here row by row: shape, label, feature bits (replace or `+` add),
+/// PBRFuzz and PBRThinSurface; it overrides no parameter.
 const PBR2: &[Pbr2Subject] = &[
     s2("HelgenStoneBlock01", "base", Features::V1, None, None),
     s2("Corpse04", "subsurface", Features::V1, None, None),
@@ -329,6 +331,9 @@ struct SdcShape {
     slots: Vec<(u32, String, Option<Vec<u8>>)>,
     /// LoadReport errors + compile errors.
     errors: Vec<String>,
+    /// The loaded shape's `.csm` name, whether it took PBR values from it and its `csm_error`: a counted subject
+    /// counts only when its `.csm` resolved (Note IE7).
+    csm: (Option<String>, bool, Option<String>),
     /// The PS b1 fields whose x, y and z are a colour of the shape's `.csm` (empty without one): `PBRParams2` with
     /// subsurface or two-layer, `MultiLayerParallaxData` with fuzz (Note IE7).
     colours: Vec<&'static str>,
@@ -359,7 +364,6 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
             .collect(),
         None => HashMap::new(),
     };
-    let parsed = parsed;
     let with = |n: &str| -> Vec<&render3d::ParsedShape> {
         parsed
             .shapes
@@ -443,6 +447,7 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         nif_origin,
         slots,
         errors: rep.errors.into_iter().chain(rep.compile_errors).collect(),
+        csm: (m.csm_path.clone(), m.pbr.is_some(), m.csm_error.clone()),
         colours: colour_fields(&m),
     })
 }
@@ -720,6 +725,8 @@ fn extraction_matches_capture() {
     // The counted CS 2.0 subjects (glint is Task 7's): the events that reached the pixel swap, and each MRT over the
     // noise limit there.
     let (mut swapped, mut over) = (BTreeSet::new(), Vec::new());
+    // Counted subjects whose shape did not draw from a resolved `.csm`: (name, PBR values taken, csm_error).
+    let mut no_csm: Vec<String> = Vec::new();
     // `.csm` colours: counted subjects whose colour field is not the capture's through `#rrggbb`, and the largest
     // difference that leaves, for a captured colour inside 0-1 (rounding) and outside it (clamp).
     let mut colour_misses = Vec::new();
@@ -932,7 +939,13 @@ fn extraction_matches_capture() {
             }
         }
         if counted.is_some() {
-            swapped.insert(name.clone());
+            // Counted only when the shape drew from its resolved `.csm`.
+            match &sdc.csm {
+                (Some(_), true, None) => {
+                    swapped.insert(name.clone());
+                }
+                other => no_csm.push(format!("{name} {other:?}")),
+            }
         }
         if let (Some(main), Some(rc)) = (&out.main, &r.composite) {
             if main.iter().any(|v| !v.is_finite()) {
@@ -987,8 +1000,8 @@ fn extraction_matches_capture() {
         .collect();
     let _ = writeln!(
         t,
-        "CS 2.0 subjects swapped (glint not counted): {} groups {groups:?}; not swapped {unswapped:?}; MRTs over the \
-         limit {over:?}",
+        "CS 2.0 subjects swapped (glint not counted): {} groups {groups:?}; not swapped {unswapped:?}; without a \
+         resolved .csm {no_csm:?}; MRTs over the limit {over:?}",
         groups.len()
     );
     let _ = writeln!(
@@ -1006,6 +1019,10 @@ fn extraction_matches_capture() {
         "only {reached} subjects reached the cbuffer step"
     );
     assert!(nonfinite.is_empty(), "non-finite output: {nonfinite:?}");
+    assert!(
+        no_csm.is_empty(),
+        "counted subjects without a resolved .csm: {no_csm:?}"
+    );
     assert_eq!(
         groups.len(),
         PBR2.len() - 1,

@@ -13,8 +13,8 @@ use std::path::Path;
 const CYL1: ShapeId = ShapeId(9);
 const CYL2: ShapeId = ShapeId(12);
 
-/// No textures: only the `.csm` files of [`pbr_subsurface`] and [`ROUGH`] (Note IE7).
-fn none(p: &str) -> Option<Vec<u8>> {
+/// The resolver: no textures, only the `.csm` files of [`pbr_subsurface`] and [`ROUGH`] (Note IE7).
+fn csm_only(p: &str) -> Option<Vec<u8>> {
     if p == ROUGH {
         return Some(common::csm_text(&rough()));
     }
@@ -56,7 +56,10 @@ fn drain(r: &mut Renderer) -> usize {
 fn furniture(cache: &Path) -> Renderer {
     let mut r = renderer(cache, FLAT);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert_eq!((rep.shapes, rep.pending), (2, 2), "{rep:?}");
     assert!(
         rep.compile_errors.is_empty() && rep.errors.is_empty(),
@@ -93,7 +96,10 @@ fn baseline_warnings(async_compile: bool) -> Vec<String> {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), LIT);
     r.set_async_compile(async_compile);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     drain(&mut r);
     let mut w = rep.warnings;
     w.extend(r.take_late_warnings());
@@ -112,7 +118,10 @@ fn a_missing_cbuffer_field_is_reported_once_after_the_async_compiles_land() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer_at(shaders.path(), cache.path(), LIT);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert_eq!(rep.pending, 2, "{rep:?}");
     assert!(rep.warnings.is_empty(), "no draws yet: {:?}", rep.warnings);
     assert!(drain(&mut r) >= 1);
@@ -121,7 +130,10 @@ fn a_missing_cbuffer_field_is_reported_once_after_the_async_compiles_land() {
     assert_eq!(w.len(), baseline_warnings(true).len() + 1, "{w:?}");
     // once per load: more landings add nothing
     let m = pbr_subsurface(material(&r, CYL1));
-    assert_eq!(r.set_material(CYL1, m, &none), Ok(EditKind::Permutation));
+    assert_eq!(
+        r.set_material(CYL1, m, &csm_only),
+        Ok(EditKind::Permutation)
+    );
     assert_eq!(drain(&mut r), 1);
     assert!(r.take_late_warnings().is_empty());
 }
@@ -132,7 +144,10 @@ fn a_missing_cbuffer_field_stays_in_the_load_report_when_compiles_settle_at_load
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer_at(shaders.path(), cache.path(), LIT);
     r.set_async_compile(false);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert!(
         rep.warnings.contains(&NO_AMBIENT.to_string()),
         "{:?}",
@@ -152,7 +167,7 @@ fn a_partly_cached_async_load_reports_the_missing_field_late_exactly_once() {
     // Warm the disk cache with the vanilla permutation of both shapes.
     let mut warm = renderer_at(shaders.path(), cache.path(), LIT);
     warm.set_async_compile(true);
-    warm.load_parsed(&nif, &none);
+    warm.load_parsed(&nif, &csm_only);
     assert!(drain(&mut warm) >= 1);
     // CYL2 now needs a permutation that is not cached; CYL1 is.
     let mut edited = nif.clone();
@@ -160,7 +175,7 @@ fn a_partly_cached_async_load_reports_the_missing_field_late_exactly_once() {
     s.material = pbr_subsurface(s.material.clone());
     let mut r = renderer_at(shaders.path(), cache.path(), LIT);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&edited, &none);
+    let rep = r.load_parsed(&edited, &csm_only);
     assert_eq!((rep.shapes, rep.pending), (2, 1), "{rep:?}");
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing, "CYL1 was cached");
     assert!(rep.warnings.is_empty(), "{:?}", rep.warnings);
@@ -182,14 +197,14 @@ fn a_second_async_load_reports_the_missing_field_again() {
     let nif = parse(&fixture("TestNifFile_Furniture_Col_SE.nif"));
     let mut r = renderer_at(shaders.path(), cache.path(), LIT);
     r.set_async_compile(true);
-    r.load_parsed(&nif, &none);
+    r.load_parsed(&nif, &csm_only);
     assert!(drain(&mut r) >= 1);
     assert!(r.take_late_warnings().contains(&NO_AMBIENT.to_string()));
     // A new permutation keeps the second load pending, so its report cannot carry the warning.
     let mut edited = nif.clone();
     let s = edited.shapes.iter_mut().find(|s| s.id == CYL1).unwrap();
     s.material = pbr_subsurface(s.material.clone());
-    let rep = r.load_parsed(&edited, &none);
+    let rep = r.load_parsed(&edited, &csm_only);
     assert!(rep.pending >= 1, "{rep:?}");
     assert!(drain(&mut r) >= 1);
     let w = r.take_late_warnings();
@@ -217,7 +232,10 @@ fn a_first_load_queues_one_job_per_program_and_draws_the_clear_colour_meanwhile(
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert_eq!(
         (rep.shapes, rep.pending),
         (2, 2),
@@ -245,7 +263,7 @@ fn load_settles_even_when_the_renderer_is_async() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), &["STANDIN_FLAT"]);
     r.set_async_compile(true);
-    let rep = r.load(&fixture("TestNifFile_DeepGraph_SE.nif"), &none);
+    let rep = r.load(&fixture("TestNifFile_DeepGraph_SE.nif"), &csm_only);
     assert_eq!(rep.pending, 0);
     assert_eq!(rep.compile_errors.len(), 1, "{:?}", rep.compile_errors);
     assert!(rep.compile_errors[0].starts_with("SkullPeg01:19: ps:"));
@@ -258,7 +276,10 @@ fn a_disk_cache_hit_is_applied_at_load_with_no_job() {
     furniture(cache.path()); // writes the entries
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert_eq!((rep.shapes, rep.pending), (2, 0), "{rep:?}");
     assert!(r.take_jobs().is_empty());
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing);
@@ -273,7 +294,7 @@ fn permutation_edit_keeps_old_draw_until_compiled() {
     let before = r.render(&scene, 64, 64).unwrap();
     let m = pbr_subsurface(material(&r, CYL1));
     assert_eq!(
-        r.set_material(CYL1, m.clone(), &none),
+        r.set_material(CYL1, m.clone(), &csm_only),
         Ok(EditKind::Permutation)
     );
     assert_eq!(
@@ -294,7 +315,7 @@ fn permutation_edit_keeps_old_draw_until_compiled() {
     // A second edit for the same program queues nothing and is what lands.
     let m2 = common::csm_shape(m.clone(), ROUGH, &rough());
     assert_eq!(
-        r.set_material(CYL1, m2.clone(), &none),
+        r.set_material(CYL1, m2.clone(), &csm_only),
         Ok(EditKind::Cbuffer)
     );
     assert!(r.take_jobs().is_empty(), "in flight already");
@@ -330,7 +351,7 @@ fn failing_permutation_keeps_old_draw() {
     // No STANDIN_OPAQUE_OK: any permutation without DO_ALPHA_TEST fails to compile.
     let mut r = renderer(cache.path(), &["STANDIN_FLAT"]);
     r.set_async_compile(true);
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_DeepGraph_SE.nif")), &none);
+    let rep = r.load_parsed(&parse(&fixture("TestNifFile_DeepGraph_SE.nif")), &csm_only);
     assert!(
         rep.compile_errors.is_empty(),
         "failures arrive later: {rep:?}"
@@ -351,7 +372,7 @@ fn failing_permutation_keeps_old_draw() {
     let mut bad = good.clone();
     bad.alpha = None;
     assert_eq!(
-        r.set_material(peg, bad.clone(), &none),
+        r.set_material(peg, bad.clone(), &csm_only),
         Ok(EditKind::Permutation)
     );
     // Shape 143 already failed on this very permutation (no alpha test), so the failure is memoised under its
@@ -368,7 +389,10 @@ fn failing_permutation_keeps_old_draw() {
         "others unaffected"
     );
     // Back to the good material: its program is still in memory, so the swap is immediate.
-    assert_eq!(r.set_material(peg, good, &none), Ok(EditKind::Permutation));
+    assert_eq!(
+        r.set_material(peg, good, &csm_only),
+        Ok(EditKind::Permutation)
+    );
     assert_eq!(status(&r, peg), ShapeStatus::Drawing);
     assert!(r.take_jobs().is_empty());
     assert_eq!(r.render(&scene, 96, 96).unwrap(), before);
@@ -385,7 +409,10 @@ fn swap_rebuilds_input_layout() {
     let mut on = off.clone();
     on.has_vertex_colors = true;
     on.slsf2 |= 1 << 5; // Vertex_Colors → VC (VS)
-    assert_eq!(r.set_material(CYL1, on, &none), Ok(EditKind::Permutation));
+    assert_eq!(
+        r.set_material(CYL1, on, &csm_only),
+        Ok(EditKind::Permutation)
+    );
     assert_eq!(
         status(&r, CYL1),
         ShapeStatus::Pending {
@@ -401,7 +428,7 @@ fn swap_rebuilds_input_layout() {
         "white vertex colour"
     );
     // And back: the first program is in memory, no job, drawn at once.
-    r.set_material(CYL1, off, &none).unwrap();
+    r.set_material(CYL1, off, &csm_only).unwrap();
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing);
     assert!(r.take_jobs().is_empty());
     assert_eq!(r.render(&scene, 64, 64).unwrap(), before);
@@ -416,9 +443,9 @@ fn out_of_order_results() {
     let base = material(&r, CYL1);
     let a = alpha_test(base.clone());
     let b = pbr_subsurface(base);
-    r.set_material(CYL1, a.clone(), &none).unwrap();
+    r.set_material(CYL1, a.clone(), &csm_only).unwrap();
     let job_a = r.take_jobs().into_iter().next().unwrap();
-    r.set_material(CYL1, b.clone(), &none).unwrap();
+    r.set_material(CYL1, b.clone(), &csm_only).unwrap();
     let job_b = r.take_jobs().into_iter().next().unwrap();
     assert_ne!(job_a.key, job_b.key);
     assert!(r.apply_compiled(run_job(job_b)), "B is wanted");
@@ -432,7 +459,7 @@ fn out_of_order_results() {
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing);
     assert_eq!(r.render(&scene, 64, 64).unwrap(), on_screen);
     // The memo works: asking for A now needs no compile.
-    r.set_material(CYL1, a, &none).unwrap();
+    r.set_material(CYL1, a, &csm_only).unwrap();
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing);
     assert!(r.take_jobs().is_empty());
 }
@@ -443,11 +470,14 @@ fn a_result_for_a_replaced_load_only_warms_the_memo() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
-    r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     let old_jobs = r.take_jobs();
     let mut pbr = pbr_subsurface(MaterialState::builtin_default());
     pbr.skinned = false;
-    let rep = r.load_builtin(Builtin::Sphere, pbr, &none);
+    let rep = r.load_builtin(Builtin::Sphere, pbr, &csm_only);
     assert_eq!((rep.shapes, rep.pending), (1, 1));
     let new_jobs = r.take_jobs();
     assert_eq!(new_jobs.len(), 1);
@@ -479,7 +509,10 @@ fn device_rebuild_reuses_compiled() {
         r.shapes().is_empty(),
         "the loaded model is gone: load again"
     );
-    let rep = r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    let rep = r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     assert_eq!((rep.shapes, rep.pending), (2, 0), "{rep:?}");
     assert!(r.take_jobs().is_empty());
     assert_eq!(cache_files(cache.path()), 0, "no compile, no disk entry");
@@ -494,7 +527,7 @@ fn an_unmemoised_failing_permutation_keeps_the_old_draw_until_it_fails() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), &["STANDIN_FLAT"]);
     r.set_async_compile(true);
-    r.load_parsed(&parse(&fixture("TestNifFile_DeepGraph_SE.nif")), &none);
+    r.load_parsed(&parse(&fixture("TestNifFile_DeepGraph_SE.nif")), &csm_only);
     drain(&mut r);
     let peg = ShapeId(103);
     let scene = Scene::neutral();
@@ -504,7 +537,7 @@ fn an_unmemoised_failing_permutation_keeps_the_old_draw_until_it_fails() {
     bad.alpha = None;
     bad.slsf2 |= 1 << 25; // Soft_Lighting
     assert_eq!(
-        r.set_material(peg, bad.clone(), &none),
+        r.set_material(peg, bad.clone(), &csm_only),
         Ok(EditKind::Permutation)
     );
     let jobs = r.take_jobs();
@@ -530,7 +563,10 @@ fn a_panicked_job_is_not_memoised() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
-    r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     let job = r.take_jobs().into_iter().next().unwrap();
     let done = render3d::CompileDone {
         key: job.key,
@@ -539,7 +575,7 @@ fn a_panicked_job_is_not_memoised() {
     assert!(r.apply_compiled(done));
     assert!(matches!(status(&r, CYL1), ShapeStatus::Failed { .. }));
     let m = material(&r, CYL1);
-    r.set_material(CYL1, m, &none).unwrap();
+    r.set_material(CYL1, m, &csm_only).unwrap();
     assert_eq!(r.take_jobs().len(), 1, "retried, not served from the memo");
 }
 
@@ -548,7 +584,10 @@ fn a_panicked_job_is_not_memoised() {
 fn a_sync_texture_edit_compiles_inline() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path(), FLAT);
-    r.load_parsed(&parse(&fixture("TestNifFile_Furniture_Col_SE.nif")), &none);
+    r.load_parsed(
+        &parse(&fixture("TestNifFile_Furniture_Col_SE.nif")),
+        &csm_only,
+    );
     let red = common::dds_rgba8(1, 1, &[[255, 0, 0, 255]]);
     let resolve = |p: &str| (p == "textures/standin/red.dds").then(|| red.clone());
     let mut m = material(&r, CYL1);
@@ -564,10 +603,10 @@ fn sync_load_compiles_key_already_taken_by_pool() {
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
     let nif = parse(&fixture("TestNifFile_Furniture_Col_SE.nif"));
-    r.load_parsed(&nif, &none);
+    r.load_parsed(&nif, &csm_only);
     let taken = r.take_jobs();
     assert!(!taken.is_empty());
-    let rep = r.load_parsed_sync(&nif, &none);
+    let rep = r.load_parsed_sync(&nif, &csm_only);
     assert_eq!((rep.shapes, rep.pending), (2, 0), "{rep:?}");
     assert_eq!(status(&r, CYL1), ShapeStatus::Drawing);
     // The pool's late results only warm the memo.
@@ -583,17 +622,17 @@ fn a_replaced_loads_jobs_are_dropped_not_queued_behind_the_new_load() {
     let mut r = renderer(cache.path(), FLAT);
     r.set_async_compile(true);
     let nif = parse(&fixture("TestNifFile_Furniture_Col_SE.nif"));
-    r.load_parsed(&nif, &none);
+    r.load_parsed(&nif, &csm_only);
     let sent = r.take_jobs(); // handed to the pool
     assert!(!sent.is_empty());
-    r.load_parsed(&nif, &none);
+    r.load_parsed(&nif, &csm_only);
     let unsent = r.take_jobs();
     // the unsent queue holds only the new load's jobs, and the same program is queued again
     assert_eq!(unsent.len(), sent.len());
     assert!(sent.iter().all(|j| !j.is_current()), "old jobs are stale");
     assert!(unsent.iter().all(|j| j.is_current()));
     // an edit after the load is current too
-    r.load_parsed(&nif, &none);
-    r.load_parsed(&nif, &none);
+    r.load_parsed(&nif, &csm_only);
+    r.load_parsed(&nif, &csm_only);
     assert_eq!(r.take_jobs().len(), sent.len(), "no pile-up of unsent jobs");
 }
