@@ -101,6 +101,80 @@ impl Path {
     }
 }
 
+/// The code a hot function is compiled for, passed first to every function between a frame entry and the kernels (the
+/// frames are in `bc1/frames.rs`). Each instance has a concrete `Isa`, so a kernel choice on [`Isa::avx2`] folds at
+/// compile time.
+pub(crate) trait Isa: Copy {
+    /// The path this code runs on.
+    #[allow(dead_code)] // First read by a wide kernel's run counter, with the first AVX2 kernel.
+    const PATH: Path;
+    /// The token of the AVX2 path, when this is it.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    fn avx2(self) -> Option<Avx2>;
+}
+
+/// The base path's code: the SSE2 kernels (the portable ones on a target without SSE2).
+#[derive(Clone, Copy)]
+pub(crate) struct Base;
+
+impl Isa for Base {
+    const PATH: Path = Path::Base;
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    fn avx2(self) -> Option<Avx2> {
+        None
+    }
+}
+
+/// Proof that std found AVX2 on this CPU: only [`Avx2::require`] builds one (the field is private), so code holding an
+/// `Avx2` may call a `#[target_feature(enable = "avx2")]` function.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[derive(Clone, Copy)]
+pub(crate) struct Avx2(());
+
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+impl Avx2 {
+    /// The token. Panics unless std detects AVX2 (cached after the first call).
+    pub(crate) fn require() -> Avx2 {
+        assert!(
+            Detected::now().avx2,
+            "path avx2 is not available: {}",
+            Path::Avx2.missing().unwrap_or("")
+        );
+        Avx2(())
+    }
+}
+
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+impl Isa for Avx2 {
+    const PATH: Path = Path::Avx2;
+    fn avx2(self) -> Option<Avx2> {
+        Some(self)
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// How often this thread ran each path's frame, by place in [`Path::ALL`].
+    static FRAME_RUNS: std::cell::Cell<[u64; Path::ALL.len()]> =
+        const { std::cell::Cell::new([0; Path::ALL.len()]) };
+}
+
+/// Counts one run of path `p`'s frame on this thread (unit tests only; each frame entry calls it first).
+#[cfg(test)]
+pub(crate) fn frame_ran(p: Path) {
+    FRAME_RUNS.with(|c| {
+        let mut runs = c.get();
+        runs[p as usize] += 1;
+        c.set(runs);
+    });
+}
+
+/// How often this thread ran each path's frame, by place in [`Path::ALL`].
+#[cfg(test)]
+pub(crate) fn frame_runs() -> [u64; Path::ALL.len()] {
+    FRAME_RUNS.with(|c| c.get())
+}
+
 /// The paths the unit tests run: `tests/support/paths.rs`'s `paths()`, with the same line and the same
 /// `SDC_BCENC_PATHS` checks.
 #[cfg(test)]

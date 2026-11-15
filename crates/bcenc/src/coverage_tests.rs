@@ -2,13 +2,13 @@
 //! hidden `_on` entry gives the base path's bytes on every path the machine has, and each public function is its `_on`
 //! entry on `Path::best()`.
 use crate::bc1::alpha::encode_alpha;
-use crate::bc1::encode::{encode, encode_level};
+use crate::bc1::frames::{encode_alpha_on, encode_level_on, encode_on};
 use crate::bc1::palette::{build_single_tables, dual_palette, single_tables};
 use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6};
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
 use crate::gen;
 use crate::hits::{counts, Hit};
-use crate::path::tested_paths;
+use crate::path::{frame_runs, tested_paths, Base};
 use crate::{
     bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_on,
     bc1_encode_block_alpha_with, bc1_encode_block_level, bc1_encode_block_level_on,
@@ -246,6 +246,33 @@ fn the_public_functions_run_the_best_path() {
     }
 }
 
+/// Each frame entry runs its path's frame once per call: on every tested path, 4 blocks (one from each of the first 4
+/// colour classes) through `encode_on` and `encode_alpha_on` (with texels 0 and 15 transparent, so the alpha encode
+/// does not hand on to the plain one) count 8 frames on that path and none on another. `Base` counts too: its entry is
+/// the match arm.
+#[test]
+fn the_frames_run_on_their_path() {
+    let blocks = &gen::colour_classes(0xE0_0007, 1)[..4];
+    for p in tested_paths() {
+        let before = frame_runs();
+        for px in blocks {
+            encode_on::<18>(p, px, true, PLAIN);
+            encode_alpha_on::<18>(p, px, 0x8001, PLAIN);
+        }
+        let after = frame_runs();
+        for q in Path::ALL {
+            let want = if q == p { 8 } else { 0 };
+            assert_eq!(
+                after[q as usize] - before[q as usize],
+                want,
+                "frames run on path {} while encoding on path {}",
+                q.name(),
+                p.name()
+            );
+        }
+    }
+}
+
 /// How often this thread took each branch since `before` (an earlier [`counts`]). The counters are per thread, so
 /// the tests running beside this one add nothing; taking the difference also leaves out a test that ran earlier on
 /// the same thread.
@@ -261,60 +288,69 @@ fn taken(grew: &[(Hit, u64)], hit: Hit) -> u64 {
     grew.iter().find(|&&(h, _)| h == hit).unwrap().1
 }
 
+/// On every tested path, through the `_on` entries, so each path's code takes every branch (the counters start again
+/// per path).
 #[test]
 fn every_ported_branch_is_taken() {
-    let before = counts();
-    for v in gen::bc4_classes(0xC0DE_0001, 600) {
-        let px = v.map(|a| [a, a ^ 0x5A, 0, a]);
-        for rad in [4, 5, 10] {
-            bc4_encode_block(&px, 0, rad);
-            bc5_encode_block(&px, rad);
-            for cut in gen::CUTS {
-                bc4_encode_alpha(&v, rad, cut);
-            }
-            // rgbcx reads a cut of 0 as 128.
-            bc4_encode_alpha(&v, rad, 0);
-        }
-    }
-    // The BC1 palettes, and the single-colour and total-ordering tables: the encoder builds those once, on whichever
-    // thread asks first, so the test builds them here, on its own.
-    for three in [false, true] {
-        dual_palette(three, 3, 40, 5, 20, 9, 31);
-    }
-    build_single_tables();
-    build_order_tables();
-    // BC1 in both modes with both weight sets: the colour classes, plus every grey and the solid colours at the ends
-    // of the range. Every texel on one selector at a total-ordering lookup is rare: 1500 per class reach every arm
-    // (the review-shaped narrow clusters take the 4-colour selector 0 arm, the half-step near-solid blocks the
-    // 3-colour selector 1 arm).
+    let grey = gen::bc4_classes(0xC0DE_0001, 600);
+    // Every texel on one selector at a total-ordering lookup is rare: 1500 per class reach every arm (the review-shaped
+    // narrow clusters take the 4-colour selector 0 arm, the half-step near-solid blocks the 3-colour selector 1 arm).
     let blocks = gen::colour_classes(0xC0DE_0002, 1500);
-    for allow_3color in [false, true] {
-        for weights in [PLAIN, PERCEPTUAL] {
-            for px in &blocks {
-                encode::<18>(px, allow_3color, weights);
-            }
-            for px in &solids() {
-                encode::<18>(px, allow_3color, weights);
-            }
-        }
-    }
-    // BC1 one-bit alpha: every mask class over a sample of the colour classes, both weight sets, and the block whose
-    // endpoint search runs all 64 rounds (no class reaches that bound).
     let masks = gen::alpha_masks(0xC0DE_0003, 24);
-    for weights in [PLAIN, PERCEPTUAL] {
-        for px in blocks.iter().step_by(7) {
-            for &mask in &masks {
-                encode_alpha::<18>(px, mask, weights);
+    for p in tested_paths() {
+        let before = counts();
+        for v in &grey {
+            let px = v.map(|a| [a, a ^ 0x5A, 0, a]);
+            for rad in [4, 5, 10] {
+                bc4_encode_block_on(p, &px, 0, rad);
+                bc5_encode_block_on(p, &px, rad);
+                for cut in gen::CUTS {
+                    bc4_encode_alpha_on(p, v, rad, cut);
+                }
+                // rgbcx reads a cut of 0 as 128.
+                bc4_encode_alpha_on(p, v, rad, 0);
             }
         }
+        // The BC1 palettes, and the single-colour and total-ordering tables: the encoder builds those once, on
+        // whichever thread asks first, so the test builds them here, on its own.
+        for three in [false, true] {
+            dual_palette(three, 3, 40, 5, 20, 9, 31);
+        }
+        build_single_tables();
+        build_order_tables();
+        // BC1 in both modes with both weight sets: the colour classes, plus every grey and the solid colours at the
+        // ends of the range.
+        for allow_3color in [false, true] {
+            for weights in [PLAIN, PERCEPTUAL] {
+                for px in &blocks {
+                    encode_on::<18>(p, px, allow_3color, weights);
+                }
+                for px in &solids() {
+                    encode_on::<18>(p, px, allow_3color, weights);
+                }
+            }
+        }
+        // BC1 one-bit alpha: every mask class over a sample of the colour classes, both weight sets, and the block
+        // whose endpoint search runs all 64 rounds (no class reaches that bound).
+        for weights in [PLAIN, PERCEPTUAL] {
+            for px in blocks.iter().step_by(7) {
+                for &mask in &masks {
+                    encode_alpha_on::<18>(p, px, mask, weights);
+                }
+            }
+        }
+        encode_alpha_on::<18>(p, &gen::LONG_WALK.0, gen::LONG_WALK.1, PLAIN);
+        let never: Vec<_> = since(&before)
+            .into_iter()
+            .filter(|&(_, n)| n == 0)
+            .map(|(h, _)| h)
+            .collect();
+        assert!(
+            never.is_empty(),
+            "path {}: branches never taken: {never:?}",
+            p.name()
+        );
     }
-    encode_alpha::<18>(&gen::LONG_WALK.0, gen::LONG_WALK.1, PLAIN);
-    let never: Vec<_> = since(&before)
-        .into_iter()
-        .filter(|&(_, n)| n == 0)
-        .map(|(h, _)| h)
-        .collect();
-    assert!(never.is_empty(), "branches never taken: {never:?}");
 }
 
 /// The greys and the solid colours at the ends of the range, green apart from red and blue.
@@ -393,7 +429,8 @@ fn never_at(p: Params) -> Vec<Hit> {
 }
 
 /// At every level the encode equals rgbcx, with the shadow checks of every `Seen` skip running (HY8's argument holds
-/// for any `Params`, Note HY15), and takes the branches level 18 takes except those its search depth rules out.
+/// for any `Params`, Note HY15), and takes the branches level 18 takes except those its search depth rules out; on
+/// every tested path, each path's counts compared with its own level 18.
 #[test]
 fn every_level_matches_rgbcx_with_its_skips_checked() {
     // The once-built tables, on this thread before the first count: a build inside the first pass would count there.
@@ -407,42 +444,47 @@ fn every_level_matches_rgbcx_with_its_skips_checked() {
     let blocks = gen::colour_classes(0xC0DE_0002, 1500);
     let solids = solids();
     let named = one_round_blocks();
-    let mut passes = Vec::new();
-    for level in LEVELS {
-        let before = counts();
-        for allow_3color in [false, true] {
-            for perceptual in [false, true] {
-                let weights = if perceptual { PERCEPTUAL } else { PLAIN };
-                for px in blocks.iter().chain(&solids).chain(&named) {
-                    assert_eq!(
-                        encode_level(px, level, allow_3color, weights),
-                        encoders_sys::bc1_encode_block_level(px, level, allow_3color, perceptual),
-                        "level {level}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}"
-                    );
+    for p in tested_paths() {
+        let mut passes = Vec::new();
+        for level in LEVELS {
+            let before = counts();
+            for allow_3color in [false, true] {
+                for perceptual in [false, true] {
+                    let weights = if perceptual { PERCEPTUAL } else { PLAIN };
+                    for px in blocks.iter().chain(&solids).chain(&named) {
+                        assert_eq!(
+                            encode_level_on(p, px, level, allow_3color, weights),
+                            encoders_sys::bc1_encode_block_level(px, level, allow_3color, perceptual),
+                            "path {}, level {level}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}",
+                            p.name()
+                        );
+                    }
                 }
             }
+            passes.push((level, since(&before)));
         }
-        passes.push((level, since(&before)));
-    }
-    let h18 = &passes.iter().find(|(l, _)| *l == 18).unwrap().1;
-    let mut wrong = Vec::new();
-    for (level, hl) in &passes {
-        let never = never_at(params(*level));
-        for &(hit, n) in hl {
-            if never.contains(&hit) {
-                if n > 0 {
+        let h18 = &passes.iter().find(|(l, _)| *l == 18).unwrap().1;
+        let mut wrong = Vec::new();
+        for (level, hl) in &passes {
+            let never = never_at(params(*level));
+            for &(hit, n) in hl {
+                if never.contains(&hit) {
+                    if n > 0 {
+                        wrong.push(format!(
+                            "path {}, level {level} took {hit:?}, which its search depth rules out",
+                            p.name()
+                        ));
+                    }
+                } else if taken(h18, hit) > 0 && n == 0 {
                     wrong.push(format!(
-                        "level {level} took {hit:?}, which its search depth rules out"
+                        "path {}, level {level} never took {hit:?}, which level 18 takes",
+                        p.name()
                     ));
                 }
-            } else if taken(h18, hit) > 0 && n == 0 {
-                wrong.push(format!(
-                    "level {level} never took {hit:?}, which level 18 takes"
-                ));
             }
         }
+        assert!(wrong.is_empty(), "{wrong:#?}");
     }
-    assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
 /// The class generators' restated rounding (`round_code`, `round_code_midpoint`, which find the 565 rounding
@@ -498,7 +540,7 @@ fn two_opaque_colours_never_tie_on_the_default_alpha_axis() {
                     let px: [[u8; 4]; 16] = std::array::from_fn(|i| colour(i < n_a));
                     // Texels n_a + n_b and up are transparent.
                     let mask = (0xFFFFu32 << (n_a + n_b)) as u16;
-                    encode_alpha::<18>(&px, mask, PLAIN);
+                    encode_alpha::<18>(Base, &px, mask, PLAIN);
                     cases += 1;
                 }
             }
@@ -517,8 +559,8 @@ fn the_default_axis_tie_block_keeps_the_default_axis() {
     let mut swapped = px;
     swapped.swap(0, 1);
     let before = counts();
-    encode_alpha::<18>(&px, mask, PLAIN);
-    encode_alpha::<18>(&swapped, mask, PERCEPTUAL);
+    encode_alpha::<18>(Base, &px, mask, PLAIN);
+    encode_alpha::<18>(Base, &swapped, mask, PERCEPTUAL);
     let grew = since(&before);
     assert_eq!(taken(&grew, Hit::AlphaAxisDefault), 2);
     assert_eq!(taken(&grew, Hit::AlphaAxisScaled), 0);

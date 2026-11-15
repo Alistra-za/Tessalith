@@ -29,6 +29,7 @@
 use super::Ends;
 #[cfg(test)]
 use super::DUAL;
+use crate::path::Isa;
 
 /// A block's texels prepared for the searches, for one set of channel weights `w` and decoder weights `dec`.
 pub(crate) struct Texels {
@@ -46,12 +47,14 @@ pub(crate) struct Texels {
 impl Texels {
     /// Panics unless every channel weight is in 1..=256 and their sum is at most 256, and both decoder weights are
     /// at least 1 and their sum is at most 4 (the kernel's integer bounds, written beside the kernel).
+    #[inline(always)]
     pub(crate) fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Self {
         Self::masked(px, w, dec, 0)
     }
 
     /// As `new`; texel i is transparent when bit i of `mask` is set (only [`find_sels3_masked`] reads the mask), and
     /// panics when a bit above the 16th is set. `new` is `masked` with mask 0.
+    #[inline(always)]
     pub(crate) fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Self {
         assert!(
             mask <= 0xFFFF,
@@ -80,9 +83,16 @@ impl Texels {
 }
 
 /// The block's error under endpoints `e` with the best 4-colour selector per texel, in kernel units. Always the full
-/// total. `sels` is written only when the total is below `cutoff`.
-pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-    let total = imp::find_sels4(&t.k, e, sels, cutoff);
+/// total. `sels` is written only when the total is below `cutoff`. The kernel is the one compiled for `isa`.
+#[inline(always)]
+pub(crate) fn find_sels4(
+    isa: impl Isa,
+    t: &Texels,
+    e: &Ends,
+    sels: &mut [u8; 16],
+    cutoff: u32,
+) -> u32 {
+    let total = imp::find_sels4(isa, &t.k, e, sels, cutoff);
     #[cfg(test)]
     assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
     #[cfg(test)]
@@ -97,8 +107,15 @@ pub(crate) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
 }
 
 /// [`find_sels4`] for a 3-colour block (selectors 0 low endpoint, 1 high endpoint, 2 midpoint).
-pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-    let total = imp::find_sels3(&t.k, e, sels, cutoff);
+#[inline(always)]
+pub(crate) fn find_sels3(
+    isa: impl Isa,
+    t: &Texels,
+    e: &Ends,
+    sels: &mut [u8; 16],
+    cutoff: u32,
+) -> u32 {
+    let total = imp::find_sels3(isa, &t.k, e, sels, cutoff);
     #[cfg(test)]
     assert_eq!(t.mask, 0, "a masked block goes to find_sels3_masked");
     #[cfg(test)]
@@ -112,8 +129,9 @@ pub(crate) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32)
 
 /// [`find_sels3`] with no cutoff, for a block built with [`Texels::masked`]: all 16 selectors are written, and a
 /// transparent texel gets selector 3 and adds no error. Returns the opaque texels' error in kernel units.
-pub(crate) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-    let total = imp::find_sels3_masked(&t.k, e, sels);
+#[inline(always)]
+pub(crate) fn find_sels3_masked(isa: impl Isa, t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    let total = imp::find_sels3_masked(isa, &t.k, e, sels);
     #[cfg(test)]
     if t.dec == DUAL {
         let mut want = [0xEEu8; 16];
@@ -388,6 +406,7 @@ mod scalar {
 mod portable {
     use super::super::Ends;
     use super::scalar;
+    use crate::path::Isa;
 
     pub(super) struct Texels {
         px: [[u8; 4]; 16],
@@ -410,12 +429,24 @@ mod portable {
     // The products below fit `u32`: a `_dec` total is at most 16 texels x 256 (the channel weights' sum) x 4 (the
     // decoder weights' sum) x 255^2 = 1,065,369,600, and times the decoder weights' sum again 4,261,478,400 < 2^32.
     // `Texels::masked` refuses weights above those sums.
-    pub(super) fn find_sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    // The searches take the code path as the SSE2 ones do, and ignore it: there is no wider portable code.
+    pub(super) fn find_sels3_masked(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+    ) -> u32 {
         scalar::find_sels3_masked_dec(&t.px, t.mask, t.w, t.dec, e, sels)
             * (t.dec[0] + t.dec[1]) as u32
     }
 
-    pub(super) fn find_sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    pub(super) fn find_sels4(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+        cutoff: u32,
+    ) -> u32 {
         let mut local = [0u8; 16];
         let total =
             scalar::find_sels4_dec(&t.px, t.w, t.dec, e, &mut local) * (t.dec[0] + t.dec[1]) as u32;
@@ -425,7 +456,13 @@ mod portable {
         total
     }
 
-    pub(super) fn find_sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    pub(super) fn find_sels3(
+        _isa: impl Isa,
+        t: &Texels,
+        e: &Ends,
+        sels: &mut [u8; 16],
+        cutoff: u32,
+    ) -> u32 {
         let mut local = [0u8; 16];
         let total =
             scalar::find_sels3_dec(&t.px, t.w, t.dec, e, &mut local) * (t.dec[0] + t.dec[1]) as u32;

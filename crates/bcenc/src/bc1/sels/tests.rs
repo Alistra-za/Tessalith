@@ -1,9 +1,13 @@
-//! Tests of the selector searches: every test runs on the public path and on `portable`.
+//! Tests of the selector searches: every test runs on the public path, on `portable` and, when the unit tests run the
+//! AVX2 path, on the kernels' AVX2 stamps.
 
 use super::super::palette::dual_palette;
 use super::super::{PERCEPTUAL, PLAIN};
 use super::*;
 use crate::gen;
+use crate::path::Base;
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+use crate::path::{tested_paths, Avx2, Path};
 
 fn blocks() -> Vec<[[u8; 4]; 16]> {
     gen::colour_classes(0x5E15_0001, 40)
@@ -71,15 +75,45 @@ impl Kernel for Public {
         Texels::masked(px, w, dec, mask)
     }
     fn f3m(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-        find_sels3_masked(t, e, sels)
+        find_sels3_masked(Base, t, e, sels)
     }
     fn f4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        find_sels4(t, e, sels, cutoff)
+        find_sels4(Base, t, e, sels, cutoff)
     }
     fn f3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        find_sels3(t, e, sels, cutoff)
+        find_sels3(Base, t, e, sels, cutoff)
     }
 }
+/// The public searches on the AVX2 path (the kernels' AVX2 stamps).
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+struct OnAvx2;
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+impl Kernel for OnAvx2 {
+    type T = Texels;
+    fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Texels {
+        Texels::new(px, w, dec)
+    }
+    fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Texels {
+        Texels::masked(px, w, dec, mask)
+    }
+    fn f3m(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+        find_sels3_masked(Avx2::require(), t, e, sels)
+    }
+    fn f4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+        find_sels4(Avx2::require(), t, e, sels, cutoff)
+    }
+    fn f3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+        find_sels3(Avx2::require(), t, e, sels, cutoff)
+    }
+}
+
+/// Whether the unit tests run the AVX2 path (`path::tested_paths`, which panics when `SDC_BCENC_PATHS` names a path
+/// this machine lacks).
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+fn avx2_tested() -> bool {
+    tested_paths().contains(&Path::Avx2)
+}
+
 struct Portable;
 impl Kernel for Portable {
     type T = portable::Texels;
@@ -90,13 +124,13 @@ impl Kernel for Portable {
         portable::Texels::masked(px, w, dec, mask)
     }
     fn f3m(t: &portable::Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-        portable::find_sels3_masked(t, e, sels)
+        portable::find_sels3_masked(Base, t, e, sels)
     }
     fn f4(t: &portable::Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        portable::find_sels4(t, e, sels, cutoff)
+        portable::find_sels4(Base, t, e, sels, cutoff)
     }
     fn f3(t: &portable::Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-        portable::find_sels3(t, e, sels, cutoff)
+        portable::find_sels3(Base, t, e, sels, cutoff)
     }
 }
 
@@ -130,6 +164,10 @@ fn equal_the_scalar_searches<K: Kernel>() {
 fn the_kernels_equal_the_scalar_searches() {
     equal_the_scalar_searches::<Public>();
     equal_the_scalar_searches::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        equal_the_scalar_searches::<OnAvx2>();
+    }
 }
 
 #[test]
@@ -183,6 +221,10 @@ fn take_the_decoder_weights<K: Kernel>() {
 fn the_kernels_take_the_decoder_weights() {
     take_the_decoder_weights::<Public>();
     take_the_decoder_weights::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        take_the_decoder_weights::<OnAvx2>();
+    }
 }
 
 fn decide_by_the_cutoff<K: Kernel>() {
@@ -229,6 +271,10 @@ fn decide_by_the_cutoff<K: Kernel>() {
 fn a_cutoff_decides_as_the_scalar_search_does() {
     decide_by_the_cutoff::<Public>();
     decide_by_the_cutoff::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        decide_by_the_cutoff::<OnAvx2>();
+    }
 }
 
 /// The texel of entry `j`'s colour on both decoders, when the two decoders agree on it.
@@ -379,6 +425,10 @@ fn ties_and_exact<K: Kernel>() {
 fn ties_and_exact_texels() {
     ties_and_exact::<Public>();
     ties_and_exact::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        ties_and_exact::<OnAvx2>();
+    }
 }
 
 /// The inputs that make the largest errors: endpoints, blocks and channel weights.
@@ -451,6 +501,10 @@ fn largest_errors<K: Kernel>() {
 fn the_largest_errors_do_not_overflow() {
     largest_errors::<Public>();
     largest_errors::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        largest_errors::<OnAvx2>();
+    }
 }
 
 /// The masks the masked tests run: those of `gen::alpha_masks`, none and all.
@@ -519,6 +573,10 @@ fn masked_equals_the_scalar_search<K: Kernel>() {
 fn the_masked_kernel_equals_the_scalar_search() {
     masked_equals_the_scalar_search::<Public>();
     masked_equals_the_scalar_search::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        masked_equals_the_scalar_search::<OnAvx2>();
+    }
 }
 
 #[test]
@@ -569,6 +627,10 @@ fn masked_largest_errors<K: Kernel>() {
 fn the_masked_largest_errors_do_not_overflow() {
     masked_largest_errors::<Public>();
     masked_largest_errors::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        masked_largest_errors::<OnAvx2>();
+    }
 }
 
 #[test]

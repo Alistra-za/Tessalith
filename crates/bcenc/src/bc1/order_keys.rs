@@ -13,6 +13,7 @@
 
 use super::fit::OrderTables;
 use super::tables::{BEST_TOTAL_ORDERINGS3, MAX_TOTAL_ORDERINGS4};
+use crate::path::Isa;
 
 /// `MAX_TOTAL_ORDERINGS3` (rgbcx.h): the width of the generated table's rows.
 pub(super) const MAX_TOTAL_ORDERINGS3: usize = BEST_TOTAL_ORDERINGS3[0].len();
@@ -29,8 +30,12 @@ const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 /// (`params.rs` asserts it is inside the clamp). The level is a const generic so that the count is a constant in each
 /// instance.
 ///
+/// The kernel is the stamp compiled for `isa`'s path (as in [`keys3`]); the scalar code where the target lacks SSE2.
+///
 /// [`Seen`]: super::seen::Seen
+#[inline(always)]
 pub(crate) fn keys4<const LEVEL: u32>(
+    isa: impl Isa,
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u16; MAX_TOTAL_ORDERINGS4],
@@ -39,8 +44,13 @@ pub(crate) fn keys4<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS4] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) };
+        let keys = if let Some(_t) = isa.avx2() {
+            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
+            unsafe { sse2::keys4_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        } else {
+            // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
+            unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) }
+        };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
         assert_eq!(
@@ -50,7 +60,11 @@ pub(crate) fn keys4<const LEVEL: u32>(
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys4::<LEVEL>(total, sums, row, tables, single_key);
+    let keys = {
+        // The scalar code serves every path here.
+        let _ = isa;
+        scalar::keys4::<LEVEL>(total, sums, row, tables, single_key)
+    };
     keys
 }
 
@@ -64,7 +78,9 @@ pub(crate) fn keys4<const LEVEL: u32>(
 /// 32) (`cEncodeBC1Exhaustive` is level 19 only, so the `std::min` bound is what the ported levels use).
 ///
 /// [`Seen`]: super::seen::Seen
+#[inline(always)]
 pub(crate) fn keys3<const LEVEL: u32>(
+    isa: impl Isa,
     total: [i32; 3],
     sums: &[[u32; 17]; 3],
     row: &[u8; MAX_TOTAL_ORDERINGS3],
@@ -73,8 +89,13 @@ pub(crate) fn keys3<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS3] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
-        let keys = unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) };
+        let keys = if let Some(_t) = isa.avx2() {
+            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
+            unsafe { sse2::keys3_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        } else {
+            // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
+            unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) }
+        };
         // Shadow check: every real call in the unit tests also runs the code the kernel replaces.
         #[cfg(test)]
         assert_eq!(
@@ -84,7 +105,11 @@ pub(crate) fn keys3<const LEVEL: u32>(
         keys
     };
     #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
-    let keys = scalar::keys3::<LEVEL>(total, sums, row, tables, single_key);
+    let keys = {
+        // The scalar code serves every path here.
+        let _ = isa;
+        scalar::keys3::<LEVEL>(total, sums, row, tables, single_key)
+    };
     keys
 }
 
@@ -167,6 +192,15 @@ mod tests {
     use super::super::tables::{N3, N4};
     use super::super::Ends;
     use super::*;
+    use crate::path::Base;
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    use crate::path::{tested_paths, Avx2, Path};
+
+    /// Whether the unit tests run the AVX2 path, whose kernels are the AVX2 stamps.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    fn avx2_tested() -> bool {
+        tested_paths().contains(&Path::Avx2)
+    }
 
     /// Rows that together hold every 4-colour ordering index.
     fn rows4() -> Vec<[u16; MAX_TOTAL_ORDERINGS4]> {
@@ -230,6 +264,8 @@ mod tests {
         // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        let avx2 = avx2_tested();
         let tables = order_tables();
         let rows = rows3();
         for px in blocks() {
@@ -238,12 +274,20 @@ mod tests {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
                     // Level 18 fits the whole row.
-                    let keys = keys3::<18>(total, &sums, row, tables, SINGLE);
+                    let keys = keys3::<18>(Base, total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
                         scalar::keys3::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
+                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                    if avx2 {
+                        assert_eq!(
+                            keys3::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
+                            keys,
+                            "AVX2 stamp, {px:?} along {axis:?}"
+                        );
+                    }
                     for (q, &s) in row.iter().enumerate() {
                         if TOTAL_ORDER_3_16.contains(&(s as usize)) {
                             assert_eq!(keys[q], SINGLE, "ordering {s}");
@@ -259,6 +303,8 @@ mod tests {
         // Meaningful only where the SSE2 kernel exists: on a target without SSE2 both sides are the scalar code, and
         // the scalar path is then covered by the differential tests against `encoders_sys`.
         const SINGLE: u32 = 0xDEAD_BEEF;
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        let avx2 = avx2_tested();
         let axes = axes();
         let tables = order_tables();
         let rows = rows4();
@@ -268,12 +314,20 @@ mod tests {
                 let sums = sorted_sums(&px, axis, total);
                 for row in &rows {
                     // Level 18 fits the whole row.
-                    let keys = keys4::<18>(total, &sums, row, tables, SINGLE);
+                    let keys = keys4::<18>(Base, total, &sums, row, tables, SINGLE);
                     assert_eq!(
                         keys,
                         scalar::keys4::<18>(total, &sums, row, tables, SINGLE),
                         "{px:?} along {axis:?}"
                     );
+                    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+                    if avx2 {
+                        assert_eq!(
+                            keys4::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
+                            keys,
+                            "AVX2 stamp, {px:?} along {axis:?}"
+                        );
+                    }
                     for (q, &s) in row.iter().enumerate() {
                         if TOTAL_ORDER_4_16.contains(&(s as usize)) {
                             assert_eq!(keys[q], SINGLE, "ordering {s}");

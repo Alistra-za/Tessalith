@@ -1,10 +1,13 @@
 //! `bcenc`: rgbcx's block encoders in Rust. A port of rgbcx from bc7enc_rdo commit b943862 with Tessalith's patches
 //! (MIT or public domain, `crates/encoders-sys/vendor/bc7enc_rdo/LICENSE`). The vendored C++ in `encoders-sys` is the
 //! specification and the reference every test compares with. No dependencies, no mutable global state (two sets of
-//! tables are built once in a `OnceLock`). `unsafe` has one use: calling a `#[target_feature(enable = "sse2")]`
-//! function of a module compiled only where the target has SSE2 (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and
-//! `mod sse2` in `bc4.rs`), each call with a `// SAFETY:` comment; Rust asks for the block even though the feature is
-//! always on there. A target without SSE2 runs portable code instead, which the unit tests run on every target.
+//! tables are built once in a `OnceLock`). `unsafe` has two uses, each call with a `// SAFETY:` comment: calling a
+//! `#[target_feature(enable = "sse2")]` function of a module compiled only where the target has SSE2
+//! (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and `mod sse2` in `bc4.rs`), where Rust asks for the block even though
+//! the feature is always on; and calling a `#[target_feature(enable = "avx2")]` function (the AVX2 frames of
+//! `bc1/frames.rs` and the kernels' AVX2 stamps) while holding a `path::Avx2`, a token only `Avx2::require` creates,
+//! after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the unit tests
+//! run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
 //! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16). Each call runs on
 //! the widest code path the CPU has, picked per call; `Path` and the `_on` entries are hidden, for tests and the speed
@@ -144,8 +147,8 @@ pub fn bc1_encode_block_on(
     path.assert_available();
     let w = bc1::weights(perceptual);
     match search {
-        Bc1Search::Default => bc1::encode::encode::<18>(px, allow_3color, w),
-        Bc1Search::Fast => bc1::encode::encode::<BC1_FAST_LEVEL>(px, allow_3color, w),
+        Bc1Search::Default => bc1::frames::encode_on::<18>(path, px, allow_3color, w),
+        Bc1Search::Fast => bc1::frames::encode_on::<BC1_FAST_LEVEL>(path, px, allow_3color, w),
     }
 }
 
@@ -174,7 +177,7 @@ pub fn bc1_encode_block_level_on(
     perceptual: bool,
 ) -> [u8; 8] {
     path.assert_available();
-    bc1::encode::encode_level(px, level, allow_3color, bc1::weights(perceptual))
+    bc1::frames::encode_level_on(path, px, level, allow_3color, bc1::weights(perceptual))
 }
 
 /// The alpha half of `rgbcx::encode_bc3_hq`: the BC4 search with the alpha-test guard at `cut` (BC4_SDC_GUARD128).
@@ -235,8 +238,8 @@ pub fn bc1_encode_block_alpha_on(
     path.assert_available();
     let w = bc1::weights(perceptual);
     match search {
-        Bc1Search::Default => bc1::alpha::encode_alpha::<18>(px, transparent, w),
-        Bc1Search::Fast => bc1::alpha::encode_alpha::<BC1_FAST_LEVEL>(px, transparent, w),
+        Bc1Search::Default => bc1::frames::encode_alpha_on::<18>(path, px, transparent, w),
+        Bc1Search::Fast => bc1::frames::encode_alpha_on::<BC1_FAST_LEVEL>(path, px, transparent, w),
     }
 }
 

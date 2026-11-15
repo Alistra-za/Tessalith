@@ -10,6 +10,7 @@ use super::params::params;
 use super::{BlockStats, Ends};
 
 /// `maximum(a, b)`: `(a > b) ? a : b`.
+#[inline(always)]
 pub(super) fn maximum(a: f32, b: f32) -> f32 {
     if a > b {
         a
@@ -19,6 +20,7 @@ pub(super) fn maximum(a: f32, b: f32) -> f32 {
 }
 
 /// `clampf`.
+#[inline(always)]
 fn clampf(value: f32, low: f32, high: f32) -> f32 {
     if value < low {
         low
@@ -32,6 +34,7 @@ fn clampf(value: f32, low: f32, high: f32) -> f32 {
 /// `encode_bc1_pick_initial` with the level's flags: the grey arm for an all-grey block, else the principal-axis arm
 /// with the level's power iterations (round 0) or the float bounding box (`bounding_box`, round 1, where `encode_bc1`
 /// adds `cEncodeBC1BoundingBox`). The 2D least-squares and integer bounding-box arms need flags no ported level sets.
+#[inline(always)]
 pub(crate) fn pick_initial<const LEVEL: u32>(
     px: &[[u8; 4]; 16],
     bounding_box: bool,
