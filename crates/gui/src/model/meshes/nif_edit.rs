@@ -1926,7 +1926,7 @@ impl MeshesModel {
             nif: Arc::new(nif),
             textures: Arc::new(textures),
             // Note IE12: a `.csm` a shape names is read through the scan, as in the Meshes view.
-            scan_db: self.store_path.clone(),
+            scan_db: self.scan_db(),
         }))
     }
 

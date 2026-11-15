@@ -2684,6 +2684,25 @@ fn csm_meshes(files: &[(&str, &str)]) -> (tempfile::TempDir, tempfile::TempDir, 
     (inst, cache, m)
 }
 
+/// Scans the instance again, and waits for the list and the NIF to be selected again.
+fn rescan(m: &mut MeshesModel) {
+    let t = Instant::now();
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    m.poll();
+    while m.scanning() || m.rows_loading() {
+        assert!(t.elapsed().as_secs() < 60, "the rescan did not end");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    assert_eq!(
+        m.error, None,
+        "the render thread's open database does not block the scan"
+    );
+    assert!(m.selected_nif.is_some(), "x.nif selected again");
+}
+
 /// The loaded shape once the render thread has answered.
 fn csm_shape(m: &mut MeshesModel) -> ShapeInfo {
     run_idle(&mut m.v3);
@@ -2923,6 +2942,55 @@ fn a_borrowed_normal_draws_pbr() {
     );
     assert!(s.material.pbr.is_some(), "the set's .csm draws PBR");
 }
+/// Fix round 1 (t9 item 2): the spec carries the scan it was built from, so a rescan that changes only the `.csm`
+/// reloads the view and draws the new values.
+#[test]
+fn a_rescan_draws_a_changed_csm() {
+    let (inst, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    assert_eq!(
+        csm_shape(&mut m).material.pbr.map(|p| p.params[0]),
+        Some(0.3)
+    );
+    let rev = |m: &MeshesModel| match m.v3.content() {
+        Some(v3::Content::Mesh(s)) => s.scan_db.as_ref().map(|d| d.rev),
+        _ => None,
+    };
+    let before = rev(&m);
+    scan_fixture::put(
+        inst.path(),
+        "mods/A/materials/a.csm",
+        br#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.75}"#,
+    );
+    rescan(&mut m);
+    assert_ne!(rev(&m), before, "a new scan revision in the spec");
+    assert_eq!(
+        csm_shape(&mut m).material.pbr.map(|p| p.params[0]),
+        Some(0.75),
+        "the rescanned .csm is drawn"
+    );
+}
+
+/// Fix round 1 (t9 item 3): the render thread opens the scan database once and keeps it across loads (a texture set
+/// pick and its undo reload the view); a rescan opens it again. Its open connection does not block the scan (`rescan` checks the scan's error).
+#[test]
+fn the_render_thread_opens_the_scan_once_per_revision() {
+    let (inst, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    let db = inst.path().join("scan.db");
+    let opens = || sdc_gui::model::viewport3d::scan_db_opens(&db);
+    let s = csm_shape(&mut m);
+    assert!(s.material.pbr.is_some());
+    assert_eq!(opens(), 1);
+    let block = s_block(&m);
+    m.set_txst(block, Some(ROCK01)).unwrap();
+    csm_shape(&mut m);
+    m.set_txst(block, None).unwrap();
+    csm_shape(&mut m);
+    assert_eq!(opens(), 1, "the reloads share the open database");
+    rescan(&mut m);
+    csm_shape(&mut m);
+    assert_eq!(opens(), 2, "a rescan opens it again");
+}
+
 /// The Meshes view's edit preview (a parsed NIF) reads a `.csm` through the scan too.
 #[test]
 fn a_parsed_preview_reads_the_csm_through_the_scan() {
@@ -2935,7 +3003,10 @@ fn a_parsed_preview_reads_the_csm_through_the_scan() {
             key: 1,
             nif: Arc::new(render3d::parse(&csm_nif("materials\\a.csm"))),
             textures: Arc::new(HashMap::new()),
-            scan_db: Some(inst.path().join("scan.db")),
+            scan_db: Some(v3::ScanDb {
+                path: inst.path().join("scan.db"),
+                rev: 0,
+            }),
         }),
         false,
     );

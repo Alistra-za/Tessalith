@@ -4,7 +4,7 @@
 //! The model owns its own worker channel, so the Textures view's model is untouched. Reads go through its own
 //! read-only `Store` connection and happen only on a selection change or when a scan ends, never per frame.
 use crate::model::picker::PickerPurpose;
-use crate::model::viewport3d::{FileSource, MeshSpec, Viewport3d};
+use crate::model::viewport3d::{FileSource, MeshSpec, ScanDb, Viewport3d};
 use crate::settings::MeshesSettings;
 use crate::worker::{start_scan, WorkerMsg};
 use engine::shader::{MeshAlpha, Shader};
@@ -1352,6 +1352,15 @@ impl MeshesModel {
         }
     }
 
+    /// Note IE12: the scan database and the completed scan the 3D view's content is built from.
+    fn scan_db(&self) -> Option<ScanDb> {
+        let path = self.store_path.clone()?;
+        Some(ScanDb {
+            path,
+            rev: self.scan_rev,
+        })
+    }
+
     /// Note GH3 (owner O11 (a)): the opened folder's output game paths (`textures/…`, lower case, `/`), `rev` bumped
     /// only when they change; the app calls this each frame. Each path is kept with its PBR twin, so a NIF naming
     /// `textures/x` matches an output `textures/pbr/x` and back (a leading `textures/pbr/` folded on both sides).
@@ -1735,7 +1744,7 @@ impl MeshesModel {
                     self.error = Some(db_err(e));
                     vec![]
                 });
-                let spec = mesh_spec(store, self.store_path.as_deref(), copy, &s);
+                let spec = mesh_spec(store, self.scan_db(), copy, &s);
                 let location = store.copy_location(copy).ok().flatten();
                 self.shapes = s;
                 self.resolved = resolved;
@@ -1799,11 +1808,11 @@ impl MeshesModel {
 }
 
 /// What the 3D panel draws for `copy`: where its bytes are and where the game's copy of each texture is. A `.csm`
-/// material, its roots and the textures it names are looked up in the scan at `db` when the render thread asks for
-/// them (Note IE12).
+/// material, its roots and the textures it names are looked up in the scan `db` when the render thread asks for them
+/// (Note IE12).
 fn mesh_spec(
     store: &Store,
-    db: Option<&Path>,
+    db: Option<ScanDb>,
     copy: i64,
     shapes: &[ShapeView],
 ) -> Result<Option<MeshSpec>, ScanError> {
@@ -1829,7 +1838,7 @@ fn mesh_spec(
         materials: HashMap::new(),
         csm: BTreeMap::new(),
         material_notes: vec![],
-        scan_db: db.map(Path::to_path_buf),
+        scan_db: db,
     }))
 }
 

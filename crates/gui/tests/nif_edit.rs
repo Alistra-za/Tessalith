@@ -1254,7 +1254,7 @@ fn open_edit_loads_the_source_and_previews_parsed() {
     // Note IE12: a `.csm` the preview's shapes name is read through the scan.
     assert!(matches!(
         m.v3.content(),
-        Some(Content::Parsed { scan_db: Some(db), .. }) if *db == d.path().join("scan.db")
+        Some(Content::Parsed { scan_db: Some(db), .. }) if db.path == d.path().join("scan.db")
     ));
     assert!(m.v3.nif_view);
     m.close_edit();

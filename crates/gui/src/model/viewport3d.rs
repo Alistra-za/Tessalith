@@ -173,7 +173,16 @@ pub struct MeshSpec {
     pub material_notes: Vec<String>,
     /// Note IE12: the scan database. A `materials/…` or `textures/…` path in neither map is looked up there when the
     /// render thread asks for it: a `.csm` a shape names, a root of its chain, a texture a `.csm` names.
-    pub scan_db: Option<PathBuf>,
+    pub scan_db: Option<ScanDb>,
+}
+
+/// Note IE12: a scan database and the completed scan of it a content was built from (`MeshesModel`'s scan count). A
+/// rescan is a new value, so the view reloads (a `.csm`, a root or a texture it names may have changed) and the render
+/// thread opens the database again.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanDb {
+    pub path: PathBuf,
+    pub rev: u64,
 }
 
 /// One shape's Advanced Skin card picks (Note GN): the renderer's preview and where each picked key is read (added
@@ -201,7 +210,7 @@ pub enum Content {
         textures: Arc<HashMap<String, FileSource>>,
         /// Note IE12: the scan database a path the map lacks is looked up in, as [`MeshSpec::scan_db`] (the Meshes
         /// view's edit preview); `None` reads the map only.
-        scan_db: Option<PathBuf>,
+        scan_db: Option<ScanDb>,
     },
     Builtin {
         key: u64,
@@ -299,14 +308,14 @@ impl Content {
             Content::Mesh(s) => Files {
                 materials: Some(&s.materials),
                 map: &s.textures,
-                scan_db: s.scan_db.as_deref(),
+                scan_db: s.scan_db.as_ref(),
             },
             Content::Parsed {
                 textures, scan_db, ..
             } => Files {
                 materials: None,
                 map: textures,
-                scan_db: scan_db.as_deref(),
+                scan_db: scan_db.as_ref(),
             },
             Content::Builtin { textures, .. } => Files {
                 materials: None,
@@ -324,7 +333,7 @@ impl Content {
 struct Files<'a> {
     materials: Option<&'a HashMap<String, FileSource>>,
     map: &'a HashMap<String, FileSource>,
-    scan_db: Option<&'a Path>,
+    scan_db: Option<&'a ScanDb>,
 }
 
 /// A rendered frame: RGBA8, sRGB-encoded for display when Linear Lighting is on.
@@ -654,7 +663,7 @@ pub enum V3Cmd {
         id: u64,
         nif: Arc<ParsedNif>,
         textures: Arc<HashMap<String, FileSource>>,
-        scan_db: Option<PathBuf>,
+        scan_db: Option<ScanDb>,
     },
     LoadBuiltin {
         id: u64,
@@ -1704,14 +1713,13 @@ impl Drop for Viewport3d {
     }
 }
 
-/// The file resolver over `f` (canonical path → bytes); read errors are collected in `errors`. The scan is opened
-/// once, on the first path that needs it.
+/// The file resolver over `f` (canonical path → bytes); read errors are collected in `errors`. The scan is read
+/// through this thread's one open database ([`scan_source`]).
 fn resolver<'a>(
     f: Files<'a>,
     bsas: &'a RefCell<HashMap<PathBuf, Option<BsaIndex>>>,
     errors: &'a RefCell<Vec<String>>,
 ) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
-    let scan: RefCell<Option<Option<modscan::store::Store>>> = RefCell::new(None);
     move |norm: &str| {
         let found = f
             .materials
@@ -1719,7 +1727,7 @@ fn resolver<'a>(
             .or_else(|| f.map.get(norm));
         let src = match found {
             Some(s) => std::borrow::Cow::Borrowed(s),
-            None => std::borrow::Cow::Owned(scan_source(f.scan_db?, norm, &scan, errors)?),
+            None => std::borrow::Cow::Owned(scan_source(f.scan_db?, norm, errors)?),
         };
         match read_source(&src, bsas) {
             Ok(b) => Some(b),
@@ -1732,14 +1740,32 @@ fn resolver<'a>(
     }
 }
 
+thread_local! {
+    /// Note IE12: this thread's one read-only scan database (the render thread's: its loads, edits and skin applies
+    /// share it), opened on the first path that needs it and kept for the thread's life; opened again when the path or
+    /// the scan revision changes, or after a query failed. A failed open is kept too, and retried on a new revision.
+    /// The database is in WAL mode (the scan's `open_rw`), so this idle connection holds no lock a scan waits for.
+    static SCAN: RefCell<Option<(ScanDb, Result<modscan::store::Store, String>)>> =
+        const { RefCell::new(None) };
+}
+
+#[cfg(feature = "test-hooks")]
+static SCAN_OPENS: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Tests (Note IE12): how often a render thread opened the scan database at `path`.
+#[cfg(feature = "test-hooks")]
+pub fn scan_db_opens(path: &Path) -> usize {
+    SCAN_OPENS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|p| *p == path)
+        .count()
+}
+
 /// Where the scan at `db` has `norm` (Note IE12): a `.csm` from `mat_winner`, a texture from `tex_winner`, each with
-/// the scan's winner rule (loose before BSA). A database that cannot be read is reported once per resolver.
-fn scan_source(
-    db: &Path,
-    norm: &str,
-    scan: &RefCell<Option<Option<modscan::store::Store>>>,
-    errors: &RefCell<Vec<String>>,
-) -> Option<FileSource> {
+/// the scan's winner rule (loose before BSA). A database that cannot be read is reported once per resolver's errors.
+fn scan_source(db: &ScanDb, norm: &str, errors: &RefCell<Vec<String>>) -> Option<FileSource> {
     use modscan::store::Store;
     let lookup = if norm.starts_with("materials/") {
         Store::material_location
@@ -1748,26 +1774,39 @@ fn scan_source(
     } else {
         return None;
     };
-    let fail = |e: modscan::ScanError| {
-        let line = format!("Scan database {}: {e}", db.display());
+    let fail = |e: &str| {
+        let line = format!("Scan database {}: {e}", db.path.display());
         let mut errors = errors.borrow_mut();
         if !errors.contains(&line) {
             errors.push(line);
         }
     };
-    let mut scan = scan.borrow_mut();
-    let store = scan
-        .get_or_insert_with(|| Store::open_read_only(db).map_err(fail).ok())
-        .as_ref()?;
-    match lookup(store, norm) {
-        Ok(at) => at.map(|(kind, root)| FileSource::from_store(kind, &root, norm)),
-        Err(e) => {
-            fail(e);
-            None
+    SCAN.with(|cell| {
+        let mut cell = cell.borrow_mut();
+        if cell.as_ref().is_none_or(|(k, _)| k != db) {
+            #[cfg(feature = "test-hooks")]
+            SCAN_OPENS.lock().unwrap().push(db.path.clone());
+            let store = Store::open_read_only(&db.path).map_err(|e| e.to_string());
+            *cell = Some((db.clone(), store));
         }
-    }
+        let store = match cell.as_ref().map(|(_, s)| s) {
+            Some(Ok(s)) => s,
+            Some(Err(e)) => {
+                fail(e);
+                return None;
+            }
+            None => return None,
+        };
+        match lookup(store, norm) {
+            Ok(at) => at.map(|(kind, root)| FileSource::from_store(kind, &root, norm)),
+            Err(e) => {
+                fail(&e.to_string());
+                *cell = None;
+                None
+            }
+        }
+    })
 }
-
 /// Loads `c`, then applies the material edits made since its load again (a reload after a shaders, features or
 /// device change keeps them).
 fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>) -> LoadReport {
