@@ -142,8 +142,8 @@ fn kinds_menu(ui: &mut egui::Ui, model: &AppModel, hidden_rows: usize) -> Option
         }
     });
     button.on_hover_text(
-        "Hide the kinds of warning and info row you don't need. Blocks and questions always show, and Export's review \
-         still lists every warning.",
+        "Hide the kinds of warning and info row you don't need. Blocks and questions always show. A hidden row still \
+         counts in the tab's number and in the ready counts.",
     );
     act
 }

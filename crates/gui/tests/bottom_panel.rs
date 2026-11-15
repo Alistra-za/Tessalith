@@ -206,6 +206,32 @@ fn a_hidden_kind_leaves_the_list_but_not_the_ready_count() {
     assert!(h.state().settings.problems_hidden.is_empty());
 }
 
+/// Note FM24 took the warnings out of Review, so the `Kinds ▾` hover no longer says Review lists them; it says what a
+/// hidden row still does (Note HC4: the counts ignore the hiding).
+#[test]
+fn the_kinds_hover_says_what_a_hidden_row_still_does() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_only_warnings(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    h.get_by_label("Kinds ▾").hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_by_label_contains("review still lists every warning")
+            .is_none(),
+        "Review lists no warning (Note FM24)"
+    );
+    h.get_by_label_contains(
+        "A hidden row still counts in the tab's number and in the ready counts",
+    );
+}
+
 /// Note HC4: a question can't be hidden, so a project of questions has no `Kinds ▾`.
 #[test]
 fn a_question_is_no_kind_to_hide() {

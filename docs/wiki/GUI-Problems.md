@@ -65,4 +65,4 @@ When a plan settles, every sub-type taken from a High-confidence suggestion (inc
 
 Click a row's subject to select it in the Textures view. Arriving from a count (**N undecided**, a set's **⚠** badge) opens the list narrowed, with a chip to clear it. The **Checks** pill narrows to check rows.
 
-**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden, and Review still lists every warning before an export.
+**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden. A hidden row still counts in the tab's number and in the ready counts.
