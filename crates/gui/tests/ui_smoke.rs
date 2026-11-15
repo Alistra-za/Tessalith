@@ -831,7 +831,7 @@ fn the_settings_strip_is_compact() {
     let mut h = harness(model);
     h.run();
     // At 1280×800 the settings start open (Note FC8, supersedes CE16's strip there).
-    assert!(h.query_by_label("Settings").is_none());
+    assert!(h.query_by_label("Preview settings").is_none());
     for group in ["Alpha", "Mipmaps", "Compression"] {
         assert!(h.query_all_by_label_contains(group).count() > 0, "{group}");
     }
@@ -1023,7 +1023,7 @@ fn at_1200x800_the_preview_keeps_its_width_and_the_toolbar_fits() {
         bar.width(),
         sdc_gui::ui::preview::PREVIEW_MIN
     );
-    h.get_by_label("Settings");
+    h.get_by_label("Preview settings");
     assert_toolbar_layout(&h, &[]);
 }
 
@@ -1034,19 +1034,32 @@ fn the_collapsed_settings_strip_opens_the_settings() {
     let (mut h, _d) = expanded_at_1200();
     assert!(PanelState::load(&h.ctx, eframe::egui::Id::new("preview-settings-strip")).is_some());
     assert!(h.query_by_label_contains("Compression").is_none());
-    h.get_by_label("Settings").hover();
+    h.get_by_label("Preview settings").hover();
     h.run();
-    h.get_by_label("Settings").click();
+    h.get_by_label("Preview settings").click();
     h.run();
     h.run();
     assert!(h.query_all_by_label_contains("Compression").count() > 0);
-    assert!(h.query_by_label("Settings").is_none());
+    assert!(h.query_by_label("Preview settings").is_none());
     // Collapsing and expanding again starts collapsed (a fresh PreviewUi per expansion).
     h.state_mut().collapse();
     h.run();
     h.state_mut().expand("landscape/rock01_rmaos");
     h.run();
-    h.get_by_label("Settings");
+    h.get_by_label("Preview settings");
+}
+
+/// Rule 8.1 (final review minor): the strip's button and the popped-out Settings window's heading are on screen
+/// together, so the strip is named "Preview settings" and "Settings" names only the window's heading.
+#[test]
+fn the_strip_and_the_popped_out_settings_window_have_their_own_names() {
+    use eframe::egui::accesskit::Role;
+    let (mut h, _d) = expanded_at_1200();
+    h.state_mut().settings_tab_popped = true;
+    h.state_mut().open_settings_tab();
+    h.run();
+    h.get_by_role_and_label(Role::Button, "Preview settings");
+    assert_eq!(h.query_all_by_label("Settings").count(), 1, "the heading");
 }
 
 /// Note FC8 (supersedes CE16's collapsed default): from 1280 px wide the preview's settings start open; below 1280
@@ -1057,7 +1070,7 @@ fn preview_settings_open_at_1280() {
     use sdc_gui::ui::State;
     type H = Harness<'static, (AppModel, State)>;
     let open = |h: &H| {
-        h.query_by_label("Settings").is_none()
+        h.query_by_label("Preview settings").is_none()
             && h.query_all_by_label_contains("Compression").count() > 0
     };
     for (width, want) in [(1280.0, true), (1600.0, true), (1200.0, false)] {
@@ -1538,7 +1551,42 @@ fn a_mip_count_shows_ticked_with_a_note() {
         tick.accesskit_node().toggled(),
         Some(eframe::egui::accesskit::Toggled::True)
     );
-    h.get_by_label("(3 levels)");
+    // Note JI3: the count is the Levels combo's value; the tick row no longer repeats it as a note.
+    assert_eq!(
+        h.get_by_role_and_label(Role::ComboBox, "Levels")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("3 levels")
+    );
+    assert!(h.query_by_label("(3 levels)").is_none());
+}
+
+/// Note JI3 (final review I3): an edited mip count has one ↺ in the texture panel, on its Levels row; the tick row
+/// above it shows none (the strip, which has no Levels row, keeps the tick row's).
+#[test]
+fn an_edited_mip_count_has_one_reset() {
+    use eframe::egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut model = opened(d.path());
+    model.set_field("landscape/leaf.png", "mips.levels", serde_json::json!(3));
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_item("landscape/leaf.png");
+    let mut h = harness(model);
+    h.run();
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let resets: Vec<_> = h
+        .query_all_by_label("↺")
+        .map(|n| n.rect())
+        .filter(|r| c.contains(r.center()))
+        .collect();
+    assert_eq!(resets.len(), 1, "one ↺ in the centre: {resets:?}");
+    let levels = h.get_by_role_and_label(Role::ComboBox, "Levels").rect();
+    assert!(
+        levels.min.y <= resets[0].center().y && resets[0].center().y <= levels.max.y,
+        "the ↺ {:?} is on the Levels row {levels:?}",
+        resets[0]
+    );
 }
 
 /// Note JI3: the Levels row is in the texture panel's Mipmaps group, under the tick box, and nowhere else.

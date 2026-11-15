@@ -234,8 +234,6 @@ fn size_is_a_group_and_header_stays_in_compression() {
     assert!(!FIELDS.iter().any(|(f, _)| *f == "mips.levels"));
     assert!(mips_on(&serde_json::json!("full")) && mips_on(&serde_json::json!(4)));
     assert!(!mips_on(&serde_json::json!("none")));
-    assert_eq!(mips_count(&serde_json::json!(4)), Some(4));
-    assert_eq!(mips_count(&serde_json::json!("full")), None);
 }
 
 #[test]

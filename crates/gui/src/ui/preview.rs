@@ -175,10 +175,14 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
             .exact_size(STRIP_WIDTH)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
             .show(ui, |ui| {
-                if strip_button(ui, "Settings")
-                    .on_hover_text("Show the texture settings")
-                    .clicked()
-                {
+                let r = strip_button(ui, "Settings");
+                // Rule 8.1: the popped-out Settings window's heading can be on screen too, so the strip has a name
+                // of its own (rule 8.3: set after the strip's own).
+                let enabled = r.enabled();
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, "Preview settings")
+                });
+                if r.on_hover_text("Show the texture settings").clicked() {
                     state.settings_open = true;
                 }
             });

@@ -8,10 +8,10 @@ use crate::model::code_text::{
 };
 use crate::model::fields::{
     auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
-    field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view,
-    mips_count, mips_on, provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER,
-    BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID,
-    PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_on,
+    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, BC3_CHOICES, BC3_CUSTOM,
+    BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER,
+    WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -1006,8 +1006,9 @@ fn hint_label(ui: &mut egui::Ui, text: &str) {
 /// The last cell of a field row: ↺ (when `edited`) is laid out first on the right, the hint takes what is left
 /// (Note FI12, rule 3.3), so the reset never leaves the panel. Returns true when ↺ is clicked.
 fn hint_and_reset(ui: &mut egui::Ui, edited: bool, hint: impl FnOnce(&mut egui::Ui)) -> bool {
-    // The panel's floating scroll bar senses its full width over the content's right edge, and with Levels, Size and
-    // DDS header (Note JI3) the panel scrolls at 800 px high: ↺ keeps clear of it, or its click goes to the bar.
+    // The panel's scroll bar (floating, thin in the centre: rule 3.2) senses its full width, which reaches over the
+    // content's right edge, and with Levels, Size and DDS header (Note JI3) the panel scrolls at 800 px high: ↺ keeps
+    // clear of it, or its click goes to the bar.
     let s = &ui.spacing().scroll;
     let bar = s.bar_width + s.bar_outer_margin;
     ui.scope(|ui| {
@@ -1072,14 +1073,12 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
             json!(if on { "full" } else { "none" }),
         ));
     }
-    let hint = |ui: &mut egui::Ui| match mips_count(&f.value) {
-        _ if cx.compact => {
-            ui.label("");
-        }
-        Some(n) => hint_label(ui, &format!("({n} levels)")),
-        None => hint_label(ui, &provenance_text(&f.provenance)),
+    // Note JI3: the Levels row below carries the count's note and ↺; only the strip, which has no Levels row, puts the
+    // ↺ on the tick row.
+    let hint = |ui: &mut egui::Ui| {
+        ui.label("");
     };
-    if hint_and_reset(ui, f.edited, hint) {
+    if hint_and_reset(ui, cx.compact && f.edited, hint) {
         actions.push(Action::Clear(f.field));
     }
     ui.end_row();
@@ -1222,10 +1221,12 @@ fn helper_tick_row(
     ui.end_row();
 }
 
+/// One group's rows, from `views` (`field_views`, built once per draw).
 fn group(
     ui: &mut egui::Ui,
     name: &'static str,
     cx: &Ctx,
+    views: &[FieldView],
     tick: Option<&HelperTick>,
     actions: &mut Vec<Action>,
 ) {
@@ -1246,8 +1247,8 @@ fn group(
                     let exr = (name == "Alpha")
                         .then(|| crate::model::fields::exr_straight_view(cx.target, cx.job))
                         .flatten();
-                    for f in field_views(cx.target, cx.job)
-                        .into_iter()
+                    for f in views
+                        .iter()
                         .filter(|f| {
                             group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
                         })
@@ -1256,14 +1257,14 @@ fn group(
                         .filter(|f| {
                             !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))
                         })
-                        .chain(exr)
+                        .chain(exr.iter())
                     {
                         // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.
                         let t = tick.filter(|_| f.field == "subtype");
                         if t.is_some_and(|t| t.on) {
                             helper_role_row(ui, cx.key, &cx.edit_off, actions);
                         } else {
-                            match field_row(ui, cx, &f) {
+                            match field_row(ui, cx, f) {
                                 Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
                                 Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
                                 None => {}
@@ -1795,8 +1796,10 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 size_line(ui, model, key);
             }
             let shown: &[&str] = if compact { &COMPACT_GROUPS } else { &GROUPS };
+            // Once per draw, not once per group: each build serialises the profile.
+            let views = field_views(target, job);
             for g in shown {
-                group(ui, g, &cx, tick.as_ref(), &mut actions);
+                group(ui, g, &cx, &views, tick.as_ref(), &mut actions);
             }
             if !compact {
                 for (k, f, v) in super::cube_section::cube_section(ui, model, key) {

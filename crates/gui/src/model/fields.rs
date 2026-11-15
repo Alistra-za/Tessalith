@@ -4,8 +4,8 @@ use engine::policy::{JobStatus, Need, Provenance, ResolvedJob};
 use engine::suggest::Confidence;
 use serde_json::Value;
 
-/// The editable fields in display order, with the label each row shows (Note JI3: the drawer's DDS header and Size
-/// rows included).
+/// The editable fields, with the label each row shows (Note JI3: the drawer's DDS header and Size rows included). The
+/// panel draws them by group (`group_of`, in `settings_panel::GROUPS` order), in this order within a group.
 pub const FIELDS: [(&str, &str); 21] = [
     ("subtype", "Sub-type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
@@ -571,11 +571,6 @@ pub fn filter_option_lock(p: &Profile, f: MipFilter) -> Option<&'static str> {
 /// Whether the level value means mipmaps are on: anything but `"none"`.
 pub fn mips_on(levels: &Value) -> bool {
     levels.as_str() != Some("none")
-}
-
-/// The level count, when the value is a number rather than `"full"` or `"none"`.
-pub fn mips_count(levels: &Value) -> Option<u64> {
-    levels.as_u64()
 }
 
 /// Every field the settings panel edits, each once, in display order (F3a: bulk lookups and copy-from-active).
