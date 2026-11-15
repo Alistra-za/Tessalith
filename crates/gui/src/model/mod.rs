@@ -3872,10 +3872,20 @@ impl AppModel {
         self.edit("Mode", move |p| p.set_target(t));
     }
 
-    /// Remove an unmatched `[files]` entry (one that names no file under the current target) and plan again.
-    pub fn remove_unmatched(&mut self, key: &str) {
-        let k = key.to_string();
-        self.edit("Remove entry", move |p| p.remove_file_entry(&k));
+    /// Note JI6: remove unmatched `[files]` entries (ones that name no file in the checked mode) in one undo step, and
+    /// plan again.
+    pub fn remove_unmatched_keys(&mut self, keys: &[String]) {
+        let label = match keys.len() {
+            0 => return,
+            1 => "Remove entry".to_string(),
+            n => format!("Remove {n} entries"),
+        };
+        let keys = keys.to_vec();
+        self.edit(&label, move |p| {
+            for k in &keys {
+                p.remove_file_entry(k);
+            }
+        });
     }
 
     pub fn is_dirty(&self) -> bool {

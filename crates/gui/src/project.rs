@@ -371,8 +371,10 @@ impl ProjectDoc {
         ConfigFile::parse(&self.f.doc.to_string(), "sdc.toml").map_err(|e| e.to_string())
     }
 
+    /// `target`, read from the document (no parse: the unmatched-entries row asks every frame, Note JI6).
     pub fn target(&self) -> Option<Target> {
-        self.config().ok()?.target
+        let s = self.f.doc.get("target")?.as_str()?;
+        serde_json::from_value(Json::String(s.to_string())).ok()
     }
     pub fn set_target(&mut self, t: Target) {
         if self.read_only() {

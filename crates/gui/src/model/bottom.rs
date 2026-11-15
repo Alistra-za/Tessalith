@@ -194,6 +194,9 @@ pub enum Fix {
     RemoveAliases(PathBuf, String),
     /// Note HG: copy the winning record's current paths into the set's (by id) mapping.
     UseRecordPaths(String),
+    /// Note JI6: remove these unmatched `[files]` entries, one undo step. The row carries every entry; its
+    /// `Entries ▾` menu asks for one at a time.
+    RemoveUnmatched(Vec<String>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -765,6 +768,21 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             fix: undo(a.step),
             detail: Some(a.lines.join("\n")),
             ..row(Level::Info, At::Project, a.text.clone(), None)
+        });
+    }
+    // Note JI6: the `[files]` entries that name no file, checked by the last full plan in its mode (`m.target`); one
+    // row with every entry on hover.
+    if !m.unmatched_keys.is_empty() {
+        let keys = m.unmatched_keys.clone();
+        let mode = code_text::target_name(m.target);
+        let text = match keys.len() {
+            1 => format!("1 saved setting names no file in this mode ({mode})"),
+            n => format!("{n} saved settings name no file in this mode ({mode})"),
+        };
+        out.push(Problem {
+            detail: Some(keys.join("\n")),
+            fix: Some(Fix::RemoveUnmatched(keys)),
+            ..row(Level::Info, At::Project, text, Some(Code::CfgFileUnmatched))
         });
     }
     // Note FC10: hand remedies with a button. X10/X3: a diffuse shaped like complex grass that nothing tags as grass

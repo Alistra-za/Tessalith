@@ -26,12 +26,7 @@ pub const REENCODE_TEXT: &str = "Re-encode every output";
 const REENCODE_HOVER: &str =
     "Encode every output again, even when nothing changed. Files Tessalith has no record of are kept.";
 
-pub(super) fn target_name(t: Target) -> &'static str {
-    match t {
-        Target::Cs => "cs",
-        Target::Vanilla => "vanilla",
-    }
-}
+pub(super) use crate::model::code_text::target_name;
 
 pub(super) fn target_help(t: Target) -> &'static str {
     match t {

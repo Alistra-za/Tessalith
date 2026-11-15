@@ -665,3 +665,222 @@ fn a_mesh_remove_is_recorded_and_not_asked() {
         .query_all_by_role(egui::accesskit::Role::ComboBox)
         .any(|n| n.accesskit_node().value().as_deref() == Some("Remove")));
 }
+
+/// Note JI6: a project with a `[files]` entry for the cs-only `_rmaos` (and, with `extra`, one for a file no mode has),
+/// planned in vanilla.
+fn vanilla_with_unmatched(d: &std::path::Path, extra: bool) -> AppModel {
+    let mut m = opened(d);
+    m.set_field(
+        "landscape/rock01_rmaos",
+        "alpha.threshold",
+        serde_json::json!(90),
+    );
+    if extra {
+        m.set_field("missing/ghost", "alpha.threshold", serde_json::json!(90));
+    }
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+fn file_keys(m: &AppModel) -> Vec<String> {
+    m.project.as_ref().unwrap().file_keys()
+}
+
+/// The unmatched row is an Info row, near the list's end: scroll the Problems list to its bottom, as a user would.
+fn scroll_to_end(h: &mut Harness<'static, AppModel>) {
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom"))
+        .expect("the bottom panel is open")
+        .outer_rect;
+    h.hover_at(panel.center());
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -5000.0),
+        phase: egui::TouchPhase::Move,
+        modifiers: egui::Modifiers::NONE,
+    });
+    h.run_steps(30);
+}
+
+/// Moved from the drawer's tests (Note JI6): the model lists the entry and removes it.
+#[test]
+fn unmatched_entries_are_listed_and_removable() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = vanilla_with_unmatched(d.path(), false);
+    assert_eq!(m.unmatched_keys, vec!["landscape/rock01_rmaos".to_string()]);
+    m.remove_unmatched_keys(&["landscape/rock01_rmaos".to_string()]);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.unmatched_keys.is_empty());
+    assert!(!file_keys(&m).contains(&"landscape/rock01_rmaos".to_string()));
+}
+
+/// Note JI6: the unmatched entries are one Info row of the project, worded for the mode they were checked in.
+#[test]
+fn unmatched_entries_show_as_one_info_row() {
+    let d = tempfile::tempdir().unwrap();
+    let m = vanilla_with_unmatched(d.path(), false);
+    let rows = problems(&m);
+    let r: Vec<_> = rows
+        .iter()
+        .filter(|p| p.code == Some(Code::CfgFileUnmatched))
+        .collect();
+    assert_eq!(r.len(), 1, "{rows:?}");
+    assert_eq!(r[0].level, Level::Info);
+    assert_eq!(r[0].at, At::Project);
+    assert_eq!(
+        r[0].text,
+        "1 saved setting names no file in this mode (vanilla)"
+    );
+    assert_eq!(r[0].detail.as_deref(), Some("landscape/rock01_rmaos"));
+    assert!(!bottom::counts_as_ready_problem(r[0]));
+}
+
+/// Note JI6: `Entries ▾` lists each entry with its own Remove, one undo step.
+#[test]
+fn the_entries_menu_removes_one_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let m = vanilla_with_unmatched(d.path(), true);
+    let mut h = harness(m);
+    h.run();
+    scroll_to_end(&mut h);
+    h.get_by_label("Project: 2 saved settings name no file in this mode (vanilla)");
+    h.get_by_label("Entries ▾").click();
+    h.run();
+    h.get_by_label("Remove missing/ghost").click();
+    // The frame that takes the click makes the edit and closes the menu.
+    h.run_steps(2);
+    assert!(h.query_by_label("Remove landscape/rock01_rmaos").is_none());
+    // Before its plan lands the row still carries both entries; the menu lists only those still in `[files]`.
+    assert_eq!(h.state().unmatched_keys.len(), 2);
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Remove missing/ghost").is_none());
+    h.get_by_label("Remove landscape/rock01_rmaos");
+    idle(&mut h);
+    let m = h.state();
+    assert!(!file_keys(m).contains(&"missing/ghost".to_string()));
+    assert!(file_keys(m).contains(&"landscape/rock01_rmaos".to_string()));
+    assert_eq!(m.undo_label(), Some("Remove entry"));
+    assert_eq!(m.unmatched_keys, vec!["landscape/rock01_rmaos".to_string()]);
+}
+
+/// Note JI6: `Remove all` names every entry on hover and removes them in one undo step.
+#[test]
+fn remove_all_drops_every_entry_in_one_step() {
+    let d = tempfile::tempdir().unwrap();
+    let m = vanilla_with_unmatched(d.path(), true);
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    scroll_to_end(&mut h);
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(!all.accesskit_node().is_disabled());
+    h.hover_at(all.rect().center());
+    h.run_steps(4);
+    // A label's text is its AccessKit value.
+    let tip: Vec<String> = h
+        .query_all_by_label_contains("Removes these [files] entries: ")
+        .filter_map(|n| n.accesskit_node().value())
+        .collect();
+    assert_eq!(tip.len(), 1, "{tip:?}");
+    assert!(tip[0].contains("landscape/rock01_rmaos") && tip[0].contains("missing/ghost"));
+    h.get_by_label("Remove all").click();
+    h.run_steps(2);
+    idle(&mut h);
+    let m = h.state_mut();
+    for k in ["landscape/rock01_rmaos", "missing/ghost"] {
+        assert!(!file_keys(m).contains(&k.to_string()), "{k}");
+    }
+    assert_eq!(m.undo_label(), Some("Remove 2 entries"));
+    assert!(m.unmatched_keys.is_empty());
+    assert!(!problems(m)
+        .iter()
+        .any(|p| p.code == Some(Code::CfgFileUnmatched)));
+    m.undo();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for k in ["landscape/rock01_rmaos", "missing/ghost"] {
+        assert!(
+            file_keys(m).contains(&k.to_string()),
+            "one undo restores {k}"
+        );
+    }
+    // The row comes back with the undo's plan (not a stale cached list).
+    let row = row_of(m, Code::CfgFileUnmatched);
+    assert_eq!(
+        row.text,
+        "2 saved settings name no file in this mode (vanilla)"
+    );
+    let detail = row.detail.unwrap_or_default();
+    assert!(detail.contains("landscape/rock01_rmaos") && detail.contains("missing/ghost"));
+}
+
+/// Note JI6 (ruling 3.3): with no `target` in sdc.toml the preset's mode decides, so `Remove all` is on, not waiting
+/// for a mode change that never comes.
+#[test]
+fn remove_all_works_without_a_target_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_field("missing/ghost", "alpha.threshold", serde_json::json!(90));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.project.as_ref().unwrap().target(), None);
+    let mut h = harness(m);
+    h.run();
+    scroll_to_end(&mut h);
+    h.get_by_label("Project: 1 saved setting names no file in this mode (cs)");
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(!all.accesskit_node().is_disabled());
+}
+
+/// Review Focus 5, Note JI6: the row was checked in the last full plan's mode. While the project's mode differs (a
+/// plan for the new mode is out), Remove all is off and says so; each entry's Remove waits for the plan (Note FS1).
+#[test]
+fn remove_all_waits_while_the_mode_differs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = vanilla_with_unmatched(d.path(), true);
+    m.set_target(engine::config::Target::Cs);
+    assert!(m.full_plan_pending());
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run_steps(2);
+    scroll_to_end(&mut h);
+    h.get_by_label("Project: 2 saved settings name no file in this mode (vanilla)");
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(all.accesskit_node().is_disabled());
+    h.hover_at(all.rect().center());
+    h.run_steps(4);
+    assert_eq!(
+        h.query_all_by_label_contains("Checked in vanilla; the project is now cs")
+            .count(),
+        1
+    );
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    let one = h.get_by_label("Remove missing/ghost");
+    assert!(one.accesskit_node().is_disabled(), "it waits for the plan");
+    h.hover_at(one.rect().center());
+    h.run_steps(4);
+    h.get_by_label("Wait for the plan to finish");
+    // The menu button closes its menu again.
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    assert!(h.query_by_label("Remove missing/ghost").is_none());
+    // The plan for cs lands: rock01's `_rmaos` is a file there.
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run_steps(4);
+    scroll_to_end(&mut h);
+    h.get_by_label("Project: 1 saved setting names no file in this mode (cs)");
+    let all = h.get_by_role_and_label(egui::accesskit::Role::Button, "Remove all");
+    assert!(!all.accesskit_node().is_disabled());
+    h.get_by_label("Entries ▾").click();
+    h.run_steps(2);
+    assert!(!h
+        .get_by_label("Remove missing/ghost")
+        .accesskit_node()
+        .is_disabled());
+}

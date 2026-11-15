@@ -1,6 +1,5 @@
-//! The right-hand Advanced drawer (M3a spec §2.5): the `[files]` entries that match nothing (Note JI1 moved the
-//! live-encode switch, the checks and the cache limit to the Settings tab). Drawing only: every edit is a call on the
-//! model, applied once the drawing is over.
+//! The right-hand Advanced drawer (M3a spec §2.5), empty now: Note JI1 moved the live-encode switch, the checks and the
+//! cache limit to the Settings tab, and Note JI6 the `[files]` entries that match nothing to a Problems row.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
 use crate::model::AppModel;
 use eframe::egui;
@@ -11,11 +10,6 @@ const ADV_MIN: f32 = 260.0;
 /// The drawer keeps no state of its own now (Note JI3); the struct goes with the drawer in Task 9.
 #[derive(Debug, Default)]
 pub struct AdvancedState {}
-
-/// What a control asks of the model.
-enum Action {
-    RemoveUnmatched(String),
-}
 
 /// The drawer: a 24 px "Advanced" strip while closed, the panel while `settings.advanced_open`.
 pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, _state: &mut AdvancedState) {
@@ -49,33 +43,13 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, _state: &mut AdvancedState)
                 close = ui.button("Close").clicked();
             });
         });
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| body(ui, model));
+        // Note JI6: its last section, the unmatched `[files]` entries, is a Problems row now (Note JI7 removes the
+        // drawer).
     });
     if close {
         model.settings.advanced_open = false;
         model.save_settings();
     }
-}
-
-/// The drawer's sections (also the set panel's Advanced tab, layout v2 C6); applies its edits once they are drawn.
-pub fn body(ui: &mut egui::Ui, model: &mut AppModel) {
-    let mut actions = vec![];
-    // Note JI3, JI4: the texture fields are the texture panel's now (the search fields through its Effort row); Note
-    // JI1: the preview, checks and cache settings are the Settings tab's.
-    unmatched(ui, model, &mut actions);
-    for a in actions {
-        match a {
-            Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
-        }
-    }
-}
-
-fn section(ui: &mut egui::Ui, name: &str, body: impl FnOnce(&mut egui::Ui)) {
-    egui::CollapsingHeader::new(egui::RichText::new(name).strong())
-        .default_open(true)
-        .show(ui, body);
 }
 
 /// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed
@@ -175,34 +149,6 @@ pub(super) fn held_value(
 ) -> (egui::Response, Option<f64>) {
     let (out, r) = held(ui, egui::Id::new(id), current, false, false, add);
     (r, out)
-}
-
-fn unmatched(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Unmatched [files] entries", |ui| {
-        if model.unmatched_keys.is_empty() {
-            ui.weak("Every [files] entry in sdc.toml matches a file.");
-            return;
-        }
-        ui.label(
-            egui::RichText::new(
-                "These entries name no file under the current target and have no effect.",
-            )
-            .small()
-            .weak(),
-        );
-        let editable = model.project.as_ref().is_some_and(|p| !p.read_only());
-        for k in &model.unmatched_keys {
-            ui.horizontal(|ui| {
-                ui.label(k);
-                if ui
-                    .add_enabled(editable, egui::Button::new("Remove"))
-                    .clicked()
-                {
-                    actions.push(Action::RemoveUnmatched(k.clone()));
-                }
-            });
-        }
-    });
 }
 
 /// Gesture drivers for the number-box wrappers over [`held`] (L29): a typed value and an arrow key each commit once.

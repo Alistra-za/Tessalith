@@ -1,10 +1,20 @@
 //! Note FB8 (amendment D): the UI carries no code text. A row or banner shows a sentence that names the action; the
 //! code stays on the hover and in the Messages log.
 use engine::codes::Code;
-use engine::config::AlphaPolicy;
+use engine::config::{AlphaPolicy, Target};
+
+/// A mode's `sdc.toml` name (`target = "cs"`), as the header, the Settings tab and the unmatched-entries row (Note JI6)
+/// show it.
+pub fn target_name(t: Target) -> &'static str {
+    match t {
+        Target::Cs => "cs",
+        Target::Vanilla => "vanilla",
+    }
+}
 
 /// The action sentence of `code`, one table for every code Problems or a banner can show (warnings, blockers and
-/// errors). Empty for the codes with none (Info results never get a row): the caller then shows the engine's message.
+/// errors). Empty for the codes with none (most Info results; CFG-FILE-UNMATCHED's row words its own text, Note JI6): the
+/// caller then shows the row's or the engine's message.
 pub fn code_sentence(code: Code) -> &'static str {
     use Code::*;
     match code {

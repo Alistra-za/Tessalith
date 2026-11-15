@@ -250,6 +250,9 @@ fn fix_button(
         }
         return None;
     }
+    if let Fix::RemoveUnmatched(keys) = fix {
+        return unmatched_buttons(ui, m, keys, off);
+    }
     let clicked = match fix {
         // Note DU3: a set entry that matches no file is removed in place.
         Fix::RemoveMissing(miss) => {
@@ -358,6 +361,8 @@ fn fix_button(
             "Write the record's current paths to this set's mapping; its outputs follow them",
             sets_off,
         ),
+        // Drawn above by `unmatched_buttons`.
+        Fix::RemoveUnmatched(_) => false,
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
             ui,
@@ -374,6 +379,90 @@ fn fix_button(
         ),
     };
     clicked.then(|| fix.clone())
+}
+
+/// Note JI6: the unmatched-entries row's `Entries ▾` (each entry still in `[files]`, with its own Remove) and
+/// `Remove all`, right to left so they read in that order. Decided each frame, not cached with the row: Remove all reads
+/// the project's mode and the plan state, and is offered only in the mode the entries were checked in (`model.target`,
+/// the last full plan's) while no full plan is out. Each entry's Remove waits on `off` as every row's fix does.
+fn unmatched_buttons(
+    ui: &mut egui::Ui,
+    m: &AppModel,
+    keys: &[String],
+    off: Option<&str>,
+) -> Option<Fix> {
+    let checked = m.target;
+    let now = m.project.as_ref().and_then(|d| d.target());
+    let all_off = m
+        .toml_read_only_reason()
+        .or_else(|| {
+            now.filter(|t| *t != checked).map(|t| {
+                format!(
+                    "Checked in {}; the project is now {}. Wait for the plan.",
+                    code_text::target_name(checked),
+                    code_text::target_name(t)
+                )
+            })
+        })
+        .or_else(|| off.map(str::to_string))
+        .or_else(|| {
+            m.full_plan_pending()
+                .then(|| "Wait for the plan to finish".to_string())
+        });
+    let b = ui.add_enabled(all_off.is_none(), egui::Button::new("Remove all"));
+    let all = match &all_off {
+        Some(why) => b.on_disabled_hover_text(why),
+        None => b.on_hover_ui(|ui| {
+            ui.label(format!(
+                "Removes these [files] entries: {}",
+                keys.join(", ")
+            ));
+        }),
+    }
+    .clicked();
+    let one = super::path_picker::menu(ui, "Entries ▾", |ui| {
+        let listed = m
+            .project
+            .as_ref()
+            .map(|d| d.file_keys())
+            .unwrap_or_default();
+        let mut pick = None;
+        egui::ScrollArea::vertical()
+            .max_height(240.0)
+            .show(ui, |ui| {
+                for k in keys.iter().filter(|k| listed.contains(k)) {
+                    ui.horizontal(|ui| {
+                        ui.label(k);
+                        let b = ui.add_enabled(off.is_none(), egui::Button::new("Remove"));
+                        let name = format!("Remove {k}");
+                        b.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::WidgetType::Button,
+                                off.is_none(),
+                                &name,
+                            )
+                        });
+                        let b = match off {
+                            Some(why) => b.on_disabled_hover_text(why),
+                            None => b.on_hover_text("Remove this entry from sdc.toml"),
+                        };
+                        if b.clicked() {
+                            pick = Some(k.clone());
+                        }
+                    });
+                }
+            });
+        if pick.is_some() {
+            ui.close();
+        }
+        pick
+    })
+    .inner
+    .flatten();
+    if all {
+        return Some(Fix::RemoveUnmatched(keys.to_vec()));
+    }
+    one.map(|k| Fix::RemoveUnmatched(vec![k]))
 }
 
 pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
@@ -716,5 +805,6 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
                 model.status_line = why;
             }
         }
+        Fix::RemoveUnmatched(keys) => model.remove_unmatched_keys(&keys),
     }
 }
