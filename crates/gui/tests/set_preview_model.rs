@@ -2307,3 +2307,30 @@ fn an_input_name_in_a_created_set_rebuilds_its_view() {
         "{e}"
     );
 }
+
+/// JF1: an alias the engine refuses (another extension, IN-ALIAS-INVALID) leaves the file planned under its real
+/// name, so the match key keeps the name on disk.
+#[test]
+fn a_refused_alias_leaves_the_match_key_on_the_file_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    m.edit_docs("t", None, true, |p, _| {
+        p.set_read_as("landscape/rock01.png", Some("landscape/rock02.tga"))
+    });
+    idle_for(&mut m);
+    // Save and open the folder again, so the views are built fresh from the saved alias.
+    m.save().unwrap();
+    let root = m.root.clone().expect("an opened folder");
+    m.open_folder(root);
+    idle_for(&mut m);
+    assert_eq!(
+        m.read_as_of("landscape/rock01.png").as_deref(),
+        Some("landscape/rock02.tga")
+    );
+    let (_, e) = entry_of(&m, "landscape/rock01");
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock01.dds"),
+        "{e}"
+    );
+}
