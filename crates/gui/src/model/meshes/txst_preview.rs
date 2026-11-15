@@ -10,6 +10,9 @@ use render3d::ShapeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+/// Note IE12: the end of a blocked picked set's Problems row (the shape keeps its name field's material).
+const BLOCKED_TAIL: &str = "the shape keeps the material its NIF names";
+
 /// One TXST plugin records assign to a shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TxstChoice {
@@ -135,7 +138,8 @@ impl MeshesModel {
     }
 
     /// The design's TXST-JSON rule (Note IE12): each picked TXST whose EDID a project set binds draws that set's
-    /// in-memory `.csm` in place of the shape's name field; a blocked one draws the shape vanilla, with a row.
+    /// in-memory `.csm` in place of the shape's name field. A blocked one writes no texture-set file, so, as in game,
+    /// the shape keeps the material its NIF names, with a row saying why.
     fn apply_set_csms(&self, spec: &mut MeshSpec) {
         spec.csm.clear();
         spec.materials.clear();
@@ -144,18 +148,16 @@ impl MeshesModel {
             let Some(c) = self.txst_edid(f).and_then(|e| self.txst_csms.get(e)) else {
                 continue;
             };
-            let id = ShapeId(block);
             match (&c.blocked, memory_source(c)) {
                 (None, Some((key, src))) => {
-                    spec.csm.insert(id, Some(key.clone()));
+                    spec.csm.insert(ShapeId(block), key.clone());
                     spec.materials.insert(key, src);
                 }
                 (blocked, _) => {
-                    spec.csm.insert(id, None);
                     let why = blocked
                         .clone()
                         .unwrap_or_else(|| format!("{} is not a .csm under materials", c.path));
-                    let row = format!("{why}; drawn vanilla");
+                    let row = format!("{why}; {BLOCKED_TAIL}");
                     if !spec.material_notes.contains(&row) {
                         spec.material_notes.push(row);
                     }

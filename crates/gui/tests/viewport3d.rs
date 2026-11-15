@@ -2759,6 +2759,7 @@ fn txst_json_csm_wins() {
     app.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
     app.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
     app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.6)));
+    app.set_cs_value(ROCK, Kind::Txst, "roughnessScale", Some(json!(0.45)));
     assert!(app.wait_idle(Duration::from_secs(60)));
     let store_copy = r#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.9}"#;
     let (_i, _c, mut m) = csm_meshes(&[
@@ -2781,15 +2782,16 @@ fn txst_json_csm_wins() {
     );
     let pbr = s.material.pbr.expect("the set's PBR values");
     assert_ne!(pbr.features & nif::pbr2::feat::FUZZ, 0, "the set's fuzz");
-    assert_ne!(pbr.params[0], 0.9, "not the scan's copy at the set's path");
-    assert_ne!(pbr.params[0], 0.3, "not the name field's file");
+    // The set's roughness: neither the scan's copy at the set's path (0.9) nor the name field's file (0.3).
+    assert_eq!(pbr.params[0], 0.45, "the set's roughnessScale");
+    assert_eq!(pbr.params[16], 0.6, "the set's fuzzWeight");
 
     // An unsaved set edit reaches the 3D view: a new spec, a reload.
     app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
     assert!(app.wait_idle(Duration::from_secs(60)));
     hand(&mut m, &app);
     let after = csm_shape(&mut m).material.pbr.expect("still the set's");
-    assert_ne!(after.params, pbr.params, "the edited fuzz weight is drawn");
+    assert_eq!(after.params[16], 0.2, "the edited fuzz weight is drawn");
 
     // "From the NIF" takes the set's .csm away again: the name field's file.
     m.set_txst(block, None).unwrap();
@@ -2797,14 +2799,15 @@ fn txst_json_csm_wins() {
     assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
 }
 
-/// A picked set whose `.csm` is blocked draws the shape vanilla (never the name field's or the scan's copy) with a
-/// row saying why.
+/// Fix round 1 (ruling): a picked set whose `.csm` is blocked writes no texture-set file, so, as in game, the shape
+/// keeps its name field's material (never the scan's copy at the set's path), with a row saying why.
 #[test]
-fn a_blocked_set_csm_draws_vanilla_with_a_row() {
+fn a_blocked_set_keeps_the_name_field_with_a_row() {
     use sdc_gui::model::csm_export::SetCsm;
+    let store_copy = r#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.9}"#;
     let (_i, _c, mut m) = csm_meshes(&[
         ("materials/a.csm", A_CSM),
-        ("materials/pbr/landscape/rock01.csm", A_CSM),
+        ("materials/pbr/landscape/rock01.csm", store_copy),
     ]);
     assert_eq!(m.txst_edids(), ["Rock01"]);
     let why = "landscape/rock01: no .csm written: the set has no RMAOS texture";
@@ -2819,11 +2822,82 @@ fn a_blocked_set_csm_draws_vanilla_with_a_row() {
     )]));
     m.set_txst(s_block(&m), Some(ROCK01)).unwrap();
     let s = csm_shape(&mut m);
-    assert_eq!(s.material.csm_path, None);
-    assert_eq!(s.material.pbr, None);
-    assert_eq!(m.v3.material_problems(), [format!("{why}; drawn vanilla")]);
+    assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
+    assert_eq!(
+        s.material.pbr.map(|p| p.params[0]),
+        Some(0.3),
+        "the name field's .csm"
+    );
+    assert_eq!(
+        m.v3.material_problems(),
+        [format!("{why}; the shape keeps the material its NIF names")]
+    );
 }
 
+/// Fix round 1 (t9 item 5): the set's `.csm` is built as the export builds it (`entry_csm`), so a Normal the set
+/// borrows from another set is the path its PGPatcher entry names, and the pick draws PBR.
+#[test]
+fn a_borrowed_normal_draws_pbr() {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::cs_pbr::Kind;
+    use sdc_gui::model::{csm_export, pbr_export, Answer};
+    const ROCK: &str = "landscape/rock01";
+    let p = tempfile::tempdir().unwrap();
+    let mut app = support::pbr_opened_plain(p.path());
+    app.add_cs_block(ROCK, Kind::Txst);
+    app.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
+    // The rock has no normal of its own; it borrows the wall's.
+    let tex = p.path().join("textures/landscape");
+    std::fs::remove_file(tex.join("rock01_normal.png")).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| image::Rgb([x as u8 * 3, y as u8 * 3, 90]))
+        .save(tex.join("wall.png"))
+        .unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, _| image::Rgb([120u8 + (x % 8) as u8, 130, 250]))
+        .save(tex.join("wall_normal.png"))
+        .unwrap();
+    app.replan();
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    app.decide("landscape/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    app.decide(
+        "landscape/wall_normal.png",
+        Answer::Subtype(Subtype::PbrNormal),
+    );
+    app.decide(
+        "landscape/wall_normal.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    app.edit_docs("borrow", None, true, |_, s| {
+        s.set_borrow(ROCK, 2, Some("landscape/wall"))
+    });
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    let named = pbr_export::json_entries(&app)
+        .into_iter()
+        .find(|(v, _)| v.id == ROCK)
+        .and_then(|(_, e)| e.slots.get(&2).cloned())
+        .expect("the entry names the borrowed normal");
+    let named = named.replace('\\', "/");
+    let named = named
+        .strip_prefix("textures/")
+        .unwrap_or(&named)
+        .to_string();
+    let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    let csms = csm_export::txst_csms(&app, &m.txst_edids());
+    let c = &csms["Rock01"];
+    assert_eq!(c.blocked, None, "{:?}", c.warnings);
+    assert_eq!(
+        c.csm.values.get("NormalTexture"),
+        Some(&nif::csm::Value::Text(named))
+    );
+    m.set_txst_csms(csms);
+    m.set_txst(s_block(&m), Some(ROCK01)).unwrap();
+    let s = csm_shape(&mut m);
+    assert_eq!(
+        s.material.csm_path.as_deref(),
+        Some("materials/pbr/landscape/rock01.csm")
+    );
+    assert!(s.material.pbr.is_some(), "the set's .csm draws PBR");
+}
 /// The Meshes view's edit preview (a parsed NIF) reads a `.csm` through the scan too.
 #[test]
 fn a_parsed_preview_reads_the_csm_through_the_scan() {

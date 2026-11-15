@@ -774,10 +774,11 @@ fn txst_csms_finds_the_binding_set_by_exact_edid() {
     let m = with_txst(d.path());
     let got = txst_csms(&m, &edids(&["Rock01", "rock01", "Other"]));
     assert_eq!(got.keys().collect::<Vec<_>>(), ["Rock01"]);
+    let v = view(&m);
+    let exported = entry_csm(&v, &entry(&m), m.cs_block(ROCK, Kind::Txst).as_ref()).unwrap();
     assert_eq!(
-        got["Rock01"],
-        rock_csm(&m),
-        "the set's .csm, unsaved edits included"
+        got["Rock01"], exported,
+        "the set's .csm as the export builds it"
     );
     let (key, _) = memory_source(&got["Rock01"]).unwrap();
     assert_eq!(key, "materials/pbr/landscape/rock01.csm");
@@ -791,6 +792,22 @@ fn txst_csms_skips_an_edid_the_export_refuses() {
     m.set_cs_edids(ROCK, Kind::Txst, &["Rock01.".into()]);
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(txst_csms(&m, &edids(&["Rock01."])).is_empty());
+}
+
+/// Fix round 1 (t9 item 5): a set with no PGPatcher entry writes no `.csm` and no texture-set file, so its `.csm` is
+/// blocked with the export's reason.
+#[test]
+fn txst_csms_blocks_a_set_with_no_pgpatcher_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    m.set_json_value(ROCK, "match1", Some(json!("")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let got = txst_csms(&m, &edids(&["Rock01"]));
+    assert_eq!(
+        got["Rock01"].blocked.as_deref(),
+        Some(format!("{ROCK}: {NO_ENTRY}").as_str())
+    );
+    assert_eq!(got["Rock01"].path, ROCK_CSM);
 }
 
 /// A set that gets no `.csm` (PBR Landscape) and a target other than CS give nothing.

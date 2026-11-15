@@ -166,9 +166,9 @@ pub struct MeshSpec {
     /// texture set pick's project set `.csm`, in memory (`csm_export::memory_source`).
     pub materials: HashMap<String, FileSource>,
     /// Note IE12: per shape, the `.csm` its texture set pick's project set gives in place of the NIF's name field
-    /// (canonical `materials/…`); `None` draws the shape vanilla (that set's `.csm` is blocked, `material_notes` says
+    /// (canonical `materials/…`). A blocked set's shape is not here: it keeps its name field (`material_notes` says
     /// why).
-    pub csm: BTreeMap<ShapeId, Option<String>>,
+    pub csm: BTreeMap<ShapeId, String>,
     /// Note IE12: Problems rows the spec itself carries (a picked set whose `.csm` is blocked).
     pub material_notes: Vec<String>,
     /// Note IE12: the scan database. A `materials/…` or `textures/…` path in neither map is looked up there when the
@@ -1790,7 +1790,7 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
                     }
                     // Note IE12: the pick's set `.csm` in place of the name field's (render3d resolves it).
                     if let Some(c) = spec.csm.get(&s.id) {
-                        s.material.csm_path = c.clone();
+                        s.material.csm_path = Some(c.clone());
                     }
                 }
                 r.load_parsed_sync(&p, &textures)
