@@ -11,6 +11,18 @@ pub enum Path {
     Avx2,
 }
 
+// Each path's place in `ALL` is its discriminant, which `Path::available` compares.
+const _: () = {
+    let mut i = 0;
+    while i < Path::ALL.len() {
+        assert!(
+            Path::ALL[i] as usize == i,
+            "Path::ALL is not in declaration order"
+        );
+        i += 1;
+    }
+};
+
 /// Whether this build has the wide paths: an x86_64 target with SSE2 (the cfg of the SSE2 kernels).
 const BUILT: bool = cfg!(all(target_arch = "x86_64", target_feature = "sse2"));
 

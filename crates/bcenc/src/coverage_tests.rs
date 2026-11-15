@@ -1,4 +1,6 @@
-//! Every `hit!` branch of the ported code is taken by the class generators.
+//! Two roles. Every `hit!` branch of the ported code is taken by the class generators. And the code paths agree: each
+//! hidden `_on` entry gives the base path's bytes on every path the machine has, and each public function is its `_on`
+//! entry on `Path::best()`.
 use crate::bc1::alpha::encode_alpha;
 use crate::bc1::encode::{encode, encode_level};
 use crate::bc1::palette::{build_single_tables, dual_palette, single_tables};

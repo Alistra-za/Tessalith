@@ -101,6 +101,7 @@ pub fn bc5_encode_block(px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
 /// [`bc5_encode_block`] on `path`. Panics if this machine cannot run `path`.
 #[doc(hidden)]
 pub fn bc5_encode_block_on(path: Path, px: &[[u8; 4]; 16], search_radius: u32) -> [u8; 16] {
+    path.assert_available();
     let mut out = [0u8; 16];
     out[..8].copy_from_slice(&bc4_encode_block_on(path, px, 0, search_radius));
     out[8..].copy_from_slice(&bc4_encode_block_on(path, px, 1, search_radius));
@@ -302,6 +303,7 @@ pub fn bc3_encode_block_raw_cut_on(
     perceptual: bool,
     search: Bc1Search,
 ) -> [u8; 16] {
+    path.assert_available();
     let alpha: [u8; 16] = std::array::from_fn(|i| px[i][3]);
     let mut out = [0u8; 16];
     out[..8].copy_from_slice(&bc4_encode_alpha_on(path, &alpha, search_radius, cut));
