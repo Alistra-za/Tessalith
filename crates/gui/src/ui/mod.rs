@@ -297,8 +297,9 @@ pub(crate) fn centre_floor(ctx: &egui::Context, model: &AppModel) -> f32 {
 /// Mirrors `centre`'s and `set_editor::draw`'s routing: true when the centre shows a set's editor (2D: a set still in
 /// the plan; 3D: the followed set's 3D view, also for a member texture, AG87) rather than the preview, the bulk panel
 /// or a hint. Callers add the 2D/3D side (`!three_d` = the set panel, `three_d` = the 3D settings window). Keep it in
-/// step with those two; `set_panel.rs::no_window_edge_strip_in_any_state` pins it.
-fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
+/// step with those two; `set_panel.rs::no_window_edge_strip_in_any_state` pins it against the set editor's tabs (public
+/// for that pin only).
+pub fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
     model.root.is_some()
         && model.expanded.is_none()
         && !model.in_bulk()

@@ -285,9 +285,10 @@ fn the_json_editor_button_stays_inside_a_narrow_centre() {
 }
 
 /// Note JI7: the Advanced drawer is gone, so nothing is drawn at the window edge in any centre state: no "Advanced"
-/// label, and the centre reaches the window's right edge (less the harness' 8 px margin). `set_editor_shown` still
-/// mirrors `centre`'s and `set_editor::draw`'s routing: the set editor's tabs are drawn for a set in 2D only. Each case
-/// is a fresh harness, so the persisted panel states are this case's own. The last field is the set editor's tabs.
+/// label, and the centre reaches the window's right edge (less the harness' 8 px margin). The set editor's tabs are
+/// drawn for a set in 2D only, and `set_editor_shown` agrees with that routing in every state with the selection in
+/// front (its pin). Each case is a fresh harness, so the persisted panel states are this case's own. The last field is
+/// the set editor's tabs.
 #[test]
 fn no_window_edge_strip_in_any_state() {
     type Setup = fn(&mut AppModel);
@@ -392,6 +393,18 @@ fn no_window_edge_strip_in_any_state() {
             h.run();
         }
         assert_eq!(set_tabs(&h), want_tabs, "{name}: the set editor's tabs");
+        // The pin on `set_editor_shown`: with the selection in front it is true in 2D exactly when the tabs are drawn
+        // (it sets the editor's ROWS_MIN floor), and in 3D for the set's view (the 3D settings window).
+        let (m, s) = h.state();
+        let now_3d = s.set3d.enabled && sdc_gui::ui::set_preview::wanted(m);
+        assert_eq!(now_3d, three_d, "{name}: the 3D view");
+        if m.centre_front() == sdc_gui::model::CentreTab::Selection {
+            assert_eq!(
+                sdc_gui::ui::set_editor_shown(m, now_3d),
+                set_tabs(&h) || now_3d,
+                "{name}: set_editor_shown"
+            );
+        }
         assert!(
             h.query_by_label("Advanced").is_none(),
             "{name}: an Advanced strip or drawer"

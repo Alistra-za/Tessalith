@@ -178,6 +178,29 @@ fn a_window_narrowed_and_widened_again_restores_the_column_widths() {
         outer(&h, "textures").width() < before[0] - 1.0,
         "not narrowed"
     );
+    // What a save writes meanwhile is the chosen width, not the narrower one drawn (it took over this pin from the
+    // Advanced drawer's width tests, Note JI7).
+    let saved = |h: &H, id: &str| {
+        let m = &h.state().0;
+        sdc_gui::layout::capture(
+            &h.ctx,
+            &sdc_gui::settings::LayoutSettings::default(),
+            &m.filter,
+            &m.prefs,
+            &m.sets_filter,
+            &m.view,
+            (&Default::default(), &Default::default()),
+        )
+        .widths
+        .get(id)
+        .copied()
+    };
+    let kept = saved(&h, "textures").expect("a textures width is saved");
+    assert!(
+        (kept - before[0]).abs() <= 1.0,
+        "saved {kept} while narrowed, chosen {}",
+        before[0]
+    );
     h.set_size(egui::vec2(1280.0, 800.0));
     h.run_steps(3);
     let after = [outer(&h, "textures").width(), outer(&h, "sets").width()];

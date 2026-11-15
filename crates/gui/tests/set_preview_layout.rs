@@ -75,7 +75,7 @@ fn check(w: f32, collapsed: bool) {
         "centre {} at {w}",
         right - left
     );
-    // The frame takes the centre's width (less its margins), between the columns and the strip.
+    // The frame takes the centre's width (less its margins), between the columns and the window edge.
     let img = h.get_by_label(FRAME_LABEL).rect();
     assert!(
         img.min.x >= left - 0.5,
