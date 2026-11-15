@@ -31,8 +31,9 @@ export const meta = {
 //   x_cs_version       CS version ("1-9-0-0", the CommunityShaders.dll FileVersion) used only when SettingsUser.json
 //                      has no Version (a build that never saved its full settings); a Version on disk wins
 //   x_cs_settings      overlay of SettingsUser.json sections/keys (nested objects); only listed keys are edited,
-//                      missing keys are inserted. Always added on top: RenderDoc."Enable RenderDoc Capture",
-//                      Advanced."Frame Annotations" = true. Log Level is not forced (debug level = CS developer mode = debug shaders).
+//                      missing keys are inserted. Always added on top: "Developer Tools".RenderDoc."Enable RenderDoc
+//                      Capture" (CS 2.0 builds, sections keyed by feature GetName()), RenderDoc."Enable RenderDoc Capture"
+//                      (CS 1.x) and Advanced."Frame Annotations" = true. Log Level is not forced (debug level = CS developer mode = debug shaders).
 //   x_profiles_other_runs  {<profile>: {x_cs_settings: {...} | "<base>" | "<base> without <Feature> in Disable at Boot",
 //                      x_cs_settings_add: {...} merged on top (e.g. A_DC_LOG = A_DC + Log Level 1), groups: [labels]}}
 //                      (A_RT = "A" with only the retest groups; A_DC_LOG = debug-log launch for P0, not a fixture)

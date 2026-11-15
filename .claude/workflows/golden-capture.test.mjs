@@ -148,7 +148,7 @@ const lib = (cmd, env = {}) => {
 // ---------- 2. profiles and plan checks (W1, W8) ----------
 {
   const A = resolveProfile(plan, 'A'), B = resolveProfile(plan, 'B'), DC = resolveProfile(plan, 'A_DC')
-  for (const p of [A, B, DC]) { assert.equal(p.overlay.RenderDoc['Enable RenderDoc Capture'], true); assert.equal(p.overlay.Advanced['Frame Annotations'], true) }
+  for (const p of [A, B, DC]) { assert.equal(p.overlay.RenderDoc['Enable RenderDoc Capture'], true); assert.equal(p.overlay['Developer Tools'].RenderDoc['Enable RenderDoc Capture'], true); assert.equal(p.overlay.Advanced['Frame Annotations'], true) }
   assert.equal(A.overlay['Disable at Boot'].DynamicCubemaps, true)
   assert.ok(!('DynamicCubemaps' in DC.overlay['Disable at Boot']), 'A_DC drops DynamicCubemaps')
   assert.ok(!('Disable at Boot' in B.overlay), 'B edits only the capture keys')
@@ -339,6 +339,12 @@ const pending = () => { try { return Object.values(JSON.parse(fs.readFileSync(JO
   const live = fs.readFileSync(LIVE)
   assert.notEqual(sha(LIVE), ORIG_SHA)
   assert.ok(!(live[0] === 0xef && live[1] === 0xbb), 'no BOM')
+  // CS 2.0 keys feature sections by GetName() ("Developer Tools", with a space); CS 1.x reads the top-level RenderDoc.
+  // Literal keys, not the overlay, so a key dropped from CAPTURE_KEYS fails here. The restore below covers both.
+  const written = JSON.parse(live.toString('utf8'))
+  assert.equal(written['Developer Tools']?.RenderDoc?.['Enable RenderDoc Capture'], true, 'CS 2.0: Developer Tools.RenderDoc.Enable RenderDoc Capture')
+  assert.equal(written.RenderDoc?.['Enable RenderDoc Capture'], true, 'CS 1.x: RenderDoc.Enable RenderDoc Capture')
+  ok('capture keys cover CS 2.0 feature names')
   const ov = resolveProfile(plan, 'A').overlay
   assert.equal(ov.Advanced['Log Level'], 1)
   assert.ok(!('Log Level' in (resolveProfile({ ...plan, x_cs_settings: {} }, 'A').overlay.Advanced || {})), 'capture keys do not force Log Level')
@@ -347,7 +353,9 @@ const pending = () => { try { return Object.values(JSON.parse(fs.readFileSync(JO
   const { edits } = planSettingsEdits(ORIG_TEXT, ov)
   const touched = new Set(edits.map(e => e.line))
   before.forEach((l, i) => { if (!touched.has(i + 1)) assert.ok(after.includes(l), `line ${i + 1} kept`) })
-  assert.equal(after.length - before.length, edits.filter(e => e.before === null).length, 'one new line per inserted key')
+  // An inserted section ("Developer Tools" when the file has none) spans its pretty-printed lines; a scalar key one.
+  const insertedLines = edits.filter(e => e.before === null).reduce((n, e) => n + JSON.stringify(JSON.parse(e.after), null, 1).split('\n').length, 0)
+  assert.equal(after.length - before.length, insertedLines, 'new lines = the inserted keys, sections at their printed height')
   assert.equal(fs.readFileSync(path.join(RUN_A, 'SettingsUser.applied.json'), 'utf8'), live.toString('utf8'), 'applied copy for P04_SETTINGS')
 
   // Review #1: another profile in another run dir must refuse while A is pending (and not back up A's edits).

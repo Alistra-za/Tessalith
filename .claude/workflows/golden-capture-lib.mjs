@@ -40,10 +40,16 @@ export function layoutOf(plan) {
     yaw: y => Math.round((y + a) * 1e4) / 1e4,
   }
 }
-// Always on for a capture run, whatever the profile says: RenderDoc + Frame Annotations (base workflow). Log Level is NOT
+// Always on for a capture run, whatever the profile says: RenderDoc + Frame Annotations (base workflow). RenderDoc is
+// written twice: CS 2.0 builds key feature sections by GetName() ("Developer Tools", with a space; PBR2Test1, DLL
+// 1.9.0.0), CS 1.x reads the top-level RenderDoc section; each build ignores the other's. Log Level is NOT
 // forced (owner 2026-10-18): Log Level <= 1 turns on CS developer mode, which compiles D3DCOMPILE_DEBUG shaders into the
 // owner's disk cache. W2 uses the DevBench shadercache tool; X6 decodes descriptors offline (cslog_defines.py).
-const CAPTURE_KEYS = { RenderDoc: { 'Enable RenderDoc Capture': true }, Advanced: { 'Frame Annotations': true } }
+const CAPTURE_KEYS = {
+  'Developer Tools': { RenderDoc: { 'Enable RenderDoc Capture': true } },
+  RenderDoc: { 'Enable RenderDoc Capture': true },
+  Advanced: { 'Frame Annotations': true },
+}
 // x_extract stage names -> scripts, in run order (GOLDEN-EXTRACTORS.md "Run order"). D (X4 DebugPixel traces) is opt-in: named values need a
 // Developer Mode capture (profile DBG), so the default list leaves it out.
 export const EXTRACT_STAGES = [
