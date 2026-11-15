@@ -133,6 +133,117 @@ pub enum Op {
     RemoveController {
         at: Anchor, // Role::Ctrl
     },
+    /// Note IE14: the shader property's name field becomes `path`, the `.csm` CS 2.0 reads. `base` is the name the
+    /// edit saw (the one the user agreed to replace): any other name now is a Conflict. Made by [`point_at_csm`].
+    SetMaterial {
+        at: Anchor, // Role::Shader
+        path: String,
+        base: String,
+    },
+    /// Note IE14: a v1 PBR shape (type 0 or 11, SLSF2 23) to a `.csm` shape in one step, so a part of it can never
+    /// apply alone: SLSF2 12, 23, 24, 25, 26, 27 and 30 cleared, shader type 0 (the type-11 trailer goes), texture
+    /// slots kept, name field `path` (`base` as in `SetMaterial`). Made by [`convert_v1`].
+    ConvertV1 {
+        at: Anchor, // Role::Shader
+        path: String,
+        base: String,
+    },
+}
+
+/// Note IE14: what `apply` says to a `SetField` or `SetBits` that turns SLSF2 bit 23 (v1 PBR) on.
+pub const V1_GONE: &str = "v1 PBR is gone; use Convert to .csm";
+
+/// Note IE14: the SLSF2 bits [`Op::ConvertV1`] clears: the v1 flags and 24 (two-layer under v1, multi-layer parallax
+/// on type 11, which the conversion leaves).
+pub const CONVERT_CLEARS: u32 = crate::pbr2::V1_SLSF2 | 1 << 24;
+
+/// Why [`point_at_csm`] or [`convert_v1`] makes no op.
+#[derive(Debug, Clone, PartialEq, thiserror::Error)]
+pub enum EditError {
+    /// The name field holds this value, which is not a `.csm` path: replacing it needs the user's word (`force`).
+    #[error("The shader's name field holds {0:?}, which another tool may use.")]
+    NameInUse(String),
+    #[error("{0} is not a .csm file under materials")]
+    NotCsm(String),
+    #[error("The shape has no BSLightingShaderProperty.")]
+    NoShader,
+    #[error("Not a v1 PBR shape: Convert needs shader type 0 or 11 with the PBR flag (SLSF2 23).")]
+    NotV1,
+}
+
+/// Note IE14: a v1 PBR shape as CS 1.x read it: shader type 0 or 11 with SLSF2 bit 23.
+pub fn is_v1(shader_type: u32, slsf2: u32) -> bool {
+    matches!(shader_type, 0 | 11) && slsf2 & crate::material::SLSF2_TRUE_PBR != 0
+}
+
+/// The shape's shader anchor and its lighting property.
+fn shader_of(
+    m: &NifModel,
+    shape: u32,
+) -> Result<(Anchor, &crate::model::LightingModel), EditError> {
+    let l = m
+        .shape(shape)
+        .and_then(|s| s.shader)
+        .and_then(|b| m.lighting.get(&b))
+        .ok_or(EditError::NoShader)?;
+    let at = anchor_role(m, Some(shape), Role::Shader).ok_or(EditError::NoShader)?;
+    Ok((at, l))
+}
+
+/// The name field now, and whether `point_at_csm` may replace it: empty, already a `.csm` path, or `force`.
+fn replaceable(l: &crate::model::LightingModel, force: bool) -> Result<String, EditError> {
+    let name = l.lighting.name.as_deref().unwrap_or("").to_string();
+    if name.is_empty() || crate::path::canon_material(&name).is_some() || force {
+        Ok(name)
+    } else {
+        Err(EditError::NameInUse(name))
+    }
+}
+
+fn csm_ok(path: &str) -> Result<(), EditError> {
+    match crate::path::canon_material(path) {
+        Some(_) => Ok(()),
+        None => Err(EditError::NotCsm(path.to_string())),
+    }
+}
+
+/// Note IE14: the op that points shape `shape`'s shader property at the `.csm` `path` (Data-relative,
+/// `materials\…\x.csm`). Refused with [`EditError::NameInUse`] when the name field holds anything but nothing or a
+/// `.csm` path and `force` is false; the op's `base` is that name, so a forced op replaces only the name the user saw.
+pub fn point_at_csm(m: &NifModel, shape: u32, path: &str, force: bool) -> Result<Op, EditError> {
+    csm_ok(path)?;
+    let (at, l) = shader_of(m, shape)?;
+    let base = replaceable(l, force)?;
+    Ok(Op::SetMaterial {
+        at,
+        path: path.to_string(),
+        base,
+    })
+}
+
+/// Note IE14: the op that converts v1 PBR shape `shape` to the `.csm` `path`, and the PBR values its v1 flags and
+/// parameters mean (`pbr2::v1_values`, read before the type change drops the type-11 trailer). Only for [`is_v1`]
+/// shapes; the name field as in [`point_at_csm`].
+pub fn convert_v1(
+    m: &NifModel,
+    shape: u32,
+    path: &str,
+    force: bool,
+) -> Result<(Op, crate::pbr2::PbrValues), EditError> {
+    csm_ok(path)?;
+    let (at, l) = shader_of(m, shape)?;
+    let lt = &l.lighting;
+    if !is_v1(lt.shader_type, lt.slsf2) {
+        return Err(EditError::NotV1);
+    }
+    let base = replaceable(l, force)?;
+    let (values, _) = crate::pbr2::v1_values(lt.shader_type, lt.slsf2, &lt.params);
+    let op = Op::ConvertV1 {
+        at,
+        path: path.to_string(),
+        base,
+    };
+    Ok((op, values))
 }
 
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -334,6 +445,8 @@ pub fn merge_key(op: &Op) -> String {
             ("AddController", at, format!("{class}/{var:?}"))
         }
         Op::RemoveController { at } => ("RemoveController", at, String::new()),
+        Op::SetMaterial { at, .. } => ("SetMaterial", at, String::new()),
+        Op::ConvertV1 { at, .. } => ("ConvertV1", at, String::new()),
     };
     format!("{v}|{}|{what}", at.block)
 }
@@ -385,6 +498,8 @@ fn anchor_of(op: &Op) -> &Anchor {
         | Op::SetKeys { at, .. }
         | Op::AddController { at, .. }
         | Op::RemoveController { at }
+        | Op::SetMaterial { at, .. }
+        | Op::ConvertV1 { at, .. }
         | Op::SetTexturePath { at, .. } => at,
     }
 }
@@ -407,6 +522,8 @@ pub fn rebase(new_src: &[u8], ops: &[Op]) -> Result<(Vec<Op>, Vec<Outcome>), Nif
                 | Op::SetKeys { at, .. }
                 | Op::AddController { at, .. }
                 | Op::RemoveController { at }
+                | Op::SetMaterial { at, .. }
+                | Op::ConvertV1 { at, .. }
                 | Op::SetTexturePath { at, .. } => at.block = *block,
             }
         }
@@ -463,6 +580,11 @@ pub fn keep_mine(new_src: &[u8], ops: &[Op], i: usize) -> Result<Vec<Op>, NifErr
         Op::SetKeys { base, clip, .. } => {
             if let Ok(t) = structural::key_target(doc.header(), &cur, &m, block, *clip) {
                 *base = t.keys;
+            }
+        }
+        Op::SetMaterial { base, .. } | Op::ConvertV1 { base, .. } => {
+            if let Some(l) = m.lighting.get(&block) {
+                *base = l.lighting.name.as_deref().unwrap_or("").to_string();
             }
         }
         _ => {}
@@ -540,6 +662,17 @@ fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
     }
     if matches!(op, Op::AddController { .. } | Op::RemoveController { .. }) {
         return match structural::ctrl_op(&mut doc, &m, at, block, op) {
+            Ok(Outcome::Applied) => (Some(doc.bytes()), outcome),
+            Ok(o) => (None, o),
+            Err(e) => refused(e),
+        };
+    }
+    if matches!(op, Op::SetMaterial { .. } | Op::ConvertV1 { .. }) {
+        let r = match at.role {
+            Role::Shader => structural::material_op(&mut doc, cur, &m, block, op),
+            _ => Err("material ops anchor on a shader property".into()),
+        };
+        return match r {
             Ok(Outcome::Applied) => (Some(doc.bytes()), outcome),
             Ok(o) => (None, o),
             Err(e) => refused(e),
@@ -650,6 +783,14 @@ fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
         }
         _ => unreachable!("filtered above"),
     };
+    // Note IE14 (design goal 6): no edit writes v1 PBR; a shape that has it keeps it until Convert.
+    if let (Field::Slsf2, Value::U32(now), Ok(b)) = (field, current, <[u8; 4]>::try_from(&new[..]))
+    {
+        let pbr = crate::material::SLSF2_TRUE_PBR;
+        if u32::from_le_bytes(b) & pbr != 0 && now & pbr == 0 {
+            return refused(V1_GONE.into());
+        }
+    }
     if let Err(e) = doc.patch(block, rel, &new) {
         return refused(e.to_string());
     }

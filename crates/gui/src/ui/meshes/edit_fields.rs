@@ -1,5 +1,6 @@
 //! The edit panel's Shader and Alpha tabs (spec §7, plan A17). Widgets only read the session; every change is
 //! collected in an [`Act`] that `edit_panel::panel` applies after drawing.
+use crate::model::meshes::csm_actions::{CsmAction, NO_SET};
 use crate::model::meshes::nif_edit::{edit_slot_label, edit_slot_shown, NifEdit, Selection};
 use crate::model::meshes::pg_entries::pg_ignore;
 use crate::model::meshes::{shader_type_name, MeshesModel, SHADER_TYPES};
@@ -7,7 +8,8 @@ use crate::pgp::alpha::{AlphaFlags, BLEND_MODES, DEFAULT_FLAGS, DEFAULT_THRESH, 
 use crate::ui::status::{AMBER, RED};
 use eframe::egui;
 use nif::edit::validate::{
-    type_flag_errors, type_flag_lock, type_slsf2_fix, Level, Target, Warning,
+    type_flag_errors, type_flag_lock, type_slsf2_fix, Level, Target, Warning, CONVERT_FIX,
+    V1_VANILLA,
 };
 use nif::edit::{anchor_role, anchor_shape, merge_key, Anchor, Op, Role};
 use nif::fields::{Field, Value};
@@ -40,11 +42,15 @@ pub(super) struct Act {
     pub playing: Option<crate::model::meshes::nif_edit::Playing>,
     /// Note CS: the line shown after `push` (a shader type change that also fixed a flag).
     pub notice: Option<String>,
+    /// Note IE14: Convert to .csm (the v1 warning's button) or Use the set's .csm, on the selected shape.
+    pub csm: Option<CsmAction>,
 }
 
 const LABEL_W: f32 = 132.0;
 const SKINNED_HOVER: &str = "Set by the mesh; changing it breaks skinning.";
-const PBR_HOVER: &str = "TruePBR marker: PGPatcher and CS rely on it.";
+/// Note IE14: the v1 PBR flag is read-only (no edit writes v1 PBR); a v1 shape's warning carries Convert to .csm.
+const PBR_HOVER: &str =
+    "The v1 PBR flag: read-only. CS 2.0 draws a v1 shape vanilla; use Convert to .csm on its warning.";
 const TYPE_HOVER: &str = "Changing the type changes the trailer fields.";
 const BROWSE_LIMIT: usize = 200;
 
@@ -75,6 +81,15 @@ pub(super) fn warnings(ui: &mut egui::Ui, e: &NifEdit, target: &Target, act: &mu
         ui.horizontal(|ui| {
             ui.add_space(LABEL_W);
             ui.add(egui::Label::new(egui::RichText::new(&w.text).color(color)).wrap());
+            // Note IE14: the v1 warning's fix is no op but a flow (the project set, maybe a question).
+            if w.text == V1_VANILLA {
+                let r = ui.small_button(CONVERT_FIX);
+                let name = format!("{CONVERT_FIX}: {} ({})", w.text, target_name(target));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                if r.clicked() {
+                    act.csm = Some(CsmAction::Convert);
+                }
+            }
             if let Some(fix) = &w.fix {
                 // Note CS: a flag fix names what it does.
                 let label = match fix {
@@ -354,6 +369,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
     let pbr = lt.slsf2 & SLSF2_TRUE_PBR != 0;
     // Meshes UI T6 (Note CZ21): the texture slots first, as the shape's identity.
     texture_slots(ui, m, e, shape, l, act);
+    material_row(ui, m, shape.block, l, act);
     ui.separator();
 
     ui.horizontal(|ui| {
@@ -617,6 +633,69 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
     }
 }
 
+/// Note IE14: the button that points the shape at its project set's `.csm`.
+pub const USE_SET_CSM: &str = "Use the set's .csm";
+
+/// Note IE14: the shader property's name field (CS 2.0 reads a `.csm` path from it) and [`USE_SET_CSM`]. The button is
+/// off, saying why, on a v1 shape (Convert does it), without a project set, or when the name is that `.csm` already.
+fn material_row(
+    ui: &mut egui::Ui,
+    m: &MeshesModel,
+    shape: u32,
+    l: &nif::model::LightingModel,
+    act: &mut Act,
+) {
+    let name = l.lighting.name.as_deref().unwrap_or("");
+    let set = m.set_for_shape(shape);
+    let canon = nif::path::canon_material;
+    let off = if nif::edit::is_v1(l.lighting.shader_type, l.lighting.slsf2) {
+        Some(
+            "A v1 PBR shape: use Convert to .csm on its warning, which also copies its values."
+                .to_string(),
+        )
+    } else {
+        match set {
+            None => Some(NO_SET.to_string()),
+            Some(s) if canon(name).is_some() && canon(name) == canon(&s.path) => {
+                Some(format!("The shape uses {}'s .csm already.", s.set_id))
+            }
+            Some(_) => None,
+        }
+    };
+    let full = format!(
+        "Material: {}",
+        if name.is_empty() { "(none)" } else { name }
+    );
+    ui.horizontal(|ui| {
+        row_label(ui, "Material");
+        egui::Sides::new().shrink_left().truncate().show(
+            ui,
+            |ui| {
+                let shown = if name.is_empty() { "(none)" } else { name };
+                let r = ui.add(egui::Label::new(shown).truncate());
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &full));
+                r.on_hover_text(&full);
+            },
+            |ui| {
+                let r = ui.add_enabled(off.is_none(), egui::Button::new(USE_SET_CSM));
+                match (&off, set) {
+                    (Some(why), _) => {
+                        r.on_disabled_hover_text(why);
+                    }
+                    (None, Some(s)) => {
+                        let r =
+                            r.on_hover_text(format!("Name {} in the shape ({})", s.path, s.set_id));
+                        if r.clicked() {
+                            act.csm = Some(CsmAction::Point);
+                        }
+                    }
+                    (None, None) => {}
+                }
+            },
+        );
+    });
+}
+
 /// What a warning applies to, in words, for a fix button's accessible name.
 fn target_name(t: &Target) -> String {
     match t {
@@ -633,6 +712,7 @@ fn warnings_of<'a>(e: &'a NifEdit, target: &'a Target) -> impl Iterator<Item = &
         .iter()
         .chain(&e.op_warnings)
         .chain(&e.pg_warnings)
+        .chain(&e.csm_warnings)
         .filter(move |w| w.target == *target)
 }
 

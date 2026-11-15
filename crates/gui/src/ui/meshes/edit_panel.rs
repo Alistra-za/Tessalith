@@ -3,6 +3,7 @@
 //! Extra data tabs.
 use super::edit_fields::{self, Act};
 use super::{edit_ctrl, edit_extra};
+use crate::model::meshes::csm_actions::CsmAction;
 use crate::model::meshes::edit_doc::OpStatus;
 use crate::model::meshes::nif_edit::{NifEdit, Selection, NO_EDITS, NO_EXPORT_FOLDER};
 use crate::model::meshes::MeshesModel;
@@ -393,6 +394,16 @@ fn apply(m: &mut MeshesModel, act: Act) {
     }
     if act.open.is_some() {
         m.open_in_textures = act.open;
+    }
+    // Note IE14: on the shape whose Shader tab drew the button.
+    let shape = m.edit.as_ref().and_then(|e| match e.selection {
+        Selection::Shape(b) => Some(b),
+        _ => None,
+    });
+    match (act.csm, shape) {
+        (Some(CsmAction::Convert), Some(b)) => m.convert_to_csm(b),
+        (Some(CsmAction::Point), Some(b)) => m.point_at_set_csm(b),
+        _ => {}
     }
     // A field that lost its focus to the Review… click committed its push or typed path (and flush) above this frame
     // (rule 7.5).

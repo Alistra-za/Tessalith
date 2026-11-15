@@ -50,6 +50,7 @@ mod edit_panel;
 mod skin_preview;
 mod txst_preview;
 use crate::model::meshes::skin_preview::has_skin_card;
+pub use edit_fields::USE_SET_CSM;
 use skin_preview::SkinAct;
 /// Problems listed under "Scan details"; the count is always shown.
 const MAX_LISTED: usize = 200;
@@ -1394,7 +1395,134 @@ fn shape_details(ui: &mut egui::Ui, winners: &[(usize, String)]) {
     }
 }
 
+/// Note IE14: the Name question's buttons and the Differences window's; Enter presses only the safe one.
+pub const KEEP_NAME: &str = "Keep the name";
+pub const USE_SET_VALUES: &str = "Use the set's values";
+pub const REPLACE_SET_VALUES: &str = "Replace the set's values";
+
+/// Note IE14: the question a `.csm` action waits on (`MeshesModel::csm_ask`). Enter is the safe answer (keep the name,
+/// use the set's values); replacing is a click on its red-outlined button.
+fn csm_dialog(ctx: &egui::Context, m: &mut MeshesModel) {
+    use crate::model::meshes::csm_actions::{CsmAnswer, CsmAsk};
+    use crate::ui::dialogs::{dialog, dialog_hover, Role};
+    let Some(ask) = m.csm_ask.clone() else {
+        return;
+    };
+    let answer = match &ask {
+        CsmAsk::Name { old, .. } => {
+            let replace = format!("Replace {old}");
+            let buttons = [
+                (replace.as_str(), Role::Destructive, true),
+                (KEEP_NAME, Role::Default, true),
+            ];
+            let (keys, clicked) = dialog(
+                ctx,
+                "meshes-csm-name",
+                false,
+                460.0,
+                "Replace the material name?",
+                &buttons,
+                |ui| {
+                    ui.add(
+                        egui::Label::new(format!(
+                            "The shape's material name is {old}. Tessalith did not write it, and another tool may \
+                             use it. Replace it with the set's .csm path?"
+                        ))
+                        .wrap(),
+                    );
+                },
+            );
+            match clicked {
+                Some(0) => Some(CsmAnswer::ReplaceName),
+                Some(_) => Some(CsmAnswer::Cancel),
+                None if keys.cancel || keys.enter => Some(CsmAnswer::Cancel),
+                None => None,
+            }
+        }
+        CsmAsk::Differences {
+            set_id,
+            rows,
+            replace_blocked,
+            ..
+        } => {
+            let buttons = [
+                ("Cancel", Role::Plain, true),
+                (
+                    REPLACE_SET_VALUES,
+                    Role::Destructive,
+                    replace_blocked.is_none(),
+                ),
+                (USE_SET_VALUES, Role::Default, true),
+            ];
+            let hovers = [None, replace_blocked.as_deref(), None];
+            let (keys, clicked) = dialog_hover(
+                ctx,
+                "meshes-csm-differences",
+                false,
+                560.0,
+                "The set holds other PBR values",
+                &buttons,
+                &hovers,
+                |ui| {
+                    ui.add(
+                        egui::Label::new(format!(
+                            "{set_id} holds PBR values that differ from this v1 shape's. The shape will use the \
+                             set's .csm either way."
+                        ))
+                        .wrap(),
+                    );
+                    egui::ScrollArea::vertical().max_height(300.0).show(ui, |ui| {
+                        egui::Grid::new("meshes-csm-diff-grid")
+                            .num_columns(3)
+                            .striped(true)
+                            .show(ui, |ui| {
+                                ui.strong("Value");
+                                ui.strong("Set");
+                                ui.strong("Shape");
+                                ui.end_row();
+                                for r in rows {
+                                    let l = ui.label(&r.label).on_hover_text(&r.key);
+                                    if r.read_only {
+                                        l.on_hover_text(
+                                            "A PGPatcher setting: change it in the set's PGPatcher settings.",
+                                        );
+                                    }
+                                    ui.label(&r.set);
+                                    ui.label(&r.shape);
+                                    ui.end_row();
+                                }
+                            });
+                    });
+                    if rows.iter().any(|r| r.read_only) {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(
+                                    "PGPatcher settings are not replaced: change them in the set's PGPatcher settings.",
+                                )
+                                .weak(),
+                            )
+                            .wrap(),
+                        );
+                    }
+                },
+            );
+            match clicked {
+                Some(1) => Some(CsmAnswer::ReplaceSet),
+                Some(2) => Some(CsmAnswer::UseSet),
+                Some(_) => Some(CsmAnswer::Cancel),
+                None if keys.enter => Some(CsmAnswer::UseSet),
+                None if keys.cancel => Some(CsmAnswer::Cancel),
+                None => None,
+            }
+        }
+    };
+    if let Some(a) = answer {
+        m.answer_csm(a);
+    }
+}
+
 fn dialogs(ctx: &egui::Context, m: &mut MeshesModel) {
+    csm_dialog(ctx, m);
     if let Some(d) = m.dialog.clone() {
         let (mut use_it, mut choose, mut folder) = (false, false, false);
         egui::Modal::new(egui::Id::new("meshes-mo2")).show(ctx, |ui| {

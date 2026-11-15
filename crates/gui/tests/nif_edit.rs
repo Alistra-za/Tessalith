@@ -410,6 +410,17 @@ fn every_op_variant_round_trips() {
             stop: 2.0,
         },
         Op::RemoveController { at: ctrl.clone() },
+        // Note IE14
+        Op::SetMaterial {
+            at: shader.clone(),
+            path: "materials\\pbr\\a.csm".into(),
+            base: "Tool name".into(),
+        },
+        Op::ConvertV1 {
+            at: shader.clone(),
+            path: "materials\\pbr\\a.csm".into(),
+            base: String::new(),
+        },
     ];
     for v in [
         E::Bsx(7),
@@ -2353,23 +2364,8 @@ fn skinned_and_pbr_bits_are_greyed() {
     assert!(!h.get_by_label("Specular").accesskit_node().is_disabled());
     assert!(h.query_by_label("Specular level").is_none());
     h.get_by_label("Glossiness");
-    // A PBR shape: Glossiness and Specular Strength read as CS uses them.
-    let m = h.state_mut();
-    let e = m.edit.as_ref().unwrap();
-    let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
-    let shader = e.model.shape(a).unwrap().shader.unwrap();
-    let base = e.model.lighting[&shader].lighting.slsf2;
-    m.edit_push(
-        vec![Op::SetBits {
-            at,
-            field: Field::Slsf2,
-            mask: 1 << 23,
-            value: 1 << 23,
-            base,
-        }],
-        None,
-    );
-    h.run_steps(2);
+    // A PBR shape (Note IE14: in the source): Glossiness and Specular Strength read as CS uses them.
+    set_slsf2(&mut h, a, V1_PBR);
     h.get_by_label("Specular level");
     h.get_by_label("Roughness scale");
     assert!(h.query_by_label("Glossiness").is_none());
@@ -4706,23 +4702,48 @@ fn ctrl_z_does_nothing_in_a_text_field_a_popup_or_a_dialog() {
     assert_eq!(textures(&h), tex);
 }
 
-/// Sets `mask` bits of SLSF2 on shape A's shader (the edit panel redraws on the next run).
+/// SLSF2 bit 23, the v1 PBR flag.
+const V1_PBR: u32 = 1 << 23;
+
+/// Note IE14: no edit turns SLSF2 bit 23 (v1 PBR) on any more, so a test's v1 shape gets it in the source bytes:
+/// `mask` bits of SLSF2 on shape `shape`'s shader set to `value` there, and the source reloaded.
+fn source_slsf2(m: &mut MeshesModel, shape: u32, mask: u32, value: u32) {
+    m.edit_with(|e| {
+        let shader = e.model.shape(shape).unwrap().shader.unwrap() as usize;
+        let mut b = e.source.to_vec();
+        let h = nif::header::Header::parse(&b).unwrap();
+        let (rel, _) = nif::fields::locate(&h, &b, shader, Field::Slsf2).unwrap();
+        let at = h.offsets()[shader] + rel;
+        let old = u32::from_le_bytes(b[at..at + 4].try_into().unwrap());
+        b[at..at + 4].copy_from_slice(&((old & !mask) | (value & mask)).to_le_bytes());
+        e.reload_source(b).unwrap();
+    });
+}
+
+/// Sets `mask` bits of SLSF2 on shape A's shader (the edit panel redraws on the next run): bit 23 in the source
+/// (Note IE14), the rest by an edit.
 fn set_slsf2(h: &mut Harness<'static, MeshesModel>, a: u32, mask: u32) {
     let m = h.state_mut();
-    let e = m.edit.as_ref().unwrap();
-    let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
-    let shader = e.model.shape(a).unwrap().shader.unwrap();
-    let base = e.model.lighting[&shader].lighting.slsf2;
-    m.edit_push(
-        vec![Op::SetBits {
-            at,
-            field: Field::Slsf2,
-            mask,
-            value: mask,
-            base,
-        }],
-        None,
-    );
+    if mask & V1_PBR != 0 {
+        source_slsf2(m, a, V1_PBR, V1_PBR);
+    }
+    let mask = mask & !V1_PBR;
+    if mask != 0 {
+        let e = m.edit.as_ref().unwrap();
+        let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
+        let shader = e.model.shape(a).unwrap().shader.unwrap();
+        let base = e.model.lighting[&shader].lighting.slsf2;
+        m.edit_push(
+            vec![Op::SetBits {
+                at,
+                field: Field::Slsf2,
+                mask,
+                value: mask,
+                base,
+            }],
+            None,
+        );
+    }
     h.run_steps(2);
 }
 
@@ -8347,26 +8368,25 @@ fn exportable(b: Vec<u8>) -> (tempfile::TempDir, NifEdit) {
     (d, e)
 }
 
-fn pbr_on(e: &NifEdit) -> Op {
-    let at = nif::edit::anchor_role(&e.model, Some(0), Role::Shader).unwrap();
-    let base = e.model.lighting[&1].lighting.slsf2;
-    Op::SetBits {
-        at,
-        field: Field::Slsf2,
-        mask: 1 << 23,
-        value: 1 << 23,
-        base,
-    }
+/// `b` with SLSF2 bit 23 (v1 PBR) on its shader, block 1 (Note IE14: no edit sets it).
+fn pbr_on(b: &[u8]) -> Vec<u8> {
+    let h = nif::header::Header::parse(b).unwrap();
+    let (rel, _) = nif::fields::locate(&h, b, 1, Field::Slsf2).unwrap();
+    let at = h.offsets()[1] + rel;
+    let mut out = b.to_vec();
+    let old = u32::from_le_bytes(out[at..at + 4].try_into().unwrap());
+    out[at..at + 4].copy_from_slice(&(old | V1_PBR).to_le_bytes());
+    out
 }
 
 #[test]
 fn env_map_scale_on_pbr_blocks_export_after_a_switch_and_in_the_source() {
-    // The shape turns PBR after the var-8 controller exists.
+    // The shape turns PBR after the var-8 controller exists (Note IE14: the source changes; no edit sets bit 23).
     let (_d, mut e) = exportable(ctrl_scene_vars(0x82, [8, 20]));
     assert!(e.warnings.iter().all(|w| w.text != ENV_PBR));
-    let op = pbr_on(&e);
-    e.push(vec![op], None);
-    assert_eq!(e.export_block().as_deref(), Some(ENV_PBR));
+    let pbr = pbr_on(&e.source);
+    e.reload_source(pbr).unwrap();
+    assert!(e.warnings.iter().any(|w| w.text == ENV_PBR));
     // A file that already has it: an unrelated edit still cannot export.
     let (_d2, mut e2) = exportable(e.patched.to_vec());
     let at = nif::edit::anchor_role(&e2.model, Some(0), Role::Shader).unwrap();
@@ -10156,19 +10176,9 @@ fn two_sets_with_empty_rmaos_are_two_rows() {
             .texture_set
             .unwrap()
     };
+    // Note IE14: v1 PBR in the source (no edit sets bit 23).
     for s in [a, b] {
-        let e = m.edit.as_ref().unwrap();
-        let at = nif::edit::anchor_role(&e.model, Some(s), Role::Shader).unwrap();
-        let shader = e.model.shape(s).unwrap().shader.unwrap();
-        let base = e.model.lighting[&shader].lighting.slsf2;
-        let op = Op::SetBits {
-            at,
-            field: Field::Slsf2,
-            mask: 1 << 23,
-            value: 1 << 23,
-            base,
-        };
-        m.edit_push(vec![op], None);
+        source_slsf2(&mut m, s, V1_PBR, V1_PBR);
     }
     let rows = |m: &MeshesModel| {
         m.nif_problems()
@@ -11648,4 +11658,514 @@ fn a_pending_texture_row_gives_the_nif_index_on_hover() {
     h.get_by_label_contains(": Texture slot 2: ").hover();
     h.run_steps(30);
     h.get_by_label("NIF texture index 1");
+}
+
+// ---- Note IE14: point a shape at its set's .csm, convert a v1 PBR shape ----
+
+use nif::edit::validate::{CONVERT_FIX, V1_VANILLA};
+use sdc_gui::model::cs_pbr::Kind as CsKind;
+use sdc_gui::model::meshes::csm_actions::*;
+use sdc_gui::model::AppModel;
+
+/// The support fixture's PBR set and its `.csm` (output prefix `textures\pbr\landscape\rock01`).
+const ROCK: &str = "landscape/rock01";
+const ROCK_CSM: &str = "materials\\pbr\\landscape\\rock01.csm";
+
+/// Shape "S" (0) -> BSLSP (1) of `shader_type` with `slsf2`, its name field `name` (None: -1), glossiness 0.3 and
+/// specular strength 0.8 (v1 specular level and roughness scale) -> texture set (2) on the rock01 set's outputs.
+fn v1_rock(shader_type: u32, slsf2: u32, name: Option<&str>) -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = n.string("S");
+    let nm = name.map_or(-1, |x| n.string(x));
+    let trailer: &[f32] = match shader_type {
+        11 => &[7.0, 0.4, 2.0, 3.0, 0.9],
+        _ => &[],
+    };
+    let body = W::default()
+        .u32(shader_type)
+        .raw(&nif::net::encode_net(nm, &[], -1))
+        .u32(0x8000_0000)
+        .u32(slsf2)
+        .fs(&[0.0, 0.0, 1.0, 1.0])
+        .i32(2)
+        .fs(&[0.0, 0.0, 0.0, 1.0])
+        .u32(3)
+        .fs(&[1.0, 0.0, 0.3])
+        .fs(&[0.2, 0.5, 0.7, 0.8])
+        .fs(&[0.6, 1.5])
+        .fs(trailer)
+        .0;
+    n.block("BSTriShape", one_tri(s, 1)); // a triangle, so the preview draws it
+    n.block("BSLightingShaderProperty", body);
+    n.block(
+        "BSShaderTextureSet",
+        scenes::texset(&[
+            "textures\\pbr\\landscape\\rock01.dds",
+            "textures\\pbr\\landscape\\rock01_n.dds",
+            "",
+            "",
+            "",
+            "textures\\pbr\\landscape\\rock01_rmaos.dds",
+            "",
+            "",
+            "",
+        ]),
+    );
+    n.bytes()
+}
+
+/// The PBR project of `support::pbr_opened_plain` (rock01 a PBR set, no `cs_txst` block) and an edit on `nif` with
+/// its sets handed over, as the app does each frame.
+fn rock_edit(d: &Path, nif: Vec<u8>) -> (AppModel, MeshesModel) {
+    let app = support::pbr_opened_plain(d);
+    let mut m = direct(nif);
+    select(&mut m, "S");
+    m.sync_project_csms(&app);
+    (app, m)
+}
+
+fn notice(m: &MeshesModel) -> Option<String> {
+    m.edit.as_ref().unwrap().notice.clone()
+}
+
+fn lighting(m: &MeshesModel) -> &nif::props::Lighting {
+    &m.edit.as_ref().unwrap().model.lighting[&1].lighting
+}
+
+/// The shape's v1 values as the block keys Convert writes.
+fn v1_block(shader_type: u32, slsf2: u32) -> std::collections::BTreeMap<String, serde_json::Value> {
+    let b = v1_rock(shader_type, slsf2, None);
+    let model = nif::model::read_model(&b).unwrap();
+    let p = &model.lighting[&1].lighting.params;
+    shape_block(&nif::pbr2::v1_values(shader_type, slsf2, p).0)
+}
+
+/// Design §5.4: a set with no PBR values gets the shape's (one undo step of the sets history), then the shape points
+/// at the set's .csm with its v1 flags cleared; the set's .csm stays valid.
+#[test]
+fn convert_copies_values_into_empty_set() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut app, mut m) = rock_edit(d.path(), v1_rock(0, V1_PBR, None));
+    assert!(
+        app.cs_block(ROCK, CsKind::Txst).is_none(),
+        "the fixture set has no block"
+    );
+    m.convert_to_csm(0);
+    assert_eq!(m.csm_ask, None, "nothing to ask: the set has no values");
+    assert!(ops(&m).is_empty(), "the op waits for the set's write");
+    let w = m.csm_write.clone().expect("the set's values to write");
+    assert_eq!(w.set_id, ROCK);
+    apply_csm_write(&mut app, &mut m);
+    assert_eq!(m.csm_write, None);
+    // the set holds the shape's values: specular level from glossiness, roughness scale from specular strength
+    let block = app
+        .cs_block(ROCK, CsKind::Txst)
+        .expect("the block the copy made")
+        .values;
+    let want = v1_block(0, V1_PBR);
+    assert!(!want.is_empty());
+    for (k, v) in &want {
+        assert_eq!(block.get(k), Some(v), "{k}");
+    }
+    let num = |k: &str| block.get(k).and_then(|v| v.as_f64()).unwrap();
+    assert!((num("specularLevel") - 0.3).abs() < 1e-6);
+    assert!((num("roughnessScale") - 0.8).abs() < 1e-6);
+    assert_eq!(app.undo_label(), Some("Copy the shape's PBR values"));
+    // the set's .csm is still written
+    let set = sdc_gui::model::csm_export::csm_sets(&app)
+        .into_iter()
+        .find(|(v, _)| v.id == ROCK)
+        .expect("the set's .csm")
+        .1;
+    assert_eq!(set.blocked, None);
+    assert_eq!(set.path, ROCK_CSM);
+    // the shape now names it, without the v1 flag
+    let e = m.edit.as_ref().unwrap();
+    assert!(
+        matches!(&e.doc.ops()[..], [Op::ConvertV1 { .. }]),
+        "{:?}",
+        e.doc.ops()
+    );
+    assert_eq!(e.outcomes, vec![nif::edit::Outcome::Applied]);
+    assert_eq!(lighting(&m).name.as_deref(), Some(ROCK_CSM));
+    assert_eq!(lighting(&m).slsf2 & V1_PBR, 0);
+    assert!(notice(&m)
+        .unwrap()
+        .contains("Copied the shape's PBR values into landscape/rock01"));
+    assert!(
+        m.edit
+            .as_ref()
+            .unwrap()
+            .warnings
+            .iter()
+            .all(|w| w.text != V1_VANILLA),
+        "converted: no v1 warning"
+    );
+}
+
+/// Design §5.4: a set whose values differ opens the differences window; Enter keeps the set's values (never the
+/// replace), and Replace writes the shape's into the set.
+#[test]
+fn convert_shows_differences() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut app, mut m) = rock_edit(d.path(), v1_rock(0, V1_PBR, None));
+    app.set_cs_value(
+        ROCK,
+        CsKind::Txst,
+        "specularLevel",
+        Some(serde_json::json!(0.5)),
+    );
+    app.set_cs_value(
+        ROCK,
+        CsKind::Txst,
+        "fuzzWeight",
+        Some(serde_json::json!(0.25)),
+    );
+    m.sync_project_csms(&app);
+    m.convert_to_csm(0);
+    let Some(CsmAsk::Differences { rows, .. }) = m.csm_ask.clone() else {
+        panic!("the differences window: {:?}", m.csm_ask)
+    };
+    let row = rows
+        .iter()
+        .find(|r| r.key == "specularLevel")
+        .expect("a specular level row");
+    assert_eq!(
+        (
+            row.label.as_str(),
+            row.set.as_str(),
+            row.shape.as_str(),
+            row.read_only
+        ),
+        ("Specular level", "0.5", "0.3", false)
+    );
+    assert!(rows.iter().any(|r| r.key == "fuzzWeight"), "{rows:?}");
+    assert!(ops(&m).is_empty(), "nothing before the answer");
+    // The window: Enter answers "Use the set's values".
+    let mut h = view(m);
+    h.run_steps(3);
+    h.get_by_label("The set holds other PBR values");
+    h.get_by_role_and_label(AkRole::Button, sdc_gui::ui::meshes::REPLACE_SET_VALUES);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    let m = h.state_mut();
+    assert_eq!(m.csm_ask, None);
+    assert_eq!(m.csm_write, None, "the set is not written");
+    assert!(matches!(&ops(m)[..], [Op::ConvertV1 { .. }]));
+    apply_csm_write(&mut app, m);
+    let block = app.cs_block(ROCK, CsKind::Txst).unwrap().values;
+    assert_eq!(block.get("specularLevel"), Some(&serde_json::json!(0.5)));
+    // Again from the source: Replace the set's values.
+    m.undo_edit();
+    assert!(ops(m).is_empty());
+    m.convert_to_csm(0);
+    assert!(matches!(m.csm_ask, Some(CsmAsk::Differences { .. })));
+    m.answer_csm(CsmAnswer::ReplaceSet);
+    assert!(ops(m).is_empty(), "the op follows the set's write");
+    apply_csm_write(&mut app, m);
+    let block = app.cs_block(ROCK, CsKind::Txst).unwrap().values;
+    assert!((block["specularLevel"].as_f64().unwrap() - 0.3).abs() < 1e-6);
+    assert_eq!(
+        block.get("fuzzWeight"),
+        None,
+        "a value the shape lacks is removed"
+    );
+    assert!(matches!(&ops(m)[..], [Op::ConvertV1 { .. }]));
+    assert_eq!(app.undo_label(), Some("Replace the set's PBR values"));
+}
+
+/// Advisor (IE14): a set whose values equal the shape's (at .csm precision) asks nothing: a second shape of the set.
+#[test]
+fn convert_with_equal_values_asks_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut app, mut m) = rock_edit(d.path(), v1_rock(0, V1_PBR, None));
+    let values = v1_block(0, V1_PBR)
+        .into_iter()
+        .map(|(k, v)| (k, Some(v)))
+        .collect();
+    assert!(app.set_cs_values(ROCK, "test", values));
+    m.sync_project_csms(&app);
+    m.convert_to_csm(0);
+    assert_eq!(m.csm_ask, None);
+    assert_eq!(m.csm_write, None);
+    assert!(matches!(&ops(&m)[..], [Op::ConvertV1 { .. }]));
+}
+
+/// Design §5.4: no project set owns the shape's diffuse: refused, nothing changes. Off CS: refused too.
+#[test]
+fn convert_refused_without_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut other = v1_rock(0, V1_PBR, None);
+    let from = b"textures\\pbr\\landscape\\rock01.dds";
+    let at = other.windows(from.len()).position(|w| w == from).unwrap();
+    other[at..at + from.len()].copy_from_slice(b"textures\\pbr\\landscape\\other1.dds");
+    let (_app, mut m) = rock_edit(d.path(), other);
+    m.convert_to_csm(0);
+    assert_eq!(notice(&m).as_deref(), Some(NO_SET));
+    assert_eq!(NO_SET, "Make a texture set for these textures first.");
+    assert!(ops(&m).is_empty());
+    assert_eq!((m.csm_ask.clone(), m.csm_write.clone()), (None, None));
+    // off Community Shaders there is no .csm
+    let mut m = direct(v1_rock(0, V1_PBR, None));
+    m.set_project_csms(ProjectCsms::default());
+    m.convert_to_csm(0);
+    assert_eq!(notice(&m).as_deref(), Some(NOT_CS));
+    assert!(ops(&m).is_empty());
+}
+
+/// Design §5.4: a v1 shape's Warn carries Convert to .csm; its button runs the conversion on the selected shape.
+#[test]
+fn v1_shape_warns_with_fix() {
+    let d = tempfile::tempdir().unwrap();
+    let (_app, m) = rock_edit(d.path(), v1_rock(11, V1_PBR | (1 << 24), None));
+    let e = m.edit.as_ref().unwrap();
+    let w: Vec<_> = e.warnings.iter().filter(|w| w.text == V1_VANILLA).collect();
+    assert_eq!(w.len(), 1, "{:?}", e.warnings);
+    assert_eq!(w[0].level, nif::edit::validate::Level::Warn);
+    assert_eq!(
+        w[0].target,
+        Target::Field {
+            block: 1,
+            field: Field::Slsf2
+        }
+    );
+    assert!(
+        e.blocked.is_none() || e.blocked.as_deref() == Some(NO_EDITS),
+        "a Warn never blocks"
+    );
+    assert!(
+        m.nif_problems().iter().any(|p| p.text == V1_VANILLA),
+        "a worklist row"
+    );
+    let mut h = view(m);
+    h.run_steps(3);
+    h.get_by_label(V1_VANILLA);
+    let name = format!("{CONVERT_FIX}: {V1_VANILLA}");
+    let by = || {
+        egui_kittest::kittest::By::new()
+            .role(AkRole::Button)
+            .label_contains(&name)
+    };
+    h.get(by()).scroll_to_me();
+    h.run();
+    h.get(by()).click();
+    h.run_steps(2);
+    let m = h.state();
+    assert!(
+        m.csm_write.is_some(),
+        "the empty set takes the shape's values: {:?} {:?}",
+        notice(m),
+        m.csm_ask
+    );
+}
+
+/// Design goal 6: no edit sets SLSF2 bit 23; the raw flag list shows it read-only, pointing at Convert. An old saved
+/// edit that set it reapplies as a refused row that blocks export.
+#[test]
+fn bit_23_cannot_be_set() {
+    let mut m = direct(scenes::shared_alpha_and_set());
+    let a = select(&mut m, "A");
+    let e = m.edit.as_ref().unwrap();
+    let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
+    let shader = e.model.shape(a).unwrap().shader.unwrap();
+    let base = e.model.lighting[&shader].lighting.slsf2;
+    m.edit_push(
+        vec![Op::SetBits {
+            at,
+            field: Field::Slsf2,
+            mask: V1_PBR,
+            value: V1_PBR,
+            base,
+        }],
+        None,
+    );
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        e.outcomes,
+        vec![nif::edit::Outcome::Refused(nif::edit::V1_GONE.into())]
+    );
+    assert_eq!(e.model.lighting[&shader].lighting.slsf2 & V1_PBR, 0);
+    // With an export folder, the refused row blocks the export (an old saved edit reapplies the same way).
+    let (_d, mut x) = exportable(scenes::shared_alpha_and_set());
+    x.push(e.doc.ops().to_vec(), None);
+    assert_eq!(
+        x.export_block().as_deref(),
+        Some("1 edit cannot be applied.")
+    );
+    let mut h = view(m);
+    h.run_steps(2);
+    open_flags(&mut h);
+    let flag = h.get_by_label("Unused01 (TruePBR)");
+    assert!(flag.accesskit_node().is_disabled(), "read-only");
+    flag.hover();
+    h.run_steps(30);
+    h.get_by_label_contains("use Convert to .csm");
+    // Type 11 stays in the shader type combo (vanilla multi-layer parallax).
+    assert!(sdc_gui::model::meshes::SHADER_TYPES.len() > 11);
+}
+
+/// Design §5.4, §7: a shader controller on a value a .csm sets warns on a shape whose loaded material is CS 2.0 PBR.
+#[test]
+fn csm_controller_warns() {
+    let mut m = direct(ctrl_scene_vars(0x82, [9, 20]));
+    let s = select(&mut m, "S");
+    let e = m.edit.as_ref().unwrap();
+    let ctrl = |var: u32| {
+        *e.model
+            .ctrls
+            .iter()
+            .find(|(_, c)| c.var == Some(var))
+            .unwrap()
+            .0
+    };
+    let (gloss, uv) = (ctrl(9), ctrl(20));
+    // The scene's shape has no geometry to load: its loaded material stands in.
+    let mut material = nif::material::MaterialState::builtin_default();
+    material.csm_path = Some("materials/pbr/a.csm".into());
+    let info = |material: nif::material::MaterialState| render3d::ShapeInfo {
+        id: ShapeId(s),
+        name: "S".into(),
+        material,
+        status: render3d::ShapeStatus::Drawing,
+    };
+    // Not PBR: no warning.
+    m.v3.shapes = vec![info(material.clone())];
+    m.refresh_csm_warnings();
+    assert!(m.edit.as_ref().unwrap().csm_warnings.is_empty());
+    material.pbr = Some(nif::pbr2::PbrValues {
+        features: 0,
+        params: nif::pbr2::PBR2_DEFAULTS,
+        fuzz_roughness: -1.0,
+    });
+    m.v3.shapes = vec![info(material)];
+    m.poll(); // the loaded material lands on a poll
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(
+        e.csm_warnings,
+        vec![nif::edit::validate::Warning {
+            level: nif::edit::validate::Level::Warn,
+            target: Target::Block { block: gloss },
+            text: CSM_CTRL.into(),
+            fix: None,
+        }],
+        "var 9 (specular level on PBR), not var 20 (U offset, {uv})"
+    );
+    assert!(m.nif_problems().iter().any(|p| p.text == CSM_CTRL));
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    h.get_by_label(CSM_CTRL);
+}
+
+/// Resolution (IE14): a name field Tessalith did not write is replaced only after a dialog naming it; Enter keeps it;
+/// a name that changed after the question asks again.
+#[test]
+fn convert_asks_before_replacing_a_foreign_name() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut app, mut m) = rock_edit(d.path(), v1_rock(0, V1_PBR, Some("ToolName")));
+    m.convert_to_csm(0);
+    assert_eq!(
+        m.csm_ask,
+        Some(CsmAsk::Name {
+            shape: 0,
+            old: "ToolName".into(),
+            then: CsmAction::Convert
+        })
+    );
+    let mut h = view(m);
+    h.run_steps(3);
+    h.get_by_label_contains("The shape's material name is ToolName");
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().csm_ask, None, "Enter keeps the name");
+    assert_eq!(h.state().csm_write, None);
+    h.state_mut().convert_to_csm(0);
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::Button, "Replace ToolName")
+        .click();
+    h.run_steps(3);
+    let m = h.state_mut();
+    assert!(m.csm_write.is_some(), "replaced: the values step follows");
+    apply_csm_write(&mut app, m);
+    assert_eq!(lighting(m).name.as_deref(), Some(ROCK_CSM));
+    // The source's name changes while the question is open: the answer asks again, naming the new one.
+    m.undo_edit();
+    m.convert_to_csm(0);
+    m.edit_with(|e| e.reload_source(v1_rock(0, V1_PBR, Some("Other"))).unwrap());
+    m.answer_csm(CsmAnswer::ReplaceName);
+    assert!(
+        matches!(&m.csm_ask, Some(CsmAsk::Name { old, .. }) if old == "Other"),
+        "{:?}",
+        m.csm_ask
+    );
+}
+
+/// Design §5.4: Use the set's .csm points a plain shape's name field at its set's .csm (no flags change).
+#[test]
+fn use_the_sets_csm_points_a_plain_shape() {
+    let d = tempfile::tempdir().unwrap();
+    let (_app, m) = rock_edit(d.path(), v1_rock(0, 0, None));
+    let mut h = view(m);
+    h.run_steps(3);
+    h.get_by_role_and_label(AkRole::Button, sdc_gui::ui::meshes::USE_SET_CSM)
+        .click();
+    h.run_steps(3);
+    let m = h.state();
+    assert!(
+        matches!(&ops(m)[..], [Op::SetMaterial { .. }]),
+        "{:?}",
+        ops(m)
+    );
+    assert_eq!(lighting(m).name.as_deref(), Some(ROCK_CSM));
+    assert_eq!(lighting(m).slsf2, 0);
+    // Done: the button says why it is off.
+    assert!(h
+        .get_by_role_and_label(AkRole::Button, sdc_gui::ui::meshes::USE_SET_CSM)
+        .accesskit_node()
+        .is_disabled());
+}
+
+/// Note IE14: the edit preview reads the set's in-memory .csm a shape now names, and reloads when its text changes.
+#[test]
+fn the_edit_preview_reads_the_sets_csm() {
+    use sdc_gui::model::viewport3d::FileSource;
+    let (_d, mut m, cmds) = session_on(&v1_rock(0, 0, None));
+    let key = "materials/pbr/landscape/rock01.csm".to_string();
+    let mem = |id: u64| FileSource::Memory {
+        id,
+        bytes: std::sync::Arc::new(b"{\"Version\":1}".to_vec()),
+    };
+    let sets = |id: u64| ProjectCsms {
+        cs: true,
+        editable: true,
+        sets: vec![ProjectCsm {
+            set_id: ROCK.into(),
+            path: ROCK_CSM.into(),
+            diffuse: vec!["textures/pbr/landscape/rock01.dds".into()],
+            block: Default::default(),
+            pgp_on: vec![],
+            memory: Some((key.clone(), mem(id))),
+        }],
+    };
+    m.set_project_csms(sets(1));
+    m.v3.request_frame(64, 64);
+    assert!(
+        cmds.try_iter()
+            .all(|c| !matches!(c, V3Cmd::LoadParsed { .. })),
+        "no shape names it yet"
+    );
+    let shape = shape_named(m.edit.as_ref().unwrap(), "S");
+    m.point_at_set_csm(shape);
+    let loaded = |m: &mut MeshesModel, cmds: &Receiver<V3Cmd>| {
+        m.v3.request_frame(64, 64); // the load goes out with the next frame
+        cmds.try_iter().find_map(|c| match c {
+            V3Cmd::LoadParsed { textures, .. } => Some(textures),
+            _ => None,
+        })
+    };
+    let t = loaded(&mut m, &cmds).expect("a reload with the set's .csm");
+    assert_eq!(t.get(&key), Some(&mem(1)));
+    m.set_project_csms(sets(2));
+    let t = loaded(&mut m, &cmds).expect("a reload with the changed .csm");
+    assert_eq!(t.get(&key), Some(&mem(2)));
 }

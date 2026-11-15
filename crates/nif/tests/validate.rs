@@ -1,6 +1,6 @@
 mod builder;
 use builder::scenes;
-use nif::edit::validate::{new_errors, validate, Level, Target, Warning};
+use nif::edit::validate::{new_errors, validate, Level, Target, Warning, V1_VANILLA};
 use nif::edit::{apply, Op};
 use nif::extra::ExtraValue;
 use nif::fields::{locate, Field, Value};
@@ -359,15 +359,18 @@ fn bsxflags_must_be_named_bsx() {
     );
 }
 
+/// Note IE14: a v1 PBR shape's only line is that it draws vanilla on CS 2.0.
 #[test]
-fn pbr_shape_has_no_warning() {
+fn pbr_shape_has_only_the_v1_warning() {
     let b = put(
         scenes::lsp_shape(0, &[]),
         1,
         Field::Slsf2,
         Value::U32(1 << 23),
     );
-    assert!(warnings(&b).is_empty());
+    let w = warnings(&b);
+    assert_eq!(w.len(), 1, "{w:#?}");
+    assert_eq!(w[0].text, V1_VANILLA);
 }
 
 fn path_warnings(p: &str) -> Vec<Warning> {
@@ -720,8 +723,42 @@ fn slsf_vanilla_lighting_bits_do_not_warn() {
         let w = slsf_scene(t, f2);
         assert!(w.is_empty(), "{w:#?}");
     }
-    // PBR type 11 without bit 24 is common.
-    assert!(slsf_scene(11, 1 << 23).is_empty());
+    // PBR type 11 without bit 24 is common: only Note IE14's v1 line.
+    let w = slsf_scene(11, 1 << 23);
+    assert_eq!(w.len(), 1, "{w:#?}");
+    only(&w, V1_VANILLA, Level::Warn);
+}
+
+/// Note IE14: a v1 PBR shape (type 0 or 11 with SLSF2 23) draws vanilla on CS 2.0 unless its name field names a `.csm`.
+/// The Warn has no op: the GUI gives it the Convert to .csm action. It never blocks export.
+#[test]
+fn v1_shape_warns_draws_vanilla() {
+    for t in [0, 11] {
+        let w = slsf_scene(t, 1 << 23);
+        let x = only(&w, V1_VANILLA, Level::Warn);
+        assert_eq!(
+            x.target,
+            Target::Field {
+                block: 1,
+                field: Field::Slsf2
+            }
+        );
+        assert_eq!(x.fix, None);
+        assert!(new_errors(&w, &w).is_empty(), "never blocks");
+    }
+    // not v1: no PBR bit, or a type v1 never used
+    none(&slsf_scene(0, 1 << 26), V1_VANILLA);
+    none(&slsf_scene(1, 1 << 23), V1_VANILLA);
+    // a `.csm` in the name field: CS 2.0 draws that
+    let mut n = builder::Nif::new(100);
+    let s = n.string("S");
+    let csm = n.string("materials\\pbr\\a.csm");
+    n.block("BSTriShape", scenes::bstri_named(s, 1, -1));
+    let mut body = scenes::lsp_body(0, &[], -1, &[]);
+    body[4..8].copy_from_slice(&csm.to_le_bytes());
+    n.block("BSLightingShaderProperty", body);
+    let b = put(n.bytes(), 1, Field::Slsf2, Value::U32(1 << 23));
+    none(&warnings(&b), V1_VANILLA);
 }
 
 // ---- v2 B4: authored keys ----

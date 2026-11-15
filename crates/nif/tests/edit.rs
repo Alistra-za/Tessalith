@@ -2453,20 +2453,12 @@ fn add_env_map_scale_is_refused_on_pbr() {
     let Value::U32(slsf2) = current(&b, 3, Field::Slsf2) else {
         panic!("slsf2")
     };
-    let pbr = Op::SetField {
-        at: at.clone(),
-        field: Field::Slsf2,
-        value: Value::U32(slsf2 | 1 << 23),
-        base: Value::U32(slsf2),
-    };
+    // Note IE14: no op turns v1 PBR on, so the PBR shape is the source's
+    let pbr = put_u32(&b, 3, Field::Slsf2, slsf2 | 1 << 23);
     let keys = lin(&[(0.0, 1.0), (1.0, 2.0)]);
-    let r = apply(
-        &b,
-        &[pbr, add(at.clone(), LSCF, Some(8), keys.clone(), 1.0)],
-    )
-    .unwrap();
+    let r = apply(&pbr, &[add(at.clone(), LSCF, Some(8), keys.clone(), 1.0)]).unwrap();
     assert_eq!(
-        r.outcomes[1],
+        r.outcomes[0],
         Outcome::Refused("Env map scale crashes the game on PBR materials.".into())
     );
     let r = apply(&b, &[add(at, LSCF, Some(8), keys, 1.0)]).unwrap();
@@ -2978,4 +2970,223 @@ fn an_empty_manager_on_the_root_chain_is_an_error_unless_the_source_has_it() {
     assert!(fresh
         .iter()
         .any(|e| e.text == EMPTY_MANAGER && e.level == Level::Error));
+}
+
+// ---- Note IE14: point a shape at a .csm, convert a v1 PBR shape ----
+
+/// `b` with `field` of block `block` set to `v` in the source bytes (no op can make it).
+fn put_u32(b: &[u8], block: u32, field: Field, v: u32) -> Vec<u8> {
+    let h = Header::parse(b).unwrap();
+    let (rel, _) = locate(&h, b, block as usize, field).unwrap();
+    let at = h.offsets()[block as usize] + rel;
+    let mut out = b.to_vec();
+    out[at..at + 4].copy_from_slice(&v.to_le_bytes());
+    out
+}
+
+const V1_SLOTS: [&str; 9] = [
+    "textures\\pbr\\a.dds",
+    "textures\\pbr\\a_n.dds",
+    "",
+    "textures\\pbr\\a_p.dds",
+    "",
+    "textures\\pbr\\a_rmaos.dds",
+    "textures\\pbr\\a_cnr.dds",
+    "",
+    "",
+];
+
+/// Shape "S" (0) -> BSLSP (1) of `shader_type` with `slsf2`, its name field `name` (None: -1) and distinct values in
+/// every field `from_v1` reads -> texture set (2) with [`V1_SLOTS`].
+fn v1_scene(shader_type: u32, slsf2: u32, name: Option<&str>) -> Vec<u8> {
+    let mut n = builder::Nif::new(100);
+    let s = n.string("S");
+    let nm = name.map_or(-1, |x| n.string(x));
+    let trailer: &[f32] = match shader_type {
+        11 => &[7.0, 0.4, 2.0, 3.0, 0.9],
+        1 => &[1.0],
+        _ => &[],
+    };
+    let body = builder::W::default()
+        .u32(shader_type)
+        .raw(&nif::net::encode_net(nm, &[], -1))
+        .u32(0x8000_0000) // slsf1
+        .u32(slsf2)
+        .fs(&[0.0, 0.0, 1.0, 1.0]) // uv offset, scale
+        .i32(2) // texture set
+        .fs(&[0.0, 0.0, 0.0, 1.0]) // emissive color, multiple
+        .u32(3) // clamp
+        .fs(&[1.0, 0.0, 0.3]) // alpha, refraction, glossiness (v1 specular level)
+        .fs(&[0.2, 0.5, 0.7, 0.8]) // specular color, strength (v1 roughness scale)
+        .fs(&[0.6, 1.5]) // lighting effects
+        .fs(trailer)
+        .0;
+    n.block("BSTriShape", scenes::bstri_named(s, 1, -1));
+    n.block("BSLightingShaderProperty", body);
+    n.block("BSShaderTextureSet", scenes::texset(&V1_SLOTS));
+    n.bytes()
+}
+
+const CSM: &str = "materials\\pbr\\a.csm";
+
+fn name_of(b: &[u8]) -> Option<String> {
+    let m = read_model(b).unwrap();
+    m.lighting[&1].lighting.name.as_deref().map(str::to_string)
+}
+
+fn slots_of(b: &[u8]) -> Vec<String> {
+    let m = read_model(b).unwrap();
+    m.texsets[&2]
+        .raw
+        .slots
+        .iter()
+        .map(|s| nif::text::lossy(s))
+        .collect()
+}
+
+#[test]
+fn point_at_csm_refuses_foreign_name() {
+    let b = v1_scene(0, 0, Some("SomeToolsName"));
+    let m = read_model(&b).unwrap();
+    assert_eq!(
+        point_at_csm(&m, 0, CSM, false),
+        Err(EditError::NameInUse("SomeToolsName".into()))
+    );
+    // with the user's word, the op replaces exactly that name
+    let op = point_at_csm(&m, 0, CSM, true).unwrap();
+    let r = apply(&b, std::slice::from_ref(&op)).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    assert_eq!(name_of(&r.bytes).as_deref(), Some(CSM));
+    assert_eq!(slots_of(&r.bytes), V1_SLOTS);
+    // a source whose name changed since the user agreed: a Conflict, nothing written
+    let other = v1_scene(0, 0, Some("AnotherName"));
+    let r = apply(&other, &[op]).unwrap();
+    assert!(matches!(&r.outcomes[0], Outcome::Conflict(_)), "{r:?}");
+    assert_eq!(r.bytes, other);
+    // nothing, or a .csm path already: no word needed
+    for name in [None, Some("Materials\\Old\\x.CSM")] {
+        let b = v1_scene(0, 0, name);
+        let m = read_model(&b).unwrap();
+        let op = point_at_csm(&m, 0, CSM, false).unwrap();
+        let r = apply(&b, &[op]).unwrap();
+        assert_eq!(r.outcomes, vec![Outcome::Applied], "{name:?}");
+        assert_eq!(name_of(&r.bytes).as_deref(), Some(CSM));
+    }
+    assert_eq!(
+        point_at_csm(&m, 0, "textures\\a.dds", true),
+        Err(EditError::NotCsm("textures\\a.dds".into()))
+    );
+}
+
+#[test]
+fn convert_v1_clears_flags() {
+    let bits = [12, 13, 23, 24, 25, 26, 27, 30];
+    let slsf2 = bits.iter().fold(0u32, |a, b| a | 1 << b);
+    let b = v1_scene(11, slsf2, None);
+    let m = read_model(&b).unwrap();
+    let lt = &m.lighting[&1].lighting;
+    let want = nif::pbr2::v1_values(11, slsf2, &lt.params).0;
+    let (op, values) = convert_v1(&m, 0, CSM, false).unwrap();
+    assert_eq!(values, want);
+    use nif::pbr2::feat::*;
+    assert_eq!(
+        values.features,
+        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT
+    );
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    assert_eq!(current(&r.bytes, 1, Field::ShaderType), Value::U32(0));
+    // exactly SLSF2 12, 23, 24, 25, 26, 27 and 30 clear: 13 stays
+    assert_eq!(current(&r.bytes, 1, Field::Slsf2), Value::U32(1 << 13));
+    assert_eq!(name_of(&r.bytes).as_deref(), Some(CSM));
+    assert_eq!(slots_of(&r.bytes), V1_SLOTS);
+    let after = read_model(&r.bytes).unwrap();
+    assert!(after.problems.is_empty(), "{:?}", after.problems);
+    assert_eq!(
+        after.lighting[&1].lighting.params.trailer,
+        nif::props::LightingTrailer::None
+    );
+    // a second run: no longer v1, refused whole
+    let again = Op::ConvertV1 {
+        at: anchor_role(&after, Some(0), Role::Shader).unwrap(),
+        path: CSM.into(),
+        base: CSM.into(),
+    };
+    let r2 = apply(&r.bytes, &[again]).unwrap();
+    assert!(matches!(&r2.outcomes[0], Outcome::Refused(_)), "{r2:?}");
+    assert_eq!(r2.bytes, r.bytes);
+    assert_eq!(convert_v1(&after, 0, CSM, false), Err(EditError::NotV1));
+}
+
+#[test]
+fn convert_v1_on_type_0_keeps_the_type_and_the_foreign_name_asks() {
+    let slsf2 = (1 << 23) | (1 << 26) | (1 << 5);
+    let b = v1_scene(0, slsf2, Some("Tool"));
+    let m = read_model(&b).unwrap();
+    assert_eq!(
+        convert_v1(&m, 0, CSM, false),
+        Err(EditError::NameInUse("Tool".into()))
+    );
+    let (op, v) = convert_v1(&m, 0, CSM, true).unwrap();
+    assert_eq!(v.features, nif::pbr2::feat::SUBSURFACE);
+    let r = apply(&b, &[op]).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    assert_eq!(current(&r.bytes, 1, Field::ShaderType), Value::U32(0));
+    assert_eq!(current(&r.bytes, 1, Field::Slsf2), Value::U32(1 << 5));
+    assert_eq!(name_of(&r.bytes).as_deref(), Some(CSM));
+    // type 1 with the PBR bit was never v1 PBR
+    let m = read_model(&v1_scene(1, 1 << 23, None)).unwrap();
+    assert_eq!(convert_v1(&m, 0, CSM, false), Err(EditError::NotV1));
+}
+
+/// Design goal 6: no edit writes v1 PBR. `SetField` and `SetBits` that turn SLSF2 23 on are refused; one that keeps
+/// it on (a v1 shape's other flag) or clears it applies.
+#[test]
+fn bit_23_cannot_be_set() {
+    let b = v1_scene(0, 1, None);
+    let at = shader_anchor(&b);
+    let field = Op::SetField {
+        at: at.clone(),
+        field: Field::Slsf2,
+        value: Value::U32(1 | 1 << 23),
+        base: Value::U32(1),
+    };
+    let bits = Op::SetBits {
+        at: at.clone(),
+        field: Field::Slsf2,
+        mask: 1 << 23,
+        value: 1 << 23,
+        base: 1,
+    };
+    for op in [field, bits] {
+        let r = apply(&b, &[op]).unwrap();
+        assert_eq!(r.outcomes, vec![Outcome::Refused(V1_GONE.into())]);
+        assert_eq!(r.bytes, b);
+    }
+    let v1 = v1_scene(0, 1 | 1 << 23, None);
+    for (mask, value) in [(1 << 26, 1 << 26), (1 << 23, 0)] {
+        let op = Op::SetBits {
+            at: at.clone(),
+            field: Field::Slsf2,
+            mask,
+            value,
+            base: 1 | 1 << 23,
+        };
+        let r = apply(&v1, &[op]).unwrap();
+        assert_eq!(r.outcomes, vec![Outcome::Applied], "{mask:#x}");
+    }
+}
+
+#[test]
+fn material_ops_merge_keys_and_keep_mine() {
+    let b = v1_scene(0, 0, Some("Old"));
+    let m = read_model(&b).unwrap();
+    let op = point_at_csm(&m, 0, CSM, true).unwrap();
+    assert_eq!(merge_key(&op), "SetMaterial|1|");
+    // the source renamed it: keep mine takes the new name as the base
+    let renamed = v1_scene(0, 0, Some("Newer"));
+    let ops = keep_mine(&renamed, std::slice::from_ref(&op), 0).unwrap();
+    let r = apply(&renamed, &ops).unwrap();
+    assert_eq!(r.outcomes, vec![Outcome::Applied]);
+    assert_eq!(name_of(&r.bytes).as_deref(), Some(CSM));
 }

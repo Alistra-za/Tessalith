@@ -68,7 +68,9 @@ fn target_tab(t: &Target) -> (NifTab, Option<Field>) {
 fn op_tab(op: &Op) -> (NifTab, Option<Field>) {
     match op {
         Op::SetField { field, .. } | Op::SetBits { field, .. } => (field_tab(*field), Some(*field)),
-        Op::SetTexturePath { .. } => (NifTab::Shader, None),
+        Op::SetTexturePath { .. } | Op::SetMaterial { .. } | Op::ConvertV1 { .. } => {
+            (NifTab::Shader, None)
+        }
         Op::SplitAlpha { .. } | Op::AddAlpha { .. } | Op::RemoveAlpha { .. } => {
             (NifTab::Alpha, None)
         }
@@ -128,7 +130,12 @@ pub(super) fn problems(e: &NifEdit) -> Vec<NifProblem> {
     for w in &e.op_warnings {
         warn(w, w.level == Level::Error);
     }
-    for w in e.warnings.iter().chain(&e.pg_warnings) {
+    for w in e
+        .warnings
+        .iter()
+        .chain(&e.pg_warnings)
+        .chain(&e.csm_warnings)
+    {
         warn(w, false);
     }
     // Note GD2: after a write PGPatcher's output is stale (was the footer's note); the cleanup's skip in plain words

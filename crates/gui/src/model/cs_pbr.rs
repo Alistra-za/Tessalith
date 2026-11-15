@@ -522,6 +522,25 @@ impl AppModel {
         });
     }
 
+    /// Note IE14: several texture-set block keys (dotted; `None` removes one) in one undo step named `label`: a NIF
+    /// edit's Convert to .csm. False, with nothing written, when the sets document cannot be edited.
+    pub fn set_cs_values(
+        &mut self,
+        set: &str,
+        label: &str,
+        values: Vec<(String, Option<Json>)>,
+    ) -> bool {
+        if !self.sets_editable() {
+            return false;
+        }
+        self.cs_edit(set, label, None, move |d, s| {
+            for (k, v) in values {
+                d.set_cs_value(s, Kind::Txst, &k, v);
+            }
+        });
+        true
+    }
+
     pub fn set_cs_edids(&mut self, set: &str, kind: Kind, edids: &[String]) {
         let v = json!(edids);
         self.cs_edit(set, "Change EDIDs", None, move |d, s| {

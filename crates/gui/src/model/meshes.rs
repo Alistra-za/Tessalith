@@ -24,6 +24,7 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+pub mod csm_actions;
 pub mod edit_doc;
 pub mod export;
 pub mod nif_edit;
@@ -486,6 +487,15 @@ pub struct MeshesModel {
     /// How often `sync_txst_csms` built the map (tests pin the gate with it).
     #[cfg(feature = "test-hooks")]
     pub txst_csm_builds: u64,
+    /// Note IE14: the project sets a NIF edit's shape can use the `.csm` of (the app hands them over while an edit is
+    /// open, `sync_project_csms`), and what they were built from.
+    project_csms: csm_actions::ProjectCsms,
+    project_csm_key: Option<csm_actions::ProjectCsmKey>,
+    /// Note IE14: the question a `.csm` action waits on (the edit panel draws it as a dialog).
+    pub csm_ask: Option<csm_actions::CsmAsk>,
+    /// Note IE14: a Convert's values for its project set and the op that follows them; the app writes the set, then
+    /// pushes the op (`csm_actions::apply_csm_write`).
+    pub csm_write: Option<csm_actions::CsmWrite>,
     /// Database or scan errors; shown, never swallowed.
     pub error: Option<String>,
     pub dialog: Option<MeshesDialog>,
@@ -628,6 +638,10 @@ impl MeshesModel {
             txst_csm_key: None,
             #[cfg(feature = "test-hooks")]
             txst_csm_builds: 0,
+            project_csms: Default::default(),
+            project_csm_key: None,
+            csm_ask: None,
+            csm_write: None,
             error: None,
             dialog: None,
             report: None,
@@ -897,6 +911,8 @@ impl MeshesModel {
     /// Drain worker messages. True when anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = self.v3.poll();
+        // Note IE14: the loaded materials land after the edit that made them.
+        self.refresh_csm_warnings();
         changed |= self.poll_pg();
         changed |= self.poll_project();
         if self.rows_loading() {

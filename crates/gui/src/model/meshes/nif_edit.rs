@@ -105,6 +105,9 @@ pub struct NifEdit {
     pub op_warnings: Vec<Warning>,
     /// B-P41: `PGP_ENV_SCALE` Warnings from the cached In game simulation (never blocking, never a new simulation).
     pub pg_warnings: Vec<Warning>,
+    /// Note IE14: a Warn under each shader controller on a CS 2.0 PBR shape that drives a value its `.csm` sets
+    /// (`MeshesModel::refresh_csm_warnings`, from the loaded materials).
+    pub csm_warnings: Vec<Warning>,
     /// Every controller's editable keys by (controller, clip), `nif::edit::keys_of`; rebuilt in `reapply`, never
     /// per frame (F23). B7 adds the clip entries.
     pub keys: BTreeMap<(u32, Option<u32>), Result<KeyData, String>>,
@@ -415,6 +418,8 @@ pub fn op_label(op: &Op, m: &NifModel) -> String {
         Op::SetKeys { at, .. } => ("Edit keys".into(), at),
         Op::AddController { at, .. } => ("Add controller".into(), at),
         Op::RemoveController { at } => ("Remove controller".into(), at),
+        Op::SetMaterial { at, .. } => ("Material (.csm)".into(), at),
+        Op::ConvertV1 { at, .. } => (nif::edit::validate::CONVERT_FIX.into(), at),
     };
     match &at.shape {
         Some(s) => format!("{s}: {what}"),
@@ -519,6 +524,8 @@ pub fn op_name(op: &Op) -> String {
         Op::SetKeys { .. } => "Edit keys".into(),
         Op::AddController { .. } => "Add controller".into(),
         Op::RemoveController { .. } => "Remove controller".into(),
+        Op::SetMaterial { .. } => "Use a .csm".into(),
+        Op::ConvertV1 { .. } => nif::edit::validate::CONVERT_FIX.into(),
     }
 }
 
@@ -545,6 +552,8 @@ fn anchor_mut(op: &mut Op) -> &mut Anchor {
         | Op::RemoveExtra { at }
         | Op::AddController { at, .. }
         | Op::RemoveController { at }
+        | Op::SetMaterial { at, .. }
+        | Op::ConvertV1 { at, .. }
         | Op::SetKeys { at, .. } => at,
     }
 }
@@ -557,6 +566,7 @@ fn keep_base(op: &mut Op, old: &Op) {
         (Op::SetTexturePath { base, .. }, Op::SetTexturePath { base: b, .. }) => base.clone_from(b),
         (Op::EditExtra { base, .. }, Op::EditExtra { base: b, .. }) => base.clone_from(b),
         (Op::SetKeys { base, .. }, Op::SetKeys { base: b, .. }) => base.clone_from(b),
+        (Op::SetMaterial { base, .. }, Op::SetMaterial { base: b, .. }) => base.clone_from(b),
         _ => {}
     }
 }
@@ -684,6 +694,7 @@ impl NifEdit {
             warnings: vec![],
             op_warnings: vec![],
             pg_warnings: vec![],
+            csm_warnings: vec![],
             keys: BTreeMap::new(),
             selection: Selection::Root,
             solo: false,
@@ -1920,7 +1931,8 @@ impl MeshesModel {
         }
         let mut nif = e.preview_nif();
         nif.head_part = store.is_head_part_mesh(&e.data_path).unwrap_or(false); // shading only, as mesh_spec
-        let textures = texture_sources(store, &slot_paths(&nif.shapes)).map_err(db_err)?;
+        let mut textures = texture_sources(store, &slot_paths(&nif.shapes)).map_err(db_err)?;
+        textures.extend(self.csm_sources(&nif));
         Ok(Some(Content::Parsed {
             key: next_key(),
             nif: Arc::new(nif),
@@ -1928,6 +1940,48 @@ impl MeshesModel {
             // Note IE12: a `.csm` a shape names is read through the scan, as in the Meshes view.
             scan_db: self.scan_db(),
         }))
+    }
+
+    /// Note IE14: the project sets' in-memory `.csm` that `nif`'s shapes name, by canonical path: the preview reads
+    /// them ahead of the scan's copy (unsaved set edits included, exported or not), as the set preview does.
+    fn csm_sources(&self, nif: &ParsedNif) -> HashMap<String, FileSource> {
+        let all = self.project_materials();
+        nif.shapes
+            .iter()
+            .filter_map(|s| s.material.csm_path.as_ref())
+            .filter_map(|p| Some((p.clone(), all.get(p)?.clone())))
+            .collect()
+    }
+
+    /// Note IE14: after the project sets' `.csm` changed, the edit preview reloads when a shape names one whose text
+    /// is not the one loaded.
+    pub(super) fn refresh_edit_materials(&mut self) {
+        let Some(e) = &self.edit else { return };
+        let Some(Content::Parsed {
+            nif,
+            textures,
+            scan_db,
+            ..
+        }) = self.v3.content()
+        else {
+            return;
+        };
+        if e.le_mesh {
+            return;
+        }
+        let csms = self.csm_sources(nif);
+        if csms.iter().all(|(k, v)| textures.get(k) == Some(v)) {
+            return;
+        }
+        let mut map = (**textures).clone();
+        map.extend(csms);
+        let c = Content::Parsed {
+            key: next_key(),
+            nif: nif.clone(),
+            textures: Arc::new(map),
+            scan_db: scan_db.clone(),
+        };
+        self.v3.set_content(Some(c), true);
     }
 
     /// Shows the open session's edit preview, rebuilt from its current edits, on the toggle's side (v2 B8: In game
@@ -2586,7 +2640,10 @@ impl MeshesModel {
         if let Some(e) = &mut self.edit {
             e.lookup_failed = false;
         }
-        let mut reload = fresh.keys().any(|k| !textures.contains_key(k));
+        // Note IE14: a shape that now names a project set's `.csm` (a Convert) reads its in-memory text.
+        let csms = self.csm_sources(&next);
+        let mut reload = fresh.keys().any(|k| !textures.contains_key(k))
+            || csms.iter().any(|(k, v)| textures.get(k) != Some(v));
         if !reload {
             // The render thread keeps these edits and re-applies them on a reload it starts itself.
             for (s, old) in &pairs {
@@ -2601,6 +2658,7 @@ impl MeshesModel {
             for (k, v) in fresh {
                 map.entry(k).or_insert(v);
             }
+            map.extend(csms);
             let c = Content::Parsed {
                 key: next_key(),
                 nif: Arc::new(next),

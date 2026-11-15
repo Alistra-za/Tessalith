@@ -947,6 +947,56 @@ pub(crate) fn extra_op(
     Ok(Outcome::Applied)
 }
 
+/// Note IE14: SetMaterial and ConvertV1 on the BSLightingShaderProperty `lsp`. A name other than the op's `base` is a
+/// Conflict; ConvertV1 on a shape that is no longer v1 PBR is refused. Every check runs before the first write.
+pub(crate) fn material_op(
+    doc: &mut NifDoc,
+    cur: &[u8],
+    m: &NifModel,
+    lsp: u32,
+    op: &Op,
+) -> Result<Outcome, String> {
+    let (Op::SetMaterial { path, base, .. } | Op::ConvertV1 { path, base, .. }) = op else {
+        return Err("not a material op".into());
+    };
+    let l = m
+        .lighting
+        .get(&lsp)
+        .ok_or("not a readable shader property")?;
+    let now = l.lighting.name.as_deref().unwrap_or("");
+    if now != base {
+        return Ok(Outcome::Conflict(format!(
+            "changed in the source: the name was {base:?}, now {now:?}"
+        )));
+    }
+    if crate::path::canon_material(path).is_none() {
+        return Err(format!("{path} is not a .csm file under materials"));
+    }
+    let name = win1252(path)?;
+    if let Op::ConvertV1 { .. } = op {
+        let lt = &l.lighting;
+        if !super::is_v1(lt.shader_type, lt.slsf2) {
+            return Err(super::EditError::NotV1.to_string());
+        }
+        let (rel, _) = enc(crate::fields::locate(
+            doc.header(),
+            cur,
+            lsp as usize,
+            crate::fields::Field::Slsf2,
+        ))?;
+        let flags = lt.slsf2 & !super::CONVERT_CLEARS;
+        enc(doc.patch(lsp, rel, &flags.to_le_bytes()))?;
+        if lt.shader_type != 0 {
+            // re-emits the head as patched above, without the type-11 trailer
+            set_shader_type(doc, m, lsp, 0)?;
+        }
+    }
+    let idx = enc(doc.string(&name))?;
+    let at = l.prop.net.start - doc.header().offsets()[lsp as usize];
+    patch(doc, lsp, at, idx)?;
+    Ok(Outcome::Applied)
+}
+
 /// SetTexturePath on the shape `shape`: edits its set in place when it has one user, else on a fresh copy that
 /// only this shape's BSLSP points at. A stale `base` is a Conflict.
 pub(crate) fn texture_path_op(

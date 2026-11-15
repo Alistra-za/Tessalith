@@ -335,6 +335,9 @@ impl eframe::App for SdcApp {
         self.meshes.set_project_textures(rev, paths);
         // Note IE12: the project sets' `.csm` for the TXSTs the shown mesh's records name, built only on a change.
         self.meshes.sync_txst_csms(&self.model);
+        // Note IE14: the project sets a NIF edit's shapes can use the `.csm` of; a Convert's values go to the set first.
+        self.meshes.sync_project_csms(&self.model);
+        crate::model::meshes::csm_actions::apply_csm_write(&mut self.model, &mut self.meshes);
         // Note GD5: an export folder change's lines about the open NIF edit go to Messages.
         for line in self.meshes.messages.drain(..) {
             self.model
