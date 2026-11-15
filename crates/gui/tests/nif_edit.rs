@@ -8380,8 +8380,8 @@ fn pbr_on(b: &[u8]) -> Vec<u8> {
 }
 
 #[test]
-fn env_map_scale_on_pbr_blocks_export_after_a_switch_and_in_the_source() {
-    // The shape turns PBR after the var-8 controller exists (Note IE14: the source changes; no edit sets bit 23).
+fn env_map_scale_on_pbr_warns_after_a_source_reload_and_blocks_export() {
+    // The source turns the shape PBR after the var-8 controller exists (Note IE14: no edit sets bit 23).
     let (_d, mut e) = exportable(ctrl_scene_vars(0x82, [8, 20]));
     assert!(e.warnings.iter().all(|w| w.text != ENV_PBR));
     let pbr = pbr_on(&e.source);
@@ -12038,6 +12038,7 @@ fn csm_controller_warns() {
         fuzz_roughness: -1.0,
     });
     m.v3.shapes = vec![info(material)];
+    m.v3.shapes_rev += 1; // as a Shapes reply does
     m.poll(); // the loaded material lands on a poll
     let e = m.edit.as_ref().unwrap();
     assert_eq!(
@@ -12125,7 +12126,7 @@ fn use_the_sets_csm_points_a_plain_shape() {
         .is_disabled());
 }
 
-/// Note IE14: the edit preview reads the set's in-memory .csm a shape now names, and reloads when its text changes.
+/// Note IE15: the edit preview reads the set's in-memory .csm a shape now names, and reloads when its text changes.
 #[test]
 fn the_edit_preview_reads_the_sets_csm() {
     use sdc_gui::model::viewport3d::FileSource;
@@ -12224,4 +12225,77 @@ fn the_csm_buttons_fit_the_edit_panel() {
             "{w} px: the name {name:?} runs past the panel"
         );
     }
+}
+
+/// t11 fix round 1 (item 2): while the sets cannot be edited, "Replace the set's values" is off from the start, with
+/// SETS_LOCKED as its reason; "Use the set's values" still works.
+#[test]
+fn replace_is_off_while_the_sets_are_locked() {
+    let mut m = direct(v1_rock(0, V1_PBR, None));
+    select(&mut m, "S");
+    let mut block = serde_json::Map::new();
+    block.insert("specularLevel".into(), serde_json::json!(0.5));
+    m.set_project_csms(ProjectCsms {
+        cs: true,
+        editable: false,
+        sets: vec![ProjectCsm {
+            set_id: ROCK.into(),
+            path: ROCK_CSM.into(),
+            diffuse: vec!["textures/pbr/landscape/rock01.dds".into()],
+            block,
+            pgp_on: vec![],
+            memory: None,
+        }],
+    });
+    m.convert_to_csm(0);
+    let Some(CsmAsk::Differences {
+        replace_blocked, ..
+    }) = m.csm_ask.clone()
+    else {
+        panic!("the differences window: {:?}", m.csm_ask)
+    };
+    assert_eq!(replace_blocked.as_deref(), Some(SETS_LOCKED));
+    let mut h = view(m);
+    h.run_steps(3);
+    assert!(h
+        .get_by_role_and_label(AkRole::Button, sdc_gui::ui::meshes::REPLACE_SET_VALUES)
+        .accesskit_node()
+        .is_disabled());
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert!(matches!(&ops(h.state())[..], [Op::ConvertV1 { .. }]));
+}
+
+/// t11 fix round 1 (item 3): off Community Shaders, "Use the set's .csm" says NOT_CS, not NO_SET.
+#[test]
+fn use_the_sets_csm_says_not_cs_off_cs() {
+    let mut m = direct(v1_rock(0, 0, None));
+    select(&mut m, "S");
+    m.set_project_csms(ProjectCsms::default());
+    assert_eq!(m.use_set_csm_off(0).as_deref(), Some(NOT_CS));
+    let d = tempfile::tempdir().unwrap();
+    let (_app, m) = rock_edit(d.path(), v1_rock(0, 0, None));
+    assert_eq!(m.use_set_csm_off(0), None, "on CS with a set: on");
+}
+
+/// t11 fix round 1 (item 4, Note FI18): `poll` rebuilds the .csm controller warnings only when the edit or the
+/// loaded shapes change; an idle poll builds nothing.
+#[test]
+fn csm_warnings_build_only_on_change() {
+    let mut m = direct(ctrl_scene_vars(0x82, [9, 20]));
+    select(&mut m, "S");
+    m.poll();
+    let b = m.csm_warning_builds;
+    for _ in 0..5 {
+        m.poll();
+    }
+    assert_eq!(m.csm_warning_builds, b, "idle polls");
+    m.v3.shapes_rev += 1; // a Shapes reply landed
+    m.poll();
+    assert_eq!(m.csm_warning_builds, b + 1);
+    m.poll();
+    assert_eq!(m.csm_warning_builds, b + 1);
+    gloss(&mut m, 7.0);
+    m.poll();
+    assert_eq!(m.csm_warning_builds, b + 2, "an edit");
 }

@@ -359,7 +359,7 @@ fn bsxflags_must_be_named_bsx() {
     );
 }
 
-/// Note IE14: a v1 PBR shape's only line is that it draws vanilla on CS 2.0.
+/// Note IE15: a v1 PBR shape's only line is that it draws vanilla on CS 2.0.
 #[test]
 fn pbr_shape_has_only_the_v1_warning() {
     let b = put(
@@ -723,13 +723,13 @@ fn slsf_vanilla_lighting_bits_do_not_warn() {
         let w = slsf_scene(t, f2);
         assert!(w.is_empty(), "{w:#?}");
     }
-    // PBR type 11 without bit 24 is common: only Note IE14's v1 line.
+    // PBR type 11 without bit 24 is common: only Note IE15's v1 line.
     let w = slsf_scene(11, 1 << 23);
     assert_eq!(w.len(), 1, "{w:#?}");
     only(&w, V1_VANILLA, Level::Warn);
 }
 
-/// Note IE14: a v1 PBR shape (type 0 or 11 with SLSF2 23) draws vanilla on CS 2.0 unless its name field names a `.csm`.
+/// Note IE15: a v1 PBR shape (type 0 or 11 with SLSF2 23) draws vanilla on CS 2.0 unless its name field names a `.csm`.
 /// The Warn has no op: the GUI gives it the Convert to .csm action. It never blocks export.
 #[test]
 fn v1_shape_warns_draws_vanilla() {

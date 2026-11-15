@@ -3177,6 +3177,42 @@ fn bit_23_cannot_be_set() {
     }
 }
 
+/// Design goal 6 (t11 fix round 1): a shader type change that makes a shape v1 PBR (bit 23 already in the source under
+/// another type) is refused too; a change between the two v1 types, or away from them, applies.
+#[test]
+fn a_type_change_cannot_make_v1() {
+    let flagged = v1_scene(1, 1 << 23, None);
+    let at = shader_anchor(&flagged);
+    let to = |base: u32, t: u32| Op::SetField {
+        at: at.clone(),
+        field: Field::ShaderType,
+        value: Value::U32(t),
+        base: Value::U32(base),
+    };
+    for t in [0, 11] {
+        let r = apply(&flagged, &[to(1, t)]).unwrap();
+        assert_eq!(
+            r.outcomes,
+            vec![Outcome::Refused(V1_GONE.into())],
+            "type {t}"
+        );
+        assert_eq!(r.bytes, flagged);
+    }
+    let plain = v1_scene(1, 0, None);
+    assert_eq!(
+        apply(&plain, &[to(1, 11)]).unwrap().outcomes,
+        vec![Outcome::Applied]
+    );
+    let v1 = v1_scene(0, 1 << 23, None);
+    for t in [11, 1] {
+        assert_eq!(
+            apply(&v1, &[to(0, t)]).unwrap().outcomes,
+            vec![Outcome::Applied],
+            "type {t}"
+        );
+    }
+}
+
 #[test]
 fn material_ops_merge_keys_and_keep_mine() {
     let b = v1_scene(0, 0, Some("Old"));

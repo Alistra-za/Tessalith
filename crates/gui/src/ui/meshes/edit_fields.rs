@@ -1,6 +1,6 @@
 //! The edit panel's Shader and Alpha tabs (spec §7, plan A17). Widgets only read the session; every change is
 //! collected in an [`Act`] that `edit_panel::panel` applies after drawing.
-use crate::model::meshes::csm_actions::{CsmAction, NO_SET};
+use crate::model::meshes::csm_actions::CsmAction;
 use crate::model::meshes::nif_edit::{edit_slot_label, edit_slot_shown, NifEdit, Selection};
 use crate::model::meshes::pg_entries::pg_ignore;
 use crate::model::meshes::{shader_type_name, MeshesModel, SHADER_TYPES};
@@ -81,7 +81,7 @@ pub(super) fn warnings(ui: &mut egui::Ui, e: &NifEdit, target: &Target, act: &mu
         ui.horizontal(|ui| {
             ui.add_space(LABEL_W);
             ui.add(egui::Label::new(egui::RichText::new(&w.text).color(color)).wrap());
-            // Note IE14: the v1 warning's fix is no op but a flow (the project set, maybe a question).
+            // Note IE15: the v1 warning's fix is no op but a flow (the project set, maybe a question).
             if w.text == V1_VANILLA {
                 let r = ui.small_button(CONVERT_FIX);
                 let name = format!("{CONVERT_FIX}: {} ({})", w.text, target_name(target));
@@ -647,21 +647,7 @@ fn material_row(
 ) {
     let name = l.lighting.name.as_deref().unwrap_or("");
     let set = m.set_for_shape(shape);
-    let canon = nif::path::canon_material;
-    let off = if nif::edit::is_v1(l.lighting.shader_type, l.lighting.slsf2) {
-        Some(
-            "A v1 PBR shape: use Convert to .csm on its warning, which also copies its values."
-                .to_string(),
-        )
-    } else {
-        match set {
-            None => Some(NO_SET.to_string()),
-            Some(s) if canon(name).is_some() && canon(name) == canon(&s.path) => {
-                Some(format!("The shape uses {}'s .csm already.", s.set_id))
-            }
-            Some(_) => None,
-        }
-    };
+    let off = m.use_set_csm_off(shape);
     let full = format!(
         "Material: {}",
         if name.is_empty() { "(none)" } else { name }

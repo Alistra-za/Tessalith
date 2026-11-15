@@ -150,7 +150,8 @@ pub enum Op {
     },
 }
 
-/// Note IE14: what `apply` says to a `SetField` or `SetBits` that turns SLSF2 bit 23 (v1 PBR) on.
+/// Note IE14: what `apply` says to a `SetField` or `SetBits` that turns SLSF2 bit 23 (v1 PBR) on, or to a shader type
+/// change that makes a shape with bit 23 v1 PBR.
 pub const V1_GONE: &str = "v1 PBR is gone; use Convert to .csm";
 
 /// Note IE14: the SLSF2 bits [`Op::ConvertV1`] clears: the v1 flags and 24 (two-layer under v1, multi-layer parallax
@@ -752,6 +753,14 @@ fn step(cur: &[u8], op: &Op) -> (Option<Vec<u8>>, Outcome) {
                 return refused(format!("{value:?} does not fit {field:?}"));
             }
             if let (Field::ShaderType, Value::U32(t)) = (field, value) {
+                // Note IE14 (design goal 6): nor does a type change make a shape v1 PBR (the source's bit 23 under
+                // another type).
+                if let (Some(l), Value::U32(now)) = (m.lighting.get(&block), current) {
+                    let flags = l.lighting.slsf2;
+                    if is_v1(*t, flags) && !is_v1(now, flags) {
+                        return refused(V1_GONE.into());
+                    }
+                }
                 let r = structural::set_shader_type(&mut doc, &m, block, *t);
                 return finish(doc, r, outcome);
             }

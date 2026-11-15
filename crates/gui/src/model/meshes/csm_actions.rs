@@ -29,7 +29,7 @@ pub const NOT_CS: &str =
 /// The sets document cannot be edited (read-only or not loaded), so the values have nowhere to go.
 pub const SETS_LOCKED: &str =
     "The project's texture sets cannot be edited now, so the shape's values have nowhere to go.";
-/// Note IE14 (design §5.4, §7): CS 2.0 may draw a `.csm` value where a controller animates the NIF's.
+/// Note IE15 (design §5.4, §7): CS 2.0 may draw a `.csm` value where a controller animates the NIF's.
 pub const CSM_CTRL: &str = "CS 2.0 may not animate values a .csm sets";
 /// The `fuzzRoughness` block key: a number, not in `TXST_PARAMS`.
 const FUZZ_ROUGHNESS: &str = "fuzzRoughness";
@@ -61,8 +61,9 @@ pub struct ProjectCsms {
     pub sets: Vec<ProjectCsm>,
 }
 
-/// What `ProjectCsms` was built from: the sets' view key and the scan evidence revision.
-pub(crate) type ProjectCsmKey = (ViewKey, u64);
+/// What `ProjectCsms` was built from: the sets' view key, the scan evidence revision and `sets_editable()` (the view
+/// key does not cover the sets file turning read-only).
+pub(crate) type ProjectCsmKey = (ViewKey, u64, bool);
 
 /// Each set that gets a `.csm` (`csm_export::gets_csm`, PGPatcher entry or not), as the actions read it.
 pub fn project_csms(app: &AppModel) -> ProjectCsms {
@@ -161,8 +162,8 @@ pub enum CsmAsk {
         rows: Vec<DiffRow>,
         /// What "Replace the set's values" writes (None: the key is removed).
         writes: Vec<(String, Option<Json>)>,
-        /// Why "Replace the set's values" is off: the shape's switches with the set's PGPatcher settings make no
-        /// valid `.csm`.
+        /// Why "Replace the set's values" is off: the sets cannot be edited ([`SETS_LOCKED`]), or the shape's
+        /// switches with the set's PGPatcher settings make no valid `.csm`.
         replace_blocked: Option<String>,
         op: Box<Op>,
     },
@@ -411,12 +412,12 @@ enum Step {
 
 impl MeshesModel {
     /// Note IE14: the app's per-frame hand-over while a NIF edit is open: [`project_csms`], built only when the sets'
-    /// view key or the scan evidence revision moved (an idle frame builds nothing, Note FI18).
+    /// view key, the scan evidence revision or `sets_editable()` moved (an idle frame builds nothing, Note FI18).
     pub fn sync_project_csms(&mut self, app: &AppModel) {
         if self.edit.is_none() {
             return;
         }
-        let key = (app.view_key(), app.evidence_rev);
+        let key = (app.view_key(), app.evidence_rev, app.sets_editable());
         if self.project_csm_key.as_ref() == Some(&key) {
             return;
         }
@@ -451,6 +452,35 @@ impl MeshesModel {
             .sets
             .iter()
             .find(|s| s.diffuse.contains(&d))
+    }
+
+    /// [`NOT_CS`] off the Community Shaders target: checked before the set, so off CS never reads [`NO_SET`].
+    fn target_off(&self) -> Option<&'static str> {
+        (!self.project_csms.cs).then_some(NOT_CS)
+    }
+
+    /// Why "Use the set's .csm" is off for shape `shape` (None: on): off CS, a v1 shape (Convert does it), no project
+    /// set owns its diffuse, or its name is that `.csm` already.
+    pub fn use_set_csm_off(&self, shape: u32) -> Option<String> {
+        let l = lighting_of(&self.edit.as_ref()?.model, shape)?;
+        if let Some(why) = self.target_off() {
+            return Some(why.into());
+        }
+        if nif::edit::is_v1(l.lighting.shader_type, l.lighting.slsf2) {
+            return Some(
+                "A v1 PBR shape: use Convert to .csm on its warning, which also copies its values."
+                    .into(),
+            );
+        }
+        let canon = nif::path::canon_material;
+        let name = l.lighting.name.as_deref().unwrap_or("");
+        match self.set_for_shape(shape) {
+            None => Some(NO_SET.into()),
+            Some(s) if canon(name).is_some() && canon(name) == canon(&s.path) => {
+                Some(format!("The shape uses {}'s .csm already.", s.set_id))
+            }
+            Some(_) => None,
+        }
     }
 
     /// Convert to .csm on shape `shape` (a v1 PBR shape): see [`Self::csm_step`].
@@ -494,8 +524,8 @@ impl MeshesModel {
         let Some(e) = &self.edit else {
             return Err(String::new());
         };
-        if !self.project_csms.cs {
-            return Err(NOT_CS.into());
+        if let Some(why) = self.target_off() {
+            return Err(why.into());
         }
         let set = self.set_for_shape(shape).ok_or(NO_SET)?;
         let current = lighting_of(&e.model, shape)
@@ -561,7 +591,11 @@ impl MeshesModel {
             .map(|k| (k.to_string(), mine.get(*k).cloned()))
             .collect();
         rows.extend(pgp);
-        let replace_blocked = switch_error(set, &mine).map(|why| no_valid_csm(&set.set_id, &why));
+        let replace_blocked = if self.project_csms.editable {
+            switch_error(set, &mine).map(|why| no_valid_csm(&set.set_id, &why))
+        } else {
+            Some(SETS_LOCKED.into())
+        };
         Ok(Step::Ask(CsmAsk::Differences {
             set_id: set.set_id.clone(),
             rows,
@@ -627,11 +661,29 @@ impl MeshesModel {
         }
     }
 
-    /// Note IE14 (design §5.4, §7): a Warn under each shader controller that drives a value a `.csm` sets, on a shape
-    /// whose loaded material is CS 2.0 PBR (`v3.shapes`, from its resolved `.csm`). Called on each poll (the load
-    /// lands later than the edit); replaced only when it changes.
+    /// [`Self::refresh_csm_warnings`] when the edit (`rev`) or the loaded shapes (`v3.shapes_rev`, which land later
+    /// than the edit) changed since the last build; an idle poll builds nothing (Note FI18).
+    pub(super) fn poll_csm_warnings(&mut self) {
+        let Some(e) = &self.edit else {
+            self.csm_warning_key = None;
+            return;
+        };
+        let key = (e.rev, self.v3.shapes_rev);
+        if self.csm_warning_key != Some(key) {
+            self.csm_warning_key = Some(key);
+            self.refresh_csm_warnings();
+        }
+    }
+
+    /// Note IE15 (design §5.4, §7): a Warn under each shader controller that drives a value a `.csm` sets, on a shape
+    /// whose loaded material is CS 2.0 PBR (`v3.shapes`, from its resolved `.csm`). `poll` calls it through
+    /// [`Self::poll_csm_warnings`]; replaced only when it changes.
     pub fn refresh_csm_warnings(&mut self) {
         let Some(e) = &mut self.edit else { return };
+        #[cfg(feature = "test-hooks")]
+        {
+            self.csm_warning_builds += 1;
+        }
         let w = csm_ctrl_warnings(&e.model, &self.v3.shapes);
         if e.csm_warnings != w {
             e.csm_warnings = w;

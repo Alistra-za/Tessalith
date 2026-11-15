@@ -105,7 +105,7 @@ pub struct NifEdit {
     pub op_warnings: Vec<Warning>,
     /// B-P41: `PGP_ENV_SCALE` Warnings from the cached In game simulation (never blocking, never a new simulation).
     pub pg_warnings: Vec<Warning>,
-    /// Note IE14: a Warn under each shader controller on a CS 2.0 PBR shape that drives a value its `.csm` sets
+    /// Note IE15: a Warn under each shader controller on a CS 2.0 PBR shape that drives a value its `.csm` sets
     /// (`MeshesModel::refresh_csm_warnings`, from the loaded materials).
     pub csm_warnings: Vec<Warning>,
     /// Every controller's editable keys by (controller, clip), `nif::edit::keys_of`; rebuilt in `reapply`, never
@@ -1942,7 +1942,7 @@ impl MeshesModel {
         }))
     }
 
-    /// Note IE14: the project sets' in-memory `.csm` that `nif`'s shapes name, by canonical path: the preview reads
+    /// Note IE15: the project sets' in-memory `.csm` that `nif`'s shapes name, by canonical path: the preview reads
     /// them ahead of the scan's copy (unsaved set edits included, exported or not), as the set preview does.
     fn csm_sources(&self, nif: &ParsedNif) -> HashMap<String, FileSource> {
         let all = self.project_materials();
@@ -1953,7 +1953,7 @@ impl MeshesModel {
             .collect()
     }
 
-    /// Note IE14: after the project sets' `.csm` changed, the edit preview reloads when a shape names one whose text
+    /// Note IE15: after the project sets' `.csm` changed, the edit preview reloads when a shape names one whose text
     /// is not the one loaded.
     pub(super) fn refresh_edit_materials(&mut self) {
         let Some(e) = &self.edit else { return };
@@ -2640,7 +2640,7 @@ impl MeshesModel {
         if let Some(e) = &mut self.edit {
             e.lookup_failed = false;
         }
-        // Note IE14: a shape that now names a project set's `.csm` (a Convert) reads its in-memory text.
+        // Note IE15: a shape that now names a project set's `.csm` (a Convert) reads its in-memory text.
         let csms = self.csm_sources(&next);
         let mut reload = fresh.keys().any(|k| !textures.contains_key(k))
             || csms.iter().any(|(k, v)| textures.get(k) != Some(v));

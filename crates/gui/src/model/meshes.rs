@@ -491,6 +491,12 @@ pub struct MeshesModel {
     /// open, `sync_project_csms`), and what they were built from.
     project_csms: csm_actions::ProjectCsms,
     project_csm_key: Option<csm_actions::ProjectCsmKey>,
+    /// What the `.csm` controller warnings were last built from in `poll`: the edit's `rev` and the 3D view's
+    /// `shapes_rev` (Note FI18: an idle poll builds nothing).
+    csm_warning_key: Option<(u64, u64)>,
+    /// How often `refresh_csm_warnings` built the warnings (tests pin the gate with it).
+    #[cfg(feature = "test-hooks")]
+    pub csm_warning_builds: u64,
     /// Note IE14: the question a `.csm` action waits on (the edit panel draws it as a dialog).
     pub csm_ask: Option<csm_actions::CsmAsk>,
     /// Note IE14: a Convert's values for its project set and the op that follows them; the app writes the set, then
@@ -640,6 +646,9 @@ impl MeshesModel {
             txst_csm_builds: 0,
             project_csms: Default::default(),
             project_csm_key: None,
+            csm_warning_key: None,
+            #[cfg(feature = "test-hooks")]
+            csm_warning_builds: 0,
             csm_ask: None,
             csm_write: None,
             error: None,
@@ -911,8 +920,8 @@ impl MeshesModel {
     /// Drain worker messages. True when anything changed.
     pub fn poll(&mut self) -> bool {
         let mut changed = self.v3.poll();
-        // Note IE14: the loaded materials land after the edit that made them.
-        self.refresh_csm_warnings();
+        // Note IE15: the loaded materials land after the edit that made them.
+        self.poll_csm_warnings();
         changed |= self.poll_pg();
         changed |= self.poll_project();
         if self.rows_loading() {

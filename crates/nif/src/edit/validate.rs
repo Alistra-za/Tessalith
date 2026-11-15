@@ -93,10 +93,10 @@ pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders
 /// Start of every CS 2.0 Error (Note IE7; [`TYPE_22`] is the one left): CS 2.0 logs the block and draws nothing. [`always_blocks`] matches the
 /// prefix.
 pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
-/// Note IE14: a v1 PBR shape (type 0 or 11 with SLSF2 23) and no `.csm` in its name field; its fix is "Convert to
+/// Note IE15: a v1 PBR shape (type 0 or 11 with SLSF2 23) and no `.csm` in its name field; its fix is "Convert to
 /// .csm" ([`super::convert_v1`]).
 pub const V1_VANILLA: &str = "Draws vanilla on CS 2.0";
-/// Note IE14: the action the GUI offers on [`V1_VANILLA`].
+/// Note IE15: the action the GUI offers on [`V1_VANILLA`].
 pub const CONVERT_FIX: &str = "Convert to .csm";
 /// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.
 pub const TYPE_22: &str = "CS 2.0 won't draw this shape: type 22 is runtime only";
@@ -339,7 +339,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             let t = "Fit_Slope (SLSF2 12) does nothing without the PBR flag.";
             push(Level::Warn, slsf2.clone(), t, None);
         }
-        // Note IE14: CS 2.0 reads no v1 flag; a shape whose name field names a `.csm` draws from it instead. The GUI
+        // Note IE15: CS 2.0 reads no v1 flag; a shape whose name field names a `.csm` draws from it instead. The GUI
         // gives this text its Convert action (the set and its path are the project's, which validation never sees).
         let named = lt.name.as_deref().and_then(crate::path::canon_material);
         if super::is_v1(lt.shader_type, lt.slsf2) && named.is_none() && !l.prop.users.is_empty() {

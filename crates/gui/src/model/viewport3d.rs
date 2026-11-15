@@ -814,6 +814,8 @@ pub struct Viewport3d {
     pub bounds: Option<([f32; 3], f32)>,
     /// Shapes of the loaded `Parsed`/`Builtin` content (empty for a `Mesh`).
     pub shapes: Vec<ShapeInfo>,
+    /// Bumped whenever `shapes` changes (a Shapes reply, a new load), so readers rebuild only then.
+    pub shapes_rev: u64,
     /// The `Parsed` content is the NIF editor's (v2 A16): its failed shapes are listed like a mesh's.
     pub nif_view: bool,
     /// The edit preview's animation clock; `None` when the content has no animated controller (v2 B3). Owned by
@@ -896,6 +898,7 @@ impl Viewport3d {
             bounds: None,
             content: None,
             shapes: vec![],
+            shapes_rev: 0,
             nif_view: false,
             clock: None,
             swap_errors: vec![],
@@ -1109,6 +1112,7 @@ impl Viewport3d {
         self.render_done = self.render_sent;
         self.edits_done = self.edits_sent;
         self.shapes.clear();
+        self.shapes_rev += 1;
         self.render_error = None;
         self.last_sent = None;
         self.kept_view = keep_view && !le;
@@ -1591,6 +1595,7 @@ impl Viewport3d {
                         self.held_frame = false;
                     }
                     self.shapes = s;
+                    self.shapes_rev += 1;
                     // A load that leaves the current view not offered falls back to Lit.
                     if !self.offered().contains(&self.debug) {
                         self.set_debug(DebugView::Lit);
