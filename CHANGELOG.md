@@ -12,6 +12,8 @@
 - `sdc.exe` is 463 KB and `tessalith.exe` 463 KB smaller: the ISPC Texture Compressor code now holds only its BC6H encoder, the one part Tessalith uses. BC6H output is byte for byte the same.
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
 
+- Choosing **Advanced Skin** for a set that opened as PBR now makes it an Advanced skin set: the albedo becomes `skin_albedo`, a `_f` is packed into the `_rfaos` as the fuzz mask, and the export writes a `.csskin.json` and no PGPatcher JSON entry. Before, the types Tessalith had recorded on its own kept the set half PBR. A type you picked yourself stays.
+
 ## 3.0.0
 
 - Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own. The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.
