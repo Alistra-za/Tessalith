@@ -1925,6 +1925,8 @@ impl MeshesModel {
             key: next_key(),
             nif: Arc::new(nif),
             textures: Arc::new(textures),
+            // Note IE12: a `.csm` a shape names is read through the scan, as in the Meshes view.
+            scan_db: self.store_path.clone(),
         }))
     }
 
@@ -2538,10 +2540,21 @@ impl MeshesModel {
         }
         // A failed show_edit_preview left a plain copy on screen: the session is current, and the next switch
         // rebuilds the preview from it.
-        let Some(Content::Parsed { nif, textures, .. }) = self.v3.content() else {
+        let Some(Content::Parsed {
+            nif,
+            textures,
+            scan_db,
+            ..
+        }) = self.v3.content()
+        else {
             return;
         };
-        let (head_part, textures, retry) = (nif.head_part, textures.clone(), e.lookup_failed);
+        let (head_part, textures, scan_db, retry) = (
+            nif.head_part,
+            textures.clone(),
+            scan_db.clone(),
+            e.lookup_failed,
+        );
         let mut next = e.preview_nif();
         next.head_part = head_part;
         let pairs: Vec<(&ParsedShape, Option<&MaterialState>)> = next
@@ -2592,6 +2605,7 @@ impl MeshesModel {
                 key: next_key(),
                 nif: Arc::new(next),
                 textures: Arc::new(map),
+                scan_db,
             };
             self.v3.set_content(Some(c), true);
         }

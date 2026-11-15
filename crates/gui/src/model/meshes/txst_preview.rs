@@ -3,9 +3,11 @@
 //! view. The game matches alternate textures by 3D index, so the record's stored shape name is shown, never used. Preview only: nothing is written, and the picks reset when
 //! the shapes reload (another mesh, the In game / Source toggle, Edit opening or closing).
 use super::{db_err, texture_sources, MeshesModel};
-use crate::model::viewport3d::Content;
+use crate::model::csm_export::{memory_source, SetCsm};
+use crate::model::viewport3d::{Content, MeshSpec};
 use modscan::store::ShapeView;
 use render3d::ShapeId;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 /// One TXST plugin records assign to a shape.
@@ -90,9 +92,84 @@ impl MeshesModel {
                 self.txst_picks.remove(&block);
             }
         }
+        self.apply_set_csms(&mut spec);
         // The same model: the camera and the skin card's picks stay.
         self.v3
             .set_content(Some(Content::Mesh(Arc::new(spec))), true);
         Ok(())
+    }
+
+    /// Note IE12: the EDIDs of the TXSTs the plugin records using this mesh assign (any shape), each once: what the
+    /// app looks up among the project's `cs_txst` blocks, so a pick finds its set's `.csm` at once.
+    pub fn txst_edids(&self) -> Vec<String> {
+        let mut out: Vec<String> = self
+            .plugin_uses
+            .iter()
+            .flat_map(|u| &u.swaps)
+            .filter(|s| s.txst_formid != 0)
+            .filter_map(|s| s.txst_edid.clone())
+            .collect();
+        out.sort();
+        out.dedup();
+        out
+    }
+
+    /// Note IE12: the app's hand-over (`csm_export::txst_csms`), by TXST EDID. A change reaches the 3D view when a
+    /// pick uses it: the spec gets the new `.csm` text, a new source id, so the view reloads (render3d's per-load
+    /// cache starts empty).
+    pub fn set_txst_csms(&mut self, csms: BTreeMap<String, SetCsm>) {
+        if self.txst_csms == csms {
+            return;
+        }
+        self.txst_csms = csms;
+        if self.txst_picks.is_empty() {
+            return;
+        }
+        let Some(Content::Mesh(spec)) = self.v3.content() else {
+            return;
+        };
+        let mut spec = (**spec).clone();
+        self.apply_set_csms(&mut spec);
+        self.v3
+            .set_content(Some(Content::Mesh(Arc::new(spec))), true);
+    }
+
+    /// The design's TXST-JSON rule (Note IE12): each picked TXST whose EDID a project set binds draws that set's
+    /// in-memory `.csm` in place of the shape's name field; a blocked one draws the shape vanilla, with a row.
+    fn apply_set_csms(&self, spec: &mut MeshSpec) {
+        spec.csm.clear();
+        spec.materials.clear();
+        spec.material_notes.clear();
+        for (&block, &f) in &self.txst_picks {
+            let Some(c) = self.txst_edid(f).and_then(|e| self.txst_csms.get(e)) else {
+                continue;
+            };
+            let id = ShapeId(block);
+            match (&c.blocked, memory_source(c)) {
+                (None, Some((key, src))) => {
+                    spec.csm.insert(id, Some(key.clone()));
+                    spec.materials.insert(key, src);
+                }
+                (blocked, _) => {
+                    spec.csm.insert(id, None);
+                    let why = blocked
+                        .clone()
+                        .unwrap_or_else(|| format!("{} is not a .csm under materials", c.path));
+                    let row = format!("{why}; drawn vanilla");
+                    if !spec.material_notes.contains(&row) {
+                        spec.material_notes.push(row);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The EDID the plugin records give TXST `formid`.
+    fn txst_edid(&self, formid: u32) -> Option<&str> {
+        self.plugin_uses
+            .iter()
+            .flat_map(|u| &u.swaps)
+            .find(|s| s.txst_formid == formid)
+            .and_then(|s| s.txst_edid.as_deref())
     }
 }

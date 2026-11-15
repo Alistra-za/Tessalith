@@ -760,3 +760,65 @@ fn csm_shas_live_in_sidecar() {
     s.restore_keeping_json_sha(&before);
     assert_eq!(s.csm_shas(), shas, "kept across undo");
 }
+
+// ---- Note IE12: the Meshes view's texture set picks find a set's `.csm` by TXST EDID ----
+
+fn edids(e: &[&str]) -> Vec<String> {
+    e.iter().map(|s| s.to_string()).collect()
+}
+
+/// The set whose `cs_txst` block binds the EDID, as typed (CS matches the exact case), gives its in-memory `.csm`.
+#[test]
+fn txst_csms_finds_the_binding_set_by_exact_edid() {
+    let d = tempfile::tempdir().unwrap();
+    let m = with_txst(d.path());
+    let got = txst_csms(&m, &edids(&["Rock01", "rock01", "Other"]));
+    assert_eq!(got.keys().collect::<Vec<_>>(), ["Rock01"]);
+    assert_eq!(
+        got["Rock01"],
+        rock_csm(&m),
+        "the set's .csm, unsaved edits included"
+    );
+    let (key, _) = memory_source(&got["Rock01"]).unwrap();
+    assert_eq!(key, "materials/pbr/landscape/rock01.csm");
+}
+
+/// An EDID the export refuses (here: not a file name) binds no set, so the name field stays in force.
+#[test]
+fn txst_csms_skips_an_edid_the_export_refuses() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    m.set_cs_edids(ROCK, Kind::Txst, &["Rock01.".into()]);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(txst_csms(&m, &edids(&["Rock01."])).is_empty());
+}
+
+/// A set that gets no `.csm` (PBR Landscape) and a target other than CS give nothing.
+#[test]
+fn txst_csms_is_empty_for_landscape_sets_and_off_cs() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        txst_csms(&m, &edids(&["Rock01"])).is_empty(),
+        "PBR Landscape"
+    );
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    assert!(!txst_csms(&m, &edids(&["Rock01"])).is_empty());
+    m.target = engine::config::Target::Vanilla;
+    assert!(txst_csms(&m, &edids(&["Rock01"])).is_empty(), "not CS");
+}
+
+/// The source id follows the text: the same `.csm` is the same source (no reload), a changed one is not.
+#[test]
+fn memory_source_ids_follow_the_text() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    let a = memory_source(&rock_csm(&m)).unwrap().1;
+    assert_eq!(a, memory_source(&rock_csm(&m)).unwrap().1);
+    m.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.3)));
+    assert_ne!(a, memory_source(&rock_csm(&m)).unwrap().1);
+}

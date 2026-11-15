@@ -2,12 +2,15 @@
 //! `PBREnabled`, the set's texture paths, the switches its PGPatcher settings and `cs_txst` block turn on and only the
 //! numbers the block sets; never a generic key. Written after a clean export with the other JSON kinds' guard. A PBR
 //! Landscape set keeps its inline texture-set JSON and gets none (design §5.3). No egui types.
-use super::cs_pbr::CsBlock;
+use super::auto_flags::{hint, resolved_for};
+use super::cs_pbr::{CsBlock, Kind};
 use super::history::{orphans, records_at};
 use super::sets::SetView;
+use super::viewport3d::FileSource;
 use super::AppModel;
 use crate::pgp::settings::{Settings, FOLIAGE_KEY};
 use crate::pgp::writer::EntryInput;
+use crate::sets_doc::SetEntry;
 use engine::config::Target;
 use engine::sets::same_id;
 use nif::csm::{self, Csm, Value};
@@ -406,6 +409,67 @@ pub fn finite_only(c: &mut Csm) -> Vec<String> {
             format!("{k} is not a finite number; left out of the .csm")
         })
         .collect()
+}
+
+/// Note IE12: set `c`'s `.csm` as a 3D view file: its canonical `materials/…` key and its text in memory, the source
+/// id a hash of the text (an unchanged `.csm` is the same source, so no reload; a changed one reloads). `None` when the
+/// path is no `.csm` under materials. The Meshes view's texture set picks and the set preview read it ahead of the
+/// scan's copy of the same path.
+pub fn memory_source(c: &SetCsm) -> Option<(String, FileSource)> {
+    use std::hash::{Hash, Hasher};
+    let key = nif::path::canon_material(&c.path)?;
+    let text = csm::to_text(&c.csm);
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    let src = FileSource::Memory {
+        id: h.finish(),
+        bytes: std::sync::Arc::new(text.into_bytes()),
+    };
+    Some((key, src))
+}
+
+/// The set entry whose `cs_txst` block binds TXST `edid` (exact case: CS matches the EDID as typed) and writes its
+/// texture-set file: an EDID two sets bind, or one that cannot be a file name, is refused at the export
+/// (`cs_pbr_export::refusals`), so no set gets it.
+fn txst_binder<'a>(entries: &'a [SetEntry], edid: &str) -> Option<&'a SetEntry> {
+    let binds = |e: &&SetEntry| {
+        e.cs_txst
+            .as_ref()
+            .is_some_and(|b| b.edids.iter().any(|x| x == edid))
+    };
+    let e = entries.iter().find(binds)?;
+    let refused = super::cs_pbr_export::refusals(entries);
+    (!refused.contains_key(&(e.id.clone(), Kind::Txst, edid.to_string()))).then_some(e)
+}
+
+/// Note IE12: for each TXST EDID in `edids` that a project set's `cs_txst` block binds, that set's in-memory `.csm`
+/// (`set_csm` with the settings the export resolves; unsaved edits included, exported or not). CS only; a set that
+/// gets no `.csm` (PBR Landscape, not PBR) is left out, so its shapes keep their name field.
+// shortcut: `set_csm` takes the set's own and `slotN` textures, not the borrowed slots its PGPatcher entry names
+// (`entry_csm`), so a set that borrows Normal or RMAOS shows as blocked here; use `entry_csm` if users meet it.
+pub fn txst_csms(m: &AppModel, edids: &[String]) -> BTreeMap<String, SetCsm> {
+    let mut out = BTreeMap::new();
+    if m.target != Target::Cs || edids.is_empty() {
+        return out;
+    }
+    let Some(doc) = m.sets_doc.as_ref() else {
+        return out;
+    };
+    let entries = doc.entries();
+    let views = super::sets::views(m);
+    for edid in edids {
+        let Some(e) = txst_binder(&entries, edid) else {
+            continue;
+        };
+        let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
+            continue;
+        };
+        let pgp = resolved_for(v.json, &v.slots, &v.settings, &hint(m, v));
+        if let Some(c) = set_csm(v, &pgp, e.cs_txst.as_ref()) {
+            out.insert(edid.clone(), c);
+        }
+    }
+    out
 }
 
 /// Each set that gets a `.csm`, as the export writes it (CS only): the sets with a PGPatcher entry

@@ -478,6 +478,9 @@ pub struct MeshesModel {
     pub plugin_uses: Vec<MeshUse>,
     /// Note GO: each shape card's texture set pick (NIF block → TXST FormID); the slots are in the 3D view's spec.
     txst_picks: BTreeMap<u32, u32>,
+    /// Note IE12: by TXST EDID, the `.csm` of the project set whose `cs_txst` block binds it (the app hands them over
+    /// each frame, `set_txst_csms`).
+    txst_csms: BTreeMap<String, crate::model::csm_export::SetCsm>,
     /// Database or scan errors; shown, never swallowed.
     pub error: Option<String>,
     pub dialog: Option<MeshesDialog>,
@@ -616,6 +619,7 @@ impl MeshesModel {
             tex_users: None,
             plugin_uses: vec![],
             txst_picks: BTreeMap::new(),
+            txst_csms: BTreeMap::new(),
             error: None,
             dialog: None,
             report: None,
@@ -1723,7 +1727,7 @@ impl MeshesModel {
                     self.error = Some(db_err(e));
                     vec![]
                 });
-                let spec = mesh_spec(store, copy, &s);
+                let spec = mesh_spec(store, self.store_path.as_deref(), copy, &s);
                 let location = store.copy_location(copy).ok().flatten();
                 self.shapes = s;
                 self.resolved = resolved;
@@ -1786,9 +1790,12 @@ impl MeshesModel {
     }
 }
 
-/// What the 3D panel draws for `copy`: where its bytes are and where the game's copy of each texture is.
+/// What the 3D panel draws for `copy`: where its bytes are and where the game's copy of each texture is. A `.csm`
+/// material, its roots and the textures it names are looked up in the scan at `db` when the render thread asks for
+/// them (Note IE12).
 fn mesh_spec(
     store: &Store,
+    db: Option<&Path>,
     copy: i64,
     shapes: &[ShapeView],
 ) -> Result<Option<MeshSpec>, ScanError> {
@@ -1811,6 +1818,10 @@ fn mesh_spec(
         le_mesh,
         head_part: store.is_head_part_mesh(&path).unwrap_or(false), // shading only: a failed lookup is body
         txst: BTreeMap::new(),
+        materials: HashMap::new(),
+        csm: BTreeMap::new(),
+        material_notes: vec![],
+        scan_db: db.map(Path::to_path_buf),
     }))
 }
 

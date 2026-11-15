@@ -421,6 +421,16 @@ fn problems(ui: &mut egui::Ui, v: &mut Viewport3d) {
                     ui.colored_label(RED, format!("{}: shader failed: {error}{kept}", i.name));
                 }
             }
+            // Note IE12: a `.csm` that did not resolve, or a picked set's that is blocked: drawn vanilla. The Meshes view
+            // only, as the shader rows: the set preview reads no scan.
+            let rows = if v.is_mesh() || v.nif_view {
+                v.material_problems()
+            } else {
+                vec![]
+            };
+            for t in rows.into_iter().take(MAX_LISTED) {
+                ui.colored_label(AMBER, t);
+            }
             for (i, t) in r.missing_textures.iter().take(MAX_LISTED).enumerate() {
                 ui.horizontal_wrapped(|ui| {
                     ui.colored_label(MAGENTA, format!("Missing texture: {t}"));

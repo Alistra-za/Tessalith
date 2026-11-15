@@ -1242,7 +1242,7 @@ fn lit_shape(e: &NifEdit) -> (u32, u32) {
 
 #[test]
 fn open_edit_loads_the_source_and_previews_parsed() {
-    let (_d, mut m) = session(false);
+    let (d, mut m) = session(false);
     m.open_edit();
     assert_eq!(m.error, None);
     let e = m.edit.as_ref().expect("an edit session");
@@ -1251,6 +1251,11 @@ fn open_edit_loads_the_source_and_previews_parsed() {
     assert!(!e.le_mesh);
     assert_eq!(e.source_changed, None);
     assert!(matches!(m.v3.content(), Some(Content::Parsed { .. })));
+    // Note IE12: a `.csm` the preview's shapes name is read through the scan.
+    assert!(matches!(
+        m.v3.content(),
+        Some(Content::Parsed { scan_db: Some(db), .. }) if *db == d.path().join("scan.db")
+    ));
     assert!(m.v3.nif_view);
     m.close_edit();
     assert!(m.edit.is_none());

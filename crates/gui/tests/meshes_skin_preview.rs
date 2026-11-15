@@ -226,6 +226,10 @@ fn the_wet_amount_is_kept_per_shape_and_another_mesh_resets_every_pick() {
         le_mesh: false,
         head_part: false,
         txst: Default::default(),
+        materials: HashMap::new(),
+        csm: Default::default(),
+        material_notes: vec![],
+        scan_db: None,
     }));
     assert!(m.skin_entry(5).is_none(), "picks reset with another mesh");
 }

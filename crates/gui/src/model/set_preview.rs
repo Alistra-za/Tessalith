@@ -2364,6 +2364,7 @@ impl SetPreview {
                         key: self.next,
                         nif: Arc::new(parsed),
                         textures: Arc::new(textures),
+                        scan_db: None,
                     }),
                     same,
                 );

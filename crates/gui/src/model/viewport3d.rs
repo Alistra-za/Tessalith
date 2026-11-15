@@ -54,6 +54,18 @@ pub fn off_line(off: &[String]) -> Option<String> {
     let names: Vec<String> = off.iter().map(|n| spaced(n)).collect();
     Some(format!("Off in this preview: {}", names.join(", ")))
 }
+/// Note IE12: the Problems row of a shape's `.csm` (canonical `path`) that did not resolve (`error`, the shape's
+/// `csm_error`): the file asked for missing is "not found"; any other error (bad JSON, a root, a rule) gives its text.
+pub fn csm_row(path: &str, error: &str) -> String {
+    let shown = path.replace('/', "\\");
+    // `csm_error` holds the error's text only, so the missing file is told by its text.
+    if error == nif::csm::CsmError::NotFound(path.to_string()).to_string() {
+        format!("Material file {shown} not found; drawn vanilla")
+    } else {
+        format!("Material file {shown}: {error}; drawn vanilla")
+    }
+}
+
 /// Accessible name of the drawn frame.
 pub const FRAME_LABEL: &str = "3D preview";
 
@@ -150,6 +162,18 @@ pub struct MeshSpec {
     /// Note GO: the shape card's texture set pick, preview only: the TXST's 9 slot paths ("" = empty) in place of
     /// the shape's own. `textures` holds where each one is read.
     pub txst: BTreeMap<ShapeId, Vec<String>>,
+    /// Note IE12: `.csm` files by canonical `materials/…` path, read ahead of the scan's copy of the same path: a
+    /// texture set pick's project set `.csm`, in memory (`csm_export::memory_source`).
+    pub materials: HashMap<String, FileSource>,
+    /// Note IE12: per shape, the `.csm` its texture set pick's project set gives in place of the NIF's name field
+    /// (canonical `materials/…`); `None` draws the shape vanilla (that set's `.csm` is blocked, `material_notes` says
+    /// why).
+    pub csm: BTreeMap<ShapeId, Option<String>>,
+    /// Note IE12: Problems rows the spec itself carries (a picked set whose `.csm` is blocked).
+    pub material_notes: Vec<String>,
+    /// Note IE12: the scan database. A `materials/…` or `textures/…` path in neither map is looked up there when the
+    /// render thread asks for it: a `.csm` a shape names, a root of its chain, a texture a `.csm` names.
+    pub scan_db: Option<PathBuf>,
 }
 
 /// One shape's Advanced Skin card picks (Note GN): the renderer's preview and where each picked key is read (added
@@ -175,6 +199,9 @@ pub enum Content {
         key: u64,
         nif: Arc<ParsedNif>,
         textures: Arc<HashMap<String, FileSource>>,
+        /// Note IE12: the scan database a path the map lacks is looked up in, as [`MeshSpec::scan_db`] (the Meshes
+        /// view's edit preview); `None` reads the map only.
+        scan_db: Option<PathBuf>,
     },
     Builtin {
         key: u64,
@@ -193,13 +220,15 @@ impl PartialEq for Content {
                     key: a,
                     nif: n,
                     textures: t,
+                    scan_db: d,
                 },
                 Content::Parsed {
                     key: b,
                     nif: m,
                     textures: u,
+                    scan_db: e,
                 },
-            ) => a == b && Arc::ptr_eq(n, m) && t == u,
+            ) => a == b && Arc::ptr_eq(n, m) && t == u && d == e,
             (
                 Content::Builtin {
                     key: a,
@@ -232,7 +261,17 @@ impl Content {
     fn load_cmd(&self, id: u64) -> V3Cmd {
         match self.clone() {
             Content::Mesh(spec) => V3Cmd::Load { id, spec },
-            Content::Parsed { nif, textures, .. } => V3Cmd::LoadParsed { id, nif, textures },
+            Content::Parsed {
+                nif,
+                textures,
+                scan_db,
+                ..
+            } => V3Cmd::LoadParsed {
+                id,
+                nif,
+                textures,
+                scan_db,
+            },
             Content::Builtin {
                 shape,
                 material,
@@ -253,6 +292,39 @@ impl Content {
             Content::Parsed { textures, .. } | Content::Builtin { textures, .. } => textures,
         }
     }
+
+    /// Where the render thread reads this content's files (Note IE12).
+    fn files(&self) -> Files<'_> {
+        match self {
+            Content::Mesh(s) => Files {
+                materials: Some(&s.materials),
+                map: &s.textures,
+                scan_db: s.scan_db.as_deref(),
+            },
+            Content::Parsed {
+                textures, scan_db, ..
+            } => Files {
+                materials: None,
+                map: textures,
+                scan_db: scan_db.as_deref(),
+            },
+            Content::Builtin { textures, .. } => Files {
+                materials: None,
+                map: textures,
+                scan_db: None,
+            },
+        }
+    }
+}
+
+/// Where the render thread reads a content's files (Note IE12): `materials` first (a set's in-memory `.csm`), then
+/// `map`, then, for a `materials/…` or `textures/…` path in neither, the scan in `scan_db`, asked when the renderer
+/// asks (a `.csm` a shape names, a root of its chain, a texture a `.csm` names).
+#[derive(Clone, Copy)]
+struct Files<'a> {
+    materials: Option<&'a HashMap<String, FileSource>>,
+    map: &'a HashMap<String, FileSource>,
+    scan_db: Option<&'a Path>,
 }
 
 /// A rendered frame: RGBA8, sRGB-encoded for display when Linear Lighting is on.
@@ -582,6 +654,7 @@ pub enum V3Cmd {
         id: u64,
         nif: Arc<ParsedNif>,
         textures: Arc<HashMap<String, FileSource>>,
+        scan_db: Option<PathBuf>,
     },
     LoadBuiltin {
         id: u64,
@@ -916,6 +989,25 @@ impl Viewport3d {
             || self.edits_done < self.edits_sent
             || self.reconf_done < self.reconf_sent
             || self.compiling() > 0
+    }
+
+    /// Note IE12: the Problems rows about `.csm` materials: the content's own notes (a picked set whose `.csm` is
+    /// blocked), then one row per file a shape could not draw with ([`csm_row`]).
+    pub fn material_problems(&self) -> Vec<String> {
+        let mut out = match &self.content {
+            Some(Content::Mesh(s)) => s.material_notes.clone(),
+            _ => vec![],
+        };
+        for s in &self.shapes {
+            let (Some(path), Some(e)) = (&s.material.csm_path, &s.material.csm_error) else {
+                continue;
+            };
+            let row = csm_row(path, e);
+            if !out.contains(&row) {
+                out.push(row);
+            }
+        }
+        out
     }
 
     /// The content is a Meshes-view mesh (the set preview lists its own shape errors).
@@ -1612,21 +1704,66 @@ impl Drop for Viewport3d {
     }
 }
 
-/// The texture resolver over `map` (canonical path → bytes); read errors are collected in `errors`.
+/// The file resolver over `f` (canonical path → bytes); read errors are collected in `errors`. The scan is opened
+/// once, on the first path that needs it.
 fn resolver<'a>(
-    map: &'a HashMap<String, FileSource>,
+    f: Files<'a>,
     bsas: &'a RefCell<HashMap<PathBuf, Option<BsaIndex>>>,
     errors: &'a RefCell<Vec<String>>,
 ) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
+    let scan: RefCell<Option<Option<modscan::store::Store>>> = RefCell::new(None);
     move |norm: &str| {
-        let src = map.get(norm)?;
-        match read_source(src, bsas) {
+        let found = f
+            .materials
+            .and_then(|m| m.get(norm))
+            .or_else(|| f.map.get(norm));
+        let src = match found {
+            Some(s) => std::borrow::Cow::Borrowed(s),
+            None => std::borrow::Cow::Owned(scan_source(f.scan_db?, norm, &scan, errors)?),
+        };
+        match read_source(&src, bsas) {
             Ok(b) => Some(b),
-            Err(_) if matches!(src, FileSource::Optional(_)) => None,
+            Err(_) if matches!(*src, FileSource::Optional(_)) => None,
             Err(e) => {
                 errors.borrow_mut().push(e);
                 None
             }
+        }
+    }
+}
+
+/// Where the scan at `db` has `norm` (Note IE12): a `.csm` from `mat_winner`, a texture from `tex_winner`, each with
+/// the scan's winner rule (loose before BSA). A database that cannot be read is reported once per resolver.
+fn scan_source(
+    db: &Path,
+    norm: &str,
+    scan: &RefCell<Option<Option<modscan::store::Store>>>,
+    errors: &RefCell<Vec<String>>,
+) -> Option<FileSource> {
+    use modscan::store::Store;
+    let lookup = if norm.starts_with("materials/") {
+        Store::material_location
+    } else if norm.starts_with("textures/") {
+        Store::texture_location
+    } else {
+        return None;
+    };
+    let fail = |e: modscan::ScanError| {
+        let line = format!("Scan database {}: {e}", db.display());
+        let mut errors = errors.borrow_mut();
+        if !errors.contains(&line) {
+            errors.push(line);
+        }
+    };
+    let mut scan = scan.borrow_mut();
+    let store = scan
+        .get_or_insert_with(|| Store::open_read_only(db).map_err(fail).ok())
+        .as_ref()?;
+    match lookup(store, norm) {
+        Ok(at) => at.map(|(kind, root)| FileSource::from_store(kind, &root, norm)),
+        Err(e) => {
+            fail(e);
+            None
         }
     }
 }
@@ -1636,7 +1773,7 @@ fn resolver<'a>(
 fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>) -> LoadReport {
     let bsas = RefCell::new(HashMap::new());
     let errors = RefCell::new(vec![]);
-    let textures = resolver(c.textures(), &bsas, &errors);
+    let textures = resolver(c.files(), &bsas, &errors);
     let mut rep = match c {
         Content::Mesh(spec) => match read_source(&spec.nif, &bsas) {
             Ok(nif) => {
@@ -1650,6 +1787,10 @@ fn load(r: &mut Renderer, c: &Content, edits: &BTreeMap<ShapeId, MaterialState>)
                             .iter()
                             .map(|t| nif::path::canon_texture(t.as_bytes()))
                             .collect();
+                    }
+                    // Note IE12: the pick's set `.csm` in place of the name field's (render3d resolves it).
+                    if let Some(c) = spec.csm.get(&s.id) {
+                        s.material.csm_path = c.clone();
                     }
                 }
                 r.load_parsed_sync(&p, &textures)
@@ -1747,7 +1888,11 @@ fn apply_skin(r: &mut Renderer, c: &Content, id: ShapeId, e: Option<&SkinEntry>)
     let bsas = RefCell::new(HashMap::new());
     let errors = RefCell::new(vec![]);
     let preview = e.map(|e| e.preview.clone()).unwrap_or_default();
-    let _ = r.set_skin_preview(id, preview, &resolver(&map, &bsas, &errors));
+    let files = Files {
+        map: &map,
+        ..c.files()
+    };
+    let _ = r.set_skin_preview(id, preview, &resolver(files, &bsas, &errors));
     errors.into_inner()
 }
 
@@ -1764,7 +1909,7 @@ fn log_for_replay<T>(r: &Result<T, String>) -> bool {
 fn edit(r: &mut Renderer, c: &Content, id: ShapeId, m: MaterialState) -> Result<EditKind, String> {
     let bsas = RefCell::new(HashMap::new());
     let errors = RefCell::new(vec![]);
-    let textures = resolver(c.textures(), &bsas, &errors);
+    let textures = resolver(c.files(), &bsas, &errors);
     r.set_material(id, m, &textures)
 }
 
@@ -1922,12 +2067,18 @@ fn render_loop(
                     None
                 }
                 V3Cmd::Load { id, spec } => Some((id, Content::Mesh(spec))),
-                V3Cmd::LoadParsed { id, nif, textures } => Some((
+                V3Cmd::LoadParsed {
+                    id,
+                    nif,
+                    textures,
+                    scan_db,
+                } => Some((
                     id,
                     Content::Parsed {
                         key: id,
                         nif,
                         textures,
+                        scan_db,
                     },
                 )),
                 V3Cmd::LoadBuiltin {
@@ -2028,7 +2179,7 @@ fn render_loop(
             for l in layer_due.drain(..) {
                 let bsas = RefCell::new(HashMap::new());
                 let errors = RefCell::new(vec![]);
-                r.set_projected_layer(l, &resolver(c.textures(), &bsas, &errors));
+                r.set_projected_layer(l, &resolver(c.files(), &bsas, &errors));
                 send(V3Reply::ProjectedMissing(r.projected_missing()));
             }
             // Shapes re-permuted or rewritten: report them and redraw from the last camera (a load does both itself).
@@ -2236,7 +2387,12 @@ mod tests {
             ("slot".to_string(), gone()),
         ]);
         let (bsas, errors) = (RefCell::new(HashMap::new()), RefCell::new(vec![]));
-        let r = resolver(&map, &bsas, &errors);
+        let files = Files {
+            materials: None,
+            map: &map,
+            scan_db: None,
+        };
+        let r = resolver(files, &bsas, &errors);
         assert_eq!(r("a_rfaos"), None);
         assert_eq!(r("b_rfaos").as_deref(), Some(&b"dds"[..]));
         assert!(errors.borrow().is_empty(), "{:?}", errors.borrow());

@@ -366,6 +366,10 @@ fn the_render_thread_loads_the_picked_slots() {
         le_mesh: false,
         head_part: false,
         txst,
+        materials: HashMap::new(),
+        csm: BTreeMap::new(),
+        material_notes: vec![],
+        scan_db: None,
     };
     let slot0 = |v: &mut Viewport3d| {
         let t = Instant::now();

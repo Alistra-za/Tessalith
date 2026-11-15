@@ -149,6 +149,10 @@ fn femalebody_viewport(cache: &Path) -> Option<Viewport3d> {
         le_mesh: false,
         head_part: false,
         txst: Default::default(),
+        materials: Default::default(),
+        csm: Default::default(),
+        material_notes: vec![],
+        scan_db: None,
     }));
     Some(v)
 }
@@ -438,6 +442,10 @@ fn spec(key: i64, le_mesh: bool) -> v3::MeshSpec {
         le_mesh,
         head_part: false,
         txst: Default::default(),
+        materials: Default::default(),
+        csm: Default::default(),
+        material_notes: vec![],
+        scan_db: None,
     }
 }
 
@@ -629,6 +637,7 @@ fn parsed(key: u64, nif: &Arc<render3d::ParsedNif>, tex: &[(&str, v3::FileSource
                 .map(|(k, s)| (k.to_string(), s.clone()))
                 .collect(),
         ),
+        scan_db: None,
     }
 }
 
@@ -922,6 +931,7 @@ fn femalebody_playback_holds_30_fps() {
             key: 2,
             nif: nif.clone(),
             textures: Arc::new(spec.textures.clone()),
+            scan_db: None,
         }),
         false,
     );
@@ -2565,4 +2575,288 @@ fn a_reader_opens_each_archive_once() {
     assert!(r.read(&bsa("meshes/a.nif")).is_err());
     assert!(r.read(&bsa("meshes/b.nif")).is_err());
     assert_eq!(r.archives(), 1);
+}
+
+// ---- Note IE12: the Meshes view reads `.csm` materials ----
+
+#[path = "../../nif/tests/builder/mod.rs"]
+mod builder;
+#[path = "../../esp/tests/common/mod.rs"]
+mod esp_fixture;
+#[path = "../../modscan/tests/common/mod.rs"]
+mod scan_fixture;
+mod support;
+use sdc_gui::model::meshes::MeshesModel;
+use sdc_gui::settings::MeshesSettings;
+
+/// TXST Rock01 in the scan's Skyrim.esm: x.nif's alternate texture on 3D index 0.
+const ROCK01: u32 = 0x0000_0ABC;
+/// The `.csm` x.nif's shape names: PBR, roughness 0.3, an RMAOS texture the NIF does not name.
+const A_CSM: &str = r#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.3, "RmaosTexture": "a_rmaos.dds"}"#;
+
+/// One triangle "S" (block 0) -> type-0 lighting shader (1) whose name field is `name` -> texture set (2): diffuse
+/// and normal.
+fn csm_nif(name: &str) -> Vec<u8> {
+    let mut n = builder::Nif::new(100);
+    let s = n.string("S");
+    let name = n.string(name);
+    n.block("BSTriShape", builder::scenes::tri_shape(s, 1));
+    let mut body = builder::scenes::lsp(0, 2);
+    body[4..8].copy_from_slice(&name.to_le_bytes()); // NiObjectNET name, after the shader type
+    n.block("BSLightingShaderProperty", body);
+    let mut slots = [""; 9];
+    slots[0] = "textures\\a_d.dds";
+    slots[1] = "textures\\a_n.dds";
+    n.block("BSShaderTextureSet", builder::scenes::texset(&slots));
+    n.bytes()
+}
+
+/// Mod A: meshes/x.nif named `materials\a.csm`, its textures and `a_rmaos.dds`, the `files` (Data path, text), and
+/// Skyrim.esm with TXST Rock01 on x.nif's 3D index 0. Scanned, x.nif selected, the 3D view on the stand-in shaders.
+/// Returns the instance and the shader cache folders with the model.
+fn csm_meshes(files: &[(&str, &str)]) -> (tempfile::TempDir, tempfile::TempDir, MeshesModel) {
+    use esp_fixture as b;
+    let inst = scan_fixture::instance_fixture("+A\n");
+    let root = inst.path();
+    scan_fixture::put(root, "mods/A/meshes/x.nif", &csm_nif("materials\\a.csm"));
+    for t in ["a_d.dds", "a_n.dds", "a_rmaos.dds"] {
+        scan_fixture::put(root, &format!("mods/A/textures/{t}"), b"dds");
+    }
+    for (rel, text) in files {
+        scan_fixture::put(root, &format!("mods/A/{rel}"), text.as_bytes());
+    }
+    let txst = b::rec(
+        b"TXST",
+        ROCK01,
+        &[b::edid("Rock01"), b::sub(b"TX00", &b::zstr("a_d.dds"))],
+    );
+    let stat = b::rec(
+        b"STAT",
+        0xDEF,
+        &[
+            b::edid("RockStat"),
+            b::sub(b"MODL", &b::zstr("x.nif")),
+            b::sub(b"MODS", &b::alt(&[("S", ROCK01, 0)])),
+        ],
+    );
+    scan_fixture::put(
+        root,
+        "Game/Data/Skyrim.esm",
+        &b::plugin(
+            esp::FLAG_ESM,
+            &[],
+            &[b::top(b"TXST", &[txst]), b::top(b"STAT", &[stat])],
+        ),
+    );
+    scan_fixture::put(root, "profiles/Default/plugins.txt", b"");
+    let mut m = MeshesModel::new(Some(root.join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    let cache = tempfile::tempdir().unwrap();
+    m.v3.use_shader_folder(standin_root());
+    m.v3.cache_dir = Some(cache.path().to_path_buf());
+    m.activate_with(None);
+    m.use_instance(root.to_path_buf(), "Default".into());
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    let t = Instant::now();
+    m.poll();
+    while m.scanning() || m.rows_loading() {
+        assert!(t.elapsed().as_secs() < 60, "scan did not end");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    assert_eq!(m.error, None);
+    let a = m.mods.iter().find(|r| r.name == "A").expect("mod A").id;
+    m.select_mod(a);
+    while m.rows_loading() {
+        assert!(t.elapsed().as_secs() < 60, "rows did not load");
+        std::thread::sleep(Duration::from_millis(10));
+        m.poll();
+    }
+    let copy = m
+        .nifs
+        .iter()
+        .find(|r| r.path == "meshes/x.nif")
+        .expect("x.nif scanned")
+        .copy_id;
+    m.select_nif(copy);
+    (inst, cache, m)
+}
+
+/// The loaded shape once the render thread has answered.
+fn csm_shape(m: &mut MeshesModel) -> ShapeInfo {
+    run_idle(&mut m.v3);
+    m.v3.shapes[0].clone()
+}
+
+/// The shape card's block of shape "S".
+fn s_block(m: &MeshesModel) -> u32 {
+    m.shapes
+        .iter()
+        .find(|s| s.name.as_deref() == Some("S"))
+        .expect("shape S")
+        .block
+}
+
+/// Design §5.5: a shape whose name field is a `.csm` the scan has is PBR, and the textures the `.csm` names are read
+/// through the scan too.
+#[test]
+fn mesh_with_csm_previews_pbr() {
+    let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
+    assert_eq!(s.material.csm_error, None);
+    let pbr = s.material.pbr.expect("the .csm's PBR values");
+    assert_eq!(pbr.params[0], 0.3, "PBRRoughnessScale");
+    let rep = m.v3.report.clone().unwrap();
+    assert!(
+        rep.missing_textures.is_empty(),
+        "the .csm's RMAOS comes from the scan: {:?}",
+        rep.missing_textures
+    );
+    assert!(m.v3.material_problems().is_empty());
+}
+
+/// A `.csm` the scan does not have: drawn vanilla, and the panel's problems say which file.
+#[test]
+fn missing_csm_warns() {
+    let (_i, _c, mut m) = csm_meshes(&[]);
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.pbr, None);
+    let v = std::mem::take(&mut m.v3);
+    let mut h = harness(v);
+    h.run_steps(4);
+    h.get_by_label("Material file materials\\a.csm not found; drawn vanilla");
+}
+
+/// A broken `.csm` gets its own row with the error's text.
+#[test]
+fn a_broken_csm_is_its_own_row() {
+    let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", "{ not json")]);
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.pbr, None);
+    let rows = m.v3.material_problems();
+    assert_eq!(rows.len(), 1, "{rows:?}");
+    assert!(
+        rows[0].starts_with("Material file materials\\a.csm: not valid JSON")
+            && rows[0].ends_with("; drawn vanilla"),
+        "{rows:?}"
+    );
+}
+
+/// The design's TXST-JSON rule: a picked TXST whose EDID a project set's `cs_txst` block binds draws that set's
+/// in-memory `.csm`, not the name field's file and not the scan's copy at the set's path. A set edit reaches the view.
+#[test]
+fn txst_json_csm_wins() {
+    use sdc_gui::model::cs_pbr::Kind;
+    use sdc_gui::model::csm_export;
+    use serde_json::json;
+    const ROCK: &str = "landscape/rock01";
+    let p = tempfile::tempdir().unwrap();
+    let mut app = support::pbr_opened_plain(p.path());
+    app.add_cs_block(ROCK, Kind::Txst);
+    app.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
+    app.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
+    app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.6)));
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    let store_copy = r#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.9}"#;
+    let (_i, _c, mut m) = csm_meshes(&[
+        ("materials/a.csm", A_CSM),
+        ("materials/pbr/landscape/rock01.csm", store_copy),
+    ]);
+    // What the app does every frame.
+    let hand = |m: &mut MeshesModel, app: &sdc_gui::model::AppModel| {
+        let csms = csm_export::txst_csms(app, &m.txst_edids());
+        m.set_txst_csms(csms);
+    };
+    hand(&mut m, &app);
+    let block = s_block(&m);
+    m.set_txst(block, Some(ROCK01)).unwrap();
+    let s = csm_shape(&mut m);
+    assert_eq!(
+        s.material.csm_path.as_deref(),
+        Some("materials/pbr/landscape/rock01.csm"),
+        "the set's .csm, not the name field's"
+    );
+    let pbr = s.material.pbr.expect("the set's PBR values");
+    assert_ne!(pbr.features & nif::pbr2::feat::FUZZ, 0, "the set's fuzz");
+    assert_ne!(pbr.params[0], 0.9, "not the scan's copy at the set's path");
+    assert_ne!(pbr.params[0], 0.3, "not the name field's file");
+
+    // An unsaved set edit reaches the 3D view: a new spec, a reload.
+    app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    hand(&mut m, &app);
+    let after = csm_shape(&mut m).material.pbr.expect("still the set's");
+    assert_ne!(after.params, pbr.params, "the edited fuzz weight is drawn");
+
+    // "From the NIF" takes the set's .csm away again: the name field's file.
+    m.set_txst(block, None).unwrap();
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
+}
+
+/// A picked set whose `.csm` is blocked draws the shape vanilla (never the name field's or the scan's copy) with a
+/// row saying why.
+#[test]
+fn a_blocked_set_csm_draws_vanilla_with_a_row() {
+    use sdc_gui::model::csm_export::SetCsm;
+    let (_i, _c, mut m) = csm_meshes(&[
+        ("materials/a.csm", A_CSM),
+        ("materials/pbr/landscape/rock01.csm", A_CSM),
+    ]);
+    assert_eq!(m.txst_edids(), ["Rock01"]);
+    let why = "landscape/rock01: no .csm written: the set has no RMAOS texture";
+    m.set_txst_csms(std::collections::BTreeMap::from([(
+        "Rock01".to_string(),
+        SetCsm {
+            path: "materials\\pbr\\landscape\\rock01.csm".into(),
+            csm: nif::csm::Csm::default(),
+            warnings: vec![],
+            blocked: Some(why.into()),
+        },
+    )]));
+    m.set_txst(s_block(&m), Some(ROCK01)).unwrap();
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.csm_path, None);
+    assert_eq!(s.material.pbr, None);
+    assert_eq!(m.v3.material_problems(), [format!("{why}; drawn vanilla")]);
+}
+
+/// The Meshes view's edit preview (a parsed NIF) reads a `.csm` through the scan too.
+#[test]
+fn a_parsed_preview_reads_the_csm_through_the_scan() {
+    let (inst, cache, _m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    let mut v = Viewport3d::new();
+    v.use_shader_folder(standin_root());
+    v.cache_dir = Some(cache.path().to_path_buf());
+    v.set_content(
+        Some(v3::Content::Parsed {
+            key: 1,
+            nif: Arc::new(render3d::parse(&csm_nif("materials\\a.csm"))),
+            textures: Arc::new(HashMap::new()),
+            scan_db: Some(inst.path().join("scan.db")),
+        }),
+        false,
+    );
+    run_idle(&mut v);
+    let m = &v.shapes[0].material;
+    assert_eq!(m.csm_error, None);
+    assert_eq!(m.pbr.as_ref().map(|p| p.params[0]), Some(0.3));
+}
+
+/// A `.csm`'s root chain is read through the scan on demand: a materials-relative `RootMaterialPath` in the mod.
+#[test]
+fn a_csm_root_is_read_through_the_scan() {
+    let child = r#"{"Version": 1, "PBREnabled": true, "RootMaterialPath": "base\\b.csm"}"#;
+    let root = r#"{"Version": 1, "PBREnabled": true, "PBRSpecularLevel": 0.5}"#;
+    let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", child), ("materials/base/b.csm", root)]);
+    let s = csm_shape(&mut m);
+    assert_eq!(s.material.csm_error, None);
+    assert_eq!(
+        s.material.pbr.map(|p| p.params[1]),
+        Some(0.5),
+        "PBRSpecularLevel from the root"
+    );
 }
