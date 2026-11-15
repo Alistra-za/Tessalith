@@ -315,7 +315,7 @@ enum Footer<'a> {
     Nif(&'a crate::model::meshes::NifReviewRow),
     NifWaiting(&'a crate::model::meshes::NifReviewRow),
     NifSkipped(&'a crate::model::meshes::NifReviewRow),
-    Written(usize),
+    Written(String),
     Json(&'a JsonLine),
 }
 
@@ -649,7 +649,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 )));
                 list.extend(nif_skipped.iter().map(|r| Footer::NifSkipped(r)));
             }
-            list.push(Footer::Written(m.export_files()));
+            list.push(Footer::Written(m.written_text()));
             // Note FC5: the Keep/Overwrite question moved to Blockers.
             list.extend(json.iter().map(Footer::Json));
             let row_h = ui.spacing().interact_size.y;
@@ -690,9 +690,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                     )
                                     .on_hover_text(&t);
                                 }
-                                Footer::Written(files) => {
+                                Footer::Written(text) => {
                                     ui.strong("What will be written");
-                                    ui.label(format!("{files} DDS file{}", plural(*files)));
+                                    // Note JD1: with an Also tick the line is long; cut, it keeps its text on hover.
+                                    ui.add(egui::Label::new(text).truncate());
                                 }
                                 Footer::Json(l) => {
                                     let fallback = (!folder_chosen).then(|| m.export_root());

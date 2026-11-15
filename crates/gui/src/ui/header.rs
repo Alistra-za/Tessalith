@@ -283,15 +283,15 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     });
 }
 
-/// Export's hover (A12): "{n} files, {m} problems"; with an "Also export as" tick on, "{n} files to {k} folders, {m}
-/// problems" (re-check A7, Note CN).
+/// Export's hover (A12): "{n} files, {m} problems"; with an "Also export as" tick on, "{n} files + Vanilla folder,
+/// {m} problems" (Note JD1: the count is the PBR folder's).
 pub fn export_hover(model: &AppModel) -> String {
     let n = crate::model::bottom::flagged(model).ready_rows;
     let files = model.export_files();
     if model.also_on() {
         format!(
-            "{files} files to {} folders, {n} problems",
-            model.also_folder_count()
+            "{files} files + {}, {n} problems",
+            model.also_extra_folders()
         )
     } else {
         format!("{files} files, {n} problems")

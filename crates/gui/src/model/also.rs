@@ -258,12 +258,13 @@ impl AppModel {
         engine::also::check_names(&cfg, &project)
     }
 
-    /// "to {k} folders": 3 with CM (it needs Vanilla, TA30), else 2.
-    pub fn also_folder_count(&self) -> usize {
+    /// Note JD1: the folders an Also export writes beside the PBR folder, as the count's texts name them (CM needs
+    /// Vanilla, TA30). They get no number: their files are planned by the export itself, after the PBR folder.
+    pub fn also_extra_folders(&self) -> &'static str {
         if self.also_ticks().1 {
-            3
+            "Vanilla and CM folders"
         } else {
-            2
+            "Vanilla folder"
         }
     }
 

@@ -456,7 +456,22 @@ impl AppModel {
         t
     }
 
-    /// "Export 20 files (skip 2 undecided)".
+    /// Review's count under What will be written: "20 DDS files". Note JD1: with an Also tick the count is the PBR
+    /// folder's and the other folders are named without one, "20 DDS files in the PBR folder, plus the Vanilla folder".
+    pub fn written_text(&self) -> String {
+        let n = self.export_files();
+        let dds = format!("{n} DDS file{}", plural(n));
+        if self.also_runs() {
+            format!(
+                "{dds} in the PBR folder, plus the {}",
+                self.also_extra_folders()
+            )
+        } else {
+            dds
+        }
+    }
+
+    /// "Export 20 files (skip 2 undecided)"; with an Also tick, "Export 20 files + Vanilla folder".
     pub fn review_button_text(&self) -> String {
         // Note GH8: no project, no texture run: the button writes the NIF edits alone.
         if self.root.is_none() {
@@ -470,9 +485,9 @@ impl AppModel {
             Some(s) => s.label.clone(),
             None => format!("Export {files} file{}", plural(files)),
         };
-        // Re-check A7 (TA30): this project's planned files, written to the PBR folder and copied or derived on.
+        // Note JD1: the count is the PBR folder's; the folders copied or derived from it are named, not counted.
         if self.also_runs() {
-            t.push_str(&format!(" to {} folders", self.also_folder_count()));
+            t.push_str(&format!(" + {}", self.also_extra_folders()));
         }
         // Note FI7 (rule 7.1): only the NIF edits this Export writes; a blocked one is skipped.
         let blocked = self.nif_rows.iter().filter(|r| r.blocked.is_some()).count();

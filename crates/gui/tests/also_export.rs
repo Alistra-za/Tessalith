@@ -321,14 +321,60 @@ fn reviews_button_names_the_folders() {
     let d = tempfile::tempdir().unwrap();
     let mut m = project(d.path());
     let plain = m.review_button_text();
-    assert!(!plain.contains("folders"), "{plain}");
+    assert!(!plain.contains("folder"), "{plain}");
     tick(&mut m, AlsoTarget::Vanilla);
     let n = m.export_files();
-    assert!(m
-        .review_button_text()
-        .starts_with(&format!("Export {n} files to 2 folders")));
+    assert_eq!(
+        m.review_button_text(),
+        format!("Export {n} files + Vanilla folder")
+    );
     tick(&mut m, AlsoTarget::Cm);
-    assert!(m.review_button_text().contains(" to 3 folders"));
+    assert_eq!(
+        m.review_button_text(),
+        format!("Export {n} files + Vanilla and CM folders")
+    );
+}
+
+/// Note JD1: the number on Review's Export button, under What will be written and on the header hover is the number
+/// of DDS files the export writes into the PBR folder (a first export into an empty location). The Vanilla and CM
+/// folders are named and get no number: "5 files to 2 folders" stood for an export that wrote 9.
+#[test]
+fn the_count_is_the_pbr_folders_and_the_other_folders_are_named() {
+    for (also, named) in [
+        (AlsoTarget::Vanilla, "Vanilla folder"),
+        (AlsoTarget::Cm, "Vanilla and CM folders"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = project(d.path());
+        tick(&mut m, also);
+        m.export_clicked();
+        assert!(m.review.is_some());
+        let button = m.review_button_text();
+        let counted = m.export_files();
+        assert_eq!(button, format!("Export {counted} files + {named}"));
+        assert_eq!(
+            m.written_text(),
+            format!("{counted} DDS files in the PBR folder, plus the {named}")
+        );
+        let hover = sdc_gui::ui::header::export_hover(&m);
+        assert!(
+            hover.starts_with(&format!("{counted} files + {named}, ")),
+            "{hover}"
+        );
+        m.export_from_review();
+        idle(&mut m);
+        assert_eq!(m.dialog, None, "{:?}", m.export.notes);
+        let written: Vec<usize> = m
+            .also_folders()
+            .iter()
+            .map(|f| support::dds_under(f))
+            .collect();
+        assert_eq!(
+            counted, written[0],
+            "{also:?}: {button}, written per folder {written:?}"
+        );
+        assert!(written[1] > 0, "the Vanilla folder is written: {written:?}");
+    }
 }
 
 /// P8 (replaces "the progress never goes backwards"): one `drawer_epoch` for the three phases; every row done.
@@ -662,6 +708,20 @@ fn reviewing(d: &Path, w: f32) -> H {
     h
 }
 
+/// Note JD1: under What will be written the count is the PBR folder's and the Vanilla folder is named, at a narrow
+/// window too (a cut line keeps its whole text as its name).
+#[test]
+fn reviews_footer_counts_the_pbr_folder_and_names_the_vanilla_folder() {
+    for w in [1100.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let h = reviewing(d.path(), w);
+        let n = h.state().export_files();
+        let line = format!("{n} DDS files in the PBR folder, plus the Vanilla folder");
+        assert!(has_label(&h, &line), "{w}: {line}");
+        assert!(has_label(&h, &format!("Export {n} files + Vanilla folder")));
+    }
+}
+
 #[test]
 fn the_export_to_menu_toggles_the_ticks() {
     let d = tempfile::tempdir().unwrap();
@@ -791,7 +851,7 @@ fn reviews_export_stays_disabled_with_the_also_reason() {
         .find(|n| {
             n.accesskit_node()
                 .label()
-                .is_some_and(|l| l.starts_with("Export ") && l.contains("folders"))
+                .is_some_and(|l| l.starts_with("Export ") && l.ends_with(" + Vanilla folder"))
         })
         .expect("Review's Export");
     assert!(button.accesskit_node().is_disabled());
@@ -933,7 +993,7 @@ fn the_header_export_hover_names_the_folders() {
     assert!(!plain.contains("folders"), "{plain}");
     tick(&mut m, AlsoTarget::Cm);
     let t = sdc_gui::ui::header::export_hover(&m);
-    assert!(t.contains(" files to 3 folders, "), "{t}");
+    assert!(t.contains(" files + Vanilla and CM folders, "), "{t}");
 }
 
 /// A drag of a recipe box follows the pointer and ends in one edit (one undo step), not one per frame.
