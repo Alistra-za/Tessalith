@@ -216,7 +216,8 @@ impl AppModel {
         }
     }
 
-    /// The files an export writes: items with a job that is neither undecided, packed into another nor skipped.
+    /// The files an export writes: items with a job that is neither undecided, packed into another, skipped nor in
+    /// error (an `Error` job runs and fails, so it writes nothing).
     /// Cached like `bottom::problems` (Review and the header read it every frame): `items` is only replaced
     /// together with `invalidate_views`, which changes the view key.
     pub fn export_files(&self) -> usize {
@@ -245,6 +246,7 @@ impl AppModel {
                         ItemStatus::NeedsDecision
                             | ItemStatus::PackedInto(_)
                             | ItemStatus::Skipped(_)
+                            | ItemStatus::Error(_)
                     )
             })
             .count()

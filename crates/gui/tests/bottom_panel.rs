@@ -710,7 +710,10 @@ fn uncached_export_files(m: &AppModel) -> usize {
             i.job.is_some()
                 && !matches!(
                     i.status,
-                    ItemStatus::NeedsDecision | ItemStatus::PackedInto(_) | ItemStatus::Skipped(_)
+                    ItemStatus::NeedsDecision
+                        | ItemStatus::PackedInto(_)
+                        | ItemStatus::Skipped(_)
+                        | ItemStatus::Error(_)
                 )
         })
         .count()

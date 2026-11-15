@@ -313,6 +313,24 @@ pub fn pbr_wall(dir: &Path, albedo: u8, rmaos: [u8; 3]) -> AppModel {
 }
 
 /// A 64 px BC1 DDS at `path` (parent folders made), written by the engine's writer, never copied.
+/// How many `.dds` files are under `dir`, at any depth (0 for a folder that does not exist): what an export wrote.
+pub fn dds_under(dir: &Path) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
+    entries
+        .flatten()
+        .map(|e| e.path())
+        .map(|p| {
+            if p.is_dir() {
+                dds_under(&p)
+            } else {
+                usize::from(p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dds")))
+            }
+        })
+        .sum()
+}
+
 pub fn bc1_dds(path: &Path) {
     use engine::dds::{dds_bytes, DdsDesc, ResolvedHeader};
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();

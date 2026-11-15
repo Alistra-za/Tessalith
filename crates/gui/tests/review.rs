@@ -36,6 +36,45 @@ fn a_clean_project_exports_without_review() {
     assert!(m.export.summary.is_some());
 }
 
+/// A texture the plan gave an error (here BC6H outside the cs mode) is never written, so the button's count leaves it
+/// out: the count is the number of DDS files the export writes.
+#[test]
+fn a_texture_that_will_fail_is_not_in_the_export_count() {
+    use sdc_gui::model::items::ItemStatus;
+    let d = tempfile::tempdir().unwrap();
+    let c = d.path().join("textures/clutter");
+    std::fs::create_dir_all(&c).unwrap();
+    let grad = |x: u32, y: u32| image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]);
+    image::ImageBuffer::from_fn(64, 64, grad)
+        .save(c.join("barrel.png"))
+        .unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(c.join("barrel_n.png"))
+        .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"clutter/barrel.png\"]\nformat = \"bc6h_uf16\"\n",
+    )
+    .unwrap();
+    let export = d.path().join("export");
+    let mut m = opened_as_the_app(d.path().join("textures"), export.clone());
+    let barrel = m.item("clutter/barrel.png").expect("the barrel");
+    assert!(
+        matches!(barrel.status, ItemStatus::Error(_)),
+        "{:?}",
+        barrel.status
+    );
+    assert_eq!(m.undecided(), 0, "only the error is in the way");
+    let counted = m.export_files();
+    let button = m.header_export_text();
+    export_through(&mut m);
+    idle(&mut m);
+    let written = dds_under(&export);
+    assert_eq!(written, 1, "the normal map alone");
+    assert_eq!(counted, written, "{button}");
+    assert!(button.ends_with(" 1 file"), "{button}");
+}
+
 #[test]
 fn undecided_textures_open_review_not_a_dialog() {
     let d = tempfile::tempdir().unwrap();
