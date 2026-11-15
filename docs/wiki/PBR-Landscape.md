@@ -27,7 +27,7 @@ A set can write Community Shaders' own runtime files: a **PBR texture set** (`<e
 
 ### CS PBR 2.0 keys
 
-With **CS PBR 2.0 (experimental)** ticked in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental), the texture set block gets eight more rows, and the `PBRTextureSets` file writes the ones that hold a value. Unticked, the rows are hidden and the file is written without them. <!-- D:ID44 -->
+With **CS PBR 2.0 (experimental)** ticked in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental), the texture set block gets eight more rows, and the `PBRTextureSets` file writes the ones that hold a value. Unticked, the rows are hidden and the file is written without them. <!-- D:ID44 --> The PBR Landscape card hides the eight rows like its other unread rows: while **Also write into the PGPatcher JSON** is off and a row holds no value, because CS's landscape shader doesn't read them. <!-- D:ID47 -->
 
 | Row | Key | Value |
 |---|---|---|

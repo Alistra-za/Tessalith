@@ -35,7 +35,7 @@ For authors trying shader type 21 on Community Shaders' TruePBR 2.0 test build. 
 - **A type-21 shape** draws with CS 2.0 shading. A shape that breaks a CS 2.0 rule isn't drawn, as in game, and the **notes** list under the view gives the rule ("CS 2.0 won't draw this shape: …"). <!-- D:ID38 -->
 - **A v1 PBR shape** (type 0 or 11 with the PBR flag) draws as vanilla, because CS 2.0 hands it to the vanilla shader. <!-- D:ID33 -->
 - **With the box off**, a type-21 shape draws as the v1 PBR shape a conversion would write, and the notes say "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading". Thin surface and foliage have no v1 shading. <!-- D:ID33,ID40 -->
-- **How far to trust it:** base, subsurface, two-layer, fuzz, thin-surface and foliage shapes matched in-game captures of the test build pixel for pixel. Glint and hair weren't checked. Vanilla and v1 shapes get lighting options the game left off, so judge those with the box off. <!-- D:ID51,ID53 -->
+- **How far to trust it:** the test shapes for base, subsurface, two-layer, fuzz, thin surface and foliage (one mesh per feature) matched in-game captures of the test build pixel for pixel, checked once. Glint and hair weren't checked. Vanilla and v1 shapes get lighting options the game left off, so judge those with the box off. <!-- D:ID51,ID53,ID56 -->
 
 ## Move the camera and light
 

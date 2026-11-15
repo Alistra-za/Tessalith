@@ -36,7 +36,6 @@ Controllers CS 2.0 doesn't animate are unlinked in the same step ([NIF animation
 
 - After refraction the Shader tab shows the PBR version, ten feature checkboxes and the parameters of the features that are on; glossiness, specular and the trailer don't exist on type 21. A feature that would break one of CS 2.0's combination rules is greyed, and its hover names the rule. <!-- D:ID22 -->
 - Texture slots, here and on the shape card, carry the 2.0 names (RMAOS and the two feature textures among them). The v1 PBR flags are hidden, and flags CS 2.0 forbids are locked off. <!-- D:ID23,ID25 -->
-- The PBRThinSurface and PBRFuzz extra data show on the **Extra data** tab, read only. <!-- D:ID2 -->
 - With the box off a type-21 shape still opens: its type, features and parameters are locked, while textures, alpha, UV, emissive and flags stay editable. <!-- D:ID21 -->
 
 ### What blocks a type-21 export
