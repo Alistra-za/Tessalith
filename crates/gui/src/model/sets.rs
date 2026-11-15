@@ -2333,22 +2333,67 @@ impl AppModel {
                 from: "no set".into(),
             };
         }
-        // A texture that belongs to a real set (more than itself, or one the user touched) asks what to do. An entry
-        // holding only its id (left by a rename back) is no edit.
-        if let Some(f) = &from {
-            let edited = self.sets_doc.as_ref().is_some_and(|d| {
-                entry_of(&d.entries(), &f.id).is_some_and(|e| {
-                    *e != SetEntry {
-                        id: e.id.clone(),
-                        ..SetEntry::default()
-                    }
-                })
-            });
-            if f.members.len() > 1 || edited || f.created {
-                return DropOutcome::AskChoice { from: f.id.clone() };
-            }
+        // A texture that belongs to a real set asks what to do.
+        if let Some(f) = from.as_ref().filter(|f| self.is_real_set(f)) {
+            return DropOutcome::AskChoice { from: f.id.clone() };
         }
         self.drop_choice(item, set, DropChoice::Move)
+    }
+
+    /// A set the user would lose by moving a texture out of it: more than one member, or one the user touched. An
+    /// entry holding only its id (left by a rename back) is no edit.
+    pub(super) fn is_real_set(&self, f: &SetView) -> bool {
+        let edited = self.sets_doc.as_ref().is_some_and(|d| {
+            entry_of(&d.entries(), &f.id).is_some_and(|e| {
+                *e != SetEntry {
+                    id: e.id.clone(),
+                    ..SetEntry::default()
+                }
+            })
+        });
+        f.members.len() > 1 || edited || f.created
+    }
+
+    /// Note JD1: slot `kind` (an empty `_wet` or `_detail_n`) of set `set` takes `item` from its folder, as a drop
+    /// would move it; an undecided `item` is typed for the slot in the same step.
+    pub fn move_into_slot(&mut self, item: &str, set: &str, kind: SlotKind) -> Result<(), String> {
+        if !self.sets_editable() {
+            return Err(READ_ONLY.into());
+        }
+        let sub = match kind {
+            SlotKind::SkinWet => Subtype::SkinWet,
+            SlotKind::SkinDetail => Subtype::SkinDetail,
+            _ => return Err("only the skin wet and detail slots take a file this way".into()),
+        };
+        let target = self.drop_target(set)?;
+        // The menu lists files for an empty slot only; one filled since then is not replaced from here.
+        if self.occupant(&target, Some(kind), None)?.is_some() {
+            return Err("the slot is filled; clear it first".into());
+        }
+        self.choice_allowed(item, &target, Some(kind), DropChoice::Move)?;
+        let undecided = self.item(item).is_some_and(|i| i.waiting);
+        if undecided {
+            if let Some(why) = self.toml_read_only_reason() {
+                return Err(why);
+            }
+        }
+        let mut out = Ok(());
+        self.batch_edit(&format!("Move into {}", target.id), |m| {
+            if undecided {
+                m.edit_subtype("Assign", item, Some(sub));
+            }
+            out = m.apply_choice(item, &target, Some(kind), DropChoice::Move, None);
+        });
+        out
+    }
+
+    /// Note JD2: slot `kind` (an empty `_wet` or `_detail_n`) of set `set` borrows `item` from its set, as Share does.
+    pub fn borrow_into_slot(&mut self, item: &str, set: &str) -> Result<(), String> {
+        match self.drop_choice(item, set, DropChoice::Share) {
+            DropOutcome::Joined => Ok(()),
+            DropOutcome::Refused(e) => Err(e),
+            _ => Err("the slot is filled; clear it first".into()),
+        }
     }
 
     /// The answer to `AskChoice` (or a plain move). Any choice that would put a finished texture into a slot the set
