@@ -426,20 +426,44 @@ fn statics_using_the_diffuse_get_the_entry_with_the_blocks_values() {
     let pgp =
         pgp_json(&m).unwrap_or_else(|| panic!("no PGPatcher JSON; notes {:?}", m.export.notes));
     let e = &pgp["entries"][0];
+    // Note IE10: a plain PBR set's values are in its `.csm`; its texture-set file names it.
     let cs: Json = serde_json::from_str(
         &std::fs::read_to_string(m.export_root().join("PBRTextureSets/LandscapeRock01.json"))
             .unwrap(),
     )
     .unwrap();
+    assert_eq!(cs, json!({"csm": r"materials\pbr\landscape\rock01.csm"}));
+    let c = nif::csm::parse(
+        &std::fs::read_to_string(m.export_root().join("materials/pbr/landscape/rock01.csm"))
+            .unwrap(),
+    )
+    .unwrap();
+    let num = |k: &str| match c.values.get(k) {
+        Some(nif::csm::Value::Num(n)) => json!(*n),
+        v => panic!("{k}: {v:?}"),
+    };
     assert_eq!(e["specular_level"], json!(0.02));
-    assert_eq!(cs["specularLevel"], json!(0.02));
-    let g = &cs["glintParameters"];
+    assert_eq!(num("PBRSpecularLevel"), json!(0.02));
     assert_eq!(
         e["glint"],
-        json!({"screen_space_scale": g["screenSpaceScale"], "log_microfacet_density": 16.0,
-               "microfacet_roughness": g["microfacetRoughness"], "density_randomization": g["densityRandomization"]})
+        json!({"screen_space_scale": num("PBRGlintScreenSpaceScale"), "log_microfacet_density": 16.0,
+               "microfacet_roughness": 0.7, "density_randomization": 300.0})
     );
-    assert_eq!(g["logMicrofacetDensity"], json!(16.0));
+    assert_eq!(num("PBRGlintLogMicrofacetDensity"), json!(16.0));
+    // The template's microfacet roughness and density randomization are past the `.csm` schema's range: clamped,
+    // with a note (the PGPatcher entry keeps them).
+    assert_eq!(num("PBRGlintMicrofacetRoughness"), json!(0.3));
+    assert_eq!(num("PBRGlintDensityRandomization"), json!(5.0));
+    for k in [
+        "PBRGlintMicrofacetRoughness 0.7 is outside",
+        "PBRGlintDensityRandomization 300 is outside",
+    ] {
+        assert!(
+            m.export.notes.iter().any(|n| n.contains(k)),
+            "{k} in {:?}",
+            m.export.notes
+        );
+    }
 }
 
 #[test]

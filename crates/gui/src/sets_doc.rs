@@ -55,6 +55,9 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// Advanced skin materials: `[project] cs_skin_sha256` (and the sidecar table), path under the export root → hash of
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
+/// Note IE10: `[project] csm_sha256` (and the sidecar table), path under the export root → hash of the set `.csm`
+/// material sdc last wrote there.
+const CSM_SHA: &str = "csm_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 17] = [
     "id",
@@ -326,7 +329,15 @@ impl SetsDoc {
             let v = Value::from(s);
             self.set_project(LAST_SHA, Some(v));
         }
-        for k in [PGP_SHA, CS_SHA, CM_SHA, COPY_SHA, XPMF_SHA, CS_SKIN_SHA] {
+        for k in [
+            PGP_SHA,
+            CS_SHA,
+            CM_SHA,
+            COPY_SHA,
+            XPMF_SHA,
+            CS_SKIN_SHA,
+            CSM_SHA,
+        ] {
             if self.side.contains_key(k) {
                 let m = self.shas(k);
                 self.set_shas(k, &m);
@@ -406,6 +417,7 @@ impl SetsDoc {
         let copies = self.doc_shas(COPY_SHA);
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
+        let csm = self.doc_shas(CSM_SHA);
         let folder = self.export_folder();
         let target = self.target_mod();
         let old = self.text();
@@ -421,6 +433,7 @@ impl SetsDoc {
             (COPY_SHA, &copies),
             (XPMF_SHA, &xpmf),
             (CS_SKIN_SHA, &skin),
+            (CSM_SHA, &csm),
         ] {
             if self.doc_shas(k) != *m {
                 self.set_shas(k, m);
@@ -620,6 +633,14 @@ impl SetsDoc {
 
     pub fn set_cs_skin_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
         self.record_shas(CS_SKIN_SHA, shas)
+    }
+
+    pub fn csm_shas(&self) -> BTreeMap<String, String> {
+        self.shas(CSM_SHA)
+    }
+
+    pub fn set_csm_shas(&mut self, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
+        self.record_shas(CSM_SHA, shas)
     }
 
     pub fn copy_shas(&self) -> BTreeMap<String, String> {

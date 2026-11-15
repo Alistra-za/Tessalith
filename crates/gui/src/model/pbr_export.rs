@@ -591,7 +591,7 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
         return vec![];
     }
     let known = m.known_textures(Some(0));
-    set_views(m)
+    let mut out: Vec<ExportIssue> = set_views(m)
         .iter()
         .filter(|v| v.json && m.in_run(&v.key))
         .flat_map(|v| {
@@ -605,7 +605,21 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
                 .chain(rename_hits_elsewhere(&v.settings, derived, &known))
                 .map(move |w| issue(v, format!("{}: {w}", v.id)))
         })
-        .collect()
+        .collect();
+    // Note IE10: a set's clamped or left-out `.csm` values, and why its `.csm` is not written. Here, not in Problems'
+    // own loops, so a partial plan carries them over with the other asks (Note FL7).
+    for (v, c) in super::csm_export::csm_sets(m)
+        .into_iter()
+        .filter(|(v, _)| m.in_run(&v.key))
+    {
+        out.extend(
+            c.warnings
+                .into_iter()
+                .chain(c.blocked)
+                .map(|t| issue(&v, t)),
+        );
+    }
+    out
 }
 
 /// What an export about to start writes once it has ended: the PGPatcher JSON and the vanilla copies.

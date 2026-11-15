@@ -318,7 +318,7 @@ pub struct PbrValues {
 }
 
 /// Each `.csm` switch and its feature bit.
-const CSM_SWITCHES: [(&str, u32); 11] = [
+pub const CSM_SWITCHES: [(&str, u32); 11] = [
     ("PBRSubsurfaceEnabled", feat::SUBSURFACE),
     ("PBRTwoLayerEnabled", feat::TWO_LAYER),
     ("PBRTwoLayerColoredCoat", feat::COLORED_COAT),
@@ -333,7 +333,7 @@ const CSM_SWITCHES: [(&str, u32); 11] = [
 ];
 
 /// Each `.csm` PBR number or colour key and its parameter; a colour fills three ([`COLOR_PARAMS`]).
-const CSM_PARAMS: [(&str, usize); 19] = [
+pub const CSM_PARAMS: [(&str, usize); 19] = [
     ("PBRRoughnessScale", 0),
     ("PBRSpecularLevel", 1),
     ("PBRDisplacementTextureScale", 2),

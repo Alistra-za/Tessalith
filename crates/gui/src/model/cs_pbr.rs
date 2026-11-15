@@ -45,7 +45,8 @@ pub enum FieldKind {
 }
 
 /// One CS field (`TruePBR.h`): its in-game slider range (the editor's drag range; JSON is not clamped) and CS's
-/// default (a colour's default is each channel's).
+/// default (a colour's default is each channel's). A texture set that exports a `.csm` drags in the schema's range
+/// instead, and its export clamps to it (`csm_export::csm_range`, Note IE10).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Field {
     pub name: &'static str,

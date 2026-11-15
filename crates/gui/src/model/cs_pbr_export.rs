@@ -1,5 +1,6 @@
 //! The Community Shaders runtime JSON (design §5): `PBRTextureSets\<EDID>.json` and `PBRMaterialObjects\<EDID>.json`,
-//! one file per EDID per block, written after a clean export. No egui types.
+//! one file per EDID per block, written after a clean export. A PBR set's texture-set file names its `.csm`
+//! (`csm_export`, Note IE10); a PBR Landscape set's holds the values. No egui types.
 use super::cs_pbr::{field, floats, Kind, GLINT_FIELDS};
 use serde::Serialize;
 use serde_json::{json, Map, Value as Json};
@@ -38,6 +39,16 @@ pub fn to_text(kind: Kind, values: &Map<String, Json>) -> String {
     if kind == Kind::Mato {
         obj.entry("specularLevel").or_insert(json!(MATO_SPECULAR));
     }
+    pretty(obj)
+}
+
+/// Note IE10 (design §5.3): a PBR set's texture-set file, `{"csm": "<materials path>"}`; the values live in the `.csm`.
+pub fn csm_pointer_text(path: &str) -> String {
+    pretty(Map::from_iter([("csm".to_string(), json!(path))]))
+}
+
+/// `obj` as CS's saver writes it (see `to_text`).
+fn pretty(obj: Map<String, Json>) -> String {
     let mut out = Vec::new();
     let mut ser = serde_json::Serializer::with_formatter(
         &mut out,
@@ -142,9 +153,16 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
         ..Default::default()
     };
     let mut done = BTreeSet::new();
+    // Note IE10: a PBR set (not PBR Landscape) writes its values to its `.csm`, and its texture-set file names it.
+    let csms = super::csm_export::csm_sets(m);
     // Note HF9: only the sets in the run write their files; the others' stay as they are.
     for e in entries.iter().filter(|e| m.in_run_id(&e.id)) {
+        let csm = csms
+            .iter()
+            .find(|(v, _)| engine::sets::same_id(&v.id, &e.id))
+            .map(|(_, c)| c);
         for (kind, b) in blocks(e) {
+            let pointer = csm.filter(|_| kind == Kind::Txst);
             let known = |k: &String| field(kind, k).is_some();
             let mut values = b.values.clone();
             values.retain(|k, _| known(k));
@@ -155,7 +173,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                 .iter()
                 .filter(|k| known(k))
                 .chain(all.keys().filter(|k| !values.contains_key(*k)));
-            for k in left_out {
+            // A `.csm` set's left-out values are the `.csm`'s warnings.
+            for k in left_out.filter(|_| pointer.is_none()) {
                 p.notes.push(format!(
                     "{}: {}.{k} has the wrong type and was left out",
                     e.id,
@@ -163,7 +182,16 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                 ));
             }
             for edid in &b.edids {
-                match refused.get(&(e.id.clone(), kind, edid.clone())) {
+                // A file naming a `.csm` that is not written would point at nothing.
+                let why = refused
+                    .get(&(e.id.clone(), kind, edid.clone()))
+                    .cloned()
+                    .or_else(|| {
+                        pointer
+                            .filter(|c| c.blocked.is_some())
+                            .map(|c| format!("the set's {} is not written", c.path))
+                    });
+                match why {
                     Some(why) => {
                         p.refused.push(rel_path(kind, edid));
                         let n = format!("{} {edid} not written: {why}", kind.label());
@@ -173,7 +201,11 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                     }
                     None => {
                         if done.insert((kind, edid.to_lowercase())) {
-                            p.files.push((rel_path(kind, edid), to_text(kind, &values)));
+                            let text = match pointer {
+                                Some(c) => csm_pointer_text(&c.path),
+                                None => to_text(kind, &values),
+                            };
+                            p.files.push((rel_path(kind, edid), text));
                         }
                     }
                 }

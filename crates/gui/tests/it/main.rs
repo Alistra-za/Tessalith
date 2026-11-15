@@ -69,6 +69,8 @@ mod cs_pbr_export;
 mod cs_pbr_ui;
 #[path = "../cs_skin_json.rs"]
 mod cs_skin_json;
+#[path = "../csm_export.rs"]
+mod csm_export;
 #[path = "../cube_preview.rs"]
 mod cube_preview;
 #[path = "../cubemap_gui.rs"]

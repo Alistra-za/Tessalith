@@ -859,6 +859,14 @@ fn the_outputs_leave_the_pbr_folder_safely() {
     // The old outputs stay where they were, and no note names them as written (no export reports a moved DDS as an
     // orphan; the JSON names the new path, above).
     assert!(root.join("textures/pbr/arm/steel.dds").is_file());
+    // Note IE10: the `.csm` moves with the output prefix, and the old one is reported as left in place.
+    let (csm, notes): (Vec<&str>, Vec<&str>) = notes
+        .lines()
+        .partition(|l| l.contains("steel.csm: no pbr set writes this .csm any more"));
+    assert_eq!(csm.len(), 1, "{notes:?}");
+    assert!(root.join("materials/pbr/arm/steel.csm").is_file());
+    assert!(root.join("materials/armor/plate.csm").is_file());
+    let notes = notes.join("\n");
     assert!(
         !notes.contains("pbr/arm/steel") && !notes.contains(r"pbr\arm\steel"),
         "{notes}"

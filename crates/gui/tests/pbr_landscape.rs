@@ -372,11 +372,12 @@ fn a_plain_pbr_set_still_reaches_the_advanced_records_panel() {
     assert!(has(&h, "PGPatcher entry for statics:"));
 }
 
-/// An old project (a texture-set block, no shader key) loads as PBR Landscape and exports the same CS and PGPatcher
-/// files as when the set is PBR.
+/// An old project (a texture-set block, no shader key) loads as PBR Landscape and exports the same PGPatcher file and
+/// the same CS file names as when the set is PBR. Note IE10: as PBR its texture-set files name its `.csm` instead of
+/// holding the values.
 #[test]
 fn an_old_project_with_a_texture_set_block_exports_the_same_files() {
-    use sdc_gui::model::{cs_pbr_export, pbr_export};
+    use sdc_gui::model::{cs_pbr_export, csm_export, pbr_export};
     let d = tempfile::tempdir().unwrap();
     let mut m = support::pbr_opened(d.path());
     m.apply_cs_template(ID, Kind::Txst, "LandscapeMountainSlab")
@@ -396,7 +397,20 @@ fn an_old_project_with_a_texture_set_block_exports_the_same_files() {
     m.set_shader(ID, Some(Shader::Pbr));
     settle(&mut m);
     assert_eq!(view(&m).shader.unwrap().shader, Shader::Pbr);
-    assert_eq!(files(&m), landscape);
+    let pbr = files(&m);
+    assert_eq!(pbr.1, landscape.1);
+    let names = |f: &[(String, String)]| f.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>();
+    assert_eq!(names(&pbr.0), names(&landscape.0));
+    let csm = r"materials\pbr\landscape\rock01.csm";
+    assert!(
+        pbr.0
+            .iter()
+            .all(|(_, t)| *t == cs_pbr_export::csm_pointer_text(csm)),
+        "{:?}",
+        pbr.0
+    );
+    let written = csm_export::prepare(&m).unwrap().files;
+    assert_eq!(names(&written), ["materials/pbr/landscape/rock01.csm"]);
 }
 
 /// Note BM: renders the PBR Landscape card (a template, EDIDs and a material object filled in) to

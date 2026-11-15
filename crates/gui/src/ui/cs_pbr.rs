@@ -11,6 +11,7 @@ use crate::model::cs_pbr::{
 };
 use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS, TXST2_FIELDS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
+use crate::model::csm_export::{csm_key, csm_range, gets_csm, NO_CSM_KEY};
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
 use crate::model::AppModel;
 use eframe::egui;
@@ -123,7 +124,7 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
-        field_row(ui, Kind::Txst, f, b.values.get(f.name), &mut own);
+        field_row(ui, Kind::Txst, f, b.values.get(f.name), false, &mut own);
     }
     acts.extend(own.into_iter().map(|a| match a {
         Act::Value(_, k, x) => Act::Shared(k, x),
@@ -150,7 +151,7 @@ fn mato_shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: 
                 }
             });
         } else {
-            field_row(ui, Kind::Mato, f, b.values.get(f.name), acts);
+            field_row(ui, Kind::Mato, f, b.values.get(f.name), false, acts);
             if ui
                 .small_button(format!("Sync {}", field_label(f.name)))
                 .on_hover_text("Use the shared value again")
@@ -199,10 +200,16 @@ fn block(
         pgp_box(ui, m, v, b, acts);
     }
     let pgp = landscape && m.pgp_written(v);
+    // Note IE10: a PBR set's texture-set values go to its `.csm`: rows name the `.csm` keys and drag in the schema's
+    // ranges, and the key a `.csm` has none for is hidden (its stored value stays; Problems warns about it).
+    let csm = kind == Kind::Txst && !card && gets_csm(v);
     let mut hidden = 0;
     for f in fields(kind) {
         // Note BM16: in the card the shared fields are edited in the Shared section (and below for an unsynced block).
         if card && SHARED_FIELDS.contains(&f.name) {
+            continue;
+        }
+        if csm && f.name == NO_CSM_KEY {
             continue;
         }
         // Note ID47: the CS 2.0 keys count as landscape-unread too.
@@ -211,7 +218,7 @@ fn block(
             hidden += 1;
             continue;
         }
-        field_row(ui, kind, f, b.values.get(f.name), acts);
+        field_row(ui, kind, f, b.values.get(f.name), csm, acts);
     }
     if card && kind == Kind::Mato {
         mato_shared(ui, m, v, b, acts);
@@ -253,10 +260,11 @@ fn default_text(kind: Kind, f: &Field) -> String {
     }
 }
 
-fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field) -> bool {
+/// `range`: the field's, or (a `.csm` set, Note IE10) the schema's.
+fn drag(ui: &mut egui::Ui, x: &mut f64, range: (f64, f64)) -> bool {
     ui.add(
         egui::DragValue::new(x)
-            .range(f.range.0..=f.range.1)
+            .range(range.0..=range.1)
             // Note FO3 (V6): a stored value is shown as it is; the default clamp would rewrite it on draw.
             // shortcut: an AccessKit SetValue then skips the range, upgrade by clamping what is written.
             .clamp_existing_to_range(false)
@@ -265,14 +273,42 @@ fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field) -> bool {
     .changed()
 }
 
-fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts: &mut Vec<Act>) {
+/// The hover's key line: the JSON key, or for a `.csm` set (Note IE10) the `.csm` key(s) the value is written as.
+fn key_text(name: &str, csm: bool) -> String {
+    if !csm {
+        return format!("JSON key: {name}");
+    }
+    if name == "glintParameters" {
+        let keys: Vec<&str> = std::iter::once("enabled")
+            .chain(GLINT_FIELDS.iter().map(|g| g.name))
+            .filter_map(|g| csm_key(&format!("glintParameters.{g}")))
+            .collect();
+        return format!(".csm keys: {}", keys.join(", "));
+    }
+    match csm_key(name) {
+        Some(k) => format!(".csm key: {k}"),
+        None => format!("{name}: no .csm key; not exported"),
+    }
+}
+
+/// `csm`: a texture-set row of a set that exports a `.csm` (Note IE10): the hover names the `.csm` key, and the drag
+/// range is the schema's.
+fn field_row(
+    ui: &mut egui::Ui,
+    kind: Kind,
+    f: &Field,
+    cur: Option<&Json>,
+    csm: bool,
+    acts: &mut Vec<Act>,
+) {
+    let range = |key: &str, f: &Field| csm.then(|| csm_range(key)).flatten().unwrap_or(f.range);
     ui.horizontal_wrapped(|ui| {
         let mut on = cur.is_some();
         if ui
             .checkbox(&mut on, field_label(f.name))
             .on_hover_text(match field_note(kind, f.name) {
-                Some(n) => format!("JSON key: {}. {n}", f.name),
-                None => format!("JSON key: {}", f.name),
+                Some(n) => format!("{}. {n}", key_text(f.name, csm)),
+                None => key_text(f.name, csm),
             })
             .changed()
         {
@@ -285,7 +321,7 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
         match f.kind {
             FieldKind::Num => {
                 let mut x = cur.as_f64().unwrap_or(f.default);
-                if drag(ui, &mut x, f) {
+                if drag(ui, &mut x, range(f.name, f)) {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(x))));
                 }
             }
@@ -296,7 +332,7 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                     .unwrap_or_default();
                 let mut changed = false;
                 for x in c.iter_mut() {
-                    changed |= drag(ui, x, f);
+                    changed |= drag(ui, x, range(f.name, f));
                 }
                 if changed {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(c))));
@@ -325,9 +361,10 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                 }
                 for g in &GLINT_FIELDS {
                     let mut x = cur.get(g.name).and_then(Json::as_f64).unwrap_or(g.default);
+                    let key = format!("{}.{}", f.name, g.name);
                     ui.label(field_label(g.name))
-                        .on_hover_text(format!("JSON key: {}.{}", f.name, g.name));
-                    if drag(ui, &mut x, g) {
+                        .on_hover_text(key_text(&key, csm));
+                    if drag(ui, &mut x, range(&key, g)) {
                         acts.push(Act::Value(
                             kind,
                             format!("{}.{}", f.name, g.name),

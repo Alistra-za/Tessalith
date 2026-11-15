@@ -134,7 +134,16 @@ fn names(dir: &std::path::Path) -> Vec<String> {
 }
 
 fn with_blocks(d: &std::path::Path) -> AppModel {
-    let mut m = pbr_opened_plain(d);
+    blocks_on(pbr_opened_plain(d))
+}
+
+/// Note IE10: a plain PBR set's texture-set file names its `.csm`; the tests of the values written inline use the PBR
+/// Landscape fixture, whose file still holds them.
+fn landscape_with_blocks(d: &std::path::Path) -> AppModel {
+    blocks_on(pbr_opened(d))
+}
+
+fn blocks_on(mut m: AppModel) -> AppModel {
     m.add_cs_block(ROCK, Kind::Txst);
     m.set_cs_edids(
         ROCK,
@@ -150,7 +159,7 @@ fn with_blocks(d: &std::path::Path) -> AppModel {
 #[test]
 fn export_writes_one_file_per_edid_named_exactly_and_records_hashes() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     export_and_wait(&mut m);
     let root = m.export_root();
     assert_eq!(
@@ -296,7 +305,7 @@ fn duplicate_and_invalid_edids_are_refused_per_file() {
 #[test]
 fn wrong_typed_values_are_left_out_with_a_note() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     m.set_cs_value(ROCK, Kind::Txst, "subsurfaceColor", Some(json!([1.0, 1.0])));
     m.set_cs_value(ROCK, Kind::Txst, "glintParameters.extra", Some(json!(1)));
     export_and_wait(&mut m);
@@ -354,7 +363,7 @@ fn a_hand_edited_old_case_file_survives_the_rename() {
 #[test]
 fn a_save_error_leaves_an_open_question_and_goes_to_the_notes() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     export_and_wait(&mut m);
     m.set_cs_value(ROCK, Kind::Txst, "specularLevel", Some(json!(0.03)));
     // Saved by the user, so the hash record saves (an unsaved edit waits for Save, Note BD2) and meets the change.
@@ -453,7 +462,7 @@ fn a_refused_recorded_file_is_not_reported_as_unbound() {
 #[test]
 fn switching_export_folders_keeps_each_folders_records() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     let a = m.export_root();
     export_and_wait(&mut m);
     m.set_export_folder(d.path().join("b"));
@@ -476,7 +485,7 @@ fn switching_export_folders_keeps_each_folders_records() {
 #[test]
 fn a_relative_record_is_read_under_the_export_folder() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     export_and_wait(&mut m);
     let f = txst_file(&m, "LandscapeRock01");
     let sha = sdc_gui::model::history::sha256_of(&f).unwrap();
@@ -589,7 +598,7 @@ fn export_writes_the_cs2_keys() {
     );
     // Through the export: the block's keys reach the file, a wrong-typed one is left out with a note.
     let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
+    let mut m = landscape_with_blocks(d.path());
     m.set_cs_value(ROCK, Kind::Txst, "thinSurface", Some(json!(true)));
     m.set_cs_value(ROCK, Kind::Txst, "subsurfaceBalance", Some(json!(0.6)));
     m.set_cs_value(ROCK, Kind::Txst, "foliage", Some(json!(1)));
