@@ -308,7 +308,7 @@ fn the_bc6h_effort_dropdown_still_offers_veryslow() {
 fn the_perceptual_tick_shows_for_bc1() {
     let d = tempfile::tempdir().unwrap();
     let mut m = ready(d.path());
-    // Note JD2: a landscape diffuse allows no BC1, so the rock is a plain diffuse here.
+    // Note JF2: a landscape diffuse allows no BC1, so the rock is a plain diffuse here.
     m.set_field(ROCK, "subtype", json!("diffuse"));
     idle(&mut m);
     let n = m.item(NORMAL).unwrap().job.clone().unwrap().profile;

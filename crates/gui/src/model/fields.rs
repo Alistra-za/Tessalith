@@ -220,9 +220,9 @@ pub fn format_label(format: Format, tag: ColorTag) -> String {
 pub const NOT_VALID: &str = " (not valid for this map)";
 
 /// The (format, tag) pairs a format picker lists for `p` under `target`, labelled (owner, 2026-10-13): the pairs
-/// the GUI allows (`format_rule::allowed`: the engine's, BC4 and R8 only for a grey map, Note JD), then the current
+/// the GUI allows (`format_rule::allowed`: the engine's, BC4 and R8 only for a grey map, Note JF), then the current
 /// pair, marked `NOT_VALID`, when it is not one of them (only until the settled plan fixes it, or in a read-only
-/// project, Note JD3).
+/// project, Note JF3).
 pub fn encoding_options(target: Target, p: &Profile) -> Vec<((Format, ColorTag), String)> {
     let cur = (p.format, p.color.tag);
     let allowed = super::format_rule::allowed(p.subtype, target);

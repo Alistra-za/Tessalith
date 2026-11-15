@@ -3590,7 +3590,7 @@ impl AppModel {
         f: engine::config::Format,
         tag: engine::config::ColorTag,
     ) {
-        // Note JD2: a pair the texture's sub-type does not allow is never written.
+        // Note JF2: a pair the texture's sub-type does not allow is never written.
         if !self.format_write_ok(item, "format", &json!([f, tag])) {
             return;
         }

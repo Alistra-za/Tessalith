@@ -137,7 +137,7 @@ fn a_texture_in_a_locked_slot_is_reset_too() {
     idle(&mut m);
     m.set_shader(&set, Some(Shader::Pbr));
     idle(&mut m);
-    // Note JD3: a lock no longer keeps a pair the type does not allow.
+    // Note JF3: a lock no longer keeps a pair the type does not allow.
     assert_eq!(file(&m, "format"), None);
     assert_eq!(file(&m, "color.tag"), None);
     let (line, _) = m.encoding_note.clone().expect("a note");
@@ -247,7 +247,7 @@ fn several_textures_give_one_count_line_with_each_on_hover() {
     );
 }
 
-/// Note JD3 (supersedes Review M6's lock): an explicit pair the type does not allow is cleared; with nothing explicit
+/// Note JF3 (supersedes Review M6's lock): an explicit pair the type does not allow is cleared; with nothing explicit
 /// the best allowed pair is pinned (BC7 first, the tag kept where it can be); an allowed pair is kept.
 #[test]
 fn the_verdict_clears_or_pins() {

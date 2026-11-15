@@ -105,7 +105,7 @@ fn the_format_list_follows_allowed_encodings() {
             .into_iter()
             .map(|(v, _)| v)
             .collect();
-        // Note JD: the GUI's list (BC4 and R8 only on a grey map).
+        // Note JF: the GUI's list (BC4 and R8 only on a grey map).
         let allowed: Vec<_> = sdc_gui::model::format_rule::allowed(row.subtype, Target::Cs)
             .into_iter()
             .map(|(f, t)| json!([f, t]))

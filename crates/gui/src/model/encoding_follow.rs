@@ -1,4 +1,4 @@
-//! Task 9 (owner, 2026-10-13; DECISIONS Z11), Note JD (owner, 2026-11-15): encoding follows type. A texture whose
+//! Task 9 (owner, 2026-10-13; DECISIONS Z11), Note JF (owner, 2026-11-15): encoding follows type. A texture whose
 //! resolved format and tag its sub-type does not allow (`format_rule::allowed`) is fixed on the settled plan: an
 //! explicit pair is cleared, so the type's default applies; else the best allowed pair is pinned.
 use super::fields::format_label;
@@ -14,7 +14,7 @@ pub(super) struct Pending {
     fixed: Vec<Fixed>,
     /// 1 after the first round (clear or pin), 2 after the round that pins what a clear left disallowed.
     round: u8,
-    /// Folded into a user step, whose Undo takes the fix back with it (JD3).
+    /// Folded into a user step, whose Undo takes the fix back with it (JF3).
     undo: bool,
 }
 
@@ -38,7 +38,7 @@ pub enum Verdict {
 }
 
 /// The rule for a texture of sub-type `st` resolving to `pair`: `explicit` when its `[files]` entry sets the format
-/// or tag. Note JD3: no lock keeps a pair the type does not allow.
+/// or tag. Note JF3: no lock keeps a pair the type does not allow.
 pub fn verdict(target: Target, st: Subtype, pair: (Format, ColorTag), explicit: bool) -> Verdict {
     decide(&allowed(st, target), target, st, pair, explicit)
 }
@@ -86,7 +86,7 @@ impl AppModel {
     }
 
     /// Forget the cleanup state: an undo, redo, open or reload restores a state as it was, and a note or pending
-    /// cleanup of before no longer applies. Its plan still runs the rule (Note JD3).
+    /// cleanup of before no longer applies. Its plan still runs the rule (Note JF3).
     pub(super) fn reset_type_follow(&mut self) {
         self.encoding_note = None;
         self.type_pending = None;
@@ -150,7 +150,7 @@ impl AppModel {
 
     /// Run from `finish_plan` when a plan chain has settled (the final pass: output paths agree with sub-types).
     /// Writes the note of a cleanup this plan shows, then fixes every texture whose pair its sub-type does not allow
-    /// (Note JD3): one edit and one replan. The edit is folded into the user step that started the chain, else it is
+    /// (Note JF3): one edit and one replan. The edit is folded into the user step that started the chain, else it is
     /// its own step. True when it re-planned. The cleanup's own plan (`type_cleaned`) only runs a second, pinning
     /// round for what the first cleared, so a chain cleans at most twice; it does not use `auto_replans`.
     pub(super) fn settle_types(&mut self) -> bool {
@@ -261,7 +261,7 @@ impl AppModel {
         self.messages
             .log(super::messages::Severity::Info, line.clone());
         self.encoding_note = Some((line, lines.join("\n")));
-        // Note FC3: the note is a Problems row; its Undo is offered while its step is the top one. Note JD3: a fix no
+        // Note FC3: the note is a Problems row; its Undo is offered while its step is the top one. Note JF3: a fix no
         // user step caused offers none, since the rule would fix it again.
         self.encoding_note_step = if p.undo {
             self.history.pushes

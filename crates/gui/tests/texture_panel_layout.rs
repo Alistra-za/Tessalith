@@ -158,7 +158,7 @@ fn a_long_value_does_not_widen_the_column() {
     let d = tempfile::tempdir().unwrap();
     let m = model(d.path());
     // Every format the texture allows keeps the Format combo at its width. (A pair the type does not allow, whose
-    // "(not valid for this map)" label was the longest value, is no longer written or kept, Note JD.)
+    // "(not valid for this map)" label was the longest value, is no longer written or kept, Note JF.)
     let pairs = sdc_gui::model::format_rule::allowed(Subtype::Diffuse, Target::Cs);
     assert!(pairs.len() > 5, "{pairs:?}");
     let mut h = harness(m, 1280.0);
