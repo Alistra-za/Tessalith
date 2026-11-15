@@ -10,6 +10,7 @@ rust-version.workspace = true
 thiserror.workspace = true
 encoding_rs.workspace = true
 half.workspace = true
+serde_json = { workspace = true }
 serde = { workspace = true, optional = true, features = ["rc"] }
 
 [dev-dependencies]

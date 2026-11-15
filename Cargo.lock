@@ -2045,6 +2045,7 @@ dependencies = [
  "encoding_rs",
  "half",
  "serde",
+ "serde_json",
  "thiserror 2.0.21",
  "walkdir",
 ]
