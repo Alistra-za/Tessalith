@@ -5,11 +5,6 @@
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
 //! The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
-//!
-//! The palette is `e1` plus a row of deltas picked by `d = e0 - e1`: every weight pair sums to 65,536, so entry `j`
-//! is `e1 + ((a_j * d + 32768) >> 16)` with `a_j` the weight of `e0` and an arithmetic (floor) shift, and the wrapping
-//! add is exact because every entry is in 0..=255. The 511 rows of 8 bytes are 4 KB, built by a `const fn`; the full
-//! `(e0, e1)` table would be 512 KB, which leaves the L1 cache for no gain over one add per entry.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
 
@@ -18,62 +13,7 @@
 use crate::hits::{hit, Hit};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.
-/// Entry `j` is `e1` plus a row of deltas picked by `d = e0 - e1` (`PAL4`).
 pub fn pal(e0: u8, e1: u8) -> [u8; 8] {
-    let d = e0 as i32 - e1 as i32;
-    let row = &PAL4[(d + 255) as usize];
-    let mut p = row.map(|t| e1.wrapping_add(t));
-    if d <= 0 {
-        p[6] = 0;
-        p[7] = 255;
-    }
-    p
-}
-
-/// Delta rows for `pal`, indexed `d + 255`: entry 0 is `d` (mod 256), entry 1 is 0, entries 2..=7 the interpolated
-/// deltas of the mode `d` selects (in the 6-value mode, entries 6 and 7 stay 0 and `pal` sets them).
-static PAL4: [[u8; 8]; 511] = build_pal4();
-
-const fn build_pal4() -> [[u8; 8]; 511] {
-    const W8: [i32; 6] = [56173, 46812, 37450, 28086, 18724, 9363];
-    const W6: [i32; 4] = [52429, 39321, 26215, 13107];
-    const B8: [i32; 6] = [9363, 18724, 28086, 37450, 46812, 56173];
-    const B6: [i32; 4] = [13107, 26215, 39321, 52429];
-    let mut t = [[0u8; 8]; 511];
-    let mut i = 0;
-    while i < 6 {
-        assert!(W8[i] + B8[i] == 65536);
-        i += 1;
-    }
-    i = 0;
-    while i < 4 {
-        assert!(W6[i] + B6[i] == 65536);
-        i += 1;
-    }
-    let mut k = 0;
-    while k < 511 {
-        let d = k as i32 - 255;
-        t[k][0] = d as u8;
-        let mut j = 0;
-        if d > 0 {
-            while j < 6 {
-                t[k][2 + j] = ((W8[j] * d + 32768) >> 16) as u8;
-                j += 1;
-            }
-        } else {
-            while j < 4 {
-                t[k][2 + j] = ((W6[j] * d + 32768) >> 16) as u8;
-                j += 1;
-            }
-        }
-        k += 1;
-    }
-    t
-}
-
-/// The interpolation `pal` replaced, kept as the test reference.
-#[cfg(test)]
-fn pal_computed(e0: u8, e1: u8) -> [u8; 8] {
     let (l, h) = (e0 as u32, e1 as u32);
     let w = |a: u32, b: u32| ((a * l + b * h + 32768) >> 16) as u8;
     if l > h {
@@ -632,15 +572,6 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
 mod tests {
     use super::*;
     use crate::gen;
-
-    #[test]
-    fn the_palette_table_equals_the_interpolation_for_every_pair() {
-        for e0 in 0..=255u8 {
-            for e1 in 0..=255u8 {
-                assert_eq!(pal(e0, e1), pal_computed(e0, e1), "{e0} {e1}");
-            }
-        }
-    }
 
     /// The endpoint pairs tried for a block: every pair with both ends on a stride of 5, then every pair within 3 of
     /// the block's least and greatest value.
