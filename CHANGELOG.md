@@ -11,6 +11,7 @@
 - On CPUs without AVX2, BC7 and BC6H now use ISPC's SSE2 code: Tessalith no longer ships the SSE4 and AVX versions. On the CPU measured, a CPU with AVX but no AVX2 takes 1.76 times as long as before for BC7 and 1.50 times for BC6H, and one with SSE4.2 but no AVX 1.29 and 1.09 times. The output is byte for byte the same, and CPUs with AVX2 are not affected. Numbers: docs/research/avx512-ispc.md#without-avx2-the-sse2-path.
 - `sdc.exe` is 463 KB and `tessalith.exe` 463 KB smaller: the ISPC Texture Compressor code now holds only its BC6H encoder, the one part Tessalith uses. BC6H output is byte for byte the same.
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
+- In the GUI a grey map (envmask, height, model-space specular, skin `_sk`, projected noise, gray) is BC4 or R8 only: no Format row, bulk edit, Copy settings or preset edit offers or writes another format. A format a texture's type doesn't allow, on any type, now resets itself when the project opens or the type changes (to the type's default, else the best format the type allows) and says so in Problems; a slot lock no longer keeps it. The CLI still writes what `sdc.toml` says.
 
 ## 3.0.0
 
