@@ -929,6 +929,15 @@ fn a_read_only_project_offers_no_removal() {
     h.hover_at(all.rect().center());
     h.run_steps(4);
     h.get_by_label(&why);
+    // Final review I4: the document lists no entry, so `Entries ▾` is off too, with the same reason.
+    let entries = h.get_by_role_and_label(egui::accesskit::Role::Button, "Entries ▾");
+    assert!(entries.accesskit_node().is_disabled(), "Entries ▾ is off");
+    h.hover_at(entries.rect().center());
+    h.run_steps(4);
+    assert!(
+        h.query_all_by_label(&why).count() > 0,
+        "Entries ▾'s hover gives the reason"
+    );
     h.get_by_label("Entries ▾").click();
     h.run_steps(2);
     for k in ["landscape/rock01_rmaos", "missing/ghost"] {

@@ -423,45 +423,57 @@ fn unmatched_buttons(
         }),
     }
     .clicked();
-    let one = super::path_picker::menu(ui, "Entries ▾", |ui| {
-        let listed = m
+    // Final review I4: the entries still in `[files]` (none in the empty document a read-only `sdc.toml` leaves); with
+    // none, `Entries ▾` is off with Remove all's reason rather than opening on nothing.
+    let listed: Vec<&String> = {
+        let have = m
             .project
             .as_ref()
             .map(|d| d.file_keys())
             .unwrap_or_default();
-        let mut pick = None;
-        egui::ScrollArea::vertical()
-            .max_height(240.0)
-            .show(ui, |ui| {
-                for k in keys.iter().filter(|k| listed.contains(k)) {
-                    ui.horizontal(|ui| {
-                        ui.label(k);
-                        let b = ui.add_enabled(off.is_none(), egui::Button::new("Remove"));
-                        let name = format!("Remove {k}");
-                        b.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::Button,
-                                off.is_none(),
-                                &name,
-                            )
+        keys.iter().filter(|k| have.contains(k)).collect()
+    };
+    let menu = ui.add_enabled_ui(!listed.is_empty(), |ui| {
+        super::path_picker::menu(ui, "Entries ▾", |ui| {
+            let mut pick = None;
+            egui::ScrollArea::vertical()
+                .max_height(240.0)
+                .show(ui, |ui| {
+                    for k in &listed {
+                        ui.horizontal(|ui| {
+                            ui.label(*k);
+                            let b = ui.add_enabled(off.is_none(), egui::Button::new("Remove"));
+                            let name = format!("Remove {k}");
+                            b.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::WidgetType::Button,
+                                    off.is_none(),
+                                    &name,
+                                )
+                            });
+                            let b = match off {
+                                Some(why) => b.on_disabled_hover_text(why),
+                                None => b.on_hover_text("Remove this entry from sdc.toml"),
+                            };
+                            if b.clicked() {
+                                pick = Some((*k).clone());
+                            }
                         });
-                        let b = match off {
-                            Some(why) => b.on_disabled_hover_text(why),
-                            None => b.on_hover_text("Remove this entry from sdc.toml"),
-                        };
-                        if b.clicked() {
-                            pick = Some(k.clone());
-                        }
-                    });
-                }
-            });
-        if pick.is_some() {
-            ui.close();
-        }
-        pick
-    })
-    .inner
-    .flatten();
+                    }
+                });
+            if pick.is_some() {
+                ui.close();
+            }
+            pick
+        })
+    });
+    let one = menu.inner.inner.flatten();
+    if listed.is_empty() {
+        let why = all_off
+            .as_deref()
+            .unwrap_or("No entry is left in sdc.toml's [files]");
+        menu.inner.response.on_disabled_hover_text(why);
+    }
     if all {
         return Some(Fix::RemoveUnmatched(keys.to_vec()));
     }
