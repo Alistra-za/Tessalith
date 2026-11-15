@@ -3042,8 +3042,8 @@ impl AppModel {
     }
 
     /// Note DU6-DU9: what choosing `shader` for set `set` does to its own diffuse: `(item, its own [files] sub-type
-    /// before, true)` to make it `skin_albedo` (Advanced Skin, on cs, a free diffuse whose sub-type is inferred or a
-    /// plain `diffuse`), or `(item, the recorded sub-type, false)` to revert one Tessalith made `skin_albedo` and the
+    /// before, true)` to make it `skin_albedo` (Advanced Skin, on cs, a free diffuse whose sub-type is inferred, a
+    /// plain `diffuse` or an untouched recorded one), or `(item, the recorded sub-type, false)` to revert one Tessalith made `skin_albedo` and the
     /// user has not changed since. `None`: the shader alone.
     fn skin_follow(&self, set: &str, shader: Option<Shader>) -> Option<(String, String, bool)> {
         let views = views(self);
@@ -3065,7 +3065,10 @@ impl AppModel {
             let job = self.item(item)?.job.as_ref()?;
             let inferred = job.provenance.get("subtype") == Some(&Provenance::Suggestion);
             let plain = job.profile.subtype == Subtype::Diffuse;
-            if job.profile.subtype == Subtype::SkinAlbedo || !(inferred || plain) {
+            // Note FC1 R5: a sub-type the plan recorded on its own (`pbr_albedo`) and nobody changed counts as
+            // inferred; `was` keeps it, so leaving Advanced Skin writes it back (DU7).
+            let untouched = self.untouched_subtype(item, v.shader.as_ref().map(|p| p.shader));
+            if job.profile.subtype == Subtype::SkinAlbedo || !(inferred || plain || untouched) {
                 return None;
             }
             let was = own.as_ref().and_then(|v| v.as_str()).unwrap_or("");

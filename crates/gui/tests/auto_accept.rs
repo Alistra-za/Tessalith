@@ -249,6 +249,65 @@ fn a_shader_pick_records_the_member_type_it_re_types() {
     assert_eq!(cli_job(&cli, "eye_n.png").profile.subtype, Subtype::Msn);
 }
 
+/// Loose skin maps that open as a PBR set: the plan records `pbr_albedo`, `pbr_normal` and `pbr_fuzz` on its own.
+fn loose_skin(root: &Path) {
+    rgb(root, "anna/body_albedo.png", [150, 110, 90]);
+    rgb(root, "anna/body_normal.png", [128, 128, 255]);
+    rgb(root, "anna/body_roughness.png", [120, 120, 120]);
+    rgb(root, "anna/body_ao.png", [200, 200, 200]);
+    rgb(root, "anna/body_f.png", [40, 40, 40]);
+    rgb(root, "anna/body_sk.png", [90, 90, 90]);
+}
+
+/// Note FC1 R5 with Note DU6: Advanced Skin on a set that opened as PBR makes its untouched recorded `pbr_albedo`
+/// `skin_albedo`, so the set is an Advanced skin set (a `.csskin.json`, no PGPatcher JSON), and the saved text plans
+/// the same under `sdc convert`.
+#[test]
+fn advanced_skin_re_types_an_untouched_recorded_pbr_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    loose_skin(&root);
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    assert_eq!(
+        subtype(&m, "anna/body_albedo.png"),
+        Some(json!("pbr_albedo"))
+    );
+    let id = set_id(&m, "anna/body");
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        subtype(&m, "anna/body_albedo.png"),
+        Some(json!("skin_albedo"))
+    );
+    let views = sdc_gui::model::sets::views(&m);
+    let v = views.iter().find(|v| v.id == id).unwrap();
+    assert!(v.skin, "an Advanced skin set");
+    assert_eq!(sdc_gui::model::sets::kind_text(&m, v), "skin");
+    assert!(
+        !sdc_gui::model::sets::is_json_set(v, m.target),
+        "no PGPatcher JSON"
+    );
+    let (skins, _) = sdc_gui::model::cs_skin_json::skin_json_plan(&m);
+    assert!(
+        skins
+            .iter()
+            .any(|(_, _, json, _)| json.to_string_lossy().ends_with("body.csskin.json")),
+        "a .csskin.json beside the diffuse: {skins:?}"
+    );
+    let cli = cli_plan(&root, &text(&m));
+    assert_eq!(
+        cli_job(&cli, "body_albedo.png").profile.subtype,
+        Subtype::SkinAlbedo
+    );
+    // Note DU7: leaving Advanced Skin writes the recorded type back.
+    m.set_shader(&id, Some(Shader::Pbr));
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        subtype(&m, "anna/body_albedo.png"),
+        Some(json!("pbr_albedo"))
+    );
+}
+
 /// Note FC1 R5 (round 3): going back to Auto re-types an untouched member too, also after a reopen (a new history).
 #[test]
 fn choosing_auto_re_types_an_untouched_member_after_a_reopen() {
