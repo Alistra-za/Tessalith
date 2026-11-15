@@ -17,6 +17,7 @@
 - Review's file count is the number of DDS files the export writes. A texture that failed to plan is no longer counted. With **Also export** on, the count is the PBR folder's and the button reads **Export 24 files + Vanilla folder**; it used to read "Export 24 files to 2 folders" for an export that wrote 45.
 - A skin map Community Shaders can't load in its format (`FMT-CS-SKIN-LOADER`) has a **Use BC7** button, and a sub-type the mode doesn't have and gives no fallback for (`CFG-UNAVAILABLE`) has **Set type…**. Both used to show an **Acknowledge** that changed nothing.
 - The **Kinds ▾** hover in Problems no longer says Review lists every warning: Review lists none.
+- In the GUI a grey map (envmask, height, model-space specular, skin `_sk`, projected noise, gray) is BC4 or R8 only: no Format row, bulk edit, Copy settings or preset edit offers or writes another format. A format a texture's type doesn't allow, on any type, now resets itself when the project opens or the type changes (to the type's default, else the best format the type allows) and says so in Problems; a slot lock no longer keeps it. The CLI still writes what `sdc.toml` says.
 
 ## 3.0.0
 

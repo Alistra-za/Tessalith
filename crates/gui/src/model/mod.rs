@@ -15,6 +15,7 @@ pub mod encoding_follow;
 pub mod export;
 pub mod export_scope;
 pub mod fields;
+pub mod format_rule;
 pub mod heatmap;
 pub mod helpers;
 pub mod history;
@@ -671,8 +672,6 @@ pub struct AppModel {
     last_inputs: Option<EngineInputs>,
     /// Automatic re-plans in a row because the inputs changed; bounded so a bug can never loop.
     auto_replans: u8,
-    /// Task 9 (Z11): plans of an undo, redo, open or reload do not clean up encodings; the next settled plan ends it.
-    follow_off: bool,
     /// A cleanup waiting for the plan that shows its new defaults (the note is written then).
     type_pending: Option<encoding_follow::Pending>,
     /// The sub-types before the plan chain in flight (`settle_types` compares them with the final pass).
@@ -913,7 +912,6 @@ impl AppModel {
             missing_preset_id: None,
             last_inputs: None,
             auto_replans: 0,
-            follow_off: false,
             type_pending: None,
             type_base: None,
             type_cause: false,
@@ -3594,6 +3592,10 @@ impl AppModel {
         f: engine::config::Format,
         tag: engine::config::ColorTag,
     ) {
+        // Note JG2: a pair the texture's sub-type does not allow is never written.
+        if !self.format_write_ok(item, "format", &json!([f, tag])) {
+            return;
+        }
         let k = item.to_string();
         self.edit("Format", move |p| {
             p.set_file_value(&k, "format", &json!(f));
@@ -3629,6 +3631,9 @@ impl AppModel {
             if let Ok(st) = serde_json::from_value::<Subtype>(value.clone()) {
                 return self.edit_subtype("Change subtype", item_key, Some(st));
             }
+        }
+        if !self.format_write_ok(item_key, field, &value) {
+            return;
         }
         // Note CP: the BC7 weighting row writes two fields (`fields::weighting_writes`, CP10).
         if field == fields::WEIGHTING {

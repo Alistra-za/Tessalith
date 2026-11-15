@@ -308,6 +308,9 @@ fn the_bc6h_effort_dropdown_still_offers_veryslow() {
 fn the_perceptual_tick_shows_for_bc1() {
     let d = tempfile::tempdir().unwrap();
     let mut m = ready(d.path());
+    // Note JG2: a landscape diffuse allows no BC1, so the rock is a plain diffuse here.
+    m.set_field(ROCK, "subtype", json!("diffuse"));
+    idle(&mut m);
     let n = m.item(NORMAL).unwrap().job.clone().unwrap().profile;
     let mut nb = n.clone();
     nb.format = Format::Bc1;
@@ -322,7 +325,7 @@ fn the_perceptual_tick_shows_for_bc1() {
     h.run();
     assert_eq!(ticks(&h), 0, "BC7 has the dropdown, not the tick");
     for fmt in [Format::Bc3, Format::Bc1] {
-        h.state_mut().set_format(ROCK, fmt, ColorTag::Srgb);
+        h.state_mut().set_format(ROCK, fmt, ColorTag::Unorm);
         idle(h.state_mut());
         h.run();
         let p = h.state().item(ROCK).unwrap().job.clone().unwrap().profile;
@@ -374,10 +377,10 @@ fn a_format_change_away_from_bc7_drops_the_weighting() {
     let mut m = ready(d.path());
     m.set_field(ROCK, WEIGHTING, json!("alpha8"));
     idle(&mut m);
-    m.set_format(ROCK, Format::Bc7, ColorTag::Srgb);
+    m.set_format(ROCK, Format::Bc7, ColorTag::Unorm);
     idle(&mut m);
     assert_eq!(own(&m, ROCK).1, Some(json!("alpha8")), "BC7 keeps it");
-    m.set_format(ROCK, Format::Bc1, ColorTag::Srgb);
+    m.set_format(ROCK, Format::Bc3, ColorTag::Unorm);
     idle(&mut m);
     assert_eq!(own(&m, ROCK).1, None);
     assert!(!ignored(&m, ROCK));

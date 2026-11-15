@@ -559,6 +559,9 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     const LEAF: &str = "landscape/leaf.png";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
+    // Note JG2: a landscape diffuse allows no BC1, so the leaf is a plain diffuse here.
+    m.set_field(LEAF, "subtype", serde_json::json!("diffuse"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.decide(LEAF, sdc_gui::model::Answer::Alpha(AlphaPolicy::Cutout));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.select_item(LEAF);

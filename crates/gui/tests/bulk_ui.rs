@@ -202,7 +202,7 @@ fn two_selected_sets_show_the_kind_chips() {
 fn the_copy_dialog_ticks_every_field_and_check_none_clears_them() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", serde_json::json!("bc1"));
+    m.set_field(LEAF, "format", serde_json::json!("bc5"));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
@@ -221,7 +221,7 @@ fn the_copy_dialog_ticks_every_field_and_check_none_clears_them() {
 fn the_copy_dialog_applies_nothing_with_nothing_ticked() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", serde_json::json!("bc1"));
+    m.set_field(LEAF, "format", serde_json::json!("bc5"));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);

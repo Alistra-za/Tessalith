@@ -156,23 +156,28 @@ fn mipmaps_tick_is_in_the_control_column() {
 #[test]
 fn a_long_value_does_not_widen_the_column() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = model(d.path());
-    // A CS diffuse is linear only: BC7 _SRGB is kept, and marked.
-    m.set_format(KEY, Format::Bc7, ColorTag::Srgb);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let h = harness(m, 1280.0);
-    let c = centre(&h);
-    let node = h
-        .query_all(by().role(Role::ComboBox).label("Format"))
-        .find(|n| c.contains(n.rect().center()))
-        .expect("the Format combo");
-    assert!(
-        node.value().is_some_and(|v| v.contains("not valid")),
-        "{:?}",
-        node.value()
-    );
-    let w = node.rect().width();
-    assert!((w - CONTROL_W).abs() <= 1.0, "Format is {w} wide");
+    let m = model(d.path());
+    // Every format the texture allows keeps the Format combo at its width. (A pair the type does not allow, whose
+    // "(not valid for this map)" label was the longest value, is no longer written or kept, Note JG.)
+    let pairs = sdc_gui::model::format_rule::allowed(Subtype::Diffuse, Target::Cs);
+    assert!(pairs.len() > 5, "{pairs:?}");
+    let mut h = harness(m, 1280.0);
+    for (f, t) in pairs {
+        h.state_mut().set_format(KEY, f, t);
+        assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+        h.run();
+        let c = centre(&h);
+        let node = h
+            .query_all(by().role(Role::ComboBox).label("Format"))
+            .find(|n| c.contains(n.rect().center()))
+            .expect("the Format combo");
+        let w = node.rect().width();
+        assert!(
+            (w - CONTROL_W).abs() <= 1.0,
+            "Format is {w} wide at {:?}",
+            node.value()
+        );
+    }
 }
 
 /// With the Advanced drawer open too: the centre is then narrower than two full columns, and a row as wide as it

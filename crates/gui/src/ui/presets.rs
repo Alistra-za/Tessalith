@@ -400,6 +400,12 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
     if let Some(e) = &pm.error {
         ui.colored_label(RED, e);
     }
+    // Note JG4: an Info line per row the load fixed (a format its type does not allow); Save writes it.
+    if let Some(n) = pm.note() {
+        for line in n.lines() {
+            ui.weak(line);
+        }
+    }
     // Audit item 4: the file was edited by hand since it was picked.
     if pm.changed_on_disk {
         ui.horizontal_wrapped(|ui| {

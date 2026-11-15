@@ -435,10 +435,8 @@ fn skip_of(
             .flatten()
             .map(|t| (job.profile.format, t));
         if let Some(e) = encoding_of(field, v).or(tag) {
-            let grey = job.profile.category == engine::config::Category::Grayscale;
-            if !engine::policy::allowed_encodings_for(job.profile.subtype, target, grey)
-                .contains(&e)
-            {
+            // Note JG: the GUI's list (BC4 and R8 only on a grey map).
+            if !super::format_rule::allowed(job.profile.subtype, target).contains(&e) {
                 return Some(NOT_ALLOWED.into());
             }
         }

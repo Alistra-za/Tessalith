@@ -18,7 +18,7 @@ Right-clicking a selected tile or set keeps the selection; right-clicking anothe
 
 ![A texture tile's right-click menu.](../img/gui/GUI-Bulk-and-Rename/tile-menu.png)
 
-- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. Textures only: to copy between sets, use **Select members of kind** first.
+- **Copy settings from <texture> to N…** opens a checklist of the last-clicked texture's own settings, all ticked. Untick what you want to keep. A format a target's type doesn't allow is skipped for it, so a [grey map](GUI-Texture-Panel.md#how-edits-are-saved) never takes BC7. Textures only: to copy between sets, use **Select members of kind** first.
 - **Reset all settings for N…** removes their `sdc.toml` entries after asking. It keeps your acknowledgements and skips a texture in a pinned slot.
 
 ## Renaming

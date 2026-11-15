@@ -86,7 +86,9 @@ Each edit becomes a `[files."<path>"]` entry in `sdc.toml`, keyed by the path re
 
 Unsaved edits put a dot in the window title until you **Save** (**Ctrl+S**); Export saves first. If `sdc.toml` changed on disk while you have unsaved edits, saving asks for **Reload from disk** or **Overwrite with my changes**.
 
-**Encoding follows type.** When a texture's sub-type changes, a format or tag you set that the new type doesn't allow is reset, so the new type's default applies. An Info row in Problems says which, with **Undo this change**; a texture in a pinned slot is left alone.
+**Encoding follows type.** A format or tag the texture's type doesn't allow never stays: when a type changes, when a project opens, after an undo, in a pinned slot too. A format you set is reset so the type's default applies; if that default isn't allowed either (a preset or rule gives it), the best format the type allows is set, usually BC7. An Info row in Problems says which, with **Undo this change** when your edit caused it. Opening a project that needed it leaves it unsaved, so **Save** writes the fix.
+
+**Grey maps are BC4 or R8.** Every map of the Grayscale group (envmask, height, model-space specular, skin `_sk`, projected noise, gray) is offered and kept as BC4 or R8 only, in the Format row, the slot combo, bulk edits, Copy settings and the Presets tab. The CLI still writes what `sdc.toml` says.
 
 ## Advanced drawer
 

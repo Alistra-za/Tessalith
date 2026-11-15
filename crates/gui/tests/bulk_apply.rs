@@ -155,7 +155,7 @@ fn a_bulk_sub_type_prunes_gone_auto_pbr_entries_and_keeps_live_ones() {
 fn a_read_only_sdc_toml_makes_every_bulk_write_a_no_op() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", json!("bc1"));
+    m.set_field(LEAF, "format", json!("bc5"));
     idle(&mut m);
     std::fs::write(d.path().join("textures/sdc.toml"), "this is = [not toml").unwrap();
     m.reload_documents();
@@ -163,7 +163,7 @@ fn a_read_only_sdc_toml_makes_every_bulk_write_a_no_op() {
     assert!(m.project.as_ref().unwrap().read_only());
     let (steps, generation) = (m.history.undo.len(), m.generation());
     let ks = strings(&[ROCK, ODD]);
-    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc5")));
     m.apply_copy_settings(LEAF, &ks, &["format".to_string()]);
     m.reset_all_settings(&ks);
     assert_eq!((m.history.undo.len(), m.generation()), (steps, generation));
@@ -209,7 +209,7 @@ fn copy_from_active_lists_the_set_fields_and_writes_only_the_ticked_ones() {
 fn reset_all_removes_the_entries_after_the_confirm_as_one_step() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(ROCK, "format", json!("bc1"));
+    m.set_field(ROCK, "format", json!("bc5"));
     m.set_field(ODD, "encoder.effort", json!("veryfast"));
     idle(&mut m);
     m.click_item(ROCK, false, false);
@@ -232,7 +232,7 @@ fn reset_all_removes_the_entries_after_the_confirm_as_one_step() {
 fn reset_all_keeps_the_acknowledged_warnings() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(ROCK, "format", json!("bc1"));
+    m.set_field(ROCK, "format", json!("bc5"));
     m.set_field(ROCK, "allow", json!(["CHAN-NOT-GRAY"]));
     idle(&mut m);
     assert_eq!(m.project.as_ref().unwrap().allow(ROCK).len(), 1, "fixture");
@@ -354,9 +354,9 @@ fn a_bulk_write_that_changes_nothing_sets_no_report() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let keys = strings(&[ROCK, ODD]);
-    m.apply_bulk_edit(&keys, "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&keys, "format", BulkOp::Set(json!("bc5")));
     m.bulk.report = None;
-    m.apply_bulk_edit(&keys, "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&keys, "format", BulkOp::Set(json!("bc5")));
     assert_eq!(m.bulk.report, None, "same values: nothing was written");
     m.reset_all_settings(&strings(&[LEAF]));
     assert_eq!(m.bulk.report, None, "no entry to remove");
@@ -366,7 +366,8 @@ fn a_bulk_write_that_changes_nothing_sets_no_report() {
 fn one_texture_is_singular_in_the_step_label_and_report() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.apply_bulk_edit(&strings(&[ROCK]), "format", BulkOp::Set(json!("bc1")));
+    // Note JG2: a landscape diffuse allows no BC1, so the write is BC5.
+    m.apply_bulk_edit(&strings(&[ROCK]), "format", BulkOp::Set(json!("bc5")));
     assert_eq!(
         m.history.undo.last().unwrap().label,
         "Change Format on 1 texture"
@@ -711,12 +712,12 @@ fn copy_settings_still_skips_a_field_nothing_in_the_copy_unlocks() {
 fn writing_an_equal_value_leaves_sdc_toml_clean() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", json!("bc1"));
+    m.set_field(LEAF, "format", json!("bc5"));
     idle(&mut m);
     m.save().unwrap();
     assert!(!m.is_dirty());
     let steps = m.history.undo.len();
-    m.set_field(LEAF, "format", json!("bc1"));
+    m.set_field(LEAF, "format", json!("bc5"));
     assert_eq!(m.history.undo.len(), steps, "no undo step");
     assert!(!m.is_dirty(), "an equal write does not dirty the document");
     m.set_field(LEAF, "format", json!("bc3"));
@@ -728,12 +729,12 @@ fn writing_an_equal_value_leaves_sdc_toml_clean() {
 fn a_bulk_write_of_an_equal_value_leaves_the_documents_clean() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", json!("bc1"));
+    m.set_field(LEAF, "format", json!("bc5"));
     idle(&mut m);
     m.save().unwrap();
     assert!(!m.is_dirty());
     let steps = m.history.undo.len();
-    m.apply_bulk_edit(&strings(&[LEAF]), "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&strings(&[LEAF]), "format", BulkOp::Set(json!("bc5")));
     assert_eq!(m.history.undo.len(), steps, "no undo step");
     assert!(!m.is_dirty(), "an equal bulk write does not dirty anything");
     m.apply_bulk_edit(&strings(&[LEAF]), "format", BulkOp::Set(json!("bc3")));
@@ -746,12 +747,12 @@ fn a_bulk_write_of_an_equal_value_leaves_the_documents_clean() {
 fn undo_back_to_the_saved_state_is_not_dirty() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.set_field(LEAF, "format", json!("bc1"));
+    m.set_field(LEAF, "format", json!("bc5"));
     idle(&mut m);
     m.save().unwrap();
     assert!(!m.is_dirty(), "fixture: saved");
     let ks = strings(&[ROCK, ODD]);
-    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc5")));
     assert!(m.is_dirty());
     idle(&mut m);
     m.undo();
@@ -790,7 +791,7 @@ fn the_bulk_notice_clears_on_undo_and_on_selection_change() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let ks = strings(&[ROCK, ODD]);
-    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc1")));
+    m.apply_bulk_edit(&ks, "format", BulkOp::Set(json!("bc5")));
     assert!(m.bulk.report.is_some(), "fixture: a notice");
     idle(&mut m);
     m.undo();

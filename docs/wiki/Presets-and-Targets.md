@@ -50,6 +50,7 @@ Every built-in preset has one rule: any file under an `interface` or `sky` folde
 
 - **Built-in presets are read-only.** **Duplicate** makes an editable copy.
 - **One row per sub-type**, in two families: **PBR / Community Shaders** and **Vanilla**. Open a row for its Compression, Resize & mips, Alpha, Channel remap and Packing fills. Each field hints the base's value; **↺** drops your change.
+- **A format a type can't use is fixed when the preset opens.** A user preset that gives `skin_sk` BC7 opens with BC4 set and a note in the editor saying so; **Save preset** writes the fix. Grey maps are BC4 or R8 in the GUI: [texture panel](GUI-Texture-Panel.md).
 - **A preset that wouldn't load is never written.** The creator loads it through the same loader as the presets folder before saving, edits your file in place (comments kept), and re-reads the folder, so the preset appears in the **Preset** menu without a restart.
 - **A preset that `sdc.toml` names but is gone** blocks the export: Problems shows "Preset <id> is not installed" with **Choose preset…**. On the command line that is an error: [CLI reference](CLI-Reference.md#target-and-preset-from-the-command-line).
 

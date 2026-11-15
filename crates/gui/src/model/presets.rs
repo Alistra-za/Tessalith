@@ -250,6 +250,8 @@ pub struct PresetsModel {
     pub changed_on_disk: bool,
     /// `suffixes_of` for every sub-type under `.0` (thousands of `suggest` calls, so once per target).
     suffixes: (Option<Target>, Vec<Vec<&'static str>>),
+    /// Note JG4: what loading the draft changed so no row keeps a format its type does not allow, until the next load.
+    note: Option<String>,
 }
 
 fn json_of(v: &toml::Value) -> Value {
@@ -308,6 +310,7 @@ impl PresetsModel {
             error: None,
             changed_on_disk: false,
             suffixes: (None, vec![]),
+            note: None,
         };
         m.rescan();
         m
@@ -364,6 +367,8 @@ impl PresetsModel {
             file: file.map(PathBuf::from),
         });
         self.refresh();
+        // Note JG4: a user preset never keeps a format its type does not allow; the draft is then unsaved.
+        self.note = super::format_rule::fix_preset(self);
     }
 
     fn unique_id(&self, stem: &str) -> String {
@@ -405,6 +410,7 @@ impl PresetsModel {
             file: None,
         });
         self.refresh();
+        self.note = super::format_rule::fix_preset(self);
     }
 
     /// A new preset on the target's quality preset.
@@ -428,6 +434,7 @@ impl PresetsModel {
             file: None,
         });
         self.refresh();
+        self.note = super::format_rule::fix_preset(self);
     }
 
     fn str_field(&self, key: &str) -> String {
@@ -514,11 +521,18 @@ impl PresetsModel {
 
     /// Set `field` for `st`. A format pick takes its tag (`value` is `[format, tag]`).
     pub fn set_field(&mut self, st: Subtype, field: &str, value: Value) {
+        // Note JG2: a pair the sub-type does not allow is never written.
+        if !super::format_rule::preset_write_ok(self, st, field, &value) {
+            return;
+        }
         self.edit_scope(st, None, |sub| put_field(sub, field, &value));
     }
 
     /// Set `field` in `st`'s branch `suffix`, creating its rule (Note AP).
     pub fn set_branch_field(&mut self, st: Subtype, suffix: &str, field: &str, value: Value) {
+        if !super::format_rule::preset_write_ok(self, st, field, &value) {
+            return;
+        }
         self.edit_scope(st, Some(suffix), |sub| put_field(sub, field, &value));
     }
 
@@ -680,6 +694,13 @@ impl PresetsModel {
             d.table = d.saved.clone();
         }
         self.refresh();
+        // Note JG4: the saved table may hold a format its type does not allow; it is fixed again.
+        self.note = super::format_rule::fix_preset(self);
+    }
+
+    /// Note JG4: what the last load changed so no format the type does not allow is kept (Info lines), if anything.
+    pub fn note(&self) -> Option<&str> {
+        self.note.as_deref()
     }
 
     pub fn dirty(&self) -> bool {
@@ -1068,6 +1089,7 @@ impl PresetsModel {
             .to_string();
         std::fs::remove_file(&src).map_err(|e| format!("{src}: {e}"))?;
         self.draft = None;
+        self.note = None;
         self.rescan();
         Ok(())
     }
