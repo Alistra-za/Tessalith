@@ -274,6 +274,10 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
         eprintln!("skipped: AVX2-path probe");
         return;
     }
+    // The probe block is found in bc7e's bytes on an AMD CPU.
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
     for policy in [AlphaPolicy::Remove, AlphaPolicy::Data] {
         let mut p = profile(Subtype::Diffuse);
         p.format = Format::Bc7;

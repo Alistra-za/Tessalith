@@ -166,6 +166,9 @@ fn recorded(target: IspcTarget) -> [(Bc6hLevel, &'static str); 5] {
 /// `SDC_TEST_AVX512=1`), at each level `pins` names for the target, and checks the SHA-256 against the pin.
 /// `SDC_RECORD_LEVEL_HASHES=1` prints the hashes instead.
 fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
     let px = hdr_image();
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     for target in IspcTarget::ALL

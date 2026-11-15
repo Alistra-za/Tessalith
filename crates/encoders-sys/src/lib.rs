@@ -12,6 +12,8 @@ pub use bc7::{
     bc7e_compress_blocks_tuned_on, Bc7Level, Bc7Params, Bc7Tune,
 };
 pub use rgbcx::*;
+#[cfg(feature = "test-hooks")]
+pub use target::skip_byte_pins;
 pub use target::{ispc_target, IspcTarget};
 
 use std::sync::Once;

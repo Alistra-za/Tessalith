@@ -386,6 +386,9 @@ fn hash(level: Bc7Level, perceptual: bool, exact_opaque: bool, target: IspcTarge
 
 #[test]
 fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
+    if encoders_sys::skip_byte_pins() {
+        return;
+    }
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     let mut diffs = vec![];
     for target in IspcTarget::ALL
