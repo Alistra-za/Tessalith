@@ -39,6 +39,7 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("marker_dialog", marker_dialog),
     ("set_editor", set_editor),
     ("slot_menu", slot_menu),
+    ("also_export_tab", also_export_tab),
     ("pgp_material", pgp_material),
     ("helper_panel", helper_panel),
     ("cube_panel", cube_panel),
@@ -385,6 +386,14 @@ fn set_editor(dir: &Path) -> Frame {
         select_set(&mut h.state_mut().model, "architecture/stone/stonewall")
     });
     shot(&mut h, r)
+}
+
+/// GUI-Set-Editor: the Also export tab of a PBR set, opened as Review's "Recipe settings…" opens it (Note JI2).
+fn also_export_tab(dir: &Path) -> Frame {
+    let mut h = opened_with(dir, |m| select_set(m, "architecture/stone/cobble"));
+    let r = reveal(&mut h, |h| sdc_gui::ui::set_editor::show_also_tab(&h.ctx));
+    let tab = rightmost(&h, "Also export").rect();
+    shot(&mut h, r.union(tab))
 }
 
 /// GUI-Set-Editor: a set-editor slot row's right-click menu (the slot menus).

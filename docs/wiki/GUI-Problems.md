@@ -42,13 +42,18 @@ A row you must act on has its fix as a button.
 | *No texture set of the latest scan uses this texture* (grey) | No button: the set still exports. |
 | *Replaces {file} of the target mod in the load order* (an output the target mod already ships) | No button: the set still exports. Rename its outputs to keep the target's file ([Renaming](GUI-Bulk-and-Rename.md#renaming)). <!-- D:HL6 --> |
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}**: [Presets and targets](Presets-and-Targets.md#checking-and-installing). |
-| *3 saved settings name no file in this mode (cs)* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
+| *{n} saved settings name no file in this mode ({mode})* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
 Info rows count in the tab's number but never against "ready".
 
 ### Unmatched [files] entries
 
-A `[files]` entry in `sdc.toml` whose key names no file (the file was renamed, moved or deleted) does nothing, so Problems lists all of them in one grey row. Before you remove one, check the mode in the row: some files are planned only under `cs`, so an entry can name no file in `vanilla` and still match in `cs`. The removes wait for the plan to finish, and **Remove all** is greyed while `sdc.toml` names another mode than the one shown; its hover lists what it deletes.
+A `[files]` entry in `sdc.toml` whose key names no file does nothing. That happens when the file was renamed, moved or deleted. Problems lists every such entry in one grey row.
+
+Check the mode in the row before you remove anything. Some files are planned only under `cs`, so an entry that names no file in `vanilla` can still match in `cs`.
+
+- **Remove** and **Remove all** are greyed while the plan runs and while `sdc.toml` is read-only.
+- **Remove all** is also greyed while `sdc.toml` names a different mode from the one in the row. Its hover lists what it deletes.
 
 ## Deciding from the list
 

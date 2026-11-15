@@ -108,6 +108,12 @@ scenario = "slot_menu"
 used_by = ["GUI-Set-Editor.md"]
 
 [[shot]]
+id = "also-export-tab"
+page = "GUI-Set-Editor"
+scenario = "also_export_tab"
+used_by = ["GUI-Set-Editor.md"]
+
+[[shot]]
 id = "pgp-material"
 page = "GUI-PGPatcher-JSON"
 scenario = "pgp_material"

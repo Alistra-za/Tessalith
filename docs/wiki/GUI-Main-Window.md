@@ -39,13 +39,13 @@ A dot in the window title means unsaved edits. The status line shows file and se
 
 ## Settings tab
 
-**Settings…** in the header opens the Settings tab in the centre column, beside the Presets tab, also with no folder open. **Pop out** gives it its own window. It has two sections: what belongs to the open folder, then what applies everywhere. <!-- D:JI1 -->
+**Settings…** in the header opens the Settings tab in the centre column, beside the Presets tab. It works with no folder open, and **Pop out** gives it its own window. The top section belongs to the open folder; the lower one applies to every project. <!-- D:JI1 -->
 
 ![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
 
 ### This project
 
-These rows save in the open folder. With no folder open the section reads "No project open".
+These rows are saved in the open folder's files. With no folder open, the section reads "No project open".
 
 | Row | Writes |
 |---|---|

@@ -104,7 +104,7 @@ A DDS input is left as it is and not written. **Re-encode this file** writes `re
 
 ## Where these settings come from
 
-To see what set a value (a built-in default, a preset, a rule, `sdc.toml`, the image analysis), open **Where these settings come from**, the folded section at the bottom of the panel. It lists every field of the texture with its value and its source, and puts the values that differ from the `sdc-base` preset in bold. Tick **Show only what differs from sdc-base** to hide the rest; the tick stays as you move between textures. It only reads: change a value in the rows above. <!-- D:JI3 --> How presets and rules stack: [Presets and targets](Presets-and-Targets.md).
+To see what set a value (a built-in default, a preset, a rule, `sdc.toml`, the image analysis), open **Where these settings come from**, the folded section at the bottom of the panel. It lists every field of the texture with its value and its source, and puts the values that differ from the `sdc-base` preset in bold. Tick **Show only what differs from sdc-base** to hide the rest; the tick stays as you move between textures. The section is read-only; to change a value, use the rows above. <!-- D:JI3 --> How presets and rules stack: [Presets and targets](Presets-and-Targets.md).
 
 ## How edits are saved
 
