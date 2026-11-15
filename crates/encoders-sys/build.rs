@@ -27,6 +27,9 @@ fn main() {
         // rgbcx's BC4 search (BC4_SDC_SEARCH) must round like the Rust reference: no FP contraction or reassociation.
         .flag("/fp:precise")
         .define("NOMINMAX", None)
+        // sdc patch 0003: the ISPC TC kernel objects hold BC6H only; ispc_texcomp.cpp must not compile the other
+        // wrappers. No other file in this build reads the symbol.
+        .define("SDC_BC6H_ONLY", None)
         .define("NDEBUG", None)
         .include(v.join("bc7enc_rdo"))
         .include(v.join("ispctc"))

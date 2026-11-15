@@ -9,6 +9,9 @@
 # target's) is reported as EXTRA and counted as a difference. -Update never deletes a vendored file: remove an
 # EXTRA object with `git rm`.
 #
+# kernel.ispc is built with -DSDC_BC6H_ONLY in both compiler runs (ISPC TC patch 0003): its objects hold the BC6H
+# encoder only. bc7e.ispc does not get the define.
+#
 # Reproducibility: ISPC embeds the source path it was given, so it is always run with the working
 # directory at the repo root and a repo-relative source path, with the target pinned explicitly
 # (--arch=x86-64 --target-os=windows). The generated header's line 2 (the output path, which is a
@@ -58,7 +61,7 @@ function Build-Objects([string]$exe, [string]$out) {
     # ISPC prints hundreds of compiler warnings for these two vendored sources; show them only on failure.
     $log = & $exe @common "--opt=disable-assertions" (Get-SourceArg $Bc7eSource) -o "$out\bc7e\bc7e.obj" -h "$out\bc7e\bc7e_ispc.h" 2>&1
     if ($LASTEXITCODE) { $log; throw "ispc failed on $Bc7eSource" }
-    $log = & $exe @common (Get-SourceArg "$vendor\ispctc\kernel.ispc") -o "$out\ispctc\kernel.obj" -h "$out\ispctc\kernel_ispc.h" 2>&1
+    $log = & $exe @common "-DSDC_BC6H_ONLY" (Get-SourceArg "$vendor\ispctc\kernel.ispc") -o "$out\ispctc\kernel.obj" -h "$out\ispctc\kernel_ispc.h" 2>&1
     if ($LASTEXITCODE) { $log; throw "ispc failed on kernel.ispc" }
   }
   finally { Pop-Location }

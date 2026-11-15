@@ -19,6 +19,9 @@
 // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
 // IN THE SOFTWARE.
 ////////////////////////////////////////////////////////////////////////////////
+// Modified for Tessalith (sdc patch 0003, 2026-11-14, patches/0003-bc6h-only.patch): with SDC_BC6H_ONLY the
+// wrappers of the removed kernels are not compiled. Changes are marked "sdc patch 0003".
+////////////////////////////////////////////////////////////////////////////////
 
 #include "ispc_texcomp.h"
 #include "kernel_ispc.h"
@@ -446,6 +449,7 @@ void ReplicateBorders(rgba_surface* dst_slice, const rgba_surface* src_tex, int 
     }
 }
 
+#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
 void CompressBlocksBC1(const rgba_surface* src, uint8_t* dst)
 {
 	ispc::CompressBlocksBC1_ispc((ispc::rgba_surface*)src, dst);
@@ -465,18 +469,23 @@ void CompressBlocksBC5(const rgba_surface* src, uint8_t* dst)
 {
 	ispc::CompressBlocksBC5_ispc((ispc::rgba_surface*)src, dst);
 }
+#endif // SDC_BC6H_ONLY
 
+#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
 void CompressBlocksBC7(const rgba_surface* src, uint8_t* dst, bc7_enc_settings* settings)
 {
 	ispc::CompressBlocksBC7_ispc((ispc::rgba_surface*)src, dst, (ispc::bc7_enc_settings*)settings);
 }
+#endif // SDC_BC6H_ONLY
 
 void CompressBlocksBC6H(const rgba_surface* src, uint8_t* dst, bc6h_enc_settings* settings)
 {
     ispc::CompressBlocksBC6H_ispc((ispc::rgba_surface*)src, dst, (ispc::bc6h_enc_settings*)settings);
 }
 
+#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
 void CompressBlocksETC1(const rgba_surface* src, uint8_t* dst, etc_enc_settings* settings)
 {
     ispc::CompressBlocksETC1_ispc((ispc::rgba_surface*)src, dst, (ispc::etc_enc_settings*)settings);
 }
+#endif // SDC_BC6H_ONLY

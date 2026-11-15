@@ -1,0 +1,280 @@
+diff --git a/crates/encoders-sys/vendor/ispctc/ispc_texcomp.cpp b/crates/encoders-sys/vendor/ispctc/ispc_texcomp.cpp
+index 49c4c413..e0edd238 100644
+--- a/crates/encoders-sys/vendor/ispctc/ispc_texcomp.cpp
++++ b/crates/encoders-sys/vendor/ispctc/ispc_texcomp.cpp
+@@ -19,6 +19,9 @@
+ // FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+ // IN THE SOFTWARE.
+ ////////////////////////////////////////////////////////////////////////////////
++// Modified for Tessalith (sdc patch 0003, 2026-11-14, patches/0003-bc6h-only.patch): with SDC_BC6H_ONLY the
++// wrappers of the removed kernels are not compiled. Changes are marked "sdc patch 0003".
++////////////////////////////////////////////////////////////////////////////////
+ 
+ #include "ispc_texcomp.h"
+ #include "kernel_ispc.h"
+@@ -446,6 +449,7 @@ void ReplicateBorders(rgba_surface* dst_slice, const rgba_surface* src_tex, int
+     }
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
+ void CompressBlocksBC1(const rgba_surface* src, uint8_t* dst)
+ {
+ 	ispc::CompressBlocksBC1_ispc((ispc::rgba_surface*)src, dst);
+@@ -465,18 +469,23 @@ void CompressBlocksBC5(const rgba_surface* src, uint8_t* dst)
+ {
+ 	ispc::CompressBlocksBC5_ispc((ispc::rgba_surface*)src, dst);
+ }
++#endif // SDC_BC6H_ONLY
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
+ void CompressBlocksBC7(const rgba_surface* src, uint8_t* dst, bc7_enc_settings* settings)
+ {
+ 	ispc::CompressBlocksBC7_ispc((ispc::rgba_surface*)src, dst, (ispc::bc7_enc_settings*)settings);
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ void CompressBlocksBC6H(const rgba_surface* src, uint8_t* dst, bc6h_enc_settings* settings)
+ {
+     ispc::CompressBlocksBC6H_ispc((ispc::rgba_surface*)src, dst, (ispc::bc6h_enc_settings*)settings);
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: kernel not in the BC6H-only objects
+ void CompressBlocksETC1(const rgba_surface* src, uint8_t* dst, etc_enc_settings* settings)
+ {
+     ispc::CompressBlocksETC1_ispc((ispc::rgba_surface*)src, dst, (ispc::etc_enc_settings*)settings);
+ }
++#endif // SDC_BC6H_ONLY
+diff --git a/crates/encoders-sys/vendor/ispctc/kernel.ispc b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+index 1e3e16d8..9a8a776e 100644
+--- a/crates/encoders-sys/vendor/ispctc/kernel.ispc
++++ b/crates/encoders-sys/vendor/ispctc/kernel.ispc
+@@ -16,6 +16,10 @@
+ // on when a bc6h_enc_settings has both slow_mode and fast_mode set (no upstream profile does). Every upstream
+ // profile encodes as before. Changes are marked "sdc patch 0001".
+ ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
++// Modified for Tessalith (sdc patch 0003, 2026-11-14, patches/0003-bc6h-only.patch): with SDC_BC6H_ONLY defined, only
++// the BC6H encoder and the helpers it uses are compiled; every other encoder sits inside `#ifndef SDC_BC6H_ONLY` blocks
++// marked "sdc patch 0003". Without the define the file compiles as before.
++///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+ 
+ #ifndef ISPC_UINT_IS_DEFINED
+ //these are defined in ISPC version 1.13.0 and later
+@@ -27,12 +31,14 @@ typedef unsigned int64 uint64;
+ ///////////////////////////
+ //   generic helpers
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline float RCP(float x)
+ {
+     return 1.0f/x; // uses rcp when compiled with --opt=fast-math
+     //return rcp(x);
+     //return rcp_fast(x);
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline float RSQRT(float x)
+ {
+@@ -51,6 +57,7 @@ inline void swap_ints(int u[], int v[], uniform int n)
+ 	}
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline void swap_uints(uint32 u[], uint32 v[], uniform int n)
+ {
+     for (uniform int i=0; i<n; i++)
+@@ -60,6 +67,7 @@ inline void swap_uints(uint32 u[], uint32 v[], uniform int n)
+ 		v[i] = t;
+ 	}
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline float sq(float v)
+ {
+@@ -122,6 +130,7 @@ struct rgba_surface
+ 	int width, height, stride;
+ };
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline void load_block_interleaved(float block[48], uniform rgba_surface* uniform src, int xx, uniform int yy)
+ {
+     for (uniform int y = 0; y<4; y++)
+@@ -150,6 +159,7 @@ inline void load_block_interleaved_rgba(float block[64], uniform rgba_surface* u
+ 		block[16*3+y*4+x] = (int)((rgba>>24)&255);
+ 	}
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline void load_block_interleaved_16bit(float block[48], uniform rgba_surface* uniform src, int xx, uniform int yy)
+ {
+@@ -170,6 +180,7 @@ inline void load_block_interleaved_16bit(float block[48], uniform rgba_surface*
+     }
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline void load_block_r_8bit(float block[16], uniform rgba_surface* uniform src, int xx, uniform int yy)
+ {
+ 	for (uniform int y=0; y<4; y++)
+@@ -204,6 +215,7 @@ inline void load_block_interleaved_rg_8bit(float block[32], uniform rgba_surface
+ 		block[16*1+y*4+3] = (int)((rgrg1>>24)&255);
+ 	}
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline void store_data(uniform uint8 dst[], int width, int xx, uniform int yy, uint32 data[], int data_size)
+ {
+@@ -214,12 +226,14 @@ inline void store_data(uniform uint8 dst[], int width, int xx, uniform int yy, u
+ 	}
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline void ssymv(float a[3], float covar[6], float b[3])
+ {
+ 	a[0] = covar[0]*b[0]+covar[1]*b[1]+covar[2]*b[2];
+ 	a[1] = covar[1]*b[0]+covar[3]*b[1]+covar[4]*b[2];
+ 	a[2] = covar[2]*b[0]+covar[4]*b[1]+covar[5]*b[2];
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline void ssymv3(float a[4], float covar[10], float b[4])
+ {
+@@ -236,6 +250,7 @@ inline void ssymv4(float a[4], float covar[10], float b[4])
+ 	a[3] = covar[3]*b[0]+covar[6]*b[1]+covar[8]*b[2]+covar[9]*b[3];
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline void compute_axis3(float axis[3], float covar[6], uniform const int powerIterations)
+ {
+ 	float vec[3] = {1,1,1};
+@@ -258,6 +273,7 @@ inline void compute_axis3(float axis[3], float covar[6], uniform const int power
+ 
+ 	for (uniform int p=0; p<3; p++) axis[p] = vec[p];
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ inline void compute_axis(float axis[4], float covar[10], uniform const int powerIterations, uniform int channels)
+ {
+@@ -286,6 +302,7 @@ inline void compute_axis(float axis[4], float covar[10], uniform const int power
+ ///////////////////////////////////////////////////////////
+ //					 BC1/BC3 encoding
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline int stb__Mul8Bit(int a, int b)
+ {
+   int t = a*b + 128;
+@@ -766,6 +783,7 @@ struct mode45_parameters
+ void bc7_code_mode01237(uint32 data[5], int qep[6], uint32 qblock[2], int part_id, uniform int mode);
+ void bc7_code_mode45(uint32 data[5], mode45_parameters params[], uniform int mode);
+ void bc7_code_mode6(uint32 data[5], int qep[8], uint32 qblock[2]);
++#endif // SDC_BC6H_ONLY
+ 
+ ///////////////////////////
+ //   BC7 format data
+@@ -991,6 +1009,7 @@ void block_segment_core(float ep[], float block[64], int mask, uniform int chann
+     }
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ void block_segment(float ep[], float block[64], int mask, uniform int channels)
+ {
+     block_segment_core(ep, block, mask, channels);
+@@ -1001,6 +1020,7 @@ void block_segment(float ep[], float block[64], int mask, uniform int channels)
+ 		ep[4*i+p] = clamp(ep[4*i+p], 0, 255);
+ 	}
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ float get_pca_bound(float covar[10], uniform int channels)
+ {
+@@ -1036,6 +1056,7 @@ float get_pca_bound(float covar[10], uniform int channels)
+ 	return bound;
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ float block_pca_bound(float block[64], int mask, uniform int channels)
+ {
+ 	float stats[15];
+@@ -1046,6 +1067,7 @@ float block_pca_bound(float block[64], int mask, uniform int channels)
+ 
+ 	return get_pca_bound(covar, channels);
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ float block_pca_bound_split(float block[64], int mask, float full_stats[15], uniform int channels)
+ {
+@@ -1071,6 +1093,7 @@ float block_pca_bound_split(float block[64], int mask, float full_stats[15], uni
+ ///////////////////////////
+ // endpoint quantization
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ inline int unpack_to_byte(int v, uniform const int bits)
+ {
+ 	assert(bits >= 4);
+@@ -1224,6 +1247,7 @@ void ep_quant_dequant(int qep[], float ep[], uniform int mode, uniform int chann
+ 	ep_quant(qep, ep, mode, channels);
+ 	ep_dequant(ep, qep, mode);
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ ///////////////////////////
+ //   pixel quantization
+@@ -1362,6 +1386,7 @@ void opt_endpoints(float ep[], float block[64], uniform int bits, uint32 qblock[
+ //////////////////////////
+ // parameter estimation
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ float compute_opaque_err(float block[64], uniform int channels)
+ {
+     if (channels == 3) return 0;
+@@ -1459,6 +1484,7 @@ void bc7_enc_mode01237(bc7_enc_state state[], uniform int mode, int part_list[],
+         bc7_code_mode01237(state->best_data, best_qep, best_qblock, best_part_id, mode);
+     }
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ void partial_sort_list(int list[], uniform int length, uniform int partial_count)
+ {
+@@ -1481,6 +1507,7 @@ void partial_sort_list(int list[], uniform int length, uniform int partial_count
+ 	}
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ void bc7_enc_mode02(bc7_enc_state state[])
+ {
+ 	int part_list[64];
+@@ -1785,6 +1812,7 @@ void bc7_enc_mode6(bc7_enc_state state[])
+         bc7_code_mode6(state->best_data, qep, qblock);
+     }
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ //////////////////////////
+ // BC7 bitstream coding
+@@ -1902,6 +1930,7 @@ void bc7_code_adjust_skip_mode01237(uint32 data[5], uniform int mode, int part_i
+ 	}
+ }
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ void bc7_code_mode01237(uint32 data[5], int qep[], uint32 qblock[2], int part_id, uniform int mode)
+ {
+ 	uniform int bits = 2;  if (mode == 0 || mode == 1) bits = 3;
+@@ -2133,6 +2162,7 @@ export void CompressBlocksBC7_ispc(uniform rgba_surface src[], uniform uint8 dst
+ 		CompressBlockBC7(src, xx, yy, dst, settings);
+ 	}
+ }
++#endif // SDC_BC6H_ONLY
+ 
+ ///////////////////////////////////////////////////////////
+ //					 BC6H encoding
+@@ -3356,6 +3386,7 @@ export void CompressBlocksBC6H_ispc(uniform rgba_surface src[], uniform uint8 ds
+ ///////////////////////////////////////////////////////////
+ //					 ETC encoding
+ 
++#ifndef SDC_BC6H_ONLY // sdc patch 0003: not used by BC6H
+ struct etc_enc_settings
+ {
+     int fastSkipTreshold;
+@@ -3904,3 +3935,4 @@ export void CompressBlocksETC1_ispc(uniform rgba_surface src[], uniform uint8 ds
+         CompressBlockETC1(src, xx, yy, dst, settings);
+     }
+ }
++#endif // SDC_BC6H_ONLY
