@@ -10,7 +10,7 @@ use render3d::device::Gpu;
 use render3d::material::{
     own_pbr, pbr_mode, Pbr, PBR_FUZZ, PBR_HAS_FUZZ_ROUGHNESS_TEXTURE, PBR_SUBSURFACE,
 };
-use render3d::{parse, Builtin, EditKind, LoadReport, Renderer, ShaderSource, ShapeId};
+use render3d::{parse, Builtin, EditKind, LoadReport, ParsedNif, Renderer, ShaderSource, ShapeId};
 
 const SHAPE: ShapeId = ShapeId(0);
 
@@ -176,6 +176,72 @@ fn broken_csm_draws_vanilla() {
         "{:?}",
         rep.warnings
     );
+}
+
+/// A `.csm` the resolver lacked at load is asked for again on the next edit (as a missing texture is), so a file
+/// exported meanwhile shows without a reload.
+#[test]
+fn a_missing_csm_is_asked_again_on_edit() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path());
+    r.load(&csm_nif("materials\\t.csm"), &|_| None);
+    assert_eq!(own_pbr(&material(&r)), Pbr::None);
+    let parsed = parse(&csm_nif("materials\\t.csm")).shapes[0]
+        .material
+        .clone();
+    let csm = FUZZ_CSM.as_bytes().to_vec();
+    let read = move |p: &str| (p == "materials/t.csm").then(|| csm.clone());
+    r.set_material(SHAPE, parsed, &read).unwrap();
+    let m = material(&r);
+    assert_eq!(own_pbr(&m), Pbr::V2);
+    assert_eq!(m.csm_error, None);
+    assert_eq!(cb(&r, "PBRParams1")[0], 0.7);
+}
+
+/// A type-21 shape as a plane, named `materials\t.csm` when `csm` is set.
+fn t21_plane(csm: bool) -> ParsedNif {
+    let mut s = common::plane_shape(0, common::IDENT, [0.0; 3], 1);
+    s.material = common::as_t21(s.material, nif::pbr2::feat::SUBSURFACE);
+    if csm {
+        s.material.csm_path = Some("materials/t.csm".into());
+    }
+    ParsedNif {
+        shapes: vec![s],
+        ..Default::default()
+    }
+}
+
+/// A `.csm` that does not resolve leaves a type-21 shape its block's values (Note IE6).
+#[test]
+fn broken_csm_on_type_21_keeps_the_block() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path());
+    let read = |p: &str| (p == "materials/t.csm").then(|| b"{ not json".to_vec());
+    let rep = r.load_parsed(&t21_plane(true), &read);
+    assert!(rep.compile_errors.is_empty(), "{rep:?}");
+    let m = material(&r);
+    assert!(m.csm_error.is_some());
+    assert_eq!(m.pbr, m.type21_values());
+    assert_eq!(own_pbr(&m), Pbr::V2);
+    assert_eq!(
+        cb(&r, "PBRFlags")[0].to_bits() & PBR_SUBSURFACE,
+        PBR_SUBSURFACE
+    );
+}
+
+/// An edit from type 21 to another type (no `.csm`) drops the PBR values: the shape draws vanilla.
+#[test]
+fn a_type_21_shape_retyped_draws_vanilla() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path());
+    r.load_parsed(&t21_plane(false), &|_| None);
+    assert_eq!(own_pbr(&material(&r)), Pbr::V2);
+    let mut m = material(&r);
+    m.shader_type = 0;
+    r.set_material(SHAPE, m, &|_| None).unwrap();
+    assert_eq!(pbr_mode(&material(&r)), Pbr::None);
+    let (ps, _, _) = r.draw_diag(SHAPE).unwrap();
+    assert!(!ps.iter().any(|(k, _)| k == "TRUE_PBR"), "{ps:?}");
 }
 
 /// Guard (Note IE5): a v1 shape (SLSF2 bit 23) draws as vanilla, so it compiles no TRUE_PBR.

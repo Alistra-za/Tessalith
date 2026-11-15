@@ -151,6 +151,16 @@ struct ShapeState {
     compile_failed: bool,
 }
 
+/// A cached `.csm` result that is a file the resolver lacked: the file asked for, or a root of its chain.
+fn csm_missing(r: &Result<nif::csm::Csm, nif::csm::CsmError>) -> bool {
+    use nif::csm::CsmError::{NotFound, Root};
+    match r {
+        Err(NotFound(_)) => true,
+        Err(Root { reason, .. }) => matches!(**reason, NotFound(_)),
+        _ => false,
+    }
+}
+
 /// Takes a shape out of the draw order and keeps its draw for later ([`material::skipped`]).
 fn hide(state: &mut ShapeState) {
     state.status = ShapeStatus::Hidden;
@@ -1450,9 +1460,9 @@ impl Renderer {
         }
     }
 
-    /// `m` as the renderer stores and draws it (Note IE6): a type-21 shape's PBR values from its block, then the
-    /// shape's `.csm` (`apply_csm`), resolved through `read` once per load. A `.csm` that does not resolve sets
-    /// `csm_error` and leaves the rest of `m` as it is, with a note naming the file in `rep`.
+    /// `m` as the renderer stores and draws it (Note IE6): its PBR values derived again (a type-21 block's, else none),
+    /// then the shape's `.csm` (`apply_csm`), resolved through `read` once per load. A `.csm` that does not resolve
+    /// sets `csm_error` and leaves the rest of `m` as it is, with a note naming the file in `rep`.
     fn with_csm(
         &mut self,
         m: &mut MaterialState,
@@ -1460,11 +1470,10 @@ impl Renderer {
         read: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) {
-        // shortcut: a type-21 block's trailer stays the source of its values (edits change the trailer) while type 21
-        // is read; drop this line with type 21.
-        if m.shader_type == 21 {
-            m.pbr = m.type21_values();
-        }
+        // Never kept from the incoming material: an edit away from type 21, or a cleared name, must drop them. A
+        // type-21 block's trailer stays the source of its values while type 21 is read.
+        m.pbr = m.type21_values();
+        m.csm_error = None;
         let Some(path) = m.csm_path.clone() else {
             return;
         };
@@ -1873,6 +1882,8 @@ impl Renderer {
             .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?
             .name
             .clone();
+        // A file the resolver lacked is asked for again, as a missing texture is (a `.csm` exported since shows).
+        self.csm_cache.retain(|_, r| !csm_missing(r));
         // an edit's `.csm` note was the load's; the material keeps `csm_error`
         self.with_csm(&mut m, &name, textures, &mut LoadReport::default());
         let (kind, rebuild) = {

@@ -101,6 +101,25 @@ fn eligible_shapes() {
     assert!(!projected_eligible(&msn));
 }
 
+/// Note IE6: a `.csm` shape (PBR values, no bit 23) is PBR for the rule, so type 3 or SLSF2.24 keeps the layer as
+/// `defines` drops its technique; the same material without the values does not.
+#[test]
+fn a_csm_shape_of_type_3_or_with_slsf2_24_is_eligible() {
+    let csm = nif::pbr2::PbrValues {
+        features: 0,
+        params: nif::pbr2::PBR2_DEFAULTS,
+        fuzz_roughness: -1.0,
+    };
+    for (t, bits) in [(3, 0), (11, 0), (0, 1 << 24)] {
+        let mut m = MaterialState::builtin_default();
+        m.shader_type = t;
+        m.slsf2 |= bits;
+        assert!(!projected_eligible(&m), "vanilla type {t} {bits:#x}");
+        m.pbr = Some(csm.clone());
+        assert!(projected_eligible(&m), ".csm type {t} {bits:#x}");
+    }
+}
+
 fn names(d: &render3d::permutation::Defines) -> Vec<&str> {
     d.0.iter().map(|x| x.0.as_str()).collect()
 }

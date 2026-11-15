@@ -97,6 +97,8 @@ pub fn tree_note(m: &MaterialState) -> Option<&str> {
 // shortcut: a foreign `.csm`'s generic keys (UV, alpha, flags, emittance) are not applied, the NIF's own values stand
 // (a set's `.csm` never holds them, design 5.3); apply them when the preview must match such a file.
 pub fn apply_csm(m: &mut MaterialState, c: &nif::csm::Csm) {
+    // shortcut: on a type-21 shape the file replaces the block's values wholesale (no `PBREnabled` turns PBR off, an
+    // absent key takes the spec default, not the trailer's); this goes with type 21 in Task 6.
     m.pbr = nif::pbr2::pbr_values(c);
     for k in nif::csm::KEYS {
         let (Some(slot), Some(nif::csm::Value::Text(t))) = (k.slot, c.values.get(k.name)) else {
