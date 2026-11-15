@@ -68,6 +68,22 @@ fn a_missing_file_is_an_error_naming_it() {
     assert!(x.text.contains("nope.hlsli"));
 }
 
+/// Every name and byte of the embedded `shaders/cs2` (Note IE5), always on: the folder test below needs owner data.
+/// The hash is of `shaders/cs2` as it stands at 06c393b8 (unchanged since), names in `bundled_names` order.
+#[test]
+fn the_bundle_is_the_pinned_cs2_tree() {
+    use sha2::Digest;
+    let mut h = sha2::Sha256::new();
+    for n in render3d::bundled_names() {
+        h.update(n.as_bytes());
+        h.update(render3d::bundled_read(n).unwrap());
+    }
+    assert_eq!(
+        hex::encode(h.finalize()),
+        "208f7bb792ef6a0824e2712af4aa2b050e8aa77caf843d40299f267c16797687"
+    );
+}
+
 /// Every bundled file is the PBR2Test1 Shaders folder's byte for byte, but `Skin/Skin.hlsli`, the override (Note
 /// ID26), and `SettingsDefault.json`, which the build does not ship (ID27). Gated on `SDC_CS_SHADERS_B` (read-only
 /// owner data). The override makes a whole-expansion comparison differ, so the files are compared one by one.

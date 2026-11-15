@@ -82,11 +82,12 @@ fn replay_matches_capture_per_mrt() {
         return;
     };
     let root = Path::new(&root);
+    // Fails before any work on a root the bundled shaders did not draw (Note IE5).
+    let noise = Noise::load(&golden::noise_path(root).unwrap_or_else(|e| panic!("{e}"))).unwrap();
     let cache = tempfile::tempdir().unwrap();
     let fp = render3d::ShaderSource::Bundled;
     let mut ren = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
     let baseline = "golden-baseline.txt";
-    let noise = Noise::load(&golden::noise_path(root)).unwrap();
     let subjects = golden::subjects(root, PROFILES).unwrap();
 
     let mut table = String::from(

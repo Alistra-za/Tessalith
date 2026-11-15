@@ -366,10 +366,12 @@ fn no_reader_shapes() -> Vec<ParsedShape> {
     ]
 }
 
-/// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, forward and deferred. Captured on base
-/// 06c393b8 with `ShaderSource::BundledB` (the CS 2.0 tree, the only one since Note IE5; the CS 1.9 pins came from
-/// f9639a84, before Note GX). WARP, not the default GPU, so the bytes do not depend on the adapter or driver; a
-/// Windows update that changes WARP's rasteriser changes them too, so re-capture on that base before re-pinning.
+/// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, forward and deferred: a regression pin of
+/// that frame since base 06c393b8, captured there with `ShaderSource::BundledB` (the CS 2.0 tree, the only one since
+/// Note IE5). That base already has Note GX's pre-pass, so the pin does not show the frame matches one drawn before
+/// GX; the no-pre-pass and no-copy asserts below carry GX1. WARP, not the default GPU, so the bytes do not depend on
+/// the adapter or driver; a Windows update that changes WARP's rasteriser changes them too, so re-capture on that base
+/// before re-pinning.
 const NO_READER_SHA256: [(bool, &str); 2] = [
     (
         false,
@@ -381,10 +383,9 @@ const NO_READER_SHA256: [(bool, &str); 2] = [
     ),
 ];
 
-/// Two pins for a frame with no t17 reader (Note GX1): its pixels are byte-identical to [`NO_READER_SHA256`]'s base,
-/// forward and deferred, with both targets' depth R32_TYPELESS (GX2); and it draws no pre-pass and its target holds
-/// no copy.
-/// The last asserts show the hooks can fail: adding a hair card turns the pre-pass on and makes the copy.
+/// A frame with no t17 reader: its pixels match the [`NO_READER_SHA256`] regression pin, forward and deferred, with
+/// both targets' depth R32_TYPELESS (GX2); and it draws no pre-pass and its target holds no copy (Note GX1). The last
+/// asserts show the hooks can fail: adding a hair card turns the pre-pass on and makes the copy.
 #[test]
 fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
     use sha2::Digest;

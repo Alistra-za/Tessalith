@@ -219,6 +219,22 @@ fn the_renderer_writes_the_cs2_pbr_block() {
     assert_eq!(r.shapes()[1].material.slsf2 & 1 << 23, 1 << 23);
 }
 
+/// Note IE5: clearing SLSF2 bit 23 on a v1 shape changes nothing the shaders draw, so the edit is `Same`; the stored
+/// material still follows the edit (the `Same && !rebuild` branch of `set_material`).
+#[test]
+fn a_v1_bit_edit_is_same_and_kept() {
+    let (_c, mut r) = renderer(true);
+    load(&mut r, vec![v1(&[])]);
+    let mut m = r.shapes()[0].material.clone();
+    m.slsf2 &= !(1 << 23);
+    assert_eq!(
+        r.set_material(ShapeId(1), m.clone(), &|_| None),
+        Ok(EditKind::Same)
+    );
+    assert_eq!(r.shapes()[0].material, m);
+    assert_eq!(status(&r, 1), ShapeStatus::Drawing);
+}
+
 /// A parameter edit on a type-21 shape is a cbuffer edit that reaches the draw.
 #[test]
 fn a_type_21_parameter_edit_reaches_the_draw() {

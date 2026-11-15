@@ -1682,6 +1682,9 @@ impl Renderer {
                     compile_failed: false,
                 },
             );
+            // shortcut: a refused type-21 shape (one that breaks a CS 2.0 rule, `material::skipped`, Note ID38) is never
+            // begun, so its textures go unresolved and its missing ones stay out of `LoadReport.missing_textures`, until
+            // Task 6 removes type 21.
             if !hidden {
                 self.begin(s.id, &s.material, textures, &mut rep);
             }

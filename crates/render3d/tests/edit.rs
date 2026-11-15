@@ -6,9 +6,8 @@ use common::{
 };
 use nif::material::MaterialState;
 use nif::props::Alpha;
-use render3d::material::pbr2_flags;
 use render3d::scene::Scene;
-use render3d::{Bound, EditKind, Renderer, ShapeId, ShapeStatus};
+use render3d::{EditKind, Renderer, ShapeId, ShapeStatus};
 
 const CYL1: ShapeId = ShapeId(9);
 
@@ -234,8 +233,9 @@ fn vertex_colours_without_a_colour_stream_read_white() {
     );
 }
 
-/// The packed PBRFlags reach the shader: Subsurface on a type-21 shape is a cbuffer edit (Subsurface = 16) and turns
-/// the stand-in's flag channel on (Note IE5: type 21, since the v1 bit draws as vanilla).
+/// The packed PBRFlags reach the shader: Subsurface on a type-21 shape is a cbuffer edit and turns the stand-in's flag
+/// channel on (Note IE5: type 21, since the v1 bit draws as vanilla; the flag values are `material.rs`'s
+/// `pbr2_flags_table`).
 #[test]
 fn pbr_flags_reach_the_shader() {
     use nif::pbr2::feat::SUBSURFACE;
@@ -249,10 +249,8 @@ fn pbr_flags_reach_the_shader() {
         r.set_material(CYL1, m.clone(), &|_| None),
         Ok(EditKind::Permutation)
     );
-    assert_eq!(pbr2_flags(0, None, &Bound::default()), 0);
     let plain = r.render(&Scene::neutral(), 64, 64).unwrap();
     let m = common::as_t21(m, SUBSURFACE);
-    assert_eq!(pbr2_flags(SUBSURFACE, None, &Bound::default()), 16);
     assert_eq!(r.set_material(CYL1, m, &|_| None), Ok(EditKind::Cbuffer));
     let subsurface = r.render(&Scene::neutral(), 64, 64).unwrap();
     assert!(

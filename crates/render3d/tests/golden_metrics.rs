@@ -238,26 +238,23 @@ fn mrt_info_and_raw_readers() {
     assert!(read_mask(&p, 4).is_err());
 }
 
-/// Note ID50: each golden root has its own noise floor beside the captures, found by its exact folder name.
+/// Notes ID50 and IE5: the PBR2Test1 root has its noise floor beside the captures, found by its exact folder name;
+/// any other root, the CS 1.9 captures or a near miss, is refused before a replay starts.
 #[test]
-fn noise_path_is_per_root() {
+fn noise_path_accepts_only_the_bundled_root() {
     let golden = Path::new("golden");
-    let a = golden.join("cs-1.9.0-d2026.10.11.0");
-    assert_eq!(
-        noise_path(&a),
-        a.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json")
-    );
     let b = golden.join("cs-1.9.0-d2026.11.14");
     assert_eq!(
-        noise_path(&b),
+        noise_path(&b).unwrap(),
         b.join("noise_Skyrim_AE_1.6.1170_20261114_201422_frame67390_Skyrim_AE_1.6.1170_20261114_201422_frame67391.json")
     );
-    // An exact name: a near miss gets the default floor.
-    let near = golden.join("cs-1.9.0-d2026.11.14.1");
-    assert_eq!(
-        noise_path(&near),
-        near.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json")
-    );
+    for name in ["cs-1.9.0-d2026.10.11.0", "cs-1.9.0-d2026.11.14.1"] {
+        let e = noise_path(&golden.join(name)).unwrap_err();
+        assert!(
+            e.ends_with("root not captured with the bundled CS shaders") && e.contains(name),
+            "{e}"
+        );
+    }
 }
 
 #[test]

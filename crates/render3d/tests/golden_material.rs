@@ -538,8 +538,9 @@ fn fmt_v(v: &[f32]) -> String {
 #[ignore]
 fn extraction_matches_capture() {
     let Some(env) = env() else { return };
+    let noise =
+        Noise::load(&golden::noise_path(&env.root).unwrap_or_else(|e| panic!("{e}"))).unwrap();
     let mut ren = renderer(&env);
-    let noise = Noise::load(&golden::noise_path(&env.root)).unwrap();
     let mut t = String::new();
     let (mut reached, mut nonfinite, mut define_mismatch) = (0usize, Vec::new(), 0usize);
     let mut firsts: Vec<String> = Vec::new();

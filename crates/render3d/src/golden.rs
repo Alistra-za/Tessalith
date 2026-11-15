@@ -163,25 +163,27 @@ impl Noise {
     }
 }
 
-/// The noise floor of a golden root not in [`NOISE_FILES`] (the CS 1.9.0 captures; golden_noise.py output beside them).
-const DEFAULT_NOISE: &str =
-    "noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json";
-
-/// Golden roots (`rdc-out\golden\<cs-version key>`) by exact folder name, and each root's noise floor file (Note
-/// ID50): the CS PBR2Test1 captures, which the bundled CS 2.0 shaders replay (Note IE).
+/// The golden roots the bundled CS 2.0 shaders replay (`rdc-out\golden\<cs-version key>`) by exact folder name, and
+/// each root's noise floor file (Note ID50): only the CS PBR2Test1 captures (Note IE5).
 const NOISE_FILES: &[(&str, &str)] = &[(
     "cs-1.9.0-d2026.11.14",
     "noise_Skyrim_AE_1.6.1170_20261114_201422_frame67390_Skyrim_AE_1.6.1170_20261114_201422_frame67391.json",
 )];
 
-/// The golden root's noise floor file.
-pub fn noise_path(root: &Path) -> PathBuf {
+/// The golden root's noise floor file; any other root (the CS 1.9 captures) is an error, since the bundled shaders
+/// did not draw it (Note IE5).
+pub fn noise_path(root: &Path) -> Result<PathBuf, String> {
     let name = root.file_name().and_then(|n| n.to_str());
-    let file = NOISE_FILES
+    let (_, file) = NOISE_FILES
         .iter()
         .find(|(f, _)| Some(*f) == name)
-        .map_or(DEFAULT_NOISE, |e| e.1);
-    root.join(file)
+        .ok_or_else(|| {
+            format!(
+                "{}: root not captured with the bundled CS shaders",
+                root.display()
+            )
+        })?;
+    Ok(root.join(file))
 }
 
 /// One subject folder of the golden root.
