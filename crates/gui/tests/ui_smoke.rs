@@ -1549,18 +1549,36 @@ fn a_mip_count_shows_ticked_with_a_note() {
         tick.accesskit_node().toggled(),
         Some(eframe::egui::accesskit::Toggled::True)
     );
-    h.get_by_label("(3 levels — see Advanced)");
+    h.get_by_label("(3 levels)");
 }
 
+/// Note JI3: the Levels row is in the texture panel's Mipmaps group, under the tick box; the drawer has none.
 #[test]
-fn levels_live_in_the_advanced_drawer_not_the_main_panel() {
+fn levels_live_in_the_mipmaps_group() {
+    use eframe::egui::accesskit::Role;
     let mut h = leaf_with_policy(engine::config::AlphaPolicy::Cutout);
-    assert!(h.query_by_label("Levels").is_none());
     h.state_mut().settings.advanced_open = true;
     h.run();
-    h.get_by_label("Levels");
-    // The drawer adds its own "Mipmaps" section heading next to the group heading and the tick box.
-    assert!(h.query_all_by_label("Mipmaps").count() >= 3);
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let levels = h.get_by_role_and_label(Role::ComboBox, "Levels").rect();
+    assert!(
+        c.contains(levels.center()),
+        "Levels {levels:?} in the centre {c:?}"
+    );
+    let tick = h.get_by_role_and_label(Role::CheckBox, "Mipmaps").rect();
+    let filter = h.get_by_role_and_label(Role::ComboBox, "Filter").rect();
+    assert!(
+        tick.max.y <= levels.min.y && levels.max.y <= filter.min.y,
+        "Levels {levels:?} between the tick {tick:?} and Filter {filter:?}"
+    );
+    // The drawer lost its Mipmaps section: every "Levels" node is the centre's row.
+    for n in h.query_all_by_label("Levels") {
+        assert!(
+            c.contains(n.rect().center()),
+            "Levels {:?} outside the centre {c:?}",
+            n.rect()
+        );
+    }
 }
 
 #[test]

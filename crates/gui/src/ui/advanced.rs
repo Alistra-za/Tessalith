@@ -3,7 +3,7 @@
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
 use super::settings_panel::{field_row, Ctx, RowEdit};
-use crate::model::fields::{advanced_field_views, levels_view, provenance_text};
+use crate::model::fields::{provenance_text, search_field_views};
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::{AppModel, Selection};
 use crate::settings::ChecksSettings;
@@ -78,7 +78,7 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     preview_settings(ui, model, &mut actions);
     checks(ui, model, &mut actions);
     cache(ui, model, &mut actions);
-    mipmaps(ui, model, &mut actions);
+    // Note JI3: the level count, DDS header and Size rows are the texture panel's now.
     texture_fields(ui, model, &mut actions);
     unmatched(ui, model, &mut actions);
     for a in actions {
@@ -429,49 +429,10 @@ fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     });
 }
 
-/// The mip level count (Full chain, None or 2..N levels); the basic panel only has the on/off tick box.
-fn mipmaps(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Mipmaps", |ui| {
-        let Some((key, job)) = selected_job(model) else {
-            ui.weak("Select a texture to edit its mip level count.");
-            return;
-        };
-        // Backlog T32 (Note FK): off while a plan is pending, as the settings panel's rows are.
-        let why = model.fix_off();
-        let f = levels_view(model.target, &job);
-        ui.add_enabled_ui(why.is_none(), |ui| {
-            egui::Grid::new(("advanced-mips", &key))
-                .num_columns(3)
-                .show(ui, |ui| {
-                    let cx = Ctx {
-                        key: &key,
-                        job: &job,
-                        target: model.target,
-                        busy: model.edit_busy(),
-                        compact: false,
-                        aligned: false,
-                        alpha_asked: false,
-                        edit_off: why.clone(),
-                        warnings: &[],
-                    };
-                    match field_row(ui, &cx, &f) {
-                        Some(RowEdit::Set(v)) => {
-                            actions.push(Action::SetField(key.clone(), f.field, v))
-                        }
-                        Some(RowEdit::Clear) => {
-                            actions.push(Action::ClearField(key.clone(), f.field))
-                        }
-                        None => {}
-                    }
-                });
-        });
-    });
-}
-
 fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
     section(ui, "Advanced texture fields", |ui| {
         let Some((key, job)) = selected_job(model) else {
-            ui.weak("Select a texture to edit its encoder and header fields.");
+            ui.weak("Select a texture to edit its encoder search fields.");
             return;
         };
         let busy = model.edit_busy();
@@ -491,7 +452,7 @@ fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>
                         edit_off: why.clone(),
                         warnings: &[],
                     };
-                    for f in advanced_field_views(model.target, &job) {
+                    for f in search_field_views(model.target, &job) {
                         match field_row(ui, &cx, &f) {
                             Some(RowEdit::Set(v)) => {
                                 actions.push(Action::SetField(key.clone(), f.field, v))

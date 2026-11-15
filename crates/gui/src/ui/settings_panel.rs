@@ -44,7 +44,8 @@ struct HelperTick {
 
 /// The groups the compact strip keeps (Task 17's preview).
 const COMPACT_GROUPS: [&str; 3] = ["Alpha", "Mipmaps", "Compression"];
-pub(super) const GROUPS: [&str; 4] = ["Type", "Alpha", "Mipmaps", "Compression"];
+/// Also the bulk panel's groups. Note JI3: Size (Resize, Relative to, Size floor) after Mipmaps.
+pub(super) const GROUPS: [&str; 5] = ["Type", "Alpha", "Mipmaps", "Size", "Compression"];
 /// Note HI1: the label column's width, on the texture, helper and cubemap rows.
 pub(super) const LABEL_W: f32 = 150.0;
 /// Note HI1: every control's width on those rows (rule 3.5: `ComboBox::width` is only a minimum).
@@ -955,17 +956,25 @@ fn hint_label(ui: &mut egui::Ui, text: &str) {
 /// The last cell of a field row: ↺ (when `edited`) is laid out first on the right, the hint takes what is left
 /// (Note FI12, rule 3.3), so the reset never leaves the panel. Returns true when ↺ is clicked.
 fn hint_and_reset(ui: &mut egui::Ui, edited: bool, hint: impl FnOnce(&mut egui::Ui)) -> bool {
-    egui::Sides::new()
-        .shrink_left()
-        .truncate()
-        .show(ui, hint, |ui| {
-            edited
-                && ui
-                    .small_button("↺")
-                    .on_hover_text("Use the inherited value")
-                    .clicked()
-        })
-        .1
+    // The panel's floating scroll bar senses its full width over the content's right edge, and with Levels, Size and
+    // DDS header (Note JI3) the panel scrolls at 800 px high: ↺ keeps clear of it, or its click goes to the bar.
+    let s = &ui.spacing().scroll;
+    let bar = s.bar_width + s.bar_outer_margin;
+    ui.scope(|ui| {
+        ui.set_max_width((ui.available_width() - bar).max(0.0));
+        egui::Sides::new()
+            .shrink_left()
+            .truncate()
+            .show(ui, hint, |ui| {
+                edited
+                    && ui
+                        .small_button("↺")
+                        .on_hover_text("Use the inherited value")
+                        .clicked()
+            })
+            .1
+    })
+    .inner
 }
 
 /// The Sub-type field (Note FB9, owner amendment J): a button showing the type that opens the type picker, the
@@ -989,7 +998,7 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
     (picked.filter(|s| Some(*s) != current).map(|s| json!(s)), r)
 }
 
-/// The basic Mipmaps rows: the on/off tick box (the level count lives in the Advanced drawer), then the filter.
+/// The basic Mipmaps rows: the on/off tick box, the level count (Note JI3; not in the strip), then the filter.
 fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let f = levels_view(cx.target, cx.job);
     let mut on = mips_on(&f.value);
@@ -1017,13 +1026,20 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
         _ if cx.compact => {
             ui.label("");
         }
-        Some(n) => hint_label(ui, &format!("({n} levels — see Advanced)")),
+        Some(n) => hint_label(ui, &format!("({n} levels)")),
         None => hint_label(ui, &provenance_text(&f.provenance)),
     };
     if hint_and_reset(ui, f.edited, hint) {
         actions.push(Action::Clear(f.field));
     }
     ui.end_row();
+    if !cx.compact {
+        match field_row(ui, cx, &f) {
+            Some(RowEdit::Set(v)) => actions.push(Action::Set(f.field, v)),
+            Some(RowEdit::Clear) => actions.push(Action::Clear(f.field)),
+            None => {}
+        }
+    }
     filter_row(ui, cx, actions);
     let e = edge_view(cx.target, cx.job);
     match field_row(ui, cx, &e) {
@@ -1185,8 +1201,11 @@ fn group(
                         .filter(|f| {
                             group_of(f.field) == name && !field_hidden(&cx.job.profile, f.field)
                         })
-                        // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds.
-                        .filter(|f| !(cx.compact && f.field.starts_with("color.")))
+                        // Note HI2: the strip keeps the rows it showed, so not the colour rows Compression now holds;
+                        // nor DDS header (Note JI3).
+                        .filter(|f| {
+                            !(cx.compact && (f.field.starts_with("color.") || f.field == "header"))
+                        })
                         .chain(exr)
                     {
                         // Note HI4: an image's Helper row under Sub-type; ticked, the role list takes Sub-type's place.

@@ -4,8 +4,9 @@ use engine::policy::{JobStatus, Need, Provenance, ResolvedJob};
 use engine::suggest::Confidence;
 use serde_json::Value;
 
-/// The editable fields in display order, with the label each row shows.
-pub const FIELDS: [(&str, &str); 17] = [
+/// The editable fields in display order, with the label each row shows (Note JI3: the drawer's DDS header and Size
+/// rows included).
+pub const FIELDS: [(&str, &str); 21] = [
     ("subtype", "Sub-type"),
     // Note IA2: shown only for `msn` (`hidden_reason`).
     (MSN_SOURCE, "Baked in"),
@@ -27,6 +28,11 @@ pub const FIELDS: [(&str, &str); 17] = [
     (WEIGHTING, "BC7 weighting"),
     // FM42: a tick for BC1 and BC3 only (`hidden_reason`); BC7 picks Perceptual in the weighting row.
     ("encoder.perceptual", "Perceptual"),
+    ("header", "DDS header"),
+    // Note JI3: the Size group (`group_of`).
+    ("resize", "Resize"),
+    ("resize_relative_to", "Relative to"),
+    ("resize_floor", "Size floor"),
 ];
 
 /// The model-space normal's baker row (Note IA2), in the Type group.
@@ -118,15 +124,11 @@ pub fn weighting_value(p: &Profile) -> Value {
         .unwrap_or_else(|| Value::from("linear"))
 }
 
-/// The rarely changed fields the Advanced drawer edits (M3a spec §2.5).
-pub const ADVANCED_FIELDS: [(&str, &str); 7] = [
-    (WEIGHTING, "BC7 weighting"),
+/// The encoder search fields, still edited in the Advanced drawer (Note JI3: the drawer's other fields are `FIELDS`
+/// rows now). Kept in `all_fields` so lookups, bulk labels and Copy settings (FM44) keep every field.
+pub const SEARCH_FIELDS: [(&str, &str); 2] = [
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
     ("encoder.bc1_search", "BC1/BC3 search"),
-    ("header", "DDS header"),
-    ("resize", "Resize"),
-    ("resize_relative_to", "Relative to"),
-    ("resize_floor", "Size floor"),
 ];
 
 /// The cubemap section's fields in display order (Note DT7), in the groups `ui::cube_section` draws them in.
@@ -154,7 +156,7 @@ pub fn cube_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
     views_of(&CUBE_FIELDS, target, job)
 }
 
-/// The mip level count: shown as the basic Mipmaps tick box, edited as a count in the Advanced drawer.
+/// The mip level count: the Mipmaps group's tick box, and its Levels row under it (Note JI3).
 pub const LEVELS_FIELD: (&str, &str) = ("mips.levels", "Levels");
 /// The mip filter: a live combo in the basic Mipmaps group, each option locked by `filter_option_lock`.
 pub const FILTER_FIELD: (&str, &str) = ("mips.filter", "Filter");
@@ -170,6 +172,8 @@ pub fn group_of(field: &str) -> &'static str {
         return "Type";
     }
     match field.split('.').next().unwrap_or("") {
+        // Note JI3: the Size group; `header` stays in Compression.
+        "resize" | "resize_relative_to" | "resize_floor" => "Size",
         "subtype" => "Type",
         "alpha" => "Alpha",
         "mips" => "Mipmaps",
@@ -328,7 +332,7 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
         "encoder.bc1_search" if !matches!(p.format, Format::Bc1 | Format::Bc3) => {
             Some("BC1 and BC3 only")
         }
-        // Note CP (fix round 1, I2): the Advanced drawer shows the row everywhere; lock it where it does nothing.
+        // Note CP (fix round 1, I2): shown for a non-BC7 texture, the row is locked; it does nothing there.
         WEIGHTING => hidden_reason(p, WEIGHTING),
         "mips.edge" if p.mips.filter == MipFilter::Box => {
             Some("only tent, Mitchell and Kaiser read the edge")
@@ -408,8 +412,8 @@ pub const EXR_STRAIGHT_HOVER: &str =
 /// Help of the Helper tick row (Note HI9), which has no field of its own.
 pub const HELPER_HELP: &str = "A helper fills a channel of another texture, such as an AO map packed into an RMAOS or a mask into a diffuse's alpha. Tick it, then pick a role.";
 
-/// Help of the basic Mipmaps tick row (Note HI9); the Advanced drawer's Levels row reads `field_help("mips.levels")`.
-pub const MIPMAPS_HELP: &str = "Mipmaps are the smaller copies the game shows at a distance. Off writes only the full-size level. The level count is in the Advanced drawer.";
+/// Help of the basic Mipmaps tick row (Note HI9); the Levels row under it reads `field_help("mips.levels")`.
+pub const MIPMAPS_HELP: &str = "Mipmaps are the smaller copies the game shows at a distance. Off writes only the full-size level. The Levels row sets the count.";
 
 /// The help a field's row shows on its `?` and its label (Note HI9); `None` for a row with no `?` (the cube section).
 pub fn field_help(field: &str) -> Option<&'static str> {
@@ -475,9 +479,9 @@ pub fn mips_count(levels: &Value) -> Option<u64> {
     levels.as_u64()
 }
 
-/// The Advanced drawer's fields, with their locks.
-pub fn advanced_field_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
-    views_of(&ADVANCED_FIELDS, target, job)
+/// The search fields' views, with their locks.
+pub fn search_field_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
+    views_of(&SEARCH_FIELDS, target, job)
 }
 
 /// Every field the settings panel and the Advanced drawer edit, each once, in display order (F3a: bulk lookups and
@@ -485,11 +489,7 @@ pub fn advanced_field_views(target: Target, job: &ResolvedJob) -> Vec<FieldView>
 pub fn all_fields() -> Vec<(&'static str, &'static str)> {
     let mut v = FIELDS.to_vec();
     v.extend([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD]);
-    v.extend(
-        ADVANCED_FIELDS
-            .into_iter()
-            .filter(|(f, _)| !FIELDS.iter().any(|(g, _)| g == f)),
-    );
+    v.extend(SEARCH_FIELDS);
     v
 }
 

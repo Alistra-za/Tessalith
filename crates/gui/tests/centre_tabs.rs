@@ -234,10 +234,9 @@ fn the_tab_strip_keeps_later_auto_ids() {
     assert_eq!(next_id(false), next_id(true));
 }
 
-/// A leaf with two edited fields, the drawer open: the texture panel's rows carry a hint and a ↺ each.
+/// A leaf with two edited fields (Note JI3: both in the texture panel): its rows carry a hint and a ↺ each.
 fn edited_leaf(dir: &std::path::Path) -> AppModel {
     let mut m = opened(dir);
-    m.settings.advanced_open = true;
     m.select_item("landscape/leaf.png");
     m.set_field(
         "landscape/leaf.png",
@@ -250,57 +249,38 @@ fn edited_leaf(dir: &std::path::Path) -> AppModel {
 }
 
 fn sized(width: f32, m: AppModel) -> H {
+    sized_tall(width, 1000.0, m)
+}
+
+fn sized_tall(width: f32, height: f32, m: AppModel) -> H {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(width, 1000.0))
+        .with_size(egui::vec2(width, height))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
 
-/// Note FI12 (A9): a row's ↺ is laid out before its hint, so it stays inside the centre at every width with the
-/// drawer open (the kittest stands in for screenshots at 1100, 1280 and 1600 px).
+/// Note FI12 (A9): a row's ↺ is laid out before its hint, so it stays inside the centre at every width (the kittest
+/// stands in for screenshots at 1100, 1280 and 1600 px). Note JI3: both edited rows, Threshold and Resize, are the
+/// texture panel's.
 #[test]
 fn the_reset_button_stays_on_the_panel() {
     for width in [1100.0f32, 1280.0, 1600.0] {
         let d = tempfile::tempdir().unwrap();
-        let h = sized(width, edited_leaf(d.path()));
+        // Tall enough that the Size group is on screen.
+        let h = sized_tall(width, 1600.0, edited_leaf(d.path()));
         let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
-        let drawer = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-            .expect("the drawer is drawn")
-            .outer_rect;
-        assert!(
-            drawer.max.x <= width + 0.5,
-            "{width}: the drawer {drawer:?} leaves the window"
-        );
-        // On-screen ↺ buttons (rows scrolled out below the panel are not drawn), split by which panel they sit in.
-        let (mut centre, mut in_drawer) = (vec![], vec![]);
-        for n in h.query_all_by_label("↺") {
-            let r = n.rect();
-            if r.max.y > c.max.y {
-                continue;
-            }
-            if r.min.x < drawer.min.x {
-                centre.push(r)
-            } else {
-                in_drawer.push(r)
-            }
-        }
+        let resets: Vec<_> = h.query_all_by_label("↺").map(|n| n.rect()).collect();
         assert_eq!(
-            centre.len(),
-            1,
-            "{width}: the edited Alpha row's ↺ is in the centre"
+            resets.len(),
+            2,
+            "{width}: the edited Threshold and Resize rows' ↺: {resets:?}"
         );
-        for r in &centre {
+        for r in &resets {
             assert!(
                 c.expand(0.5).contains_rect(*r),
                 "{width}: ↺ {r:?} leaves the centre {c:?}"
-            );
-        }
-        for r in &in_drawer {
-            assert!(
-                drawer.expand(0.5).contains_rect(*r),
-                "{width}: ↺ {r:?} leaves the drawer {drawer:?}"
             );
         }
     }
@@ -309,29 +289,27 @@ fn the_reset_button_stays_on_the_panel() {
 #[test]
 fn a_clipped_hint_keeps_its_text_on_hover() {
     let text = "from this texture's settings";
-    // The hint column is the drawer's (the centre's rows are compact and leave it blank).
+    // Note JI3: measured on the centre's rows (the edited Threshold and Resize rows), the drawer closed.
     let visible = |h: &H| {
-        let drawer = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-            .expect("the drawer is drawn")
-            .outer_rect;
+        let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
         let hints = h
             .query_all_by_label(text)
             .map(|n| n.rect())
-            .filter(|r| r.min.x >= drawer.min.x && r.max.y <= drawer.max.y)
+            .filter(|r| r.min.x >= c.min.x && r.max.y <= c.max.y)
             .collect::<Vec<_>>();
-        (drawer, hints)
+        (c, hints)
     };
     let d = tempfile::tempdir().unwrap();
     let wide = sized(1600.0, edited_leaf(d.path()));
     let natural = visible(&wide).1[0].width();
     let d = tempfile::tempdir().unwrap();
     let mut h = sized(900.0, edited_leaf(d.path()));
-    let (drawer, before) = visible(&h);
+    let (centre, before) = visible(&h);
     assert!(!before.is_empty(), "the edited rows show their hint");
     for r in &before {
         assert!(
-            drawer.expand(0.5).contains_rect(*r),
-            "hint {r:?} leaves the drawer {drawer:?}"
+            centre.expand(0.5).contains_rect(*r),
+            "hint {r:?} leaves the centre {centre:?}"
         );
     }
     assert!(
@@ -344,7 +322,7 @@ fn a_clipped_hint_keeps_its_text_on_hover() {
         .unwrap()
         .hover();
     h.run();
-    // The tooltip may be shifted left of the drawer to fit the window, so count every node with the text.
+    // The tooltip may be shifted to fit the window, so count every node with the text.
     assert_eq!(
         h.query_all_by_label(text).count(),
         all + 1,

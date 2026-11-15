@@ -74,7 +74,11 @@ fn field_views_mark_edited_fields() {
     assert!(!views.iter().find(|v| v.field == "format").unwrap().edited);
     let mut groups: Vec<&str> = views.iter().map(|v| group_of(v.field)).collect();
     groups.dedup();
-    assert_eq!(groups, vec!["Type", "Alpha", "Mipmaps", "Compression"]);
+    // Note JI3: the Size rows follow DDS header in `FIELDS`; the panel draws its groups in `GROUPS` order.
+    assert_eq!(
+        groups,
+        vec!["Type", "Alpha", "Mipmaps", "Compression", "Size"]
+    );
     assert_eq!(group_of("color.content"), "Compression");
     assert_eq!(group_of("color.tag"), "Compression");
 }
@@ -196,17 +200,42 @@ fn provenance_reads_as_prose() {
     );
 }
 
+/// Note JI3: Resize, Relative to and Size floor are the Size group; DDS header stays in Compression; Levels is the
+/// Mipmaps group's (drawn by `mipmaps_rows`, so not a `FIELDS` row). `all_fields` lists each field once.
 #[test]
-fn coverage_belongs_to_alpha_and_levels_to_the_drawer() {
-    use sdc_gui::model::fields::{mips_count, mips_on, ADVANCED_FIELDS};
+fn size_is_a_group_and_header_stays_in_compression() {
+    for f in ["resize", "resize_relative_to", "resize_floor"] {
+        assert_eq!(group_of(f), "Size", "{f}");
+    }
+    assert_eq!(group_of("header"), "Compression");
+    assert_eq!(group_of("mips.levels"), "Mipmaps");
     assert_eq!(group_of("mips.coverage"), "Alpha");
     assert_eq!(group_of("mips.normal"), "Mipmaps");
+    let all = all_fields();
+    for f in [
+        "header",
+        "resize",
+        "resize_relative_to",
+        "resize_floor",
+        "encoder.bc45_search_radius",
+        "encoder.bc1_search",
+        "mips.levels",
+    ] {
+        assert_eq!(
+            all.iter().filter(|(g, _)| *g == f).count(),
+            1,
+            "{f} once in all_fields"
+        );
+    }
+    assert_eq!(all.iter().filter(|(g, _)| *g == WEIGHTING).count(), 1);
+    assert!(FIELDS
+        .iter()
+        .any(|(f, l)| *f == "header" && *l == "DDS header"));
     assert!(!FIELDS.iter().any(|(f, _)| *f == "mips.levels"));
     assert!(mips_on(&serde_json::json!("full")) && mips_on(&serde_json::json!(4)));
     assert!(!mips_on(&serde_json::json!("none")));
     assert_eq!(mips_count(&serde_json::json!(4)), Some(4));
     assert_eq!(mips_count(&serde_json::json!("full")), None);
-    assert!(!ADVANCED_FIELDS.iter().any(|(f, _)| *f == "mips.levels"));
 }
 
 #[test]
@@ -309,8 +338,8 @@ fn filter_and_edge_stay_in_the_basic_mipmaps_group() {
     assert_eq!(group_of(EDGE_FIELD.0), "Mipmaps");
     assert_eq!(group_of("mips.filter"), "Mipmaps");
     assert_eq!(group_of("mips.edge"), "Mipmaps");
-    assert!(!ADVANCED_FIELDS.iter().any(|f| f.0 == "mips.filter"));
-    assert!(ADVANCED_FIELDS.iter().any(|f| f.0 == "resize"));
+    assert!(!FIELDS.iter().any(|f| f.0 == "mips.filter"));
+    assert!(FIELDS.iter().any(|f| f.0 == "resize"));
     for f in ["mips.filter", "mips.edge", "resize"] {
         assert!(engine::overrides::FIELD_PATHS.contains(&f), "{f}");
     }
@@ -397,14 +426,14 @@ fn filter_edge_and_resize_views_show_their_defaults() {
     let job = m.item("landscape/leaf.png").unwrap().job.clone().unwrap();
     assert_eq!(filter_view(m.target, &job).value, serde_json::json!("box"));
     assert_eq!(edge_view(m.target, &job).value, serde_json::json!("wrap"));
-    let resize = advanced_field_views(m.target, &job)
+    let resize = field_views(m.target, &job)
         .into_iter()
         .find(|v| v.field == "resize")
         .unwrap();
     assert_eq!(resize.value, serde_json::json!("none"));
     // Note FM29: the floor shows its default 512 and stays editable while nothing halves, so Copy settings can
     // carry it together with `resize`.
-    let floor = advanced_field_views(m.target, &job)
+    let floor = field_views(m.target, &job)
         .into_iter()
         .find(|v| v.field == "resize_floor")
         .unwrap();
@@ -680,11 +709,8 @@ fn value_of_agrees_with_the_field_views() {
 /// not serialise it, and is locked outside BC1 and BC3.
 #[test]
 fn the_bc1_search_row_follows_the_radius_row_and_defaults() {
-    let at = |f: &str| ADVANCED_FIELDS.iter().position(|(k, _)| *k == f).unwrap();
-    assert_eq!(
-        ADVANCED_FIELDS[at("encoder.bc1_search")].1,
-        "BC1/BC3 search"
-    );
+    let at = |f: &str| SEARCH_FIELDS.iter().position(|(k, _)| *k == f).unwrap();
+    assert_eq!(SEARCH_FIELDS[at("encoder.bc1_search")].1, "BC1/BC3 search");
     assert_eq!(
         at("encoder.bc1_search"),
         at("encoder.bc45_search_radius") + 1
@@ -720,10 +746,7 @@ fn the_bc1_search_row_follows_the_radius_row_and_defaults() {
 /// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.
 #[test]
 fn every_field_row_has_help() {
-    let rows = FIELDS
-        .iter()
-        .chain(ADVANCED_FIELDS.iter())
-        .chain([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD, EXR_STRAIGHT_FIELD].iter());
+    let rows = all_fields().into_iter().chain([EXR_STRAIGHT_FIELD]);
     for (f, label) in rows {
         assert!(field_help(f).is_some(), "{f} ({label}) has no help");
     }

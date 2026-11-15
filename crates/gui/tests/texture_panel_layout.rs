@@ -13,19 +13,24 @@ use support::*;
 
 const KEY: &str = "landscape/rock01.png";
 
-const COMBOS: [&str; 12] = [
+const COMBOS: [&str; 17] = [
     "Sub-type",
     "Input content",
     "DDS tag",
     "Alpha",
     "Comparison",
+    "Levels",
     "Filter",
     "Edge",
     "Normal handling",
     "Normal base level",
+    "Resize",
+    "Relative to",
+    "Size floor",
     "Format",
     "Effort",
     "BC7 weighting",
+    "DDS header",
 ];
 const CHECKS: [&str; 2] = ["Exact opaque alpha", "Mipmaps"];
 
@@ -40,8 +45,12 @@ fn model(dir: &std::path::Path) -> AppModel {
 }
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
+    sized_harness(m, w, 800.0)
+}
+
+fn sized_harness(m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
-        .with_size(egui::vec2(w, 800.0))
+        .with_size(egui::vec2(w, height))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
@@ -311,6 +320,92 @@ fn render_helper_tick_shots() {
                 .save(out.join(format!("helper-{name}-{w}.png")))
                 .unwrap();
         }
+    }
+}
+
+/// Note JI3: Levels in Mipmaps, a Size group (Resize, Relative to, Size floor) after it, and DDS header in
+/// Compression, each drawn once and in the centre; with the drawer open, BC7 weighting is one row, not two.
+#[test]
+fn the_panel_shows_levels_a_size_group_and_the_dds_header() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = leaf(d.path());
+    m.settings.advanced_open = true;
+    // Tall enough that the last group is inside the centre (AccessKit rects are not clipped).
+    let h = sized_harness(m, 1280.0, 1600.0);
+    let c = centre(&h);
+    let header = |t: &str| {
+        h.query_all_by_label(t)
+            .find(|n| c.contains(n.rect().center()))
+            .unwrap_or_else(|| panic!("{t} in the centre"))
+            .rect()
+    };
+    // Group order: Mipmaps, Size, Compression.
+    assert!(header("Mipmaps").top() < header("Size").top());
+    assert!(header("Size").top() < header("Compression").top());
+    for name in [
+        "Levels",
+        "Resize",
+        "Relative to",
+        "Size floor",
+        "DDS header",
+    ] {
+        let n = h
+            .query_all(by().role(Role::ComboBox).label(name))
+            .filter(|n| c.contains(n.rect().center()))
+            .count();
+        assert_eq!(n, 1, "{name} once in the centre");
+    }
+    // The leaf is BC7. The drawer's rows name no combo, so count the row labels too.
+    assert_eq!(
+        h.query_all(by().role(Role::ComboBox).label("BC7 weighting"))
+            .count(),
+        1
+    );
+    for name in [
+        "BC7 weighting",
+        "Levels",
+        "Resize",
+        "Relative to",
+        "Size floor",
+        "DDS header",
+    ] {
+        let labels: Vec<Rect> = h
+            .query_all(by().role(Role::Label).label(name))
+            .map(|n| n.rect())
+            .collect();
+        assert_eq!(labels.len(), 1, "one {name} row: {labels:?}");
+        assert!(c.contains(labels[0].center()), "{name} in the centre");
+    }
+}
+
+/// Note JI3 (moved from the drawer's test): Relative to showing "Slot 8 …" stays inside the centre at 1100 and 1280.
+#[test]
+fn relative_to_slot_8_stays_inside_the_centre() {
+    for w in [1100.0f32, 1280.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = model(d.path());
+        m.set_field(KEY, "resize", serde_json::json!("half"));
+        m.set_field(KEY, "resize_relative_to", serde_json::json!("slot8"));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let h = sized_harness(m, w, 1600.0);
+        let c = centre(&h);
+        let combos: Vec<_> = h
+            .query_all_by_role(Role::ComboBox)
+            .filter(|n| c.contains(n.rect().center()))
+            .collect();
+        assert!(
+            combos.iter().any(|n| n
+                .accesskit_node()
+                .value()
+                .is_some_and(|v| v.starts_with("Slot 8"))),
+            "{w}: the Relative to combo shows Slot 8"
+        );
+        let past: Vec<_> = combos
+            .iter()
+            .filter(|n| n.rect().max.x > c.max.x + 0.5)
+            .map(|n| (n.accesskit_node().value(), n.rect().max.x))
+            .collect();
+        assert!(past.is_empty(), "{w}: past the centre {c:?}: {past:?}");
     }
 }
 
@@ -673,6 +768,41 @@ fn compact_controls_have_one_width() {
     }
 }
 
+/// The scroll-bar margin `hint_and_reset` keeps (Note JI3) also applies in the strip, whose last cell is narrow: an
+/// edited row's ↺ stays clear of the row's combo.
+// shortcut: at 1600 px the strip's ↺ ends ~4 px past the strip's edge (it ended ~14 px past before the margin); the
+// strip's label formula leaves the last cell 18 px for a 19 px ↺. Pin `r.max.x <= strip.max.x` once that is fixed.
+#[test]
+fn a_strip_reset_stays_beside_its_combo() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = model(d.path());
+    m.set_field(KEY, "encoder.effort", serde_json::json!("veryfast"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.expand(KEY);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let h = harness(m, 1600.0);
+    let strip =
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("preview-settings"))
+            .expect("the settings strip is open at 1600 wide")
+            .outer_rect;
+    let resets: Vec<Rect> = h
+        .query_all_by_label("↺")
+        .map(|n| n.rect())
+        .filter(|r| strip.contains(r.center()))
+        .collect();
+    assert_eq!(resets.len(), 1, "the edited Effort row's ↺: {resets:?}");
+    let r = resets[0];
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .map(|n| n.rect())
+        .find(|c| strip.contains(c.center()) && c.min.y <= r.center().y && r.center().y <= c.max.y)
+        .expect("the Effort combo on the ↺'s row");
+    assert!(
+        combo.max.x <= r.min.x,
+        "↺ {r:?} overlaps its combo {combo:?}"
+    );
+}
+
 /// A pin: the strip never showed the colour rows, and now they are in Compression, which it shows.
 #[test]
 fn compact_strip_has_no_colour_rows() {
@@ -681,7 +811,15 @@ fn compact_strip_has_no_colour_rows() {
     assert!(h
         .query_all_by_label("Compression")
         .any(|n| strip.contains(n.rect().center())));
-    for name in ["Input content", "DDS tag"] {
+    // Note JI3: nor the rows the drawer handed to the centre (Levels, the Size group, DDS header).
+    for name in [
+        "Input content",
+        "DDS tag",
+        "DDS header",
+        "Levels",
+        "Resize",
+        "Size floor",
+    ] {
         assert!(
             h.query_by_label_contains(name).is_none(),
             "{name} in the strip"

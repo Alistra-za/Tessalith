@@ -114,6 +114,29 @@ fn the_open_drawer_shows_its_sections() {
             "{label:?} is gone (FM25): {labels:?}"
         );
     }
+    // Note JI3: the rows the texture panel took (its Levels, Size and DDS header rows) and the duplicate BC7
+    // weighting row are not drawn here too; the two search rows stay. Read by the drawer's columns only: the field rows
+    // lie below the window, and AccessKit rects are not clipped.
+    let rows: Vec<String> = h
+        .query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x >= panel.min.x - 1.0 && n.rect().max.x <= panel.max.x + 1.0)
+        // A label's text is its AccessKit value.
+        .filter_map(|n| n.accesskit_node().label().or(n.accesskit_node().value()))
+        .collect();
+    assert!(rows.iter().any(|l| l == "BC1/BC3 search"), "{rows:?}");
+    for label in [
+        "Levels",
+        "Resize",
+        "Relative to",
+        "Size floor",
+        "DDS header",
+        "BC7 weighting",
+    ] {
+        assert!(
+            !rows.iter().any(|l| l == label),
+            "{label:?} is the texture panel's (JI3): {rows:?}"
+        );
+    }
 }
 
 fn drawer_harness(width: f32, model: AppModel) -> Harness<'static, AppModel> {
@@ -264,51 +287,6 @@ fn no_inspector_value_passes_the_drawer_edge() {
         assert!(checked > 10, "{width}: only {checked} labels checked");
     }
 }
-/// Final review (GUI M9), rule 3.5: no combo in the drawer ends past its edge, with the longest Relative to label
-/// ("Slot 8 · …") shown. Drawn alone, as `no_inspector_value_passes_the_drawer_edge` is.
-// shortcut: at the drawer's 260 px minimum every combo of the fields grid ends ~3 px past the edge (the label
-// column plus egui's combo width); pin 260 too once that grid gets exact-width combo slots.
-#[test]
-fn no_drawer_combo_passes_the_drawer_edge() {
-    for width in [280.0f32, 380.0] {
-        let d = tempfile::tempdir().unwrap();
-        let mut model = leaf_model(d.path());
-        model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
-        model.set_field(
-            "landscape/leaf.png",
-            "resize_relative_to",
-            serde_json::json!("slot8"),
-        );
-        assert!(model.wait_idle(Duration::from_secs(60)));
-        let mut h = Harness::builder()
-            .with_size(eframe::egui::vec2(width, 1400.0))
-            .build_ui_state(
-                |ui, model: &mut AppModel| {
-                    let mut state = sdc_gui::ui::advanced::AdvancedState::default();
-                    ui.allocate_ui(eframe::egui::vec2(width, 1400.0), |ui| {
-                        sdc_gui::ui::advanced::body(ui, model, &mut state);
-                    });
-                },
-                model,
-            );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-        h.run();
-        let combos: Vec<_> = h.query_all_by_role(Role::ComboBox).collect();
-        assert!(
-            combos.iter().any(|n| n
-                .accesskit_node()
-                .value()
-                .is_some_and(|v| v.starts_with("Slot 8"))),
-            "{width}: the Relative to combo shows Slot 8"
-        );
-        let past: Vec<_> = combos
-            .iter()
-            .filter(|n| n.rect().max.x > width + 1.0)
-            .map(|n| (n.accesskit_node().value(), n.rect().max.x))
-            .collect();
-        assert!(past.is_empty(), "{width}: past the drawer edge: {past:?}");
-    }
-}
 
 #[test]
 fn the_inspector_names_the_texture() {
@@ -372,7 +350,7 @@ fn remove_drops_an_unmatched_entry() {
 
 #[test]
 fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
-    use sdc_gui::model::fields::advanced_field_views;
+    use sdc_gui::model::fields::{field_view, search_field_views};
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     m.set_field(
@@ -383,20 +361,10 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
     m.set_field("landscape/rock01.png", "header", serde_json::json!("dx10"));
     assert!(m.wait_idle(Duration::from_secs(60)));
     let job = m.item("landscape/rock01.png").unwrap().job.clone().unwrap();
-    let views = advanced_field_views(m.target, &job);
+    let views = search_field_views(m.target, &job);
     let names: Vec<_> = views.iter().map(|v| v.field).collect();
-    assert_eq!(
-        names,
-        [
-            "encoder.bc7_weights",
-            "encoder.bc45_search_radius",
-            "encoder.bc1_search",
-            "header",
-            "resize",
-            "resize_relative_to",
-            "resize_floor"
-        ]
-    );
+    // Note JI3: the drawer keeps the two search rows; the others are texture-panel rows.
+    assert_eq!(names, ["encoder.bc45_search_radius", "encoder.bc1_search"]);
     let search = views
         .iter()
         .find(|v| v.field == "encoder.bc1_search")
@@ -412,7 +380,7 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
         job.profile.format
     );
     assert_eq!(search.value, serde_json::json!("default"));
-    let header = views.iter().find(|v| v.field == "header").unwrap();
+    let header = field_view(m.target, &job, "header").unwrap();
     assert_eq!(header.value, serde_json::json!("dx10"));
     assert!(header.edited);
     let radius = views
@@ -427,7 +395,7 @@ fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
 #[test]
 fn the_bc1_search_row_edits_a_bc1_texture() {
     use engine::config::Format;
-    use sdc_gui::model::fields::advanced_field_views;
+    use sdc_gui::model::fields::search_field_views;
     const K: &str = "landscape/rock01.png";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
@@ -452,7 +420,7 @@ fn the_bc1_search_row_edits_a_bc1_texture() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     let job = m.item(K).unwrap().job.clone().unwrap();
     assert_eq!(job.profile.format, Format::Bc1);
-    let views = advanced_field_views(m.target, &job);
+    let views = search_field_views(m.target, &job);
     let v = views
         .iter()
         .find(|v| v.field == "encoder.bc1_search")
@@ -593,129 +561,4 @@ fn the_cache_limit_box_saves_a_typed_limit() {
     h.run();
     assert_eq!(h.state().settings.analysis_cache_mb, Some(800));
     assert_eq!(GuiSettings::load(&toml).0.analysis_cache_mb, Some(800));
-}
-
-/// Backlog T32: while a plan is pending the drawer's rows are off, like the settings panel's (Note FK), so a pick is
-/// not dropped as "unchanged" against the stale view.
-#[test]
-fn drawer_texture_rows_wait_for_the_plan() {
-    let d = tempfile::tempdir().unwrap();
-    let mut model = leaf_model(d.path());
-    model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
-    assert!(model.fix_off().is_some(), "the edit left a plan in flight");
-    let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(400.0, 1400.0))
-        .build_ui_state(
-            |ui, model: &mut AppModel| {
-                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
-                sdc_gui::ui::advanced::body(ui, model, &mut state);
-            },
-            model,
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run_steps(3);
-    let combos: Vec<_> = h
-        .query_all_by_role(Role::ComboBox)
-        .map(|n| (n.accesskit_node().value(), n.accesskit_node().is_disabled()))
-        .collect();
-    // The rows show the stale view (Resize: None) until the plan lands, so every combo must be off meanwhile.
-    assert!(
-        combos.iter().any(|(v, _)| v.as_deref() == Some("None")),
-        "{combos:?}"
-    );
-    assert!(
-        combos.iter().all(|(_, off)| *off),
-        "a drawer row is enabled during a plan: {combos:?}"
-    );
-}
-
-/// Backlog T32 (second half): the pending plan's wait reason is on the disabled row, and once the plan lands a pick
-/// of None is written (it was dropped as "unchanged" against the stale view).
-#[test]
-fn drawer_resize_pick_waits_for_the_plan_then_writes() {
-    let d = tempfile::tempdir().unwrap();
-    let mut model = leaf_model(d.path());
-    model.set_field("landscape/leaf.png", "resize", serde_json::json!("half"));
-    let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(400.0, 1400.0))
-        .build_ui_state(
-            |ui, model: &mut AppModel| {
-                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
-                sdc_gui::ui::advanced::body(ui, model, &mut state);
-            },
-            model,
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run_steps(3);
-    // The Resize combo is the one showing `value` (its accessible text is its value).
-    let resize = |h: &Harness<'_, AppModel>, value: &str| {
-        h.query_all_by_role(Role::ComboBox)
-            .find(|n| n.accesskit_node().value().as_deref() == Some(value))
-            .unwrap_or_else(|| panic!("no combo showing {value}"))
-            .rect()
-            .center()
-    };
-    h.hover_at(resize(&h, "None"));
-    h.run();
-    h.get_by_label("Wait for the plan to finish");
-    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
-    h.run_steps(3);
-    h.query_all_by_role(Role::ComboBox)
-        .find(|n| n.accesskit_node().value().as_deref() == Some("Half"))
-        .expect("the Resize combo shows the landed Half")
-        .click();
-    h.run();
-    h.get_by_label("None").click();
-    h.run_steps(3);
-    let own = h
-        .state()
-        .project
-        .as_ref()
-        .unwrap()
-        .file_value("landscape/leaf.png", "resize");
-    assert_eq!(own, Some(serde_json::json!("none")));
-}
-
-/// Note HI18: the drawer's rows have no `?`, so the label shows the row's help on hover.
-#[test]
-fn a_drawer_label_shows_the_rows_help() {
-    let d = tempfile::tempdir().unwrap();
-    let model = leaf_model(d.path());
-    let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(380.0, 1400.0))
-        .build_ui_state(
-            |ui, model: &mut AppModel| {
-                let mut state = sdc_gui::ui::advanced::AdvancedState::default();
-                ui.allocate_ui(eframe::egui::vec2(380.0, 1400.0), |ui| {
-                    sdc_gui::ui::advanced::body(ui, model, &mut state);
-                });
-            },
-            model,
-        );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run();
-    let text = sdc_gui::model::fields::field_help("resize_floor").unwrap();
-    assert!(h.query_all_by_label_contains(text).next().is_none());
-    let rects: Vec<_> = h
-        .query_all_by_label("Size floor")
-        .filter(|n| n.accesskit_node().role() == Role::Label)
-        .map(|n| n.rect())
-        .collect();
-    assert!(!rects.is_empty(), "the drawer has a Size floor row");
-    let shown = rects.iter().any(|r| {
-        h.query_all_by_label("Size floor")
-            .find(|n| n.rect() == *r)
-            .unwrap()
-            .hover();
-        h.run();
-        h.query_all_by_label_contains(text).next().is_some()
-    });
-    assert!(shown, "no Size floor label shows its help");
-    assert!(
-        !h.query_all_by_role(Role::Label).any(|n| n
-            .accesskit_node()
-            .value()
-            .is_some_and(|v| v.starts_with("Help: "))),
-        "a ? in the drawer"
-    );
 }

@@ -337,3 +337,57 @@ fn a_bulk_row_has_a_question_mark() {
     h.run();
     assert!(h.query_all_by_label_contains(text).next().is_some());
 }
+
+/// Spec 4.7 (Z4/Z8 amended), Note JI3: the bulk panel loops the texture panel's groups, so it has the Size group's
+/// rows and DDS header; a Resize pick writes every selected texture in one undo step.
+#[test]
+fn the_bulk_panel_has_size_and_dds_header_rows() {
+    use eframe::egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.click_item(ROCK, false, false);
+    m.click_item(LEAF, true, false);
+    // Tall enough that the Size group is on screen.
+    let mut h = Harness::builder()
+        .with_size(eframe::egui::vec2(1280.0, 1600.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run();
+    h.get_by_label("2 textures selected");
+    h.get_by_label("Size");
+    // The bulk combos have no name of their own yet: a row's combo is the one on its label's line.
+    let combo_on = |h: &Harness<'static, AppModel>, label: &str| {
+        let y = h
+            .query_all(egui_kittest::kittest::by().role(Role::Label).label(label))
+            .next()
+            .unwrap_or_else(|| panic!("a {label} row"))
+            .rect()
+            .center()
+            .y;
+        let on: Vec<_> = h
+            .query_all_by_role(Role::ComboBox)
+            .map(|n| n.rect())
+            .filter(|r| r.min.y <= y && y <= r.max.y)
+            .collect();
+        assert_eq!(on.len(), 1, "one combo on the {label} row: {on:?}");
+        on[0]
+    };
+    combo_on(&h, "DDS header");
+    let resize = combo_on(&h, "Resize");
+    h.query_all_by_role(Role::ComboBox)
+        .find(|n| n.rect() == resize)
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_label("Half").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    for k in [ROCK, LEAF] {
+        assert_eq!(
+            h.state().project.as_ref().unwrap().file_value(k, "resize"),
+            Some(serde_json::json!("half")),
+            "{k}"
+        );
+    }
+    assert_eq!(h.state().undo_label(), Some("Change Resize on 2 textures"));
+}

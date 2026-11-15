@@ -2,7 +2,8 @@
 //! half-size question (Note FM).
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use eframe::egui::accesskit::Role;
+use egui_kittest::kittest::{by, NodeT as _, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Code;
 use image::{ImageBuffer, Rgb, RgbImage};
@@ -98,6 +99,118 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
+}
+
+/// The texture panel's combo named `row` (its row label), which must be inside the centre column.
+fn in_centre(h: &Harness<'static, AppModel>, row: &str) -> egui::Rect {
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let found: Vec<_> = h
+        .query_all(by().role(Role::ComboBox).label(row))
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(found.len(), 1, "one {row} combo: {found:?}");
+    assert!(
+        c.min.x <= found[0].min.x && found[0].max.x <= c.max.x + 0.5,
+        "{row} {:?} in the centre {c:?}",
+        found[0]
+    );
+    found[0]
+}
+
+/// Opens the centre combo named `row` (scrolled into view first, as a user would) and picks `pick` in its list.
+fn pick_in(h: &mut Harness<'static, AppModel>, row: &str, pick: &str) {
+    in_centre(h, row);
+    h.get_by_role_and_label(Role::ComboBox, row).scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, row).click();
+    h.run();
+    h.get_by_label(pick).click();
+    h.run();
+}
+
+/// Spec 9.1, Note JI3: each row moved out of the Advanced drawer writes the same `[files]` key the drawer row wrote,
+/// as one "Change {key}" undo step.
+#[test]
+fn moved_rows_write_the_same_files_keys() {
+    let cases = [
+        ("Levels", "2 levels", "mips.levels", serde_json::json!(2)),
+        ("Resize", "Half", "resize", serde_json::json!("half")),
+        // 512 is the default, and a pick equal to the current value writes nothing.
+        (
+            "Size floor",
+            "256 px",
+            "resize_floor",
+            serde_json::json!(256),
+        ),
+        (
+            "DDS header",
+            "DX10 extended header",
+            "header",
+            serde_json::json!("dx10"),
+        ),
+    ];
+    for (row, pick, field, value) in cases {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        m.select_item("up.png");
+        let mut h = harness(m);
+        h.run();
+        assert_eq!(
+            own(h.state(), "up.png", field),
+            None,
+            "{field} starts unset"
+        );
+        pick_in(&mut h, row, pick);
+        assert!(h.state_mut().wait_idle(WAIT));
+        h.run();
+        assert_eq!(own(h.state(), "up.png", field), Some(value), "{row}");
+        let label = format!("Change {field}");
+        assert_eq!(h.state().undo_label(), Some(label.as_str()), "{row}");
+    }
+}
+
+/// Backlog T32 (moved from the drawer, Note JI3): while a plan is pending the centre's Resize row is off with the
+/// wait reason, so a pick is not dropped as "unchanged" against the stale view; once the plan lands a pick of None
+/// is written.
+#[test]
+fn resize_pick_waits_for_the_plan_then_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.select_item("up.png");
+    m.set_field("up.png", "resize", serde_json::json!("half"));
+    assert!(m.fix_off().is_some(), "the edit left a plan in flight");
+    // Drawing only, never polled: the plan lands only at `wait_idle` below.
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1280.0, 1600.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run_steps(3);
+    let resize = |h: &Harness<'static, AppModel>| {
+        let n = h.get_by_role_and_label(Role::ComboBox, "Resize");
+        (
+            n.rect(),
+            n.accesskit_node().value(),
+            n.accesskit_node().is_disabled(),
+        )
+    };
+    let (r, value, off) = resize(&h);
+    // The stale view (Resize: None) is shown, and the row is off until the plan lands.
+    assert_eq!((value.as_deref(), off), (Some("None"), true));
+    h.hover_at(r.center());
+    h.run();
+    h.get_by_label("Wait for the plan to finish");
+    assert!(h.state_mut().wait_idle(WAIT));
+    h.run_steps(3);
+    let (_, value, off) = resize(&h);
+    assert_eq!((value.as_deref(), off), (Some("Half"), false));
+    h.get_by_role_and_label(Role::ComboBox, "Resize").click();
+    h.run();
+    h.get_by_label("None").click();
+    h.run_steps(3);
+    assert_eq!(
+        own(h.state(), "up.png", "resize"),
+        Some(serde_json::json!("none"))
+    );
 }
 
 /// Copy settings lists `resize` and `resize_floor` as ticks like any other field.
@@ -261,21 +374,21 @@ fn the_estimate_follows_resize_and_its_floor() {
     assert_eq!(estimate((1024, 1024), &p).width, 128);
 }
 
-/// Note FM44: the Advanced drawer's "Relative to" row sits after Resize, offers own size and slots 1 to 8 by name, is
+/// Note FM44, JI3: the Size group's "Relative to" row sits after Resize, offers own size and slots 1 to 8 by name, is
 /// never locked (so Copy settings carries it onto a texture whose resize is still None), and the size estimate
 /// follows the planned reference.
 #[test]
 fn the_size_row_offers_relative_to_slots() {
     use engine::config::{ResizeMode, Target};
-    use sdc_gui::model::fields::{advanced_field_views, ADVANCED_FIELDS};
+    use sdc_gui::model::fields::{field_views, FIELDS};
     use sdc_gui::model::out_size::estimate;
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    let at = |f: &str| ADVANCED_FIELDS.iter().position(|(g, _)| *g == f).unwrap();
+    let at = |f: &str| FIELDS.iter().position(|(g, _)| *g == f).unwrap();
     assert_eq!(at("resize_relative_to"), at("resize") + 1);
     let view = |m: &AppModel, item: &str| {
         let j = m.item(item).unwrap().job.clone().unwrap();
-        advanced_field_views(m.target, &j)
+        field_views(m.target, &j)
             .into_iter()
             .find(|v| v.field == "resize_relative_to")
             .unwrap()
@@ -298,11 +411,10 @@ fn the_size_row_offers_relative_to_slots() {
         (serde_json::json!("slot1"), None)
     );
     assert!(v.edited);
-    m.settings.advanced_open = true;
     m.select_item("up.png");
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Relative to");
+    in_centre(&h, "Relative to");
     let mut m = h.into_state();
     // Copy settings carries it.
     m.click_item("up2.png", false, false);
@@ -372,10 +484,17 @@ fn relative_to_and_floor_say_they_do_nothing_without_a_resize() {
     const NONE: &str = "no effect while Resize is None";
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.settings.advanced_open = true;
     m.select_item("up.png");
     let mut h = harness(m);
     h.run();
+    // Note JI3: the two notes are on the centre's Size group rows.
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    assert_eq!(
+        h.query_all_by_label(NONE)
+            .filter(|n| c.min.x <= n.rect().min.x && n.rect().max.x <= c.max.x + 0.5)
+            .count(),
+        2
+    );
     assert_eq!(h.query_all_by_label(NONE).count(), 2);
     h.state_mut()
         .set_field("up.png", "resize", serde_json::json!("half"));
@@ -408,15 +527,16 @@ fn a_cubes_resize_rows_say_face_size_sizes_it() {
     }
 }
 
-/// The Advanced drawer has a Size floor row showing the default, then the texture's own value; Clear removes the key.
+/// Note JI3: the Size group has a Size floor row showing the default, then the texture's own value; Clear removes the
+/// key.
 #[test]
 fn the_size_floor_row_follows_resize_and_clear_removes_it() {
-    use sdc_gui::model::fields::advanced_field_views;
+    use sdc_gui::model::fields::field_views;
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     let floor = |m: &AppModel| {
         let j = m.item("up.png").unwrap().job.clone().unwrap();
-        advanced_field_views(m.target, &j)
+        field_views(m.target, &j)
             .into_iter()
             .find(|v| v.field == "resize_floor")
             .unwrap()
@@ -430,11 +550,10 @@ fn the_size_floor_row_follows_resize_and_clear_removes_it() {
     let v = floor(&m);
     assert_eq!((v.value.clone(), v.lock), (serde_json::json!(256), None));
     assert!(v.edited, "Clear (↺) shows for the texture's own value");
-    m.settings.advanced_open = true;
     m.select_item("up.png");
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Size floor");
+    in_centre(&h, "Size floor");
     let mut m = h.into_state();
     m.clear_field("up.png", "resize_floor");
     assert!(m.wait_idle(WAIT));
