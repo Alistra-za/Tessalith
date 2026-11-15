@@ -23,7 +23,7 @@ fn a_texture_set_is_written_as_cs_saves_it_with_decimal_points() {
         "notACsField": 5
     }));
     assert_eq!(
-        to_text(Kind::Txst, &v, false),
+        to_text(Kind::Txst, &v),
         lines(&[
             "{",
             "    \"displacementScale\": 0.2,",
@@ -55,7 +55,7 @@ fn a_material_object_is_written_as_cs_saves_it() {
                             "microfacetRoughness": 1, "screenSpaceScale": 1, "extra": 1}
     }));
     assert_eq!(
-        to_text(Kind::Mato, &v, false),
+        to_text(Kind::Mato, &v),
         lines(&[
             "{",
             "    \"baseColorScale\": [",
@@ -80,7 +80,7 @@ fn a_material_object_is_written_as_cs_saves_it() {
 #[test]
 fn material_specular_is_always_written_and_absent_fields_are_omitted() {
     assert_eq!(
-        to_text(Kind::Mato, &obj(json!({"roughness": 0.9})), false),
+        to_text(Kind::Mato, &obj(json!({"roughness": 0.9}))),
         lines(&[
             "{",
             "    \"roughness\": 0.9,",
@@ -89,7 +89,7 @@ fn material_specular_is_always_written_and_absent_fields_are_omitted() {
         ])
     );
     assert_eq!(
-        to_text(Kind::Txst, &obj(json!({"specularLevel": 0.04})), false),
+        to_text(Kind::Txst, &obj(json!({"specularLevel": 0.04}))),
         lines(&["{", "    \"specularLevel\": 0.04", "}"])
     );
     assert_eq!(
@@ -162,7 +162,7 @@ fn export_writes_one_file_per_edid_named_exactly_and_records_hashes() {
     let b = m.cs_block(ROCK, Kind::Txst).unwrap();
     assert_eq!(
         std::fs::read_to_string(txst_file(&m, "LandscapeRock01")).unwrap(),
-        to_text(Kind::Txst, &b.values, false)
+        to_text(Kind::Txst, &b.values)
     );
     let mato =
         std::fs::read_to_string(root.join("PBRMaterialObjects/SnowMaterialObject1P.json")).unwrap();
@@ -557,40 +557,17 @@ fn the_cs_json_gate_is_cancel_only() {
     assert!(f.is_file(), "{:?}", m.export.notes);
 }
 
-/// Note ID44: with the "CS PBR 2.0 (experimental)" box off, a block holding CS 2.0 keys exports exactly what main
-/// writes: neither key, and no note about them.
+/// Notes ID44 and IE5: the CS 2.0 keys are written: bools as `true` / `false`, numbers with a decimal point, keys
+/// sorted with the others.
 #[test]
-fn box_off_export_is_byte_identical() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = with_blocks(d.path());
-    assert!(!m.settings.cs_pbr2, "the box is off by default");
-    let main = prepare(&m).unwrap();
-    m.set_cs_value(ROCK, Kind::Txst, "thinSurface", Some(json!(true)));
-    m.set_cs_value(ROCK, Kind::Txst, "subsurfaceBalance", Some(json!(0.6)));
-    // A wrong-typed CS 2.0 key is an unknown key with the box off: no "wrong type" note either.
-    m.set_cs_value(ROCK, Kind::Txst, "foliage", Some(json!(1)));
-    let p = prepare(&m).unwrap();
-    assert_eq!(p, main, "files and notes as main writes them");
-    assert_eq!(
-        p.files[0],
-        (
-            "PBRTextureSets/LandscapeRock01.json".to_string(),
-            lines(&["{", "    \"specularLevel\": 0.02", "}"])
-        )
-    );
-}
-
-/// Note ID44: with the box on the CS 2.0 keys are written: bools as `true` / `false`, numbers with a decimal point,
-/// keys sorted with the others.
-#[test]
-fn box_on_export_writes_new_keys() {
+fn export_writes_the_cs2_keys() {
     let v = obj(json!({
         "thinSurface": true, "foliage": false, "fuzzRoughnessTexture": true, "subsurfaceBalance": 1,
         "fuzzRoughness": -1, "thinSurfaceBackRoughnessScale": 2, "thinSurfaceSpecularWeight": 0.5,
         "thinSurfaceBackSpecularWeight": 0.25, "specularLevel": 0.04
     }));
     assert_eq!(
-        to_text(Kind::Txst, &v, true),
+        to_text(Kind::Txst, &v),
         lines(&[
             "{",
             "    \"foliage\": false,",
@@ -607,13 +584,12 @@ fn box_on_export_writes_new_keys() {
     );
     // A material object has none of them.
     assert_eq!(
-        to_text(Kind::Mato, &obj(json!({"thinSurface": true})), true),
+        to_text(Kind::Mato, &obj(json!({"thinSurface": true}))),
         lines(&["{", "    \"specularLevel\": 0.04", "}"])
     );
     // Through the export: the block's keys reach the file, a wrong-typed one is left out with a note.
     let d = tempfile::tempdir().unwrap();
     let mut m = with_blocks(d.path());
-    m.settings.cs_pbr2 = true;
     m.set_cs_value(ROCK, Kind::Txst, "thinSurface", Some(json!(true)));
     m.set_cs_value(ROCK, Kind::Txst, "subsurfaceBalance", Some(json!(0.6)));
     m.set_cs_value(ROCK, Kind::Txst, "foliage", Some(json!(1)));

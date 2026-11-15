@@ -238,28 +238,10 @@ fn mrt_info_and_raw_readers() {
     assert!(read_mask(&p, 4).is_err());
 }
 
-/// Note ID49: the tree comes from an exact list of tree-B fixture folder names; any other folder is tree A.
+/// Note ID50: each golden root has its own noise floor beside the captures, found by its exact folder name.
 #[test]
-fn tree_of_matches_tree_b_folders_exactly() {
-    use render3d::Tree;
+fn noise_path_is_per_root() {
     let golden = Path::new("golden");
-    assert_eq!(tree_of(&golden.join("cs-1.9.0-d2026.11.14")), Tree::B);
-    // A trailing separator names the same folder.
-    assert_eq!(tree_of(Path::new(r"golden\cs-1.9.0-d2026.11.14\")), Tree::B);
-    for a in [
-        "cs-1.9.0-d2026.10.11.0",
-        "cs-1.9.0-d2026.11.14.1",
-        "cs-1.9.0-d2026.11.15",
-        "cs-1.9.0-d2026.11.1",
-        "CS-1.9.0-D2026.11.14",
-        "b9-tex",
-    ] {
-        assert_eq!(tree_of(&golden.join(a)), Tree::A, "{a}");
-    }
-    assert_eq!(tree_of(Path::new("")), Tree::A);
-    // Each tree has its own baseline; each root its own noise floor beside the captures.
-    assert_eq!(baseline_file(Tree::A), "golden-baseline.txt");
-    assert_eq!(baseline_file(Tree::B), "golden-baseline-b.txt");
     let a = golden.join("cs-1.9.0-d2026.10.11.0");
     assert_eq!(
         noise_path(&a),
@@ -269,6 +251,12 @@ fn tree_of_matches_tree_b_folders_exactly() {
     assert_eq!(
         noise_path(&b),
         b.join("noise_Skyrim_AE_1.6.1170_20261114_201422_frame67390_Skyrim_AE_1.6.1170_20261114_201422_frame67391.json")
+    );
+    // An exact name: a near miss gets the default floor.
+    let near = golden.join("cs-1.9.0-d2026.11.14.1");
+    assert_eq!(
+        noise_path(&near),
+        near.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json")
     );
 }
 

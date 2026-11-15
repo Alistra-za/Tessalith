@@ -573,9 +573,6 @@ pub enum V3Cmd {
     /// The "Accurate (deferred)" toggle (`Renderer::set_deferred`): no reload; every shape re-permutes in the
     /// background while its old draw stays.
     SetDeferred(bool),
-    /// The "CS PBR 2.0 (experimental)" setting (Note ID31): `Renderer::set_tree`; every shape re-permutes in the
-    /// background while its old draw stays. Nothing reloads.
-    SetTree(render3d::Tree),
     Load {
         id: u64,
         spec: Arc<MeshSpec>,
@@ -787,8 +784,6 @@ pub struct Viewport3d {
     thread: Option<Sender<V3Cmd>>,
     /// Where the render thread reads shader text: the bundle, or a test's stand-in folder.
     source: render3d::ShaderSource,
-    /// The embedded shader tree the render thread uses (Note ID31): follows `GuiSettings.cs_pbr2`.
-    tree: render3d::Tree,
     /// Test seam: the channel `ensure_thread` takes instead of spawning the render loop.
     #[cfg(feature = "test-hooks")]
     fake_thread: Option<Sender<V3Cmd>>,
@@ -849,7 +844,6 @@ impl Viewport3d {
             busy_since: None,
             thread: None,
             source: render3d::ShaderSource::Bundled,
-            tree: render3d::Tree::A,
             #[cfg(feature = "test-hooks")]
             fake_thread: None,
             tx,
@@ -971,34 +965,6 @@ impl Viewport3d {
             self.reconf_sent += 1;
             let _ = t.send(V3Cmd::SetFeatures(on));
         }
-    }
-
-    /// The shader tree (Note ID31): a running render thread switches at once (shapes recompile in the background,
-    /// nothing reloads); a thread started later starts on it. A test's stand-in folder is left alone.
-    pub fn set_tree(&mut self, tree: render3d::Tree) {
-        if self.tree == tree {
-            return;
-        }
-        self.tree = tree;
-        if !matches!(
-            self.source,
-            render3d::ShaderSource::Bundled | render3d::ShaderSource::BundledB
-        ) {
-            return;
-        }
-        self.source = match tree {
-            render3d::Tree::A => render3d::ShaderSource::Bundled,
-            render3d::Tree::B => render3d::ShaderSource::BundledB,
-        };
-        if let Some(t) = &self.thread {
-            if t.send(V3Cmd::SetTree(tree)).is_ok() {
-                self.reconf_sent += 1;
-            }
-        }
-    }
-
-    pub fn tree(&self) -> render3d::Tree {
-        self.tree
     }
 
     /// The "Accurate (deferred)" toggle (v2 D8): the render thread re-permutes every shape in the background while
@@ -1276,21 +1242,22 @@ impl Viewport3d {
                 DebugOutput::Lit => true,
                 o => {
                     self.debug_support
-                        && self.shapes.iter().any(|s| {
-                            o.availability_in(&s.material, self.tree) != Availability::None
-                        })
+                        && self
+                            .shapes
+                            .iter()
+                            .any(|s| o.availability_drawn(&s.material) != Availability::None)
                 }
             })
             .collect()
     }
 
-    /// The loaded shapes' per-tree notes for the tree in use ("<shape>: <note>", `render3d::material::tree_note`;
-    /// Note ID38): built from the shapes the render thread last reported, so a tree switch or an edit updates them.
+    /// The loaded shapes' notes ("<shape>: <note>", `render3d::material::tree_note`; Note ID38): built from the shapes
+    /// the render thread last reported, so an edit updates them.
     pub fn tree_notes(&self) -> Vec<String> {
         self.shapes
             .iter()
             .filter_map(|s| {
-                render3d::material::tree_note(&s.material, self.tree)
+                render3d::material::tree_note(&s.material)
                     .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
             })
             .collect()
@@ -1298,12 +1265,12 @@ impl Viewport3d {
 
     /// The stand-in a view uses for some loaded shape, for the hover text.
     pub fn stand_in(&self, d: DebugView) -> Option<&'static str> {
-        self.shapes.iter().find_map(
-            |s| match d.output().availability_in(&s.material, self.tree) {
+        self.shapes
+            .iter()
+            .find_map(|s| match d.output().availability_drawn(&s.material) {
                 Availability::StandIn(n) => Some(n),
                 _ => None,
-            },
-        )
+            })
     }
 
     /// Copy image (Ctrl+Shift+C): the last frame's RGBA8 to `put` (the clipboard), and the status note.
@@ -1937,13 +1904,9 @@ fn render_loop(
                     compiled_changed |= r.apply_compiled(done);
                     None
                 }
-                c @ (V3Cmd::SetFeatures(_) | V3Cmd::SetTree(_)) => {
-                    match c {
-                        V3Cmd::SetFeatures(on) => r.set_features_on(on),
-                        V3Cmd::SetTree(tree) => r.set_tree(tree),
-                        _ => {}
-                    }
-                    // Both rebuild the composite: retry the look's deferred choice, and tell a failure once
+                V3Cmd::SetFeatures(on) => {
+                    r.set_features_on(on);
+                    // It rebuilds the composite: retry the look's deferred choice, and tell a failure once
                     // (Note ID32), as `SetDeferred` does.
                     if want_deferred && !r.deferred() {
                         if let Err(e) = r.set_deferred(true) {

@@ -46,7 +46,6 @@ const LABEL_W: f32 = 132.0;
 const SKINNED_HOVER: &str = "Set by the mesh; changing it breaks skinning.";
 const PBR_HOVER: &str = "TruePBR marker: PGPatcher and CS rely on it.";
 const TYPE_HOVER: &str = "Changing the type changes the trailer fields.";
-const TYPE_21_OFF: &str = "Tick CS PBR 2.0 in Settings to change it";
 const BANNED_HOVER: &str = "Not allowed on CS 2.0 PBR";
 const BROWSE_LIMIT: usize = 200;
 
@@ -385,33 +384,23 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         row_label(ui, "Shader type");
         let mut t = lt.shader_type;
         let shown = shader_type_name(t);
-        // Note ID21: a type-21 shape's type is changed only with the setting on; the combo says so.
-        let locked = lt.shader_type == 21 && !m.cs_pbr2;
-        let r = ui
-            .add_enabled_ui(!locked, |ui| {
-                egui::ComboBox::from_id_salt("meshes-edit-shader-type")
-                    .width(200.0)
-                    .selected_text(&shown)
-                    .show_ui(ui, |ui| {
-                        for (i, n) in SHADER_TYPES.iter().enumerate() {
-                            ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
-                        }
-                        // Note ID10, ID21: type 21 is a Skyrim SE type, offered with the setting on
-                        if m.cs_pbr2 && e.model.bsver == 100 {
-                            ui.selectable_value(&mut t, 21, shader_type_name(21));
-                        }
-                    })
-                    .response
+        let r = egui::ComboBox::from_id_salt("meshes-edit-shader-type")
+            .width(200.0)
+            .selected_text(&shown)
+            .show_ui(ui, |ui| {
+                for (i, n) in SHADER_TYPES.iter().enumerate() {
+                    ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
+                }
+                // Note ID10, ID21: type 21 is a Skyrim SE type
+                if e.model.bsver == 100 {
+                    ui.selectable_value(&mut t, 21, shader_type_name(21));
+                }
             })
-            .inner;
+            .response;
         let typ = egui::WidgetType::ComboBox;
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
-        if locked {
-            r.on_disabled_hover_text(TYPE_21_OFF);
-        } else {
-            r.on_hover_text(TYPE_HOVER);
-        }
+        r.on_hover_text(TYPE_HOVER);
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {
                 at: at.clone(),
@@ -549,10 +538,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         },
     ) = (t21, &p.trailer)
     {
-        let enabled = m.cs_pbr2;
-        ui.add_enabled_ui(enabled, |ui| {
-            pbr2_section(ui, e, act, &at, (*version, *features, params));
-        });
+        pbr2_section(ui, e, act, &at, (*version, *features, params));
     }
     if !t21 {
         let gloss = if pbr { "Specular level" } else { "Glossiness" };

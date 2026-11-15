@@ -6,8 +6,9 @@ use common::{
 };
 use nif::material::MaterialState;
 use nif::props::Alpha;
+use render3d::material::pbr2_flags;
 use render3d::scene::Scene;
-use render3d::{pbr_flags, Bound, EditKind, Renderer, ShapeId, ShapeStatus};
+use render3d::{Bound, EditKind, Renderer, ShapeId, ShapeStatus};
 
 const CYL1: ShapeId = ShapeId(9);
 
@@ -233,24 +234,25 @@ fn vertex_colours_without_a_colour_stream_read_white() {
     );
 }
 
-/// The packed PBRFlags reach the shader: Rim on a PBR shape is a cbuffer edit (Subsurface = 16) and turns the
-/// stand-in's flag channel on.
+/// The packed PBRFlags reach the shader: Subsurface on a type-21 shape is a cbuffer edit (Subsurface = 16) and turns
+/// the stand-in's flag channel on (Note IE5: type 21, since the v1 bit draws as vanilla).
 #[test]
 fn pbr_flags_reach_the_shader() {
+    use nif::pbr2::feat::SUBSURFACE;
     let cache = tempfile::tempdir().unwrap();
     let mut r = furniture(cache.path());
     let mut m = material(&r, CYL1);
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
-    m.slsf2 |= 1 << 23;
     m.params.emissive_color = [0.0; 3]; // D1 would add the NIF emissive colour under PBR
+    let m = common::as_t21(m, 0);
     assert_eq!(
         r.set_material(CYL1, m.clone(), &|_| None),
         Ok(EditKind::Permutation)
     );
-    assert_eq!(pbr_flags(&m, &Bound::default()), 0);
+    assert_eq!(pbr2_flags(0, None, &Bound::default()), 0);
     let plain = r.render(&Scene::neutral(), 64, 64).unwrap();
-    m.slsf2 |= 1 << 26;
-    assert_eq!(pbr_flags(&m, &Bound::default()), 16);
+    let m = common::as_t21(m, SUBSURFACE);
+    assert_eq!(pbr2_flags(SUBSURFACE, None, &Bound::default()), 16);
     assert_eq!(r.set_material(CYL1, m, &|_| None), Ok(EditKind::Cbuffer));
     let subsurface = r.render(&Scene::neutral(), 64, 64).unwrap();
     assert!(

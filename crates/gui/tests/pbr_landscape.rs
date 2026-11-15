@@ -201,12 +201,13 @@ fn rows_landscape_does_not_read_hide_while_the_box_is_off() {
     assert!(!box_on(&h));
     assert!(!has(&h, "Coat strength") && !has(&h, "Subsurface opacity"));
     assert!(has(&h, "Roughness scale") && has(&h, "Glint parameters"));
-    assert!(has(&h, &format!("9 {HIDDEN_ROWS}")));
+    // The 9 landscape-unread rows and the 8 CS 2.0 keys (Notes ID47 and IE5: the keys are always fields now).
+    assert!(has(&h, &format!("17 {HIDDEN_ROWS}")));
     h.state_mut()
         .set_cs_value(ID, Kind::Txst, "coatStrength", Some(serde_json::json!(0.5)));
     h.run();
     assert!(has(&h, "Coat strength"), "a valued row is never hidden");
-    assert!(has(&h, &format!("8 {HIDDEN_ROWS}")));
+    assert!(has(&h, &format!("16 {HIDDEN_ROWS}")));
 }
 
 fn glint(m: &AppModel, kind: Kind) -> Option<serde_json::Value> {

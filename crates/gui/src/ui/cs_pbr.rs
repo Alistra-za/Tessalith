@@ -119,7 +119,7 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
     ui.strong(SHARED);
     let b = m.cs_block(&v.id, Kind::Txst).unwrap_or_default();
     let mut own = vec![];
-    for f in fields(Kind::Txst, m.settings.cs_pbr2)
+    for f in fields(Kind::Txst)
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
@@ -134,7 +134,7 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
 /// Note BM16: a material object's shared field: "shared (above)" with Unsync, or its own row with Sync.
 fn mato_shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut Vec<Act>) {
     let txst = m.cs_block(&v.id, Kind::Txst);
-    for f in fields(Kind::Mato, m.settings.cs_pbr2)
+    for f in fields(Kind::Mato)
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
@@ -200,8 +200,7 @@ fn block(
     }
     let pgp = landscape && m.pgp_written(v);
     let mut hidden = 0;
-    let pbr2 = m.settings.cs_pbr2;
-    for f in fields(kind, pbr2) {
+    for f in fields(kind) {
         // Note BM16: in the card the shared fields are edited in the Shared section (and below for an unsynced block).
         if card && SHARED_FIELDS.contains(&f.name) {
             continue;
@@ -220,8 +219,7 @@ fn block(
     if hidden > 0 {
         ui.weak(format!("{hidden} {HIDDEN_ROWS}"));
     }
-    // Note ID44: with the box off a CS 2.0 key is an unknown key, never "wrong type".
-    for k in b.bad.iter().filter(|k| field(kind, k, pbr2).is_some()) {
+    for k in b.bad.iter().filter(|k| field(kind, k).is_some()) {
         ui.colored_label(
             AMBER,
             format!("{k}: wrong type in sdc-project.toml; not exported"),

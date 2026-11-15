@@ -1,4 +1,4 @@
-//! Note ID33: tree B draws type 21 with CS 2.0's thin-surface shading. WARP, bundled tree B shaders (fxc compiles).
+//! Note ID33: the CS 2.0 shaders draw type 21 with thin-surface shading. WARP, bundled shaders (fxc compiles).
 #[path = "common/mod.rs"]
 mod common;
 use nif::material::MaterialState;
@@ -59,7 +59,7 @@ fn render_pbr2_thin_surface_plane() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = Renderer::with_gpu_source(
         Gpu::new_warp().unwrap(),
-        ShaderSource::BundledB,
+        ShaderSource::Bundled,
         cache.path().to_path_buf(),
     )
     .unwrap();

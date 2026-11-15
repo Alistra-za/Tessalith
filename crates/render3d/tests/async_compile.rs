@@ -182,13 +182,12 @@ fn a_second_async_load_reports_the_missing_field_again() {
     assert_eq!(w.iter().filter(|s| *s == NO_AMBIENT).count(), 1, "{w:?}");
 }
 
-/// Vanilla → TruePBR with Rim (Subsurface): a permutation edit whose pixels differ (the stand-in writes 0.5
-/// green when PBRFlags ≠ 0).
+/// Vanilla → type-21 PBR with Subsurface (Note IE5: the v1 bit draws as vanilla): a permutation edit whose pixels
+/// differ (the stand-in writes 0.5 green when PBRFlags ≠ 0).
 fn pbr_subsurface(mut m: MaterialState) -> MaterialState {
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
-    m.slsf2 |= (1 << 23) | (1 << 26);
     m.params.emissive_color = [0.0; 3];
-    m
+    common::as_t21(m, nif::pbr2::feat::SUBSURFACE)
 }
 
 fn alpha_test(mut m: MaterialState) -> MaterialState {
@@ -280,7 +279,10 @@ fn permutation_edit_keeps_old_draw_until_compiled() {
     );
     // A second edit for the same program queues nothing and is what lands.
     let mut m2 = m.clone();
-    m2.params.glossiness = 7.0;
+    let nif::props::LightingTrailer::Pbr2 { params, .. } = &mut m2.params.trailer else {
+        unreachable!()
+    };
+    params[0] = 0.5; // roughness scale
     assert_eq!(
         r.set_material(CYL1, m2.clone(), &none),
         Ok(EditKind::Cbuffer)

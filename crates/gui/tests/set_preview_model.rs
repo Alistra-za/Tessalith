@@ -2249,10 +2249,10 @@ fn preview_applies_payload_then_txst_then_extra() {
     assert_eq!(p, plain);
 }
 
-/// Note ID45: the fingerprint carries the texture set's values for the type-21 path only with the box on, so a
-/// CS 2.0 key edit is a material change then and nothing with the box off.
+/// Notes ID45 and IE5: the fingerprint carries the texture set's values for the type-21 path, so a CS 2.0 key edit is
+/// a material change.
 #[test]
-fn the_fingerprint_carries_the_texture_set_only_with_the_box_on() {
+fn the_fingerprint_carries_the_texture_set() {
     use sdc_gui::model::cs_pbr::Kind;
     let dir = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(dir.path());
@@ -2262,22 +2262,8 @@ fn the_fingerprint_carries_the_texture_set_only_with_the_box_on() {
         id,
         Kind::Txst,
         "subsurfaceBalance",
-        Some(serde_json::json!(0.6)),
-    );
-    let off = fingerprint(&m, &key).unwrap();
-    assert_eq!(off.txst21, None);
-    m.set_cs_value(
-        id,
-        Kind::Txst,
-        "subsurfaceBalance",
         Some(serde_json::json!(0.5)),
     );
-    let off2 = fingerprint(&m, &key).unwrap();
-    assert_eq!(
-        classify(Some(&off), &off2, &serde_json::Value::Null),
-        Delta::default()
-    );
-    m.settings.cs_pbr2 = true;
     let on = fingerprint(&m, &key).unwrap();
     assert_eq!(
         on.txst21.as_ref().and_then(|v| v.get("subsurfaceBalance")),
@@ -2334,38 +2320,4 @@ fn thin_surface_extra_is_ignored_on_two_layer_and_hair() {
             "features {features}"
         );
     }
-}
-
-/// Note ID45 (review: box toggle): ticking or unticking the box reaches the fingerprint on the next throttled check,
-/// with no sets-document edit.
-#[test]
-fn toggling_the_box_refreshes_the_fingerprint() {
-    use sdc_gui::model::cs_pbr::Kind;
-    let dir = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened(dir.path());
-    let key = rock(&m).0.key;
-    m.select_set(&key);
-    m.set_cs_value(
-        "landscape/rock01",
-        Kind::Txst,
-        "thinSurface",
-        Some(serde_json::json!(true)),
-    );
-    let mut s = SetPreview::new(None, DEFAULT_CAP);
-    run(&mut s, &m);
-    assert_eq!(s.fp.as_ref().unwrap().txst21, None);
-    m.settings.cs_pbr2 = true;
-    s.shown = true;
-    s.poll_at(&m, Instant::now() + THROTTLE);
-    assert!(s
-        .fp
-        .as_ref()
-        .unwrap()
-        .txst21
-        .as_ref()
-        .is_some_and(|v| v.contains_key("thinSurface")));
-    m.settings.cs_pbr2 = false;
-    s.shown = true;
-    s.poll_at(&m, Instant::now() + THROTTLE * 3);
-    assert_eq!(s.fp.as_ref().unwrap().txst21, None);
 }

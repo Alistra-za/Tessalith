@@ -366,22 +366,24 @@ fn no_reader_shapes() -> Vec<ParsedShape> {
     ]
 }
 
-/// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, captured on base f9639a84 (before
-/// Note GX), forward and deferred. WARP, not the default GPU, so the bytes do not depend on the adapter or driver;
-/// a Windows update that changes WARP's rasteriser changes them too, so re-capture on that base before re-pinning.
+/// SHA-256 of the 128 × 128 RGBA8 readback of [`no_reader_shapes`] on WARP, forward and deferred. Captured on base
+/// 06c393b8 with `ShaderSource::BundledB` (the CS 2.0 tree, the only one since Note IE5; the CS 1.9 pins came from
+/// f9639a84, before Note GX). WARP, not the default GPU, so the bytes do not depend on the adapter or driver; a
+/// Windows update that changes WARP's rasteriser changes them too, so re-capture on that base before re-pinning.
 const NO_READER_SHA256: [(bool, &str); 2] = [
     (
         false,
-        "d3cddc8212422ef19291924c8ce235ac0add7e70d8d5076d33629627befdf544",
+        "e30e463e1c5746333e0a192c89e1f5a1eecff5b5f5cc71ecf26375ac2b3f9cda",
     ),
     (
         true,
-        "7d1cef7a9cb334306595af2940cb3c6c389de1ce6bc998c08285ab19889c547e",
+        "cac51f6d205ecf5713643ad728adb842de2b152b6d30dccd882439f08fde8f35",
     ),
 ];
 
-/// Two pins for a frame with no t17 reader (Note GX1): its pixels are byte-identical to base f9639a84, forward and
-/// deferred, with both targets' depth R32_TYPELESS (GX2); and it draws no pre-pass and its target holds no copy.
+/// Two pins for a frame with no t17 reader (Note GX1): its pixels are byte-identical to [`NO_READER_SHA256`]'s base,
+/// forward and deferred, with both targets' depth R32_TYPELESS (GX2); and it draws no pre-pass and its target holds
+/// no copy.
 /// The last asserts show the hooks can fail: adding a hair card turns the pre-pass on and makes the copy.
 #[test]
 fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
@@ -404,9 +406,9 @@ fn render_a_frame_without_a_depth_reader_is_unchanged_and_draws_no_prepass() {
         assert_eq!(
             got, want,
             "deferred {deferred}: the frame's bytes changed. The pin depends on WARP's rasteriser and the system \
-             d3dcompiler, so a Windows update can move it. To re-take it, check out the base commit (f9639a84) in a \
-             temporary detached worktree, copy this test there without the last_prepass_draws and has_depth_copy \
-             asserts, run it and pin the hashes its assert reports; never re-pin from this branch"
+             d3dcompiler, so a Windows update can move it. To re-take it, check out the base commit (06c393b8) in a \
+             temporary detached worktree, copy this test there with ShaderSource::BundledB, run it and pin the \
+             hashes its assert reports; never re-pin from this branch"
         );
         assert_eq!(r.last_prepass_draws(), 0, "deferred {deferred}");
         assert!(

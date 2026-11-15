@@ -2,9 +2,9 @@
 //! composite MainRW. Thresholds (D-P18): over == 0 on RT0-RT7 and on main over the clean sub-mask; the subject
 //! classes must match tests/fixtures/golden-baseline.txt (D-P20). D5 adds the Dynamic Cubemaps profiles A_DC and
 //! A_DC_N (A_DC_LOG is a define-log capture, R8): their composite reads the captured env cube (X3e); a subject whose
-//! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared). Note ID49: a root that
-//! `golden::tree_of` names tree B (the CS PBR2Test1 captures) replays on tree B against
-//! tests/fixtures/golden-baseline-b.txt, with that root's own noise floor (`golden::noise_path`).
+//! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared). The bundled CS 2.0 shaders
+//! replay the CS PBR2Test1 captures (`cs-1.9.0-d2026.11.14`, Notes ID49 and IE), with that root's own noise floor
+//! (`golden::noise_path`).
 use render3d::golden::{self, Diff, Noise};
 use render3d::Renderer;
 use std::collections::{BTreeMap, BTreeSet};
@@ -85,10 +85,7 @@ fn replay_matches_capture_per_mrt() {
     let cache = tempfile::tempdir().unwrap();
     let fp = render3d::ShaderSource::Bundled;
     let mut ren = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
-    // Note ID49: a CS PBR2Test1 root replays on tree B against its own baseline and noise floor.
-    let tree = golden::tree_of(root);
-    ren.set_tree(tree);
-    let baseline = golden::baseline_file(tree);
+    let baseline = "golden-baseline.txt";
     let noise = Noise::load(&golden::noise_path(root)).unwrap();
     let subjects = golden::subjects(root, PROFILES).unwrap();
 

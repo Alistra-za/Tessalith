@@ -23,6 +23,19 @@ pub fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
+/// `m` as a type-21 (CS 2.0 PBR) shape with `features` and the default parameters, the v1 bit cleared. Since the v1
+/// bit draws as vanilla (Note IE5), this is the material a test uses to reach the PBR path.
+pub fn as_t21(mut m: nif::material::MaterialState, features: u32) -> nif::material::MaterialState {
+    m.shader_type = 21;
+    m.slsf2 &= !nif::material::SLSF2_TRUE_PBR;
+    m.params.trailer = nif::props::LightingTrailer::Pbr2 {
+        version: 2,
+        features,
+        params: nif::pbr2::PBR2_DEFAULTS,
+    };
+    m
+}
+
 /// A WARP renderer on the stand-in shader with exactly `features` as CS feature defines.
 pub fn renderer(cache: &Path, features: &[&str]) -> Renderer {
     renderer_at(&standin_root(), cache, features)

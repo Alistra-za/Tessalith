@@ -1,7 +1,6 @@
 crates/encoders-sys/vendor/** -text
 crates/*/tests/fixtures/** -text
 crates/*/tests/data/** -text
-crates/render3d/shaders/cs/** -text
 crates/render3d/shaders/cs2/** -text
 schema/*.json text eol=lf
 crates/gui/assets/*.json text eol=lf

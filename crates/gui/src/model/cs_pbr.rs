@@ -83,7 +83,8 @@ pub const TXST_FIELDS: [Field; 13] = [
 ];
 
 /// Note ID44: the texture-set keys CS TruePBR 2.0 reads beyond `TXST_FIELDS` (`PBRTextureSetData` at 92af7dd; the
-/// local .csm schema and spec sections 4 and 7 agree). Edited and exported only with "CS PBR 2.0 (experimental)" on.
+/// local .csm schema and spec sections 4 and 7 agree). Edited and exported with the others; templates leave them
+/// out (Note IE5).
 pub const TXST2_FIELDS: [Field; 8] = [
     f("subsurfaceBalance", Num, 0.0, 1.0, 0.75),
     f("thinSurface", Bool, 0.0, 0.0, 0.0),
@@ -110,7 +111,7 @@ const fn concat<const N: usize>(a: &[Field], b: &[Field]) -> [Field; N] {
     out
 }
 
-/// `TXST_FIELDS` then `TXST2_FIELDS`: the texture-set fields with the box on.
+/// `TXST_FIELDS` then `TXST2_FIELDS`: the texture-set fields.
 const TXST_ALL: [Field; 21] = concat(&TXST_FIELDS, &TXST2_FIELDS);
 
 /// Material-object fields. `roughness` is absolute, not a scale; CS's `specularLevel` default is 1.0.
@@ -203,7 +204,7 @@ pub fn field_note(kind: Kind, name: &str) -> Option<&'static str> {
             "Absolute specular level where the material object projects (replaces the surface's; not a scale)."
         }
         (Kind::Txst, "fuzzRoughness") => "A negative value uses the base roughness.",
-        // Note ID46 (owner 2026-11-14): CS 2.0 reads the roughness from the parallax slot's G (tree B Lighting.hlsl).
+        // Note ID46 (owner 2026-11-14): CS 2.0 reads the roughness from the parallax slot's G (cs2 Lighting.hlsl).
         (Kind::Txst, "fuzzRoughnessTexture") => {
             "Fuzz roughness comes from the green channel of the parallax (height) slot's texture, so that texture \
              holds two channels: encode it BC5 or BC1, not BC4."
@@ -219,17 +220,25 @@ pub fn mato_synced(txst: Option<&CsBlock>, mato: &CsBlock, field: &str) -> bool 
         && txst.and_then(|b| b.values.get(field)) == mato.values.get(field)
 }
 
-/// `pbr2`: the "CS PBR 2.0 (experimental)" box (`GuiSettings::cs_pbr2`); on, a texture set also has `TXST2_FIELDS`.
-pub fn fields(kind: Kind, pbr2: bool) -> &'static [Field] {
+/// A texture set's fields are `TXST_FIELDS` then the CS 2.0 keys, `TXST2_FIELDS` (Notes ID44 and IE).
+pub fn fields(kind: Kind) -> &'static [Field] {
     match kind {
-        Kind::Txst if pbr2 => &TXST_ALL,
-        Kind::Txst => &TXST_FIELDS,
+        Kind::Txst => &TXST_ALL,
         Kind::Mato => &MATO_FIELDS,
     }
 }
 
-pub fn field(kind: Kind, name: &str, pbr2: bool) -> Option<&'static Field> {
-    fields(kind, pbr2).iter().find(|f| f.name == name)
+pub fn field(kind: Kind, name: &str) -> Option<&'static Field> {
+    fields(kind).iter().find(|f| f.name == name)
+}
+
+/// The fields a template sets (Note ID44): the CS 1.x ones, without the CS 2.0 keys, which a template leaves as they
+/// are.
+pub fn template_fields(kind: Kind) -> &'static [Field] {
+    match kind {
+        Kind::Txst => &TXST_FIELDS,
+        Kind::Mato => &MATO_FIELDS,
+    }
 }
 
 /// Whether `v` has the type CS reads for a field of kind `fk` (unknown glint sub-keys are allowed: never written).
@@ -400,8 +409,7 @@ pub struct CsBlock {
     pub bad: Vec<String>,
 }
 
-/// Reads a block table. Unknown keys are left alone: they stay in the file and are never exported. The CS 2.0 keys
-/// are read whatever the box says (the document has no settings); every reader filters them by `field(.., pbr2)`.
+/// Reads a block table. Unknown keys are left alone: they stay in the file and are never exported.
 pub(crate) fn block_of(t: &dyn TableLike, kind: Kind) -> CsBlock {
     let mut b = CsBlock::default();
     for (k, item) in t.iter() {
@@ -429,7 +437,7 @@ pub(crate) fn block_of(t: &dyn TableLike, kind: Kind) -> CsBlock {
                     .unwrap_or_default()
             }
             _ => {
-                if let Some(f) = field(kind, k, true) {
+                if let Some(f) = field(kind, k) {
                     match item_json(item).filter(|v| valid_value(f.kind, v)) {
                         Some(v) => {
                             b.values.insert(k.to_string(), v);

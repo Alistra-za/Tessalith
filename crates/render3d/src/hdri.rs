@@ -236,8 +236,9 @@ pub fn specular_chain(
                     for (k, p) in out.iter_mut().enumerate() {
                         let i = c * chunk + k;
                         let (f, j) = (i / per_face, (i % per_face) as u32);
-                        // CS's getSamplingVector: the texel's corner (ThreadID / size, no + 0.5), Note GM2.
-                        let at = |c: u32| c as f32 / n as f32;
+                        // CS 2.0's GetCubemapSamplingVector (CubemapCommon.hlsli): the texel's centre,
+                        // (ThreadID + 0.5) / size. CS 1.9 sampled the corner (Notes GM2, IE5).
+                        let at = |c: u32| (c as f32 + 0.5) / n as f32;
                         let dir = texcore::cube::dir_at(f, at(j % n), at(j / n));
                         *p = prefilter(src, dir, r, wt);
                     }

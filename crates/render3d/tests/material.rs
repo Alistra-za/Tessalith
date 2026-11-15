@@ -532,7 +532,7 @@ fn distinct() -> [f32; 25] {
     std::array::from_fn(|i| 0.01 * (i + 1) as f32)
 }
 
-/// Note ID33: the v2 feature bits map to CS's `PBR::Flags` (tree B PBRMath.hlsli:24-39).
+/// Note ID33: the v2 feature bits map to CS's `PBR::Flags` (cs2 PBRMath.hlsli:24-39).
 #[test]
 fn pbr2_flags_table() {
     use nif::pbr2::feat;
@@ -608,7 +608,7 @@ fn pbr2_flags_table() {
     );
 }
 
-/// Note ID33: the CS 2.0 cbuffer packing, member by member (tree B Lighting.hlsl:536, 545, 566-570).
+/// Note ID33: the CS 2.0 cbuffer packing, member by member (cs2 Lighting.hlsl:536, 545, 566-570).
 #[test]
 fn write_pbr2_packs_params() {
     use nif::pbr2::feat;
@@ -677,7 +677,7 @@ fn write_pbr2_packs_params() {
         [1.0, 0.5, 2.0]
     );
 
-    // Pin of the v1 and vanilla writes these members kept (tree A byte identity).
+    // Pin of the v1 and vanilla writes these members kept.
     let mut v = pbr(&[]);
     v.params.lighting_effect_1 = 0.3;
     v.params.lighting_effect_2 = 2.0;

@@ -1032,8 +1032,7 @@ pub struct SetFingerprint {
     pub entry: Option<EntryInput>,
     pub prefix: Option<String>,
     pub members: Vec<MemberSlot>,
-    /// Note ID45: the texture-set block's values a type-21 shape takes (`apply_txst21`); `None` with the "CS PBR 2.0
-    /// (experimental)" box off or without a block.
+    /// Note ID45: the texture-set block's values a type-21 shape takes (`apply_txst21`); `None` without a block.
     pub txst21: Option<serde_json::Map<String, Value>>,
 }
 
@@ -1056,10 +1055,7 @@ pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
         prefix: v.prefix.clone(),
         members,
         txst21: m
-            .settings
-            .cs_pbr2
-            .then(|| m.cs_block(&v.id, crate::model::cs_pbr::Kind::Txst))
-            .flatten()
+            .cs_block(&v.id, crate::model::cs_pbr::Kind::Txst)
             .map(|b| b.values),
     })
 }
@@ -1164,7 +1160,7 @@ pub fn classify(old: Option<&SetFingerprint>, new: &SetFingerprint, default: &Va
         }
         d.material = va != vb && !d.reload;
     }
-    // Note ID45: a texture-set edit the type-21 shapes take (always `None` with the box off).
+    // Note ID45: a texture-set edit the type-21 shapes take.
     d.material |= old.txst21 != new.txst21 && !d.reload;
     d
 }
@@ -2338,7 +2334,7 @@ impl SetPreview {
         });
         let sources: Vec<MaterialState> = shapes.into_iter().map(|(_, _, m)| m).collect();
         let mut rows = self.crashed(rows, &sources);
-        // Note ID45: with the box on, the type-21 shapes take the set's texture set (a built-in shape is never 21).
+        // Note ID45: the type-21 shapes take the set's texture set (a built-in shape is never 21).
         // shortcut: unreachable while a set with a texture-set block is plane-locked (Note BM, R1); the .csm rework
         // owns unlocking type-21 meshes for such sets.
         if let Some(v) = self.fp.as_ref().and_then(|f| f.txst21.as_ref()) {

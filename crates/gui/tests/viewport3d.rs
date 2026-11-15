@@ -1696,56 +1696,6 @@ fn the_features_toggle_sends_set_features_and_no_load() {
     assert!(!v.busy());
 }
 
-/// Note ID31: a tree change reaches a running render thread once, as one reconfiguration; the same tree sends nothing.
-#[test]
-fn set_tree_sends_set_tree_once() {
-    let (_d, mut v, cmds) = confirmed();
-    v.set_tree(render3d::Tree::A);
-    assert!(cmds.try_recv().is_err(), "tree A is the start");
-    v.set_tree(render3d::Tree::B);
-    v.set_tree(render3d::Tree::B);
-    let sent: Vec<v3::V3Cmd> = cmds.try_iter().collect();
-    assert_eq!(sent.len(), 1);
-    assert!(matches!(sent[0], v3::V3Cmd::SetTree(render3d::Tree::B)));
-    assert_eq!(v.tree(), render3d::Tree::B);
-    assert!(v.busy(), "awake until the render thread answers");
-    v.handle(v3::V3Reply::Reconfigured(1));
-    assert!(!v.busy());
-}
-
-/// Note ID31: a test's stand-in folder is never replaced by a tree change, running thread or not.
-#[test]
-fn set_tree_leaves_a_stand_in_folder_and_sends_nothing() {
-    let (_d, mut v, cmds) = confirmed();
-    v.use_shader_folder(std::path::PathBuf::from("standin"));
-    v.set_tree(render3d::Tree::B);
-    assert!(cmds.try_recv().is_err(), "the folder source has no tree");
-    assert!(matches!(
-        v.source_for_test(),
-        render3d::ShaderSource::Folder(_)
-    ));
-}
-
-/// Note ID31 (pin): a render thread not started yet reads the tree's source, so the box on at startup starts on B.
-#[test]
-fn set_tree_before_the_thread_starts_picks_the_bundled_b_source() {
-    let mut v = Viewport3d::new();
-    assert!(matches!(
-        v.source_for_test(),
-        render3d::ShaderSource::Bundled
-    ));
-    v.set_tree(render3d::Tree::B);
-    assert!(matches!(
-        v.source_for_test(),
-        render3d::ShaderSource::BundledB
-    ));
-    v.set_tree(render3d::Tree::A);
-    assert!(matches!(
-        v.source_for_test(),
-        render3d::ShaderSource::Bundled
-    ));
-}
-
 #[test]
 fn the_panel_stays_awake_until_the_refresh_after_the_last_shapes_is_read() {
     let (_d, mut v, _cmds) = loaded_mesh();
@@ -1783,7 +1733,8 @@ fn the_off_line_lists_what_the_renderer_leaves_off() {
     h.get_by_label_contains("Off in this preview: Dynamic Cubemaps, LOD Blending");
 }
 
-/// Note GT4: with all 48 defaults off the line is still one row, and the full list stays the label's text.
+/// Note GT4: with all 42 defaults off (the CS 2.0 list, Note IE5) the line is still one row, and the full list stays
+/// the label's text.
 #[test]
 fn the_off_line_is_one_row_with_the_full_text() {
     let height = |off: Vec<String>| {
@@ -1800,7 +1751,7 @@ fn the_off_line_is_one_row_with_the_full_text() {
         .iter()
         .cloned()
         .collect();
-    assert_eq!(all.len(), 48);
+    assert_eq!(all.len(), 42);
     let one = height(vec![all[0].clone()]);
     let many = height(all.clone());
     assert!((many - one).abs() < 1.0, "one row: {one} vs {many}");
@@ -2077,7 +2028,20 @@ fn shape_info(id: u32, m: MaterialState) -> ShapeInfo {
     }
 }
 
+/// A shape the shaders draw as PBR: type 21 (Note IE5: a v1 shape draws as vanilla).
 fn pbr() -> MaterialState {
+    let mut m = MaterialState::builtin_default();
+    m.shader_type = 21;
+    m.params.trailer = nif::props::LightingTrailer::Pbr2 {
+        version: 2,
+        features: 0,
+        params: nif::pbr2::PBR2_DEFAULTS,
+    };
+    m
+}
+
+/// A v1 shape: SLSF2 bit 23 on a lighting type.
+fn pbr_v1() -> MaterialState {
     let mut m = MaterialState::builtin_default();
     m.slsf2 |= nif::material::SLSF2_TRUE_PBR;
     m
@@ -2118,37 +2082,24 @@ fn offered_views_follow_support_and_the_loaded_materials() {
     );
 }
 
-/// Note ID38: the views and the per-tree notes follow the tree in use. Tree B draws a v1 shape as vanilla (no
-/// Metallic) and skips a type-21 shape that breaks a CS 2.0 rule, which tree A draws as its stand-in.
+/// Notes ID38 and IE5: the views and the notes follow what the CS 2.0 shaders draw. A v1 shape draws as vanilla
+/// (no Metallic, no note); a type-21 shape that breaks a CS 2.0 rule is skipped with its note.
 #[test]
-fn views_and_tree_notes_follow_the_tree() {
+fn views_and_notes_follow_the_drawn_material() {
     use v3::DebugView::*;
     let (mut v, _cmds) = rendered();
     v.handle(v3::V3Reply::DebugSupport(true));
-    v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr())]));
-    assert!(v.offered().contains(&Metallic), "A: v1 is TruePBR");
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr_v1())]));
+    assert!(!v.offered().contains(&Metallic), "v1 is vanilla");
     assert!(v.tree_notes().is_empty());
-    v.set_tree(render3d::Tree::B);
-    assert!(!v.offered().contains(&Metallic), "B: v1 is vanilla");
 
-    let mut bad = MaterialState::builtin_default();
-    bad.shader_type = 21;
-    bad.params.trailer = nif::props::LightingTrailer::Pbr2 {
-        version: 2,
-        features: 0,
-        params: nif::pbr2::PBR2_DEFAULTS,
-    };
+    let mut bad = pbr();
     bad.pbr2_error = Some("CS 2.0 won't draw this shape: x".into());
     v.handle(v3::V3Reply::Shapes(vec![
-        shape_info(0, pbr()),
+        shape_info(0, pbr_v1()),
         shape_info(1, bad),
     ]));
     assert_eq!(v.tree_notes(), ["s1: CS 2.0 won't draw this shape: x"]);
-    v.set_tree(render3d::Tree::A);
-    assert_eq!(
-        v.tree_notes(),
-        [format!("s1: {}", render3d::material::APPROXIMATE)]
-    );
 }
 
 #[test]

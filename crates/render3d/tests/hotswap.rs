@@ -122,8 +122,8 @@ fn ab_toggle_is_instant_and_the_srgb_header_shows() {
     assert!(!r.set_texture_variant(PATH, Variant::Encoded), "dropped");
 }
 
-/// T-H4: a TruePBR emissive map (slot 2 → t6) swapped in sets HasEmissive (the stand-in's green channel) and
-/// dropping it clears the flag again.
+/// T-H4: a PBR emissive map (slot 2 → t6) swapped in sets HasEmissive (the stand-in's green channel) and dropping
+/// it clears the flag again. A type-21 shape (Note IE5: the v1 bit draws as vanilla).
 #[test]
 fn swapping_an_emissive_map_in_and_out_flips_has_emissive() {
     let cache = tempfile::tempdir().unwrap();
@@ -131,8 +131,8 @@ fn swapping_an_emissive_map_in_and_out_flips_has_emissive() {
     r.load(&fixture("TestNifFile_Furniture_Col_SE.nif"), &|_| None);
     let mut m = material(&r);
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
-    m.slsf2 |= 1 << 23; // TruePBR
     m.params.emissive_color = [0.0; 3]; // D1 would add the NIF emissive colour under PBR
+    let mut m = common::as_t21(m, 0);
     m.set_slot_raw(2, "Textures\\Standin\\Emit.dds");
     assert_eq!(
         r.set_material(CYL1, m, &|_| None),
@@ -208,10 +208,10 @@ fn a_pending_shape_showing_its_previous_draw_receives_the_swap() {
         r.set_material(CYL1, m.clone(), &resolve),
         Ok(EditKind::Textures)
     );
-    // TruePBR: a new program, whose job is taken and never applied.
+    // Type-21 PBR: a new program, whose job is taken and never applied.
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
-    m.slsf2 |= (1 << 23) | (1 << 26);
     m.params.emissive_color = [0.0; 3];
+    let m = common::as_t21(m, nif::pbr2::feat::SUBSURFACE);
     assert_eq!(r.set_material(CYL1, m, &resolve), Ok(EditKind::Permutation));
     let withheld = r.take_jobs();
     let status = r
@@ -273,8 +273,8 @@ fn a_pending_shape_follows_the_material_its_draw_was_built_with() {
     r.set_material(CYL1, m.clone(), &resolve).unwrap();
     m.set_slot_raw(0, r"Textures\Standin\New.dds");
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
-    m.slsf2 |= (1 << 23) | (1 << 26);
     m.params.emissive_color = [0.0; 3];
+    let m = common::as_t21(m, nif::pbr2::feat::SUBSURFACE);
     assert_eq!(r.set_material(CYL1, m, &resolve), Ok(EditKind::Permutation));
     let withheld = r.take_jobs();
     let before = frame(&mut r);

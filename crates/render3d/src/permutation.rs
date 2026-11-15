@@ -1,8 +1,8 @@
 //! NIF material → CS Lighting.hlsl permutation defines (plan 04 §1.2, corrected by real captures:
 //! tools/rdc-out/p04/answers.md Q4, controller ruling RB7).
 
-/// How a drawn material uses TruePBR (Note ID33): not at all, the v1 form (SLSF2 bit 23 on tree A) or CS 2.0's type 21
-/// (tree B). [`crate::material::pbr_mode`] picks it per tree.
+/// How a drawn material uses TruePBR (Note ID33): not at all, the v1 form (SLSF2 bit 23; `material::drawn` clears it,
+/// Note IE) or CS 2.0's type 21. [`crate::material::pbr_mode`] picks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pbr {
     None,

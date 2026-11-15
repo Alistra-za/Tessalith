@@ -2,7 +2,7 @@
 //! like `ProjectDoc`; written only on Save or Export. A file that does not parse makes set and JSON editing
 //! read-only (DECISIONS P8); `sdc.toml` editing is unaffected.
 use crate::model::cm_json::{block_of as cm_block_of, CmBlock};
-use crate::model::cs_pbr::{self, block_of, field, fields, CsBlock, Kind, Template};
+use crate::model::cs_pbr::{self, block_of, template_fields, CsBlock, Kind, Template};
 use crate::model::set_groups::{GroupTarget, SetGroup};
 use crate::pgp::settings::Settings;
 use crate::project::{
@@ -1679,12 +1679,13 @@ impl SetsDoc {
         let Some(b) = sub_table(tbl, t.kind.key(), || Item::Table(Table::new())) else {
             return;
         };
-        // Note ID44: the templates are CS 1.x values; the CS 2.0 keys stay as unknown keys do, whatever the box says.
-        for f in fields(t.kind, false) {
+        // Note ID44: the templates are CS 1.x values; the CS 2.0 keys stay as they are.
+        let known = template_fields(t.kind);
+        for f in known {
             b.remove(f.name);
         }
         for (k, v) in &t.values {
-            if field(t.kind, k, false).is_some() {
+            if known.iter().any(|f| f.name == k) {
                 write_json(b, k, v);
             }
         }

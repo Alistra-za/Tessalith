@@ -362,8 +362,8 @@ pub struct ToV1 {
     pub dropped: Vec<&'static str>,
 }
 
-/// The v1 PBR shape that stands for v2 `features` and `params`, by the same table in reverse. An approximation for
-/// tree A's preview (design, settled item 5). Every set feature the chosen v1 form can't carry goes to `dropped`:
+/// The v1 PBR shape that stands for v2 `features` and `params`, by the same table in reverse (design, settled item
+/// 5). Every set feature the chosen v1 form can't carry goes to `dropped`:
 /// thin surface and foliage always, subsurface, fuzz and glint under two-layer, anything but hair under hair, and
 /// glint beside fuzz (fuzz wins the trailer, as in `from_v1`).
 pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
@@ -425,19 +425,9 @@ pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
     r
 }
 
-/// The v1 PBR type that stands for a type-21 shape in tree A's preview: 11 when [`to_v1`] keeps trailer floats
-/// (two-layer, fuzz, glint), else 0 (Note ID33).
-pub fn stand_in_type(features: u32, params: &[f32; PARAM_COUNT]) -> u32 {
-    if to_v1(features, params).mlp.is_some() {
-        11
-    } else {
-        0
-    }
-}
-
 /// What a type-21 shape with SLSF2 `slsf2` becomes as v1 PBR type `new_type` (0 or 11): the SLSF2 word, the five
 /// lighting fields, the trailer floats after Lighting Effect 2, and the features dropped. `set_shader_type`'s
-/// conversion from 21 writes it and the preview's tree A draws it, so the two agree (Note ID11, ID14, ID40).
+/// conversion from 21 writes it (Note ID11, ID14).
 #[derive(Debug, Clone, PartialEq)]
 pub struct V1Body {
     pub slsf2: u32,

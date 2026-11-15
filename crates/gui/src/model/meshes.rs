@@ -536,9 +536,6 @@ pub struct MeshesModel {
     pub pick_export_folder_request: bool,
     /// Note GH9: a texture export runs (set by the app each frame); `Export this NIF` waits for it.
     pub export_running: bool,
-    /// Note ID21: the "CS PBR 2.0 (experimental)" setting (set by the app each frame); the Shader tab offers type 21
-    /// and edits its features and parameters only while it is on.
-    pub cs_pbr2: bool,
     /// Note GD18: the edit panel's Diff view, set by `show_nif_diff`: the NIF's data path and `nif_diff`'s lines.
     pub nif_diff_view: Option<(String, Vec<String>)>,
     /// Note GD2: Review's Keep / Overwrite answers by lowercase data path, with the hash each was given for.
@@ -648,7 +645,6 @@ impl MeshesModel {
             quick_export_result: None,
             pick_export_folder_request: false,
             export_running: false,
-            cs_pbr2: false,
             nif_diff_view: None,
             nif_answers: HashMap::new(),
             foreign_cache: Default::default(),

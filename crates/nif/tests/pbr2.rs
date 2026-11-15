@@ -301,16 +301,14 @@ fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
 }
 
-/// Note ID40: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes and the preview's
-/// tree A draws.
+/// Note ID40: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes.
 #[test]
 fn v1_body_is_the_from_21_conversion() {
-    use nif::pbr2::{stand_in_type, v1_body, V1_SLSF2};
+    use nif::pbr2::{v1_body, V1_SLSF2};
     let mut p = PBR2_DEFAULTS;
     p[17..=20].copy_from_slice(&[1.5, 10.0, 0.02, 3.0]);
     let slsf2 = V1_SLSF2 | 1 << 24 | 1 << 4;
     let v = to_v1(GLINT, &p);
-    assert_eq!(stand_in_type(GLINT, &p), 11);
     let b = v1_body(slsf2, GLINT, &p, 11);
     assert_eq!(b.slsf2, 1 << 4 | v.slsf2_set);
     assert_eq!(
@@ -331,7 +329,6 @@ fn v1_body_is_the_from_21_conversion() {
     assert_eq!(b0.slsf2, 1 << 4 | PBR | 1 << 26);
     assert!(b0.trailer.is_empty());
     assert_eq!(b0.dropped, ["Glint"]);
-    assert_eq!(stand_in_type(SUBSURFACE, &p), 0);
     assert_eq!(v1_body(slsf2, SUBSURFACE, &p, 0).trailer, Vec::<f32>::new());
 }
 

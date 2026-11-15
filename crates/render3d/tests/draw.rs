@@ -105,6 +105,27 @@ fn srgb_readback_and_timing() {
     );
 }
 
+/// Notes ID32 and IE: a renderer starts on the bundled CS 2.0 settings: its 42 features, no `VANILLA_FRESNEL` (CS 2.0
+/// has no VanillaFresnel feature), Linear Lighting on.
+#[test]
+fn a_renderer_seeds_the_bundled_cs2_settings() {
+    use render3d::cs_settings::FEATURE_NAMES;
+    let cache = tempfile::tempdir().unwrap();
+    let r = render3d::Renderer::with_gpu_source(
+        render3d::device::Gpu::new_warp().unwrap(),
+        render3d::ShaderSource::Bundled,
+        cache.path().to_path_buf(),
+    )
+    .unwrap();
+    assert_eq!(FEATURE_NAMES.len(), 42);
+    assert_eq!(
+        r.settings().loaded,
+        FEATURE_NAMES.iter().map(|s| s.to_string()).collect()
+    );
+    assert!(!r.features().iter().any(|f| f == "VANILLA_FRESNEL"));
+    assert!(r.features().iter().any(|f| f == "ENABLE_LL"));
+}
+
 /// Note GT: `Renderer::new` compiles the CS tree embedded in the exe. No `SDC_CS_SHADERS` and no MO2 variable is
 /// read (run it with them unset: the constructor takes no folder), and the furniture's centre is lit.
 #[test]

@@ -13,9 +13,6 @@ pub struct GuiSettings {
     pub recent: Vec<PathBuf>,
     /// Live preview encoding; off on a fresh install (M3a spec §6.3).
     pub live_encode: bool,
-    /// Note ID20: "CS PBR 2.0 (experimental)", for Community Shaders builds with TruePBR 2.0 (shader type 21); off on a
-    /// fresh install. Per user, not per project.
-    pub cs_pbr2: bool,
     /// The Textures and Sets columns: shown at all (the header's checkboxes), and collapsed to a strip (the
     /// arrows on each column).
     pub textures_hidden: bool,

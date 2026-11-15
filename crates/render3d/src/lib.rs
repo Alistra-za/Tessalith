@@ -28,7 +28,7 @@ pub mod textures;
 pub use builtin::{builtin_mesh, Builtin};
 pub use composite::Composite;
 pub use debug::{Availability, DebugOutput};
-pub use includes::{ShaderSource, Tree};
+pub use includes::ShaderSource;
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
@@ -489,8 +489,6 @@ impl Renderer {
     }
 
     fn build(gpu: Gpu, source: ShaderSource, cache_dir: PathBuf) -> Result<Renderer, String> {
-        // Note ID32: the settings start as the source's own tree's (a folder: tree A's).
-        let tree = source.tree().unwrap_or(Tree::A);
         let sd = D3D11_SAMPLER_DESC {
             Filter: D3D11_FILTER_MIN_MAG_MIP_LINEAR,
             AddressU: D3D11_TEXTURE_ADDRESS_WRAP,
@@ -597,8 +595,8 @@ impl Renderer {
             sources: SourceSet::new(source.clone()),
             source,
             cache_dir,
-            features: cs_settings::preview_defines(cs_settings::defaults_in(tree), true),
-            settings: cs_settings::defaults_in(tree).clone(),
+            features: cs_settings::preview_defines(cs_settings::defaults(), true),
+            settings: cs_settings::defaults().clone(),
             features_on: true,
             old_ll: std::cell::OnceCell::new(),
             programs: HashMap::new(),
@@ -658,38 +656,6 @@ impl Renderer {
 
     pub fn settings(&self) -> &CsSettings {
         &self.settings
-    }
-
-    /// The embedded shader tree in use (a test folder counts as A).
-    pub fn tree(&self) -> Tree {
-        self.source.tree().unwrap_or(Tree::A)
-    }
-
-    /// Switches to the embedded shader tree `tree` (Note ID29): the source, its expansion memo, the old-LL probe,
-    /// the CS settings (that tree's defaults), the composite, the prefilter and the compiled results all start
-    /// over, then every shape is re-permuted (`begin_all`; the old draws stay while programs compile). The disk
-    /// cache is content-addressed and shared. The same tree again does nothing. A test's stand-in folder is
-    /// replaced by the bundled tree (`tree()` calls the folder A).
-    pub fn set_tree(&mut self, tree: Tree) {
-        if self.source.tree() == Some(tree) {
-            return;
-        }
-        self.source = match tree {
-            Tree::A => ShaderSource::Bundled,
-            Tree::B => ShaderSource::BundledB,
-        };
-        self.sources = SourceSet::new(self.source.clone());
-        self.old_ll = std::cell::OnceCell::new();
-        self.settings = cs_settings::defaults_in(tree).clone();
-        self.composite = None;
-        self.prefilter = None;
-        self.compiled.clear();
-        // Jobs of the old tree: the unsent ones go, the pool drops the sent ones.
-        self.load_epoch.fetch_add(1, Ordering::Relaxed);
-        self.jobs.clear();
-        self.inflight.clear();
-        self.refresh_settings_defines();
-        self.begin_all();
     }
 
     /// The "Community Shaders features" toggle (C8): off drops every settings define (LL included) and the sRGB
@@ -752,13 +718,12 @@ impl Renderer {
     fn rewrite_static(&mut self) {
         let ll = self.linear_lighting();
         let fixed = self.fixed_pipeline;
-        let tree = self.tree();
         for s in self.shapes.values_mut() {
             if s.status != ShapeStatus::Drawing {
                 continue;
             }
             if let Some(d) = s.draw.as_mut() {
-                let m = material::drawn(&s.material, tree);
+                let m = material::drawn(&s.material);
                 let fv = values_for(
                     &self.settings,
                     self.features_on,
@@ -771,15 +736,14 @@ impl Renderer {
         }
     }
 
-    /// Every shape this tree draws through [`Renderer::begin`] (a define-set or tree change, C11); one it skips
-    /// ([`material::skipped`]: hidden, or a type-21 shape CS 2.0 refuses on tree B) is hidden. A program that is at
-    /// hand swaps now; the others queue one job each and stay `Pending { showing_previous }` on their old draw.
-    /// The resolver is never asked: every slot of a shape's material is in `tex_cache` since its load or edit.
+    /// Every shape through [`Renderer::begin`] (a define-set change, C11); one it skips ([`material::skipped`]:
+    /// hidden, or a type-21 shape CS 2.0 refuses) is hidden. A program that is at hand swaps now; the others queue one
+    /// job each and stay `Pending { showing_previous }` on their old draw. The resolver is never asked: every slot of
+    /// a drawn shape's material is in `tex_cache` since its load or edit.
     fn begin_all(&mut self) {
-        let tree = self.tree();
         let mut todo: Vec<(ShapeId, MaterialState)> = vec![];
         for (id, s) in self.shapes.iter_mut() {
-            if material::skipped(&s.material, tree) {
+            if material::skipped(&s.material) {
                 if s.status != ShapeStatus::Hidden {
                     hide(s);
                 }
@@ -1317,24 +1281,6 @@ impl Renderer {
         }
     }
 
-    /// A shape only this tree skips (a type-21 shape CS 2.0 refuses on tree B, Note ID38; not one the user hid) comes
-    /// back on `set_tree` through `begin_all`, which has no resolver: its slots are resolved now, as both trees draw
-    /// them. The draw itself is built fresh by `begin` (a swap writes every field), so stale fields cannot survive.
-    fn resolve_skipped(
-        &mut self,
-        m: &MaterialState,
-        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
-        rep: &mut LoadReport,
-    ) {
-        if m.hidden {
-            return;
-        }
-        for tree in [Tree::A, Tree::B] {
-            let d = material::drawn(m, tree);
-            self.resolve_textures(&d, textures, rep);
-        }
-    }
-
     /// Builds one shape's draw for material `m` on `program`: textures (already in `tex_cache`), vertex streams
     /// against the VS inputs, zero cbuffers from the reflection, then the material.
     fn build_draw(
@@ -1500,9 +1446,9 @@ impl Renderer {
         }
     }
 
-    /// Starts building shape `id` for `m` (already stored as its material; drawn as `material::drawn` on this tree,
-    /// Note ID33): swaps now when the program is at hand, else queues one job (deduplicated) and marks the shape
-    /// `Pending`. The old draw, if any, stays.
+    /// Starts building shape `id` for `m` (already stored as its material; drawn as `material::drawn`, Note ID33):
+    /// swaps now when the program is at hand, else queues one job (deduplicated) and marks the shape `Pending`. The
+    /// old draw, if any, stays.
     fn begin(
         &mut self,
         id: ShapeId,
@@ -1510,7 +1456,7 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) {
-        let m = &*material::drawn(m, self.tree());
+        let m = &*material::drawn(m);
         self.resolve_textures(m, textures, rep);
         let wanted = match self.wanted(m) {
             Ok(w) => w,
@@ -1557,7 +1503,7 @@ impl Renderer {
             let Some(w) = self.shapes.get_mut(id).and_then(|s| s.wanted.take()) else {
                 continue;
             };
-            let m = material::drawn(&self.shapes[id].material, self.tree()).into_owned();
+            let m = material::drawn(&self.shapes[id].material).into_owned();
             match self.lookup(&w) {
                 Lookup::Ready(p) => self.swap(*id, &p, &m, &mut LoadReport::default()),
                 Lookup::Failed(e) => self.fail(*id, e, true),
@@ -1715,9 +1661,8 @@ impl Renderer {
         if parsed.le_mesh {
             return rep;
         }
-        let tree = self.tree();
         for s in &parsed.shapes {
-            let hidden = material::skipped(&s.material, tree);
+            let hidden = material::skipped(&s.material);
             self.shapes.insert(
                 s.id,
                 ShapeState {
@@ -1739,8 +1684,6 @@ impl Renderer {
             );
             if !hidden {
                 self.begin(s.id, &s.material, textures, &mut rep);
-            } else {
-                self.resolve_skipped(&s.material, textures, &mut rep);
             }
         }
         if sync {
@@ -1803,14 +1746,13 @@ impl Renderer {
         self.load_inner(&parsed, textures, !self.async_compile, true)
     }
 
-    /// The loaded shapes' per-tree notes for this renderer's tree, in id order, as "<shape>: <note>"
-    /// ([`material::tree_note`]; Note ID38). Not in the [`LoadReport`]: they change with `set_tree` and edits.
+    /// The loaded shapes' notes, in id order, as "<shape>: <note>" ([`material::tree_note`]; Note ID38). Not in the
+    /// [`LoadReport`]: they change with edits.
     pub fn tree_notes(&self) -> Vec<String> {
-        let tree = self.tree();
         self.shapes
             .values()
             .filter_map(|s| {
-                material::tree_note(&s.material, tree)
+                material::tree_note(&s.material)
                     .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
             })
             .collect()
@@ -1887,12 +1829,8 @@ impl Renderer {
                 .get(&id)
                 .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?;
             let features: Vec<&str> = self.features.iter().map(String::as_str).collect();
-            // Both as this tree draws them (Note ID33).
-            let tree = self.tree();
-            let (old, new) = (
-                material::drawn(&state.material, tree),
-                material::drawn(&m, tree),
-            );
+            // Both as the shaders draw them (Note ID33).
+            let (old, new) = (material::drawn(&state.material), material::drawn(&m));
             let kind = classify(&old, &new, &features, self.deferred && !self.fixed_pipeline);
             // `classify` cannot see the layer: an edit that makes it apply or stop applying (type 0 ↔ 14, SLSF2.24)
             // changes PROJECTED_UV without any other define.
@@ -1909,8 +1847,7 @@ impl Renderer {
                 || kind == EditKind::Permutation;
             (kind, rebuild)
         };
-        if material::skipped(&m, self.tree()) {
-            self.resolve_skipped(&m, textures, &mut LoadReport::default());
+        if material::skipped(&m) {
             if let Some(state) = self.shapes.get_mut(&id) {
                 state.material = m;
                 hide(state);
@@ -1919,7 +1856,7 @@ impl Renderer {
             return Ok(kind);
         }
         if kind == EditKind::Same && !rebuild {
-            // The source can differ in what this tree does not draw (a type-21 payload on tree A): keep it for a switch.
+            // The source can differ in what the shaders do not draw (SLSF2 bit 23 on a v1 shape): keep it.
             if let Some(state) = self.shapes.get_mut(&id) {
                 state.material = m;
             }
@@ -1970,7 +1907,7 @@ impl Renderer {
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) -> Result<(), String> {
-        let m = &*material::drawn(m, self.tree());
+        let m = &*material::drawn(m);
         if kind == EditKind::Textures {
             self.resolve_textures(m, textures, rep);
             let name = self.shapes[&id].name.clone();
@@ -2127,7 +2064,7 @@ impl Renderer {
                 // `built` is drawn already (Note ID33)
                 let b = match s.draw.as_ref() {
                     Some(d) => Cow::Borrowed(&d.built),
-                    None => material::drawn(&s.material, self.tree()),
+                    None => material::drawn(&s.material),
                 };
                 (
                     b.shader_type,
@@ -2161,13 +2098,12 @@ impl Renderer {
         self.tex_cache.insert(path.to_string(), entry);
         let ll = self.linear_lighting();
         let fixed = self.fixed_pipeline;
-        let tree = self.tree();
         let mut touched = vec![];
         for (id, reg, srv, real) in plan {
             let Some(s) = self.shapes.get_mut(&id) else {
                 continue;
             };
-            let material = material::drawn(&s.material, tree).into_owned();
+            let material = material::drawn(&s.material).into_owned();
             let applied = s.status == ShapeStatus::Drawing;
             let Some(d) = s.draw.as_mut() else {
                 continue;
@@ -2201,7 +2137,7 @@ impl Renderer {
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn draw_diag(&mut self, id: ShapeId) -> Option<DrawDiag> {
-        let m = material::drawn(&self.shapes.get(&id)?.material, self.tree()).into_owned();
+        let m = material::drawn(&self.shapes.get(&id)?.material).into_owned();
         let w = self.wanted(&m).ok()?;
         let reflection = match self.programs.get(&w.key) {
             Some(Ok(p)) => Some(p.ps.reflection.clone()),
@@ -2842,22 +2778,16 @@ fn env_regs(r: &compile::Reflection) -> Vec<(u32, bool)> {
         .collect()
 }
 
-/// Every path in the embedded CS tree A, for the test that it holds only the include closure.
+/// Every path in the embedded CS tree, for the test that it holds only the include closure.
 #[cfg(feature = "test-hooks")]
 pub fn bundled_names() -> Vec<&'static str> {
-    bundled::names_in(Tree::A).collect()
+    bundled::names().collect()
 }
 
-/// Every path in the embedded tree `tree`.
+/// The embedded bytes of `rel` (`None` when absent).
 #[cfg(feature = "test-hooks")]
-pub fn bundled_names_in(tree: Tree) -> Vec<&'static str> {
-    bundled::names_in(tree).collect()
-}
-
-/// The embedded bytes of `rel` in `tree` (`None` when absent).
-#[cfg(feature = "test-hooks")]
-pub fn bundled_read_in(tree: Tree, rel: &str) -> Option<&'static [u8]> {
-    bundled::read_in(tree, rel)
+pub fn bundled_read(rel: &str) -> Option<&'static [u8]> {
+    bundled::read(rel)
 }
 
 /// A define the CS settings manage (C8): `ENABLE_LL`, `CS_GAME_GAMMA=<value>` or a

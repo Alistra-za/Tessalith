@@ -17,8 +17,10 @@ fn the_library_parses_with_31_texture_sets_and_3_material_objects() {
     for x in t {
         assert!(x.edids.contains(&x.name), "{}", x.name);
         for (k, v) in &x.values {
-            let f =
-                field(x.kind, k, false).unwrap_or_else(|| panic!("{}: unknown field {k}", x.name));
+            let f = template_fields(x.kind)
+                .iter()
+                .find(|f| f.name == k)
+                .unwrap_or_else(|| panic!("{}: unknown field {k}", x.name));
             assert!(valid_value(f.kind, v), "{}: {k} = {v}", x.name);
         }
     }
@@ -768,7 +770,7 @@ fn txst_overrides_map_all_keys() {
         "fuzzRoughness": 0.3, "fuzzRoughnessTexture": true
     });
     let v = v.as_object().unwrap();
-    assert_eq!(v.len(), fields(Kind::Txst, true).len(), "every field");
+    assert_eq!(v.len(), fields(Kind::Txst).len(), "every field");
     let ov = txst_overrides(v);
     let p = [
         0.9, 0.05, 0.8, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.11, 0.12, 0.13, 0.15, 0.16, 0.17,
@@ -810,20 +812,23 @@ fn txst_overrides_map_all_keys() {
     assert_eq!(ov, Pbr2Override::default());
 }
 
-/// Note ID44: the 8 CS 2.0 keys exist only with the box on; Note ID46: the owner's hover on the fuzz texture switch.
+/// Notes ID44 and IE5: a texture set's fields are the CS 1.x ones then the 8 CS 2.0 keys, and a template sets only the
+/// CS 1.x ones; Note ID46: the owner's hover on the fuzz texture switch.
 #[test]
-fn cs2_fields_follow_the_box() {
+fn cs2_fields_are_texture_set_fields() {
     let n = field_note(Kind::Txst, "fuzzRoughnessTexture").unwrap();
     assert!(
         n.contains("green channel") && n.contains("parallax") && n.contains("BC5 or BC1"),
         "{n}"
     );
-    assert_eq!(fields(Kind::Txst, false), &TXST_FIELDS[..]);
-    assert_eq!(fields(Kind::Txst, true)[13..], TXST2_FIELDS[..]);
-    assert_eq!(fields(Kind::Mato, true), &MATO_FIELDS[..]);
-    assert!(field(Kind::Txst, "thinSurface", false).is_none());
+    assert_eq!(fields(Kind::Txst)[..13], TXST_FIELDS[..]);
+    assert_eq!(fields(Kind::Txst)[13..], TXST2_FIELDS[..]);
+    assert_eq!(fields(Kind::Mato), &MATO_FIELDS[..]);
+    assert_eq!(template_fields(Kind::Txst), &TXST_FIELDS[..]);
+    assert_eq!(template_fields(Kind::Mato), &MATO_FIELDS[..]);
+    assert!(field(Kind::Mato, "thinSurface").is_none());
     assert_eq!(
-        field(Kind::Txst, "fuzzRoughnessTexture", true).map(|f| f.kind),
+        field(Kind::Txst, "fuzzRoughnessTexture").map(|f| f.kind),
         Some(FieldKind::Bool)
     );
     assert!(valid_value(FieldKind::Bool, &json!(true)));
@@ -885,7 +890,7 @@ fn txst_params_name_the_payload_parameters() {
         assert_eq!(COLOR_PARAMS.contains(&i), width == 3, "{key}");
         assert_eq!(key, k);
         let top = key.split('.').next().unwrap();
-        assert!(field(Kind::Txst, top, true).is_some(), "{key} is a field");
+        assert!(field(Kind::Txst, top).is_some(), "{key} is a field");
         assert_eq!(PARAM_NAMES[i], name, "{key}");
         if width == 3 {
             assert_eq!(PARAM_NAMES[i + 1], name.replace(" R", " G"), "{key}");
@@ -896,8 +901,8 @@ fn txst_params_name_the_payload_parameters() {
     assert_eq!(covered, PARAM_COUNT, "every parameter has one key");
 }
 
-/// Note ID44 (review: other `CsBlock` readers): CS 2.0 keys in a texture-set block change no other reader, box off
-/// or on: the PGPatcher entry (`overlay` / `cs_to_pgp`, PGP_MAP keys only) and the EDID refusals.
+/// Note ID44 (review: other `CsBlock` readers): CS 2.0 keys in a texture-set block change no other reader: the
+/// PGPatcher entry (`overlay` / `cs_to_pgp`, PGP_MAP keys only) and the EDID refusals.
 #[test]
 fn cs2_keys_in_a_block_change_no_other_reader() {
     use sdc_gui::model::cs_pbr_export::refusals;
@@ -928,7 +933,5 @@ fn cs2_keys_in_a_block_change_no_other_reader() {
         .unwrap()
         .values
         .contains_key("thinSurface"));
-    assert_eq!(read(&m), base, "box off");
-    m.settings.cs_pbr2 = true;
-    assert_eq!(read(&m), base, "box on");
+    assert_eq!(read(&m), base);
 }

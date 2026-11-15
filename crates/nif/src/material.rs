@@ -117,8 +117,8 @@ pub struct MaterialState {
     /// have none. Read with [`MaterialState::skin`], written with [`MaterialState::set_skin`].
     pub skin_preview: Option<Box<SkinPreview>>,
     /// Preview-only, never in the NIF: the first CS 2.0 rule a type-21 shape breaks (`render3d::parse` fills it from
-    /// `edit::validate`'s type-21 rules; None = valid, not type 21, or not checked). The preview's tree B does not
-    /// draw the shape while it is set; tree A draws its stand-in (Note ID38).
+    /// `edit::validate`'s type-21 rules; None = valid, not type 21, or not checked). The preview does not draw the
+    /// shape while it is set (Notes ID38 and IE5).
     pub pbr2_error: Option<String>,
 }
 

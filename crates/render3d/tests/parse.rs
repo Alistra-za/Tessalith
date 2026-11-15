@@ -79,8 +79,8 @@ fn skipped_shape_messages_use_a_short_label() {
     }
 }
 
-/// Note ID38: `parse` is one for both trees. A type-21 shape is never hidden and gets no per-tree warning; its first
-/// CS 2.0 Error is `material.pbr2_error`, which the renderer reads on tree B.
+/// Note ID38: a type-21 shape is never hidden by `parse` and gets no warning of its own; its first CS 2.0 Error is
+/// `material.pbr2_error`, which the renderer reads.
 #[test]
 fn parse_records_the_first_cs2_error() {
     use nif::pbr2::feat;

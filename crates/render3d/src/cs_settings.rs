@@ -41,62 +41,10 @@ pub const PREVIEW_FEATURES: &[(&str, &str)] = &[
     ("DynamicCubemaps", "DYNAMIC_CUBEMAPS"),
 ];
 
-/// The `Shaders/Features/*.ini` stems of the pinned CS (1.9.0 (AIO build 2026-10-03)): every feature counts as loaded in the
-/// bundled defaults. The test `feature_names_equal_the_pinned_features_folder` compares it with the folder.
+/// The `Shaders/Features/*.ini` stems of the pinned CS 2.0 (the PBR2Test1 build, Notes ID29 and IE): every feature
+/// counts as loaded in the bundled defaults. The test `feature_names_equal_the_pinned_features_folder` compares it with
+/// the folder.
 pub const FEATURE_NAMES: &[&str] = &[
-    "CloudShadows",
-    "CSEditor",
-    "DynamicCubemaps",
-    "Effects11",
-    "ExponentialHeightFog",
-    "ExtendedMaterials",
-    "ExtendedTranslucency",
-    "GrassCollision",
-    "GrassLighting",
-    "GrassOptimizations",
-    "HairSpecular",
-    "HDRDisplay",
-    "HorizonFix",
-    "ImageBasedLighting",
-    "InteriorSun",
-    "InverseSquareLighting",
-    "LightLimitFix",
-    "LinearLighting",
-    "LODBlending",
-    "NRD",
-    "PerformanceOverlay",
-    "PhysicalSky",
-    "PostProcessing",
-    "PseudoSunBounce",
-    "RemoteControl",
-    "RenderDoc",
-    "SceneManager",
-    "Screenshot",
-    "ScreenSpaceGI",
-    "ScreenSpacePointLightShadows",
-    "ScreenSpaceReflections",
-    "ScreenSpaceShadows",
-    "Skin",
-    "Skylighting",
-    "SkySync",
-    "SubsurfaceScattering",
-    "TerrainBlending",
-    "TerrainHelper",
-    "TerrainShadows",
-    "TerrainVariation",
-    "TruePBR",
-    "UnifiedWater",
-    "Upscaling",
-    "VanillaFresnel",
-    "VolumetricLighting",
-    "VolumetricShadows",
-    "WaterEffects",
-    "WetnessEffects",
-];
-
-/// The `Shaders/Features/*.ini` stems of tree B's CS (the PBR2Test1 build, Note ID29): every feature counts as loaded
-/// in tree B's defaults. The test `feature_names_b_equal_the_pbr2_features_folder` compares it with the folder.
-pub const FEATURE_NAMES_B: &[&str] = &[
     "CloudShadows",
     "CSEditor",
     "DeveloperTools",
@@ -142,27 +90,17 @@ pub const FEATURE_NAMES_B: &[&str] = &[
 ];
 
 /// The preview's settings (Note GT3): the pinned CS's `SettingsDefault.json` from the embedded tree, with every
-/// [`FEATURE_NAMES`] feature loaded. Its `"Disable at Boot"` is null, so none is switched off.
+/// [`FEATURE_NAMES`] feature loaded. Its `"Disable at Boot"` is null, so none is switched off. The PBR2Test1 build
+/// ships no `SettingsDefault.json`, so the bundled one is CS 1.9.0's (Note ID27).
 pub fn defaults() -> &'static CsSettings {
-    defaults_in(crate::Tree::A)
-}
-
-/// [`defaults`] for `tree` (Note ID29): that tree's own `SettingsDefault.json` and its feature list
-/// ([`FEATURE_NAMES_B`] for tree B). The two JSON files are byte-identical today (Note ID27).
-pub fn defaults_in(tree: crate::Tree) -> &'static CsSettings {
-    static A: std::sync::OnceLock<CsSettings> = std::sync::OnceLock::new();
-    static B: std::sync::OnceLock<CsSettings> = std::sync::OnceLock::new();
-    let (cell, names) = match tree {
-        crate::Tree::A => (&A, FEATURE_NAMES),
-        crate::Tree::B => (&B, FEATURE_NAMES_B),
-    };
-    cell.get_or_init(|| {
-        let bytes = crate::bundled::read_in(tree, "SettingsDefault.json")
-            .expect("bundled SettingsDefault.json");
+    static CELL: std::sync::OnceLock<CsSettings> = std::sync::OnceLock::new();
+    CELL.get_or_init(|| {
+        let bytes =
+            crate::bundled::read("SettingsDefault.json").expect("bundled SettingsDefault.json");
         let Ok(Value::Object(merged)) = serde_json::from_slice(strip_bom(bytes)) else {
             panic!("bundled SettingsDefault.json is not a JSON object");
         };
-        let loaded: BTreeSet<String> = names.iter().map(|n| n.to_string()).collect();
+        let loaded: BTreeSet<String> = FEATURE_NAMES.iter().map(|n| n.to_string()).collect();
         CsSettings {
             linear_lighting: setting(&merged, "Linear Lighting", "enableLinearLighting")
                 .is_none_or(|x| x != 0.0),

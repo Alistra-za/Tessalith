@@ -442,8 +442,8 @@ fn the_inspector_lists_skipped_user_presets_with_their_reason() {
 }
 
 /// Note FM25 (P17): the drawer's exact rows once the Batch section (threads, memory), the preview-size combo, the
-/// 16384 box and the Interface section (Reduce motion) are gone. Nothing is selected, so only the section headings,
-/// their always-present rows and the Close button remain.
+/// 16384 box and the Interface section (Reduce motion) are gone, and since Note IE5 the "CS PBR 2.0 (experimental)"
+/// box. Nothing is selected, so only the section headings, their always-present rows and the Close button remain.
 #[test]
 fn advanced_has_no_batch_or_preview_size_rows() {
     use eframe::egui;
@@ -470,7 +470,6 @@ fn advanced_has_no_batch_or_preview_size_rows() {
         "Advanced texture fields",
         "Also export recipe",
         "Analysis cache limit",
-        "CS PBR 2.0 (experimental)",
         "Cache",
         "Checks",
         "Close",
@@ -536,36 +535,6 @@ fn the_cache_limit_box_saves_a_typed_limit() {
     h.run();
     assert_eq!(h.state().settings.analysis_cache_mb, Some(800));
     assert_eq!(GuiSettings::load(&toml).0.analysis_cache_mb, Some(800));
-}
-
-/// Note ID20: the Preview section's "CS PBR 2.0 (experimental)" box shows `cs_pbr2` and a click saves it to gui.toml.
-#[test]
-fn checkbox_toggles_setting() {
-    use sdc_gui::settings::GuiSettings;
-    let label = "CS PBR 2.0 (experimental)";
-    let d = tempfile::tempdir().unwrap();
-    let mut model = opened(d.path());
-    model.settings.advanced_open = true;
-    let toml = d.path().join("settings").join("gui.toml");
-    model.settings_path = Some(toml.clone());
-    let mut h = harness(model);
-    h.run();
-    let boxed = |h: &Harness<'static, AppModel>| {
-        h.get_by_role_and_label(Role::CheckBox, label)
-            .accesskit_node()
-            .toggled()
-    };
-    assert_eq!(boxed(&h), Some(eframe::egui::accesskit::Toggled::False));
-    assert!(!toml.exists(), "drawing saves nothing");
-    h.get_by_role_and_label(Role::CheckBox, label).click();
-    h.run();
-    assert!(h.state().settings.cs_pbr2);
-    assert_eq!(boxed(&h), Some(eframe::egui::accesskit::Toggled::True));
-    assert!(GuiSettings::load(&toml).0.cs_pbr2, "saved to gui.toml");
-    h.get_by_role_and_label(Role::CheckBox, label).click();
-    h.run();
-    assert!(!h.state().settings.cs_pbr2);
-    assert!(!GuiSettings::load(&toml).0.cs_pbr2);
 }
 
 /// Backlog T32: while a plan is pending the drawer's rows are off, like the settings panel's (Note FK), so a pick is

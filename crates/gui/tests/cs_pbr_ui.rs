@@ -121,8 +121,7 @@ fn the_section_shows_the_block_template_refusals_and_checks() {
     assert!(h.state().cs_block(id, Kind::Mato).is_some());
 }
 
-/// Note ID44: with the box on, a CS 2.0 bool key is a field row: its box adds the key (false), the value box sets it.
-/// With the box off the row is not drawn.
+/// Notes ID44 and IE5: a CS 2.0 bool key is a field row: its box adds the key (false), the value box sets it.
 #[test]
 fn bool_field_row_toggles() {
     let d = tempfile::tempdir().unwrap();
@@ -130,7 +129,7 @@ fn bool_field_row_toggles() {
     let id = "landscape/rock01";
     model.set_shader(id, Some(engine::shader::Shader::Pbr));
     model.add_cs_block(id, Kind::Txst);
-    // A wrong-typed CS 2.0 key: an unknown key with the box off, a "wrong type" line with it on.
+    // A wrong-typed CS 2.0 key: a "wrong type" line.
     model.set_cs_value(id, Kind::Txst, "foliage", Some(serde_json::json!(1)));
     let key = set_views(&model)
         .into_iter()
@@ -143,17 +142,7 @@ fn bool_field_row_toggles() {
     h.run();
     h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
     h.run();
-    assert!(!has(&h, "Thin surface"), "box off: no CS 2.0 row");
-    assert!(
-        !has(&h, "foliage: wrong type"),
-        "box off: no wrong-type line"
-    );
-    h.state_mut().settings.cs_pbr2 = true;
-    h.run();
-    assert!(
-        has(&h, "foliage: wrong type"),
-        "box on: the wrong-type line"
-    );
+    assert!(has(&h, "foliage: wrong type"), "the wrong-type line");
     let value = |h: &Harness<'static, AppModel>| {
         h.state()
             .cs_block(id, Kind::Txst)

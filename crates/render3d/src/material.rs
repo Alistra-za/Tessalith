@@ -5,7 +5,6 @@ use crate::cbuffer::CbWriter;
 pub use crate::permutation::Pbr;
 use crate::permutation::{defines, runtime_bits, Material, Stage};
 use crate::scene::{srgb_to_linear, Mat3x4};
-use crate::Tree;
 use nif::material::MaterialState;
 use nif::pbr2::Pbr2Extra;
 use nif::props::{LightingParams, LightingTrailer};
@@ -34,25 +33,21 @@ pub const PBR_HAIR_MARSCHNER: u32 = 1024;
 pub const PBR_GLINT: u32 = 2048;
 /// CS `PBR::Flags::ProjectedGlint` (PBRMath.hlsli:35): the MATO layer's glint, set by [`write_projected`].
 pub const PBR_PROJECTED_GLINT: u32 = 4096;
-/// CS 2.0 `PBR::Flags::Foliage` (tree B PBRMath.hlsli:37); [`pbr2_flags`] sets [`PBR_THIN_SURFACE`] with it.
+/// CS 2.0 `PBR::Flags::Foliage` (cs2 PBRMath.hlsli:37); [`pbr2_flags`] sets [`PBR_THIN_SURFACE`] with it.
 pub const PBR_FOLIAGE: u32 = 1 << 13;
-/// CS 2.0 `PBR::Flags::ThinSurface` (tree B PBRMath.hlsli:38).
+/// CS 2.0 `PBR::Flags::ThinSurface` (cs2 PBRMath.hlsli:38).
 pub const PBR_THIN_SURFACE: u32 = 1 << 14;
-/// CS 2.0 `PBR::Flags::HasFuzzRoughnessTexture` (tree B PBRMath.hlsli:39): fuzz roughness from slot 3 green.
+/// CS 2.0 `PBR::Flags::HasFuzzRoughnessTexture` (cs2 PBRMath.hlsli:39): fuzz roughness from slot 3 green.
 pub const PBR_HAS_FUZZ_ROUGHNESS_TEXTURE: u32 = 1 << 15;
 
-/// The note of a type-21 shape on tree A, which draws its `to_v1` stand-in (Note ID33).
-pub const APPROXIMATE: &str = "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading";
-
-/// The PBR mode `m` draws with on `tree`'s shaders (Note ID33). Tree A: type 21 draws as its `to_v1` stand-in (V1),
-/// bit 23 is V1. Tree B: type 21 is V2, and a v1 shape is None, because CS 2.0 hands it to the vanilla reader. Type 21
-/// is checked first, so a foreign type-21 shape that still has bit 23 is v2.
-pub fn pbr_mode(m: &MaterialState, tree: Tree) -> Pbr {
-    match tree {
-        _ if !m.is_pbr2() && !m.is_pbr() => Pbr::None,
-        Tree::A => Pbr::V1,
-        Tree::B if m.is_pbr2() => Pbr::V2,
-        Tree::B => Pbr::None,
+/// The PBR mode `m` draws with on the CS 2.0 shaders (Notes ID33 and IE): type 21 is V2, and a v1 shape is None,
+/// because CS 2.0 hands it to the vanilla reader. Type 21 is checked first, so a foreign type-21 shape that still has
+/// bit 23 is v2.
+pub fn pbr_mode(m: &MaterialState) -> Pbr {
+    if m.is_pbr2() {
+        Pbr::V2
+    } else {
+        Pbr::None
     }
 }
 
@@ -68,65 +63,32 @@ pub fn own_pbr(m: &MaterialState) -> Pbr {
     }
 }
 
-/// The material `tree`'s shaders draw for `m` (Note ID33); `own_pbr(&drawn(m, tree)) == pbr_mode(m, tree)`.
-/// - tree A, type 21: what a conversion to v1 PBR writes (`nif::pbr2::v1_body`, Note ID40; an approximation: tree A
-///   has no thin-surface or foliage shading): type 11 with a MultiLayer trailer when `to_v1` keeps trailer floats,
-///   else type 0; the extra data is dropped.
-/// - tree B, a v1 shape: the same material without SLSF2 bit 23, which the vanilla reader ignores.
-/// - anything else: `m` as it is.
-pub fn drawn(m: &MaterialState, tree: Tree) -> Cow<'_, MaterialState> {
-    match tree {
-        Tree::A if m.is_pbr2() => {
-            let (features, params) = pbr2_payload(m);
-            let t = nif::pbr2::stand_in_type(features, &params);
-            let b = nif::pbr2::v1_body(m.slsf2, features, &params, t);
-            let mut s = m.clone();
-            s.shader_type = t;
-            s.slsf2 = b.slsf2;
-            s.params.glossiness = b.glossiness;
-            s.params.specular_color = b.specular_color;
-            s.params.specular_strength = b.specular_strength;
-            s.params.lighting_effect_1 = b.lighting_effect_1;
-            s.params.lighting_effect_2 = b.lighting_effect_2;
-            s.params.trailer = match b.trailer[..] {
-                [inner_thickness, refraction_scale, u, v, envmap_strength] => {
-                    LightingTrailer::MultiLayer {
-                        inner_thickness,
-                        refraction_scale,
-                        inner_texture_scale: [u, v],
-                        envmap_strength,
-                    }
-                }
-                _ => LightingTrailer::None,
-            };
-            s.params.pbr2_extra = None;
-            Cow::Owned(s)
-        }
-        Tree::B if !m.is_pbr2() && m.is_pbr() => {
-            let mut s = m.clone();
-            s.slsf2 &= !nif::material::SLSF2_TRUE_PBR;
-            Cow::Owned(s)
-        }
-        _ => Cow::Borrowed(m),
+/// The material the CS 2.0 shaders draw for `m` (Notes ID33 and IE); `own_pbr(&drawn(m)) == pbr_mode(m)`. A v1
+/// shape (SLSF2 bit 23, not type 21) is the same material without bit 23, which the vanilla reader ignores; anything
+/// else is `m` as it is.
+pub fn drawn(m: &MaterialState) -> Cow<'_, MaterialState> {
+    if !m.is_pbr2() && m.is_pbr() {
+        let mut s = m.clone();
+        s.slsf2 &= !nif::material::SLSF2_TRUE_PBR;
+        Cow::Owned(s)
+    } else {
+        Cow::Borrowed(m)
     }
 }
 
-/// The renderer does not draw `m` on `tree`: the user hid it, or it is a type-21 shape that breaks a CS 2.0 rule
-/// (`pbr2_error`) on tree B, which CS 2.0 does not draw either (Note ID38). Tree A draws such a shape's stand-in.
-pub fn skipped(m: &MaterialState, tree: Tree) -> bool {
-    m.hidden || (tree == Tree::B && m.is_pbr2() && m.pbr2_error.is_some())
+/// The renderer does not draw `m`: the user hid it, or it is a type-21 shape that breaks a CS 2.0 rule
+/// (`pbr2_error`), which CS 2.0 does not draw either (Note ID38).
+pub fn skipped(m: &MaterialState) -> bool {
+    m.hidden || (m.is_pbr2() && m.pbr2_error.is_some())
 }
 
-/// The per-tree note of a type-21 shape the user has not hidden: on tree A [`APPROXIMATE`], on tree B the CS 2.0 rule
-/// it breaks (Note ID38). `None` for anything else.
-pub fn tree_note(m: &MaterialState, tree: Tree) -> Option<&str> {
+/// The note of a type-21 shape the user has not hidden: the CS 2.0 rule it breaks (Note ID38). `None` for anything
+/// else.
+pub fn tree_note(m: &MaterialState) -> Option<&str> {
     if m.hidden || !m.is_pbr2() {
         return None;
     }
-    match tree {
-        Tree::A => Some(APPROXIMATE),
-        Tree::B => m.pbr2_error.as_deref(),
-    }
+    m.pbr2_error.as_deref()
 }
 
 /// The features and parameters of a type-21 material; features 0 and the spec defaults when the trailer is not the
@@ -159,7 +121,7 @@ fn has_bits(bound: &Bound) -> u32 {
     .fold(0, |f, (_, flag)| f | flag)
 }
 
-/// `PBRFlags` of a type-21 material (Note ID33): each feature bit maps to its CS `PBR::Flags` value (tree B
+/// `PBRFlags` of a type-21 material (Note ID33): each feature bit maps to its CS `PBR::Flags` value (cs2
 /// PBRMath.hlsli:24-39), Foliage also sets ThinSurface, a 2-float PBRFuzz whose switch `[1]` is 1 sets
 /// HasFuzzRoughnessTexture (not on two-layer or hair), and the Has-bits come from `bound` as in v1.
 pub fn pbr2_flags(features: u32, extra: Option<&Pbr2Extra>, bound: &Bound) -> u32 {
@@ -186,7 +148,7 @@ pub fn pbr2_flags(features: u32, extra: Option<&Pbr2Extra>, bound: &Bound) -> u3
     f | has_bits(bound)
 }
 
-/// The CS 2.0 PBR block of a type-21 material (Note ID33; tree B Lighting.hlsl members, see the task report):
+/// The CS 2.0 PBR block of a type-21 material (Note ID33; cs2 Lighting.hlsl members, see the task report):
 /// - `PBRFlags` = [`pbr2_flags`]; `PBRParams1` = (roughness scale p0, displacement scale p2, specular level p1);
 /// - `PBRParams2` = coat colour and strength p7-p10 (two-layer) or subsurface colour and opacity p3-p6 (subsurface);
 /// - `MultiLayerParallaxData` = (coat roughness p11, coat specular level p12, 0, 0) for two-layer, fuzz colour and
@@ -678,7 +640,7 @@ fn bindings(m: &MaterialState) -> Vec<(Option<u32>, &str)> {
         .collect()
 }
 
-/// Sorts an edit of a drawn material ([`drawn`], the renderer passes both on its tree) by what it costs. The
+/// Sorts an edit of a drawn material ([`drawn`], the renderer passes both) by what it costs. The
 /// permutation oracle is `permutation::defines` (03 §1.2): `Permutation`
 /// iff the VS or PS define set differs. Otherwise `Textures` iff a slot's register or canonical path differs
 /// (e.g. a new path, or type 0 ↔ 2 moving slot 2 between t12 and t6), else `Cbuffer`. A change of `hidden` alone

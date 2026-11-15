@@ -58,7 +58,8 @@ impl DebugOutput {
         }
     }
 
-    /// TruePBR (v1 or type 21, as the material is: [`DebugOutput::availability_in`] asks per tree): Exact for all.
+    /// TruePBR (v1 or type 21, as the material is: [`DebugOutput::availability_drawn`] asks of the drawn material):
+    /// Exact for all.
     /// Non-PBR: Albedo and NormalWorld Exact; Roughness StandIn("1 − specular mask"); Metallic
     /// None (CS's non-PBR material has no metallic term); Ao StandIn("vertex AO"), None for shader types 4, 5, 6 and
     /// 16 (FaceGen, FaceGen tint, Hair, Eye: vertexAO is the constant 1, L:2673, 2689).
@@ -78,9 +79,9 @@ impl DebugOutput {
         }
     }
 
-    /// [`DebugOutput::availability`] of what `tree`'s shaders draw for `m` (`material::drawn`, Note ID33).
-    pub fn availability_in(self, m: &MaterialState, tree: crate::Tree) -> Availability {
-        self.availability(&crate::material::drawn(m, tree))
+    /// [`DebugOutput::availability`] of what the shaders draw for `m` (`material::drawn`, Note ID33).
+    pub fn availability_drawn(self, m: &MaterialState) -> Availability {
+        self.availability(&crate::material::drawn(m))
     }
 }
 
@@ -268,10 +269,9 @@ mod tests {
         assert_eq!(DebugOutput::Ao.define(), Some(5));
     }
 
-    /// Note ID33: type 21 is PBR on both trees (tree A draws its v1 stand-in); a v1 shape is vanilla on tree B.
+    /// Note ID33: type 21 is PBR on the CS 2.0 shaders; a v1 shape draws vanilla there.
     #[test]
-    fn availability_follows_the_tree() {
-        use crate::Tree;
+    fn availability_follows_the_drawn_material() {
         use Availability::*;
         let mut v1 = MaterialState::builtin_default();
         v1.slsf2 |= nif::material::SLSF2_TRUE_PBR;
@@ -284,13 +284,8 @@ mod tests {
         };
         let m = DebugOutput::Metallic;
         assert_eq!(m.availability(&t21), Exact, "type 21 is PBR");
-        assert_eq!(m.availability_in(&t21, Tree::A), Exact);
-        assert_eq!(m.availability_in(&t21, Tree::B), Exact);
-        assert_eq!(m.availability_in(&v1, Tree::A), Exact);
-        assert_eq!(
-            m.availability_in(&v1, Tree::B),
-            None,
-            "v1 draws vanilla on B"
-        );
+        assert_eq!(m.availability_drawn(&t21), Exact);
+        assert_eq!(m.availability(&v1), Exact, "v1 as the material is");
+        assert_eq!(m.availability_drawn(&v1), None, "v1 draws vanilla");
     }
 }

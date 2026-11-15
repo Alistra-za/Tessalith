@@ -379,8 +379,6 @@ fn eligibility_flip_is_a_permutation() {
     );
     let shape = common::plane_shape(0, common::IDENT, [0.0; 3], 0);
     let plain = shape.material.clone();
-    let mut pbr_plain = plain.clone();
-    pbr_plain.slsf2 |= 1 << 23;
     let parsed = render3d::ParsedNif {
         shapes: vec![shape],
         ..Default::default()
@@ -425,15 +423,17 @@ fn eligibility_flip_is_a_permutation() {
         );
         assert!(projected(&mut r));
     }
-    // A PBR coat (SLSF2.24) keeps the layer (Note GZ1): the toggle stays a cbuffer edit.
-    let mut coat = pbr_plain.clone();
-    coat.slsf2 |= 1 << 24;
+    // A type-21 coat (the Two-layer feature) keeps the layer (Notes GZ1 and IE5): the toggle stays a cbuffer edit.
     assert!(r
-        .set_material(ShapeId(0), pbr_plain.clone(), &|_| None)
+        .set_material(ShapeId(0), common::as_t21(plain.clone(), 0), &|_| None)
         .is_ok());
     assert!(projected(&mut r));
     assert_eq!(
-        r.set_material(ShapeId(0), coat, &|_| None),
+        r.set_material(
+            ShapeId(0),
+            common::as_t21(plain.clone(), nif::pbr2::feat::TWO_LAYER),
+            &|_| None
+        ),
         Ok(EditKind::Cbuffer)
     );
     assert!(projected(&mut r));
@@ -463,17 +463,20 @@ fn up_quad(id: u32, m: MaterialState) -> render3d::ParsedShape {
     }
 }
 
-/// Type 0 PBR, mid-grey base colour at slot 0, an RMAOS at slot 5 that matches the ash layer's roughness 0.9 and
-/// specular 0.04 (so the layer changes only the colour), depth test and write on. Glossiness is CS's specular-level
-/// scale on PBR (`rawRMAOS.w *= PBRParams1.z`, Lighting.hlsl:1439): the vanilla default 80 would make it 3.2 and the
-/// diffuse black.
+/// Type-21 PBR (Note IE5), mid-grey base colour at slot 0, an RMAOS at slot 5 that matches the ash layer's roughness
+/// 0.9 and specular 0.04 (so the layer changes only the colour), depth test and write on. The specular level is a
+/// scale of the RMAOS alpha (`rawRMAOS.w *= PBRParams1.z`, cs2 Lighting.hlsl:1533), so it is 1 here, not 0.04.
 fn grey_pbr() -> MaterialState {
-    let mut m = pbr();
-    m.params.glossiness = 1.0;
+    let mut m = MaterialState::builtin_default();
     m.slsf1 |= 1 << 31;
     m.slsf2 |= 1;
     m.set_slot_raw(0, r"textures\test\grey.dds");
     m.set_slot_raw(5, r"textures\test\grey_rmaos.dds");
+    let mut m = common::as_t21(m, 0);
+    let nif::props::LightingTrailer::Pbr2 { params, .. } = &mut m.params.trailer else {
+        unreachable!()
+    };
+    params[1] = 1.0;
     m
 }
 
@@ -541,9 +544,10 @@ fn render_projected_tints_up_faces() {
         "brighter toward white × scale: {off:?} → {on:?}"
     );
     assert!(on[0] > on[2], "red over blue (0.66 vs 0.63): {on:?}");
+    // CS 2.0's member is a float4: the layer writes xyz, w keeps the fuzz roughness (−1: the base roughness).
     assert_eq!(
         r.draw_cb_floats(ShapeId(0), "MaterialObjectRGBScale"),
-        Some(vec![0.66, 0.63, 0.63])
+        Some(vec![0.66, 0.63, 0.63, -1.0])
     );
     // A load keeps the layer and its textures; the fallbacks are not load-report missing textures (R1 lists them).
     let rep = r.load_parsed(&parsed, &grey_textures);
@@ -592,7 +596,8 @@ fn render_projected_tints_up_faces() {
 }
 
 /// Note GZ on the bundled CS: a plane turned to face up by its NIF rotation (not its vertices) takes the layer as
-/// `up_quad` does (GZ2), and a PBR coat (SLSF2.24) compiles with `PROJECTED_UV` and takes it too (GZ1).
+/// `up_quad` does (GZ2), and a type-21 coat (the Two-layer feature) compiles with `PROJECTED_UV` and takes it too
+/// (GZ1, Note IE5).
 #[test]
 fn render_projected_rotated_static_and_coat() {
     let cache = tempfile::tempdir().unwrap();
@@ -607,7 +612,9 @@ fn render_projected_rotated_static_and_coat() {
         [0.0, 1.0, 0.0, 0.0],
     ];
     let mut coat = grey_pbr();
-    coat.slsf2 |= 1 << 24;
+    if let nif::props::LightingTrailer::Pbr2 { features, .. } = &mut coat.params.trailer {
+        *features = nif::pbr2::feat::TWO_LAYER;
+    }
     let white = common::dds_rgba8(1, 1, &[[255; 4]]);
     let (w, h) = (128, 128);
     let mut off_on = |shape: render3d::ParsedShape| {
@@ -632,15 +639,9 @@ fn render_projected_rotated_static_and_coat() {
         (0..3).all(|c| (up[c] as i32 - rotated[c] as i32).abs() <= 2),
         "{up:?} vs {rotated:?}"
     );
-    let mut coat11 = coat.clone();
-    coat11.shader_type = 11;
     let (off, on) = off_on(up_quad(0, coat));
     println!("coat off {off:?} on {on:?}");
     assert!(on[0] > off[0] && on[0] > on[2], "{off:?} → {on:?}");
-    // A type 11 coat (its MultiLayer floats load only for type 11; Note GZ3) draws the same.
-    let (off11, on11) = off_on(up_quad(0, coat11));
-    println!("type 11 coat off {off11:?} on {on11:?}");
-    assert_eq!((off11, on11), (off, on));
 }
 
 #[test]

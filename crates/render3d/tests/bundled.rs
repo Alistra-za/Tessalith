@@ -1,4 +1,5 @@
-//! The pinned CS tree embedded in the crate (Note GT2): reads, closure, and equality with the folder it came from.
+//! The pinned CS 2.0 tree embedded in the crate, `shaders/cs2` (Notes GT2, ID26 and IE): reads, closure, and
+//! equality with the folder it came from.
 use render3d::includes::expand;
 use render3d::source::SourceSet;
 use render3d::ShaderSource;
@@ -33,6 +34,9 @@ fn every_entry_expands_from_the_bundle() {
     }
 }
 
+/// The files the bundler wrote into `shaders/cs2` (including `SettingsDefault.json`).
+const BUNDLED_FILES: usize = 54;
+
 #[test]
 fn the_bundle_holds_only_the_closure() {
     let mut reached = BTreeSet::new();
@@ -47,7 +51,7 @@ fn the_bundle_holds_only_the_closure() {
         .map(str::to_string)
         .collect();
     assert_eq!(held, reached);
-    assert_eq!(held.len(), 58);
+    assert_eq!(held.len(), BUNDLED_FILES);
 }
 
 #[test]
@@ -64,26 +68,26 @@ fn a_missing_file_is_an_error_naming_it() {
     assert!(x.text.contains("nope.hlsli"));
 }
 
+/// Every bundled file is the PBR2Test1 Shaders folder's byte for byte, but `Skin/Skin.hlsli`, the override (Note
+/// ID26), and `SettingsDefault.json`, which the build does not ship (ID27). Gated on `SDC_CS_SHADERS_B` (read-only
+/// owner data). The override makes a whole-expansion comparison differ, so the files are compared one by one.
 #[test]
-fn bundled_expansion_equals_the_folder() {
-    let Some(root) = std::env::var_os("SDC_CS_SHADERS").map(PathBuf::from) else {
-        eprintln!("skipped: set SDC_CS_SHADERS");
+fn bundled_files_equal_the_folder_but_the_override() {
+    let Some(root) = std::env::var_os("SDC_CS_SHADERS_B").map(PathBuf::from) else {
+        eprintln!("skipped: set SDC_CS_SHADERS_B");
         return;
     };
-    let bundled = SourceSet::new(ShaderSource::Bundled);
-    let folder = SourceSet::new(ShaderSource::Folder(root));
-    for e in ENTRIES {
-        let (b, f) = (
-            bundled.get(Path::new(e)).unwrap(),
-            folder.get(Path::new(e)).unwrap(),
-        );
-        assert!(b.text == f.text, "{e}: text differs");
-        assert_eq!(b.sha256, f.sha256, "{e}");
-        eprintln!("{e}: {} bytes, sha256 equal", b.text.len());
+    let mut compared = 0;
+    for n in render3d::bundled_names() {
+        if n == "skin/skin.hlsli" || n == "settingsdefault.json" {
+            continue;
+        }
+        let f = std::fs::read(root.join(n)).unwrap_or_else(|e| panic!("{n}: {e}"));
+        assert!(render3d::bundled_read(n) == Some(&f[..]), "{n} differs");
+        compared += 1;
     }
+    assert_eq!(compared, BUNDLED_FILES - 2);
 }
-
-// ---- Tree B: CS TruePBR 2.0 (Note ID) ----
 
 /// Git blob sha1 (`blob <len>\0<bytes>`), so the test can name a commit's file by the id git gives it.
 fn git_blob_sha1(data: &[u8]) -> String {
@@ -150,62 +154,20 @@ fn git_blob_sha1_matches_git() {
     );
 }
 
-/// The files the bundler wrote into `shaders/cs2` (including `SettingsDefault.json`).
-const TREE_B_FILES: usize = 54;
-
 #[test]
-fn tree_b_holds_only_its_closure() {
-    let mut reached = BTreeSet::new();
-    for e in ENTRIES {
-        for f in expand(&ShaderSource::BundledB, e).unwrap().files {
-            reached.insert(f.to_string_lossy().to_ascii_lowercase());
-        }
-    }
-    reached.insert("settingsdefault.json".to_string());
-    let held: BTreeSet<String> = render3d::bundled_names_in(render3d::Tree::B)
-        .into_iter()
-        .map(str::to_string)
-        .collect();
-    assert_eq!(held, reached);
-    assert_eq!(held.len(), TREE_B_FILES);
-}
-
-#[test]
-fn tree_b_skin_is_advanced_skin() {
-    let skin =
-        render3d::bundled_read_in(render3d::Tree::B, "Skin/Skin.hlsli").expect("tree B Skin.hlsli");
-    // jiayev/advanced-skin be6afe5.
+fn the_skin_is_advanced_skin() {
+    let skin = render3d::bundled_read("Skin/Skin.hlsli").expect("bundled Skin.hlsli");
+    // jiayev/advanced-skin be6afe5 (Note ID26).
     assert_eq!(
         git_blob_sha1(skin),
         "be6afe5e165a1a2dd6f1ed08f2aa0cea8b8508a8"
     );
 }
 
-#[test]
-fn tree_a_unchanged() {
-    assert_eq!(render3d::bundled_names().len(), 58);
-    // Every name and byte of tree A: `shaders/cs` stays what Note GT pinned.
-    use sha2::Digest;
-    let mut h = sha2::Sha256::new();
-    for n in render3d::bundled_names() {
-        h.update(n.as_bytes());
-        h.update(render3d::bundled_read_in(render3d::Tree::A, n).unwrap());
-    }
-    assert_eq!(
-        hex::encode(h.finalize()),
-        "489f2b076b3192cf82a08b04c3d485d8c2e894991c4950fca29c1dbbe06a1008"
-    );
-    let skin = render3d::bundled_read_in(render3d::Tree::A, "Skin/Skin.hlsli").unwrap();
-    assert_eq!(
-        git_blob_sha1(skin),
-        "be6afe5e165a1a2dd6f1ed08f2aa0cea8b8508a8"
-    );
-}
-
-/// Compiles tree B's `Lighting.hlsl` (not GPU, GT5): the default and `TRUE_PBR` permutations, and the Skin path
+/// Compiles the bundled `Lighting.hlsl` (not GPU, GT5): the default and `TRUE_PBR` permutations, and the Skin path
 /// (`CS_SKIN` includes `Skin/Skin.hlsli`, which `Lighting.hlsl` reads only under that define).
 #[test]
-fn tree_b_lighting_compiles() {
+fn lighting_compiles() {
     use render3d::permutation::{defines, Material, Pbr, Stage};
     let m = |shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool| Material {
         shader_type,
@@ -225,7 +187,7 @@ fn tree_b_lighting_compiles() {
         projected_glint: false,
         wetness: false,
     };
-    let src = SourceSet::new(ShaderSource::BundledB)
+    let src = SourceSet::new(ShaderSource::Bundled)
         .get(Path::new("Lighting.hlsl"))
         .unwrap();
     // Skin.hlsli's own code reached the compiler's input (the expander follows every include).

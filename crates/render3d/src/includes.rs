@@ -1,53 +1,38 @@
 //! Textual #include expansion so D3DCompile sees one buffer; CS includes are root-relative ("Common/x.hlsli").
-pub use crate::bundled::Tree;
 use std::path::PathBuf;
 
 /// Where shader text is read from: the tree embedded in the exe. Tests can also read a folder (stand-ins, the
 /// owner's CS for comparisons).
 #[derive(Clone, Debug, Default)]
 pub enum ShaderSource {
-    /// Tree A: the pinned CS 1.9.0 closure (Note GT).
+    /// The pinned CS 2.0 closure, `shaders/cs2` (Notes GT and IE).
     #[default]
     Bundled,
-    /// Tree B: the CS 2.0 (TruePBR type 21) closure (Note ID).
-    BundledB,
     #[cfg(feature = "test-hooks")]
     Folder(PathBuf),
 }
 
 impl ShaderSource {
-    /// The embedded tree this source reads, `None` for a test folder.
-    pub(crate) fn tree(&self) -> Option<Tree> {
-        match self {
-            ShaderSource::Bundled => Some(Tree::A),
-            ShaderSource::BundledB => Some(Tree::B),
-            #[cfg(feature = "test-hooks")]
-            ShaderSource::Folder(_) => None,
-        }
-    }
-
     fn read(&self, rel: &str) -> Option<Vec<u8>> {
-        match (self.tree(), self) {
-            (Some(t), _) => crate::bundled::read_in(t, rel).map(<[u8]>::to_vec),
+        match self {
+            ShaderSource::Bundled => crate::bundled::read(rel).map(<[u8]>::to_vec),
             #[cfg(feature = "test-hooks")]
-            (None, ShaderSource::Folder(root)) => std::fs::read(root.join(rel)).ok(),
-            _ => None,
+            ShaderSource::Folder(root) => std::fs::read(root.join(rel)).ok(),
         }
     }
 
     fn has(&self, rel: &str) -> bool {
-        match (self.tree(), self) {
-            (Some(t), _) => crate::bundled::read_in(t, rel).is_some(),
+        match self {
+            ShaderSource::Bundled => crate::bundled::read(rel).is_some(),
             #[cfg(feature = "test-hooks")]
-            (None, ShaderSource::Folder(root)) => root.join(rel).is_file(),
-            _ => false,
+            ShaderSource::Folder(root) => root.join(rel).is_file(),
         }
     }
 
     /// What error messages and `Expanded::files` call `rel`: the bundle's `rel` itself, or a test folder's path.
     pub(crate) fn path_of(&self, rel: &str) -> PathBuf {
         match self {
-            ShaderSource::Bundled | ShaderSource::BundledB => PathBuf::from(rel),
+            ShaderSource::Bundled => PathBuf::from(rel),
             #[cfg(feature = "test-hooks")]
             ShaderSource::Folder(root) => root.join(rel),
         }

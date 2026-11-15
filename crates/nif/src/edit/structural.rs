@@ -271,7 +271,7 @@ fn from_21(
     };
     let mut out = head_to_refraction(body, p, new_type)?;
     let mut notes = vec![];
-    // a PBR target is `pbr2::v1_body`, which the preview's tree A draws too (Note ID40); any other is plain vanilla:
+    // a PBR target is `pbr2::v1_body` (Note ID40); any other is plain vanilla:
     // the v1 PBR flags and the stale multi-layer flag go, and the values are `MaterialState::builtin_default`'s
     let (s2, (gloss, spec, strength, le1, le2), t) = if matches!(new_type, 0 | 11) {
         let b = pbr2::v1_body(lt.slsf2, *features, params, new_type);

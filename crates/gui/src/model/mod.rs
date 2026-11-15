@@ -1059,13 +1059,6 @@ impl AppModel {
         }
     }
 
-    /// Note ID20: the "CS PBR 2.0 (experimental)" box; saves the setting.
-    /// The app hands it to the Meshes model each frame (`MeshesModel::cs_pbr2`).
-    pub fn set_cs_pbr2(&mut self, on: bool) {
-        self.settings.cs_pbr2 = on;
-        self.save_settings();
-    }
-
     /// Note HV2: the analysis disk cache's limit, saved now and applied when the app next starts.
     pub fn set_analysis_cache_mb(&mut self, mb: u32) {
         self.settings.analysis_cache_mb = Some(mb);

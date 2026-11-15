@@ -4460,41 +4460,6 @@ fn in_the_meshes_view_sized(
     (d, h)
 }
 
-/// Note ID31 (Review Focus 3): the "CS PBR 2.0 (experimental)" setting switches both 3D panels' shader tree and
-/// leaves the open NIF edit alone.
-#[test]
-fn toggling_cs_pbr2_switches_tree_keeps_edits() {
-    use render3d::Tree;
-    use sdc_gui::model::viewport3d::V3Cmd;
-    app_data();
-    let t = tempfile::tempdir().unwrap();
-    let model = support::opened(&t.path().join("mod"));
-    let (_d, mut h) = in_the_meshes_view(model, 2);
-    let cmds = h.state_mut().meshes.v3.attach_test_thread();
-    let sets = h.state_mut().state.set3d.v3.attach_test_thread();
-    let before = h.state().meshes.edit.as_ref().unwrap().doc.clone();
-    assert_eq!(before.ops.len(), 2);
-    h.state_mut().model.set_cs_pbr2(true);
-    h.run_steps(3);
-    let sent: Vec<V3Cmd> = cmds.try_iter().collect();
-    assert!(
-        sent.iter().any(|c| matches!(c, V3Cmd::SetTree(Tree::B))),
-        "SetTree(B) sent to the Meshes panel"
-    );
-    assert!(sets
-        .try_iter()
-        .any(|c| matches!(c, V3Cmd::SetTree(Tree::B))));
-    assert_eq!(nif(&h), (2, false));
-    let doc = |h: &AppH| h.state().meshes.edit.as_ref().unwrap().doc.clone();
-    assert_eq!(doc(&h), before, "the edit op list is unchanged");
-    h.state_mut().model.set_cs_pbr2(false);
-    h.run_steps(3);
-    assert!(cmds
-        .try_iter()
-        .any(|c| matches!(c, V3Cmd::SetTree(Tree::A))));
-    assert_eq!(doc(&h), before);
-}
-
 /// Beyond the brief's list: with no Textures history, Ctrl+Z and the header still undo the NIF step.
 #[test]
 fn ctrl_z_undoes_a_nif_edit_with_an_empty_textures_history() {
@@ -9099,7 +9064,6 @@ fn pick_21_shows_notes() {
     }
     let mut m = direct(b);
     select(&mut m, "S");
-    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
@@ -9140,7 +9104,6 @@ fn leaving_21_still_pushes_the_slsf1_type_fix_in_the_same_undo_step() {
     b[at..at + 4].copy_from_slice(&((1u32 << 31) | (1 << 21)).to_le_bytes());
     let mut m = direct(b);
     select(&mut m, "S");
-    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
@@ -11824,11 +11787,10 @@ fn undoing_a_type_21_pick_that_unlinked_controllers_restores_the_source() {
 
 const TYPE_21: &str = "TruePBR 2.0 (21)";
 
-/// A type-21 shape "S" with `features` and `params`, selected, the CS PBR 2.0 setting `on`.
-fn t21_model(features: u32, params: &[f32; 25], on: bool) -> MeshesModel {
+/// A type-21 shape "S" with `features` and `params`, selected.
+fn t21_model(features: u32, params: &[f32; 25]) -> MeshesModel {
     let mut m = direct(scenes::lsp21_shape(features, params));
     select(&mut m, "S");
-    m.cs_pbr2 = on;
     m
 }
 
@@ -11859,22 +11821,11 @@ fn click_scrolled(h: &mut Harness<'static, MeshesModel>, role: AkRole, label: &s
     h.run_steps(3);
 }
 
+/// Note IE5: an SE shape is offered type 21 with no setting.
 #[test]
-fn type_21_hidden_when_box_off() {
+fn type_21_offered_on_se() {
     let mut m = direct(scenes::lsp_shape(0, &[]));
     select(&mut m, "S");
-    let mut h = view(m);
-    h.run_steps(2);
-    open_type_list(&mut h);
-    h.get_by_label("Glow Shader (2)");
-    assert!(h.query_by_label_contains("TruePBR 2.0").is_none());
-}
-
-#[test]
-fn type_21_offered_when_box_on() {
-    let mut m = direct(scenes::lsp_shape(0, &[]));
-    select(&mut m, "S");
-    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     open_type_list(&mut h);
@@ -11900,7 +11851,6 @@ fn type_21_offered_when_box_on() {
 fn type_21_not_offered_on_le() {
     let mut m = direct(scenes::lsp_shape(0, &[]));
     select(&mut m, "S");
-    m.cs_pbr2 = true;
     // an LE NIF (BSVER 83): the model's version is all the combo reads
     m.edit.as_mut().unwrap().model.bsver = 83;
     let mut h = view(m);
@@ -11912,7 +11862,7 @@ fn type_21_not_offered_on_le() {
 
 #[test]
 fn type_21_tab_shows_features_and_base_params() {
-    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS));
     h.run_steps(2);
     h.get_by_role_and_label(AkRole::Label, "PBR version 2");
     for n in nif::pbr2::FEATURE_NAMES {
@@ -11945,7 +11895,6 @@ fn two_layer_disables_subsurface_checkbox() {
     let mut h = view(t21_model(
         nif::pbr2::feat::TWO_LAYER,
         &nif::pbr2::PBR2_DEFAULTS,
-        true,
     ));
     h.run_steps(2);
     let sub = h.get_by_role_and_label(AkRole::CheckBox, "Subsurface");
@@ -11965,7 +11914,7 @@ fn two_layer_disables_subsurface_checkbox() {
 
 #[test]
 fn toggling_fuzz_pushes_setbits() {
-    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS));
     h.run_steps(2);
     assert!(h
         .query_by_role_and_label(AkRole::SpinButton, "Fuzz weight")
@@ -11992,7 +11941,7 @@ fn toggling_fuzz_pushes_setbits() {
 
 #[test]
 fn param_edit_pushes_pbrparam_field() {
-    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS));
     h.run_steps(2);
     edit_number(&mut h, "Roughness scale", "2.5");
     let got = ops(h.state());
@@ -12009,47 +11958,30 @@ fn param_edit_pushes_pbrparam_field() {
     assert_eq!(pbr2_of(h.state()).1[0], 2.5);
 }
 
+/// Note IE5: with the CS PBR 2.0 box gone, a type-21 shape's type combo, features and parameters are all editable.
 #[test]
-fn box_off_type_21_params_read_only() {
-    let mut h = view(t21_model(
-        nif::pbr2::feat::FUZZ,
-        &nif::pbr2::PBR2_DEFAULTS,
-        false,
-    ));
+fn type_21_fields_are_editable() {
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS));
     h.run_steps(2);
-    for n in ["Roughness scale", "Fuzz weight"] {
-        let d = h.get_by_role_and_label(AkRole::SpinButton, n);
-        assert!(d.accesskit_node().is_disabled(), "{n}");
-    }
-    for n in nif::pbr2::FEATURE_NAMES {
-        let c = h.get_by_role_and_label(AkRole::CheckBox, n);
-        assert!(c.accesskit_node().is_disabled(), "{n}");
-    }
-    // the shared fields stay editable
-    for n in ["Shader alpha", "UV offset U"] {
+    let c = h.get_by_role_and_label(AkRole::ComboBox, "Shader type");
+    assert!(!c.accesskit_node().is_disabled());
+    h.get_by_label(TYPE_21);
+    for n in ["Roughness scale", "Shader alpha", "UV offset U"] {
         let d = h.get_by_role_and_label(AkRole::SpinButton, n);
         assert!(!d.accesskit_node().is_disabled(), "{n}");
+    }
+    // features no CS 2.0 rule blocks on a bare shape (Coloured coat and the coat's others need Two-layer)
+    for n in ["Subsurface", "Two-layer coat", "Fuzz", "Hair", "Glint"] {
+        let c = h.get_by_role_and_label(AkRole::CheckBox, n);
+        assert!(!c.accesskit_node().is_disabled(), "{n}");
     }
     assert!(ops(h.state()).is_empty());
 }
 
 #[test]
-fn box_off_type_21_combo_disabled() {
-    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, false));
-    h.run_steps(2);
-    let c = h.get_by_role_and_label(AkRole::ComboBox, "Shader type");
-    assert!(c.accesskit_node().is_disabled());
-    h.get_by_label(TYPE_21);
-    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
-        .hover();
-    h.run_steps(30);
-    h.get_by_label_contains("Tick CS PBR 2.0 in Settings to change it");
-}
-
-#[test]
-fn saved_doc_with_type_21_ops_loads_box_off() {
-    // Review Focus 4: a document holding PbrFeatures and PbrParam ops opens and applies with the setting off
-    let mut m = t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true);
+fn saved_doc_with_type_21_ops_loads() {
+    // Review Focus 4: a document holding PbrFeatures and PbrParam ops opens and applies
+    let mut m = t21_model(0, &nif::pbr2::PBR2_DEFAULTS);
     let e = m.edit.as_ref().unwrap();
     let at = nif::edit::anchor_role(&e.model, Some(shape_named(e, "S")), Role::Shader).unwrap();
     m.edit_push(
@@ -12092,7 +12024,6 @@ fn saved_doc_with_type_21_ops_loads_box_off() {
     assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
     let mut m = MeshesModel::empty();
     m.edit = Some(e);
-    assert!(!m.cs_pbr2);
     let (features, params) = pbr2_of(&m);
     assert_eq!((features, params[16]), (32, 0.5));
 }
@@ -12108,7 +12039,6 @@ fn v1_flags_hidden_on_type_21() {
     b[at..at + 4].copy_from_slice(&((1u32 << 23) | (1 << 1) | 1).to_le_bytes());
     let mut m = direct(b);
     select(&mut m, "S");
-    m.cs_pbr2 = true;
     let mut h = view(m);
     h.run_steps(2);
     open_flags(&mut h);
@@ -12307,7 +12237,7 @@ fn the_shape_card_names_type_21_slots_like_the_editor() {
 #[test]
 fn a_param_drag_stays_inside_param_range() {
     // Specular level is 0-1: a typed 5 lands on 1
-    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS, true));
+    let mut h = view(t21_model(0, &nif::pbr2::PBR2_DEFAULTS));
     h.run_steps(2);
     edit_number(&mut h, "Specular level", "5");
     let got = ops(h.state());

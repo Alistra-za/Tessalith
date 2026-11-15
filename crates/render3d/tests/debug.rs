@@ -2,7 +2,7 @@
 //! as its values (opt-in).
 mod common;
 use common::{cache_files, dds_rgba8, renderer};
-use nif::material::{MaterialState, SLSF2_TRUE_PBR};
+use nif::material::MaterialState;
 use render3d::device::Gpu;
 use render3d::scene::Scene;
 use render3d::{Builtin, DebugOutput, Renderer, ShapeId};
@@ -33,8 +33,8 @@ fn the_standin_refuses_debug_views_and_lit_keys_are_unchanged() {
     );
 }
 
-/// A TruePBR sphere with roughness scale 1 (PBRParams1.x, L:1439) and a 1×1 RMAOS (64, 128, 192) reads back
-/// as those values in Roughness / Metallic / AO (vertexAO 1: no vertex colours, L:269), encode on and off.
+/// A type-21 sphere with roughness scale 1 (PBRParams1.x, cs2 Lighting.hlsl:1533) and a 1×1 RMAOS (64, 128, 192)
+/// reads back as those values in Roughness / Metallic / AO (vertexAO 1: no vertex colours), encode on and off.
 #[test]
 fn bundled_cs_reads_rmaos_back_as_its_values() {
     let fp = render3d::ShaderSource::Bundled;
@@ -42,9 +42,7 @@ fn bundled_cs_reads_rmaos_back_as_its_values() {
     let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
         .unwrap();
     assert!(r.debug_supported(), "the bundled CS has the anchor");
-    let mut m = MaterialState::builtin_default();
-    m.slsf2 |= SLSF2_TRUE_PBR;
-    m.params.specular_strength = 1.0; // the roughness scale
+    let mut m = common::as_t21(MaterialState::builtin_default(), 0);
     m.set_slot_raw(5, r"textures\sdc\rmaos.dds");
     let rmaos = dds_rgba8(1, 1, &[[64, 128, 192, 255]]);
     let rep = r.load_builtin(Builtin::Sphere, m, &|p| {
