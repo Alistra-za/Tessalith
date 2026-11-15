@@ -1054,6 +1054,79 @@ fn recipe_drags_in_the_also_export_tab_write_export_legacy() {
     );
 }
 
+/// Note JI2 (final review I1): a recipe value outside its box's range, hand-written in `sdc.toml`, is left as it is:
+/// opening the tab and drawing the box write nothing (no clamp, no undo step, nothing to save).
+#[test]
+fn an_out_of_range_recipe_value_survives_opening_the_tab() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("mods/Mod");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[export]\nalso = [\"vanilla\"]\n\n[export.legacy]\nlandscape_spec = 6.0\n",
+    )
+    .unwrap();
+    let mut m = project(d.path());
+    assert!(m.also_on(), "fixture: Vanilla ticked");
+    assert_eq!(
+        m.also_config().legacy.landscape_spec,
+        6.0,
+        "fixture: the value is read"
+    );
+    let k = steel_key(&m);
+    m.select_set(&k);
+    // Opening the folder may already leave edits to save (an accepted suggestion); the tab must add none.
+    let before = m.project.as_ref().unwrap().text();
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    press(&mut h, |h| {
+        h.get_by_role_and_label(Role::Button, "Also export")
+    });
+    fn spec(h: &H) -> egui_kittest::Node<'_> {
+        h.get_by_role_and_label(Role::SpinButton, "Landscape spec factor")
+    }
+    spec(&h).scroll_to_me();
+    h.run();
+    assert!(!spec(&h).accesskit_node().is_disabled(), "the box is live");
+    settle(&mut h);
+    assert_eq!(h.state().also_config().legacy.landscape_spec, 6.0);
+    assert_ne!(h.state().undo_label(), Some("Also export settings"));
+    assert_eq!(
+        h.state().project.as_ref().unwrap().text(),
+        before,
+        "sdc.toml's text is unchanged"
+    );
+}
+
+/// Note JI2 (final review I2): with the Settings tab in front of the centre, Review's "Recipe settings…" brings the
+/// selected set's Also export tab up, and its one-shot scroll request is used.
+#[test]
+fn recipe_link_over_the_settings_tab_shows_the_also_export_tab() {
+    use sdc_gui::model::CentreTab;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    let k = steel_key(&m);
+    m.select_set(&k);
+    m.open_settings_tab();
+    m.open_review();
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    assert_eq!(h.state().centre_front(), CentreTab::Settings, "fixture");
+    assert!(h
+        .query_by_role_and_label(Role::SpinButton, "Diffuse brightness")
+        .is_none());
+    press(&mut h, |h| h.get_by_label("Recipe settings…"));
+    settle(&mut h);
+    assert_eq!(h.state().centre_front(), CentreTab::Selection);
+    assert_eq!(h.state().selection, sdc_gui::model::Selection::Set(k));
+    brightness(&h);
+    let left = h
+        .ctx
+        .data(|d| d.get_temp::<bool>(eframe::egui::Id::new("set-editor-tab-scroll")));
+    assert_eq!(left, None, "the scroll request was used");
+}
+
 /// Note JI2 (rule 8.4): the tab's project ticks and Export to ▾'s items are on screen together, so the tab's carry
 /// "All sets: …" names; a click on one writes `[export] also` as the header's does.
 #[test]
@@ -1090,6 +1163,11 @@ fn the_material_tab_has_no_also_export_group() {
     m.select_set(&k);
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
+    assert_eq!(
+        h.query_all_by_label("Also export").count(),
+        1,
+        "one node named Also export"
+    );
     assert!(
         h.query_all_by_label("Also export")
             .all(|n| n.accesskit_node().role() == Role::Button),

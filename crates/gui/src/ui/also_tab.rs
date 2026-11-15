@@ -186,11 +186,14 @@ fn recipe(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
             .show(ui, |ui| {
                 // The number box first: in a narrow column the text is cut, never the box.
                 for (v, label, key, lo, hi, hover) in rows {
+                    // A hand-written value outside the range is shown as it is: egui's clamp on draw would report a
+                    // change and write it back with no edit (final review I1; as `cube_section::num`).
                     let (r, done) = held_value(ui, ("also-recipe", key), *v, |ui, x| {
                         ui.add(
                             egui::DragValue::new(x)
                                 .speed(0.01)
                                 .range(lo..=hi)
+                                .clamp_existing_to_range(false)
                                 .max_decimals(3)
                                 .update_while_editing(false),
                         )
