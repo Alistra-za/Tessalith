@@ -79,13 +79,14 @@ fn defines_per_material() {
             csm(0),
             Pbr::V2,
             &["TRUE_PBR"],
-            &["SPECULAR", "GLINT"],
+            &["SPECULAR", "GLINT", "ANISO_LIGHTING"],
         ),
         (
+            // CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (Note IE8).
             ".csm glint",
             csm(feat::GLINT),
             Pbr::V2,
-            &["TRUE_PBR", "GLINT"],
+            &["TRUE_PBR", "GLINT", "ANISO_LIGHTING"],
             &[],
         ),
         (
@@ -93,7 +94,7 @@ fn defines_per_material() {
             csm(feat::THIN_SURFACE | feat::FOLIAGE),
             Pbr::V2,
             &["TRUE_PBR"],
-            &["GLINT"],
+            &["GLINT", "ANISO_LIGHTING"],
         ),
         (
             "a .csm shape with bit 23 is v2",

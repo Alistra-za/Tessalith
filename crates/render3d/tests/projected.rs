@@ -154,7 +154,7 @@ fn defines_match_capture() {
         ["PSHADER", "PROJECTED_UV", "VC", "TRUE_PBR", "DEFERRED"]
     );
     assert_eq!(names(&vs), ["VSHADER", "PROJECTED_UV", "VC", "DEFERRED"]);
-    // Snow (18019): also GLINT.
+    // Snow (18019): also GLINT, and ANISO_LIGHTING with it (Note IE8).
     pm.projected_glint = true;
     assert_eq!(
         names(&defines(&pm, Stage::Pixel, &[], true)),
@@ -164,6 +164,7 @@ fn defines_match_capture() {
             "VC",
             "TRUE_PBR",
             "GLINT",
+            "ANISO_LIGHTING",
             "DEFERRED"
         ]
     );

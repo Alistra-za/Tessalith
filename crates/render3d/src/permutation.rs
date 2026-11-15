@@ -111,7 +111,8 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     // TruePBR: CS enables glint from its remapped Glint flag (Fit_Slope without MLP/Soft/Back; 01 §3.1, P1 spec
     // §2.2); SLSF2.21 is cleared at load. Vanilla: Anisotropic_Lighting (SLSF2.21) → ANISO_LIGHTING.
     // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019). A `.csm` has its own
-    // Glint feature bit (Note ID33).
+    // Glint feature bit (Note ID33). CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (its debug log, 28 GLINT
+    // keys; Note IE8); only VanillaSpecular reads it, which TruePBR never calls.
     let own_glint = match m.pbr {
         Pbr::V1 => crate::material::remapped_glint(m.slsf2),
         Pbr::V2 => m.pbr2_glint,
@@ -119,6 +120,7 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     };
     if pbr && (own_glint || (m.projected && m.projected_glint)) {
         out.push("GLINT");
+        out.push("ANISO_LIGHTING");
     } else if ps && !pbr && bit(m.slsf2, 21) {
         out.push("ANISO_LIGHTING");
     }

@@ -142,7 +142,12 @@ fn glint_define_matches_the_glint_flag() {
         assert_eq!(remapped_glint(m.slsf2), flag, "{bits:?}");
         let d = defines(&perm_material(&m), Stage::Pixel, &[], false);
         assert_eq!(d.0.iter().any(|(k, _)| k == "GLINT"), flag, "{bits:?}");
-        assert!(!d.0.iter().any(|(k, _)| k == "ANISO_LIGHTING"), "{bits:?}");
+        // CS 2.0 compiles ANISO_LIGHTING with every GLINT (Note IE8); SLSF2.21 alone gives neither.
+        assert_eq!(
+            d.0.iter().any(|(k, _)| k == "ANISO_LIGHTING"),
+            flag,
+            "{bits:?}"
+        );
     }
 }
 

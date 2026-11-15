@@ -45,15 +45,13 @@ const EXTRACTION: &[&str] = &[
     "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26941_CaveWormtubeLarge_0",
 ];
 
-/// The glint subject's defines are Task 7's (Note ID56): it is reported, not counted.
-const GLINT: &str = "glint";
-
 /// The PS b2 (PerGeometry) fields that come from the material (Lighting.hlsl:564-582).
 const B2_MATERIAL: &[&str] = &["MaterialData", "AlphaTestRef", "EmitColor"];
 
 /// Engine textures: bound by the game whatever the material (noise, shadow mask, and the scene depth that CS 2.0's
-/// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID42).
-const ENGINE_REGS: &[u32] = &[11, 14, 17];
+/// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID42), and CS's glint noise
+/// map at t20, which CS generates once for every GLINT draw (sdc's own copy is `render3d::glint_noise`; Note IE8).
+const ENGINE_REGS: &[u32] = &[11, 14, 17, 20];
 
 fn to_defines(list: &[String]) -> Defines {
     Defines(
@@ -321,8 +319,8 @@ fn extraction_matches_capture() {
     let mut t = String::new();
     let (mut reached, mut nonfinite, mut define_mismatch) = (0usize, Vec::new(), 0usize);
     let mut firsts: Vec<String> = Vec::new();
-    // The counted CS 2.0 subjects (glint is Task 7's): the events that reached the pixel swap, and each MRT over the
-    // noise limit there.
+    // The counted CS 2.0 subjects (glint included, Note IE8): the events that reached the pixel swap, and each MRT over
+    // the noise limit there.
     let (mut swapped, mut over) = (BTreeSet::new(), Vec::new());
     // Counted subjects whose shape did not draw from a resolved `.csm`: (name, PBR values taken, csm_error).
     let mut no_csm: Vec<String> = Vec::new();
@@ -333,7 +331,7 @@ fn extraction_matches_capture() {
     for s in EXTRACTION {
         let dir = env.root.join(s);
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
-        let counted = subject_of(&name).filter(|p| p.label != GLINT);
+        let counted = subject_of(&name);
         let _ = writeln!(t, "\n== {s}");
         let mut r = load_fixture(&dir).unwrap();
         // (1)-(2) sdc's load and the shape.
@@ -595,11 +593,11 @@ fn extraction_matches_capture() {
     let unswapped: Vec<&str> = EXTRACTION
         .iter()
         .map(|s| s.rsplit('/').next().unwrap())
-        .filter(|n| subject_of(n).is_some_and(|p| p.label != GLINT) && !swapped.contains(*n))
+        .filter(|n| subject_of(n).is_some() && !swapped.contains(*n))
         .collect();
     let _ = writeln!(
         t,
-        "CS 2.0 subjects swapped (glint not counted): {} groups {groups:?}; not swapped {unswapped:?}; without a \
+        "CS 2.0 subjects swapped: {} groups {groups:?}; not swapped {unswapped:?}; without a \
          resolved .csm {no_csm:?}; MRTs over the limit {over:?}",
         groups.len()
     );
@@ -624,7 +622,7 @@ fn extraction_matches_capture() {
     );
     assert_eq!(
         groups.len(),
-        PBR2.len() - 1,
+        PBR2.len(),
         "CS 2.0 subjects swapped: {groups:?}; not swapped {unswapped:?}"
     );
     assert!(unswapped.is_empty(), "not swapped: {unswapped:?}");

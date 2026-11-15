@@ -81,7 +81,7 @@ fn define_table() {
             }
         }
     }
-    // Aniso: ANISO_LIGHTING, or GLINT with TruePBR.
+    // Aniso: ANISO_LIGHTING, or GLINT (with ANISO_LIGHTING) under TruePBR.
     assert!(
         names(&defines(&m(6, 0, 1 << 21, true), Stage::Pixel, &[], false))
             .contains(&"ANISO_LIGHTING")
@@ -101,7 +101,8 @@ fn define_table() {
     };
     let has = |v: &[String], n: &str| v.iter().any(|x| x == n);
     assert!(!has(&pbr_ps(1 << 21), "GLINT") && !has(&pbr_ps(1 << 21), "ANISO_LIGHTING"));
-    assert!(has(&pbr_ps(1 << 12), "GLINT"));
+    // CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (Note IE8).
+    assert!(has(&pbr_ps(1 << 12), "GLINT") && has(&pbr_ps(1 << 12), "ANISO_LIGHTING"));
     assert!(
         has(&pbr_ps((1 << 12) | (1 << 26)), "GLINT"),
         "subsurface + glint"
