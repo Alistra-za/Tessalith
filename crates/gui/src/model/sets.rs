@@ -3031,7 +3031,12 @@ impl AppModel {
                 .as_ref()
                 .and_then(|p| p.file_value(k, "subtype"))
         };
-        let skin = shader == Some(Shader::AdvancedSkin) && self.target == Target::Cs;
+        // Note DW1: a pinned diffuse keeps the set from turning skin, so its `_f` stays `pbr_fuzz`.
+        let pinned = match v.slots.get(&SlotKind::Diffuse) {
+            Some(SlotFill::Own { item }) => locked_items(self).contains_key(item),
+            _ => false,
+        };
+        let skin = shader == Some(Shader::AdvancedSkin) && self.target == Target::Cs && !pinned;
         v.members
             .iter()
             .filter(|k| self.untouched_subtype(k, now))

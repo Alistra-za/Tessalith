@@ -294,6 +294,25 @@ fn advanced_skin_re_types_an_untouched_recorded_pbr_albedo() {
             .any(|(_, _, json, _)| json.to_string_lossy().ends_with("body.csskin.json")),
         "a .csskin.json beside the diffuse: {skins:?}"
     );
+    for i in &m.items {
+        let out = i
+            .job
+            .as_ref()
+            .map(|j| j.output.to_string_lossy().replace('\\', "/"));
+        assert!(
+            !out.as_deref().is_some_and(|o| o.contains("textures/pbr/")),
+            "{} is not written under textures/pbr: {out:?}",
+            i.key
+        );
+    }
+    let rows = sdc_gui::model::bottom::problems(&m);
+    assert!(
+        !rows
+            .iter()
+            .any(|p| p.text.contains("needs skin_albedo") || p.text.contains("is not used by")),
+        "{:?}",
+        rows.iter().map(|p| &p.text).collect::<Vec<_>>()
+    );
     let cli = cli_plan(&root, &text(&m));
     assert_eq!(
         cli_job(&cli, "body_albedo.png").profile.subtype,
@@ -342,6 +361,51 @@ fn advanced_skin_packs_an_untouched_recorded_fuzz_into_rfaos() {
     m.set_shader(&id, Some(Shader::Pbr));
     assert!(m.wait_idle(WAIT));
     assert_eq!(subtype(&m, "anna/body_f.png"), Some(json!("pbr_fuzz")));
+}
+
+/// Note JE3 and DW1: under accept High a type the user picked that differs from the auto pick stays, and a pinned
+/// diffuse keeps the set from turning skin, so nothing is cleared or recorded again.
+#[test]
+fn advanced_skin_keeps_hand_types_and_a_pinned_diffuse() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    loose_skin(&root);
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    m.set_field(
+        "anna/body_albedo.png",
+        "subtype",
+        json!("landscape_diffuse"),
+    );
+    m.set_field("anna/body_f.png", "subtype", json!("pbr_subsurface"));
+    assert!(m.wait_idle(WAIT));
+    let id = set_id(&m, "anna/body");
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        subtype(&m, "anna/body_albedo.png"),
+        Some(json!("landscape_diffuse"))
+    );
+    assert_eq!(
+        subtype(&m, "anna/body_f.png"),
+        Some(json!("pbr_subsurface"))
+    );
+
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    loose_skin(&root);
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    let id = set_id(&m, "anna/body");
+    m.set_slot_lock(&id, 1, true).unwrap();
+    assert!(m.wait_idle(WAIT));
+    let steps = m.history.undo.len();
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(
+        subtype(&m, "anna/body_albedo.png"),
+        Some(json!("pbr_albedo"))
+    );
+    assert_eq!(subtype(&m, "anna/body_f.png"), Some(json!("pbr_fuzz")));
+    assert_eq!(m.history.undo.len(), steps + 1, "the shader step only");
 }
 
 /// Note FC1 R5 (round 3): going back to Auto re-types an untouched member too, also after a reopen (a new history).
