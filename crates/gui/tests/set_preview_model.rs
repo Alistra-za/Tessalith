@@ -2654,13 +2654,19 @@ fn a_pbr_landscape_plane_draws_a_preview_only_csm() {
         "{:?}",
         s.v3.content()
     );
+    let [u, v] = builtin_scene(&s).0.params.uv_scale;
     s.set_tiling(2.0);
+    run(&mut s, &m);
     let (material, files) = builtin_scene(&s);
-    let uv = material.params.uv_scale;
+    assert_eq!(material.params.uv_scale, [u * 2.0, v * 2.0], "tiled");
     let drawn = resolved(material, &files);
     let pbr = drawn.pbr.expect("the plane draws PBR");
     assert_eq!(pbr.params[0], 0.45, "the block's roughnessScale");
-    assert_eq!(drawn.params.uv_scale, uv, "the tiling stands");
+    assert_eq!(
+        drawn.params.uv_scale,
+        [u * 2.0, v * 2.0],
+        "the .csm keeps the tiling"
+    );
     assert!(csm_lines(&m, &key).is_empty(), "{:?}", csm_lines(&m, &key));
     assert!(
         !s.gets_csm(),
@@ -2683,4 +2689,65 @@ fn render_a_pbr_landscape_plane_draws_pbr() {
     let pbr = shapes[0].material.pbr.clone().expect("the plane draws PBR");
     assert_eq!(pbr.params[0], 0.45);
     assert_eq!(shapes[0].material.csm_error, None);
+    // The tiling slider is a material edit on the same load (`SetMaterial`): the plane stays PBR.
+    let uv = shapes[0].material.params.uv_scale;
+    s.set_tiling(2.0);
+    let t = Instant::now();
+    let shapes = loop {
+        let shapes = drawn(&mut s, &m);
+        if shapes[0].material.params.uv_scale != uv {
+            break shapes;
+        }
+        assert!(t.elapsed() < Duration::from_secs(90), "never tiled");
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(
+        shapes[0].material.params.uv_scale,
+        [uv[0] * 2.0, uv[1] * 2.0]
+    );
+    let pbr = shapes[0]
+        .material
+        .pbr
+        .clone()
+        .expect("still PBR after tiling");
+    assert_eq!(pbr.params[0], 0.45);
+}
+
+/// Note IE13 (fix round 1): on the real device an unsaved block edit is drawn after its reload (the edit is a new
+/// load, since render3d reads a `.csm` once per load).
+#[test]
+fn render_unsaved_edit_reaches_preview() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    let cache = tempfile::tempdir().unwrap();
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    real_render(&mut s, cache.path());
+    run(&mut s, &m);
+    let before = drawn(&mut s, &m)[0]
+        .material
+        .pbr
+        .clone()
+        .expect("the set's .csm");
+    assert_eq!(before.params[16], 0.6);
+    m.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let t = Instant::now();
+    let after = loop {
+        let p = drawn(&mut s, &m)[0]
+            .material
+            .pbr
+            .clone()
+            .expect("still the set's");
+        if p.params[16] != 0.6 {
+            break p;
+        }
+        assert!(
+            t.elapsed() < Duration::from_secs(90),
+            "the edit was never drawn"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    };
+    assert_eq!(after.params[16], 0.2, "the edited fuzz weight is drawn");
+    assert_eq!(after.params[0], 0.45);
 }
