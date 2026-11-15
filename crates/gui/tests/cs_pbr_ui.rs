@@ -120,3 +120,50 @@ fn the_section_shows_the_block_template_refusals_and_checks() {
     h.run();
     assert!(h.state().cs_block(id, Kind::Mato).is_some());
 }
+
+/// Note ID44: with the box on, a CS 2.0 bool key is a field row: its box adds the key (false), the value box sets it.
+/// With the box off the row is not drawn.
+#[test]
+fn bool_field_row_toggles() {
+    let d = tempfile::tempdir().unwrap();
+    let mut model = pbr_opened(d.path());
+    let id = "landscape/rock01";
+    model.set_shader(id, Some(engine::shader::Shader::Pbr));
+    model.add_cs_block(id, Kind::Txst);
+    let key = set_views(&model)
+        .into_iter()
+        .find(|v| v.id == id)
+        .unwrap()
+        .key;
+    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    model.select_set(&key);
+    let mut h = tall(model);
+    h.run();
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    h.run();
+    assert!(!has(&h, "Thin surface"), "box off: no CS 2.0 row");
+    h.state_mut().settings.cs_pbr2 = true;
+    h.run();
+    let value = |h: &Harness<'static, AppModel>| {
+        h.state()
+            .cs_block(id, Kind::Txst)
+            .unwrap()
+            .values
+            .get("thinSurface")
+            .cloned()
+    };
+    assert_eq!(value(&h), None);
+    h.get_by_label("Thin surface").click();
+    h.run();
+    assert_eq!(
+        value(&h),
+        Some(serde_json::json!(false)),
+        "added at CS's default"
+    );
+    h.get_by_label("Thin surface value").click();
+    h.run();
+    assert_eq!(value(&h), Some(serde_json::json!(true)));
+    h.get_by_label("Thin surface value").click();
+    h.run();
+    assert_eq!(value(&h), Some(serde_json::json!(false)));
+}

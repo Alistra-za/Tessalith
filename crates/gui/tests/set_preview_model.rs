@@ -454,6 +454,7 @@ fn fp_of(entry: Option<EntryInput>, sig: &str) -> SetFingerprint {
             sig: sig.into(),
             paths: vec!["textures/pbr/x/rock.dds".into()],
         }],
+        txst21: None,
     }
 }
 
@@ -2183,4 +2184,111 @@ fn a_texture_set_block_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
     assert_eq!(s.rows[0].material.params.uv_scale, [4.0, 4.0]);
     run(&mut s, &m);
     assert_eq!(uv(&s), [4.0, 4.0]);
+}
+
+/// Note ID45: CS 2.0's order on a type-21 shape: the payload, then the texture set, then the extra data. Payload
+/// p21 = 0.75, the texture set's 0.6 and a PBRThinSurface 0.7 give 0.7; without the extra data, 0.6.
+#[test]
+fn preview_applies_payload_then_txst_then_extra() {
+    use nif::material::MaterialState;
+    use nif::pbr2::{feat, Pbr2Extra, PBR2_DEFAULTS};
+    use nif::props::LightingTrailer;
+    use sdc_gui::model::cs_pbr::txst_overrides;
+    let mut m = MaterialState::builtin_default();
+    m.shader_type = 21;
+    m.params.trailer = LightingTrailer::Pbr2 {
+        version: 2,
+        features: feat::SUBSURFACE,
+        params: PBR2_DEFAULTS,
+    };
+    let payload = |m: &MaterialState| match &m.params.trailer {
+        LightingTrailer::Pbr2 {
+            features, params, ..
+        } => (*features, *params),
+        t => panic!("{t:?}"),
+    };
+    assert_eq!(payload(&m).1[21], 0.75);
+    let ov = txst_overrides(
+        serde_json::json!({"subsurfaceBalance": 0.6, "thinSurface": true, "fuzzRoughness": 0.4})
+            .as_object()
+            .unwrap(),
+    );
+    let mut without = m.clone();
+    apply_txst21(&mut without, &ov);
+    assert_eq!(payload(&without).1[21], 0.6);
+    assert_eq!(payload(&without).0, feat::SUBSURFACE | feat::THIN_SURFACE);
+    assert_eq!(
+        without.params.pbr2_extra.and_then(|x| x.fuzz),
+        Some(vec![0.4, 0.0]),
+        "the texture set's fuzz roughness, as a PBRFuzz"
+    );
+    let mut with = m.clone();
+    with.params.pbr2_extra = Some(Pbr2Extra {
+        thin: Some(vec![0.7, 0.5, 0.5, 1.0]),
+        fuzz: Some(vec![-1.0, 1.0]),
+    });
+    apply_txst21(&mut with, &ov);
+    assert_eq!(payload(&with).1[21], 0.7);
+    assert_eq!(
+        with.params.pbr2_extra.and_then(|x| x.fuzz),
+        Some(vec![-1.0, 1.0]),
+        "the NIF's PBRFuzz wins"
+    );
+    // A PBRThinSurface of the wrong count is ignored, as CS does.
+    let mut bad = m.clone();
+    bad.params.pbr2_extra = Some(Pbr2Extra {
+        thin: Some(vec![0.7]),
+        fuzz: None,
+    });
+    apply_txst21(&mut bad, &ov);
+    assert_eq!(payload(&bad).1[21], 0.6);
+    // Not type 21: untouched.
+    let plain = MaterialState::builtin_default();
+    let mut p = plain.clone();
+    apply_txst21(&mut p, &ov);
+    assert_eq!(p, plain);
+}
+
+/// Note ID45: the fingerprint carries the texture set's values for the type-21 path only with the box on, so a
+/// CS 2.0 key edit is a material change then and nothing with the box off.
+#[test]
+fn the_fingerprint_carries_the_texture_set_only_with_the_box_on() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    let key = rock(&m).0.key;
+    let id = "landscape/rock01";
+    m.set_cs_value(
+        id,
+        Kind::Txst,
+        "subsurfaceBalance",
+        Some(serde_json::json!(0.6)),
+    );
+    let off = fingerprint(&m, &key).unwrap();
+    assert_eq!(off.txst21, None);
+    m.set_cs_value(
+        id,
+        Kind::Txst,
+        "subsurfaceBalance",
+        Some(serde_json::json!(0.5)),
+    );
+    let off2 = fingerprint(&m, &key).unwrap();
+    assert_eq!(
+        classify(Some(&off), &off2, &serde_json::Value::Null),
+        Delta::default()
+    );
+    m.settings.cs_pbr2 = true;
+    let on = fingerprint(&m, &key).unwrap();
+    assert_eq!(
+        on.txst21.as_ref().and_then(|v| v.get("subsurfaceBalance")),
+        Some(&serde_json::json!(0.5))
+    );
+    m.set_cs_value(
+        id,
+        Kind::Txst,
+        "subsurfaceBalance",
+        Some(serde_json::json!(0.4)),
+    );
+    let on2 = fingerprint(&m, &key).unwrap();
+    assert!(classify(Some(&on), &on2, &serde_json::Value::Null).material);
 }

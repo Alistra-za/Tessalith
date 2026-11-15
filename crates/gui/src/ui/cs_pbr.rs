@@ -4,12 +4,12 @@
 //! drawing.
 use super::columns::{AMBER, RED};
 use crate::model::cs_pbr::{
-    check_edid, check_text, field_label, fields, pgp_box_text, set_key, single_pass_text,
+    check_edid, check_text, field, field_label, fields, pgp_box_text, set_key, single_pass_text,
     statics_text, templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics,
     StaticsStatus, GLINT_FIELDS, LANDSCAPE_UNREAD, NOT_CHECKED, NO_TXST_USES, PGP_BOX,
     PGP_BOX_UNAVAILABLE,
 };
-use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS};
+use crate::model::cs_pbr::{field_note, mato_synced, SHARED_FIELDS, SINGLE_PASS, TXST2_FIELDS};
 use crate::model::cs_pbr_export::{refusals, MATO_SPECULAR};
 use crate::model::sets::{is_json_set, is_pbr_landscape, SetView};
 use crate::model::AppModel;
@@ -119,7 +119,7 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
     ui.strong(SHARED);
     let b = m.cs_block(&v.id, Kind::Txst).unwrap_or_default();
     let mut own = vec![];
-    for f in fields(Kind::Txst)
+    for f in fields(Kind::Txst, m.settings.cs_pbr2)
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
@@ -134,7 +134,7 @@ fn shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, acts: &mut Vec<Act>) {
 /// Note BM16: a material object's shared field: "shared (above)" with Unsync, or its own row with Sync.
 fn mato_shared(ui: &mut egui::Ui, m: &AppModel, v: &SetView, b: &CsBlock, acts: &mut Vec<Act>) {
     let txst = m.cs_block(&v.id, Kind::Txst);
-    for f in fields(Kind::Mato)
+    for f in fields(Kind::Mato, m.settings.cs_pbr2)
         .iter()
         .filter(|f| SHARED_FIELDS.contains(&f.name))
     {
@@ -200,13 +200,15 @@ fn block(
     }
     let pgp = landscape && m.pgp_written(v);
     let mut hidden = 0;
-    for f in fields(kind) {
+    let pbr2 = m.settings.cs_pbr2;
+    for f in fields(kind, pbr2) {
         // Note BM16: in the card the shared fields are edited in the Shared section (and below for an unsynced block).
         if card && SHARED_FIELDS.contains(&f.name) {
             continue;
         }
-        if landscape && !pgp && LANDSCAPE_UNREAD.contains(&f.name) && !b.values.contains_key(f.name)
-        {
+        // Note ID47: the CS 2.0 keys count as landscape-unread too.
+        let unread = LANDSCAPE_UNREAD.contains(&f.name) || TXST2_FIELDS.contains(f);
+        if landscape && !pgp && unread && !b.values.contains_key(f.name) {
             hidden += 1;
             continue;
         }
@@ -218,7 +220,8 @@ fn block(
     if hidden > 0 {
         ui.weak(format!("{hidden} {HIDDEN_ROWS}"));
     }
-    for k in &b.bad {
+    // Note ID44: with the box off a CS 2.0 key is an unknown key, never "wrong type".
+    for k in b.bad.iter().filter(|k| field(kind, k, pbr2).is_some()) {
         ui.colored_label(
             AMBER,
             format!("{k}: wrong type in sdc-project.toml; not exported"),
@@ -235,6 +238,7 @@ fn default_of(f: &Field) -> Json {
         FieldKind::Num => json!(f.default),
         FieldKind::Rgb => json!([f.default, f.default, f.default]),
         FieldKind::Glint => json!({"enabled": true}),
+        FieldKind::Bool => json!(f.default != 0.0),
     }
 }
 
@@ -244,6 +248,8 @@ fn default_text(kind: Kind, f: &Field) -> String {
             format!("written as {MATO_SPECULAR} (CS default {})", f.default)
         }
         FieldKind::Glint => "CS default: off".into(),
+        FieldKind::Bool if f.default == 0.0 => "CS default: off".into(),
+        FieldKind::Bool => "CS default: on".into(),
         FieldKind::Rgb => format!("CS default: {0}, {0}, {0}", f.default),
         FieldKind::Num => format!("CS default: {}", f.default),
     }
@@ -296,6 +302,18 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                 }
                 if changed {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(c))));
+                }
+            }
+            FieldKind::Bool => {
+                let mut b = cur.as_bool().unwrap_or(f.default != 0.0);
+                let name = format!("{} value", field_label(f.name));
+                let r = ui.checkbox(&mut b, "on");
+                // Every bool row's box reads "on"; the name tells them apart (egui-ui-rules 8.4).
+                r.widget_info(|| {
+                    egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, b, &name)
+                });
+                if r.changed() {
+                    acts.push(Act::Value(kind, f.name.into(), Some(json!(b))));
                 }
             }
             FieldKind::Glint => {

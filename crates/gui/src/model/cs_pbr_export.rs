@@ -16,10 +16,11 @@ pub fn rel_path(kind: Kind, edid: &str) -> String {
 /// One file's text: the block's known fields with every number a float (CS drops int colour arrays), 4-space
 /// indent, keys sorted as CS's own saver (nlohmann::json) writes them, `\n` line ends, no final newline (ruling R3).
 /// serde_json's map is sorted (no `preserve_order` in Cargo.lock); the golden tests pin it.
-pub fn to_text(kind: Kind, values: &Map<String, Json>) -> String {
+/// `pbr2`: the "CS PBR 2.0 (experimental)" box; off, the CS 2.0 keys are left out (Note ID44).
+pub fn to_text(kind: Kind, values: &Map<String, Json>, pbr2: bool) -> String {
     let mut obj = Map::new();
     for (k, v) in values {
-        if field(kind, k).is_none() {
+        if field(kind, k, pbr2).is_none() {
             continue;
         }
         let v = match v.as_object() {
@@ -107,8 +108,8 @@ pub fn refusals(entries: &[SetEntry]) -> BTreeMap<(String, Kind, String), String
 
 /// Whether a block value can be written as is: the type CS reads, and a glint object with a key CS reads (an empty
 /// one would be written as `{}`). `to_text` does no shape check, so nothing else may reach it.
-fn writable(kind: Kind, k: &str, v: &Json) -> bool {
-    field(kind, k).is_some_and(|f| valid_value(f.kind, v))
+fn writable(kind: Kind, k: &str, v: &Json, pbr2: bool) -> bool {
+    field(kind, k, pbr2).is_some_and(|f| valid_value(f.kind, v))
         && v.as_object().is_none_or(|g| {
             g.keys()
                 .any(|gk| gk == "enabled" || GLINT_FIELDS.iter().any(|f| f.name == gk.as_str()))
@@ -135,6 +136,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
         return None;
     }
     let entries = m.sets_doc.as_ref()?.entries();
+    let pbr2 = m.settings.cs_pbr2;
     let refused = refusals(&entries);
     let mut p = PendingCs {
         root: m.output_root(),
@@ -145,12 +147,17 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
     // Note HF9: only the sets in the run write their files; the others' stay as they are.
     for e in entries.iter().filter(|e| m.in_run_id(&e.id)) {
         for (kind, b) in blocks(e) {
+            // Note ID44: with the box off the CS 2.0 keys are unknown keys: not written, no note.
+            let known = |k: &String| field(kind, k, pbr2).is_some();
             let mut values = b.values.clone();
-            values.retain(|k, v| writable(kind, k, v));
+            values.retain(|k, _| known(k));
+            let all = values.clone();
+            values.retain(|k, v| writable(kind, k, v, pbr2));
             let left_out = b
                 .bad
                 .iter()
-                .chain(b.values.keys().filter(|k| !values.contains_key(*k)));
+                .filter(|k| known(k))
+                .chain(all.keys().filter(|k| !values.contains_key(*k)));
             for k in left_out {
                 p.notes.push(format!(
                     "{}: {}.{k} has the wrong type and was left out",
@@ -169,7 +176,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                     }
                     None => {
                         if done.insert((kind, edid.to_lowercase())) {
-                            p.files.push((rel_path(kind, edid), to_text(kind, &values)));
+                            p.files
+                                .push((rel_path(kind, edid), to_text(kind, &values, pbr2)));
                         }
                     }
                 }

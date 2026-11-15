@@ -17,7 +17,8 @@ fn the_library_parses_with_31_texture_sets_and_3_material_objects() {
     for x in t {
         assert!(x.edids.contains(&x.name), "{}", x.name);
         for (k, v) in &x.values {
-            let f = field(x.kind, k).unwrap_or_else(|| panic!("{}: unknown field {k}", x.name));
+            let f =
+                field(x.kind, k, false).unwrap_or_else(|| panic!("{}: unknown field {k}", x.name));
             assert!(valid_value(f.kind, v), "{}: {k} = {v}", x.name);
         }
     }
@@ -747,4 +748,71 @@ fn the_set_key_is_pgpatchers_match_rule() {
     v.settings.clear();
     v.derived_match = None;
     assert_eq!(set_key(&v), None);
+}
+
+/// Note ID45: every texture-set key CS 2.0 reads lands on its type-21 feature bit or payload parameter; the fuzz
+/// pair has no parameter and goes to `fuzz`; `innerLayerDisplacementOffset` has no type-21 field.
+#[test]
+fn txst_overrides_map_all_keys() {
+    use nif::pbr2::feat;
+    let v = json!({
+        "roughnessScale": 0.9, "specularLevel": 0.05, "displacementScale": 0.8,
+        "subsurfaceColor": [0.1, 0.2, 0.3], "subsurfaceOpacity": 0.4,
+        "coatColor": [0.5, 0.6, 0.7], "coatStrength": 0.11, "coatRoughness": 0.12, "coatSpecularLevel": 0.13,
+        "innerLayerDisplacementOffset": 0.14,
+        "fuzzColor": [0.15, 0.16, 0.17], "fuzzWeight": 0.18,
+        "glintParameters": {"enabled": true, "screenSpaceScale": 1.9, "logMicrofacetDensity": 20,
+                            "microfacetRoughness": 0.02, "densityRandomization": 3},
+        "subsurfaceBalance": 0.6, "thinSurfaceSpecularWeight": 0.21, "thinSurfaceBackSpecularWeight": 0.22,
+        "thinSurfaceBackRoughnessScale": 2.5, "thinSurface": true, "foliage": false,
+        "fuzzRoughness": 0.3, "fuzzRoughnessTexture": true
+    });
+    let v = v.as_object().unwrap();
+    assert_eq!(v.len(), fields(Kind::Txst, true).len(), "every field");
+    let ov = txst_overrides(v);
+    let p = [
+        0.9, 0.05, 0.8, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.11, 0.12, 0.13, 0.15, 0.16, 0.17,
+        0.18, 1.9, 20.0, 0.02, 3.0, 0.6, 0.21, 0.22, 2.5,
+    ];
+    assert_eq!(
+        ov,
+        Pbr2Override {
+            features_set: feat::GLINT | feat::THIN_SURFACE,
+            features_clear: feat::FOLIAGE,
+            params: p.map(Some),
+            fuzz: [Some(0.3), Some(1.0)],
+        }
+    );
+    // The bools the other way; a missing or wrong-typed key changes nothing.
+    let ov = txst_overrides(
+        json!({"glintParameters": {"enabled": false}, "thinSurface": false, "foliage": true,
+               "fuzzRoughnessTexture": false, "roughnessScale": "0.5", "subsurfaceColor": [1, 1]})
+        .as_object()
+        .unwrap(),
+    );
+    assert_eq!(
+        ov,
+        Pbr2Override {
+            features_set: feat::FOLIAGE,
+            features_clear: feat::GLINT | feat::THIN_SURFACE,
+            fuzz: [None, Some(0.0)],
+            ..Default::default()
+        }
+    );
+    assert_eq!(txst_overrides(&Default::default()), Pbr2Override::default());
+}
+
+/// Note ID44: the 8 CS 2.0 keys exist only with the box on, and a template never touches them.
+#[test]
+fn cs2_fields_follow_the_box() {
+    assert_eq!(fields(Kind::Txst, false), &TXST_FIELDS[..]);
+    assert_eq!(fields(Kind::Txst, true)[13..], TXST2_FIELDS[..]);
+    assert_eq!(fields(Kind::Mato, true), &MATO_FIELDS[..]);
+    assert!(field(Kind::Txst, "thinSurface", false).is_none());
+    assert_eq!(
+        field(Kind::Txst, "fuzzRoughnessTexture", true).map(|f| f.kind),
+        Some(FieldKind::Bool)
+    );
+    assert!(valid_value(FieldKind::Bool, &json!(true)));
+    assert!(!valid_value(FieldKind::Bool, &json!(1)));
 }

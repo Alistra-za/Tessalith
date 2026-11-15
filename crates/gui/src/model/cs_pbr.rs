@@ -40,6 +40,8 @@ pub enum FieldKind {
     Rgb,
     /// `glintParameters { enabled, screenSpaceScale, logMicrofacetDensity, microfacetRoughness, densityRandomization }`.
     Glint,
+    /// `true` / `false` (CS 2.0's `thinSurface`, `foliage`, `fuzzRoughnessTexture`); the default is 0.0 = false.
+    Bool,
 }
 
 /// One CS field (`TruePBR.h`): its in-game slider range (the editor's drag range; JSON is not clamped) and CS's
@@ -61,7 +63,7 @@ const fn f(name: &'static str, kind: FieldKind, lo: f64, hi: f64, default: f64) 
     }
 }
 
-use FieldKind::{Glint, Num, Rgb};
+use FieldKind::{Bool, Glint, Num, Rgb};
 
 /// Texture-set fields, in CS's struct order (research §2).
 pub const TXST_FIELDS: [Field; 13] = [
@@ -79,6 +81,37 @@ pub const TXST_FIELDS: [Field; 13] = [
     f("fuzzWeight", Num, 0.0, 1.0, 0.0),
     f("glintParameters", Glint, 0.0, 0.0, 0.0),
 ];
+
+/// Note ID44: the texture-set keys CS TruePBR 2.0 reads beyond `TXST_FIELDS` (`PBRTextureSetData` at 92af7dd; the
+/// local .csm schema and spec sections 4 and 7 agree). Edited and exported only with "CS PBR 2.0 (experimental)" on.
+pub const TXST2_FIELDS: [Field; 8] = [
+    f("subsurfaceBalance", Num, 0.0, 1.0, 0.75),
+    f("thinSurface", Bool, 0.0, 0.0, 0.0),
+    f("foliage", Bool, 0.0, 0.0, 0.0),
+    f("thinSurfaceSpecularWeight", Num, 0.0, 1.0, 0.5),
+    f("thinSurfaceBackSpecularWeight", Num, 0.0, 1.0, 0.5),
+    f("thinSurfaceBackRoughnessScale", Num, 0.0, 3.0, 1.0),
+    f("fuzzRoughness", Num, -1.0, 1.0, -1.0),
+    f("fuzzRoughnessTexture", Bool, 0.0, 0.0, 0.0),
+];
+
+const fn concat<const N: usize>(a: &[Field], b: &[Field]) -> [Field; N] {
+    assert!(N == a.len() + b.len());
+    let mut out = [a[0]; N];
+    let mut i = 0;
+    while i < a.len() {
+        out[i] = a[i];
+        i += 1;
+    }
+    while i < N {
+        out[i] = b[i - a.len()];
+        i += 1;
+    }
+    out
+}
+
+/// `TXST_FIELDS` then `TXST2_FIELDS`: the texture-set fields with the box on.
+const TXST_ALL: [Field; 21] = concat(&TXST_FIELDS, &TXST2_FIELDS);
 
 /// Material-object fields. `roughness` is absolute, not a scale; CS's `specularLevel` default is 1.0.
 pub const MATO_FIELDS: [Field; 4] = [
@@ -118,6 +151,14 @@ pub fn field_label(name: &str) -> &str {
         "logMicrofacetDensity" => "Log microfacet density",
         "microfacetRoughness" => "Microfacet roughness",
         "densityRandomization" => "Density randomization",
+        "subsurfaceBalance" => "Subsurface balance",
+        "thinSurface" => "Thin surface",
+        "foliage" => "Foliage",
+        "thinSurfaceSpecularWeight" => "Thin-surface specular weight",
+        "thinSurfaceBackSpecularWeight" => "Thin-surface back specular weight",
+        "thinSurfaceBackRoughnessScale" => "Thin-surface back roughness scale",
+        "fuzzRoughness" => "Fuzz roughness",
+        "fuzzRoughnessTexture" => "Fuzz roughness from texture",
         _ => name,
     }
 }
@@ -161,6 +202,12 @@ pub fn field_note(kind: Kind, name: &str) -> Option<&'static str> {
         (Kind::Mato, "specularLevel") => {
             "Absolute specular level where the material object projects (replaces the surface's; not a scale)."
         }
+        (Kind::Txst, "fuzzRoughness") => "A negative value uses the base roughness.",
+        // Note ID46 (owner 2026-11-14): CS 2.0 reads the roughness from the parallax slot's G (tree B Lighting.hlsl).
+        (Kind::Txst, "fuzzRoughnessTexture") => {
+            "Fuzz roughness comes from the green channel of the parallax (height) slot's texture, so that texture \
+             holds two channels: encode it BC5 or BC1, not BC4."
+        }
         _ => return None,
     })
 }
@@ -172,21 +219,24 @@ pub fn mato_synced(txst: Option<&CsBlock>, mato: &CsBlock, field: &str) -> bool 
         && txst.and_then(|b| b.values.get(field)) == mato.values.get(field)
 }
 
-pub fn fields(kind: Kind) -> &'static [Field] {
+/// `pbr2`: the "CS PBR 2.0 (experimental)" box (`GuiSettings::cs_pbr2`); on, a texture set also has `TXST2_FIELDS`.
+pub fn fields(kind: Kind, pbr2: bool) -> &'static [Field] {
     match kind {
+        Kind::Txst if pbr2 => &TXST_ALL,
         Kind::Txst => &TXST_FIELDS,
         Kind::Mato => &MATO_FIELDS,
     }
 }
 
-pub fn field(kind: Kind, name: &str) -> Option<&'static Field> {
-    fields(kind).iter().find(|f| f.name == name)
+pub fn field(kind: Kind, name: &str, pbr2: bool) -> Option<&'static Field> {
+    fields(kind, pbr2).iter().find(|f| f.name == name)
 }
 
 /// Whether `v` has the type CS reads for a field of kind `fk` (unknown glint sub-keys are allowed: never written).
 pub fn valid_value(fk: FieldKind, v: &Json) -> bool {
     match fk {
         FieldKind::Num => v.is_number(),
+        FieldKind::Bool => v.is_boolean(),
         FieldKind::Rgb => v
             .as_array()
             .is_some_and(|a| a.len() == 3 && a.iter().all(Json::is_number)),
@@ -198,6 +248,84 @@ pub fn valid_value(fk: FieldKind, v: &Json) -> bool {
             })
         }),
     }
+}
+
+/// What a texture-set block changes on a type-21 material (Note ID45): feature bits (`nif::pbr2::feat`) switched on
+/// and off, the payload parameters it replaces, and the `PBRFuzz` pair it gives (fuzz roughness, texture switch 0 or
+/// 1), which has no payload field. A key the block does not hold changes nothing.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Pbr2Override {
+    pub features_set: u32,
+    pub features_clear: u32,
+    pub params: [Option<f32>; nif::pbr2::PARAM_COUNT],
+    pub fuzz: [Option<f32>; 2],
+}
+
+/// Note ID45: the 21 texture-set keys onto a type-21 material (spec section 4's parameter order). The glint's
+/// `enabled`, `thinSurface` and `foliage` switch their feature bit on or off; `innerLayerDisplacementOffset` has no
+/// type-21 field. A value of the wrong type (or a colour without three numbers) is skipped.
+pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
+    use nif::pbr2::feat;
+    const PARAMS: [(&str, usize); 19] = [
+        ("roughnessScale", 0),
+        ("specularLevel", 1),
+        ("displacementScale", 2),
+        ("subsurfaceColor", 3),
+        ("subsurfaceOpacity", 6),
+        ("coatColor", 7),
+        ("coatStrength", 10),
+        ("coatRoughness", 11),
+        ("coatSpecularLevel", 12),
+        ("fuzzColor", 13),
+        ("fuzzWeight", 16),
+        ("glintParameters.screenSpaceScale", 17),
+        ("glintParameters.logMicrofacetDensity", 18),
+        ("glintParameters.microfacetRoughness", 19),
+        ("glintParameters.densityRandomization", 20),
+        ("subsurfaceBalance", 21),
+        ("thinSurfaceSpecularWeight", 22),
+        ("thinSurfaceBackSpecularWeight", 23),
+        ("thinSurfaceBackRoughnessScale", 24),
+    ];
+    let get = |key: &str| match key.split_once('.') {
+        Some((o, k)) => values.get(o).and_then(|g| g.get(k)),
+        None => values.get(key),
+    };
+    let num = |v: &Json| v.as_f64().map(|x| x as f32);
+    let mut ov = Pbr2Override::default();
+    for (key, i) in PARAMS {
+        let Some(v) = get(key) else { continue };
+        match v.as_array() {
+            Some(c) if c.len() == 3 => {
+                if let Some(c) = c.iter().map(num).collect::<Option<Vec<f32>>>() {
+                    for (j, x) in c.into_iter().enumerate() {
+                        ov.params[i + j] = Some(x);
+                    }
+                }
+            }
+            Some(_) => {}
+            None => ov.params[i] = num(v),
+        }
+    }
+    for (key, bit) in [
+        ("glintParameters.enabled", feat::GLINT),
+        ("thinSurface", feat::THIN_SURFACE),
+        ("foliage", feat::FOLIAGE),
+    ] {
+        match get(key).and_then(Json::as_bool) {
+            Some(true) => ov.features_set |= bit,
+            Some(false) => ov.features_clear |= bit,
+            None => {}
+        }
+    }
+    ov.fuzz = [
+        values.get("fuzzRoughness").and_then(num),
+        values
+            .get("fuzzRoughnessTexture")
+            .and_then(Json::as_bool)
+            .map(|b| if b { 1.0 } else { 0.0 }),
+    ];
+    ov
 }
 
 /// One built-in template (design §4).
@@ -286,7 +414,8 @@ pub struct CsBlock {
     pub bad: Vec<String>,
 }
 
-/// Reads a block table. Unknown keys are left alone: they stay in the file and are never exported.
+/// Reads a block table. Unknown keys are left alone: they stay in the file and are never exported. The CS 2.0 keys
+/// are read whatever the box says (the document has no settings); every reader filters them by `field(.., pbr2)`.
 pub(crate) fn block_of(t: &dyn TableLike, kind: Kind) -> CsBlock {
     let mut b = CsBlock::default();
     for (k, item) in t.iter() {
@@ -314,7 +443,7 @@ pub(crate) fn block_of(t: &dyn TableLike, kind: Kind) -> CsBlock {
                     .unwrap_or_default()
             }
             _ => {
-                if let Some(f) = field(kind, k) {
+                if let Some(f) = field(kind, k, true) {
                     match item_json(item).filter(|v| valid_value(f.kind, v)) {
                         Some(v) => {
                             b.values.insert(k.to_string(), v);

@@ -1679,11 +1679,12 @@ impl SetsDoc {
         let Some(b) = sub_table(tbl, t.kind.key(), || Item::Table(Table::new())) else {
             return;
         };
-        for f in fields(t.kind) {
+        // Note ID44: the templates are CS 1.x values; the CS 2.0 keys stay as unknown keys do, whatever the box says.
+        for f in fields(t.kind, false) {
             b.remove(f.name);
         }
         for (k, v) in &t.values {
-            if field(t.kind, k).is_some() {
+            if field(t.kind, k, false).is_some() {
                 write_json(b, k, v);
             }
         }

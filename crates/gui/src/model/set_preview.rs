@@ -1032,6 +1032,9 @@ pub struct SetFingerprint {
     pub entry: Option<EntryInput>,
     pub prefix: Option<String>,
     pub members: Vec<MemberSlot>,
+    /// Note ID45: the texture-set block's values a type-21 shape takes (`apply_txst21`); `None` with the "CS PBR 2.0
+    /// (experimental)" box off or without a block.
+    pub txst21: Option<serde_json::Map<String, Value>>,
 }
 
 /// `None` when the set is gone.
@@ -1052,6 +1055,12 @@ pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
         entry,
         prefix: v.prefix.clone(),
         members,
+        txst21: m
+            .settings
+            .cs_pbr2
+            .then(|| m.cs_block(&v.id, crate::model::cs_pbr::Kind::Txst))
+            .flatten()
+            .map(|b| b.values),
     })
 }
 
@@ -1155,6 +1164,8 @@ pub fn classify(old: Option<&SetFingerprint>, new: &SetFingerprint, default: &Va
         }
         d.material = va != vb && !d.reload;
     }
+    // Note ID45: a texture-set edit the type-21 shapes take (always `None` with the box off).
+    d.material |= old.txst21 != new.txst21 && !d.reload;
     d
 }
 
@@ -1547,6 +1558,40 @@ fn cs_num(o: &serde_json::Map<String, Value>, fields: &[cs_pbr::Field], name: &s
     o.get(name)
         .and_then(|v| cs_value(v, f))
         .unwrap_or(f.map_or(0.0, |f| f.default as f32))
+}
+
+/// Note ID45: a type-21 material as CS 2.0 sets it up: its payload, then the texture set's `ov`, then the
+/// `PBRThinSurface` / `PBRFuzz` extra data. Any other material is left alone.
+/// The extra data follows render3d's `write_pbr2` rules (ignored on two-layer or hair, or with the wrong float count):
+/// a `PBRThinSurface` replaces p21-p24 here (render3d applies it again, to the same values), and the texture set's
+/// fuzz pair becomes a `PBRFuzz` when the NIF has no usable one (the payload has no fuzz roughness field).
+pub fn apply_txst21(m: &mut MaterialState, ov: &cs_pbr::Pbr2Override) {
+    use nif::pbr2::feat;
+    if !m.is_pbr2() {
+        return;
+    }
+    let nif::props::LightingTrailer::Pbr2 {
+        features, params, ..
+    } = &mut m.params.trailer
+    else {
+        return;
+    };
+    *features = (*features & !ov.features_clear) | ov.features_set;
+    for (p, o) in params.iter_mut().zip(ov.params) {
+        *p = o.unwrap_or(*p);
+    }
+    let extra_used = *features & (feat::TWO_LAYER | feat::HAIR) == 0;
+    let x = m.params.pbr2_extra.get_or_insert_with(Default::default);
+    if let Some(thin) = x.thin.as_deref().filter(|v| extra_used && v.len() == 4) {
+        params[21..=24].copy_from_slice(thin);
+    }
+    let fuzz_usable = x.fuzz.as_ref().is_some_and(|v| v.len() == 2);
+    if !fuzz_usable && ov.fuzz.iter().any(Option::is_some) {
+        x.fuzz = Some(vec![ov.fuzz[0].unwrap_or(-1.0), ov.fuzz[1].unwrap_or(0.0)]);
+    }
+    if *x == nif::pbr2::Pbr2Extra::default() {
+        m.params.pbr2_extra = None;
+    }
 }
 
 /// The layer from a `cs_mato` block's values and its record's DATA (design D3, D5). `data` None: SnowMaterialObject1P's
@@ -2294,7 +2339,15 @@ impl SetPreview {
             self.exists(p)
         });
         let sources: Vec<MaterialState> = shapes.into_iter().map(|(_, _, m)| m).collect();
-        self.crashed(rows, &sources)
+        let mut rows = self.crashed(rows, &sources);
+        // Note ID45: with the box on, the type-21 shapes take the set's texture set (a built-in shape is never 21).
+        if let Some(v) = self.fp.as_ref().and_then(|f| f.txst21.as_ref()) {
+            let ov = cs_pbr::txst_overrides(v);
+            for r in &mut rows {
+                apply_txst21(&mut r.material, &ov);
+            }
+        }
+        rows
     }
 
     /// Builds the scene and hands it to the viewport: every shape simulated, its material written into the parsed
