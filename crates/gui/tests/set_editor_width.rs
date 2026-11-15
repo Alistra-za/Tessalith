@@ -182,7 +182,7 @@ fn the_assign_menu_header_is_the_slot_label() {
 
 /// A set whose diffuse row shows Confirm (`asks`: an undecided alpha on a plain diffuse) or the reset (its own alpha),
 /// selected, in a window sized so the centre is exactly `ROWS_MIN` wide.
-fn at_the_floor(asks: bool) -> H {
+fn at_the_floor(asks: bool) -> (H, tempfile::TempDir) {
     use sdc_gui::ui::set_editor::ROWS_MIN;
     let set = if asks {
         "landscape/leaf"
@@ -216,9 +216,8 @@ fn at_the_floor(asks: bool) -> H {
         let centre = full.intersect(h.ctx.content_rect());
         let off = centre.width() - ROWS_MIN;
         if off.abs() <= 0.5 {
-            // Keep the temp folder alive for the harness's life.
-            std::mem::forget(d);
-            return h;
+            // The caller keeps the temp folder for the harness's life, and it is deleted after.
+            return (h, d);
         }
         w -= off;
     }
@@ -230,7 +229,7 @@ fn at_the_floor(asks: bool) -> H {
 #[test]
 fn slot_rows_fit_at_the_new_floor() {
     for asks in [true, false] {
-        let h = at_the_floor(asks);
+        let (h, _d) = at_the_floor(asks);
         let full = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
         let margin = egui::Frame::central_panel(&h.ctx.global_style())
             .inner_margin

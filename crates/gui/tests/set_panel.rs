@@ -54,7 +54,7 @@ fn centre(h: &H) -> egui::Rect {
         .intersect(h.ctx.content_rect())
 }
 
-/// The set editor's tabs are drawn: its "Also export" tab in the centre (the drawer's strip is at the window edge).
+/// The set editor's tabs are drawn: its "Also export" tab is in the centre (Note JI2).
 fn set_tabs(h: &H) -> bool {
     sdc_gui::ui::centre_rect(&h.ctx).is_some_and(|c| {
         h.query_all_by_role(Role::Button).any(|n| {

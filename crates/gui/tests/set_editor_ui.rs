@@ -852,7 +852,7 @@ fn a_filled_fuzz_slot_greys_the_coat_normal_switch() {
         .is_disabled());
 }
 
-/// F1 spec §4: the drawer no longer shows PGPatcher keys; they are in the TruePBR box.
+/// F1 spec §4: PGPatcher keys are in the TruePBR box, not on the Also export tab (Note JI2).
 #[test]
 fn the_header_has_the_json_editor_and_the_also_export_tab_has_no_pgpatcher_keys() {
     let d = tempfile::tempdir().unwrap();
