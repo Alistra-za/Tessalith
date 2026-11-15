@@ -1,9 +1,9 @@
 //! M6 Track F3a (design `2026-10-13-sdc-m6-f3a-design.md`): the multi-selection, the bulk edit plan and its
 //! commands. No egui types.
 use super::fields::{
-    all_fields, effort_field, encoding_options, field_view, filter_option_lock, hidden_reason,
-    views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_SEARCH, EDGE_FIELD, EFFORT_FIELDS,
-    FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
+    all_fields, bc3_pair, effort_field, encoding_options, field_view, filter_option_lock,
+    hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
+    EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
 };
 use super::set_groups::GroupTarget;
 use super::sets::{
@@ -659,6 +659,11 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
                                         .unwrap_or_else(|| serde_json::json!(j.profile.color.tag)),
                                 ])
                             }
+                            // Note JI4: two different Custom pairs are mixed, so the BC3 row compares the pair.
+                            (BC3_SEARCH, Some(j)) if v.value == BC3_CUSTOM => {
+                                let (bc1, radius) = bc3_pair(&j.profile);
+                                serde_json::json!([BC3_CUSTOM, bc1, radius])
+                            }
                             _ => own.clone().unwrap_or_else(|| v.value.clone()),
                         };
                         if !values[n].contains(&value) {
@@ -672,6 +677,10 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
     }
     for (row, mut vals) in rows.iter_mut().zip(values) {
         row.value = if vals.len() == 1 { vals.pop() } else { None };
+        // One shared Custom pair shows as the row's Custom entry.
+        if row.field == BC3_SEARCH && row.value.as_ref().is_some_and(|v| v[0] == BC3_CUSTOM) {
+            row.value = Some(Value::from(BC3_CUSTOM));
+        }
     }
     rows
 }

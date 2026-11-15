@@ -10,8 +10,8 @@ use crate::model::fields::{
     auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
     field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view,
     mips_count, mips_on, provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER,
-    BC3_CHOICES, BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER,
-    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID,
+    PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -365,7 +365,7 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
             let (bc1, radius) = bc3_pair(p);
             if !BC3_CHOICES.iter().any(|c| c.1 == bc1 && c.2 == radius) {
                 v.push((
-                    json!(CUSTOM),
+                    json!(BC3_CUSTOM),
                     format!("Custom: search {bc1}, radius {radius}"),
                 ));
             }
@@ -420,8 +420,7 @@ fn search_options(max: bool) -> Options {
     v
 }
 
-/// Note JI4: the BC3 Effort row's read-only entry for a pair no choice names.
-const CUSTOM: &str = "custom";
+/// Note JI4: the hover of the BC3 Effort row's read-only entry for a pair no choice names.
 const CUSTOM_HOVER: &str =
     "Mixed values from a preset or [files]; pick Fast, Default or Max to set both";
 
@@ -478,7 +477,7 @@ pub(super) fn combo_for(
         }
     };
     // Rule 3.4: the BC3 row's Custom entry is longer than the combo, so the closed combo shows it whole on hover.
-    let custom = field == BC3_SEARCH && *current == json!(CUSTOM);
+    let custom = field == BC3_SEARCH && *current == json!(BC3_CUSTOM);
     let full = (field == "resize_relative_to" || custom)
         .then(|| options.iter().find(|(v, _)| v == current))
         .flatten()
@@ -491,7 +490,7 @@ pub(super) fn combo_for(
                 // A null value is a non-selectable group heading.
                 if v.is_null() {
                     ui.label(egui::RichText::new(label).weak());
-                } else if field == BC3_SEARCH && *v == json!(CUSTOM) {
+                } else if field == BC3_SEARCH && *v == json!(BC3_CUSTOM) {
                     // Note JI4: the mixed pair is shown, never picked.
                     ui.add_enabled(false, egui::Button::selectable(v == current, label))
                         .on_disabled_hover_text(CUSTOM_HOVER);

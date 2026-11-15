@@ -467,6 +467,68 @@ fn a_bulk_bc3_pick_writes_both_fields_on_every_texture() {
     assert_eq!(h.state().undo_label(), Some("Change Effort on 2 textures"));
 }
 
+/// Review fix 1: two BC3 textures holding different Custom pairs read "— mixed", not one shared Custom value; the
+/// same Custom pair on both is shared.
+#[test]
+fn different_custom_bc3_pairs_read_mixed_in_bulk() {
+    use sdc_gui::model::bulk::bulk_fields;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pair(d.path(), Format::Bc3, Format::Bc3);
+    m.set_field(ROCK, BC1, json!("fast"));
+    m.set_field(ROCK, RADIUS, json!("max"));
+    m.set_field(LEAF, BC1, json!("default"));
+    m.set_field(LEAF, RADIUS, json!("fast"));
+    idle(&mut m);
+    let ks = vec![ROCK.to_string(), LEAF.to_string()];
+    let effort = |m: &AppModel| {
+        bulk_fields(m, &ks)
+            .into_iter()
+            .find(|r| r.label == "Effort")
+            .unwrap()
+    };
+    let row = effort(&m);
+    assert_eq!((row.field, row.value.clone(), row.applies), (BC3, None, 2));
+    assert_eq!(row.note(), "— mixed");
+    m.set_field(LEAF, BC1, json!("fast"));
+    m.set_field(LEAF, RADIUS, json!("max"));
+    idle(&mut m);
+    assert_eq!(effort(&m).value, Some(json!("custom")), "one shared pair");
+    let h = harness(m);
+    assert_eq!(
+        effort_value(&h).as_deref(),
+        Some("Custom: search fast, radius max")
+    );
+}
+
+/// Review fix 2: ↺ on the bulk Effort row of two BC3 textures clears both fields on both, as one step.
+#[test]
+fn a_bulk_bc3_reset_clears_both_fields_on_every_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pair(d.path(), Format::Bc3, Format::Bc3);
+    for k in [ROCK, LEAF] {
+        m.set_field(k, BC3, json!("max"));
+    }
+    idle(&mut m);
+    let mut h = harness(m);
+    let row = effort(&h);
+    let reset = h
+        .query_all(by().label("↺"))
+        .map(|n| n.rect())
+        .find(|r| r.min.y <= row.center().y && row.center().y <= r.max.y)
+        .expect("a reset on the bulk Effort row");
+    h.query_all(by().label("↺"))
+        .find(|n| n.rect() == reset)
+        .unwrap()
+        .click();
+    h.run();
+    settle(&mut h);
+    for k in [ROCK, LEAF] {
+        assert_eq!(file(h.state(), k, BC1), None, "{k}");
+        assert_eq!(file(h.state(), k, RADIUS), None, "{k}");
+    }
+    assert_eq!(h.state().undo_label(), Some("Reset Effort on 2 textures"));
+}
+
 /// The bulk Effort row's choices come from a texture that reads its field, not from the active one: a mixed BC3
 /// pair beside an active RGBA8 texture still shows its Custom entry.
 #[test]

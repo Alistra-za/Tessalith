@@ -142,6 +142,9 @@ pub const BC3_CHOICES: [(&str, &str, &str); 3] = [
     ("max", "default", "max"),
 ];
 
+/// Note JI4: the BC3 row's value for a pair no `BC3_CHOICES` entry names (shown, never written).
+pub const BC3_CUSTOM: &str = "custom";
+
 /// Note JI4: why the Effort row is greyed on a format no encoder search reads.
 pub const NO_SEARCH: &str = "this format has no search setting";
 
@@ -197,7 +200,7 @@ pub fn effort_view(target: Target, job: &ResolvedJob) -> FieldView {
     let value = BC3_CHOICES
         .iter()
         .find(|c| c.1 == bc1 && c.2 == radius)
-        .map_or_else(|| Value::from("custom"), |c| Value::from(c.0));
+        .map_or_else(|| Value::from(BC3_CUSTOM), |c| Value::from(c.0));
     let (bc1_f, radius_f) = ("encoder.bc1_search", "encoder.bc45_search_radius");
     let decided_by = if radius != "default" {
         radius_f
