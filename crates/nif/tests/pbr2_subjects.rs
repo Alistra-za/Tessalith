@@ -4,11 +4,13 @@
 //! `#[ignore]` and takes its paths from `SDC_PBR2_SUBJECTS_MANIFEST` and `SDC_PBR2_SUBJECTS_OUT`.
 mod builder;
 use builder::{scenes, Nif, W};
+use nif::edit::validate::Warning;
 use nif::edit::validate::{always_blocks, validate, Level};
 use nif::edit::{anchor_role, apply, Op, Outcome, Role};
 use nif::extra::{encode_extra, ExtraValue};
 use nif::fields::{locate, Field, Value};
 use nif::header::Header;
+use nif::material::SLSF2_TRUE_PBR as PBR;
 use nif::model::{read_model, NifModel};
 use nif::net::encode_net;
 use nif::pbr2::feat::*;
@@ -32,7 +34,7 @@ struct Subject {
 
 /// The converted bytes and what the conversion said (op notes, then any Warn text). Every v1 PBR shader (type 0 or 11
 /// with SLSF2 23) becomes type 21; other shaders stay as they are. Err when no shader is v1 PBR, an op does not apply,
-/// or the result has an Error (any type-21 Error is CS 2.0 not drawing the shape).
+/// or the result has a finding `refused` names (any type-21 Error, or a warning CS 2.0 always blocks on).
 fn convert(src: &[u8], s: &Subject) -> Result<(Vec<u8>, Vec<String>), String> {
     let m = read_model(src).map_err(|e| e.to_string())?;
     let mut shaders: Vec<(u32, u32)> = vec![]; // (shader, a shape using it)
@@ -108,17 +110,22 @@ fn convert(src: &[u8], s: &Subject) -> Result<(Vec<u8>, Vec<String>), String> {
         }
     }
     let m = read_model(&bytes).map_err(|e| e.to_string())?;
-    let w = validate(&m, None);
-    let bad: Vec<String> = w
-        .iter()
-        .filter(|w| w.level == Level::Error || always_blocks(w))
-        .map(|w| w.text.clone())
-        .collect();
+    let (bad, rest): (Vec<Warning>, Vec<Warning>) =
+        validate(&m, None).into_iter().partition(refused);
     if !bad.is_empty() {
-        return Err(bad.join("; "));
+        let texts: Vec<String> = bad.into_iter().map(|w| w.text).collect();
+        return Err(texts.join("; "));
     }
-    notes.extend(w.into_iter().map(|w| format!("Warn: {}", w.text)));
+    notes.extend(
+        rest.into_iter()
+            .map(|w| format!("{:?}: {}", w.level, w.text)),
+    );
     Ok((bytes, notes))
+}
+
+/// A finding that refuses a subject: any Error, or a warning CS 2.0 always blocks on (`WONT_DRAW`).
+fn refused(w: &Warning) -> bool {
+    w.level == Level::Error || always_blocks(w)
 }
 
 /// `ops` on `src`; Err unless every op applied. Its notes go to `notes`.
@@ -250,7 +257,8 @@ fn parse_line(line: &str) -> Result<(String, String, String, Subject), String> {
 }
 
 /// Writes each manifest subject to `SDC_PBR2_SUBJECTS_OUT\<game path>`. A file already there is never replaced
-/// (`create_new`); a subject that fails conversion writes nothing and fails the run.
+/// (`create_new`). Every subject is converted and every destination checked absent before the first write, so a
+/// refused subject or an existing file writes nothing and fails the run.
 #[test]
 #[ignore = "owner meshes: set SDC_PBR2_SUBJECTS_MANIFEST and SDC_PBR2_SUBJECTS_OUT"]
 fn write_pbr2_subjects() {
@@ -273,6 +281,11 @@ fn write_pbr2_subjects() {
         let (b, notes) = convert(&src, &s).unwrap_or_else(|e| panic!("{label}: {e}"));
         made.push((label, game, b, notes));
     }
+    let taken = existing(&out, made.iter().map(|m| m.1.as_str()));
+    assert!(
+        taken.is_empty(),
+        "already there, nothing written: {taken:?}"
+    );
     for (label, game, b, notes) in made {
         let dst = std::path::Path::new(&out).join(&game);
         std::fs::create_dir_all(dst.parent().unwrap()).unwrap();
@@ -305,6 +318,27 @@ fn write_pbr2_subjects() {
     }
 }
 
+/// The destinations under `out` that already exist (or cannot be checked).
+fn existing<'a>(out: &str, games: impl Iterator<Item = &'a str>) -> Vec<String> {
+    games
+        .map(|g| std::path::Path::new(out).join(g))
+        .filter(|p| !matches!(p.try_exists(), Ok(false)))
+        .map(|p| p.display().to_string())
+        .collect()
+}
+
+#[test]
+fn existing_lists_only_taken_destinations() {
+    let dir = std::env::temp_dir().join(format!("sdc-pbr2-subjects-{}", std::process::id()));
+    std::fs::create_dir_all(dir.join("meshes")).unwrap();
+    std::fs::write(dir.join("meshes").join("a.nif"), b"x").unwrap();
+    let out = dir.to_str().unwrap();
+    let taken = existing(out, ["meshes\\a.nif", "meshes\\b.nif"].into_iter());
+    std::fs::remove_dir_all(&dir).unwrap();
+    assert_eq!(taken.len(), 1, "{taken:?}");
+    assert!(taken[0].ends_with("a.nif"), "{taken:?}");
+}
+
 #[test]
 fn manifest_line_parses() {
     let (l, src, game, s) = parse_line(
@@ -335,10 +369,8 @@ fn manifest_line_parses() {
 
 // ---- tests of the conversion ----
 
-const PBR: u32 = 1 << 23;
-
 /// A one-shape SE NIF: triangle shape "S" (0) -> BSLightingShaderProperty of `shader_type` with SLSF2 `slsf2` (1)
-/// -> texture set (2) with `slots` filled.
+/// -> texture set (2) with `slots` filled (0-based indices: index 5 is slot 6, 1-based, the RMAOS).
 fn v1_scene(shader_type: u32, slsf2: u32, trailer: &[f32], slots: &[usize]) -> Vec<u8> {
     let mut n = Nif::new(100);
     let s = n.string("S");
@@ -372,7 +404,7 @@ fn v1_scene(shader_type: u32, slsf2: u32, trailer: &[f32], slots: &[usize]) -> V
 
 const SLOTS: [usize; 3] = [0, 1, 5];
 
-/// (shader type, features, params, extra) of the scene's one shader.
+/// (shader type, features, params, extra, SLSF2) of the scene's one shader.
 fn type21_of(b: &[u8]) -> (u32, u32, [f32; 25], Option<nif::pbr2::Pbr2Extra>, u32) {
     let m = read_model(b).unwrap();
     let l = &m.lighting[&1].lighting;
@@ -388,7 +420,7 @@ fn type21_of(b: &[u8]) -> (u32, u32, [f32; 25], Option<nif::pbr2::Pbr2Extra>, u3
 fn errors(b: &[u8]) -> Vec<String> {
     validate(&read_model(b).unwrap(), None)
         .into_iter()
-        .filter(|w| w.level == Level::Error || always_blocks(w))
+        .filter(refused)
         .map(|w| w.text)
         .collect()
 }
@@ -459,7 +491,7 @@ fn hair_from_a_plain_v1_shape() {
 
 #[test]
 fn refuses_what_cs2_would_not_draw() {
-    // no RMAOS in slot 6
+    // no RMAOS: index 5 (slot 6, 1-based) left empty
     let src = v1_scene(0, 1 | PBR, &[], &[0, 1]);
     let e = convert(&src, &Subject::default()).unwrap_err();
     assert!(e.contains(nif::edit::validate::WONT_DRAW), "{e}");
