@@ -13,7 +13,7 @@ pub use bc7::{
 };
 pub use rgbcx::*;
 #[cfg(feature = "test-hooks")]
-pub use target::skip_byte_pins;
+pub use target::{intel_cpu, skip_byte_pins};
 pub use target::{ispc_target, IspcTarget};
 
 use std::sync::Once;

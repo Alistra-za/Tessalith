@@ -274,10 +274,9 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
         eprintln!("skipped: AVX2-path probe");
         return;
     }
-    // The probe block is found in bc7e's bytes on an AMD CPU.
-    if encoders_sys::skip_byte_pins() {
-        return;
-    }
+    // The probe image has a broken rotated block in an AMD CPU's bc7e bytes and none on an Intel CPU (Note JC), so there
+    // only the "nothing else" half is checked.
+    let probe = !encoders_sys::intel_cpu();
     for policy in [AlphaPolicy::Remove, AlphaPolicy::Data] {
         let mut p = profile(Subtype::Diffuse);
         p.format = Format::Bc7;
@@ -297,7 +296,7 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
             },
         );
         assert!(
-            min_decoded_alpha(&raw) < 254,
+            !probe || min_decoded_alpha(&raw) < 254,
             "probe needs a broken rotated block"
         );
         let mut want = raw.clone();
@@ -308,8 +307,11 @@ fn exact_opaque_off_still_fixes_rotated_blocks_and_nothing_else() {
             out == want,
             "{policy:?}: output != bc7e bytes with the rotated fix applied"
         );
-        assert!(only_rotated_blocks_fixed(&out, &raw, &format!("{policy:?}")) > 0);
-        assert_eq!(min_decoded_alpha(&out), 255, "{policy:?}");
+        let fixed = only_rotated_blocks_fixed(&out, &raw, &format!("{policy:?}"));
+        if probe {
+            assert!(fixed > 0);
+            assert_eq!(min_decoded_alpha(&out), 255, "{policy:?}");
+        }
     }
 }
 

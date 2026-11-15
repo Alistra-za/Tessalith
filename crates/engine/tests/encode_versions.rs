@@ -107,13 +107,11 @@ fn check_strict(file: &Path, observed: BTreeMap<String, Value>) -> Vec<String> {
 
 /// The byte-identity pin of every output `observed` names (keys carry `prefix`), read back from the DDS that
 /// `run_target` wrote under `d`: sub-type, format, size and the SHA-256 of the pixel data. BC7 and BC6H bytes depend
-/// on the CPU's ISA path, so their hash is keyed `payload_sha256@<isa>`; without `isa_pins` (an Intel CPU, Note JC)
-/// that field is left out, and `pin_fields` keeps the recorded one.
+/// on the CPU's ISA path, so their hash is keyed `payload_sha256@<isa>`.
 fn identity_entries(
     d: &Path,
     prefix: &str,
     observed: &BTreeMap<String, (Subtype, String)>,
-    isa_pins: bool,
 ) -> BTreeMap<String, Value> {
     use engine::dds::DdsPixelFormat::*;
     observed
@@ -134,9 +132,7 @@ fn identity_entries(
                 "width": dds.width,
                 "height": dds.height,
             });
-            if isa_pins || !by_isa {
-                pin[field] = hex::encode(Sha256::digest(&dds.data)).into();
-            }
+            pin[field] = hex::encode(Sha256::digest(&dds.data)).into();
             (key.clone(), pin)
         })
         .collect()
@@ -521,8 +517,6 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         eprintln!("skipped: identity.json holds no AVX-512 pins");
         return;
     }
-    // On an Intel CPU the BC7 and BC6H hashes are not compared; every other pin still is.
-    let isa_pins = !encoders_sys::skip_byte_pins();
     let d = tempfile::tempdir().unwrap();
     let mut sets = vec![];
     for st in Subtype::ALL {
@@ -577,7 +571,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         guarded().collect(),
         "sub-types with a cs encode-input pin"
     );
-    let mut identity = identity_entries(d.path(), "", &observed, isa_pins);
+    let mut identity = identity_entries(d.path(), "", &observed);
 
     // Vanilla has its own pixel paths (packing arms, no PBR), so it is pinned too, under `vanilla/`.
     let (summary, events, vanilla) = run_target(d.path(), &sets, Target::Vanilla, "vanilla/");
@@ -614,7 +608,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         guarded().filter(|st| !CS_ONLY.contains(st)).collect(),
         "sub-types with a vanilla encode-input pin"
     );
-    identity.extend(identity_entries(d.path(), "vanilla/", &vanilla, isa_pins));
+    identity.extend(identity_entries(d.path(), "vanilla/", &vanilla));
     observed.extend(vanilla);
 
     // Byte-identity coverage (Note FM1): formats and alpha policies the fixtures above may not reach.
@@ -626,7 +620,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         (0, 0, 0),
         "{events:#?}"
     );
-    identity.extend(identity_entries(c.path(), "cov/", &cov, isa_pins));
+    identity.extend(identity_entries(c.path(), "cov/", &cov));
     let dims = |name: &str| {
         let p = &identity[&format!("cov/textures/c/{name}.dds")];
         (p["width"].as_u64(), p["height"].as_u64())
@@ -648,9 +642,7 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
             [format!("payload_sha256@{}", engine::manifest::dispatched_isa())]
         .clone()
     };
-    if isa_pins {
-        assert_ne!(bc7("gpick_rmaos"), bc7("rpick_rmaos"));
-    }
+    assert_ne!(bc7("gpick_rmaos"), bc7("rpick_rmaos"));
     let formats: BTreeSet<&str> = identity
         .values()
         .map(|p| p["format"].as_str().unwrap())
@@ -696,8 +688,41 @@ fn encode_inputs_are_pinned_or_their_type_was_bumped() {
         &bumped,
     );
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    let failures = check_strict(&dir.join("identity.json"), identity);
+    let identity_file = dir.join("identity.json");
+    if encoders_sys::intel_cpu() {
+        without_isa_hashes(&identity_file, &mut identity);
+    }
+    let failures = check_strict(&identity_file, identity);
     assert!(failures.is_empty(), "{}", failures.join("\n"));
+}
+
+/// On an Intel CPU (Note JC): drops every `payload_sha256@<isa>` field from `identity`, so `pin_fields` keeps the
+/// recorded AMD hash and compares every other field. A by-ISA hash with no recorded value fails: it is recorded on an
+/// AMD CPU.
+fn without_isa_hashes(file: &Path, identity: &mut BTreeMap<String, Value>) {
+    eprintln!(
+        "Intel CPU: the BC7/BC6H hashes are not compared; the other identity pins are (Note JC)"
+    );
+    let recorded: BTreeMap<String, Value> =
+        serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    let mut unrecorded = vec![];
+    for (key, pin) in identity.iter_mut() {
+        let pin = pin.as_object_mut().unwrap();
+        let isa: Vec<String> = pin
+            .keys()
+            .filter(|f| f.starts_with("payload_sha256@"))
+            .cloned()
+            .collect();
+        for field in isa {
+            if recorded.get(key).and_then(|r| r.get(&field)).is_none() {
+                unrecorded.push(format!(
+                    "{key}: no recorded {field}; record it on an AMD CPU"
+                ));
+            }
+            pin.remove(&field);
+        }
+    }
+    assert!(unrecorded.is_empty(), "{}", unrecorded.join("\n"));
 }
 
 #[test]

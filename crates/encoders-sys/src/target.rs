@@ -68,12 +68,18 @@ pub fn ispc_target() -> IspcTarget {
     *TARGET.get_or_init(init)
 }
 
-/// Whether a test that compares BC7 or BC6H bytes against a recorded hash skips on this CPU: the hashes were recorded
-/// on an AMD CPU and an Intel CPU encodes other bytes on the same ISPC path (Note JC). `SDC_TEST_AS_INTEL=1` takes
-/// the Intel path on any CPU, to test it. Prints the reason when it skips.
+/// Whether the BC7 and BC6H bytes recorded in the tests are out of reach on this CPU: they were recorded on an AMD CPU,
+/// and an Intel CPU encodes other bytes on the same ISPC path (Note JC). True on an Intel CPU, and on any CPU with
+/// `SDC_TEST_AS_INTEL=1`, to test that path.
+#[cfg(feature = "test-hooks")]
+pub fn intel_cpu() -> bool {
+    cpu_is_intel() || std::env::var("SDC_TEST_AS_INTEL").as_deref() == Ok("1")
+}
+
+/// `intel_cpu()`, printing the reason when it is true: for a test that skips whole on an Intel CPU.
 #[cfg(feature = "test-hooks")]
 pub fn skip_byte_pins() -> bool {
-    let intel = cpu_is_intel() || std::env::var("SDC_TEST_AS_INTEL").as_deref() == Ok("1");
+    let intel = intel_cpu();
     if intel {
         eprintln!("skipped: the recorded BC7/BC6H hashes are an AMD CPU's; this Intel CPU encodes other bytes (Note JC)");
     }
@@ -81,7 +87,7 @@ pub fn skip_byte_pins() -> bool {
 }
 
 /// The CPUID vendor string is "GenuineIntel" (leaf 0: EBX, EDX, ECX).
-#[cfg(feature = "test-hooks")]
+#[cfg(all(feature = "test-hooks", target_arch = "x86_64"))]
 fn cpu_is_intel() -> bool {
     let r = std::arch::x86_64::__cpuid(0);
     let mut vendor = [0u8; 12];
@@ -89,6 +95,11 @@ fn cpu_is_intel() -> bool {
     vendor[4..8].copy_from_slice(&r.edx.to_le_bytes());
     vendor[8..].copy_from_slice(&r.ecx.to_le_bytes());
     &vendor == b"GenuineIntel"
+}
+
+#[cfg(all(feature = "test-hooks", not(target_arch = "x86_64")))]
+fn cpu_is_intel() -> bool {
+    false
 }
 
 /// `best`, or at most AVX2 unless `lift`.
