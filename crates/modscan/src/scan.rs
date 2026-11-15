@@ -9,7 +9,7 @@ use crate::store::{
     KIND_DATA, KIND_MOD, KIND_OVERWRITE, PARSE_FAILED, PARSE_NOT_SKYRIM,
 };
 use crate::ScanError;
-use nif::path::{is_facegen, is_lod_path};
+use nif::path::{canon_material, is_facegen, is_lod_path};
 use rayon::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -95,6 +95,15 @@ fn guarded(f: impl FnOnce() -> Result<nif::scan::NifScan, nif::NifError>) -> Cop
 enum Loc {
     Loose(PathBuf),
     Bsa(usize, usize),
+}
+
+/// What `walk` found: NIF copies with their byte locations and the opened BSAs, then the stat-only copies.
+struct Walked {
+    copies: Vec<Copy>,
+    locs: Vec<Loc>,
+    opened: Vec<Bsa>,
+    tex: Vec<Copy>,
+    mats: Vec<Copy>,
 }
 
 pub(crate) fn file_mtime(p: &std::path::Path) -> i64 {
@@ -275,7 +284,13 @@ fn scan_body(
 
     // 3. Walk.
     let mut failed_bsas = HashSet::new();
-    let (copies, locs, opened, tex) = walk(&loose, &bsas, &mut report, &mut failed_bsas, progress);
+    let Walked {
+        copies,
+        locs,
+        opened,
+        tex,
+        mats,
+    } = walk(&loose, &bsas, &mut report, &mut failed_bsas, progress);
     report.phase_ms.push(("walk", lap(&mut t)));
     // A BSA that failed to open (locked, being redeployed) is not enabled, so delete_unseen keeps its cached rows.
     let enable_bsa_ids: Vec<i64> = bsa_ids
@@ -419,6 +434,7 @@ fn scan_body(
         // clean rescan (begin_scan: reads never mix old winners in).
         store.set_winners(&HashMap::new(), &HashMap::new())?;
         store.set_textures(&HashMap::new())?;
+        store.set_materials(&HashMap::new())?;
         // Old rec_winner rows would name winners of the previous run; record uses stay empty until a clean rescan.
         store.unload_plugins()?;
         // A tainted run still returns a (flagged) result: its origins are listed, as before.
@@ -474,19 +490,24 @@ fn scan_body(
     store.set_winners(&game_rows, &src_rows)?;
     let mut resolve_ms = lap(&mut t);
 
-    // Texture winners (game view only; stat-only data from the walk).
-    let tex_pids = store.path_ids(&tex.iter().map(|c| c.path.as_str()).collect::<Vec<_>>())?;
-    let tex_win = winners(&tex, &loose, &bsas);
-    let tex_pid_of: HashMap<&str, i64> = tex
-        .iter()
-        .zip(&tex_pids)
-        .map(|(c, &p)| (c.path.as_str(), p))
-        .collect();
-    let tex_win_rows: HashMap<i64, (i64, u32)> = tex_win
-        .iter()
-        .map(|(p, &(i, n))| (tex_pid_of[p.as_str()], (origin_id(tex[i].origin), n)))
-        .collect();
-    store.set_textures(&tex_win_rows)?;
+    // Texture and `.csm` material winners (game view only; stat-only data from the walk).
+    let stat_rows =
+        |store: &mut Store, c: &[Copy]| -> Result<HashMap<i64, (i64, u32)>, ScanError> {
+            let pids = store.path_ids(&c.iter().map(|c| c.path.as_str()).collect::<Vec<_>>())?;
+            let pid_of: HashMap<&str, i64> = c
+                .iter()
+                .zip(&pids)
+                .map(|(c, &p)| (c.path.as_str(), p))
+                .collect();
+            Ok(winners(c, &loose, &bsas)
+                .iter()
+                .map(|(p, &(i, n))| (pid_of[p.as_str()], (origin_id(c[i].origin), n)))
+                .collect())
+        };
+    let tex_rows = stat_rows(store, &tex)?;
+    store.set_textures(&tex_rows)?;
+    let mat_rows = stat_rows(store, &mats)?;
+    store.set_materials(&mat_rows)?;
     let textures_ms = lap(&mut t);
 
     let mut rows = Vec::with_capacity(copies.len());
@@ -545,18 +566,20 @@ fn enable_run(store: &mut Store, loose: &[i64], bsa: &[i64]) -> Result<(), ScanE
     store.enable_origins(&all)
 }
 
-/// Step 3: loose NIFs per origin and NIF entries per BSA (FaceGen excluded), one copy per (path, origin).
+/// Step 3: loose NIFs per origin and NIF entries per BSA (FaceGen excluded), one copy per (path, origin); then the
+/// stat-only texture and `.csm` material copies.
 fn walk(
     loose: &[LooseOrigin],
     bsas: &[ActiveBsa],
     report: &mut Report,
     failed_bsas: &mut HashSet<usize>,
     progress: &dyn Fn(Progress),
-) -> (Vec<Copy>, Vec<Loc>, Vec<Bsa>, Vec<Copy>) {
+) -> Walked {
     let total = loose.len() + bsas.len();
     let mut copies = vec![];
     let mut locs = vec![];
     let mut tex: Vec<Copy> = vec![];
+    let mut mats: Vec<Copy> = vec![];
     let mut seen: HashSet<(String, OriginRef)> = HashSet::new();
     for (i, o) in loose.iter().enumerate() {
         progress(Progress {
@@ -600,6 +623,23 @@ fn walk(
                 mtime: f.mtime,
             });
         }
+        // `.csm` materials (Note IE4): stat only, like textures.
+        let (files, errs) = vfs::loose::walk(&o.root, &["materials"], &["csm"]);
+        for e in errs {
+            if !report.problems.contains(&e) {
+                report.problems.push(e);
+            }
+        }
+        for f in files {
+            if let Some(path) = canon_material(&f.norm) {
+                mats.push(Copy {
+                    path,
+                    origin: OriginRef::Loose(i),
+                    size: f.size,
+                    mtime: f.mtime,
+                });
+            }
+        }
     }
     let mut opened = vec![];
     for (i, b) in bsas.iter().enumerate() {
@@ -624,6 +664,14 @@ fn walk(
             if e.norm.starts_with("textures/") && e.norm.ends_with(".dds") && !is_facegen(&e.norm) {
                 tex.push(Copy {
                     path: e.norm.clone(),
+                    origin: OriginRef::Bsa(i),
+                    size: e.size as u64,
+                    mtime,
+                });
+            } else if let Some(path) = canon_material(&e.norm).filter(|p| *p == e.norm) {
+                // `filter`: an archive's `data/materials/…` entry is not the game's `materials/…` file.
+                mats.push(Copy {
+                    path,
                     origin: OriginRef::Bsa(i),
                     size: e.size as u64,
                     mtime,
@@ -657,7 +705,13 @@ fn walk(
         done: total,
         total,
     });
-    (copies, locs, opened, tex)
+    Walked {
+        copies,
+        locs,
+        opened,
+        tex,
+        mats,
+    }
 }
 
 #[cfg(test)]

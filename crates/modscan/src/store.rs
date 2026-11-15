@@ -10,8 +10,9 @@ use std::sync::Arc;
 
 /// `PRAGMA user_version` of the current schema. Older databases are dropped and rebuilt (the store is a cache).
 /// 8: shape.index3d (PGPatcher 3D index, GUI suggestions item 6). 9: 2.0 debloat (Note GJ7), the dead tables and
-/// columns dropped. 10: ARMA skin textures as `alt_tex` rows (Note GO4), so every plugin is read again.
-pub const SCHEMA_VERSION: i64 = 10;
+/// columns dropped. 10: ARMA skin textures as `alt_tex` rows (Note GO4), so every plugin is read again. 11: `.csm`
+/// material winners in `mat_winner` (Note IE4).
+pub const SCHEMA_VERSION: i64 = 11;
 
 const SCHEMA: &str = r#"
 CREATE TABLE path   (id INTEGER PRIMARY KEY, p TEXT NOT NULL UNIQUE);
@@ -42,6 +43,8 @@ CREATE TABLE tex_use (tex_path_id INTEGER, texset_id INTEGER, slot INTEGER,
 CREATE TABLE nif_winner     (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE TABLE nif_winner_src (path_id INTEGER PRIMARY KEY, copy_id INTEGER NOT NULL);
 CREATE TABLE tex_winner (path_id INTEGER PRIMARY KEY, origin_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
+-- `.csm` material files (`materials/**/*.csm`, loose and in BSAs), resolved like textures (Note IE4).
+CREATE TABLE mat_winner (path_id INTEGER PRIMARY KEY, origin_id INTEGER NOT NULL, n_copies INTEGER NOT NULL);
 CREATE INDEX nif_copy_origin ON nif_copy(origin_id);
 -- The texset uniqueness key. SQLite treats NULLs as distinct in UNIQUE, so empty (NULL) slots are folded to 0
 -- (path ids start at 1) and INSERT OR IGNORE dedups sets with empty slots too.
@@ -1248,10 +1251,23 @@ impl Store {
 
     /// Replaces `tex_winner`: path_id -> (origin_id, n_copies).
     pub fn set_textures(&mut self, winners: &HashMap<i64, (i64, u32)>) -> Result<(), ScanError> {
+        self.replace_winners("tex_winner", winners)
+    }
+
+    /// Replaces `mat_winner` (`.csm` materials): path_id -> (origin_id, n_copies).
+    pub fn set_materials(&mut self, winners: &HashMap<i64, (i64, u32)>) -> Result<(), ScanError> {
+        self.replace_winners("mat_winner", winners)
+    }
+
+    fn replace_winners(
+        &mut self,
+        table: &str,
+        winners: &HashMap<i64, (i64, u32)>,
+    ) -> Result<(), ScanError> {
         let tx = self.conn.transaction()?;
-        tx.execute_batch("DELETE FROM tex_winner;")?;
+        tx.execute_batch(&format!("DELETE FROM {table};"))?;
         {
-            let mut w = tx.prepare("INSERT INTO tex_winner VALUES (?1,?2,?3)")?;
+            let mut w = tx.prepare(&format!("INSERT INTO {table} VALUES (?1,?2,?3)"))?;
             for (p, (o, n)) in winners {
                 w.execute(params![p, o, n])?;
             }
@@ -1282,11 +1298,23 @@ impl Store {
     /// Where the game's copy of texture `norm` lives: (origin kind, origin root). A BSA origin's root is the
     /// archive file; any other root is a folder holding `norm` as a loose file.
     pub fn texture_location(&self, norm: &str) -> Result<Option<(i32, String)>, ScanError> {
+        self.winner_location("tex_winner", norm)
+    }
+
+    /// Where the game's copy of `.csm` material `norm` (`nif::path::canon_material` form) lives, as
+    /// [`Store::texture_location`]: the highest-priority loose copy, else the highest-ranked BSA (Note IE4).
+    pub fn material_location(&self, norm: &str) -> Result<Option<(i32, String)>, ScanError> {
+        self.winner_location("mat_winner", norm)
+    }
+
+    fn winner_location(&self, table: &str, norm: &str) -> Result<Option<(i32, String)>, ScanError> {
         Ok(self
             .conn
             .query_row(
-                "SELECT o.kind, o.root FROM tex_winner w JOIN path p ON p.id = w.path_id
-                 JOIN origin o ON o.id = w.origin_id WHERE p.p = ?1 AND o.enabled = 1",
+                &format!(
+                    "SELECT o.kind, o.root FROM {table} w JOIN path p ON p.id = w.path_id
+                     JOIN origin o ON o.id = w.origin_id WHERE p.p = ?1 AND o.enabled = 1"
+                ),
                 [norm],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )

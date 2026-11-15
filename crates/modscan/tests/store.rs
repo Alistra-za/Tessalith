@@ -1,4 +1,5 @@
 // Store API: raw slot strings + flags, geometry columns, schema version, error propagation.
+mod common;
 use modscan::store::ChunkItem;
 use modscan::store::{CopyResult, Store, PARSE_PARTIAL};
 use nif::path::{canon_texture, PathFlags};
@@ -298,7 +299,7 @@ fn schema_v3_rebuilds_old_databases_and_sets_pragmas() {
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
     assert_eq!(v, modscan::store::SCHEMA_VERSION);
-    assert_eq!(v, 10);
+    assert_eq!(v, 11);
     let n: i64 = c
         .query_row("SELECT count(*) FROM shape", [], |r| r.get(0))
         .unwrap();
@@ -1416,4 +1417,103 @@ fn texture_paths_lists_winners_by_substring_sorted_and_limited() {
     assert_eq!(s.texture_paths("rock", 1).unwrap(), ["textures/a/rock.dds"]);
     assert_eq!(s.texture_paths("%", 10).unwrap(), ["textures/d/r%ck.dds"]);
     assert_eq!(s.texture_paths("", 10).unwrap().len(), 4);
+}
+
+// ---- Note IE4: `.csm` material winners ----
+
+fn mo2_scan(r: &std::path::Path) -> Store {
+    let inst = modscan::mo2::Instance::load(r, None).unwrap();
+    let mut s = Store::open(&r.join("scan.db")).unwrap();
+    modscan::scan::run(
+        &modscan::scan::Source::Mo2(inst),
+        &mut s,
+        &Default::default(),
+        &|_| {},
+        &|| vec![],
+    )
+    .unwrap();
+    s
+}
+
+#[test]
+fn material_location_winner() {
+    let d = common::instance_fixture("+B\n+A\n");
+    let r = d.path();
+    common::put(r, "mods/A/materials/pbr/x.csm", b"{}");
+    common::put(r, "mods/B/materials/pbr/x.csm", b"{}");
+    // A vanilla-named archive in the game Data folder is always active, whatever the modlist enables.
+    let bsa = r.join("Game/Data/Skyrim - Materials.bsa");
+    common::put(
+        r,
+        "Game/Data/Skyrim - Materials.bsa",
+        &common::bsa(&[
+            ("materials\\pbr", "x.csm", b"{}"),
+            // Not under `materials/` in the archive, so not the game's `materials/pbr/y.csm`.
+            ("data\\materials\\pbr", "y.csm", b"{}"),
+        ]),
+    );
+    let s = mo2_scan(r);
+    let (kind, root) = s.material_location("materials/pbr/x.csm").unwrap().unwrap();
+    assert_eq!(kind, KIND_MOD);
+    assert_eq!(std::path::Path::new(&root), r.join("mods").join("B"));
+    assert!(s
+        .material_location("materials/pbr/none.csm")
+        .unwrap()
+        .is_none());
+    assert!(s
+        .material_location("materials/pbr/y.csm")
+        .unwrap()
+        .is_none());
+    drop(s);
+    std::fs::write(r.join("profiles/Default/modlist.txt"), "-B\n-A\n").unwrap();
+    let s = mo2_scan(r);
+    let (kind, root) = s.material_location("materials/pbr/x.csm").unwrap().unwrap();
+    assert_eq!(kind, modscan::store::KIND_BSA);
+    assert_eq!(std::path::Path::new(&root), bsa);
+}
+
+#[test]
+fn a_tainted_scan_empties_the_material_winners() {
+    let d = common::instance_fixture("+A\n");
+    let r = d.path();
+    common::put(r, "mods/A/materials/x.csm", b"{}");
+    assert!(mo2_scan(r)
+        .material_location("materials/x.csm")
+        .unwrap()
+        .is_some());
+    // PGPatcher starts mid-scan: A stays enabled, so only the emptied table hides the previous winner.
+    let calls = std::sync::atomic::AtomicUsize::new(0);
+    let mut s = Store::open(&r.join("scan.db")).unwrap();
+    let rep = modscan::scan::run(
+        &modscan::scan::Source::Mo2(modscan::mo2::Instance::load(r, None).unwrap()),
+        &mut s,
+        &Default::default(),
+        &|_| {},
+        &|| {
+            if calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                vec![]
+            } else {
+                vec!["pgtools.exe".into()]
+            }
+        },
+    )
+    .unwrap();
+    assert!(rep.tainted);
+    assert!(s.material_location("materials/x.csm").unwrap().is_none());
+}
+
+#[test]
+fn material_location_folds() {
+    let d = common::instance_fixture("+A\n");
+    let r = d.path();
+    common::put(r, "mods/A/Materials/PBR/X.csm", b"{}");
+    common::put(r, "mods/A/materials/pbr/notes.json", b"{}");
+    let s = mo2_scan(r);
+    let (kind, root) = s.material_location("materials/pbr/x.csm").unwrap().unwrap();
+    assert_eq!(kind, KIND_MOD);
+    assert_eq!(std::path::Path::new(&root), r.join("mods").join("A"));
+    assert!(s
+        .material_location("materials/pbr/notes.json")
+        .unwrap()
+        .is_none());
 }
