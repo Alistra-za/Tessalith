@@ -153,6 +153,38 @@ fn the_problems_row_of_an_unavailable_type_has_set_type() {
     );
 }
 
+/// **Use BC7** takes its pair from `allowed_encodings` only (`bc7_for`). Every skin map the code is raised for has
+/// BC7 there, so the button is never missing; a grey map has not, so the button could not write BC7 on one.
+#[test]
+fn bc7_is_allowed_on_every_skin_map_the_code_covers_and_never_on_a_grey_map() {
+    use engine::policy::{allowed_encodings, cs_skin_loader_ok};
+    for st in [Subtype::SkinRfaos, Subtype::SkinWet, Subtype::SkinDetail] {
+        assert!(
+            !cs_skin_loader_ok(st, Format::Rgb8),
+            "{st:?}: the code is raised"
+        );
+        assert!(cs_skin_loader_ok(st, Format::Bc7), "{st:?}: BC7 ends it");
+        assert!(
+            allowed_encodings(st, Target::Cs)
+                .iter()
+                .any(|(f, _)| *f == Format::Bc7),
+            "{st:?}: BC7 is offered"
+        );
+    }
+    for target in [Target::Cs, Target::Vanilla] {
+        assert!(
+            cs_skin_loader_ok(Subtype::Gray, Format::Rgb8),
+            "never raised on a grey map"
+        );
+        assert!(
+            allowed_encodings(Subtype::Gray, target)
+                .iter()
+                .all(|(f, _)| matches!(f, Format::Bc4 | Format::R8)),
+            "{target:?}: a grey map is BC4 or R8"
+        );
+    }
+}
+
 /// A sub-type with a fallback is resolved as the fallback once acknowledged, so its Acknowledge stays and works.
 #[test]
 fn an_unavailable_type_with_a_fallback_keeps_its_acknowledge() {
