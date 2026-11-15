@@ -608,16 +608,37 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
         .collect();
     // Note IE10: a set's clamped or left-out `.csm` values, and why its `.csm` is not written. Here, not in Problems'
     // own loops, so a partial plan carries them over with the other asks (Note FL7).
-    for (v, c) in super::csm_export::csm_sets(m)
-        .into_iter()
-        .filter(|(v, _)| m.in_run(&v.key))
-    {
+    let csms = super::csm_export::csm_sets(m);
+    for (v, c) in csms.iter().filter(|(v, _)| m.in_run(&v.key)) {
         out.extend(
             c.warnings
-                .into_iter()
-                .chain(c.blocked)
-                .map(|t| issue(&v, t)),
+                .iter()
+                .chain(&c.blocked)
+                .map(|t| issue(v, t.clone())),
         );
+    }
+    // Note IE10 (fix round 2 ruling): a set that gets a `.csm` but has none this run (no PGPatcher entry) and binds a
+    // texture-set EDID: its file is refused at the export, so the user learns it here first.
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    let binds = |id: &str| {
+        entries
+            .iter()
+            .any(|e| same_id(&e.id, id) && e.cs_txst.as_ref().is_some_and(|b| !b.edids.is_empty()))
+    };
+    for v in set_views(m).iter().filter(|v| {
+        m.in_run(&v.key)
+            && super::csm_export::gets_csm(v)
+            && !csms.iter().any(|(c, _)| same_id(&c.id, &v.id))
+            && binds(&v.id)
+    }) {
+        out.push(issue(
+            v,
+            format!(
+                "{}: its PBR texture set files are not written: {}",
+                v.id,
+                super::csm_export::NO_ENTRY
+            ),
+        ));
     }
     out
 }

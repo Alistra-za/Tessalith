@@ -55,7 +55,7 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// Advanced skin materials: `[project] cs_skin_sha256` (and the sidecar table), path under the export root → hash of
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
-/// Note IE10: `[project] csm_sha256` (and the sidecar table), path under the export root → hash of the set `.csm`
+/// Note IE11: `[project] csm_sha256` (and the sidecar table), path under the export root → hash of the set `.csm`
 /// material sdc last wrote there.
 const CSM_SHA: &str = "csm_sha256";
 /// Keys of a `[[sets]]` table that are not JSON settings.

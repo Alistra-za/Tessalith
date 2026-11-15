@@ -190,9 +190,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                     .get(&(e.id.clone(), kind, edid.clone()))
                     .cloned()
                     .or_else(|| match pointer {
-                        Some(None) => Some(
-                            "the set writes no .csm this run (it has no PGPatcher entry)".into(),
-                        ),
+                        Some(None) => Some(super::csm_export::NO_ENTRY.into()),
                         Some(Some(c)) if c.blocked.is_some() => {
                             Some(format!("the set's {} is not written", c.path))
                         }

@@ -200,8 +200,8 @@ fn block(
         pgp_box(ui, m, v, b, acts);
     }
     let pgp = landscape && m.pgp_written(v);
-    // Note IE10: a PBR set's texture-set values go to its `.csm`: rows name the `.csm` keys and drag in the schema's
-    // ranges, and the key a `.csm` has none for is hidden (its stored value stays; Problems warns about it).
+    // Notes IE10, IE11: a PBR set's texture-set values go to its `.csm`: rows name the `.csm` keys and drag in the
+    // schema's ranges, and the key a `.csm` has none for is hidden (its stored value stays; Problems warns about it).
     let csm = kind == Kind::Txst && !card && gets_csm(v);
     let mut hidden = 0;
     for f in fields(kind) {
@@ -260,7 +260,7 @@ fn default_text(kind: Kind, f: &Field) -> String {
     }
 }
 
-/// `range`: the field's, or (a `.csm` set, Note IE10) the schema's.
+/// `range`: the field's, or (a `.csm` set, Note IE11) the schema's.
 fn drag(ui: &mut egui::Ui, x: &mut f64, range: (f64, f64)) -> bool {
     ui.add(
         egui::DragValue::new(x)
@@ -273,7 +273,7 @@ fn drag(ui: &mut egui::Ui, x: &mut f64, range: (f64, f64)) -> bool {
     .changed()
 }
 
-/// The hover's key line: the JSON key, or for a `.csm` set (Note IE10) the `.csm` key(s) the value is written as.
+/// The hover's key line: the JSON key, or for a `.csm` set (Note IE11) the `.csm` key(s) the value is written as.
 fn key_text(name: &str, csm: bool) -> String {
     if !csm {
         return format!("JSON key: {name}");
@@ -291,7 +291,7 @@ fn key_text(name: &str, csm: bool) -> String {
     }
 }
 
-/// `csm`: a texture-set row of a set that exports a `.csm` (Note IE10): the hover names the `.csm` key, and the drag
+/// `csm`: a texture-set row of a set that exports a `.csm` (Note IE11): the hover names the `.csm` key, and the drag
 /// range is the schema's.
 fn field_row(
     ui: &mut egui::Ui,

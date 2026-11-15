@@ -586,6 +586,11 @@ fn a_csm_set_without_a_csm_writes_no_inline_json() {
         p.notes
     );
     assert_eq!(p.refused, ["PBRTextureSets/Rock01.json"]);
+    // Fix round 2 (ruling): the user learns before the export, in a Problems row naming the set.
+    let row = problem_texts(&m)
+        .into_iter()
+        .find(|t| t.contains(ROCK) && t.contains(NO_ENTRY));
+    assert!(row.is_some(), "{:?}", problem_texts(&m));
 }
 
 /// The set's PGPatcher entry as the export builds it.
@@ -634,6 +639,35 @@ fn a_locked_rmaos_is_not_blocked() {
     let s = rock_csm(&m);
     assert_eq!(s.blocked, None, "{:?}", s.warnings);
     assert!(!s.csm.values.contains_key("RmaosTexture"), "{s:?}");
+}
+
+/// Fix round 2: a slot the PGPatcher entry clears (`slotN = ""`) is written as `""` (the spec's "clear"); an absent
+/// key would inherit the NIF's texture instead.
+#[test]
+fn a_cleared_slot_is_written_empty() {
+    let d = tempfile::tempdir().unwrap();
+    let m = with_txst(d.path());
+    let v = view(&m);
+    let mut e = entry(&m);
+    e.settings.insert("slot3".into(), json!(""));
+    e.slots.insert(7, String::new());
+    let s = entry_csm(&v, &e, None).unwrap();
+    assert_eq!(s.blocked, None, "{:?}", s.warnings);
+    assert_eq!(
+        s.csm.values.get("GlowTexture"),
+        Some(&Value::Text(String::new()))
+    );
+    assert_eq!(
+        s.csm.values.get("Features1Texture"),
+        Some(&Value::Text(String::new()))
+    );
+    let text = csm::to_text(&s.csm);
+    assert!(text.contains("\"GlowTexture\": \"\""), "{text}");
+    assert_eq!(csm::parse(&text).as_ref(), Ok(&s.csm));
+    // A cleared needed slot is still missing.
+    e.settings.insert("slot6".into(), json!(""));
+    let why = entry_csm(&v, &e, None).unwrap().blocked.expect("blocked");
+    assert!(why.contains("has no RMAOS texture;"), "{why}");
 }
 
 /// Fix round 1 (Important 3): a wrong-typed block value of a `.csm` set is left out with a warning, whatever its kind:

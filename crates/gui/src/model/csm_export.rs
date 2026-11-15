@@ -78,6 +78,9 @@ fn number_key(key: &str) -> Option<NumberKey> {
     })
 }
 
+/// Why a set that gets a `.csm` has none this run, so its texture-set file is not written either.
+pub const NO_ENTRY: &str = "the set writes no .csm this run (it has no PGPatcher entry)";
+
 /// The texture-set key a `.csm` has no key for: dropped, with a warning when the block holds a non-default value.
 pub const NO_CSM_KEY: &str = "innerLayerDisplacementOffset";
 
@@ -226,10 +229,17 @@ fn build(
                 Some(rel.to_string_lossy().into_owned())
             })
         });
-        // `""` clears the slot (the entry's form): no texture.
-        if let Some(p) = path.filter(|p| !p.trim().is_empty()) {
-            values.insert(name, Value::Text(texture_value(&p)));
-            present.insert(n);
+        // `""` clears the slot (the spec's form; an absent key would inherit the NIF's texture): written as `""`, and no
+        // texture for the needed-slot check.
+        match path {
+            Some(p) if p.trim().is_empty() => {
+                values.insert(name, Value::Text(String::new()));
+            }
+            Some(p) => {
+                values.insert(name, Value::Text(texture_value(&p)));
+                present.insert(n);
+            }
+            None => {}
         }
     }
     // Missing: no key written and no lock (a locked slot keeps the mesh's texture).
