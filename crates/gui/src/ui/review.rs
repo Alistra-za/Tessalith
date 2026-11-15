@@ -4,13 +4,15 @@ use super::settings_panel::{alpha_question, subtype_label};
 use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
 use crate::model::code_text::{
-    ack_label, ack_label_for_texture, alpha_confirm_text, code_line, not_a_cube,
+    ack_label, ack_label_for_texture, alpha_confirm_text, change_line, code_line, not_a_cube,
+    USE_BC7, USE_BC7_HOVER,
 };
-use crate::model::items::{alpha_asked, Decision};
+use crate::model::items::{alpha_asked, bc7_for, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
+use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
@@ -67,6 +69,7 @@ pub fn undecided_row(
             Decision::Acknowledge(code) => {
                 Some((code_line(*code).to_string(), Some(code.as_str())))
             }
+            Decision::Change(code) => Some((change_line(*code).to_string(), Some(code.as_str()))),
             // Note GU2: no menu, only what a cube source is; the type picker on the row is the way out.
             Decision::NotACubeSource => Some((not_a_cube(item.job.as_ref()), None)),
             Decision::Subtype { .. } => None,
@@ -138,8 +141,11 @@ fn fix_buttons_on(
             match d {
                 // Note FB9 (owner amendment A): `[Set type: {suggestion} ✓] ▾`, the main part accepts, ▾ opens the
                 // picker; without a suggestion the plain "Set type…" opens it.
-                // A not-a-cube source has only this answer too: a different sub-type (no suggestion).
-                d @ (Decision::Subtype { .. } | Decision::NotACubeSource) => {
+                // A not-a-cube source has only this answer too: a different sub-type (no suggestion). Note JD3: so
+                // has a type the mode does not have and gives no fallback for.
+                d @ (Decision::Subtype { .. }
+                | Decision::NotACubeSource
+                | Decision::Change(Code::CfgUnavailable)) => {
                     let suggested = match d {
                         Decision::Subtype { suggested } => *suggested,
                         _ => None,
@@ -199,6 +205,21 @@ fn fix_buttons_on(
                         pick = Some(RowPick::Answer(key.to_string(), Answer::Acknowledge(*code)));
                     }
                 }
+                // Note JD3: the one change that ends the block, never an Acknowledge that cannot.
+                Decision::Change(Code::FmtCsSkinLoader) => {
+                    if let Some((f, tag)) = item.job.as_ref().and_then(bc7_for) {
+                        if ui
+                            .button(USE_BC7)
+                            .on_hover_text(USE_BC7_HOVER)
+                            .on_disabled_hover_text(why)
+                            .clicked()
+                        {
+                            pick = Some(RowPick::Answer(key.to_string(), Answer::Format(f, tag)));
+                        }
+                    }
+                }
+                // Any other such code has no one-click change: its sentence names the fix.
+                Decision::Change(_) => {}
             }
         }
     });

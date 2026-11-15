@@ -26,6 +26,8 @@ A row you must act on has its fix as a button.
 | A blocker, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …* | None: the texture failed to plan. |
 | *Undecided: …* | The type buttons and **Acknowledge** ([below](#deciding-from-the-list)). |
+| *Undecided: Community Shaders can't load this skin map in this format…* | **Use BC7**, which sets the file's format. No **Acknowledge**: it can't lift this block. <!-- D:JD3 --> |
+| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Presets…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JD3 --> |
 | *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
 | Warnings on a set | **Go to set**. They never hold back Export or open Review. |

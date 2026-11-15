@@ -142,6 +142,22 @@ pub fn alpha_confirm_text(policy: AlphaPolicy) -> String {
     format!("Alpha: {} (proposed) — confirm", alpha_label(policy))
 }
 
+/// Note JD3: the sentence of a block Acknowledge cannot clear (`Decision::Change`). A type the mode does not have
+/// names its two ways out; any other code keeps its own sentence, which names the fix already.
+pub fn change_line(code: Code) -> &'static str {
+    match code {
+        Code::CfgUnavailable => {
+            "This type isn't available in this mode — set another type, or change the mode in Presets…"
+        }
+        _ => code_line(code),
+    }
+}
+
+/// Note JD3: the button on a skin map Community Shaders cannot load in its format.
+pub const USE_BC7: &str = "Use BC7";
+/// [`USE_BC7`]'s hover.
+pub const USE_BC7_HOVER: &str = "Write this texture as BC7, which Community Shaders loads";
+
 /// [`ack_label`] with " for this texture", for the panels that act on the one texture.
 pub fn ack_label_for_texture(code: Code) -> String {
     format!("{} for this texture", ack_label(code))

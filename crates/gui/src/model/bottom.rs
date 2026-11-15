@@ -478,13 +478,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 }
                 // Note FB8: the sentence names the action; the code is on the hover.
                 Decision::Acknowledge(c) => code_text::code_line(*c).into(),
+                Decision::Change(c) => code_text::change_line(*c).into(),
             })
             .collect();
         let mut also: Vec<Code> = i
             .decisions
             .iter()
             .filter_map(|d| match d {
-                Decision::Acknowledge(c) => Some(*c),
+                Decision::Acknowledge(c) | Decision::Change(c) => Some(*c),
                 _ => None,
             })
             .collect();

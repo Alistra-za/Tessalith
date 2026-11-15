@@ -55,6 +55,7 @@ An **amber border** means the texture still needs an answer: a Medium or Low sub
 | What does the alpha channel mean? | An **Alpha** row, the dropdown set to the proposal, and **Confirm**. Pick another type, or press Confirm to keep the proposal. The rows below already read as the proposal. <!-- D:FM35 --> |
 | "IN-GREEN-UNSTATED" on a plain `_normal` | The map is converted as DirectX. Press **Treat as OpenGL (flip green)** if it is an OpenGL map; **Treat as DirectX** undoes it. |
 | A blocking warning | **Acknowledge for this texture**, or **Drop the alpha anyway** when the chosen format discards a varying alpha you've already confirmed: the export writes the texture without its alpha. |
+| A blocking warning that can't be acknowledged | **Use BC7**, or a sub-type dropdown and **Confirm**: [which row gets which](GUI-Problems.md#rows-and-their-fixes). <!-- D:JD3 --> |
 
 Each answer is a field value or an `allow` code on the file's `[files]` entry. Your choice always wins over a suggestion. A field the target or the sub-type fixes is greyed with the reason (a field lock); it is not a pin and not a PGPatcher lock.
 

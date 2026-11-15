@@ -2,7 +2,7 @@
 use super::helpers::{fill_text, target_file};
 use engine::api::Plan;
 use engine::codes::{Code, Severity, Warning};
-use engine::config::{AlphaPolicy, Subtype, Target};
+use engine::config::{AlphaPolicy, ColorTag, Format, Subtype, Target};
 use engine::discover::{InputFile, InputKind};
 use engine::events::{EngineEvent, EventKind, RecipeReport};
 use engine::helper::report::HelperReport;
@@ -11,7 +11,10 @@ use engine::manifest::output_key;
 use engine::overrides::project_rel;
 use engine::pack::plan::files_stem;
 use engine::pack::RecipeKind;
-use engine::policy::{near_binary, JobStatus, Need, ResolvedJob, SourceStamp};
+use engine::policy::{
+    allowed_encodings, availability, near_binary, Availability, JobStatus, Need, ResolvedJob,
+    SourceStamp,
+};
 use engine::session::{Session, Thumbnail};
 use engine::suggest::suggest_alpha;
 use std::collections::BTreeMap;
@@ -47,6 +50,34 @@ pub enum Decision {
     /// A single image that is not six faces, a cross or a strip (`Need::CubeLayout`); its only answer is a sub-type.
     NotACubeSource,
     Acknowledge(Code),
+    /// Note JD3: a blocking code that `allow` cannot clear ([`ack_clears`]). The question names the change that
+    /// ends it and offers that change, never Acknowledge.
+    Change(Code),
+}
+
+/// Note JD3: whether adding `code` to the file's `allow` ends its block. The engine ignores `allow` for
+/// FMT-CS-SKIN-LOADER (the file would load as nothing in CS), and for CFG-UNAVAILABLE it only accepts a fallback
+/// sub-type, so a sub-type without one stays blocked (`engine::policy::resolve`).
+pub fn ack_clears(job: &ResolvedJob, code: Code) -> bool {
+    match code {
+        Code::FmtCsSkinLoader => false,
+        Code::CfgUnavailable => matches!(
+            availability(job.profile.target, job.profile.subtype),
+            Availability::Unavailable { fallback: Some(_) }
+        ),
+        _ => true,
+    }
+}
+
+/// Note JD3: what **Use BC7** writes for a skin map Community Shaders cannot load: BC7 with the job's own tag when
+/// the type takes that pair, else with the first tag it takes. `None` (no button) for a type that takes no BC7 under
+/// the mode, so the button never writes a format the type's own format list leaves out.
+pub fn bc7_for(job: &ResolvedJob) -> Option<(Format, ColorTag)> {
+    let all = allowed_encodings(job.profile.subtype, job.profile.target);
+    let mut bc7 = all.iter().filter(|(f, _)| *f == Format::Bc7);
+    let first = bc7.next().copied()?;
+    let own = (Format::Bc7, job.profile.color.tag);
+    Some(if all.contains(&own) { own } else { first })
 }
 
 #[derive(Debug, Clone)]
@@ -150,10 +181,19 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
     // type is kept), so that code is no second question. Once asked and answered it can come back for a format that
     // cannot store the type, and is then its own Acknowledge.
     let alpha_asked = out.contains(&Decision::AlphaMeaning);
+    let type_asked = out
+        .iter()
+        .any(|d| matches!(d, Decision::Subtype { .. } | Decision::NotACubeSource));
     for w in &job.warnings {
         let merged = alpha_asked && w.code == Code::LossAlphaData;
         if w.severity == Severity::Blocking && w.code != Code::SugLowConfidence && !merged {
-            out.push(Decision::Acknowledge(w.code));
+            // Note JD3: Acknowledge only where it ends the block. A type the mode does not have is answered by the
+            // type question when that is asked already, so it is no second one.
+            if ack_clears(job, w.code) {
+                out.push(Decision::Acknowledge(w.code));
+            } else if !(type_asked && w.code == Code::CfgUnavailable) {
+                out.push(Decision::Change(w.code));
+            }
         }
     }
     out
