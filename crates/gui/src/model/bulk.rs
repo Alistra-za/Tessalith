@@ -1462,7 +1462,7 @@ impl AppModel {
         } else {
             vec![]
         };
-        // Note HG: a record fill the user turned off comes back from here, after Clear (the only command on 9 and 10).
+        // Note HG: a record fill the user turned off comes back from here, after Clear (on 9 and 10, after the JD entries).
         if let Some(host) = v.fill_off.get(&n) {
             let at = menu
                 .iter()
@@ -1543,7 +1543,9 @@ impl AppModel {
     ) -> Vec<MenuEntry> {
         let id = v.id.clone();
         let folder = |k: &str| k.rsplit_once('/').map_or("", |(d, _)| d).to_string();
-        let here = folder(&id);
+        // The set's folder is where its files are; a renamed set's id may name another (or none), so it counts too.
+        let mut here: Vec<String> = v.members.iter().map(|k| folder(k)).collect();
+        here.push(folder(&id));
         let tail = format!("_{}", kind.suffix());
         let toml_off = self.toml_read_only_reason();
         let mut moves = vec![];
@@ -1554,7 +1556,8 @@ impl AppModel {
                 && i.input
                     .file_stem()
                     .is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with(&tail));
-            if !(typed || named) || !same_id(&folder(&i.key), &here) {
+            let f = folder(&i.key);
+            if !(typed || named) || !here.iter().any(|h| same_id(h, &f)) {
                 continue;
             }
             let from = views.iter().find(|o| o.members.iter().any(|k| k == &i.key));

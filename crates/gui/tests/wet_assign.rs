@@ -236,3 +236,43 @@ fn a_file_in_a_real_set_is_only_borrowed() {
         sdc_gui::model::bulk::MenuAction::SlotBorrow { item, .. } if item == "m/rock02_wet.png"
     )));
 }
+
+/// A set renamed into another folder still lists the files of the folder its own files are in.
+#[test]
+fn a_renamed_set_lists_its_files_folder() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    m.decide("m/body_wet.png", Answer::Subtype(Subtype::SkinWet));
+    idle(&mut m);
+    m.rename_set("m/body", "other/anna").unwrap();
+    idle(&mut m);
+    let menu = m.slot_menu("other/anna", SlotKind::SkinWet);
+    assert!(
+        menu.iter().any(|e| matches!(
+            &e.action,
+            sdc_gui::model::bulk::MenuAction::SlotMove { item, .. } if item == "m/body_wet.png"
+        )),
+        "{:?}",
+        menu.iter().map(|e| &e.label).collect::<Vec<_>>()
+    );
+}
+
+/// Note JD3's limit: beside a set that is skin only by its chosen shader, `body_detail_n.png` types `normal` and is
+/// not listed; typed Skin detail by hand, it is.
+#[test]
+fn a_detail_map_typed_normal_is_listed_once_typed_skin_detail() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    let listed = |m: &AppModel| {
+        m.slot_menu("m/body", SlotKind::SkinDetail).iter().any(|e| {
+            matches!(
+                &e.action,
+                sdc_gui::model::bulk::MenuAction::SlotMove { item, .. } if item == "m/body_detail_n.png"
+            )
+        })
+    };
+    assert!(!listed(&m));
+    m.decide("m/body_detail_n.png", Answer::Subtype(Subtype::SkinDetail));
+    idle(&mut m);
+    assert!(listed(&m));
+}
