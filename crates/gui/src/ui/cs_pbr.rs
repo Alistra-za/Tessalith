@@ -307,8 +307,8 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
             FieldKind::Bool => {
                 let mut b = cur.as_bool().unwrap_or(f.default != 0.0);
                 let name = format!("{} value", field_label(f.name));
-                let r = ui.checkbox(&mut b, "on");
-                // Every bool row's box reads "on"; the name tells them apart (egui-ui-rules 8.4).
+                let r = ui.add(egui::Checkbox::without_text(&mut b));
+                // No visible text: the AccessKit name tells the value box from the row's key box (egui-ui-rules 8.4).
                 r.widget_info(|| {
                     egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, b, &name)
                 });

@@ -266,35 +266,13 @@ pub struct Pbr2Override {
 /// type-21 field. A value of the wrong type (or a colour without three numbers) is skipped.
 pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
     use nif::pbr2::feat;
-    // (key, first parameter, width: 1 = a number, 3 = a colour).
-    const PARAMS: [(&str, usize, usize); 19] = [
-        ("roughnessScale", 0, 1),
-        ("specularLevel", 1, 1),
-        ("displacementScale", 2, 1),
-        ("subsurfaceColor", 3, 3),
-        ("subsurfaceOpacity", 6, 1),
-        ("coatColor", 7, 3),
-        ("coatStrength", 10, 1),
-        ("coatRoughness", 11, 1),
-        ("coatSpecularLevel", 12, 1),
-        ("fuzzColor", 13, 3),
-        ("fuzzWeight", 16, 1),
-        ("glintParameters.screenSpaceScale", 17, 1),
-        ("glintParameters.logMicrofacetDensity", 18, 1),
-        ("glintParameters.microfacetRoughness", 19, 1),
-        ("glintParameters.densityRandomization", 20, 1),
-        ("subsurfaceBalance", 21, 1),
-        ("thinSurfaceSpecularWeight", 22, 1),
-        ("thinSurfaceBackSpecularWeight", 23, 1),
-        ("thinSurfaceBackRoughnessScale", 24, 1),
-    ];
     let get = |key: &str| match key.split_once('.') {
         Some((o, k)) => values.get(o).and_then(|g| g.get(k)),
         None => values.get(key),
     };
     let num = |v: &Json| v.as_f64().map(|x| x as f32);
     let mut ov = Pbr2Override::default();
-    for (key, i, width) in PARAMS {
+    for (key, i, width) in TXST_PARAMS {
         let Some(v) = get(key) else { continue };
         let xs: Option<Vec<f32>> = match (width, v.as_array()) {
             (1, None) => num(v).map(|x| vec![x]),
@@ -325,6 +303,31 @@ pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
     ];
     ov
 }
+
+/// Note ID45: each texture-set key `txst_overrides` puts on the type-21 payload: (key, its first parameter in
+/// `nif::pbr2::PARAM_NAMES` order, width: 1 = a number, 3 = a colour). A value outside the parameter's range is passed
+/// through as it is.
+pub const TXST_PARAMS: [(&str, usize, usize); 19] = [
+    ("roughnessScale", 0, 1),
+    ("specularLevel", 1, 1),
+    ("displacementScale", 2, 1),
+    ("subsurfaceColor", 3, 3),
+    ("subsurfaceOpacity", 6, 1),
+    ("coatColor", 7, 3),
+    ("coatStrength", 10, 1),
+    ("coatRoughness", 11, 1),
+    ("coatSpecularLevel", 12, 1),
+    ("fuzzColor", 13, 3),
+    ("fuzzWeight", 16, 1),
+    ("glintParameters.screenSpaceScale", 17, 1),
+    ("glintParameters.logMicrofacetDensity", 18, 1),
+    ("glintParameters.microfacetRoughness", 19, 1),
+    ("glintParameters.densityRandomization", 20, 1),
+    ("subsurfaceBalance", 21, 1),
+    ("thinSurfaceSpecularWeight", 22, 1),
+    ("thinSurfaceBackSpecularWeight", 23, 1),
+    ("thinSurfaceBackRoughnessScale", 24, 1),
+];
 
 /// One built-in template (design §4).
 #[derive(Debug, Clone, PartialEq, Deserialize)]

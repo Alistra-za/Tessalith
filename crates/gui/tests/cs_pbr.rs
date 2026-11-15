@@ -829,3 +829,103 @@ fn cs2_fields_follow_the_box() {
     assert!(valid_value(FieldKind::Bool, &json!(true)));
     assert!(!valid_value(FieldKind::Bool, &json!(1)));
 }
+
+/// Note ID45 (review minor 2): each `TXST_PARAMS` index names the payload parameter of its key, and every parameter
+/// has exactly one key.
+#[test]
+fn txst_params_name_the_payload_parameters() {
+    use nif::pbr2::{PARAM_COUNT, PARAM_NAMES};
+    let want = [
+        ("roughnessScale", "Roughness scale"),
+        ("specularLevel", "Specular level"),
+        ("displacementScale", "Displacement scale"),
+        ("subsurfaceColor", "Subsurface colour R"),
+        ("subsurfaceOpacity", "Subsurface opacity"),
+        ("coatColor", "Coat colour R"),
+        ("coatStrength", "Coat strength"),
+        ("coatRoughness", "Coat roughness"),
+        ("coatSpecularLevel", "Coat specular level"),
+        ("fuzzColor", "Fuzz colour R"),
+        ("fuzzWeight", "Fuzz weight"),
+        (
+            "glintParameters.screenSpaceScale",
+            "Glint screen-space scale",
+        ),
+        (
+            "glintParameters.logMicrofacetDensity",
+            "Glint log microfacet density",
+        ),
+        (
+            "glintParameters.microfacetRoughness",
+            "Glint microfacet roughness",
+        ),
+        (
+            "glintParameters.densityRandomization",
+            "Glint density randomization",
+        ),
+        ("subsurfaceBalance", "Subsurface balance"),
+        (
+            "thinSurfaceSpecularWeight",
+            "Thin-surface front specular weight",
+        ),
+        (
+            "thinSurfaceBackSpecularWeight",
+            "Thin-surface back specular weight",
+        ),
+        (
+            "thinSurfaceBackRoughnessScale",
+            "Thin-surface back roughness scale",
+        ),
+    ];
+    assert_eq!(TXST_PARAMS.len(), want.len());
+    let mut covered = 0;
+    for (&(key, i, width), (k, name)) in TXST_PARAMS.iter().zip(want) {
+        assert_eq!(key, k);
+        let top = key.split('.').next().unwrap();
+        assert!(field(Kind::Txst, top, true).is_some(), "{key} is a field");
+        assert_eq!(PARAM_NAMES[i], name, "{key}");
+        if width == 3 {
+            assert_eq!(PARAM_NAMES[i + 1], name.replace(" R", " G"), "{key}");
+            assert_eq!(PARAM_NAMES[i + 2], name.replace(" R", " B"), "{key}");
+        }
+        covered += width;
+    }
+    assert_eq!(covered, PARAM_COUNT, "every parameter has one key");
+}
+
+/// Note ID44 (review: other `CsBlock` readers): CS 2.0 keys in a texture-set block change no other reader, box off
+/// or on: the PGPatcher entry (`overlay` / `cs_to_pgp`, PGP_MAP keys only) and the EDID refusals.
+#[test]
+fn cs2_keys_in_a_block_change_no_other_reader() {
+    use sdc_gui::model::cs_pbr_export::refusals;
+    use sdc_gui::model::pbr_export::json_entries;
+    use sdc_gui::pgp::writer::{document, to_text};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_plain(d.path());
+    let id = "landscape/rock01";
+    m.add_cs_block(id, Kind::Txst);
+    m.set_cs_statics(id, Statics::Always);
+    m.set_cs_value(id, Kind::Txst, "specularLevel", Some(json!(0.02)));
+    m.set_cs_edids(id, Kind::Txst, &["Rock01".into()]);
+    let read = |m: &sdc_gui::model::AppModel| {
+        let entries: Vec<_> = json_entries(m).into_iter().map(|(_, e)| e).collect();
+        let doc = m.sets_doc.as_ref().unwrap().entries();
+        (
+            to_text(&document(&entries)),
+            refusals(&doc),
+            cs_to_pgp(&m.cs_block(id, Kind::Txst).unwrap().values),
+        )
+    };
+    let base = read(&m);
+    assert!(base.0.contains("\"specular_level\": 0.02"), "{}", base.0);
+    m.set_cs_value(id, Kind::Txst, "thinSurface", Some(json!(true)));
+    m.set_cs_value(id, Kind::Txst, "fuzzRoughness", Some(json!(0.3)));
+    assert!(m
+        .cs_block(id, Kind::Txst)
+        .unwrap()
+        .values
+        .contains_key("thinSurface"));
+    assert_eq!(read(&m), base, "box off");
+    m.settings.cs_pbr2 = true;
+    assert_eq!(read(&m), base, "box on");
+}

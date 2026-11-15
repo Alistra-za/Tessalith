@@ -218,9 +218,7 @@ fn write_pbr2(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
     if let Some(v) = mlpd {
         w.set("MultiLayerParallaxData", &v);
     }
-    let thin = used
-        .and_then(|x| x.thin.as_deref())
-        .filter(|v| v.len() == 4);
+    let thin = nif::pbr2::thin_surface_used(features, extra);
     w.set("LightingEffectParams", thin.unwrap_or(&p[21..=24]));
     let fuzz_roughness = used
         .and_then(|x| x.fuzz.as_deref())

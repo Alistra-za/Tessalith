@@ -220,6 +220,15 @@ pub struct Pbr2Extra {
     pub fuzz: Option<Vec<f32>>,
 }
 
+/// The `PBRThinSurface` floats CS 2.0 applies (spec section 7): exactly 4, and none on a two-layer or hair material.
+/// The preview's TXST step (gui `set_preview::apply_txst21`) and render3d's `write_pbr2` both ask this.
+pub fn thin_surface_used(features: u32, extra: Option<&Pbr2Extra>) -> Option<&[f32]> {
+    extra
+        .filter(|_| features & (feat::TWO_LAYER | feat::HAIR) == 0)
+        .and_then(|x| x.thin.as_deref())
+        .filter(|v| v.len() == 4)
+}
+
 /// What [`from_v1`] makes of a v1 shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToV2 {

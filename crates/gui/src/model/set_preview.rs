@@ -1562,11 +1562,10 @@ fn cs_num(o: &serde_json::Map<String, Value>, fields: &[cs_pbr::Field], name: &s
 
 /// Note ID45: a type-21 material as CS 2.0 sets it up: its payload, then the texture set's `ov`, then the
 /// `PBRThinSurface` / `PBRFuzz` extra data. Any other material is left alone.
-/// The extra data follows render3d's `write_pbr2` rules (ignored on two-layer or hair, or with the wrong float count):
-/// a `PBRThinSurface` replaces p21-p24 here (render3d applies it again, to the same values), and the texture set's
-/// fuzz pair becomes a `PBRFuzz` when the NIF has no usable one (the payload has no fuzz roughness field).
+/// A `PBRThinSurface` replaces p21-p24 by `nif::pbr2::thin_surface_used`, the rule render3d's `write_pbr2` uses
+/// (render3d applies it again, to the same values), and the texture set's fuzz pair becomes a `PBRFuzz` when the NIF
+/// has no 2-float one (the payload has no fuzz roughness field).
 pub fn apply_txst21(m: &mut MaterialState, ov: &cs_pbr::Pbr2Override) {
-    use nif::pbr2::feat;
     if !m.is_pbr2() {
         return;
     }
@@ -1580,11 +1579,10 @@ pub fn apply_txst21(m: &mut MaterialState, ov: &cs_pbr::Pbr2Override) {
     for (p, o) in params.iter_mut().zip(ov.params) {
         *p = o.unwrap_or(*p);
     }
-    let extra_used = *features & (feat::TWO_LAYER | feat::HAIR) == 0;
-    let x = m.params.pbr2_extra.get_or_insert_with(Default::default);
-    if let Some(thin) = x.thin.as_deref().filter(|v| extra_used && v.len() == 4) {
+    if let Some(thin) = nif::pbr2::thin_surface_used(*features, m.params.pbr2_extra.as_ref()) {
         params[21..=24].copy_from_slice(thin);
     }
+    let x = m.params.pbr2_extra.get_or_insert_with(Default::default);
     let fuzz_usable = x.fuzz.as_ref().is_some_and(|v| v.len() == 2);
     if !fuzz_usable && ov.fuzz.iter().any(Option::is_some) {
         x.fuzz = Some(vec![ov.fuzz[0].unwrap_or(-1.0), ov.fuzz[1].unwrap_or(0.0)]);
@@ -2341,6 +2339,8 @@ impl SetPreview {
         let sources: Vec<MaterialState> = shapes.into_iter().map(|(_, _, m)| m).collect();
         let mut rows = self.crashed(rows, &sources);
         // Note ID45: with the box on, the type-21 shapes take the set's texture set (a built-in shape is never 21).
+        // shortcut: unreachable while a set with a texture-set block is plane-locked (Note BM, R1); the .csm rework
+        // owns unlocking type-21 meshes for such sets.
         if let Some(v) = self.fp.as_ref().and_then(|f| f.txst21.as_ref()) {
             let ov = cs_pbr::txst_overrides(v);
             for r in &mut rows {

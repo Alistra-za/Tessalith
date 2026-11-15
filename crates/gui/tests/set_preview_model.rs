@@ -2292,3 +2292,80 @@ fn the_fingerprint_carries_the_texture_set_only_with_the_box_on() {
     let on2 = fingerprint(&m, &key).unwrap();
     assert!(classify(Some(&on), &on2, &serde_json::Value::Null).material);
 }
+
+/// Note ID45 (review minor 6): a PBRThinSurface is ignored on a two-layer or hair material, as CS 2.0 and render3d's
+/// `write_pbr2` (one rule, `nif::pbr2::thin_surface_used`).
+#[test]
+fn thin_surface_extra_is_ignored_on_two_layer_and_hair() {
+    use nif::material::MaterialState;
+    use nif::pbr2::{feat, thin_surface_used, Pbr2Extra, PBR2_DEFAULTS};
+    use nif::props::LightingTrailer;
+    use sdc_gui::model::cs_pbr::txst_overrides;
+    let ov = txst_overrides(
+        serde_json::json!({"subsurfaceBalance": 0.6})
+            .as_object()
+            .unwrap(),
+    );
+    let thin = Pbr2Extra {
+        thin: Some(vec![0.7, 0.5, 0.5, 1.0]),
+        fuzz: None,
+    };
+    for (features, want) in [
+        (feat::TWO_LAYER, 0.6),
+        (feat::HAIR, 0.6),
+        (feat::SUBSURFACE, 0.7),
+    ] {
+        let mut m = MaterialState::builtin_default();
+        m.shader_type = 21;
+        m.params.trailer = LightingTrailer::Pbr2 {
+            version: 2,
+            features,
+            params: PBR2_DEFAULTS,
+        };
+        m.params.pbr2_extra = Some(thin.clone());
+        apply_txst21(&mut m, &ov);
+        let LightingTrailer::Pbr2 { params, .. } = m.params.trailer else {
+            unreachable!()
+        };
+        assert_eq!(params[21], want, "features {features}");
+        assert_eq!(
+            thin_surface_used(features, Some(&thin)).is_some(),
+            want == 0.7,
+            "features {features}"
+        );
+    }
+}
+
+/// Note ID45 (review: box toggle): ticking or unticking the box reaches the fingerprint on the next throttled check,
+/// with no sets-document edit.
+#[test]
+fn toggling_the_box_refreshes_the_fingerprint() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    let key = rock(&m).0.key;
+    m.select_set(&key);
+    m.set_cs_value(
+        "landscape/rock01",
+        Kind::Txst,
+        "thinSurface",
+        Some(serde_json::json!(true)),
+    );
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert_eq!(s.fp.as_ref().unwrap().txst21, None);
+    m.settings.cs_pbr2 = true;
+    s.shown = true;
+    s.poll_at(&m, Instant::now() + THROTTLE);
+    assert!(s
+        .fp
+        .as_ref()
+        .unwrap()
+        .txst21
+        .as_ref()
+        .is_some_and(|v| v.contains_key("thinSurface")));
+    m.settings.cs_pbr2 = false;
+    s.shown = true;
+    s.poll_at(&m, Instant::now() + THROTTLE * 3);
+    assert_eq!(s.fp.as_ref().unwrap().txst21, None);
+}
