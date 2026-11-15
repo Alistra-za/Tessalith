@@ -644,38 +644,39 @@ Tessalith 1.x could hand BC7 and BC6H to the user's own NVTT 3.2.5 `nvcompress` 
 
 ### Encode time of the Rust port of rgbcx (2026-11-13, Note HY)
 
-Tessalith encodes BC1, BC3, BC4 and BC5 with `bcenc`, a Rust port of its patched rgbcx. The port runs the same search and writes the same bytes. Three changes make it faster, and each gives the C++ result for every block:
+Tessalith encodes BC1, BC3, BC4 and BC5 with `bcenc`, a Rust port of its patched rgbcx. The port runs the same search and writes the same bytes. Four changes make it faster, and each gives the C++ result for every block:
 
 - **A repeated pair of BC1 endpoints is scored once.** rgbcx's level-18 search reaches the same two endpoint colours many times in one block, by different routes. The port keeps the pairs it has scored for the block and skips a repeat.
 - **A pair is scored against all 16 texels at once.** Finding each texel's nearest palette entry and summing the error is SSE2 integer code over the whole block, in BC1 and in BC4.
 - **BC4 searches each mode once.** rgbcx searches the 8-value and the 6-value candidates, then searches one mode's candidates again when it refits. The port keeps the first search's result.
+- **A BC1 total-ordering pass fits all its orderings at once.** A 4-colour pass has 128 orderings and a 3-colour pass 32. Each gets its endpoint pair from the pass's prefix sums and the block's totals, so the port computes them together on SSE2 vectors, the float code included, and scores them in rgbcx's order.
 
-Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (16 textures of 1024² from installed Skyrim mods), `bcenc` at c81ae94e against the vendored C++ on the [benchmark machine](#benchmark-machine-and-tools), with the arguments the engine passes (`crates/bcenc/examples/speed.rs`). The one-bit-alpha row has no real mask to use, so it marks a texel transparent when its green is below 64:
+Time per 4×4 block in µs: one thread, median of 5 runs over 1,048,576 blocks (16 textures of 1024² from installed Skyrim mods), two passes, the mean of the two medians, `bcenc` at b26f0004 against the vendored C++ on the [benchmark machine](#benchmark-machine-and-tools), with the arguments the engine passes (`crates/bcenc/examples/speed.rs`). The one-bit-alpha row has no real mask to use, so it marks a texel transparent when its green is below 64:
 
 | Format | rgbcx (C++) | `bcenc` | `bcenc` / C++ |
 |---|--:|--:|--:|
-| BC1 | 27.20 | 5.38 | 0.20 |
-| BC1, perceptual | 26.87 | 5.34 | 0.20 |
-| BC1, one-bit alpha | 14.97 | 3.02 | 0.20 |
-| BC3 | 25.34 | 4.85 | 0.19 |
-| BC4 | 30.07 | 1.84 | 0.06 |
-| BC5 | 58.24 | 3.67 | 0.06 |
+| BC1 | 28.86 | 4.16 | 0.14 |
+| BC1, perceptual | 28.37 | 4.24 | 0.15 |
+| BC1, one-bit alpha | 15.97 | 2.53 | 0.16 |
+| BC3 | 27.00 | 4.18 | 0.15 |
+| BC4 | 30.56 | 2.03 | 0.07 |
+| BC5 | 60.07 | 4.07 | 0.07 |
 
-The port before the three changes (945ad68c) took 0.69 of the C++ time on BC1 and BC3 and 0.82 on BC4 and BC5.
+The port takes 0.14 to 0.16 of the C++ time on BC1 and BC3 and 0.07 on BC4 and BC5; before the BC1 fit change (9ec06da4) it took 0.19 to 0.20 on BC1 and BC3. The port before the first three changes (945ad68c) took 0.69 of the C++ time on BC1 and BC3 and 0.82 on BC4 and BC5.
 
-`sdc convert` of 300 PNGs with the format forced, Tessalith 3.0.0 against c81ae94e, in seconds (reading, mips and writing included; a test job ran at idle priority beside both builds):
+`sdc convert` of 300 PNGs with the format forced, Tessalith 3.0.0 against b26f0004, in seconds, the lower of two rounds (reading, mips and writing included; another job ran beside both builds):
 
-| Forced format | 3.0.0 | c81ae94e |
+| Forced format | 3.0.0 | b26f0004 |
 |---|--:|--:|
-| BC1 | 63.0 | 15.7 |
-| BC3 | 61.8 | 15.1 |
-| BC4 | 21.3 | 5.5 |
-| BC5 | 26.4 | 6.0 |
+| BC1 | 67.7 | 14.1 |
+| BC3 | 62.7 | 13.9 |
+| BC4 | 20.4 | 4.8 |
+| BC5 | 27.8 | 5.7 |
 
-Every DDS has the same SHA-256 from both builds, in these four configurations and seven more (perceptual, one-bit alpha, cutout, a BC3 alpha cut, the `vanilla-compact` preset).
+Every DDS has the same SHA-256 from both builds, in forced BC1, BC1 perceptual, BC1 cutout (plain and perceptual), BC3 with two alpha cuts, BC4 and BC5 (a 300-PNG slice).
 
-Compared with the C++ block by block, c81ae94e has 0 mismatches in each:
-- **Real textures:** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons. The port before the three changes (017fbc68) passed the same run.
+Compared with the C++ block by block, b26f0004 has 0 mismatches in each:
+- **Real textures:** every block of 10,000 textures as BC1, BC3, BC4 and BC5, and the 1,437 with transparent texels as BC1 with one-bit alpha: 2.72 billion comparisons. The port before the first three changes (017fbc68) passed the same run.
 - **Generated blocks:** 100 million BC1 blocks, every solid colour, 50 million one-bit-alpha blocks, 50 million BC3 blocks and 20 million BC4 blocks.
 
 A sampling profile of c81ae94e on the same blocks shows where the rest of the time goes. BC1: the least-squares endpoint fits and their rounding to 5:6:5 38%, scoring texels and building palettes 33%, the table of scored pairs 14%. BC4: scoring texels 62%, building palettes 16%.
