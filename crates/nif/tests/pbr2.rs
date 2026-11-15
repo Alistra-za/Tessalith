@@ -107,48 +107,21 @@ fn clamp_gives_a_value_param_error_accepts() {
 }
 
 // --- v1 <-> v2 conversion (Task 5) ---
+#[path = "common/v1_fixtures.rs"]
+mod v1_fixtures;
 use nif::pbr2::{from_v1, to_v1, ToV1};
-use nif::props::{LightingParams, LightingTrailer};
+use nif::props::LightingParams;
+use v1_fixtures::{fixture, v1, PBR};
 
-const PBR: u32 = 1 << 23;
-
-fn v1(
-    strength: f32,
-    gloss: f32,
-    colour: [f32; 3],
-    le1: f32,
-    le2: f32,
-    t: Option<[f32; 4]>,
-) -> LightingParams {
-    LightingParams {
-        uv_offset: [0.0; 2],
-        uv_scale: [1.0; 2],
-        emissive_color: [0.0; 3],
-        emissive_multiple: 1.0,
-        texture_clamp_mode: 3,
-        alpha: 1.0,
-        refraction_strength: 0.0,
-        glossiness: gloss,
-        specular_color: colour,
-        specular_strength: strength,
-        lighting_effect_1: le1,
-        lighting_effect_2: le2,
-        trailer: match t {
-            Some(t) => LightingTrailer::MultiLayer {
-                inner_thickness: t[0],
-                refraction_scale: t[1],
-                inner_texture_scale: [t[2], t[3]],
-                envmap_strength: 0.0,
-            },
-            None => LightingTrailer::None,
-        },
-        pbr2_extra: None,
-    }
+/// `from_v1` on the v1 fixture `name`.
+fn from_fixture(name: &str) -> nif::pbr2::ToV2 {
+    let (t, f2, p) = fixture(name);
+    from_v1(t, f2, &p)
 }
 
 #[test]
 fn plain_v1_maps_to_defaults_plus_three() {
-    let r = from_v1(0, PBR, &v1(0.8, 0.05, [0.2, 0.3, 0.4], 0.7, 0.5, None));
+    let r = from_fixture("plain");
     let mut want = PBR2_DEFAULTS;
     (want[0], want[1], want[2]) = (0.8, 0.05, 0.5);
     assert_eq!((r.features, r.params), (0, want));
@@ -157,19 +130,7 @@ fn plain_v1_maps_to_defaults_plus_three() {
 
 #[test]
 fn two_layer_type_11_maps_coat() {
-    let f2 = PBR | 1 << 24 | 1 << 25 | 1 << 27 | 1 << 30;
-    let r = from_v1(
-        11,
-        f2,
-        &v1(
-            1.0,
-            0.04,
-            [0.1, 0.2, 0.3],
-            0.6,
-            1.0,
-            Some([0.3, 0.06, 0.0, 0.0]),
-        ),
-    );
+    let r = from_fixture("two_layer_11");
     assert_eq!(
         r.features,
         TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT
@@ -177,29 +138,17 @@ fn two_layer_type_11_maps_coat() {
     assert_eq!(r.params[7..=10], [0.1, 0.2, 0.3, 0.6]);
     assert_eq!(r.params[11..=12], [0.3, 0.06]);
     // type 0 has no trailer: the coat roughness and level stay default
-    let r = from_v1(
-        0,
-        PBR | 1 << 24,
-        &v1(1.0, 0.04, [0.1, 0.2, 0.3], 0.6, 1.0, None),
-    );
+    let r = from_fixture("two_layer_0");
     assert_eq!(r.features, TWO_LAYER);
     assert_eq!(r.params[11..=12], PBR2_DEFAULTS[11..=12]);
     // 24 wins over 26 and 12
-    let r = from_v1(
-        0,
-        PBR | 1 << 24 | 1 << 26 | 1 << 12,
-        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, None),
-    );
+    let r = from_fixture("two_layer_wins");
     assert_eq!(r.features, TWO_LAYER);
 }
 
 #[test]
 fn subsurface_maps_colour_and_opacity() {
-    let r = from_v1(
-        0,
-        PBR | 1 << 26,
-        &v1(1.0, 0.04, [0.9, 0.5, 0.4], 0.35, 1.0, None),
-    );
+    let r = from_fixture("subsurface");
     assert_eq!(r.features, SUBSURFACE);
     assert_eq!(r.params[3..=6], [0.9, 0.5, 0.4, 0.35]);
     assert_eq!(r.params[7..=10], PBR2_DEFAULTS[7..=10]);
@@ -207,19 +156,11 @@ fn subsurface_maps_colour_and_opacity() {
 
 #[test]
 fn fuzz_from_trailer() {
-    let r = from_v1(
-        11,
-        PBR | 1 << 25,
-        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
-    );
+    let r = from_fixture("fuzz");
     assert_eq!(r.features, FUZZ);
     assert_eq!(r.params[13..=16], [0.2, 0.4, 0.6, 0.8]);
     // 25 wins over 12, and subsurface can sit beside it
-    let r = from_v1(
-        11,
-        PBR | 1 << 25 | 1 << 12 | 1 << 26,
-        &v1(1.0, 0.04, [0.5; 3], 0.5, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
-    );
+    let r = from_fixture("fuzz_subsurface");
     assert_eq!(r.features, FUZZ | SUBSURFACE);
     assert_eq!(r.params[3..=6], [0.5; 4]);
 }
@@ -228,11 +169,7 @@ fn fuzz_from_trailer() {
 /// Note ID37: v1 trailer[1] is the log microfacet density itself (CS 1.x BSLightingShaderMaterialPBR.cpp:305), and so
 /// is p18 (spec section 4, default 40); only the shader packing takes 40 - it.
 fn glint_keeps_log_density() {
-    let r = from_v1(
-        11,
-        PBR | 1 << 12,
-        &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([1.5, 10.0, 0.02, 3.0])),
-    );
+    let r = from_fixture("glint");
     assert_eq!(r.features, GLINT);
     assert_eq!(r.params[17..=20], [1.5, 10.0, 0.02, 3.0]);
     let mut p = PBR2_DEFAULTS;
@@ -242,11 +179,7 @@ fn glint_keeps_log_density() {
 
 #[test]
 fn hair_alone() {
-    let r = from_v1(
-        11,
-        PBR | 1 << 27 | 1 << 26 | 1 << 25,
-        &v1(0.5, 0.04, [1.0; 3], 0.0, 1.0, Some([0.2, 0.4, 0.6, 0.8])),
-    );
+    let r = from_fixture("hair");
     assert_eq!(r.features, HAIR);
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
 }
@@ -363,8 +296,7 @@ fn to_v1_names_every_feature_its_form_cannot_carry() {
 
 #[test]
 fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
-    let f2 = 1 << 24 | 1 << 25 | 1 << 26 | 1 << 27 | 1 << 12 | 1 << 30;
-    let r = from_v1(11, f2, &v1(0.8, 0.05, [0.2; 3], 0.7, 0.5, Some([0.3; 4])));
+    let r = from_fixture("no_pbr_bit");
     assert_eq!(r.features, 0);
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
 }

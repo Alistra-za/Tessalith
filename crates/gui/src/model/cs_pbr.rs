@@ -272,8 +272,13 @@ pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
     };
     let num = |v: &Json| v.as_f64().map(|x| x as f32);
     let mut ov = Pbr2Override::default();
-    for (key, i, width) in TXST_PARAMS {
+    for &(key, i) in TXST_PARAMS {
         let Some(v) = get(key) else { continue };
+        let width = if nif::pbr2::COLOR_PARAMS.contains(&i) {
+            3
+        } else {
+            1
+        };
         let xs: Option<Vec<f32>> = match (width, v.as_array()) {
             (1, None) => num(v).map(|x| vec![x]),
             (3, Some(c)) if c.len() == 3 => c.iter().map(num).collect(),
@@ -305,29 +310,9 @@ pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
 }
 
 /// Note ID45: each texture-set key `txst_overrides` puts on the type-21 payload: (key, its first parameter in
-/// `nif::pbr2::PARAM_NAMES` order, width: 1 = a number, 3 = a colour). A value outside the parameter's range is passed
-/// through as it is.
-pub const TXST_PARAMS: [(&str, usize, usize); 19] = [
-    ("roughnessScale", 0, 1),
-    ("specularLevel", 1, 1),
-    ("displacementScale", 2, 1),
-    ("subsurfaceColor", 3, 3),
-    ("subsurfaceOpacity", 6, 1),
-    ("coatColor", 7, 3),
-    ("coatStrength", 10, 1),
-    ("coatRoughness", 11, 1),
-    ("coatSpecularLevel", 12, 1),
-    ("fuzzColor", 13, 3),
-    ("fuzzWeight", 16, 1),
-    ("glintParameters.screenSpaceScale", 17, 1),
-    ("glintParameters.logMicrofacetDensity", 18, 1),
-    ("glintParameters.microfacetRoughness", 19, 1),
-    ("glintParameters.densityRandomization", 20, 1),
-    ("subsurfaceBalance", 21, 1),
-    ("thinSurfaceSpecularWeight", 22, 1),
-    ("thinSurfaceBackSpecularWeight", 23, 1),
-    ("thinSurfaceBackRoughnessScale", 24, 1),
-];
+/// `nif::pbr2::PARAM_NAMES` order; a colour fills three, `nif::pbr2::COLOR_PARAMS`). A value outside the parameter's
+/// range is passed through as it is. The map lives in `nif::pbr2` (Note IE2).
+pub use nif::pbr2::TXST_PARAMS;
 
 /// One built-in template (design §4).
 #[derive(Debug, Clone, PartialEq, Deserialize)]

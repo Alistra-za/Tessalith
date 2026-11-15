@@ -1,6 +1,8 @@
 // crates/nif/src/pbr2.rs
 //! CS TruePBR 2.0 (shader type 21): the 25 PBR parameters of the payload (spec section 4, in file order).
+use crate::csm::{self, Csm, Value};
 use crate::props::{LightingParams, LightingTrailer};
+use std::collections::BTreeMap;
 
 /// What the payload's PBR Version word must be (spec section 2).
 pub const VERSION: u32 = 2;
@@ -21,6 +23,10 @@ pub mod feat {
     pub const GLINT: u32 = 128;
     pub const FOLIAGE: u32 = 256;
     pub const THIN_SURFACE: u32 = 512;
+    /// Not a payload bit: the `.csm` switch `PBRFuzzRoughnessTexture` (fuzz roughness from the displacement
+    /// texture's green channel), carried in `PbrValues::features` (Note IE2). `feature_errors` reports it as a bit
+    /// above 9, so a payload check masks it off first.
+    pub const FUZZ_ROUGHNESS_TEXTURE: u32 = 1024;
 }
 
 /// SLSF1 bits that must be off on a type-21 block (spec section 5): 7, 10, 11, 14, 17, 18, 21, 28.
@@ -76,6 +82,9 @@ pub const FEATURE_NAMES: [&str; 10] = [
     "Foliage",
     "Thin surface",
 ];
+
+/// The first parameter of each colour (three parameters, R G B).
+pub const COLOR_PARAMS: [usize; 3] = [3, 7, 13];
 
 /// Name of each of the 25 parameters, in file order.
 pub const PARAM_NAMES: [&str; PARAM_COUNT] = [
@@ -471,4 +480,169 @@ pub fn v1_body(slsf2: u32, features: u32, params: &[f32; PARAM_COUNT], new_type:
         trailer,
         dropped: v.dropped,
     }
+}
+
+/// Note ID45: the CS `PBRTextureSets` JSON key of each parameter (`glintParameters.*` nested), by its first index; a
+/// colour key fills three ([`COLOR_PARAMS`]).
+pub const TXST_PARAMS: &[(&str, usize)] = &[
+    ("roughnessScale", 0),
+    ("specularLevel", 1),
+    ("displacementScale", 2),
+    ("subsurfaceColor", 3),
+    ("subsurfaceOpacity", 6),
+    ("coatColor", 7),
+    ("coatStrength", 10),
+    ("coatRoughness", 11),
+    ("coatSpecularLevel", 12),
+    ("fuzzColor", 13),
+    ("fuzzWeight", 16),
+    ("glintParameters.screenSpaceScale", 17),
+    ("glintParameters.logMicrofacetDensity", 18),
+    ("glintParameters.microfacetRoughness", 19),
+    ("glintParameters.densityRandomization", 20),
+    ("subsurfaceBalance", 21),
+    ("thinSurfaceSpecularWeight", 22),
+    ("thinSurfaceBackSpecularWeight", 23),
+    ("thinSurfaceBackRoughnessScale", 24),
+];
+
+/// The PBR values of a `.csm` material (Note IE2): the feature bits (`feat`, with `FUZZ_ROUGHNESS_TEXTURE`), the 25
+/// parameters, and the fuzz roughness (-1: use the base roughness).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PbrValues {
+    pub features: u32,
+    pub params: [f32; PARAM_COUNT],
+    pub fuzz_roughness: f32,
+}
+
+/// Each `.csm` switch and its feature bit.
+const CSM_SWITCHES: [(&str, u32); 11] = [
+    ("PBRSubsurfaceEnabled", feat::SUBSURFACE),
+    ("PBRTwoLayerEnabled", feat::TWO_LAYER),
+    ("PBRTwoLayerColoredCoat", feat::COLORED_COAT),
+    ("PBRTwoLayerInterlayerParallax", feat::INTERLAYER_PARALLAX),
+    ("PBRTwoLayerCoatNormal", feat::COAT_NORMAL),
+    ("PBRFuzzEnabled", feat::FUZZ),
+    ("PBRHairMarschner", feat::HAIR),
+    ("PBRGlintEnabled", feat::GLINT),
+    ("PBRFoliageEnabled", feat::FOLIAGE),
+    ("PBRThinSurfaceEnabled", feat::THIN_SURFACE),
+    ("PBRFuzzRoughnessTexture", feat::FUZZ_ROUGHNESS_TEXTURE),
+];
+
+/// Each `.csm` PBR number or colour key and its parameter; a colour fills three ([`COLOR_PARAMS`]).
+const CSM_PARAMS: [(&str, usize); 19] = [
+    ("PBRRoughnessScale", 0),
+    ("PBRSpecularLevel", 1),
+    ("PBRDisplacementTextureScale", 2),
+    ("PBRSubsurfaceColor", 3),
+    ("PBRSubsurfaceOpacity", 6),
+    ("PBRTwoLayerCoatColor", 7),
+    ("PBRTwoLayerCoatStrength", 10),
+    ("PBRTwoLayerCoatRoughness", 11),
+    ("PBRTwoLayerCoatSpecularLevel", 12),
+    ("PBRFuzzColor", 13),
+    ("PBRFuzzWeight", 16),
+    ("PBRGlintScreenSpaceScale", 17),
+    ("PBRGlintLogMicrofacetDensity", 18),
+    ("PBRGlintMicrofacetRoughness", 19),
+    ("PBRGlintDensityRandomization", 20),
+    ("PBRThinSurfaceSubsurfaceBalance", 21),
+    ("PBRThinSurfaceSpecularWeight", 22),
+    ("PBRThinSurfaceBackSpecularWeight", 23),
+    ("PBRThinSurfaceBackRoughnessScale", 24),
+];
+
+/// The feature whose parameters include `i`; 0 for p0-p2, which every PBR material has.
+fn param_owner(i: usize) -> u32 {
+    match i {
+        3..=6 => feat::SUBSURFACE,
+        7..=12 => feat::TWO_LAYER,
+        13..=16 => feat::FUZZ,
+        17..=20 => feat::GLINT,
+        21..=24 => feat::THIN_SURFACE,
+        _ => 0,
+    }
+}
+
+/// The PBR values of a (resolved) `.csm`; `None` unless `PBREnabled` is true. A switch is on when the file holds it
+/// true; an absent number takes [`PBR2_DEFAULTS`], an absent `PBRFuzzRoughness` -1.
+pub fn pbr_values(c: &Csm) -> Option<PbrValues> {
+    if c.values.get("PBREnabled") != Some(&Value::Bool(true)) {
+        return None;
+    }
+    let features = CSM_SWITCHES
+        .iter()
+        .filter(|(key, _)| c.values.get(key) == Some(&Value::Bool(true)))
+        .fold(0, |f, (_, bit)| f | bit);
+    let mut params = PBR2_DEFAULTS;
+    for (key, i) in CSM_PARAMS {
+        match c.values.get(key) {
+            Some(Value::Num(n)) => params[i] = *n as f32,
+            Some(Value::Color(rgb)) => params[i..i + 3].copy_from_slice(&csm::rgb(*rgb)),
+            _ => {}
+        }
+    }
+    let fuzz_roughness = match c.values.get("PBRFuzzRoughness") {
+        Some(Value::Num(n)) => *n as f32,
+        _ => -1.0,
+    };
+    Some(PbrValues {
+        features,
+        params,
+        fuzz_roughness,
+    })
+}
+
+/// The `.csm` that stands for `v`: `PBREnabled`, each switch that is on, p0-p2 and every parameter of a feature that
+/// is on, and `PBRFuzzRoughness` with fuzz. Parameters are clamped to [`PARAM_RANGE`] (a colour to 0-1 by `#rrggbb`)
+/// and the fuzz roughness to at most 1; the caller reports clamps. No texture, generic key or root.
+pub fn csm_from_values(v: &PbrValues) -> Csm {
+    let mut values = BTreeMap::new();
+    values.insert("PBREnabled", Value::Bool(true));
+    for (key, bit) in CSM_SWITCHES {
+        if v.features & bit != 0 {
+            values.insert(key, Value::Bool(true));
+        }
+    }
+    let p: [f32; PARAM_COUNT] = std::array::from_fn(|i| clamp_param(i, v.params[i]));
+    for (key, i) in CSM_PARAMS {
+        let owner = param_owner(i);
+        if owner != 0 && v.features & owner == 0 {
+            continue;
+        }
+        let value = if COLOR_PARAMS.contains(&i) {
+            Value::Color(csm::hex([p[i], p[i + 1], p[i + 2]]))
+        } else {
+            Value::Num(csm::num(p[i]))
+        };
+        values.insert(key, value);
+    }
+    if v.features & feat::FUZZ != 0 {
+        let r = if v.fuzz_roughness.is_finite() {
+            v.fuzz_roughness.min(1.0)
+        } else {
+            -1.0
+        };
+        values.insert("PBRFuzzRoughness", Value::Num(csm::num(r)));
+    }
+    Csm {
+        version: csm::VERSION,
+        values,
+    }
+}
+
+/// [`from_v1`] as [`PbrValues`] (fuzz roughness -1), with its clamps. v1 has no foliage flag, so no foliage bit.
+pub fn v1_values(
+    shader_type: u32,
+    slsf2: u32,
+    p: &LightingParams,
+) -> (PbrValues, Vec<(usize, f32, f32)>) {
+    let t = from_v1(shader_type, slsf2, p);
+    let v = PbrValues {
+        features: t.features,
+        params: t.params,
+        fuzz_roughness: -1.0,
+    };
+    (v, t.clamped)
 }

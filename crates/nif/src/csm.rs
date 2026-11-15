@@ -1,7 +1,8 @@
 // crates/nif/src/csm.rs
 //! Community Shaders material files (`.csm`, CS's PBR 2.0 proposal; Note IE): a table of the schema's keys
-//! (`zcsm.schema.json`), a per-file parse with the schema's type, range and pattern checks, its allOf rules, and a
-//! writer. A file holds only the keys it sets: an absent key comes from the root material or the NIF.
+//! (`zcsm.schema.json`), a per-file parse with the schema's type, range and pattern checks, its allOf rules, a
+//! writer, and `resolve` for root chains. A file holds only the keys it sets: an absent key comes from the root
+//! material or the NIF. `pbr2::{pbr_values, csm_from_values}` bridge the PBR keys to the shader's values.
 use std::collections::BTreeMap;
 
 /// The `Version` this model reads and writes.
@@ -29,9 +30,10 @@ pub struct KeyDef {
     pub kind: Kind,
     /// Inclusive bounds of a number; an infinite bound is no bound.
     pub range: Option<(f64, f64)>,
-    /// The texture-set slot of a texture key.
+    /// A texture key's slot in the NIF's texture set: the 0-based index, in the order BSShaderTextureSet lists them.
     pub slot: Option<usize>,
-    /// A key that is not a PBR key or a texture: a set's `.csm` never holds it, the NIF's own value stands.
+    /// One of the generic (non-PBR) shader keys (tiling, UV, alpha, flags, emittance): a set's `.csm` never holds
+    /// it, so the NIF's own value stands. False for textures, PBR keys and `RootMaterialPath`.
     pub generic: bool,
 }
 
@@ -175,6 +177,77 @@ pub enum CsmError {
     Depth,
     #[error("missing key {0}")]
     Missing(String),
+    #[error("material file {0} not found")]
+    NotFound(String),
+    #[error("{0} is not a .csm file under materials")]
+    NotMaterial(String),
+}
+
+/// The most files one material chain holds: the file asked for and its roots.
+pub const MAX_CHAIN: usize = 16;
+
+/// Reads the `.csm` at `path` and its `RootMaterialPath` chain through `read`, which gets canonical paths
+/// (`path::canon_material`). The chain merges root first, so each child's keys win; the allOf rules are checked on
+/// the merge, and the result holds no `RootMaterialPath`. An error in a root is `Root` naming that root; the file
+/// asked for reports its own errors bare, as `Loop`, `Depth` and `Rule` are (Note IE2).
+pub fn resolve(path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Csm, CsmError> {
+    let mut next = Some(
+        crate::path::canon_material(path).ok_or_else(|| CsmError::NotMaterial(path.to_string()))?,
+    );
+    let mut seen: Vec<String> = Vec::new();
+    let mut files = Vec::new();
+    while let Some(at) = next {
+        if seen.contains(&at) {
+            return Err(CsmError::Loop(at));
+        }
+        if seen.len() == MAX_CHAIN {
+            return Err(CsmError::Depth);
+        }
+        let (file, root) = match load(&at, read) {
+            Ok(loaded) => loaded,
+            Err(e) if seen.is_empty() => return Err(e),
+            Err(e) => {
+                return Err(CsmError::Root {
+                    path: at,
+                    reason: Box::new(e),
+                })
+            }
+        };
+        files.push(file);
+        seen.push(at);
+        next = root;
+    }
+    let mut merged = Csm {
+        version: VERSION,
+        values: BTreeMap::new(),
+    };
+    for file in files.into_iter().rev() {
+        merged.values.extend(file.values);
+    }
+    match rule_errors(&merged).first().copied() {
+        Some(rule) => Err(CsmError::Rule(rule)),
+        None => Ok(merged),
+    }
+}
+
+/// One file of a chain, parsed, without its `RootMaterialPath`, and that root's canonical path.
+fn load(
+    path: &str,
+    read: &dyn Fn(&str) -> Option<Vec<u8>>,
+) -> Result<(Csm, Option<String>), CsmError> {
+    let bytes = read(path).ok_or_else(|| CsmError::NotFound(path.to_string()))?;
+    let text =
+        std::str::from_utf8(&bytes).map_err(|e| CsmError::Json(format!("not UTF-8: {e}")))?;
+    let mut c = parse(text)?;
+    let root = match c.values.remove("RootMaterialPath") {
+        Some(Value::Text(r)) if !r.is_empty() => Some(crate::path::canon_material(&r).ok_or_else(
+            || CsmError::Pattern {
+                key: "RootMaterialPath".into(),
+            },
+        )?),
+        _ => None,
+    };
+    Ok((c, root))
 }
 
 fn ends_with_ci(s: &str, suffix: &str) -> bool {
@@ -241,7 +314,12 @@ pub fn parse(text: &str) -> Result<Csm, CsmError> {
     let version = map
         .get("Version")
         .ok_or_else(|| CsmError::Missing("Version".into()))?;
-    let version = version.as_u64().ok_or_else(|| CsmError::Type {
+    // Draft-07 counts a whole float (`1.0`) as an integer.
+    let whole = version
+        .as_f64()
+        .filter(|v| *v >= 0.0 && v.fract() == 0.0)
+        .map(|v| v as u64);
+    let version = version.as_u64().or(whole).ok_or_else(|| CsmError::Type {
         key: "Version".into(),
     })?;
     if version != u64::from(VERSION) {

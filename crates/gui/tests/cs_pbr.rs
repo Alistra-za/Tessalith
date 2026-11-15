@@ -834,7 +834,7 @@ fn cs2_fields_follow_the_box() {
 /// has exactly one key.
 #[test]
 fn txst_params_name_the_payload_parameters() {
-    use nif::pbr2::{PARAM_COUNT, PARAM_NAMES};
+    use nif::pbr2::{COLOR_PARAMS, PARAM_COUNT, PARAM_NAMES};
     let want = [
         ("roughnessScale", "Roughness scale"),
         ("specularLevel", "Specular level"),
@@ -879,7 +879,8 @@ fn txst_params_name_the_payload_parameters() {
     ];
     assert_eq!(TXST_PARAMS.len(), want.len());
     let mut covered = 0;
-    for (&(key, i, width), (k, name)) in TXST_PARAMS.iter().zip(want) {
+    for (&(key, i), (k, name)) in TXST_PARAMS.iter().zip(want) {
+        let width = if COLOR_PARAMS.contains(&i) { 3 } else { 1 };
         assert_eq!(key, k);
         let top = key.split('.').next().unwrap();
         assert!(field(Kind::Txst, top, true).is_some(), "{key} is a field");

@@ -96,6 +96,14 @@ pub fn canon_model(raw: &[u8]) -> String {
     rebase(&s, "meshes").1
 }
 
+/// A `.csm` material path in canonical form (`materials/…`, lower case, `/`), from a Data-relative path with or without
+/// one leading `data\`; `None` when it is not a `.csm` file under `materials` (Note IE2).
+pub fn canon_material(p: &str) -> Option<String> {
+    let s = slashes_lower(p);
+    let s = s.strip_prefix("data/").unwrap_or(&s);
+    (s.starts_with("materials/") && s.ends_with(".csm")).then(|| s.to_string())
+}
+
 /// PGPatcher's LOD blocklist (`*\lod\*`, `*\dyndolod\*`, `*_lod_*`, `*_lod.*`) on a canonical lower-case path.
 pub fn is_lod_path(norm: &str) -> bool {
     ["/lod/", "/dyndolod/", "_lod_", "_lod."]
