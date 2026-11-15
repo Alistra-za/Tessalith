@@ -207,6 +207,9 @@ fn subdirs(p: &Path) -> Result<Vec<PathBuf>, String> {
     Ok(out)
 }
 
+/// The capture profiles the golden replay runs (`tests/golden.rs`), and so the subjects `tests/golden_defines.rs` checks.
+pub const PROFILES: &[&str] = &["A", "A_RT", "A_RT2", "A_DC", "A_DC_N"];
+
 /// Every subject under `root` whose capture folder's manifest.json "profile" is in `profiles`; sorted by (capture, event).
 pub fn subjects(root: &Path, profiles: &[&str]) -> Result<Vec<Subject>, String> {
     let mut out = Vec::new();

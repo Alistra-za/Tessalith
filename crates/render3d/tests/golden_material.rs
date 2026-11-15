@@ -51,6 +51,9 @@ const B2_MATERIAL: &[&str] = &["MaterialData", "AlphaTestRef", "EmitColor"];
 /// Engine textures: bound by the game whatever the material (noise, shadow mask, and the scene depth that CS 2.0's
 /// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID42), and CS's glint noise
 /// map at t20, which CS generates once for every GLINT draw (sdc's own copy is `render3d::glint_noise`; Note IE8).
+// shortcut: t20 keeps the game's glint noise, so the glint subject's pixels never test sdc's `glint_noise` port against
+// CS's map (`tests/glint_noise.rs` checks it against an independent computation only). Swap in sdc's map once the
+// replay can bind an RGBA32F texture from the renderer.
 const ENGINE_REGS: &[u32] = &[11, 14, 17, 20];
 
 fn to_defines(list: &[String]) -> Defines {

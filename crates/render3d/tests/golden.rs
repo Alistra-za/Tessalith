@@ -5,13 +5,12 @@
 //! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared). The bundled CS 2.0 shaders
 //! replay the CS PBR2Test1 captures (`cs-1.9.0-d2026.11.14`, Notes ID49 and IE), with that root's own noise floor
 //! (`golden::noise_path`).
-use render3d::golden::{self, Diff, Noise};
+use render3d::golden::{self, Diff, Noise, PROFILES};
 use render3d::Renderer;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
 
-const PROFILES: &[&str] = &["A", "A_RT", "A_RT2", "A_DC", "A_DC_N"];
 const TWO_SIDED: &str = "two-sided alpha-tested: no captured depth (capture not kept)";
 
 fn bits(v: &[f32]) -> Vec<u32> {

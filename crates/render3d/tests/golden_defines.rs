@@ -1,22 +1,32 @@
 //! Note IE8: the defines sdc picks for a golden subject's own NIF material are the ones CS 2.0 compiled in the capture
 //! (`defines_match_capture`), and so are the lighting flags CS 2.0 reads at run time from cb4 `PixelShaderDescriptor`.
+//! The captures record the PS defines (decoded from the PSO) but not the VS ones, only the VS bytecode's hash: the
+//! test holds sdc to one set of the VS-read defines ([`VS_READ`]) per captured VS instead.
 //! Needs SDC_GOLDEN (the CS PBR2Test1 root) and SDC_ACHERUS; runs alone (it loads each subject on the GPU).
 #[path = "common/golden_nif.rs"]
 mod golden_nif;
 
-use golden_nif::{env, key, load_sdc, mapped_shape, renderer, M};
-use render3d::golden;
+use golden_nif::{env, json, key, load_sdc, mapped_shape, renderer, M};
+use render3d::golden::{self, PROFILES};
 use render3d::material::drawn;
-use std::collections::BTreeSet;
+use render3d::permutation::{LIGHTING_BACK, LIGHTING_RIM, LIGHTING_SOFT, LIGHTING_SPECULAR};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
-
-/// The profiles `golden.rs` replays.
-const PROFILES: &[&str] = &["A", "A_RT", "A_RT2", "A_DC", "A_DC_N"];
 
 /// cb4 `PixelShaderDescriptor` bits CS 2.0 reads at run time for a non-LOD, non-landscape shape: Specular, Soft, Rim and
 /// Back lighting (cs2 `Lighting.hlsl` `RuntimeLightingFlags`, `Common/Permutation.hlsli` `LightingFlags`). The other
 /// bits of the captured value are engine state (ShadowDir, DefShadow, CharacterLight) or the technique.
-const LIGHTING_BITS: u32 = 0x1E00;
+const LIGHTING_BITS: u32 = LIGHTING_SPECULAR | LIGHTING_SOFT | LIGHTING_RIM | LIGHTING_BACK;
+
+/// The subjects compared: the replayed subjects whose shape `NIFS` maps. Update it when a capture or a `NIFS` row is
+/// added or removed (the table the test writes lists the unmapped shapes).
+const COMPARED: usize = 43;
+
+/// VS defines compared across subjects that share a captured VS: the material defines cs2's VS code reads
+/// (`Lighting.hlsl` `VSHADER` section, lines 35-286). It reads no technique define but EYE, so CS 2.0 draws Default,
+/// EnvMap and MLP shapes with one VS (all 43 subjects, the coffin, Object174, SOVStairsPiece01 and BlackreachCrystalL01
+/// among them, use two VS hashes); sdc's ENVMAP and MULTI_LAYER_PARALLAX on the VS change its compile key, not its code.
+const VS_READ: &[&str] = &["EYE", "MODELSPACENORMALS", "PROJECTED_UV", "SKINNED", "VC"];
 
 /// Capture-side differences: (subject folder name, the define or `cb4`, why). None so far.
 const EXCEPTIONS: &[(&str, &str, &str)] = &[];
@@ -32,6 +42,8 @@ fn defines_match_capture() {
     let (mut compared, mut mismatches, mut failures) = (0usize, Vec::new(), Vec::new());
     let mut unmapped: BTreeSet<String> = BTreeSet::new();
     let mut matched_exceptions = BTreeSet::new();
+    // Captured VS hash → sdc's VS define set → the subjects that got it.
+    let mut by_vs: BTreeMap<String, BTreeMap<Vec<String>, Vec<String>>> = BTreeMap::new();
     for s in golden::subjects(&env.root, PROFILES).unwrap() {
         let name = s.dir.file_name().unwrap().to_string_lossy().into_owned();
         let who = format!("{}/{name}", s.capture);
@@ -51,11 +63,46 @@ fn defines_match_capture() {
                 continue;
             }
         };
-        let Some((sdc_defs, _, _)) = ren.draw_diag(sdc.id) else {
-            failures.push(format!("{who}: no draw_diag ({:?})", sdc.errors));
+        let Some((sdc_defs, Some(refl), _)) = ren.draw_diag(sdc.id) else {
+            failures.push(format!(
+                "{who}: no draw_diag or PS reflection ({:?})",
+                sdc.errors
+            ));
+            continue;
+        };
+        // The capture's PixelShaderDescriptor at its reflected offset (the same cs2 source compiled both).
+        let Some(desc_at) = refl
+            .cbuffers
+            .iter()
+            .filter(|c| c.slot == 4)
+            .flat_map(|c| &c.vars)
+            // fxc names it with its namespace (`Permutation::PixelShaderDescriptor`).
+            .find(|v| v.name.rsplit("::").next() == Some("PixelShaderDescriptor"))
+            .map(|v| v.offset as usize)
+        else {
+            failures.push(format!(
+                "{who}: the PS reflects no cb4 PixelShaderDescriptor"
+            ));
             continue;
         };
         compared += 1;
+        let vs_sha = json(&s.dir.join("state.json"))["shaders"]["vs"]["sha256"]
+            .as_str()
+            .unwrap_or("?")
+            .to_string();
+        let vs_set: Vec<String> = ren
+            .draw_vs_defines(sdc.id)
+            .unwrap_or_default()
+            .into_iter()
+            .map(|d| d.0)
+            .filter(|d| VS_READ.contains(&d.as_str()))
+            .collect();
+        by_vs
+            .entry(vs_sha)
+            .or_default()
+            .entry(vs_set)
+            .or_default()
+            .push(who.clone());
         let cap: BTreeSet<&str> = r.defines[0]
             .iter()
             .map(|d| key(d))
@@ -75,7 +122,8 @@ fn defines_match_capture() {
             )
             .collect();
         let raw = std::fs::read(s.dir.join("cb_ps_b4.bin")).unwrap();
-        let cap_cb4 = u32::from_le_bytes(raw[4..8].try_into().unwrap()) & LIGHTING_BITS;
+        let cap_cb4 =
+            u32::from_le_bytes(raw[desc_at..desc_at + 4].try_into().unwrap()) & LIGHTING_BITS;
         let sdc_cb4 = ren
             .draw_cb_floats(sdc.id, "PixelShaderDescriptor")
             .map(|f| f[0].to_bits() & LIGHTING_BITS);
@@ -115,6 +163,21 @@ fn defines_match_capture() {
             }
         }
     }
+    // One captured VS was compiled from one define set, so sdc must give its subjects one VS set too.
+    let split_vs: Vec<String> = by_vs
+        .iter()
+        .filter(|(_, sets)| sets.len() > 1)
+        .map(|(sha, sets)| format!("VS {sha}: {sets:?}"))
+        .collect();
+    let _ = writeln!(
+        t,
+        "\ncaptured VS shaders {}; split across sdc VS define sets {}",
+        by_vs.len(),
+        split_vs.len()
+    );
+    for v in &split_vs {
+        let _ = writeln!(t, "  {v}");
+    }
     let stale: Vec<_> = EXCEPTIONS
         .iter()
         .filter(|(n, w, _)| !matched_exceptions.contains(&(n.to_string(), w.to_string())))
@@ -140,8 +203,12 @@ fn defines_match_capture() {
         failures.is_empty(),
         "subjects sdc did not load: {failures:#?}"
     );
-    assert!(compared >= 40, "only {compared} subjects compared");
+    assert_eq!(compared, COMPARED, "subjects compared");
     assert!(stale.is_empty(), "exceptions no subject needs: {stale:?}");
+    assert!(
+        split_vs.is_empty(),
+        "subjects sharing a captured VS get different sdc VS defines: {split_vs:#?}"
+    );
     assert!(
         mismatches.is_empty(),
         "sdc's defines differ from the capture: {mismatches:#?}"
