@@ -17,3 +17,45 @@ pub fn allowed(st: Subtype, target: Target) -> Vec<(Format, ColorTag)> {
         .filter(|&(f, t)| matches!(f, Format::Bc4 | Format::R8) && t == ColorTag::Unorm)
         .collect()
 }
+
+impl super::AppModel {
+    /// The write guard (Note JD2): false when writing `field` = `value` on `item` would leave a (format, tag) pair its
+    /// sub-type does not allow. A bare format pairs with the texture's current tag and a lone tag with its current
+    /// format, as the bulk check does (DECISIONS AF5). The sub-type is the document's when it names one, so a sub-type
+    /// written earlier in the same batch (Copy settings) counts before its plan lands. Other fields, and a texture
+    /// with no plan yet, pass.
+    pub(super) fn format_write_ok(
+        &self,
+        item: &str,
+        field: &str,
+        value: &serde_json::Value,
+    ) -> bool {
+        let Some(p) = self
+            .item(item)
+            .and_then(|i| i.job.as_ref())
+            .map(|j| &j.profile)
+        else {
+            return true;
+        };
+        let st = self
+            .project
+            .as_ref()
+            .and_then(|d| d.file_value(item, "subtype"))
+            .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
+            .unwrap_or(p.subtype);
+        let pair = match field {
+            "format" => serde_json::from_value::<(Format, ColorTag)>(value.clone())
+                .ok()
+                .or_else(|| {
+                    serde_json::from_value::<Format>(value.clone())
+                        .ok()
+                        .map(|f| (f, p.color.tag))
+                }),
+            "color.tag" => serde_json::from_value::<ColorTag>(value.clone())
+                .ok()
+                .map(|t| (p.format, t)),
+            _ => return true,
+        };
+        pair.is_none_or(|e| allowed(st, self.target).contains(&e))
+    }
+}

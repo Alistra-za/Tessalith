@@ -98,14 +98,27 @@ fn switching_grass_to_pbr_resets_a_linear_albedo_and_says_so() {
 
 #[test]
 fn an_explicit_encoding_the_new_type_allows_is_kept() {
+    // Complex grass allows BC7 linear only and a TruePBR albedo sRGB only, so a landscape diffuse becomes a diffuse:
+    // both allow BC3 linear.
+    const ROCK: &str = "landscape/rock01.png";
     let d = tempfile::tempdir().unwrap();
-    let srgb = (Format::Bc7, ColorTag::Srgb);
-    let (mut m, set) = grass_with(d.path(), Some(srgb));
-    m.set_shader(&set, Some(Shader::Pbr));
+    let mut m = support::opened(d.path());
+    let bc3 = (Format::Bc3, ColorTag::Unorm);
+    m.set_format(ROCK, bc3.0, bc3.1);
     idle(&mut m);
-    assert!(allowed_encodings(job_of(&m).profile.subtype, m.target).contains(&srgb));
-    assert_eq!(file(&m, "format"), Some(json!("bc7")));
-    assert_eq!(file(&m, "color.tag"), Some(json!("srgb")));
+    m.encoding_note = None;
+    m.set_field(ROCK, "subtype", json!("diffuse"));
+    idle(&mut m);
+    let p = m
+        .item(ROCK)
+        .and_then(|i| i.job.clone())
+        .expect("job")
+        .profile;
+    assert_eq!(p.subtype, Subtype::Diffuse);
+    assert!(allowed_encodings(p.subtype, m.target).contains(&bc3));
+    let own = |f| m.project.as_ref().unwrap().file_value(ROCK, f);
+    assert_eq!(own("format"), Some(json!("bc3")));
+    assert_eq!(own("color.tag"), Some(json!("unorm")));
     assert_eq!(m.encoding_note, None);
 }
 

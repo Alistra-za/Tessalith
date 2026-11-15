@@ -100,6 +100,23 @@ fn every_grey_picker_lists_bc4_and_r8_only() {
 }
 
 #[test]
+fn a_direct_format_write_of_bc7_on_a_grey_map_is_refused() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = typed_sk(d.path());
+    m.set_format(SK, Format::Bc7, ColorTag::Unorm);
+    m.set_field(SK, "format", json!("bc7"));
+    m.set_field(SK, "color.tag", json!("srgb"));
+    idle(&mut m);
+    assert_eq!(own(&m, SK, "format"), None);
+    assert_eq!(own(&m, SK, "color.tag"), None);
+    assert_eq!(pair(&m, SK).1, Format::Bc4);
+    // R8 is the other grey format: it is written.
+    m.set_format(SK, Format::R8, ColorTag::Unorm);
+    idle(&mut m);
+    assert_eq!(own(&m, SK, "format"), Some(json!("r8")));
+}
+
+#[test]
 fn a_bulk_bc7_skips_the_grey_map() {
     let d = tempfile::tempdir().unwrap();
     let mut m = typed_sk(d.path());

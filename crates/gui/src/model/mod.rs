@@ -3593,6 +3593,10 @@ impl AppModel {
         f: engine::config::Format,
         tag: engine::config::ColorTag,
     ) {
+        // Note JD2: a pair the texture's sub-type does not allow is never written.
+        if !self.format_write_ok(item, "format", &json!([f, tag])) {
+            return;
+        }
         let k = item.to_string();
         self.edit("Format", move |p| {
             p.set_file_value(&k, "format", &json!(f));
@@ -3628,6 +3632,9 @@ impl AppModel {
             if let Ok(st) = serde_json::from_value::<Subtype>(value.clone()) {
                 return self.edit_subtype("Change subtype", item_key, Some(st));
             }
+        }
+        if !self.format_write_ok(item_key, field, &value) {
+            return;
         }
         // Note CP: the BC7 weighting row writes two fields (`fields::weighting_writes`, CP10).
         if field == fields::WEIGHTING {

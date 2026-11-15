@@ -296,7 +296,8 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
     let d = tempfile::tempdir().unwrap();
     grass_png(&d.path().join("textures/plants/g.png"), 32);
     let mut m = support::opened(d.path());
-    m.set_format("plants/g.png", Format::Bc7, ColorTag::Srgb);
+    // Allowed on the diffuse it is now (Note JD2), not on complex grass (BC7 linear only).
+    m.set_format("plants/g.png", Format::Bc3, ColorTag::Unorm);
     assert!(m.wait_idle(Duration::from_secs(60)));
     let last = m.history.undo.last().cloned().expect("a step");
     // Accepted from the scan's plan on: a High type accepted before it would be recorded, and a recorded type is the
