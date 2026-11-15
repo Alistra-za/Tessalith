@@ -308,6 +308,42 @@ fn advanced_skin_re_types_an_untouched_recorded_pbr_albedo() {
     );
 }
 
+/// Note FC1 R5 with Note DR2: Advanced Skin clears an untouched recorded `pbr_fuzz`, so the `_f` packs into the
+/// `_rfaos` G channel as the skin fuzz mask; leaving Advanced Skin records `pbr_fuzz` again.
+#[test]
+fn advanced_skin_packs_an_untouched_recorded_fuzz_into_rfaos() {
+    use sdc_gui::model::items::ItemStatus;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    loose_skin(&root);
+    rgb(&root, "anna/body_wet.png", [128, 128, 255]);
+    let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
+    assert_eq!(subtype(&m, "anna/body_f.png"), Some(json!("pbr_fuzz")));
+    let id = set_id(&m, "anna/body");
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    assert!(m.wait_idle(WAIT));
+    // The written `rfaos` recipe makes the set Advanced skin, so the `_wet` joins it (`join_skin_wet`).
+    let views = sdc_gui::model::sets::views(&m);
+    let v = views.iter().find(|v| v.id == id).unwrap();
+    assert!(v.members.iter().any(|k| k == "anna/body_wet.png"));
+    assert_eq!(subtype(&m, "anna/body_wet.png"), Some(json!("skin_wet")));
+    assert_eq!(subtype(&m, "anna/body_f.png"), None);
+    let f = m.item("anna/body_f.png").unwrap();
+    assert!(
+        matches!(&f.status, ItemStatus::PackedInto(k) if k.ends_with("body_rfaos.dds")),
+        "the _f fills _rfaos G: {:?}",
+        f.status
+    );
+    let cli = cli_plan(&root, &text(&m));
+    assert!(
+        !cli.jobs.iter().any(|j| j.input.ends_with("body_f.png")),
+        "sdc convert packs the _f too"
+    );
+    m.set_shader(&id, Some(Shader::Pbr));
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(subtype(&m, "anna/body_f.png"), Some(json!("pbr_fuzz")));
+}
+
 /// Note FC1 R5 (round 3): going back to Auto re-types an untouched member too, also after a reopen (a new history).
 #[test]
 fn choosing_auto_re_types_an_untouched_member_after_a_reopen() {

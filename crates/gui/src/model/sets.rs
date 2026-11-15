@@ -3006,7 +3006,8 @@ impl AppModel {
     /// Note FC1 R5: set `set`'s members whose recorded sub-type is untouched under the shader being left and whose
     /// pick under `shader` differs (`None`, Auto: the pick without a shader; the plan re-applies an automatic one);
     /// a locked slot's member too, as the engine's shader re-type ignored locks before FC1 (the lock guards its
-    /// encoding). Each with the value to write (`None` under Auto: cleared).
+    /// encoding). Each with the value to write (`None` under Auto, or an untouched `pbr_fuzz` under Advanced Skin,
+    /// Note JE2: cleared).
     fn untouched_for_shader(
         &self,
         set: &str,
@@ -3030,10 +3031,18 @@ impl AppModel {
                 .as_ref()
                 .and_then(|p| p.file_value(k, "subtype"))
         };
+        let skin = shader == Some(Shader::AdvancedSkin) && self.target == Target::Cs;
         v.members
             .iter()
             .filter(|k| self.untouched_subtype(k, now))
             .filter_map(|k| {
+                // Note JE2: under Advanced Skin an untouched `pbr_fuzz` is the skin fuzz mask, which packs into the
+                // `_rfaos` G channel only while no sub-type is written (Note DR2): clear it. shortcut: a set with a
+                // `_fuzz`/`_sheen` map keeps its `_f` as `pbr_fuzz` (DR7), so the next plan records it again in a
+                // step of its own; check the set's raw maps here if that shows up.
+                if skin && held(k) == Some(serde_json::json!(Subtype::PbrFuzz)) {
+                    return Some((k.clone(), None));
+                }
                 let new = self.auto_pick(k, shader).map(|st| serde_json::json!(st));
                 (new.is_some() && new != held(k))
                     .then(|| (k.clone(), new.filter(|_| shader.is_some())))
