@@ -650,3 +650,38 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     h.run_steps(4);
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
 }
+
+/// Note JI5: the set row's Confirm ("Slot confirm alpha") is a name of its own beside Problems' and Review's. The set
+/// editor and the texture panel are never up together, so the texture panel's "Confirm alpha" is absent here.
+#[test]
+fn the_slot_confirm_name_is_distinct() {
+    for surface in ["Problems", "Review"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        m.decide(
+            "landscape/leaf.png",
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let set = m
+            .sets
+            .iter()
+            .find(|s| s.key.ends_with("landscape/leaf"))
+            .unwrap()
+            .key
+            .clone();
+        m.select_set(&set);
+        match surface {
+            "Problems" => m.open_problems(None),
+            _ => m.open_review(),
+        }
+        let mut h = harness(m);
+        h.run();
+        for name in [
+            "Slot confirm alpha".to_string(),
+            format!("{surface} confirm alpha"),
+        ] {
+            assert_eq!(h.query_all_by_label(&name).count(), 1, "{surface}: {name}");
+        }
+    }
+}

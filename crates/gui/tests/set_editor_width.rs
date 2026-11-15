@@ -77,7 +77,8 @@ fn set_editor_is_one_column() {
             for l in [
                 "Diffuse thumbnail",
                 "Match on this",
-                "Opaque",
+                "Slot confirm alpha",
+                "Reset slot alpha",
                 "Assign…",
                 "ready",
                 "warning",
@@ -167,4 +168,67 @@ fn the_assign_menu_header_is_the_slot_label() {
     );
     // The row's own label and the menu's header.
     assert_eq!(h.query_all_by_label("Emissive / Skin (slot 3)").count(), 2);
+}
+
+/// Note JI5: with the centre at the editor's floor, every slot-row control, the alpha combo and its Confirm included,
+/// ends inside the set editor (Note HP goal 6). Confirm shows while the alpha is a proposal, so a set that asks is
+/// checked too, and a set with its own alpha shows the reset instead.
+#[test]
+fn slot_rows_fit_at_the_new_floor() {
+    use sdc_gui::ui::set_editor::ROWS_MIN;
+    let mut at_floor = 0;
+    for (set, asks) in [("landscape/leaf", true), ("landscape/rock01", false)] {
+        for w in [1024.0, 1100.0, 1280.0] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = pbr_opened_plain(d.path());
+            m.decide(
+                "landscape/leaf.png",
+                sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+            );
+            if !asks {
+                m.set_alpha("landscape/rock01.png", engine::config::AlphaPolicy::Blend);
+            }
+            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            let key = m
+                .sets
+                .iter()
+                .find(|s| s.key.ends_with(set))
+                .unwrap()
+                .key
+                .clone();
+            m.select_set(&key);
+            let mut h = harness(m, w);
+            h.run_steps(3);
+            let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+            // The set editor's own right edge is the centre's, less its margin; no control passes it.
+            let edge = centre.intersect(h.ctx.content_rect()).right();
+            if centre.width() > ROWS_MIN + 1.0 {
+                continue;
+            }
+            at_floor += 1;
+            let want = if asks {
+                "Slot confirm alpha"
+            } else {
+                "Reset slot alpha"
+            };
+            let cells: Vec<egui::Rect> = h
+                .query_all_by_role(Role::ComboBox)
+                .filter(|n| {
+                    n.accesskit_node()
+                        .label()
+                        .is_some_and(|l| l.starts_with("Slot alpha type: "))
+                })
+                .map(|n| n.rect())
+                .chain(h.query_all_by_label(want).map(|n| n.rect()))
+                .collect();
+            assert_eq!(cells.len(), 2, "{set} at {w}: the alpha combo and {want}");
+            for r in cells {
+                assert!(
+                    r.max.x <= edge,
+                    "{set} at {w}: {r:?} passes the edge {edge}"
+                );
+            }
+        }
+    }
+    assert!(at_floor >= 2, "some width puts the centre at the floor");
 }

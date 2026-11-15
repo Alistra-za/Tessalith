@@ -92,7 +92,7 @@ fn the_rename_dialog_shows_a_collision_and_renames_on_a_free_name() {
 }
 
 #[test]
-fn the_set_editor_shows_slot_rows_opaque_and_slot_commands() {
+fn the_set_editor_shows_slot_rows_alpha_and_slot_commands() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_plain(d.path());
     let key = m
@@ -125,7 +125,7 @@ fn the_set_editor_shows_slot_rows_opaque_and_slot_commands() {
         h.query_by_label("Skin _sk").is_none(),
         "the PBR shader has no _sk slot (F1 spec §5)"
     );
-    h.get_by_label("Opaque");
+    h.get_by_label_contains("Slot alpha type: ");
     // A combo box exposes its text as a value, not a label.
     assert!(
         h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
@@ -143,7 +143,7 @@ fn the_set_editor_shows_slot_rows_opaque_and_slot_commands() {
 }
 
 #[test]
-fn opaque_and_format_edit_the_diffuse_in_one_step_each() {
+fn alpha_and_format_edit_the_diffuse_in_one_step_each() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     let diffuse = m
@@ -153,10 +153,23 @@ fn opaque_and_format_edit_the_diffuse_in_one_step_each() {
         .unwrap()
         .key
         .clone();
-    m.set_opaque(&diffuse, true);
-    assert!(m.is_opaque(&diffuse));
+    m.set_alpha(&diffuse, engine::config::AlphaPolicy::Remove);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(&diffuse, "alpha.policy"),
+        Some(serde_json::json!("remove"))
+    );
+    assert_eq!(m.undo_label(), Some("Alpha"));
     m.undo();
-    assert!(!m.is_opaque(&diffuse));
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(&diffuse, "alpha.policy"),
+        None
+    );
     m.set_format(
         &diffuse,
         engine::config::Format::Bc1,
@@ -900,10 +913,10 @@ fn advanced_truepbr_settings_are_collapsed_and_hold_the_advanced_keys() {
     assert!(h.query_by_label_contains("Match slot").is_none());
 }
 
-/// Final review Minor 2 (parked Task 14): the slot cards' Format and Opaque write `sdc.toml`; while it is read-only
+/// Final review Minor 2 (parked Task 14): the slot cards' Format and the alpha type write `sdc.toml`; while it is read-only
 /// they are disabled and say why on hover (the edit would be dropped silently).
 #[test]
-fn a_read_only_sdc_toml_disables_format_and_opaque_and_explains_why() {
+fn a_read_only_sdc_toml_disables_format_and_alpha_and_explains_why() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     rock_selected(&mut m);
@@ -929,7 +942,7 @@ fn a_read_only_sdc_toml_disables_format_and_opaque_and_explains_why() {
         combos.iter().all(|n| n.accesskit_node().is_disabled()),
         "every format is disabled"
     );
-    let opaque = h.get_by_label("Opaque");
+    let opaque = h.get_by_label_contains("Slot alpha type: ");
     assert!(opaque.accesskit_node().is_disabled());
     opaque.hover();
     h.run();

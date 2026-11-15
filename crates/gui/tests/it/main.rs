@@ -279,6 +279,8 @@ mod settings;
 mod settings_tab;
 #[path = "../skin_card.rs"]
 mod skin_card;
+#[path = "../slot_alpha.rs"]
+mod slot_alpha;
 #[path = "../slot_file_drop.rs"]
 mod slot_file_drop;
 #[path = "../slot_lock.rs"]

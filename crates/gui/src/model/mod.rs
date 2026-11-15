@@ -3621,23 +3621,18 @@ impl AppModel {
         });
     }
 
-    /// The Diffuse card's Opaque checkbox: alpha `remove` while ticked; unticked returns to the resolved default.
-    pub fn set_opaque(&mut self, item: &str, on: bool) {
+    /// Note JI5: the diffuse slot row's alpha type, written to the item's own `alpha.policy` in one step.
+    pub fn set_alpha(&mut self, item: &str, p: AlphaPolicy) {
         let k = item.to_string();
-        self.edit("Opaque", move |p| {
-            if on {
-                p.set_file_value(&k, "alpha.policy", &json!(AlphaPolicy::Remove));
-            } else {
-                p.clear_file_value(&k, "alpha.policy");
-            }
+        self.edit("Alpha", move |d| {
+            d.set_file_value(&k, "alpha.policy", &json!(p))
         });
     }
 
-    pub fn is_opaque(&self, item: &str) -> bool {
-        self.project
-            .as_ref()
-            .and_then(|p| p.file_value(item, "alpha.policy"))
-            .is_some_and(|v| v == json!(AlphaPolicy::Remove))
+    /// Note JI5: the slot row's reset: drop the item's own `alpha.policy`, so the preset's or the proposal applies.
+    pub fn clear_alpha(&mut self, item: &str) {
+        let k = item.to_string();
+        self.edit("Alpha", move |d| d.clear_file_value(&k, "alpha.policy"));
     }
 
     pub fn set_field(&mut self, item_key: &str, field: &str, value: serde_json::Value) {

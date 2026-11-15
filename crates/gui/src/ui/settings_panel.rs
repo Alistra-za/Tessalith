@@ -194,29 +194,56 @@ pub fn alpha_question(
     why: &str,
     place: &str,
 ) -> Option<AlphaPolicy> {
-    let confirm = |ui: &mut egui::Ui| {
-        let r = ui.button("Confirm");
-        let name = match place {
-            "" => "Confirm alpha".to_string(),
-            p => format!("{p} confirm alpha"),
-        };
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), &name));
-        let r = r.on_hover_text(format!(
-            "Use {} and close this question",
-            alpha_label(shown)
-        ));
-        let r = match why {
-            "" => r,
-            w => r.on_disabled_hover_text(w),
-        };
-        r.clicked().then_some(shown)
-    };
     if ui.layout().prefer_right_to_left() {
-        let ok = confirm(ui);
+        let ok = alpha_confirm(ui, shown, why, place);
         alpha_dropdown(ui, id, shown, why, place).or(ok)
     } else {
         let picked = alpha_dropdown(ui, id, shown, why, place);
-        picked.or(confirm(ui))
+        picked.or(alpha_confirm(ui, shown, why, place))
+    }
+}
+
+/// The Confirm button of an alpha question: answers with `shown`. Its accessible name is "Confirm alpha" after
+/// `place` ("Problems confirm alpha"); `why` is its hover while it is off.
+fn alpha_confirm(
+    ui: &mut egui::Ui,
+    shown: AlphaPolicy,
+    why: &str,
+    place: &str,
+) -> Option<AlphaPolicy> {
+    let r = ui.button("Confirm");
+    let name = match place {
+        "" => "Confirm alpha".to_string(),
+        p => format!("{p} confirm alpha"),
+    };
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), &name));
+    let r = r.on_hover_text(format!(
+        "Use {} and close this question",
+        alpha_label(shown)
+    ));
+    let r = match why {
+        "" => r,
+        w => r.on_disabled_hover_text(w),
+    };
+    r.clicked().then_some(shown)
+}
+
+/// Note JI5: the slot row's alpha type, left to right: the dropdown on `shown`, then Confirm while the type is still
+/// the engine's proposal (`asked`). Picking the shown entry is no change and answers nothing; only Confirm answers
+/// with it. The caller sets the dropdown's width (`spacing.combo_width`).
+pub fn alpha_choice(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    shown: AlphaPolicy,
+    asked: bool,
+    why: &str,
+    place: &str,
+) -> Option<AlphaPolicy> {
+    let picked = alpha_dropdown(ui, id, shown, why, place).filter(|p| *p != shown);
+    if asked {
+        picked.or(alpha_confirm(ui, shown, why, place))
+    } else {
+        picked
     }
 }
 

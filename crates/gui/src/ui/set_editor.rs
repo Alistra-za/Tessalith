@@ -2,6 +2,7 @@
 //! width, then the Material / Also export tabs and groups. Drawing only: every change is a model call, made after drawing.
 use super::columns::{border_of, bulk_menu, status_text, AMBER, RED};
 use super::sets_column::{DropState, Pending, SlotNote};
+use super::settings_panel::alpha_choice;
 use super::slot_commands::SlotCmdState;
 use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
@@ -11,7 +12,7 @@ use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
     PARALLAX_HOVER,
 };
-use crate::model::items::{ItemKind, ItemStatus, TextureItem};
+use crate::model::items::{self, ItemKind, ItemStatus, TextureItem};
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::sets::{
@@ -21,7 +22,7 @@ use crate::model::sets::{
 use crate::model::AppModel;
 use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
 use eframe::egui;
-use engine::config::{ColorTag, Format, PackRecipe, RawMap, Target};
+use engine::config::{AlphaPolicy, ColorTag, Format, PackRecipe, RawMap, Target};
 use engine::events::RecipeReport;
 use engine::pack::RecipeKind;
 use engine::shader::Shader;
@@ -35,8 +36,13 @@ pub const PGP_LOCK_UNWRITTEN: &str = "lock stored, not written (no PGPatcher ent
 /// Note FB2: the centre's floor while the 2D set editor is shown, so its slot rows fit without clipping. Measured at
 /// 1280 px on the fixture's PBR set (system fonts): Slot 151 ("Coat normal / Fuzz (slot 7)"), thumbnail 56, Format 185
 /// (an RMAOS row's fill rows), Flags 21, Status 8, File at `FILE_MIN`, five gaps and the scroll bar reserve make 511;
-/// plus the centre panel's 16 px of margin and a little slack.
-pub const ROWS_MIN: f32 = 540.0;
+/// plus the centre panel's 16 px of margin and a little slack make 540. Note JI5 adds the diffuse row's alpha dropdown
+/// (`ALPHA_W`), Confirm and their two gaps (about 184 px), rounded up: 724.
+pub const ROWS_MIN: f32 = 724.0;
+
+/// Note JI5: the slot row's alpha dropdown, wide enough for `Cutout + Blend` (the longest `alpha_label`) uncut plus
+/// the combo's arrow. Measured by `slot_alpha::alpha_w_fits_the_longest_label`, which fails when the fonts say otherwise.
+pub const ALPHA_W: f32 = 114.0;
 
 const THUMB: f32 = 56.0;
 /// The format and recipe combos (A5).
@@ -53,7 +59,9 @@ enum Act {
     Select(String),
     Expand(String),
     Format(String, Format, ColorTag),
-    Opaque(String, bool),
+    /// Note JI5: the diffuse slot row's alpha type (item key, type), and its reset.
+    Alpha(String, AlphaPolicy),
+    ClearAlpha(String),
     /// "Enable parallax" on a complex `_m` (DECISIONS AH2).
     Parallax(String, bool),
     /// Clear the `_m`'s own `alpha.parallax` (the reset next to a locked box).
@@ -158,7 +166,8 @@ pub fn draw(
             Act::Select(k) => select = Some(k),
             Act::Expand(k) => expand = Some(k),
             Act::Format(k, f, t) => model.set_format(&k, f, t),
-            Act::Opaque(k, on) => model.set_opaque(&k, on),
+            Act::Alpha(k, p) => model.set_alpha(&k, p),
+            Act::ClearAlpha(k) => model.clear_alpha(&k),
             Act::Parallax(k, on) => model.set_field(&k, "alpha.parallax", serde_json::json!(on)),
             Act::ParallaxReset(k) => model.clear_field(&k, "alpha.parallax"),
             Act::Recipe(k, r) => {
@@ -708,10 +717,10 @@ fn row(
         .rect
         .width();
 
-    // Flags: small icon toggles, Match on this (slots 1/2 of a JSON set) and Opaque (the diffuse). Each keeps its
-    // full label as its accessible name and leads its hover with it.
+    // Flags: Match on this (slots 1/2 of a JSON set), an icon toggle that keeps its full label as its accessible
+    // name and leads its hover with it, and the diffuse's alpha type (Note JI5), on one line.
     let flags_w = ui
-        .vertical(|ui| {
+        .horizontal(|ui| {
             if let (Some(n), Some(_)) = (
                 match slot {
                     _ if !shows_json_panel(v, model.target) => None,
@@ -742,20 +751,50 @@ fn row(
                     acts.push(Act::Json(v.id.clone(), k, val));
                 }
             }
-            let Some(i) = own.filter(|i| i.job.is_some() && slot == SlotKind::Diffuse) else {
+            let Some((i, job)) = own_job.filter(|_| slot == SlotKind::Diffuse) else {
                 return;
             };
-            let on = model.is_opaque(&i.key);
-            if flag(
-                ui,
-                toml_read_only.is_none(),
-                on,
-                "◼",
-                "Opaque",
-                "Strips alpha: the diffuse is fully opaque",
-                toml_read_only.as_deref().unwrap_or_default(),
-            ) {
-                acts.push(Act::Opaque(i.key.clone(), !on));
+            // Note JI5: the proposal while it asks, else the resolved type (a preset's shows too). An edit waits for
+            // the plan, as the texture panel's rows do (Note FS1); read-only `sdc.toml` is the same reason.
+            let proposal = items::alpha_asked(i);
+            let shown = proposal.unwrap_or(job.profile.alpha.policy);
+            let off = model.fix_off();
+            let why = off.as_deref().unwrap_or_default();
+            let mut picked = None;
+            ui.add_enabled_ui(off.is_none(), |ui| {
+                // The dropdown is as wide as its longest label.
+                ui.spacing_mut().combo_width = ALPHA_W;
+                picked = alpha_choice(
+                    ui,
+                    egui::Id::new(("slot-alpha", &v.id)),
+                    shown,
+                    proposal.is_some(),
+                    why,
+                    "Slot",
+                );
+            });
+            if let Some(p) = picked {
+                acts.push(Act::Alpha(i.key.clone(), p));
+            }
+            let own_alpha = model
+                .project
+                .as_ref()
+                .is_some_and(|p| p.file_value(&i.key, "alpha.policy").is_some());
+            if own_alpha {
+                let r = ui.add_enabled(off.is_none(), egui::Button::new("↺").small());
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::WidgetType::Button,
+                        r.enabled(),
+                        "Reset slot alpha",
+                    )
+                });
+                if r.on_hover_text("Go back to the inherited alpha")
+                    .on_disabled_hover_text(why)
+                    .clicked()
+                {
+                    acts.push(Act::ClearAlpha(i.key.clone()));
+                }
             }
         })
         .response
