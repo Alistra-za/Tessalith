@@ -40,9 +40,9 @@ pub const PBR_THIN_SURFACE: u32 = 1 << 14;
 /// CS 2.0 `PBR::Flags::HasFuzzRoughnessTexture` (cs2 PBRMath.hlsli:39): fuzz roughness from slot 3 green.
 pub const PBR_HAS_FUZZ_ROUGHNESS_TEXTURE: u32 = 1 << 15;
 
-/// The PBR mode `m` draws with on the CS 2.0 shaders (Notes ID33 and IE): a material with PBR values (a `.csm` or
-/// type 21) is V2, and a v1 shape is None, because CS 2.0 hands it to the vanilla reader. V2 is checked first, so a
-/// foreign type-21 shape that still has bit 23 is v2.
+/// The PBR mode `m` draws with on the CS 2.0 shaders (Notes ID33 and IE): a material with PBR values (a `.csm`) is
+/// V2, and a v1 shape is None, because CS 2.0 hands it to the vanilla reader. V2 is checked first, so a `.csm` shape
+/// that still has bit 23 is v2.
 pub fn pbr_mode(m: &MaterialState) -> Pbr {
     if m.is_pbr2() {
         Pbr::V2
@@ -76,29 +76,12 @@ pub fn drawn(m: &MaterialState) -> Cow<'_, MaterialState> {
     }
 }
 
-/// The renderer does not draw `m`: the user hid it, or it is a type-21 shape that breaks a CS 2.0 rule
-/// (`pbr2_error`), which CS 2.0 does not draw either (Note ID38).
-pub fn skipped(m: &MaterialState) -> bool {
-    m.hidden || (m.is_pbr2() && m.pbr2_error.is_some())
-}
-
-/// The note of a type-21 shape the user has not hidden: the CS 2.0 rule it breaks (Note ID38). `None` for anything
-/// else.
-pub fn tree_note(m: &MaterialState) -> Option<&str> {
-    if m.hidden || !m.is_pbr2() {
-        return None;
-    }
-    m.pbr2_error.as_deref()
-}
-
 /// A resolved `.csm` on `m` (Note IE6): `pbr` = its PBR values (None unless `PBREnabled`), each texture key it holds
 /// replaces its slot (`textures\<value>`, an empty value clears the slot), and `csm_error` is cleared. Applying it twice
 /// gives the same material.
 // shortcut: a foreign `.csm`'s generic keys (UV, alpha, flags, emittance) are not applied, the NIF's own values stand
 // (a set's `.csm` never holds them, design 5.3); apply them when the preview must match such a file.
 pub fn apply_csm(m: &mut MaterialState, c: &nif::csm::Csm) {
-    // shortcut: on a type-21 shape the file replaces the block's values wholesale (no `PBREnabled` turns PBR off, an
-    // absent key takes the spec default, not the trailer's); this goes with type 21 in Task 6.
     m.pbr = nif::pbr2::pbr_values(c);
     for k in nif::csm::KEYS {
         let (Some(slot), Some(nif::csm::Value::Text(t))) = (k.slot, c.values.get(k.name)) else {
@@ -160,7 +143,7 @@ pub fn pbr2_flags(v: &PbrValues, bound: &Bound) -> u32 {
 /// - `PBRParams2` = coat colour and strength p7-p10 (two-layer) or subsurface colour and opacity p3-p6 (subsurface);
 /// - `MultiLayerParallaxData` = (coat roughness p11, coat specular level p12, 0, 0) for two-layer, fuzz colour and
 ///   weight p13-p16 for fuzz, (p17, 40 − p18, p19, p20) for glint;
-/// - `LightingEffectParams` = p21-p24 (a type-21 `PBRThinSurface` is already in them);
+/// - `LightingEffectParams` = p21-p24;
 /// - `MaterialObjectRGBScale` = (1, 1, 1, fuzz roughness); −1 uses the base roughness.
 fn write_pbr2(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
     let Some(v) = &m.pbr else {
@@ -218,7 +201,7 @@ pub struct ProjectedLayer {
 /// snow (14), and on a vanilla shape not parallax (3), MLP (11) or SLSF2.24 (MLP), whose `PROJECTED_UV` branches
 /// differ (Lighting.hlsl:1740-1748). TruePBR drops the parallax and MLP techniques, so a PBR shape of type 3 or 11
 /// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, GZ3). A CS 2.0 PBR
-/// material (a `.csm` or type 21) counts as PBR here (Note IE6).
+/// material (a `.csm`) counts as PBR here (Note IE6).
 /// Also not eye (16) or model-space normals (SLSF1.12): those permutations do not compile with `PROJECTED_UV` (EYE
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).
 pub fn projected_eligible(m: &MaterialState) -> bool {
@@ -501,8 +484,7 @@ fn write_trailer(w: &mut CbWriter, p: &LightingParams, has_env_mask: bool) {
         LightingTrailer::SparkleSnow(s) => {
             w.set("SparkleParams", s);
         }
-        // a drawn type-21 material goes through `write_pbr2`, never here
-        LightingTrailer::None | LightingTrailer::Pbr2 { .. } => {}
+        LightingTrailer::None => {}
     }
 }
 

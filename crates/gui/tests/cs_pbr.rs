@@ -106,6 +106,21 @@ fn blocks_read_back_with_unknown_and_wrong_typed_keys_and_overlay_the_pgpatcher_
     assert!(s.entries()[1].cs_txst.is_none());
 }
 
+/// Pin (Note IE7): a project whose texture set holds the CS 2.0 keys loads with them, though type 21, which the
+/// preview once applied them to, is gone.
+#[test]
+fn a_texture_set_with_cs2_keys_loads() {
+    let (_d, s) = doc(
+        "[[sets]]\nid = \"a/one\"\n\n[sets.cs_txst]\nedids = [\"A\"]\nsubsurfaceBalance = 0.6\n\
+         thinSurface = true\nfoliage = false\nfuzzRoughness = 0.3\nfuzzRoughnessTexture = true\n",
+    );
+    let t = s.entries()[0].cs_txst.clone().unwrap();
+    assert!(t.bad.is_empty(), "{:?}", t.bad);
+    assert_eq!(t.values["subsurfaceBalance"], json!(0.6));
+    assert_eq!(t.values["thinSurface"], json!(true));
+    assert_eq!(t.values["fuzzRoughnessTexture"], json!(true));
+}
+
 #[test]
 fn block_edits_keep_comments_and_unknown_keys() {
     let (d, mut s) = doc(TWO_SETS);
@@ -752,66 +767,6 @@ fn the_set_key_is_pgpatchers_match_rule() {
     assert_eq!(set_key(&v), None);
 }
 
-/// Note ID45: every texture-set key CS 2.0 reads lands on its type-21 feature bit or payload parameter; the fuzz
-/// pair has no parameter and goes to `fuzz`; `innerLayerDisplacementOffset` has no type-21 field.
-#[test]
-fn txst_overrides_map_all_keys() {
-    use nif::pbr2::feat;
-    let v = json!({
-        "roughnessScale": 0.9, "specularLevel": 0.05, "displacementScale": 0.8,
-        "subsurfaceColor": [0.1, 0.2, 0.3], "subsurfaceOpacity": 0.4,
-        "coatColor": [0.5, 0.6, 0.7], "coatStrength": 0.11, "coatRoughness": 0.12, "coatSpecularLevel": 0.13,
-        "innerLayerDisplacementOffset": 0.14,
-        "fuzzColor": [0.15, 0.16, 0.17], "fuzzWeight": 0.18,
-        "glintParameters": {"enabled": true, "screenSpaceScale": 1.9, "logMicrofacetDensity": 20,
-                            "microfacetRoughness": 0.02, "densityRandomization": 3},
-        "subsurfaceBalance": 0.6, "thinSurfaceSpecularWeight": 0.21, "thinSurfaceBackSpecularWeight": 0.22,
-        "thinSurfaceBackRoughnessScale": 2.5, "thinSurface": true, "foliage": false,
-        "fuzzRoughness": 0.3, "fuzzRoughnessTexture": true
-    });
-    let v = v.as_object().unwrap();
-    assert_eq!(v.len(), fields(Kind::Txst).len(), "every field");
-    let ov = txst_overrides(v);
-    let p = [
-        0.9, 0.05, 0.8, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.11, 0.12, 0.13, 0.15, 0.16, 0.17,
-        0.18, 1.9, 20.0, 0.02, 3.0, 0.6, 0.21, 0.22, 2.5,
-    ];
-    assert_eq!(
-        ov,
-        Pbr2Override {
-            features_set: feat::GLINT | feat::THIN_SURFACE,
-            features_clear: feat::FOLIAGE,
-            params: p.map(Some),
-            fuzz: [Some(0.3), Some(1.0)],
-        }
-    );
-    // The bools the other way; a missing or wrong-typed key changes nothing.
-    let ov = txst_overrides(
-        json!({"glintParameters": {"enabled": false}, "thinSurface": false, "foliage": true,
-               "fuzzRoughnessTexture": false, "roughnessScale": "0.5", "subsurfaceColor": [1, 1]})
-        .as_object()
-        .unwrap(),
-    );
-    assert_eq!(
-        ov,
-        Pbr2Override {
-            features_set: feat::FOLIAGE,
-            features_clear: feat::GLINT | feat::THIN_SURFACE,
-            fuzz: [None, Some(0.0)],
-            ..Default::default()
-        }
-    );
-    assert_eq!(txst_overrides(&Default::default()), Pbr2Override::default());
-    // A value of the wrong shape changes nothing: three numbers under a number key, a number under a colour key.
-    let ov = txst_overrides(
-        json!({"subsurfaceOpacity": [0.1, 0.2, 0.3], "thinSurfaceBackRoughnessScale": [1, 1, 1],
-               "coatColor": 0.5})
-        .as_object()
-        .unwrap(),
-    );
-    assert_eq!(ov, Pbr2Override::default());
-}
-
 /// Notes ID44 and IE5: a texture set's fields are the CS 1.x ones then the 8 CS 2.0 keys, and a template sets only the
 /// CS 1.x ones; Note ID46: the owner's hover on the fuzz texture switch.
 #[test]
@@ -835,7 +790,7 @@ fn cs2_fields_are_texture_set_fields() {
     assert!(!valid_value(FieldKind::Bool, &json!(1)));
 }
 
-/// Note ID45 (review minor 2): each `TXST_PARAMS` index names the payload parameter of its key, and every parameter
+/// Note IE3: each `TXST_PARAMS` index names the payload parameter of its key, and every parameter
 /// has exactly one key.
 #[test]
 fn txst_params_name_the_payload_parameters() {

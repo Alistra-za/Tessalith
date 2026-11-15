@@ -30,11 +30,6 @@ const SLSF2_EFFECT_LIGHTING: u32 = 30;
 
 const TYPE_DEFAULT: u32 = 0;
 const TYPE_MLP: u32 = 11;
-/// CS TruePBR 2.0 (`nif::pbr2`).
-const TYPE_CS_PBR2: u32 = 21;
-/// The outcome text of a type-21 shape.
-const TYPE_21_SKIP: &str =
-    "shader type 21 (CS TruePBR 2.0) is unknown to PGPatcher 2.3.1, left as it is";
 
 /// Keys badged "not previewed" (spec §2.1), in display order. 2.0's removed `pbr` / `env_*` keys get none (R2).
 const BADGE_KEYS: [&str; 4] = [
@@ -304,11 +299,6 @@ pub(crate) fn run(
     // A non-string match key throws at load or in `shouldApply`, before any texture check (Note GE5).
     if let Some(msg) = matches.iter().find_map(|(e, _)| match_key_error(e)) {
         return SimResult::Error(msg);
-    }
-    // Note ID4: PGPatcher 2.3.1 doesn't know CS 2.0's shader type 21 and would re-type the shape or mix v1 and v2
-    // data, so the model leaves the shape as it is.
-    if source.shader_type == TYPE_CS_PBR2 {
-        return SimResult::Skip(TYPE_21_SKIP.into());
     }
     let mut sim = Sim::new(source);
     // 01 §1.4: the slot pass of all entries, then every non-empty slot must exist; `delete` skips the check.

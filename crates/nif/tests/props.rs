@@ -1,9 +1,7 @@
 // crates/nif/tests/props.rs
 mod builder;
-use builder::scenes::lsp21_body;
 use builder::{Nif, W};
 use nif::header::Header;
-use nif::pbr2::PBR2_DEFAULTS;
 use nif::props::*;
 use nif::NifError;
 
@@ -111,79 +109,6 @@ fn wrong_declared_size_is_reported() {
     assert!(
         matches!(decode_lighting(&h, &b, 0), Err(NifError::BlockSize { declared, consumed, .. }) if declared == consumed + 4)
     );
-}
-
-/// Note ID1: type 21 is read structurally, whatever the version and features are; the glossiness through
-/// lighting effect fields do not exist on it and stay 0.
-#[test]
-fn decodes_type_21_payload() {
-    let mut n = Nif::new(100);
-    n.block(
-        "BSLightingShaderProperty",
-        lsp21_body(&[7], -1, 0x8000_0000, 1, 2, 0x201, &PBR2_DEFAULTS),
-    );
-    let b = n.bytes();
-    let h = Header::parse(&b).unwrap();
-    assert_eq!(h.sizes[0], 180 + 4);
-    let l = decode_lighting(&h, &b, 0).unwrap();
-    assert_eq!(l.shader_type, 21);
-    assert_eq!((l.slsf1, l.slsf2, l.texture_set), (0x8000_0000, 1, 2));
-    assert_eq!(l.params.uv_scale, [1.0, 1.0]);
-    assert_eq!(
-        l.params.trailer,
-        LightingTrailer::Pbr2 {
-            version: 2,
-            features: 0x201,
-            params: PBR2_DEFAULTS
-        }
-    );
-    let p = &l.params;
-    assert_eq!(
-        [
-            p.glossiness,
-            p.specular_color[0],
-            p.specular_color[1],
-            p.specular_color[2],
-            p.specular_strength,
-            p.lighting_effect_1,
-            p.lighting_effect_2
-        ],
-        [0.0; 7]
-    );
-    assert!(p.trailer.names().is_empty());
-}
-
-#[test]
-fn type_21_with_vanilla_size_is_block_size_error() {
-    let mut n = Nif::new(100);
-    n.block("BSLightingShaderProperty", lsp(21, -1, 1).0); // the 100 + 4N vanilla body
-    let b = n.bytes();
-    let h = Header::parse(&b).unwrap();
-    assert!(
-        matches!(decode_lighting(&h, &b, 0), Err(NifError::BlockSize { declared, consumed, .. }) if declared == 100 && consumed == 180),
-        "{:?}",
-        decode_lighting(&h, &b, 0)
-    );
-}
-
-/// Validation is a later layer's job: a version 1 block still decodes.
-#[test]
-fn type_21_with_version_1_still_decodes() {
-    let mut n = Nif::new(100);
-    n.block(
-        "BSLightingShaderProperty",
-        lsp21_body(&[], -1, 0, 0, 1, 0xFFFF, &[f32::NAN; 25]),
-    );
-    let b = n.bytes();
-    let h = Header::parse(&b).unwrap();
-    let l = decode_lighting(&h, &b, 0).unwrap();
-    let LightingTrailer::Pbr2 {
-        version, features, ..
-    } = l.params.trailer
-    else {
-        panic!("{:?}", l.params.trailer);
-    };
-    assert_eq!((version, features), (1, 0xFFFF));
 }
 
 #[test]

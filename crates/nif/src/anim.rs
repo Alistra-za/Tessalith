@@ -480,9 +480,6 @@ pub fn clip_tracks_in(m: &NifModel, h: &Header, b: &[u8], seq: u32, prop: u32) -
 /// values; sRGB→linear × multiple for EmitColor happens downstream in render3d.
 pub fn apply_anim(base: &MaterialState, tracks: &[Track], t: f32) -> MaterialState {
     let mut out = base.clone();
-    // CS 2.0 (type 21) runs the specular level, roughness scale and specular colour controllers with no change
-    // (Note ID16); the Env map scale has no constant on the PBR payload either.
-    let t21 = matches!(base.params.trailer, LightingTrailer::Pbr2 { .. });
     for tr in tracks {
         let ct = ctrl_time(t, tr.freq, tr.phase, tr.start, tr.stop, tr.flags);
         let v = match &tr.keys {
@@ -498,7 +495,6 @@ pub fn apply_anim(base: &MaterialState, tracks: &[Track], t: f32) -> MaterialSta
                 21 => p.uv_scale[0] = v,
                 23 => p.uv_scale[1] = v,
                 11 => p.emissive_multiple = v,
-                9 | 10 if t21 => {}
                 9 => p.glossiness = v,
                 10 => p.specular_strength = v,
                 12 => p.alpha = v,
@@ -511,7 +507,7 @@ pub fn apply_anim(base: &MaterialState, tracks: &[Track], t: f32) -> MaterialSta
                 _ => {}
             },
             (Target::Lscc(1), Some(AnimValue::Vec3(v))) => p.emissive_color = v,
-            (Target::Lscc(0), Some(AnimValue::Vec3(v))) if !t21 => p.specular_color = v,
+            (Target::Lscc(0), Some(AnimValue::Vec3(v))) => p.specular_color = v,
             (Target::AlphaRef, Some(AnimValue::F32(v))) if !v.is_nan() => {
                 if let Some(a) = &mut out.alpha {
                     a.threshold = v.round().clamp(0.0, 255.0) as u8;

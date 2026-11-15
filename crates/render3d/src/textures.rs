@@ -23,7 +23,7 @@ use windows::Win32::Graphics::Dxgi::Common::{
 };
 
 /// The Lighting.hlsl register a NIF texture-set slot (0-based) is bound to, or `None` when this
-/// technique does not read that slot. `pbr`: the drawn material is TruePBR, v1 or type 21
+/// technique does not read that slot. `pbr`: the drawn material is TruePBR, v1 or a `.csm`
 /// (`material::own_pbr`); CS 2.0 reads the same registers (cs2 Lighting.hlsl:476-497, Note ID33).
 ///
 /// Table from 04 §2.3 ([Inference] there). Every row the captures exercise is **confirmed** by joining the

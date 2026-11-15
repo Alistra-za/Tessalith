@@ -123,7 +123,7 @@ fn ab_toggle_is_instant_and_the_srgb_header_shows() {
 }
 
 /// T-H4: a PBR emissive map (slot 2 → t6) swapped in sets HasEmissive (the stand-in's green channel) and dropping
-/// it clears the flag again. A type-21 shape (Note IE5: the v1 bit draws as vanilla).
+/// it clears the flag again. A `.csm` shape (Notes IE5 and IE7: the v1 bit draws as vanilla).
 #[test]
 fn swapping_an_emissive_map_in_and_out_flips_has_emissive() {
     let cache = tempfile::tempdir().unwrap();
@@ -132,10 +132,10 @@ fn swapping_an_emissive_map_in_and_out_flips_has_emissive() {
     let mut m = material(&r);
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
     m.params.emissive_color = [0.0; 3]; // D1 would add the NIF emissive colour under PBR
-    let mut m = common::as_t21(m, 0);
+    let mut m = common::as_csm(m, 0);
     m.set_slot_raw(2, "Textures\\Standin\\Emit.dds");
     assert_eq!(
-        r.set_material(CYL1, m, &|_| None),
+        r.set_material(CYL1, m, &common::csm_read),
         Ok(EditKind::Permutation)
     );
     let absent = frame(&mut r);
@@ -208,11 +208,14 @@ fn a_pending_shape_showing_its_previous_draw_receives_the_swap() {
         r.set_material(CYL1, m.clone(), &resolve),
         Ok(EditKind::Textures)
     );
-    // Type-21 PBR: a new program, whose job is taken and never applied.
+    // `.csm` PBR: a new program, whose job is taken and never applied.
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
     m.params.emissive_color = [0.0; 3];
-    let m = common::as_t21(m, nif::pbr2::feat::SUBSURFACE);
-    assert_eq!(r.set_material(CYL1, m, &resolve), Ok(EditKind::Permutation));
+    let m = common::as_csm(m, nif::pbr2::feat::SUBSURFACE);
+    assert_eq!(
+        r.set_material(CYL1, m, &common::or_csm(&resolve)),
+        Ok(EditKind::Permutation)
+    );
     let withheld = r.take_jobs();
     let status = r
         .shapes()
@@ -274,8 +277,11 @@ fn a_pending_shape_follows_the_material_its_draw_was_built_with() {
     m.set_slot_raw(0, r"Textures\Standin\New.dds");
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
     m.params.emissive_color = [0.0; 3];
-    let m = common::as_t21(m, nif::pbr2::feat::SUBSURFACE);
-    assert_eq!(r.set_material(CYL1, m, &resolve), Ok(EditKind::Permutation));
+    let m = common::as_csm(m, nif::pbr2::feat::SUBSURFACE);
+    assert_eq!(
+        r.set_material(CYL1, m, &common::or_csm(&resolve)),
+        Ok(EditKind::Permutation)
+    );
     let withheld = r.take_jobs();
     let before = frame(&mut r);
     let green = dds_rgba8(1, 1, &[[0, 255, 0, 255]]);

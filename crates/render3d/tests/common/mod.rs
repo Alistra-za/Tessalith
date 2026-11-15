@@ -23,18 +23,63 @@ pub fn fixture(name: &str) -> Vec<u8> {
     .unwrap()
 }
 
-/// `m` as a type-21 (CS 2.0 PBR) shape with `features` and the default parameters, the v1 bit cleared. Since the v1
-/// bit draws as vanilla (Note IE5), this is the material a test uses to reach the PBR path.
-pub fn as_t21(mut m: nif::material::MaterialState, features: u32) -> nif::material::MaterialState {
-    m.shader_type = 21;
+/// The folder of the `.csm` files [`as_csm`] names and [`csm_read`] serves.
+const CSM_DIR: &str = "materials/sdc-test/";
+
+/// `m` as a `.csm` (CS 2.0 PBR) shape, the v1 bit cleared: named `materials/sdc-test/f<features hex>.csm`, which
+/// [`csm_read`] serves as the default parameters with `features`. Since the v1 bit draws as vanilla (Note IE5) and a
+/// `.csm` is the only source of PBR values (Note IE7), this is the material a test uses to reach the PBR path; the
+/// renderer reads the file through the resolver, so the resolver must serve it ([`or_csm`]). `pbr` is set as the file
+/// gives it.
+pub fn as_csm(m: nif::material::MaterialState, features: u32) -> nif::material::MaterialState {
+    csm_shape(
+        m,
+        &format!("{CSM_DIR}f{features:x}.csm"),
+        &csm_values(features),
+    )
+}
+
+/// `m` as a `.csm` shape named `path` (canonical), the v1 bit cleared, as the renderer stores it once the resolver
+/// serves [`csm_text`]`(v)` at `path`.
+pub fn csm_shape(
+    mut m: nif::material::MaterialState,
+    path: &str,
+    v: &nif::pbr2::PbrValues,
+) -> nif::material::MaterialState {
     m.slsf2 &= !nif::material::SLSF2_TRUE_PBR;
-    m.params.trailer = nif::props::LightingTrailer::Pbr2 {
-        version: 2,
+    m.csm_path = Some(path.into());
+    m.pbr = nif::pbr2::pbr_values(&nif::pbr2::csm_from_values(v));
+    m
+}
+
+/// The default parameters with `features` (fuzz roughness -1).
+pub fn csm_values(features: u32) -> nif::pbr2::PbrValues {
+    nif::pbr2::PbrValues {
         features,
         params: nif::pbr2::PBR2_DEFAULTS,
-    };
-    m.pbr = m.type21_values();
-    m
+        fuzz_roughness: -1.0,
+    }
+}
+
+/// The `.csm` file that stands for `v`.
+pub fn csm_text(v: &nif::pbr2::PbrValues) -> Vec<u8> {
+    nif::csm::to_text(&nif::pbr2::csm_from_values(v)).into_bytes()
+}
+
+/// The resolver of the files [`as_csm`] names; `None` for any other path.
+pub fn csm_read(p: &str) -> Option<Vec<u8>> {
+    let hex = p
+        .strip_prefix(CSM_DIR)?
+        .strip_prefix('f')?
+        .strip_suffix(".csm")?;
+    Some(csm_text(&csm_values(u32::from_str_radix(hex, 16).ok()?)))
+}
+
+/// `read` that also serves the files [`as_csm`] names.
+pub fn or_csm<'a>(
+    read: impl Fn(&str) -> Option<Vec<u8>> + 'a,
+) -> impl Fn(&str) -> Option<Vec<u8>> + 'a {
+    move |p| csm_read(p).or_else(|| read(p))
 }
 
 /// A WARP renderer on the stand-in shader with exactly `features` as CS feature defines.

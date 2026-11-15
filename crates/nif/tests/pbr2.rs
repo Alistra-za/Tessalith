@@ -109,8 +109,7 @@ fn clamp_gives_a_value_param_error_accepts() {
 // --- v1 <-> v2 conversion (Task 5) ---
 #[path = "common/v1_fixtures.rs"]
 mod v1_fixtures;
-use nif::pbr2::{from_v1, to_v1, ToV1};
-use nif::props::LightingParams;
+use nif::pbr2::from_v1;
 use v1_fixtures::{fixture, v1, PBR};
 
 /// `from_v1` on the v1 fixture `name`.
@@ -172,9 +171,6 @@ fn glint_keeps_log_density() {
     let r = from_fixture("glint");
     assert_eq!(r.features, GLINT);
     assert_eq!(r.params[17..=20], [1.5, 10.0, 0.02, 3.0]);
-    let mut p = PBR2_DEFAULTS;
-    p[17..=20].copy_from_slice(&[1.5, 10.0, 0.02, 3.0]);
-    assert_eq!(to_v1(GLINT, &p).mlp, Some([1.5, 10.0, 0.02, 3.0]));
 }
 
 #[test]
@@ -206,130 +202,11 @@ fn out_of_range_is_clamped_and_reported() {
     assert_eq!(r.clamped.len(), 1);
 }
 
-fn params_for(features: u32) -> [f32; PARAM_COUNT] {
-    let mut p = PBR2_DEFAULTS;
-    (p[0], p[1], p[2]) = (0.7, 0.2, 1.3);
-    for (bit, rows) in [
-        (TWO_LAYER, 7..=12),
-        (SUBSURFACE, 3..=6),
-        (FUZZ, 13..=16),
-        (GLINT, 17..=20),
-    ] {
-        if features & bit != 0 {
-            for i in rows {
-                p[i] = 0.1 + 0.05 * i as f32;
-            }
-        }
-    }
-    if features & GLINT != 0 {
-        (p[17], p[18], p[19]) = (1.5, 25.0, 0.1); // inside the glint ranges
-    }
-    p
-}
-fn lp(r: &ToV1) -> LightingParams {
-    v1(
-        r.specular_strength,
-        r.glossiness,
-        r.specular_color,
-        r.lighting_effect_1,
-        r.lighting_effect_2,
-        r.mlp,
-    )
-}
-
-#[test]
-fn to_v1_round_trips_reversible_subset() {
-    for f in [
-        0,
-        SUBSURFACE,
-        FUZZ,
-        GLINT,
-        FUZZ | SUBSURFACE,
-        GLINT | SUBSURFACE,
-        HAIR,
-        TWO_LAYER,
-        TWO_LAYER | COLORED_COAT,
-        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT,
-    ] {
-        let p = params_for(f);
-        let r = to_v1(f, &p);
-        assert!(r.dropped.is_empty());
-        assert_eq!(r.slsf2_set & PBR, PBR);
-        let back = from_v1(if r.mlp.is_some() { 11 } else { 0 }, r.slsf2_set, &lp(&r));
-        assert_eq!((back.features, back.params), (f, p), "{f:#x}");
-        assert!(back.clamped.is_empty());
-    }
-}
-
-#[test]
-fn to_v1_drops_thin_and_foliage() {
-    let r = to_v1(THIN_SURFACE | FOLIAGE | SUBSURFACE, &PBR2_DEFAULTS);
-    assert_eq!(r.dropped, ["Foliage", "Thin surface"]);
-    assert_eq!(r.slsf2_set, PBR | 1 << 26);
-    let r = to_v1(THIN_SURFACE, &PBR2_DEFAULTS);
-    assert_eq!(
-        (r.dropped.as_slice(), r.slsf2_set),
-        (&["Thin surface"][..], PBR)
-    );
-}
-
-#[test]
-fn to_v1_names_every_feature_its_form_cannot_carry() {
-    for (f, want) in [
-        (TWO_LAYER | SUBSURFACE, &["Subsurface"][..]),
-        (TWO_LAYER | FUZZ, &["Fuzz"]),
-        (TWO_LAYER | GLINT | SUBSURFACE, &["Subsurface", "Glint"]),
-        (HAIR | SUBSURFACE | FUZZ, &["Subsurface", "Fuzz"]),
-        (HAIR | TWO_LAYER, &["Hair"]),
-        (FUZZ | GLINT, &["Glint"]),
-        (FUZZ | GLINT | SUBSURFACE, &["Glint"]),
-        (COLORED_COAT | HAIR, &["Coloured coat"]),
-        (
-            TWO_LAYER | COAT_NORMAL | FOLIAGE | THIN_SURFACE,
-            &["Foliage", "Thin surface"],
-        ),
-    ] {
-        let p = to_v1(f, &PBR2_DEFAULTS);
-        assert_eq!(p.dropped, want, "{f:#x}");
-    }
-}
-
 #[test]
 fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
     let r = from_fixture("no_pbr_bit");
     assert_eq!(r.features, 0);
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
-}
-
-/// Note ID40: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes.
-#[test]
-fn v1_body_is_the_from_21_conversion() {
-    use nif::pbr2::{v1_body, V1_SLSF2};
-    let mut p = PBR2_DEFAULTS;
-    p[17..=20].copy_from_slice(&[1.5, 10.0, 0.02, 3.0]);
-    let slsf2 = V1_SLSF2 | 1 << 24 | 1 << 4;
-    let v = to_v1(GLINT, &p);
-    let b = v1_body(slsf2, GLINT, &p, 11);
-    assert_eq!(b.slsf2, 1 << 4 | v.slsf2_set);
-    assert_eq!(
-        b.trailer,
-        [1.5, 10.0, 0.02, 3.0, nif::edit::trailer_defaults(11)[4]]
-    );
-    assert_eq!(
-        (b.glossiness, b.specular_strength, b.specular_color),
-        (v.glossiness, v.specular_strength, v.specular_color)
-    );
-    assert_eq!(
-        (b.lighting_effect_1, b.lighting_effect_2),
-        (v.lighting_effect_1, v.lighting_effect_2)
-    );
-    assert!(b.dropped.is_empty());
-    // type 0 keeps only the flags it shares with the type-11 form and names what the trailer carried
-    let b0 = v1_body(slsf2, GLINT | SUBSURFACE, &p, 0);
-    assert_eq!(b0.slsf2, 1 << 4 | PBR | 1 << 26);
-    assert!(b0.trailer.is_empty());
-    assert_eq!(b0.dropped, ["Glint"]);
-    assert_eq!(v1_body(slsf2, SUBSURFACE, &p, 0).trailer, Vec::<f32>::new());
 }
 
 #[test]

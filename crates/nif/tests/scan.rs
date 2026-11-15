@@ -1,7 +1,6 @@
 mod builder;
-use builder::scenes::{avobj, bstri, lsp, net, texset};
+use builder::scenes::{avobj, bstri, bstri_named, lsp, net, texset};
 use builder::{Nif, W};
-use nif::pbr2::Pbr2Extra;
 use nif::scan::{scan, Shader};
 use nif::shape_head::ShapeKind;
 
@@ -58,20 +57,43 @@ fn bstrishape_links_shader_texset_alpha() {
     assert_eq!(r.alpha.unwrap().threshold, 128);
 }
 
+/// Note IE7: type 21 is an unknown shader type again, as before phase 1. A block in phase 1's CS 2.0 layout (180 + 4N
+/// bytes) does not decode: the shape has no lighting and the scan reports the block, exactly as for a type-22 twin. A
+/// type-21 block of the vanilla size reads like any unknown type, with no PBR values.
 #[test]
-fn scan_reads_type_21_as_lighting() {
+fn type_21_is_unknown() {
     let b = builder::scenes::lsp21_shape(0x201, &nif::pbr2::PBR2_DEFAULTS);
-    let s = scan(&b).unwrap();
+    let h = nif::header::Header::parse(&b).unwrap();
+    let mut twin = b.clone();
+    let at = h.offsets()[1];
+    twin[at..at + 4].copy_from_slice(&22u32.to_le_bytes());
+    let (s, t) = (scan(&b).unwrap(), scan(&twin).unwrap());
+    assert!(
+        matches!(s.shapes[0].shader, Shader::None),
+        "{:?}",
+        s.shapes[0].shader
+    );
+    assert!(matches!(t.shapes[0].shader, Shader::None));
+    assert_eq!(s.problems.len(), 1, "{:?}", s.problems);
+    assert!(s.problems[0].starts_with("block 1"), "{:?}", s.problems);
+    assert_eq!(s.problems, t.problems);
+
+    // the vanilla body with type 21: read, no trailer, no PBR values
+    let mut n = Nif::new(100);
+    let name = n.string("S");
+    n.block("BSTriShape", bstri_named(name, 1, -1));
+    n.block("BSLightingShaderProperty", lsp(21, 2));
+    n.block("BSShaderTextureSet", texset(&["textures\\a_d.dds"]));
+    let s = scan(&n.bytes()).unwrap();
     assert!(s.problems.is_empty(), "{:?}", s.problems);
-    assert_eq!(s.shapes.len(), 1);
-    match &s.shapes[0].shader {
-        Shader::Lighting(l, slots) => {
-            assert_eq!(l.shader_type, 21);
-            assert_eq!(slots[0].norm, "textures/a_d.dds");
-            assert_eq!(slots[5].norm, "textures/a_rmaos.dds");
-        }
-        other => panic!("{other:?}"),
-    }
+    let r = &s.shapes[0];
+    let Shader::Lighting(l, slots) = &r.shader else {
+        panic!("{:?}", r.shader);
+    };
+    assert_eq!(l.shader_type, 21);
+    assert_eq!(l.params.trailer, nif::props::LightingTrailer::None);
+    let m = nif::material::MaterialState::from_lighting(&r.head, l, slots, r.alpha);
+    assert_eq!(m.pbr, None);
 }
 
 #[test]
@@ -250,83 +272,4 @@ fn a_shape_head_never_reads_past_its_block() {
         "{p}"
     );
     assert!(p.contains("declared") && p.contains("decodes as"), "{p}");
-}
-
-#[test]
-fn thin_and_fuzz_reach_lighting() {
-    let b = builder::scenes::lsp21_shape_extras(Some(&[0.7, 0.4, 0.6, 1.5]), Some(&[-1.0, 1.0]));
-    let want = Some(Pbr2Extra {
-        thin: Some(vec![0.7, 0.4, 0.6, 1.5]),
-        fuzz: Some(vec![-1.0, 1.0]),
-    });
-    let s = scan(&b).unwrap();
-    assert!(s.problems.is_empty(), "{:?}", s.problems);
-    match &s.shapes[0].shader {
-        Shader::Lighting(l, _) => assert_eq!(l.params.pbr2_extra, want),
-        other => panic!("{other:?}"),
-    }
-    let m = nif::model::read_model(&b).unwrap();
-    assert!(m.problems.is_empty(), "{:?}", m.problems);
-    assert_eq!(
-        m.lighting
-            .values()
-            .next()
-            .unwrap()
-            .lighting
-            .params
-            .pbr2_extra,
-        want
-    );
-}
-
-#[test]
-fn one_block_alone_and_none_at_all() {
-    let b = builder::scenes::lsp21_shape_extras(None, Some(&[0.5, 0.0]));
-    let Shader::Lighting(l, _) = &scan(&b).unwrap().shapes[0].shader else {
-        panic!()
-    };
-    assert_eq!(
-        l.params.pbr2_extra,
-        Some(Pbr2Extra {
-            thin: None,
-            fuzz: Some(vec![0.5, 0.0])
-        })
-    );
-    let b = builder::scenes::lsp21_shape_extras(None, None);
-    let Shader::Lighting(l, _) = &scan(&b).unwrap().shapes[0].shader else {
-        panic!()
-    };
-    assert_eq!(l.params.pbr2_extra, None);
-}
-
-#[test]
-fn wrong_count_is_kept_as_written() {
-    let b = builder::scenes::lsp21_shape_extras(None, Some(&[0.1, 0.2, 0.3]));
-    let Shader::Lighting(l, _) = &scan(&b).unwrap().shapes[0].shader else {
-        panic!()
-    };
-    let x = l.params.pbr2_extra.as_ref().unwrap();
-    assert_eq!(x.fuzz.as_ref().map(Vec::len), Some(3));
-}
-
-#[test]
-fn extras_on_other_shader_types_are_not_read() {
-    // a type-0 shader whose extra list names a PBRFuzz block: the extra is ignored (type 21 only)
-    let mut n = Nif::new(100);
-    let s = n.string("S");
-    let nm = n.string("PBRFuzz");
-    n.block("BSTriShape", builder::scenes::tri_shape(s, 1));
-    n.block(
-        "BSLightingShaderProperty",
-        builder::scenes::lsp_body(0, &[3], -1, &[]),
-    );
-    n.block("BSShaderTextureSet", texset(&[]));
-    n.block(
-        "NiFloatsExtraData",
-        builder::scenes::floats_extra(nm, &[0.0, 0.0]),
-    );
-    let Shader::Lighting(l, _) = &scan(&n.bytes()).unwrap().shapes[0].shader else {
-        panic!()
-    };
-    assert_eq!(l.params.pbr2_extra, None);
 }

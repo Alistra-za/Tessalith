@@ -1,8 +1,7 @@
-//! Note ID33: the PBR mode and the define set on the CS 2.0 shaders (Note IE): type 21 draws as CS 2.0 PBR and v1 as
-//! vanilla (CS 2.0 hands it to the vanilla reader).
+//! Note ID33: the PBR mode and the define set on the CS 2.0 shaders (Note IE): a `.csm` shape draws as CS 2.0 PBR
+//! and v1 as vanilla (CS 2.0 hands it to the vanilla reader).
 use nif::material::MaterialState;
-use nif::pbr2::{feat, PBR2_DEFAULTS};
-use nif::props::LightingTrailer;
+use nif::pbr2::feat;
 use render3d::material::{drawn, pbr_mode, perm_material, Pbr};
 use render3d::permutation::{defines, Stage};
 
@@ -16,22 +15,9 @@ fn v1(bits: &[u32]) -> MaterialState {
     m
 }
 
-/// A type-21 material as `decode_lighting` gives it: the v1 lighting fields read 0, the payload in the trailer.
-fn t21(features: u32) -> MaterialState {
-    let mut m = MaterialState::builtin_default();
-    m.shader_type = 21;
-    m.params.glossiness = 0.0;
-    m.params.specular_color = [0.0; 3];
-    m.params.specular_strength = 0.0;
-    m.params.lighting_effect_1 = 0.0;
-    m.params.lighting_effect_2 = 0.0;
-    m.params.trailer = LightingTrailer::Pbr2 {
-        version: 2,
-        features,
-        params: PBR2_DEFAULTS,
-    };
-    m.pbr = m.type21_values();
-    m
+/// The builtin material as a `.csm` shape with `features` (Note IE7: a `.csm` is the only source of PBR values).
+fn csm(features: u32) -> MaterialState {
+    common::as_csm(MaterialState::builtin_default(), features)
 }
 
 fn names(m: &MaterialState, stage: Stage) -> Vec<String> {
@@ -78,25 +64,31 @@ fn defines_per_material() {
             &["MULTI_LAYER_PARALLAX", "ENVMAP"],
             &["TRUE_PBR"],
         ),
-        ("21", t21(0), Pbr::V2, &["TRUE_PBR"], &["SPECULAR", "GLINT"]),
         (
-            "21 glint",
-            t21(feat::GLINT),
+            ".csm",
+            csm(0),
+            Pbr::V2,
+            &["TRUE_PBR"],
+            &["SPECULAR", "GLINT"],
+        ),
+        (
+            ".csm glint",
+            csm(feat::GLINT),
             Pbr::V2,
             &["TRUE_PBR", "GLINT"],
             &[],
         ),
         (
-            "21 thin surface",
-            t21(feat::THIN_SURFACE | feat::FOLIAGE),
+            ".csm thin surface",
+            csm(feat::THIN_SURFACE | feat::FOLIAGE),
             Pbr::V2,
             &["TRUE_PBR"],
             &["GLINT"],
         ),
         (
-            "a foreign 21 with bit 23 is v2",
+            "a .csm shape with bit 23 is v2",
             {
-                let mut m = t21(0);
+                let mut m = csm(0);
                 m.slsf2 |= 1 << 23;
                 m
             },
@@ -122,10 +114,10 @@ fn defines_per_material() {
     assert!(vs.iter().any(|x| x == "MULTI_LAYER_PARALLAX"), "{vs:?}");
 }
 
-/// The shaders draw type 21 as it is, and a v1 shape without bit 23.
+/// The shaders draw a `.csm` shape as it is, and a v1 shape without bit 23.
 #[test]
 fn drawn_clears_only_the_v1_bit() {
-    let b = t21(feat::SUBSURFACE);
+    let b = csm(feat::SUBSURFACE);
     assert_eq!(*drawn(&b), b);
     let mut want = v1(&[26]);
     want.slsf2 &= !(1 << 23);
@@ -152,6 +144,36 @@ fn renderer(sync: bool) -> (tempfile::TempDir, Renderer) {
     (cache, r)
 }
 
+/// The `.csm` of [`glint`], which [`files`] serves.
+const GLINT: &str = "materials/test/glint.csm";
+/// The `.csm` of [`thin`], which [`files`] serves.
+const THIN: &str = "materials/test/thin.csm";
+
+/// Glint with thin surface (so the file holds p21-p24), parameters away from the defaults.
+fn glint() -> nif::pbr2::PbrValues {
+    let mut v = common::csm_values(feat::GLINT | feat::THIN_SURFACE);
+    v.params[..3].copy_from_slice(&[0.7, 0.2, 1.3]);
+    v.params[17..=20].copy_from_slice(&[1.5, 12.0, 0.02, 3.0]);
+    v.params[21..=24].copy_from_slice(&[0.11, 0.22, 0.33, 0.44]);
+    v
+}
+
+/// Thin surface with subsurface balance 0.9.
+fn thin() -> nif::pbr2::PbrValues {
+    let mut v = common::csm_values(feat::THIN_SURFACE);
+    v.params[21] = 0.9;
+    v
+}
+
+/// The resolver: the `.csm` files of `common::as_csm`, [`GLINT`] and [`THIN`].
+fn files(p: &str) -> Option<Vec<u8>> {
+    match p {
+        GLINT => Some(common::csm_text(&glint())),
+        THIN => Some(common::csm_text(&thin())),
+        _ => common::csm_read(p),
+    }
+}
+
 /// Loads one plane per material, ids 1, 2, …
 fn load(r: &mut Renderer, mats: Vec<MaterialState>) {
     let shapes = mats
@@ -168,7 +190,7 @@ fn load(r: &mut Renderer, mats: Vec<MaterialState>) {
             shapes,
             ..Default::default()
         },
-        &|_| None,
+        &files,
     );
     assert!(
         rep.errors.is_empty() && rep.compile_errors.is_empty(),
@@ -194,19 +216,12 @@ fn status(r: &Renderer, id: u32) -> ShapeStatus {
         .status
 }
 
-/// Note ID33, on the draws the renderer builds (sync compile, WARP): a type-21 glint shape gets its CS 2.0 block; a v1
+/// Note ID33, on the draws the renderer builds (sync compile, WARP): a `.csm` glint shape gets its CS 2.0 block; a v1
 /// shape is vanilla (no PBRFlags).
 #[test]
 fn the_renderer_writes_the_cs2_pbr_block() {
     let (_c, mut r) = renderer(true);
-    let mut g = t21(feat::GLINT);
-    let LightingTrailer::Pbr2 { params, .. } = &mut g.params.trailer else {
-        unreachable!()
-    };
-    params[..3].copy_from_slice(&[0.7, 0.2, 1.3]);
-    params[17..=20].copy_from_slice(&[1.5, 12.0, 0.02, 3.0]);
-    params[21..=24].copy_from_slice(&[0.11, 0.22, 0.33, 0.44]);
-    g.pbr = g.type21_values();
+    let g = common::csm_shape(MaterialState::builtin_default(), GLINT, &glint());
     let glint = [1.5, 40.0 - 12.0, 0.02, 3.0];
     load(&mut r, vec![g, v1(&[26])]);
 
@@ -217,7 +232,7 @@ fn the_renderer_writes_the_cs2_pbr_block() {
     assert_eq!(cb(&r, 2, "LightingEffectParams").len(), 4, "shape 2 draws");
     assert_eq!(flags(&r, 2), 0, "v1 draws as vanilla");
     // The stored material stays the source.
-    assert_eq!(r.shapes()[0].material.shader_type, 21);
+    assert_eq!(r.shapes()[0].material.shader_type, 0);
     assert_eq!(r.shapes()[1].material.slsf2 & 1 << 23, 1 << 23);
 }
 
@@ -237,146 +252,14 @@ fn a_v1_bit_edit_is_same_and_kept() {
     assert_eq!(status(&r, 1), ShapeStatus::Drawing);
 }
 
-/// A parameter edit on a type-21 shape is a cbuffer edit that reaches the draw.
+/// An edit that points a `.csm` shape at a file differing only in a parameter is a cbuffer edit that reaches the draw.
 #[test]
-fn a_type_21_parameter_edit_reaches_the_draw() {
+fn a_csm_parameter_edit_reaches_the_draw() {
     let (_c, mut r) = renderer(true);
-    load(&mut r, vec![t21(0)]);
-    let mut m = r.shapes()[0].material.clone();
-    let LightingTrailer::Pbr2 { params, .. } = &mut m.params.trailer else {
-        unreachable!()
-    };
-    params[21] = 0.9;
-    m.pbr = m.type21_values();
-    let kind = r.set_material(ShapeId(1), m.clone(), &|_| None).unwrap();
+    load(&mut r, vec![csm(feat::THIN_SURFACE)]);
+    let m = common::csm_shape(r.shapes()[0].material.clone(), THIN, &thin());
+    let kind = r.set_material(ShapeId(1), m.clone(), &files).unwrap();
     assert_eq!(kind, EditKind::Cbuffer);
     assert_eq!(r.shapes()[0].material, m);
     assert_eq!(cb(&r, 1, "LightingEffectParams")[0], 0.9);
-}
-
-/// Note ID38: the renderer, not `parse`, decides that a type-21 shape that breaks a CS 2.0 rule is skipped, at load and
-/// on every edit, with the rule as its note. `hidden` stays the user's.
-#[test]
-fn an_invalid_21_is_skipped() {
-    let (_c, mut r) = renderer(false);
-    let why = "CS 2.0 won't draw this shape: hair must be the only feature";
-    let mut bad = t21(feat::HAIR | feat::SUBSURFACE);
-    bad.pbr2_error = Some(why.into());
-    let mut user_hidden = t21(0);
-    user_hidden.hidden = true;
-    load(&mut r, vec![bad.clone(), t21(0), user_hidden]);
-    assert_eq!(status(&r, 1), ShapeStatus::Hidden, "skipped");
-    assert_ne!(status(&r, 2), ShapeStatus::Hidden);
-    assert_eq!(status(&r, 3), ShapeStatus::Hidden);
-    // a shape the user hid gets no note
-    assert_eq!(r.tree_notes(), [format!("plane1: {why}")]);
-    assert!(!r.shapes()[0].material.hidden, "hidden is the user's");
-
-    // An edit that fixes it draws it; one that breaks it again skips it.
-    let mut fixed = bad.clone();
-    fixed.pbr2_error = None;
-    r.set_material(ShapeId(1), fixed, &|_| None).unwrap();
-    assert_ne!(status(&r, 1), ShapeStatus::Hidden);
-    assert!(r.tree_notes().is_empty());
-    r.set_material(ShapeId(1), bad, &|_| None).unwrap();
-    assert_eq!(status(&r, 1), ShapeStatus::Hidden);
-    assert_eq!(status(&r, 3), ShapeStatus::Hidden);
-}
-
-/// Every texture the resolver gives: a 4×4 RGBA8 DDS.
-fn any_texture(_: &str) -> Option<Vec<u8>> {
-    Some(common::dds_rgba8(4, 4, &[[128, 128, 255, 255]; 16]))
-}
-
-/// An invalid type-21 shape with diffuse, normal and RMAOS paths.
-fn refused_with_slots() -> MaterialState {
-    let mut m = t21(feat::HAIR | feat::SUBSURFACE);
-    m.pbr2_error = Some("CS 2.0 won't draw this shape: hair must be the only feature".into());
-    for (slot, path) in [(0, "a_d.dds"), (1, "a_n.dds"), (5, "a_rmaos.dds")] {
-        m.slots[slot] = nif::path::canon_texture(format!("textures\\{path}").as_bytes());
-    }
-    m
-}
-
-/// `m` with its CS 2.0 error cleared.
-fn fixed(mut m: MaterialState) -> MaterialState {
-    m.pbr2_error = None;
-    m
-}
-
-/// The draw as a test sees it: the registers bound to a real texture and the PBR block's constants.
-fn draw_of(r: &Renderer) -> (Option<Vec<u32>>, Vec<Vec<f32>>) {
-    let vars = [
-        "PBRFlags",
-        "PBRParams1",
-        "LightingEffectParams",
-        "MultiLayerParallaxData",
-    ];
-    (
-        r.draw_bound(ShapeId(1)),
-        vars.iter().map(|v| cb(r, 1, v)).collect(),
-    )
-}
-
-fn load_with_textures(r: &mut Renderer, m: MaterialState) {
-    let mut s = common::plane_shape(1, common::IDENT, [1.0; 3], 0);
-    s.material = m;
-    let rep = r.load_parsed(
-        &ParsedNif {
-            shapes: vec![s],
-            ..Default::default()
-        },
-        &any_texture,
-    );
-    assert!(
-        rep.errors.is_empty() && rep.compile_errors.is_empty(),
-        "{rep:?}"
-    );
-}
-
-/// Note ID38: a shape skipped from its load, or edited while skipped, is drawn whole by the edit that fixes it: the
-/// same textures and constants as a renderer that loaded it valid (the edit's resolver reads its slots).
-#[test]
-fn a_skipped_shape_fixed_by_an_edit_draws_whole() {
-    let (_cv, mut valid) = renderer(true);
-    load_with_textures(&mut valid, fixed(refused_with_slots()));
-    let want = draw_of(&valid);
-    assert!(
-        want.0.as_ref().is_some_and(|b| b.len() >= 3),
-        "{:?}",
-        want.0
-    );
-
-    let (_cs, mut skipped) = renderer(true);
-    load_with_textures(&mut skipped, refused_with_slots());
-    assert_eq!(status(&skipped, 1), ShapeStatus::Hidden);
-    skipped
-        .set_material(ShapeId(1), fixed(refused_with_slots()), &any_texture)
-        .unwrap();
-    assert_eq!(status(&skipped, 1), ShapeStatus::Drawing);
-    assert_eq!(draw_of(&skipped), want, "loaded skipped, then fixed");
-
-    // Edited while skipped: a parameter and a new diffuse path, then fixed.
-    let mut edited = refused_with_slots();
-    let LightingTrailer::Pbr2 { params, .. } = &mut edited.params.trailer else {
-        unreachable!()
-    };
-    params[0] = 0.5;
-    params[2] = 0.7;
-    edited.pbr = edited.type21_values();
-    edited.slots[0] = nif::path::canon_texture(b"textures\\b_d.dds");
-    let (_cv2, mut valid2) = renderer(true);
-    load_with_textures(&mut valid2, fixed(edited.clone()));
-    let want = draw_of(&valid2);
-
-    let (_cs2, mut skipped2) = renderer(true);
-    load_with_textures(&mut skipped2, refused_with_slots());
-    skipped2
-        .set_material(ShapeId(1), edited.clone(), &any_texture)
-        .unwrap();
-    assert_eq!(status(&skipped2, 1), ShapeStatus::Hidden);
-    skipped2
-        .set_material(ShapeId(1), fixed(edited), &any_texture)
-        .unwrap();
-    assert_eq!(draw_of(&skipped2), want, "edited while skipped, then fixed");
 }

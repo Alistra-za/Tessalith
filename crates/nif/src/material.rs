@@ -117,15 +117,11 @@ pub struct MaterialState {
     /// them across material edits (`Renderer::set_skin_preview`). None = the shape as loaded; boxed, as most shapes
     /// have none. Read with [`MaterialState::skin`], written with [`MaterialState::set_skin`].
     pub skin_preview: Option<Box<SkinPreview>>,
-    /// Preview-only, never in the NIF: the first CS 2.0 rule a type-21 shape breaks (`render3d::parse` fills it from
-    /// `edit::validate`'s type-21 rules; None = valid, not type 21, or not checked). The preview does not draw the
-    /// shape while it is set (Notes ID38 and IE5).
-    pub pbr2_error: Option<String>,
     /// The `.csm` the shader property's name field names (`path::canon_material` form), None when the name is not a
     /// materials `.csm` path (Note IE6).
     pub csm_path: Option<String>,
-    /// The CS 2.0 PBR values the shape draws with: from its resolved `.csm` (`render3d::material::apply_csm`), or from
-    /// a type-21 block ([`MaterialState::type21_values`]). None = not PBR 2.0.
+    /// The CS 2.0 PBR values the shape draws with, from its resolved `.csm` (`render3d::material::apply_csm`). None =
+    /// not PBR 2.0.
     pub pbr: Option<PbrValues>,
     /// Preview-only: why `csm_path` could not be applied (`csm::resolve`'s error text); the shape then draws with the
     /// NIF's own material.
@@ -164,8 +160,8 @@ pub fn empty_slot() -> TexPath {
 impl MaterialState {
     /// The NIF's own material. `slots` is the texture set as scanned (`nif::scan::Shader::Lighting`), padded
     /// with empty slots or cut to [`SLOT_COUNT`]. `has_vertex_colors` comes from the shape's vertex
-    /// descriptor (`Vertex_Colors` attribute), not from SLSF2.5. `csm_path` comes from the property's name field;
-    /// a type-21 block fills `pbr` (Note IE6).
+    /// descriptor (`Vertex_Colors` attribute), not from SLSF2.5. `csm_path` comes from the property's name field
+    /// (Note IE6); `pbr` stays None until a `.csm` is applied.
     pub fn from_lighting(
         head: &ShapeHead,
         l: &Lighting,
@@ -174,7 +170,7 @@ impl MaterialState {
     ) -> MaterialState {
         let mut s: Vec<TexPath> = slots.iter().take(SLOT_COUNT).cloned().collect();
         s.resize(SLOT_COUNT, empty_slot());
-        let mut m = MaterialState {
+        MaterialState {
             shader_type: l.shader_type,
             slsf1: l.slsf1,
             slsf2: l.slsf2,
@@ -187,13 +183,10 @@ impl MaterialState {
                 .is_some_and(|d| VertexDesc(d).has(Attr::Colors)),
             hidden: false,
             skin_preview: None,
-            pbr2_error: None,
             csm_path: l.name.as_deref().and_then(crate::path::canon_material),
             pbr: None,
             csm_error: None,
-        };
-        m.pbr = m.type21_values();
-        m
+        }
     }
 
     /// The material of a built-in preview shape before the set editor fills it: shader 0, SLSF1 = Specular |
@@ -220,14 +213,12 @@ impl MaterialState {
                 lighting_effect_1: 0.3,
                 lighting_effect_2: 2.0,
                 trailer: LightingTrailer::None,
-                pbr2_extra: None,
             },
             slots: vec![empty_slot(); SLOT_COUNT],
             skinned: false,
             has_vertex_colors: false,
             hidden: false,
             skin_preview: None,
-            pbr2_error: None,
             csm_path: None,
             pbr: None,
             csm_error: None,
@@ -249,50 +240,9 @@ impl MaterialState {
         self.slsf2 & SLSF2_TRUE_PBR != 0
     }
 
-    /// The shape draws as CS 2.0 PBR: it has PBR values, from a `.csm` or a type-21 block (Notes ID1 and IE6).
+    /// The shape draws as CS 2.0 PBR: it has PBR values from a `.csm` (Note IE6).
     pub fn is_pbr2(&self) -> bool {
         self.pbr.is_some()
-    }
-
-    /// The PBR values of a type-21 shape (Note IE6), as CS 2.0 applies its block: the payload's features and
-    /// parameters, a 4-float `PBRThinSurface` as p21-p24, and a 2-float `PBRFuzz` as the fuzz roughness (NaN gives -1,
-    /// a negative value is kept, else at most 1) plus `FUZZ_ROUGHNESS_TEXTURE` when its `[1]` is 1. Neither extra block
-    /// counts on two-layer or hair (spec section 7). Features 0 and the defaults when the trailer is not the payload;
-    /// None for any other shader type.
-    pub fn type21_values(&self) -> Option<PbrValues> {
-        use crate::pbr2::feat;
-        if self.shader_type != 21 {
-            return None;
-        }
-        let (features, mut params) = match &self.params.trailer {
-            LightingTrailer::Pbr2 {
-                features, params, ..
-            } => (*features & feat::PAYLOAD_FEATURES, *params),
-            _ => (0, crate::pbr2::PBR2_DEFAULTS),
-        };
-        let extra = self.params.pbr2_extra.as_ref();
-        if let Some(thin) = crate::pbr2::thin_surface_used(features, extra) {
-            params[21..=24].copy_from_slice(thin);
-        }
-        let fuzz = extra
-            .filter(|_| features & (feat::TWO_LAYER | feat::HAIR) == 0)
-            .and_then(|x| x.fuzz.as_deref())
-            .filter(|v| v.len() == 2);
-        let fuzz_roughness = fuzz.map_or(-1.0, |v| match v[0] {
-            r if r.is_nan() => -1.0,
-            r if r < 0.0 => r,
-            r => r.min(1.0),
-        });
-        let texture = if fuzz.is_some_and(|v| v[1] == 1.0) {
-            feat::FUZZ_ROUGHNESS_TEXTURE
-        } else {
-            0
-        };
-        Some(PbrValues {
-            features: features | texture,
-            params,
-            fuzz_roughness,
-        })
     }
 
     /// The NiAlphaProperty enables blending (flags bit 0).

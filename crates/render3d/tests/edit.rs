@@ -233,8 +233,8 @@ fn vertex_colours_without_a_colour_stream_read_white() {
     );
 }
 
-/// The packed PBRFlags reach the shader: Subsurface on a type-21 shape is a cbuffer edit and turns the stand-in's flag
-/// channel on (Note IE5: type 21, since the v1 bit draws as vanilla; the flag values are `material.rs`'s
+/// The packed PBRFlags reach the shader: Subsurface on a `.csm` shape is a cbuffer edit and turns the stand-in's flag
+/// channel on (Notes IE5 and IE7: a `.csm`, since the v1 bit draws as vanilla; the flag values are `material.rs`'s
 /// `pbr2_flags_table`).
 #[test]
 fn pbr_flags_reach_the_shader() {
@@ -244,14 +244,17 @@ fn pbr_flags_reach_the_shader() {
     let mut m = material(&r, CYL1);
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
     m.params.emissive_color = [0.0; 3]; // D1 would add the NIF emissive colour under PBR
-    let m = common::as_t21(m, 0);
+    let m = common::as_csm(m, 0);
     assert_eq!(
-        r.set_material(CYL1, m.clone(), &|_| None),
+        r.set_material(CYL1, m.clone(), &common::csm_read),
         Ok(EditKind::Permutation)
     );
     let plain = r.render(&Scene::neutral(), 64, 64).unwrap();
-    let m = common::as_t21(m, SUBSURFACE);
-    assert_eq!(r.set_material(CYL1, m, &|_| None), Ok(EditKind::Cbuffer));
+    let m = common::as_csm(m, SUBSURFACE);
+    assert_eq!(
+        r.set_material(CYL1, m, &common::csm_read),
+        Ok(EditKind::Cbuffer)
+    );
     let subsurface = r.render(&Scene::neutral(), 64, 64).unwrap();
     assert!(
         channel(&subsurface, 1) > channel(&plain, 1) + 1000,

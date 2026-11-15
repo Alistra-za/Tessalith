@@ -11,8 +11,6 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 /// The slots and the effect paths are shared by every shape that names the same property (Note GB4).
-// `Lighting` carries the type-21 payload (25 floats) inline; shapes are few and the rows are built once per scan.
-#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone, PartialEq)]
 pub enum Shader {
     None,

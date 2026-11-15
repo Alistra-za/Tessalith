@@ -1,35 +1,47 @@
-//! Note ID33: the CS 2.0 shaders draw type 21 with thin-surface shading. WARP, bundled shaders (fxc compiles).
+//! Note ID33: the CS 2.0 shaders draw a `.csm` shape with thin-surface shading (Note IE7). WARP, bundled shaders
+//! (fxc compiles).
 #[path = "common/mod.rs"]
 mod common;
 use nif::material::MaterialState;
-use nif::pbr2::{feat, PBR2_DEFAULTS};
-use nif::props::LightingTrailer;
+use nif::pbr2::{feat, PbrValues};
 use render3d::device::Gpu;
 use render3d::scene::{Camera, DirLight, Scene};
 use render3d::{Builtin, Renderer, ShaderSource, ShapeId};
 
 const N: u32 = 64;
 
-/// A double-sided type-21 plane: subsurface (opacity 0.5, white) with `extra` features.
-fn plane21(extra: u32) -> MaterialState {
+/// Subsurface (opacity 0.5, white) with `extra` features.
+fn values(extra: u32) -> PbrValues {
+    let mut v = common::csm_values(feat::SUBSURFACE | extra);
+    v.params[6] = 0.5;
+    v
+}
+
+/// The `.csm` of [`values`]`(extra)`, which [`files`] serves.
+fn path(extra: u32) -> String {
+    format!("materials/test/plane{extra:x}.csm")
+}
+
+fn files(p: &str) -> Option<Vec<u8>> {
+    let hex = p
+        .strip_prefix("materials/test/plane")?
+        .strip_suffix(".csm")?;
+    Some(common::csm_text(&values(
+        u32::from_str_radix(hex, 16).ok()?,
+    )))
+}
+
+/// A double-sided `.csm` plane of [`values`]`(extra)`.
+fn plane(extra: u32) -> MaterialState {
     let mut m = MaterialState::builtin_default();
-    m.shader_type = 21;
     m.slsf1 = 1 << 31; // Z test
     m.slsf2 = 1 | (1 << 4); // Z write, Double_Sided
-    let mut params = PBR2_DEFAULTS;
-    params[6] = 0.5;
-    m.params.trailer = LightingTrailer::Pbr2 {
-        version: 2,
-        features: feat::SUBSURFACE | extra,
-        params,
-    };
-    m.pbr = m.type21_values();
-    m
+    common::csm_shape(m, &path(extra), &values(extra))
 }
 
 /// The plane (in the XZ plane) seen face-on from −Y, lit only by the sun from +Y: from behind.
 fn render(r: &mut Renderer, m: MaterialState) -> Vec<u8> {
-    let rep = r.load_builtin(Builtin::Plane, m, &|_| None);
+    let rep = r.load_builtin(Builtin::Plane, m, &files);
     assert!(
         rep.errors.is_empty() && rep.compile_errors.is_empty(),
         "{rep:?}"
@@ -64,15 +76,15 @@ fn render_pbr2_thin_surface_plane() {
         cache.path().to_path_buf(),
     )
     .unwrap();
-    let thin = render(&mut r, plane21(feat::THIN_SURFACE));
+    let thin = render(&mut r, plane(feat::THIN_SURFACE));
     let flags = r.draw_cb_floats(ShapeId(0), "PBRFlags").unwrap()[0].to_bits();
     assert_ne!(
         flags & render3d::material::PBR_THIN_SURFACE,
         0,
         "PBRFlags {flags:#x}"
     );
-    let thin_again = render(&mut r, plane21(feat::THIN_SURFACE));
-    let solid = render(&mut r, plane21(0));
+    let thin_again = render(&mut r, plane(feat::THIN_SURFACE));
+    let solid = render(&mut r, plane(0));
     // The noise floor: the same material drawn twice.
     let floor = (mean(&thin) - mean(&thin_again)).abs();
     let tol = floor + 1.0;

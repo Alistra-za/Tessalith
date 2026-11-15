@@ -2,9 +2,11 @@
 //! replay: geometry, scene cbuffers, engine textures, samplers and depth from the capture; the material (PS b1 used
 //! variables, the PS b2 material fields, VS b1 TexcoordOffset, material textures) from sdc's own `Renderer::load`.
 //! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN and SDC_ACHERUS (the CS PBR2Test1 root, which
-//! the bundled CS 2.0 shaders replay, Notes ID49 and IE).
+//! the bundled CS 2.0 shaders replay, Notes ID49 and IE). The CS 2.0 subjects are their own v1 meshes pointed at a
+//! `.csm` built here (Note IE7).
 mod common;
 
+use nif::material::MaterialState;
 use render3d::compile::{compile, used_vars, CbVar, SrvKind, VarKind};
 use render3d::golden::{self, Noise};
 use render3d::material::{drawn, own_pbr, Pbr};
@@ -41,7 +43,7 @@ const NIFS: &[(&str, &str)] = &[
         "SOVStairsPiece01",
         r"meshes\architecture\sovengarde\sovstairspiece01.nif",
     ),
-    // The type-21 subjects (Note ID48; the MO2 loose winner is the s6 copy while it is installed).
+    // The type-21 subjects (Note ID51; the MO2 loose winner is the s6 copy while it is installed).
     (
         "HelgenStoneBlock01",
         r"meshes\clutter\helgen\helgenstoneblock01.nif",
@@ -87,6 +89,107 @@ const EXTRACTION: &[&str] = &[
     "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26977_HandCartCanopy_1",
     "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26941_CaveWormtubeLarge_0",
 ];
+
+/// The feature bits of a CS 2.0 subject: v1's (`pbr2::v1_values` of the mesh's own flags), replaced, or added to.
+#[derive(Clone, Copy)]
+enum Features {
+    V1,
+    Replace(u32),
+    Add(u32),
+}
+
+/// One CS 2.0 subject of the T1, T2 and T2L captures (phase 1's manifest `pbr2test1-subjects.tsv`, Note ID51): the capture's
+/// shape name, the manifest label, its features, PBRFuzz (fuzz roughness, texture switch) and PBRThinSurface
+/// (p21-p24). No subject overrides a parameter.
+struct Pbr2Subject {
+    shape: &'static str,
+    label: &'static str,
+    features: Features,
+    fuzz: Option<[f32; 2]>,
+    thin: Option<[f32; 4]>,
+}
+
+/// The CS 2.0 subjects (Note IE7). The captures drew phase 1's type-21 NIFs; those are gone, so each subject is its
+/// own mesh pointed at a `.csm` that carries the same values.
+const PBR2: &[Pbr2Subject] = &[
+    s2("HelgenStoneBlock01", "base", Features::V1, None, None),
+    s2("Corpse04", "subsurface", Features::V1, None, None),
+    s2("AzuraSmallCrystal05", "two-layer", Features::V1, None, None),
+    s2("Rug01Rolled", "fuzz", Features::V1, Some([0.6, 0.0]), None),
+    s2("LoadScreenMRaltar01", "glint", Features::V1, None, None),
+    s2(
+        "CookingStone01",
+        "hair",
+        Features::Replace(0x40),
+        None,
+        None,
+    ),
+    s2(
+        "HandCartCanopy",
+        "thin-surface",
+        Features::Add(0x200),
+        None,
+        Some([0.3, 0.7, 0.2, 1.5]),
+    ),
+    s2(
+        "CaveWormtubeLarge",
+        "foliage",
+        Features::Add(0x100),
+        None,
+        None,
+    ),
+];
+
+const fn s2(
+    shape: &'static str,
+    label: &'static str,
+    features: Features,
+    fuzz: Option<[f32; 2]>,
+    thin: Option<[f32; 4]>,
+) -> Pbr2Subject {
+    Pbr2Subject {
+        shape,
+        label,
+        features,
+        fuzz,
+        thin,
+    }
+}
+
+/// Points a v1 PBR shape (type 0 or 11 with SLSF2 bit 23) of subject `s` at a `.csm` holding the values phase 1's
+/// type-21 subject NIF carried: `pbr2::v1_values` of the shape's flags and trailer, `s`'s features, a PBRFuzz as the
+/// fuzz roughness (and its texture switch when 1), a PBRThinSurface as p21-p24; neither on two-layer or hair, as CS 2.0
+/// read them. Returns the `.csm` path and the text the resolver serves; None for any other shape.
+fn point_at_csm(s: &Pbr2Subject, p: &mut render3d::ParsedShape) -> Option<(String, Vec<u8>)> {
+    use nif::pbr2::feat;
+    let m = &mut p.material;
+    if !matches!(m.shader_type, 0 | 11) || !m.is_pbr() {
+        return None;
+    }
+    let (mut v, _) = nif::pbr2::v1_values(m.shader_type, m.slsf2, &m.params);
+    v.features = match s.features {
+        Features::V1 => v.features,
+        Features::Replace(f) => f,
+        Features::Add(a) => v.features | a,
+    };
+    let plain = v.features & (feat::TWO_LAYER | feat::HAIR) == 0;
+    if let Some([r, tex]) = s.fuzz.filter(|_| plain) {
+        v.fuzz_roughness = r;
+        if tex == 1.0 {
+            v.features |= feat::FUZZ_ROUGHNESS_TEXTURE;
+        }
+    }
+    if let Some(t) = s.thin.filter(|_| plain) {
+        v.params[21..=24].copy_from_slice(&t);
+    }
+    let path = format!("materials/subjects/{}-{}.csm", s.label, p.id.0);
+    m.csm_path = Some(path.clone());
+    let text = nif::csm::to_text(&nif::pbr2::csm_from_values(&v));
+    Some((path, text.into_bytes()))
+}
+
+/// The glint subject's defines are Task 7's (Note ID56): it is reported, not counted.
+const GLINT: &str = "glint";
 
 /// Material defines compared (VC is VS-only in sdc and the geometry is the capture's).
 const M: &[&str] = &[
@@ -226,6 +329,9 @@ struct SdcShape {
     slots: Vec<(u32, String, Option<Vec<u8>>)>,
     /// LoadReport errors + compile errors.
     errors: Vec<String>,
+    /// The PS b1 fields whose x, y and z are a colour of the shape's `.csm` (empty without one): `PBRParams2` with
+    /// subsurface or two-layer, `MultiLayerParallaxData` with fuzz (Note IE7).
+    colours: Vec<&'static str>,
 }
 
 /// Loads the subject's NIF into `ren` (features = the capture's non-material defines, so ENABLE_LL and the CS
@@ -243,7 +349,17 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         .game
         .file(path)
         .ok_or_else(|| format!("{path}: not found"))?;
-    let parsed: ParsedNif = parse(&bytes);
+    let mut parsed: ParsedNif = parse(&bytes);
+    let subject = PBR2.iter().find(|s| s.shape.eq_ignore_ascii_case(name));
+    let csm: HashMap<String, Vec<u8>> = match subject {
+        Some(s) => parsed
+            .shapes
+            .iter_mut()
+            .filter_map(|p| point_at_csm(s, p))
+            .collect(),
+        None => HashMap::new(),
+    };
+    let parsed = parsed;
     let with = |n: &str| -> Vec<&render3d::ParsedShape> {
         parsed
             .shapes
@@ -287,7 +403,6 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
             None => "absent".to_string(),
         }
     );
-    let m = shape.material.clone();
     let id = shape.id;
     // CS features as captured: everything but the material defines, DEFERRED, VC and K=V values.
     let features: Vec<String> = r.defines[0]
@@ -298,8 +413,18 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         .cloned()
         .collect();
     ren.set_features(features);
-    let rep = ren.load_parsed_sync(&parsed, &|p| env.game.file(p).map(|f| f.1));
-    // The registers of the material the shaders draw (Note ID33), as `bind_textures` maps them.
+    let rep = ren.load_parsed_sync(&parsed, &|p| {
+        csm.get(p)
+            .cloned()
+            .or_else(|| env.game.file(p).map(|f| f.1))
+    });
+    // The registers of the material the shaders draw (Note ID33), as `bind_textures` maps them; a `.csm` applied.
+    let m = ren
+        .shapes()
+        .into_iter()
+        .find(|s| s.id == id)
+        .ok_or("the shape was not loaded")?
+        .material;
     let d = drawn(&m);
     let (pbr, msn) = (own_pbr(&d) != Pbr::None, d.slsf1 & (1 << 12) != 0);
     let slots = d
@@ -318,6 +443,7 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         nif_origin,
         slots,
         errors: rep.errors.into_iter().chain(rep.compile_errors).collect(),
+        colours: colour_fields(&m),
     })
 }
 
@@ -327,8 +453,33 @@ struct Field {
     var: String,
     offset: u32,
     capture: Vec<f32>,
+    /// What sdc should hold: the capture, with a `.csm` colour's x, y and z through `#rrggbb` (`csm::hex`, then
+    /// `csm::rgb`), as a `.csm` stores a colour (Note IE7).
+    expected: Vec<f32>,
+    /// A `.csm` colour field ([`SdcShape::colours`]).
+    colour: bool,
     sdc: Option<Vec<f32>>,
     ok: bool,
+}
+
+/// The PS b1 fields that carry a colour of `m`'s CS 2.0 PBR values, as `write_pbr2` packs them.
+fn colour_fields(m: &MaterialState) -> Vec<&'static str> {
+    use nif::pbr2::feat;
+    let Some(v) = &m.pbr else { return vec![] };
+    let has = |b: u32| v.features & b != 0;
+    let mut out = vec![];
+    if has(feat::TWO_LAYER | feat::SUBSURFACE) {
+        out.push("PBRParams2");
+    }
+    if has(feat::FUZZ) && !has(feat::TWO_LAYER) {
+        out.push("MultiLayerParallaxData");
+    }
+    out
+}
+
+/// `c` through `#rrggbb`: what a `.csm` holds for a colour of the float `c`.
+fn quantised(c: &[f32]) -> [f32; 3] {
+    nif::csm::rgb(nif::csm::hex([c[0], c[1], c[2]]))
 }
 
 fn floats(b: &[u8]) -> Vec<f32> {
@@ -388,10 +539,11 @@ fn material_fields(env: &Env, r: &Replay) -> Result<Vec<(&'static str, CbVar, u3
 
 fn compare_fields(
     ren: &Renderer,
-    id: ShapeId,
+    sdc_shape: &SdcShape,
     r: &Replay,
     fields: &[(&'static str, CbVar, u32)],
 ) -> Vec<Field> {
+    let id = sdc_shape.id;
     fields
         .iter()
         .map(|(stem, v, size)| {
@@ -402,12 +554,21 @@ fn compare_fields(
             } else {
                 ren.draw_cb_floats(id, &v.name)
             };
-            let ok = sdc.as_ref().is_some_and(|s| same(v.kind, s, &capture));
+            let colour = *stem == "ps_b1"
+                && capture.len() >= 3
+                && sdc_shape.colours.contains(&v.name.as_str());
+            let mut expected = capture.clone();
+            if colour {
+                expected[..3].copy_from_slice(&quantised(&capture));
+            }
+            let ok = sdc.as_ref().is_some_and(|s| same(v.kind, s, &expected));
             Field {
                 cb: stem,
                 var: v.name.clone(),
                 offset: v.offset,
                 capture,
+                expected,
+                colour,
                 sdc,
                 ok,
             }
@@ -462,7 +623,9 @@ fn dds_wh(b: &[u8]) -> Option<(u32, u32)> {
 }
 
 /// Writes sdc's material into the capture's replay: the compared fields sdc has, and sdc's slot textures at its
-/// registers (capture-only material registers are dropped: unbound, reads 0). Returns notes.
+/// registers (capture-only material registers are dropped: unbound, reads 0). A `.csm` colour component whose captured
+/// value is outside 0-1 keeps the capture's: `#rrggbb` cannot hold it (Note IE7), and the field check already holds sdc
+/// to the clamped value. Returns notes.
 fn swap_material(
     ren: &Renderer,
     r: &mut Replay,
@@ -479,6 +642,16 @@ fn swap_material(
         let b = r.cbuffers.get_mut(f.cb).unwrap();
         *b = cb_bytes(b, sizes[f.cb]);
         for (i, x) in v.iter().enumerate() {
+            let x = match f.capture.get(i) {
+                Some(c) if f.colour && i < 3 && !(0.0..=1.0).contains(c) => {
+                    notes.push(format!(
+                        "{}.{}[{i}]: capture {c} kept (sdc {x})",
+                        f.cb, f.var
+                    ));
+                    c
+                }
+                _ => x,
+            };
             let o = f.offset as usize + 4 * i;
             b[o..o + 4].copy_from_slice(&x.to_le_bytes());
         }
@@ -544,9 +717,17 @@ fn extraction_matches_capture() {
     let mut t = String::new();
     let (mut reached, mut nonfinite, mut define_mismatch) = (0usize, Vec::new(), 0usize);
     let mut firsts: Vec<String> = Vec::new();
+    // The counted CS 2.0 subjects (glint is Task 7's): the events that reached the pixel swap, and each MRT over the
+    // noise limit there.
+    let (mut swapped, mut over) = (BTreeSet::new(), Vec::new());
+    // `.csm` colours: counted subjects whose colour field is not the capture's through `#rrggbb`, and the largest
+    // difference that leaves, for a captured colour inside 0-1 (rounding) and outside it (clamp).
+    let mut colour_misses = Vec::new();
+    let (mut rounding, mut clamp) = ((0.0f32, String::new()), (0.0f32, String::new()));
     for s in EXTRACTION {
         let dir = env.root.join(s);
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
+        let counted = subject_of(&name).filter(|p| p.label != GLINT);
         let _ = writeln!(t, "\n== {s}");
         let mut r = load_fixture(&dir).unwrap();
         // (1)-(2) sdc's load and the shape.
@@ -598,7 +779,23 @@ fn extraction_matches_capture() {
             }
         };
         reached += 1;
-        let fields = compare_fields(&ren, sdc.id, &r, &layout);
+        let fields = compare_fields(&ren, &sdc, &r, &layout);
+        for f in fields.iter().filter(|f| f.colour) {
+            if counted.is_some() && !f.ok {
+                colour_misses.push(format!("{name} {}", f.var));
+            }
+            for (c, e) in f.capture.iter().zip(&f.expected).take(3) {
+                let d = (c - e).abs();
+                let (max, what) = if (0.0..=1.0).contains(c) {
+                    (&mut rounding, "rounding")
+                } else {
+                    (&mut clamp, "clamp")
+                };
+                if d > max.0 {
+                    *max = (d, format!("{name} {} {what} {c} -> {e}", f.var));
+                }
+            }
+        }
         let first = fields.iter().find(|f| !f.ok);
         match first {
             Some(f) => {
@@ -626,14 +823,18 @@ fn extraction_matches_capture() {
             } else {
                 ""
             };
+            let cap = if !f.colour {
+                fmt_v(&f.capture)
+            } else {
+                format!("{} (.csm {})", fmt_v(&f.capture), fmt_v(&f.expected))
+            };
             let _ = writeln!(
                 t,
-                "{} | {} | {} | {} | {} | {} | {}{note}",
+                "{} | {} | {} | {} | {cap} | {} | {}{note}",
                 f.cb,
                 f.var,
                 f.offset,
                 group(&f.var),
-                fmt_v(&f.capture),
                 f.sdc
                     .as_deref()
                     .map_or("not reflected by sdc".into(), fmt_v),
@@ -726,6 +927,12 @@ fn extraction_matches_capture() {
                 max,
             );
             let _ = write!(row, " {:.2}%/{:.3e}", 100.0 * d.over, d.max_abs);
+            if counted.is_some() && d.over > 0.0 {
+                over.push(format!("{name} RT{i} {:.2}%", 100.0 * d.over));
+            }
+        }
+        if counted.is_some() {
+            swapped.insert(name.clone());
         }
         if let (Some(main), Some(rc)) = (&out.main, &r.composite) {
             if main.iter().any(|v| !v.is_finite()) {
@@ -769,6 +976,27 @@ fn extraction_matches_capture() {
         let _ = writeln!(t, "  {f}");
     }
     let _ = writeln!(t, "non-finite: {nonfinite:?}");
+    let groups: BTreeSet<&str> = swapped
+        .iter()
+        .filter_map(|n: &String| subject_of(n).map(|p| p.label))
+        .collect();
+    let unswapped: Vec<&str> = EXTRACTION
+        .iter()
+        .map(|s| s.rsplit('/').next().unwrap())
+        .filter(|n| subject_of(n).is_some_and(|p| p.label != GLINT) && !swapped.contains(*n))
+        .collect();
+    let _ = writeln!(
+        t,
+        "CS 2.0 subjects swapped (glint not counted): {} groups {groups:?}; not swapped {unswapped:?}; MRTs over the \
+         limit {over:?}",
+        groups.len()
+    );
+    let _ = writeln!(
+        t,
+        ".csm colours: fields off the capture's #rrggbb {colour_misses:?}; largest rounding {:.6} ({}); largest \
+         clamp {:.6} ({})",
+        rounding.0, rounding.1, clamp.0, clamp.1
+    );
     print!("{t}");
     let out = std::env::temp_dir().join("golden-extraction.txt");
     std::fs::write(&out, &t).unwrap();
@@ -778,6 +1006,27 @@ fn extraction_matches_capture() {
         "only {reached} subjects reached the cbuffer step"
     );
     assert!(nonfinite.is_empty(), "non-finite output: {nonfinite:?}");
+    assert_eq!(
+        groups.len(),
+        PBR2.len() - 1,
+        "CS 2.0 subjects swapped: {groups:?}; not swapped {unswapped:?}"
+    );
+    assert!(unswapped.is_empty(), "not swapped: {unswapped:?}");
+    assert!(
+        colour_misses.is_empty(),
+        "colour fields off the capture's #rrggbb: {colour_misses:?}"
+    );
+    assert!(
+        over.is_empty(),
+        "CS 2.0 subject MRTs over the limit: {over:?}"
+    );
+}
+
+/// The CS 2.0 subject of an extraction folder (`ev<event>_<shape>_<index>`).
+fn subject_of(folder: &str) -> Option<&'static Pbr2Subject> {
+    let f = folder.to_ascii_lowercase();
+    PBR2.iter()
+        .find(|p| f.contains(&format!("_{}", p.shape.to_ascii_lowercase())))
 }
 
 /// Part 3 mode B: the DBG subject with sdc's material swapped in (as in extraction_matches_capture); the NIF is
@@ -786,7 +1035,7 @@ fn hybrid(ren: &mut Renderer, env: &Env, dir: &Path) -> Result<(Replay, Vec<Stri
     let mut r = load_fixture(dir)?;
     let sdc = load_sdc(ren, env, dir, &r)?;
     let layout = material_fields(env, &r)?;
-    let fields = compare_fields(ren, sdc.id, &r, &layout);
+    let fields = compare_fields(ren, &sdc, &r, &layout);
     let sizes: HashMap<&str, u32> = layout.iter().map(|(s, _, z)| (*s, *z)).collect();
     let mut notes = swap_material(ren, &mut r, &fields, &sizes, &sdc);
     notes.extend(

@@ -259,68 +259,9 @@ pub fn valid_value(fk: FieldKind, v: &Json) -> bool {
     }
 }
 
-/// What a texture-set block changes on a type-21 material (Note ID45): feature bits (`nif::pbr2::feat`) switched on
-/// and off, the payload parameters it replaces, and the `PBRFuzz` pair it gives (fuzz roughness, texture switch 0 or
-/// 1), which has no payload field. A key the block does not hold changes nothing.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Pbr2Override {
-    pub features_set: u32,
-    pub features_clear: u32,
-    pub params: [Option<f32>; nif::pbr2::PARAM_COUNT],
-    pub fuzz: [Option<f32>; 2],
-}
-
-/// Note ID45: the 21 texture-set keys onto a type-21 material (spec section 4's parameter order). The glint's
-/// `enabled`, `thinSurface` and `foliage` switch their feature bit on or off; `innerLayerDisplacementOffset` has no
-/// type-21 field. A value of the wrong type (or a colour without three numbers) is skipped.
-pub fn txst_overrides(values: &Map<String, Json>) -> Pbr2Override {
-    use nif::pbr2::feat;
-    let get = |key: &str| match key.split_once('.') {
-        Some((o, k)) => values.get(o).and_then(|g| g.get(k)),
-        None => values.get(key),
-    };
-    let num = |v: &Json| v.as_f64().map(|x| x as f32);
-    let mut ov = Pbr2Override::default();
-    for &(key, i) in TXST_PARAMS {
-        let Some(v) = get(key) else { continue };
-        let width = if nif::pbr2::COLOR_PARAMS.contains(&i) {
-            3
-        } else {
-            1
-        };
-        let xs: Option<Vec<f32>> = match (width, v.as_array()) {
-            (1, None) => num(v).map(|x| vec![x]),
-            (3, Some(c)) if c.len() == 3 => c.iter().map(num).collect(),
-            _ => None,
-        };
-        for (j, x) in xs.into_iter().flatten().enumerate() {
-            ov.params[i + j] = Some(x);
-        }
-    }
-    for (key, bit) in [
-        ("glintParameters.enabled", feat::GLINT),
-        ("thinSurface", feat::THIN_SURFACE),
-        ("foliage", feat::FOLIAGE),
-    ] {
-        match get(key).and_then(Json::as_bool) {
-            Some(true) => ov.features_set |= bit,
-            Some(false) => ov.features_clear |= bit,
-            None => {}
-        }
-    }
-    ov.fuzz = [
-        values.get("fuzzRoughness").and_then(num),
-        values
-            .get("fuzzRoughnessTexture")
-            .and_then(Json::as_bool)
-            .map(|b| if b { 1.0 } else { 0.0 }),
-    ];
-    ov
-}
-
-/// Note ID45: each texture-set key `txst_overrides` puts on the type-21 payload: (key, its first parameter in
-/// `nif::pbr2::PARAM_NAMES` order; a colour fills three, `nif::pbr2::COLOR_PARAMS`). A value outside the parameter's
-/// range is passed through as it is. The map lives in `nif::pbr2` (Note IE3).
+/// Each texture-set key's PBR parameter: (key, its first parameter in `nif::pbr2::PARAM_NAMES` order; a
+/// colour fills three, `nif::pbr2::COLOR_PARAMS`). The map lives in `nif::pbr2` (Note IE3); type 21, which the texture
+/// set once overrode in the preview, is gone (Note IE7).
 pub use nif::pbr2::TXST_PARAMS;
 
 /// One built-in template (design §4).

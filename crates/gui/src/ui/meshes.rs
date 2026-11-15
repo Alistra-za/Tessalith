@@ -1,6 +1,6 @@
 //! The Meshes view (plan A Task 12): a flat list of meshes (Note GC) | shapes of the selected NIF. Draws `MeshesModel`; every store read happens in the model on a click, never here.
 use crate::model::meshes::export::DocBadge;
-use crate::model::meshes::nif_edit::{edit_slot_label, Selection, ANIM_INVALID, EDIT_HIDDEN};
+use crate::model::meshes::nif_edit::{Selection, ANIM_INVALID, EDIT_HIDDEN};
 use crate::model::meshes::pg_entries::{
     is_error, is_warning, INSTANCE_UNREADABLE, IN_GAME_SCOPE, NO_INSTANCE, PGP_ENV_SCALE,
     READING_JSON,
@@ -1301,11 +1301,7 @@ fn shape(
         for (i, t) in s.textures.iter().enumerate() {
             let Some(p) = t else { continue };
             ui.horizontal_wrapped(|ui| {
-                // Note ID25: a type-21 shape names its slots as the editor does (spec section 6).
-                let name = match s.shader_type {
-                    Some(21) if s.shader_kind == 1 => edit_slot_label(21, 0, 0, i),
-                    _ => slot_name(s.shader_kind, i),
-                };
+                let name = slot_name(s.shader_kind, i);
                 // Note GH7: 1-based like the set editor; the NIF's own index is on hover.
                 let n = i + 1;
                 ui.label(if name.is_empty() {

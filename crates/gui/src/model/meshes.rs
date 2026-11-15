@@ -59,14 +59,10 @@ pub const SHADER_TYPES: [&str; 21] = [
     "FO4 Dismemberment",
 ];
 
-/// Shader type 21 (CS TruePBR 2.0), which the combo offers only with the setting on (Note ID21).
-pub const TYPE_21_NAME: &str = "TruePBR 2.0";
-
 /// `Environment Map (1)`; an unknown number shows as `type N`.
 pub fn shader_type_name(t: u32) -> String {
     match SHADER_TYPES.get(t as usize) {
         Some(n) => format!("{n} ({t})"),
-        None if t == 21 => format!("{TYPE_21_NAME} ({t})"),
         None => format!("type {t}"),
     }
 }

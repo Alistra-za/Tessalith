@@ -1,6 +1,6 @@
 //! Structural ops: shader type re-emit and alpha add/remove/split (spec §5, plan A9). Removal is unlink: the
 //! block stays as an orphan. New blocks are appended; refs inside opaque blocks are never rewritten.
-use super::validate::{var_label, ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
+use super::validate::{ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
 use super::{Anchor, Op, Outcome, Role};
 use crate::clips::{
     encode_mttc, encode_palette, encode_sequence, read_mttc, read_palette, read_sequence_out,
@@ -10,11 +10,10 @@ use crate::ctrl::{read_manager, Manager, BASE_LEN, CB_LEN};
 use crate::extra::{encode_extra, ExtraValue, EDITABLE};
 use crate::header::Header;
 use crate::keys::{encode_data, read_data, KeyData, KeyGroup};
-use crate::material::{SLSF1_NAMES, SLSF2_NAMES, SLSF2_TRUE_PBR};
+use crate::material::SLSF2_TRUE_PBR;
 use crate::model::{NifModel, PropModel, ShapeModel};
 use crate::net::{encode_net, ObjectNet};
-use crate::pbr2;
-use crate::props::{encode_texture_set, LightingTrailer};
+use crate::props::encode_texture_set;
 use crate::write::NifDoc;
 
 /// Default trailer floats after Lighting Effect 2 for a shader type (01-format §1.2).
@@ -30,277 +29,39 @@ pub fn trailer_defaults(shader_type: u32) -> Vec<f32> {
     }
 }
 
-fn put_u32(out: &mut [u8], at: usize, v: u32) {
-    out[at..at + 4].copy_from_slice(&v.to_le_bytes());
-}
-
-/// Re-emits a BSLightingShaderProperty with a new shader type, and says what it did beyond the type. The trailer
-/// floats after Lighting Effect 2 keep their bytes when the old and new type have the same trailer length
-/// (5 <-> 6), else take the defaults. Type 21 (CS TruePBR 2.0) replaces everything after refraction with the PBR
-/// payload: to it the v1 shape converts by `pbr2::from_v1`, from it by `pbr2::to_v1` (Note ID10).
+/// Re-emits a BSLightingShaderProperty with a new shader type. The trailer floats after Lighting Effect 2 keep
+/// their bytes when the old and new type have the same trailer length (5 <-> 6), else take the defaults.
 pub(crate) fn set_shader_type(
     doc: &mut NifDoc,
-    cur: &[u8],
     m: &NifModel,
     lsp: u32,
     new_type: u32,
-) -> Result<Vec<String>, String> {
-    if new_type == 20 || new_type > 21 {
-        return Err(format!("shader type {new_type} is not a Skyrim type"));
+) -> Result<(), String> {
+    if new_type >= 20 {
+        return Err("shader type 20 is not a Skyrim type".into());
     }
-    if new_type == 21 && m.bsver != 100 {
-        return Err("Type 21 needs a Skyrim SE NIF".into());
-    }
-    let l = m
+    let net = &m
         .lighting
         .get(&lsp)
-        .ok_or("not a readable shader property")?;
+        .ok_or("not a readable shader property")?
+        .prop
+        .net;
     let body = doc.block(lsp);
-    let p = l.prop.net.end - doc.header().offsets()[lsp as usize]; // block-relative end of the NiObjectNET
-    let (old_type, lt) = (l.lighting.shader_type, &l.lighting);
-    if old_type == new_type {
-        return Ok(vec![]);
-    }
-    let (out, mut notes) = if new_type == 21 {
-        to_21(body, p, lt)?
-    } else if old_type == 21 {
-        from_21(body, p, lt, new_type)?
+    let p = net.end - doc.header().offsets()[lsp as usize]; // block-relative end of the NiObjectNET
+    let head = body
+        .get(..p + 84)
+        .ok_or("shader block shorter than its fixed fields")?;
+    let old_type = u32::from_le_bytes(head[..4].try_into().unwrap());
+    let mut out = head.to_vec();
+    out[..4].copy_from_slice(&new_type.to_le_bytes());
+    if trailer_defaults(old_type).len() == trailer_defaults(new_type).len() {
+        out.extend_from_slice(&body[p + 84..]);
     } else {
-        let head = body
-            .get(..p + 84)
-            .ok_or("shader block shorter than its fixed fields")?;
-        let mut out = head.to_vec();
-        out[..4].copy_from_slice(&new_type.to_le_bytes());
-        if trailer_defaults(old_type).len() == trailer_defaults(new_type).len() {
-            out.extend_from_slice(&body[p + 84..]);
-        } else {
-            let t = trailer_defaults(new_type);
-            out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
-        }
-        (out, vec![])
-    };
+        let t = trailer_defaults(new_type);
+        out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
+    }
     doc.set_block(lsp, out);
-    if new_type == 21 {
-        notes.extend(unlink_refused(doc, cur, m, lsp)?);
-    }
-    Ok(notes)
-}
-
-/// Going to type 21: unlinks each controller of the shader's chain whose variable CS 2.0 refuses, as PGPatcher PR-882
-/// does (Note ID16). The chain is relinked past it, its next and target become -1, and the controlled blocks that
-/// name it leave every clip. No block is deleted; managers, MTTC, palettes and BSX stay. One note per controller and
-/// clip. Only the lighting shader float and colour controllers are checked.
-pub(crate) fn unlink_refused(
-    doc: &mut NifDoc,
-    cur: &[u8],
-    m: &NifModel,
-    lsp: u32,
-) -> Result<Vec<String>, String> {
-    let l = m
-        .lighting
-        .get(&lsp)
-        .ok_or("not a readable shader property")?;
-    let prop = &l.prop;
-    let refused: Vec<u32> = prop
-        .ctrls
-        .iter()
-        .copied()
-        .filter(|c| {
-            m.ctrls.get(c).is_some_and(|c| {
-                let float = &*c.class == LSCF;
-                (float || &*c.class == LSCC)
-                    && c.var.is_some_and(|v| pbr2::var_refused_on_21(float, v))
-            })
-        })
-        .collect();
-    if refused.is_empty() {
-        return Ok(vec![]);
-    }
-    whole_chain(m, prop)?;
-    if let Some(&c) = refused.iter().find(|&&c| owners(m, c).len() > 1) {
-        let label = ctrl_label(m, c, l.lighting.slsf2);
-        return Err(format!(
-            "The {label} controller is shared by several properties: it cannot be unlinked for type 21."
-        ));
-    }
-    let kept: Vec<u32> = prop
-        .ctrls
-        .iter()
-        .copied()
-        .filter(|c| !refused.contains(c))
-        .collect();
-    patch(
-        doc,
-        prop.block,
-        ctrl_ref_at(doc, prop),
-        kept.first().map_or(-1, |&c| c as i32),
-    )?;
-    for (k, &c) in kept.iter().enumerate() {
-        patch(doc, c, 0, kept.get(k + 1).map_or(-1, |&n| n as i32))?;
-    }
-    for &c in &refused {
-        patch(doc, c, 0, -1)?; // next
-        patch(doc, c, 22, -1)?; // target
-    }
-    let h = enc(Header::parse(cur))?;
-    let mut notes = vec![];
-    let mut cut: Vec<(u32, Vec<usize>)> = vec![];
-    for s in &m.sequences {
-        let mut drop: Vec<usize> = refused
-            .iter()
-            .flat_map(|&c| crate::anim::bound_cbs(m, &h, s, c))
-            .collect();
-        if drop.is_empty() {
-            continue;
-        }
-        drop.sort_unstable();
-        drop.dedup();
-        cut.push((s.block, drop));
-    }
-    for (seq, drop) in &cut {
-        let mut out = enc(read_sequence_out(&h, cur, *seq as usize))?;
-        let mut k = 0;
-        out.blocks.retain(|_| {
-            k += 1;
-            !drop.contains(&(k - 1))
-        });
-        doc.set_block(*seq, enc(encode_sequence(&out))?);
-    }
-    for &c in &refused {
-        let label = ctrl_label(m, c, l.lighting.slsf2);
-        let clips: Vec<String> = m
-            .sequences
-            .iter()
-            .filter(|s| !crate::anim::bound_cbs(m, &h, s, c).is_empty())
-            .map(|s| s.name.as_deref().unwrap_or("(unnamed)").to_string())
-            .collect();
-        if clips.is_empty() {
-            notes.push(format!("Unlinked the {label} controller"));
-        }
-        for name in clips {
-            notes.push(format!("Unlinked the {label} controller from clip {name}"));
-        }
-    }
-    Ok(notes)
-}
-
-/// The label of controller `c`'s variable, as the editor shows it ("Variable N" when it has none).
-fn ctrl_label(m: &NifModel, c: u32, slsf2: u32) -> String {
-    m.ctrls
-        .get(&c)
-        .and_then(|c| c.var.map(|v| var_label(&c.class, v, slsf2)))
-        .unwrap_or_else(|| "controller".into())
-}
-
-/// The block bytes up to the end of the refraction field (the head both type-21 conversions keep), with the new type.
-fn head_to_refraction(body: &[u8], p: usize, new_type: u32) -> Result<Vec<u8>, String> {
-    let mut out = body
-        .get(..p + 56)
-        .ok_or("shader block shorter than its fixed fields")?
-        .to_vec();
-    put_u32(&mut out, 0, new_type);
-    Ok(out)
-}
-
-/// A v1 shape as type 21: only a type 0 or 11 shape with SLSF2 bit 23 is v1 PBR (Note ID13); anything else gets the
-/// defaults and no features.
-fn to_21(
-    body: &[u8],
-    p: usize,
-    lt: &crate::props::Lighting,
-) -> Result<(Vec<u8>, Vec<String>), String> {
-    let mut out = head_to_refraction(body, p, 21)?;
-    let mut notes = vec![];
-    let v1 = matches!(lt.shader_type, 0 | 11) && lt.slsf2 & SLSF2_TRUE_PBR != 0;
-    let (features, params) = if v1 {
-        let c = pbr2::from_v1(lt.shader_type, lt.slsf2, &lt.params);
-        let names = (0..pbr2::FEATURE_NAMES.len())
-            .filter(|b| c.features >> b & 1 != 0)
-            .map(|b| pbr2::FEATURE_NAMES[b])
-            .collect::<Vec<_>>();
-        let list = if names.is_empty() {
-            "none".to_string()
-        } else {
-            names.join(", ")
-        };
-        notes.push(format!("Converted from v1 PBR: {list}"));
-        for &(i, from, to) in &c.clamped {
-            notes.push(format!(
-                "{} clamped from {from} to {to}",
-                pbr2::PARAM_NAMES[i]
-            ));
-        }
-        (c.features, c.params)
-    } else {
-        (0, pbr2::PBR2_DEFAULTS)
-    };
-    let (s1, s2) = (lt.slsf1, lt.slsf2);
-    let (n1, n2) = (
-        s1 & !pbr2::BANNED_SLSF1,
-        s2 & !(pbr2::V1_SLSF2 | pbr2::BANNED_SLSF2),
-    );
-    for (old, new, names) in [(s1, n1, &SLSF1_NAMES), (s2, n2, &SLSF2_NAMES)] {
-        for (b, name) in names.iter().enumerate() {
-            if (old & !new) >> b & 1 != 0 {
-                notes.push(format!("{name} flag cleared: type 21 doesn't use it"));
-            }
-        }
-    }
-    put_u32(&mut out, p, n1);
-    put_u32(&mut out, p + 4, n2);
-    out.extend(pbr2::VERSION.to_le_bytes());
-    out.extend(features.to_le_bytes());
-    out.extend(params.iter().flat_map(|f| f.to_le_bytes()));
-    Ok((out, notes))
-}
-
-/// A type-21 shape as `new_type`: type 0 or 11 become v1 PBR by `pbr2::to_v1`, any other type plain vanilla. Type 0
-/// has no trailer, so when `to_v1` chose the type-11 form (two-layer, fuzz, glint) only the flags that form shares
-/// with type 0 (PBR 23, subsurface 26) stay, and the features the trailer carried are dropped and named (Note ID11).
-fn from_21(
-    body: &[u8],
-    p: usize,
-    lt: &crate::props::Lighting,
-    new_type: u32,
-) -> Result<(Vec<u8>, Vec<String>), String> {
-    let LightingTrailer::Pbr2 {
-        features, params, ..
-    } = &lt.params.trailer
-    else {
-        return Err("not a readable type 21 shader property".into());
-    };
-    let mut out = head_to_refraction(body, p, new_type)?;
-    let mut notes = vec![];
-    // a PBR target is `pbr2::v1_body` (Note ID40); any other is plain vanilla: the v1 PBR flags and the stale
-    // multi-layer flag go, and the values are `MaterialState::builtin_default`'s
-    let (s2, (gloss, spec, strength, le1, le2), t) = if matches!(new_type, 0 | 11) {
-        let b = pbr2::v1_body(lt.slsf2, *features, params, new_type);
-        if !b.dropped.is_empty() {
-            notes.push(format!("Dropped: {}", b.dropped.join(", ")));
-        }
-        let fields = (
-            b.glossiness,
-            b.specular_color,
-            b.specular_strength,
-            b.lighting_effect_1,
-            b.lighting_effect_2,
-        );
-        (b.slsf2, fields, b.trailer)
-    } else {
-        (
-            lt.slsf2 & !(pbr2::V1_SLSF2 | 1 << 24),
-            (80.0, [1.0; 3], 1.0, 0.3, 2.0),
-            trailer_defaults(new_type),
-        )
-    };
-    put_u32(&mut out, p + 4, s2);
-    out.extend(
-        [gloss, spec[0], spec[1], spec[2], strength, le1, le2]
-            .iter()
-            .flat_map(|f| f.to_le_bytes()),
-    );
-    out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
-    Ok((out, notes))
+    Ok(())
 }
 
 fn patch(doc: &mut NifDoc, block: u32, at: usize, v: i32) -> Result<(), String> {
@@ -909,15 +670,6 @@ pub(crate) fn ctrl_op(
                 .lighting
                 .get(&block)
                 .is_some_and(|l| l.lighting.slsf2 & SLSF2_TRUE_PBR != 0);
-            if let (Some(v), true) = (var, shader) {
-                let l = m.lighting.get(&block).map(|l| &l.lighting);
-                if l.is_some_and(|l| l.shader_type == 21)
-                    && pbr2::var_refused_on_21(class == LSCF, *v)
-                {
-                    let label = var_label(class, *v, l.map_or(0, |l| l.slsf2));
-                    return Err(format!("{label} isn't animated by CS 2.0"));
-                }
-            }
             if class == LSCF && *var == Some(8) && pbr {
                 return Err(ENV_SCALE_PBR.into());
             }

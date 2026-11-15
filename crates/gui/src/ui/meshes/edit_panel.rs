@@ -358,13 +358,12 @@ fn apply(m: &mut MeshesModel, act: Act) {
     let push = if same_slot { None } else { act.push };
     // the typed path first: the click that ended the typing came after it
     let mut pushed = false;
-    let before = m.edit.as_ref().map_or(0, |e| e.doc.ops.len());
     for (ops, merge) in [act.path, push].into_iter().flatten() {
         m.edit_push(ops, merge);
         pushed = true;
     }
     if let (true, Some(e)) = (pushed, &mut m.edit) {
-        e.notice = e.notice_for(before, act.notice);
+        e.notice = act.notice;
     }
     if let (true, Some(e)) = (act.flush, &mut m.edit) {
         e.flush();

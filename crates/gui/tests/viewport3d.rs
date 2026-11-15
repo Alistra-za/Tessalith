@@ -2028,16 +2028,16 @@ fn shape_info(id: u32, m: MaterialState) -> ShapeInfo {
     }
 }
 
-/// A shape the shaders draw as PBR: type 21 (Note IE5: a v1 shape draws as vanilla).
+/// A shape the shaders draw as PBR: the PBR values of a resolved `.csm` (Notes IE5 and IE7: a v1 shape draws as
+/// vanilla).
 fn pbr() -> MaterialState {
     let mut m = MaterialState::builtin_default();
-    m.shader_type = 21;
-    m.params.trailer = nif::props::LightingTrailer::Pbr2 {
-        version: 2,
+    m.csm_path = Some("materials/t.csm".into());
+    m.pbr = Some(nif::pbr2::PbrValues {
         features: 0,
         params: nif::pbr2::PBR2_DEFAULTS,
-    };
-    m.pbr = m.type21_values();
+        fuzz_roughness: -1.0,
+    });
     m
 }
 
@@ -2083,24 +2083,20 @@ fn offered_views_follow_support_and_the_loaded_materials() {
     );
 }
 
-/// Notes ID38 and IE5: the views and the notes follow what the CS 2.0 shaders draw. A v1 shape draws as vanilla
-/// (no Metallic, no note); a type-21 shape that breaks a CS 2.0 rule is skipped with its note.
+/// Note IE5: the views follow what the CS 2.0 shaders draw. A v1 shape draws as vanilla (no Metallic); a `.csm`
+/// shape is PBR.
 #[test]
-fn views_and_notes_follow_the_drawn_material() {
+fn views_follow_the_drawn_material() {
     use v3::DebugView::*;
     let (mut v, _cmds) = rendered();
     v.handle(v3::V3Reply::DebugSupport(true));
     v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr_v1())]));
     assert!(!v.offered().contains(&Metallic), "v1 is vanilla");
-    assert!(v.tree_notes().is_empty());
-
-    let mut bad = pbr();
-    bad.pbr2_error = Some("CS 2.0 won't draw this shape: x".into());
     v.handle(v3::V3Reply::Shapes(vec![
         shape_info(0, pbr_v1()),
-        shape_info(1, bad),
+        shape_info(1, pbr()),
     ]));
-    assert_eq!(v.tree_notes(), ["s1: CS 2.0 won't draw this shape: x"]);
+    assert!(v.offered().contains(&Metallic), "a .csm shape is PBR");
 }
 
 #[test]

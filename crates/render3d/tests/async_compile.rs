@@ -13,8 +13,22 @@ use std::path::Path;
 const CYL1: ShapeId = ShapeId(9);
 const CYL2: ShapeId = ShapeId(12);
 
-fn none(_: &str) -> Option<Vec<u8>> {
-    None
+/// No textures: only the `.csm` files of [`pbr_subsurface`] and [`ROUGH`] (Note IE7).
+fn none(p: &str) -> Option<Vec<u8>> {
+    if p == ROUGH {
+        return Some(common::csm_text(&rough()));
+    }
+    common::csm_read(p)
+}
+
+/// The `.csm` of a second Subsurface edit that differs only in a parameter.
+const ROUGH: &str = "materials/test/rough.csm";
+
+/// Subsurface with roughness scale 0.5.
+fn rough() -> nif::pbr2::PbrValues {
+    let mut v = common::csm_values(nif::pbr2::feat::SUBSURFACE);
+    v.params[0] = 0.5;
+    v
 }
 
 fn material(r: &Renderer, id: ShapeId) -> MaterialState {
@@ -182,12 +196,12 @@ fn a_second_async_load_reports_the_missing_field_again() {
     assert_eq!(w.iter().filter(|s| *s == NO_AMBIENT).count(), 1, "{w:?}");
 }
 
-/// Vanilla → type-21 PBR with Subsurface (Note IE5: the v1 bit draws as vanilla): a permutation edit whose pixels
-/// differ (the stand-in writes 0.5 green when PBRFlags ≠ 0).
+/// Vanilla → `.csm` PBR with Subsurface (Notes IE5 and IE7: the v1 bit draws as vanilla): a permutation edit whose
+/// pixels differ (the stand-in writes 0.5 green when PBRFlags ≠ 0).
 fn pbr_subsurface(mut m: MaterialState) -> MaterialState {
     m.slsf2 &= !((1 << 12) | (1 << 24) | (1 << 25) | (1 << 26) | (1 << 27));
     m.params.emissive_color = [0.0; 3];
-    common::as_t21(m, nif::pbr2::feat::SUBSURFACE)
+    common::as_csm(m, nif::pbr2::feat::SUBSURFACE)
 }
 
 fn alpha_test(mut m: MaterialState) -> MaterialState {
@@ -278,12 +292,7 @@ fn permutation_edit_keeps_old_draw_until_compiled() {
         "byte-identical while the program compiles"
     );
     // A second edit for the same program queues nothing and is what lands.
-    let mut m2 = m.clone();
-    let nif::props::LightingTrailer::Pbr2 { params, .. } = &mut m2.params.trailer else {
-        unreachable!()
-    };
-    params[0] = 0.5; // roughness scale
-    m2.pbr = m2.type21_values();
+    let m2 = common::csm_shape(m.clone(), ROUGH, &rough());
     assert_eq!(
         r.set_material(CYL1, m2.clone(), &none),
         Ok(EditKind::Cbuffer)

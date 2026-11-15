@@ -33,7 +33,7 @@ fn the_standin_refuses_debug_views_and_lit_keys_are_unchanged() {
     );
 }
 
-/// A type-21 sphere with roughness scale 1 (PBRParams1.x, cs2 Lighting.hlsl:1533) and a 1×1 RMAOS (64, 128, 192)
+/// A `.csm` sphere with roughness scale 1 (PBRParams1.x, cs2 Lighting.hlsl:1533) and a 1×1 RMAOS (64, 128, 192)
 /// reads back as those values in Roughness / Metallic / AO (vertexAO 1: no vertex colours), encode on and off.
 #[test]
 fn bundled_cs_reads_rmaos_back_as_its_values() {
@@ -42,12 +42,14 @@ fn bundled_cs_reads_rmaos_back_as_its_values() {
     let mut r = Renderer::with_gpu_source(Gpu::new_warp().unwrap(), fp, cache.path().to_path_buf())
         .unwrap();
     assert!(r.debug_supported(), "the bundled CS has the anchor");
-    let mut m = common::as_t21(MaterialState::builtin_default(), 0);
+    let mut m = common::as_csm(MaterialState::builtin_default(), 0);
     m.set_slot_raw(5, r"textures\sdc\rmaos.dds");
     let rmaos = dds_rgba8(1, 1, &[[64, 128, 192, 255]]);
-    let rep = r.load_builtin(Builtin::Sphere, m, &|p| {
-        (p == "textures/sdc/rmaos.dds").then(|| rmaos.clone())
-    });
+    let rep = r.load_builtin(
+        Builtin::Sphere,
+        m,
+        &common::or_csm(|p: &str| (p == "textures/sdc/rmaos.dds").then(|| rmaos.clone())),
+    );
     assert!(
         rep.errors.is_empty() && rep.compile_errors.is_empty(),
         "{rep:?}"

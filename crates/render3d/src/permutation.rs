@@ -2,7 +2,7 @@
 //! tools/rdc-out/p04/answers.md Q4, controller ruling RB7).
 
 /// How a drawn material uses TruePBR (Note ID33): not at all, the v1 form (SLSF2 bit 23; `material::drawn` clears it,
-/// Note IE) or CS 2.0's type 21. [`crate::material::pbr_mode`] picks it.
+/// Note IE) or CS 2.0's, from a `.csm`. [`crate::material::pbr_mode`] picks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pbr {
     None,
@@ -108,7 +108,7 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     }
     // TruePBR: CS enables glint from its remapped Glint flag (Fit_Slope without MLP/Soft/Back; 01 §3.1, P1 spec
     // §2.2); SLSF2.21 is cleared at load. Vanilla: Anisotropic_Lighting (SLSF2.21) → ANISO_LIGHTING.
-    // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019). Type 21 has its own
+    // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019). A `.csm` has its own
     // Glint feature bit (Note ID33).
     let own_glint = match m.pbr {
         Pbr::V1 => crate::material::remapped_glint(m.slsf2),

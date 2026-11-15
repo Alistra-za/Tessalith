@@ -165,7 +165,7 @@ pub type SkinPreviews = BTreeMap<ShapeId, SkinEntry>;
 
 /// What the panel draws: a NIF read through a [`MeshSpec`] (the Meshes view), a parsed NIF whose shape materials
 /// the caller set (the set preview's simulated PGPatcher patch, P1-A), or a built-in shape.
-// `MaterialState` holds the type-21 payload (25 floats) inline; a content value is built once per load.
+// `MaterialState` holds a `.csm`'s PBR values (25 floats) inline; a content value is built once per load.
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Clone)]
 pub enum Content {
@@ -1247,18 +1247,6 @@ impl Viewport3d {
                             .iter()
                             .any(|s| o.availability_drawn(&s.material) != Availability::None)
                 }
-            })
-            .collect()
-    }
-
-    /// The loaded shapes' notes ("<shape>: <note>", `render3d::material::tree_note`; Note ID38): built from the shapes
-    /// the render thread last reported, so an edit updates them.
-    pub fn tree_notes(&self) -> Vec<String> {
-        self.shapes
-            .iter()
-            .filter_map(|s| {
-                render3d::material::tree_note(&s.material)
-                    .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
             })
             .collect()
     }

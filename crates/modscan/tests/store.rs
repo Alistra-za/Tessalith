@@ -42,7 +42,6 @@ fn lighting() -> Lighting {
             lighting_effect_1: 0.3,
             lighting_effect_2: 2.0,
             trailer: LightingTrailer::None,
-            pbr2_extra: None,
         },
     }
 }

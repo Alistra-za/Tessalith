@@ -1,6 +1,4 @@
 //! `parse`: pure NIF → per-shape data, keyed by block index.
-#[path = "../../nif/tests/builder/mod.rs"]
-mod builder;
 use nif::scan::{scan, Shader};
 use render3d::{parse, ParsedNif, ShapeId};
 
@@ -77,39 +75,6 @@ fn skipped_shape_messages_use_a_short_label() {
         );
         assert!(label.ends_with('…'));
     }
-}
-
-/// Note ID38: a type-21 shape is never hidden by `parse` and gets no warning of its own; its first CS 2.0 Error is
-/// `material.pbr2_error`, which the renderer reads.
-#[test]
-fn parse_records_the_first_cs2_error() {
-    use nif::pbr2::feat;
-    let bad =
-        builder::scenes::lsp21_shape(feat::HAIR | feat::SUBSURFACE, &nif::pbr2::PBR2_DEFAULTS);
-    let p = parse(&bad);
-    assert!(p.errors.is_empty(), "{:?}", p.errors);
-    assert_eq!(p.shapes.len(), 1, "{:?}", p.skipped);
-    let m = &p.shapes[0].material;
-    assert_eq!(m.shader_type, 21, "the stored material stays the source");
-    assert!(!m.hidden);
-    assert_eq!(
-        m.pbr2_error.as_deref(),
-        Some(
-            format!(
-                "{}{}",
-                nif::edit::validate::WONT_DRAW,
-                nif::pbr2::HAIR_ALONE
-            )
-            .as_str()
-        )
-    );
-    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
-
-    let good = builder::scenes::lsp21_shape(0x201, &nif::pbr2::PBR2_DEFAULTS);
-    let p = parse(&good);
-    assert!(!p.shapes[0].material.hidden);
-    assert_eq!(p.shapes[0].material.pbr2_error, None);
-    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
 }
 
 #[test]

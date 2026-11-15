@@ -161,7 +161,7 @@ fn csm_missing(r: &Result<nif::csm::Csm, nif::csm::CsmError>) -> bool {
     }
 }
 
-/// Takes a shape out of the draw order and keeps its draw for later ([`material::skipped`]).
+/// Takes a shape out of the draw order and keeps its draw for later (`MaterialState::hidden`).
 fn hide(state: &mut ShapeState) {
     state.status = ShapeStatus::Hidden;
     // A program still compiling for it is memoised when it lands, not applied.
@@ -750,14 +750,13 @@ impl Renderer {
         }
     }
 
-    /// Every shape through [`Renderer::begin`] (a define-set change, C11); one it skips ([`material::skipped`]:
-    /// hidden, or a type-21 shape CS 2.0 refuses) is hidden. A program that is at hand swaps now; the others queue one
-    /// job each and stay `Pending { showing_previous }` on their old draw. The resolver is never asked: every slot of
-    /// a drawn shape's material is in `tex_cache` since its load or edit.
+    /// Every shape through [`Renderer::begin`] (a define-set change, C11); a hidden one stays hidden. A program that
+    /// is at hand swaps now; the others queue one job each and stay `Pending { showing_previous }` on their old draw.
+    /// The resolver is never asked: every slot of a drawn shape's material is in `tex_cache` since its load or edit.
     fn begin_all(&mut self) {
         let mut todo: Vec<(ShapeId, MaterialState)> = vec![];
         for (id, s) in self.shapes.iter_mut() {
-            if material::skipped(&s.material) {
+            if s.material.hidden {
                 if s.status != ShapeStatus::Hidden {
                     hide(s);
                 }
@@ -1460,9 +1459,9 @@ impl Renderer {
         }
     }
 
-    /// `m` as the renderer stores and draws it (Note IE6): its PBR values derived again (a type-21 block's, else none),
-    /// then the shape's `.csm` (`apply_csm`), resolved through `read` once per load. A `.csm` that does not resolve
-    /// sets `csm_error` and leaves the rest of `m` as it is, with a note naming the file in `rep`.
+    /// `m` as the renderer stores and draws it (Note IE6): no PBR values, then the shape's `.csm` (`apply_csm`), resolved
+    /// through `read` once per load. A `.csm` that does not resolve sets `csm_error` and leaves the rest of `m` as it
+    /// is, with a note naming the file in `rep`.
     fn with_csm(
         &mut self,
         m: &mut MaterialState,
@@ -1470,9 +1469,8 @@ impl Renderer {
         read: &dyn Fn(&str) -> Option<Vec<u8>>,
         rep: &mut LoadReport,
     ) {
-        // Never kept from the incoming material: an edit away from type 21, or a cleared name, must drop them. A
-        // type-21 block's trailer stays the source of its values while type 21 is read.
-        m.pbr = m.type21_values();
+        // Never kept from the incoming material: a cleared or changed name must drop them (Note IE7).
+        m.pbr = None;
         m.csm_error = None;
         let Some(path) = m.csm_path.clone() else {
             return;
@@ -1712,7 +1710,7 @@ impl Renderer {
         for s in &parsed.shapes {
             let mut m = s.material.clone();
             self.with_csm(&mut m, &s.name, textures, &mut rep);
-            let hidden = material::skipped(&m);
+            let hidden = m.hidden;
             self.shapes.insert(
                 s.id,
                 ShapeState {
@@ -1732,9 +1730,6 @@ impl Renderer {
                     compile_failed: false,
                 },
             );
-            // shortcut: a refused type-21 shape (one that breaks a CS 2.0 rule, `material::skipped`, Note ID38) is never
-            // begun, so its textures go unresolved and its missing ones stay out of `LoadReport.missing_textures`, until
-            // Task 6 removes type 21.
             if !hidden {
                 self.begin(s.id, &m, textures, &mut rep);
             }
@@ -1797,18 +1792,6 @@ impl Renderer {
             ..ParsedNif::default()
         };
         self.load_inner(&parsed, textures, !self.async_compile, true)
-    }
-
-    /// The loaded shapes' notes, in id order, as "<shape>: <note>" ([`material::tree_note`]; Note ID38). Not in the
-    /// [`LoadReport`]: they change with edits.
-    pub fn tree_notes(&self) -> Vec<String> {
-        self.shapes
-            .values()
-            .filter_map(|s| {
-                material::tree_note(&s.material)
-                    .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
-            })
-            .collect()
     }
 
     /// Every loaded shape in id order, with the material last loaded or set and its status.
@@ -1907,7 +1890,7 @@ impl Renderer {
                 || kind == EditKind::Permutation;
             (kind, rebuild)
         };
-        if material::skipped(&m) {
+        if m.hidden {
             if let Some(state) = self.shapes.get_mut(&id) {
                 state.material = m;
                 hide(state);

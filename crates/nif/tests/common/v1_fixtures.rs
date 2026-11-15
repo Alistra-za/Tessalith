@@ -38,7 +38,6 @@ pub fn v1(
             },
             None => LightingTrailer::None,
         },
-        pbr2_extra: None,
     }
 }
 

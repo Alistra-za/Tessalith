@@ -58,7 +58,7 @@ impl DebugOutput {
         }
     }
 
-    /// TruePBR (v1 or type 21, as the material is: [`DebugOutput::availability_drawn`] asks of the drawn material):
+    /// TruePBR (v1 or a `.csm`, as the material is: [`DebugOutput::availability_drawn`] asks of the drawn material):
     /// Exact for all.
     /// Non-PBR: Albedo and NormalWorld Exact; Roughness StandIn("1 − specular mask"); Metallic
     /// None (CS's non-PBR material has no metallic term); Ao StandIn("vertex AO"), None for shader types 4, 5, 6 and
@@ -269,23 +269,21 @@ mod tests {
         assert_eq!(DebugOutput::Ao.define(), Some(5));
     }
 
-    /// Note ID33: type 21 is PBR on the CS 2.0 shaders; a v1 shape draws vanilla there.
+    /// Note ID33: a `.csm` shape is PBR on the CS 2.0 shaders; a v1 shape draws vanilla there.
     #[test]
     fn availability_follows_the_drawn_material() {
         use Availability::*;
         let mut v1 = MaterialState::builtin_default();
         v1.slsf2 |= nif::material::SLSF2_TRUE_PBR;
-        let mut t21 = MaterialState::builtin_default();
-        t21.shader_type = 21;
-        t21.params.trailer = nif::props::LightingTrailer::Pbr2 {
-            version: 2,
+        let mut csm = MaterialState::builtin_default();
+        csm.pbr = Some(nif::pbr2::PbrValues {
             features: 0,
             params: nif::pbr2::PBR2_DEFAULTS,
-        };
-        t21.pbr = t21.type21_values();
+            fuzz_roughness: -1.0,
+        });
         let m = DebugOutput::Metallic;
-        assert_eq!(m.availability(&t21), Exact, "type 21 is PBR");
-        assert_eq!(m.availability_drawn(&t21), Exact);
+        assert_eq!(m.availability(&csm), Exact, "a .csm shape is PBR");
+        assert_eq!(m.availability_drawn(&csm), Exact);
         assert_eq!(m.availability(&v1), Exact, "v1 as the material is");
         assert_eq!(m.availability_drawn(&v1), None, "v1 draws vanilla");
     }

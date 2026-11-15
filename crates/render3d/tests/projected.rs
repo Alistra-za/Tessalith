@@ -442,16 +442,20 @@ fn eligibility_flip_is_a_permutation() {
         );
         assert!(projected(&mut r));
     }
-    // A type-21 coat (the Two-layer feature) keeps the layer (Notes GZ1 and IE5): the toggle stays a cbuffer edit.
+    // A `.csm` coat (the Two-layer feature) keeps the layer (Notes GZ1, IE5 and IE7): the toggle stays a cbuffer edit.
     assert!(r
-        .set_material(ShapeId(0), common::as_t21(plain.clone(), 0), &|_| None)
+        .set_material(
+            ShapeId(0),
+            common::as_csm(plain.clone(), 0),
+            &common::csm_read
+        )
         .is_ok());
     assert!(projected(&mut r));
     assert_eq!(
         r.set_material(
             ShapeId(0),
-            common::as_t21(plain.clone(), nif::pbr2::feat::TWO_LAYER),
-            &|_| None
+            common::as_csm(plain.clone(), nif::pbr2::feat::TWO_LAYER),
+            &common::csm_read
         ),
         Ok(EditKind::Cbuffer)
     );
@@ -482,29 +486,42 @@ fn up_quad(id: u32, m: MaterialState) -> render3d::ParsedShape {
     }
 }
 
-/// Type-21 PBR (Note IE5), mid-grey base colour at slot 0, an RMAOS at slot 5 that matches the ash layer's roughness
-/// 0.9 and specular 0.04 (so the layer changes only the colour), depth test and write on. The specular level is a
-/// scale of the RMAOS alpha (`rawRMAOS.w *= PBRParams1.z`, cs2 Lighting.hlsl:1533), so it is 1 here, not 0.04.
-fn grey_pbr() -> MaterialState {
+/// `.csm` PBR (Notes IE5 and IE7) with `features`, mid-grey base colour at slot 0, an RMAOS at slot 5 that matches
+/// the ash layer's roughness 0.9 and specular 0.04 (so the layer changes only the colour), depth test and write on.
+/// The specular level is a scale of the RMAOS alpha (`rawRMAOS.w *= PBRParams1.z`, cs2 Lighting.hlsl:1533), so it is
+/// 1 here, not 0.04. [`grey_textures`] serves its `.csm`.
+fn grey_pbr(features: u32) -> MaterialState {
     let mut m = MaterialState::builtin_default();
     m.slsf1 |= 1 << 31;
     m.slsf2 |= 1;
     m.set_slot_raw(0, r"textures\test\grey.dds");
     m.set_slot_raw(5, r"textures\test\grey_rmaos.dds");
-    let mut m = common::as_t21(m, 0);
-    let nif::props::LightingTrailer::Pbr2 { params, .. } = &mut m.params.trailer else {
-        unreachable!()
-    };
-    params[1] = 1.0;
-    m.pbr = m.type21_values();
-    m
+    common::csm_shape(
+        m,
+        &format!("materials/test/grey{features:x}.csm"),
+        &grey_values(features),
+    )
+}
+
+/// The PBR values of [`grey_pbr`]: the defaults with specular level 1.
+fn grey_values(features: u32) -> nif::pbr2::PbrValues {
+    let mut v = common::csm_values(features);
+    v.params[1] = 1.0;
+    v
 }
 
 fn grey_textures(p: &str) -> Option<Vec<u8>> {
     match p {
         "textures/test/grey.dds" => Some(common::dds_rgba8(1, 1, &[[128, 128, 128, 255]])),
         "textures/test/grey_rmaos.dds" => Some(common::dds_rgba8(1, 1, &[[230, 0, 255, 10]])),
-        _ => None,
+        _ => {
+            let hex = p
+                .strip_prefix("materials/test/grey")?
+                .strip_suffix(".csm")?;
+            Some(common::csm_text(&grey_values(
+                u32::from_str_radix(hex, 16).ok()?,
+            )))
+        }
     }
 }
 
@@ -539,7 +556,7 @@ fn render_projected_tints_up_faces() {
         return;
     };
     let parsed = render3d::ParsedNif {
-        shapes: vec![up_quad(0, grey_pbr())],
+        shapes: vec![up_quad(0, grey_pbr(0))],
         ..Default::default()
     };
     let rep = r.load_parsed(&parsed, &grey_textures);
@@ -616,26 +633,22 @@ fn render_projected_tints_up_faces() {
 }
 
 /// Note GZ on the bundled CS: a plane turned to face up by its NIF rotation (not its vertices) takes the layer as
-/// `up_quad` does (GZ2), and a type-21 coat (the Two-layer feature) compiles with `PROJECTED_UV` and takes it too
-/// (GZ1, Note IE5).
+/// `up_quad` does (GZ2), and a `.csm` coat (the Two-layer feature) compiles with `PROJECTED_UV` and takes it too
+/// (GZ1, Notes IE5 and IE7).
 #[test]
 fn render_projected_rotated_static_and_coat() {
     let cache = tempfile::tempdir().unwrap();
     let Some(mut r) = cs_renderer(cache.path()) else {
         return;
     };
-    let mut turned = up_quad(0, grey_pbr());
+    let mut turned = up_quad(0, grey_pbr(0));
     turned.mesh = std::sync::Arc::new(render3d::builtin_mesh(render3d::Builtin::Plane));
     turned.world = [
         [1.0, 0.0, 0.0, 0.0],
         [0.0, 0.0, -1.0, 0.0],
         [0.0, 1.0, 0.0, 0.0],
     ];
-    let mut coat = grey_pbr();
-    if let nif::props::LightingTrailer::Pbr2 { features, .. } = &mut coat.params.trailer {
-        *features = nif::pbr2::feat::TWO_LAYER;
-    }
-    coat.pbr = coat.type21_values();
+    let coat = grey_pbr(nif::pbr2::feat::TWO_LAYER);
     let white = common::dds_rgba8(1, 1, &[[255; 4]]);
     let (w, h) = (128, 128);
     let mut off_on = |shape: render3d::ParsedShape| {
@@ -653,7 +666,7 @@ fn render_projected_rotated_static_and_coat() {
         assert!(ps.iter().any(|(k, _)| k == "PROJECTED_UV"), "{ps:?}");
         (off, centre(&r.render(&top_scene(), w, h).unwrap(), w, h))
     };
-    let (_, up) = off_on(up_quad(0, grey_pbr()));
+    let (_, up) = off_on(up_quad(0, grey_pbr(0)));
     let (_, rotated) = off_on(turned);
     println!("up {up:?} rotated {rotated:?}");
     assert!(
@@ -679,7 +692,7 @@ fn render_projected_skips_skinned() {
         .map(|s| s.id)
         .collect();
     assert!(!skinned.is_empty());
-    parsed.shapes.push(up_quad(9999, grey_pbr()));
+    parsed.shapes.push(up_quad(9999, grey_pbr(0)));
     r.set_projected_layer(Some(ash()), &|_| None);
     let rep = r.load_parsed(&parsed, &grey_textures);
     assert!(rep.compile_errors.is_empty(), "{rep:?}");
@@ -701,7 +714,7 @@ fn render_projected_value_edit_is_cbuffer_only() {
         return;
     };
     let parsed = render3d::ParsedNif {
-        shapes: vec![up_quad(0, grey_pbr())],
+        shapes: vec![up_quad(0, grey_pbr(0))],
         ..Default::default()
     };
     r.set_projected_layer(Some(ash()), &|_| None);

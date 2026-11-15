@@ -198,47 +198,29 @@ fn a_missing_csm_is_asked_again_on_edit() {
     assert_eq!(cb(&r, "PBRParams1")[0], 0.7);
 }
 
-/// A type-21 shape as a plane, named `materials\t.csm` when `csm` is set.
-fn t21_plane(csm: bool) -> ParsedNif {
-    let mut s = common::plane_shape(0, common::IDENT, [0.0; 3], 1);
-    s.material = common::as_t21(s.material, nif::pbr2::feat::SUBSURFACE);
-    if csm {
-        s.material.csm_path = Some("materials/t.csm".into());
-    }
-    ParsedNif {
-        shapes: vec![s],
-        ..Default::default()
-    }
-}
-
-/// A `.csm` that does not resolve leaves a type-21 shape its block's values (Note IE6).
+/// An edit that clears the `.csm` name drops the PBR values, though the edited material still carries the stored
+/// ones: the renderer never keeps them from the incoming material (Note IE7). The shape draws vanilla.
 #[test]
-fn broken_csm_on_type_21_keeps_the_block() {
+fn a_cleared_csm_name_draws_vanilla() {
     let cache = tempfile::tempdir().unwrap();
     let mut r = renderer(cache.path());
-    let read = |p: &str| (p == "materials/t.csm").then(|| b"{ not json".to_vec());
-    let rep = r.load_parsed(&t21_plane(true), &read);
+    let mut s = common::plane_shape(0, common::IDENT, [0.0; 3], 1);
+    s.material = common::as_csm(s.material, nif::pbr2::feat::SUBSURFACE);
+    let parsed = ParsedNif {
+        shapes: vec![s],
+        ..Default::default()
+    };
+    let rep = r.load_parsed(&parsed, &common::csm_read);
     assert!(rep.compile_errors.is_empty(), "{rep:?}");
-    let m = material(&r);
-    assert!(m.csm_error.is_some());
-    assert_eq!(m.pbr, m.type21_values());
-    assert_eq!(own_pbr(&m), Pbr::V2);
+    assert_eq!(own_pbr(&material(&r)), Pbr::V2);
     assert_eq!(
         cb(&r, "PBRFlags")[0].to_bits() & PBR_SUBSURFACE,
         PBR_SUBSURFACE
     );
-}
-
-/// An edit from type 21 to another type (no `.csm`) drops the PBR values: the shape draws vanilla.
-#[test]
-fn a_type_21_shape_retyped_draws_vanilla() {
-    let cache = tempfile::tempdir().unwrap();
-    let mut r = renderer(cache.path());
-    r.load_parsed(&t21_plane(false), &|_| None);
-    assert_eq!(own_pbr(&material(&r)), Pbr::V2);
     let mut m = material(&r);
-    m.shader_type = 0;
-    r.set_material(SHAPE, m, &|_| None).unwrap();
+    assert!(m.pbr.is_some());
+    m.csm_path = None;
+    r.set_material(SHAPE, m, &common::csm_read).unwrap();
     assert_eq!(pbr_mode(&material(&r)), Pbr::None);
     let (ps, _, _) = r.draw_diag(SHAPE).unwrap();
     assert!(!ps.iter().any(|(k, _)| k == "TRUE_PBR"), "{ps:?}");

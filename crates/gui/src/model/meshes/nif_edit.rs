@@ -139,8 +139,6 @@ pub struct NifEdit {
     pub problems: Arc<Vec<NifProblem>>,
     /// Note CS: what a shader type change also did to the flags, until the next change.
     pub notice: Option<String>,
-    /// Note ID10: what each op did beyond its field, `(op index, sentence)`, from the last `reapply`.
-    pub notes: Vec<(usize, String)>,
     /// The last export's result line, and whether it is an error.
     pub export_note: Option<(String, bool)>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
@@ -309,24 +307,8 @@ const PBR_SLOTS: [&str; 9] = [
     "Unused",
 ];
 
-/// CS TruePBR 2.0 (type 21) slot meanings (spec §6); the v1 flag plays no part.
-const PBR2_SLOTS: [&str; 9] = [
-    "Base colour",
-    "Normal",
-    "Emissive",
-    "Displacement",
-    "Unused (must be empty)",
-    "RMAOS",
-    "Features 1 (fuzz / coat normal)",
-    "Features 0 (subsurface / coat)",
-    "Unused (must be empty)",
-];
-
 /// The Shader tab's name of texture-set slot `slot` (spec §7, F§1.3).
 pub fn edit_slot_label(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) -> &'static str {
-    if shader_type == 21 {
-        return PBR2_SLOTS.get(slot).copied().unwrap_or("Unused");
-    }
     if slsf2 & SLSF2_TRUE_PBR != 0 {
         return PBR_SLOTS.get(slot).copied().unwrap_or("Unused");
     }
@@ -363,8 +345,8 @@ pub fn edit_slot_label(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) ->
 /// editor names only the True PBR slots).
 pub fn edit_slot_shown(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) -> &'static str {
     match slot {
-        2 if shader_type != 21 && slsf2 & SLSF2_TRUE_PBR != 0 => "Emissive / Skin",
-        6 if shader_type != 21 && slsf2 & SLSF2_TRUE_PBR != 0 => "Coat normal / Fuzz",
+        2 if slsf2 & SLSF2_TRUE_PBR != 0 => "Emissive / Skin",
+        6 if slsf2 & SLSF2_TRUE_PBR != 0 => "Coat normal / Fuzz",
         _ => edit_slot_label(shader_type, slsf1, slsf2, slot),
     }
 }
@@ -400,11 +382,6 @@ pub fn field_label(f: Field) -> String {
         Field::StopTime => "Stop".into(),
         Field::Variable => "Controlled variable".into(),
         Field::InterpValue(n) => format!("Interpolator value {}", n + 1),
-        Field::PbrVersion => "PBR version".into(),
-        Field::PbrFeatures => "PBR features".into(),
-        Field::PbrParam(i) => nif::pbr2::PARAM_NAMES
-            .get(i as usize)
-            .map_or_else(|| format!("PBR parameter {i}"), |s| s.to_string()),
     }
 }
 
@@ -725,7 +702,6 @@ impl NifEdit {
             blocked_rev: 0,
             problems: Arc::default(),
             notice: None,
-            notes: Vec::new(),
             export_note: None,
             cleanup_note: None,
             retarget_error: None,
@@ -969,7 +945,6 @@ impl NifEdit {
                 Outcome::Applied | Outcome::ReAnchored { .. } => OpStatus::Applied,
             };
         }
-        self.notes = a.notes;
         self.patched = Arc::new(a.bytes);
         // Note GD2: the export's bytes once per change, so the Review row can count what the cleanup drops
         match nif::edit::compact(&self.patched, self.source_blocks) {
@@ -1303,23 +1278,6 @@ impl NifEdit {
         }
     }
 
-    /// The notice after a push that began with `before` ops: the caller's flag notice, then what the pushed ops did
-    /// beyond their field (Note ID10).
-    pub fn notice_for(&self, before: usize, flag: Option<String>) -> Option<String> {
-        // a merged push replaces the last op instead of adding one: its notes sit at that op's index
-        let from = if self.doc.ops.len() > before {
-            before
-        } else {
-            self.doc.ops.len().saturating_sub(1)
-        };
-        let done = self
-            .notes
-            .iter()
-            .filter(|n| n.0 >= from)
-            .map(|n| format!("{}.", n.1));
-        let lines: Vec<String> = flag.into_iter().chain(done).collect();
-        (!lines.is_empty()).then(|| lines.join(" "))
-    }
     /// The ops of the drag with merge key `merge` while it runs (empty otherwise): their bases are the values from
     /// before the drag.
     pub fn drag_ops(&self, merge: &str) -> &[DocOp] {

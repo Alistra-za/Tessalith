@@ -2,12 +2,11 @@
 use super::{anchor_role, Anchor, Op, Role};
 use crate::ctrl::TimeCtrl;
 use crate::extra::{Extra, ExtraValue};
-use crate::fields::{Field, Value};
+use crate::fields::Field;
 use crate::keys::{KeyData, KeyGroup};
-use crate::material::{SLSF1_NAMES, SLSF1_SPECULAR, SLSF2_NAMES, SLSF2_TRUE_PBR};
-use crate::model::{LightingModel, NifModel};
+use crate::material::{SLSF1_SPECULAR, SLSF2_TRUE_PBR};
+use crate::model::NifModel;
 use crate::path::canon_texture;
-use crate::pbr2;
 use crate::props::LightingTrailer;
 use std::collections::BTreeSet;
 
@@ -91,13 +90,11 @@ pub const EYE_ENV_TYPE: &str =
 /// CM27 / Note GD6: on a PBR material CS's default white RMAOS sets metallic to 1, so an empty NIF slot 5 (index; the
 /// 1-based slot 6 of the set editor, Note GH7) is fully metallic.
 pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic";
-/// Start of every type-21 Error (Note ID4): CS 2.0 logs the block and draws nothing. The text varies per field and
-/// parameter, so [`always_blocks`] matches the prefix instead of listing each text in [`ALWAYS_BLOCK`].
+/// Start of every CS 2.0 Error (Note ID4): CS 2.0 logs the block and draws nothing. [`always_blocks`] matches the
+/// prefix.
 pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
 /// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.
 pub const TYPE_22: &str = "CS 2.0 won't draw this shape: type 22 is runtime only";
-/// A v1 PBR flag (SLSF2 12, 23, 25, 26, 27, 30) on a type-21 shader: CS 2.0 doesn't read it. A Warn, never blocks.
-pub const V1_FLAG: &str = "v1 PBR flag: CS 2.0 doesn't use it";
 /// Errors that block export even when the source already has them: each one crashes or blacks out in game.
 const ALWAYS_BLOCK: [&str; 6] = [
     ENV_SCALE_PBR,
@@ -210,7 +207,6 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
     let bsx = root_bsx(m);
     for (&block, l) in &m.lighting {
         let (lt, p) = (&l.lighting, &l.lighting.params);
-        let t21 = lt.shader_type == 21;
         let mut range = |label: &str, v: f32, lo: f32, hi: f32, field| {
             // NaN is outside every range.
             if !(lo..=hi).contains(&v) {
@@ -225,17 +221,14 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             100.0,
             Field::EmissiveMultiple,
         );
-        // Type 21 has no glossiness or specular strength: its payload is checked by `type_21` below.
-        if !t21 {
-            range(
-                "Specular Strength",
-                p.specular_strength,
-                0.0,
-                10.0,
-                Field::SpecularStrength,
-            );
-            range("Glossiness", p.glossiness, 0.0, 999.0, Field::Glossiness);
-        }
+        range(
+            "Specular Strength",
+            p.specular_strength,
+            0.0,
+            10.0,
+            Field::SpecularStrength,
+        );
+        range("Glossiness", p.glossiness, 0.0, 999.0, Field::Glossiness);
         range("Alpha", p.alpha, 0.0, 128.0, Field::Alpha);
         range(
             "Refraction",
@@ -304,8 +297,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             .users
             .first()
             .and_then(|&s| anchor_role(m, Some(s), Role::Shader));
-        // Type 21 has its own flag rules (`type_21`): bits 24 and 17, Fit_Slope and the type flags are covered there.
-        if mlp && !pbr && lt.shader_type != 11 && !t21 && !l.prop.users.is_empty() {
+        if mlp && !pbr && lt.shader_type != 11 && !l.prop.users.is_empty() {
             let fix = shader_at.clone().map(|at| Op::SetBits {
                 at,
                 field: Field::Slsf2,
@@ -314,7 +306,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
                 base: lt.slsf2,
             });
             push(Level::Error, slsf2.clone(), MLP_TYPE, fix);
-        } else if mlp && lt.shader_type != 11 && !t21 {
+        } else if mlp && lt.shader_type != 11 {
             let t = "Multi_Layer_Parallax (SLSF2 24) is set but the shader type is not 11.";
             push(Level::Warn, slsf2.clone(), t, None);
         }
@@ -328,7 +320,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             });
             push(Level::Warn, slsf2.clone(), GLOW_ON_EYE, fix);
         }
-        if lt.shader_type != 16 && !t21 && lt.slsf1 & (1 << 17) != 0 {
+        if lt.shader_type != 16 && lt.slsf1 & (1 << 17) != 0 {
             let fix = shader_at.clone().map(|at| Op::SetBits {
                 at,
                 field: Field::Slsf1,
@@ -338,12 +330,12 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             });
             push(Level::Warn, fld(block, Field::Slsf1), EYE_ENV_TYPE, fix);
         }
-        if !pbr && !t21 && lt.slsf2 & (1 << 12) != 0 {
+        if !pbr && lt.slsf2 & (1 << 12) != 0 {
             let t = "Fit_Slope (SLSF2 12) does nothing without the PBR flag.";
             push(Level::Warn, slsf2, t, None);
         }
         // S-P2: a shader no shape uses is never drawn, so its flags cannot crash or render black.
-        let errs = match l.prop.users.is_empty() || t21 {
+        let errs = match l.prop.users.is_empty() {
             true => vec![],
             false => type_flag_errors(lt.shader_type, lt.slsf1),
         };
@@ -379,8 +371,6 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
         for (i, c) in chain.iter().enumerate() {
             let tgt = Target::Block { block: c.block };
             match (&*c.class, c.var) {
-                // `type_21` rules the variables of a type-21 chain
-                _ if t21 => {}
                 (LSCF, Some(8)) if pbr => push(Level::Error, tgt.clone(), ENV_SCALE_PBR, None),
                 // B-P41: glossiness (9) too, per B9 I6-R10Z (CM22).
                 (LSCF, Some(9 | 10)) | (LSCC, Some(0)) if !specular => {
@@ -403,12 +393,6 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
                     ctrl_title(c, lt.slsf2)
                 );
                 push(Level::Warn, tgt, &t, None);
-            }
-        }
-        // S-P2: a shader no shape uses is never drawn, so its rules cannot block export
-        if t21 && !l.prop.users.is_empty() {
-            for w in type_21(m, block, l, shader_at.clone()) {
-                push(w.level, w.target, &w.text, w.fix);
             }
         }
     }
@@ -543,13 +527,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
                 .get(u)
                 .is_some_and(|l| l.lighting.slsf2 & SLSF2_TRUE_PBR != 0)
         });
-        // a type-21 shader has its own slot rules (`type_21`)
-        let t21 = s.users.iter().any(|u| {
-            m.lighting
-                .get(u)
-                .is_some_and(|l| l.lighting.shader_type == 21)
-        });
-        if pbr && !t21 && s.raw.slots.get(5).is_none_or(|r| r.is_empty()) {
+        if pbr && s.raw.slots.get(5).is_none_or(|r| r.is_empty()) {
             push(
                 Level::Warn,
                 Target::Slot { set, slot: 5 },
@@ -604,192 +582,6 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
         }
     }
     out
-}
-
-/// The CS 2.0 rules of the type-21 shader `block` alone, in `validate`'s order and without fixes; empty for any other
-/// block. The preview does not draw a shape with an Error (Note ID34, ID38).
-pub fn type_21_warnings(m: &NifModel, block: u32) -> Vec<Warning> {
-    m.lighting
-        .get(&block)
-        .filter(|l| l.lighting.shader_type == 21)
-        .map_or_else(Vec::new, |l| type_21(m, block, l, None))
-}
-
-/// The CS 2.0 rules for one type-21 shader (spec sections 2-8, Note ID4): what makes CS log the block and not draw the
-/// shape is an Error (text starts with [`WONT_DRAW`]); what CS only ignores is a Warn.
-fn type_21(m: &NifModel, block: u32, l: &LightingModel, shader_at: Option<Anchor>) -> Vec<Warning> {
-    let (lt, p) = (&l.lighting, &l.lighting.params);
-    let mut out = vec![];
-    let mut push = |level, target, text: String, fix| {
-        out.push(Warning {
-            level,
-            target,
-            text,
-            fix,
-        })
-    };
-    let fld = |field| Target::Field { block, field };
-    let err = |text: &str| format!("{WONT_DRAW}{text}");
-    let LightingTrailer::Pbr2 {
-        version,
-        features,
-        params,
-    } = p.trailer
-    else {
-        return out;
-    };
-
-    if version != pbr2::VERSION {
-        let fix = shader_at.clone().map(|at| Op::SetField {
-            at,
-            field: Field::PbrVersion,
-            value: Value::U32(pbr2::VERSION),
-            base: Value::U32(version),
-        });
-        let t = err(&format!("PBR version is {version}, CS 2.0 reads 2"));
-        push(Level::Error, fld(Field::PbrVersion), t, fix);
-    }
-    for text in pbr2::feature_errors(features) {
-        push(Level::Error, fld(Field::PbrFeatures), err(text), None);
-    }
-    for (i, &v) in params.iter().enumerate() {
-        let Some(text) = pbr2::param_error(i, v) else {
-            continue;
-        };
-        let fix = shader_at.clone().map(|at| Op::SetField {
-            at,
-            field: Field::PbrParam(i as u8),
-            value: Value::F32(pbr2::clamp_param(i, v).to_bits()),
-            base: Value::F32(v.to_bits()),
-        });
-        push(Level::Error, fld(Field::PbrParam(i as u8)), err(&text), fix);
-    }
-
-    // flags (spec section 5); the v1 PBR flags are hidden on 21, so they are a Warn with a fix, not a block
-    for (field, now, banned, names) in [
-        (Field::Slsf1, lt.slsf1, pbr2::BANNED_SLSF1, &SLSF1_NAMES),
-        (Field::Slsf2, lt.slsf2, pbr2::BANNED_SLSF2, &SLSF2_NAMES),
-    ] {
-        let mask = now & banned;
-        if mask == 0 {
-            continue;
-        }
-        let fix = clear_bits(&shader_at, field, mask, now);
-        let list = bit_names(mask, names);
-        push(
-            Level::Error,
-            fld(field),
-            err(&format!("shader flag {list} must be off")),
-            fix,
-        );
-    }
-    let v1 = lt.slsf2 & pbr2::V1_SLSF2;
-    if v1 != 0 {
-        let fix = clear_bits(&shader_at, Field::Slsf2, v1, lt.slsf2);
-        push(Level::Warn, fld(Field::Slsf2), V1_FLAG.to_string(), fix);
-    }
-
-    // texture slots (spec section 6); an absent set reads as every slot empty
-    let set = l
-        .texture_set
-        .and_then(|b| m.texsets.get(&b).map(|s| (b, s)));
-    let filled = |slot: usize| {
-        set.is_some_and(|(_, s)| s.raw.slots.get(slot).is_some_and(|r| !r.is_empty()))
-    };
-    let at_slot = |slot: u32| match set {
-        Some((set, _)) => Target::Slot { set, slot },
-        None => Target::Block { block },
-    };
-    for (slot, role) in [(4, "environment"), (8, "unused")] {
-        if filled(slot) {
-            let t = err(&format!("slot {} ({role}) must be empty", slot + 1));
-            push(Level::Error, at_slot(slot as u32), t, None);
-        }
-    }
-    let needs = [
-        (0, "diffuse", true),
-        (1, "normal", true),
-        (5, "RMAOS", true),
-        (
-            3,
-            "height, for interlayer parallax",
-            features & pbr2::feat::INTERLAYER_PARALLAX != 0,
-        ),
-        (
-            6,
-            "inner layer, for coat normal",
-            features & pbr2::feat::COAT_NORMAL != 0,
-        ),
-    ];
-    for (slot, role, required) in needs {
-        if required && !filled(slot) {
-            let t = err(&format!("slot {} ({role}) is empty", slot + 1));
-            push(Level::Error, at_slot(slot as u32), t, None);
-        }
-    }
-
-    if m.bsver != 100 {
-        let t = err(&format!(
-            "type 21 needs a Skyrim SE/AE file (BS version 100), this one is {}",
-            m.bsver
-        ));
-        push(Level::Error, Target::Block { block }, t, None);
-    }
-
-    // spec section 7: CS ignores a block with the wrong float count
-    if let Some(x) = &p.pbr2_extra {
-        for (name, floats, want) in [("PBRThinSurface", &x.thin, 4), ("PBRFuzz", &x.fuzz, 2)] {
-            if let Some(n) = floats.as_ref().map(Vec::len).filter(|&n| n != want) {
-                let t = format!("{name} has {n} floats, not {want}: CS ignores it");
-                push(Level::Warn, Target::Block { block }, t, None);
-            }
-        }
-    }
-
-    // spec section 8: only the shared fields can be animated
-    for c in l.prop.ctrls.iter().filter_map(|c| m.ctrls.get(c)) {
-        let (float, no_effect) = match &*c.class {
-            LSCF => (true, &pbr2::NO_EFFECT_FLOAT_VARS[..]),
-            LSCC => (false, &pbr2::NO_EFFECT_COLOR_VARS[..]),
-            _ => continue,
-        };
-        let Some(v) = c.var else { continue };
-        let tgt = Target::Block { block: c.block };
-        if no_effect.contains(&v) {
-            let t = format!(
-                "{} runs, but CS 2.0 shows no change",
-                var_label(&c.class, v, lt.slsf2)
-            );
-            push(Level::Warn, tgt, t, None);
-        } else if pbr2::var_refused_on_21(float, v) {
-            let t = err(&format!(
-                "controller variable {v} of {} is not one CS 2.0 reads",
-                c.class
-            ));
-            push(Level::Error, tgt, t, None);
-        }
-    }
-    out
-}
-
-/// A fix that switches `mask` off in `field`, when the shader can be reached.
-fn clear_bits(at: &Option<Anchor>, field: Field, mask: u32, base: u32) -> Option<Op> {
-    at.clone().map(|at| Op::SetBits {
-        at,
-        field,
-        mask,
-        value: 0,
-        base,
-    })
-}
-
-/// The names of the bits in `mask`, comma separated.
-fn bit_names(mask: u32, names: &[&str; 32]) -> String {
-    (0..32)
-        .filter(|b| mask >> b & 1 != 0)
-        .map(|b| names[b])
-        .collect::<Vec<_>>()
-        .join(", ")
 }
 
 /// Errors in the keys the ops author (spec §3.3): times, values and tangents must be finite (B-P29); times must not
@@ -896,8 +688,8 @@ pub fn demote_source(source: &[Warning], edited: &mut [Warning]) {
     }
 }
 
-/// An Error that blocks export even when the source already has it: an [`ALWAYS_BLOCK`] text, or any type-21 Error
-/// (text starts with [`WONT_DRAW`]; the texts name the field, so they cannot all be listed).
+/// An Error that blocks export even when the source already has it: an [`ALWAYS_BLOCK`] text, or a CS 2.0 Error (text
+/// starts with [`WONT_DRAW`]).
 pub fn always_blocks(w: &Warning) -> bool {
     ALWAYS_BLOCK.contains(&w.text.as_str()) || w.text.starts_with(WONT_DRAW)
 }

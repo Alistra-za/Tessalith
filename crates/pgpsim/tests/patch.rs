@@ -17,34 +17,6 @@ fn with(extra: Value) -> Value {
     e
 }
 
-/// PGPatcher 2.3.1 doesn't know shader type 21 (Note ID4): the shape keeps its material, whatever the entry says.
-#[test]
-fn type_21_shape_left_untouched() {
-    let mut src = rock();
-    src.shader_type = 21;
-    src.slsf2 = 1;
-    src.params.trailer = LightingTrailer::Pbr2 {
-        version: 2,
-        features: 0,
-        params: nif::pbr2::PBR2_DEFAULTS,
-    };
-    let r = sim(
-        &with(json!({"roughness_scale": 0.25})),
-        &sdc_default(),
-        &src,
-    );
-    let SimResult::Skip(why) = r else {
-        panic!("{r:?}")
-    };
-    assert!(why.contains("type 21"), "{why}");
-    // the same entry still patches a vanilla shape
-    let entry = with(json!({"roughness_scale": 0.25}));
-    assert!(matches!(
-        sim(&entry, &sdc_default(), &rock()),
-        SimResult::Patched { .. }
-    ));
-}
-
 #[test]
 fn plain_sdc_entry() {
     let (m, mp, badges) = patched(sim(

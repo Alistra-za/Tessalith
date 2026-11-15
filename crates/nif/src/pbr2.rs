@@ -1,14 +1,11 @@
 // crates/nif/src/pbr2.rs
-//! CS TruePBR 2.0 (shader type 21): the 25 PBR parameters of the payload (spec section 4, in file order).
+//! CS TruePBR 2.0 PBR values: the feature bits and the 25 parameters (the PBR 2.0 spec's section 4 order) a `.csm`
+//! material sets, and the bridge from a v1 PBR shape (Notes ID and IE).
 use crate::csm::{self, Csm, Value};
 use crate::props::{LightingParams, LightingTrailer};
 use std::collections::BTreeMap;
 
-/// What the payload's PBR Version word must be (spec section 2).
-pub const VERSION: u32 = 2;
-/// A type-21 body is this many bytes longer than a vanilla one (180 against 100).
-pub const BLOCK_EXTRA: usize = 80;
-/// Number of PBR parameters in the payload.
+/// Number of PBR parameters.
 pub const PARAM_COUNT: usize = 25;
 
 /// The PBR feature bits (spec section 3), as masks.
@@ -32,34 +29,8 @@ pub mod feat {
     pub const PAYLOAD_FEATURES: u32 = 0x3ff;
 }
 
-/// SLSF1 bits that must be off on a type-21 block (spec section 5): 7, 10, 11, 14, 17, 18, 21, 28.
-pub const BANNED_SLSF1: u32 =
-    1 << 7 | 1 << 10 | 1 << 11 | 1 << 14 | 1 << 17 | 1 << 18 | 1 << 21 | 1 << 28;
-/// SLSF2 bits that must be off on a type-21 block (spec section 5): 1, 6, 9, 20, 24.
-pub const BANNED_SLSF2: u32 = 1 << 1 | 1 << 6 | 1 << 9 | 1 << 20 | 1 << 24;
 /// The v1 PBR flags (SLSF2 12, 23, 25, 26, 27, 30). CS 2.0 doesn't use them; a clean v2 shape has them off.
 pub const V1_SLSF2: u32 = 1 << 12 | 1 << 23 | 1 << 25 | 1 << 26 | 1 << 27 | 1 << 30;
-
-/// Float controller variables CS 2.0 acts on (spec section 8): refraction, emissive multiple, alpha, UV.
-pub const FLOAT_VARS: [u32; 7] = [0, 11, 12, 20, 21, 22, 23];
-/// Float controller variables CS 2.0 runs but shows no change for (glossiness, specular strength).
-pub const NO_EFFECT_FLOAT_VARS: [u32; 2] = [9, 10];
-/// Colour controller variables CS 2.0 acts on: emissive colour.
-pub const COLOR_VARS: [u32; 1] = [1];
-/// Colour controller variables CS 2.0 runs but shows no change for (specular colour).
-pub const NO_EFFECT_COLOR_VARS: [u32; 1] = [0];
-
-/// True when CS 2.0 refuses controller variable `var` of the lighting shader float (`float`) or colour controller
-/// class (Note ID16): neither one it acts on nor one it runs without a visible change. The validator, the pick of
-/// type 21 and AddController all ask this one question.
-pub fn var_refused_on_21(float: bool, var: u32) -> bool {
-    let (offered, no_effect) = if float {
-        (&FLOAT_VARS[..], &NO_EFFECT_FLOAT_VARS[..])
-    } else {
-        (&COLOR_VARS[..], &NO_EFFECT_COLOR_VARS[..])
-    };
-    !offered.contains(&var) && !no_effect.contains(&var)
-}
 
 /// Default of each of the 25 parameters.
 pub const PBR2_DEFAULTS: [f32; PARAM_COUNT] = [
@@ -70,20 +41,6 @@ pub const PBR2_DEFAULTS: [f32; PARAM_COUNT] = [
     1.5, 40.0, 0.015, 2.0,  // glint scale, log density, roughness, randomization
     0.75, // subsurface balance
     0.5, 0.5, 1.0, // thin surface: front, back specular weight, back roughness scale
-];
-
-/// Name of each feature bit 0-9, in bit order.
-pub const FEATURE_NAMES: [&str; 10] = [
-    "Subsurface",
-    "Two-layer coat",
-    "Coloured coat",
-    "Interlayer parallax",
-    "Coat normal",
-    "Fuzz",
-    "Hair",
-    "Glint",
-    "Foliage",
-    "Thin surface",
 ];
 
 /// The first parameter of each colour (three parameters, R G B).
@@ -221,26 +178,6 @@ pub fn allowed_with(features: u32, bit: u32) -> bool {
         .all(|e| now.contains(e))
 }
 
-/// The two optional NiFloatsExtraData blocks of a type-21 shader (spec section 7), found by name on the property's
-/// extra-data list. The floats stay as written: a wrong count is the validator's to report (Note ID2).
-#[derive(Debug, Clone, PartialEq, Default)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-pub struct Pbr2Extra {
-    /// `PBRThinSurface`: expected 4 floats (subsurface balance, front and back specular weight, back roughness scale).
-    pub thin: Option<Vec<f32>>,
-    /// `PBRFuzz`: expected 2 floats (fuzz roughness, green-channel switch).
-    pub fuzz: Option<Vec<f32>>,
-}
-
-/// The `PBRThinSurface` floats CS 2.0 applies (spec section 7): exactly 4, and none on a two-layer or hair material.
-/// The preview's TXST step (gui `set_preview::apply_txst21`) and render3d's `write_pbr2` both ask this.
-pub fn thin_surface_used(features: u32, extra: Option<&Pbr2Extra>) -> Option<&[f32]> {
-    extra
-        .filter(|_| features & (feat::TWO_LAYER | feat::HAIR) == 0)
-        .and_then(|x| x.thin.as_deref())
-        .filter(|v| v.len() == 4)
-}
-
 /// What [`from_v1`] makes of a v1 shape.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToV2 {
@@ -347,135 +284,7 @@ pub fn from_v1(shader_type: u32, slsf2: u32, p: &LightingParams) -> ToV2 {
     }
 }
 
-/// What [`to_v1`] makes of a v2 shape: the SLSF2 bits to set, the lighting fields, and the type-11 trailer floats
-/// (`None`: type 0, no trailer).
-#[derive(Debug, Clone, PartialEq)]
-pub struct ToV1 {
-    pub slsf2_set: u32,
-    pub glossiness: f32,
-    pub specular_color: [f32; 3],
-    pub specular_strength: f32,
-    pub lighting_effect_1: f32,
-    pub lighting_effect_2: f32,
-    pub mlp: Option<[f32; 4]>,
-    /// Set features the v1 shape can't carry, by [`FEATURE_NAMES`], in bit order.
-    pub dropped: Vec<&'static str>,
-}
-
-/// The v1 PBR shape that stands for v2 `features` and `params`, by the same table in reverse (design, settled item
-/// 5). Every set feature the chosen v1 form can't carry goes to `dropped`:
-/// thin surface and foliage always, subsurface, fuzz and glint under two-layer, anything but hair under hair, and
-/// glint beside fuzz (fuzz wins the trailer, as in `from_v1`).
-pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
-    use feat::*;
-    let (has, p) = (|m: u32| features & m != 0, params);
-    let mut r = ToV1 {
-        slsf2_set: SLSF2_PBR,
-        glossiness: p[1],
-        specular_color: [1.0; 3],
-        specular_strength: p[0],
-        lighting_effect_1: 0.0,
-        lighting_effect_2: p[2],
-        mlp: None,
-        dropped: Vec::new(),
-    };
-    if has(TWO_LAYER) {
-        r.slsf2_set |= SLSF2_MLP;
-        for (bit, flag) in [
-            (INTERLAYER_PARALLAX, SLSF2_SOFT),
-            (COAT_NORMAL, SLSF2_BACK),
-            (COLORED_COAT, SLSF2_COLORED),
-        ] {
-            if has(bit) {
-                r.slsf2_set |= flag;
-            }
-        }
-        r.specular_color = [p[7], p[8], p[9]];
-        r.lighting_effect_1 = p[10];
-        r.mlp = Some([p[11], p[12], 0.0, 0.0]);
-    } else if has(HAIR) {
-        r.slsf2_set |= SLSF2_BACK;
-    } else {
-        if has(SUBSURFACE) {
-            r.slsf2_set |= SLSF2_SUBSURFACE;
-            r.specular_color = [p[3], p[4], p[5]];
-            r.lighting_effect_1 = p[6];
-        }
-        if has(FUZZ) {
-            r.slsf2_set |= SLSF2_SOFT;
-            r.mlp = Some([p[13], p[14], p[15], p[16]]);
-        } else if has(GLINT) {
-            r.slsf2_set |= SLSF2_FIT_SLOPE;
-            r.mlp = Some([p[17], p[18], p[19], p[20]]);
-        }
-    }
-    let kept = if has(TWO_LAYER) {
-        TWO_LAYER | INTERLAYER_PARALLAX | COAT_NORMAL | COLORED_COAT
-    } else if has(HAIR) {
-        HAIR
-    } else {
-        SUBSURFACE | if has(FUZZ) { FUZZ } else { GLINT }
-    };
-    r.dropped = FEATURE_NAMES
-        .iter()
-        .enumerate()
-        .filter(|&(bit, _)| features & !kept & (1 << bit) != 0)
-        .map(|(_, &name)| name)
-        .collect();
-    r
-}
-
-/// What a type-21 shape with SLSF2 `slsf2` becomes as v1 PBR type `new_type` (0 or 11): the SLSF2 word, the five
-/// lighting fields, the trailer floats after Lighting Effect 2, and the features dropped. `set_shader_type`'s
-/// conversion from 21 writes it (Note ID11, ID14).
-#[derive(Debug, Clone, PartialEq)]
-pub struct V1Body {
-    pub slsf2: u32,
-    pub glossiness: f32,
-    pub specular_color: [f32; 3],
-    pub specular_strength: f32,
-    pub lighting_effect_1: f32,
-    pub lighting_effect_2: f32,
-    /// `trailer_defaults(new_type)` with the [`to_v1`] trailer floats first on type 11; empty on type 0.
-    pub trailer: Vec<f32>,
-    pub dropped: Vec<&'static str>,
-}
-
-/// See [`V1Body`]. The v1 PBR flags and the stale multi-layer bit go, then the bits [`to_v1`] sets. Type 0 has no
-/// trailer, so when `to_v1` chose the type-11 form only the bits that form shares with type 0 (PBR 23, subsurface 26)
-/// stay, and every feature but subsurface is dropped (Note ID14).
-pub fn v1_body(slsf2: u32, features: u32, params: &[f32; PARAM_COUNT], new_type: u32) -> V1Body {
-    let mut v = to_v1(features, params);
-    if new_type == 0 && (v.mlp.is_some() || v.slsf2_set & SLSF2_MLP != 0) {
-        v.slsf2_set &= SLSF2_PBR | SLSF2_SUBSURFACE;
-        v.mlp = None;
-        let kept = if v.slsf2_set & SLSF2_SUBSURFACE != 0 {
-            feat::SUBSURFACE
-        } else {
-            0
-        };
-        v.dropped = (0..FEATURE_NAMES.len())
-            .filter(|b| features & !kept & (1 << b) != 0)
-            .map(|b| FEATURE_NAMES[b])
-            .collect();
-    }
-    let mut trailer = crate::edit::trailer_defaults(new_type);
-    if let (11, Some(mlp)) = (new_type, v.mlp) {
-        trailer[..4].copy_from_slice(&mlp);
-    }
-    V1Body {
-        slsf2: (slsf2 & !(V1_SLSF2 | SLSF2_MLP)) | v.slsf2_set,
-        glossiness: v.glossiness,
-        specular_color: v.specular_color,
-        specular_strength: v.specular_strength,
-        lighting_effect_1: v.lighting_effect_1,
-        lighting_effect_2: v.lighting_effect_2,
-        trailer,
-        dropped: v.dropped,
-    }
-}
-
-/// Note ID45: the CS `PBRTextureSets` JSON key of each parameter (`glintParameters.*` nested), by its first index; a
+/// Note IE3: the CS `PBRTextureSets` JSON key of each parameter (`glintParameters.*` nested), by its first index; a
 /// colour key fills three ([`COLOR_PARAMS`]).
 pub const TXST_PARAMS: &[(&str, usize)] = &[
     ("roughnessScale", 0),

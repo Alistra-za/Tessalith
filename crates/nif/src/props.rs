@@ -2,10 +2,8 @@
 //! Small property blocks, decoded fully and checked against the declared block size (plan 01 Q2, nif.xml
 //! 6581-6685, 6307-6319, 3972-3978). BSVER 83 and 100 share these layouts.
 use crate::cursor::Cursor;
-use crate::extra::ExtraValue;
 use crate::header::Header;
 use crate::path::{canon_texture, TexPath};
-use crate::pbr2::Pbr2Extra;
 use crate::text::lossy;
 use crate::NifError;
 use std::sync::Arc;
@@ -34,13 +32,6 @@ pub enum LightingTrailer {
         cubemap_scale: f32,
         left_center: [f32; 3],
         right_center: [f32; 3],
-    },
-    /// Shader type 21 (CS TruePBR 2.0): PBR version, feature bits and the 25 parameters (`crate::pbr2`). Read
-    /// structurally; whether the values are valid is a later layer's job (Note ID1).
-    Pbr2 {
-        version: u32,
-        features: u32,
-        params: [f32; 25],
     },
 }
 
@@ -99,8 +90,6 @@ impl LightingTrailer {
                 "Right eye Y",
                 "Right eye Z",
             ],
-            // the parameters are named by `crate::pbr2::PARAM_NAMES`, not as trailer fields
-            LightingTrailer::Pbr2 { .. } => &[],
         }
     }
 }
@@ -121,38 +110,6 @@ pub struct LightingParams {
     pub lighting_effect_1: f32,
     pub lighting_effect_2: f32,
     pub trailer: LightingTrailer,
-    /// Type 21 only: the PBRThinSurface / PBRFuzz blocks on the extra-data list (`None` when there are none).
-    #[cfg_attr(
-        feature = "serde",
-        serde(default, skip_serializing_if = "Option::is_none")
-    )]
-    pub pbr2_extra: Option<Pbr2Extra>,
-}
-
-/// The PBRThinSurface and PBRFuzz blocks among the extra data of the type-21 shader property `block`; `None` when it
-/// has neither. A block that does not decode as NiFloatsExtraData is skipped.
-fn read_pbr2_extra(h: &Header, b: &[u8], block: usize) -> Option<Pbr2Extra> {
-    let net = crate::net::read_net(h, b, block).ok()?;
-    let mut x = Pbr2Extra::default();
-    for &r in &net.extra {
-        let Ok(i) = usize::try_from(r) else { continue };
-        if i >= h.sizes.len() || h.kind(i) != b"NiFloatsExtraData" {
-            continue;
-        }
-        let Ok(e) = crate::extra::read_extra(h, b, i) else {
-            continue;
-        };
-        let Some(ExtraValue::Floats(v)) = e.value else {
-            continue;
-        };
-        // the first block of a name wins
-        match e.name.as_deref() {
-            Some(b"PBRThinSurface") if x.thin.is_none() => x.thin = Some(v),
-            Some(b"PBRFuzz") if x.fuzz.is_none() => x.fuzz = Some(v),
-            _ => {}
-        }
-    }
-    (x != Pbr2Extra::default()).then_some(x)
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -256,32 +213,12 @@ pub fn decode_lighting(h: &Header, b: &[u8], block: usize) -> Result<Lighting, N
     let texture_clamp_mode = c.u32()?;
     let alpha = c.f32()?;
     let refraction_strength = c.f32()?;
-    // Type 21 (CS TruePBR 2.0) replaces everything after refraction with the PBR payload (Note ID1).
-    let (glossiness, specular_color, specular_strength, lighting_effect_1, lighting_effect_2) =
-        if shader_type == 21 {
-            (0.0, [0.0; 3], 0.0, 0.0, 0.0)
-        } else {
-            (c.f32()?, c.f32s::<3>()?, c.f32()?, c.f32()?, c.f32()?)
-        };
+    let glossiness = c.f32()?;
+    let specular_color = c.f32s::<3>()?;
+    let specular_strength = c.f32()?;
+    let lighting_effect_1 = c.f32()?;
+    let lighting_effect_2 = c.f32()?;
     let trailer = match shader_type {
-        21 => {
-            // version, features and 25 floats; a shorter block would hit the cursor's end first, so report the
-            // size mismatch the same way `finish` does
-            const PAYLOAD: usize = 4 + 4 + 4 * 25;
-            if end - c.pos() != PAYLOAD {
-                return Err(NifError::BlockSize {
-                    block: block as u32,
-                    kind: crate::text::label(&lossy(h.kind(block))).into_owned(),
-                    declared: h.sizes[block],
-                    consumed: (c.pos() - start + PAYLOAD) as u32,
-                });
-            }
-            LightingTrailer::Pbr2 {
-                version: c.u32()?,
-                features: c.u32()?,
-                params: c.f32s::<25>()?,
-            }
-        }
         1 => LightingTrailer::EnvMap { scale: c.f32()? },
         5 => LightingTrailer::SkinTint(c.f32s::<3>()?),
         6 => LightingTrailer::HairTint(c.f32s::<3>()?),
@@ -324,11 +261,6 @@ pub fn decode_lighting(h: &Header, b: &[u8], block: usize) -> Result<Lighting, N
             lighting_effect_1,
             lighting_effect_2,
             trailer,
-            pbr2_extra: if shader_type == 21 {
-                read_pbr2_extra(h, b, block)
-            } else {
-                None
-            },
         },
     })
 }
