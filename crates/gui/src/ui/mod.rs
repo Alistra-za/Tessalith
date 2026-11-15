@@ -364,8 +364,8 @@ fn switched_to(ctx: &egui::Context, now: CentreShown) -> bool {
     changed
 }
 
-/// The centre: a docked Presets or JSON editor tab in front (Note FB7), else the preview of an expanded texture, else
-/// the settings of the selected texture or set, else a hint.
+/// The centre: a docked Presets, JSON editor or Settings tab in front (Note FB7, JI1), else the preview of an expanded
+/// texture, else the settings of the selected texture or set, else a hint.
 fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: bool) {
     // Before the start screen: Presets… opens with no folder too (K5).
     centre_tabs::strip(ui, model);
@@ -407,6 +407,8 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             set_preview::draw(ui, model, &mut state.set3d);
         }
         Selection::Item(key) => {
+            // ui-rules 3.2 (Note JI7): a bar drawn without hover, so a panel taller than the window says so.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-texture")
                 .auto_shrink([false, false]);

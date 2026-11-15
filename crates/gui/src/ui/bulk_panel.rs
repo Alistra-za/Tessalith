@@ -125,6 +125,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                 keys.len(),
                 keys.first().map_or("", String::as_str)
             );
+            // ui-rules 3.2 (Note JI7): a bar drawn without hover, so a panel taller than the window says so.
+            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-bulk")
                 .auto_shrink([false, false]);

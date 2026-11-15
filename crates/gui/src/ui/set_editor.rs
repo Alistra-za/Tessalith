@@ -132,7 +132,9 @@ pub fn draw(
     let editable = off.is_none();
     let why = off.unwrap_or_default();
     // Note FB2 (amendment C): one column, as the texture settings panel: the name box, the slot rows at full width,
-    // then the tabs and groups. Nothing sits beside the rows, so nothing can cover them.
+    // then the tabs and groups. Nothing sits beside the rows, so nothing can cover them. ui-rules 3.2 (CC21, Note JI7):
+    // a bar drawn without hover.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
     let mut area = egui::ScrollArea::vertical()
         .id_salt("centre-set")
         .auto_shrink([false, false]);

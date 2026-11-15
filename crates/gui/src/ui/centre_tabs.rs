@@ -1,5 +1,6 @@
-//! Note FB7 (review C6, amendment F): Presets and the TruePBR JSON editor are tabs of the centre column, not floating
-//! windows. Pop out shows a view in an OS window of its own (for a second monitor); Dock brings it back.
+//! Note FB7 (review C6, amendment F): Presets, the TruePBR JSON editor and Settings (Note JI1) are tabs of the centre
+//! column, not floating windows. Pop out shows a view in an OS window of its own (for a second monitor); Dock brings it
+//! back.
 use super::{json_editor, presets, settings_tab};
 use crate::model::{AppModel, CentreTab};
 use eframe::egui;

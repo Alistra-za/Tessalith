@@ -239,6 +239,8 @@ mod review;
 mod review_json_answer;
 #[path = "../review_tab.rs"]
 mod review_tab;
+#[path = "../scroll_bars.rs"]
+mod scroll_bars;
 #[path = "../set_cards.rs"]
 mod set_cards;
 #[path = "../set_cleanup.rs"]
