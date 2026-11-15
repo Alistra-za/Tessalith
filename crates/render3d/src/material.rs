@@ -361,7 +361,7 @@ pub fn perm_material(m: &MaterialState) -> Material {
 /// `PerMaterial.SpecularColor` as the engine uploads it (answers.md Q5, frame11178 ev4217/5488/5536/6544):
 /// `xyz = sRGB→linear(NIF specular colour) × NIF specular strength`, `w = NIF glossiness` (shininess,
 /// iLH:973). The linearisation is the Linear Lighting effect (owner's CS has LL on); with LL off it is
-/// `colour × strength` [Inference, Q5 open item]. Written only when SPECULAR is compiled; the PBR path
+/// `colour × strength` [Inference, Q5 open item]. Written only with the Specular lighting flag; the PBR path
 /// uses [`pbr_params`] instead.
 pub fn pack_specular(p: &LightingParams, linear_lighting: bool) -> [f32; 4] {
     let c = p.specular_color.map(|c| {
@@ -525,7 +525,8 @@ pub fn write_material(
         "TexcoordOffset",
         &[p.uv_offset[0], p.uv_offset[1], p.uv_scale[0], p.uv_scale[1]],
     );
-    // SPECULAR is compiled only for vanilla shapes with Specular set and a non-zero strength (permutation.rs).
+    // The Specular lighting flag is set only for vanilla shapes with Specular set and a non-zero strength
+    // (`permutation::runtime_bits`).
     if !pbr && bit(m.slsf1, 0) && p.specular_strength > 0.0 {
         w.set("SpecularColor", &pack_specular(p, linear_lighting));
     }
@@ -571,7 +572,8 @@ pub fn write_material(
         .filter(|a| a.test())
         .map_or(0.0, |a| a.threshold as f32 / 255.0);
     w.set("AlphaTestRefRS", &[tref]);
-    // cb4: engine PS desc & ~compile key = runtime bits only (answers.md Q4.1, B5 `runtime_bits`).
+    // cb4: engine PS desc & ~compile key = the runtime bits: the lighting flags and the Glowmap technique (answers.md
+    // Q4.1, Note IE8, `runtime_bits`).
     w.set_u32("PixelShaderDescriptor", &[runtime_bits(&perm_material(m))]);
     // InWorld (bit 0); SourceAlphaBlend (bit 8) only for blended passes (answers.md Q4.2).
     w.set_u32(

@@ -65,35 +65,18 @@ fn define_table() {
     let skin_vs = defines(&m(5, 0, 0, true), Stage::Vertex, &[], false);
     assert!(!names(&skin_vs).contains(&"FACEGEN_RGB_TINT"));
 
-    // RB7 (answers.md Q4.2): Specular/Soft/Rim/Back are compile-time in installed CS 1.9.
-    let lit = defines(
-        &m(4, 1, (1 << 25) | (1 << 26) | (1 << 27), true),
-        Stage::Pixel,
-        &[],
-        false,
-    );
-    for want in ["SPECULAR", "SOFT_LIGHTING", "RIM_LIGHTING", "BACK_LIGHTING"] {
-        assert!(names(&lit).contains(&want), "{want} in {:?}", names(&lit));
-    }
-    let lit_vs = defines(&m(4, 1, 1 << 25, true), Stage::Vertex, &[], false);
-    assert!(!names(&lit_vs).contains(&"SPECULAR") && !names(&lit_vs).contains(&"SOFT_LIGHTING"));
-    // Specular strength 0 drops SPECULAR although SLSF1.0 is set (Arch_Mouth capture).
-    let mut mouth = m(5, 1, 0, true);
-    mouth.specular_strength = 0.0;
-    assert!(!names(&defines(&mouth, Stage::Pixel, &[], false)).contains(&"SPECULAR"));
-    // Under TruePBR these flags remap to PBRFlags instead (Arch_Eye: SF2.26 -> no Rim).
-    let pbr_rim = defines(
-        &m(0, 1, (1 << 23) | (1 << 26) | (1 << 25), false),
-        Stage::Pixel,
-        &[],
-        false,
-    );
-    for no in ["SPECULAR", "SOFT_LIGHTING", "RIM_LIGHTING"] {
-        assert!(
-            !names(&pbr_rim).contains(&no),
-            "{no} in {:?}",
-            names(&pbr_rim)
-        );
+    // Note IE8: Specular/Soft/Rim/Back are no defines on CS 2.0 (cb4 runtime bits, `runtime_bits_table`), on either
+    // stage, vanilla or PBR.
+    for (st, slsf2) in [
+        (4, (1 << 25) | (1 << 26) | (1 << 27)),
+        (0, (1 << 23) | (1 << 26) | (1 << 25)),
+    ] {
+        for stage in [Stage::Pixel, Stage::Vertex] {
+            let lit = defines(&m(st, 1, slsf2, true), stage, &[], false);
+            for no in ["SPECULAR", "SOFT_LIGHTING", "RIM_LIGHTING", "BACK_LIGHTING"] {
+                assert!(!names(&lit).contains(&no), "{no} in {:?}", names(&lit));
+            }
+        }
     }
     // Aniso: ANISO_LIGHTING, or GLINT with TruePBR.
     assert!(
@@ -173,18 +156,34 @@ fn define_table() {
     assert!(!names(&defines(&vc, Stage::Pixel, &[], false)).contains(&"VC"));
 }
 
-/// RB7 / answers.md Q4.1: cb4 `PixelShaderDescriptor` = engine PS desc & ~CS compile key. Specular/Soft/Rim/Back
-/// are compile-time defines in installed CS 1.9 and never reach cb4; CharacterLight/DefShadow stay 0 in the preview.
-/// The Glowmap technique is still read at run time (Lighting.hlsl:2598), so type 2 keeps `2 << 24`.
+/// answers.md Q4.1: cb4 `PixelShaderDescriptor` = engine PS desc & ~CS compile key. CS 2.0 keeps Specular/Soft/Rim/Back
+/// out of the compile key, so they reach cb4 (Note IE8: the coffin is key 0x11 with cb4 0x6200 in the PBR2Test1
+/// captures, key 0x211 with cb4 0x6000 on CS 1.9); CharacterLight/DefShadow stay 0 in the preview. The Glowmap
+/// technique is read at run time too, so type 2 adds `2 << 24`.
 #[test]
 fn runtime_bits_table() {
+    use render3d::permutation::{LIGHTING_BACK, LIGHTING_RIM, LIGHTING_SOFT, LIGHTING_SPECULAR};
     let b = runtime_bits(&m(2, 1, (1 << 25) | (1 << 27), false));
-    assert_eq!(b, 2 << 24);
+    assert_eq!(
+        b,
+        2 << 24 | LIGHTING_SPECULAR | LIGHTING_SOFT | LIGHTING_BACK
+    );
     assert_eq!(
         runtime_bits(&m(0, 1, (1 << 25) | (1 << 26) | (1 << 27), true)),
-        0
+        0x1E00
     );
     assert_eq!(runtime_bits(&m(5, 1 << 12, 0, true)), 0);
+    assert_eq!(runtime_bits(&m(0, 0, 1 << 26, false)), LIGHTING_RIM);
+    // Specular strength 0 drops the Specular flag although SLSF1.0 is set (Arch_Mouth capture).
+    let mut mouth = m(5, 1, 0, true);
+    mouth.specular_strength = 0.0;
+    assert_eq!(runtime_bits(&mouth), 0);
+    // Under TruePBR the flags remap to PBRFlags instead (Arch_Eye: SF2.26 -> no Rim); the captured PBR draws' cb4
+    // holds none of them.
+    assert_eq!(
+        runtime_bits(&m(0, 1, (1 << 23) | (1 << 25) | (1 << 26), false)),
+        0
+    );
 }
 
 #[test]
@@ -344,7 +343,8 @@ fn bundled_cs_lighting_compiles() {
         );
         assert!(!c.reflection.cbuffers.is_empty());
     }
-    // RB7 defines: hair with Specular/Soft/Rim/Back/Aniso + alpha, and TruePBR with Glint.
+    // RB7 defines: hair with Aniso + alpha (its Specular/Soft/Rim/Back flags are runtime bits, Note IE8), and TruePBR
+    // with Glint.
     let mut hair = m(6, 1, (1 << 21) | (1 << 25) | (1 << 26) | (1 << 27), true);
     hair.alpha_test = true;
     let pbr = m(0, 1, (1 << 21) | (1 << 23), false);

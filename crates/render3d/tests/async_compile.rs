@@ -532,10 +532,10 @@ fn an_unmemoised_failing_permutation_keeps_the_old_draw_until_it_fails() {
     let peg = ShapeId(103);
     let scene = Scene::neutral();
     let before = r.render(&scene, 96, 96).unwrap();
-    // No alpha test fails; Soft_Lighting makes it a permutation shape 143 never asked for.
+    // No alpha test fails; Anisotropic_Lighting makes it a permutation shape 143 never asked for.
     let mut bad = material(&r, peg);
     bad.alpha = None;
-    bad.slsf2 |= 1 << 25; // Soft_Lighting
+    bad.slsf2 |= 1 << 21; // Anisotropic_Lighting → ANISO_LIGHTING
     assert_eq!(
         r.set_material(peg, bad.clone(), &csm_only),
         Ok(EditKind::Permutation)

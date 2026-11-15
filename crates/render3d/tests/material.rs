@@ -386,9 +386,11 @@ fn classify_table() {
         EditKind::Permutation
     );
     assert_eq!(classify(&base, &uv, &f, true), EditKind::Cbuffer);
-    // Specular strength 0 ↔ > 0 toggles SPECULAR on vanilla shapes.
+    // Specular strength 0 ↔ > 0 and the soft/rim/back flags toggle cb4 lighting bits, no define (Note IE8).
     let no_spec = with(&|m| m.params.specular_strength = 0.0);
-    assert_eq!(classify(&base, &no_spec, &f, false), EditKind::Permutation);
+    assert_eq!(classify(&base, &no_spec, &f, false), EditKind::Cbuffer);
+    let back = with(&|m| m.slsf2 |= 1 << 27);
+    assert_eq!(classify(&base, &back, &f, false), EditKind::Cbuffer);
     // A new slot path rebinds; a raw-only change (same canonical path) does not.
     let tex = with(&|m| m.set_slot_raw(0, "textures\\a.dds"));
     assert_eq!(classify(&base, &tex, &f, false), EditKind::Textures);

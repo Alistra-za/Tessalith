@@ -15,7 +15,6 @@ fn standin_root() -> PathBuf {
 
 /// `TestNifFile_DeepGraph_SE.nif`: 27 Lighting shapes; all but `SkullPeg01:19` have an NiAlphaProperty
 /// (→ DO_ALPHA_TEST). The stand-in's PS `#error`s without DO_ALPHA_TEST, so exactly that shape fails.
-/// Every fixture shape carries SPECULAR, so SPECULAR cannot be the failing key.
 #[test]
 fn standin_renders_on_warp_with_one_failing_permutation() {
     let root = standin_root();

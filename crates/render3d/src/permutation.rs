@@ -23,7 +23,7 @@ pub struct Material {
     /// The shape has an NiAlphaProperty (blend or test): CS sets DoAlphaTest for both (answers.md Q4.2).
     pub alpha_test: bool,
     pub has_vertex_colors: bool,
-    /// NIF specular strength; SPECULAR is dropped when it is 0 (answers.md Q4.2, Arch_Mouth).
+    /// NIF specular strength; the Specular lighting flag is dropped when it is 0 (answers.md Q4.2, Arch_Mouth).
     pub specular_strength: f32,
     /// The MATO projected layer applies to this shape (Note GG): `PROJECTED_UV` on both stages. Set by the
     /// renderer from its layer and `material::projected_eligible`; [`crate::material::perm_material`] leaves it false.
@@ -120,21 +120,8 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     } else if ps && !pbr && bit(m.slsf2, 21) {
         out.push("ANISO_LIGHTING");
     }
-    // Compile-time in installed CS 1.9, PS only, and not under TruePBR (answers.md Q4.1/Q4.2).
-    if ps && !pbr {
-        if bit(m.slsf1, 0) && m.specular_strength > 0.0 {
-            out.push("SPECULAR");
-        }
-        if bit(m.slsf2, 25) {
-            out.push("SOFT_LIGHTING");
-        }
-        if bit(m.slsf2, 26) {
-            out.push("RIM_LIGHTING");
-        }
-        if bit(m.slsf2, 27) {
-            out.push("BACK_LIGHTING");
-        }
-    }
+    // Specular, Soft, Rim and Back lighting are no defines on CS 2.0: they reach the shader at run time (Note IE8,
+    // `runtime_bits`).
     // Every CS skin wetness line is under it (Lighting.hlsl:1658, 1695, 2169), all in the PS.
     if ps && m.wetness && features.contains(&"CS_SKIN") {
         out.push("WETNESS_EFFECTS");
@@ -151,14 +138,32 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     Defines(d)
 }
 
-/// The bits cb4 `PixelShaderDescriptor` still carries for this material. In installed CS 1.9 cb4 is
-/// `engine PS desc & ~CS compile key` (answers.md Q4.1): Specular/Soft/Rim/Back are compile-time defines and
-/// CharacterLight/DefShadow stay 0 in the preview. Only the Glowmap technique is read at run time
-/// (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`, Lighting.hlsl:2598), so type 2 → `2 << 24`, else 0.
+/// cb4 `PixelShaderDescriptor` Specular, Soft, Rim and Back lighting (cs2 Common/Permutation.hlsli `LightingFlags`).
+pub const LIGHTING_SPECULAR: u32 = 1 << 9;
+pub const LIGHTING_SOFT: u32 = 1 << 10;
+pub const LIGHTING_RIM: u32 = 1 << 11;
+pub const LIGHTING_BACK: u32 = 1 << 12;
+
+/// The bits cb4 `PixelShaderDescriptor` carries for this material: `engine PS desc & ~CS compile key` (answers.md
+/// Q4.1), with CharacterLight/DefShadow/ShadowDir 0 in the preview. CS 2.0 keeps Specular, Soft, Rim and Back out of
+/// the compile key and reads them here (cs2 Lighting.hlsl `HasLightingFlag`; Note IE8): Specular for SLSF1.0 with a
+/// specular strength above 0 (Arch_Mouth), Soft, Rim, Back for SLSF2.25-27, none of them under TruePBR. The Glowmap
+/// technique is read here too (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`), so type 2 adds `2 << 24`.
 pub fn runtime_bits(m: &Material) -> u32 {
-    if m.shader_type == 2 {
-        2 << 24
-    } else {
-        0
+    let technique = if m.shader_type == 2 { 2 << 24 } else { 0 };
+    if m.pbr != Pbr::None {
+        return technique;
     }
+    [
+        (
+            bit(m.slsf1, 0) && m.specular_strength > 0.0,
+            LIGHTING_SPECULAR,
+        ),
+        (bit(m.slsf2, 25), LIGHTING_SOFT),
+        (bit(m.slsf2, 26), LIGHTING_RIM),
+        (bit(m.slsf2, 27), LIGHTING_BACK),
+    ]
+    .into_iter()
+    .filter(|(on, _)| *on)
+    .fold(technique, |b, (_, flag)| b | flag)
 }

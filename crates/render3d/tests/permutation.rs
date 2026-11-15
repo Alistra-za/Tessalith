@@ -47,15 +47,15 @@ fn defines_per_material() {
             "v1 is vanilla",
             v1(&[]),
             Pbr::None,
-            &["SPECULAR"],
-            &["TRUE_PBR"],
+            &[],
+            &["TRUE_PBR", "SPECULAR"],
         ),
         (
-            "v1 soft/rim/back are the vanilla lighting flags",
+            "v1 soft/rim/back are the vanilla lighting flags, at run time",
             v1(&[25, 26, 27]),
             Pbr::None,
-            &["SOFT_LIGHTING", "RIM_LIGHTING", "BACK_LIGHTING"],
-            &["TRUE_PBR"],
+            &[],
+            &["TRUE_PBR", "SOFT_LIGHTING", "RIM_LIGHTING", "BACK_LIGHTING"],
         ),
         (
             "v1 MLP type 11 keeps its technique",
@@ -114,6 +114,27 @@ fn defines_per_material() {
     assert!(vs.iter().any(|x| x == "MULTI_LAYER_PARALLAX"), "{vs:?}");
 }
 
+/// Note IE8: CS 2.0 reads a vanilla shape's Specular, Soft, Rim and Back lighting from cb4 `PixelShaderDescriptor`, so
+/// a v1 shape (drawn vanilla) carries them there; a `.csm` shape carries none.
+#[test]
+fn lighting_flags_are_runtime_bits() {
+    use render3d::permutation::{
+        runtime_bits, LIGHTING_BACK, LIGHTING_RIM, LIGHTING_SOFT, LIGHTING_SPECULAR,
+    };
+    let bits = |m: &MaterialState| runtime_bits(&perm_material(&drawn(m)));
+    assert_eq!(bits(&v1(&[])), LIGHTING_SPECULAR);
+    assert_eq!(
+        bits(&v1(&[25, 26, 27])),
+        LIGHTING_SPECULAR | LIGHTING_SOFT | LIGHTING_RIM | LIGHTING_BACK
+    );
+    let mut dull = v1(&[26]);
+    dull.params.specular_strength = 0.0;
+    assert_eq!(bits(&dull), LIGHTING_RIM);
+    let mut b = csm(feat::SUBSURFACE);
+    b.slsf2 |= (1 << 25) | (1 << 26) | (1 << 27);
+    assert_eq!(bits(&b), 0);
+}
+
 /// The shaders draw a `.csm` shape as it is, and a v1 shape without bit 23.
 #[test]
 fn drawn_clears_only_the_v1_bit() {
@@ -128,6 +149,7 @@ fn drawn_clears_only_the_v1_bit() {
 mod common;
 use render3d::device::Gpu;
 use render3d::material::{EditKind, PBR_GLINT};
+use render3d::permutation::{LIGHTING_RIM, LIGHTING_SPECULAR};
 use render3d::{ParsedNif, Renderer, ShaderSource, ShapeId, ShapeStatus};
 
 /// A WARP renderer on the bundled shaders; `sync` compiles every program before a call returns, so the draws'
@@ -231,6 +253,10 @@ fn the_renderer_writes_the_cs2_pbr_block() {
     assert_eq!(cb(&r, 1, "LightingEffectParams"), [0.11, 0.22, 0.33, 0.44]);
     assert_eq!(cb(&r, 2, "LightingEffectParams").len(), 4, "shape 2 draws");
     assert_eq!(flags(&r, 2), 0, "v1 draws as vanilla");
+    // Note IE8: the vanilla lighting flags reach cb4 (Specular on in the builtin material, Rim from SLSF2.26).
+    let desc = |id| cb(&r, id, "PixelShaderDescriptor")[0].to_bits();
+    assert_eq!(desc(2), LIGHTING_SPECULAR | LIGHTING_RIM, "{:#x}", desc(2));
+    assert_eq!(desc(1), 0, "{:#x}", desc(1));
     // The stored material stays the source.
     assert_eq!(r.shapes()[0].material.shader_type, 0);
     assert_eq!(r.shapes()[1].material.slsf2 & 1 << 23, 1 << 23);
