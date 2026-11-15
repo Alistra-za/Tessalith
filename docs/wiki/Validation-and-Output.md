@@ -55,7 +55,7 @@ The thresholds are fixed; only `validation.mips` is a setting.
 
 ## The manifest
 
-Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2`, `avx`, `sse4` or `sse2`), the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
+Every output root has `<output root>\_sdc\manifest.jsonl`: one JSON line per file written. When a file is converted again a new line is appended, and the last line for each output wins. A record holds the resolved settings and where each came from, the source hashes, the encoder versions, the CPU path that encoded it (`isa`: `avx512`, `avx2` or `sse2`; `avx` and `sse4` appear only in records an older version wrote), the validation summary and the output's size and time. The JSON Schema for it is `manifest`: [CLI reference](CLI-Reference.md#sdc-presets).
 
 ## Re-runs and if-changed
 
