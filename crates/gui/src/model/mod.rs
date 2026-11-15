@@ -15,6 +15,7 @@ pub mod encoding_follow;
 pub mod export;
 pub mod export_scope;
 pub mod fields;
+pub mod format_rule;
 pub mod heatmap;
 pub mod helpers;
 pub mod history;

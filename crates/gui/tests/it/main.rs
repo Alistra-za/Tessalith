@@ -103,6 +103,8 @@ mod fill_from_names;
 mod generate_removed;
 #[path = "../generated_sidecar.rs"]
 mod generated_sidecar;
+#[path = "../grey_format.rs"]
+mod grey_format;
 #[path = "../gui_tweaks.rs"]
 mod gui_tweaks;
 #[path = "../header_layout.rs"]
