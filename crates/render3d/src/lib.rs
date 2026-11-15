@@ -1181,7 +1181,8 @@ impl Renderer {
             if path.norm.is_empty() {
                 continue;
             }
-            let Some(reg) = textures::register_for_slot(m.shader_type, pbr, msn, slot) else {
+            let Some(reg) = textures::register_for_slot(m.shader_type, m.slsf2, pbr, msn, slot)
+            else {
                 continue;
             };
             let Some(kind) = draw::srv_kind_at(&program.ps.reflection, reg) else {
@@ -1271,7 +1272,7 @@ impl Renderer {
         let (pbr, msn) = (material::own_pbr(m) != Pbr::None, m.slsf1 & (1 << 12) != 0);
         for (slot, path) in m.slots.iter().enumerate() {
             if !path.norm.is_empty()
-                && textures::register_for_slot(m.shader_type, pbr, msn, slot).is_some()
+                && textures::register_for_slot(m.shader_type, m.slsf2, pbr, msn, slot).is_some()
             {
                 self.texture(&path.norm, false, true, textures, rep);
             }
@@ -2080,7 +2081,8 @@ impl Renderer {
                     continue;
                 }
                 let pbr = material::own_pbr(m) != Pbr::None;
-                let Some(reg) = textures::register_for_slot(m.shader_type, pbr, msn, slot) else {
+                let Some(reg) = textures::register_for_slot(m.shader_type, m.slsf2, pbr, msn, slot)
+                else {
                     continue;
                 };
                 let Some(view) = d.srvs.iter().find(|(r, _)| *r == reg).map(|(_, v)| v) else {
@@ -2198,6 +2200,14 @@ impl Renderer {
                 .collect()
         });
         Some((w.ps.0, reflection, srvs))
+    }
+
+    /// Diagnostic hook: the VS defines the shape's material compiles with.
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn draw_vs_defines(&self, id: ShapeId) -> Option<Vec<(String, String)>> {
+        let m = material::drawn(&self.shapes.get(&id)?.material).into_owned();
+        Some(self.wanted(&m).ok()?.vs.0)
     }
 
     /// Test hook: the floats of `var` as written in the shape's pixel-stage cbuffers (`None` without a draw or when

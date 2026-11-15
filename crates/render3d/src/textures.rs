@@ -40,7 +40,18 @@ use windows::Win32::Graphics::Dxgi::Common::{
 /// parallax slot 3 → t3, cubemap slot 4 → t4, MLP inner slot 6 → t8, MSN slot 7 → t2, FaceGen slot 6 → t3
 /// (the engine binds the FaceTint DDS by FormID there, not the NIF path: Arch_Head's slot 6 is
 /// `textures\lel` while t3 holds `facetint\…\000a2c8f.dds`).
-pub fn register_for_slot(shader_type: u32, pbr: bool, msn: bool, slot: usize) -> Option<u32> {
+///
+/// The MLP rows (slot 4 → t4, slot 6 → t8) follow the technique, so they need SLSF2.24 on type 11
+/// ([`crate::material::is_mlp`], Note IE9): cs2 Lighting.hlsl:470-485 declares t4, t5 and t8 only under
+/// `ENVMAP`/`MULTI_LAYER_PARALLAX`.
+pub fn register_for_slot(
+    shader_type: u32,
+    slsf2: u32,
+    pbr: bool,
+    msn: bool,
+    slot: usize,
+) -> Option<u32> {
+    let mlp = crate::material::is_mlp(shader_type, slsf2);
     if pbr {
         return match slot {
             0 => Some(0),
@@ -60,9 +71,9 @@ pub fn register_for_slot(shader_type: u32, pbr: bool, msn: bool, slot: usize) ->
         2 => Some(12),
         3 if shader_type == 3 => Some(3),
         3 if shader_type == 4 => Some(4),
-        4 if matches!(shader_type, 1 | 11 | 16) => Some(4),
+        4 if matches!(shader_type, 1 | 16) || mlp => Some(4),
         5 => Some(5),
-        6 if shader_type == 11 => Some(8),
+        6 if mlp => Some(8),
         6 if shader_type == 4 => Some(3),
         7 if msn => Some(2),
         7 => Some(9),

@@ -408,6 +408,22 @@ fn classify_table() {
     let mut glow = glow_src.clone();
     glow.shader_type = 2;
     assert_eq!(classify(&glow_src, &glow, &f, false), EditKind::Textures);
+    // Type 11 without SLSF2.24 is the Default technique (Note IE9): its slot 6 feeds no register, so 0 → 11 leaves
+    // the bindings and the defines alone; SLSF2.24 then switches to MLP, which reads slot 6 at t8.
+    let mut layer_src = base.clone();
+    layer_src.set_slot_raw(6, "textures\\layer.dds");
+    let mut t11_plain = layer_src.clone();
+    t11_plain.shader_type = 11;
+    assert_eq!(
+        classify(&layer_src, &t11_plain, &f, false),
+        EditKind::Cbuffer
+    );
+    let mut t11_mlp = t11_plain.clone();
+    t11_mlp.slsf2 |= 1 << 24;
+    assert_eq!(
+        classify(&t11_plain, &t11_mlp, &f, false),
+        EditKind::Permutation
+    );
     // PBR on/off is TRUE_PBR; under PBR, roughness and the shader type (technique 0) are cbuffer edits,
     // Rim (→ Subsurface) too, but Fit_Slope toggles GLINT.
     let pbr = with(&|m| m.slsf2 |= 1 << 23);

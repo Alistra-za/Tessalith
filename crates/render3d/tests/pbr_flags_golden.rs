@@ -51,7 +51,13 @@ fn pgpatcher_output_class_bits() {
             .enumerate()
             .filter(|(_, p)| !p.norm.is_empty())
             .filter_map(|(i, _)| {
-                register_for_slot(m.shader_type, m.is_pbr(), m.slsf1 & (1 << 12) != 0, i)
+                register_for_slot(
+                    m.shader_type,
+                    m.slsf2,
+                    m.is_pbr(),
+                    m.slsf1 & (1 << 12) != 0,
+                    i,
+                )
             });
         let flags = pbr_flags(
             m,

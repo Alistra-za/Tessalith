@@ -398,7 +398,7 @@ pub fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result
         .enumerate()
         .filter(|(_, p)| !p.norm.is_empty())
         .filter_map(|(slot, p)| {
-            let reg = register_for_slot(d.shader_type, pbr, msn, slot)?;
+            let reg = register_for_slot(d.shader_type, d.slsf2, pbr, msn, slot)?;
             Some((reg, p.norm.clone(), env.game.file(&p.norm).map(|f| f.1)))
         })
         .collect();

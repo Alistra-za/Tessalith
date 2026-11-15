@@ -3,21 +3,38 @@ use render3d::textures::{default_for_register, register_for_slot};
 
 #[test]
 fn slot_register_tables() {
-    assert_eq!(register_for_slot(0, false, false, 0), Some(0));
-    assert_eq!(register_for_slot(2, false, false, 2), Some(6));
-    assert_eq!(register_for_slot(5, false, true, 2), Some(12));
-    assert_eq!(register_for_slot(5, false, true, 7), Some(2));
-    assert_eq!(register_for_slot(1, false, false, 4), Some(4));
-    assert_eq!(register_for_slot(11, false, false, 6), Some(8));
-    assert_eq!(register_for_slot(0, true, false, 5), Some(5));
-    assert_eq!(register_for_slot(0, true, false, 6), Some(9));
-    assert_eq!(register_for_slot(0, true, false, 7), Some(12));
+    const MLP: u32 = 1 << 24;
+    assert_eq!(register_for_slot(0, 0, false, false, 0), Some(0));
+    assert_eq!(register_for_slot(2, 0, false, false, 2), Some(6));
+    assert_eq!(register_for_slot(5, 0, false, true, 2), Some(12));
+    assert_eq!(register_for_slot(5, 0, false, true, 7), Some(2));
+    assert_eq!(register_for_slot(1, 0, false, false, 4), Some(4));
+    assert_eq!(register_for_slot(11, MLP, false, false, 4), Some(4));
+    assert_eq!(register_for_slot(11, MLP, false, false, 6), Some(8));
+    assert_eq!(register_for_slot(0, 0, true, false, 5), Some(5));
+    assert_eq!(register_for_slot(0, 0, true, false, 6), Some(9));
+    assert_eq!(register_for_slot(0, 0, true, false, 7), Some(12));
     assert_eq!(default_for_register(1), [128, 128, 255, 255]);
     // Capture-confirmed rows (frame11178, see register_for_slot docs).
-    assert_eq!(register_for_slot(4, false, false, 2), Some(12)); // Arch_Head _sk
-    assert_eq!(register_for_slot(6, false, false, 7), Some(9)); // Lashes lash_flow
-    assert_eq!(register_for_slot(0, true, false, 3), Some(4)); // Moisture m_p
-    assert_eq!(register_for_slot(0, true, false, 4), None);
+    assert_eq!(register_for_slot(4, 0, false, false, 2), Some(12)); // Arch_Head _sk
+    assert_eq!(register_for_slot(6, 0, false, false, 7), Some(9)); // Lashes lash_flow
+    assert_eq!(register_for_slot(0, 0, true, false, 3), Some(4)); // Moisture m_p
+    assert_eq!(register_for_slot(0, 0, true, false, 4), None);
+}
+
+/// Note IE9: a type-11 shape without SLSF2.24 draws the Default technique, which reads neither the cube map (t4) nor
+/// the inner layer (t8): SOVStairsPiece01:1 in the PBR2Test1 captures reflects only t0, t1, t6, t9, t11, t12, t14 and
+/// t17. Its slots 4 and 6 feed nothing, as on a type-0 shape.
+#[test]
+fn type_11_without_slsf2_24_binds_no_mlp_register() {
+    for slot in [4, 6] {
+        assert_eq!(register_for_slot(11, 0, false, false, slot), None, "{slot}");
+        assert_eq!(
+            register_for_slot(11, 0, false, false, slot),
+            register_for_slot(0, 0, false, false, slot),
+            "{slot}"
+        );
+    }
 }
 
 fn lit(px: &[u8]) -> usize {

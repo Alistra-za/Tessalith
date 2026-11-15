@@ -58,7 +58,7 @@ fn define_table() {
     assert!(!names(&glow_ps).iter().any(|n| n.contains("GLOW")));
     let mlp = defines(&m(11, 0, 1 << 24, false), Stage::Pixel, &[], false);
     assert!(names(&mlp).contains(&"MULTI_LAYER_PARALLAX") && names(&mlp).contains(&"ENVMAP"));
-    // The MLP technique needs SLSF2.24 (Note IE8); without it type 11 is the Default technique.
+    // The MLP technique needs SLSF2.24 (Note IE9); without it type 11 is the Default technique.
     let t11 = defines(&m(11, 0, 0, false), Stage::Pixel, &[], false);
     assert!(!names(&t11).contains(&"MULTI_LAYER_PARALLAX") && !names(&t11).contains(&"ENVMAP"));
     let pbr = defines(&m(0, 0, 1 << 23, false), Stage::Pixel, &[], false);

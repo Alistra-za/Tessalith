@@ -56,9 +56,8 @@ fn technique(m: &Material) -> &'static [&'static str] {
         4 => &["FACEGEN"],
         5 => &["FACEGEN_RGB_TINT"],
         6 => &["HAIR"],
-        // Only with SLSF2.24 (Multi_Layer_Parallax): the game draws a type-11 shape without it with the Default
-        // technique (Note IE8, SOVStairsPiece01 in the PBR2Test1 captures).
-        11 if bit(m.slsf2, 24) => &["MULTI_LAYER_PARALLAX", "ENVMAP"],
+        // Only with SLSF2.24 (Multi_Layer_Parallax): a type-11 shape without it draws the Default technique.
+        _ if crate::material::is_mlp(m.shader_type, m.slsf2) => &["MULTI_LAYER_PARALLAX", "ENVMAP"],
         16 => &["EYE"],
         // 2 = Glowmap: runtime technique (cb4 PixelShaderDescriptor >> 24, Lighting.hlsl:2598).
         _ => &[],
@@ -154,20 +153,21 @@ pub const LIGHTING_BACK: u32 = 1 << 12;
 /// specular strength above 0 (Arch_Mouth), Soft, Rim, Back for SLSF2.25-27, none of them under TruePBR. The Glowmap
 /// technique is read here too (`(PixelShaderDescriptor >> 24) & 0x3F == Glowmap`), so type 2 adds `2 << 24`.
 pub fn runtime_bits(m: &Material) -> u32 {
-    let technique = if m.shader_type == 2 { 2 << 24 } else { 0 };
+    let mut b = if m.shader_type == 2 { 2 << 24 } else { 0 };
     if m.pbr != Pbr::None {
-        return technique;
+        return b;
     }
-    [
-        (
-            bit(m.slsf1, 0) && m.specular_strength > 0.0,
-            LIGHTING_SPECULAR,
-        ),
-        (bit(m.slsf2, 25), LIGHTING_SOFT),
-        (bit(m.slsf2, 26), LIGHTING_RIM),
-        (bit(m.slsf2, 27), LIGHTING_BACK),
-    ]
-    .into_iter()
-    .filter(|(on, _)| *on)
-    .fold(technique, |b, (_, flag)| b | flag)
+    if bit(m.slsf1, 0) && m.specular_strength > 0.0 {
+        b |= LIGHTING_SPECULAR;
+    }
+    if bit(m.slsf2, 25) {
+        b |= LIGHTING_SOFT;
+    }
+    if bit(m.slsf2, 26) {
+        b |= LIGHTING_RIM;
+    }
+    if bit(m.slsf2, 27) {
+        b |= LIGHTING_BACK;
+    }
+    b
 }

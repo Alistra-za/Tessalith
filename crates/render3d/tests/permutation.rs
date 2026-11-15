@@ -34,7 +34,7 @@ fn names(m: &MaterialState, stage: Stage) -> Vec<String> {
 fn defines_per_material() {
     let mut mlp = v1(&[24]);
     mlp.shader_type = 11;
-    // SOVStairsPiece01's type-11 glint shapes: no SLSF2.24 (Note IE8).
+    // Like SOVStairsPiece01's type-11 shapes (SLSF2 0x9021: bit 12, no SLSF2.24; Note IE9).
     let mut t11 = v1(&[12]);
     t11.shader_type = 11;
     // (what, material, mode, PS defines that must be set, PS defines that must not be)

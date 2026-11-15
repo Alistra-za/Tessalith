@@ -400,8 +400,13 @@ fn diag_arch_scalp_on_bundled_cs() {
             let msn = m.slsf1 & (1 << 12) != 0;
             for (i, t) in m.slots.iter().enumerate() {
                 if !t.norm.is_empty() {
-                    let reg =
-                        render3d::textures::register_for_slot(m.shader_type, m.is_pbr(), msn, i);
+                    let reg = render3d::textures::register_for_slot(
+                        m.shader_type,
+                        m.slsf2,
+                        m.is_pbr(),
+                        msn,
+                        i,
+                    );
                     println!("  slot {i}: {} -> t{reg:?}", t.norm);
                 }
             }

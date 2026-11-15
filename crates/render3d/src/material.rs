@@ -197,6 +197,14 @@ pub struct ProjectedLayer {
     pub glint: Option<Glint>,
 }
 
+/// The shape draws the MultiLayerParallax technique: type 11 with SLSF2.24 (Note IE9). A type-11 shape without the
+/// flag draws the Default technique in game (SOVStairsPiece01 in the PBR2Test1 captures: technique 0, and the PS
+/// reflects no t4, t5 or t8). Picks the technique defines ([`crate::permutation`]) and the t4/t8 registers
+/// ([`crate::textures::register_for_slot`]).
+pub const fn is_mlp(shader_type: u32, slsf2: u32) -> bool {
+    shader_type == 11 && bit(slsf2, 24)
+}
+
 /// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not FaceGen (4, 5) or sparkle
 /// snow (14), and on a vanilla shape not parallax (3), MLP (11) or SLSF2.24 (MLP), whose `PROJECTED_UV` branches
 /// differ (Lighting.hlsl:1740-1748). TruePBR drops the parallax and MLP techniques, so a PBR shape of type 3 or 11
@@ -206,6 +214,9 @@ pub struct ProjectedLayer {
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).
 pub fn projected_eligible(m: &MaterialState) -> bool {
     let pbr = m.is_pbr() || m.is_pbr2();
+    // shortcut: a vanilla type 11 without SLSF2.24, or SLSF2.24 on another type, draws the Default technique (Note
+    // IE9), whose `PROJECTED_UV` branch is the plain one, yet stays excluded: no capture shows whether the game
+    // projects a material object onto such a shape. Use `is_mlp` here once one does.
     !m.skinned
         && !matches!(m.shader_type, 4 | 5 | 14 | 16)
         && (pbr || (!matches!(m.shader_type, 3 | 11) && !bit(m.slsf2, 24)))
@@ -449,6 +460,8 @@ fn write_trailer(w: &mut CbWriter, p: &LightingParams, has_env_mask: bool) {
         LightingTrailer::ParallaxOcc { max_passes, scale } => {
             w.set("ParallaxOccData", &[*max_passes, *scale, 0.0, 0.0]);
         }
+        // The trailer follows the shader type (the game's material class), not SLSF2.24; without the flag the Default
+        // technique reads neither field, so writing them changes no pixel (Note IE9).
         LightingTrailer::MultiLayer {
             inner_thickness,
             refraction_scale,
@@ -615,7 +628,13 @@ fn bindings(m: &MaterialState) -> Vec<(Option<u32>, &str)> {
         .enumerate()
         .map(|(i, s)| {
             (
-                crate::textures::register_for_slot(m.shader_type, own_pbr(m) != Pbr::None, msn, i),
+                crate::textures::register_for_slot(
+                    m.shader_type,
+                    m.slsf2,
+                    own_pbr(m) != Pbr::None,
+                    msn,
+                    i,
+                ),
                 s.norm.as_str(),
             )
         })
