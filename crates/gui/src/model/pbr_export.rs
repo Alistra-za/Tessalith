@@ -270,6 +270,18 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         .collect()
 }
 
+/// The set whose view key is `key` and its PGPatcher entry (`None`: it has none, as [`json_entries`] gives them). `None`
+/// when no set has the key. The set preview's fingerprint and the set's `.csm` look a set up through this.
+pub fn set_entry(m: &AppModel, key: &str) -> Option<(SetView, Option<EntryInput>)> {
+    match json_entries(m).into_iter().find(|(v, _)| v.key == key) {
+        Some((v, e)) => Some((v, Some(e))),
+        None => set_views(m)
+            .into_iter()
+            .find(|v| v.key == key)
+            .map(|v| (v, None)),
+    }
+}
+
 /// `json_entries` less the sets whose entry the statics rule drops (design §5.1): what the written file holds.
 pub fn written_json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     json_entries(m)

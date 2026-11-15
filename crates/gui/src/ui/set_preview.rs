@@ -116,17 +116,10 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
                 ui.add(egui::Label::new(egui::RichText::new(&line).weak()).truncate())
                     .on_hover_text(&line);
             }
-            // Note IE13: a set that gets a `.csm` says what of it shows in game, and why a blocked one draws nothing of
-            // it; NEEDS_CS is for a set with none (not CS, not PBR, PBR Landscape).
-            if !simulated && s.csm_lines().is_empty() {
+            // Note IE13: a set that gets a `.csm` has its lines in the set editor's head (`set_editor::csm_lines`);
+            // NEEDS_CS is for a set with none (not CS, not PBR, PBR Landscape).
+            if !simulated && !s.gets_csm() {
                 ui.colored_label(AMBER, NEEDS_CS);
-            }
-            // One row each, so the frame keeps its share at 1024 pt (BH13); the whole line on hover and in its name.
-            for line in s.csm_lines() {
-                ui.add(egui::Label::new(egui::RichText::new(line).color(AMBER)).truncate())
-                    .on_hover_ui(|ui| {
-                        ui.label(line);
-                    });
             }
             if fp.grass {
                 ui.colored_label(AMBER, GRASS_APPROX);

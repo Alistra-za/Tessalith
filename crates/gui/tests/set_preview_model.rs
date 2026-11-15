@@ -2378,46 +2378,66 @@ fn unsaved_edit_reaches_preview() {
     );
 }
 
-/// Note IE13: a PBR set on CS shows the PGPatcher line above the frame; a PBR Landscape set (no `.csm`) does not.
-#[test]
-fn pgpatcher_warning_shown() {
-    use egui_kittest::kittest::Queryable;
-    let dir = tempfile::tempdir().unwrap();
-    let m = fuzzy_rock(dir.path());
-    let mut s = SetPreview::new(None, DEFAULT_CAP);
-    run(&mut s, &m);
-    assert_eq!(s.csm_lines(), [PGPATCHER_V1]);
-    let mut m = m;
+/// The `.csm` lines of set `key` (`csm_export::view_csm`; none when it gets no `.csm`).
+fn csm_lines(m: &AppModel, key: &str) -> Vec<String> {
+    sdc_gui::model::csm_export::view_csm(m, key).map_or(vec![], |c| c.lines.clone())
+}
+
+/// The whole UI, as the app draws it.
+fn app_ui(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
+    let h = egui_kittest::Harness::builder()
+        .with_size(eframe::egui::vec2(1500.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+/// The set preview panel alone, in the set's 3D view.
+fn preview_ui(
+    mut m: AppModel,
+    s: SetPreview,
+) -> egui_kittest::Harness<'static, (AppModel, SetPreview)> {
     m.settings.set_view_3d = true;
-    let mut h = egui_kittest::Harness::builder()
+    egui_kittest::Harness::builder()
         .with_size(eframe::egui::vec2(520.0, 1000.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, SetPreview)| sdc_gui::ui::set_preview::draw(ui, m, s),
             (m, s),
-        );
+        )
+}
+
+/// Note IE13 (fix round 1, t10 item 1): a PBR set on CS has the PGPatcher line in the set editor's warning area, shown
+/// in 2D with no 3D preview; a PBR Landscape set (no `.csm`) has none.
+#[test]
+fn pgpatcher_warning_shown() {
+    use egui_kittest::kittest::Queryable;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    let key = rock(&m).0.key;
+    assert_eq!(csm_lines(&m, &key), [PGPATCHER_V1]);
+    m.settings.set_view_3d = false;
+    let mut h = app_ui(m);
     h.run_steps(4);
     h.get_by_label(PGPATCHER_V1);
-    assert!(h.query_by_label(NEEDS_CS).is_none());
 
     let dir = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened(dir.path());
+    let m = pbr_opened(dir.path());
     let key = rock(&m).0.key;
-    m.select_set(&key);
-    let mut s = SetPreview::new(None, DEFAULT_CAP);
-    run(&mut s, &m);
     assert!(
-        s.csm_lines().is_empty(),
+        csm_lines(&m, &key).is_empty(),
         "PBR Landscape: {:?}",
-        s.csm_lines()
+        csm_lines(&m, &key)
     );
 }
 
-/// Note IE13: a set whose `.csm` is blocked (no RMAOS) writes none, so the shape keeps its own material and the reason
-/// is shown; the set's `.csm` draws again once it is fine.
+/// Note IE13: a set whose `.csm` is blocked (no RMAOS) writes none, so the shape keeps what PGPatcher 2.3.1 gives it and
+/// the reason is shown; the set's `.csm` draws again once it is fine.
 #[test]
 fn a_blocked_set_csm_keeps_the_shape_material_with_the_reason() {
+    use sdc_gui::model::csm_export::CSM_BLOCKED_TAIL;
     let dir = tempfile::tempdir().unwrap();
     let mut m = fuzzy_rock(dir.path());
+    let key = rock(&m).0.key;
     m.set_json_value(ROCK, "slot6", Some(json!("")));
     assert!(m.wait_idle(Duration::from_secs(60)));
     let mut s = SetPreview::new(None, DEFAULT_CAP);
@@ -2427,16 +2447,72 @@ fn a_blocked_set_csm_keeps_the_shape_material_with_the_reason() {
         c => panic!("{c:?}"),
     };
     assert_eq!(csm(&s), None);
+    let lines = csm_lines(&m, &key);
     assert!(
-        s.csm_lines().iter().any(|l| l.starts_with(ROCK)
+        lines.iter().any(|l| l.starts_with(ROCK)
             && l.contains("no .csm written")
-            && l.ends_with("the shapes keep the material their NIF names")),
-        "{:?}",
-        s.csm_lines()
+            && l.ends_with(CSM_BLOCKED_TAIL)),
+        "{lines:?}"
     );
     m.set_json_value(ROCK, "slot6", None);
     assert!(m.wait_idle(Duration::from_secs(60)));
     run(&mut s, &m);
     assert_eq!(csm(&s).as_deref(), Some(ROCK_CSM));
-    assert_eq!(s.csm_lines(), [PGPATCHER_V1]);
+    assert_eq!(csm_lines(&m, &key), [PGPATCHER_V1]);
+}
+
+/// Note IE13 (fix round 1, t10 item 7): a CS PBR set with no PGPatcher entry gets no simulation, but it does get a
+/// `.csm` (blocked: no entry), so the set editor shows the no-entry reason and the 3D panel no NEEDS_CS line.
+#[test]
+fn a_pbr_set_with_no_pgpatcher_entry_shows_its_reason_in_place_of_needs_cs() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::csm_export::{CSM_BLOCKED_TAIL, NO_ENTRY};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    let key = rock(&m).0.key;
+    m.set_json_value(ROCK, "match1", Some(json!("")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        csm_lines(&m, &key),
+        [
+            PGPATCHER_V1.to_string(),
+            format!("{ROCK}: {NO_ENTRY}; {CSM_BLOCKED_TAIL}")
+        ]
+    );
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert!(
+        s.fp.as_ref().is_some_and(|f| f.entry.is_none()),
+        "no simulation"
+    );
+    assert!(s.gets_csm());
+    let mut h = preview_ui(m, s);
+    h.run_steps(4);
+    assert!(h.query_by_label(NEEDS_CS).is_none());
+    let mut m = h.into_state().0;
+    m.settings.set_view_3d = false;
+    let mut h = app_ui(m);
+    h.run_steps(4);
+    h.get_by_label(&format!("{ROCK}: {NO_ENTRY}; {CSM_BLOCKED_TAIL}"));
+}
+
+/// Note IE13 (fix round 1, t10 item 9): a switch off CS drops the set's `.csm` (the view key holds the target), so its
+/// lines go and the 3D panel shows NEEDS_CS.
+#[test]
+fn a_target_switch_off_cs_drops_the_csm_and_shows_needs_cs() {
+    use egui_kittest::kittest::Queryable;
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = fuzzy_rock(dir.path());
+    let key = rock(&m).0.key;
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert!(s.gets_csm());
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    run(&mut s, &m);
+    assert!(csm_lines(&m, &key).is_empty());
+    assert!(!s.gets_csm());
+    let mut h = preview_ui(m, s);
+    h.run_steps(4);
+    h.get_by_label(NEEDS_CS);
 }

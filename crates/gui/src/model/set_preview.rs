@@ -5,11 +5,10 @@
 //! Part 1: per-member preview encodes → DDS bytes served as `FileSource::Memory`, fresh/stale per member, paused
 //! during an export. Results come back on this module's own channel, so `worker.rs` needs no new message.
 use crate::model::cs_pbr::{self, CsBlock};
-use crate::model::csm_export::SetCsm;
+use crate::model::csm_export::{SetCsm, ViewCsm};
 use crate::model::items::{ItemKind, ItemStatus, TextureItem};
-use crate::model::pbr_export::json_entries;
+use crate::model::pbr_export::set_entry;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
-use crate::model::sets::set_views;
 use crate::model::sets::{SetView, SlotFill, SlotKind};
 use crate::model::viewport3d::FileSource;
 use crate::model::viewport3d::{read_file, Content, ScanDb, Viewport3d};
@@ -964,12 +963,12 @@ impl Encoder {
 // ---- Part 2: fingerprint, change classification, mesh candidates, PGPatcher simulation, the panel's model ----
 
 /// No PGPatcher simulation (D3): shown for a set that gets no `.csm` either (not CS, not PBR, PBR Landscape without an
-/// entry); a `.csm` set without an entry shows its `.csm`'s [`CSM_BLOCKED_TAIL`] line instead (Note IE13).
+/// entry); a `.csm` set without an entry has its [`crate::model::csm_export::NO_ENTRY`] line in the set editor
+/// instead (Note IE13).
 pub const NEEDS_CS: &str = "PGPatcher preview needs the CS target and a PBR set";
-/// Note IE13: shown for a set that gets a `.csm` (the preview draws it; PGPatcher 2.3.1 does not point meshes at it).
+/// Note IE13: the set editor's line for a set that gets a `.csm` (the preview draws it; PGPatcher 2.3.1 does not point
+/// meshes at it).
 pub const PGPATCHER_V1: &str = "PGPatcher 2.3.1 writes v1 PBR, which CS 2.0 draws vanilla. A PGPatcher with .csm support is needed for these meshes in game.";
-/// Note IE13: the end of a blocked `.csm`'s line (the preview draws the shapes' own material, as the game would).
-pub const CSM_BLOCKED_TAIL: &str = "the shapes keep the material their NIF names";
 /// PBR grass design §4.5 (owner D5): the object PBR path stands in for CS's `RunGrass.hlsl`.
 pub const GRASS_APPROX: &str = "PBR grass approximated: drawn with the object PBR shader (no wrapped diffuse, wind or grass LOD; micro-shadows still apply).";
 pub const JSON_WINS: &str = "Assumes your Tessalith JSON wins over other mods' PGPatcher configs.";
@@ -1043,10 +1042,7 @@ pub struct SetFingerprint {
 
 /// `None` when the set is gone.
 pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
-    let (v, entry) = match json_entries(m).into_iter().find(|(v, _)| v.key == set_key) {
-        Some((v, e)) => (v, Some(e)),
-        None => (set_views(m).into_iter().find(|v| v.key == set_key)?, None),
-    };
+    let (v, entry) = set_entry(m, set_key)?;
     let members = member_slots(m, &v, entry.as_ref());
     Some(SetFingerprint {
         set_key: set_key.into(),
@@ -1714,13 +1710,11 @@ pub struct SetPreview {
     /// What `xpmf_doc` and `xpmf_tex` were built from (the project, the followed set, whether it has a `cs_mato`
     /// block, the shown encodes): an idle frame rebuilds nothing.
     xpmf_key: Option<(super::ViewKey, String, bool, u64)>,
-    /// Note IE13: the followed set's `.csm` as the export builds it (`csm_export::followed_csm`; `None`: it gets none).
-    csm: Option<SetCsm>,
+    /// Note IE13: the followed set's `.csm` as the export builds it (`csm_export::view_csm`; `None`: it gets none).
+    csm: Option<Arc<ViewCsm>>,
     /// What `csm` was built from (the project's view key, the scan evidence revision, the followed set): an idle check
     /// builds nothing.
     csm_from: Option<(super::ViewKey, u64, String)>,
-    /// The lines above the frame about the set's `.csm` ([`PGPATCHER_V1`], a blocked `.csm`'s reason).
-    csm_lines: Vec<String>,
     /// The scan generation a scene's `ScanDb` carries: bumped by each `requery`, which reopens the UI thread's store.
     scan_gen: u64,
     /// Tests: how often `csm` was built.
@@ -1802,16 +1796,15 @@ impl SetPreview {
             xpmf_key: None,
             csm: None,
             csm_from: None,
-            csm_lines: vec![],
             scan_gen: 0,
             #[cfg(feature = "test-hooks")]
             csm_builds: 0,
         }
     }
 
-    /// Note IE13: the lines about the followed set's `.csm`, shown above the frame.
-    pub fn csm_lines(&self) -> &[String] {
-        &self.csm_lines
+    /// Note IE13: the followed set gets a `.csm` (the set editor shows its lines; [`NEEDS_CS`] is not shown).
+    pub fn gets_csm(&self) -> bool {
+        self.csm.is_some()
     }
 
     /// Note GE14: the whole-run crash lines; a change re-pushes the scene.
@@ -1977,7 +1970,6 @@ impl SetPreview {
             }
             self.csm = None;
             self.csm_from = None;
-            self.csm_lines.clear();
             self.gone = Some(key.to_string());
             return;
         };
@@ -2037,29 +2029,25 @@ impl SetPreview {
             self.csm_builds += 1;
         }
         self.csm_from = Some(from);
-        let csm = crate::model::csm_export::followed_csm(m, key);
-        if csm == self.csm {
-            return false;
-        }
-        self.csm_lines = match &csm {
-            None => vec![],
-            Some(c) => std::iter::once(PGPATCHER_V1.to_string())
-                .chain(
-                    c.blocked
-                        .as_ref()
-                        .map(|why| format!("{why}; {CSM_BLOCKED_TAIL}")),
-                )
-                .collect(),
-        };
-        self.csm = csm;
-        true
+        // Only what the scene holds counts: a change to the `.csm`'s warnings alone loads nothing again.
+        let drawn = |s: &Self| s.drawable_csm().map(|c| (c.path.clone(), c.csm.clone()));
+        let before = drawn(self);
+        self.csm = crate::model::csm_export::view_csm(m, key);
+        before != drawn(self)
     }
 
-    /// Note IE13: the canonical `materials/…` key of the followed set's `.csm` when it draws (`None`: it gets none, or
-    /// it is blocked and writes none, so the shapes keep their own material).
+    /// Note IE13: the followed set's `.csm` when it draws (`None`: it gets none, or it is blocked and writes none, so the
+    /// shapes keep their own material).
+    fn drawable_csm(&self) -> Option<&SetCsm> {
+        self.csm
+            .as_ref()
+            .map(|c| &c.csm)
+            .filter(|c| c.blocked.is_none())
+    }
+
+    /// Note IE13: the canonical `materials/…` key of [`Self::drawable_csm`].
     fn drawn_csm(&self) -> Option<String> {
-        let c = self.csm.as_ref().filter(|c| c.blocked.is_none())?;
-        nif::path::canon_material(&c.path)
+        nif::path::canon_material(&self.drawable_csm()?.path)
     }
 
     /// Note IE13: every shape PGPatcher patches with the set's entry (the shapes the preview finds by the set's match
@@ -2080,7 +2068,7 @@ impl SetPreview {
     /// Note IE13: the set's `.csm` in the scene's file map (its text in memory, ahead of any scan copy), and the game's
     /// copy of each texture only the `.csm` names (a borrowed slot, a `slotN`); the set's own outputs are the encodes.
     fn add_set_csm(&self, map: &mut HashMap<String, FileSource>) {
-        let Some(c) = self.csm.as_ref().filter(|c| c.blocked.is_none()) else {
+        let Some(c) = self.drawable_csm() else {
             return;
         };
         let Some((key, src)) = crate::model::csm_export::memory_source(c) else {

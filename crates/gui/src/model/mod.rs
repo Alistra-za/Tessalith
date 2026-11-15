@@ -280,7 +280,12 @@ pub(crate) struct ViewCache {
     pub xpmf_card: Option<(String, Arc<xpmf_json::CardValues>)>,
     /// `cs_skin_json::skin_json_plan`'s plan.
     pub cs_skin: Option<Arc<cs_skin_json::Plan>>,
+    /// Note IE13: one set's `.csm` (`csm_export::view_csm`), keyed by (evidence_rev, set key) inside the view_key cell.
+    pub set_csm: Option<(SetCsmKey, Option<Arc<csm_export::ViewCsm>>)>,
 }
+
+/// `(evidence_rev, set key)`.
+pub(crate) type SetCsmKey = (u64, String);
 
 /// The replies `poll` drops as stale, counted for tests (backlog L54).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

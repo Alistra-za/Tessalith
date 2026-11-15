@@ -410,6 +410,10 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
                 // AG132: its own settings are in the settings window, with the set's.
                 set_preview::settings_toggle(ui, model);
             });
+            // Note IE13: the followed set's `.csm` lines, as the set editor's head shows them.
+            if let Some(set) = crate::model::set_preview::followed_set(model) {
+                set_editor::csm_lines(ui, model, &set);
+            }
             ui.separator();
             set_preview::draw(ui, model, &mut state.set3d);
         }

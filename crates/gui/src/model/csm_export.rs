@@ -193,9 +193,16 @@ fn build(
     cs_txst: Option<&CsBlock>,
     slots: &BTreeMap<u8, String>,
 ) -> Option<SetCsm> {
-    if !gets_csm(v) {
-        return None;
-    }
+    gets_csm(v).then(|| build_any(v, pgp, cs_txst, slots))
+}
+
+/// [`build`] for any PBR-family set (a PBR Landscape set's preview-only material too).
+fn build_any(
+    v: &SetView,
+    pgp: &Settings,
+    cs_txst: Option<&CsBlock>,
+    slots: &BTreeMap<u8, String>,
+) -> SetCsm {
     let id = &v.id;
     let mut values = BTreeMap::new();
     let mut warnings = vec![];
@@ -276,12 +283,12 @@ fn build(
             missing.join(" or ")
         ))
     };
-    Some(SetCsm {
+    SetCsm {
         path: csm_path(v.prefix.as_deref().unwrap_or(id)),
         csm: c,
         warnings,
         blocked,
-    })
+    }
 }
 
 /// The block's switches and numbers (only the keys it sets), clamped to the schema with a warning per clamp.
@@ -516,26 +523,59 @@ pub fn csm_sets(m: &AppModel) -> Vec<(SetView, SetCsm)> {
         .collect()
 }
 
+/// Note IE13: the end of a blocked `.csm`'s line: the shapes PGPatcher patches keep its v1 output, which CS 2.0 draws
+/// vanilla.
+pub const CSM_BLOCKED_TAIL: &str =
+    "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)";
+
+/// Note IE13: one set's `.csm` as the set editor and the set preview show it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ViewCsm {
+    pub csm: SetCsm,
+    /// The set editor's lines about it: [`super::set_preview::PGPATCHER_V1`], then a blocked `.csm`'s reason with
+    /// [`CSM_BLOCKED_TAIL`].
+    pub lines: Vec<String>,
+}
+
 /// Note IE13: the `.csm` of the set whose view key is `key`, as [`csm_sets`] builds it (unsaved edits included); a set
 /// that gets one but has no PGPatcher entry gets [`NO_ENTRY`] as its block reason. `None` off CS and for a set that gets
-/// none (not PBR, PBR Landscape). The set preview draws it.
-pub fn followed_csm(m: &AppModel, key: &str) -> Option<SetCsm> {
+/// none (not PBR, PBR Landscape). Cached by the view key, the scan evidence revision and
+/// `key`, so the set editor reads it every frame.
+pub fn view_csm(m: &AppModel, key: &str) -> Option<std::sync::Arc<ViewCsm>> {
+    let at = (m.evidence_rev, key.to_string());
+    super::cached(
+        m,
+        |c| {
+            c.set_csm
+                .as_ref()
+                .filter(|(k, _)| *k == at)
+                .map(|(_, v)| v.clone())
+        },
+        |c, v| c.set_csm = Some((at.clone(), v)),
+        || build_view_csm(m, key).map(std::sync::Arc::new),
+    )
+}
+
+fn build_view_csm(m: &AppModel, key: &str) -> Option<ViewCsm> {
     if m.target != Target::Cs {
         return None;
     }
+    let (v, e) = super::pbr_export::set_entry(m, key)?;
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
-    match super::pbr_export::json_entries(m)
-        .into_iter()
-        .find(|(v, _)| v.key == key)
-    {
-        Some((v, e)) => entry_csm(&v, &e, txst_block(&entries, &v.id)),
-        None => {
-            let v = super::sets::set_views(m)
-                .into_iter()
-                .find(|v| v.key == key)?;
-            gets_csm(&v).then(|| no_entry(&v))
-        }
-    }
+    let block = txst_block(&entries, &v.id);
+    let csm = match e {
+        Some(e) => entry_csm(&v, &e, block)?,
+        None if gets_csm(&v) => no_entry(&v),
+        None => return None,
+    };
+    let lines = std::iter::once(super::set_preview::PGPATCHER_V1.to_string())
+        .chain(
+            csm.blocked
+                .as_ref()
+                .map(|why| format!("{why}; {CSM_BLOCKED_TAIL}")),
+        )
+        .collect();
+    Some(ViewCsm { csm, lines })
 }
 
 /// What an export about to start writes once it has ended (computed when it starts, like the CS PBR JSON).

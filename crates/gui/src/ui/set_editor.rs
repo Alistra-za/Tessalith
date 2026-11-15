@@ -233,6 +233,7 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     if clear_name {
         model.clear_output_name(&v.id);
     }
+    csm_lines(ui, model, &v.key);
     // G6: a delete section that matches this set's textures deletes the shapes the set is for.
     for h in crate::model::sections::delete_hits(model)
         .iter()
@@ -253,6 +254,20 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
         });
     }
     ui.separator();
+}
+
+/// Note IE13: the lines about set `key`'s `.csm` (CS only): PGPatcher 2.3.1 writes v1, and why a blocked one is not
+/// drawn. One row each, so the 3D frame keeps its share at 1024 pt (BH13); the whole line on hover and in its name.
+pub fn csm_lines(ui: &mut egui::Ui, model: &AppModel, key: &str) {
+    let Some(c) = crate::model::csm_export::view_csm(model, key) else {
+        return;
+    };
+    for line in &c.lines {
+        ui.add(egui::Label::new(egui::RichText::new(line).color(AMBER)).truncate())
+            .on_hover_ui(|ui| {
+                ui.label(line);
+            });
+    }
 }
 
 /// The tabs under the slot rows (C6, R12; Note FB2): Material on a JSON set or Set on any other, then Advanced;
