@@ -12169,3 +12169,59 @@ fn the_edit_preview_reads_the_sets_csm() {
     let t = loaded(&mut m, &cmds).expect("a reload with the changed .csm");
     assert_eq!(t.get(&key), Some(&mem(2)));
 }
+
+/// Rule 3.1 / 3.3: at 1100, 1280 and 1600 px, with a long name in the name field (not a `.csm`, so the v1 warning
+/// shows), the Material row's "Use the set's .csm" and the warning's "Convert to .csm" stay inside the edit panel.
+#[test]
+fn the_csm_buttons_fit_the_edit_panel() {
+    let long = format!(
+        "Rock01_{}_LongFoliageMaterialName",
+        "VeryLongFolderName_".repeat(8)
+    );
+    for w in [1100.0, 1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let (_app, m) = rock_edit(d.path(), v1_rock(11, V1_PBR, Some(&long)));
+        let mut h = Harness::builder()
+            .with_size(egui::vec2(w, 800.0))
+            .build_ui_state(
+                |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+                m,
+            );
+        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+        h.run_steps(3);
+        let convert = format!("{CONVERT_FIX}: {V1_VANILLA}");
+        for (label, exact) in [(sdc_gui::ui::meshes::USE_SET_CSM, true), (&*convert, false)] {
+            let by = || {
+                let b = egui_kittest::kittest::By::new().role(AkRole::Button);
+                if exact {
+                    b.label(label)
+                } else {
+                    b.label_contains(label)
+                }
+            };
+            h.get(by()).scroll_to_me();
+            h.run();
+            let edit =
+                egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
+                    .expect("the edit panel is drawn")
+                    .outer_rect;
+            let r = h.get(by()).rect();
+            assert!(
+                r.max.x <= edit.max.x + 0.5 && r.min.x >= edit.min.x - 0.5,
+                "{w} px: {label} {r:?} outside {edit:?}"
+            );
+            // Squeezed buttons count too: an un-truncated name leaves the button a sliver (measured: 17 px).
+            assert!(r.width() > 60.0, "{w} px: {label} squeezed to {r:?}");
+        }
+        let right = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
+            .expect("the edit panel is drawn")
+            .outer_rect
+            .max
+            .x;
+        let name = h.get_by_label(&format!("Material: {long}")).rect();
+        assert!(
+            name.max.x <= right + 0.5,
+            "{w} px: the name {name:?} runs past the panel"
+        );
+    }
+}
