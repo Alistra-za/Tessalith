@@ -187,6 +187,56 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
     }
 }
 
+/// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
+/// Recorded before the BC6H-only trim was tried (Note JB), 2026-11-14.
+const RECORDED_PEAK: [&str; 3] = [
+    "e0da9c0a767f735d46fad610ec0458ad0fa65b28470b6dfee742f48d2e9f9c77",
+    "e43d1d2d25d7e30f9c98517b8675d8631486a8e5b35096efe96fc6163d53d5aa",
+    "e1f6d9cff4b0d5c30f132f708b54b466dfc70f5d4dbc3a28ea88ed93a387372f",
+];
+
+fn recorded_peak(target: IspcTarget) -> &'static str {
+    match target {
+        IspcTarget::Sse2 => RECORDED_PEAK[0],
+        IspcTarget::Avx2 => RECORDED_PEAK[1],
+        IspcTarget::Avx512 => RECORDED_PEAK[2],
+    }
+}
+
+/// The peak mode encodes byte-identically to the recorded objects on every supported path.
+/// `SDC_RECORD_LEVEL_HASHES=1` prints the hashes.
+#[test]
+fn the_peak_mode_is_byte_identical_to_the_recorded_objects() {
+    let px = hdr_image();
+    let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
+    for target in IspcTarget::ALL
+        .into_iter()
+        .filter(|t| t.supported() && *t <= ispc_target())
+    {
+        let mut out = vec![0u8; 16 * 16 * 16];
+        bc6h_compress_rows_on(&px, 64, 64, &mut out, Bc6hLevel::VeryslowPeak, target);
+        let got = hex::encode(Sha256::digest(&out));
+        if record {
+            println!("{target:?} VeryslowPeak {got}");
+        } else {
+            assert_eq!(got, recorded_peak(target), "{target:?} VeryslowPeak");
+        }
+    }
+}
+
+/// A peak pin equal to the veryslow pin would mean the peak mode never engaged on `hdr_image()`.
+#[test]
+fn the_peak_pin_is_not_the_veryslow_pin() {
+    for t in IspcTarget::ALL {
+        let veryslow = recorded(t)
+            .iter()
+            .find(|(l, _)| *l == Bc6hLevel::Veryslow)
+            .unwrap()
+            .1;
+        assert_ne!(recorded_peak(t), veryslow, "{t:?}");
+    }
+}
+
 #[test]
 fn the_plain_call_encodes_on_the_process_target() {
     let px = hdr_image();
