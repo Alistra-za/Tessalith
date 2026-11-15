@@ -28,6 +28,8 @@ export const meta = {
 //
 // PLAN FORMAT (in-game-capture.js keys plus these x_ keys)
 //   x_profile          name of the top-level profile (default "A")
+//   x_cs_version       CS version ("1-9-0-0", the CommunityShaders.dll FileVersion) used only when SettingsUser.json
+//                      has no Version (a build that never saved its full settings); a Version on disk wins
 //   x_cs_settings      overlay of SettingsUser.json sections/keys (nested objects); only listed keys are edited,
 //                      missing keys are inserted. Always added on top: RenderDoc."Enable RenderDoc Capture",
 //                      Advanced."Frame Annotations" = true. Log Level is not forced (debug level = CS developer mode = debug shaders).

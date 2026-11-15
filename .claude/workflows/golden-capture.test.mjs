@@ -277,6 +277,20 @@ const pending = () => { try { return Object.values(JSON.parse(fs.readFileSync(JO
   ok(`preflight --dry-run: ${r.edits} edits planned, ${r.planned_captures} captures, settings untouched, plan.txt written`)
 }
 {
+  // x_cs_version stands in only when SettingsUser.json has no Version (a build that never saved its full settings).
+  const mo2nv = path.join(T, 'mo2-noversion'); fs.cpSync(MO2, mo2nv, { recursive: true })
+  const live = path.join(mo2nv, 'overwrite', 'SKSE', 'Plugins', 'CommunityShaders', 'SettingsUser.json')
+  const s = JSON.parse(fs.readFileSync(live, 'utf8')); delete s.Version; fs.writeFileSync(live, JSON.stringify(s))
+  const nv = lib(`preflight ${preArgs().replace(MO2, mo2nv)} --dry-run`)
+  assert.equal(nv.ok, false); assert.match(nv.reason, /CS version unknown.*x_cs_version/)
+  const pv = path.join(T, 'plan-csversion.json'); fs.writeFileSync(pv, JSON.stringify({ ...JSON.parse(fs.readFileSync(PLAN, 'utf8')), x_cs_version: '1-9-0-0' }))
+  const fb = lib(`preflight ${preArgs().replace(MO2, mo2nv).replace(PLAN, pv)} --dry-run`)
+  assert.equal(fb.ok, true, fb.reason); assert.equal(fb.cs_key, 'cs-1.9.0-d2026.10.11.0')
+  const pw = path.join(T, 'plan-csversion-ignored.json'); fs.writeFileSync(pw, JSON.stringify({ ...JSON.parse(fs.readFileSync(PLAN, 'utf8')), x_cs_version: '2-0-0-0' }))
+  assert.equal(lib(`preflight ${preArgs().replace(PLAN, pw)} --dry-run`).cs_key, 'cs-1.9.0-d2026.10.11.0', 'a Version on disk wins')
+  ok('preflight: x_cs_version stands in for a missing SettingsUser Version; a Version on disk wins')
+}
+{
   // x_cs_feature_log: the profile's debug log reaches the Analyse env; a missing file is refused before anything runs.
   const withLog = (log) => { const p = path.join(T, `plan-featlog-${path.basename(log)}.json`); fs.writeFileSync(p, JSON.stringify({ ...JSON.parse(fs.readFileSync(PLAN, 'utf8')), x_cs_feature_log: { A: log } })); return p }
   const r = lib(`preflight ${preArgs().replace(PLAN, withLog(PLAN))} --dry-run`)

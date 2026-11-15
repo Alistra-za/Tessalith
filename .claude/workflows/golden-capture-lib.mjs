@@ -473,8 +473,10 @@ async function preflightBody(o, { plan, profile, overlay, rawGroups, scripts, jo
   const mo = mo2Facts(o.mo2, o['cs-mod'])
   const origBuf = fs.readFileSync(settingsPath)
   const settingsText = origBuf.toString('utf8')
-  const csSettingsVersion = JSON.parse(settingsText.replace(/^\uFEFF/, '')).Version || ''
-  if (!csSettingsVersion || !mo.csMeta) return { ok: false, reason: `CS version unknown (SettingsUser Version "${csSettingsVersion}", meta "${mo.csMeta}")` }
+  // A CS build that has never saved its full settings writes no Version; the plan's x_cs_version (the
+  // CommunityShaders.dll FileVersion, dash-separated like CS writes it) stands in. A Version on disk always wins.
+  const csSettingsVersion = JSON.parse(settingsText.replace(/^\uFEFF/, '')).Version || plan.x_cs_version || ''
+  if (!csSettingsVersion || !mo.csMeta) return { ok: false, reason: `CS version unknown (SettingsUser Version "${csSettingsVersion}", meta "${mo.csMeta}"); set the plan's x_cs_version to the DLL version, e.g. "1-9-0-0"` }
   const csKey = `cs-${csSettingsVersion.split('-').slice(0, 3).join('.')}-${mo.csMeta}`
   // x_fixture_out can only name where the extractors already write (golden_common.GOLDEN_ROOT\<cs-version>).
   const extractOut = path.join(extractorRoot(o.tools), csKey)
