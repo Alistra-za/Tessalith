@@ -84,3 +84,67 @@ impl super::AppModel {
         pair.is_none_or(|e| allowed(st, self.target).contains(&e))
     }
 }
+
+/// The Presets tab's write guard (Note JF2): false when writing `field` = `value` in `st`'s scope would leave a pair
+/// `st` does not allow under the preset's target. A lone tag pairs with the row's resolved format.
+pub(crate) fn preset_write_ok(
+    pm: &super::presets::PresetsModel,
+    st: Subtype,
+    field: &str,
+    value: &serde_json::Value,
+) -> bool {
+    let row_format = || {
+        pm.row(st)
+            .and_then(|r| r.profile.as_ref().ok())
+            .map(|p| p.format)
+    };
+    let pair = match field {
+        "format" => serde_json::from_value::<(Format, ColorTag)>(value.clone()).ok(),
+        "color.tag" => serde_json::from_value::<ColorTag>(value.clone())
+            .ok()
+            .and_then(|t| Some((row_format()?, t))),
+        _ => return true,
+    };
+    pair.is_none_or(|e| allowed(st, pm.target).contains(&e))
+}
+
+/// Note JF4: fix an editable preset draft whose sub-type row resolves to a pair `allowed` does not list: the draft's
+/// own format and tag are dropped, then, when the base still gives a disallowed pair, `best` is set. The lines it
+/// wrote, or `None`.
+// shortcut: suffix branch rows are not fixed here (their combo and setter are guarded); upgrade if a user preset's
+// branch gives a grey type another format.
+pub(crate) fn fix_preset(pm: &mut super::presets::PresetsModel) -> Option<String> {
+    use super::fields::format_label;
+    if pm.draft.as_ref().is_none_or(|d| d.read_only) {
+        return None;
+    }
+    let bad = |pm: &super::presets::PresetsModel, st: Subtype| {
+        let p = pm.row(st)?.profile.as_ref().ok()?;
+        let e = (p.format, p.color.tag);
+        let list = allowed(st, pm.target);
+        (!list.is_empty() && !list.contains(&e)).then_some(e)
+    };
+    let mut lines = vec![];
+    for st in Subtype::ALL {
+        let Some(old) = bad(pm, st) else { continue };
+        if pm.field(st, "format").is_some() || pm.field(st, "color.tag").is_some() {
+            // Dropping the format drops its tag too (`drop_field`).
+            pm.clear_field(st, "format");
+        }
+        if let Some(still) = bad(pm, st) {
+            if let Some((f, t)) = best(st, pm.target, still) {
+                pm.set_field(st, "format", serde_json::json!([f, t]));
+            }
+        }
+        let now = pm
+            .row(st)
+            .and_then(|r| r.profile.as_ref().ok())
+            .map_or_else(String::new, |p| format_label(p.format, p.color.tag));
+        lines.push(format!(
+            "{}: {} is not valid for this type; format set to {now}.",
+            super::labels::subtype_name(st),
+            format_label(old.0, old.1)
+        ));
+    }
+    (!lines.is_empty()).then(|| lines.join("\n"))
+}

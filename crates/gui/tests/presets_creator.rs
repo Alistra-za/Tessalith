@@ -119,10 +119,11 @@ fn reset_drops_the_override_so_the_base_shows_through() {
     let d = tempfile::tempdir().unwrap();
     let mut pm = copy_of_quality(d.path());
     let before = pm.toml_text();
-    pm.set_field(Subtype::Envmask, "format", json!(["bc7", "unorm"]));
-    assert_eq!(pm.field(Subtype::Envmask, "format"), Some(json!("bc7")));
+    // Note JF2: a grey type takes BC4 or R8 only, so the override is R8.
+    pm.set_field(Subtype::Envmask, "format", json!(["r8", "unorm"]));
+    assert_eq!(pm.field(Subtype::Envmask, "format"), Some(json!("r8")));
     let p = pm.row(Subtype::Envmask).unwrap().profile.clone().unwrap();
-    assert_eq!(p.format, engine::config::Format::Bc7);
+    assert_eq!(p.format, engine::config::Format::R8);
     pm.clear_field(Subtype::Envmask, "format");
     assert_eq!(pm.field(Subtype::Envmask, "format"), None);
     assert_eq!(pm.field(Subtype::Envmask, "color.tag"), None);

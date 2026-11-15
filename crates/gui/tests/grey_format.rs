@@ -227,3 +227,37 @@ fn a_disallowed_pair_on_any_type_resolves_on_open() {
     assert_eq!(own(&m, NORMAL, "format"), None);
     assert!(m.encoding_note.is_some());
 }
+
+#[test]
+fn the_presets_tab_never_keeps_bc7_on_a_grey_type() {
+    let d = tempfile::tempdir().unwrap();
+    let dir = d.path().join("presets");
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(
+        dir.join("mine.toml"),
+        "schema_version = 1\nid = \"mine\"\nversion = \"1.0.0\"\nbase = \"cs-quality\"\n\n[subtypes.skin_sk]\nformat = \"bc7\"\n",
+    )
+    .unwrap();
+    let mut pm = sdc_gui::model::presets::PresetsModel::new(Some(dir), Target::Cs);
+    pm.select("mine");
+    let row = pm.row(Subtype::SkinSk).expect("a row");
+    let p = row.profile.as_ref().expect("a profile");
+    assert!(
+        GREY_OK.contains(&(p.format, p.color.tag)),
+        "{:?}",
+        (p.format, p.color.tag)
+    );
+    assert!(pm.dirty(), "Save writes the fix");
+    assert!(
+        pm.note().is_some_and(|n| n.contains("BC7")),
+        "{:?}",
+        pm.note()
+    );
+    pm.set_field(Subtype::SkinSk, "format", json!(["bc7", "unorm"]));
+    let p = pm.row(Subtype::SkinSk).unwrap().profile.clone().unwrap();
+    assert_ne!(
+        p.format,
+        Format::Bc7,
+        "the editor never writes BC7 on a grey type"
+    );
+}
