@@ -450,9 +450,9 @@ Per block, in the Rust encoder (`bcenc` `speed` example, 1,048,576 blocks, quiet
 
 Question: does counting NVIDIA's error 2 or 3 times AMD's, instead of equally, give a better BC1? Measured on branch `feat/bcenc-weights` (tag `bcenc-plan-d-measured`, commit d892a3eb, unmerged) with `crates/bcenc/examples/quality.rs` and `examples/speed.rs`. Level 18, 3-colour blocks on, `rgb_real` (93 images), mean of per-image RGB PSNR. The baseline `rust:w11` is today's default, weights (1, 1). It equals `cpp:18` on every image (39.5085 dB NVIDIA, 39.7447 dB AMD; paired delta 0, 0 wins, 0 losses), so the run is valid. W21 is weights (2, 1), W31 is (3, 1), NVIDIA first.
 
-The rule was fixed before the run. Per image the change in each decoder's PSNR is taken against the baseline. A candidate fails if any image has both decoders fall, if NVIDIA's mean gain is not above zero, below 0.02 dB or has a 95% interval that includes zero, if AMD loses more than half of NVIDIA's gain, or if the gap between the two decoders' means does not shrink. It passes if both means rise, or if AMD's loss is slight and the gap shrinks. It also has to encode faster than C++ would for one decoder model and use at most a third of the Rust port's time gain. The per-image reading of "both lower is a fail", the half-the-gain reading of "slight loss", the shrinking gap, the speed bar and the budget were pinned by the controller and confirmed by the owner on 2026-11-13. Only the 0.02 dB floor, the choice of candidates and dropping endpoint refinement were the acting owner's.
+The rule was fixed before the run. Per image the change in each decoder's PSNR is taken against the baseline. A candidate fails if any image has both decoders fall, or if NVIDIA's mean gain is not above zero, is below 0.02 dB, or has a 95% interval that includes zero. Otherwise it passes if AMD's mean also rises. If AMD falls, it passes only if AMD loses at most half of NVIDIA's gain and the gap between the decoders' means shrinks. It also has to encode faster than C++ would for one decoder model and use at most a third of the Rust port's time gain. The per-image reading of "both lower is a fail", the half-the-gain reading of "slight loss", the shrinking gap, the speed bar and the budget were pinned by the controller and confirmed by the owner on 2026-11-13. Only the 0.02 dB floor, the choice of candidates and dropping endpoint refinement were the acting owner's.
 
-Endpoint refinement was ruled out before the run: the best pair within 1 code of level 18's gains +0.002 dB NVIDIA and +0.001 dB AMD, within 2 codes +0.003 and +0.002 (1,048,576 blocks, 2026-11-13); level 19 gains +0.002 dB at 5.5 times the time. All below the floor. The encoder is already within about 0.003 dB of the best its search space holds for the summed error, so new weights only trade one decoder against the other.
+Endpoint refinement was ruled out before the run: the best pair within 1 code of level 18's gains +0.002 dB NVIDIA and +0.001 dB AMD, within 2 codes +0.003 and +0.002 (1,048,576 blocks, 2026-11-13); level 19 gains +0.002 dB at 5.5 times the time. All below the floor. The encoder is already within about 0.003 dB of the best its search space holds for the summed error, so new weights only trade one decoder against the other. Before the run I expected both candidates to fail, perhaps at the first step (an image with both decoders falling), and the likely end to be "measured, nothing passed, default unchanged". That was right except for the step: no image had both decoders fall in the plain rows, and both candidates failed on the 0.02 dB floor.
 
 | Candidate | NVIDIA (dB) | AMD (dB) | Δ NVIDIA (wins/losses) | Δ AMD (wins/losses) | Verdict |
 |---|--:|--:|---|---|---|
@@ -467,13 +467,13 @@ Speed, per BC1 block (1,048,576 blocks, 5 runs, quiet machine): C++ 27.3 us, the
 Report-only rows, each against the (1, 1) default under the same setting:
 
 | Setting | W21 Δ NVIDIA / Δ AMD | W31 Δ NVIDIA / Δ AMD | Images with both decoders falling | Verdict |
-|---|---|---|--:|---|
-| Perceptual weights | +0.0071 / -0.0155 | +0.0090 / -0.0237 | 2 | fail for both |
-| 3-colour blocks off (BC3's colour half) | +0.0105 / -0.0153 | +0.0137 / -0.0228 | 0 | fail: below the gain floor |
+|---|---|---|---|---|
+| Perceptual weights | +0.0071 / -0.0155 | +0.0090 / -0.0237 | W21 2, W31 2 | fail for both: an image has both decoders fall |
+| 3-colour blocks off (BC3's colour half) | +0.0105 / -0.0153 | +0.0137 / -0.0228 | W21 0, W31 0 | fail: below the gain floor |
 
 Two limits of this measurement:
 
-- **The NVIDIA 3-colour model has a gap in rgbcx's tables.** The table for the NVIDIA midpoint of a 3-colour block (`interp_half_6_nv`) is asymmetric, and `solid_block` and `bc1_encode3` swap the endpoints after scoring. The score the encoder minimises then differs from what NVIDIA decodes on some blocks. Both NVIDIA-weighted candidates were measured with this handicap; AMD's table is symmetric and has no such gap.
+- **The NVIDIA 3-colour model has a gap in rgbcx's tables.** The table for the NVIDIA midpoint of a 3-colour block (`interp_half_6_nv`) is asymmetric, and `solid_block` and `bc1_encode3` swap the endpoints after scoring. The score the encoder minimises then differs from what NVIDIA decodes on some blocks. Both NVIDIA-weighted candidates were measured with this handicap; AMD's table (`interp_half_5_6_amd`) is symmetric and has no such gap: Task 2's trace of 64 encodings found zero AMD gap.
 - **1-bit alpha gets worse under both candidates.** On generated blocks, total error against (1, 1) is +0.035% for W21 and +0.067% for W31. The `rgb_real` images are opaque and do not exercise the alpha path, so no image-set figure exists for it.
 
 Result: nothing passed and the default stays (1, 1). The weight parameter and the measurement tool stay on the branch, unmerged.
