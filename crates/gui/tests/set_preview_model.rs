@@ -2183,3 +2183,154 @@ fn a_texture_set_block_locks_the_plane_and_tiling_multiplies_after_pgpsim() {
     run(&mut s, &m);
     assert_eq!(uv(&s), [4.0, 4.0]);
 }
+
+fn rock_named(m: &AppModel, id: &str) -> (SetView, EntryInput) {
+    json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.id == id)
+        .unwrap_or_else(|| panic!("no PGPatcher entry for {id}"))
+}
+
+/// The JSON entry of set `id`, as the export writes it.
+fn entry_of(m: &AppModel, id: &str) -> (SetView, serde_json::Value) {
+    let (v, e) = rock_named(m, id);
+    (v, sdc_gui::pgp::writer::entry_node(&e).to_value())
+}
+
+fn idle_for(m: &mut AppModel) {
+    assert!(
+        m.wait_idle(Duration::from_secs(120)),
+        "planning did not finish"
+    );
+}
+
+/// The owner's `teeth_albedo2.png` named `textures/arch/mouth/teeth_02` kept `match_diffuse = arch\mouth\teeth_albedo2`,
+/// which no mesh uses: the match key follows the name the albedo is read as (its `[inputs]` alias), not its file
+/// name on disk, so the meshes that use the input name are found and patched.
+#[test]
+fn an_input_name_moves_the_match_key_and_the_meshes_follow() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    m.set_input_name("landscape/rock01", "textures/landscape/rock02")
+        .unwrap();
+    idle_for(&mut m);
+    let (v, e) = entry_of(&m, "landscape/rock02");
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock02.dds"),
+        "{e}"
+    );
+    // The outputs under `textures\pbr\` move with the match key, as the alias moves every other output (AA1).
+    let (_, input) = rock_named(&m, "landscape/rock02");
+    let slots = member_slots(&m, &v, Some(&input));
+    assert_eq!(
+        slots
+            .iter()
+            .find(|s| s.kind == SlotKind::Diffuse)
+            .map(|s| s.paths.clone()),
+        Some(vec!["textures/pbr/landscape/rock02.dds".to_string()])
+    );
+    m.select_set(&v.key);
+    let db = scan_db(dir.path(), &[r"textures\landscape\rock02.dds"]);
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
+    run(&mut s, &m);
+    let Candidates::Ready(list) = &s.candidates else {
+        panic!("{:?}", s.candidates)
+    };
+    assert_eq!(list.len(), 1, "the mesh that uses the input name");
+}
+
+/// A Key-form rename (HJ3, HJ4) keeps `match_diffuse` + `rename`; the `match_diffuse` is the input name's.
+#[test]
+fn a_key_form_rename_of_an_input_named_set_matches_the_input_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    m.set_input_name("landscape/rock01", "textures/landscape/rock02")
+        .unwrap();
+    idle_for(&mut m);
+    m.set_json_value(
+        "landscape/rock02",
+        "rename",
+        Some(serde_json::json!("boulder")),
+    );
+    idle_for(&mut m);
+    let (_, e) = entry_of(&m, "landscape/rock02");
+    assert_eq!(
+        e["match_diffuse"],
+        serde_json::json!(r"landscape\rock02"),
+        "{e}"
+    );
+    assert_eq!(e["rename"], serde_json::json!(r"landscape\boulder"), "{e}");
+}
+
+/// A renamed set keeps its id when its albedo gets an input name, so no key of the views changes: the view must
+/// still be rebuilt for the new match key.
+#[test]
+fn an_input_name_on_a_renamed_set_moves_its_match_key() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    m.rename_set("landscape/rock01", "landscape/boulder")
+        .unwrap();
+    idle_for(&mut m);
+    let _ = sdc_gui::model::sets::views(&m);
+    m.set_input_name("landscape/boulder", "textures/landscape/rock02")
+        .unwrap();
+    idle_for(&mut m);
+    let (_, e) = entry_of(&m, "landscape/boulder");
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock02.dds"),
+        "{e}"
+    );
+}
+
+/// A created set keeps its id under any input name and no item key changes, so only `sets::view_reads` (the diffuse's
+/// game path) tells the fast re-plan that its view, and its match key, changed (Note JH2).
+#[test]
+fn an_input_name_in_a_created_set_rebuilds_its_view() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    let id = m.drop_new_set("landscape/rock01.png").unwrap();
+    idle_for(&mut m);
+    let (_, e) = entry_of(&m, &id);
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock01.dds"),
+        "{e}"
+    );
+    m.set_input_name(&id, "textures/landscape/rock02").unwrap();
+    idle_for(&mut m);
+    let (_, e) = entry_of(&m, &id);
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock02.dds"),
+        "{e}"
+    );
+}
+
+/// JH1: an alias the engine refuses (another extension, IN-ALIAS-INVALID) leaves the file planned under its real
+/// name, so the match key keeps the name on disk.
+#[test]
+fn a_refused_alias_leaves_the_match_key_on_the_file_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(dir.path());
+    m.edit_docs("t", None, true, |p, _| {
+        p.set_read_as("landscape/rock01.png", Some("landscape/rock02.tga"))
+    });
+    idle_for(&mut m);
+    // Save and open the folder again, so the views are built fresh from the saved alias.
+    m.save().unwrap();
+    let root = m.root.clone().expect("an opened folder");
+    m.open_folder(root);
+    idle_for(&mut m);
+    assert_eq!(
+        m.read_as_of("landscape/rock01.png").as_deref(),
+        Some("landscape/rock02.tga")
+    );
+    let (_, e) = entry_of(&m, "landscape/rock01");
+    assert_eq!(
+        e["match1"],
+        serde_json::json!(r"landscape\rock01.dds"),
+        "{e}"
+    );
+}

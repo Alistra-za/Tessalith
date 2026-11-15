@@ -18,6 +18,7 @@
 - A skin map Community Shaders can't load in its format (`FMT-CS-SKIN-LOADER`) has a **Use BC7** button, and a sub-type the mode doesn't have and gives no fallback for (`CFG-UNAVAILABLE`) has **Set type…**. Both used to show an **Acknowledge** that changed nothing.
 - The **Kinds ▾** hover in Problems no longer says Review lists every warning: Review lists none.
 - In the GUI a grey map (envmask, height, model-space specular, skin `_sk`, projected noise, gray) is BC4 or R8 only: no Format row, bulk edit, Copy settings or preset edit offers or writes another format. A format a texture's type doesn't allow, on any type, now resets itself when the project opens or the type changes (to the type's default, else the best format the type allows) and says so in Problems; a slot lock no longer keeps it. The CLI still writes what `sdc.toml` says.
+- A TruePBR set whose albedo has an input name now matches the meshes that use that name: the PGPatcher match key, the set preview's mesh list and the outputs under `textures\pbr\` follow the input name. Before, they kept the file's name on disk, which no mesh used, so the 3D preview fell back to the sphere and the exported JSON patched nothing. An existing project with such a set writes its outputs under the new name on the next export; the old ones stay on disk.
 
 ## 3.0.0
 

@@ -783,11 +783,27 @@ fn auto_id(item_key: &str) -> String {
     }
 }
 
-/// The stem the diffuse's output has when it mirrors its source (DECISIONS N2): the source stem, without a colour
-/// term (`rock01_albedo` → `rock01`, as Discover names the output). Taken from the source, never from the plan's
-/// output, which an output path has already moved under the prefix.
-fn mirrored_stem(item: &TextureItem) -> String {
-    let stem = Path::new(&item.key)
+/// Note JH1: the path texture `item` is read as: its `[inputs]` alias when the plan applied it (the job's game path
+/// ends with it, as `input_name_plan` checks), else its key. A refused alias (IN-ALIAS-INVALID) leaves the key.
+fn read_name(m: &AppModel, item: &TextureItem) -> String {
+    let alias = m.read_as_of(&item.key).map(|a| a.replace('\\', "/"));
+    let applied = |a: &String| {
+        let (game, a) = (
+            super::rename::lower(super::input_name::no_ext(
+                item.job.as_ref().map_or("", |j| j.game_path.as_str()),
+            )),
+            super::rename::lower(super::input_name::no_ext(a)),
+        );
+        game == a || game.ends_with(&format!("/{a}"))
+    };
+    alias.filter(applied).unwrap_or_else(|| item.key.clone())
+}
+
+/// The stem the diffuse's output has when it mirrors its source (DECISIONS N2): the stem of the name it is read as
+/// (`read_name`), without a colour term (`rock01_albedo` → `rock01`, as Discover names the output). Taken from the
+/// source, never from the plan's output, which an output path has already moved under the prefix.
+fn mirrored_stem(read: &str) -> String {
+    let stem = Path::new(read)
         .file_stem()
         .unwrap_or_default()
         .to_string_lossy()
@@ -830,15 +846,19 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
 /// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
 /// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
-/// `finish_view` the diffuse's `job.profile.subtype` and its key (`mirrored_stem`). The keys are compared apart
-/// (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets document (in the
-/// views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`). `output_suffix` and
-/// `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
-pub(crate) fn view_reads(i: &TextureItem) -> (Option<SlotKind>, Option<Subtype>, bool) {
+/// `finish_view` the diffuse's `job.profile.subtype`, its key and the name it is read as (`read_name`: its alias,
+/// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JH1). The keys are
+/// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
+/// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
+/// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
+pub(crate) fn view_reads(
+    i: &TextureItem,
+) -> (Option<SlotKind>, Option<Subtype>, bool, Option<&str>) {
     (
         slot_of(i),
         i.job.as_ref().map(|j| j.profile.subtype),
         i.waiting,
+        i.job.as_ref().map(|j| j.game_path.as_str()),
     )
 }
 
@@ -1113,9 +1133,10 @@ fn match_of_path(p: &str) -> String {
 }
 
 /// Note HL5: `derived_match` and where it came from. A JSON set takes the first that exists: its mapping's base, a
-/// record's slot 1 (no albedo owner), the albedo (the diffuse, as before), the set's own base path.
-fn set_match(v: &mut SetView, diffuse: Option<&TextureItem>) {
-    let albedo = diffuse.map(|i| derive_match_diffuse(dir_of(&i.key), &mirrored_stem(i)));
+/// record's slot 1 (no albedo owner), the albedo (the diffuse, as before, under the name it is read as, `read_name`),
+/// the set's own base path.
+fn set_match(v: &mut SetView, diffuse: Option<&str>) {
+    let albedo = diffuse.map(|r| derive_match_diffuse(dir_of(r), &mirrored_stem(r)));
     let mapped = v.txst.as_ref().and_then(|t| match &t.base {
         Some(b) => Some(match_of_path(b)),
         None => t.slots.get(&1).filter(|_| !v.pbr).map(|p| match_of_path(p)),
@@ -1164,7 +1185,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
     if is_pbr_grass(v) {
         crate::pgp::settings::grass_view(&mut v.settings);
     }
-    set_match(v, diffuse);
+    set_match(v, diffuse.map(|i| read_name(m, i)).as_deref());
     match prefix_of(&v.settings, v.derived_match.as_deref().unwrap_or("")) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
