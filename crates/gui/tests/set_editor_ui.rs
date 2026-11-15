@@ -942,9 +942,9 @@ fn a_read_only_sdc_toml_disables_format_and_alpha_and_explains_why() {
         combos.iter().all(|n| n.accesskit_node().is_disabled()),
         "every format is disabled"
     );
-    let opaque = h.get_by_label_contains("Slot alpha type: ");
-    assert!(opaque.accesskit_node().is_disabled());
-    opaque.hover();
+    let alpha = h.get_by_label_contains("Slot alpha type: ");
+    assert!(alpha.accesskit_node().is_disabled());
+    alpha.hover();
     h.run();
     h.run();
     assert!(

@@ -664,6 +664,28 @@ fn resize_line(w: f32, h: f32) -> String {
     format!(r#"{{"op":"resize","w":{w},"h":{h}}}"#)
 }
 
+/// Note JI5: the editor's floor grew with the slot row's alpha cells, so the narrow windows these pins were drawn at
+/// (900, 1055 and 1100 px under the old 540 floor) move with it: the floor plus what the other columns and chrome
+/// took at that size.
+fn at_floor(others: f32) -> f32 {
+    ROWS_MIN + others
+}
+
+/// The old 1055 px window: the columns yield to the editor.
+fn narrow() -> f32 {
+    at_floor(515.0)
+}
+
+/// The old 900 px window: Textures is at its minimum and Sets keeps its own.
+fn tight() -> f32 {
+    at_floor(360.0)
+}
+
+/// The old 1100 px: from here Textures keeps its width when a set opens.
+fn narrow_limit() -> f32 {
+    at_floor(560.0)
+}
+
 #[test]
 fn opening_a_set_takes_the_editors_room_from_textures_first() {
     for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
@@ -700,8 +722,8 @@ fn opening_a_set_takes_the_editors_room_from_textures_first() {
 
 #[test]
 fn a_tight_window_takes_textures_to_its_minimum_before_sets() {
-    // At 900 the card's title is cut away and the card cannot be driven into view, so open it at 1055 first.
-    let (open, tight) = (resize_line(1055.0, 770.0), resize_line(900.0, 770.0));
+    // Tight, the card's title is cut away and the card cannot be driven into view, so open it at the narrow size first.
+    let (open, tight) = (resize_line(narrow(), 770.0), resize_line(tight(), 770.0));
     let (_d, h) = crate::replay(
         "demo",
         &[
@@ -720,9 +742,9 @@ fn a_tight_window_takes_textures_to_its_minimum_before_sets() {
     assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
 }
 
-/// Textures' width at 1055 with armor/gold open, Sets expanded or (`hide`: hidden / collapsed) not.
+/// Textures' width at the narrow size with armor/gold open, Sets expanded or (`hide`: hidden / collapsed) not.
 fn textures_with_gold_open(hidden: bool, collapsed: bool) -> f32 {
-    let resize = resize_line(1055.0, 770.0);
+    let resize = resize_line(narrow(), 770.0);
     let before = |h: &mut crate::app_harness::H| {
         let s = &mut h.state_mut().model.settings;
         (s.sets_hidden, s.sets_collapsed) = (hidden, collapsed);
@@ -1551,7 +1573,7 @@ fn the_shader_popup_counts_follow_the_search() {
 /// A filter change starts the list at its top: the old offset showed a set under the "hidden by filter" line (SC3).
 #[test]
 fn a_filter_change_starts_the_list_at_its_top() {
-    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0), (1055.0, 400.0)] {
+    for (w, h_px) in [(narrow(), 770.0), (1400.0, 790.0), (narrow(), 400.0)] {
         let resize = resize_line(w, h_px);
         let open = resize_line(w, 790.0);
         let (_d, h) = crate::replay_mid(
@@ -1937,7 +1959,7 @@ fn a_short_title_keeps_its_status_pill_on_the_title_row() {
 /// coming from Sets (never below SETS_MIN). At 1055 that is two tiles a row, not one beside a blank strip.
 #[test]
 fn a_shrunk_textures_column_holds_whole_tile_columns() {
-    for (w, h_px) in [(1055.0, 770.0), (1400.0, 790.0)] {
+    for (w, h_px) in [(narrow(), 770.0), (1400.0, 790.0)] {
         let resize = resize_line(w, h_px);
         let (_d, mut h) =
             crate::replay("demo", &[resize.as_str(), r#"{"op":"settle","frames":6}"#]);
@@ -1950,7 +1972,7 @@ fn a_shrunk_textures_column_holds_whole_tile_columns() {
             "{w}x{h_px}: sets {s}, textures {t}, centre {c}, tiles a row {cols0} -> {cols}"
         );
         assert!(s >= SETS_MIN - 0.5 && c >= ROWS_MIN - 1.0, "{at}");
-        if w < 1100.0 {
+        if w < narrow_limit() {
             assert_eq!(cols, 2, "{at}");
             let step = tile_step(
                 h.state().model.prefs.tile,

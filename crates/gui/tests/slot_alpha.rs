@@ -187,6 +187,9 @@ fn the_slot_reset_goes_back_to_the_inherited_alpha() {
     assert_eq!(own(h.state(), ROCK), None);
     assert_eq!(h.state().undo_label(), Some("Alpha"));
     assert!(h.query_by_label("Reset slot alpha").is_none());
+    // One undo gives the own alpha back.
+    h.state_mut().undo();
+    assert_eq!(own(h.state(), ROCK), Some(json!("blend")));
 }
 
 #[test]
@@ -243,10 +246,19 @@ fn alpha_w_fits_the_longest_label() {
 
 #[test]
 fn rows_min_makes_room_for_the_alpha_cells() {
-    let (_, confirm) = natural_widths();
-    let spacing = egui::Style::default().spacing.item_spacing.x;
-    let grown = sdc_gui::ui::set_editor::ALPHA_W + confirm + 2.0 * spacing;
-    let floor = sdc_gui::ui::set_editor::ROWS_MIN;
-    // Measured before this change: 540 (Note FB2); it grows by the alpha combo, Confirm and two gaps, rounded up.
-    assert_eq!(floor, (540.0 + grown).ceil(), "ROWS_MIN, grown {grown}");
+    // Measured in the real row (a set that asks, so Confirm shows): Confirm's width and the gap the row draws with.
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(leaf(d.path()));
+    h.run_steps(4);
+    let combo = slot_combo(&h).rect();
+    let confirm = h.get_by_label("Slot confirm alpha").rect();
+    let gap = confirm.min.x - combo.max.x;
+    let grown = sdc_gui::ui::set_editor::ALPHA_W + confirm.width() + 2.0 * gap;
+    // Before this change the floor was 540 (Note FB2); it grows by the combo, Confirm and the two gaps, rounded up.
+    assert_eq!(
+        sdc_gui::ui::set_editor::ROWS_MIN,
+        (540.0 + grown).ceil(),
+        "ROWS_MIN, Confirm {}, gap {gap}, grown {grown}",
+        confirm.width()
+    );
 }

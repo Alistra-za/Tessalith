@@ -312,6 +312,27 @@ fn problems_and_review_have_their_own_confirm() {
         ] {
             assert_eq!(h.query_all_by_label(&name).count(), 1, "{name}");
         }
+        // Note JI5: the set editor's slot row asks it too, under its own name. It and the texture panel are never up
+        // together (one selection), so the set is selected for a look and the item is selected again.
+        let set = h
+            .state()
+            .sets
+            .iter()
+            .find(|s| s.key.ends_with("landscape/leaf"))
+            .unwrap()
+            .key
+            .clone();
+        h.state_mut().select_set(&set);
+        h.run_steps(4);
+        for (name, n) in [
+            ("Slot confirm alpha".to_string(), 1),
+            (format!("{surface} confirm alpha"), 1),
+            ("Confirm alpha".to_string(), 0),
+        ] {
+            assert_eq!(h.query_all_by_label(&name).count(), n, "set row: {name}");
+        }
+        h.state_mut().select_item("landscape/leaf.png");
+        h.run_steps(4);
         press(&mut h, &format!("{surface} confirm alpha"));
         settle(&mut h);
         let doc = h.state().project.as_ref().unwrap();
@@ -649,39 +670,4 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     h.state_mut().show_tab(BottomTab::Review);
     h.run_steps(4);
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
-}
-
-/// Note JI5: the set row's Confirm ("Slot confirm alpha") is a name of its own beside Problems' and Review's. The set
-/// editor and the texture panel are never up together, so the texture panel's "Confirm alpha" is absent here.
-#[test]
-fn the_slot_confirm_name_is_distinct() {
-    for surface in ["Problems", "Review"] {
-        let d = tempfile::tempdir().unwrap();
-        let mut m = opened(d.path());
-        m.decide(
-            "landscape/leaf.png",
-            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
-        );
-        assert!(m.wait_idle(Duration::from_secs(60)));
-        let set = m
-            .sets
-            .iter()
-            .find(|s| s.key.ends_with("landscape/leaf"))
-            .unwrap()
-            .key
-            .clone();
-        m.select_set(&set);
-        match surface {
-            "Problems" => m.open_problems(None),
-            _ => m.open_review(),
-        }
-        let mut h = harness(m);
-        h.run();
-        for name in [
-            "Slot confirm alpha".to_string(),
-            format!("{surface} confirm alpha"),
-        ] {
-            assert_eq!(h.query_all_by_label(&name).count(), 1, "{surface}: {name}");
-        }
-    }
 }

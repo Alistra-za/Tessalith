@@ -77,8 +77,6 @@ fn set_editor_is_one_column() {
             for l in [
                 "Diffuse thumbnail",
                 "Match on this",
-                "Slot confirm alpha",
-                "Reset slot alpha",
                 "Assign…",
                 "ready",
                 "warning",
@@ -90,6 +88,18 @@ fn set_editor_is_one_column() {
             for role in [Role::ComboBox, Role::SpinButton] {
                 rows.extend(h.query_all_by_role(role).map(|n| n.rect()).filter(in_rows));
             }
+            // Note JI5: the Flags cell's alpha dropdown (it replaced "Opaque") is in the rows, above the tabs.
+            let alpha: Vec<_> = h
+                .query_all_by_role(Role::ComboBox)
+                .filter(|n| {
+                    n.accesskit_node()
+                        .label()
+                        .is_some_and(|l| l.starts_with("Slot alpha type: "))
+                })
+                .map(|n| n.rect())
+                .collect();
+            assert_eq!(alpha.len(), 1, "{at}: the slot alpha combo");
+            assert!(in_rows(&alpha[0]), "{at}: {:?} is in the rows", alpha[0]);
             assert!(rows.len() > 6, "{at}: found the row widgets {rows:?}");
             for r in &rows {
                 assert!(
@@ -170,65 +180,98 @@ fn the_assign_menu_header_is_the_slot_label() {
     assert_eq!(h.query_all_by_label("Emissive / Skin (slot 3)").count(), 2);
 }
 
-/// Note JI5: with the centre at the editor's floor, every slot-row control, the alpha combo and its Confirm included,
-/// ends inside the set editor (Note HP goal 6). Confirm shows while the alpha is a proposal, so a set that asks is
-/// checked too, and a set with its own alpha shows the reset instead.
+/// A set whose diffuse row shows Confirm (`asks`: an undecided alpha on a plain diffuse) or the reset (its own alpha),
+/// selected, in a window sized so the centre is exactly `ROWS_MIN` wide.
+fn at_the_floor(asks: bool) -> H {
+    use sdc_gui::ui::set_editor::ROWS_MIN;
+    let set = if asks {
+        "landscape/leaf"
+    } else {
+        "landscape/rock01"
+    };
+    // The width the other columns and chrome take, then corrected by what the first frames really give the centre.
+    let mut w = ROWS_MIN + 515.0;
+    for _ in 0..4 {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = pbr_opened_plain(d.path());
+        m.decide(
+            "landscape/leaf.png",
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+        );
+        if !asks {
+            m.set_alpha("landscape/rock01.png", engine::config::AlphaPolicy::Blend);
+        }
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let key = m
+            .sets
+            .iter()
+            .find(|s| s.key.ends_with(set))
+            .unwrap()
+            .key
+            .clone();
+        m.select_set(&key);
+        let mut h = harness(m, w);
+        h.run_steps(4);
+        let full = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+        let centre = full.intersect(h.ctx.content_rect());
+        let off = centre.width() - ROWS_MIN;
+        if off.abs() <= 0.5 {
+            // Keep the temp folder alive for the harness's life.
+            std::mem::forget(d);
+            return h;
+        }
+        w -= off;
+    }
+    panic!("no window width gives the centre exactly {ROWS_MIN} px");
+}
+
+/// Note JI5, Note HP goal 6: with the centre exactly at `ROWS_MIN`, every control of every slot row (the alpha combo,
+/// Confirm and the reset included) ends inside the set editor, whose right edge is the centre's less its margin.
 #[test]
 fn slot_rows_fit_at_the_new_floor() {
-    use sdc_gui::ui::set_editor::ROWS_MIN;
-    let mut at_floor = 0;
-    for (set, asks) in [("landscape/leaf", true), ("landscape/rock01", false)] {
-        for w in [1024.0, 1100.0, 1280.0] {
-            let d = tempfile::tempdir().unwrap();
-            let mut m = pbr_opened_plain(d.path());
-            m.decide(
-                "landscape/leaf.png",
-                sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    for asks in [true, false] {
+        let h = at_the_floor(asks);
+        let full = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        let margin = egui::Frame::central_panel(&h.ctx.global_style())
+            .inner_margin
+            .right as f32;
+        let edge = full.intersect(h.ctx.content_rect()).right() - margin;
+        let at = format!("{} at the floor", if asks { "Confirm" } else { "reset" });
+        let (diffuse, cmds) = (
+            slot_rect(&h, "Diffuse"),
+            h.get_by_role_and_label(Role::Button, "Slot commands…")
+                .rect(),
+        );
+        // Every control between the first row and Slot commands….
+        let in_rows = |r: &egui::Rect| {
+            r.min.x >= full.min.x && r.min.y >= diffuse.min.y - 30.0 && r.max.y <= cmds.max.y
+        };
+        let mut rows = vec![];
+        for role in [
+            Role::Button,
+            Role::ComboBox,
+            Role::SpinButton,
+            Role::CheckBox,
+            Role::Image,
+            Role::Label,
+        ] {
+            rows.extend(h.query_all_by_role(role).map(|n| n.rect()).filter(in_rows));
+        }
+        let want = if asks {
+            "Slot confirm alpha"
+        } else {
+            "Reset slot alpha"
+        };
+        assert!(
+            h.query_all_by_label(want).count() == 1,
+            "{at}: the row shows {want}"
+        );
+        assert!(rows.len() > 12, "{at}: found the row controls {rows:?}");
+        for r in &rows {
+            assert!(
+                r.max.x <= edge,
+                "{at}: row control {r:?} passes the editor's edge {edge}"
             );
-            if !asks {
-                m.set_alpha("landscape/rock01.png", engine::config::AlphaPolicy::Blend);
-            }
-            assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-            let key = m
-                .sets
-                .iter()
-                .find(|s| s.key.ends_with(set))
-                .unwrap()
-                .key
-                .clone();
-            m.select_set(&key);
-            let mut h = harness(m, w);
-            h.run_steps(3);
-            let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
-            // The set editor's own right edge is the centre's, less its margin; no control passes it.
-            let edge = centre.intersect(h.ctx.content_rect()).right();
-            if centre.width() > ROWS_MIN + 1.0 {
-                continue;
-            }
-            at_floor += 1;
-            let want = if asks {
-                "Slot confirm alpha"
-            } else {
-                "Reset slot alpha"
-            };
-            let cells: Vec<egui::Rect> = h
-                .query_all_by_role(Role::ComboBox)
-                .filter(|n| {
-                    n.accesskit_node()
-                        .label()
-                        .is_some_and(|l| l.starts_with("Slot alpha type: "))
-                })
-                .map(|n| n.rect())
-                .chain(h.query_all_by_label(want).map(|n| n.rect()))
-                .collect();
-            assert_eq!(cells.len(), 2, "{set} at {w}: the alpha combo and {want}");
-            for r in cells {
-                assert!(
-                    r.max.x <= edge,
-                    "{set} at {w}: {r:?} passes the edge {edge}"
-                );
-            }
         }
     }
-    assert!(at_floor >= 2, "some width puts the centre at the floor");
 }
