@@ -1,22 +1,17 @@
-//! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, the live-encode switch,
+//! The right-hand Advanced drawer (M3a spec §2.5): the live-encode switch, the checks, the cache limit
 //! and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
-use crate::model::fields::provenance_text;
-use crate::model::inspector::{inspector_rows, InspectorRow};
-use crate::model::{AppModel, Selection};
+use crate::model::AppModel;
 use crate::settings::ChecksSettings;
 use eframe::egui;
-use engine::policy::ResolvedJob;
-use serde_json::Value;
 
 /// The drawer's narrowest width.
 const ADV_MIN: f32 = 260.0;
 
+/// The drawer keeps no state of its own now (Note JI3); the struct goes with the drawer in Task 9.
 #[derive(Debug, Default)]
-pub struct AdvancedState {
-    pub only_differences: bool,
-}
+pub struct AdvancedState {}
 
 /// What a control asks of the model.
 enum Action {
@@ -27,7 +22,7 @@ enum Action {
 }
 
 /// The drawer: a 24 px "Advanced" strip while closed, the panel while `settings.advanced_open`.
-pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
+pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, _state: &mut AdvancedState) {
     if !model.settings.advanced_open {
         egui::Panel::right("advanced-strip")
             .resizable(false)
@@ -60,7 +55,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
         });
         egui::ScrollArea::vertical()
             .auto_shrink([false, false])
-            .show(ui, |ui| body(ui, model, state));
+            .show(ui, |ui| body(ui, model));
     });
     if close {
         model.settings.advanced_open = false;
@@ -69,9 +64,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
 }
 
 /// The drawer's sections (also the set panel's Advanced tab, layout v2 C6); applies its edits once they are drawn.
-pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
+pub fn body(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut actions = vec![];
-    inspector(ui, model, state);
     preview_settings(ui, model, &mut actions);
     checks(ui, model, &mut actions);
     cache(ui, model, &mut actions);
@@ -87,147 +81,10 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     }
 }
 
-/// The selected texture's key and resolved job, when it has one.
-fn selected_job(model: &AppModel) -> Option<(String, ResolvedJob)> {
-    // F3a: the drawer edits one texture; with several selected it waits for one.
-    if model.in_bulk() {
-        return None;
-    }
-    let Selection::Item(key) = &model.selection else {
-        return None;
-    };
-    let job = model.item(key)?.job.clone()?;
-    Some((key.clone(), job))
-}
-
-fn value_text(v: &Value) -> String {
-    match v {
-        Value::String(s) => s.clone(),
-        other => other.to_string(),
-    }
-}
-
 fn section(ui: &mut egui::Ui, name: &str, body: impl FnOnce(&mut egui::Ui)) {
     egui::CollapsingHeader::new(egui::RichText::new(name).strong())
         .default_open(true)
         .show(ui, body);
-}
-
-/// Slack kept off the inspector grid's width for the scroll bar and the grid's own cell padding (rule 3.7).
-const GRID_MARGIN: f32 = 24.0;
-/// The narrowest an inspector column gets.
-const MIN_COL: f32 = 60.0;
-
-/// A field's row text: the bulk panel's label, else the key as words ("alpha.compare" is "Alpha compare").
-fn field_text(field: &str) -> String {
-    let label = crate::model::bulk::field_label(field);
-    if label != field {
-        label.to_string()
-    } else {
-        crate::model::labels::readable(&field.replace('.', "_"))
-    }
-}
-
-fn inspector(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) {
-    let mut open_presets = false;
-    section(ui, "Preset inspector", |ui| {
-        // D10: the drawer names the texture first (A18).
-        // Only a texture with resolved settings is named; the body below has nothing to show for any other.
-        let heading = match selected_job(model) {
-            Some((key, _)) => format!(
-                "How {}'s settings resolve",
-                key.rsplit('/').next().unwrap_or(&key)
-            ),
-            None => "No texture selected".to_string(),
-        };
-        ui.label(egui::RichText::new(heading).strong());
-        ui.weak(format!("Batch preset: {}", model.batch_preset));
-        if model.loaded_user_presets.is_empty() {
-            ui.horizontal(|ui| {
-                ui.weak("No user presets.");
-                open_presets = ui.button("Presets…").clicked();
-            });
-        } else {
-            ui.label("User presets:");
-            for (id, file) in &model.loaded_user_presets {
-                ui.label(egui::RichText::new(format!("{id} — {file}")).small());
-            }
-        }
-        for (file, reason) in &model.skipped_user_presets {
-            ui.label(
-                egui::RichText::new(format!("Skipped: {file} — {reason}"))
-                    .small()
-                    .color(ui.visuals().warn_fg_color),
-            );
-        }
-        ui.label(
-            egui::RichText::new(
-                "Built-in presets are read-only here. Change a texture in the centre panel.",
-            )
-            .small()
-            .weak(),
-        );
-        let (Some((_, job)), Some(session)) = (selected_job(model), model.session.as_ref()) else {
-            ui.weak("Select a texture to see how its settings were resolved.");
-            return;
-        };
-        ui.checkbox(
-            &mut state.only_differences,
-            format!("Show only what differs from {}", engine::presets::BASE_ID),
-        );
-        let rows: Vec<InspectorRow> = inspector_rows(&job, session.engine().registry())
-            .into_iter()
-            .filter(|r| !state.only_differences || r.differs_from_base)
-            .collect();
-        if rows.is_empty() {
-            ui.weak("Nothing differs from the base preset.");
-            return;
-        }
-        // Three columns share the drawer's width (the drawer's minimum keeps each above 60 px, so no side scroll).
-        let col = ((ui.available_width() - 2.0 * ui.spacing().item_spacing.x - GRID_MARGIN) / 3.0)
-            .max(MIN_COL);
-        egui::Grid::new("inspector")
-            .num_columns(3)
-            .striped(true)
-            .max_col_width(col)
-            .show(ui, |ui| {
-                for r in rows {
-                    let text = |s: String| {
-                        if r.differs_from_base {
-                            egui::RichText::new(s).strong()
-                        } else {
-                            egui::RichText::new(s)
-                        }
-                    };
-                    let shown = field_text(&r.field);
-                    // One tooltip: the name and its key (the automatic elided-text one is off for this label).
-                    let name = format!("{shown} ({})", r.field);
-                    let key_label = ui
-                        .add(
-                            egui::Label::new(text(shown))
-                                .truncate()
-                                .show_tooltip_when_elided(false),
-                        )
-                        .on_hover_text(&name);
-                    key_label.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name)
-                    });
-                    ui.add(egui::Label::new(text(value_text(&r.value))).truncate());
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(provenance_text(&r.provenance))
-                                .small()
-                                .weak(),
-                        )
-                        .truncate(),
-                    );
-                    ui.end_row();
-                }
-            });
-    });
-    if open_presets {
-        model.open_presets();
-    }
 }
 
 /// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed

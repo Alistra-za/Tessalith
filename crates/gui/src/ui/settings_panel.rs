@@ -1793,6 +1793,8 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
     });
     if !compact {
         used_by(ui, model, key);
+        // Note JI3: the preset inspector, folded, last.
+        super::inspector_section::section(ui, model, key);
     }
     for a in actions {
         match a {

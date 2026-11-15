@@ -129,6 +129,8 @@ mod helpers_list;
 mod history;
 #[path = "../input_name_edit.rs"]
 mod input_name_edit;
+#[path = "../inspector_section.rs"]
+mod inspector_section;
 #[path = "../json_errors.rs"]
 mod json_errors;
 #[path = "../json_pending.rs"]

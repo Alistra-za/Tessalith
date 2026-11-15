@@ -16,6 +16,7 @@ pub mod group;
 pub mod header;
 pub mod helper_panel;
 pub mod input_name;
+mod inspector_section;
 pub mod json_editor;
 pub mod marker_dialog;
 pub mod meshes;
