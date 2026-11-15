@@ -2750,7 +2750,6 @@ fn a_broken_csm_is_its_own_row() {
 #[test]
 fn txst_json_csm_wins() {
     use sdc_gui::model::cs_pbr::Kind;
-    use sdc_gui::model::csm_export;
     use serde_json::json;
     const ROCK: &str = "landscape/rock01";
     let p = tempfile::tempdir().unwrap();
@@ -2767,11 +2766,7 @@ fn txst_json_csm_wins() {
         ("materials/pbr/landscape/rock01.csm", store_copy),
     ]);
     // What the app does every frame.
-    let hand = |m: &mut MeshesModel, app: &sdc_gui::model::AppModel| {
-        let csms = csm_export::txst_csms(app, &m.txst_edids());
-        m.set_txst_csms(csms);
-    };
-    hand(&mut m, &app);
+    m.sync_txst_csms(&app);
     let block = s_block(&m);
     m.set_txst(block, Some(ROCK01)).unwrap();
     let s = csm_shape(&mut m);
@@ -2789,7 +2784,7 @@ fn txst_json_csm_wins() {
     // An unsaved set edit reaches the 3D view: a new spec, a reload.
     app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
     assert!(app.wait_idle(Duration::from_secs(60)));
-    hand(&mut m, &app);
+    m.sync_txst_csms(&app);
     let after = csm_shape(&mut m).material.pbr.expect("still the set's");
     assert_eq!(after.params[16], 0.2, "the edited fuzz weight is drawn");
 
@@ -2797,6 +2792,36 @@ fn txst_json_csm_wins() {
     m.set_txst(block, None).unwrap();
     let s = csm_shape(&mut m);
     assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
+}
+
+/// Fix round 1 (t9 item 1, Note FI18's rule): the app's per-frame hand-over builds the sets' `.csm` only when the
+/// sets' view key, the scan evidence or the mesh's EDIDs change; an idle frame builds nothing.
+#[test]
+fn the_txst_csm_hand_over_builds_only_on_a_change() {
+    use sdc_gui::model::cs_pbr::Kind;
+    use serde_json::json;
+    const ROCK: &str = "landscape/rock01";
+    let p = tempfile::tempdir().unwrap();
+    let mut app = support::pbr_opened_plain(p.path());
+    app.add_cs_block(ROCK, Kind::Txst);
+    app.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
+    m.sync_txst_csms(&app);
+    let builds = m.txst_csm_builds;
+    assert_eq!(builds, 1);
+    for _ in 0..3 {
+        m.sync_txst_csms(&app);
+    }
+    assert_eq!(m.txst_csm_builds, builds, "an idle frame builds nothing");
+    app.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.3)));
+    assert!(app.wait_idle(Duration::from_secs(60)));
+    m.sync_txst_csms(&app);
+    m.sync_txst_csms(&app);
+    assert_eq!(m.txst_csm_builds, builds + 1, "a set edit builds once");
+    m.plugin_uses.clear();
+    m.sync_txst_csms(&app);
+    assert_eq!(m.txst_csm_builds, builds + 2, "another mesh's EDIDs build");
 }
 
 /// Fix round 1 (ruling): a picked set whose `.csm` is blocked writes no texture-set file, so, as in game, the shape

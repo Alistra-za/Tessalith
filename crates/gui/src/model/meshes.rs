@@ -479,8 +479,13 @@ pub struct MeshesModel {
     /// Note GO: each shape card's texture set pick (NIF block → TXST FormID); the slots are in the 3D view's spec.
     txst_picks: BTreeMap<u32, u32>,
     /// Note IE12: by TXST EDID, the `.csm` of the project set whose `cs_txst` block binds it (the app hands them over
-    /// each frame, `set_txst_csms`).
+    /// each frame, `sync_txst_csms`).
     txst_csms: BTreeMap<String, crate::model::csm_export::SetCsm>,
+    /// What `txst_csms` was built from: the sets' view key, the scan evidence revision and the mesh's TXST EDIDs.
+    txst_csm_key: Option<txst_preview::TxstCsmKey>,
+    /// How often `sync_txst_csms` built the map (tests pin the gate with it).
+    #[cfg(feature = "test-hooks")]
+    pub txst_csm_builds: u64,
     /// Database or scan errors; shown, never swallowed.
     pub error: Option<String>,
     pub dialog: Option<MeshesDialog>,
@@ -620,6 +625,9 @@ impl MeshesModel {
             plugin_uses: vec![],
             txst_picks: BTreeMap::new(),
             txst_csms: BTreeMap::new(),
+            txst_csm_key: None,
+            #[cfg(feature = "test-hooks")]
+            txst_csm_builds: 0,
             error: None,
             dialog: None,
             report: None,

@@ -333,10 +333,8 @@ impl eframe::App for SdcApp {
         // Note FI18 (GH3's hand-over): the rev moves only when the list does, so an idle frame builds nothing.
         let (rev, paths) = self.model.output_game_paths();
         self.meshes.set_project_textures(rev, paths);
-        // Note IE12: the project sets' `.csm` for the TXSTs the shown mesh's records name; only a change reloads.
-        let edids = self.meshes.txst_edids();
-        self.meshes
-            .set_txst_csms(crate::model::csm_export::txst_csms(&self.model, &edids));
+        // Note IE12: the project sets' `.csm` for the TXSTs the shown mesh's records name, built only on a change.
+        self.meshes.sync_txst_csms(&self.model);
         // Note GD5: an export folder change's lines about the open NIF edit go to Messages.
         for line in self.meshes.messages.drain(..) {
             self.model

@@ -3,12 +3,16 @@
 //! view. The game matches alternate textures by 3D index, so the record's stored shape name is shown, never used. Preview only: nothing is written, and the picks reset when
 //! the shapes reload (another mesh, the In game / Source toggle, Edit opening or closing).
 use super::{db_err, texture_sources, MeshesModel};
-use crate::model::csm_export::{memory_source, SetCsm};
+use crate::model::csm_export::{memory_source, txst_csms, SetCsm};
 use crate::model::viewport3d::{Content, MeshSpec};
+use crate::model::{AppModel, ViewKey};
 use modscan::store::ShapeView;
 use render3d::ShapeId;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+
+/// What the sets' `.csm` by EDID were built from: the sets' view key, the scan evidence revision, the mesh's EDIDs.
+pub(crate) type TxstCsmKey = (ViewKey, u64, Vec<String>);
 
 /// Note IE12: the end of a blocked picked set's Problems row (the shape keeps its name field's material).
 const BLOCKED_TAIL: &str = "the shape keeps the material its NIF names";
@@ -117,8 +121,25 @@ impl MeshesModel {
         out
     }
 
-    /// Note IE12: the app's hand-over (`csm_export::txst_csms`), by TXST EDID. A change reaches the 3D view when a
-    /// pick uses it: the spec gets the new `.csm` text, a new source id, so the view reloads (render3d's per-load
+    /// Note IE12: the app's per-frame hand-over. Builds `csm_export::txst_csms` only when what it reads changed (Note
+    /// FI18's rule: an idle frame builds nothing): the sets' view key (sets document, items, plan inputs, target,
+    /// scan), the scan evidence revision (`auto_flags::hint`) or this mesh's TXST EDIDs.
+    pub fn sync_txst_csms(&mut self, app: &AppModel) {
+        let key = (app.view_key(), app.evidence_rev, self.txst_edids());
+        if self.txst_csm_key.as_ref() == Some(&key) {
+            return;
+        }
+        #[cfg(feature = "test-hooks")]
+        {
+            self.txst_csm_builds += 1;
+        }
+        let csms = txst_csms(app, &key.2);
+        self.txst_csm_key = Some(key);
+        self.set_txst_csms(csms);
+    }
+
+    /// Note IE12: by TXST EDID, the project sets' `.csm` ([`Self::sync_txst_csms`]). A change reaches the 3D view when
+    /// a pick uses it: the spec gets the new `.csm` text, a new source id, so the view reloads (render3d's per-load
     /// cache starts empty).
     pub fn set_txst_csms(&mut self, csms: BTreeMap<String, SetCsm>) {
         if self.txst_csms == csms {
