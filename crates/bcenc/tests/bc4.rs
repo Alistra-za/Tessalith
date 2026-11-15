@@ -1,8 +1,13 @@
-//! `bcenc`'s BC4 and BC5 equal the vendored rgbcx (through `encoders_sys`) on every block class.
-use bcenc::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
+//! `bcenc`'s BC4 and BC5 equal the vendored rgbcx (through `encoders_sys`) on every block class. Every comparison runs
+//! on every code path the machine has (`support/paths.rs`), through the hidden `_on` entries.
+use bcenc::{
+    bc4_encode_alpha_on, bc4_encode_block, bc4_encode_block_on, bc5_encode_block_on, Path,
+};
 
 #[path = "support/gen.rs"]
 mod gen;
+#[path = "support/paths.rs"]
+mod paths;
 
 const RADII: [u32; 3] = [4, 5, 10];
 
@@ -14,19 +19,30 @@ fn px(v: &[u8; 16], ch: usize) -> [[u8; 4]; 16] {
     p
 }
 
-/// Both outputs and the replay data on a mismatch.
-fn same<const N: usize>(got: [u8; N], want: [u8; N], what: &str, input: &dyn std::fmt::Debug) {
-    assert_eq!(
-        got, want,
-        "{what}: texels {input:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
+/// `got` on every path against `want`; both outputs, the path and the replay data on a mismatch.
+fn same<const N: usize>(
+    got: impl Fn(Path) -> [u8; N],
+    want: [u8; N],
+    what: &str,
+    input: &dyn std::fmt::Debug,
+) -> [u8; N] {
+    for path in paths::paths() {
+        let got = got(path);
+        assert_eq!(
+            got,
+            want,
+            "{what} on path {}: texels {input:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+            path.name()
+        );
+    }
+    want
 }
 
 fn check_bc4(v: &[u8; 16]) {
     let p = px(v, 0);
     for rad in RADII {
         same(
-            bcenc::bc4_encode_block(&p, 0, rad),
+            |path| bc4_encode_block_on(path, &p, 0, rad),
             encoders_sys::bc4_encode_block(&p, 0, rad),
             &format!("bc4 radius {rad}"),
             v,
@@ -53,7 +69,7 @@ fn bc5_equals_rgbcx_on_block_classes() {
         }
         for rad in RADII {
             same(
-                bc5_encode_block(&p, rad),
+                |path| bc5_encode_block_on(path, &p, rad),
                 encoders_sys::bc5_encode_block(&p, rad),
                 &format!("bc5 radius {rad}"),
                 &(v, w),
@@ -77,7 +93,7 @@ fn bc3_alpha_half_equals_rgbcx_for_each_cut() {
                     .try_into()
                     .unwrap();
                 same(
-                    bc4_encode_alpha(&v, rad, cut),
+                    |path| bc4_encode_alpha_on(path, &v, rad, cut),
                     want,
                     &format!("bc3 alpha radius {rad} cut {cut}"),
                     &v,
@@ -94,11 +110,11 @@ fn bc4_channel_picks_the_named_channel() {
         let p: [[u8; 4]; 16] =
             std::array::from_fn(|t| [chunk[0][t], chunk[1][t], chunk[2][t], chunk[3][t]]);
         for (ch, own) in chunk.iter().enumerate() {
-            let got = bc4_encode_block(&p, ch, 5);
-            assert_eq!(
-                got,
+            let got = same(
+                |path| bc4_encode_block_on(path, &p, ch, 5),
                 encoders_sys::bc4_encode_block(&p, ch, 5),
-                "channel {ch} of {p:?}"
+                &format!("bc4 channel {ch}"),
+                &p,
             );
             // The channel is the only input: other channels do not matter.
             assert_eq!(
@@ -131,7 +147,7 @@ fn bc4_equals_rgbcx_on_20_million_blocks() {
                     for v in &blocks {
                         let p = px(v, 0);
                         same(
-                            bc4_encode_block(&p, 0, 5),
+                            |path| bc4_encode_block_on(path, &p, 0, 5),
                             encoders_sys::bc4_encode_block(&p, 0, 5),
                             "bc4 radius 5",
                             v,

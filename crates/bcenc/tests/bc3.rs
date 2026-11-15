@@ -1,16 +1,19 @@
 //! `bcenc`'s BC3 encode equals the vendored rgbcx (`encode_bc3_hq(18, .., rad, BC4_USE_ALL_MODES | BC4_SDC_SEARCH |
 //! BC4_SDC_GUARD128 | cut << 8)` through `encoders_sys`, plain or perceptual weights) on the alpha classes paired with
-//! the colour classes. The comparisons go through `bc3_encode_block_raw_cut`, which takes the cut as rgbcx's flags do
-//! (0 is 128); `bc3_encode_block`, the engine's entry, takes it as a `NonZeroU8` and is checked against that.
-//! `bc3_encode_block_with(.., Bc1Search::Fast)` equals rgbcx's `encode_bc3_hq(BC1_FAST_LEVEL, ..)`.
+//! the colour classes. The comparisons go through the hidden `bc3_encode_block_raw_cut_on` on every code path the
+//! machine has (`support/paths.rs`); it takes the cut as rgbcx's flags do (0 is 128). `bc3_encode_block`, the engine's
+//! entry, takes it as a `NonZeroU8` and is checked against that. `Bc1Search::Fast` equals rgbcx's
+//! `encode_bc3_hq(BC1_FAST_LEVEL, ..)`.
 use bcenc::{
-    bc1_encode_block, bc3_encode_block, bc3_encode_block_raw_cut, bc3_encode_block_with,
-    bc4_encode_alpha, Bc1Search, BC1_FAST_LEVEL,
+    bc1_encode_block, bc3_encode_block, bc3_encode_block_raw_cut_on, bc4_encode_alpha, Bc1Search,
+    BC1_FAST_LEVEL,
 };
 use std::num::NonZeroU8;
 
 #[path = "support/gen.rs"]
 mod gen;
+#[path = "support/paths.rs"]
+mod paths;
 
 /// The search radii the engine uses.
 const RADII: [u32; 3] = [4, 5, 10];
@@ -19,29 +22,32 @@ const CUTS: [u8; 5] = [0, 1, 128, 201, 255];
 
 /// Both outputs, the arguments and the texels on a mismatch, so the block can be replayed.
 fn same(px: &[[u8; 4]; 16], rad: u32, cut: u8, perceptual: bool) -> [u8; 16] {
-    let got = bc3_encode_block_raw_cut(px, rad, cut, perceptual);
-    let want = encoders_sys::bc3_encode_block(px, rad, cut, perceptual);
-    assert_eq!(
-        got, want,
-        "bc3, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
-    got
+    same_with(px, rad, cut, perceptual, Bc1Search::Default)
 }
 
-/// [`same`] at `search`. `Bc1Search::Fast` goes through `bc3_encode_block_with`, which takes the cut as a `NonZeroU8`,
-/// so a cut of 0 is passed to it as the 128 rgbcx reads it as.
-fn same_with(px: &[[u8; 4]; 16], rad: u32, cut: u8, perceptual: bool, search: Bc1Search) {
-    if search == Bc1Search::Default {
-        same(px, rad, cut, perceptual);
-        return;
+/// [`same`] at `search`: rgbcx at the level `search` stands for (level 18 for `Default`).
+fn same_with(
+    px: &[[u8; 4]; 16],
+    rad: u32,
+    cut: u8,
+    perceptual: bool,
+    search: Bc1Search,
+) -> [u8; 16] {
+    let want = match search {
+        Bc1Search::Default => encoders_sys::bc3_encode_block(px, rad, cut, perceptual),
+        Bc1Search::Fast => {
+            encoders_sys::bc3_encode_block_level(px, rad, cut, BC1_FAST_LEVEL, perceptual)
+        }
+    };
+    for path in paths::paths() {
+        let got = bc3_encode_block_raw_cut_on(path, px, rad, cut, perceptual, search);
+        assert_eq!(
+            got, want,
+            "bc3 {search:?} on path {}, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}",
+            path.name()
+        );
     }
-    let nz = NonZeroU8::new(cut).unwrap_or(NonZeroU8::new(128).unwrap());
-    let got = bc3_encode_block_with(px, rad, nz, perceptual, search);
-    let want = encoders_sys::bc3_encode_block_level(px, rad, cut, BC1_FAST_LEVEL, perceptual);
-    assert_eq!(
-        got, want,
-        "bc3 {search:?}, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}\n  bcenc {got:?}\n  rgbcx {want:?}"
-    );
+    want
 }
 
 /// Alpha block `i` of `alpha` under colour block `i % colour.len()`.

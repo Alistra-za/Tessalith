@@ -2,13 +2,16 @@
 //! `SDC_BCENC_CORPUS` (read recursively, sorted by path) in 4x4 blocks and compares the bytes of both encoders per
 //! block. `SDC_BCENC_CORPUS_EVERY=n` takes every n-th file (default 1). With the variable unset a test prints
 //! "skipped" and passes. The tests write nothing. The `*_fast` tests compare `Bc1Search::Fast` with rgbcx at
-//! `BC1_FAST_LEVEL`.
+//! `BC1_FAST_LEVEL`. Every block is compared on every code path the machine has (`support/paths.rs`), through the
+//! hidden `_on` entries; a mismatch names its path.
 use bcenc::{Bc1Search, BC1_FAST_LEVEL};
 use rayon::prelude::*;
 use std::fmt::Write as _;
-use std::num::NonZeroU8;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
+
+#[path = "support/paths.rs"]
+mod paths;
 
 type Block = [[u8; 4]; 16];
 
@@ -26,13 +29,22 @@ struct Diff {
     want: Vec<u8>,
 }
 
-fn cmp(diffs: &mut Vec<Diff>, mode: impl FnOnce() -> String, got: &[u8], want: &[u8]) {
-    if got != want {
-        diffs.push(Diff {
-            mode: mode(),
-            got: got.to_vec(),
-            want: want.to_vec(),
-        });
+/// `got` on every path against `want`; each path that differs is one `Diff`, its mode naming the path.
+fn cmp<const N: usize>(
+    diffs: &mut Vec<Diff>,
+    mode: impl Fn() -> String,
+    got: impl Fn(bcenc::Path) -> [u8; N],
+    want: &[u8; N],
+) {
+    for path in paths::paths() {
+        let got = got(path);
+        if got != *want {
+            diffs.push(Diff {
+                mode: format!("path {}, {}", path.name(), mode()),
+                got: got.to_vec(),
+                want: want.to_vec(),
+            });
+        }
     }
 }
 
@@ -133,6 +145,8 @@ fn run(name: &str, wanted: fn(&[[u8; 4]]) -> bool, check: impl Fn(&Block, &mut V
         return;
     };
     let every = every();
+    // The paths line, and any `SDC_BCENC_PATHS` panic, before the walk.
+    let names: Vec<&str> = paths::paths().iter().map(|p| p.name()).collect();
     let started = Instant::now();
     let mut paths = Vec::new();
     walk(Path::new(&dir), &mut paths);
@@ -167,7 +181,8 @@ fn run(name: &str, wanted: fn(&[[u8; 4]]) -> bool, check: impl Fn(&Block, &mut V
         }
     }
     println!(
-        "{name}: files compared {compared}, skipped {skipped}, unreadable {unreadable}, blocks compared {blocks}, mismatches {mismatches}, {:.1} s",
+        "{name}: paths {}, files compared {compared}, skipped {skipped}, unreadable {unreadable}, blocks compared {blocks}, mismatches {mismatches}, {:.1} s",
+        names.join(", "),
         started.elapsed().as_secs_f64()
     );
     assert!(
@@ -197,7 +212,7 @@ fn corpus_bc1_equals_rgbcx() {
             cmp(
                 d,
                 || format!("allow_3color true, perceptual {perceptual}"),
-                &bcenc::bc1_encode_block(px, true, perceptual),
+                |p| bcenc::bc1_encode_block_on(p, px, true, perceptual, Bc1Search::Default),
                 &encoders_sys::bc1_encode_block(px, true, false, perceptual),
             );
         }
@@ -216,7 +231,7 @@ fn corpus_bc1_alpha_equals_rgbcx() {
             cmp(
                 d,
                 || format!("mask {mask:#06x}, perceptual {perceptual}"),
-                &bcenc::bc1_encode_block_alpha(px, mask, perceptual),
+                |p| bcenc::bc1_encode_block_alpha_on(p, px, mask, perceptual, Bc1Search::Default),
                 &encoders_sys::bc1_encode_block_alpha(px, mask, perceptual),
             );
         }
@@ -231,7 +246,16 @@ fn corpus_bc3_equals_rgbcx() {
             cmp(
                 d,
                 || format!("radius {RADIUS}, cut {CUT}, perceptual {perceptual}"),
-                &bcenc::bc3_encode_block(px, RADIUS, NonZeroU8::new(CUT).unwrap(), perceptual),
+                |p| {
+                    bcenc::bc3_encode_block_raw_cut_on(
+                        p,
+                        px,
+                        RADIUS,
+                        CUT,
+                        perceptual,
+                        Bc1Search::Default,
+                    )
+                },
                 &encoders_sys::bc3_encode_block(px, RADIUS, CUT, perceptual),
             );
         }
@@ -246,7 +270,7 @@ fn corpus_bc1_equals_rgbcx_fast() {
             cmp(
                 d,
                 || format!("fast, allow_3color true, perceptual {perceptual}"),
-                &bcenc::bc1_encode_block_with(px, true, perceptual, Bc1Search::Fast),
+                |p| bcenc::bc1_encode_block_on(p, px, true, perceptual, Bc1Search::Fast),
                 &encoders_sys::bc1_encode_block_level(px, BC1_FAST_LEVEL, true, perceptual),
             );
         }
@@ -265,7 +289,7 @@ fn corpus_bc1_alpha_equals_rgbcx_fast() {
             cmp(
                 d,
                 || format!("fast, mask {mask:#06x}, perceptual {perceptual}"),
-                &bcenc::bc1_encode_block_alpha_with(px, mask, perceptual, Bc1Search::Fast),
+                |p| bcenc::bc1_encode_block_alpha_on(p, px, mask, perceptual, Bc1Search::Fast),
                 &encoders_sys::bc1_encode_block_alpha_level(px, mask, BC1_FAST_LEVEL, perceptual),
             );
         }
@@ -276,12 +300,20 @@ fn corpus_bc1_alpha_equals_rgbcx_fast() {
 #[ignore = "needs SDC_BCENC_CORPUS (a folder of PNGs); SDC_BCENC_CORPUS_EVERY=n takes every n-th file"]
 fn corpus_bc3_equals_rgbcx_fast() {
     run("bc3_fast", every_image, |px, d| {
-        let cut = NonZeroU8::new(CUT).unwrap();
         for perceptual in [false, true] {
             cmp(
                 d,
                 || format!("fast, radius {RADIUS}, cut {CUT}, perceptual {perceptual}"),
-                &bcenc::bc3_encode_block_with(px, RADIUS, cut, perceptual, Bc1Search::Fast),
+                |p| {
+                    bcenc::bc3_encode_block_raw_cut_on(
+                        p,
+                        px,
+                        RADIUS,
+                        CUT,
+                        perceptual,
+                        Bc1Search::Fast,
+                    )
+                },
                 &encoders_sys::bc3_encode_block_level(px, RADIUS, CUT, BC1_FAST_LEVEL, perceptual),
             );
         }
@@ -296,7 +328,7 @@ fn corpus_bc4_equals_rgbcx() {
             cmp(
                 d,
                 || format!("channel {channel}, radius {RADIUS}"),
-                &bcenc::bc4_encode_block(px, channel, RADIUS),
+                |p| bcenc::bc4_encode_block_on(p, px, channel, RADIUS),
                 &encoders_sys::bc4_encode_block(px, channel, RADIUS),
             );
         }
@@ -310,7 +342,7 @@ fn corpus_bc5_equals_rgbcx() {
         cmp(
             d,
             || format!("radius {RADIUS}"),
-            &bcenc::bc5_encode_block(px, RADIUS),
+            |p| bcenc::bc5_encode_block_on(p, px, RADIUS),
             &encoders_sys::bc5_encode_block(px, RADIUS),
         );
     });

@@ -6,7 +6,243 @@ use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
 use crate::gen;
 use crate::hits::{counts, Hit};
-use crate::{bc4_encode_alpha, bc4_encode_block, bc5_encode_block};
+use crate::path::tested_paths;
+use crate::{
+    bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_on,
+    bc1_encode_block_alpha_with, bc1_encode_block_level, bc1_encode_block_level_on,
+    bc1_encode_block_on, bc1_encode_block_with, bc3_encode_block, bc3_encode_block_raw_cut,
+    bc3_encode_block_raw_cut_on, bc3_encode_block_with, bc4_encode_alpha, bc4_encode_alpha_on,
+    bc4_encode_block, bc4_encode_block_on, bc5_encode_block, bc5_encode_block_on, Bc1Search, Path,
+};
+use std::num::NonZeroU8;
+
+/// The `(allow_3color, perceptual)` combinations.
+const MODES: [(bool, bool); 4] = [(false, false), (false, true), (true, false), (true, true)];
+
+/// Colour block `i` with the alpha of grey block `i % grey.len()`.
+fn with_alpha(colour: &[[[u8; 4]; 16]], grey: &[[u8; 16]]) -> Vec<[[u8; 4]; 16]> {
+    colour
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let a = &grey[i % grey.len()];
+            std::array::from_fn(|k| [c[k][0], c[k][1], c[k][2], a[k]])
+        })
+        .collect()
+}
+
+/// Grey block `v` on channel 0, its reverse on channel 1, its complement on channels 2 and 3.
+fn channels(v: &[u8; 16]) -> [[u8; 4]; 16] {
+    std::array::from_fn(|k| [v[k], v[15 - k], !v[k], !v[(k + 5) % 16]])
+}
+
+/// `f` on every tested path equals `f(Path::Base)`.
+fn as_on_base<const N: usize>(
+    paths: &[Path],
+    what: impl Fn() -> String,
+    f: impl Fn(Path) -> [u8; N],
+) {
+    let base = f(Path::Base);
+    for &p in paths.iter().filter(|&&p| p != Path::Base) {
+        assert_eq!(f(p), base, "{} on path {}", what(), p.name());
+    }
+}
+
+/// Every hidden `_on` entry gives, on every path the machine has, the bytes it gives on `Path::Base`: BC1 in its four
+/// modes at both searches and at every level, one-bit alpha with the masks of `gen::alpha_masks`, BC3 at radii 4, 5
+/// and 10 and cuts 1 and 128, BC4 (channels 0 and 3, and as BC3's alpha) and BC5 at each radius.
+#[test]
+fn every_path_gives_the_base_bytes() {
+    let paths = tested_paths();
+    let grey = gen::bc4_classes(0xE0_0002, 40);
+    let blocks = with_alpha(&gen::colour_classes(0xE0_0001, 40), &grey);
+    let masks = gen::alpha_masks(0xE0_0003, 4);
+    for (i, px) in blocks.iter().enumerate() {
+        let mask = masks[i % masks.len()];
+        for search in [Bc1Search::Default, Bc1Search::Fast] {
+            for (allow_3color, perceptual) in MODES {
+                as_on_base(
+                    &paths,
+                    || {
+                        format!("bc1 {search:?}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}")
+                    },
+                    |p| bc1_encode_block_on(p, px, allow_3color, perceptual, search),
+                );
+            }
+            for perceptual in [false, true] {
+                as_on_base(
+                    &paths,
+                    || {
+                        format!("bc1 alpha {search:?}, mask {mask:#06x}, perceptual {perceptual}: texels {px:?}")
+                    },
+                    |p| bc1_encode_block_alpha_on(p, px, mask, perceptual, search),
+                );
+                for rad in [4, 5, 10] {
+                    for cut in [1, 128] {
+                        as_on_base(
+                            &paths,
+                            || {
+                                format!("bc3 {search:?}, radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}")
+                            },
+                            |p| bc3_encode_block_raw_cut_on(p, px, rad, cut, perceptual, search),
+                        );
+                    }
+                }
+            }
+        }
+        for level in LEVELS {
+            for (allow_3color, perceptual) in MODES {
+                as_on_base(
+                    &paths,
+                    || {
+                        format!("bc1 level {level}, allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}")
+                    },
+                    |p| bc1_encode_block_level_on(p, px, level, allow_3color, perceptual),
+                );
+            }
+        }
+    }
+    for v in &grey {
+        let px = channels(v);
+        for rad in [4, 5, 10] {
+            for channel in [0, 3] {
+                as_on_base(
+                    &paths,
+                    || format!("bc4 channel {channel}, radius {rad}: texels {px:?}"),
+                    |p| bc4_encode_block_on(p, &px, channel, rad),
+                );
+            }
+            for cut in [1, 128] {
+                as_on_base(
+                    &paths,
+                    || format!("bc4 alpha radius {rad}, cut {cut}: values {v:?}"),
+                    |p| bc4_encode_alpha_on(p, v, rad, cut),
+                );
+            }
+            as_on_base(
+                &paths,
+                || format!("bc5 radius {rad}: texels {px:?}"),
+                |p| bc5_encode_block_on(p, &px, rad),
+            );
+        }
+    }
+}
+
+/// Every public function is its `_on` entry on `Path::best()`, argument for argument: the differential tests go
+/// through the `_on` entries, so this is what ties the public functions to rgbcx. The arguments differ from each
+/// other and from the defaults (radius 4 and 10, cuts 0, 1 and 201, channels 0, 2 and 3, both searches, every level),
+/// so a wrapper that drops or swaps one gives other bytes.
+#[test]
+fn the_public_functions_run_the_best_path() {
+    let best = Path::best();
+    let grey = gen::bc4_classes(0xE0_0005, 4);
+    let blocks = with_alpha(&gen::colour_classes(0xE0_0004, 4), &grey);
+    let masks = gen::alpha_masks(0xE0_0006, 4);
+    for (i, px) in blocks.iter().enumerate() {
+        let mask = masks[i % masks.len()];
+        for (allow_3color, perceptual) in MODES {
+            let what =
+                || format!("allow_3color {allow_3color}, perceptual {perceptual}: texels {px:?}");
+            assert_eq!(
+                bc1_encode_block(px, allow_3color, perceptual),
+                bc1_encode_block_on(best, px, allow_3color, perceptual, Bc1Search::Default),
+                "bc1_encode_block, {}",
+                what()
+            );
+            for search in [Bc1Search::Default, Bc1Search::Fast] {
+                assert_eq!(
+                    bc1_encode_block_with(px, allow_3color, perceptual, search),
+                    bc1_encode_block_on(best, px, allow_3color, perceptual, search),
+                    "bc1_encode_block_with {search:?}, {}",
+                    what()
+                );
+            }
+            for level in LEVELS {
+                assert_eq!(
+                    bc1_encode_block_level(px, level, allow_3color, perceptual),
+                    bc1_encode_block_level_on(best, px, level, allow_3color, perceptual),
+                    "bc1_encode_block_level {level}, {}",
+                    what()
+                );
+            }
+        }
+        for perceptual in [false, true] {
+            let what = || format!("mask {mask:#06x}, perceptual {perceptual}: texels {px:?}");
+            assert_eq!(
+                bc1_encode_block_alpha(px, mask, perceptual),
+                bc1_encode_block_alpha_on(best, px, mask, perceptual, Bc1Search::Default),
+                "bc1_encode_block_alpha, {}",
+                what()
+            );
+            for search in [Bc1Search::Default, Bc1Search::Fast] {
+                assert_eq!(
+                    bc1_encode_block_alpha_with(px, mask, perceptual, search),
+                    bc1_encode_block_alpha_on(best, px, mask, perceptual, search),
+                    "bc1_encode_block_alpha_with {search:?}, {}",
+                    what()
+                );
+            }
+            for (rad, cut) in [(4, 1u8), (10, 201)] {
+                let what =
+                    || format!("radius {rad}, cut {cut}, perceptual {perceptual}: texels {px:?}");
+                let nz = NonZeroU8::new(cut).unwrap();
+                assert_eq!(
+                    bc3_encode_block(px, rad, nz, perceptual),
+                    bc3_encode_block_raw_cut_on(best, px, rad, cut, perceptual, Bc1Search::Default),
+                    "bc3_encode_block, {}",
+                    what()
+                );
+                for search in [Bc1Search::Default, Bc1Search::Fast] {
+                    assert_eq!(
+                        bc3_encode_block_with(px, rad, nz, perceptual, search),
+                        bc3_encode_block_raw_cut_on(best, px, rad, cut, perceptual, search),
+                        "bc3_encode_block_with {search:?}, {}",
+                        what()
+                    );
+                }
+                for raw in [0, cut] {
+                    assert_eq!(
+                        bc3_encode_block_raw_cut(px, rad, raw, perceptual),
+                        bc3_encode_block_raw_cut_on(
+                            best,
+                            px,
+                            rad,
+                            raw,
+                            perceptual,
+                            Bc1Search::Default
+                        ),
+                        "bc3_encode_block_raw_cut, raw cut {raw}, {}",
+                        what()
+                    );
+                }
+            }
+        }
+    }
+    for v in &grey {
+        let px = channels(v);
+        for (channel, rad) in [(0, 4), (2, 10), (3, 5)] {
+            assert_eq!(
+                bc4_encode_block(&px, channel, rad),
+                bc4_encode_block_on(best, &px, channel, rad),
+                "bc4_encode_block channel {channel}, radius {rad}: texels {px:?}"
+            );
+        }
+        for (rad, cut) in [(4, 0), (10, 1), (5, 201)] {
+            assert_eq!(
+                bc4_encode_alpha(v, rad, cut),
+                bc4_encode_alpha_on(best, v, rad, cut),
+                "bc4_encode_alpha radius {rad}, cut {cut}: values {v:?}"
+            );
+        }
+        for rad in [4, 10] {
+            assert_eq!(
+                bc5_encode_block(&px, rad),
+                bc5_encode_block_on(best, &px, rad),
+                "bc5_encode_block radius {rad}: texels {px:?}"
+            );
+        }
+    }
+}
 
 /// How often this thread took each branch since `before` (an earlier [`counts`]). The counters are per thread, so
 /// the tests running beside this one add nothing; taking the difference also leaves out a test that ran earlier on
