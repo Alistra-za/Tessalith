@@ -512,51 +512,6 @@ fn the_inspector_lists_skipped_user_presets_with_their_reason() {
     h.get_by_label_contains("unknown preset 'nope'");
 }
 
-/// Note FM25 (P17): the drawer's exact rows once the Batch section (threads, memory), the preview-size combo, the
-/// 16384 box and the Interface section (Reduce motion) are gone. Nothing is selected, so only the section headings,
-/// their always-present rows and the Close button remain.
-#[test]
-fn advanced_has_no_batch_or_preview_size_rows() {
-    use eframe::egui;
-    let d = tempfile::tempdir().unwrap();
-    let mut model = opened(d.path());
-    model.settings.advanced_open = true;
-    let mut h = harness(model);
-    h.run();
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-        .expect("the drawer is open")
-        .outer_rect;
-    let mut labels: Vec<String> = h
-        .query_all_by_role(Role::Label)
-        .chain(h.query_all_by_role(Role::Button))
-        .chain(h.query_all_by_role(Role::CheckBox))
-        .chain(h.query_all_by_role(Role::SpinButton))
-        .chain(h.query_all_by_role(Role::ComboBox))
-        .filter(|n| panel.expand(1.0).contains_rect(n.rect()))
-        .filter_map(|n| n.accesskit_node().label())
-        .collect();
-    labels.sort();
-    labels.dedup();
-    let want = [
-        "Advanced texture fields",
-        "Also export recipe",
-        "Analysis cache limit",
-        "Cache",
-        "Checks",
-        "Close",
-        "Green direction check",
-        "Live encode",
-        "Low detail check",
-        "Mipmaps",
-        "Parallax check",
-        "Preset inspector",
-        "Presets…",
-        "Preview",
-        "Unmatched [files] entries",
-    ];
-    assert_eq!(labels, want);
-}
-
 /// Note HV2: the Cache section's box shows the analysis cache limit, and a typed limit is saved to gui.toml once. A
 /// limit from gui.toml outside the box's range is left as it is by drawing the drawer.
 #[test]

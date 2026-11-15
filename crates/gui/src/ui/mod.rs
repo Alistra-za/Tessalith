@@ -1,6 +1,7 @@
 //! egui drawing of the model (M3a spec §2). No logic beyond mapping input to model calls.
 pub mod actions;
 pub mod advanced;
+pub mod also_tab;
 pub mod bottom;
 pub mod bulk_panel;
 pub mod centre_tabs;
@@ -437,7 +438,6 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
                 &mut state.slot_cmds,
                 &mut state.drops,
                 view,
-                &mut state.advanced,
             );
             if three_d {
                 set_preview::draw(ui, model, &mut state.set3d);

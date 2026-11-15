@@ -298,6 +298,21 @@ pub fn export_hover(model: &AppModel) -> String {
     }
 }
 
+/// The "Also export as" ticks: target, text, hover. Export to ▾ and the set editor's Also export tab (Note JI2) show
+/// them.
+pub(super) const ALSO_ITEMS: [(AlsoTarget, &str, &str); 2] = [
+    (
+        AlsoTarget::Vanilla,
+        "Also export as Vanilla",
+        "Also write a Vanilla folder: the PBR sets converted to vanilla textures, the rest copied",
+    ),
+    (
+        AlsoTarget::Cm,
+        "Also export as Complex material",
+        "Also write a Complex material folder (and the Vanilla folder it installs on)",
+    ),
+];
+
 /// Export to ▾'s two "Also export as" items (owner answer 5): checkable, and the menu stays open on a tick. Ticking
 /// needs the cs mode (TA20); a tick left on stays clickable so it can be cleared (the model allows the untick).
 fn also_items(
@@ -307,31 +322,8 @@ fn also_items(
 ) -> Option<(AlsoTarget, bool)> {
     let (v, c) = model.also_ticks();
     let mut out = None;
-    for (t, on, text, hover) in [
-        (
-            AlsoTarget::Vanilla,
-            v,
-            "Also export as Vanilla",
-            "Also write a Vanilla folder: the PBR sets converted to vanilla textures, the rest copied",
-        ),
-        (
-            AlsoTarget::Cm,
-            c,
-            "Also export as Complex material",
-            "Also write a Complex material folder (and the Vanilla folder it installs on)",
-        ),
-    ] {
-        // Without a project the model's edit is a silent no-op: say why instead.
-        let why = busy
-            .map(str::to_string)
-            .or_else(|| {
-                model
-                    .project
-                    .is_none()
-                    .then(|| "Open a folder first".to_string())
-            })
-            .or_else(|| model.toml_read_only_reason())
-            .or_else(|| (!on && model.target != Target::Cs).then(|| also::NEEDS_CS.to_string()));
+    for ((t, text, hover), on) in ALSO_ITEMS.into_iter().zip([v, c]) {
+        let why = also::tick_off(model, on, busy);
         let mut now = on;
         let r = ui.add_enabled(why.is_none(), egui::Checkbox::new(&mut now, text));
         let r = match &why {

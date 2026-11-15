@@ -783,7 +783,7 @@ fn review_has_no_half_size_or_stale_group() {
         "PBR",
         "PBR folder name",
         "Problems (8)",
-        "Recipe settings are in Advanced",
+        "Recipe settings…",
         "Review",
         "Set type: landscape diffuse ✓",
         "Set type: landscape normal ✓",

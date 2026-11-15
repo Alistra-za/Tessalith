@@ -774,9 +774,9 @@ fn reviews_also_section_shows_the_ticks_location_and_skip_list() {
         a.label().or(a.value()).unwrap_or_default(),
         format!("Also folders go in: {loc}")
     );
-    // No recipe drags in Review: a link to Advanced instead.
+    // No recipe drags in Review: a link to a set's Also export tab instead (Note JI2).
     assert!(!has_label(&h, "Diffuse brightness"));
-    assert!(has_label(&h, "Recipe settings are in Advanced"));
+    assert!(has_label(&h, "Recipe settings…"));
     let steel = steel_id(h.state());
     let ends = |n: &egui_kittest::Node<'_>, end: &str| {
         n.accesskit_node().label().is_some_and(|l| l.ends_with(end))
@@ -794,12 +794,37 @@ fn reviews_also_section_shows_the_ticks_location_and_skip_list() {
     h.state_mut().undo();
     settle(&mut h);
     assert!(h.state().also_config().skip.is_empty(), "one undo step");
-    // The link opens the Advanced drawer, where the recipe is.
-    press(&mut h, |h| {
-        h.get_by_label("Recipe settings are in Advanced")
-    });
-    assert!(h.state().settings.advanced_open);
-    assert!(has_label(&h, "Diffuse brightness"));
+    // Note JI2: from an expanded texture of the PBR set, the link closes the preview and opens the set's Also export
+    // tab, where the recipe is.
+    let (steel_key, steel_tex) = {
+        let all = sdc_gui::model::sets::views(h.state());
+        let v = all.iter().find(|v| v.key.ends_with("steel")).unwrap();
+        let tex = v
+            .members
+            .iter()
+            .find(|k| k.ends_with("steel.png"))
+            .expect("the steel diffuse")
+            .clone();
+        (v.key.clone(), tex)
+    };
+    h.state_mut().expand(&steel_tex);
+    settle(&mut h);
+    assert!(h.state().expanded.is_some());
+    press(&mut h, |h| h.get_by_label("Recipe settings…"));
+    settle(&mut h);
+    assert!(h.state().expanded.is_none(), "the preview closed");
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(steel_key)
+    );
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let spin = h
+        .get_by_role_and_label(Role::SpinButton, "Diffuse brightness")
+        .rect();
+    assert!(
+        centre.contains(spin.center()),
+        "the recipe {spin:?} is in the centre {centre:?}"
+    );
 }
 
 #[test]
@@ -880,56 +905,90 @@ fn the_dialog_free_cm_lines_follow_keep_metal_brightness() {
         .any(|l| l.contains("the Vanilla folder is written too")));
 }
 
-#[test]
-fn the_set_panel_skip_group_shows_only_on_pbr_sets() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = project(d.path());
-    tick(&mut m, AlsoTarget::Vanilla);
-    let views = sdc_gui::model::sets::views(&m);
-    let key = |end: &str| {
-        views
-            .iter()
-            .find(|v| v.key.ends_with(end))
-            .unwrap()
-            .key
-            .clone()
-    };
-    let (steel_key, cup_key) = (key("steel"), key("cup"));
-    let steel = steel_id(&m);
-    m.select_set(&steel_key);
-    let mut h = ui_harness(m, 1600.0);
-    settle(&mut h);
-    assert!(has_label(&h, "Also export"));
-    assert!(has_label(&h, "converted"));
-    press(&mut h, |h| checkbox(h, "Skip vanilla/CM for this set"));
-    settle(&mut h);
-    assert_eq!(h.state().also_config().skip, [steel.as_str()]);
-    assert!(has_label(&h, "skipped"));
-    // A plain set has no group.
-    h.state_mut().select_set(&cup_key);
-    settle(&mut h);
-    assert!(!has_label(&h, "Skip vanilla/CM for this set"));
-    // No tick: no group on the PBR set either.
-    h.state_mut().select_set(&steel_key);
-    h.state_mut().set_also_tick(AlsoTarget::Vanilla, false);
-    settle(&mut h);
-    assert!(!has_label(&h, "Skip vanilla/CM for this set"));
+/// The steel set's key (the set editor's selection).
+fn steel_key(m: &AppModel) -> String {
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.key.ends_with("steel"))
+        .expect("the steel set")
+        .key
+        .clone()
 }
 
-#[test]
-fn recipe_drags_in_advanced_write_export_legacy() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = project(d.path());
-    m.settings.advanced_open = true;
+/// `project` (Vanilla ticked when `ticked`) with the steel set selected and its Also export tab open (Note JI2).
+fn also_tab(d: &Path, ticked: bool) -> H {
+    let mut m = project(d);
+    if ticked {
+        tick(&mut m, AlsoTarget::Vanilla);
+    }
+    let k = steel_key(&m);
+    m.select_set(&k);
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
-    open_recipe(&mut h);
-    fn spin(h: &H) -> egui_kittest::Node<'_> {
-        h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness")
-    }
-    spin(&h).scroll_to_me();
+    press(&mut h, |h| {
+        h.get_by_role_and_label(Role::Button, "Also export")
+    });
+    h
+}
+
+fn skip_tick(h: &H) -> egui_kittest::Node<'_> {
+    checkbox(h, "Skip vanilla/CM for this set")
+}
+
+fn brightness(h: &H) -> egui_kittest::Node<'_> {
+    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness")
+}
+
+/// Note JI2 (correction 5): with both ticks off the Skip tick is drawn greyed and says to turn a tick on; with a tick
+/// on it writes `[export] skip`, one undo step.
+#[test]
+fn the_skip_tick_is_greyed_while_both_ticks_are_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = also_tab(d.path(), false);
+    assert!(skip_tick(&h).accesskit_node().is_disabled());
+    assert!(hover_says(
+        &mut h,
+        skip_tick,
+        "Turn on Also export as Vanilla or as Complex material below first"
+    ));
+    h.state_mut().set_also_tick(AlsoTarget::Vanilla, true);
+    settle(&mut h);
+    assert!(!skip_tick(&h).accesskit_node().is_disabled());
+    let steel = steel_id(h.state());
+    press(&mut h, skip_tick);
+    settle(&mut h);
+    assert_eq!(h.state().also_config().skip, [steel.as_str()]);
+    assert_eq!(h.state().undo_label(), Some("Skip vanilla/CM for this set"));
+}
+
+/// Note JI2 (spec 2.3): the recipe is greyed while both ticks are off, and its hover says why; either tick turns it on.
+#[test]
+fn the_recipe_is_greyed_while_both_ticks_are_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = also_tab(d.path(), false);
+    brightness(&h).scroll_to_me();
     h.run();
-    spin(&h).focus();
+    assert!(brightness(&h).accesskit_node().is_disabled());
+    assert!(hover_says(
+        &mut h,
+        brightness,
+        "Turn on Also export as Vanilla or as Complex material to use these"
+    ));
+    h.state_mut().set_also_tick(AlsoTarget::Cm, true);
+    settle(&mut h);
+    assert!(!brightness(&h).accesskit_node().is_disabled());
+}
+
+/// Note JI2: the recipe moved from the drawer to the Also export tab. A typed value and a drag of a box each end in
+/// one edit (one undo step), not one per frame.
+#[test]
+fn recipe_drags_in_the_also_export_tab_write_export_legacy() {
+    use eframe::egui::{pos2, Event, PointerButton};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = also_tab(d.path(), true);
+    brightness(&h).scroll_to_me();
+    h.run();
+    brightness(&h).focus();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);
     h.run();
@@ -951,9 +1010,184 @@ fn recipe_drags_in_advanced_write_export_legacy() {
         0.9,
         "one undo step"
     );
-    // P17: Keep metal brightness is not in Advanced; Dielectric env is one number box.
+    // P17: Keep metal brightness is only in Review; Dielectric env is one number box.
     assert!(!has_label(&h, "Keep metal brightness"));
     h.get_by_role_and_label(Role::SpinButton, "Dielectric env from gloss");
+    // A drag follows the pointer and ends in one edit.
+    brightness(&h).scroll_to_me();
+    h.run();
+    let at = brightness(&h).rect().center();
+    let ev = |h: &mut H, e: Event| {
+        h.input_mut().events.push(e);
+        h.step();
+    };
+    let button = |pos, pressed| Event::PointerButton {
+        pos,
+        button: PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    ev(&mut h, Event::PointerMoved(at));
+    ev(&mut h, button(at, true));
+    for i in 1..=10 {
+        ev(
+            &mut h,
+            Event::PointerMoved(pos2(at.x + 2.0 * i as f32, at.y)),
+        );
+    }
+    assert_eq!(
+        h.state().also_config().legacy.brightness,
+        0.9,
+        "nothing written during the drag"
+    );
+    ev(&mut h, button(pos2(at.x + 20.0, at.y), false));
+    settle(&mut h);
+    let b = h.state().also_config().legacy.brightness;
+    assert!(b > 1.0, "the drag moved the value: {b}");
+    assert_eq!(h.state().undo_label(), Some("Also export settings"));
+    h.state_mut().undo();
+    settle(&mut h);
+    assert_eq!(
+        h.state().also_config().legacy.brightness,
+        0.9,
+        "one undo step"
+    );
+}
+
+/// Note JI2 (rule 8.4): the tab's project ticks and Export to ▾'s items are on screen together, so the tab's carry
+/// "All sets: …" names; a click on one writes `[export] also` as the header's does.
+#[test]
+fn all_sets_ticks_have_their_own_names() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = also_tab(d.path(), false);
+    h.get_by_label_contains("Export to: ").click();
+    h.run();
+    for t in ["Vanilla", "Complex material"] {
+        checkbox(&h, &format!("Also export as {t}"));
+        checkbox(&h, &format!("All sets: also export as {t}"));
+    }
+    h.key_press(Key::Escape);
+    h.run();
+    press(&mut h, |h| checkbox(h, "All sets: also export as Vanilla"));
+    settle(&mut h);
+    assert_eq!(h.state().also_ticks(), (true, false));
+    assert_eq!(h.state().undo_label(), Some("Also export as"));
+    // The tick moves the output root, and so the set keys: the set stays selected, its tab open, its Skip tick on.
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(steel_key(h.state()))
+    );
+    assert!(!skip_tick(&h).accesskit_node().is_disabled());
+}
+
+/// Note JI2 (spec 2.2): the Material tab's "Also export" group is gone; the Skip tick is only on the Also export tab.
+#[test]
+fn the_material_tab_has_no_also_export_group() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    let k = steel_key(&m);
+    m.select_set(&k);
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    assert!(
+        h.query_all_by_label("Also export")
+            .all(|n| n.accesskit_node().role() == Role::Button),
+        "only the tab is named Also export"
+    );
+    assert!(!has_label(&h, "Skip vanilla/CM for this set"));
+    assert!(!has_label(&h, "converted"));
+}
+
+/// Note JI2: from 3D, where the set editor is not drawn, the link switches the view to 2D.
+#[test]
+fn recipe_link_from_3d_switches_to_2d() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = project(d.path());
+    tick(&mut m, AlsoTarget::Vanilla);
+    m.settings.set_view_3d = true;
+    m.open_review();
+    let steel = steel_key(&m);
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    press(&mut h, |h| h.get_by_label("Recipe settings…"));
+    settle(&mut h);
+    assert!(!h.state().settings.set_view_3d);
+    assert_eq!(h.state().selection, sdc_gui::model::Selection::Set(steel));
+    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
+}
+
+/// Note JI2 (correction 6): the link's set is the selected set if it is PBR, else the first PBR set not skipped, else
+/// the first PBR set.
+#[test]
+fn recipe_set_prefers_the_selected_pbr_set_then_the_first_unskipped() {
+    let d = tempfile::tempdir().unwrap();
+    let arm = d.path().join("mods/Mod/textures/pbr/arm");
+    png(&arm.join("brass.png"), [200, 180, 100, 255]);
+    png(&arm.join("brass_n.png"), [128, 128, 255, 255]);
+    png(&arm.join("brass_rmaos.png"), [128, 255, 200, 255]);
+    let mut m = project(d.path());
+    let all = sdc_gui::model::sets::views(&m);
+    let pbr: Vec<(String, String)> = all
+        .iter()
+        .filter(|v| sdc_gui::model::also::is_pbr_set(v))
+        .map(|v| (v.key.clone(), v.id.clone()))
+        .collect();
+    assert_eq!(pbr.len(), 2, "brass and steel are PBR sets");
+    let cup = all
+        .iter()
+        .find(|v| v.key.ends_with("cup"))
+        .unwrap()
+        .key
+        .clone();
+
+    m.select_set(&cup);
+    assert_eq!(
+        m.recipe_set().as_ref(),
+        Some(&pbr[0].0),
+        "not PBR: the first"
+    );
+    m.set_skip_also(&pbr[0].1, true);
+    idle(&mut m);
+    assert_eq!(
+        m.recipe_set().as_ref(),
+        Some(&pbr[1].0),
+        "the first not skipped"
+    );
+    m.set_skip_also(&pbr[1].1, true);
+    idle(&mut m);
+    assert_eq!(
+        m.recipe_set().as_ref(),
+        Some(&pbr[0].0),
+        "all skipped: the first"
+    );
+    m.select_set(&pbr[1].0);
+    assert_eq!(
+        m.recipe_set().as_ref(),
+        Some(&pbr[1].0),
+        "the selected PBR set"
+    );
+}
+
+/// Note JI2 (Review Focus 1): with no PBR set there is no set to open, so the link is not drawn.
+#[test]
+fn the_recipe_link_is_not_drawn_without_a_pbr_set() {
+    let d = tempfile::tempdir().unwrap();
+    // Only `project`'s plain cup set (support's `opened` has an auto PBR Landscape set).
+    let c = d.path().join("mods/Mod/textures/clutter");
+    png(&c.join("cup.png"), [120, 90, 60, 255]);
+    png(&c.join("cup_n.png"), [128, 128, 255, 255]);
+    let mut m = support::opened_as_the_app(d.path().join("mods/Mod"), d.path().join("out"));
+    assert!(!sdc_gui::model::sets::views(&m).is_empty());
+    assert!(sdc_gui::model::sets::views(&m)
+        .iter()
+        .all(|v| !sdc_gui::model::also::is_pbr_set(v)));
+    assert_eq!(m.recipe_set(), None);
+    m.open_review();
+    let mut h = ui_harness(m, 1600.0);
+    settle(&mut h);
+    assert!(has_label(&h, "Also export as"), "Review's Also column");
+    assert!(!has_label(&h, "Recipe settings…"));
 }
 
 #[test]
@@ -994,60 +1228,6 @@ fn the_header_export_hover_names_the_folders() {
     tick(&mut m, AlsoTarget::Cm);
     let t = sdc_gui::ui::header::export_hover(&m);
     assert!(t.contains(" files + Vanilla and CM folders, "), "{t}");
-}
-
-/// A drag of a recipe box follows the pointer and ends in one edit (one undo step), not one per frame.
-#[test]
-fn a_recipe_drag_is_one_edit() {
-    use eframe::egui::{pos2, Event, PointerButton};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = project(d.path());
-    m.settings.advanced_open = true;
-    let mut h = ui_harness(m, 1600.0);
-    settle(&mut h);
-    open_recipe(&mut h);
-    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness")
-        .scroll_to_me();
-    h.run();
-    let at = h
-        .get_by_role_and_label(Role::SpinButton, "Diffuse brightness")
-        .rect()
-        .center();
-    let ev = |h: &mut H, e: Event| {
-        h.input_mut().events.push(e);
-        h.step();
-    };
-    let button = |pos, pressed| Event::PointerButton {
-        pos,
-        button: PointerButton::Primary,
-        pressed,
-        modifiers: Modifiers::NONE,
-    };
-    ev(&mut h, Event::PointerMoved(at));
-    ev(&mut h, button(at, true));
-    for i in 1..=10 {
-        ev(
-            &mut h,
-            Event::PointerMoved(pos2(at.x + 2.0 * i as f32, at.y)),
-        );
-    }
-    assert_eq!(
-        h.state().also_config().legacy.brightness,
-        0.9,
-        "nothing written during the drag"
-    );
-    ev(&mut h, button(pos2(at.x + 20.0, at.y), false));
-    settle(&mut h);
-    let b = h.state().also_config().legacy.brightness;
-    assert!(b > 1.0, "the drag moved the value: {b}");
-    assert_eq!(h.state().undo_label(), Some("Also export settings"));
-    h.state_mut().undo();
-    settle(&mut h);
-    assert_eq!(
-        h.state().also_config().legacy.brightness,
-        0.9,
-        "one undo step"
-    );
 }
 
 // ---- Task 12 fix round 1 ----
@@ -1146,10 +1326,22 @@ fn the_also_controls_are_off_while_an_export_runs() {
     m.export.running = Some(Default::default());
     let mut h = ui_harness(m, 1600.0);
     h.run_steps(4);
-    for l in ["Vanilla", "Skip vanilla/CM for this set"] {
+    // Note JI2: the Skip tick, the project's ticks and the recipe are on the set's Also export tab.
+    h.get_by_role_and_label(Role::Button, "Also export")
+        .scroll_to_me();
+    h.run_steps(4);
+    h.get_by_role_and_label(Role::Button, "Also export").click();
+    h.run_steps(4);
+    for l in [
+        "Vanilla",
+        "Skip vanilla/CM for this set",
+        "All sets: also export as Vanilla",
+    ] {
         assert!(checkbox(&h, l).accesskit_node().is_disabled(), "{l}");
     }
+    assert!(brightness(&h).accesskit_node().is_disabled());
     let running = sdc_gui::model::also::EXPORT_RUNNING;
+    assert!(hover_says(&mut h, skip_tick, running));
     assert!(hover_says(
         &mut h,
         |h| h.get_by_label("Choose where the Also folders go…"),
@@ -1314,25 +1506,6 @@ fn a_name_draft_is_cancelled_by_esc_and_stays_with_its_project() {
     h.key_press(Key::Tab);
     settle(&mut h);
     assert_eq!(h.state().also_config().names.vanilla, None);
-}
-
-/// M4 (ruled): the recipe section starts closed; Review's link opens it.
-#[test]
-fn the_recipe_section_starts_closed() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = project(d.path());
-    m.settings.advanced_open = true;
-    let mut h = ui_harness(m, 1600.0);
-    settle(&mut h);
-    assert!(has_label(&h, "Also export recipe"));
-    assert!(!has_label(&h, "Diffuse brightness"));
-}
-
-/// M4: the recipe section starts closed; open it as a user does.
-fn open_recipe(h: &mut H) {
-    if !has_label(h, "Diffuse brightness") {
-        press(h, |h| h.get_by_label("Also export recipe"));
-    }
 }
 
 /// Note FC5: with Also on, the NIF edits are due once, after the Also run has fully ended (its zips too).

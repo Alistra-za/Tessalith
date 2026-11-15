@@ -21,6 +21,20 @@ pub fn is_pbr_set(v: &sets::SetView) -> bool {
     v.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family())
 }
 
+/// Why an "Also export as" tick (`on`: ticked now) is off, in one order for Export to ▾, Review and the set editor's
+/// Also export tab (Note JI2): `busy` (the caller's text), no folder (the model's edit would be a silent no-op), a
+/// read-only `sdc.toml`, then TA20 for an unticked box outside the cs mode (a tick left from it stays clickable).
+pub fn tick_off(m: &AppModel, on: bool, busy: Option<&str>) -> Option<String> {
+    busy.map(str::to_string)
+        .or_else(|| {
+            m.project
+                .is_none()
+                .then(|| "Open a folder first".to_string())
+        })
+        .or_else(|| m.toml_read_only_reason())
+        .or_else(|| (!on && m.target != Target::Cs).then(|| NEEDS_CS.to_string()))
+}
+
 pub(super) fn phase_name(p: Phase) -> &'static str {
     match p {
         Phase::Pbr => "PBR",
@@ -104,6 +118,23 @@ impl AppModel {
         self.edit_export("Skip vanilla/CM for this set", move |p| {
             p.set_skip_also(&id, on)
         });
+    }
+
+    /// Note JI2 (correction 6): the set Review's "Recipe settings…" opens, by key: the selected set when it is PBR, else
+    /// the first PBR set in list order that is not skipped, else the first PBR set; `None` without a PBR set.
+    pub fn recipe_set(&self) -> Option<String> {
+        let all = sets::views(self);
+        let pbr = || all.iter().filter(|v| is_pbr_set(v));
+        if let super::Selection::Set(k) = &self.selection {
+            if pbr().any(|v| &v.key == k) {
+                return Some(k.clone());
+            }
+        }
+        let skip = self.also_config().skip;
+        pbr()
+            .find(|v| !skip.iter().any(|s| engine::sets::same_id(s, &v.id)))
+            .or_else(|| pbr().next())
+            .map(|v| v.key.clone())
     }
 
     /// C2: set `id` is in `[export] skip`.

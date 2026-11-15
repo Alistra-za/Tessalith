@@ -1,5 +1,5 @@
 //! Review C1, C21 and C14, owner amendment C (Note FB2): the set editor is one scrolling column. The slot rows sit on
-//! top at full width, the Material / Advanced tabs and groups below them, so nothing is ever drawn over the rows and
+//! top at full width, the Material / Also export tabs and groups below them, so nothing is ever drawn over the rows and
 //! no sideways scroll holds them; the set name and the slot label are each shown once.
 mod support;
 use eframe::egui::{self, accesskit::Role};
@@ -37,29 +37,33 @@ fn rock_set(dir: &std::path::Path) -> (AppModel, String) {
 /// tabs' left edge, and ends inside the centre column (no sideways scroll, nothing beside the rows).
 #[test]
 fn set_editor_is_one_column() {
-    for advanced in [false, true] {
+    for open in ["Material", "Also export"] {
         for w in [1024.0, 1100.0, 1280.0, 1536.0] {
             let d = tempfile::tempdir().unwrap();
-            let (mut m, _) = rock_set(d.path());
-            m.settings.advanced_open = advanced;
+            let (m, _) = rock_set(d.path());
             let mut h = harness(m, w);
             h.run();
-            let at = format!("{w} px, advanced {advanced}");
+            // Note JI2: the tab picked lives in egui memory, so each case clicks the one it wants.
+            h.get_by_role_and_label(Role::Button, open).scroll_to_me();
+            h.run();
+            h.get_by_role_and_label(Role::Button, open).click();
+            h.run();
+            let at = format!("{w} px, {open} tab");
             // The centre panel's rect grows with its content; what the user sees ends at the window.
             let full = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
             let centre = full.intersect(h.ctx.content_rect());
             let tab = |t: &str| h.get_by_role_and_label(Role::Button, t).rect();
-            let (material, adv) = (tab("Material"), tab("Advanced"));
-            // The first thing under the tabs: the Material group, or the Advanced body's first section.
-            let first = if advanced {
-                h.get_by_label_contains("Preset inspector").rect()
+            let (material, also) = (tab("Material"), tab("Also export"));
+            // The first thing under the tabs: the Material group, or the Also export tab's "This set" heading.
+            let first = if open == "Also export" {
+                h.get_by_label("This set").rect()
             } else {
                 h.query_all_by_label("Material")
                     .find(|n| n.accesskit_node().role() != Role::Button)
                     .expect("the Material group")
                     .rect()
             };
-            let top = material.min.y.min(adv.min.y).min(first.min.y);
+            let top = material.min.y.min(also.min.y).min(first.min.y);
             let (diffuse, cmds) = (
                 slot_rect(&h, "Diffuse"),
                 h.get_by_role_and_label(Role::Button, "Slot commands…")

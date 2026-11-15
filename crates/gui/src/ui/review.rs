@@ -378,11 +378,9 @@ fn name_field(
 fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut Option<Act>) {
     let cfg = m.also_config();
     let (v, c) = m.also_ticks();
-    let off = m
-        .export
-        .running
-        .is_some()
-        .then(|| also::EXPORT_RUNNING.to_string())
+    let busy = m.export.running.is_some().then_some(also::EXPORT_RUNNING);
+    let off = busy
+        .map(str::to_string)
         .or_else(|| m.toml_read_only_reason());
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     ui.add_enabled_ui(off.is_none(), |ui| {
@@ -392,11 +390,11 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
                 (AlsoTarget::Cm, c, "Complex material"),
             ] {
                 // A tick left from the cs mode stays clickable, so it can be cleared.
-                let cs = (!on && m.target != Target::Cs).then_some(also::NEEDS_CS);
+                let why = also::tick_off(m, on, busy);
                 let mut now = on;
-                let r = ui.add_enabled(cs.is_none(), egui::Checkbox::new(&mut now, text));
+                let r = ui.add_enabled(why.is_none(), egui::Checkbox::new(&mut now, text));
                 if r
-                    .on_disabled_hover_text(off.as_deref().or(cs).unwrap_or_default())
+                    .on_disabled_hover_text(why.as_deref().unwrap_or_default())
                     .changed()
                 {
                     *act = Some(Act::AlsoTick(t, now));
@@ -508,10 +506,14 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
     if let Some(why) = gate {
         ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
     }
-    if ui
-        .link("Recipe settings are in Advanced")
-        .on_hover_text("Brightness, AO, specular and the other [export.legacy] values")
-        .clicked()
+    // Note JI2 (correction 6): the recipe is on a PBR set's Also export tab, so with no PBR set there is no link.
+    if m.recipe_set().is_some()
+        && ui
+            .link("Recipe settings…")
+            .on_hover_text(
+                "Brightness, AO, specular and the other [export.legacy] values, in a set's Also export tab",
+            )
+            .clicked()
     {
         *act = Some(Act::Recipe);
     }
@@ -896,10 +898,18 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         // The header's Preset menu opens on the request (as Problems' `Choose preset…` does).
         Some(Act::ChoosePreset) => model.choose_preset = Some(ui.ctx().cumulative_pass_nr()),
         Some(Act::Skip(id, on)) => model.set_skip_also(&id, on),
+        // Note JI2: the set's Also export tab, in 2D (the set editor is not drawn in 3D or over a preview).
         Some(Act::Recipe) => {
-            super::advanced::open_recipe(ui.ctx());
-            model.settings.advanced_open = true;
-            model.save_settings();
+            if let Some(k) = model.recipe_set() {
+                model.collapse();
+                model.select_set(&k);
+                super::set_editor::show_also_tab(ui.ctx());
+                if model.settings.set_view_3d {
+                    model.settings.set_view_3d = false;
+                    model.save_settings();
+                }
+                super::header::set_meshes_view(ui.ctx(), false);
+            }
         }
         Some(Act::GoTo(k)) => {
             model.select_set(&k);

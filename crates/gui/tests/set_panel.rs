@@ -1,6 +1,6 @@
-//! Layout v2 A3 / C6: every set editor has a Material (JSON set) or Set tab and an Advanced tab, under the slot rows
-//! since Note FB2 (one column); the window-edge Advanced strip stays for a texture, the preview, a bulk selection,
-//! nothing selected and 3D.
+//! Layout v2 A3 / C6: every set editor has a Material (JSON set) or Set tab and an Also export tab (Note JI2), under
+//! the slot rows since Note FB2 (one column); the window-edge Advanced strip stays for a texture, the preview, a bulk
+//! selection, nothing selected and 3D.
 mod support;
 use eframe::egui::{self, accesskit::Role, containers::panel::PanelState, Id};
 use egui_kittest::kittest::{NodeT, Queryable};
@@ -62,26 +62,41 @@ fn centre(h: &H) -> egui::Rect {
         .intersect(h.ctx.content_rect())
 }
 
-/// The set editor's tabs are drawn: its "Advanced" tab in the centre (the drawer's strip is at the window edge).
+/// The set editor's tabs are drawn: its "Also export" tab in the centre (the drawer's strip is at the window edge).
 fn set_tabs(h: &H) -> bool {
     sdc_gui::ui::centre_rect(&h.ctx).is_some_and(|c| {
         h.query_all_by_role(Role::Button).any(|n| {
-            n.accesskit_node().label().as_deref() == Some("Advanced")
+            n.accesskit_node().label().as_deref() == Some("Also export")
                 && c.contains(n.rect().center())
         })
     })
 }
 
+/// Note JI2 (Review Focus 1): on a set that is not PBR the Also export tab says it reads PBR sets only, with no Skip
+/// tick, and still shows the project's ticks and recipe. The window-edge drawer stays away while a set is shown.
 #[test]
-fn a_vanilla_set_has_a_set_tab_and_an_advanced_tab_and_no_window_edge_drawer() {
+fn a_vanilla_set_reads_pbr_only_and_keeps_the_project_block() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
     decide_all(&mut m);
-    rock_selected(&mut m);
+    // rock01 is auto PBR Landscape here (its roughness and AO pack); leaf is a plain set.
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .filter(|v| !sdc_gui::model::also::is_pbr_set(v))
+        .expect("the plain leaf set")
+        .key
+        .clone();
+    m.select_set(&key);
     let mut h = harness(m);
     h.run();
     h.get_by_role_and_label(Role::Button, "Set");
-    h.get_by_role_and_label(Role::Button, "Advanced");
+    h.get_by_role_and_label(Role::Button, "Also export").click();
+    h.run();
+    h.get_by_label("Also export reads PBR sets only; this set is not one");
+    assert!(h.query_by_label("Skip vanilla/CM for this set").is_none());
+    h.get_by_role_and_label(Role::CheckBox, "All sets: also export as Vanilla");
+    h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
     assert!(!drawer_drawn(&h), "no strip at the window edge");
 }
 
@@ -113,21 +128,36 @@ fn a_pbr_set_has_a_material_tab() {
     h.get_by_label("Features");
 }
 
+/// Note JI2: a PBR set's Also export tab holds this set's Skip tick and the project's block, not the drawer's body;
+/// the tab picked lives in egui memory, so nothing is written to gui.toml (review finding 9).
 #[test]
-fn the_advanced_tab_shows_the_drawer_body_and_is_remembered() {
+fn a_pbr_set_has_material_and_also_export_tabs_and_the_choice_is_not_saved() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
+    let toml = d.path().join("settings").join("gui.toml");
+    m.settings_path = Some(toml.clone());
     rock_selected(&mut m);
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.key.ends_with("landscape/rock01") && sdc_gui::model::also::is_pbr_set(v)),
+        "rock01 is a PBR set"
+    );
     let mut h = harness(m);
     h.run();
-    assert!(h.query_by_label_contains("Preset inspector").is_none());
-    h.get_by_role_and_label(Role::Button, "Advanced").click();
+    h.get_by_role_and_label(Role::Button, "Material");
+    h.get_by_role_and_label(Role::Button, "Also export").click();
     h.run();
-    h.get_by_label_contains("Preset inspector");
-    // A7: the code's hint, with a set selected.
-    h.get_by_label("Select a texture to edit its encoder and header fields.");
-    assert!(h.state().0.settings.advanced_open);
+    h.get_by_label("This set");
+    h.get_by_label("All sets in this project");
+    h.get_by_label("Skip vanilla/CM for this set");
+    assert!(h.query_by_label("No texture selected").is_none());
+    assert!(h.query_by_label_contains("Preset inspector").is_none());
+    assert!(h
+        .query_by_label_contains("Select a texture to edit")
+        .is_none());
     assert!(h.query_by_label("Features").is_none(), "one tab at a time");
+    assert!(!toml.exists(), "the tab choice is not written to gui.toml");
 }
 
 /// Note FB2 (was "the slot rows stay put while the material panel scrolls"): one column scrolls as one, so the rows
@@ -241,7 +271,7 @@ fn turning_multilayer_on_opens_the_coat_group() {
     h.get_by_label("Coat colour");
 }
 
-/// Note FB2 (C14): the button sits on the tab row, after the Advanced tab.
+/// Note FB2 (C14): the button sits on the tab row, after the Also export tab (Note JI2).
 #[test]
 fn the_json_editor_button_is_small_and_on_the_tab_row() {
     let d = tempfile::tempdir().unwrap();
@@ -249,7 +279,7 @@ fn the_json_editor_button_is_small_and_on_the_tab_row() {
     rock_selected(&mut m);
     let mut h = harness(m);
     h.run();
-    let tab = h.get_by_role_and_label(Role::Button, "Advanced").rect();
+    let tab = h.get_by_role_and_label(Role::Button, "Also export").rect();
     let b = h.get_by_label("PGPatcher JSON editor…");
     assert!(b.rect().width() < 220.0);
     assert!(

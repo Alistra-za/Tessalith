@@ -1,5 +1,5 @@
 //! The set editor (M3b spec §4): one scrolling column (Note FB2), the name box, the slot rows (layout v2 A2) at full
-//! width, then the Material / Advanced tabs and groups. Drawing only: every change is a model call, made after drawing.
+//! width, then the Material / Also export tabs and groups. Drawing only: every change is a model call, made after drawing.
 use super::columns::{border_of, bulk_menu, status_text, AMBER, RED};
 use super::sets_column::{DropState, Pending, SlotNote};
 use super::slot_commands::SlotCmdState;
@@ -98,7 +98,6 @@ pub fn draw(
     cmds: &mut SlotCmdState,
     drops: &mut DropState,
     view: View,
-    advanced: &mut super::advanced::AdvancedState,
 ) {
     let all = views(model);
     let Some(v) = all.iter().find(|v| v.key == key) else {
@@ -151,7 +150,7 @@ pub fn draw(
         });
         under_grid(ui, model, v);
         ui.add_space(6.0);
-        tabs(ui, model, v, advanced, view.noise_uv);
+        tabs(ui, model, v, view.noise_uv);
     });
     let (mut select, mut expand) = (None, None);
     for a in acts {
@@ -255,23 +254,43 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     ui.separator();
 }
 
-/// The tabs under the slot rows (C6, R12; Note FB2): Material on a JSON set or Set on any other, then Advanced;
-/// `advanced_open` picks the tab.
-fn tabs(
-    ui: &mut egui::Ui,
-    model: &mut AppModel,
-    v: &SetView,
-    advanced: &mut super::advanced::AdvancedState,
-    noise_uv: Option<f32>,
-) {
+/// The set editor's tab (Note JI2): kept in egui memory only, never in gui.toml (spec 2.6, review finding 9).
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
+pub(super) enum SetTab {
+    #[default]
+    Main,
+    AlsoExport,
+}
+
+const TAB_ID: &str = "set-editor-tab";
+/// Set with the tab by Review's link: the tab row scrolls to the top once, so the recipe is in view.
+const SCROLL_ID: &str = "set-editor-tab-scroll";
+
+/// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
+pub fn show_also_tab(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::new(TAB_ID), SetTab::AlsoExport);
+        d.insert_temp(egui::Id::new(SCROLL_ID), true);
+    });
+}
+
+/// The tabs under the slot rows (C6, R12; Note FB2): Material on a JSON set or Set on any other, then Also export
+/// (Note JI2).
+fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f32>) {
     let json = shows_json_panel(v, model.target);
-    let mut open = model.settings.advanced_open;
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut open, false, if json { "Material" } else { "Set" });
-        ui.selectable_value(&mut open, true, "Advanced");
+    let id = egui::Id::new(TAB_ID);
+    let was = ui.data(|d| d.get_temp::<SetTab>(id)).unwrap_or_default();
+    let mut tab = was;
+    let row = ui.horizontal(|ui| {
+        ui.selectable_value(
+            &mut tab,
+            SetTab::Main,
+            if json { "Material" } else { "Set" },
+        );
+        ui.selectable_value(&mut tab, SetTab::AlsoExport, "Also export");
         // C14 (Note FB2): the name box above names the set, so the Material tab has no name line; its JSON editor
         // button sits on the tab row. G3: the whole file, every set and the delete sections, in a centre tab (Note FB7).
-        if json && !open {
+        if json && tab == SetTab::Main {
             ui.add_space(8.0);
             if ui
                 .small_button("PGPatcher JSON editor…")
@@ -284,13 +303,19 @@ fn tabs(
             }
         }
     });
-    if open != model.settings.advanced_open {
-        model.settings.advanced_open = open;
-        model.save_settings();
+    // A request made on the frame the editor opens wins over `View::to_top`'s offset (the area applies it last).
+    if ui
+        .data_mut(|d| d.remove_temp::<bool>(egui::Id::new(SCROLL_ID)))
+        .is_some()
+    {
+        row.response.scroll_to_me(Some(egui::Align::TOP));
+    }
+    if tab != was {
+        ui.data_mut(|d| d.insert_temp(id, tab));
     }
     ui.separator();
-    if open {
-        super::advanced::body(ui, model, advanced);
+    if tab == SetTab::AlsoExport {
+        super::also_tab::body(ui, model, v);
         return;
     }
     super::cs_pbr::card(ui, model, v);
@@ -309,44 +334,8 @@ fn tabs(
         super::skin_card::card(ui, model, v);
     }
     super::cm_card::section(ui, model, v);
-    also_skip(ui, model, v);
     if !split {
         super::cs_pbr::section(ui, model, v);
-    }
-}
-
-/// C2 (owner answer 6): the "Also export" group of a PBR set while a tick is on: "converted" or "skipped", and the
-/// opt-out. 2D only; Review's "Skip these sets" covers the 3D view.
-fn also_skip(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
-    if !model.also_on() || !crate::model::also::is_pbr_set(v) {
-        return;
-    }
-    let skipped = model.also_skipped(&v.id);
-    let off = if model.export.running.is_some() {
-        Some(crate::model::also::EXPORT_RUNNING.to_string())
-    } else {
-        model.toml_read_only_reason()
-    };
-    let value = egui::RichText::new(if skipped { "skipped" } else { "converted" }).weak();
-    let mut now = skipped;
-    let changed = super::group::group(
-        ui,
-        ("also-export", v.id.as_str()),
-        "Also export",
-        Some(value),
-        true,
-        |ui| {
-            ui.add_enabled(
-                off.is_none(),
-                egui::Checkbox::new(&mut now, "Skip vanilla/CM for this set"),
-            )
-            .on_hover_text("Leave this set out of the Vanilla and Complex material folders")
-            .on_disabled_hover_text(off.as_deref().unwrap_or_default())
-            .changed()
-        },
-    );
-    if changed == Some(true) {
-        model.set_skip_also(&v.id, now);
     }
 }
 

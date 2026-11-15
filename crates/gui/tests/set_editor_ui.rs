@@ -841,23 +841,28 @@ fn a_filled_fuzz_slot_greys_the_coat_normal_switch() {
 
 /// F1 spec §4: the drawer no longer shows PGPatcher keys; they are in the TruePBR box.
 #[test]
-fn the_header_has_the_json_editor_and_the_drawer_has_no_pgpatcher_keys() {
+fn the_header_has_the_json_editor_and_the_also_export_tab_has_no_pgpatcher_keys() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     rock_selected(&mut m);
-    m.settings.advanced_open = true;
     let mut h = harness(m);
+    h.run();
+    // Note JI2: the set panel's second tab is Also export (no drawer body); the TruePBR box is on its Material tab.
+    // Opened first: the Material tab's row has its own JSON editor button.
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Also export")
+        .click();
     h.run();
     // R14: the editor is an entry of Export to ▾.
     h.get_by_label_contains("Export to: ").click();
     h.run();
     h.get_by_label(sdc_gui::ui::header::JSON_EDITOR);
-    // Close the menu again before the drawer checks.
+    // Close the menu again before the tab checks.
     h.key_press(eframe::egui::Key::Escape);
     h.run();
-    // Layout v2 C6: with a set, Advanced is the set panel's tab (open here); the TruePBR box is on its Material tab.
-    h.get_by_label_contains("Preset inspector");
+    h.get_by_label("All sets in this project");
+    assert!(h.query_by_label_contains("Preset inspector").is_none());
     assert!(h.query_by_label_contains("PGPatcher (advanced)").is_none());
+    assert!(h.query_by_label("Advanced TruePBR settings").is_none());
     h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Material")
         .click();
     h.run();
