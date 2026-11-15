@@ -28,6 +28,15 @@ On a shader property, pick **Float** or **Colour** and the **Variable**. An alph
 
 **PBR names.** On a PBR shape, as on the Shader tab, glossiness reads **Specular level**, specular strength **Roughness scale**, and specular colour **Coat colour**, **Subsurface colour** or "Specular colour (no effect on PBR)".
 
+## Type-21 controllers
+
+On a CS TruePBR 2.0 shape (shader type 21, [Editing a NIF](GUI-NIF-Edit.md#cs-pbr-20-shaders-experimental)) the tab follows what CS 2.0 animates: refraction strength, emissive multiple, alpha, the UV offsets and scales, and emissive colour.
+
+- **Picking type 21** unlinks every shader float or colour controller CS 2.0 refuses (Env map scale among them), as PGPatcher does, and deletes no block. The notice names each one ("Unlinked the <name> controller", plus "from clip <clip>" when a clip held it). The pick is refused when such a controller is shared by two shader properties. <!-- D:ID16 -->
+- **Add controller** lists the animated variables, then glossiness, specular strength and specular colour with the hover "Runs, but CS 2.0 shows no change". <!-- D:ID17,ID24 -->
+- **On those three** the value row reads "—", the preview doesn't animate them, and an amber warning says so. <!-- D:ID18,ID25 -->
+- **A type-21 NIF from another tool** keeps a refused controller when it opens. The shape gets the red "CS 2.0 won't draw this shape" error, which blocks the export until you remove the controller ([What blocks a type-21 export](GUI-NIF-Edit.md#what-blocks-a-type-21-export)).
+
 ## Warnings
 
 These come from an in-game check of each controller and show under the controller.

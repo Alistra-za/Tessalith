@@ -22,7 +22,32 @@ How to edit a mesh's shader, alpha, controllers and extra data in the Meshes vie
 
 ## CS PBR 2.0 shaders (experimental)
 
-Tick **CS PBR 2.0 (experimental)** in the Advanced drawer's Preview section and the Shader type list offers **TruePBR 2.0 (21)** on Skyrim SE meshes. A type-21 shape has no glossiness, specular or trailer fields; after refraction the Shader tab shows the PBR version, the ten feature checkboxes and the parameters of the features that are on. A feature that would break one of CS's combination rules is greyed, and its hover names the rule. The texture slots, here and on the shape card, carry the 2.0 names (RMAOS and the two feature textures among them), the v1 PBR flags are hidden, and flags CS 2.0 forbids are locked off. With the box off a type-21 shape still opens: its features and parameters are read-only and its type is locked, while textures, alpha, UV, emissive and flags stay editable. On the Controllers tab only the variables CS 2.0 reads are offered; glossiness, specular strength and specular colour run but show no change, and their value reads "—".
+For moving a mesh to Community Shaders TruePBR 2.0 (shader type 21). It needs the [CS PBR 2.0 box](GUI-Texture-Panel.md#cs-pbr-20-experimental) ticked.
+
+### Convert a shape to type 21
+
+1. Select the shape's card and open the **Shader** tab.
+2. Pick **TruePBR 2.0 (21)** in the shader type list. It is listed on Skyrim SE meshes only. <!-- D:ID21 -->
+3. Read the notice under the type. From type 0 or 11 with the PBR flag set, the features and values carry over: "Converted from v1 PBR: <features>", plus a line for each parameter clamped into CS 2.0's range. Any other shape starts at CS 2.0's defaults with no features. Each flag type 21 doesn't use is cleared and named ("<flag> flag cleared: type 21 doesn't use it"). <!-- D:ID10,ID13 -->
+
+Controllers CS 2.0 doesn't animate are unlinked in the same step ([NIF animation](GUI-NIF-Animation.md#type-21-controllers)). **Undo** gives the shape back as it was.
+
+### Edit a type-21 shape
+
+- After refraction the Shader tab shows the PBR version, ten feature checkboxes and the parameters of the features that are on; glossiness, specular and the trailer don't exist on type 21. A feature that would break one of CS 2.0's combination rules is greyed, and its hover names the rule. <!-- D:ID22 -->
+- Texture slots, here and on the shape card, carry the 2.0 names (RMAOS and the two feature textures among them). The v1 PBR flags are hidden, and flags CS 2.0 forbids are locked off. <!-- D:ID23,ID25 -->
+- The PBRThinSurface and PBRFuzz extra data show on the **Extra data** tab, read only. <!-- D:ID2 -->
+- With the box off a type-21 shape still opens: its type, features and parameters are locked, while textures, alpha, UV, emissive and flags stay editable. <!-- D:ID21 -->
+
+### What blocks a type-21 export
+
+- **Red, always blocks:** "CS 2.0 won't draw this shape: <reason>", even when the source file had it, because CS 2.0 skips such a shape in game. Reasons include a PBR version other than 2, a broken feature rule, a parameter out of range, a forbidden flag, an empty required slot and a controller CS 2.0 doesn't read. <!-- D:ID5 -->
+- **Amber:** a v1 PBR flag still set, with a **Fix** that clears it; a PBRThinSurface without 4 floats or a PBRFuzz without 2 ("CS ignores it"). <!-- D:ID6 -->
+- **In game** leaves a type-21 shape as it is, because PGPatcher 2.3.1 doesn't know type 21. <!-- D:ID6 -->
+
+### Convert back
+
+Pick type 0 or 11 to write a v1 PBR shape. The notice lists under "Dropped:" every feature v1 can't carry, such as thin surface, foliage, or glint beside fuzz. Type 0 has no trailer, so it also drops two-layer, fuzz and glint. Any other type writes plain vanilla values at their defaults. <!-- D:ID11,ID14 -->
 
 ## Shared blocks
 

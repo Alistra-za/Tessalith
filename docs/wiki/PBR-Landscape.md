@@ -21,10 +21,26 @@ A set can write Community Shaders' own runtime files: a **PBR texture set** (`<e
 - **Template** fills a block from the built-in library: PBR landscape template values by Faultier (https://www.nexusmods.com/profile/Faultierfan?gameId=1704), from Faultier's PBR landscape modders resource. It never removes EDIDs you added.
 - **EDIDs** are the records the file is for, and the file name is the EDID exactly, case included, because Community Shaders matches the exact case. After a plugin scan, texture-set EDIDs are suggested from the texture sets that use the diffuse, and material objects can be picked from the scanned records. An amber line flags an EDID that isn't in the scan; a material object that isn't single-pass is ignored by Community Shaders. An EDID that can't be a file name, or that two sets bind, isn't written.
 - A texture set also drives the set's PGPatcher entry (roughness, specular, displacement, subsurface, coat and glint come from the block, so the two files can't drift). With no scan the entry isn't written. After a scan it's written whether or not a mesh (not LOD) uses the diffuse yet, and an info row says when none does; **PGPatcher entry for statics** forces it on or off.
-- With **CS PBR 2.0 (experimental)** ticked, a texture set also writes the eight keys TruePBR 2.0 reads (thin surface, foliage, fuzz roughness and others). **Fuzz roughness from texture** reads the roughness from the parallax texture's green channel: encode that texture BC5 or BC1, not BC4. <!-- D:ID44,ID46 -->
 - **IMPORTANT** A file you edited outside Tessalith is never overwritten: the export report says so, and you delete it to let Tessalith write it again. A file Tessalith wrote for an EDID no set binds any more is reported, not deleted.
 - **Material object layer** in the 3D preview draws the snow or ash layer the game puts on statics that use the object, from the block's values and the record's DATA in your load order. Coverage goes on most non-skinned shapes; the block's material values (colour scale, roughness, specular, glint) change PBR shapes only. <!-- D:GI10,GZ1,GZ3 -->
 - When the set has an [XPMF profile](#xpmf-profiles), the layer takes the profile's four texture paths, `falloffScale`, `falloffBias` and `noiseUVScale` in place of the load order's. <!-- D:GI17 -->
+
+### CS PBR 2.0 keys
+
+With **CS PBR 2.0 (experimental)** ticked in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental), the texture set block gets eight more rows, and the `PBRTextureSets` file writes the ones that hold a value. Unticked, the rows are hidden and the file is written without them. <!-- D:ID44 -->
+
+| Row | Key | Value |
+|---|---|---|
+| **Subsurface balance** | `subsurfaceBalance` | 0 to 1, default 0.75 |
+| **Thin surface** | `thinSurface` | true or false, default false |
+| **Foliage** | `foliage` | true or false, default false |
+| **Thin-surface specular weight** | `thinSurfaceSpecularWeight` | 0 to 1, default 0.5 |
+| **Thin-surface back specular weight** | `thinSurfaceBackSpecularWeight` | 0 to 1, default 0.5 |
+| **Thin-surface back roughness scale** | `thinSurfaceBackRoughnessScale` | 0 to 3, default 1 |
+| **Fuzz roughness** | `fuzzRoughness` | -1 to 1, default -1; a negative value uses the base roughness |
+| **Fuzz roughness from texture** | `fuzzRoughnessTexture` | true or false, default false; see below |
+
+**Fuzz roughness from texture** reads the roughness from the green channel of the parallax (height) slot's texture, so that texture holds two channels: encode it BC5 or BC1, not BC4. <!-- D:ID46 -->
 
 ## Advanced skin
 

@@ -18,7 +18,7 @@ Double-click a tile (or a set member), or select it and press **Enter** or **Spa
 
 ## See the set on a mesh (3D)
 
-The 3D view renders with Direct3D 11 and the Community Shaders shader files built into Tessalith, so you can check a material close to the game before exporting. It uses Community Shaders 1.9.0 (AIO build 2026-10-03) with default settings, whatever CS you run; your own CS settings or a newer CS can look different in game. <!-- D:GT4 -->
+The 3D view renders with Direct3D 11 and the Community Shaders shader files built into Tessalith, so you can check a material close to the game before exporting. It uses Community Shaders 1.9.0 (AIO build 2026-10-03) with default settings, whatever CS you run; your own CS settings or a newer CS can look different in game. <!-- D:GT4 --> With **CS PBR 2.0 (experimental)** ticked it uses the TruePBR 2.0 test build instead ([below](#cs-pbr-20-preview-experimental)).
 
 - **The 2D | 3D switch** in a set's heading row swaps the centre pane in place. *2D* (the default) is the [set editor](GUI-Set-Editor.md); *3D* fills the centre. It is remembered in `gui.toml`.
 - **TruePBR settings…** in the heading row opens a window you can move and resize, with the set's settings (the coat settings, the skin card, the PBR Landscape card, CS PBR records, the complex material card, whichever the set has). An edit there shows in 3D right away. While the switch is on 3D, selecting any texture of a set shows that set's view, and the window follows the selection.
@@ -27,6 +27,15 @@ The 3D view renders with Direct3D 11 and the Community Shaders shader files buil
 - **Copy image** (**Ctrl+Shift+C**) copies the last frame at the size it was rendered.
 - **Material object layer:** a set with CS PBR records can draw the snow or ash layer; see [CS PBR records](PBR-Landscape.md#cs-pbr-records).
 - The **Meshes** view has the same panel ([Mod scanning](Mod-Scanning.md)).
+
+## CS PBR 2.0 preview (experimental)
+
+For authors trying shader type 21 on Community Shaders' TruePBR 2.0 test build. Tick **CS PBR 2.0 (experimental)** in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental): both 3D views (Meshes and the set preview) switch to the shaders of that build (PBR2Test1, built into Tessalith) and recompile every shape, keeping the last frame on screen until they finish. <!-- D:ID26,ID30,ID31 --> The test build ships no settings file, so the view uses CS 1.9.0's default settings with the test build's own feature list. <!-- D:ID27,ID29 -->
+
+- **A type-21 shape** draws with CS 2.0 shading. A shape that breaks a CS 2.0 rule isn't drawn, as in game, and the **notes** list under the view gives the rule ("CS 2.0 won't draw this shape: …"). <!-- D:ID38 -->
+- **A v1 PBR shape** (type 0 or 11 with the PBR flag) draws as vanilla, because CS 2.0 hands it to the vanilla shader. <!-- D:ID33 -->
+- **With the box off**, a type-21 shape draws as the v1 PBR shape a conversion would write, and the notes say "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading". Thin surface and foliage have no v1 shading. <!-- D:ID33,ID40 -->
+- **How far to trust it:** base, subsurface, two-layer, fuzz, thin-surface and foliage shapes matched in-game captures of the test build pixel for pixel. Glint and hair weren't checked. Vanilla and v1 shapes get lighting options the game left off, so judge those with the box off. <!-- D:ID51,ID53 -->
 
 ## Move the camera and light
 
