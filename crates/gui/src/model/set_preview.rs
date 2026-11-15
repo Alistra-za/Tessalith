@@ -1802,9 +1802,10 @@ impl SetPreview {
         }
     }
 
-    /// Note IE13: the followed set gets a `.csm` (the set editor shows its lines; [`NEEDS_CS`] is not shown).
+    /// Note IE13: the followed set gets a `.csm` (the set editor shows its lines; [`NEEDS_CS`] is not shown). A PBR
+    /// Landscape set's preview-only material does not count.
     pub fn gets_csm(&self) -> bool {
-        self.csm.is_some()
+        self.csm.as_ref().is_some_and(|c| !c.preview_only)
     }
 
     /// Note GE14: the whole-run crash lines; a change re-pushes the scene.

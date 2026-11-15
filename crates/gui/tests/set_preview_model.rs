@@ -2620,3 +2620,67 @@ fn a_target_switch_off_cs_drops_the_csm_and_shows_needs_cs() {
     h.run_steps(4);
     h.get_by_label(NEEDS_CS);
 }
+
+/// `pbr_opened`'s rock01 (PBR Landscape) followed, with a texture-set block holding roughnessScale 0.45.
+fn landscape_rock(dir: &Path) -> AppModel {
+    use sdc_gui::model::cs_pbr::Kind;
+    let mut m = pbr_opened(dir);
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.set_cs_value(ROCK, Kind::Txst, "roughnessScale", Some(json!(0.45)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let key = rock(&m).0.key;
+    m.select_set(&key);
+    m
+}
+
+/// Note IE13 (fix round 1, t10 item 10): a PBR Landscape set's plane draws PBR again, through a preview-only `.csm`
+/// built from the entry and block its inline texture-set JSON holds; it is never exported, has no editor lines, and the
+/// plane's tiling still applies.
+#[test]
+fn a_pbr_landscape_plane_draws_a_preview_only_csm() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = landscape_rock(dir.path());
+    let key = rock(&m).0.key;
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    run(&mut s, &m);
+    assert!(
+        matches!(
+            s.v3.content(),
+            Some(Content::Builtin {
+                shape: Builtin::Plane,
+                ..
+            })
+        ),
+        "{:?}",
+        s.v3.content()
+    );
+    s.set_tiling(2.0);
+    let (material, files) = builtin_scene(&s);
+    let uv = material.params.uv_scale;
+    let drawn = resolved(material, &files);
+    let pbr = drawn.pbr.expect("the plane draws PBR");
+    assert_eq!(pbr.params[0], 0.45, "the block's roughnessScale");
+    assert_eq!(drawn.params.uv_scale, uv, "the tiling stands");
+    assert!(csm_lines(&m, &key).is_empty(), "{:?}", csm_lines(&m, &key));
+    assert!(
+        !s.gets_csm(),
+        "a preview-only material is not the set's .csm"
+    );
+    let p = sdc_gui::model::csm_export::prepare(&m).expect("CS");
+    assert!(p.files.is_empty(), "never exported: {:?}", p.files);
+}
+
+/// Note IE13 (fix round 1, t10 item 10): on the real device the plane's material is PBR.
+#[test]
+fn render_a_pbr_landscape_plane_draws_pbr() {
+    let dir = tempfile::tempdir().unwrap();
+    let m = landscape_rock(dir.path());
+    let cache = tempfile::tempdir().unwrap();
+    let mut s = SetPreview::new(None, DEFAULT_CAP);
+    real_render(&mut s, cache.path());
+    run(&mut s, &m);
+    let shapes = drawn(&mut s, &m);
+    let pbr = shapes[0].material.pbr.clone().expect("the plane draws PBR");
+    assert_eq!(pbr.params[0], 0.45);
+    assert_eq!(shapes[0].material.csm_error, None);
+}

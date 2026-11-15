@@ -532,14 +532,17 @@ pub const CSM_BLOCKED_TAIL: &str =
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewCsm {
     pub csm: SetCsm,
+    /// A PBR Landscape set's preview-only material: never exported (the set keeps its inline texture-set JSON, which
+    /// CS 2.0 draws landscape from), built from the same PGPatcher entry and block, so the preview's plane draws PBR.
+    pub preview_only: bool,
     /// The set editor's lines about it: [`super::set_preview::PGPATCHER_V1`], then a blocked `.csm`'s reason with
-    /// [`CSM_BLOCKED_TAIL`].
+    /// [`CSM_BLOCKED_TAIL`]. None for a preview-only one.
     pub lines: Vec<String>,
 }
 
 /// Note IE13: the `.csm` of the set whose view key is `key`, as [`csm_sets`] builds it (unsaved edits included); a set
-/// that gets one but has no PGPatcher entry gets [`NO_ENTRY`] as its block reason. `None` off CS and for a set that gets
-/// none (not PBR, PBR Landscape). Cached by the view key, the scan evidence revision and
+/// that gets one but has no PGPatcher entry gets [`NO_ENTRY`] as its block reason; a PBR Landscape set with an entry
+/// gets a preview-only one. `None` off CS and for any other set. Cached by the view key, the scan evidence revision and
 /// `key`, so the set editor reads it every frame.
 pub fn view_csm(m: &AppModel, key: &str) -> Option<std::sync::Arc<ViewCsm>> {
     let at = (m.evidence_rev, key.to_string());
@@ -563,6 +566,15 @@ fn build_view_csm(m: &AppModel, key: &str) -> Option<ViewCsm> {
     let (v, e) = super::pbr_export::set_entry(m, key)?;
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let block = txst_block(&entries, &v.id);
+    if super::sets::is_pbr_landscape(&v) {
+        // No entry: no simulation either, the plane shows the plain textures.
+        let e = e?;
+        return Some(ViewCsm {
+            csm: build_any(&v, &e.settings, block, &e.slots),
+            preview_only: true,
+            lines: vec![],
+        });
+    }
     let csm = match e {
         Some(e) => entry_csm(&v, &e, block)?,
         None if gets_csm(&v) => no_entry(&v),
@@ -575,7 +587,11 @@ fn build_view_csm(m: &AppModel, key: &str) -> Option<ViewCsm> {
                 .map(|why| format!("{why}; {CSM_BLOCKED_TAIL}")),
         )
         .collect();
-    Some(ViewCsm { csm, lines })
+    Some(ViewCsm {
+        csm,
+        preview_only: false,
+        lines,
+    })
 }
 
 /// What an export about to start writes once it has ended (computed when it starts, like the CS PBR JSON).
