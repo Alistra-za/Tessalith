@@ -2388,7 +2388,16 @@ impl AppModel {
     }
 
     /// Note JD2: slot `kind` (an empty `_wet` or `_detail_n`) of set `set` borrows `item` from its set, as Share does.
-    pub fn borrow_into_slot(&mut self, item: &str, set: &str) -> Result<(), String> {
+    pub fn borrow_into_slot(
+        &mut self,
+        item: &str,
+        set: &str,
+        kind: SlotKind,
+    ) -> Result<(), String> {
+        // A stale menu entry: the item was re-typed since, so it would fill another slot.
+        if self.item(item).and_then(slot_of) != Some(kind) {
+            return Err(format!("{item} is no longer a {}", kind.label()));
+        }
         match self.drop_choice(item, set, DropChoice::Share) {
             DropOutcome::Joined => Ok(()),
             DropOutcome::Refused(e) => Err(e),

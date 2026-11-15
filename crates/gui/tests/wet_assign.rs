@@ -8,6 +8,7 @@ use egui_kittest::Harness;
 use engine::config::Subtype;
 use engine::shader::Shader;
 use image::{ImageBuffer, Rgb};
+use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::sets::{set_views, SetView, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
@@ -137,8 +138,19 @@ fn assign_on_an_empty_wet_slot_puts_a_wet_file_from_the_folder_there() {
         "{:?}",
         body.slots
     );
-    let menu = enabled_labels(&m, "m/body", SlotKind::SkinWet);
-    assert!(menu.iter().any(|l| l.contains("body_wet.png")), "{menu:?}");
+    // Listed to move in, and (its set is one other skin sets may share) to borrow.
+    let menu = m.slot_menu("m/body", SlotKind::SkinWet);
+    for borrow in [false, true] {
+        assert!(
+            menu.iter().any(|e| match &e.action {
+                MenuAction::SlotMove { item, .. } => !borrow && item == "m/body_wet.png",
+                MenuAction::SlotBorrow { item, .. } => borrow && item == "m/body_wet.png",
+                _ => false,
+            } && e.disabled.is_none()),
+            "borrow {borrow}: {:?}",
+            menu.iter().map(|e| &e.label).collect::<Vec<_>>()
+        );
+    }
     m.select_set(&body.key);
     let mut h = harness(m);
     h.run();
@@ -182,6 +194,19 @@ fn assign_on_an_empty_detail_slot_offers_another_sets_detail_map() {
         "{:?}",
         view(m, "m/body").slots
     );
+    // What is written: a `borrow.slot10` naming the host set in `sdc-project.toml`, and no slot 9 or 10 in the
+    // PGPatcher JSON (HB2).
+    let text = m.sets_doc.as_ref().unwrap().text();
+    assert!(text.contains(r#"slot10 = "m/rock02""#), "{text}");
+    assert_eq!(text.matches("slot10").count(), 1, "{text}");
+    let entries: Vec<_> = sdc_gui::model::pbr_export::json_entries(m)
+        .into_iter()
+        .map(|(_, e)| e)
+        .collect();
+    let json = sdc_gui::pgp::writer::to_text(&sdc_gui::pgp::writer::document(&entries));
+    for bad in ["slot9", "slot10"] {
+        assert!(!json.contains(bad), "{bad} in {json}");
+    }
 }
 
 /// An undecided `body_wet.png` (GY2: no suggestion, it waits) is listed too; the pick types it Skin wet and moves it

@@ -1036,6 +1036,7 @@ pub enum MenuAction {
     /// "From another set" submenu, as `SlotLink` is on the game slots.
     SlotBorrow {
         set: String,
+        kind: SlotKind,
         item: String,
     },
     /// Drop the `borrow.slot<n>` of a skin `_wet` or `_detail_n` slot (9, 10), which has no slot command to clear it.
@@ -1549,22 +1550,20 @@ impl AppModel {
         let tail = format!("_{}", kind.suffix());
         let toml_off = self.toml_read_only_reason();
         let mut moves = vec![];
-        let mut moved: Vec<&str> = vec![];
         for i in &self.items {
             let typed = slot_of(i) == Some(kind);
             let named = i.waiting
                 && i.input
                     .file_stem()
                     .is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with(&tail));
-            let f = folder(&i.key);
-            if !(typed || named) || !here.iter().any(|h| same_id(h, &f)) {
+            let dir = folder(&i.key);
+            if !(typed || named) || !here.iter().any(|h| same_id(h, &dir)) {
                 continue;
             }
-            let from = views.iter().find(|o| o.members.iter().any(|k| k == &i.key));
-            if from.is_some_and(|f| same_id(&f.id, &id) || self.is_real_set(f)) {
+            let owner = views.iter().find(|o| o.members.iter().any(|k| k == &i.key));
+            if owner.is_some_and(|o| same_id(&o.id, &id) || self.is_real_set(o)) {
                 continue;
             }
-            moved.push(&i.key);
             moves.push(MenuEntry {
                 action: MenuAction::SlotMove {
                     set: id.clone(),
@@ -1585,12 +1584,12 @@ impl AppModel {
             .iter()
             .filter(|o| !same_id(&o.id, &id))
             .flat_map(|o| o.members.iter().map(move |k| (o, k)))
-            .filter(|(_, k)| !moved.contains(&k.as_str()))
             .filter_map(|(o, k)| {
                 let it = self.item(k).filter(|i| slot_of(i) == Some(kind))?;
                 Some(MenuEntry {
                     action: MenuAction::SlotBorrow {
                         set: id.clone(),
+                        kind,
                         item: k.clone(),
                     },
                     label: format!("{} — {}", o.id, it.name),
@@ -1716,8 +1715,8 @@ impl AppModel {
             MenuAction::SlotMove { set, kind, item } => {
                 return self.move_into_slot(&item, &set, kind).err();
             }
-            MenuAction::SlotBorrow { set, item } => {
-                return self.borrow_into_slot(&item, &set).err()
+            MenuAction::SlotBorrow { set, kind, item } => {
+                return self.borrow_into_slot(&item, &set, kind).err();
             }
             MenuAction::ClearBorrow { set, n } => return self.clear_slot_borrow(&set, n).err(),
             MenuAction::RestoreFill { set, n } => return self.restore_fill(&set, n).err(),
