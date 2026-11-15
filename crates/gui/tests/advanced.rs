@@ -82,6 +82,38 @@ fn the_open_drawer_shows_its_sections() {
         );
     }
     h.get_by_label_contains("cs-quality");
+    // Note FM25 (P17): no Batch section (threads, memory), preview-size combo, 16384 box or Interface section. The
+    // drawer's own labels, read as the old exact-list test read them (the header has its own "Batch…" words).
+    let panel = eframe::egui::containers::panel::PanelState::load(
+        &h.ctx,
+        eframe::egui::Id::new("advanced"),
+    )
+    .expect("the drawer is open")
+    .outer_rect;
+    let labels: Vec<String> = h
+        .query_all_by_role(Role::Label)
+        .chain(h.query_all_by_role(Role::Button))
+        .chain(h.query_all_by_role(Role::CheckBox))
+        .chain(h.query_all_by_role(Role::SpinButton))
+        .chain(h.query_all_by_role(Role::ComboBox))
+        .filter(|n| panel.expand(1.0).contains_rect(n.rect()))
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert!(labels.iter().any(|l| l == "Preset inspector"), "{labels:?}");
+    for label in [
+        "Batch",
+        "Worker threads",
+        "Memory budget (MiB)",
+        "Largest previewed side",
+        "Allow 16384 previews",
+        "Interface",
+        "Reduce motion",
+    ] {
+        assert!(
+            !labels.iter().any(|l| l == label),
+            "{label:?} is gone (FM25): {labels:?}"
+        );
+    }
 }
 
 fn drawer_harness(width: f32, model: AppModel) -> Harness<'static, AppModel> {
