@@ -2,7 +2,7 @@
 use super::helpers::{fill_text, target_file};
 use engine::api::Plan;
 use engine::codes::{Code, Severity, Warning};
-use engine::config::{AlphaPolicy, ColorTag, Format, Subtype, Target};
+use engine::config::{AlphaPolicy, Subtype, Target};
 use engine::discover::{InputFile, InputKind};
 use engine::events::{EngineEvent, EventKind, RecipeReport};
 use engine::helper::report::HelperReport;
@@ -12,8 +12,7 @@ use engine::overrides::project_rel;
 use engine::pack::plan::files_stem;
 use engine::pack::RecipeKind;
 use engine::policy::{
-    allowed_encodings, availability, near_binary, Availability, JobStatus, Need, ResolvedJob,
-    SourceStamp,
+    availability, near_binary, Availability, JobStatus, Need, ResolvedJob, SourceStamp,
 };
 use engine::session::{Session, Thumbnail};
 use engine::suggest::suggest_alpha;
@@ -51,7 +50,7 @@ pub enum Decision {
     NotACubeSource,
     Acknowledge(Code),
     /// Note JF3: a blocking code that `allow` cannot clear ([`ack_clears`]). The question names the change that
-    /// ends it and offers that change, never Acknowledge.
+    /// ends it, never Acknowledge; a type the mode does not have offers the type picker.
     Change(Code),
 }
 
@@ -67,17 +66,6 @@ pub fn ack_clears(job: &ResolvedJob, code: Code) -> bool {
         ),
         _ => true,
     }
-}
-
-/// Note JF3: what **Use BC7** writes for a skin map Community Shaders cannot load: BC7 with the job's own tag when
-/// the type takes that pair, else with the first tag it takes. `None` (no button) for a type that takes no BC7 under
-/// the mode, so the button never writes a format the type's own format list leaves out.
-pub fn bc7_for(job: &ResolvedJob) -> Option<(Format, ColorTag)> {
-    let all = allowed_encodings(job.profile.subtype, job.profile.target);
-    let mut bc7 = all.iter().filter(|(f, _)| *f == Format::Bc7);
-    let first = bc7.next().copied()?;
-    let own = (Format::Bc7, job.profile.color.tag);
-    Some(if all.contains(&own) { own } else { first })
 }
 
 #[derive(Debug, Clone)]

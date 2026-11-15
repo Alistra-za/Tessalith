@@ -153,11 +153,6 @@ pub fn change_line(code: Code) -> &'static str {
     }
 }
 
-/// Note JF3: the button on a skin map Community Shaders cannot load in its format.
-pub const USE_BC7: &str = "Use BC7";
-/// [`USE_BC7`]'s hover.
-pub const USE_BC7_HOVER: &str = "Write this texture as BC7, which Community Shaders loads";
-
 /// [`ack_label`] with " for this texture", for the panels that act on the one texture.
 pub fn ack_label_for_texture(code: Code) -> String {
     format!("{} for this texture", ack_label(code))

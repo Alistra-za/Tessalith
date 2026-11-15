@@ -4,8 +4,7 @@ use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
 use crate::model::code_text::{
-    alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for, USE_BC7,
-    USE_BC7_HOVER,
+    alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for,
 };
 use crate::model::fields::{
     auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
@@ -13,7 +12,7 @@ use crate::model::fields::{
     provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, EXR_STRAIGHT_HOVER,
     HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
-use crate::model::items::{bc7_for, Decision, ItemKind, ItemStatus};
+use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
 use eframe::egui;
 use engine::codes::{Code, Warning};
@@ -1304,24 +1303,16 @@ fn decision_box(
                             actions.push(Action::Decide(Answer::Acknowledge(*code)));
                         }
                     }
-                    // Note JF3: a block Acknowledge cannot clear: the sentence, the engine's message and the change
-                    // that ends it (another type, or BC7 for a skin map Community Shaders cannot load).
+                    // Note JF3: a block Acknowledge cannot clear: the sentence, the engine's message and, for a type
+                    // the mode does not have, the type picker. Any other such code names its fix in the sentence.
                     Decision::Change(code) => {
                         ui.label(egui::RichText::new(change_line(*code)).strong())
                             .on_hover_text(code.as_str());
                         if let Some(m) = message_of(warnings, *code) {
                             ui.label(m);
                         }
-                        match code {
-                            Code::CfgUnavailable => subtype_decision(ui, cx, left, None, actions),
-                            Code::FmtCsSkinLoader => {
-                                if let Some((f, tag)) = bc7_for(cx.job) {
-                                    if ui.button(USE_BC7).on_hover_text(USE_BC7_HOVER).clicked() {
-                                        actions.push(Action::Decide(Answer::Format(f, tag)));
-                                    }
-                                }
-                            }
-                            _ => {}
+                        if *code == Code::CfgUnavailable {
+                            subtype_decision(ui, cx, left, None, actions);
                         }
                     }
                 }

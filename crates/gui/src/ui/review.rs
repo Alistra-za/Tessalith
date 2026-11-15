@@ -5,9 +5,8 @@ use super::status::{AMBER, RED};
 use super::type_picker::{self, TypeKind};
 use crate::model::code_text::{
     ack_label, ack_label_for_texture, alpha_confirm_text, change_line, code_line, not_a_cube,
-    USE_BC7, USE_BC7_HOVER,
 };
-use crate::model::items::{alpha_asked, bc7_for, Decision};
+use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
 use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
@@ -205,20 +204,7 @@ fn fix_buttons_on(
                         pick = Some(RowPick::Answer(key.to_string(), Answer::Acknowledge(*code)));
                     }
                 }
-                // Note JF3: the one change that ends the block, never an Acknowledge that cannot.
-                Decision::Change(Code::FmtCsSkinLoader) => {
-                    if let Some((f, tag)) = item.job.as_ref().and_then(bc7_for) {
-                        if ui
-                            .button(USE_BC7)
-                            .on_hover_text(USE_BC7_HOVER)
-                            .on_disabled_hover_text(why)
-                            .clicked()
-                        {
-                            pick = Some(RowPick::Answer(key.to_string(), Answer::Format(f, tag)));
-                        }
-                    }
-                }
-                // Any other such code has no one-click change: its sentence names the fix.
+                // Note JF3: any other code Acknowledge cannot clear has no button: its sentence names the fix.
                 Decision::Change(_) => {}
             }
         }

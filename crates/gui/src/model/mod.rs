@@ -208,8 +208,6 @@ pub enum Answer {
     Alpha(AlphaPolicy),
     Green(GreenConvention),
     Acknowledge(Code),
-    /// Note JF3: the format and tag a row's **Use BC7** writes (`items::bc7_for`).
-    Format(engine::config::Format, engine::config::ColorTag),
 }
 
 /// What a plan takes from the sets: `set_edits`, `output_paths`, and the shared roughness slots and borrowed
@@ -3698,15 +3696,12 @@ impl AppModel {
 
     /// A confirmation writes the value explicitly, or adds the code to the file's `allow` (M3a spec §5.2).
     pub fn decide(&mut self, item_key: &str, answer: Answer) {
-        match answer {
-            Answer::Subtype(st) => return self.edit_subtype("Decide", item_key, Some(st)),
-            // The Format row's own edit, so the tag and the BC7 weights follow as they do there.
-            Answer::Format(f, tag) => return self.set_format(item_key, f, tag),
-            _ => {}
+        if let Answer::Subtype(st) = answer {
+            return self.edit_subtype("Decide", item_key, Some(st));
         }
         let k = item_key.to_string();
         self.edit("Decide", move |p| match answer {
-            Answer::Subtype(_) | Answer::Format(..) => {}
+            Answer::Subtype(_) => {}
             Answer::Alpha(a) => p.set_file_value(&k, "alpha.policy", &json!(a)),
             Answer::Green(g) => p.set_file_value(&k, "channels.green_convention", &json!(g)),
             Answer::Acknowledge(c) => {

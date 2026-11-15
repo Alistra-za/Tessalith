@@ -36,34 +36,33 @@ fn a_clean_project_exports_without_review() {
     assert!(m.export.summary.is_some());
 }
 
-/// A texture the plan gave an error (here BC6H outside the cs mode) is never written, so the button's count leaves it
-/// out: the count is the number of DDS files the export writes.
+/// A texture the plan gave an error (here a cube whose six faces differ in size) is never written, so the button's
+/// count leaves it out: the count is the number of DDS files the export writes. (A format the type does not allow
+/// is no such error in the GUI: Note JG3 resets it.)
 #[test]
 fn a_texture_that_will_fail_is_not_in_the_export_count() {
     use sdc_gui::model::items::ItemStatus;
     let d = tempfile::tempdir().unwrap();
     let c = d.path().join("textures/clutter");
     std::fs::create_dir_all(&c).unwrap();
-    let grad = |x: u32, y: u32| image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]);
-    image::ImageBuffer::from_fn(64, 64, grad)
-        .save(c.join("barrel.png"))
-        .unwrap();
+    for f in ["px", "nx", "py", "ny", "pz", "nz"] {
+        let n = if f == "pz" { 32 } else { 16 };
+        image::RgbImage::from_pixel(n, n, image::Rgb([5, 6, 7]))
+            .save(c.join(format!("chrome_e_{f}.png")))
+            .unwrap();
+    }
     image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
         .save(c.join("barrel_n.png"))
         .unwrap();
-    std::fs::write(
-        d.path().join("textures/sdc.toml"),
-        "[files.\"clutter/barrel.png\"]\nformat = \"bc6h_uf16\"\n",
-    )
-    .unwrap();
     let export = d.path().join("export");
     let mut m = opened_as_the_app(d.path().join("textures"), export.clone());
-    let barrel = m.item("clutter/barrel.png").expect("the barrel");
-    assert!(
-        matches!(barrel.status, ItemStatus::Error(_)),
-        "{:?}",
-        barrel.status
-    );
+    let cube = m
+        .items
+        .iter()
+        .find(|i| matches!(i.status, ItemStatus::Error(_)))
+        .expect("the broken cube is an error item");
+    // It has a job, so only its status keeps it out of the count.
+    assert!(cube.job.is_some(), "{}", cube.key);
     assert_eq!(m.undecided(), 0, "only the error is in the way");
     let counted = m.export_files();
     let button = m.header_export_text();

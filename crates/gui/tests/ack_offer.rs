@@ -1,14 +1,16 @@
 //! Note JF3: Acknowledge is offered only for a blocking code the engine lets `allow` clear. `FMT-CS-SKIN-LOADER` and a
 //! `CFG-UNAVAILABLE` without a fallback sub-type stay blocked whatever `allow` holds (`engine::policy::resolve`), so
-//! their question offers the change that ends the block: **Use BC7**, or the type picker.
+//! their question never offers it. A type the mode does not have offers the type picker; a skin map in a format
+//! Community Shaders cannot load never asks, because Note JG3 resets that format when the plan settles.
 mod support;
 use eframe::egui;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use engine::codes::Code;
 use engine::config::{Format, Subtype, Target};
+use engine::policy::cs_skin_loader_ok;
 use image::{ImageBuffer, Rgb};
-use sdc_gui::model::items::{bc7_for, Decision, ItemStatus};
+use sdc_gui::model::items::{Decision, ItemStatus};
 use sdc_gui::model::{Answer, AppModel};
 use std::path::Path;
 use std::time::Duration;
@@ -70,47 +72,32 @@ fn problems_tab(mut m: AppModel) -> Harness<'static, AppModel> {
     h
 }
 
-fn settle(h: &mut Harness<'static, AppModel>) {
-    h.run();
-    idle(h.state_mut());
-    h.run();
-}
-
-/// The engine never lets `allow` clear FMT-CS-SKIN-LOADER (the file would load as nothing in CS): the question
-/// offers BC7, not Acknowledge, and BC7 ends it.
+/// The engine never lets `allow` clear FMT-CS-SKIN-LOADER (the file would load as nothing in CS). The GUI never
+/// leaves it as a question: a format the type does not allow is reset when the plan settles (Note JG3), and the
+/// format it lands on is one CS loads. So there is nothing to acknowledge and no row.
 #[test]
-fn a_skin_map_cs_cannot_load_offers_bc7_not_acknowledge() {
+fn a_skin_map_in_a_format_cs_cannot_load_is_reset_and_never_asks() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = one_file(d.path(), SKIN, SKIN_TOML, Target::Cs);
-    blocked_by(&m, SKIN, Code::FmtCsSkinLoader);
-    assert_eq!(
-        decisions(&m, SKIN),
-        [Decision::Change(Code::FmtCsSkinLoader)]
-    );
-    // What Acknowledge wrote: the question stays, which is why it is not offered.
-    m.decide(SKIN, Answer::Acknowledge(Code::FmtCsSkinLoader));
-    idle(&mut m);
-    blocked_by(&m, SKIN, Code::FmtCsSkinLoader);
-    let (f, tag) = bc7_for(m.item(SKIN).unwrap().job.as_ref().unwrap()).expect("BC7 is offered");
-    assert_eq!(f, Format::Bc7);
-    m.decide(SKIN, Answer::Format(f, tag));
-    idle(&mut m);
+    let m = one_file(d.path(), SKIN, SKIN_TOML, Target::Cs);
     let item = m.item(SKIN).unwrap();
     assert_eq!(item.status, ItemStatus::Ready, "{:?}", item.warnings);
-    assert_eq!(item.job.as_ref().unwrap().profile.format, Format::Bc7);
-}
-
-/// The same on screen: the Problems row has **Use BC7** and no Acknowledge, and the click ends the question.
-#[test]
-fn the_problems_row_of_a_skin_map_cs_cannot_load_has_use_bc7() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = problems_tab(one_file(d.path(), SKIN, SKIN_TOML, Target::Cs));
-    assert_eq!(h.query_all_by_label("Acknowledge").count(), 0);
-    h.get_by_label("Use BC7").click();
-    settle(&mut h);
-    let item = h.state().item(SKIN).unwrap();
-    assert_eq!(item.status, ItemStatus::Ready, "{:?}", item.warnings);
-    assert!(h.query_by_label("Use BC7").is_none());
+    assert!(decisions(&m, SKIN).is_empty());
+    assert!(
+        !item
+            .warnings
+            .iter()
+            .any(|w| w.code == Code::FmtCsSkinLoader),
+        "{:?}",
+        item.warnings
+    );
+    let job = item.job.as_ref().unwrap();
+    assert_eq!(job.profile.subtype, Subtype::SkinRfaos);
+    assert_ne!(job.profile.format, Format::Rgb8);
+    assert!(
+        cs_skin_loader_ok(job.profile.subtype, job.profile.format),
+        "{:?}",
+        job.profile.format
+    );
 }
 
 /// A sub-type with no fallback under the mode stays blocked with `allow` too: the question offers the type picker,
@@ -153,34 +140,20 @@ fn the_problems_row_of_an_unavailable_type_has_set_type() {
     );
 }
 
-/// **Use BC7** takes its pair from `allowed_encodings` only (`bc7_for`). Every skin map the code is raised for has
-/// BC7 there, so the button is never missing; a grey map has not, so the button could not write BC7 on one.
+/// Why the reset covers the code on every skin map it is raised for: each pair the GUI's format list holds for one
+/// is a pair CS loads, so the reset can never land on a format that raises the code again.
 #[test]
-fn bc7_is_allowed_on_every_skin_map_the_code_covers_and_never_on_a_grey_map() {
-    use engine::policy::{allowed_encodings, cs_skin_loader_ok};
+fn every_format_the_gui_allows_on_a_skin_map_is_one_cs_loads() {
     for st in [Subtype::SkinRfaos, Subtype::SkinWet, Subtype::SkinDetail] {
         assert!(
             !cs_skin_loader_ok(st, Format::Rgb8),
             "{st:?}: the code is raised"
         );
-        assert!(cs_skin_loader_ok(st, Format::Bc7), "{st:?}: BC7 ends it");
+        let list = sdc_gui::model::format_rule::allowed(st, Target::Cs);
+        assert!(!list.is_empty(), "{st:?}");
         assert!(
-            allowed_encodings(st, Target::Cs)
-                .iter()
-                .any(|(f, _)| *f == Format::Bc7),
-            "{st:?}: BC7 is offered"
-        );
-    }
-    for target in [Target::Cs, Target::Vanilla] {
-        assert!(
-            cs_skin_loader_ok(Subtype::Gray, Format::Rgb8),
-            "never raised on a grey map"
-        );
-        assert!(
-            allowed_encodings(Subtype::Gray, target)
-                .iter()
-                .all(|(f, _)| matches!(f, Format::Bc4 | Format::R8)),
-            "{target:?}: a grey map is BC4 or R8"
+            list.iter().all(|(f, _)| cs_skin_loader_ok(st, *f)),
+            "{st:?}: {list:?}"
         );
     }
 }
