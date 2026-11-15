@@ -13,6 +13,8 @@
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
 - **Assign…** on an Advanced skin set's empty **Skin wet** or **Skin detail** row now works. It lists that kind of file from the set's folder; a `_wet` or `_detail_n` file still waiting for a type is typed when you pick it. **From another set** borrows another set's map. Before, the menu held only the pin, and dragging the tile onto the card was the only way in.
 
+- Choosing **Advanced Skin** for a set that opened as PBR now makes it an Advanced skin set: the albedo becomes `skin_albedo`, a `_f` is packed into the `_rfaos` as the fuzz mask, and the export writes a `.csskin.json` and no PGPatcher JSON entry. Before, the types Tessalith had recorded on its own kept the set half PBR. A type you picked yourself stays.
+
 ## 3.0.0
 
 - Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own. The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.

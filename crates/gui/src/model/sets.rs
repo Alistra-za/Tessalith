@@ -3051,7 +3051,8 @@ impl AppModel {
     /// Note FC1 R5: set `set`'s members whose recorded sub-type is untouched under the shader being left and whose
     /// pick under `shader` differs (`None`, Auto: the pick without a shader; the plan re-applies an automatic one);
     /// a locked slot's member too, as the engine's shader re-type ignored locks before FC1 (the lock guards its
-    /// encoding). Each with the value to write (`None` under Auto: cleared).
+    /// encoding). Each with the value to write (`None` under Auto, or an untouched `pbr_fuzz` under Advanced Skin,
+    /// Note JE2: cleared).
     fn untouched_for_shader(
         &self,
         set: &str,
@@ -3075,10 +3076,23 @@ impl AppModel {
                 .as_ref()
                 .and_then(|p| p.file_value(k, "subtype"))
         };
+        // Note DW1: a pinned diffuse keeps the set from turning skin, so its `_f` stays `pbr_fuzz`.
+        let pinned = match v.slots.get(&SlotKind::Diffuse) {
+            Some(SlotFill::Own { item }) => locked_items(self).contains_key(item),
+            _ => false,
+        };
+        let skin = shader == Some(Shader::AdvancedSkin) && self.target == Target::Cs && !pinned;
         v.members
             .iter()
             .filter(|k| self.untouched_subtype(k, now))
             .filter_map(|k| {
+                // Note JE2: under Advanced Skin an untouched `pbr_fuzz` is the skin fuzz mask, which packs into the
+                // `_rfaos` G channel only while no sub-type is written (Note DR2): clear it. shortcut: a set with a
+                // `_fuzz`/`_sheen` map keeps its `_f` as `pbr_fuzz` (DR7), so the next plan records it again in a
+                // step of its own; check the set's raw maps here if that shows up.
+                if skin && held(k) == Some(serde_json::json!(Subtype::PbrFuzz)) {
+                    return Some((k.clone(), None));
+                }
                 let new = self.auto_pick(k, shader).map(|st| serde_json::json!(st));
                 (new.is_some() && new != held(k))
                     .then(|| (k.clone(), new.filter(|_| shader.is_some())))
@@ -3087,8 +3101,8 @@ impl AppModel {
     }
 
     /// Note DU6-DU9: what choosing `shader` for set `set` does to its own diffuse: `(item, its own [files] sub-type
-    /// before, true)` to make it `skin_albedo` (Advanced Skin, on cs, a free diffuse whose sub-type is inferred or a
-    /// plain `diffuse`), or `(item, the recorded sub-type, false)` to revert one Tessalith made `skin_albedo` and the
+    /// before, true)` to make it `skin_albedo` (Advanced Skin, on cs, a free diffuse whose sub-type is inferred, a
+    /// plain `diffuse` or an untouched recorded one), or `(item, the recorded sub-type, false)` to revert one Tessalith made `skin_albedo` and the
     /// user has not changed since. `None`: the shader alone.
     fn skin_follow(&self, set: &str, shader: Option<Shader>) -> Option<(String, String, bool)> {
         let views = views(self);
@@ -3110,7 +3124,10 @@ impl AppModel {
             let job = self.item(item)?.job.as_ref()?;
             let inferred = job.provenance.get("subtype") == Some(&Provenance::Suggestion);
             let plain = job.profile.subtype == Subtype::Diffuse;
-            if job.profile.subtype == Subtype::SkinAlbedo || !(inferred || plain) {
+            // Note FC1 R5: a sub-type the plan recorded on its own (`pbr_albedo`) and nobody changed counts as
+            // inferred; `was` keeps it, so leaving Advanced Skin writes it back (DU7).
+            let untouched = self.untouched_subtype(item, v.shader.as_ref().map(|p| p.shader));
+            if job.profile.subtype == Subtype::SkinAlbedo || !(inferred || plain || untouched) {
                 return None;
             }
             let was = own.as_ref().and_then(|v| v.as_str()).unwrap_or("");
