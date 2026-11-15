@@ -74,7 +74,7 @@ Every vendored file is listed with its SHA-256 hash in `crates/encoders-sys/vend
 
 #### Which ISPC path tests run on
 
-The objects hold five ISPC targets: SSE2, SSE4, AVX, AVX2 and AVX-512 (`avx512skx-x16`). ISPC's dispatcher picks the highest one the CPU has, and BC7 and BC6H bytes differ between the AVX-512 path, the AVX2 path and the older paths.
+The objects hold three ISPC targets: SSE2, AVX2 and AVX-512 (`avx512skx-x16`). ISPC's dispatcher picks the highest one the CPU has; a CPU without AVX2 runs SSE2. BC7 and BC6H bytes differ between the AVX-512 path, the AVX2 path and the SSE2 path.
 
 - Test builds encode on the AVX2 path at most, so tests and pinned hashes give the same result on every machine. `encoders-sys`'s `test-hooks` feature sets this cap, and a plain `cargo build` never turns it on. `cargo build` with `--tests`, `--examples` or `--all-targets` (and `cargo test --release`) does, and leaves a capped `sdc.exe` in the release folder that `tools\package-release.ps1 -NoBuild` would ship. Two CLI tests deliberately spawn a lifted `sdc convert`, so on an AVX-512 machine a default `cargo test` does encode that fixture on the AVX-512 path.
 - Set `SDC_TEST_AVX512=1` to lift the cap. Only then are the AVX-512 pins (`level_identity` and `bc6h` in `crates/encoders-sys/tests`) checked, and only on a CPU with AVX-512. `tools\gate.ps1` does this in its `avx512` step.
@@ -102,7 +102,7 @@ Use this script only to check the vendored objects or to change the ISPC sources
 | `-Update` | off | Copy the rebuilt objects and headers into `vendor\ispc-objs`. |
 | `-Bc7eOnly` | off | With `-Update`, replace only the bc7e objects. |
 
-The script compiles for x86-64 Windows with the five targets, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH`, `DIFF` or `SKIP` for each object and exits with 0 when every object reports `MATCH` or `SKIP`.
+The script compiles for x86-64 Windows with the three targets, from the repository root with repository-relative paths so the output is reproducible. It reports `MATCH`, `DIFF` or `SKIP` for each object and exits with 0 when every object reports `MATCH` or `SKIP`. A vendored object the build does not produce is reported as `EXTRA` and fails the check; `-Update` never deletes one. The ISPC Texture Compressor kernel is compiled with `-DSDC_BC6H_ONLY` (ISPC TC patch 0003, BC6H only), and `build.rs` sets the same symbol for `ispc_texcomp.cpp`.
 
 #### tools\hash-vendor.ps1
 

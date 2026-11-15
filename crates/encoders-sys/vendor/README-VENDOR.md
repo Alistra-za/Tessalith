@@ -81,7 +81,9 @@ or edited. Without the define the source compiles as upstream plus patch 0001. `
 were checked equal on every path (SSE2, AVX2, AVX-512): the five-level and peak-mode pins of `tests/bc6h.rs` on one
 synthetic 64x64 HDR image, and 18 Poly Haven HDR files (1024x512) at all six levels. Object sizes before and after
 (KB of 1,024 bytes): `kernel.obj` 4.9 to 2.0, `kernel_sse2.obj` 349.8 to 156.5, `kernel_avx2.obj` 326.8 to 145.1,
-`kernel_avx512skx.obj` 241.3 to 93.2.
+`kernel_avx512skx.obj` 241.3 to 93.2. The file's own `clamp` must stay unguarded (guarded, ISPC's standard-library
+`clamp` takes its place): only the regeneration check (10 MATCH) and the real-file hashes catch that, not the synthetic
+pins (Note JB5).
 
 Patch "rgbcx BC4 round-to-nearest" (M6 Track D, 2026-10-12) edits `bc7enc_rdo/rgbcx.h` in place, marked
 `sdc patch (M6 Track D): round to nearest to match hardware/bcdec`. `bc4_block::get_block_values6/8`, the BC4 palette

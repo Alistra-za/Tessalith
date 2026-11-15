@@ -76,7 +76,7 @@ ISPC 1.32.0's release notes list a fix for an AVX-512 miscompile in 1.31.0 (ISPC
 
 ### Object files
 
-ISPC 1.32.0 against the vendored files (ISPC 1.31.0), the four targets that were vendored before.
+ISPC 1.32.0 against the vendored files (ISPC 1.31.0), the four targets that were vendored before. The SSE4 and AVX rows describe the objects of that time; Note JB dropped them.
 
 | File under `vendor/ispc-objs/` | ISPC 1.31.0 bytes | ISPC 1.32.0 bytes | Same file? |
 |---|---:|---:|---|
@@ -161,6 +161,24 @@ The branch that added the path ran `ispc_speed` (below) on the same 16 PNGs afte
 
 - Every printed hash equalled the [Bytes and quality](#bytes-and-quality) table: the AVX2 path gave the AVX2 hash and the dispatched path the AVX-512 hash.
 - `level_identity`'s AVX-512 row differs from its AVX2 row in all 32 cells (8 levels × 4 parameter combinations).
+
+## Without AVX2: the SSE2 path
+
+Note JB dropped the SSE4 and AVX objects, so a CPU without AVX2 now runs ISPC's SSE2 path. This section measures what that costs, on the same Ryzen 7 9800X3D with forced paths, on 2026-11-14. No old CPU was measured.
+
+- **Method.** The same 16 PNGs and calls as [Method](#method), one thread, a quiet machine, median of three rounds: `ispc_speed --targets avx,sse2,sse4,avx2 --rounds 3`, run before the objects were dropped.
+- **Result.** SSE2 against AVX takes 1.50 to 1.76 times as long, and against SSE4 1.09 to 1.29 times (the larger of each format's two lines is the figure in the wiki and the changelog).
+
+| Configuration | AVX µs/block | SSE4 µs/block | SSE2 µs/block | SSE2 / AVX | SSE2 / SSE4 | SSE2 hash |
+|---|---:|---:|---:|---:|---:|---|
+| BC7 veryslow, linear | 25.816 | 34.742 | 44.664 | 1.730 | 1.286 | `e6bb93527f4caee8` |
+| BC7 fast, linear | 2.419 | 3.568 | 4.251 | 1.758 | 1.191 | `3a64fd256737a629` |
+| BC6H veryslow + peak | 43.350 | 60.964 | 65.210 | 1.504 | 1.070 | `496ea7470785432c` |
+| BC6H fast | 1.592 | 2.197 | 2.393 | 1.503 | 1.089 | `b3a8f77bd129ac40` |
+
+- **Bytes.** The SSE2, SSE4 and AVX paths gave the same hash in all four configurations, so a CPU that ran SSE4 or AVX writes the same bytes on SSE2. The AVX2 path gives other hashes, as in [Bytes and quality](#bytes-and-quality).
+- **Not measured.** An old CPU. On a Zen 5 the forced SSE2, SSE4 and AVX paths run on cores that also have AVX2, so the ratios may differ on a CPU that has only SSE.
+- **Repeat it.** Run `cargo run --offline --release -p encoders-sys --example ispc_speed -- files.txt --targets sse2,avx2 --rounds 3` with the 16 PNGs of [Method](#method) in `files.txt`. The SSE2 hashes above must come out exactly. The SSE4 and AVX columns need a build from before Note JB, which still has those objects.
 
 ## Not measured
 
