@@ -1586,7 +1586,7 @@ impl AppModel {
         self.planning.is_some() || self.votes_pending.is_some()
     }
 
-    /// `busy()` with `plan_wait` for the plan: what the Advanced fields wait on. `busy()` itself stays true until the
+    /// `busy()` with `plan_wait` for the plan: what the texture panel's fields wait on. `busy()` itself stays true until the
     /// full plan lands, as the frame loop and `wait_idle` need.
     pub fn edit_busy(&self) -> bool {
         self.plan_wait() || self.non_plan_busy()

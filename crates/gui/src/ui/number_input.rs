@@ -1,56 +1,7 @@
-//! The right-hand Advanced drawer (M3a spec §2.5), empty now: Note JI1 moved the live-encode switch, the checks and the
-//! cache limit to the Settings tab, and Note JI6 the `[files]` entries that match nothing to a Problems row.
-use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
-use crate::model::AppModel;
+//! Number widgets over a model value that is written once per gesture (L29, Note FN2), shared by the set editor's
+//! fill value, the cube section, Review, and the Settings and Also export tabs. Note JI7: they outlived the Advanced
+//! drawer, whose module they lived in.
 use eframe::egui;
-
-/// The drawer's narrowest width.
-const ADV_MIN: f32 = 260.0;
-
-/// The drawer keeps no state of its own now (Note JI3); the struct goes with the drawer in Task 9.
-#[derive(Debug, Default)]
-pub struct AdvancedState {}
-
-/// The drawer: a 24 px "Advanced" strip while closed, the panel while `settings.advanced_open`.
-pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, _state: &mut AdvancedState) {
-    if !model.settings.advanced_open {
-        egui::Panel::right("advanced-strip")
-            .resizable(false)
-            .exact_size(STRIP_WIDTH)
-            .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
-            .show(ui, |ui| {
-                if strip_button(ui, "Advanced")
-                    .on_hover_text("Open the Advanced drawer")
-                    .clicked()
-                {
-                    model.settings.advanced_open = true;
-                    model.save_settings();
-                }
-            });
-        return;
-    }
-    let mut close = false;
-    // Drawn before the columns: it leaves them their minimums and the centre its floor (K8, rule §2.3).
-    let max = ui.available_width() - TEXTURES_MIN - SETS_MIN - super::centre_floor(ui.ctx(), model);
-    let panel = egui::Panel::right("advanced")
-        .default_size(380.0)
-        .size_range(ADV_MIN..=max.max(ADV_MIN));
-    // The user's width survives the cap (a narrow window, an expanded preview) and is what gui.toml saves.
-    super::chosen_width_panel(ui, "advanced", 380.0, panel, |ui| {
-        ui.horizontal(|ui| {
-            ui.heading("Advanced");
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                close = ui.button("Close").clicked();
-            });
-        });
-        // Note JI6: its last section, the unmatched `[files]` entries, is a Problems row now (Note JI7 removes the
-        // drawer).
-    });
-    if close {
-        model.settings.advanced_open = false;
-        model.save_settings();
-    }
-}
 
 /// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed
 /// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one

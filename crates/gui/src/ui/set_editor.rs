@@ -1174,7 +1174,7 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                     source_picker(ui, model, key, role, None, acts);
                     let mut v = shown;
                     let name = format!("{} fill", role_label(role));
-                    if super::advanced::settled_drag(
+                    if super::number_input::settled_drag(
                         ui,
                         &mut v,
                         1.0,

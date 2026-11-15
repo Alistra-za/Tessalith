@@ -215,7 +215,7 @@ fn output_items(
 }
 
 /// The helper rows' control width: the texture rows' one, less the Reset (the widest button beside a control) where
-/// the row would not fit, so the centre is not widened under the Advanced drawer (Note HI1, rule 3.1).
+/// the row would not fit, so the centre is not widened past the window (Note HI1, rule 3.1).
 fn control_w(ui: &egui::Ui) -> f32 {
     let reset = egui::WidgetText::from("Reset")
         .into_galley(

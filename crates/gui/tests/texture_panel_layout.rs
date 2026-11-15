@@ -189,40 +189,32 @@ fn a_long_value_does_not_widen_the_column() {
     }
 }
 
-/// With the Advanced drawer open too: the centre is then narrower than two full columns, and a row as wide as it
-/// widened the centre under the drawer.
+/// At 1100 px the centre is narrower than two full columns: every row stays inside it, a row as wide as it does not
+/// widen it past the window's edge (less the harness' 8 px margin), and the combos keep one width.
 #[test]
 fn rows_stay_inside_the_column_at_1100() {
-    for drawer in [false, true] {
-        let d = tempfile::tempdir().unwrap();
-        let mut m = model(d.path());
-        m.settings.advanced_open = drawer;
-        let h = harness(m, 1100.0);
-        let c = centre(&h);
-        let edge = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-            .filter(|_| drawer)
-            .map_or(c.max.x, |p| p.outer_rect.min.x);
+    let d = tempfile::tempdir().unwrap();
+    let h = harness(model(d.path()), 1100.0);
+    let c = centre(&h);
+    let edge = h.ctx.content_rect().right() - 8.0;
+    assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
+    for (n, r) in controls(&h, c) {
         assert!(
-            c.max.x <= edge + 0.5,
-            "the centre {c:?} runs under the drawer at {edge}"
+            r.max.x <= c.max.x,
+            "{n} ends at {}, the centre at {}",
+            r.max.x,
+            c.max.x
         );
-        for (n, r) in controls(&h, c) {
-            assert!(
-                r.max.x <= edge,
-                "drawer {drawer}: {n} ends at {}, the centre at {edge}",
-                r.max.x
-            );
-        }
-        // Scaled down or not, the column keeps one width.
-        let all = combos(&h, c);
-        for (n, r) in &all {
-            assert!(
-                (r.width() - all[0].1.width()).abs() <= 1.0,
-                "drawer {drawer}: {n} is {} wide, Sub-type {}",
-                r.width(),
-                all[0].1.width()
-            );
-        }
+    }
+    // Scaled down or not, the column keeps one width.
+    let all = combos(&h, c);
+    for (n, r) in &all {
+        assert!(
+            (r.width() - all[0].1.width()).abs() <= 1.0,
+            "{n} is {} wide, Sub-type {}",
+            r.width(),
+            all[0].1.width()
+        );
     }
 }
 
@@ -324,12 +316,11 @@ fn render_helper_tick_shots() {
 }
 
 /// Note JI3: Levels in Mipmaps, a Size group (Resize, Relative to, Size floor) after it, and DDS header in
-/// Compression, each drawn once and in the centre; with the drawer open, BC7 weighting is one row, not two.
+/// Compression, each drawn once and in the centre; BC7 weighting is one row.
 #[test]
 fn the_panel_shows_levels_a_size_group_and_the_dds_header() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = leaf(d.path());
-    m.settings.advanced_open = true;
+    let m = leaf(d.path());
     // Tall enough that the last group is inside the centre (AccessKit rects are not clipped).
     let h = sized_harness(m, 1280.0, 1600.0);
     let c = centre(&h);
@@ -355,7 +346,7 @@ fn the_panel_shows_levels_a_size_group_and_the_dds_header() {
             .count();
         assert_eq!(n, 1, "{name} once in the centre");
     }
-    // The leaf is BC7. The drawer's rows name no combo, so count the row labels too.
+    // The leaf is BC7. Count the row labels too: a row whose combo is unnamed would hide from the combo count.
     assert_eq!(
         h.query_all(by().role(Role::ComboBox).label("BC7 weighting"))
             .count(),
@@ -409,23 +400,19 @@ fn relative_to_slot_8_stays_inside_the_centre() {
     }
 }
 
-/// The helper panel shares the columns: with the drawer open at 1100 px it stays inside the centre too.
+/// The helper panel shares the columns: at 1100 px it stays inside the centre, and the centre inside the window (less
+/// the harness' 8 px margin).
 #[test]
 fn helper_rows_stay_inside_at_1100() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    m.settings.advanced_open = true;
     m.select_item("landscape/rock01_roughness.png");
     let h = harness(m, 1100.0);
-    h.get_by_role_and_label(Role::ComboBox, "Helper role");
     let c = centre(&h);
-    let drawer = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-        .expect("the drawer is drawn")
-        .outer_rect;
-    assert!(
-        c.max.x <= drawer.min.x + 0.5,
-        "the centre {c:?} runs under the drawer {drawer:?}"
-    );
+    let edge = h.ctx.content_rect().right() - 8.0;
+    assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
+    let role = control(&h, Role::ComboBox, "Helper role", c);
+    assert!(role.max.x <= c.max.x, "Helper role {role:?} past {c:?}");
 }
 
 const LEAF: &str = "landscape/leaf.png";
@@ -1107,22 +1094,14 @@ fn a_no_set_image_has_the_helper_tick() {
     control(&h, Role::ComboBox, "Helper role", c);
 }
 
-/// Note HI1, HI4: at 1100 px with the Advanced drawer open the Helper tick stays in the control column, inside the
-/// centre.
+/// Note HI1, HI4: at 1100 px the Helper tick stays in the control column, inside the centre.
 #[test]
-fn the_helper_tick_at_1100_with_the_drawer_open() {
+fn the_helper_tick_at_1100_stays_in_the_control_column() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = model(d.path());
-    m.settings.advanced_open = true;
-    let h = harness(m, 1100.0);
+    let h = harness(model(d.path()), 1100.0);
     let c = centre(&h);
-    let drawer = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("advanced"))
-        .expect("the drawer is drawn")
-        .outer_rect;
-    assert!(
-        c.max.x <= drawer.min.x + 0.5,
-        "the centre {c:?} runs under the drawer {drawer:?}"
-    );
+    let edge = h.ctx.content_rect().right() - 8.0;
+    assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
     let sub = control(&h, Role::ComboBox, "Sub-type", c);
     let tick = control(&h, Role::CheckBox, "Helper", c);
     assert!(

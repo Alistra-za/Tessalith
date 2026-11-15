@@ -13,8 +13,6 @@
 
 #[path = "../ack_offer.rs"]
 mod ack_offer;
-#[path = "../advanced.rs"]
-mod advanced;
 #[path = "../alpha_prop.rs"]
 mod alpha_prop;
 #[path = "../also_export.rs"]

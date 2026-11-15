@@ -27,7 +27,6 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("main_window", main_window),
     ("start_screen", start_screen),
     ("export_to_menu", export_to_menu),
-    ("advanced_drawer", advanced_drawer),
     ("problems_tab", problems_tab),
     ("tile_menu", tile_menu),
     ("texture_panel", texture_panel),
@@ -267,15 +266,6 @@ fn export_to_menu(dir: &Path) -> Frame {
     let r = reveal(&mut h, |h| button_starting(h, "Export to").click());
     let b = button_starting(&h, "Export to").rect();
     shot(&mut h, r.union(b))
-}
-
-/// GUI-Texture-Panel: the drawer open beside a selected texture.
-fn advanced_drawer(dir: &Path) -> Frame {
-    let mut h = opened_with(dir, |m| m.select_item("architecture/stone/stonewall.png"));
-    let r = reveal(&mut h, |h| {
-        h.state_mut().model.settings.advanced_open = true;
-    });
-    shot(&mut h, r)
 }
 
 /// GUI-Problems: the Problems tab with the demo's rows.
@@ -619,7 +609,7 @@ fn main_window(dir: &Path) -> Frame {
         // The first slot chip of the first set card (a "D" button; the Textures column has none).
         (10, tl(rect_of(&h, "D")) + egui::vec2(-4.0, 0.0)),
         (11, tl(rect_of(&h, "Type"))),
-        (12, tl(rect_of(&h, "Advanced"))),
+        (12, tl(rect_of(&h, "Settings…"))),
         (13, tl(rect_starting(&h, Role::Button, "Problems"))),
     ];
     let mut img = h.render().expect("render");

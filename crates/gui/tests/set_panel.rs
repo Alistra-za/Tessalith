@@ -1,8 +1,7 @@
 //! Layout v2 A3 / C6: every set editor has a Material (JSON set) or Set tab and an Also export tab (Note JI2), under
-//! the slot rows since Note FB2 (one column); the window-edge Advanced strip stays for a texture, the preview, a bulk
-//! selection, nothing selected and 3D.
+//! the slot rows since Note FB2 (one column); nothing is drawn at the window edge in any state (Note JI7).
 mod support;
-use eframe::egui::{self, accesskit::Role, containers::panel::PanelState, Id};
+use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
@@ -11,13 +10,6 @@ use sdc_gui::ui::State;
 use support::*;
 
 type H = Harness<'static, (AppModel, State)>;
-
-/// The window-edge drawer: its strip (a Button "Advanced", as the tab) or its open panel, by panel id.
-fn drawer_drawn(h: &H) -> bool {
-    ["advanced-strip", "advanced"]
-        .iter()
-        .any(|id| PanelState::load(&h.ctx, Id::new(*id)).is_some())
-}
 
 /// Reduced from set_preview_layout.rs `harness_with` (K19): `three_d` builds the enabled (IO-free) set preview.
 fn harness_with(m: AppModel, w: f32, h: f32, three_d: bool) -> H {
@@ -73,7 +65,7 @@ fn set_tabs(h: &H) -> bool {
 }
 
 /// Note JI2 (Review Focus 1): on a set that is not PBR the Also export tab says it reads PBR sets only, with no Skip
-/// tick, and still shows the project's ticks and recipe. The window-edge drawer stays away while a set is shown.
+/// tick, and still shows the project's ticks and recipe.
 #[test]
 fn a_vanilla_set_reads_pbr_only_and_keeps_the_project_block() {
     let d = tempfile::tempdir().unwrap();
@@ -97,7 +89,6 @@ fn a_vanilla_set_reads_pbr_only_and_keeps_the_project_block() {
     assert!(h.query_by_label("Skip vanilla/CM for this set").is_none());
     h.get_by_role_and_label(Role::CheckBox, "All sets: also export as Vanilla");
     h.get_by_role_and_label(Role::SpinButton, "Diffuse brightness");
-    assert!(!drawer_drawn(&h), "no strip at the window edge");
 }
 
 /// 2.0 debloat (Note GJ5): the set editor has no "Used by plugins" section.
@@ -181,33 +172,6 @@ fn the_slot_rows_scroll_with_the_material_groups() {
         (diffuse.min.y - now.min.y - dy).abs() < 1.0,
         "the rows moved with it ({diffuse:?} → {now:?}, {dy})"
     );
-}
-
-#[test]
-fn a_selected_texture_keeps_the_window_edge_advanced_strip() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.select_item("landscape/leaf.png");
-    let mut h = harness(m);
-    h.run();
-    assert!(drawer_drawn(&h), "the strip at the window edge");
-    assert!(!set_tabs(&h));
-}
-
-#[test]
-fn a_set_in_3d_keeps_the_window_edge_advanced_strip() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened_plain(d.path());
-    rock_selected(&mut m);
-    m.settings.set_view_3d = true;
-    let mut h = harness_with(m, 1400.0, 800.0, true);
-    // The 3D view never goes idle.
-    for _ in 0..6 {
-        h.run_steps(3);
-        let (m, s) = h.state_mut();
-        s.set3d.poll(&*m);
-    }
-    assert!(drawer_drawn(&h), "the strip at the window edge");
 }
 
 /// A group's title (K11: not the tab, which is a Button).
@@ -320,21 +284,42 @@ fn the_json_editor_button_stays_inside_a_narrow_centre() {
     assert!(b.max.x <= p.max.x, "button {b:?} inside the centre {p:?}");
 }
 
-/// `set_editor_shown` mirrors `centre`'s and `set_editor::draw`'s routing: in every centre state exactly one of the
-/// window-edge drawer and the set editor's tabs is drawn (3D: the drawer); with no folder (the start screen), neither. Each
-/// case is a fresh harness, so the persisted panel states are this case's own. The last field is (panel, drawer).
+/// Note JI7: the Advanced drawer is gone, so nothing is drawn at the window edge in any centre state: no "Advanced"
+/// label, and the centre reaches the window's right edge (less the harness' 8 px margin). `set_editor_shown` still
+/// mirrors `centre`'s and `set_editor::draw`'s routing: the set editor's tabs are drawn for a set in 2D only. Each case
+/// is a fresh harness, so the persisted panel states are this case's own. The last field is the set editor's tabs.
 #[test]
-fn drawer_and_panel_never_both_or_neither() {
+fn no_window_edge_strip_in_any_state() {
     type Setup = fn(&mut AppModel);
-    let cases: [(&str, Setup, bool, (bool, bool)); 8] = [
+    let cases: [(&str, Setup, bool, bool); 11] = [
+        // A11: the start screen.
         (
-            "expanded texture over a set",
+            "no folder",
+            |m| *m = AppModel::placeholder(Default::default()),
+            false,
+            false,
+        ),
+        (
+            "nothing",
+            |m| m.selection = sdc_gui::model::Selection::None,
+            false,
+            false,
+        ),
+        (
+            "a texture",
+            |m| m.select_item("landscape/leaf.png"),
+            false,
+            false,
+        ),
+        ("a set in 2D", rock_selected, false, true),
+        (
+            "a set in 3D",
             |m| {
                 rock_selected(m);
-                m.expanded = Some("landscape/rock01.png".into());
+                m.settings.set_view_3d = true;
             },
+            true,
             false,
-            (false, true),
         ),
         (
             "two sets",
@@ -345,49 +330,57 @@ fn drawer_and_panel_never_both_or_neither() {
                 assert!(m.in_bulk());
             },
             false,
-            (false, true),
-        ),
-        (
-            "nothing",
-            |m| m.selection = sdc_gui::model::Selection::None,
             false,
-            (false, true),
         ),
         (
-            "a texture",
-            |m| m.select_item("landscape/leaf.png"),
-            false,
-            (false, true),
-        ),
-        // A11: the start screen draws neither.
-        (
-            "no folder",
-            |m| *m = AppModel::placeholder(Default::default()),
-            false,
-            (false, false),
-        ),
-        ("a set in 2D", rock_selected, false, (true, false)),
-        (
-            "a set in 3D",
+            "expanded texture over a set",
             |m| {
                 rock_selected(m);
-                m.settings.set_view_3d = true;
+                m.expanded = Some("landscape/rock01.png".into());
             },
-            true,
-            (false, true),
+            false,
+            false,
         ),
         (
             "a stale set",
             |m| m.selection = sdc_gui::model::Selection::Set("landscape/gone".into()),
             false,
-            (false, true),
+            false,
+        ),
+        (
+            "the Presets tab",
+            |m| {
+                rock_selected(m);
+                m.open_presets();
+            },
+            false,
+            false,
+        ),
+        (
+            "the JSON editor tab",
+            |m| {
+                rock_selected(m);
+                m.open_json_editor();
+            },
+            false,
+            false,
+        ),
+        (
+            "the Settings tab",
+            |m| {
+                rock_selected(m);
+                m.open_settings_tab();
+            },
+            false,
+            false,
         ),
     ];
-    for (name, setup, three_d, (want_panel, want_drawer)) in cases {
+    let (w, margin) = (1400.0, 8.0);
+    for (name, setup, three_d, want_tabs) in cases {
         let d = tempfile::tempdir().unwrap();
         let mut m = pbr_opened_plain(d.path());
         setup(&mut m);
-        let mut h = harness_with(m, 1400.0, 900.0, three_d);
+        let mut h = harness_with(m, w, 900.0, three_d);
         if three_d {
             // The 3D view never goes idle.
             for _ in 0..6 {
@@ -398,23 +391,21 @@ fn drawer_and_panel_never_both_or_neither() {
         } else {
             h.run();
         }
-        let panel = set_tabs(&h);
-        assert_eq!(panel, want_panel, "{name}: the set panel");
-        assert_eq!(drawer_drawn(&h), want_drawer, "{name}: the drawer");
+        assert_eq!(set_tabs(&h), want_tabs, "{name}: the set editor's tabs");
+        assert!(
+            h.query_by_label("Advanced").is_none(),
+            "{name}: an Advanced strip or drawer"
+        );
+        let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+        assert!(
+            (c.max.x - (w - margin)).abs() < 0.5,
+            "{name}: the centre {c:?} ends at the window edge {}",
+            w - margin
+        );
+        if name == "a stale set" {
+            h.get_by_label("This set is no longer in the plan.");
+        }
     }
-}
-
-/// A selection whose set left the plan shows the editor's message, and Advanced stays reachable through the strip.
-#[test]
-fn a_set_no_longer_in_the_plan_keeps_the_window_edge_advanced_strip() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened_plain(d.path());
-    m.selection = sdc_gui::model::Selection::Set("landscape/gone".into());
-    let mut h = harness(m);
-    h.run();
-    h.get_by_label("This set is no longer in the plan.");
-    assert!(drawer_drawn(&h), "the strip at the window edge");
-    assert!(!set_tabs(&h));
 }
 
 /// I1 (final review): a group wider than its column (the Coat colour row) widens the scroll content, and egui unions

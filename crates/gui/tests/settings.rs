@@ -244,10 +244,10 @@ fn a_file_broken_while_running_is_kept_and_warned_about() {
     let p = d.path().join("sdc/gui.toml");
     let mut m = running(&p, GuiSettings::default());
     std::fs::write(&p, "live_encode = [broken").unwrap();
-    m.settings.advanced_open = true;
+    m.settings.live_encode = true;
     m.save_settings();
     assert_eq!(GuiSettings::load(&p), (m.settings.clone(), None));
-    assert!(GuiSettings::load(&p).0.advanced_open);
+    assert!(GuiSettings::load(&p).0.live_encode);
     assert_eq!(
         std::fs::read_to_string(p.with_extension("toml.bad")).unwrap(),
         "live_encode = [broken"
@@ -303,7 +303,7 @@ fn a_gui_toml_locked_at_launch_is_merged_by_the_first_save() {
     let d = tempfile::tempdir().unwrap();
     let p = d.path().join("sdc/gui.toml");
     GuiSettings {
-        advanced_open: true,
+        set_view_3d: true,
         ..GuiSettings::default()
     }
     .save(&p)
@@ -320,7 +320,7 @@ fn a_gui_toml_locked_at_launch_is_merged_by_the_first_save() {
     m.settings.live_encode = true;
     m.save_settings();
     let back = GuiSettings::load(&p).0;
-    assert!(back.advanced_open, "the file's value is kept");
+    assert!(back.set_view_3d, "the file's value is kept");
     assert!(back.live_encode, "the app's change is written");
 }
 
@@ -415,7 +415,7 @@ fn an_old_shaders_key_is_dropped_by_the_merging_save() {
     // A hand edit while the app runs: still carries the old key.
     std::fs::write(
         &p,
-        "live_encode = true\nadvanced_open = true\n[render3d.shaders]\nroot = 'C:\\CS\\Shaders'\nhash = 'ab12'\n",
+        "live_encode = true\nset_view_3d = true\n[render3d.shaders]\nroot = 'C:\\CS\\Shaders'\nhash = 'ab12'\n",
     )
     .unwrap();
     s.live_encode = false;
@@ -426,6 +426,30 @@ fn an_old_shaders_key_is_dropped_by_the_merging_save() {
         "{text}"
     );
     let back = GuiSettings::load(&p).0;
-    assert!(back.advanced_open, "the hand-edited field survives: {text}");
+    assert!(back.set_view_3d, "the hand-edited field survives: {text}");
     assert!(!back.live_encode, "the app's change is written: {text}");
+}
+
+/// Review Focus 2, spec 7.3 (Note JI7): a gui.toml from before the drawer went still loads, and its `advanced_open`
+/// and `[layout.widths] advanced` are dropped on the next save.
+#[test]
+fn old_advanced_keys_load_and_are_dropped_on_save() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("gui.toml");
+    std::fs::write(
+        &p,
+        "advanced_open = true\nlive_encode = true\n[layout.widths]\nadvanced = 420.0\ntextures = 300.0\n",
+    )
+    .unwrap();
+    let (s, err) = GuiSettings::load(&p);
+    assert!(err.is_none(), "{err:?}");
+    assert!(s.live_encode);
+    assert_eq!(s.layout.widths.get("textures"), Some(&300.0));
+    assert!(!s.layout.widths.contains_key("advanced"));
+    let mut m = sdc_gui::model::AppModel::placeholder(s);
+    m.settings_path = Some(p.clone());
+    m.save_settings();
+    let text = std::fs::read_to_string(&p).unwrap();
+    assert!(!text.contains("advanced"), "{text}");
+    assert!(text.contains("textures = 300"), "{text}");
 }

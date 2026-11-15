@@ -68,8 +68,8 @@ fn check(w: f32, collapsed: bool) {
         .filter_map(|i| outer(&h, i))
         .map(|r| r.max.x)
         .fold(0.0f32, f32::max);
-    // The Advanced drawer's strip is the only thing right of the centre.
-    let right = outer(&h, "advanced-strip").map_or(w, |r| r.min.x);
+    // Nothing is right of the centre (Note JI7) but the harness' 8 px margin.
+    let right = w - 8.0;
     assert!(
         right - left >= CENTRE_MIN - 0.5,
         "centre {} at {w}",

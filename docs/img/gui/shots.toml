@@ -36,12 +36,6 @@ scenario = "export_to_menu"
 used_by = ["GUI-Main-Window.md"]
 
 [[shot]]
-id = "advanced-drawer"
-page = "GUI-Texture-Panel"
-scenario = "advanced_drawer"
-used_by = ["GUI-Texture-Panel.md"]
-
-[[shot]]
 id = "problems-tab"
 page = "GUI-Problems"
 scenario = "problems_tab"

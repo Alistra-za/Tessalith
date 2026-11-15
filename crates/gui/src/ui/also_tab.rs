@@ -1,7 +1,7 @@
 //! The set editor's "Also export" tab (Note JI2): this set's Skip tick, then the project's "Also export as" ticks and
 //! the `[export.legacy]` recipe. Drawing only: every change is a model call, made once the tab is drawn.
-use super::advanced::held_value;
 use super::header::ALSO_ITEMS;
+use super::number_input::held_value;
 use crate::model::also::{self, EXPORT_RUNNING};
 use crate::model::sets::SetView;
 use crate::model::AppModel;

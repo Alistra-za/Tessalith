@@ -498,8 +498,8 @@ pub(super) fn combo_for(
         egui::RichText::new("— not set").weak()
     } else {
         match options.iter().find(|(v, _)| v == current) {
-            // Rule 3.5: "Slot 8 · Back-light / specular" held the Advanced drawer ~90 px past its edge, so the
-            // closed combo shows "Slot 8"; the list and the hover keep the slot's name.
+            // Rule 3.5: "Slot 8 · Back-light / specular" held its panel ~90 px past its edge, so the closed combo
+            // shows "Slot 8"; the list and the hover keep the slot's name.
             Some((_, l)) if field == "resize_relative_to" => {
                 egui::RichText::new(l.split(" · ").next().unwrap_or(l))
             }
@@ -756,10 +756,9 @@ pub struct Ctx<'a> {
     pub job: &'a ResolvedJob,
     pub target: Target,
     pub busy: bool,
+    /// Note HI1, HI17: off (the texture panel in the centre and in the 3D settings window), the rows stand in a
+    /// `LABEL_W` label column and a `CONTROL_W` control column; on in the strip.
     pub compact: bool,
-    /// Note HI1, HI17: the rows stand in a `LABEL_W` label column and a `CONTROL_W` control column (the texture panel
-    /// in the centre and in the 3D settings window); off in the Advanced drawer and the strip.
-    pub aligned: bool,
     /// Note HI14: the alpha question is open, so `job` holds the proposal (display only) and the Alpha row says so.
     pub alpha_asked: bool,
     /// Why the rows' edits are off, shown on their disabled hover: `sdc.toml` is read-only, or (the texture panel,
@@ -846,8 +845,8 @@ pub(super) fn help_mark(ui: &mut egui::Ui, name: &str, text: &str) -> egui::Resp
 }
 
 /// The label and control columns' widths: `LABEL_W` and `CONTROL_W`, both scaled down alike where a row would run
-/// past the visible edge (the centre at 1100 px with the Advanced drawer open; rules 3.1, 3.8). The rest of the row
-/// keeps three gaps, ↺, an elided hint and a margin (rule 3.7): a row as wide as the centre widens it, under the drawer.
+/// past the visible edge (a narrow centre; rules 3.1, 3.8). The rest of the row keeps three gaps, ↺, an elided hint
+/// and a margin (rule 3.7): a row as wide as the centre widens it past the window.
 /// Measured from the grid's left edge, so every row of a grid gets the same two widths.
 pub(super) fn column_widths(ui: &egui::Ui) -> (f32, f32) {
     column_widths_beside(ui, 0.0)
@@ -892,9 +891,9 @@ pub(super) fn control_slot<R>(
     .inner
 }
 
-/// A row's label and control cells (Note HI1, HI3). Aligned, the control is `CONTROL_W` wide; in the strip,
-/// `COMPACT_CONTROL_W`; in the Advanced drawer it sizes to its content, as before. A control with no name of its own
-/// (a combo's text is its value) is named after the row's label.
+/// A row's label and control cells (Note HI1, HI3). The control is `CONTROL_W` wide; in the strip,
+/// `COMPACT_CONTROL_W`. A control with no name of its own (a combo's text is its value) is named after the row's
+/// label.
 fn control_cell(
     ui: &mut egui::Ui,
     cx: &Ctx,
@@ -902,31 +901,26 @@ fn control_cell(
     help: Option<&str>,
     add: impl FnOnce(&mut egui::Ui) -> (Option<Value>, egui::Response),
 ) -> (Option<Value>, egui::Response) {
-    let l = if !cx.compact && cx.aligned {
+    let l = if !cx.compact {
         field_label(ui, true, label, help)
     } else {
-        let l = if cx.compact {
-            // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut
-            // short with the whole text on hover, so a 140 px control fits the 280 px strip.
-            let s = ui.spacing();
-            let room = ui.clip_rect().right() - ui.cursor().min.x;
-            let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
-                .max(s.interact_size.x);
-            label_slot(ui, w, label, None)
-        } else {
-            ui.label(label)
-        };
-        // Note HI18: the strip and the Advanced drawer are narrow, so no `?` (it cut the strip's labels and pushed the
-        // drawer's combos past its edge at 280 px); the label carries the help.
+        // The strip's labels take the room the control and ↺ leave (bounded by the visible edge, rule 3.8), cut
+        // short with the whole text on hover, so a 140 px control fits the 280 px strip.
+        let s = ui.spacing();
+        let room = ui.clip_rect().right() - ui.cursor().min.x;
+        let w = (room - COMPACT_CONTROL_W - 2.0 * s.item_spacing.x - s.interact_size.y)
+            .max(s.interact_size.x);
+        let l = label_slot(ui, w, label, None);
+        // Note HI18: the strip is narrow, so no `?` (it cut the strip's labels); the label carries the help.
         match help {
             Some(t) => help_hover(l, t),
             None => l,
         }
     };
-    let w = match (cx.aligned, cx.compact) {
-        (true, _) => column_widths(ui).1,
-        (false, true) => COMPACT_CONTROL_W,
-        (false, false) => return add(ui),
+    let w = if cx.compact {
+        COMPACT_CONTROL_W
+    } else {
+        column_widths(ui).1
     };
     let (v, r) = control_slot(ui, w, add);
     (v, r.labelled_by(l.id))
@@ -1314,9 +1308,7 @@ fn decision_box(
     actions: &mut Vec<Action>,
 ) {
     // Note HI13: where the groups' grids start (a group's body is indented), so the box's rows line up with theirs.
-    let left = cx
-        .aligned
-        .then(|| ui.max_rect().left() + ui.spacing().indent);
+    let left = (!cx.compact).then(|| ui.max_rect().left() + ui.spacing().indent);
     let frame = egui::Frame::new()
         .stroke(egui::Stroke::new(2.0, AMBER))
         .corner_radius(4.0)
@@ -1743,7 +1735,6 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                 target,
                 busy,
                 compact,
-                aligned: !compact,
                 alpha_asked: alpha.is_some(),
                 edit_off: edit_off.clone(),
                 warnings: &warnings,

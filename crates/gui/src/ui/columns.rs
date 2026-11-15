@@ -106,7 +106,7 @@ pub fn collapse_arrow(ui: &mut egui::Ui, model: &mut AppModel, column: crate::ui
     }
 }
 
-/// A strip that can be clicked (a collapsed column, and the collapsed Advanced drawer, open with it).
+/// A strip that can be clicked (a collapsed column, opened with it).
 pub fn strip_button(ui: &mut egui::Ui, name: &str) -> egui::Response {
     strip_sensing(ui, name, egui::Sense::click())
 }

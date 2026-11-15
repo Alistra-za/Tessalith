@@ -369,7 +369,7 @@ fn cache(ui: &mut egui::Ui, model: &AppModel) -> Option<u32> {
     ui.horizontal(|ui| {
         // The number box first: in a narrow tab the text is cut, never the box.
         let mut shown = now;
-        let (r, done) = super::advanced::held_value(ui, "settings-cache-mb", now, |ui, x| {
+        let (r, done) = super::number_input::held_value(ui, "settings-cache-mb", now, |ui, x| {
             let r = ui.add(
                 egui::DragValue::new(x)
                     .speed(10.0)

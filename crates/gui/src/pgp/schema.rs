@@ -144,7 +144,7 @@ pub struct KeySpec {
     pub key: &'static str,
     pub kind: KeyKind,
     pub group: Group,
-    /// Shown in the Advanced drawer rather than the main view.
+    /// Shown under "Advanced TruePBR settings" rather than in the main groups.
     pub advanced: bool,
     pub label: &'static str,
     /// Drag speed and display of a number key; unused by the other kinds.

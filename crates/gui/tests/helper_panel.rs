@@ -363,11 +363,6 @@ fn panel_controls_inside_panel_at_1100() {
             continue;
         }
         let name = ak.label().unwrap_or_default();
-        // The Advanced drawer strip is no part of the helper panel; at 1100 px it overlaps the centre by 18 px (the
-        // old, over-wide centre hid that).
-        if name == "Advanced" {
-            continue;
-        }
         assert!(
             r.max.x <= centre.max.x,
             "{name} ends at {} past {}",

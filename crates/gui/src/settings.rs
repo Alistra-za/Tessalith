@@ -23,7 +23,6 @@ pub struct GuiSettings {
     pub set_view_3d: bool,
     /// The 3D view's settings window (TruePBR settings…) is open (AG132).
     pub set_settings_open: bool,
-    pub advanced_open: bool,
     /// Note HV2: the most the analysis disk cache may hold, in MB; unset means [`ANALYSIS_CACHE_MB`]. Read at start.
     pub analysis_cache_mb: Option<u32>,
     /// The Meshes view's source (plan A Task 12), `[meshes]` in the file.

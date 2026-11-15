@@ -374,7 +374,8 @@ fn name_field(
 
 /// Review's "Also export as" column (Note CN, owner answers 5 and 6): the ticks, the location, the folder names, Keep
 /// metal brightness and the CM lines, the sets to skip, and the gate's Also reason (`gate`). It names what
-/// is written and why it cannot be yet, never that it will succeed (Task 11 M5). The recipe is in Advanced.
+/// is written and why it cannot be yet, never that it will succeed (Task 11 M5). The recipe is in a set's Also export
+/// tab (Note JI2).
 fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut Option<Act>) {
     let cfg = m.also_config();
     let (v, c) = m.also_ticks();
@@ -474,7 +475,7 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
                     let now = cfg.legacy.keep_metal_strength;
                     // One edit (one undo step) per drag, not per frame.
                     let (r, done) =
-                        super::advanced::held_value(ui, "also-keep-strength", now, |ui, s| {
+                        super::number_input::held_value(ui, "also-keep-strength", now, |ui, s| {
                             let r = ui.add(egui::Slider::new(s, 0.0..=1.0));
                             let v = *s;
                             r.widget_info(|| {

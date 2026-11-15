@@ -895,19 +895,18 @@ fn reads_before(a: eframe::egui::Rect, b: eframe::egui::Rect) -> bool {
     a.center().y < b.min.y || (b.y_range().contains(a.center().y) && a.max.x <= b.min.x)
 }
 
-fn expanded_at_1280(advanced: bool) -> (Harness<'static, AppModel>, tempfile::TempDir) {
-    expanded_at(1280.0, advanced)
+fn expanded_at_1280() -> (Harness<'static, AppModel>, tempfile::TempDir) {
+    expanded_at(1280.0)
 }
 
 /// Note FC8: below 1280 px the preview's settings start as the strip.
-fn expanded_at_1200(advanced: bool) -> (Harness<'static, AppModel>, tempfile::TempDir) {
-    expanded_at(1200.0, advanced)
+fn expanded_at_1200() -> (Harness<'static, AppModel>, tempfile::TempDir) {
+    expanded_at(1200.0)
 }
 
-fn expanded_at(width: f32, advanced: bool) -> (Harness<'static, AppModel>, tempfile::TempDir) {
+fn expanded_at(width: f32) -> (Harness<'static, AppModel>, tempfile::TempDir) {
     let d = tempfile::tempdir().unwrap();
     let mut model = opened(d.path());
-    model.settings.advanced_open = advanced;
     model.expand("landscape/rock01_rmaos");
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     let mut h = Harness::builder()
@@ -983,7 +982,7 @@ fn assert_toolbar_layout(h: &Harness<'static, AppModel>, extra: &[&str]) {
 
 #[test]
 fn the_toolbar_groups_channels_view_and_encode() {
-    let (h, _d) = expanded_at_1280(false);
+    let (h, _d) = expanded_at_1280();
     assert_toolbar_layout(&h, &[]);
 }
 
@@ -1007,13 +1006,11 @@ fn the_toolbar_pin_holds_at_three_widths() {
     }
 }
 
-/// K8, K10 (shots 15/16/17): with Advanced open at 1200×800 the viewport keeps PREVIEW_MIN and the settings collapse
-/// (Note FC8: from 1280 they start open).
+/// K8, K10 (shots 15/16/17): at 1200×800 the viewport keeps PREVIEW_MIN and the settings collapse (Note FC8: from
+/// 1280 they start open).
 #[test]
-fn at_1200x800_with_advanced_open_the_preview_keeps_its_width_and_the_toolbar_fits() {
-    use eframe::egui::containers::panel::PanelState;
-    let (mut h, _d) = expanded_at_1200(true);
-    assert!(PanelState::load(&h.ctx, eframe::egui::Id::new("advanced")).is_some());
+fn at_1200x800_the_preview_keeps_its_width_and_the_toolbar_fits() {
+    let (mut h, _d) = expanded_at_1200();
     // The wrapped rows settle: centring them in last frame's height grew the toolbar every frame.
     let settled = toolbar_rect(&h);
     h.run_steps(5);
@@ -1034,7 +1031,7 @@ fn at_1200x800_with_advanced_open_the_preview_keeps_its_width_and_the_toolbar_fi
 #[test]
 fn the_collapsed_settings_strip_opens_the_settings() {
     use eframe::egui::containers::panel::PanelState;
-    let (mut h, _d) = expanded_at_1200(true);
+    let (mut h, _d) = expanded_at_1200();
     assert!(PanelState::load(&h.ctx, eframe::egui::Id::new("preview-settings-strip")).is_some());
     assert!(h.query_by_label_contains("Compression").is_none());
     h.get_by_label("Settings").hover();
@@ -1052,8 +1049,8 @@ fn the_collapsed_settings_strip_opens_the_settings() {
     h.get_by_label("Settings");
 }
 
-/// Note FC8 (supersedes CE16's collapsed default): from 1280 px wide the preview's settings start open, and opening
-/// Advanced does not collapse them; below 1280 they start as the strip.
+/// Note FC8 (supersedes CE16's collapsed default): from 1280 px wide the preview's settings start open; below 1280
+/// they start as the strip.
 #[test]
 fn preview_settings_open_at_1280() {
     // The strip's button is drawn only while the settings are collapsed (their PanelState outlives one frame).
@@ -1066,8 +1063,6 @@ fn preview_settings_open_at_1280() {
     for (width, want) in [(1280.0, true), (1600.0, true), (1200.0, false)] {
         let d = tempfile::tempdir().unwrap();
         let mut model = opened(d.path());
-        // Below 1280 Advanced is open from the start: the settings would fit beside the picture without it.
-        model.settings.advanced_open = !want;
         model.expand("landscape/rock01_rmaos");
         assert!(model.wait_idle(std::time::Duration::from_secs(60)));
         // Its own drawing state: `ui::draw`'s thread-local one would carry the last preview's settings over.
@@ -1080,12 +1075,6 @@ fn preview_settings_open_at_1280() {
         sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         assert_eq!(open(&h), want, "{width}");
-        if want {
-            h.state_mut().0.settings.advanced_open = true;
-            h.run();
-            h.run();
-            assert!(open(&h), "{width}: Advanced opened");
-        }
     }
 }
 
@@ -1136,51 +1125,51 @@ fn the_preview_settings_panel_is_never_drawn_under_the_toolbar() {
     }
 }
 
-/// K8, S7: at 1100 px the Advanced drawer gives way (down to its 260 px minimum) so the preview keeps PREVIEW_MIN, and
-/// it gets its width back once the preview closes.
+/// Spec 7.4 (Note JI7): in 3D nothing replaces the drawer; at 1100 px the set's 3D view takes the centre to the
+/// window's right edge (less the harness' 8 px margin).
 #[test]
-fn at_1100_wide_the_advanced_drawer_leaves_the_preview_its_width() {
-    use eframe::egui::containers::panel::PanelState;
+fn in_3d_the_preview_takes_the_drawers_width() {
+    use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
+    use sdc_gui::ui::State;
     let d = tempfile::tempdir().unwrap();
-    let mut model = opened(d.path());
-    model.settings.advanced_open = true;
-    model.select_item("landscape/rock01_rmaos");
-    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    let mut model = pbr_opened_plain(d.path());
+    let key = model
+        .sets
+        .iter()
+        .find(|s| s.key.ends_with("landscape/rock01"))
+        .unwrap()
+        .key
+        .clone();
+    model.select_set(&key);
+    model.settings.set_view_3d = true;
+    let width = 1100.0;
+    let state = State {
+        set3d: SetPreview::new(None, DEFAULT_CAP),
+        ..State::default()
+    };
     let mut h = Harness::builder()
-        .with_size(eframe::egui::vec2(1100.0, 800.0))
+        .with_size(eframe::egui::vec2(width, 800.0))
         .build_ui_state(
-            |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
-            model,
+            |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
+            (model, state),
         );
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
-    h.run();
-    let width = |h: &Harness<'static, AppModel>| {
-        PanelState::load(&h.ctx, eframe::egui::Id::new("advanced"))
-            .unwrap()
-            .outer_rect
-            .width()
-    };
-    let before = width(&h);
-    assert!(before > 370.0, "Advanced {before}");
-    h.state_mut().expand("landscape/rock01_rmaos");
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
+    // The 3D view never goes idle.
+    for _ in 0..6 {
+        h.run_steps(3);
+        let (m, s) = h.state_mut();
+        s.set3d.poll(&*m);
+    }
     assert!(
-        (260.0..=330.0).contains(&width(&h)),
-        "Advanced {}",
-        width(&h)
+        h.state().1.set3d.enabled && sdc_gui::ui::set_preview::wanted(&h.state().0),
+        "the set is shown in 3D"
     );
-    let bar = toolbar_rect(&h);
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
     assert!(
-        bar.width() >= sdc_gui::ui::preview::PREVIEW_MIN,
-        "viewport {}",
-        bar.width()
+        c.max.x >= width - 8.5,
+        "the centre {c:?} ends at the window edge"
     );
-    assert_toolbar_layout(&h, &[]);
-    assert_toolbar_layout(&h, &[]);
-    h.state_mut().collapse();
-    h.run();
-    assert_eq!(width(&h), before);
+    assert!(h.query_by_label("Advanced").is_none());
 }
 
 #[test]
@@ -1552,13 +1541,11 @@ fn a_mip_count_shows_ticked_with_a_note() {
     h.get_by_label("(3 levels)");
 }
 
-/// Note JI3: the Levels row is in the texture panel's Mipmaps group, under the tick box; the drawer has none.
+/// Note JI3: the Levels row is in the texture panel's Mipmaps group, under the tick box, and nowhere else.
 #[test]
 fn levels_live_in_the_mipmaps_group() {
     use eframe::egui::accesskit::Role;
-    let mut h = leaf_with_policy(engine::config::AlphaPolicy::Cutout);
-    h.state_mut().settings.advanced_open = true;
-    h.run();
+    let h = leaf_with_policy(engine::config::AlphaPolicy::Cutout);
     let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
     let levels = h.get_by_role_and_label(Role::ComboBox, "Levels").rect();
     assert!(
@@ -1571,7 +1558,7 @@ fn levels_live_in_the_mipmaps_group() {
         tick.max.y <= levels.min.y && levels.max.y <= filter.min.y,
         "Levels {levels:?} between the tick {tick:?} and Filter {filter:?}"
     );
-    // The drawer lost its Mipmaps section: every "Levels" node is the centre's row.
+    // Every "Levels" node is the centre's row.
     for n in h.query_all_by_label("Levels") {
         assert!(
             c.contains(n.rect().center()),

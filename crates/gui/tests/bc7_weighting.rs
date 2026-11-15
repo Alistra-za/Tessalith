@@ -255,7 +255,7 @@ fn the_reset_clears_both_fields() {
 }
 
 /// Perceptual keeps the old row's lock (colour without data alpha); the weightings stay open on a normal map. The row
-/// shows only for BC7, and (I2) the Advanced drawer's view of it is locked elsewhere, with the same reason.
+/// shows only for BC7.
 #[test]
 fn perceptual_keeps_its_lock_and_the_row_is_bc7_only() {
     let d = tempfile::tempdir().unwrap();

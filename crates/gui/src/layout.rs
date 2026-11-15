@@ -184,10 +184,10 @@ fn chosen_id(name: &str) -> egui::Id {
     egui::Id::new(name).with("chosen")
 }
 
-/// The width a panel has now, in points: the Textures and Sets columns and the Advanced drawer keep the width the user
-/// dragged to apart from egui's own (see `ui::chosen_width_panel`).
+/// The width a panel has now, in points: the Textures and Sets columns keep the width the user dragged to apart from
+/// egui's own (see `ui::chosen_width_panel`).
 fn panel_width(ctx: &egui::Context, name: &str) -> Option<f32> {
-    if matches!(name, "textures" | "sets" | "advanced") {
+    if matches!(name, "textures" | "sets") {
         return ctx.data_mut(|d| d.get_persisted::<f32>(chosen_id(name)));
     }
     PanelState::load(ctx, egui::Id::new(name)).map(|s| s.outer_rect.width())
@@ -414,7 +414,7 @@ fn window_now(ctx: &egui::Context, prev: Option<WindowSettings>) -> Option<Windo
 /// Puts the saved arrangement into egui before the first frame: the panel widths and the Textures | Meshes view.
 pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
     for (name, w) in &l.widths {
-        if matches!(name.as_str(), "textures" | "sets" | "advanced") {
+        if matches!(name.as_str(), "textures" | "sets") {
             ctx.data_mut(|d| d.insert_persisted(chosen_id(name), *w));
         } else {
             let outer_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(*w, 100.0));

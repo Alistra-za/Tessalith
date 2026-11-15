@@ -151,8 +151,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
     if info.known() {
         model.view.clamp_mip(info.first, info.end);
     }
-    // Note FC8 (supersedes CE16's collapsed default): a window WIDE_WINDOW or wider starts with the settings open,
-    // and they stay open when Advanced opens.
+    // Note FC8 (supersedes CE16's collapsed default): a window WIDE_WINDOW or wider starts with the settings open.
     if !std::mem::replace(&mut state.started, true) {
         state.settings_open = ui.ctx().content_rect().width() >= WIDE_WINDOW;
     }

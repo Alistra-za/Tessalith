@@ -849,7 +849,7 @@ fn a_bulk_bc1_search_skips_other_formats() {
         Some("BC1/BC3 search: written to 2 of 3; locked on 1 of 3: BC1 and BC3 only")
     );
     // shortcut: bulk rows are the Mipmaps rows plus `FIELDS` (bulk.rs `panel_fields`), so no "— mixed" combo exists for
-    // this Advanced-drawer row to pin; upgrade when the bulk panel lists advanced rows.
+    // this row to pin; upgrade when the bulk panel lists the search rows.
 }
 
 /// Review C8: a write that reaches some textures and not others leaves the row mixed, at once (the plan is still

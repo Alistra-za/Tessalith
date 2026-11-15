@@ -763,7 +763,7 @@ fn the_search_fields_keep_their_locks_and_header_reads_its_own_value() {
     assert!(header.edited);
 }
 
-/// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.
+/// Note HI9: every row of the texture panel has help for its `?`.
 #[test]
 fn every_field_row_has_help() {
     let rows = all_fields().into_iter().chain([EXR_STRAIGHT_FIELD]);

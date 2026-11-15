@@ -1,6 +1,5 @@
 //! egui drawing of the model (M3a spec §2). No logic beyond mapping input to model calls.
 pub mod actions;
-pub mod advanced;
 pub mod also_tab;
 pub mod bottom;
 pub mod bulk_panel;
@@ -21,6 +20,7 @@ pub mod json_editor;
 pub mod marker_dialog;
 pub mod meshes;
 pub mod messages;
+mod number_input;
 pub mod path_picker;
 pub mod pgp_fields;
 pub mod presets;
@@ -54,7 +54,6 @@ pub use crate::model::counts_toward_badge;
 pub struct State {
     pub thumbs: thumbs::ThumbCache,
     pub drawer: drawer::DrawerState,
-    pub advanced: advanced::AdvancedState,
     pub preview: preview::PreviewUi,
     pub drops: sets_column::DropState,
     pub slot_cmds: slot_commands::SlotCmdState,
@@ -160,20 +159,9 @@ pub fn draw_with_scan(
         model.centre_tab = CentreTab::Selection;
     }
     ui.data_mut(|d| d.insert_temp(seen_id, seen));
-    let tab_in_front = model.centre_front() != CentreTab::Selection;
     // The 2D | 3D switch (AB4, AG78): in 3D the set's 3D view takes the centre in place of the set editor's body.
     let three_d = state.set3d.enabled && set_preview::wanted(model);
-    // C6: a set editor in 2D has Advanced as its panel's last tab; everything else keeps the window-edge drawer.
-    // A11: the start screen (no folder) has no drawer. Note FB7: nor does a Presets or JSON tab in front.
-    let folder = model.root.is_some();
-    if folder && (tab_in_front || (!three_d && set_editor_shown(model, three_d))) {
-        // The drawer is one panel: keep the columns' widget ids (a set pill's open menu) as if it were drawn, as egui
-        // does for a collapsed panel.
-        ui.skip_ahead_auto_ids(1);
-    } else if folder {
-        advanced::draw(ui, model, &mut state.advanced);
-    }
-    // A11: no columns until a folder is open.
+    // A11: no columns until a folder is open. Note JI7: nothing is drawn at the window's right edge in any state.
     if model.root.is_some() {
         let (thumbs, drops, cmds) = (&mut state.thumbs, &mut state.drops, &mut state.slot_cmds);
         // Each column stops at its minimum and leaves the columns after it theirs and the centre its floor.
@@ -309,7 +297,7 @@ pub(crate) fn centre_floor(ctx: &egui::Context, model: &AppModel) -> f32 {
 /// Mirrors `centre`'s and `set_editor::draw`'s routing: true when the centre shows a set's editor (2D: a set still in
 /// the plan; 3D: the followed set's 3D view, also for a member texture, AG87) rather than the preview, the bulk panel
 /// or a hint. Callers add the 2D/3D side (`!three_d` = the set panel, `three_d` = the 3D settings window). Keep it in
-/// step with those two; `set_panel.rs::drawer_and_panel_never_both_or_neither` pins it.
+/// step with those two; `set_panel.rs::no_window_edge_strip_in_any_state` pins it.
 fn set_editor_shown(model: &AppModel, three_d: bool) -> bool {
     model.root.is_some()
         && model.expanded.is_none()

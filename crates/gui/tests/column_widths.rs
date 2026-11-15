@@ -3,7 +3,7 @@ mod support;
 use eframe::egui::{self, containers::panel::PanelState, Event, Id, Modifiers, PointerButton};
 use egui_kittest::Harness;
 use sdc_gui::model::AppModel;
-use sdc_gui::ui::columns::{SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
+use sdc_gui::ui::columns::{SETS_MIN, TEXTURES_MIN};
 use sdc_gui::ui::set_preview::CENTRE_MIN;
 use sdc_gui::ui::State;
 use support::*;
@@ -21,6 +21,14 @@ fn harness(d: &std::path::Path, w: f32) -> H {
     sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(6);
     h
+}
+
+/// The harness draws inside an 8 px margin.
+const MARGIN: f32 = 8.0;
+
+/// Where the panels end: the window's right edge, less the margin (Note JI7: nothing is drawn at the edge).
+fn right_edge(h: &H) -> f32 {
+    h.ctx.content_rect().right() - MARGIN
 }
 
 fn outer(h: &H, id: &str) -> egui::Rect {
@@ -66,8 +74,8 @@ fn drag(h: &mut H, id: &str, to_x: f32) -> (Vec<f32>, f32) {
 
 #[test]
 fn a_narrow_window_keeps_each_column_at_its_minimum() {
-    // Room for both minimums beside the Advanced strip, not for the centre's.
-    let w = STRIP_WIDTH + TEXTURES_MIN + SETS_MIN + CENTRE_MIN / 2.0;
+    // Room for both minimums, not for the centre's.
+    let w = TEXTURES_MIN + SETS_MIN + CENTRE_MIN / 2.0;
     let d = tempfile::tempdir().unwrap();
     let h = harness(d.path(), w);
     let (t, s) = (outer(&h, "textures"), outer(&h, "sets"));
@@ -82,7 +90,7 @@ fn a_narrow_window_keeps_each_column_at_its_minimum() {
 #[test]
 fn a_window_narrower_than_the_minimums_does_not_go_negative() {
     let d = tempfile::tempdir().unwrap();
-    let h = harness(d.path(), STRIP_WIDTH + TEXTURES_MIN / 2.0);
+    let h = harness(d.path(), TEXTURES_MIN / 2.0);
     for id in ["textures", "sets"] {
         let r = outer(&h, id);
         assert!(r.width() >= 0.0 && r.width().is_finite(), "{id} {r:?}");
@@ -125,11 +133,10 @@ fn a_drag_to_the_far_right_stops_at_the_maximum() {
     let w = 1280.0;
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(d.path(), w);
-    // The centre is what lies between the Sets column and the Advanced strip.
-    let centre = |h: &H| outer(h, "advanced-strip").left() - outer(h, "sets").right();
+    // The centre is what lies between the Sets column and the window's right edge.
+    let centre = |h: &H| right_edge(h) - outer(h, "sets").right();
     // Textures stops where Sets keeps its minimum and the centre CENTRE_MIN, mid-drag too.
-    let max =
-        outer(&h, "advanced-strip").left() - outer(&h, "textures").left() - SETS_MIN - CENTRE_MIN;
+    let max = right_edge(&h) - outer(&h, "textures").left() - SETS_MIN - CENTRE_MIN;
     let (during, after) = drag(&mut h, "textures", w - 5.0);
     for t in during {
         assert!(t <= max + 2.0, "textures went to {t} mid-drag, max {max}");
@@ -144,7 +151,7 @@ fn a_drag_to_the_far_right_stops_at_the_maximum() {
     // Back to its minimum, then Sets stops where the centre keeps CENTRE_MIN.
     let left = outer(&h, "textures").left();
     drag(&mut h, "textures", left + 10.0);
-    let max = outer(&h, "advanced-strip").left() - outer(&h, "sets").left() - CENTRE_MIN;
+    let max = right_edge(&h) - outer(&h, "sets").left() - CENTRE_MIN;
     let (during, after) = drag(&mut h, "sets", w - 5.0);
     for s in during {
         assert!(s <= max + 2.0, "sets went to {s} mid-drag, max {max}");
@@ -165,10 +172,7 @@ fn a_window_narrowed_and_widened_again_restores_the_column_widths() {
     let left = outer(&h, "textures").left();
     drag(&mut h, "textures", left + 300.0);
     let before = [outer(&h, "textures").width(), outer(&h, "sets").width()];
-    h.set_size(egui::vec2(
-        STRIP_WIDTH + TEXTURES_MIN + SETS_MIN + 10.0,
-        800.0,
-    ));
+    h.set_size(egui::vec2(TEXTURES_MIN + SETS_MIN + 10.0, 800.0));
     h.run_steps(3);
     assert!(
         outer(&h, "textures").width() < before[0] - 1.0,

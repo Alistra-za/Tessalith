@@ -1,5 +1,5 @@
-//! PGPatcher settings controls (M3b spec §4.3–4.5): the main groups for a set, and the advanced keys for the
-//! Advanced drawer. Drawing only; edits go through `AppModel::set_json_value` after drawing.
+//! PGPatcher settings controls (M3b spec §4.3–4.5): the main groups for a set, and the advanced keys under
+//! "Advanced TruePBR settings". Drawing only; edits go through `AppModel::set_json_value` after drawing.
 use super::columns::AMBER;
 use crate::model::auto_flags::{auto_flags_for, hint, resolved_for};
 use crate::model::sets::{

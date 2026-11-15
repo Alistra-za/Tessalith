@@ -38,7 +38,7 @@ fn all_cubes(model: &AppModel, key: &str) -> bool {
 }
 
 /// A drag value that returns its value once per gesture (drag release or Enter), not every frame
-/// ([`super::advanced::held`]); one already sent stays on show until the re-plan lands. The engine range
+/// ([`super::number_input::held`]); one already sent stays on show until the re-plan lands. The engine range
 /// bounds the widget, but a value already outside it is shown as it is and never rewritten (ruling R2).
 #[allow(clippy::too_many_arguments)]
 fn num(
@@ -51,7 +51,7 @@ fn num(
     suffix: &str,
     name: &str,
 ) -> (Option<f64>, egui::Response) {
-    super::advanced::held(ui, id, current, busy, true, |ui, v| {
+    super::number_input::held(ui, id, current, busy, true, |ui, v| {
         let r = ui.add(
             egui::DragValue::new(v)
                 .range(range)
@@ -537,7 +537,7 @@ fn faces(
 
 #[cfg(test)]
 mod tests {
-    use super::super::advanced::gesture::{arrow, typed, St};
+    use super::super::number_input::gesture::{arrow, typed, St};
     use super::*;
     use eframe::egui::accesskit::Role;
 
