@@ -1,6 +1,6 @@
 # Main window
 
-For anyone opening a first folder: how it opens, what the header does and how to find a texture in the Textures column. The GUI saves your decisions in the folder's `sdc.toml`.
+For anyone opening a first folder: how it opens, what the header and the Settings tab do, and how to find a texture in the Textures column. The GUI saves your decisions in the folder's `sdc.toml`.
 
 ## Opening a folder
 
@@ -8,7 +8,7 @@ Click **Open folder** on the start screen, choose **Open > Open folder…**, pic
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 
-The columns and the Advanced drawer appear once a folder is open, and the widths you dragged come back.
+The columns appear once a folder is open, and the widths you dragged come back.
 
 While it opens, a progress bar counts the files to plan and **Cancel** returns to the folder you had before, with its undo history. Thumbnails land when the whole plan does; settings stay off until then.
 
@@ -21,7 +21,8 @@ When the rejected value came from a GUI edit, that edit is the top **Undo** step
 ## Header
 
 - **Undo** and **Redo** go up to 200 steps (**Ctrl+Z**, **Ctrl+Y**). Undoing back to the last save clears the unsaved dot in the title.
-- **MO2…** picks the scan source: [Mod scanning](Mod-Scanning.md). **Preset** picks the preset the folder converts with and saves it as `preset` in `sdc.toml`; its last entry, **Presets…**, opens the **Presets** tab where the Mode is set: [Presets and targets](Presets-and-Targets.md).
+- **MO2…** picks the scan source: [Mod scanning](Mod-Scanning.md). **Preset** picks the preset the folder converts with and saves it as `preset` in `sdc.toml`; its last entry, **Presets…**, opens the **Presets** tab: [Presets and targets](Presets-and-Targets.md).
+- **Settings…** opens the [Settings tab](#settings-tab), where the Mode is set.
 - **Save** (**Ctrl+S**) writes `sdc.toml` and `sdc-project.toml`. **Export** is on [Review and Export](GUI-Review-and-Export.md#the-export-button).
 
 ### Export to
@@ -35,6 +36,35 @@ The menu also holds **Open export folder**, the checkable **Also export as Vanil
 ### Status line and banner
 
 A dot in the window title means unsaved edits. The status line shows file and set counts, a VRAM estimate for the selection and the folder, and the progress of whatever runs. A banner appears under it when something needs you, such as a rejected `sdc.toml`. Everything it says is also kept in [Messages](GUI-Guide.md#messages).
+
+## Settings tab
+
+**Settings…** in the header opens the Settings tab in the centre column, beside the Presets tab, also with no folder open. **Pop out** gives it its own window. It has two sections: what belongs to the open folder, then what applies everywhere. <!-- D:JI1 -->
+
+![The Settings tab: the project's Mode, Preset and export folder, then the Preview, Checks, Cache and Columns groups.](../img/gui/GUI-Main-Window/settings-tab.png)
+
+### This project
+
+These rows save in the open folder. With no folder open the section reads "No project open".
+
+| Row | Writes |
+|---|---|
+| **Mode** | `target` in `sdc.toml`: `cs` or `vanilla`. The header's **Preset** list shows this mode's presets ([Presets and targets](Presets-and-Targets.md)). |
+| **Preset** | `preset` in `sdc.toml`, the same value as the header's **Preset**. |
+| **Export folder** (**Choose…**, **Open**) | The export folder in `sdc-project.toml`, the same value as [Export to ▾](#export-to). |
+
+Mode and Preset save with **Save**, and are greyed while `sdc.toml` is read-only. The export folder saves at once, or with **Save** while `sdc-project.toml` has unsaved edits.
+
+### App settings
+
+These apply to every project and save to `gui.toml` at once.
+
+| Group | Controls |
+|---|---|
+| Preview | **Live encode**: the expanded preview encodes again after every edit; off, use **Encode now**. The preview toolbar has the same switch. |
+| Checks | **Low detail**, **Green direction**, **Parallax**: [Artist checks](Texture-Types.md#artist-checks). |
+| Cache | **Analysis cache limit**: [Where Tessalith keeps its files](Installation.md#where-tessalith-keeps-its-files). |
+| Columns | **Textures**, **Sets**: ticked shows the column. |
 
 ## Finding a texture
 

@@ -27,7 +27,7 @@ Notice:
 
 ### Open the folder
 
-Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet. **Mode** (in the Presets tab) should read `cs`.
+Start `tessalith.exe`, click **Open folder…** and pick `C:\Work\IronPlate`, or drag the folder onto the window. Nothing is written yet. Click **Settings…** in the header: **Mode** should read `cs`.
 
 ![The start screen with two recent folders.](../img/gui/GUI-Main-Window/start-screen.png)
 

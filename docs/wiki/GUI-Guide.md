@@ -4,13 +4,13 @@ A map of the GUI (`tessalith.exe`) for anyone who just opened it, plus the keys,
 
 ## The main window
 
-![Tessalith's main window with a folder open: the header on top, the Textures and Sets columns, the settings of the selected texture, the Advanced strip at the right and the bottom panel with its Problems tab. Numbered red markers point at the areas listed below.](../img/gui/GUI-Guide/main-window.png)
+![Tessalith's main window with a folder open: the header on top, the Textures and Sets columns, the settings of the selected texture and the bottom panel with its Problems tab. Numbered red markers point at the areas listed below.](../img/gui/GUI-Guide/main-window.png)
 
 The picture shows a small made-up mod. Double-clicking a tile replaces the centre with the 2D preview: see [Previews](Previews.md).
 
 1. **Open, Undo, Redo**: [Main window](GUI-Main-Window.md#header).
-2. **MO2…, Preset**: the scan source and the preset the folder converts with. The Mode (the target, `cs` or `vanilla`) is set in the **Presets** centre tab, opened from **Preset ▾ → Presets…**: [Presets and targets](Presets-and-Targets.md).
-3. **Textures / Meshes tabs and the column eyes**: [Main window](GUI-Main-Window.md#header); the Meshes view is [Mod scanning](Mod-Scanning.md).
+2. **MO2…, Preset**: the scan source and the preset the folder converts with. The Mode (the target, `cs` or `vanilla`) is set in the [Settings tab](GUI-Main-Window.md#settings-tab); what modes and presets do: [Presets and targets](Presets-and-Targets.md).
+3. **Textures / Meshes tabs**: [Main window](GUI-Main-Window.md#header); the Meshes view is [Mod scanning](Mod-Scanning.md).
 4. **Export to ▾**: [Export to](GUI-Main-Window.md#export-to).
 5. **Save**: writes `sdc.toml` and `sdc-project.toml`.
 6. **Export**: [Review and Export](GUI-Review-and-Export.md#the-export-button).
@@ -19,7 +19,7 @@ The picture shows a small made-up mod. Double-clicking a tile replaces the centr
 9. **Sets filters**: [Finding a set](GUI-Sets-Column.md#finding-a-set).
 10. **A set card**: [Sets column](GUI-Sets-Column.md#reading-a-set-card).
 11. **Settings of the selected texture**: [Texture settings](GUI-Texture-Panel.md). Selecting a set opens the [Set editor](GUI-Set-Editor.md) instead.
-12. **Advanced** (right edge): [Texture settings](GUI-Texture-Panel.md#advanced-drawer).
+12. **Settings…** (header): the [Settings tab](GUI-Main-Window.md#settings-tab), for the project's mode, preset and export folder and the app settings.
 13. **Bottom panel tabs**: **Problems** ([Problems](GUI-Problems.md)), **Review** (only while an export is being reviewed: [Review](GUI-Review-and-Export.md#review)), **Messages** ([below](#messages)) and **Files** ([Files tab](GUI-Review-and-Export.md#the-files-tab)).
 
 The line under the header is the [status line](GUI-Main-Window.md#status-line-and-banner).

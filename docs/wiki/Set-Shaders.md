@@ -61,7 +61,7 @@ For a `cs` mod author shipping one PBR mod in three flavours. Each PBR set is co
 
 ### Turn it on
 
-- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, or the **Also export as** column in Review. While a tick is on, Export always opens Review.
+- **GUI:** **Export to ▾** (**More ▾** with no project open) → **Also export as Vanilla** and **Also export as Complex material**, the **Also export as** column in Review, or a set's [Also export tab](GUI-Set-Editor.md#also-export-tab). While a tick is on, Export always opens Review.
 - **Saved as** `[export] also` in the project `sdc.toml`.
 - **Ticking only CM** still writes the Vanilla folder (for every other map): CM installs on top of it.
 
@@ -87,7 +87,7 @@ In Review's **Also export as** column:
 - **Also folders go in** (**Choose where the Also folders go…**) is `[project] also_location` in `sdc-project.toml`, by default the export folder.
 - The three folder names: empty means the default name, shown as the hint.
 - **Keep metal brightness** and its **Strength** (CM only).
-- **Skip these sets**: tick a set to leave it out of Vanilla and CM. The set editor's Material tab has the same switch, **Skip vanilla/CM for this set**. Saved as `[export] skip`.
+- **Skip these sets**: tick a set to leave it out of Vanilla and CM. The set editor's **Also export** tab has the same switch, **Skip vanilla/CM for this set**. Saved as `[export] skip`.
 
 ### Things that need care
 
@@ -97,7 +97,7 @@ In Review's **Also export as** column:
 
 ### The recipe
 
-**Advanced → Also export recipe** (closed at first; Review's **Recipe settings are in Advanced** opens it) has one box per `[export.legacy]` key. Keys, defaults and ranges are on [Project config](Project-Config.md#export).
+The recipe is one box per `[export.legacy]` key, under **All sets in this project** in the [Also export tab](GUI-Set-Editor.md#also-export-tab) of any set; it applies to every set. Review's **Recipe settings…** opens that tab on a PBR set. <!-- D:JI2 --> Keys, defaults and ranges are on [Project config](Project-Config.md#export).
 
 ### Files this export did not write
 

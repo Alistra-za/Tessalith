@@ -10,7 +10,7 @@ Ctrl+click adds or removes one entry, Shift+click selects the range in the order
 
 With two or more textures selected, the centre shows their settings in one panel. A row only writes when you touch it, and it writes every selected texture that can take the value; the reasons for the others are on hover. **↺** resets a field on all of them, even a locked one. With several sets selected, chips pick which of their maps to edit. **Re-encode n DDS files** does for the selected DDS inputs what **Re-encode this file** does for one ([Texture settings](GUI-Texture-Panel.md#dds-files-in-the-folder)).
 
-Every bulk edit is one undo step and one plan. A read-only `sdc.toml` takes none. The Advanced drawer edits one texture only.
+Every bulk edit is one undo step and one plan. A read-only `sdc.toml` takes none. When the selected textures' formats read different Effort keys ([Effort](GUI-Texture-Panel.md#effort)), the Effort row reads "Formats differ: edit one format at a time"; a texture whose format has no search setting doesn't count, and the edit skips it. <!-- D:JI4 -->
 
 ## The right-click menu
 

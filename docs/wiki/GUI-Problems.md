@@ -26,7 +26,7 @@ A row you must act on has its fix as a button.
 | A blocker, for example a set that matches nothing | Its own button, or **Go to set**. |
 | *Failed: …* | None: the texture failed to plan. |
 | *Undecided: …* | The type buttons and **Acknowledge** ([below](#deciding-from-the-list)). |
-| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Presets…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
+| *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
 | *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
 | Warnings on a set | **Go to set**. They never hold back Export or open Review. |
@@ -42,8 +42,13 @@ A row you must act on has its fix as a button.
 | *No texture set of the latest scan uses this texture* (grey) | No button: the set still exports. |
 | *Replaces {file} of the target mod in the load order* (an output the target mod already ships) | No button: the set still exports. Rename its outputs to keep the target's file ([Renaming](GUI-Bulk-and-Rename.md#renaming)). <!-- D:HL6 --> |
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}**: [Presets and targets](Presets-and-Targets.md#checking-and-installing). |
+| *3 saved settings name no file in this mode (cs)* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
 Info rows count in the tab's number but never against "ready".
+
+### Unmatched [files] entries
+
+A `[files]` entry in `sdc.toml` whose key names no file (the file was renamed, moved or deleted) does nothing, so Problems lists all of them in one grey row. Before you remove one, check the mode in the row: some files are planned only under `cs`, so an entry can name no file in `vanilla` and still match in `cs`. The removes wait for the plan to finish, and **Remove all** is greyed while `sdc.toml` names another mode than the one shown; its hover lists what it deletes.
 
 ## Deciding from the list
 

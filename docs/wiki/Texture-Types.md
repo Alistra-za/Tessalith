@@ -216,7 +216,7 @@ Throwing away varying alpha by accident is blocked (`LOSS-ALPHA-DATA`), unless y
 
 ## Artist checks
 
-Three checks read the numbers Tessalith already measures while it plans, and warn about maps that will probably look wrong in game. They only warn: none blocks an export, asks you anything or changes "ready", and none reaches Review or the Files rows. The Problems tab lists them with a grey **check** dot and a **Checks** pill ([Problems](GUI-Problems.md)). Each has a switch in **Advanced → Checks** (all on, saved in `gui.toml`); a switch hides its results at once, with no re-plan.
+Three checks read the numbers Tessalith already measures while it plans, and warn about maps that will probably look wrong in game. They only warn: none blocks an export, asks you anything or changes "ready", and none reaches Review or the Files rows. The Problems tab lists them with a grey **check** dot and a **Checks** pill ([Problems](GUI-Problems.md)). Each has a switch in the [Settings tab](GUI-Main-Window.md#settings-tab) under Checks (all on, saved in `gui.toml`); a switch hides its results at once, with no re-plan.
 
 | Check | What it flags | Code |
 |---|---|---|
@@ -228,7 +228,7 @@ The green-direction test is weak on straight ridges: look at the map.
 
 ### Low detail
 
-With **Low detail** on, Export measures each texture it writes and writes it at its planned size; a texture that adds little detail gets the warning in Problems. Nothing is asked and nothing is held back. To write it at half size, set **Advanced → Resize** to *Half* ([`resize`](Project-Config.md#format-and-size)). Only textures that *Half* would shrink, with no resize set yet, are measured. <!-- D:FM29 -->
+With **Low detail** on, Export measures each texture it writes and writes it at its planned size; a texture that adds little detail gets the warning in Problems. Nothing is asked and nothing is held back. To write it at half size, set the texture's **Resize** (Size group) to *Half* ([`resize`](Project-Config.md#format-and-size)). Only textures that *Half* would shrink, with no resize set yet, are measured. <!-- D:FM29 -->
 
 ## Height maps
 

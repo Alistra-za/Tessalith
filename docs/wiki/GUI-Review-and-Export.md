@@ -14,7 +14,7 @@ It reads **Review n files** while something is undecided, blocked or waiting, an
 4. Opens the [Files tab](#the-files-tab).
 5. Writes the PGPatcher JSON after a complete export ([Where the JSON goes](GUI-PGPatcher-JSON.md#where-the-json-goes)), then any NIF edits ([Editing a NIF](GUI-NIF-Edit.md)).
 
-Export can't write into the folder it reads. With no export folder chosen, Review blocks: see [Export to](GUI-Main-Window.md#export-to). With **Also export** on, Review always opens and its **Export** writes three folders ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)).
+Export can't write into the folder it reads. With no export folder chosen, Review blocks: see [Export to](GUI-Main-Window.md#export-to). With **Also export** on, Review always opens and its **Export** writes three folders ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)). Its **Recipe settings…** link opens the recipe in a PBR set's Also export tab ([The recipe](Set-Shaders.md#the-recipe)).
 
 **IMPORTANT:** files an earlier export wrote that the project no longer produces stay in the export folder. Tessalith never deletes them.
 

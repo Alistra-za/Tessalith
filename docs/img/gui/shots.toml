@@ -36,6 +36,12 @@ scenario = "export_to_menu"
 used_by = ["GUI-Main-Window.md"]
 
 [[shot]]
+id = "settings-tab"
+page = "GUI-Main-Window"
+scenario = "settings_tab"
+used_by = ["GUI-Main-Window.md"]
+
+[[shot]]
 id = "problems-tab"
 page = "GUI-Problems"
 scenario = "problems_tab"

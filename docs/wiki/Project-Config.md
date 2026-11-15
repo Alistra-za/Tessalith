@@ -63,7 +63,7 @@ as = "textures/armor/iron/iron_n.png"
 |---|---|---|---|
 | `schema_version` | integer, 1 or more | 1 | Format version of this file. A newer version than the build supports is an error. |
 | `preset` | string | the target's default | The preset, by id: built-in or a user preset ([Presets and targets](Presets-and-Targets.md)). |
-| `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** row (Presets tab) writes it. |
+| `target` | `"cs"`, `"vanilla"` | from the preset, else `"cs"` | The target. The GUI's **Mode** row ([Settings tab](GUI-Main-Window.md#settings-tab)) writes it. |
 | `[defaults]` | partial profile | none | Field values for every texture. |
 | `[subtypes.<id>]` | partial profile | none | Field values for one sub-type. |
 | `[[rules]]` | array of tables | none | Conditional settings. |
@@ -165,7 +165,7 @@ helper.role = "none"
 
 Setting `helper.role` or `helper.fills` makes the helper *assigned*: it replaces what its channels already hold. Without them a helper fills only empty channels ([which data wins](Texture-Packing.md#helper-textures)).
 
-An entry that names no file under the current target is reported as `CFG-FILE-UNMATCHED` (info), and the GUI lists it under "Unmatched [files] entries" in the Advanced drawer so you can remove it.
+An entry that names no file under the current target is reported as `CFG-FILE-UNMATCHED` (info), and the GUI lists it in a Problems row so you can remove it ([Problems](GUI-Problems.md#unmatched-files-entries)).
 
 ## [inputs]
 

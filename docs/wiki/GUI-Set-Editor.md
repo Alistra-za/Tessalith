@@ -4,7 +4,7 @@ For anyone filling a material set's slots, wiring packed channels, or pointing a
 
 ## The set editor
 
-Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a vanilla set) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Advanced skin](PBR-Landscape.md#advanced-skin), [PBR Landscape](PBR-Landscape.md)). **Advanced** has the same sections as the [Advanced drawer](GUI-Texture-Panel.md#advanced-drawer).
+Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a set with no PGPatcher JSON) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Advanced skin](PBR-Landscape.md#advanced-skin), [PBR Landscape](PBR-Landscape.md)). **Also export** holds the Vanilla and CM export settings: [Also export tab](#also-export-tab).
 
 ![The set editor.](../img/gui/GUI-Set-Editor/set-editor.png)
 
@@ -16,7 +16,7 @@ One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A fi
 - Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
 - A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
-- **Match on this** (Diffuse, Normal) makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). **Opaque** (Diffuse) strips the alpha.
+- **Match on this** (Diffuse, Normal) makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). The Diffuse row's alpha dropdown shows the texture's alpha type (**Remove**, **Cutout**, **Blend**, **Cutout + Blend**, **Data**: [Alpha](Texture-Types.md#alpha)). A pick writes `alpha.policy` as one undo step. **Confirm** sits beside it while the alpha is asked, and **↺** goes back to the inherited type once the texture has its own. <!-- D:JI5 -->
 
 Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
@@ -38,6 +38,14 @@ Right-click a slot row, or a member chip on a card.
 ## Packed channel sources
 
 Under a packed output (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel has a **Source** picker: a helper or **Value**. Picking a helper adds the channel to that helper's `helper.fills` and takes it off the others, as one undo step ([Packing PBR maps](Texture-Packing.md#helper-textures)). **Value** uses the channel's `packing.fill.*` with a **Reset**; it is greyed when the channel's file feeds it by name. The engine still decides: a pick that can't fill the channel shows the helper as not used, with the reason.
+
+## Also export tab
+
+The set editor's second tab holds the settings of [Also export as Vanilla and CM](Set-Shaders.md#also-export-as-vanilla-and-cm). <!-- D:JI2 -->
+
+- **This set:** on a PBR set, **Skip vanilla/CM for this set** leaves the set out of the Vanilla and CM folders. It is greyed until one of the two ticks below is on. Any other set reads "Also export reads PBR sets only; this set is not one".
+- **All sets in this project:** **Also export as Vanilla** and **Also export as Complex material**, the same ticks as **Export to ▾**, then the [recipe](Set-Shaders.md#the-recipe) numbers, greyed while both ticks are off. These apply to every set.
+- A greyed control says why on hover: an export is running or `sdc.toml` is read-only. An unticked **Also export as** box is also greyed outside the `cs` mode.
 
 ## Shared helpers
 

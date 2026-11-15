@@ -27,6 +27,7 @@ pub const SCENARIOS: &[(&str, Scenario)] = &[
     ("main_window", main_window),
     ("start_screen", start_screen),
     ("export_to_menu", export_to_menu),
+    ("settings_tab", settings_tab),
     ("problems_tab", problems_tab),
     ("tile_menu", tile_menu),
     ("texture_panel", texture_panel),
@@ -266,6 +267,13 @@ fn export_to_menu(dir: &Path) -> Frame {
     let r = reveal(&mut h, |h| button_starting(h, "Export to").click());
     let b = button_starting(&h, "Export to").rect();
     shot(&mut h, r.union(b))
+}
+
+/// GUI-Main-Window: the Settings tab in front of the centre column (Note JI1).
+fn settings_tab(dir: &Path) -> Frame {
+    let mut h = opened_with(dir, |_| {});
+    let r = reveal(&mut h, |h| h.state_mut().model.open_settings_tab());
+    shot(&mut h, r)
 }
 
 /// GUI-Problems: the Problems tab with the demo's rows.
