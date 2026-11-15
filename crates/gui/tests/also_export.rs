@@ -335,7 +335,7 @@ fn reviews_button_names_the_folders() {
     );
 }
 
-/// Note JD1: the number on Review's Export button, under What will be written and on the header hover is the number
+/// Note JF1: the number on Review's Export button, under What will be written and on the header hover is the number
 /// of DDS files the export writes into the PBR folder (a first export into an empty location). The Vanilla and CM
 /// folders are named and get no number: "5 files to 2 folders" stood for an export that wrote 9.
 #[test]
@@ -708,7 +708,7 @@ fn reviewing(d: &Path, w: f32) -> H {
     h
 }
 
-/// Note JD1: under What will be written the count is the PBR folder's and the Vanilla folder is named, at a narrow
+/// Note JF1: under What will be written the count is the PBR folder's and the Vanilla folder is named, at a narrow
 /// window too (a cut line keeps its whole text as its name).
 #[test]
 fn reviews_footer_counts_the_pbr_folder_and_names_the_vanilla_folder() {

@@ -50,12 +50,12 @@ pub enum Decision {
     /// A single image that is not six faces, a cross or a strip (`Need::CubeLayout`); its only answer is a sub-type.
     NotACubeSource,
     Acknowledge(Code),
-    /// Note JD3: a blocking code that `allow` cannot clear ([`ack_clears`]). The question names the change that
+    /// Note JF3: a blocking code that `allow` cannot clear ([`ack_clears`]). The question names the change that
     /// ends it and offers that change, never Acknowledge.
     Change(Code),
 }
 
-/// Note JD3: whether adding `code` to the file's `allow` ends its block. The engine ignores `allow` for
+/// Note JF3: whether adding `code` to the file's `allow` ends its block. The engine ignores `allow` for
 /// FMT-CS-SKIN-LOADER (the file would load as nothing in CS), and for CFG-UNAVAILABLE it only accepts a fallback
 /// sub-type, so a sub-type without one stays blocked (`engine::policy::resolve`).
 pub fn ack_clears(job: &ResolvedJob, code: Code) -> bool {
@@ -69,7 +69,7 @@ pub fn ack_clears(job: &ResolvedJob, code: Code) -> bool {
     }
 }
 
-/// Note JD3: what **Use BC7** writes for a skin map Community Shaders cannot load: BC7 with the job's own tag when
+/// Note JF3: what **Use BC7** writes for a skin map Community Shaders cannot load: BC7 with the job's own tag when
 /// the type takes that pair, else with the first tag it takes. `None` (no button) for a type that takes no BC7 under
 /// the mode, so the button never writes a format the type's own format list leaves out.
 pub fn bc7_for(job: &ResolvedJob) -> Option<(Format, ColorTag)> {
@@ -187,7 +187,7 @@ pub fn decisions_of(job: &ResolvedJob) -> Vec<Decision> {
     for w in &job.warnings {
         let merged = alpha_asked && w.code == Code::LossAlphaData;
         if w.severity == Severity::Blocking && w.code != Code::SugLowConfidence && !merged {
-            // Note JD3: Acknowledge only where it ends the block. A type the mode does not have is answered by the
+            // Note JF3: Acknowledge only where it ends the block. A type the mode does not have is answered by the
             // type question when that is asked already, so it is no second one.
             if ack_clears(job, w.code) {
                 out.push(Decision::Acknowledge(w.code));

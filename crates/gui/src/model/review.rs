@@ -456,7 +456,7 @@ impl AppModel {
         t
     }
 
-    /// Review's count under What will be written: "20 DDS files". Note JD1: with an Also tick the count is the PBR
+    /// Review's count under What will be written: "20 DDS files". Note JF1: with an Also tick the count is the PBR
     /// folder's and the other folders are named without one, "20 DDS files in the PBR folder, plus the Vanilla folder".
     pub fn written_text(&self) -> String {
         let n = self.export_files();
@@ -485,7 +485,7 @@ impl AppModel {
             Some(s) => s.label.clone(),
             None => format!("Export {files} file{}", plural(files)),
         };
-        // Note JD1: the count is the PBR folder's; the folders copied or derived from it are named, not counted.
+        // Note JF1: the count is the PBR folder's; the folders copied or derived from it are named, not counted.
         if self.also_runs() {
             t.push_str(&format!(" + {}", self.also_extra_folders()));
         }

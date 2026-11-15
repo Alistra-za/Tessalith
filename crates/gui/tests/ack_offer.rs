@@ -1,4 +1,4 @@
-//! Note JD3: Acknowledge is offered only for a blocking code the engine lets `allow` clear. `FMT-CS-SKIN-LOADER` and a
+//! Note JF3: Acknowledge is offered only for a blocking code the engine lets `allow` clear. `FMT-CS-SKIN-LOADER` and a
 //! `CFG-UNAVAILABLE` without a fallback sub-type stay blocked whatever `allow` holds (`engine::policy::resolve`), so
 //! their question offers the change that ends the block: **Use BC7**, or the type picker.
 mod support;

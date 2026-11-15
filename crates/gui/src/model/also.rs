@@ -258,7 +258,7 @@ impl AppModel {
         engine::also::check_names(&cfg, &project)
     }
 
-    /// Note JD1: the folders an Also export writes beside the PBR folder, as the count's texts name them (CM needs
+    /// Note JF1: the folders an Also export writes beside the PBR folder, as the count's texts name them (CM needs
     /// Vanilla, TA30). They get no number: their files are planned by the export itself, after the PBR folder.
     pub fn also_extra_folders(&self) -> &'static str {
         if self.also_ticks().1 {

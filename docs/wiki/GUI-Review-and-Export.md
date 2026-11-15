@@ -52,7 +52,7 @@ Review opens in the bottom panel, not a dialog, for a blocker, an undecided text
 
 - **Blockers** (red) have **Go to set** or their own button. A missing export folder, a missing preset (**Choose preset…**) and a read-only `sdc.toml` count as blockers. <!-- D:FP8 --> Export stays greyed with the reason ("Fix 2 blockers first").
 - **Undecided** rows carry the same buttons as Problems, and **Accept all suggestions**: [Deciding from the list](GUI-Problems.md#deciding-from-the-list). Warnings aren't listed here; they are Problems rows and never hold back Export.
-- **What will be written** counts the DDS files and gives each JSON a state. A texture that failed to plan isn't counted. With **Also export** on, the count is the PBR folder's and the button reads **Export 20 files + Vanilla folder**: the Vanilla and CM files are planned during the export, so they have no count before it. <!-- D:JD1 --> **NIF edits** lists each edited NIF; one that can't be exported is listed in amber with its reason and never holds back the textures. A cancelled export writes no NIF edits.
+- **What will be written** counts the DDS files and gives each JSON a state. A texture that failed to plan isn't counted. With **Also export** on, the count is the PBR folder's and the button reads **Export 20 files + Vanilla folder**: the Vanilla and CM files are planned during the export, so they have no count before it. <!-- D:JF1 --> **NIF edits** lists each edited NIF; one that can't be exported is listed in amber with its reason and never holds back the textures. A cancelled export writes no NIF edits.
 - **Export 20 files (skip 2 undecided)** exports the decided textures and never decides for you. **Close** cancels an export it had queued.
 
 ### Overwrite questions

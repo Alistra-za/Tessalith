@@ -1304,7 +1304,7 @@ fn decision_box(
                             actions.push(Action::Decide(Answer::Acknowledge(*code)));
                         }
                     }
-                    // Note JD3: a block Acknowledge cannot clear: the sentence, the engine's message and the change
+                    // Note JF3: a block Acknowledge cannot clear: the sentence, the engine's message and the change
                     // that ends it (another type, or BC7 for a skin map Community Shaders cannot load).
                     Decision::Change(code) => {
                         ui.label(egui::RichText::new(change_line(*code)).strong())

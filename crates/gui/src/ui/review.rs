@@ -141,7 +141,7 @@ fn fix_buttons_on(
             match d {
                 // Note FB9 (owner amendment A): `[Set type: {suggestion} ✓] ▾`, the main part accepts, ▾ opens the
                 // picker; without a suggestion the plain "Set type…" opens it.
-                // A not-a-cube source has only this answer too: a different sub-type (no suggestion). Note JD3: so
+                // A not-a-cube source has only this answer too: a different sub-type (no suggestion). Note JF3: so
                 // has a type the mode does not have and gives no fallback for.
                 d @ (Decision::Subtype { .. }
                 | Decision::NotACubeSource
@@ -205,7 +205,7 @@ fn fix_buttons_on(
                         pick = Some(RowPick::Answer(key.to_string(), Answer::Acknowledge(*code)));
                     }
                 }
-                // Note JD3: the one change that ends the block, never an Acknowledge that cannot.
+                // Note JF3: the one change that ends the block, never an Acknowledge that cannot.
                 Decision::Change(Code::FmtCsSkinLoader) => {
                     if let Some((f, tag)) = item.job.as_ref().and_then(bc7_for) {
                         if ui
@@ -692,7 +692,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                 }
                                 Footer::Written(text) => {
                                     ui.strong("What will be written");
-                                    // Note JD1: with an Also tick the line is long; cut, it keeps its text on hover.
+                                    // Note JF1: with an Also tick the line is long; cut, it keeps its text on hover.
                                     ui.add(egui::Label::new(text).truncate());
                                 }
                                 Footer::Json(l) => {

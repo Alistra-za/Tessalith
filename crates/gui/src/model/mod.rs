@@ -207,7 +207,7 @@ pub enum Answer {
     Alpha(AlphaPolicy),
     Green(GreenConvention),
     Acknowledge(Code),
-    /// Note JD3: the format and tag a row's **Use BC7** writes (`items::bc7_for`).
+    /// Note JF3: the format and tag a row's **Use BC7** writes (`items::bc7_for`).
     Format(engine::config::Format, engine::config::ColorTag),
 }
 
