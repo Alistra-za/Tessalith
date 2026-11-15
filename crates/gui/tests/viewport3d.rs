@@ -2118,6 +2118,39 @@ fn offered_views_follow_support_and_the_loaded_materials() {
     );
 }
 
+/// Note ID38: the views and the per-tree notes follow the tree in use. Tree B draws a v1 shape as vanilla (no
+/// Metallic) and skips a type-21 shape that breaks a CS 2.0 rule, which tree A draws as its stand-in.
+#[test]
+fn views_and_tree_notes_follow_the_tree() {
+    use v3::DebugView::*;
+    let (mut v, _cmds) = rendered();
+    v.handle(v3::V3Reply::DebugSupport(true));
+    v.handle(v3::V3Reply::Shapes(vec![shape_info(0, pbr())]));
+    assert!(v.offered().contains(&Metallic), "A: v1 is TruePBR");
+    assert!(v.tree_notes().is_empty());
+    v.set_tree(render3d::Tree::B);
+    assert!(!v.offered().contains(&Metallic), "B: v1 is vanilla");
+
+    let mut bad = MaterialState::builtin_default();
+    bad.shader_type = 21;
+    bad.params.trailer = nif::props::LightingTrailer::Pbr2 {
+        version: 2,
+        features: 0,
+        params: nif::pbr2::PBR2_DEFAULTS,
+    };
+    bad.pbr2_error = Some("CS 2.0 won't draw this shape: x".into());
+    v.handle(v3::V3Reply::Shapes(vec![
+        shape_info(0, pbr()),
+        shape_info(1, bad),
+    ]));
+    assert_eq!(v.tree_notes(), ["s1: CS 2.0 won't draw this shape: x"]);
+    v.set_tree(render3d::Tree::A);
+    assert_eq!(
+        v.tree_notes(),
+        [format!("s1: {}", render3d::material::APPROXIMATE)]
+    );
+}
+
 #[test]
 fn a_load_that_drops_the_current_view_falls_back_to_lit() {
     let (mut v, cmds) = rendered();

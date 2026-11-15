@@ -32,7 +32,7 @@ pub use includes::{ShaderSource, Tree};
 pub use material::{
     classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
 };
-pub use parse::{parse, parse_in, ParsedNif, ParsedShape, ShapeId};
+pub use parse::{parse, ParsedNif, ParsedShape, ShapeId};
 pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
 #[cfg(feature = "test-hooks")]
 pub use replay::{load_fixture, Replay, ReplayOut};
@@ -149,6 +149,17 @@ struct ShapeState {
     /// `Failed` because the program did not compile (a `LoadReport::compile_errors` line), not for a mesh or
     /// GPU error (an `errors` line).
     compile_failed: bool,
+}
+
+/// Takes a shape out of the draw order and keeps its draw for later ([`material::skipped`]).
+fn hide(state: &mut ShapeState) {
+    state.status = ShapeStatus::Hidden;
+    // A program still compiling for it is memoised when it lands, not applied.
+    state.wanted = None;
+    // Not updated while hidden: whatever returns it to the draw order must rewrite its fields.
+    if let Some(d) = state.draw.as_mut() {
+        d.stale = true;
+    }
 }
 
 /// A permutation as the compile pool needs it: its pair key, the shared expanded source, both define sets.
@@ -760,16 +771,22 @@ impl Renderer {
         }
     }
 
-    /// Every shape that is not hidden through [`Renderer::begin`] (a define-set change, C11). A program that is at
+    /// Every shape this tree draws through [`Renderer::begin`] (a define-set or tree change, C11); one it skips
+    /// ([`material::skipped`]: hidden, or a type-21 shape CS 2.0 refuses on tree B) is hidden. A program that is at
     /// hand swaps now; the others queue one job each and stay `Pending { showing_previous }` on their old draw.
     /// The resolver is never asked: every slot of a shape's material is in `tex_cache` since its load or edit.
     fn begin_all(&mut self) {
-        let todo: Vec<(ShapeId, MaterialState)> = self
-            .shapes
-            .iter()
-            .filter(|(_, s)| s.status != ShapeStatus::Hidden)
-            .map(|(id, s)| (*id, s.material.clone()))
-            .collect();
+        let tree = self.tree();
+        let mut todo: Vec<(ShapeId, MaterialState)> = vec![];
+        for (id, s) in self.shapes.iter_mut() {
+            if material::skipped(&s.material, tree) {
+                if s.status != ShapeStatus::Hidden {
+                    hide(s);
+                }
+            } else {
+                todo.push((*id, s.material.clone()));
+            }
+        }
         let mut scratch = LoadReport::default();
         for (id, m) in todo {
             self.begin(id, &m, &|_| None, &mut scratch);
@@ -1680,8 +1697,9 @@ impl Renderer {
         if parsed.le_mesh {
             return rep;
         }
+        let tree = self.tree();
         for s in &parsed.shapes {
-            let hidden = s.material.hidden;
+            let hidden = material::skipped(&s.material, tree);
             self.shapes.insert(
                 s.id,
                 ShapeState {
@@ -1763,6 +1781,19 @@ impl Renderer {
             ..ParsedNif::default()
         };
         self.load_inner(&parsed, textures, !self.async_compile, true)
+    }
+
+    /// The loaded shapes' per-tree notes for this renderer's tree, in id order, as "<shape>: <note>"
+    /// ([`material::tree_note`]; Note ID38). Not in the [`LoadReport`]: they change with `set_tree` and edits.
+    pub fn tree_notes(&self) -> Vec<String> {
+        let tree = self.tree();
+        self.shapes
+            .values()
+            .filter_map(|s| {
+                material::tree_note(&s.material, tree)
+                    .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
+            })
+            .collect()
     }
 
     /// Every loaded shape in id order, with the material last loaded or set and its status.
@@ -1858,16 +1889,10 @@ impl Renderer {
                 || kind == EditKind::Permutation;
             (kind, rebuild)
         };
-        if m.hidden {
+        if material::skipped(&m, self.tree()) {
             if let Some(state) = self.shapes.get_mut(&id) {
                 state.material = m;
-                state.status = ShapeStatus::Hidden;
-                // A program still compiling for it is memoised when it lands, not applied.
-                state.wanted = None;
-                // Not updated while hidden: whatever returns it to the draw order must rewrite its fields.
-                if let Some(d) = state.draw.as_mut() {
-                    d.stale = true;
-                }
+                hide(state);
             }
             self.sort_draw_order();
             return Ok(kind);

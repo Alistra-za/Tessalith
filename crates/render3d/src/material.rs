@@ -41,6 +41,9 @@ pub const PBR_THIN_SURFACE: u32 = 1 << 14;
 /// CS 2.0 `PBR::Flags::HasFuzzRoughnessTexture` (tree B PBRMath.hlsli:39): fuzz roughness from slot 3 green.
 pub const PBR_HAS_FUZZ_ROUGHNESS_TEXTURE: u32 = 1 << 15;
 
+/// The note of a type-21 shape on tree A, which draws its `to_v1` stand-in (Note ID33).
+pub const APPROXIMATE: &str = "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading";
+
 /// The PBR mode `m` draws with on `tree`'s shaders (Note ID33). Tree A: type 21 draws as its `to_v1` stand-in (V1),
 /// bit 23 is V1. Tree B: type 21 is V2, and a v1 shape is None, because CS 2.0 hands it to the vanilla reader. Type 21
 /// is checked first, so a foreign type-21 shape that still has bit 23 is v2.
@@ -66,32 +69,35 @@ pub fn own_pbr(m: &MaterialState) -> Pbr {
 }
 
 /// The material `tree`'s shaders draw for `m` (Note ID33); `own_pbr(&drawn(m, tree)) == pbr_mode(m, tree)`.
-/// - tree A, type 21: the v1 shape `nif::pbr2::to_v1` makes of it (an approximation: tree A has no thin-surface or
-///   foliage shading): type 11 with a MultiLayer trailer when it carries trailer floats, else type 0; SLSF2 loses the
-///   v1 PBR bits and bit 24, then gets `slsf2_set`; the extra data is dropped.
+/// - tree A, type 21: what a conversion to v1 PBR writes (`nif::pbr2::v1_body`, Note ID38; an approximation: tree A
+///   has no thin-surface or foliage shading): type 11 with a MultiLayer trailer when `to_v1` keeps trailer floats,
+///   else type 0; the extra data is dropped.
 /// - tree B, a v1 shape: the same material without SLSF2 bit 23, which the vanilla reader ignores.
 /// - anything else: `m` as it is.
 pub fn drawn(m: &MaterialState, tree: Tree) -> Cow<'_, MaterialState> {
     match tree {
         Tree::A if m.is_pbr2() => {
             let (features, params) = pbr2_payload(m);
-            let v = nif::pbr2::to_v1(features, &params);
+            let t = nif::pbr2::stand_in_type(features, &params);
+            let b = nif::pbr2::v1_body(m.slsf2, features, &params, t);
             let mut s = m.clone();
-            s.shader_type = if v.mlp.is_some() { 11 } else { 0 };
-            s.slsf2 = (m.slsf2 & !(nif::pbr2::V1_SLSF2 | 1 << 24)) | v.slsf2_set;
-            s.params.glossiness = v.glossiness;
-            s.params.specular_color = v.specular_color;
-            s.params.specular_strength = v.specular_strength;
-            s.params.lighting_effect_1 = v.lighting_effect_1;
-            s.params.lighting_effect_2 = v.lighting_effect_2;
-            s.params.trailer = match v.mlp {
-                Some(f) => LightingTrailer::MultiLayer {
-                    inner_thickness: f[0],
-                    refraction_scale: f[1],
-                    inner_texture_scale: [f[2], f[3]],
-                    envmap_strength: 0.0,
-                },
-                None => LightingTrailer::None,
+            s.shader_type = t;
+            s.slsf2 = b.slsf2;
+            s.params.glossiness = b.glossiness;
+            s.params.specular_color = b.specular_color;
+            s.params.specular_strength = b.specular_strength;
+            s.params.lighting_effect_1 = b.lighting_effect_1;
+            s.params.lighting_effect_2 = b.lighting_effect_2;
+            s.params.trailer = match b.trailer[..] {
+                [inner_thickness, refraction_scale, u, v, envmap_strength] => {
+                    LightingTrailer::MultiLayer {
+                        inner_thickness,
+                        refraction_scale,
+                        inner_texture_scale: [u, v],
+                        envmap_strength,
+                    }
+                }
+                _ => LightingTrailer::None,
             };
             s.params.pbr2_extra = None;
             Cow::Owned(s)
@@ -102,6 +108,24 @@ pub fn drawn(m: &MaterialState, tree: Tree) -> Cow<'_, MaterialState> {
             Cow::Owned(s)
         }
         _ => Cow::Borrowed(m),
+    }
+}
+
+/// The renderer does not draw `m` on `tree`: the user hid it, or it is a type-21 shape that breaks a CS 2.0 rule
+/// (`pbr2_error`) on tree B, which CS 2.0 does not draw either (Note ID38). Tree A draws such a shape's stand-in.
+pub fn skipped(m: &MaterialState, tree: Tree) -> bool {
+    m.hidden || (tree == Tree::B && m.is_pbr2() && m.pbr2_error.is_some())
+}
+
+/// The per-tree note of a type-21 shape the user has not hidden: on tree A [`APPROXIMATE`], on tree B the CS 2.0 rule
+/// it breaks (Note ID38). `None` for anything else.
+pub fn tree_note(m: &MaterialState, tree: Tree) -> Option<&str> {
+    if m.hidden || !m.is_pbr2() {
+        return None;
+    }
+    match tree {
+        Tree::A => Some(APPROXIMATE),
+        Tree::B => m.pbr2_error.as_deref(),
     }
 }
 

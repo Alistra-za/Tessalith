@@ -225,14 +225,19 @@ fn fuzz_from_trailer() {
 }
 
 #[test]
-fn glint_inverts_log_density() {
+/// Note ID37: v1 trailer[1] is the log microfacet density itself (CS 1.x BSLightingShaderMaterialPBR.cpp:305), and so
+/// is p18 (spec section 4, default 40); only the shader packing takes 40 - it.
+fn glint_keeps_log_density() {
     let r = from_v1(
         11,
         PBR | 1 << 12,
         &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([1.5, 10.0, 0.02, 3.0])),
     );
     assert_eq!(r.features, GLINT);
-    assert_eq!(r.params[17..=20], [1.5, 30.0, 0.02, 3.0]);
+    assert_eq!(r.params[17..=20], [1.5, 10.0, 0.02, 3.0]);
+    let mut p = PBR2_DEFAULTS;
+    p[17..=20].copy_from_slice(&[1.5, 10.0, 0.02, 3.0]);
+    assert_eq!(to_v1(GLINT, &p).mlp, Some([1.5, 10.0, 0.02, 3.0]));
 }
 
 #[test]
@@ -251,14 +256,17 @@ fn out_of_range_is_clamped_and_reported() {
     let r = from_v1(0, PBR, &v1(1.0, 2.0, [1.0; 3], 0.0, 1.0, None));
     assert_eq!(r.params[1], 1.0);
     assert_eq!(r.clamped, [(1, 2.0, 1.0)]);
-    // a glint trailer of zeros (log density 40 - 0 is fine, scale 0 is below 1, roughness 0 below 0.005)
+    // a glint trailer of zeros (scale 0 and log density 0 are below 1, roughness 0 below 0.005)
     let r = from_v1(
         11,
         PBR | 1 << 12,
         &v1(1.0, 0.04, [1.0; 3], 0.0, 1.0, Some([0.0; 4])),
     );
-    assert_eq!(r.params[17..=20], [1.0, 40.0, 0.005, 0.0]);
-    assert_eq!(r.clamped, [(17, 0.0, 1.0), (19, 0.0, 0.005)]);
+    assert_eq!(r.params[17..=20], [1.0, 1.0, 0.005, 0.0]);
+    assert_eq!(
+        r.clamped,
+        [(17, 0.0, 1.0), (18, 0.0, 1.0), (19, 0.0, 0.005)]
+    );
     // a NaN takes the default
     let r = from_v1(0, PBR, &v1(f32::NAN, 0.04, [1.0; 3], 0.0, 1.0, None));
     assert_eq!(r.params[0], PBR2_DEFAULTS[0]);
@@ -359,6 +367,40 @@ fn v1_sub_flags_without_the_pbr_bit_give_no_features() {
     let r = from_v1(11, f2, &v1(0.8, 0.05, [0.2; 3], 0.7, 0.5, Some([0.3; 4])));
     assert_eq!(r.features, 0);
     assert_eq!(r.params[3..], PBR2_DEFAULTS[3..]);
+}
+
+/// Note ID38: the v1 body of a type-21 shape, which `set_shader_type`'s from-21 conversion writes and the preview's
+/// tree A draws.
+#[test]
+fn v1_body_is_the_from_21_conversion() {
+    use nif::pbr2::{stand_in_type, v1_body, V1_SLSF2};
+    let mut p = PBR2_DEFAULTS;
+    p[17..=20].copy_from_slice(&[1.5, 10.0, 0.02, 3.0]);
+    let slsf2 = V1_SLSF2 | 1 << 24 | 1 << 4;
+    let v = to_v1(GLINT, &p);
+    assert_eq!(stand_in_type(GLINT, &p), 11);
+    let b = v1_body(slsf2, GLINT, &p, 11);
+    assert_eq!(b.slsf2, 1 << 4 | v.slsf2_set);
+    assert_eq!(
+        b.trailer,
+        [1.5, 10.0, 0.02, 3.0, nif::edit::trailer_defaults(11)[4]]
+    );
+    assert_eq!(
+        (b.glossiness, b.specular_strength, b.specular_color),
+        (v.glossiness, v.specular_strength, v.specular_color)
+    );
+    assert_eq!(
+        (b.lighting_effect_1, b.lighting_effect_2),
+        (v.lighting_effect_1, v.lighting_effect_2)
+    );
+    assert!(b.dropped.is_empty());
+    // type 0 keeps only the flags it shares with the type-11 form and names what the trailer carried
+    let b0 = v1_body(slsf2, GLINT | SUBSURFACE, &p, 0);
+    assert_eq!(b0.slsf2, 1 << 4 | PBR | 1 << 26);
+    assert!(b0.trailer.is_empty());
+    assert_eq!(b0.dropped, ["Glint"]);
+    assert_eq!(stand_in_type(SUBSURFACE, &p), 0);
+    assert_eq!(v1_body(slsf2, SUBSURFACE, &p, 0).trailer, Vec::<f32>::new());
 }
 
 #[test]

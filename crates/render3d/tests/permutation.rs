@@ -195,9 +195,13 @@ fn tree_a_draws_type_21_as_its_to_v1_shape() {
     params[11] = 0.4;
     params[12] = 0.06;
     let want = nif::pbr2::to_v1(feat::TWO_LAYER | feat::COAT_NORMAL, params);
+    // v1 PBR bits and the multi-layer bit on the source go unless the stand-in sets them; other bits stay
+    m.slsf2 |= nif::pbr2::V1_SLSF2 | 1 << 24 | 1 << 4;
+    let kept = m.slsf2 & !(nif::pbr2::V1_SLSF2 | 1 << 24);
+    assert_ne!(kept & 1 << 4, 0);
     let a = drawn(&m, Tree::A);
     assert_eq!(a.shader_type, 11, "two-layer needs the MLP trailer");
-    assert_eq!(a.slsf2 & want.slsf2_set, want.slsf2_set);
+    assert_eq!(a.slsf2, kept | want.slsf2_set, "{:#x}", a.slsf2);
     assert!(a.is_pbr());
     assert_eq!(a.params.glossiness, want.glossiness);
     assert_eq!(a.params.specular_strength, want.specular_strength);
@@ -211,8 +215,33 @@ fn tree_a_draws_type_21_as_its_to_v1_shape() {
             inner_thickness: mlp[0],
             refraction_scale: mlp[1],
             inner_texture_scale: [mlp[2], mlp[3]],
-            envmap_strength: 0.0,
+            // what a conversion to type 11 writes (Note ID38)
+            envmap_strength: nif::edit::trailer_defaults(11)[4],
         }
+    );
+    // Glint: the stand-in's trailer[1] is p18, the log density (Note ID37).
+    let mut g = t21(feat::GLINT);
+    let LightingTrailer::Pbr2 { params, .. } = &mut g.params.trailer else {
+        unreachable!()
+    };
+    params[17..=20].copy_from_slice(&[1.5, 12.0, 0.02, 3.0]);
+    let LightingTrailer::MultiLayer {
+        inner_thickness,
+        refraction_scale,
+        inner_texture_scale,
+        ..
+    } = drawn(&g, Tree::A).params.trailer
+    else {
+        panic!("glint needs the MLP trailer")
+    };
+    assert_eq!(
+        [
+            inner_thickness,
+            refraction_scale,
+            inner_texture_scale[0],
+            inner_texture_scale[1]
+        ],
+        [1.5, 12.0, 0.02, 3.0]
     );
     // Without a trailer feature: type 0, no trailer.
     let plain = drawn(&t21(feat::SUBSURFACE), Tree::A).into_owned();
@@ -224,14 +253,15 @@ fn tree_a_draws_type_21_as_its_to_v1_shape() {
     assert_eq!(*drawn(&v1(&[26]), Tree::A), v1(&[26]));
 }
 
-/// The renderer resolves the drawn material with its own tree, at every (re)permutation: `set_tree` flips a v1 shape
-/// between TruePBR and vanilla and keeps type 21 on TRUE_PBR. WARP device, async: nothing is compiled.
-#[test]
-fn the_renderer_draws_per_tree() {
-    #[path = "common/mod.rs"]
-    mod common;
-    use render3d::device::Gpu;
-    use render3d::{ParsedNif, Renderer, ShaderSource, ShapeId};
+#[path = "common/mod.rs"]
+mod common;
+use render3d::device::Gpu;
+use render3d::material::{EditKind, PBR_GLINT, PBR_SUBSURFACE};
+use render3d::{ParsedNif, Renderer, ShaderSource, ShapeId, ShapeStatus};
+
+/// A WARP renderer on tree A; `sync` compiles every program before a call returns, so the draws' cbuffers are the
+/// real ones (`draw_cb_floats`).
+fn renderer(sync: bool) -> (tempfile::TempDir, Renderer) {
     let cache = tempfile::tempdir().unwrap();
     let mut r = Renderer::with_gpu_source(
         Gpu::new_warp().unwrap(),
@@ -239,35 +269,139 @@ fn the_renderer_draws_per_tree() {
         cache.path().to_path_buf(),
     )
     .unwrap();
-    r.set_async_compile(true);
-    let mut a = common::plane_shape(1, common::IDENT, [1.0; 3], 0);
-    a.material.slsf2 |= 1 << 23;
-    let mut b = common::plane_shape(2, common::IDENT, [1.0; 3], 0);
-    b.material = t21(feat::GLINT);
-    r.load_parsed(
+    r.set_async_compile(!sync);
+    (cache, r)
+}
+
+/// Loads one plane per material, ids 1, 2, …
+fn load(r: &mut Renderer, mats: Vec<MaterialState>) {
+    let shapes = mats
+        .into_iter()
+        .enumerate()
+        .map(|(i, m)| {
+            let mut s = common::plane_shape(i as u32 + 1, common::IDENT, [1.0; 3], 0);
+            s.material = m;
+            s
+        })
+        .collect();
+    let rep = r.load_parsed(
         &ParsedNif {
-            shapes: vec![a, b],
+            shapes,
             ..Default::default()
         },
         &|_| None,
     );
-    let ps = |r: &mut Renderer, id: u32| -> Vec<String> {
-        r.draw_diag(ShapeId(id))
-            .unwrap()
-            .0
-            .into_iter()
-            .map(|(k, _)| k)
-            .collect()
+    assert!(
+        rep.errors.is_empty() && rep.compile_errors.is_empty(),
+        "{rep:?}"
+    );
+}
+
+fn cb(r: &Renderer, id: u32, var: &str) -> Vec<f32> {
+    r.draw_cb_floats(ShapeId(id), var)
+        .unwrap_or_else(|| panic!("shape {id} has no {var}"))
+}
+
+fn flags(r: &Renderer, id: u32) -> u32 {
+    r.draw_cb_floats(ShapeId(id), "PBRFlags")
+        .map_or(0, |f| f[0].to_bits())
+}
+
+fn status(r: &Renderer, id: u32) -> ShapeStatus {
+    r.shapes()
+        .into_iter()
+        .find(|s| s.id == ShapeId(id))
+        .unwrap()
+        .status
+}
+
+/// Note ID33, on the draws the renderer builds (sync compile, WARP): tree A writes a type-21 glint shape's v1
+/// stand-in block and tree B its CS 2.0 block; a v1 shape is TruePBR on A and vanilla (no PBRFlags) on B.
+#[test]
+fn each_tree_writes_its_own_pbr_block() {
+    let (_c, mut r) = renderer(true);
+    let mut g = t21(feat::GLINT);
+    let LightingTrailer::Pbr2 { params, .. } = &mut g.params.trailer else {
+        unreachable!()
     };
-    let has = |d: &[String], n: &str| d.iter().any(|x| x == n);
-    let (v1a, t21a) = (ps(&mut r, 1), ps(&mut r, 2));
-    assert!(has(&v1a, "TRUE_PBR") && !has(&v1a, "SPECULAR"), "{v1a:?}");
-    assert!(has(&t21a, "TRUE_PBR") && has(&t21a, "GLINT"), "{t21a:?}");
+    params[..3].copy_from_slice(&[0.7, 0.2, 1.3]);
+    params[17..=20].copy_from_slice(&[1.5, 12.0, 0.02, 3.0]);
+    params[21..=24].copy_from_slice(&[0.11, 0.22, 0.33, 0.44]);
+    let glint = [1.5, 40.0 - 12.0, 0.02, 3.0];
+    load(&mut r, vec![g, v1(&[26])]);
+
+    assert_ne!(flags(&r, 1) & PBR_GLINT, 0, "A: {:#x}", flags(&r, 1));
+    assert_eq!(cb(&r, 1, "MultiLayerParallaxData"), glint, "A glint");
+    assert_eq!(
+        cb(&r, 1, "LightingEffectParams"),
+        [0.0, 1.3, 0.0, 0.0],
+        "A: v1 lighting effects"
+    );
+    assert_ne!(flags(&r, 2) & PBR_SUBSURFACE, 0, "A: v1 subsurface");
+
     r.set_tree(Tree::B);
-    let (v1b, t21b) = (ps(&mut r, 1), ps(&mut r, 2));
-    assert!(!has(&v1b, "TRUE_PBR") && has(&v1b, "SPECULAR"), "{v1b:?}");
-    assert!(has(&t21b, "TRUE_PBR") && has(&t21b, "GLINT"), "{t21b:?}");
+    assert_ne!(flags(&r, 1) & PBR_GLINT, 0, "B: {:#x}", flags(&r, 1));
+    assert_eq!(cb(&r, 1, "PBRParams1"), [0.7, 1.3, 0.2]);
+    assert_eq!(cb(&r, 1, "MultiLayerParallaxData"), glint, "B glint");
+    assert_eq!(cb(&r, 1, "LightingEffectParams"), [0.11, 0.22, 0.33, 0.44]);
+    assert_eq!(flags(&r, 2), 0, "B draws v1 as vanilla");
     // The stored material stays the source: type 21, not the stand-in.
-    let shapes = r.shapes();
-    assert_eq!(shapes[1].material.shader_type, 21);
+    assert_eq!(r.shapes()[0].material.shader_type, 21);
+}
+
+/// An edit tree A cannot see (p21 on a type-21 shape without subsurface or thin surface) is `Same` there, but the
+/// renderer keeps it, so tree B draws it after a switch.
+#[test]
+fn an_edit_tree_a_cannot_see_reaches_tree_b() {
+    let (_c, mut r) = renderer(true);
+    load(&mut r, vec![t21(0)]);
+    let mut m = r.shapes()[0].material.clone();
+    let LightingTrailer::Pbr2 { params, .. } = &mut m.params.trailer else {
+        unreachable!()
+    };
+    params[21] = 0.9;
+    let kind = r.set_material(ShapeId(1), m.clone(), &|_| None).unwrap();
+    assert_eq!(kind, EditKind::Same);
+    assert_eq!(r.shapes()[0].material, m);
+    r.set_tree(Tree::B);
+    assert_eq!(cb(&r, 1, "LightingEffectParams")[0], 0.9);
+}
+
+/// Note ID38: the renderer, not `parse`, decides that tree B skips a type-21 shape that breaks a CS 2.0 rule, at load,
+/// on `set_tree` and on every edit; tree A draws it (with the approximation note). `hidden` stays the user's.
+#[test]
+fn an_invalid_21_is_skipped_on_tree_b_only() {
+    let (_c, mut r) = renderer(false);
+    let why = "CS 2.0 won't draw this shape: hair must be the only feature";
+    let mut bad = t21(feat::HAIR | feat::SUBSURFACE);
+    bad.pbr2_error = Some(why.into());
+    let mut user_hidden = t21(0);
+    user_hidden.hidden = true;
+    load(&mut r, vec![bad.clone(), t21(0), user_hidden]);
+    let approx = |id: u32| format!("plane{id}: {}", render3d::material::APPROXIMATE);
+    assert_ne!(status(&r, 1), ShapeStatus::Hidden, "A draws its stand-in");
+    assert_ne!(status(&r, 2), ShapeStatus::Hidden);
+    assert_eq!(status(&r, 3), ShapeStatus::Hidden);
+    // a shape the user hid gets no note
+    assert_eq!(r.tree_notes(), [approx(1), approx(2)]);
+
+    r.set_tree(Tree::B);
+    assert_eq!(status(&r, 1), ShapeStatus::Hidden, "B skips it");
+    assert_ne!(status(&r, 2), ShapeStatus::Hidden);
+    assert_eq!(status(&r, 3), ShapeStatus::Hidden);
+    assert_eq!(r.tree_notes(), [format!("plane1: {why}")]);
+    assert!(!r.shapes()[0].material.hidden, "hidden is the user's");
+
+    // An edit that fixes it draws it; one that breaks it again skips it.
+    let mut fixed = bad.clone();
+    fixed.pbr2_error = None;
+    r.set_material(ShapeId(1), fixed, &|_| None).unwrap();
+    assert_ne!(status(&r, 1), ShapeStatus::Hidden);
+    assert!(r.tree_notes().is_empty());
+    r.set_material(ShapeId(1), bad, &|_| None).unwrap();
+    assert_eq!(status(&r, 1), ShapeStatus::Hidden);
+
+    r.set_tree(Tree::A);
+    assert_ne!(status(&r, 1), ShapeStatus::Hidden, "A again");
+    assert_eq!(status(&r, 3), ShapeStatus::Hidden);
 }

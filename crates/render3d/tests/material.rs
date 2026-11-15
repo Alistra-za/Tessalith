@@ -658,6 +658,8 @@ fn write_pbr2_packs_params() {
     );
     let w = written(&fuzz(&[0.25]), &[], false);
     assert_eq!(floats(&w, "MaterialObjectRGBScale")[3], -1.0, "wrong count");
+    let w = written(&fuzz(&[f32::NAN, 0.0]), &[], false);
+    assert_eq!(floats(&w, "MaterialObjectRGBScale")[3], -1.0, "NaN");
 
     let w = written(&t21(feat::GLINT, p, None), &[], false);
     assert_eq!(
@@ -698,6 +700,10 @@ fn thin_surface_override_wins() {
     };
     let ts = feat::THIN_SURFACE | feat::SUBSURFACE;
     assert_eq!(lep(ts, &thin), thin);
+    // Foliage alone is thin too: the override applies and the ThinSurface flag is set.
+    assert_eq!(lep(feat::FOLIAGE | feat::SUBSURFACE, &thin), thin);
+    let w = written(&t21(feat::FOLIAGE, p, extra(Some(&thin), None)), &[], false);
+    assert_eq!(flags(&w), PBR_FOLIAGE | PBR_THIN_SURFACE);
     assert_eq!(
         lep(ts, &thin[..3]),
         [p[21], p[22], p[23], p[24]],

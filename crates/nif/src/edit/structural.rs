@@ -271,51 +271,34 @@ fn from_21(
     };
     let mut out = head_to_refraction(body, p, new_type)?;
     let mut notes = vec![];
-    let pbr = matches!(new_type, 0 | 11);
-    let mut v = pbr2::to_v1(*features, params);
-    // the v1 PBR flags, and the stale multi-layer flag, go; a PBR target sets what the features mean
-    let mut s2 = lt.slsf2 & !(pbr2::V1_SLSF2 | 1 << 24);
-    if pbr {
-        if new_type == 0 && (v.mlp.is_some() || v.slsf2_set & 1 << 24 != 0) {
-            v.slsf2_set &= SLSF2_TRUE_PBR | 1 << 26;
-            v.mlp = None;
-            let kept = if v.slsf2_set & 1 << 26 != 0 {
-                pbr2::feat::SUBSURFACE
-            } else {
-                0
-            };
-            v.dropped = (0..pbr2::FEATURE_NAMES.len())
-                .filter(|b| features & !kept & (1 << b) != 0)
-                .map(|b| pbr2::FEATURE_NAMES[b])
-                .collect();
+    // a PBR target is `pbr2::v1_body`, which the preview's tree A draws too (Note ID38); any other is plain vanilla:
+    // the v1 PBR flags and the stale multi-layer flag go, and the values are `MaterialState::builtin_default`'s
+    let (s2, (gloss, spec, strength, le1, le2), t) = if matches!(new_type, 0 | 11) {
+        let b = pbr2::v1_body(lt.slsf2, *features, params, new_type);
+        if !b.dropped.is_empty() {
+            notes.push(format!("Dropped: {}", b.dropped.join(", ")));
         }
-        s2 |= v.slsf2_set;
-        if !v.dropped.is_empty() {
-            notes.push(format!("Dropped: {}", v.dropped.join(", ")));
-        }
-    }
-    put_u32(&mut out, p + 4, s2);
-    // the vanilla values of a non-PBR shape: `MaterialState::builtin_default`
-    let (gloss, spec, strength, le1, le2) = if pbr {
-        (
-            v.glossiness,
-            v.specular_color,
-            v.specular_strength,
-            v.lighting_effect_1,
-            v.lighting_effect_2,
-        )
+        let fields = (
+            b.glossiness,
+            b.specular_color,
+            b.specular_strength,
+            b.lighting_effect_1,
+            b.lighting_effect_2,
+        );
+        (b.slsf2, fields, b.trailer)
     } else {
-        (80.0, [1.0; 3], 1.0, 0.3, 2.0)
+        (
+            lt.slsf2 & !(pbr2::V1_SLSF2 | 1 << 24),
+            (80.0, [1.0; 3], 1.0, 0.3, 2.0),
+            trailer_defaults(new_type),
+        )
     };
+    put_u32(&mut out, p + 4, s2);
     out.extend(
         [gloss, spec[0], spec[1], spec[2], strength, le1, le2]
             .iter()
             .flat_map(|f| f.to_le_bytes()),
     );
-    let mut t = trailer_defaults(new_type);
-    if let (11, Some(mlp)) = (new_type, v.mlp) {
-        t[..4].copy_from_slice(&mlp);
-    }
     out.extend(t.iter().flat_map(|f| f.to_le_bytes()));
     Ok((out, notes))
 }

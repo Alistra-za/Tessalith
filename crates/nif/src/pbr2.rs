@@ -305,7 +305,8 @@ pub fn from_v1(shader_type: u32, slsf2: u32, p: &LightingParams) -> ToV2 {
             } else if has(SLSF2_FIT_SLOPE) {
                 features |= GLINT;
                 if let Some(t) = t {
-                    v[17..=20].copy_from_slice(&[t[0], 40.0 - t[1], t[2], t[3]]);
+                    // trailer[1] is the log density itself, as p18 is (Note ID37)
+                    v[17..=20].copy_from_slice(&t);
                 }
             }
         }
@@ -384,7 +385,7 @@ pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
             r.mlp = Some([p[13], p[14], p[15], p[16]]);
         } else if has(GLINT) {
             r.slsf2_set |= SLSF2_FIT_SLOPE;
-            r.mlp = Some([p[17], 40.0 - p[18], p[19], p[20]]);
+            r.mlp = Some([p[17], p[18], p[19], p[20]]);
         }
     }
     let kept = if has(TWO_LAYER) {
@@ -401,4 +402,64 @@ pub fn to_v1(features: u32, params: &[f32; PARAM_COUNT]) -> ToV1 {
         .map(|(_, &name)| name)
         .collect();
     r
+}
+
+/// The v1 PBR type that stands for a type-21 shape in tree A's preview: 11 when [`to_v1`] keeps trailer floats
+/// (two-layer, fuzz, glint), else 0 (Note ID33).
+pub fn stand_in_type(features: u32, params: &[f32; PARAM_COUNT]) -> u32 {
+    if to_v1(features, params).mlp.is_some() {
+        11
+    } else {
+        0
+    }
+}
+
+/// What a type-21 shape with SLSF2 `slsf2` becomes as v1 PBR type `new_type` (0 or 11): the SLSF2 word, the five
+/// lighting fields, the trailer floats after Lighting Effect 2, and the features dropped. `set_shader_type`'s
+/// conversion from 21 writes it and the preview's tree A draws it, so the two agree (Note ID11, ID14, ID38).
+#[derive(Debug, Clone, PartialEq)]
+pub struct V1Body {
+    pub slsf2: u32,
+    pub glossiness: f32,
+    pub specular_color: [f32; 3],
+    pub specular_strength: f32,
+    pub lighting_effect_1: f32,
+    pub lighting_effect_2: f32,
+    /// `trailer_defaults(new_type)` with the [`to_v1`] trailer floats first on type 11; empty on type 0.
+    pub trailer: Vec<f32>,
+    pub dropped: Vec<&'static str>,
+}
+
+/// See [`V1Body`]. The v1 PBR flags and the stale multi-layer bit go, then the bits [`to_v1`] sets. Type 0 has no
+/// trailer, so when `to_v1` chose the type-11 form only the bits that form shares with type 0 (PBR 23, subsurface 26)
+/// stay, and every feature but subsurface is dropped (Note ID14).
+pub fn v1_body(slsf2: u32, features: u32, params: &[f32; PARAM_COUNT], new_type: u32) -> V1Body {
+    let mut v = to_v1(features, params);
+    if new_type == 0 && (v.mlp.is_some() || v.slsf2_set & SLSF2_MLP != 0) {
+        v.slsf2_set &= SLSF2_PBR | SLSF2_SUBSURFACE;
+        v.mlp = None;
+        let kept = if v.slsf2_set & SLSF2_SUBSURFACE != 0 {
+            feat::SUBSURFACE
+        } else {
+            0
+        };
+        v.dropped = (0..FEATURE_NAMES.len())
+            .filter(|b| features & !kept & (1 << b) != 0)
+            .map(|b| FEATURE_NAMES[b])
+            .collect();
+    }
+    let mut trailer = crate::edit::trailer_defaults(new_type);
+    if let (11, Some(mlp)) = (new_type, v.mlp) {
+        trailer[..4].copy_from_slice(&mlp);
+    }
+    V1Body {
+        slsf2: (slsf2 & !(V1_SLSF2 | SLSF2_MLP)) | v.slsf2_set,
+        glossiness: v.glossiness,
+        specular_color: v.specular_color,
+        specular_strength: v.specular_strength,
+        lighting_effect_1: v.lighting_effect_1,
+        lighting_effect_2: v.lighting_effect_2,
+        trailer,
+        dropped: v.dropped,
+    }
 }

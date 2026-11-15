@@ -116,6 +116,10 @@ pub struct MaterialState {
     /// them across material edits (`Renderer::set_skin_preview`). None = the shape as loaded; boxed, as most shapes
     /// have none. Read with [`MaterialState::skin`], written with [`MaterialState::set_skin`].
     pub skin_preview: Option<Box<SkinPreview>>,
+    /// Preview-only, never in the NIF: the first CS 2.0 rule a type-21 shape breaks (`render3d::parse` fills it from
+    /// `edit::validate`'s type-21 rules; None = valid, not type 21, or not checked). The preview's tree B does not
+    /// draw the shape while it is set; tree A draws its stand-in (Note ID38).
+    pub pbr2_error: Option<String>,
 }
 
 /// The shape as loaded: no pick, dry.
@@ -172,6 +176,7 @@ impl MaterialState {
                 .is_some_and(|d| VertexDesc(d).has(Attr::Colors)),
             hidden: false,
             skin_preview: None,
+            pbr2_error: None,
         }
     }
 
@@ -206,6 +211,7 @@ impl MaterialState {
             has_vertex_colors: false,
             hidden: false,
             skin_preview: None,
+            pbr2_error: None,
         }
     }
 

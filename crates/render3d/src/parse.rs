@@ -38,20 +38,12 @@ pub struct ParsedNif {
     pub head_part: bool,
 }
 
-/// [`parse_in`] for tree A.
+/// Scans the NIF and decodes the geometry of every BSLightingShaderProperty shape, in block order. The same for both
+/// shader trees (Note ID38): a type-21 shape is kept as read, never hidden, with its first CS 2.0 Error
+/// (`edit::validate`'s type-21 rules) in `material.pbr2_error`; the renderer decides per tree what that means
+/// (`material::skipped`, `Renderer::tree_notes`). When the NIF does not read as a model the rules are not run: the
+/// shape draws, with a "CS 2.0 rules not checked" warning.
 pub fn parse(nif_bytes: &[u8]) -> ParsedNif {
-    parse_in(nif_bytes, crate::Tree::A)
-}
-
-/// The warning of a type-21 shape on tree A, which draws its `to_v1` stand-in (Note ID33).
-pub const APPROXIMATE: &str = "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading";
-
-/// Scans the NIF and decodes the geometry of every BSLightingShaderProperty shape, in block order. A type-21 shape is
-/// always kept as read (Note ID33): on tree A with the [`APPROXIMATE`] warning (`material::drawn` draws its v1
-/// stand-in); on tree B, when it breaks a CS 2.0 rule, hidden with its first Error as the warning, as CS does not draw it.
-/// shortcut: `hidden` is decided here, so a renderer switched to the other tree keeps this tree's verdict; parse again
-/// after a tree switch to upgrade.
-pub fn parse_in(nif_bytes: &[u8], tree: crate::Tree) -> ParsedNif {
     let mut out = ParsedNif::default();
     let scan = match nif::scan::scan(nif_bytes) {
         Ok(s) => s,
@@ -76,7 +68,7 @@ pub fn parse_in(nif_bytes: &[u8], tree: crate::Tree) -> ParsedNif {
     let graph = nif::graph::read_graph(&header, nif_bytes);
     out.warnings
         .extend(graph.problems.iter().map(|p| format!("NIF: {p}")));
-    let mut model: Option<Option<nif::model::NifModel>> = None;
+    let mut model: Option<Result<nif::model::NifModel, String>> = None;
     for row in &scan.shapes {
         let id = ShapeId(row.block);
         let label: Arc<str> = row
@@ -115,22 +107,13 @@ pub fn parse_in(nif_bytes: &[u8], tree: crate::Tree) -> ParsedNif {
         let world = nif::graph::world(&graph, row.block, &mesh.transform);
         let mut material = MaterialState::from_lighting(&row.head, lighting, slots, row.alpha);
         if lighting.shader_type == 21 {
-            match tree {
-                crate::Tree::A => out.warnings.push(format!("{short}: {APPROXIMATE}")),
-                crate::Tree::B => {
-                    // read once, only for a type-21 shape on tree B
-                    let m = model.get_or_insert_with(|| nif::model::read_model(nif_bytes).ok());
-                    let first = m.as_ref().and_then(|m| {
-                        let shader = u32::try_from(row.head.shader).ok()?;
-                        nif::edit::validate::type_21_warnings(m, shader)
-                            .into_iter()
-                            .find(|w| w.level == nif::edit::validate::Level::Error)
-                    });
-                    if let Some(w) = first {
-                        material.hidden = true;
-                        out.warnings.push(format!("{short}: {}", w.text));
-                    }
-                }
+            // read once, only for a NIF with a type-21 shape
+            let m = model.get_or_insert_with(|| {
+                nif::model::read_model(nif_bytes).map_err(|e| e.to_string())
+            });
+            match first_cs2_error(m.as_ref(), row.head.shader) {
+                Ok(e) => material.pbr2_error = e,
+                Err(e) => out.warnings.push(format!("{short}: {e}")),
             }
         }
         out.shapes.push(ParsedShape {
@@ -142,4 +125,33 @@ pub fn parse_in(nif_bytes: &[u8], tree: crate::Tree) -> ParsedNif {
         });
     }
     out
+}
+
+/// The first CS 2.0 Error of the type-21 shader `shader` (Note ID38): `Ok(None)` when it breaks no rule, `Err` (the
+/// warning text) when the rules could not run because the NIF did not read as a model.
+fn first_cs2_error(
+    model: Result<&nif::model::NifModel, &String>,
+    shader: i32,
+) -> Result<Option<String>, String> {
+    let m = model.map_err(|e| format!("CS 2.0 rules not checked: {e}"))?;
+    let Ok(shader) = u32::try_from(shader) else {
+        return Ok(None);
+    };
+    Ok(nif::edit::validate::type_21_warnings(m, shader)
+        .into_iter()
+        .find(|w| w.level == nif::edit::validate::Level::Error)
+        .map(|w| w.text))
+}
+
+#[cfg(test)]
+mod tests {
+    /// Note ID38: a NIF that scans but does not read as a model draws its type-21 shape unchecked, with a warning.
+    #[test]
+    fn an_unread_model_is_a_warning_not_a_verdict() {
+        let e = "block 3: truncated".to_string();
+        assert_eq!(
+            super::first_cs2_error(Err(&e), 3),
+            Err("CS 2.0 rules not checked: block 3: truncated".to_string())
+        );
+    }
 }

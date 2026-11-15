@@ -1276,23 +1276,34 @@ impl Viewport3d {
                 DebugOutput::Lit => true,
                 o => {
                     self.debug_support
-                        && self
-                            .shapes
-                            .iter()
-                            .any(|s| o.availability(&s.material) != Availability::None)
+                        && self.shapes.iter().any(|s| {
+                            o.availability_in(&s.material, self.tree) != Availability::None
+                        })
                 }
+            })
+            .collect()
+    }
+
+    /// The loaded shapes' per-tree notes for the tree in use ("<shape>: <note>", `render3d::material::tree_note`;
+    /// Note ID38): built from the shapes the render thread last reported, so a tree switch or an edit updates them.
+    pub fn tree_notes(&self) -> Vec<String> {
+        self.shapes
+            .iter()
+            .filter_map(|s| {
+                render3d::material::tree_note(&s.material, self.tree)
+                    .map(|n| format!("{}: {n}", nif::text::label(&s.name)))
             })
             .collect()
     }
 
     /// The stand-in a view uses for some loaded shape, for the hover text.
     pub fn stand_in(&self, d: DebugView) -> Option<&'static str> {
-        self.shapes
-            .iter()
-            .find_map(|s| match d.output().availability(&s.material) {
+        self.shapes.iter().find_map(
+            |s| match d.output().availability_in(&s.material, self.tree) {
                 Availability::StandIn(n) => Some(n),
                 _ => None,
-            })
+            },
+        )
     }
 
     /// Copy image (Ctrl+Shift+C): the last frame's RGBA8 to `put` (the clipboard), and the status note.

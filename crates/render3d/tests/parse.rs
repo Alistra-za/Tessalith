@@ -2,7 +2,7 @@
 #[path = "../../nif/tests/builder/mod.rs"]
 mod builder;
 use nif::scan::{scan, Shader};
-use render3d::{parse, parse_in, ParsedNif, ShapeId, Tree};
+use render3d::{parse, ParsedNif, ShapeId};
 
 fn fixture(name: &str) -> Vec<u8> {
     std::fs::read(format!(
@@ -79,52 +79,37 @@ fn skipped_shape_messages_use_a_short_label() {
     }
 }
 
-const APPROX: &str = "S: Approximate: tick CS PBR 2.0 to preview CS 2.0 shading";
-
-/// Note ID33: on tree B a type-21 shape that breaks a CS 2.0 rule is kept but hidden, with a warning naming the first
-/// Error; a valid one draws, with no warning.
+/// Note ID38: `parse` is one for both trees. A type-21 shape is never hidden and gets no per-tree warning; its first
+/// CS 2.0 Error is `material.pbr2_error`, which the renderer reads on tree B.
 #[test]
-fn invalid_21_hidden_with_reason() {
+fn parse_records_the_first_cs2_error() {
     use nif::pbr2::feat;
     let bad =
         builder::scenes::lsp21_shape(feat::HAIR | feat::SUBSURFACE, &nif::pbr2::PBR2_DEFAULTS);
-    let p = parse_in(&bad, Tree::B);
+    let p = parse(&bad);
     assert!(p.errors.is_empty(), "{:?}", p.errors);
     assert_eq!(p.shapes.len(), 1, "{:?}", p.skipped);
-    assert_eq!(p.shapes[0].material.shader_type, 21);
-    assert!(p.shapes[0].material.hidden);
+    let m = &p.shapes[0].material;
+    assert_eq!(m.shader_type, 21, "the stored material stays the source");
+    assert!(!m.hidden);
     assert_eq!(
-        p.warnings,
-        [format!(
-            "S: {}{}",
-            nif::edit::validate::WONT_DRAW,
-            nif::pbr2::HAIR_ALONE
-        )]
+        m.pbr2_error.as_deref(),
+        Some(
+            format!(
+                "{}{}",
+                nif::edit::validate::WONT_DRAW,
+                nif::pbr2::HAIR_ALONE
+            )
+            .as_str()
+        )
     );
+    assert!(p.warnings.is_empty(), "{:?}", p.warnings);
 
     let good = builder::scenes::lsp21_shape(0x201, &nif::pbr2::PBR2_DEFAULTS);
-    let p = parse_in(&good, Tree::B);
+    let p = parse(&good);
     assert!(!p.shapes[0].material.hidden);
+    assert_eq!(p.shapes[0].material.pbr2_error, None);
     assert!(p.warnings.is_empty(), "{:?}", p.warnings);
-}
-
-/// Note ID33: with the box off (tree A) every type-21 shape draws through its `to_v1` stand-in, valid or not, with the
-/// approximation warning; `parse` is tree A.
-#[test]
-fn box_off_21_draws_approx_with_warning() {
-    use nif::pbr2::feat;
-    for features in [0x201, feat::HAIR | feat::SUBSURFACE] {
-        let b = builder::scenes::lsp21_shape(features, &nif::pbr2::PBR2_DEFAULTS);
-        for p in [parse_in(&b, Tree::A), parse(&b)] {
-            assert_eq!(p.shapes.len(), 1, "{:?}", p.skipped);
-            let m = &p.shapes[0].material;
-            assert_eq!(m.shader_type, 21, "the stored material stays the source");
-            assert!(!m.hidden);
-            assert_eq!(p.warnings, [APPROX]);
-            let a = render3d::material::drawn(m, Tree::A);
-            assert!(a.is_pbr() && !a.is_pbr2(), "drawn as v1 TruePBR");
-        }
-    }
 }
 
 #[test]

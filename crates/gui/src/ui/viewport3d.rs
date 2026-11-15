@@ -193,11 +193,15 @@ pub fn details(ui: &mut egui::Ui, v: &mut Viewport3d) {
         v.set_features(on);
     }
     footer(ui, v);
-    if let Some(r) = v.report.as_ref().filter(|r| !r.warnings.is_empty()) {
-        egui::CollapsingHeader::new(format!("{} notes", r.warnings.len()))
+    // the load's warnings, then the per-tree notes of the tree in use (Note ID38)
+    let tree_notes = v.tree_notes();
+    let warnings = v.report.as_ref().map_or(&[][..], |r| &r.warnings[..]);
+    let n = warnings.len() + tree_notes.len();
+    if n > 0 {
+        egui::CollapsingHeader::new(format!("{n} notes"))
             .id_salt("viewport3d-warnings")
             .show(ui, |ui| {
-                for w in r.warnings.iter().take(MAX_LISTED) {
+                for w in warnings.iter().chain(&tree_notes).take(MAX_LISTED) {
                     ui.weak(w);
                 }
             });

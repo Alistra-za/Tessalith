@@ -607,7 +607,7 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
 }
 
 /// The CS 2.0 rules of the type-21 shader `block` alone, in `validate`'s order and without fixes; empty for any other
-/// block. The preview hides a shape on the first Error (Note ID33).
+/// block. The preview's tree B does not draw a shape with an Error (Note ID34, ID38).
 pub fn type_21_warnings(m: &NifModel, block: u32) -> Vec<Warning> {
     m.lighting
         .get(&block)
