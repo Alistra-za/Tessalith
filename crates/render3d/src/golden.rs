@@ -163,6 +163,43 @@ impl Noise {
     }
 }
 
+/// The tree-A golden root's noise floor (golden_noise.py output beside its captures).
+const TREE_A_NOISE: &str =
+    "noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json";
+
+/// Golden roots (`rdc-out\golden\<cs-version key>`) captured with the CS PBR2Test1 build, so drawn with tree B, and
+/// each root's noise floor file (Note ID49). Exact folder names: any other root is tree A.
+const TREE_B_FIXTURES: &[(&str, &str)] = &[(
+    "cs-1.9.0-d2026.11.14",
+    "noise_Skyrim_AE_1.6.1170_20261114_201422_frame67390_Skyrim_AE_1.6.1170_20261114_201422_frame67391.json",
+)];
+
+fn tree_b_entry(root: &Path) -> Option<&'static (&'static str, &'static str)> {
+    let name = root.file_name()?.to_str()?;
+    TREE_B_FIXTURES.iter().find(|(f, _)| *f == name)
+}
+
+/// The shader tree a golden root's captures were drawn with.
+pub fn tree_of(root: &Path) -> crate::Tree {
+    match tree_b_entry(root) {
+        Some(_) => crate::Tree::B,
+        None => crate::Tree::A,
+    }
+}
+
+/// The golden root's noise floor file.
+pub fn noise_path(root: &Path) -> PathBuf {
+    root.join(tree_b_entry(root).map_or(TREE_A_NOISE, |e| e.1))
+}
+
+/// The `tests/fixtures` file holding the replay's subject classes for a tree.
+pub fn baseline_file(tree: crate::Tree) -> &'static str {
+    match tree {
+        crate::Tree::A => "golden-baseline.txt",
+        crate::Tree::B => "golden-baseline-b.txt",
+    }
+}
+
 /// One subject folder of the golden root.
 pub struct Subject {
     pub dir: PathBuf,

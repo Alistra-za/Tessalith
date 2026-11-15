@@ -2,7 +2,9 @@
 //! composite MainRW. Thresholds (D-P18): over == 0 on RT0-RT7 and on main over the clean sub-mask; the subject
 //! classes must match tests/fixtures/golden-baseline.txt (D-P20). D5 adds the Dynamic Cubemaps profiles A_DC and
 //! A_DC_N (A_DC_LOG is a define-log capture, R8): their composite reads the captured env cube (X3e); a subject whose
-//! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared).
+//! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared). Note ID49: a root that
+//! `golden::tree_of` names tree B (the CS PBR2Test1 captures) replays on tree B against
+//! tests/fixtures/golden-baseline-b.txt, with that root's own noise floor (`golden::noise_path`).
 use render3d::golden::{self, Diff, Noise};
 use render3d::Renderer;
 use std::collections::{BTreeMap, BTreeSet};
@@ -83,10 +85,11 @@ fn replay_matches_capture_per_mrt() {
     let cache = tempfile::tempdir().unwrap();
     let fp = render3d::ShaderSource::Bundled;
     let mut ren = Renderer::with_source(fp, cache.path().to_path_buf()).unwrap();
-    let noise = Noise::load(
-        &root.join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
-    )
-    .unwrap();
+    // Note ID49: a CS PBR2Test1 root replays on tree B against its own baseline and noise floor.
+    let tree = golden::tree_of(root);
+    ren.set_tree(tree);
+    let baseline = golden::baseline_file(tree);
+    let noise = Noise::load(&golden::noise_path(root)).unwrap();
     let subjects = golden::subjects(root, PROFILES).unwrap();
 
     let mut table = String::from(
@@ -292,16 +295,17 @@ fn replay_matches_capture_per_mrt() {
     let out = std::env::temp_dir().join("golden-replay.txt");
     std::fs::write(&out, &table).unwrap();
     println!("table written to {}", out.display());
+    outcomes.sort();
+    let actual = std::env::temp_dir().join("golden-baseline.actual.txt");
+    std::fs::write(&actual, outcomes.join("\n") + "\n").unwrap();
 
     assert!(nonfinite.is_empty(), "non-finite output: {nonfinite:?}");
     // D-P18: zero over-limit pixels per RT and on the clean composite; main over the full mask is printed only.
     assert!(failures.is_empty(), "over-limit pixels: {failures:#?}");
     // D-P20: the subject list and each subject's class must match the tracked baseline exactly.
-    outcomes.sort();
-    let actual = std::env::temp_dir().join("golden-baseline.actual.txt");
-    std::fs::write(&actual, outcomes.join("\n") + "\n").unwrap();
-    let base_path =
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/golden-baseline.txt");
+    let base_path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures")
+        .join(baseline);
     // Fail closed: a missing or empty baseline must never turn an empty run into a pass.
     let base = std::fs::read_to_string(&base_path)
         .unwrap_or_else(|e| panic!("cannot read {}: {e}", base_path.display()));
@@ -319,7 +323,7 @@ fn replay_matches_capture_per_mrt() {
         .collect();
     assert!(
         diff.is_empty(),
-        "subjects differ from tests/fixtures/golden-baseline.txt (- baseline, + this run; this run's list is in {}):\n{}",
+        "subjects differ from tests/fixtures/{baseline} (- baseline, + this run; this run's list is in {}):\n{}",
         actual.display(),
         diff.join("\n")
     );

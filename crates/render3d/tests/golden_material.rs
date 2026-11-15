@@ -1,16 +1,20 @@
 //! v2 Phase D, D6c: sdc's own NIF material against the capture (extraction_matches_capture, report-only). A hybrid
 //! replay: geometry, scene cbuffers, engine textures, samplers and depth from the capture; the material (PS b1 used
 //! variables, the PS b2 material fields, VS b1 TexcoordOffset, material textures) from sdc's own `Renderer::load`.
-//! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN and SDC_ACHERUS; the shaders are the bundled tree.
+//! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN and SDC_ACHERUS; the shaders are the bundled tree
+//! the root's captures were drawn with (`golden::tree_of`, Note ID49), and each tree has its own subject list.
 mod common;
 
 use render3d::compile::{compile, used_vars, CbVar, SrvKind, VarKind};
 use render3d::golden::{self, Noise};
+use render3d::material::{drawn, own_pbr, Pbr};
 use render3d::permutation::Defines;
 use render3d::replay::{cb_bytes, vs_defines};
 use render3d::source::SourceSet;
 use render3d::textures::register_for_slot;
-use render3d::{load_fixture, parse, DebugOutput, ParsedNif, Renderer, Replay, ShapeId};
+use render3d::{
+    load_fixture, parse, DebugOutput, ParsedNif, Renderer, Replay, ShaderSource, ShapeId, Tree,
+};
 use serde_json::Value;
 use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
@@ -37,9 +41,31 @@ const NIFS: &[(&str, &str)] = &[
         "SOVStairsPiece01",
         r"meshes\architecture\sovengarde\sovstairspiece01.nif",
     ),
+    // The tree-B type-21 subjects (Note ID48; the MO2 loose winner is the s6 copy while it is installed).
+    (
+        "HelgenStoneBlock01",
+        r"meshes\clutter\helgen\helgenstoneblock01.nif",
+    ),
+    ("Corpse04", r"meshes\clutter\burntcorpses\corpse04.nif"),
+    (
+        "AzuraSmallCrystal05",
+        r"meshes\dungeons\azurasstar\azurasmallcrystal05.nif",
+    ),
+    ("Rug01Rolled", r"meshes\clutter\common\rug01rolled.nif"),
+    (
+        "LoadScreenMRaltar01",
+        r"meshes\loadscreenart\loadscreenmraltar01.nif",
+    ),
+    ("CookingStone01", r"meshes\clutter\cookingstone01.nif"),
+    ("HandCartCanopy", r"meshes\clutter\carts\handcartcanopy.nif"),
+    (
+        "CaveWormtubeLarge",
+        r"meshes\dlc01\plants\cavewormtube\cavewormtubelarge.nif",
+    ),
 ];
 
-const EXTRACTION: &[&str] = &[
+/// Tree A's subjects (the CS 1.9 root).
+const EXTRACTION_A: &[&str] = &[
     "Skyrim_AE_1.6.1170_frame69672/ev31535_Coffin",
     "Skyrim_AE_1.6.1170_frame69672/ev31833_Object174",
     // Added: the frame's other Object174, the one whose textures are the NobleTableLow02 winner's (D6c report).
@@ -50,6 +76,37 @@ const EXTRACTION: &[&str] = &[
     "Skyrim_AE_1.6.1170_frame82089/ev37237_ShaderSpheres02_10",
     "Skyrim_AE_1.6.1170_frame87144/ev35533_SOVStairsPiece01_6",
 ];
+
+/// Tree B's subjects (the CS PBR2Test1 root, Note ID49): tree A's v1 subjects in the A1, A2 and A2S captures (no
+/// ShaderSpheres02 there), the type-21 subjects of T1 and T2, and T2L's CookingStone01 (PBRParams2 differs between
+/// its T2 and T2L captures).
+const EXTRACTION_B: &[&str] = &[
+    "Skyrim_AE_1.6.1170_20261114_201422_frame67390/ev26892_Coffin",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame67390/ev28399_Object174",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame67390/ev28469_Object174",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame67390/ev28570_dibella_L.004_3",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame78910/ev34101_BlackreachCrystalL01_10",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame78910/ev32136_NorRubblePiece01_0",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame83415/ev31771_SOVStairsPiece01_6",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame212763/ev24951_HelgenStoneBlock01_12",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame212763/ev25009_Corpse04_0",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame212763/ev24916_AzuraSmallCrystal05_2",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame212763/ev24973_Rug01Rolled_0",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev28774_LoadScreenMRaltar01_1",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev28753_LoadScreenMRaltar01_2",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26916_CookingStone01_1",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame230321/ev26900_CookingStone01_1",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26998_HandCartCanopy_0",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26977_HandCartCanopy_1",
+    "Skyrim_AE_1.6.1170_20261114_201422_frame223565/ev26941_CaveWormtubeLarge_0",
+];
+
+fn source_of(tree: Tree) -> ShaderSource {
+    match tree {
+        Tree::A => ShaderSource::Bundled,
+        Tree::B => ShaderSource::BundledB,
+    }
+}
 
 /// Material defines compared (VC is VS-only in sdc and the geometry is the capture's).
 const M: &[&str] = &[
@@ -77,8 +134,9 @@ const M: &[&str] = &[
 /// The PS b2 (PerGeometry) fields that come from the material (Lighting.hlsl:564-582).
 const B2_MATERIAL: &[&str] = &["MaterialData", "AlphaTestRef", "EmitColor"];
 
-/// Engine textures: bound by the game whatever the material (noise, shadow mask).
-const ENGINE_REGS: &[u32] = &[11, 14];
+/// Engine textures: bound by the game whatever the material (noise, shadow mask, and the scene depth that tree B's
+/// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID42).
+const ENGINE_REGS: &[u32] = &[11, 14, 17];
 
 /// The owner's game files, read-only: MO2 loose winner first, else the highest-ranked active BSA. No Store, no
 /// scan.db.
@@ -134,6 +192,8 @@ impl Game {
 
 struct Env {
     root: PathBuf,
+    /// The tree the root's captures were drawn with (Note ID49).
+    tree: Tree,
     game: Game,
     cache: tempfile::TempDir,
 }
@@ -144,11 +204,21 @@ fn env() -> Option<Env> {
         println!("skipped: set SDC_GOLDEN and SDC_ACHERUS");
         return None;
     };
+    let root = PathBuf::from(root);
     Some(Env {
-        root: root.into(),
+        tree: golden::tree_of(&root),
+        root,
         game: Game::load(Path::new(&acherus)),
         cache: tempfile::tempdir().unwrap(),
     })
+}
+
+/// A renderer on the root's tree.
+fn renderer(env: &Env) -> Renderer {
+    let mut ren =
+        Renderer::with_source(ShaderSource::Bundled, env.cache.path().to_path_buf()).unwrap();
+    ren.set_tree(env.tree);
+    ren
 }
 
 fn key(d: &str) -> &str {
@@ -233,9 +303,10 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         }
     };
     let rule = format!(
-        "{how} -> block {} {:?}; ShapeId(shapeIndex {index:?}) {}",
+        "{how} -> block {} {:?} type {}; ShapeId(shapeIndex {index:?}) {}",
         shape.id.0,
         shape.name,
+        shape.material.shader_type,
         match by_index {
             Some(b) if b.id == shape.id => "is the same block".to_string(),
             Some(b) => format!("is block {} {:?}", b.id.0, b.name),
@@ -254,14 +325,16 @@ fn load_sdc(ren: &mut Renderer, env: &Env, dir: &Path, r: &Replay) -> Result<Sdc
         .collect();
     ren.set_features(features);
     let rep = ren.load_parsed_sync(&parsed, &|p| env.game.file(p).map(|f| f.1));
-    let msn = m.slsf1 & (1 << 12) != 0;
-    let slots = m
+    // The registers of the material the root's tree draws (Note ID33), as `bind_textures` maps them.
+    let d = drawn(&m, env.tree);
+    let (pbr, msn) = (own_pbr(&d) != Pbr::None, d.slsf1 & (1 << 12) != 0);
+    let slots = d
         .slots
         .iter()
         .enumerate()
         .filter(|(_, p)| !p.norm.is_empty())
         .filter_map(|(slot, p)| {
-            let reg = register_for_slot(m.shader_type, m.is_pbr(), msn, slot)?;
+            let reg = register_for_slot(d.shader_type, pbr, msn, slot)?;
             Some((reg, p.norm.clone(), env.game.file(&p.norm).map(|f| f.1)))
         })
         .collect();
@@ -304,7 +377,7 @@ fn same(kind: VarKind, a: &[f32], b: &[f32]) -> bool {
 /// The capture's used material fields (PS b1 PerMaterial, the PS b2 material fields, VS b1 TexcoordOffset), each
 /// with its reflected layout var and cbuffer size, keyed by fixture cbuffer stem.
 fn material_fields(env: &Env, r: &Replay) -> Result<Vec<(&'static str, CbVar, u32)>, String> {
-    let src = SourceSet::new(render3d::ShaderSource::Bundled).get(Path::new("Lighting.hlsl"))?;
+    let src = SourceSet::new(source_of(env.tree)).get(Path::new("Lighting.hlsl"))?;
     let ps_list = &r.defines[0];
     let ps_d: Vec<String> = std::iter::once("PSHADER".to_string())
         .chain(ps_list.iter().cloned())
@@ -476,7 +549,12 @@ fn fmt_v(v: &[f32]) -> String {
     format!(
         "[{}]",
         v.iter()
-            .map(|x| format!("{x:.6}"))
+            // A tiny non-zero value (an integer's bits read as a float) is shown, not rounded to 0.
+            .map(|x| if *x != 0.0 && x.abs() < 1e-4 {
+                format!("{x:e}")
+            } else {
+                format!("{x:.6}")
+            })
             .collect::<Vec<_>>()
             .join(", ")
     )
@@ -486,17 +564,16 @@ fn fmt_v(v: &[f32]) -> String {
 #[ignore]
 fn extraction_matches_capture() {
     let Some(env) = env() else { return };
-    let fp = render3d::ShaderSource::Bundled;
-    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
-    let noise = Noise::load(
-        &env.root
-            .join("noise_Skyrim_AE_1.6.1170_frame207657_Skyrim_AE_1.6.1170_frame207658.json"),
-    )
-    .unwrap();
-    let mut t = String::new();
+    let mut ren = renderer(&env);
+    let noise = Noise::load(&golden::noise_path(&env.root)).unwrap();
+    let extraction = match env.tree {
+        Tree::A => EXTRACTION_A,
+        Tree::B => EXTRACTION_B,
+    };
+    let mut t = format!("tree {:?}\n", env.tree);
     let (mut reached, mut nonfinite, mut define_mismatch) = (0usize, Vec::new(), 0usize);
     let mut firsts: Vec<String> = Vec::new();
-    for s in EXTRACTION {
+    for s in extraction {
         let dir = env.root.join(s);
         let name = dir.file_name().unwrap().to_string_lossy().into_owned();
         let _ = writeln!(t, "\n== {s}");
@@ -609,7 +686,7 @@ fn extraction_matches_capture() {
         let sdc_regs: BTreeSet<u32> = sdc.slots.iter().map(|s| s.0).collect();
         let _ = writeln!(
             t,
-            "textures: capture-only {:?} sdc-only {:?} (engine t11/t14 not compared)",
+            "textures: capture-only {:?} sdc-only {:?} (engine t11/t14/t17 not compared)",
             cap_regs.difference(&sdc_regs).collect::<Vec<_>>(),
             sdc_regs.difference(&cap_regs).collect::<Vec<_>>()
         );
@@ -714,7 +791,7 @@ fn extraction_matches_capture() {
     let _ = writeln!(
         t,
         "\nsubjects {}: reached cbuffers {reached}; material define mismatches {define_mismatch}",
-        EXTRACTION.len()
+        extraction.len()
     );
     let _ = writeln!(t, "first differing fields:");
     for f in &firsts {
@@ -816,8 +893,7 @@ const WANTED: [&str; 5] = [
 #[ignore]
 fn trace_values_match_unit_functions() {
     let Some(env) = env() else { return };
-    let fp = render3d::ShaderSource::Bundled;
-    let mut ren = Renderer::with_source(fp, env.cache.path().to_path_buf()).unwrap();
+    let mut ren = renderer(&env);
     assert!(
         ren.debug_supported(),
         "the bundled Lighting.hlsl has no debug anchor"
