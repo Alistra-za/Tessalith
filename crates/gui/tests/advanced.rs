@@ -72,7 +72,6 @@ fn the_open_drawer_shows_its_sections() {
     for label in [
         "Preset inspector",
         "Preview",
-        "Advanced texture fields",
         "Unmatched [files] entries",
         "Show only what differs from sdc-base",
     ] {
@@ -114,16 +113,20 @@ fn the_open_drawer_shows_its_sections() {
             "{label:?} is gone (FM25): {labels:?}"
         );
     }
-    // Note JI3: the rows the texture panel took (its Levels, Size and DDS header rows) and the duplicate BC7
-    // weighting row are not drawn here too; the two search rows stay. Read by the drawer's columns only: the field rows
-    // lie below the window, and AccessKit rects are not clipped.
+    // Note JI3, JI4: the rows the texture panel took (its Levels, Size, DDS header and Effort rows, the last over the
+    // two search fields) and the duplicate BC7 weighting row are not drawn here too. Read by the drawer's columns only:
+    // the last section lies below the window, and AccessKit rects are not clipped.
     let rows: Vec<String> = h
         .query_all_by_role(Role::Label)
         .filter(|n| n.rect().min.x >= panel.min.x - 1.0 && n.rect().max.x <= panel.max.x + 1.0)
         // A label's text is its AccessKit value.
         .filter_map(|n| n.accesskit_node().label().or(n.accesskit_node().value()))
         .collect();
-    assert!(rows.iter().any(|l| l == "BC1/BC3 search"), "{rows:?}");
+    assert!(
+        rows.iter()
+            .any(|l| l == "Every [files] entry in sdc.toml matches a file."),
+        "the reader sees the drawer's last section: {rows:?}"
+    );
     for label in [
         "Levels",
         "Resize",
@@ -131,12 +134,20 @@ fn the_open_drawer_shows_its_sections() {
         "Size floor",
         "DDS header",
         "BC7 weighting",
+        "BC4/BC5 search radius",
+        "BC1/BC3 search",
     ] {
         assert!(
             !rows.iter().any(|l| l == label),
-            "{label:?} is the texture panel's (JI3): {rows:?}"
+            "{label:?} is the texture panel's (JI3, JI4): {rows:?}"
         );
     }
+    assert_eq!(
+        h.query_all_by_label_contains("Advanced texture fields")
+            .count(),
+        0,
+        "the drawer has no texture fields section (JI4)"
+    );
 }
 
 fn drawer_harness(width: f32, model: AppModel) -> Harness<'static, AppModel> {
@@ -346,103 +357,6 @@ fn remove_drops_an_unmatched_entry() {
         h.query_by_label("Packing fill values").is_none(),
         "the global fill panel is retired"
     );
-}
-
-#[test]
-fn the_advanced_texture_fields_carry_their_locks_and_edit_through_the_model() {
-    use sdc_gui::model::fields::{field_view, search_field_views};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    m.set_field(
-        "landscape/rock01.png",
-        "encoder.bc45_search_radius",
-        serde_json::json!("max"),
-    );
-    m.set_field("landscape/rock01.png", "header", serde_json::json!("dx10"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let job = m.item("landscape/rock01.png").unwrap().job.clone().unwrap();
-    let views = search_field_views(m.target, &job);
-    let names: Vec<_> = views.iter().map(|v| v.field).collect();
-    // Note JI3: the drawer keeps the two search rows; the others are texture-panel rows.
-    assert_eq!(names, ["encoder.bc45_search_radius", "encoder.bc1_search"]);
-    let search = views
-        .iter()
-        .find(|v| v.field == "encoder.bc1_search")
-        .unwrap();
-    let bc1_or_bc3 = matches!(
-        job.profile.format,
-        engine::config::Format::Bc1 | engine::config::Format::Bc3
-    );
-    assert_eq!(
-        search.lock.is_none(),
-        bc1_or_bc3,
-        "{:?}",
-        job.profile.format
-    );
-    assert_eq!(search.value, serde_json::json!("default"));
-    let header = field_view(m.target, &job, "header").unwrap();
-    assert_eq!(header.value, serde_json::json!("dx10"));
-    assert!(header.edited);
-    let radius = views
-        .iter()
-        .find(|v| v.field == "encoder.bc45_search_radius")
-        .unwrap();
-    assert!(radius.lock.is_some(), "a colour map is not BC4/BC5");
-}
-
-/// Plan C Task 5: the BC1/BC3 search row edits a BC1 texture: `fast` lands in the entry, the row is not locked and
-/// its combo reads "Fast (preview)".
-#[test]
-fn the_bc1_search_row_edits_a_bc1_texture() {
-    use engine::config::Format;
-    use sdc_gui::model::fields::search_field_views;
-    const K: &str = "landscape/rock01.png";
-    let d = tempfile::tempdir().unwrap();
-    let mut m = opened(d.path());
-    // A plain diffuse: a landscape diffuse refuses BC1.
-    m.decide(
-        K,
-        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
-    );
-    // Vanilla takes BC1 on a colour map; the CS target does not.
-    m.set_target(engine::config::Target::Vanilla);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let pair = {
-        let p = &m.item(K).unwrap().job.as_ref().unwrap().profile;
-        *engine::policy::allowed_encodings(p.subtype, m.target)
-            .iter()
-            .find(|(f, _)| *f == Format::Bc1)
-            .expect("fixture: a BC1 pair for a colour map")
-    };
-    m.set_format(K, pair.0, pair.1);
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    m.set_field(K, "encoder.bc1_search", serde_json::json!("fast"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    let job = m.item(K).unwrap().job.clone().unwrap();
-    assert_eq!(job.profile.format, Format::Bc1);
-    let views = search_field_views(m.target, &job);
-    let v = views
-        .iter()
-        .find(|v| v.field == "encoder.bc1_search")
-        .unwrap();
-    assert_eq!(v.value, serde_json::json!("fast"));
-    assert!(v.edited);
-    assert_eq!(v.lock, None);
-    assert_eq!(v.label, "BC1/BC3 search");
-
-    m.settings.advanced_open = true;
-    m.select_item(K);
-    let mut h = harness(m);
-    h.run();
-    // A combo's accessible text is its value and it has no label of its own, so the row's combo is the one on the
-    // "BC1/BC3 search" label's line (the BC4/BC5 radius combo offers the same "Fast (preview)" label).
-    let row_y = h.get_by_label("BC1/BC3 search").rect().center().y;
-    let on_row: Vec<_> = h
-        .query_all_by_role(Role::ComboBox)
-        .filter(|n| n.rect().min.y <= row_y && row_y <= n.rect().max.y)
-        .map(|n| n.accesskit_node().value())
-        .collect();
-    assert_eq!(on_row, [Some("Fast (preview)".to_string())]);
 }
 
 /// M6 Track D spec §3: the GUI loads the user presets folder and the inspector lists what it loaded.

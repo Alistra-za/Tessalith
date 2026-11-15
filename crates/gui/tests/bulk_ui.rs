@@ -167,10 +167,36 @@ fn ctrl_click_on_a_set_pill_adds_it() {
 fn two_selected_textures_show_the_bulk_panel_with_mixed_values() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
+    // Note JI4: both BC7 (plain diffuses, preflight 4.1), so the Effort row edits `encoder.effort` on both.
+    for k in [ROCK, LEAF] {
+        m.decide(
+            k,
+            sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+        );
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        m.set_format(
+            k,
+            engine::config::Format::Bc7,
+            engine::config::ColorTag::Unorm,
+        );
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
     m.set_field(ROCK, "encoder.effort", serde_json::json!("veryfast"));
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.click_item(ROCK, false, false);
     m.click_item(LEAF, true, false);
+    let effort = m
+        .bulk_view()
+        .rows
+        .iter()
+        .find(|r| r.label == "Effort")
+        .cloned()
+        .unwrap();
+    assert_eq!(
+        (effort.field, effort.value, effort.applies),
+        ("encoder.effort", None, 2),
+        "effort mixed"
+    );
     let mut h = harness(m);
     h.run();
     h.get_by_label("2 textures selected");

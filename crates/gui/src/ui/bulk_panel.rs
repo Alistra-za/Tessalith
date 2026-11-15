@@ -3,13 +3,16 @@
 use super::columns::AMBER;
 use super::settings_panel::{combo, editor, field_label, Options, RowEdit, GROUPS};
 use crate::model::bulk::{BulkField, BulkOp};
-use crate::model::fields::{field_help, group_of, FieldView};
+use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
 use crate::model::sets::SlotKind;
 use crate::model::{AppModel, Selection};
 use eframe::egui;
 use engine::config::Target;
 use engine::policy::ResolvedJob;
 use serde_json::Value;
+
+/// Note JI4: the bulk Effort row's text when the selected formats read different search fields.
+const FORMATS_DIFFER: &str = "Formats differ: edit one format at a time";
 
 enum Act {
     Kind(Option<SlotKind>),
@@ -139,8 +142,25 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
                                     .num_columns(4)
                                     .show(ui, |ui| {
                                         for r in rows.iter().filter(|r| group_of(r.field) == g) {
+                                            // Note JI4: the Effort row's choices are those of a texture that
+                                            // reads its field (the BC3 row's Custom entry is that texture's pair).
+                                            let reader = EFFORT_FIELDS
+                                                .contains(&r.field)
+                                                .then(|| {
+                                                    keys.iter().find_map(|k| {
+                                                        model
+                                                            .item(k)
+                                                            .and_then(|i| i.job.as_ref())
+                                                            .filter(|j| {
+                                                                effort_field(&j.profile)
+                                                                    == Some(r.field)
+                                                            })
+                                                    })
+                                                })
+                                                .flatten();
+                                            let job = reader.unwrap_or(&job);
                                             if let Some(e) =
-                                                row(ui, &id, &job, target, busy, r, &formats)
+                                                row(ui, &id, job, target, busy, r, &formats)
                                             {
                                                 acts.push(Act::Edit(r.field, e));
                                             }
@@ -174,32 +194,39 @@ fn row(
     formats: &Options,
 ) -> Option<RowEdit> {
     let mut edit = None;
-    field_label(ui, false, r.label, field_help(r.field));
-    let view = FieldView {
-        field: r.field,
-        label: r.label,
-        value: r.value.clone().unwrap_or(Value::Null),
-        provenance: String::new(),
-        edited: r.edited > 0,
-        lock: None,
-    };
-    let (set, _) = ui
-        .add_enabled_ui(r.applies > 0, |ui| {
-            let mixed = r.value.is_none() && r.applies > 0;
-            if r.field == "format" {
-                return combo(
-                    ui,
-                    egui::Id::new((id, r.field)),
-                    &view.value,
-                    formats,
-                    mixed,
-                );
-            }
-            editor(ui, id, target, job, busy, &view, mixed)
-        })
-        .inner;
-    if let Some(v) = set {
-        edit = Some(RowEdit::Set(v));
+    let label = field_label(ui, false, r.label, field_help(r.field));
+    // Note JI4 (spec 4.6): textures whose formats read different search fields get no Effort choices.
+    if r.formats_differ {
+        ui.weak(FORMATS_DIFFER);
+    } else {
+        let view = FieldView {
+            field: r.field,
+            label: r.label,
+            value: r.value.clone().unwrap_or(Value::Null),
+            provenance: String::new(),
+            edited: r.edited > 0,
+            lock: None,
+        };
+        let (set, control) = ui
+            .add_enabled_ui(r.applies > 0, |ui| {
+                let mixed = r.value.is_none() && r.applies > 0;
+                if r.field == "format" {
+                    return combo(
+                        ui,
+                        egui::Id::new((id, r.field)),
+                        &view.value,
+                        formats,
+                        mixed,
+                    );
+                }
+                editor(ui, id, target, job, busy, &view, mixed)
+            })
+            .inner;
+        // Review finding 16: a combo's text is its value, so the control takes the row's label as its name.
+        control.labelled_by(label.id);
+        if let Some(v) = set {
+            edit = Some(RowEdit::Set(v));
+        }
     }
     let note = ui.label(egui::RichText::new(r.note()).small().weak());
     if !r.skipped.is_empty() {

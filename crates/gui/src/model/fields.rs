@@ -124,12 +124,100 @@ pub fn weighting_value(p: &Profile) -> Value {
         .unwrap_or_else(|| Value::from("linear"))
 }
 
-/// The encoder search fields, still edited in the Advanced drawer (Note JI3: the drawer's other fields are `FIELDS`
-/// rows now). Kept in `all_fields` so lookups, bulk labels and Copy settings (FM44) keep every field.
+/// The encoder search fields, which the Effort row writes on the formats that read them (Note JI4). Kept in
+/// `all_fields` so lookups, bulk labels and Copy settings (FM44) keep every field.
 pub const SEARCH_FIELDS: [(&str, &str); 2] = [
     ("encoder.bc45_search_radius", "BC4/BC5 search radius"),
     ("encoder.bc1_search", "BC1/BC3 search"),
 ];
+
+/// Note JI4: the Effort row on a BC3 texture, which reads both search fields. A row id like `WEIGHTING`: never
+/// written to `[files]` itself, and not in `all_fields`.
+pub const BC3_SEARCH: &str = "encoder.bc3_search";
+
+/// Spec goal 4, BC3 row: (choice, encoder.bc1_search, encoder.bc45_search_radius).
+pub const BC3_CHOICES: [(&str, &str, &str); 3] = [
+    ("fast", "fast", "fast"),
+    ("default", "default", "default"),
+    ("max", "default", "max"),
+];
+
+/// Note JI4: why the Effort row is greyed on a format no encoder search reads.
+pub const NO_SEARCH: &str = "this format has no search setting";
+
+/// Note JI4: every field the Effort row can write (`effort_field`'s answers).
+pub const EFFORT_FIELDS: [&str; 4] = [
+    "encoder.effort",
+    "encoder.bc45_search_radius",
+    "encoder.bc1_search",
+    BC3_SEARCH,
+];
+
+/// Note JI4: the field the Effort row writes for `p`'s format, or `None` where no encoder search runs.
+pub fn effort_field(p: &Profile) -> Option<&'static str> {
+    match p.format {
+        Format::Bc7 | Format::Bc6hUf16 => Some("encoder.effort"),
+        Format::Bc4 | Format::Bc5 => Some("encoder.bc45_search_radius"),
+        Format::Bc1 => Some("encoder.bc1_search"),
+        Format::Bc3 => Some(BC3_SEARCH),
+        _ => None,
+    }
+}
+
+/// A search field's value as its serde name (`"fast"`, `"default"`, `"max"`).
+fn search_name<T: serde::Serialize>(v: T) -> String {
+    serde_json::to_value(v)
+        .ok()
+        .and_then(|v| v.as_str().map(str::to_string))
+        .unwrap_or_default()
+}
+
+/// The (bc1_search, radius) pair `p` resolves to, as serde names.
+pub fn bc3_pair(p: &Profile) -> (String, String) {
+    (
+        search_name(p.encoder.bc1_search),
+        search_name(p.encoder.bc45_search_radius),
+    )
+}
+
+/// Note JI4: the texture panel's Effort row, labelled "Effort" on every format, over the field `effort_field` names.
+/// On BC3 its value is the `BC3_CHOICES` choice the pair matches, else `"custom"`; its provenance is the radius's when
+/// the radius is not `default`, else the BC1 search's when that is not, else the radius's (spec 4.5), and either
+/// field in the texture's own entry marks it edited.
+pub fn effort_view(target: Target, job: &ResolvedJob) -> FieldView {
+    let Some(field) = effort_field(&job.profile) else {
+        let mut v = views_of(&[("encoder.effort", "Effort")], target, job).remove(0);
+        v.lock = Some(NO_SEARCH);
+        return v;
+    };
+    if field != BC3_SEARCH {
+        return views_of(&[(field, "Effort")], target, job).remove(0);
+    }
+    let (bc1, radius) = bc3_pair(&job.profile);
+    let value = BC3_CHOICES
+        .iter()
+        .find(|c| c.1 == bc1 && c.2 == radius)
+        .map_or_else(|| Value::from("custom"), |c| Value::from(c.0));
+    let (bc1_f, radius_f) = ("encoder.bc1_search", "encoder.bc45_search_radius");
+    let decided_by = if radius != "default" {
+        radius_f
+    } else if bc1 != "default" {
+        bc1_f
+    } else {
+        radius_f
+    };
+    let prov = |f: &str| job.provenance.get(f).map(ToString::to_string);
+    FieldView {
+        field: BC3_SEARCH,
+        label: "Effort",
+        value,
+        provenance: prov(decided_by).unwrap_or_else(|| "builtin".into()),
+        edited: [bc1_f, radius_f]
+            .iter()
+            .any(|f| prov(f).as_deref() == Some("project_file")),
+        lock: None,
+    }
+}
 
 /// The cubemap section's fields in display order (Note DT7), in the groups `ui::cube_section` draws them in.
 pub const CUBE_FIELDS: [(&str, &str); 16] = [
@@ -309,7 +397,9 @@ pub fn field_lock(target: Target, p: &Profile, field: &str) -> Option<&'static s
             Some("R8 and RG8 have no _SRGB form")
         }
         "color.tag" if p.format == Format::Rgb8 => Some("RGB8 has no _SRGB form"),
-        "encoder.effort" | "encoder.perceptual" if !p.format.is_block() => {
+        // Note JI4: the Effort row's lock where no encoder search runs.
+        "encoder.effort" if !p.format.is_block() => Some(NO_SEARCH),
+        "encoder.perceptual" if !p.format.is_block() => {
             Some("no encoder runs for uncompressed formats")
         }
         "color.tag" if target != Target::Cs => Some("_SRGB is only written under cs"),
@@ -387,8 +477,13 @@ pub struct FieldView {
     pub lock: Option<&'static str>,
 }
 
+/// The texture panel's rows: `FIELDS`, the Effort row over the field the format reads (Note JI4).
 pub fn field_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
-    views_of(&FIELDS, target, job)
+    let mut views = views_of(&FIELDS, target, job);
+    if let Some(v) = views.iter_mut().find(|v| v.field == "encoder.effort") {
+        *v = effort_view(target, job);
+    }
+    views
 }
 
 /// The mip level count's view (value `"full"`, `"none"` or a number).
@@ -435,8 +530,9 @@ pub fn field_help(field: &str) -> Option<&'static str> {
         "format" => "The block format of the DDS. The DDS tag row below sets its tag.",
         "encoder.effort" => "How long the encoder searches. Slower gives better quality at the same file size.",
         WEIGHTING => "How much the BC7 encoder weighs alpha against colour. Each entry in the list says what it does.",
-        "encoder.bc45_search_radius" => "How widely the BC4 and BC5 encoder searches for endpoints. Maximum searches a radius of 10, Fast a radius of 4.",
-        "encoder.bc1_search" => "How hard the BC1 encoder searches, for BC1 and the colour of BC3. Fast takes a fraction of the time and is a little less exact; use it for previews.",
+        "encoder.bc45_search_radius" => "How long the encoder searches. On BC4 and BC5 it sets how widely it searches for endpoints: Max a radius of 10, Fast a radius of 4.",
+        "encoder.bc1_search" => "How long the encoder searches. On BC1 it sets the colour search: Fast takes a fraction of the time and is a little less exact; use it for previews.",
+        BC3_SEARCH => "How long the encoder searches. On BC3 it sets both the BC1 colour search and the BC4 alpha radius. Fast is quick and a little less exact, Max searches the alpha widest.",
         "header" => "The form of the DDS header. Auto writes a legacy header for BC1, BC3 and RGBA8 without the _SRGB tag, and the DX10 header for everything else.",
         "resize" => "Halves both sides once, twice or three times, while the longer side stays at or above the size floor.",
         "resize_relative_to" => "What Resize is measured from: this texture's own size, or the size of the set's map in a texture-set slot.",
@@ -479,13 +575,7 @@ pub fn mips_count(levels: &Value) -> Option<u64> {
     levels.as_u64()
 }
 
-/// The search fields' views, with their locks.
-pub fn search_field_views(target: Target, job: &ResolvedJob) -> Vec<FieldView> {
-    views_of(&SEARCH_FIELDS, target, job)
-}
-
-/// Every field the settings panel and the Advanced drawer edit, each once, in display order (F3a: bulk lookups and
-/// copy-from-active).
+/// Every field the settings panel edits, each once, in display order (F3a: bulk lookups and copy-from-active).
 pub fn all_fields() -> Vec<(&'static str, &'static str)> {
     let mut v = FIELDS.to_vec();
     v.extend([LEVELS_FIELD, FILTER_FIELD, EDGE_FIELD]);
@@ -493,8 +583,22 @@ pub fn all_fields() -> Vec<(&'static str, &'static str)> {
     v
 }
 
-/// One field's view, its lock included; `None` for a field `all_fields` does not list.
+/// One field's view, its lock included; `None` for a field `all_fields` does not list. `BC3_SEARCH` is the BC3
+/// Effort row's view, locked "BC3 only" on any other format (Note JI4: a bulk write skips those with that reason).
 pub fn field_view(target: Target, job: &ResolvedJob, field: &str) -> Option<FieldView> {
+    if field == BC3_SEARCH {
+        if job.profile.format == Format::Bc3 {
+            return Some(effort_view(target, job));
+        }
+        return Some(FieldView {
+            field: BC3_SEARCH,
+            label: "Effort",
+            value: Value::Null,
+            provenance: "builtin".into(),
+            edited: false,
+            lock: Some("BC3 only"),
+        });
+    }
     let entry = all_fields().into_iter().find(|(f, _)| *f == field)?;
     views_of(&[entry], target, job).pop()
 }

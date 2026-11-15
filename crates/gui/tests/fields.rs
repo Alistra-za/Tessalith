@@ -321,9 +321,10 @@ fn uncompressed_locks_explain_themselves() {
         field_lock(Target::Cs, &p, "color.tag"),
         Some("R8 and RG8 have no _SRGB form")
     );
+    // Note JI4: the Effort row's lock where no encoder search runs.
     assert_eq!(
         field_lock(Target::Cs, &p, "encoder.effort"),
-        Some("no encoder runs for uncompressed formats")
+        Some("this format has no search setting")
     );
     p.format = Format::Rgba16f;
     assert_eq!(
@@ -705,16 +706,10 @@ fn value_of_agrees_with_the_field_views() {
     assert!(unserialised > 0, "no key exercised unset_default");
 }
 
-/// Plan C Task 5: the BC1/BC3 search row sits after the BC4/BC5 radius row, reads "default" while the profile does
-/// not serialise it, and is locked outside BC1 and BC3.
+/// Plan C Task 5: the BC1/BC3 search field reads "default" while the profile does not serialise it, and is locked
+/// outside BC1 and BC3 (Note JI4: the Effort row writes it on BC1; the lock is the bulk skip reason).
 #[test]
 fn the_bc1_search_row_follows_the_radius_row_and_defaults() {
-    let at = |f: &str| SEARCH_FIELDS.iter().position(|(k, _)| *k == f).unwrap();
-    assert_eq!(SEARCH_FIELDS[at("encoder.bc1_search")].1, "BC1/BC3 search");
-    assert_eq!(
-        at("encoder.bc1_search"),
-        at("encoder.bc45_search_radius") + 1
-    );
     let reg = PresetRegistry::builtin().unwrap();
     let mut p = reg.base_profile(Target::Cs, Subtype::Diffuse);
     // `value_of` reads a key the profile does not serialise through `unset_default`.
@@ -741,6 +736,31 @@ fn the_bc1_search_row_follows_the_radius_row_and_defaults() {
         Some("BC1 and BC3 only")
     );
     assert!(field_help("encoder.bc1_search").is_some());
+}
+
+/// Moved from the drawer's test (Note JI4: the drawer's search rows are gone): the search fields keep their locks off
+/// their formats (the bulk skip reasons), and a field the texture's own entry sets reads that value, edited.
+#[test]
+fn the_search_fields_keep_their_locks_and_header_reads_its_own_value() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.set_field(
+        "landscape/rock01.png",
+        "encoder.bc45_search_radius",
+        serde_json::json!("max"),
+    );
+    m.set_field("landscape/rock01.png", "header", serde_json::json!("dx10"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let job = m.item("landscape/rock01.png").unwrap().job.clone().unwrap();
+    assert_eq!(job.profile.format, Format::Bc7, "fixture: a BC7 colour map");
+    let search = field_view(m.target, &job, "encoder.bc1_search").unwrap();
+    assert_eq!(search.lock, Some("BC1 and BC3 only"));
+    assert_eq!(search.value, serde_json::json!("default"));
+    let radius = field_view(m.target, &job, "encoder.bc45_search_radius").unwrap();
+    assert_eq!(radius.lock, Some("BC4 and BC5 only"));
+    let header = field_view(m.target, &job, "header").unwrap();
+    assert_eq!(header.value, serde_json::json!("dx10"));
+    assert!(header.edited);
 }
 
 /// Note HI9: every row of the texture panel and the Advanced drawer has help for its `?`.

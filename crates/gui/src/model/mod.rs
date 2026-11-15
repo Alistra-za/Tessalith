@@ -3643,6 +3643,20 @@ impl AppModel {
         if !self.format_write_ok(item_key, field, &value) {
             return;
         }
+        // Note JI4: the BC3 Effort row writes both search fields, as one step; Custom (or anything else) writes nothing.
+        if field == fields::BC3_SEARCH {
+            let Some(&(_, bc1, radius)) = fields::BC3_CHOICES
+                .iter()
+                .find(|c| value.as_str() == Some(c.0))
+            else {
+                return;
+            };
+            let k = item_key.to_string();
+            return self.edit("Change Effort", move |p| {
+                p.set_file_value(&k, "encoder.bc1_search", &json!(bc1));
+                p.set_file_value(&k, "encoder.bc45_search_radius", &json!(radius));
+            });
+        }
         // Note CP: the BC7 weighting row writes two fields (`fields::weighting_writes`, CP10).
         if field == fields::WEIGHTING {
             let w = value.as_str().unwrap_or("");
@@ -3688,6 +3702,14 @@ impl AppModel {
     pub fn clear_field(&mut self, item_key: &str, field: &str) {
         if field == "subtype" {
             return self.edit_subtype("Reset subtype", item_key, None);
+        }
+        // Note JI4: the BC3 Effort row's ↺ clears both search fields, as one step.
+        if field == fields::BC3_SEARCH {
+            let k = item_key.to_string();
+            return self.edit("Reset Effort", move |p| {
+                p.clear_file_value(&k, "encoder.bc1_search");
+                p.clear_file_value(&k, "encoder.bc45_search_radius");
+            });
         }
         let k = item_key.to_string();
         let f = field.to_string();

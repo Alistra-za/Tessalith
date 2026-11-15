@@ -1,8 +1,9 @@
 //! M6 Track F3a (design `2026-10-13-sdc-m6-f3a-design.md`): the multi-selection, the bulk edit plan and its
 //! commands. No egui types.
 use super::fields::{
-    all_fields, encoding_options, field_view, filter_option_lock, hidden_reason, views_of,
-    weighting_option_lock, FieldView, EDGE_FIELD, FIELDS, FILTER_FIELD, LEVELS_FIELD, WEIGHTING,
+    all_fields, effort_field, encoding_options, field_view, filter_option_lock, hidden_reason,
+    views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_SEARCH, EDGE_FIELD, EFFORT_FIELDS,
+    FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
 };
 use super::set_groups::GroupTarget;
 use super::sets::{
@@ -364,6 +365,10 @@ pub fn panel_fields() -> Vec<(&'static str, &'static str)> {
 
 /// A field's row label, or the field id for one no panel lists.
 pub fn field_label(field: &str) -> &str {
+    // Note JI4: the BC3 Effort row is no field of its own.
+    if field == BC3_SEARCH {
+        return "Effort";
+    }
     all_fields()
         .into_iter()
         .find(|(f, _)| *f == field)
@@ -395,7 +400,9 @@ fn skip_of(
     let Some(view) = view else {
         return Some(format!("{field} is not a texture setting"));
     };
-    if let Some(lock) = view.lock {
+    // Note JI4: a format no encoder search reads skips every Effort field with the Effort row's own reason.
+    let no_search = EFFORT_FIELDS.contains(&field) && effort_field(&job.profile).is_none();
+    if let Some(lock) = no_search.then_some(NO_SEARCH).or(view.lock) {
         if op != Some(&BulkOp::Clear) {
             return Some(lock.into());
         }
@@ -409,7 +416,9 @@ fn skip_of(
             || (field == WEIGHTING
                 && !super::fields::WEIGHTING_OPTIONS
                     .iter()
-                    .any(|o| v.as_str() == Some(o.0)));
+                    .any(|o| v.as_str() == Some(o.0)))
+            // Note JI4: Custom is shown, never written.
+            || (field == BC3_SEARCH && !BC3_CHOICES.iter().any(|c| v.as_str() == Some(c.0)));
         if bad {
             return Some(INVALID.into());
         }
@@ -527,11 +536,18 @@ pub struct BulkField {
     /// (reason, count) of the textures a write skips, in first-seen order.
     pub skipped: Vec<(String, usize)>,
     pub total: usize,
+    /// Note JI4 (spec 4.6): the Effort row over textures whose formats read different search fields (BC1 and BC3
+    /// count as different): nothing is offered, and the row says to edit one format at a time.
+    pub formats_differ: bool,
 }
 
 impl BulkField {
-    /// The note column: "— mixed", "applies to K of N", both, or nothing.
+    /// The note column: "— mixed", "applies to K of N", both, or nothing (also when the formats differ: the
+    /// control cell says why).
     pub fn note(&self) -> String {
+        if self.formats_differ {
+            return String::new();
+        }
         let mut parts = vec![];
         if self.value.is_none() && self.applies > 0 {
             parts.push("— mixed".to_string());
@@ -566,10 +582,31 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
             edited: 0,
             skipped: vec![],
             total: keys.len(),
+            formats_differ: false,
         })
         .collect();
     let mut values: Vec<Vec<Value>> = vec![vec![]; fields.len()];
     let locked = locked_items(m);
+    // Note JI4: the Effort row edits the field every selected texture's format reads (`effort_field`); a texture in a
+    // locked slot, or with no search, does not count. Two or more fields: the formats differ.
+    let effort = rows.iter().position(|r| r.field == "encoder.effort");
+    if let Some(n) = effort {
+        let mut read: Vec<&'static str> = vec![];
+        for k in keys.iter().filter(|k| !locked.contains_key(*k)) {
+            let f = m
+                .item(k)
+                .and_then(|i| i.job.as_ref())
+                .and_then(|j| effort_field(&j.profile));
+            if let Some(f) = f.filter(|f| !read.contains(f)) {
+                read.push(f);
+            }
+        }
+        match read.as_slice() {
+            [f] => rows[n].field = f,
+            [] => {}
+            _ => rows[n].formats_differ = true,
+        }
+    }
     // Note FB3: while a plan runs, the jobs are the ones from before the last edit; a field the document sets itself
     // is read from the document, so a partial write shows mixed at once.
     // shortcut: a Reset during a plan still shows the old value (the document read has no "unset" to tell it from
@@ -584,7 +621,17 @@ pub fn bulk_fields(m: &AppModel, keys: &[String]) -> Vec<BulkField> {
         // One profile serialisation per texture, not one per row.
         let views = job.map_or_else(Vec::new, |j| views_of(&fields, m.target, j));
         for (n, row) in rows.iter_mut().enumerate() {
-            let view = views.get(n);
+            if row.formats_differ {
+                continue;
+            }
+            // The Effort row over another field than its own reads that field's view (the BC3 row: `effort_view`).
+            let other;
+            let view = if row.field == fields[n].0 {
+                views.get(n)
+            } else {
+                other = job.and_then(|j| field_view(m.target, j, row.field));
+                other.as_ref()
+            };
             match skip_of(
                 job,
                 view,

@@ -83,6 +83,8 @@ mod detail_tails;
 mod dialog_keys;
 #[path = "../edges.rs"]
 mod edges;
+#[path = "../effort_search.rs"]
+mod effort_search;
 #[path = "../encoding_follows_type.rs"]
 mod encoding_follows_type;
 #[path = "../export.rs"]

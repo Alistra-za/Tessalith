@@ -7,10 +7,11 @@ use crate::model::code_text::{
     alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for,
 };
 use crate::model::fields::{
-    auto_subtype_reason, channel_text, edge_view, encoding_options, field_hidden, field_views,
-    filter_option_lock, filter_view, format_choices, group_of, levels_view, mips_count, mips_on,
-    provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER, EXR_STRAIGHT_HOVER,
-    HELPER_HELP, NOT_VALID, PARALLAX_HOVER, PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
+    auto_subtype_reason, bc3_pair, channel_text, edge_view, encoding_options, field_hidden,
+    field_views, filter_option_lock, filter_view, format_choices, group_of, levels_view,
+    mips_count, mips_on, provenance_text, weighting_option_lock, FieldView, BC1_ALPHA_HOVER,
+    BC3_CHOICES, BC3_SEARCH, EXR_STRAIGHT_HOVER, HELPER_HELP, NOT_VALID, PARALLAX_HOVER,
+    PERCEPTUAL_HOVER, WEIGHTING, WEIGHTING_OPTIONS,
 };
 use crate::model::items::{Decision, ItemKind, ItemStatus};
 use crate::model::{Answer, AppModel};
@@ -356,17 +357,20 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         .into_iter()
         .map(|e| opt(json!(e), &capitalised(e)))
         .collect(),
-        "encoder.bc45_search_radius" => {
-            vec![
-                opt(json!("default"), "Default"),
-                opt(json!("max"), "Maximum"),
-                opt(json!("fast"), "Fast (preview)"),
-            ]
+        // Note JI4: the Effort row's choices on BC4 and BC5, BC1, and BC3 (both fields, `BC3_CHOICES`).
+        "encoder.bc45_search_radius" => search_options(true),
+        "encoder.bc1_search" => search_options(false),
+        BC3_SEARCH => {
+            let mut v = search_options(true);
+            let (bc1, radius) = bc3_pair(p);
+            if !BC3_CHOICES.iter().any(|c| c.1 == bc1 && c.2 == radius) {
+                v.push((
+                    json!(CUSTOM),
+                    format!("Custom: search {bc1}, radius {radius}"),
+                ));
+            }
+            v
         }
-        "encoder.bc1_search" => vec![
-            opt(json!("default"), "Default"),
-            opt(json!("fast"), "Fast (preview)"),
-        ],
         "header" => vec![
             opt(json!("auto"), "Auto"),
             opt(json!("dx10"), "DX10 extended header"),
@@ -406,6 +410,20 @@ pub(super) fn options_of(field: &str, target: Target, p: &Profile) -> Option<Opt
         _ => return None,
     })
 }
+
+/// Note JI4: Fast, Default and (with `max`) Max, the search fields' choices in that order.
+fn search_options(max: bool) -> Options {
+    let mut v = vec![opt(json!("fast"), "Fast"), opt(json!("default"), "Default")];
+    if max {
+        v.push(opt(json!("max"), "Max"));
+    }
+    v
+}
+
+/// Note JI4: the BC3 Effort row's read-only entry for a pair no choice names.
+const CUSTOM: &str = "custom";
+const CUSTOM_HOVER: &str =
+    "Mixed values from a preset or [files]; pick Fast, Default or Max to set both";
 
 /// The layouts a user can pick, in display order. `Faces` (a six-file set) is not chosen but detected.
 const PICKABLE_LAYOUTS: [(CubeLayout, &str); 4] = [
@@ -459,7 +477,9 @@ pub(super) fn combo_for(
             None => egui::RichText::new(display_value(current)),
         }
     };
-    let full = (field == "resize_relative_to")
+    // Rule 3.4: the BC3 row's Custom entry is longer than the combo, so the closed combo shows it whole on hover.
+    let custom = field == BC3_SEARCH && *current == json!(CUSTOM);
+    let full = (field == "resize_relative_to" || custom)
         .then(|| options.iter().find(|(v, _)| v == current))
         .flatten()
         .map(|(_, l)| l.clone());
@@ -471,6 +491,10 @@ pub(super) fn combo_for(
                 // A null value is a non-selectable group heading.
                 if v.is_null() {
                     ui.label(egui::RichText::new(label).weak());
+                } else if field == BC3_SEARCH && *v == json!(CUSTOM) {
+                    // Note JI4: the mixed pair is shown, never picked.
+                    ui.add_enabled(false, egui::Button::selectable(v == current, label))
+                        .on_disabled_hover_text(CUSTOM_HOVER);
                 } else {
                     let mut r = ui.selectable_label(v == current, label);
                     if field == "alpha.policy" {

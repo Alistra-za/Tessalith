@@ -1,9 +1,8 @@
 //! The right-hand Advanced drawer (M3a spec §2.5): the preset inspector, the live-encode switch,
-//! the rarely changed texture fields, and the `[files]` entries that match nothing. Drawing only: every edit is a
+//! and the `[files]` entries that match nothing. Drawing only: every edit is a
 //! call on the model, applied once the drawing is over.
 use super::columns::{strip_button, SETS_MIN, STRIP_WIDTH, TEXTURES_MIN};
-use super::settings_panel::{field_row, Ctx, RowEdit};
-use crate::model::fields::{provenance_text, search_field_views};
+use crate::model::fields::provenance_text;
 use crate::model::inspector::{inspector_rows, InspectorRow};
 use crate::model::{AppModel, Selection};
 use crate::settings::ChecksSettings;
@@ -21,8 +20,6 @@ pub struct AdvancedState {
 
 /// What a control asks of the model.
 enum Action {
-    SetField(String, &'static str, Value),
-    ClearField(String, &'static str),
     RemoveUnmatched(String),
     Live(bool),
     Checks(ChecksSettings),
@@ -78,13 +75,10 @@ pub fn body(ui: &mut egui::Ui, model: &mut AppModel, state: &mut AdvancedState) 
     preview_settings(ui, model, &mut actions);
     checks(ui, model, &mut actions);
     cache(ui, model, &mut actions);
-    // Note JI3: the level count, DDS header and Size rows are the texture panel's now.
-    texture_fields(ui, model, &mut actions);
+    // Note JI3, JI4: the texture fields are the texture panel's now (the search fields through its Effort row).
     unmatched(ui, model, &mut actions);
     for a in actions {
         match a {
-            Action::SetField(k, f, v) => model.set_field(&k, f, v),
-            Action::ClearField(k, f) => model.clear_field(&k, f),
             Action::RemoveUnmatched(k) => model.remove_unmatched(&k),
             Action::Live(on) => model.set_live(on),
             Action::Checks(c) => model.set_checks(c),
@@ -425,45 +419,6 @@ fn cache(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
             if let Some(mb) = done {
                 actions.push(Action::CacheMb(mb.round() as u32));
             }
-        });
-    });
-}
-
-fn texture_fields(ui: &mut egui::Ui, model: &AppModel, actions: &mut Vec<Action>) {
-    section(ui, "Advanced texture fields", |ui| {
-        let Some((key, job)) = selected_job(model) else {
-            ui.weak("Select a texture to edit its encoder search fields.");
-            return;
-        };
-        let busy = model.edit_busy();
-        let why = model.fix_off();
-        ui.add_enabled_ui(why.is_none(), |ui| {
-            egui::Grid::new(("advanced-fields", &key))
-                .num_columns(3)
-                .show(ui, |ui| {
-                    let cx = Ctx {
-                        key: &key,
-                        job: &job,
-                        target: model.target,
-                        busy,
-                        compact: false,
-                        aligned: false,
-                        alpha_asked: false,
-                        edit_off: why.clone(),
-                        warnings: &[],
-                    };
-                    for f in search_field_views(model.target, &job) {
-                        match field_row(ui, &cx, &f) {
-                            Some(RowEdit::Set(v)) => {
-                                actions.push(Action::SetField(key.clone(), f.field, v))
-                            }
-                            Some(RowEdit::Clear) => {
-                                actions.push(Action::ClearField(key.clone(), f.field))
-                            }
-                            None => {}
-                        }
-                    }
-                });
         });
     });
 }
