@@ -400,7 +400,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
     if let Some(e) = &pm.error {
         ui.colored_label(RED, e);
     }
-    // Note JF4: an Info line per row the load fixed (a format its type does not allow); Save writes it.
+    // Note JG4: an Info line per row the load fixed (a format its type does not allow); Save writes it.
     if let Some(n) = pm.note() {
         for line in n.lines() {
             ui.weak(line);

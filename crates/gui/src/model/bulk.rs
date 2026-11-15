@@ -435,7 +435,7 @@ fn skip_of(
             .flatten()
             .map(|t| (job.profile.format, t));
         if let Some(e) = encoding_of(field, v).or(tag) {
-            // Note JF: the GUI's list (BC4 and R8 only on a grey map).
+            // Note JG: the GUI's list (BC4 and R8 only on a grey map).
             if !super::format_rule::allowed(job.profile.subtype, target).contains(&e) {
                 return Some(NOT_ALLOWED.into());
             }

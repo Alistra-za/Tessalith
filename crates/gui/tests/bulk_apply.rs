@@ -366,7 +366,7 @@ fn a_bulk_write_that_changes_nothing_sets_no_report() {
 fn one_texture_is_singular_in_the_step_label_and_report() {
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
-    // Note JF2: a landscape diffuse allows no BC1, so the write is BC5.
+    // Note JG2: a landscape diffuse allows no BC1, so the write is BC5.
     m.apply_bulk_edit(&strings(&[ROCK]), "format", BulkOp::Set(json!("bc5")));
     assert_eq!(
         m.history.undo.last().unwrap().label,

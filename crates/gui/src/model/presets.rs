@@ -250,7 +250,7 @@ pub struct PresetsModel {
     pub changed_on_disk: bool,
     /// `suffixes_of` for every sub-type under `.0` (thousands of `suggest` calls, so once per target).
     suffixes: (Option<Target>, Vec<Vec<&'static str>>),
-    /// Note JF4: what loading the draft changed so no row keeps a format its type does not allow, until the next load.
+    /// Note JG4: what loading the draft changed so no row keeps a format its type does not allow, until the next load.
     note: Option<String>,
 }
 
@@ -367,7 +367,7 @@ impl PresetsModel {
             file: file.map(PathBuf::from),
         });
         self.refresh();
-        // Note JF4: a user preset never keeps a format its type does not allow; the draft is then unsaved.
+        // Note JG4: a user preset never keeps a format its type does not allow; the draft is then unsaved.
         self.note = super::format_rule::fix_preset(self);
     }
 
@@ -521,7 +521,7 @@ impl PresetsModel {
 
     /// Set `field` for `st`. A format pick takes its tag (`value` is `[format, tag]`).
     pub fn set_field(&mut self, st: Subtype, field: &str, value: Value) {
-        // Note JF2: a pair the sub-type does not allow is never written.
+        // Note JG2: a pair the sub-type does not allow is never written.
         if !super::format_rule::preset_write_ok(self, st, field, &value) {
             return;
         }
@@ -694,11 +694,11 @@ impl PresetsModel {
             d.table = d.saved.clone();
         }
         self.refresh();
-        // Note JF4: the saved table may hold a format its type does not allow; it is fixed again.
+        // Note JG4: the saved table may hold a format its type does not allow; it is fixed again.
         self.note = super::format_rule::fix_preset(self);
     }
 
-    /// Note JF4: what the last load changed so no format the type does not allow is kept (Info lines), if anything.
+    /// Note JG4: what the last load changed so no format the type does not allow is kept (Info lines), if anything.
     pub fn note(&self) -> Option<&str> {
         self.note.as_deref()
     }

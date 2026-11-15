@@ -348,7 +348,7 @@ fn an_error_keeps_the_card_and_writes_nothing() {
     std::fs::write(
         d.path().join("textures/sdc.toml"),
         // A threshold outside 1..=254 is CFG-INVALID. (A format the type does not allow no longer stays: the GUI
-        // resolves it, Note JF3.)
+        // resolves it, Note JG3.)
         "[files.\"clutter/rock_bump.png\"]\nalpha.threshold = 0\n",
     )
     .unwrap();

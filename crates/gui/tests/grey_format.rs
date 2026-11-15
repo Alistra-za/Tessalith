@@ -1,4 +1,4 @@
-//! Note JF (owner, 2026-11-15): a grey map (every sub-type of the Grayscale category) is BC4 or R8, UNORM, in the
+//! Note JG (owner, 2026-11-15): a grey map (every sub-type of the Grayscale category) is BC4 or R8, UNORM, in the
 //! GUI. No picker offers another format, no GUI write lands one, and one already in the project or a preset resolves
 //! itself on the settled plan, with an Info row. More generally, a (format, tag) pair the type does not allow is never
 //! kept: an own pin is dropped so the type's default applies, else the best allowed format is pinned.
@@ -376,7 +376,7 @@ fn undoing_the_open_fix_fixes_it_again() {
         (Subtype::SkinSk, Format::Bc4, ColorTag::Unorm)
     );
     assert_eq!(own(&m, SK, "format"), None);
-    // The new fix is a step of its own, so Redo is gone (DECISIONS JF3).
+    // The new fix is a step of its own, so Redo is gone (DECISIONS JG3).
     assert!(m.can_undo());
     assert!(!m.can_redo());
 }
