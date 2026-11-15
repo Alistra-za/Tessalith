@@ -2365,8 +2365,8 @@ fn a_map_a_mesh_supplies_raises_no_missing_map() {
     assert_eq!(missing_maps(&m, "landscape/rock01"), ["_rmaos"], "back");
 }
 
-/// A set read under an alias is looked up by the name it writes (final review I2: the meshes name the output), which
-/// an input name leaves alone, so the alias itself is not asked.
+/// A set read under an alias is looked up by the name it writes (final review I2: the meshes name the output). A PBR
+/// set's match key and outputs follow its input name (Note JF1), so the name on disk is not asked.
 #[test]
 fn an_aliased_set_looks_up_the_written_name() {
     let d = tempfile::tempdir().unwrap();
@@ -2376,9 +2376,13 @@ fn an_aliased_set_looks_up_the_written_name() {
     idle(&mut m);
     let id = "landscape/stone";
     assert_eq!(missing_maps(&m, id), ["_rmaos"]);
-    m.set_known(supplying("textures/landscape/stone.dds", 1 << 5));
-    assert_eq!(missing_maps(&m, id), ["_rmaos"], "the alias is not asked");
     m.set_known(supplying("textures/landscape/rock01.dds", 1 << 5));
+    assert_eq!(
+        missing_maps(&m, id),
+        ["_rmaos"],
+        "the name on disk is not asked"
+    );
+    m.set_known(supplying("textures/landscape/stone.dds", 1 << 5));
     assert!(missing_maps(&m, id).is_empty());
 }
 

@@ -36,7 +36,7 @@ Unless you tick *Whole path*, the dialog changes only the base name, the part be
 
 ## Input name box
 
-The set editor's heading shows the path the set's textures are read as, without the diffuse's suffix (`body` for `body_albedo.png`). Type a new one and press Enter, or click away: every member of the set gets an `[inputs]` alias as one undo step, and its TruePBR settings, pins and borrows follow.
+The set editor's heading shows the path the set's textures are read as, without the diffuse's suffix (`body` for `body_albedo.png`). Type a new one and press Enter, or click away: every member of the set gets an `[inputs]` alias as one undo step, and its TruePBR settings, pins and borrows follow. On a TruePBR set the PGPatcher match key follows too, so the entry matches the meshes that use the new name, and the outputs move under `textures\pbr\` with it. <!-- D:JF1 -->
 
 A grey completion follows what you type, drawn from the last scan and this project's diffuse paths. Amber means the name is unknown, which only warns. A red outline means it can't be used, with the reason on hover.
 

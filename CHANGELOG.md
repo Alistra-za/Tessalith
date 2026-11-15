@@ -13,6 +13,7 @@
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
 
 - Choosing **Advanced Skin** for a set that opened as PBR now makes it an Advanced skin set: the albedo becomes `skin_albedo`, a `_f` is packed into the `_rfaos` as the fuzz mask, and the export writes a `.csskin.json` and no PGPatcher JSON entry. Before, the types Tessalith had recorded on its own kept the set half PBR. A type you picked yourself stays.
+- A TruePBR set whose albedo has an input name now matches the meshes that use that name: the PGPatcher match key, the set preview's mesh list and the outputs under `textures\pbr\` follow the input name. Before, they kept the file's name on disk, which no mesh used, so the 3D preview fell back to the sphere and the exported JSON patched nothing. An existing project with such a set writes its outputs under the new name on the next export; the old ones stay on disk.
 
 ## 3.0.0
 
