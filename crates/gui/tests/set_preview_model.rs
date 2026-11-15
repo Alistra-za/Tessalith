@@ -2212,8 +2212,9 @@ fn fuzzy_rock(dir: &Path) -> AppModel {
     m
 }
 
-/// The render thread on the repo's stand-in shaders (WARP): render3d resolves the `.csm` and stores the material it
-/// draws, which `v3.shapes` reports.
+/// The render thread on the repo's stand-in shaders and the real device (`Gpu::new`: hardware first, WARP only
+/// without one), so its tests are `render_*`: render3d resolves the `.csm` and stores the material it draws, which
+/// `v3.shapes` reports.
 fn real_render(s: &mut SetPreview, cache: &Path) {
     s.v3.use_shader_folder(PathBuf::from(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -2242,11 +2243,14 @@ fn drawn(s: &mut SetPreview, m: &AppModel) -> Vec<render3d::ShapeInfo> {
 
 /// An MO2 instance whose mod A has `meshes\landscape\rocks\rock01.nif`: shape "Rock" on a type-0 lighting shader, no
 /// name field, slots 0 and 1 the set's source diffuse and normal (a v1 mesh PGPatcher patches); and shape "Other" whose
-/// own name field is `materials\other.csm` (in mod A: PBR, roughness 0.3) on a texture the set does not match. Scanned.
+/// own name field is `materials\other.csm` (in mod A: PBR, roughness 0.3) on a texture the set does not match; and shape
+/// "Skipped", with that name field too, on the set's source diffuse and normal but a slot 9 texture the game lacks, so
+/// PGPatcher skips it. Mod A also holds an exported copy of the set's diffuse output. Scanned.
 fn rock_mesh_scan(root: &Path) -> PathBuf {
     let mut n = builder::Nif::new(100);
     let rock = n.string("Rock");
     let other = n.string("Other");
+    let skipped = n.string("Skipped");
     let other_csm = n.string("materials\\other.csm");
     n.block("BSTriShape", builder::scenes::tri_shape(rock, 1));
     n.block("BSLightingShaderProperty", builder::scenes::lsp(0, 2));
@@ -2262,7 +2266,17 @@ fn rock_mesh_scan(root: &Path) -> PathBuf {
         "BSShaderTextureSet",
         builder::scenes::texset(&["textures\\other.dds"]),
     );
+    n.block("BSTriShape", builder::scenes::tri_shape(skipped, 7));
+    let mut body = builder::scenes::lsp(0, 8);
+    body[4..8].copy_from_slice(&other_csm.to_le_bytes());
+    n.block("BSLightingShaderProperty", body);
+    slots[8] = "textures\\landscape\\rock01_gone.dds"; // the slot PGPatcher's slot pass never touches
+    n.block("BSShaderTextureSet", builder::scenes::texset(&slots));
     scan_fixture::put(root, "mods/A/meshes/landscape/rocks/rock01.nif", &n.bytes());
+    // An earlier export of the set, installed: the preview still serves this session's encode in its place.
+    let mut dds = b"DDS ".to_vec();
+    dds.resize(128, 0);
+    scan_fixture::put(root, "mods/A/textures/pbr/landscape/rock01.dds", &dds);
     scan_fixture::put(
         root,
         "mods/A/materials/other.csm",
@@ -2288,11 +2302,111 @@ fn rock_mesh_scan(root: &Path) -> PathBuf {
     db
 }
 
+/// `material` with its `.csm` resolved from the scene's in-memory files, as the render thread resolves it first (Note
+/// IE12: `materials` and the map before the scan).
+fn resolved(
+    mut material: nif::material::MaterialState,
+    files: &std::collections::HashMap<String, FileSource>,
+) -> nif::material::MaterialState {
+    let path = material.csm_path.clone().expect("a .csm");
+    let read = |p: &str| match files.get(p) {
+        Some(FileSource::Memory { bytes, .. }) => Some(bytes.to_vec()),
+        _ => None,
+    };
+    let c = nif::csm::resolve(&path, &read).expect("the .csm is in the scene's files");
+    render3d::material::apply_csm(&mut material, &c);
+    material
+}
+
+/// The built-in scene's material and files.
+fn builtin_scene(
+    s: &SetPreview,
+) -> (
+    nif::material::MaterialState,
+    std::sync::Arc<std::collections::HashMap<String, FileSource>>,
+) {
+    match s.v3.content() {
+        Some(Content::Builtin {
+            material, textures, ..
+        }) => (material.clone(), textures.clone()),
+        c => panic!("{c:?}"),
+    }
+}
+
 /// Design §5.5 (Note IE13): a PBR set (not Landscape) with a texture-set block previews on a scanned mesh, no longer
 /// on the plane alone, and the shape that uses its diffuse draws the set's in-memory `.csm`: PBR, its fuzz switch and
-/// its numbers, every texture the `.csm` names served.
+/// its numbers, every texture the `.csm` names served from this session's encodes, an installed export of them
+/// included. Fix round 1 (t10 items 3 and 4): a shape PGPatcher skips and a shape it does not match keep their own
+/// `.csm`.
 #[test]
 fn set_preview_applies_set_csm() {
+    let inst = scan_fixture::instance_fixture("+A\n");
+    let db = rock_mesh_scan(inst.path());
+    let dir = tempfile::tempdir().unwrap();
+    let m = fuzzy_rock(dir.path());
+    let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
+    run(&mut s, &m);
+    assert!(
+        matches!(s.pick(), Pick::Nif(ref c) if c.nif_path == r"meshes\landscape\rocks\rock01.nif"),
+        "the scanned mesh, not the plane: {:?}",
+        s.pick()
+    );
+    let files = match s.v3.content() {
+        Some(Content::Parsed { textures, .. }) => textures.clone(),
+        c => panic!("{c:?}"),
+    };
+    let row = |name: &str| {
+        s.rows
+            .iter()
+            .find(|r| &*r.name == name)
+            .unwrap_or_else(|| panic!("{:?}", s.rows))
+            .clone()
+    };
+    let rock = row("Rock");
+    assert!(matches!(rock.outcome, Outcome::Patched { .. }), "{rock:?}");
+    assert_eq!(rock.material.csm_path.as_deref(), Some(ROCK_CSM));
+    let drawn = resolved(rock.material, &files);
+    let pbr = drawn.pbr.clone().expect("the set's .csm draws PBR");
+    assert_ne!(pbr.features & nif::pbr2::feat::FUZZ, 0, "the set's fuzz");
+    assert_eq!(pbr.params[0], 0.45, "the set's roughnessScale");
+    assert_eq!(pbr.params[16], 0.6, "the set's fuzzWeight");
+    let named: Vec<&str> = drawn
+        .slots
+        .iter()
+        .map(|t| t.norm.as_str())
+        .filter(|n| n.contains("pbr/"))
+        .collect();
+    assert!(
+        named.contains(&"textures/pbr/landscape/rock01.dds"),
+        "{named:?}"
+    );
+    for n in named {
+        assert!(
+            matches!(files.get(n), Some(FileSource::Memory { .. })),
+            "{n}: this session's encode, not the installed export: {:?}",
+            files.get(n)
+        );
+    }
+    // Shapes PGPatcher leaves alone keep their own name field's `.csm`.
+    let other = row("Other");
+    assert_eq!(other.outcome, Outcome::NoMatch);
+    let skipped = row("Skipped");
+    assert!(matches!(skipped.outcome, Outcome::Skip(_)), "{skipped:?}");
+    for r in [other, skipped] {
+        assert!(
+            r.material
+                .csm_path
+                .as_deref()
+                .is_some_and(|p| p.ends_with("other.csm")),
+            "{r:?}"
+        );
+    }
+}
+
+/// Note IE13 (fix round 1, t10 item 2): the render thread on the real device (`Gpu::new`, hardware first) draws the
+/// set's `.csm` on the scanned mesh and each other shape's own `.csm` through the scan.
+#[test]
+fn render_set_preview_draws_set_csm() {
     let inst = scan_fixture::instance_fixture("+A\n");
     let db = rock_mesh_scan(inst.path());
     let dir = tempfile::tempdir().unwrap();
@@ -2301,11 +2415,6 @@ fn set_preview_applies_set_csm() {
     let mut s = SetPreview::new(Some(db), DEFAULT_CAP);
     real_render(&mut s, cache.path());
     run(&mut s, &m);
-    assert!(
-        matches!(s.pick(), Pick::Nif(ref c) if c.nif_path == r"meshes\landscape\rocks\rock01.nif"),
-        "the scanned mesh, not the plane: {:?}",
-        s.pick()
-    );
     let shapes = drawn(&mut s, &m);
     let rock = shapes
         .iter()
@@ -2344,15 +2453,13 @@ fn unsaved_edit_reaches_preview() {
     use sdc_gui::model::cs_pbr::Kind;
     let dir = tempfile::tempdir().unwrap();
     let mut m = fuzzy_rock(dir.path());
-    let cache = tempfile::tempdir().unwrap();
     let mut s = SetPreview::new(None, DEFAULT_CAP);
-    real_render(&mut s, cache.path());
     run(&mut s, &m);
-    let before = drawn(&mut s, &m)[0]
-        .material
-        .pbr
-        .clone()
-        .expect("the set's .csm");
+    let pbr = |s: &SetPreview| {
+        let (material, files) = builtin_scene(s);
+        resolved(material, &files).pbr.expect("the set's .csm")
+    };
+    let before = pbr(&s);
     assert_eq!(before.params[16], 0.6);
     let builds = s.csm_builds;
     let key = builtin_key(&s);
@@ -2363,11 +2470,8 @@ fn unsaved_edit_reaches_preview() {
     assert_eq!(builtin_key(&s), key, "and pushes nothing");
     m.set_cs_value(ROCK, Kind::Txst, "fuzzWeight", Some(json!(0.2)));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    let after = drawn(&mut s, &m)[0]
-        .material
-        .pbr
-        .clone()
-        .expect("still the set's");
+    run(&mut s, &m);
+    let after = pbr(&s);
     assert_eq!(after.params[16], 0.2, "the edited fuzz weight is drawn");
     assert_eq!(after.params[0], 0.45);
     assert_eq!(s.csm_builds, builds + 1, "one rebuild for the edit");

@@ -2448,13 +2448,17 @@ impl SetPreview {
                     &mut textures,
                     &rows.iter().map(|r| &r.material).collect::<Vec<_>>(),
                 );
-                textures.extend(memory);
                 self.add_set_csm(&mut textures);
+                // Last: this session's encodes win over any game copy above (an installed export of the set too).
+                textures.extend(memory);
                 self.apply_xpmf_textures(&mut textures);
                 let same = self.on_screen == Some(Shown::Nif(c.load_copy_id));
                 self.next += 1;
                 // Note IE13: a shape's own `.csm` (its name field), its roots and the textures it names come from the
                 // scan, as in the Meshes view; the generation is the query's (a `requery` reopens the scan).
+                // shortcut: `rev` follows only this preview's own `requery`, so a rescan in the Meshes view without a
+                // requery here keeps the old key (and the render thread's open store, which sees the new commits)
+                // until the next push; tie it to the completed-scan count when a stale `.csm` there is reported.
                 let scan_db = self
                     .store_path
                     .clone()
