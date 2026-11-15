@@ -11,6 +11,9 @@
 - On CPUs without AVX2, BC7 and BC6H now use ISPC's SSE2 code: Tessalith no longer ships the SSE4 and AVX versions. On the CPU measured, a CPU with AVX but no AVX2 takes 1.76 times as long as before for BC7 and 1.50 times for BC6H, and one with SSE4.2 but no AVX 1.29 and 1.09 times. The output is byte for byte the same, and CPUs with AVX2 are not affected. Numbers: docs/research/avx512-ispc.md#without-avx2-the-sse2-path.
 - `sdc.exe` is 463 KB and `tessalith.exe` 463 KB smaller: the ISPC Texture Compressor code now holds only its BC6H encoder, the one part Tessalith uses. BC6H output is byte for byte the same.
 - For people building programs on `render3d`: the new crate `texcore` holds the DDS reader and writer, the pixel decoders, the colour curves, the cube maths and image loading, with no C or C++ code. `render3d` depends on `texcore` and no longer on `engine`, so it builds without the encoders. `engine` re-exports every moved item at its old path, and no output byte changes.
+- Review's file count is the number of DDS files the export writes. A texture that failed to plan is no longer counted. With **Also export** on, the count is the PBR folder's and the button reads **Export 24 files + Vanilla folder**; it used to read "Export 24 files to 2 folders" for an export that wrote 45.
+- A skin map Community Shaders can't load in its format (`FMT-CS-SKIN-LOADER`) has a **Use BC7** button, and a sub-type the mode doesn't have and gives no fallback for (`CFG-UNAVAILABLE`) has **Set type…**. Both used to show an **Acknowledge** that changed nothing.
+- The **Kinds ▾** hover in Problems no longer says Review lists every warning: Review lists none.
 
 ## 3.0.0
 
