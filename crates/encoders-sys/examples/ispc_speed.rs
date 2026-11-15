@@ -214,6 +214,9 @@ fn measure(
 fn parse_targets(s: &str) -> Result<Vec<IspcTarget>, String> {
     let mut out: Vec<IspcTarget> = Vec::new();
     for item in s.split(',') {
+        if item.is_empty() {
+            return Err("empty ISPC target in list".to_string());
+        }
         let t = IspcTarget::ALL
             .into_iter()
             .find(|t| t.name() == item)
@@ -397,8 +400,11 @@ mod tests {
         assert!(parse_targets("sse2,sse2")
             .unwrap_err()
             .contains("listed twice"));
-        assert!(parse_targets("").is_err());
-        assert!(parse_targets("sse2,").is_err());
+        for list in ["", "sse2,", ",sse2"] {
+            assert!(parse_targets(list)
+                .unwrap_err()
+                .contains("empty ISPC target"));
+        }
     }
 
     #[test]
@@ -419,6 +425,7 @@ mod tests {
         );
         // As engine::quantize::half_bits: clamped to the finite half range, no infinity, no NaN, no negative.
         assert_eq!(hdr_texel([1e9, f32::NAN, -3.0, 1.0])[..3], [0x7BFF, 0, 0]);
+        assert_eq!(hdr_texel([-0.0, 1.0, 1.0, 1.0])[0], 0);
     }
 
     #[test]

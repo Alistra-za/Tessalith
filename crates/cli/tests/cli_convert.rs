@@ -1547,6 +1547,32 @@ fn sdc_encodes_on_avx2_unless_the_cap_is_lifted() {
     }
 }
 
+type OutputTimes = BTreeMap<String, std::time::SystemTime>;
+
+/// Every output's modified time and bytes: a kept file and a re-encoded one can have equal bytes, but not times.
+fn output_state(out: &Path) -> (OutputTimes, BTreeMap<String, Vec<u8>>) {
+    let bytes = read_all(out);
+    let times = bytes
+        .keys()
+        .map(|k| {
+            let t = std::fs::metadata(out.join(k)).unwrap().modified().unwrap();
+            (k.clone(), t)
+        })
+        .collect();
+    (times, bytes)
+}
+
+/// The latest manifest line of each output.
+fn latest_records(out: &Path) -> BTreeMap<String, String> {
+    manifest_lines(out)
+        .into_iter()
+        .map(|l| {
+            let v: Value = serde_json::from_str(&l).unwrap();
+            (v["output"].as_str().unwrap().to_string(), l)
+        })
+        .collect()
+}
+
 /// `--on-existing if-changed` does not compare the `isa`: outputs written on AVX-512 stay as they are when the next
 /// run is capped, and keep their records.
 #[test]
@@ -1557,35 +1583,14 @@ fn a_rerun_on_the_other_path_keeps_every_output() {
     let o = fx.convert_to_on("out", &HI, true);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     // The bytes alone could not tell a re-encode from a kept file on this fixture: the modified time can.
-    let state = || {
-        let bytes = read_all(&out);
-        let times = bytes
-            .keys()
-            .map(|k| {
-                let t = std::fs::metadata(out.join(k)).unwrap().modified().unwrap();
-                (k.clone(), t)
-            })
-            .collect::<BTreeMap<_, _>>();
-        (times, bytes)
-    };
-    // The latest manifest line of each output.
-    let latest = || {
-        manifest_lines(&out)
-            .into_iter()
-            .map(|l| {
-                let v: Value = serde_json::from_str(&l).unwrap();
-                (v["output"].as_str().unwrap().to_string(), l)
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
-    let ((times, bytes), records) = (state(), latest());
+    let ((times, bytes), records) = (output_state(&out), latest_records(&out));
     assert!(!bytes.is_empty() && !records.is_empty());
     let o = fx.convert_to_on("out", &HI, false);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    let (times2, bytes2) = state();
+    let (times2, bytes2) = output_state(&out);
     assert_eq!(times2, times, "an output was written again");
     assert!(bytes2 == bytes, "an output's bytes changed");
-    assert_eq!(latest(), records);
+    assert_eq!(latest_records(&out), records);
 }
 
 /// Records written by an older Tessalith on a CPU without AVX2 name a path this build no longer has. They load, and
@@ -1601,6 +1606,7 @@ fn a_record_naming_a_dropped_isa_is_kept() {
     let isa = isas(&lines);
     // Rewrite: the first half of the lines says "sse4", the rest "avx"; each line holds the field exactly once.
     let half = lines.len() / 2;
+    assert!(half > 0, "the fixture wrote too few records to split");
     let rewritten: Vec<String> = lines
         .iter()
         .zip(&isa)
@@ -1620,35 +1626,14 @@ fn a_record_naming_a_dropped_isa_is_kept() {
         .collect();
     std::fs::write(out.join("_sdc/manifest.jsonl"), rewritten.join("\n") + "\n").unwrap();
     // As in a_rerun_on_the_other_path_keeps_every_output: the modified time tells a re-encode from a kept file.
-    let state = || {
-        let bytes = read_all(&out);
-        let times = bytes
-            .keys()
-            .map(|k| {
-                let t = std::fs::metadata(out.join(k)).unwrap().modified().unwrap();
-                (k.clone(), t)
-            })
-            .collect::<BTreeMap<_, _>>();
-        (times, bytes)
-    };
-    // The latest manifest line of each output.
-    let latest = || {
-        manifest_lines(&out)
-            .into_iter()
-            .map(|l| {
-                let v: Value = serde_json::from_str(&l).unwrap();
-                (v["output"].as_str().unwrap().to_string(), l)
-            })
-            .collect::<BTreeMap<_, _>>()
-    };
-    let ((times, bytes), records) = (state(), latest());
+    let ((times, bytes), records) = (output_state(&out), latest_records(&out));
     assert!(!bytes.is_empty());
     let o = fx.convert_to_on("out", &HI, false);
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
-    let (times2, bytes2) = state();
+    let (times2, bytes2) = output_state(&out);
     assert_eq!(times2, times, "an output was written again");
     assert!(bytes2 == bytes, "an output's bytes changed");
-    assert_eq!(latest(), records);
+    assert_eq!(latest_records(&out), records);
     // Every line still parses and names a dropped path.
     for i in isas(&manifest_lines(&out)) {
         assert!(i == "sse4" || i == "avx", "{i}");

@@ -162,19 +162,17 @@ fn recorded(target: IspcTarget) -> [(Bc6hLevel, &'static str); 5] {
     }
 }
 
-/// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
-/// The ISPC target paths differ (AVX-512, AVX2 and SSE2), so each target has its own hashes; a CPU
-/// checks the targets it supports, up to `ispc_target()` (AVX2 in a test build unless `SDC_TEST_AVX512=1`).
-/// `SDC_RECORD_LEVEL_HASHES=1` prints them.
-#[test]
-fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
+/// Encodes `hdr_image()` on every target this CPU supports, up to `ispc_target()` (AVX2 in a test build unless
+/// `SDC_TEST_AVX512=1`), at each level `pins` names for the target, and checks the SHA-256 against the pin.
+/// `SDC_RECORD_LEVEL_HASHES=1` prints the hashes instead.
+fn check_pins(pins: impl Fn(IspcTarget) -> Vec<(Bc6hLevel, &'static str)>) {
     let px = hdr_image();
     let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
     for target in IspcTarget::ALL
         .into_iter()
         .filter(|t| t.supported() && *t <= ispc_target())
     {
-        for (level, want) in recorded(target) {
+        for (level, want) in pins(target) {
             let mut out = vec![0u8; 16 * 16 * 16];
             bc6h_compress_rows_on(&px, 64, 64, &mut out, level, target);
             let got = hex::encode(Sha256::digest(&out));
@@ -185,6 +183,13 @@ fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
             }
         }
     }
+}
+
+/// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
+/// The ISPC target paths differ (AVX-512, AVX2 and SSE2), so each target has its own hashes.
+#[test]
+fn shipped_levels_are_byte_identical_to_the_recorded_objects() {
+    check_pins(|t| recorded(t).to_vec());
 }
 
 /// The peak mode (`VeryslowPeak`) per path: SSE2, AVX2, AVX-512 (AVX-512 read only with the cap lifted).
@@ -204,24 +209,9 @@ fn recorded_peak(target: IspcTarget) -> &'static str {
 }
 
 /// The peak mode encodes byte-identically to the recorded objects on every supported path.
-/// `SDC_RECORD_LEVEL_HASHES=1` prints the hashes.
 #[test]
 fn the_peak_mode_is_byte_identical_to_the_recorded_objects() {
-    let px = hdr_image();
-    let record = std::env::var_os("SDC_RECORD_LEVEL_HASHES").is_some();
-    for target in IspcTarget::ALL
-        .into_iter()
-        .filter(|t| t.supported() && *t <= ispc_target())
-    {
-        let mut out = vec![0u8; 16 * 16 * 16];
-        bc6h_compress_rows_on(&px, 64, 64, &mut out, Bc6hLevel::VeryslowPeak, target);
-        let got = hex::encode(Sha256::digest(&out));
-        if record {
-            println!("{target:?} VeryslowPeak {got}");
-        } else {
-            assert_eq!(got, recorded_peak(target), "{target:?} VeryslowPeak");
-        }
-    }
+    check_pins(|t| vec![(Bc6hLevel::VeryslowPeak, recorded_peak(t))]);
 }
 
 /// A peak pin equal to the veryslow pin would mean the peak mode never engaged on `hdr_image()`.

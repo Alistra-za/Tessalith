@@ -178,7 +178,7 @@ Note JB dropped the SSE4 and AVX objects, so a CPU without AVX2 now runs ISPC's 
 
 - **Bytes.** The SSE2, SSE4 and AVX paths gave the same hash in all four configurations, so a CPU that ran SSE4 or AVX writes the same bytes on SSE2. The AVX2 path gives other hashes, as in [Bytes and quality](#bytes-and-quality).
 - **Not measured.** An old CPU. On a Zen 5 the forced SSE2, SSE4 and AVX paths run on cores that also have AVX2, so the ratios may differ on a CPU that has only SSE.
-- **Repeat it.** Follow [How to repeat it](#how-to-repeat-it), with `--targets avx,sse2,sse4,avx2 --rounds 3` in place of `--all --rounds 3`. SSE4 and AVX are gone, so that run needs the objects of commit bc032e22 or earlier. The SSE2 hashes above must come out exactly.
+- **Repeat it.** Follow [How to repeat it](#how-to-repeat-it), with `--targets avx,sse2,sse4,avx2 --rounds 3` in place of `--all --rounds 3`. SSE4 and AVX are gone, so that run needs the objects of commit bc032e22 or earlier. The SSE2 hashes above must come out exactly. On a current build, `--targets sse2` gives those SSE2 hashes (the SSE2 objects are unchanged).
 
 ## Not measured
 
