@@ -783,7 +783,7 @@ fn auto_id(item_key: &str) -> String {
     }
 }
 
-/// Note JF1: the path texture `item` is read as: its `[inputs]` alias when the plan applied it (the job's game path
+/// Note JH1: the path texture `item` is read as: its `[inputs]` alias when the plan applied it (the job's game path
 /// ends with it, as `input_name_plan` checks), else its key. A refused alias (IN-ALIAS-INVALID) leaves the key.
 fn read_name(m: &AppModel, item: &TextureItem) -> String {
     let alias = m.read_as_of(&item.key).map(|a| a.replace('\\', "/"));
@@ -847,7 +847,7 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
 /// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
 /// `finish_view` the diffuse's `job.profile.subtype`, its key and the name it is read as (`read_name`: its alias,
-/// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JF1). The keys are
+/// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JH1). The keys are
 /// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
 /// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.

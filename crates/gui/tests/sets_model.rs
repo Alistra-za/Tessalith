@@ -2366,7 +2366,7 @@ fn a_map_a_mesh_supplies_raises_no_missing_map() {
 }
 
 /// A set read under an alias is looked up by the name it writes (final review I2: the meshes name the output). A PBR
-/// set's match key and outputs follow its input name (Note JF1), so the name on disk is not asked.
+/// set's match key and outputs follow its input name (Note JH1), so the name on disk is not asked.
 #[test]
 fn an_aliased_set_looks_up_the_written_name() {
     let d = tempfile::tempdir().unwrap();

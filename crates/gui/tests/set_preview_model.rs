@@ -2285,7 +2285,7 @@ fn an_input_name_on_a_renamed_set_moves_its_match_key() {
 }
 
 /// A created set keeps its id under any input name and no item key changes, so only `sets::view_reads` (the diffuse's
-/// game path) tells the fast re-plan that its view, and its match key, changed (Note JF2).
+/// game path) tells the fast re-plan that its view, and its match key, changed (Note JH2).
 #[test]
 fn an_input_name_in_a_created_set_rebuilds_its_view() {
     let dir = tempfile::tempdir().unwrap();
@@ -2308,7 +2308,7 @@ fn an_input_name_in_a_created_set_rebuilds_its_view() {
     );
 }
 
-/// JF1: an alias the engine refuses (another extension, IN-ALIAS-INVALID) leaves the file planned under its real
+/// JH1: an alias the engine refuses (another extension, IN-ALIAS-INVALID) leaves the file planned under its real
 /// name, so the match key keeps the name on disk.
 #[test]
 fn a_refused_alias_leaves_the_match_key_on_the_file_name() {
