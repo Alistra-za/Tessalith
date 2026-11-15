@@ -15,6 +15,8 @@ const APP_HEADING: &str = "App settings: these apply to every project";
 const LABEL_W: f32 = 90.0;
 /// The most characters of the export path shown; the rest is cut from the middle (rule 3.4).
 const PATH_CHARS: usize = 48;
+/// Open's accessible name: Export to ▾ has an "Open export folder" item, and both can be on screen (rule 8.4).
+const OPEN_NAME: &str = "Settings: Open export folder";
 
 /// The lowest and highest limit the cache box offers, in MB. The prune walks the whole folder before the window
 /// opens: 5,000 MB is about 150,000 entries.
@@ -239,7 +241,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                         };
                         // Stat only while the tab is drawn (rule 9.4).
                         let state = model.export_folder_state();
-                        let r = button(ui, state.is_ok(), "Open", "Open export folder");
+                        let r = button(ui, state.is_ok(), "Open", OPEN_NAME);
                         let open = match &state {
                             Ok(p) => r.on_hover_text(format!("Show {} in Explorer", p.display())),
                             Err(why) => r.on_disabled_hover_text(why),

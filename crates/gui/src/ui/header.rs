@@ -91,7 +91,7 @@ fn row(
     open_menu(ui, model);
     undo_redo(ui, model);
     ui.separator();
-    // Note FI16: the Mode control is in the Presets tab; MO2… stands alone, where the app has a scan model.
+    // Note JI1: the Mode control is in the Settings tab (FI16); MO2… stands alone, where the app has a scan model.
     if let Some(m) = scan {
         fit(ui, button_width(ui, "MO2…") + ui.spacing().item_spacing.x);
         super::meshes::mo2_button(ui, m);

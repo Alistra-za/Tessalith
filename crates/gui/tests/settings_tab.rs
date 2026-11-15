@@ -137,7 +137,7 @@ fn the_settings_tab_holds_exactly_four_groups() {
         .collect();
     assert_eq!(preset.len(), 1, "one Settings Preset combo");
     assert!(in_project(preset[0].rect()), "{:?}", preset[0].rect());
-    for b in ["Choose export folder", "Open export folder"] {
+    for b in ["Choose export folder", "Settings: Open export folder"] {
         let r = h.get_by_role_and_label(Role::Button, b).rect();
         assert!(in_project(r), "{b} {r:?}");
     }
@@ -153,7 +153,7 @@ fn no_project_open_shows_no_project_controls() {
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h.query_by_label_contains("Preset (this project)").is_none());
     assert!(h.query_by_label("Choose export folder").is_none());
-    assert!(h.query_by_label("Open export folder").is_none());
+    assert!(h.query_by_label("Settings: Open export folder").is_none());
     h.get_by_label("Live encode setting"); // app settings still there
 }
 
@@ -219,7 +219,7 @@ fn a_long_export_path_stays_inside_at_1100() {
         h.get_by_label(&format!("Export folder: {full}"));
         let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
         assert_in_centre(&h, "Choose export folder");
-        assert_in_centre(&h, "Open export folder");
+        assert_in_centre(&h, "Settings: Open export folder");
         // Every node that starts right of the centre's left edge, at the centre's height, ends inside it: one pushed
         // wholly past the right edge counts too.
         let mut seen = 0;
@@ -294,7 +294,7 @@ fn the_export_folder_buttons_choose_and_open() {
     let mut h = harness(m, 1400.0);
     assert_in_centre(&h, "Not chosen");
     h.get_by_label("Export folder: not chosen");
-    let open = h.get_by_role_and_label(Role::Button, "Open export folder");
+    let open = h.get_by_role_and_label(Role::Button, "Settings: Open export folder");
     assert!(open.accesskit_node().is_disabled());
     open.hover();
     h.run();
@@ -315,7 +315,7 @@ fn the_export_folder_buttons_choose_and_open() {
     std::fs::create_dir_all(&out).unwrap();
     h.run();
     h.get_by_label(&format!("Export folder: {}", out.display()));
-    let open = h.get_by_role_and_label(Role::Button, "Open export folder");
+    let open = h.get_by_role_and_label(Role::Button, "Settings: Open export folder");
     assert!(!open.accesskit_node().is_disabled());
     open.click();
     h.run();
@@ -350,10 +350,29 @@ fn app_settings_save_to_gui_toml_at_once() {
     assert_eq!(h.state().settings.analysis_cache_mb, Some(7));
     assert!(!toml.exists(), "drawing and leaving the box save nothing");
 
-    for name in ["Live encode setting", "Low detail check", "Textures column"] {
-        h.get_by_role_and_label(Role::CheckBox, name).click();
-        h.run();
-    }
+    // Each edit is on disk before the next one: no later save carries an earlier value.
+    let saved = || GuiSettings::load(&toml).0;
+    h.get_by_role_and_label(Role::CheckBox, "Live encode setting")
+        .click();
+    h.run();
+    assert_eq!(saved().live_encode, !live, "Live encode saved at once");
+    h.get_by_role_and_label(Role::CheckBox, "Low detail check")
+        .click();
+    h.run();
+    assert_eq!(saved().checks.low_detail, !low, "Low detail saved at once");
+    // The Columns tick is a check box ticked while its column shows (Note BH15's eye, now a tick).
+    let toggled = |h: &H| {
+        h.get_by_role_and_label(Role::CheckBox, "Textures column")
+            .accesskit_node()
+            .toggled()
+    };
+    assert_eq!(toggled(&h), Some(egui::accesskit::Toggled::True));
+    h.get_by_role_and_label(Role::CheckBox, "Textures column")
+        .click();
+    h.run();
+    assert_eq!(toggled(&h), Some(egui::accesskit::Toggled::False));
+    assert!(saved().textures_hidden, "the Textures column saved at once");
+    assert!(!saved().sets_hidden);
     spin(&h).focus();
     h.run();
     h.key_press_modifiers(Modifiers::COMMAND, Key::A);

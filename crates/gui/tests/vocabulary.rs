@@ -188,7 +188,17 @@ fn settings_checks_use_low_detail_and_no_mip_zero() {
     });
     h.run();
     assert_eq!(h.query_all_by_label("Low detail check").count(), 1);
+    // The STRAYS sweep over the screen with the checks on it; the argument only names the view in a failure. The
+    // checks were the Advanced drawer's, and the brief's "no stray Advanced" stays as a sweep under that name too.
     assert_no_strays(&h, "Settings");
+    assert_no_strays(&h, "Advanced");
+    // shortcut: this holds only because a tab in front hides the drawer; with the selection in front its "Advanced"
+    // strip is still drawn until Task 9 removes the drawer, after which the check holds in every state.
+    assert_eq!(
+        h.query_all_by_label_contains("Advanced").count(),
+        0,
+        "no Advanced label beside the Settings tab"
+    );
     assert!(h
         .query_by_label_contains("Measure whether full size adds anything")
         .is_none());
