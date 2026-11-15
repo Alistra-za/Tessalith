@@ -153,16 +153,19 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
         ..Default::default()
     };
     let mut done = BTreeSet::new();
-    // Note IE10: a PBR set (not PBR Landscape) writes its values to its `.csm`, and its texture-set file names it.
+    // Note IE10: a PBR set (not PBR Landscape) writes its values to its `.csm`, and its texture-set file names it. Such
+    // a set never falls back to inline values: with no `.csm` this run (no PGPatcher entry), the file is refused.
     let csms = super::csm_export::csm_sets(m);
+    let views = super::sets::views(m);
     // Note HF9: only the sets in the run write their files; the others' stay as they are.
     for e in entries.iter().filter(|e| m.in_run_id(&e.id)) {
-        let csm = csms
+        let same = |id: &str| engine::sets::same_id(id, &e.id);
+        let wants = views
             .iter()
-            .find(|(v, _)| engine::sets::same_id(&v.id, &e.id))
-            .map(|(_, c)| c);
+            .any(|v| same(&v.id) && super::csm_export::gets_csm(v));
+        let csm = csms.iter().find(|(v, _)| same(&v.id)).map(|(_, c)| c);
         for (kind, b) in blocks(e) {
-            let pointer = csm.filter(|_| kind == Kind::Txst);
+            let pointer = (wants && kind == Kind::Txst).then_some(csm);
             let known = |k: &String| field(kind, k).is_some();
             let mut values = b.values.clone();
             values.retain(|k, _| known(k));
@@ -186,10 +189,14 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                 let why = refused
                     .get(&(e.id.clone(), kind, edid.clone()))
                     .cloned()
-                    .or_else(|| {
-                        pointer
-                            .filter(|c| c.blocked.is_some())
-                            .map(|c| format!("the set's {} is not written", c.path))
+                    .or_else(|| match pointer {
+                        Some(None) => Some(
+                            "the set writes no .csm this run (it has no PGPatcher entry)".into(),
+                        ),
+                        Some(Some(c)) if c.blocked.is_some() => {
+                            Some(format!("the set's {} is not written", c.path))
+                        }
+                        _ => None,
                     });
                 match why {
                     Some(why) => {
@@ -202,8 +209,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingCs> {
                     None => {
                         if done.insert((kind, edid.to_lowercase())) {
                             let text = match pointer {
-                                Some(c) => csm_pointer_text(&c.path),
-                                None => to_text(kind, &values),
+                                Some(Some(c)) => csm_pointer_text(&c.path),
+                                _ => to_text(kind, &values),
                             };
                             p.files.push((rel_path(kind, edid), text));
                         }

@@ -4,7 +4,7 @@ mod support;
 use nif::csm::{self, Csm, Value};
 use sdc_gui::model::auto_flags::{hint, resolved_for};
 use sdc_gui::model::bottom::{problems, Level};
-use sdc_gui::model::cs_pbr::{Kind, TXST2_FIELDS, TXST_FIELDS, TXST_PARAMS};
+use sdc_gui::model::cs_pbr::{Kind, TXST2_FIELDS, TXST_FIELDS};
 use sdc_gui::model::csm_export::*;
 use sdc_gui::model::history::{record_key, sha256_of};
 use sdc_gui::model::sets::{views, SetView};
@@ -157,8 +157,9 @@ fn pgp_switch_pairs() {
             &["multilayer", "coat_diffuse"],
             &["PBRTwoLayerEnabled", "PBRTwoLayerColoredCoat"],
         ),
+        // As PGPatcher v1 (SLSF2 25, which `from_v1` reads): interlayer parallax is the coat's own option.
         (
-            &["multilayer", "parallax"],
+            &["multilayer", "coat_parallax"],
             &["PBRTwoLayerEnabled", "PBRTwoLayerInterlayerParallax"],
         ),
         (&["fuzz_on"], &["PBRFuzzEnabled"]),
@@ -168,10 +169,14 @@ fn pgp_switch_pairs() {
             assert!(has(&c, w), "{keys:?} -> {w}: {c:?}");
         }
     }
+    // Parallax alone fills slot 4 only; it is no two-layer switch.
+    let c = on(&["multilayer", "parallax"]);
+    assert!(!has(&c, "PBRTwoLayerInterlayerParallax"), "{c:?}");
     // The coat options need two-layer, and PGPatcher's glint switch is not used (the block's is).
     for keys in [
         &["coat_normal"][..],
         &["coat_diffuse"],
+        &["coat_parallax"],
         &["parallax"],
         &["glint_on"],
     ] {
@@ -211,11 +216,13 @@ fn csm_path_cases() {
     }
 }
 
-/// Pins the GUI's texture-set fields against `nif::pbr2`'s key map both ways: every field that is a PBR parameter
-/// (a number or colour, and the glint numbers) is in `TXST_PARAMS`, every `TXST_PARAMS` key is a field, each index
-/// has a `.csm` key, and `csm_key` agrees. The three fields outside the map are named.
+/// Pins the GUI's own texture-set field tables (`TXST_FIELDS`, `TXST2_FIELDS`, `GLINT_FIELDS`) against `nif::pbr2`'s
+/// key map both ways: every field that is a PBR parameter (a number or colour, and the glint numbers) is in
+/// `TXST_PARAMS`, every `TXST_PARAMS` key is a field, each index has a `.csm` key, and `csm_key` agrees. The two number
+/// fields outside the map are named.
 #[test]
 fn txst_params_match_gui() {
+    use nif::pbr2::TXST_PARAMS;
     use sdc_gui::model::cs_pbr::{FieldKind, GLINT_FIELDS};
     let outside = ["innerLayerDisplacementOffset", "fuzzRoughness"];
     let mut gui: Vec<String> = vec![];
@@ -410,7 +417,8 @@ fn non_finite_numbers_are_left_out() {
     );
 }
 
-/// Design §5.3: a PBR Landscape set keeps its inline texture-set JSON, byte for byte, and gets no `.csm`.
+/// Design §5.3: a PBR Landscape set keeps its inline texture-set JSON, byte for byte, and gets no `.csm`. The literal
+/// bytes `to_text` writes are pinned in `cs_pbr_export::export_writes_the_cs2_keys` and its neighbours.
 #[test]
 fn landscape_keeps_inline_json() {
     use sdc_gui::model::cs_pbr_export;
@@ -468,24 +476,24 @@ fn txst_json_points_at_csm() {
     );
 }
 
-/// Old files open: a block with the phase-1 keys `foliage` and `innerLayerDisplacementOffset` loads; foliage exports
-/// as `PBRFoliageEnabled`, the offset (no `.csm` key) is a warning, and a save keeps both values.
+/// A phase-1 project file: a texture-set block with the CS 2.0 keys, `foliage` on and a non-default
+/// `innerLayerDisplacementOffset`.
+const PHASE1_PROJECT: &str = "[[sets]]\nid = \"landscape/rock01\"\n\n[sets.cs_txst]\nedids = [\"Rock01\"]\n\
+specularLevel = 0.25\nsubsurfaceBalance = 0.6\nthinSurface = true\nfoliage = true\nfuzzRoughness = 0.3\n\
+innerLayerDisplacementOffset = 0.5\n";
+
+/// Old files open: a phase-1 project with `foliage` and `innerLayerDisplacementOffset` loads; foliage exports as
+/// `PBRFoliageEnabled`, the offset (no `.csm` key) is a warning, and a save keeps both values.
 #[test]
 fn old_project_loads() {
     let d = tempfile::tempdir().unwrap();
-    {
-        let mut m = with_txst(d.path());
-        m.set_cs_value(ROCK, Kind::Txst, "foliage", Some(json!(true)));
-        m.set_cs_value(
-            ROCK,
-            Kind::Txst,
-            "innerLayerDisplacementOffset",
-            Some(json!(0.5)),
-        );
-        m.sets_doc.as_mut().unwrap().save(true).unwrap();
-    }
+    let project = d.path().join("textures/sdc-project.toml");
+    std::fs::create_dir_all(project.parent().unwrap()).unwrap();
+    std::fs::write(&project, PHASE1_PROJECT).unwrap();
     let mut m = pbr_opened_plain(d.path());
+    assert_eq!(m.sets_doc.as_ref().unwrap().path(), project);
     let b = m.cs_block(ROCK, Kind::Txst).expect("the block loads");
+    assert!(b.bad.is_empty(), "{:?}", b.bad);
     assert_eq!(b.values.get("foliage"), Some(&json!(true)));
     let s = rock_csm(&m);
     assert_eq!(
@@ -496,6 +504,20 @@ fn old_project_loads() {
         .into_iter()
         .find(|t| t.contains("innerLayerDisplacementOffset"));
     assert!(warn.is_some(), "{:?}", problem_texts(&m));
+    export_and_wait(&mut m);
+    let text = std::fs::read_to_string(csm_file(&m)).unwrap_or_else(|e| {
+        panic!("{e}; notes {:?}", m.export.notes);
+    });
+    for want in [
+        "\"PBRFoliageEnabled\": true",
+        "\"PBRThinSurfaceEnabled\": true",
+        "\"PBRThinSurfaceSubsurfaceBalance\": 0.6",
+        "\"PBRFuzzRoughness\": 0.3",
+        "\"PBRSpecularLevel\": 0.25",
+    ] {
+        assert!(text.contains(want), "{want} in\n{text}");
+    }
+    assert!(!text.contains("innerLayer"), "{text}");
     m.set_cs_value(ROCK, Kind::Txst, "specularLevel", Some(json!(0.03)));
     m.sets_doc.as_mut().unwrap().save(true).unwrap();
     let text = std::fs::read_to_string(m.sets_doc.as_ref().unwrap().path()).unwrap();
@@ -540,6 +562,144 @@ fn the_panel_hides_the_offset_row() {
         b.values.get("innerLayerDisplacementOffset"),
         Some(&json!(0.5))
     );
+}
+
+/// Fix round 1 (Important 1): a set that gets a `.csm` never falls back to inline values. With no PGPatcher entry
+/// (`match1 = ""`: nothing would match) there is no `.csm`, so its texture-set file is refused with a note.
+#[test]
+fn a_csm_set_without_a_csm_writes_no_inline_json() {
+    use sdc_gui::model::cs_pbr_export;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    m.set_cs_value(ROCK, Kind::Txst, "specularLevel", Some(json!(0.02)));
+    m.set_json_value(ROCK, "match1", Some(json!("")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(gets_csm(&view(&m)));
+    assert!(csm_sets(&m).is_empty(), "no PGPatcher entry, no .csm");
+    let p = cs_pbr_export::prepare(&m).unwrap();
+    assert!(p.files.is_empty(), "{:?}", p.files);
+    assert!(
+        p.notes
+            .iter()
+            .any(|n| n.contains("Rock01 not written") && n.contains(".csm")),
+        "{:?}",
+        p.notes
+    );
+    assert_eq!(p.refused, ["PBRTextureSets/Rock01.json"]);
+}
+
+/// The set's PGPatcher entry as the export builds it.
+fn entry(m: &AppModel) -> sdc_gui::pgp::writer::EntryInput {
+    sdc_gui::model::pbr_export::json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.id == ROCK)
+        .map(|(_, e)| e)
+        .expect("the rock's entry")
+}
+
+/// Fix round 1 (Important 2): a slot the PGPatcher entry names (a borrowed or renamed texture) counts as present, even
+/// when the set has no texture of its own there.
+#[test]
+fn a_borrowed_normal_is_not_blocked() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    std::fs::remove_file(d.path().join("textures/landscape/rock01_normal.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let v = view(&m);
+    let mut e = entry(&m);
+    assert!(rock_csm(&m).blocked.is_some(), "no normal of its own");
+    e.slots
+        .insert(2, r"textures\pbr\landscape\other01_n.dds".into());
+    let s = entry_csm(&v, &e, None).unwrap();
+    assert_eq!(s.blocked, None, "{:?}", s.warnings);
+    assert_eq!(
+        s.csm.values.get("NormalTexture"),
+        Some(&Value::Text("pbr/landscape/other01_n.dds".into()))
+    );
+}
+
+/// Fix round 1 (Important 2): a locked RMAOS keeps the mesh's own texture (the key is left out), so it is not missing.
+#[test]
+fn a_locked_rmaos_is_not_blocked() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    let tex = d.path().join("textures/landscape");
+    for f in ["rock01_roughness.png", "rock01_ao.png"] {
+        std::fs::remove_file(tex.join(f)).unwrap();
+    }
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_json_value(ROCK, "lock_rmaos", Some(json!(true)));
+    let s = rock_csm(&m);
+    assert_eq!(s.blocked, None, "{:?}", s.warnings);
+    assert!(!s.csm.values.contains_key("RmaosTexture"), "{s:?}");
+}
+
+/// Fix round 1 (Important 3): a wrong-typed block value of a `.csm` set is left out with a warning, whatever its kind:
+/// a two-channel colour, a text in a number field, a number in a switch.
+#[test]
+fn wrong_typed_csm_values_warn() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    m.set_cs_value(ROCK, Kind::Txst, "subsurfaceColor", Some(json!([1.0, 1.0])));
+    m.set_cs_value(ROCK, Kind::Txst, "specularLevel", Some(json!("high")));
+    m.set_cs_value(ROCK, Kind::Txst, "foliage", Some(json!(1)));
+    m.set_cs_value(
+        ROCK,
+        Kind::Txst,
+        "innerLayerDisplacementOffset",
+        Some(json!("x")),
+    );
+    let s = rock_csm(&m);
+    for k in [
+        "subsurfaceColor",
+        "specularLevel",
+        "foliage",
+        "innerLayerDisplacementOffset",
+    ] {
+        assert_eq!(
+            s.warnings
+                .iter()
+                .filter(|w| w.contains(&format!("cs_txst.{k} ")))
+                .count(),
+            1,
+            "{k}: {:?}",
+            s.warnings
+        );
+    }
+    for k in [
+        "PBRSubsurfaceColor",
+        "PBRSpecularLevel",
+        "PBRFoliageEnabled",
+    ] {
+        assert!(!s.csm.values.contains_key(k), "{k}: {s:?}");
+    }
+}
+
+/// Fix round 1 (item 12): the `.csm` rows are export asks, cached on the view key; a PGPatcher settings change (here
+/// `fuzz_on` against the block's glint) changes them.
+#[test]
+fn a_pgp_settings_change_changes_the_csm_asks() {
+    use sdc_gui::model::pbr_export::export_asks;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = with_txst(d.path());
+    m.set_cs_value(
+        ROCK,
+        Kind::Txst,
+        "glintParameters.enabled",
+        Some(json!(true)),
+    );
+    let clash = |m: &AppModel| {
+        export_asks(m)
+            .iter()
+            .any(|a| a.text.contains(csm::rule::FUZZ_GLINT))
+    };
+    assert!(!clash(&m));
+    m.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
+    assert!(clash(&m));
+    m.set_json_value(ROCK, "fuzz_on", None);
+    assert!(!clash(&m));
 }
 
 /// The `.csm` hash record lives in the sidecar like the other JSON kinds': read back on open, kept across undo.

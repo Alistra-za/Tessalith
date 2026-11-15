@@ -7,6 +7,7 @@ use super::history::{orphans, records_at};
 use super::sets::SetView;
 use super::AppModel;
 use crate::pgp::settings::{Settings, FOLIAGE_KEY};
+use crate::pgp::writer::EntryInput;
 use engine::config::Target;
 use engine::sets::same_id;
 use nif::csm::{self, Csm, Value};
@@ -16,8 +17,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 /// Each PGPatcher switch pair (design §5.2): the `.csm` switch written when every listed setting is `true`. Checked
-/// against PGPatcher's v1 output (`pgpsim::patch`) and `nif::pbr2::from_v1` in Note IE10: `multilayer` + `parallax`
-/// is the plan's pair; PGPatcher's own v1 interlayer-parallax flag comes from `coat_parallax`.
+/// against PGPatcher's v1 output (`pgpsim::patch`) and `nif::pbr2::from_v1` in Note IE10: interlayer parallax comes
+/// from `coat_parallax` (SLSF2 25 in v1), and the coat options need `multilayer` (the schema's coat sub-flags need
+/// two-layer).
 pub const PGP_SWITCHES: [(&[&str], &str); 9] = [
     (&["subsurface"], "PBRSubsurfaceEnabled"),
     (&[FOLIAGE_KEY], "PBRSubsurfaceEnabled"),
@@ -26,7 +28,10 @@ pub const PGP_SWITCHES: [(&[&str], &str); 9] = [
     (&["multilayer"], "PBRTwoLayerEnabled"),
     (&["multilayer", "coat_normal"], "PBRTwoLayerCoatNormal"),
     (&["multilayer", "coat_diffuse"], "PBRTwoLayerColoredCoat"),
-    (&["multilayer", "parallax"], "PBRTwoLayerInterlayerParallax"),
+    (
+        &["multilayer", "coat_parallax"],
+        "PBRTwoLayerInterlayerParallax",
+    ),
     (&["fuzz_on"], "PBRFuzzEnabled"),
 ];
 
@@ -41,6 +46,37 @@ pub const BLOCK_SWITCHES: [(&str, &str); 4] = [
 
 /// The block number outside `nif::pbr2::TXST_PARAMS`.
 const FUZZ_ROUGHNESS: (&str, &str) = ("fuzzRoughness", "PBRFuzzRoughness");
+
+/// A block number's `.csm` key and whether it is a colour (`#rrggbb`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct NumberKey {
+    csm: &'static str,
+    color: bool,
+}
+
+/// The block keys that are `.csm` numbers or colours: the `TXST_PARAMS` keys, then `fuzzRoughness`.
+fn number_keys() -> impl Iterator<Item = &'static str> {
+    TXST_PARAMS
+        .iter()
+        .map(|(k, _)| *k)
+        .chain([FUZZ_ROUGHNESS.0])
+}
+
+/// The one TXST→`.csm` lookup for numbers (`csm_key` and `block_values` share it).
+fn number_key(key: &str) -> Option<NumberKey> {
+    if key == FUZZ_ROUGHNESS.0 {
+        return Some(NumberKey {
+            csm: FUZZ_ROUGHNESS.1,
+            color: false,
+        });
+    }
+    let (_, i) = TXST_PARAMS.iter().find(|(k, _)| *k == key)?;
+    let (csm, _) = CSM_PARAMS.iter().find(|(_, j)| j == i)?;
+    Some(NumberKey {
+        csm,
+        color: COLOR_PARAMS.contains(i),
+    })
+}
 
 /// The texture-set key a `.csm` has no key for: dropped, with a warning when the block holds a non-default value.
 pub const NO_CSM_KEY: &str = "innerLayerDisplacementOffset";
@@ -76,14 +112,12 @@ fn texture_value(p: &str) -> String {
 /// The `.csm` key a `cs_txst` block key (dotted under `glintParameters`) is written as; `None` for a key it has none
 /// for (`innerLayerDisplacementOffset`, the `glintParameters` object itself).
 pub fn csm_key(key: &str) -> Option<&'static str> {
-    if let Some((_, i)) = TXST_PARAMS.iter().find(|(k, _)| *k == key) {
-        return CSM_PARAMS.iter().find(|(_, j)| j == i).map(|(k, _)| *k);
-    }
-    BLOCK_SWITCHES
-        .iter()
-        .chain([&FUZZ_ROUGHNESS])
-        .find(|(k, _)| *k == key)
-        .map(|(_, c)| *c)
+    number_key(key).map(|n| n.csm).or_else(|| {
+        BLOCK_SWITCHES
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, c)| *c)
+    })
 }
 
 fn key_def(name: &str) -> Option<&'static csm::KeyDef> {
@@ -123,6 +157,12 @@ pub fn gets_csm(v: &SetView) -> bool {
 /// explicit `slotN` settings; [`csm_sets`] adds borrowed slots as the PGPatcher entry names them.
 pub fn set_csm(v: &SetView, pgp: &Settings, cs_txst: Option<&CsBlock>) -> Option<SetCsm> {
     build(v, pgp, cs_txst, &BTreeMap::new())
+}
+
+/// The `.csm` of set `v` as its PGPatcher entry `e` names it (`pbr_export::json_entries`): its resolved settings and
+/// the slot paths it names (borrowed slots and renames included).
+pub fn entry_csm(v: &SetView, e: &EntryInput, cs_txst: Option<&CsBlock>) -> Option<SetCsm> {
+    build(v, &e.settings, cs_txst, &e.slots)
 }
 
 fn get<'a>(values: &'a serde_json::Map<String, Json>, key: &str) -> Option<&'a Json> {
@@ -165,11 +205,18 @@ fn build(
             .find(|(k, f)| k.game_slot() == Some(n) && f.is_filled())
             .map(|(k, _)| *k)
     };
-    for def in csm::KEYS.iter().filter(|k| k.kind == csm::Kind::Texture) {
-        let n = def.slot.map_or(0, |s| s as u8 + 1);
+    // Game slots that got a texture key, and those a lock leaves to the mesh.
+    let mut present = BTreeSet::new();
+    let mut locked = BTreeSet::new();
+    let textures = csm::KEYS
+        .iter()
+        .filter(|k| k.kind == csm::Kind::Texture)
+        .filter_map(|k| Some((k.name, k.slot? as u8 + 1)));
+    for (name, n) in textures {
         // As the PGPatcher entry: an explicit `slotN` wins; a lock keeps the mesh's own texture (the key is left out).
         let path = explicit(n).or_else(|| {
             if crate::pgp::prefix::pgp_locked(pgp, n) {
+                locked.insert(n);
                 return None;
             }
             slots.get(&n).cloned().or_else(|| {
@@ -179,13 +226,16 @@ fn build(
                 Some(rel.to_string_lossy().into_owned())
             })
         });
-        if let Some(p) = path {
-            values.insert(def.name, Value::Text(texture_value(&p)));
+        // `""` clears the slot (the entry's form): no texture.
+        if let Some(p) = path.filter(|p| !p.trim().is_empty()) {
+            values.insert(name, Value::Text(texture_value(&p)));
+            present.insert(n);
         }
     }
+    // Missing: no key written and no lock (a locked slot keeps the mesh's texture).
     let missing: Vec<&str> = NEEDED
         .iter()
-        .filter(|(n, _)| filled(*n).is_none() && explicit(*n).is_none_or(|s| s.is_empty()))
+        .filter(|(n, _)| !present.contains(n) && !locked.contains(n))
         .map(|(_, name)| *name)
         .collect();
     let on = |k: &str| pgp.get(k) == Some(&Json::Bool(true));
@@ -229,25 +279,38 @@ fn block_values(
     values: &mut BTreeMap<&'static str, Value>,
     warnings: &mut Vec<String>,
 ) {
+    // Block keys holding a value of the wrong type (or no finite number): each left out with one warning.
+    let mut unusable: BTreeSet<String> = BTreeSet::new();
     for (key, name) in BLOCK_SWITCHES {
-        if get(&b.values, key) == Some(&Json::Bool(true)) {
-            values.insert(name, Value::Bool(true));
+        match get(&b.values, key) {
+            Some(Json::Bool(true)) => {
+                values.insert(name, Value::Bool(true));
+            }
+            None | Some(Json::Bool(false)) => {}
+            Some(_) => {
+                unusable.insert(key.to_string());
+            }
         }
     }
-    let numbers = TXST_PARAMS
-        .iter()
-        .filter_map(|(k, i)| Some((*k, CSM_PARAMS.iter().find(|(_, j)| j == i)?.0, *i)))
-        .chain([(FUZZ_ROUGHNESS.0, FUZZ_ROUGHNESS.1, usize::MAX)]);
-    for (key, name, i) in numbers {
-        let Some(x) = get(&b.values, key) else {
+    if b.values
+        .get("glintParameters")
+        .is_some_and(|g| !g.is_object())
+    {
+        unusable.insert("glintParameters".into());
+    }
+    for key in number_keys() {
+        let (Some(x), Some(NumberKey { csm: name, color })) =
+            (get(&b.values, key), number_key(key))
+        else {
             continue;
         };
-        if COLOR_PARAMS.contains(&i) {
+        if color {
             let Some(rgb) = x
                 .as_array()
                 .and_then(|a| a.iter().map(Json::as_f64).collect::<Option<Vec<f64>>>())
                 .filter(|a| a.len() == 3 && a.iter().all(|c| c.is_finite()))
             else {
+                unusable.insert(key.to_string());
                 continue;
             };
             let hex = csm::hex([rgb[0] as f32, rgb[1] as f32, rgb[2] as f32]);
@@ -262,7 +325,7 @@ fn block_values(
                 ));
             }
             values.insert(name, Value::Color(hex));
-        } else if let Some(n) = x.as_f64() {
+        } else if let Some(n) = x.as_f64().filter(|n| n.is_finite()) {
             let (lo, hi) = key_def(name)
                 .and_then(|d| d.range)
                 .unwrap_or((f64::NEG_INFINITY, f64::INFINITY));
@@ -274,26 +337,32 @@ fn block_values(
                 ));
             }
             values.insert(name, Value::Num(to));
+        } else {
+            unusable.insert(key.to_string());
         }
     }
-    // `bad`: a value of the wrong type, `nan` or `inf` included (JSON holds no such number).
-    for k in b
-        .bad
-        .iter()
-        .filter(|k| csm_key(k).is_some() || k.as_str() == "glintParameters")
-    {
+    // The offset has no `.csm` key: a value other than the field's default is not exported, which the user is told.
+    let offset_default =
+        super::cs_pbr::field(super::cs_pbr::Kind::Txst, NO_CSM_KEY).map_or(0.0, |f| f.default);
+    match b.values.get(NO_CSM_KEY).map(Json::as_f64) {
+        Some(Some(x)) if x != offset_default => warnings.push(format!(
+            "{id}: {NO_CSM_KEY} is {x}, but a .csm has no key for it; it is not exported"
+        )),
+        Some(None) => {
+            unusable.insert(NO_CSM_KEY.into());
+        }
+        _ => {}
+    }
+    // `bad` (read from the project file): a value of the wrong type, `nan` or `inf` included.
+    unusable.extend(
+        b.bad
+            .iter()
+            .filter(|k| csm_key(k).is_some() || *k == "glintParameters" || *k == NO_CSM_KEY)
+            .cloned(),
+    );
+    for k in unusable {
         warnings.push(format!(
             "{id}: cs_txst.{k} is not a usable value (the wrong type, or not a finite number); left out of the .csm"
-        ));
-    }
-    if let Some(x) = b
-        .values
-        .get(NO_CSM_KEY)
-        .and_then(Json::as_f64)
-        .filter(|x| *x != 0.0)
-    {
-        warnings.push(format!(
-            "{id}: {NO_CSM_KEY} is {x}, but a .csm has no key for it; it is not exported"
         ));
     }
 }
@@ -344,7 +413,7 @@ pub fn csm_sets(m: &AppModel) -> Vec<(SetView, SetCsm)> {
                 .iter()
                 .find(|x| same_id(&x.id, &v.id))
                 .and_then(|x| x.cs_txst.as_ref());
-            let c = build(&v, &e.settings, block, &e.slots)?;
+            let c = entry_csm(&v, &e, block)?;
             Some((v, c))
         })
         .collect()
