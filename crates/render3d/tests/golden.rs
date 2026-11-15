@@ -4,7 +4,7 @@
 //! A_DC_N (A_DC_LOG is a define-log capture, R8): their composite reads the captured env cube (X3e); a subject whose
 //! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared).
 use render3d::golden::{self, Diff, Noise};
-use render3d::{load_fixture, Renderer};
+use render3d::Renderer;
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::Path;
@@ -105,46 +105,19 @@ fn replay_matches_capture_per_mrt() {
             outcomes.push(format!("{who} {code}"));
             skipped.entry(code).or_default().push(detail);
         };
-        // D-P17: an overlay mask means the capture never changed (the game rejected the draw by depth).
-        let mrt: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(s.dir.join("mrt.json")).unwrap())
-                .unwrap();
-        if mrt["maskSource"] == "overlay" {
-            skip("overlay-mask", who.clone());
-            continue;
-        }
-        // No crop: the extractor wrote no mask at all (the draw rasterized nothing).
-        if mrt["crop"].is_null() {
-            skip("empty-mask", who.clone());
-            continue;
-        }
-        let r = match load_fixture(&s.dir) {
-            Ok(r) => r,
-            Err(e) if e.contains("defines null") => {
-                skip("defines-null", who.clone());
-                continue;
-            }
-            Err(e) => {
-                skip("load-error", format!("{who}: {e}"));
+        let (r, mask, masked) = match golden::prepare(&s.dir) {
+            Ok(p) => (p.replay, p.mask, p.masked),
+            Err(k) => {
+                let detail = k.error.map_or(who.clone(), |e| format!("{who}: {e}"));
+                skip(k.code, detail);
                 continue;
             }
         };
-        // D-P21: RUN or empty is decided by the real mask.bin population, not by metadata.
-        let n = (r.crop[2] * r.crop[3]) as usize;
-        let mask = golden::read_mask(&s.dir.join("mask.bin"), n).unwrap();
-        let masked = mask.iter().filter(|m| **m).count();
-        if masked == 0 {
-            skip("empty-mask", who.clone());
-            continue;
-        }
-        if r.blended {
-            skip("blended", who.clone());
-            continue;
-        }
-        let Some(rc) = r.composite.as_ref() else {
-            skip("no-composite-data", who.clone());
-            continue;
-        };
+        let n = mask.len();
+        let rc = r
+            .composite
+            .as_ref()
+            .expect("prepare skips subjects without composite data");
         let out = match ren.render_replay(&r, true) {
             Ok(o) => o,
             Err(e) => {

@@ -292,3 +292,59 @@ pub fn read_mask(path: &Path, expected_len: usize) -> Result<Vec<bool>, String> 
         .map(|b| b != 0)
         .collect())
 }
+
+/// Why the golden replay skips a subject: its outcome code in golden-baseline.txt, and the error behind a
+/// `load-error`.
+#[derive(Debug)]
+pub struct Skip {
+    pub code: &'static str,
+    pub error: Option<String>,
+}
+
+/// A subject the golden replay runs: the loaded capture, its mask (crop-sized) and the masked pixel count.
+pub struct Ready {
+    pub replay: crate::Replay,
+    pub mask: Vec<bool>,
+    pub masked: usize,
+}
+
+/// The golden replay's skip rules for one subject folder, shared by every test that replays the goldens.
+pub fn prepare(dir: &Path) -> Result<Ready, Skip> {
+    let skip = |code| Skip { code, error: None };
+    let fail = |e| Skip {
+        code: "load-error",
+        error: Some(e),
+    };
+    let mrt = read_json(&dir.join("mrt.json")).map_err(fail)?;
+    // D-P17: an overlay mask means the capture never changed (the game rejected the draw by depth).
+    if mrt["maskSource"] == "overlay" {
+        return Err(skip("overlay-mask"));
+    }
+    // No crop: the extractor wrote no mask at all (the draw rasterized nothing).
+    if mrt["crop"].is_null() {
+        return Err(skip("empty-mask"));
+    }
+    let replay = match crate::load_fixture(dir) {
+        Ok(r) => r,
+        Err(e) if e.contains("defines null") => return Err(skip("defines-null")),
+        Err(e) => return Err(fail(e)),
+    };
+    // D-P21: RUN or empty is decided by the real mask.bin population, not by metadata.
+    let n = (replay.crop[2] * replay.crop[3]) as usize;
+    let mask = read_mask(&dir.join("mask.bin"), n).map_err(fail)?;
+    let masked = mask.iter().filter(|m| **m).count();
+    if masked == 0 {
+        return Err(skip("empty-mask"));
+    }
+    if replay.blended {
+        return Err(skip("blended"));
+    }
+    if replay.composite.is_none() {
+        return Err(skip("no-composite-data"));
+    }
+    Ok(Ready {
+        replay,
+        mask,
+        masked,
+    })
+}

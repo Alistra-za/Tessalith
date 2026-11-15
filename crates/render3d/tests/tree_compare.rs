@@ -1,16 +1,18 @@
 //! Note ID41: tree A (the CS 1.9 pin) against tree B (the CS 2.0 build) on the golden captures, report-only. Every
-//! subject of golden.rs's profiles is replayed deferred on both trees from the same capture: the captured constants
-//! go to tree B rebuilt by variable name (`remap`), because tree B's FeatureData is laid out differently, and with
-//! Terrain Blending off when the capture has no scene depth at t17 (`terrain_blending_off`). One row per
-//! subject: B against A per MRT and on the composite (max, mean, over `diff_tol`), the changed shader files its
-//! permutation pulls, and a "B as vanilla" pass for TRUE_PBR subjects. The differences are rows, not assertions
-//! (pre-flight ruling): the test asserts only that every subject draws on both trees. Needs SDC_GOLDEN.
+//! subject golden.rs runs (`golden::prepare`) is replayed deferred on both trees from the same capture: the captured
+//! constants go to tree B rebuilt by variable name (`remap`), because tree B's FeatureData is laid out differently,
+//! and with Terrain Blending off when the capture has no scene depth at t17 (`terrain_blending_off`). One row per
+//! subject: B against A per MRT and on the composite (max, mean, over `diff_tol`), and for TRUE_PBR subjects a "B as
+//! vanilla" pass with its own remap. Per group the summary lists the changed shader files the group's permutations
+//! pull. The differences are rows, not assertions (pre-flight ruling): the test fails only when a subject does not
+//! draw or a render fails on either tree (a composite error included; the MRTs are then rendered again without the
+//! composite so the row is still written) or tree B's inputs cannot be built. Needs SDC_GOLDEN.
 use render3d::compile::{compile, used_vars, CbLayout, CbVar, VarKind};
 use render3d::golden::{self, Diff, Noise};
 use render3d::permutation::Defines;
 use render3d::replay::{cb_bytes, vs_defines};
 use render3d::source::SourceSet;
-use render3d::{load_fixture, Renderer, Replay, ReplayOut, ShaderSource, Tree};
+use render3d::{Renderer, Replay, ReplayOut, ShaderSource, Tree};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
@@ -235,20 +237,20 @@ fn drew(out: &ReplayOut, r: &Replay, mask: &[bool]) -> usize {
         .count()
 }
 
-/// Mean finite difference per channel of an RGBA target over the mask.
+/// Mean finite difference per channel of an RGBA target over the mask (non-finite differences left out of the count).
 fn channel_means(b: &[f32], a: &[f32], mask: &[bool]) -> [f32; 4] {
     let mut sum = [0.0f32; 4];
-    let mut n = 0usize;
+    let mut n = [0usize; 4];
     for (p, _) in mask.iter().enumerate().filter(|(_, m)| **m) {
-        n += 1;
-        for (c, s) in sum.iter_mut().enumerate() {
+        for c in 0..4 {
             let d = (b[4 * p + c] - a[4 * p + c]).abs();
             if d.is_finite() {
-                *s += d;
+                sum[c] += d;
+                n[c] += 1;
             }
         }
     }
-    sum.map(|s| s / n.max(1) as f32)
+    std::array::from_fn(|c| sum[c] / n[c].max(1) as f32)
 }
 
 /// The channel (x, y, z, w) of an RGBA target with the largest mean difference over the mask.
@@ -319,6 +321,9 @@ struct Stage<'a> {
 /// Reflected cbuffers keyed as the capture's files (`ps_b1`), and the `cbuffer.var` names the bytecode reads.
 type Layouts = (Vec<(String, CbLayout)>, BTreeSet<String>);
 
+/// Captured cbuffer bytes keyed as the capture's files (`ps_b6`).
+type CbMap = std::collections::HashMap<String, Vec<u8>>;
+
 /// The reflected cbuffers of `st` on one tree.
 fn layouts(src: &SourceSet, st: &Stage, cache: &Path) -> Result<Layouts, String> {
     let s = src.get(Path::new(st.rel))?;
@@ -341,7 +346,7 @@ fn layouts(src: &SourceSet, st: &Stage, cache: &Path) -> Result<Layouts, String>
 /// Rebuilds `cbs` (laid out for tree A) for tree B by name. Returns the B leaves the B bytecode reads whose value a
 /// CS 1.9 capture cannot supply (zero, except `MaterialObjectRGBScale.w`: -1, "no fuzz roughness").
 fn to_tree_b(
-    cbs: &mut std::collections::HashMap<String, Vec<u8>>,
+    cbs: &mut CbMap,
     st: &Stage,
     a: &SourceSet,
     b: &SourceSet,
@@ -386,20 +391,18 @@ fn to_tree_b(
 
 /// Sets tree B's `terrainBlendingSettings.Enabled` in the PS FeatureData of `cbs` to 0; true when it was on.
 fn terrain_blending_off(
-    cbs: &mut std::collections::HashMap<String, Vec<u8>>,
+    cbs: &mut CbMap,
     ps: &[String],
     b: &SourceSet,
     cache: &Path,
-) -> bool {
+) -> Result<bool, String> {
     let st = Stage {
         rel: "Lighting.hlsl",
         defs: ps,
         target: "ps_5_0",
         stage: "ps",
     };
-    let Ok((lb, _)) = layouts(b, &st, cache) else {
-        return false;
-    };
+    let (lb, _) = layouts(b, &st, cache)?;
     for (key, l) in &lb {
         let Some(v) = l
             .vars
@@ -412,10 +415,100 @@ fn terrain_blending_off(
         if let Some(w) = cbs.get_mut(key).and_then(|c| c.get_mut(at..at + 4)) {
             let on = w.iter().any(|x| *x != 0);
             w.fill(0);
-            return on;
+            return Ok(on);
         }
     }
-    false
+    Ok(false)
+}
+
+/// Tree B's inputs for `r`, built from the capture's tree-A constants `cb_a` (draw) and `ccb_a` (composite) for the
+/// current `r.defines`: every cbuffer rebuilt by name, and Terrain Blending off when the capture has no t17 depth.
+/// Returns the B inputs a CS 1.9 capture cannot supply, and whether Terrain Blending was switched off.
+fn to_b_inputs(
+    r: &mut Replay,
+    cb_a: &CbMap,
+    ccb_a: Option<&CbMap>,
+    a: &SourceSet,
+    b: &SourceSet,
+    cache: &Path,
+) -> Result<(BTreeSet<String>, bool), String> {
+    r.cbuffers = cb_a.clone();
+    let ps = r.defines[0].clone();
+    let ps_full: Vec<String> = std::iter::once("PSHADER".to_string())
+        .chain(ps.iter().cloned())
+        .collect();
+    let vs = vs_defines(&ps, &r.mesh);
+    let mut gaps = BTreeSet::new();
+    for (defs, target, stage) in [(&ps_full, "ps_5_0", "ps"), (&vs, "vs_5_0", "vs")] {
+        let st = Stage {
+            rel: "Lighting.hlsl",
+            defs,
+            target,
+            stage,
+        };
+        gaps.extend(
+            to_tree_b(&mut r.cbuffers, &st, a, b, cache)
+                .map_err(|e| format!("{stage} remap: {e}"))?,
+        );
+    }
+    // Tree B's objects read the scene depth at t17 for Terrain Blending (Lighting.hlsl:1989-2007), which a CS 1.9
+    // capture never bound: unbound it reads 0, every pixel counts as buried and its normal bends up. With the real
+    // depth an object above the terrain is not buried, so the feature is switched off for the B pass instead.
+    let off = !r.textures.contains_key(&17)
+        && terrain_blending_off(&mut r.cbuffers, &ps_full, b, cache)
+            .map_err(|e| format!("Terrain Blending: {e}"))?;
+    if let (Some(rc), Some(c)) = (r.composite.as_mut(), ccb_a) {
+        rc.cbuffers = c.clone();
+        // The define list render_replay compiles the composite with (replay.rs replay_composite).
+        let mut cd = vec!["CSHADER".to_string()];
+        cd.extend(rc.defines_inferred.iter().cloned());
+        cd.extend(
+            ps.iter()
+                .filter(|d| *d == "ENABLE_LL" || d.starts_with("CS_GAME_GAMMA"))
+                .cloned(),
+        );
+        let st = Stage {
+            rel: "DeferredCompositeCS.hlsl",
+            defs: &cd,
+            target: "cs_5_0",
+            stage: "cs",
+        };
+        gaps.extend(
+            to_tree_b(&mut rc.cbuffers, &st, a, b, cache)
+                .map_err(|e| format!("composite remap: {e}"))?,
+        );
+    }
+    Ok((gaps, off))
+}
+
+/// The names `#ifdef`, `#ifndef` and `defined(...)` test in the directive lines of `text`.
+fn tested(text: &str) -> BTreeSet<String> {
+    let ident = |s: &str| -> String {
+        s.trim_start()
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect()
+    };
+    let mut out = BTreeSet::new();
+    for line in text.lines() {
+        let Some(d) = line.trim_start().strip_prefix('#') else {
+            continue;
+        };
+        let d = d.trim_start();
+        if let Some(rest) = d.strip_prefix("ifndef").or_else(|| d.strip_prefix("ifdef")) {
+            out.insert(ident(rest));
+        }
+        for (i, _) in d.match_indices("defined") {
+            let word = |c: char| c.is_ascii_alphanumeric() || c == '_';
+            if d[..i].chars().next_back().is_some_and(word) {
+                continue;
+            }
+            let rest = d[i + "defined".len()..].trim_start();
+            out.insert(ident(rest.strip_prefix('(').unwrap_or(rest)));
+        }
+    }
+    out.remove("");
+    out
 }
 
 /// Replays `r` on the renderer's tree; on a composite error retries without the composite and says why.
@@ -448,8 +541,8 @@ struct Group {
     within: usize,
     differs: usize,
     worst: Option<(String, f32)>,
-    /// Subjects over the tolerance per target (RT0..RT7, main).
-    over: [usize; 9],
+    /// Subjects over the tolerance per target (the MRTs, then main).
+    over: Vec<usize>,
     changed: BTreeSet<String>,
     removed: BTreeSet<String>,
     inert: BTreeSet<String>,
@@ -508,7 +601,10 @@ fn render_tree_b_vs_a_report() {
         .cloned()
         .collect();
     let mut t = format!(
-        "shader files: {} changed in content, {} whitespace only {ws_only:?}, A only {a_only:?}, B only {b_only:?}\nchanged: {changed:?}\n\n",
+        "shader files (.hlsl/.hlsli): A {}, B {}; {} shared files differ in bytes: {} changed in content, {} whitespace only {ws_only:?}; A only {a_only:?}, B only {b_only:?}\nchanged: {changed:?}\n\n",
+        fa.len(),
+        fb.len(),
+        changed.len() + ws_only.len(),
         changed.len(),
         ws_only.len()
     );
@@ -516,45 +612,32 @@ fn render_tree_b_vs_a_report() {
 
     let mut groups: BTreeMap<&str, Group> = BTreeMap::new();
     let mut unsupplied: BTreeMap<String, usize> = BTreeMap::new();
-    let mut composite_errors: BTreeMap<String, usize> = BTreeMap::new();
     let mut b_warnings: BTreeMap<String, usize> = BTreeMap::new();
     let mut skipped: BTreeMap<&str, Vec<String>> = BTreeMap::new();
-    let mut no_draw: Vec<String> = vec![];
+    // Pre-flight ruling: each is a subject that did not draw, a render error on either tree (composite included) or
+    // tree B inputs that could not be built.
+    let mut failures: Vec<String> = vec![];
     let (mut run, mut blending_off) = (0usize, 0usize);
+    let (tested_a, tested_b) = (tested(&text_a), tested(&text_b));
     for s in golden::subjects(root, PROFILES).unwrap() {
         let name = s.dir.file_name().unwrap().to_string_lossy().into_owned();
         let who = format!("{}/{name}", s.capture);
         // golden.rs's skip rules: nothing to replay.
-        let mrt: serde_json::Value =
-            serde_json::from_str(&std::fs::read_to_string(s.dir.join("mrt.json")).unwrap())
-                .unwrap();
-        if mrt["maskSource"] == "overlay" || mrt["crop"].is_null() {
-            skipped
-                .entry("overlay or empty mask")
-                .or_default()
-                .push(who);
-            continue;
-        }
-        let mut r = match load_fixture(&s.dir) {
-            Ok(r) => r,
-            Err(e) => {
-                skipped
-                    .entry("load error")
-                    .or_default()
-                    .push(format!("{who}: {}", short(&e)));
+        let golden::Ready {
+            replay: mut r,
+            mask,
+            masked,
+        } = match golden::prepare(&s.dir) {
+            Ok(p) => p,
+            Err(k) => {
+                let detail = k
+                    .error
+                    .map_or(who.clone(), |e| format!("{who}: {}", short(&e)));
+                skipped.entry(k.code).or_default().push(detail);
                 continue;
             }
         };
-        let n = (r.crop[2] * r.crop[3]) as usize;
-        let mask = golden::read_mask(&s.dir.join("mask.bin"), n).unwrap();
-        let masked = mask.iter().filter(|m| **m).count();
-        if masked == 0 || r.blended {
-            skipped
-                .entry("empty mask or blended")
-                .or_default()
-                .push(who);
-            continue;
-        }
+        let n = mask.len();
         run += 1;
         let ps: Vec<String> = r.defines[0].clone();
         let ps_full: Vec<String> = std::iter::once("PSHADER".to_string())
@@ -563,22 +646,29 @@ fn render_tree_b_vs_a_report() {
         let vs = vs_defines(&ps, &r.mesh);
         let grp = group(&ps);
         let mut notes = vec![];
+        // The capture's constants, laid out for tree A: every tree B pass rebuilds its own from these.
+        let (cb_a, ccb_a) = (
+            r.cbuffers.clone(),
+            r.composite.as_ref().map(|c| c.cbuffers.clone()),
+        );
 
         // Tree A, and A against the capture.
         ren.set_tree(Tree::A);
         let a = match replay(&mut ren, &mut r) {
             Ok((o, ce)) => {
                 if let Some(e) = ce {
-                    notes.push(format!("A composite: {}", short(&e)));
+                    failures.push(format!("{who}: A composite error {}", short(&e)));
+                    notes.push("A composite failed (MRTs only)".to_string());
                 }
                 o
             }
             Err(e) => {
-                no_draw.push(format!("{who}: A replay error {}", short(&e)));
+                failures.push(format!("{who}: A replay error {}", short(&e)));
                 continue;
             }
         };
-        let cap_over = (0..a.mrt.len())
+        let rts = a.mrt.len();
+        let cap_over = (0..rts)
             .filter(|&i| {
                 let file = format!("mrt{i}.f32");
                 let after = golden::read_f32(&s.dir.join(&file), n * 4).unwrap();
@@ -589,46 +679,15 @@ fn render_tree_b_vs_a_report() {
             .count();
 
         // Tree B: the same captured values, rebuilt in tree B's layouts.
-        let mut gaps = BTreeSet::new();
-        for (defs, target, stage) in [(&ps_full, "ps_5_0", "ps"), (&vs, "vs_5_0", "vs")] {
-            let st = Stage {
-                rel: "Lighting.hlsl",
-                defs,
-                target,
-                stage,
+        let (gaps, off) =
+            match to_b_inputs(&mut r, &cb_a, ccb_a.as_ref(), &src_a, &src_b, cache.path()) {
+                Ok(x) => x,
+                Err(e) => {
+                    failures.push(format!("{who}: tree B inputs: {}", short(&e)));
+                    continue;
+                }
             };
-            match to_tree_b(&mut r.cbuffers, &st, &src_a, &src_b, cache.path()) {
-                Ok(g) => gaps.extend(g),
-                Err(e) => notes.push(format!("{stage} remap: {}", short(&e))),
-            }
-        }
-        // Tree B's objects read the scene depth at t17 for Terrain Blending (Lighting.hlsl:1989-2007), which a CS 1.9
-        // capture never bound: unbound it reads 0, every pixel counts as buried and its normal bends up. With the real
-        // depth an object above the terrain is not buried, so the feature is switched off for the B pass instead.
-        if !r.textures.contains_key(&17)
-            && terrain_blending_off(&mut r.cbuffers, &ps_full, &src_b, cache.path())
-        {
-            blending_off += 1;
-        }
-        if let Some(rc) = r.composite.as_mut() {
-            let mut cd = vec!["CSHADER".to_string()];
-            cd.extend(rc.defines_inferred.iter().cloned());
-            cd.extend(
-                ps.iter()
-                    .filter(|d| *d == "ENABLE_LL" || d.starts_with("CS_GAME_GAMMA"))
-                    .cloned(),
-            );
-            let st = Stage {
-                rel: "DeferredCompositeCS.hlsl",
-                defs: &cd,
-                target: "cs_5_0",
-                stage: "cs",
-            };
-            match to_tree_b(&mut rc.cbuffers, &st, &src_a, &src_b, cache.path()) {
-                Ok(g) => gaps.extend(g),
-                Err(e) => notes.push(format!("composite remap: {}", short(&e))),
-            }
-        }
+        blending_off += off as usize;
         for g in gaps {
             *unsupplied.entry(g).or_default() += 1;
         }
@@ -636,38 +695,47 @@ fn render_tree_b_vs_a_report() {
         let b = match replay(&mut ren, &mut r) {
             Ok((o, ce)) => {
                 if let Some(e) = ce {
-                    *composite_errors.entry(short(&e)).or_default() += 1;
-                    notes.push("B composite failed (MRTs only)".into());
+                    failures.push(format!("{who}: B composite error {}", short(&e)));
+                    notes.push("B composite failed (MRTs only)".to_string());
                 }
                 o
             }
             Err(e) => {
-                no_draw.push(format!("{who}: B replay error {}", short(&e)));
+                failures.push(format!("{who}: B replay error {}", short(&e)));
                 continue;
             }
         };
         let (da, db) = (drew(&a, &r, &mask), drew(&b, &r, &mask));
         if da == 0 || db == 0 {
-            no_draw.push(format!("{who}: drew A {da} px, B {db} px of {masked}"));
+            failures.push(format!("{who}: drew A {da} px, B {db} px of {masked}"));
         }
         for w in b.warnings.iter().filter(|w| !a.warnings.contains(w)) {
             *b_warnings.entry(w.clone()).or_default() += 1;
         }
         let d = compare(&b, &a, &r, &mask, &noise, &name);
 
-        // TRUE_PBR subjects again on tree B with TRUE_PBR and GLINT dropped: the capture's inputs through B's vanilla
-        // path (an approximation of CS 2.0 handing a v1 shape to the vanilla reader, Note ID33).
+        // TRUE_PBR subjects again on tree B with TRUE_PBR and GLINT dropped: the capture's inputs, remapped for the
+        // vanilla permutation's layouts, through B's vanilla path (an approximation of CS 2.0 handing a v1 shape to
+        // the vanilla reader, Note ID33).
         let vanilla = if grp == "v1 PBR" {
             let keep = r.defines[0].clone();
             r.defines[0].retain(|d| d != "TRUE_PBR" && d != "GLINT");
-            let v = match replay(&mut ren, &mut r) {
-                Ok((o, _)) => {
+            let v = match to_b_inputs(&mut r, &cb_a, ccb_a.as_ref(), &src_a, &src_b, cache.path())
+                .and_then(|_| replay(&mut ren, &mut r))
+            {
+                Ok((o, ce)) => {
+                    if let Some(e) = ce {
+                        failures.push(format!("{who}: B as vanilla composite error {}", short(&e)));
+                    }
                     let dv = compare(&o, &a, &r, &mask, &noise, &name);
                     let max = dv.iter().map(|x| x.max_abs).fold(0.0, f32::max);
-                    let mean = dv.iter().map(|x| x.mean_abs).sum::<f32>() / dv.len() as f32;
+                    let mean = dv[..rts].iter().map(|x| x.mean_abs).sum::<f32>() / rts as f32;
                     format!("{max:.2e}/{mean:.1e} (RT0 {})", cell(&dv[0]))
                 }
-                Err(e) => format!("error {}", short(&e)),
+                Err(e) => {
+                    failures.push(format!("{who}: B as vanilla: {}", short(&e)));
+                    format!("error {}", short(&e))
+                }
             };
             r.defines[0] = keep;
             v
@@ -676,7 +744,7 @@ fn render_tree_b_vs_a_report() {
         };
 
         let max = d.iter().map(|x| x.max_abs).fold(0.0, f32::max);
-        let mean = d.iter().take(8).map(|x| x.mean_abs).sum::<f32>() / 8.0;
+        let mean = d[..rts].iter().map(|x| x.mean_abs).sum::<f32>() / rts as f32;
         let verdict = if max == 0.0 {
             "same"
         } else if d.iter().all(|x| x.over == 0.0) {
@@ -690,7 +758,7 @@ fn render_tree_b_vs_a_report() {
             s.profile,
             technique(&ps)
         );
-        for (i, x) in d.iter().take(8).enumerate() {
+        for (i, x) in d[..rts].iter().enumerate() {
             let _ = write!(row, " {}", cell(x));
             if x.max_abs > 0.0 {
                 row.push(channel(&b.mrt[i], &a.mrt[i], &mask));
@@ -699,7 +767,7 @@ fn render_tree_b_vs_a_report() {
         let _ = writeln!(
             row,
             " | {} | {max:.2e} | {mean:.1e} | {verdict} | {vanilla} | {}",
-            d.get(8).map_or("-".into(), cell),
+            d.get(rts).map_or("-".into(), cell),
             notes.join("; ")
         );
         print!("{row}");
@@ -716,8 +784,11 @@ fn render_tree_b_vs_a_report() {
         if g.worst.as_ref().is_none_or(|w| max > w.1) {
             g.worst = Some((who.clone(), max));
         }
-        for (i, x) in d.iter().enumerate() {
-            g.over[i] += (x.over > 0.0) as usize;
+        if g.over.len() < d.len() {
+            g.over.resize(d.len(), 0);
+        }
+        for (o, x) in g.over.iter_mut().zip(&d) {
+            *o += (x.over > 0.0) as usize;
         }
         for defs in [&ps_full, &vs] {
             g.changed.extend(
@@ -737,10 +808,7 @@ fn render_tree_b_vs_a_report() {
         g.inert.extend(
             ps.iter()
                 .map(|d| d.split('=').next().unwrap_or(d))
-                .filter(|k| {
-                    let test = format!("defined({k})");
-                    text_a.contains(&test) && !text_b.contains(&test)
-                })
+                .filter(|k| tested_a.contains(*k) && !tested_b.contains(*k))
                 .map(str::to_string),
         );
     }
@@ -788,22 +856,21 @@ fn render_tree_b_vs_a_report() {
     for (k, c) in &b_warnings {
         let _ = writeln!(summary, "  {k}: {c}");
     }
-    let _ = writeln!(summary, "tree B composite errors (subjects):");
-    for (k, c) in &composite_errors {
-        let _ = writeln!(summary, "  {k}: {c}");
-    }
-    let _ = writeln!(summary, "no draw or replay error: {no_draw:#?}");
+    let _ = writeln!(
+        summary,
+        "failures (no draw, render or composite error on either tree, tree B inputs not built): {failures:#?}"
+    );
     print!("{summary}");
     t.push_str(&summary);
     let out = std::env::temp_dir().join("tree-b-vs-a.txt");
     std::fs::write(&out, &t).unwrap();
     println!("table written to {}", out.display());
 
-    // Pre-flight ruling: every subject draws on both trees; the differences are rows.
+    // Pre-flight ruling: every subject renders and draws on both trees; the differences are rows.
     assert!(run > 0, "no golden subjects found under SDC_GOLDEN");
     assert!(
-        no_draw.is_empty(),
-        "subjects that did not draw: {no_draw:#?}"
+        failures.is_empty(),
+        "subjects that failed to render or draw: {failures:#?}"
     );
 }
 
@@ -823,6 +890,13 @@ fn layout(size: u32, vars: Vec<CbVar>) -> CbLayout {
         size,
         vars,
     }
+}
+
+#[test]
+fn tested_reads_ifdef_ifndef_and_defined() {
+    let text = "#ifdef A\n#\tif defined(B) && !defined C\n  #  ifndef D\nfloat defined(E);\n#if undefined(F)\n";
+    let want: BTreeSet<String> = ["A", "B", "C", "D"].map(String::from).into();
+    assert_eq!(tested(text), want);
 }
 
 #[test]
