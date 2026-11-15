@@ -1011,7 +1011,8 @@ pub enum MenuAction {
         set: String,
         n: u8,
     },
-    /// The "From another set" submenu; its `SlotLink` entries follow it in the list.
+    /// The "From another set" submenu; its `SlotLink` (or, on slots 9 and 10, `SlotBorrow`) entries follow it in the
+    /// list.
     FromAnotherSet,
     /// Slot `n` of `set` takes `item`'s game path (`member_game_path`), as Path would write it.
     SlotLink {
@@ -1023,6 +1024,20 @@ pub enum MenuAction {
         set: String,
         n: u8,
         on: bool,
+    },
+    /// Note JD1: move `item` (a file from the set's folder) into the empty skin `_wet` or `_detail_n` slot `kind` of
+    /// `set`, typing it for the slot when it is undecided.
+    SlotMove {
+        set: String,
+        kind: SlotKind,
+        item: String,
+    },
+    /// Note JD2: the empty skin `_wet` or `_detail_n` slot of `set` borrows `item` from its set (Share); listed in the
+    /// "From another set" submenu, as `SlotLink` is on the game slots.
+    SlotBorrow {
+        set: String,
+        kind: SlotKind,
+        item: String,
     },
     /// Drop the `borrow.slot<n>` of a skin `_wet` or `_detail_n` slot (9, 10), which has no slot command to clear it.
     ClearBorrow {
@@ -1424,11 +1439,18 @@ impl AppModel {
         let off = read_only
             .clone()
             .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
-        // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock, only a
-        // Clear for a borrow (no slot command clears it), the source file and sdc's pin.
+        // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock. An empty
+        // one takes a file from the set's folder or borrows another set's (Note JD), a borrowed one offers Clear (no
+        // slot command clears it); then the source file and sdc's pin.
         let game = kind.game_slot().is_some();
+        let empty = !v
+            .slots
+            .get(&kind)
+            .is_some_and(super::sets::SlotFill::is_filled);
         let mut menu = if game {
             self.slot_command_entries(v, &views, kind, n, &off)
+        } else if empty && (v.skin || v.shared) {
+            self.skin_slot_entries(v, &views, kind, &off)
         } else if matches!(
             v.slots.get(&kind),
             Some(super::sets::SlotFill::Borrowed { .. })
@@ -1441,7 +1463,7 @@ impl AppModel {
         } else {
             vec![]
         };
-        // Note HG: a record fill the user turned off comes back from here, after Clear (the only command on 9 and 10).
+        // Note HG: a record fill the user turned off comes back from here, after Clear (on 9 and 10, after the JD entries).
         if let Some(host) = v.fill_off.get(&n) {
             let at = menu
                 .iter()
@@ -1507,6 +1529,85 @@ impl AppModel {
             });
         }
         menu
+    }
+
+    /// Note JD: an empty skin `_wet` or `_detail_n` slot's entries. First each file of the set's folder of that slot's
+    /// type, or undecided and named for it (`*_wet`, `*_detail_n`), that is in no set or in a set of its own the user
+    /// has not touched: picking it moves it in (`SlotMove`). Then "From another set" and every other set's file of
+    /// that type, which the slot borrows (`SlotBorrow`). `off` is why they are off (read-only or pinned).
+    fn skin_slot_entries(
+        &self,
+        v: &super::sets::SetView,
+        views: &[super::sets::SetView],
+        kind: SlotKind,
+        off: &Option<String>,
+    ) -> Vec<MenuEntry> {
+        let id = v.id.clone();
+        let folder = |k: &str| k.rsplit_once('/').map_or("", |(d, _)| d).to_string();
+        // The set's folder is where its files are; a renamed set's id may name another (or none), so it counts too.
+        let mut here: Vec<String> = v.members.iter().map(|k| folder(k)).collect();
+        here.push(folder(&id));
+        let tail = format!("_{}", kind.suffix());
+        let toml_off = self.toml_read_only_reason();
+        let mut moves = vec![];
+        for i in &self.items {
+            let typed = slot_of(i) == Some(kind);
+            let named = i.waiting
+                && i.input
+                    .file_stem()
+                    .is_some_and(|s| s.to_string_lossy().to_lowercase().ends_with(&tail));
+            let dir = folder(&i.key);
+            if !(typed || named) || !here.iter().any(|h| same_id(h, &dir)) {
+                continue;
+            }
+            let owner = views.iter().find(|o| o.members.iter().any(|k| k == &i.key));
+            if owner.is_some_and(|o| same_id(&o.id, &id) || self.is_real_set(o)) {
+                continue;
+            }
+            moves.push(MenuEntry {
+                action: MenuAction::SlotMove {
+                    set: id.clone(),
+                    kind,
+                    item: i.key.clone(),
+                },
+                label: if typed {
+                    i.name.clone()
+                } else {
+                    format!("{} (undecided: make it {})", i.name, kind.label())
+                },
+                disabled: off
+                    .clone()
+                    .or_else(|| if typed { None } else { toml_off.clone() }),
+            });
+        }
+        let links: Vec<MenuEntry> = views
+            .iter()
+            .filter(|o| !same_id(&o.id, &id))
+            .flat_map(|o| o.members.iter().map(move |k| (o, k)))
+            .filter_map(|(o, k)| {
+                let it = self.item(k).filter(|i| slot_of(i) == Some(kind))?;
+                Some(MenuEntry {
+                    action: MenuAction::SlotBorrow {
+                        set: id.clone(),
+                        kind,
+                        item: k.clone(),
+                    },
+                    label: format!("{} — {}", o.id, it.name),
+                    disabled: off.clone(),
+                })
+            })
+            .collect();
+        moves.push(MenuEntry {
+            action: MenuAction::FromAnotherSet,
+            label: "From another set".into(),
+            disabled: off.clone().or_else(|| {
+                links
+                    .is_empty()
+                    .then(|| format!("no other set has a {}", super::sets::slot_kinds_label(kind)))
+            }),
+        });
+        moves.extend(links);
+        moves
     }
 
     /// The slot commands of a game slot's menu (From this set, Path…, Clear, From another set) and its From-another-set
@@ -1611,6 +1712,12 @@ impl AppModel {
                 };
             }
             MenuAction::SlotLock { set, n, on } => return self.set_slot_lock(&set, n, on).err(),
+            MenuAction::SlotMove { set, kind, item } => {
+                return self.move_into_slot(&item, &set, kind).err();
+            }
+            MenuAction::SlotBorrow { set, kind, item } => {
+                return self.borrow_into_slot(&item, &set, kind).err();
+            }
             MenuAction::ClearBorrow { set, n } => return self.clear_slot_borrow(&set, n).err(),
             MenuAction::RestoreFill { set, n } => return self.restore_fill(&set, n).err(),
             MenuAction::PgpLock { set, n, on } => return self.set_pgp_lock(&set, n, on).err(),

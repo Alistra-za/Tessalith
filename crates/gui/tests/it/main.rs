@@ -313,6 +313,8 @@ mod view_menu;
 mod viewport3d;
 #[path = "../vocabulary.rs"]
 mod vocabulary;
+#[path = "../wet_assign.rs"]
+mod wet_assign;
 #[path = "../window_layout.rs"]
 mod window_layout;
 #[path = "../xpmf_card.rs"]

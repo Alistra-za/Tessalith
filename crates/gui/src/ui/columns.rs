@@ -1170,10 +1170,14 @@ pub(super) fn bulk_menu(
     let (kinds, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = entries
         .iter()
         .partition(|e| matches!(e.action, MenuAction::SelectMembersOfKind(_)));
-    // F3a Task 8: the `SlotLink` entries go in the "From another set" submenu, which their header entry draws.
-    let (links, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest
-        .into_iter()
-        .partition(|e| matches!(e.action, MenuAction::SlotLink { .. }));
+    // F3a Task 8: the `SlotLink` entries (`SlotBorrow` on slots 9 and 10, Note JD2) go in the "From another set"
+    // submenu, which their header entry draws.
+    let (links, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest.into_iter().partition(|e| {
+        matches!(
+            e.action,
+            MenuAction::SlotLink { .. } | MenuAction::SlotBorrow { .. }
+        )
+    });
     // Note HF6: the group choices go in the "Move to group" submenu, which its header entry draws.
     let (groups, rest): (Vec<&MenuEntry>, Vec<&MenuEntry>) = rest.into_iter().partition(|e| {
         matches!(
