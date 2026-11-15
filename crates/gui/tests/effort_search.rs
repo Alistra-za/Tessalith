@@ -384,10 +384,7 @@ fn bulk_effort_follows_the_shared_field() {
         assert_eq!(file(h.state(), k, RADIUS), Some(json!("max")), "{k}");
         assert_eq!(file(h.state(), k, "encoder.effort"), None, "{k}");
     }
-    assert_eq!(
-        h.state().undo_label(),
-        Some("Change BC4/BC5 search radius on 2 textures")
-    );
+    assert_eq!(h.state().undo_label(), Some("Change Effort on 2 textures"));
 
     // BC1 and BC3 read different fields (BC3 also the radius): no combo, the row says why.
     let d = tempfile::tempdir().unwrap();

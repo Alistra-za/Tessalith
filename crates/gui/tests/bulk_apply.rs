@@ -846,10 +846,10 @@ fn a_bulk_bc1_search_skips_other_formats() {
     assert_eq!(file(&m, NORMAL, "encoder.bc1_search"), None);
     assert_eq!(
         m.bulk.report.as_deref(),
-        Some("BC1/BC3 search: written to 2 of 3; locked on 1 of 3: BC1 and BC3 only")
+        Some("Effort: written to 2 of 3; locked on 1 of 3: BC1 and BC3 only")
     );
-    // shortcut: bulk rows are the Mipmaps rows plus `FIELDS` (bulk.rs `panel_fields`), so no "— mixed" combo exists for
-    // this row to pin; upgrade when the bulk panel lists the search rows.
+    // The bulk panel reaches this field through its Effort row (Note JI4); BC1 and BC3 read different fields, so that row
+    // reads "Formats differ" here (`effort_search::bulk_effort_follows_the_shared_field`).
 }
 
 /// Review C8: a write that reaches some textures and not others leaves the row mixed, at once (the plan is still

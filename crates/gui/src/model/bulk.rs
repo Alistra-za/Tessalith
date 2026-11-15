@@ -779,7 +779,13 @@ impl AppModel {
             return;
         }
         let plan = plan_bulk_edit(self, keys, field, &op);
-        let label = field_label(field);
+        // Note JI4: the bulk panel's one Effort row writes any of these, so its step and report say "Effort" on every
+        // format (`field_label` keeps the search fields' own names for Copy settings and the inspector).
+        let label = if EFFORT_FIELDS.contains(&field) {
+            "Effort"
+        } else {
+            field_label(field)
+        };
         let verb = if op == BulkOp::Clear {
             "Reset"
         } else {
