@@ -33,6 +33,7 @@ pub fn as_t21(mut m: nif::material::MaterialState, features: u32) -> nif::materi
         features,
         params: nif::pbr2::PBR2_DEFAULTS,
     };
+    m.pbr = m.type21_values();
     m
 }
 

@@ -282,6 +282,7 @@ mod tests {
             features: 0,
             params: nif::pbr2::PBR2_DEFAULTS,
         };
+        t21.pbr = t21.type21_values();
         let m = DebugOutput::Metallic;
         assert_eq!(m.availability(&t21), Exact, "type 21 is PBR");
         assert_eq!(m.availability_drawn(&t21), Exact);

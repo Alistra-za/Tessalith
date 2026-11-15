@@ -2222,6 +2222,10 @@ fn preview_applies_payload_then_txst_then_extra() {
         Some(vec![0.4, 0.0]),
         "the texture set's fuzz roughness, as a PBRFuzz"
     );
+    // Note IE6: the values the preview draws follow.
+    let v = without.pbr.as_ref().expect("type 21 has values");
+    assert_eq!((v.params[21], v.fuzz_roughness), (0.6, 0.4));
+    assert_eq!(v.features, feat::SUBSURFACE | feat::THIN_SURFACE);
     let mut with = m.clone();
     with.params.pbr2_extra = Some(Pbr2Extra {
         thin: Some(vec![0.7, 0.5, 0.5, 1.0]),

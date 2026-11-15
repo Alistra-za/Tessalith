@@ -517,6 +517,7 @@ fn t21(features: u32, params: [f32; 25], extra: Option<Pbr2Extra>) -> MaterialSt
         params,
     };
     m.params.pbr2_extra = extra;
+    m.pbr = m.type21_values();
     m
 }
 
@@ -594,12 +595,32 @@ fn pbr2_flags_table() {
             "ignored on hair (spec section 7)",
         ),
     ];
+    // A type-21 block reaches the flags through its values (`type21_values`, Note IE6).
+    let values = |features: u32, x: Option<Pbr2Extra>| {
+        t21(features, nif::pbr2::PBR2_DEFAULTS, x)
+            .pbr
+            .expect("type 21 has values")
+    };
     for (features, x, want, what) in rows {
-        assert_eq!(pbr2_flags(*features, x.as_ref(), &none), *want, "{what}");
+        assert_eq!(
+            pbr2_flags(&values(*features, x.clone()), &none),
+            *want,
+            "{what}"
+        );
     }
+    // A `.csm`'s PBRFuzzRoughnessTexture is the feature bit outside the payload, never a payload flag.
+    let mut csm = values(feat::FUZZ, None);
+    csm.features |= feat::FUZZ_ROUGHNESS_TEXTURE;
+    assert_eq!(
+        pbr2_flags(&csm, &none),
+        PBR_FUZZ | PBR_HAS_FUZZ_ROUGHNESS_TEXTURE
+    );
     // The Has-bits come from the bound registers, as in v1.
     assert_eq!(
-        pbr2_flags(feat::SUBSURFACE, None, &bound(&[0, 1, 4, 5, 6, 9, 12])),
+        pbr2_flags(
+            &values(feat::SUBSURFACE, None),
+            &bound(&[0, 1, 4, 5, 6, 9, 12])
+        ),
         PBR_SUBSURFACE
             | PBR_HAS_EMISSIVE
             | PBR_HAS_DISPLACEMENT

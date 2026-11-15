@@ -189,9 +189,9 @@ pub enum CsmError {
 pub const MAX_CHAIN: usize = 16;
 
 /// Reads the `.csm` at `path` and its `RootMaterialPath` chain through `read`, which gets canonical paths
-/// (`path::canon_material`; a root through `path::canon_root`). The chain merges root first, so each child's keys win; the allOf rules are checked on
-/// the merge, and the result holds no `RootMaterialPath`. An error in a root is `Root` naming that root; the file
-/// asked for reports its own errors bare, as `Loop`, `Depth` and `Rule` are (Note IE2).
+/// (`path::canon_material`; a root through `path::canon_root`). The chain merges root first, so each child's keys
+/// win; the allOf rules are checked on the merge, and the result holds no `RootMaterialPath` (Note IE2). An error in
+/// a root is `Root` naming that root; the file asked for reports its own errors bare, as `Loop`, `Depth` and `Rule` are.
 pub fn resolve(path: &str, read: &dyn Fn(&str) -> Option<Vec<u8>>) -> Result<Csm, CsmError> {
     let mut next = Some(
         crate::path::canon_material(path).ok_or_else(|| CsmError::NotMaterial(path.to_string()))?,

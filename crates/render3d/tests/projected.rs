@@ -477,6 +477,7 @@ fn grey_pbr() -> MaterialState {
         unreachable!()
     };
     params[1] = 1.0;
+    m.pbr = m.type21_values();
     m
 }
 
@@ -615,6 +616,7 @@ fn render_projected_rotated_static_and_coat() {
     if let nif::props::LightingTrailer::Pbr2 { features, .. } = &mut coat.params.trailer {
         *features = nif::pbr2::feat::TWO_LAYER;
     }
+    coat.pbr = coat.type21_values();
     let white = common::dds_rgba8(1, 1, &[[255; 4]]);
     let (w, h) = (128, 128);
     let mut off_on = |shape: render3d::ParsedShape| {

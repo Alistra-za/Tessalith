@@ -30,6 +30,7 @@ fn t21(features: u32) -> MaterialState {
         features,
         params: PBR2_DEFAULTS,
     };
+    m.pbr = m.type21_values();
     m
 }
 
@@ -205,6 +206,7 @@ fn the_renderer_writes_the_cs2_pbr_block() {
     params[..3].copy_from_slice(&[0.7, 0.2, 1.3]);
     params[17..=20].copy_from_slice(&[1.5, 12.0, 0.02, 3.0]);
     params[21..=24].copy_from_slice(&[0.11, 0.22, 0.33, 0.44]);
+    g.pbr = g.type21_values();
     let glint = [1.5, 40.0 - 12.0, 0.02, 3.0];
     load(&mut r, vec![g, v1(&[26])]);
 
@@ -245,6 +247,7 @@ fn a_type_21_parameter_edit_reaches_the_draw() {
         unreachable!()
     };
     params[21] = 0.9;
+    m.pbr = m.type21_values();
     let kind = r.set_material(ShapeId(1), m.clone(), &|_| None).unwrap();
     assert_eq!(kind, EditKind::Cbuffer);
     assert_eq!(r.shapes()[0].material, m);
@@ -360,6 +363,7 @@ fn a_skipped_shape_fixed_by_an_edit_draws_whole() {
     };
     params[0] = 0.5;
     params[2] = 0.7;
+    edited.pbr = edited.type21_values();
     edited.slots[0] = nif::path::canon_texture(b"textures\\b_d.dds");
     let (_cv2, mut valid2) = renderer(true);
     load_with_textures(&mut valid2, fixed(edited.clone()));

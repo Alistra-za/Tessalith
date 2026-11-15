@@ -23,6 +23,7 @@ fn plane21(extra: u32) -> MaterialState {
         features: feat::SUBSURFACE | extra,
         params,
     };
+    m.pbr = m.type21_values();
     m
 }
 

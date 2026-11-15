@@ -1558,11 +1558,11 @@ fn cs_num(o: &serde_json::Map<String, Value>, fields: &[cs_pbr::Field], name: &s
 
 /// Note ID45: a type-21 material as CS 2.0 sets it up: its payload, then the texture set's `ov`, then the
 /// `PBRThinSurface` / `PBRFuzz` extra data. Any other material is left alone.
-/// A `PBRThinSurface` replaces p21-p24 by `nif::pbr2::thin_surface_used`, the rule render3d's `write_pbr2` uses
-/// (render3d applies it again, to the same values), and the texture set's fuzz pair becomes a `PBRFuzz` when the NIF
-/// has no 2-float one (the payload has no fuzz roughness field).
+/// A `PBRThinSurface` replaces p21-p24 by `nif::pbr2::thin_surface_used`, the rule `MaterialState::type21_values`
+/// uses (it applies it again, to the same values), and the texture set's fuzz pair becomes a `PBRFuzz` when the NIF
+/// has no 2-float one (the payload has no fuzz roughness field). The material's PBR values follow (Note IE6).
 pub fn apply_txst21(m: &mut MaterialState, ov: &cs_pbr::Pbr2Override) {
-    if !m.is_pbr2() {
+    if m.shader_type != 21 {
         return;
     }
     let nif::props::LightingTrailer::Pbr2 {
@@ -1586,6 +1586,7 @@ pub fn apply_txst21(m: &mut MaterialState, ov: &cs_pbr::Pbr2Override) {
     if *x == nif::pbr2::Pbr2Extra::default() {
         m.params.pbr2_extra = None;
     }
+    m.pbr = m.type21_values();
 }
 
 /// The layer from a `cs_mato` block's values and its record's DATA (design D3, D5). `data` None: SnowMaterialObject1P's

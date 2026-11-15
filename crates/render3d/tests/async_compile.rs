@@ -283,6 +283,7 @@ fn permutation_edit_keeps_old_draw_until_compiled() {
         unreachable!()
     };
     params[0] = 0.5; // roughness scale
+    m2.pbr = m2.type21_values();
     assert_eq!(
         r.set_material(CYL1, m2.clone(), &none),
         Ok(EditKind::Cbuffer)

@@ -391,6 +391,9 @@ pub struct Renderer {
     /// Missing slot paths whose texture-less entry an edit evicted (so the resolver is asked again); a later
     /// `replace_texture` that recreates the entry keeps `TexEntry::missing` from here. Cleared per load.
     evicted_missing: HashSet<String>,
+    /// `.csm` chains resolved since the last load, by canonical path (Note IE6): edits and animation ticks apply them
+    /// again without reading the files.
+    csm_cache: HashMap<String, Result<nif::csm::Csm, nif::csm::CsmError>>,
     /// The variant the resolver's bytes of the next loads count as ([`Renderer::set_load_variant`]).
     load_variant: Variant,
     bounds: Option<([f32; 3], f32)>,
@@ -613,6 +616,7 @@ impl Renderer {
             draw_order: vec![],
             tex_cache: HashMap::new(),
             evicted_missing: HashSet::new(),
+            csm_cache: HashMap::new(),
             load_variant: Variant::Source,
             bounds: None,
             sampler: s.ok_or("no sampler")?,
@@ -1446,6 +1450,40 @@ impl Renderer {
         }
     }
 
+    /// `m` as the renderer stores and draws it (Note IE6): a type-21 shape's PBR values from its block, then the
+    /// shape's `.csm` (`apply_csm`), resolved through `read` once per load. A `.csm` that does not resolve sets
+    /// `csm_error` and leaves the rest of `m` as it is, with a note naming the file in `rep`.
+    fn with_csm(
+        &mut self,
+        m: &mut MaterialState,
+        name: &str,
+        read: &dyn Fn(&str) -> Option<Vec<u8>>,
+        rep: &mut LoadReport,
+    ) {
+        // shortcut: a type-21 block's trailer stays the source of its values (edits change the trailer) while type 21
+        // is read; drop this line with type 21.
+        if m.shader_type == 21 {
+            m.pbr = m.type21_values();
+        }
+        let Some(path) = m.csm_path.clone() else {
+            return;
+        };
+        let resolved = self
+            .csm_cache
+            .entry(path.clone())
+            .or_insert_with(|| nif::csm::resolve(&path, read));
+        match resolved {
+            Ok(c) => material::apply_csm(m, c),
+            Err(e) => {
+                m.csm_error = Some(e.to_string());
+                rep.warnings.push(format!(
+                    "{}: {path}: {e}; drawn with the NIF's own material",
+                    nif::text::label(name)
+                ));
+            }
+        }
+    }
+
     /// Starts building shape `id` for `m` (already stored as its material; drawn as `material::drawn`, Note ID33):
     /// swaps now when the program is at hand, else queues one job (deduplicated) and marks the shape `Pending`. The
     /// old draw, if any, stays.
@@ -1647,6 +1685,7 @@ impl Renderer {
         self.draw_order.clear();
         self.tex_cache.clear();
         self.evicted_missing.clear();
+        self.csm_cache.clear();
         self.bounds = None;
         self.fields_checked = true;
         self.late_warnings.clear();
@@ -1662,14 +1701,16 @@ impl Renderer {
             return rep;
         }
         for s in &parsed.shapes {
-            let hidden = material::skipped(&s.material);
+            let mut m = s.material.clone();
+            self.with_csm(&mut m, &s.name, textures, &mut rep);
+            let hidden = material::skipped(&m);
             self.shapes.insert(
                 s.id,
                 ShapeState {
                     name: s.name.clone(),
                     mesh: s.mesh.clone(),
                     world: s.world,
-                    material: s.material.clone(),
+                    material: m.clone(),
                     draw: None,
                     status: if hidden {
                         ShapeStatus::Hidden
@@ -1686,7 +1727,7 @@ impl Renderer {
             // begun, so its textures go unresolved and its missing ones stay out of `LoadReport.missing_textures`, until
             // Task 6 removes type 21.
             if !hidden {
-                self.begin(s.id, &s.material, textures, &mut rep);
+                self.begin(s.id, &m, textures, &mut rep);
             }
         }
         if sync {
@@ -1823,14 +1864,19 @@ impl Renderer {
     fn apply_material(
         &mut self,
         id: ShapeId,
-        m: MaterialState,
+        mut m: MaterialState,
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
     ) -> Result<EditKind, String> {
+        let name = self
+            .shapes
+            .get(&id)
+            .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?
+            .name
+            .clone();
+        // an edit's `.csm` note was the load's; the material keeps `csm_error`
+        self.with_csm(&mut m, &name, textures, &mut LoadReport::default());
         let (kind, rebuild) = {
-            let state = self
-                .shapes
-                .get(&id)
-                .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?;
+            let state = &self.shapes[&id];
             let features: Vec<&str> = self.features.iter().map(String::as_str).collect();
             // Both as the shaders draw them (Note ID33).
             let (old, new) = (material::drawn(&state.material), material::drawn(&m));

@@ -2037,6 +2037,7 @@ fn pbr() -> MaterialState {
         features: 0,
         params: nif::pbr2::PBR2_DEFAULTS,
     };
+    m.pbr = m.type21_values();
     m
 }
 
