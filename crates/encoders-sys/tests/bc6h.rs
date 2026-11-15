@@ -105,7 +105,7 @@ const RECORDED: [(Bc6hLevel, &str); 5] = [
     ),
 ];
 
-/// SSE2, SSE4 and AVX write the same BC6H bytes.
+/// The SSE2 path. The SSE4 and AVX paths, dropped by Note JB, wrote the same bytes.
 const RECORDED_PRE_AVX2: [(Bc6hLevel, &str); 5] = [
     (
         Bc6hLevel::Veryfast,
@@ -156,14 +156,14 @@ const RECORDED_AVX512: [(Bc6hLevel, &str); 5] = [
 
 fn recorded(target: IspcTarget) -> [(Bc6hLevel, &'static str); 5] {
     match target {
-        IspcTarget::Sse2 | IspcTarget::Sse4 | IspcTarget::Avx => RECORDED_PRE_AVX2,
+        IspcTarget::Sse2 => RECORDED_PRE_AVX2,
         IspcTarget::Avx2 => RECORDED,
         IspcTarget::Avx512 => RECORDED_AVX512,
     }
 }
 
 /// The five shipped levels encode byte-identically to the objects vendored before the peak-preserving patch.
-/// The ISPC target paths differ (AVX-512, AVX2 and the three older ones), so each target has its own hashes; a CPU
+/// The ISPC target paths differ (AVX-512, AVX2 and SSE2), so each target has its own hashes; a CPU
 /// checks the targets it supports, up to `ispc_target()` (AVX2 in a test build unless `SDC_TEST_AVX512=1`).
 /// `SDC_RECORD_LEVEL_HASHES=1` prints them.
 #[test]

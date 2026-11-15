@@ -4,6 +4,11 @@
 # two objects are reported as SKIP and not counted. -Update (needs both compilers) copies the new objects and
 # main headers into vendor/ispc-objs (then run tools/hash-vendor.ps1).
 #
+# Targets: sse2, avx2 and avx512skx-x16 (`--target=sse2,avx2,avx512skx-x16`): each source gives one dispatcher
+# object, one object per target and the main header. A vendored `.obj` the build does not produce (a dropped
+# target's) is reported as EXTRA and counted as a difference. -Update never deletes a vendored file: remove an
+# EXTRA object with `git rm`.
+#
 # Reproducibility: ISPC embeds the source path it was given, so it is always run with the working
 # directory at the repo root and a repo-relative source path, with the target pinned explicitly
 # (--arch=x86-64 --target-os=windows). The generated header's line 2 (the output path, which is a
@@ -49,7 +54,7 @@ function Build-Objects([string]$exe, [string]$out) {
   New-Item -ItemType Directory "$out\bc7e", "$out\ispctc" | Out-Null
   Push-Location $repo
   try {
-    $common = @("-O2", "--arch=x86-64", "--target-os=windows", "--target=sse2,sse4,avx,avx2,avx512skx-x16", "--opt=fast-math")
+    $common = @("-O2", "--arch=x86-64", "--target-os=windows", "--target=sse2,avx2,avx512skx-x16", "--opt=fast-math")
     # ISPC prints hundreds of compiler warnings for these two vendored sources; show them only on failure.
     $log = & $exe @common "--opt=disable-assertions" (Get-SourceArg $Bc7eSource) -o "$out\bc7e\bc7e.obj" -h "$out\bc7e\bc7e_ispc.h" 2>&1
     if ($LASTEXITCODE) { $log; throw "ispc failed on $Bc7eSource" }
@@ -84,6 +89,11 @@ foreach ($dir in "bc7e", "ispctc") {
     $same = (Test-Path $old) -and ((Get-FileHash $old).Hash -eq (Get-FileHash $new).Hash)
     if (-not $same) { $diff++ }
     "{0,-5} {1}/{2}" -f ($(if ($same) { "MATCH" } else { "DIFF" })), $dir, $o.Name
+  }
+  # a vendored object the build no longer produces (a dropped target) is a difference too, so a stale one cannot hide
+  $built = $outputs | ForEach-Object { $_.Name }
+  foreach ($v in Get-ChildItem "$vendor\ispc-objs\$dir" -Filter "*.obj") {
+    if ($v.Name -notin $built) { $diff++; "{0,-5} {1}/{2}" -f "EXTRA", $dir, $v.Name }
   }
 }
 if ($Update) {

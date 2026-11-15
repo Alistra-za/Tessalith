@@ -402,6 +402,15 @@ mod tests {
     }
 
     #[test]
+    fn the_dropped_names_are_unknown() {
+        for name in ["sse4", "avx"] {
+            assert!(parse_targets(name)
+                .unwrap_err()
+                .contains("unknown ISPC target"));
+        }
+    }
+
+    #[test]
     fn hdr_texels_keep_values_above_one() {
         let bits = |v: f32| half::f16::from_f32(v).to_bits();
         assert_eq!(

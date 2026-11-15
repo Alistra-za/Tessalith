@@ -2,11 +2,12 @@
 //! vendored bc7e source or objects (a new patch, a rebuilt object) must keep every existing level's output
 //! for every flag combination; only a level added behind a new flag may encode differently.
 //!
-//! ISPC builds one code path per target (sse2, sse4, avx, avx2, avx512skx) and dispatches on the CPU at run time,
+//! ISPC builds one code path per target (sse2, avx2, avx512skx) and dispatches on the CPU at run time,
 //! and the paths do not encode bit-identically (fast-math, FMA). So the hashes are pinned per target: the test drives
 //! every target this CPU can run, up to `ispc_target()`, through `bc7e_compress_blocks_on` (the best one through the
 //! dispatcher itself). A CPU without some target skips only that target's rows; a test build caps `ispc_target()`
-//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`.
+//! at AVX2, so the AVX-512 row is read only with `SDC_TEST_AVX512=1`. The SSE2 row is also what the SSE4 and AVX
+//! paths wrote until Note JB dropped them.
 //!
 //! The hashes were recorded on Windows with the vendored objects (ISPC 1.31.0, bc7enc_rdo b943862 + patch
 //! 0001; level 7 from the patch-0002 objects; the AVX-512 row with the ISPC 1.32.0 objects, on an AMD Zen 5 CPU,
@@ -34,173 +35,10 @@ const LEVELS: [Bc7Level; 8] = [
     Bc7Level::Max,
 ];
 
-/// [target][level][perceptual][exact_opaque] over the four images concatenated. Levels 0 to 6 are the shipped
-/// levels; level 7 (`Max`, patch 0002) is checked only when the vendored objects carry the patch.
-const RECORDED: [[[[&str; 2]; 2]; 8]; 5] = [
-    [
-        [
-            [
-                "c81a6efea962a3ed81f33e175dfe1e30c537a1ea241700790c6a0d7a16156f0c",
-                "73dc2ae4f9c1000094368774c321069e818d9dc2dfd484223796d375ae1119c5",
-            ],
-            [
-                "96fccf91f97ce76df22774dafc3f5a22989eff99386f62b8664f0c85ed67d67b",
-                "06361eb2d5b4a5c46d1507049fac1bd958d6cb3883a7aadbe3c537e2b9d9c4af",
-            ],
-        ],
-        [
-            [
-                "8a6a6e1016b1e1ad872e99012f42694323ba9843a6b31dd223fde79c211f328c",
-                "2ad1a21913fd29b5346afe76915af946a7a0819621e145c2a853a2087e778c0e",
-            ],
-            [
-                "47a9e160fd20acfd1990dab3adbf40d01b98c8bf0275377372392732e3d87111",
-                "719e76239739d592e51ad938a9723b114af1bad7e2c0e8d6138fdf8004720b87",
-            ],
-        ],
-        [
-            [
-                "428e0e6d64c1852ceff611b1caeba5fdd3dba990ceb812fdeb76190e7f640b54",
-                "f981547441d1f95352b841ecb134122b7eab544ab079781c65113898449341a3",
-            ],
-            [
-                "47a9e160fd20acfd1990dab3adbf40d01b98c8bf0275377372392732e3d87111",
-                "719e76239739d592e51ad938a9723b114af1bad7e2c0e8d6138fdf8004720b87",
-            ],
-        ],
-        [
-            [
-                "cdc3c24d41640bd9fb02cc61d6f6f68cc6293030d96b95cc6a98f472453e7d89",
-                "19b6af8e7cad3553ec5a3816d09205e9081f887bcd0835cb732a57f3161aeea8",
-            ],
-            [
-                "a0fc5573280b033705fa57f8a0897a00a0ae072b0266c2db43e019fe547222a1",
-                "30be587cc0fd4c833bb4b4c0f7bf102125063709057068ee14403801ab4cd6a2",
-            ],
-        ],
-        [
-            [
-                "21da89672858b7e82085464471fad19370350df9b027bbead0cecf050258e7f6",
-                "da5a4bcaf78c32e08ba089e1a564db4120509c7bcfc09a7606d70d9731af33ca",
-            ],
-            [
-                "6e1902cce00d57ace763aaae8393eb6bbb9081a9e1dc45cbe72af2161876d490",
-                "d0fbccdb0d71f6a9427a7e605c11d5e618edc01bbae4224568deb63e13092ac6",
-            ],
-        ],
-        [
-            [
-                "25dc07cabfe032f52d9b6e9378d87764559a75c68f03c8dc5bc34cd534de6a02",
-                "7201336cdb08d6d0e9ecade5fe65b9dbf51b74a57041856b0c3b057fe9beec31",
-            ],
-            [
-                "6bfb56a78411377afed2dc6ffa3eac1d378c121795006bfdcfcad359bf9eef45",
-                "1767d91481365ae5a95692252d2b6aa0723259e74528485118f4c10b61db5af5",
-            ],
-        ],
-        [
-            [
-                "a2a99d418a25a14430e61a11ee204c3939ce49a8743ac85cb2f8465aa552388c",
-                "350730eafc0804f876940ca95be87031a757ba1d09fabf468b43ca0cc23800f0",
-            ],
-            [
-                "92becf6d248c3838fb068c265819f4c392217d51feadc02c70a01fe33a075f99",
-                "578bbf28b4b7dd3b3daf847870a176fb123e0262d9f9cddcf76f34c30907e446",
-            ],
-        ],
-        [
-            [
-                "5c05f11849786ea5eb2ee6d5ca0703ef5c0faeede8b51ca8ab4ba936dd19e994",
-                "9ce71331e668547146fb31cf2d847c0bd797a01fd52d70142ee6a1d533e557fb",
-            ],
-            [
-                "6165095a8fbb9e9bde5758ab5915f15c97ce1f6ec86f020e9c107af9b6ede49b",
-                "d86fda4542902c772670656ec580f371108b419c6b4cb7771f3a3673a2d06547",
-            ],
-        ],
-    ],
-    [
-        [
-            [
-                "c81a6efea962a3ed81f33e175dfe1e30c537a1ea241700790c6a0d7a16156f0c",
-                "73dc2ae4f9c1000094368774c321069e818d9dc2dfd484223796d375ae1119c5",
-            ],
-            [
-                "96fccf91f97ce76df22774dafc3f5a22989eff99386f62b8664f0c85ed67d67b",
-                "06361eb2d5b4a5c46d1507049fac1bd958d6cb3883a7aadbe3c537e2b9d9c4af",
-            ],
-        ],
-        [
-            [
-                "8a6a6e1016b1e1ad872e99012f42694323ba9843a6b31dd223fde79c211f328c",
-                "2ad1a21913fd29b5346afe76915af946a7a0819621e145c2a853a2087e778c0e",
-            ],
-            [
-                "47a9e160fd20acfd1990dab3adbf40d01b98c8bf0275377372392732e3d87111",
-                "719e76239739d592e51ad938a9723b114af1bad7e2c0e8d6138fdf8004720b87",
-            ],
-        ],
-        [
-            [
-                "428e0e6d64c1852ceff611b1caeba5fdd3dba990ceb812fdeb76190e7f640b54",
-                "f981547441d1f95352b841ecb134122b7eab544ab079781c65113898449341a3",
-            ],
-            [
-                "47a9e160fd20acfd1990dab3adbf40d01b98c8bf0275377372392732e3d87111",
-                "719e76239739d592e51ad938a9723b114af1bad7e2c0e8d6138fdf8004720b87",
-            ],
-        ],
-        [
-            [
-                "cdc3c24d41640bd9fb02cc61d6f6f68cc6293030d96b95cc6a98f472453e7d89",
-                "19b6af8e7cad3553ec5a3816d09205e9081f887bcd0835cb732a57f3161aeea8",
-            ],
-            [
-                "a0fc5573280b033705fa57f8a0897a00a0ae072b0266c2db43e019fe547222a1",
-                "30be587cc0fd4c833bb4b4c0f7bf102125063709057068ee14403801ab4cd6a2",
-            ],
-        ],
-        [
-            [
-                "21da89672858b7e82085464471fad19370350df9b027bbead0cecf050258e7f6",
-                "da5a4bcaf78c32e08ba089e1a564db4120509c7bcfc09a7606d70d9731af33ca",
-            ],
-            [
-                "6e1902cce00d57ace763aaae8393eb6bbb9081a9e1dc45cbe72af2161876d490",
-                "d0fbccdb0d71f6a9427a7e605c11d5e618edc01bbae4224568deb63e13092ac6",
-            ],
-        ],
-        [
-            [
-                "25dc07cabfe032f52d9b6e9378d87764559a75c68f03c8dc5bc34cd534de6a02",
-                "7201336cdb08d6d0e9ecade5fe65b9dbf51b74a57041856b0c3b057fe9beec31",
-            ],
-            [
-                "6bfb56a78411377afed2dc6ffa3eac1d378c121795006bfdcfcad359bf9eef45",
-                "1767d91481365ae5a95692252d2b6aa0723259e74528485118f4c10b61db5af5",
-            ],
-        ],
-        [
-            [
-                "a2a99d418a25a14430e61a11ee204c3939ce49a8743ac85cb2f8465aa552388c",
-                "350730eafc0804f876940ca95be87031a757ba1d09fabf468b43ca0cc23800f0",
-            ],
-            [
-                "92becf6d248c3838fb068c265819f4c392217d51feadc02c70a01fe33a075f99",
-                "578bbf28b4b7dd3b3daf847870a176fb123e0262d9f9cddcf76f34c30907e446",
-            ],
-        ],
-        [
-            [
-                "5c05f11849786ea5eb2ee6d5ca0703ef5c0faeede8b51ca8ab4ba936dd19e994",
-                "9ce71331e668547146fb31cf2d847c0bd797a01fd52d70142ee6a1d533e557fb",
-            ],
-            [
-                "6165095a8fbb9e9bde5758ab5915f15c97ce1f6ec86f020e9c107af9b6ede49b",
-                "d86fda4542902c772670656ec580f371108b419c6b4cb7771f3a3673a2d06547",
-            ],
-        ],
-    ],
+/// [target][level][perceptual][exact_opaque] over the four images concatenated; the target rows are SSE2, AVX2 and
+/// AVX-512 (`row`). Levels 0 to 6 are the shipped levels; level 7 (`Max`, patch 0002) is checked only when the
+/// vendored objects carry the patch.
+const RECORDED: [[[[&str; 2]; 2]; 8]; 3] = [
     [
         [
             [
@@ -449,6 +287,15 @@ const RECORDED: [[[[&str; 2]; 2]; 8]; 5] = [
     ],
 ];
 
+/// The `RECORDED` row of a target.
+fn row(target: IspcTarget) -> usize {
+    match target {
+        IspcTarget::Sse2 => 0,
+        IspcTarget::Avx2 => 1,
+        IspcTarget::Avx512 => 2,
+    }
+}
+
 /// A small deterministic generator (xorshift) so the images never depend on a crate.
 struct Rng(u64);
 impl Rng {
@@ -550,9 +397,9 @@ fn every_shipped_level_is_byte_identical_to_the_recorded_objects() {
                 for exact in [false, true] {
                     let got = hash(*level, perceptual, exact, target);
                     if record {
-                        println!("{} {li} {perceptual} {exact} {got}", target as usize);
+                        println!("{target:?} {li} {perceptual} {exact} {got}");
                     }
-                    let want = RECORDED[target as usize][li][perceptual as usize][exact as usize];
+                    let want = RECORDED[row(target)][li][perceptual as usize][exact as usize];
                     if got != want {
                         diffs.push(format!(
                             "{target:?} {level:?} perceptual={perceptual} exact={exact}: {got}"
@@ -595,8 +442,8 @@ fn tuning_with_no_overrides_matches_the_level_on_every_target() {
 #[test]
 fn the_avx512_row_is_not_the_avx2_row() {
     assert_ne!(
-        RECORDED[IspcTarget::Avx512 as usize],
-        RECORDED[IspcTarget::Avx2 as usize]
+        RECORDED[row(IspcTarget::Avx512)],
+        RECORDED[row(IspcTarget::Avx2)]
     );
 }
 

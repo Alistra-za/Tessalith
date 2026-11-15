@@ -33,16 +33,12 @@ extern "C" {
     void bc7e_compress_block_init_##t(); \
     void bc7e_compress_blocks_##t(uint32_t, uint64_t*, const uint32_t*, const ispc::bc7e_compress_block_params*);
 SDC_BC7E_TARGET(sse2)
-SDC_BC7E_TARGET(sse4)
-SDC_BC7E_TARGET(avx)
 SDC_BC7E_TARGET(avx2)
 
 // The texture compressor's per-target BC6H kernels, which ispc_texcomp.cpp's CompressBlocksBC6H reaches through the
 // dispatcher with the same two structs. They need no init.
 #define SDC_BC6H_TARGET(t) void CompressBlocksBC6H_ispc_##t(rgba_surface*, uint8_t*, bc6h_enc_settings*);
 SDC_BC6H_TARGET(sse2)
-SDC_BC6H_TARGET(sse4)
-SDC_BC6H_TARGET(avx)
 SDC_BC6H_TARGET(avx2)
 
 // Must run exactly once (Rust guards it with Once): rgbcx::init writes global state.
@@ -67,16 +63,15 @@ void sdc_init(int bc1_mode) {
     g_bc6[5].fast_mode = true;
 }
 
-// `target` < 0 lets ISPC dispatch on the CPU; 0..=3 forces the sse2, sse4, avx or avx2 code path (BC7 and BC6H alike).
-// The caller checks the CPU supports the target and never forces the one the dispatcher uses, so the
-// per-target init below never rewrites tables a dispatched encode is reading.
+// `target` < 0 lets ISPC dispatch on the CPU; 0 forces the sse2 and 3 the avx2 code path (BC7 and BC6H alike). The
+// numbers are `IspcTarget`'s; 1 and 2 (sse4, avx) were dropped by Note JB and fall to the dispatcher. The caller
+// checks the CPU supports the target and never forces the one the dispatcher uses, so the per-target init below
+// never rewrites tables a dispatched encode is reading.
 static void bc7e_blocks_on(int target, uint32_t n, uint64_t* blocks, const uint32_t* px,
                            const ispc::bc7e_compress_block_params* p) {
     static std::once_flag inited[4];
     switch (target) {
     case 0: std::call_once(inited[0], bc7e_compress_block_init_sse2); bc7e_compress_blocks_sse2(n, blocks, px, p); break;
-    case 1: std::call_once(inited[1], bc7e_compress_block_init_sse4); bc7e_compress_blocks_sse4(n, blocks, px, p); break;
-    case 2: std::call_once(inited[2], bc7e_compress_block_init_avx); bc7e_compress_blocks_avx(n, blocks, px, p); break;
     case 3: std::call_once(inited[3], bc7e_compress_block_init_avx2); bc7e_compress_blocks_avx2(n, blocks, px, p); break;
     default: ispc::bc7e_compress_blocks(n, blocks, px, p); break;
     }
@@ -169,8 +164,6 @@ void sdc_bc6h_compress(const uint16_t* rgba16f, int32_t width, int32_t rows, int
     s.stride = stride_bytes;
     switch (target) {
     case 0: CompressBlocksBC6H_ispc_sse2(&s, dst, &g_bc6[level]); break;
-    case 1: CompressBlocksBC6H_ispc_sse4(&s, dst, &g_bc6[level]); break;
-    case 2: CompressBlocksBC6H_ispc_avx(&s, dst, &g_bc6[level]); break;
     case 3: CompressBlocksBC6H_ispc_avx2(&s, dst, &g_bc6[level]); break;
     default: CompressBlocksBC6H(&s, dst, &g_bc6[level]); break;
     }

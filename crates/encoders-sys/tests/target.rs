@@ -6,7 +6,16 @@ fn the_process_target_is_supported_and_named() {
     assert!(t.supported());
     assert!(t <= IspcTarget::best());
     let names: Vec<_> = IspcTarget::ALL.iter().map(|t| t.name()).collect();
-    assert_eq!(names, ["sse2", "sse4", "avx", "avx2", "avx512"]);
+    assert_eq!(names, ["sse2", "avx2", "avx512"]);
+}
+
+/// The shim's switches (`bc7e_blocks_on`, `sdc_bc6h_compress`) take these numbers; its `default:` would silently
+/// dispatch on any other. The behaviour-level guard is `level_identity`, which sees a mismatch only on a CPU whose
+/// `best()` is above AVX2 (there a forced AVX2 encode that falls to the dispatcher writes AVX-512 bytes).
+#[test]
+fn the_shim_numbers_are_kept() {
+    let n: Vec<i32> = IspcTarget::ALL.iter().map(|t| *t as i32).collect();
+    assert_eq!(n, [0, 3, 4]);
 }
 
 #[test]

@@ -1588,6 +1588,73 @@ fn a_rerun_on_the_other_path_keeps_every_output() {
     assert_eq!(latest(), records);
 }
 
+/// Records written by an older Tessalith on a CPU without AVX2 name a path this build no longer has. They load, and
+/// `--on-existing if-changed` (the default) keeps every output (Note JB).
+#[test]
+fn a_record_naming_a_dropped_isa_is_kept() {
+    let fx = Fx::new();
+    fx.pbr_and_plain();
+    let out = fx.p("out");
+    let o = fx.convert_to_on("out", &HI, false);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let lines = manifest_lines(&out);
+    let isa = isas(&lines);
+    // Rewrite: the first half of the lines says "sse4", the rest "avx"; each line holds the field exactly once.
+    let half = lines.len() / 2;
+    let rewritten: Vec<String> = lines
+        .iter()
+        .zip(&isa)
+        .enumerate()
+        .map(|(i, (l, isa))| {
+            let from = format!("\"isa\":\"{isa}\"");
+            assert_eq!(l.matches(&from).count(), 1, "{l}");
+            l.replace(
+                &from,
+                if i < half {
+                    "\"isa\":\"sse4\""
+                } else {
+                    "\"isa\":\"avx\""
+                },
+            )
+        })
+        .collect();
+    std::fs::write(out.join("_sdc/manifest.jsonl"), rewritten.join("\n") + "\n").unwrap();
+    // As in a_rerun_on_the_other_path_keeps_every_output: the modified time tells a re-encode from a kept file.
+    let state = || {
+        let bytes = read_all(&out);
+        let times = bytes
+            .keys()
+            .map(|k| {
+                let t = std::fs::metadata(out.join(k)).unwrap().modified().unwrap();
+                (k.clone(), t)
+            })
+            .collect::<BTreeMap<_, _>>();
+        (times, bytes)
+    };
+    // The latest manifest line of each output.
+    let latest = || {
+        manifest_lines(&out)
+            .into_iter()
+            .map(|l| {
+                let v: Value = serde_json::from_str(&l).unwrap();
+                (v["output"].as_str().unwrap().to_string(), l)
+            })
+            .collect::<BTreeMap<_, _>>()
+    };
+    let ((times, bytes), records) = (state(), latest());
+    assert!(!bytes.is_empty());
+    let o = fx.convert_to_on("out", &HI, false);
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let (times2, bytes2) = state();
+    assert_eq!(times2, times, "an output was written again");
+    assert!(bytes2 == bytes, "an output's bytes changed");
+    assert_eq!(latest(), records);
+    // Every line still parses and names a dropped path.
+    for i in isas(&manifest_lines(&out)) {
+        assert!(i == "sse4" || i == "avx", "{i}");
+    }
+}
+
 #[test]
 fn a_bad_export_value_exits_2() {
     let fx = Fx::new();
