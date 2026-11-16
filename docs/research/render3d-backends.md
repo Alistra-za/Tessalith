@@ -12,7 +12,7 @@ Short answer:
 - **The golden replay fails on DXVK,** and that was the parity line I set before the run: 123 of 149 captured draws are over its limits. Both causes I found are in how the replay uses the game's captures (8× anisotropic samplers, captured depth), not in the shaders. See [what DXVK did](#what-dxvk-did-on-windows).
 - **vkd3d cannot compile the shaders.** Wine's HLSL compiler (vkd3d 2.1) stops at the first `namespace` in 96 of 98 permutations. On Linux the bytecode has to come from Microsoft's compiler. No frame has been drawn on Linux.
 
-My recommendation: keep the D3D11 API and FXC bytecode, with DXVK as the runtime to build towards. [The next step](#recommendation-and-next-step) is to choose where Linux gets that bytecode.
+My recommendation: keep the D3D11 API and FXC bytecode, with DXVK as the runtime to build towards. What is left for Linux is under [Recommendation and next step](#recommendation-and-next-step).
 
 ## Why this comes down to the shaders
 
