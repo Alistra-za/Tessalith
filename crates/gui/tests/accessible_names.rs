@@ -6,9 +6,11 @@ use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::cs_pbr::Kind;
+use sdc_gui::model::meshes::{edit_doc::EDIT_MOD, MeshesModel};
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
+use sdc_gui::settings::MeshesSettings;
 use support::*;
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
@@ -226,4 +228,158 @@ fn the_header_preset_and_the_search_boxes_are_named() {
     h.run();
     h.get_by_role_and_label(Role::ComboBox, "Preset");
     h.get_by_role_and_label(Role::TextInput, "Search textures");
+}
+
+type MeshesHarness = Harness<'static, MeshesModel>;
+
+/// A Meshes model over a one-mod MO2 instance holding the Skinned SE fixture, with the scan requested and started.
+fn scan_started() -> (tempfile::TempDir, MeshesModel) {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path();
+    let game = r.join("Game");
+    std::fs::create_dir_all(game.join("Data")).unwrap();
+    std::fs::write(
+        r.join("ModOrganizer.ini"),
+        format!(
+            "[General]\ngamePath=@ByteArray({})\nselected_profile=@ByteArray(Default)\n",
+            game.display().to_string().replace('\\', "\\\\")
+        ),
+    )
+    .unwrap();
+    std::fs::create_dir_all(r.join("overwrite")).unwrap();
+    std::fs::create_dir_all(r.join("profiles/Default")).unwrap();
+    std::fs::write(r.join("profiles/Default/modlist.txt"), "+A\n").unwrap();
+    std::fs::write(
+        r.join("profiles/Default/settings.ini"),
+        "[General]\nLocalSettings=true\n",
+    )
+    .unwrap();
+    let nif = std::fs::read(format!(
+        "{}/../nif/tests/fixtures/TestNifFile_Skinned_SE.nif",
+        env!("CARGO_MANIFEST_DIR")
+    ))
+    .unwrap();
+    std::fs::create_dir_all(r.join("mods/A/meshes")).unwrap();
+    std::fs::write(r.join("mods/A/meshes/x.nif"), nif).unwrap();
+    std::fs::create_dir_all(r.join("mods/A/textures")).unwrap();
+    std::fs::write(r.join("mods/A/textures/new.dds"), b"dds").unwrap();
+    let mut m = MeshesModel::new(Some(r.join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    m.activate_with(None);
+    m.use_instance(r.to_path_buf(), "Default".into());
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    (d, m)
+}
+
+/// `scan_started`, run to its end, with A's x.nif selected.
+fn scanned_meshes() -> (tempfile::TempDir, MeshesModel) {
+    let (d, mut m) = scan_started();
+    let t = std::time::Instant::now();
+    m.poll();
+    while m.scanning() {
+        assert!(t.elapsed() < std::time::Duration::from_secs(60));
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        m.poll();
+    }
+    assert_eq!(m.error, None);
+    let a = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a);
+    let c = m.nifs[0].copy_id;
+    m.select_nif(c);
+    m.set_nif_export_root(Some(d.path().join("mods").join(EDIT_MOD)));
+    (d, m)
+}
+
+fn meshes_harness(m: MeshesModel) -> MeshesHarness {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        )
+}
+
+/// Clicks the first button whose name contains `part` and lets the popup draw.
+fn open_browse(h: &mut MeshesHarness, part: &str) {
+    h.query_all_by_label_contains(part)
+        .find(|n| n.accesskit_node().role() == Role::Button)
+        .unwrap_or_else(|| panic!("a button named {part:?}"))
+        .click();
+    h.run();
+    h.run();
+}
+
+#[test]
+fn every_input_has_a_name_in_the_meshes_view() {
+    let (_d, m) = scanned_meshes();
+    let mut h = meshes_harness(m);
+    h.run();
+    // The mod filter, and the filter box inside its open list.
+    h.get_by_role_and_label(Role::ComboBox, "Mod filter")
+        .click();
+    h.run();
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, "Filter mods by name");
+    h.key_press(egui::Key::Escape);
+    h.run();
+    // A skin-tint shape for the Advanced Skin card, whose Browse popup has its own filter.
+    let m = h.state_mut();
+    m.shapes_col = true;
+    let mut skin = m.shapes[0].clone();
+    skin.block = 900;
+    skin.index3d = Some(900);
+    skin.shader_kind = 1;
+    skin.shader_type = Some(5);
+    skin.name = Some("Body".into());
+    m.shapes.push(skin);
+    h.run();
+    open_browse(&mut h, "Browse for the ");
+    h.get_by_role_and_label(Role::TextInput, "Filter textures");
+    h.key_press(egui::Key::Escape);
+    h.run();
+    // Edit swaps the list for the edit model's cards and the edit panel; a slot's Browse has its own filter.
+    h.state_mut().open_edit();
+    h.run();
+    h.get_by_label_contains("Select shape #0").click();
+    h.run();
+    h.run();
+    open_browse(&mut h, "Browse for ");
+    h.get_by_role_and_label(Role::TextInput, "Filter textures");
+}
+
+#[test]
+fn a_running_scan_names_its_spinner() {
+    // The scan is started and never polled, so it runs while the controls draw.
+    let (_d, m) = scan_started();
+    assert!(m.scanning());
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(800.0, 100.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::scan_controls(ui, m),
+            m,
+        );
+    // The spinner never goes idle: steps, not `run()`.
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::ProgressIndicator, "Scanning mods");
+    assert!(
+        unnamed_progress(&h).is_empty(),
+        "{:?}",
+        unnamed_progress(&h)
+    );
+}
+
+#[test]
+fn the_meshes_search_is_named() {
+    let (_d, m) = scanned_meshes();
+    let mut h = meshes_harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::TextInput, "Search meshes and mods");
 }

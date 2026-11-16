@@ -232,7 +232,7 @@ pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
 pub fn scan_controls(ui: &mut egui::Ui, m: &mut MeshesModel) {
     ui.horizontal_wrapped(|ui| {
         if m.scanning() {
-            ui.spinner();
+            super::name_input(ui.spinner(), "Scanning mods");
             if let (Some((_, done, total)), Some(text)) =
                 (m.progress, m.scan_line(std::time::Instant::now()))
             {
@@ -446,11 +446,12 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
         ui.label("No scan yet.");
         return;
     }
-    ui.add(
+    let r = ui.add(
         egui::TextEdit::singleline(&mut m.search)
             .hint_text("Search paths and mods")
             .desired_width(f32::INFINITY),
     );
+    super::name_input(r, "Search meshes and mods");
     mod_picker(ui, m);
     let project = m.project_nifs();
     // Note GH3: the pill's read runs on a worker and `poll` takes it; no pill until it lands.
@@ -593,7 +594,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
     ui.allocate_ui(size, |ui| {
         ui.add_enabled_ui(m.store_settled(), |ui| {
-            egui::ComboBox::from_id_salt("meshes-mod-picker")
+            let r = egui::ComboBox::from_id_salt("meshes-mod-picker")
                 .selected_text(text)
                 .width(size.x)
                 .truncate()
@@ -610,6 +611,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                             .hint_text("Filter: words of the mod name")
                             .desired_width(f32::INFINITY),
                     );
+                    let r = super::name_input(r, "Filter mods by name");
                     if fresh {
                         r.request_focus();
                     }
@@ -647,7 +649,8 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                         ui.close();
                     }
                 })
-                .response
+                .response;
+            super::name_input(r, "Mod filter")
                 .on_disabled_hover_text("Available after the scan finishes");
         });
     });

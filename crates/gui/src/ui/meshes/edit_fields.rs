@@ -818,11 +818,12 @@ fn browse(ui: &mut egui::Ui, m: &MeshesModel, commit: &mut Option<String>) {
     let fid = egui::Id::unique("meshes-edit-browse-filter");
     let cid = egui::Id::unique("meshes-edit-browse-list");
     let mut filter: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
-    ui.add(
+    let r = ui.add(
         egui::TextEdit::singleline(&mut filter)
             .hint_text("Filter textures")
             .desired_width(320.0),
     );
+    crate::ui::name_input(r, "Filter textures");
     // One query per filter, not per frame.
     let cached: Option<(String, Vec<String>)> = ui.data(|d| d.get_temp(cid));
     let list = match cached {

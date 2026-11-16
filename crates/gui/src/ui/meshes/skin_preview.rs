@@ -139,11 +139,12 @@ fn hover(m: &MeshesModel, s: &ShapeView, map: SkinMap, picked: Option<&str>) -> 
 fn browse(ui: &mut egui::Ui, m: &MeshesModel, salt: (u32, SkinMap)) -> Option<SkinPick> {
     let fid = egui::Id::unique(("skin-card-browse-filter", salt));
     let mut q: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
-    ui.add(
+    let r = ui.add(
         egui::TextEdit::singleline(&mut q)
             .hint_text("Filter textures")
             .desired_width(360.0),
     );
+    crate::ui::name_input(r, "Filter textures");
     ui.data_mut(|d| d.insert_temp(fid, q.clone()));
     let mods = path_picker::cached(ui, "skin-card-mods", (0, hash(&q)), || {
         m.texture_paths(&q, MOD_LIMIT)
