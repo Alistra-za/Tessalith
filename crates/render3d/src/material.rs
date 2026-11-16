@@ -208,7 +208,7 @@ pub const fn is_mlp(shader_type: u32, slsf2: u32) -> bool {
 /// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not FaceGen (4, 5) or sparkle
 /// snow (14), and on a vanilla shape not parallax (3), MLP (11) or SLSF2.24 (MLP), whose `PROJECTED_UV` branches
 /// differ (Lighting.hlsl:1740-1748). TruePBR drops the parallax and MLP techniques, so a PBR shape of type 3 or 11
-/// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, GZ3). A CS 2.0 PBR
+/// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, IE23). A CS 2.0 PBR
 /// material (a `.csm`) counts as PBR here (Note IE6).
 /// Also not eye (16) or model-space normals (SLSF1.12): those permutations do not compile with `PROJECTED_UV` (EYE
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).

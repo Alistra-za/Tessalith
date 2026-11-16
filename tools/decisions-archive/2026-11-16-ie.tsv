@@ -51,5 +51,8 @@ ID54	ID			IE5		archive-item	2026-11-16
 ID55	ID			IE5,IE19		archive-item	2026-11-16		
 ID56	ID			IE8,IE17		partial	2026-11-16		
 GZ1	GZ			IE5,IE6		partial	2026-11-16		
-GZ3	GZ			IE5,IE6		partial	2026-11-16		
+GZ3	GZ			IE5,IE23		archive-item	2026-11-16	crates/render3d/src/material.rs	its CS 1.9 wording was archived as a partial first (fix round 1)
 GT3	GT			IE5		partial	2026-11-16		
+ID43	ID			IE5		partial	2026-11-16		tree B renamed to the cs2 shaders (fix round 1)
+ID47	ID			IE5		partial	2026-11-16		tree B renamed to the cs2 shaders (fix round 1)
+ID52	ID			IE5		partial	2026-11-16		tree B renamed to the cs2 shaders (fix round 1)

@@ -306,6 +306,10 @@ ARCHIVED (wording before the edit; superseded in part by Note IE, 2026-11-16)
 - pgpsim: AU, CM, GE, ID
 
 ARCHIVED (wording at the task base b06542ad; superseded in part by Note IE, 2026-11-16)
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS, ID
+- Packing and helpers: B, H, I, M, R, W, AL, BB, BP, BQ, BV, CN, DR, DY, FB, FM, FQ, FV, HC, HE, HG, GV, GW, HL, HF, HH, HR, HS
+- Presets and config: G, N, S, T, X, AE, AL, AM, AP, AS, AV, AZ, BC, BJ, BO, BQ, BR, BV, CN, CV, FB, FL, FM, FQ, FX, FY, GU, HB, GV, GW, IA, IB
+- CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, ID, IE
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, ID, IE
 - pgpsim: AU, CM, GE, ID, IE
@@ -649,6 +653,9 @@ ARCHIVED (wording before the edit; superseded in part by Note IE5, 2026-11-16)
 ARCHIVED (wording before the edit; superseded in part by Note IE5 and Note IE6, 2026-11-16)
 - MATO snow/ash layer (Set preview toggle): the record is the first scan `edids` match (ASCII case-insensitive), read on a worker (one plugin at a time, keyed cache); a missing or bad record draws default coverage (falloff 0.35 / 0.4, noise 48) with a grey line, never an error; so does a missing projected texture (`Renderer::projected_missing()`). Skinned shapes, shader types 4, 5, 14, 16, SLSF1.12, and on a vanilla shape types 3 and 11 and SLSF2.24 skip the layer (a PBR shape of type 3 or 11, or a PBR SLSF2.24 coat, keeps it; GZ1, GZ3). Bad JSON values take CS defaults (one bad `baseColorScale` component resets all three; glint only for boolean `true`). Changed layer textures show after a toggle off and on. Glint noise ports `noisegen.cs.hlsl`; vertex colour follows `has_vertex_colors`. [GG3, GG4, GG5, GG6, GG7, GG8, GG9, GG10, GG12, GG13, GG19, GG20, GG21]
 
+ARCHIVED (wording before the edit; superseded in part by Note IE24, 2026-11-16)
+- A MATO-only landscape set needs no RMAOS. CS does not draw the projected normal and detail samples in this build (slot hover says so); they still export. A landscape `_noise` is always ProjectedNoise; the detail names are `detail_normal` there (GW1). The two new kinds have no slot number, so no slot-keyed map gets them. The card shows every refusal `prepare` can know. The preview takes the profile's textures, coverage, then MATO DATA, cycling the layer when texture paths change. [GI10, GI15, GI16, GI17, GI18, GI19, GI21, GI25, GI28, GI29]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -815,6 +822,12 @@ ARCHIVED (wording before the edit; superseded in part by Note IE5 and Note IE6, 
 ARCHIVED (wording before the edit; superseded in part by Note IE5 and Note IE6, 2026-11-16)
 - **GZ3 A PBR shape of type 3 or 11 gets the layer.** CS drops the parallax and MLP techniques under TruePBR (`permutation::defines`; the captured Arch_Eye_Moisture, a PBR shape (SLSF2.23) of type 11, has technique 0), so the `PROJECTED_UV` exclusion at Lighting.hlsl:1748 does not apply to it. A coat (SLSF2.24) or fuzz (SLSF2.25) shape keeps type 11 because its MultiLayer floats, which carry the coat and fuzz values (`write_pbr`), load only for type 11, so GZ1 alone missed every such coat. `projected_eligible` skips types 3 and 11 only on a non-PBR shape; FaceGen (4, 5), sparkle snow (14) and eye (16) keep their technique and stay skipped. Tests `eligible_shapes` (a PBR type 3 or 11 shape, with or without SLSF2.24, compiles the type 0 program on both stages) and `render_projected_rotated_static_and_coat` (a type 11 coat draws as a type 0 one; only the coat was rendered).
 
+ARCHIVED (wording before the edit; superseded in part by Note IE23, 2026-11-16)
+- **GZ1 A CS 2.0 PBR shape with SLSF2.24 gets the layer.** On a PBR shape SLSF2.24 is not multi-layer parallax: CS 1.x's TruePBR.cpp turned it into `PBRFlags::TwoLayer` (the coat) and its PBR permutation list has ProjectedUV with technique None; on CS 2.0 the coat is the `.csm`'s Two-layer feature and PBR draws the Default technique (ID35). The coat reads `PBRParams2` and `MultiLayerParallaxData`; the layer writes `MaterialObjectRGBScale`, `ParallaxOccData` and `SparkleParams` and samples t3, t8, t10 and t11, so nothing collides. `projected_eligible` skips SLSF2.24 only on a non-PBR shape (GZ3 does the same for types 3 and 11), and reads the drawn material, so a v1 shape, drawn vanilla, is non-PBR there (IE5); a PBR coat toggle stays a cbuffer edit. **Amends GG6** (DECISIONS-1.x.md, frozen; the MATO digest line holds the current rule).
+
+ARCHIVED (superseded by Note IE5 and Note IE23, 2026-11-16)
+- **GZ3 A CS 2.0 PBR shape of type 3 or 11 gets the layer.** CS drops the parallax and MLP techniques under TruePBR (ID35; the captured Arch_Eye_Moisture, a PBR shape of type 11, has technique 0), so the `PROJECTED_UV` exclusion of those techniques does not apply to it. `projected_eligible` skips types 3 and 11 only on a non-PBR shape, and a v1 shape draws vanilla (IE5); FaceGen (4, 5), sparkle snow (14) and eye (16) keep their technique and stay skipped. Tests `eligible_shapes` and `render_projected_rotated_static_and_coat` (a coat draws as a type 0 one).
+
 ## Note ID — CS TruePBR 2.0 (type 21) (NIF team, 2026-11-14)
 
 ARCHIVED (superseded by Note IE7, 2026-11-16)
@@ -969,6 +982,15 @@ ARCHIVED (superseded by Note IE5 and Note IE19, 2026-11-16)
 
 ARCHIVED (wording before the edit; superseded in part by Note IE8 and Note IE17, 2026-11-16)
 - **ID56 Open follow-ups from the Task 15 captures, for the .csm rework.** Tree B compiles SPECULAR, SOFT_LIGHTING and BACK_LIGHTING on v1 and vanilla shapes where the PBR2Test1 captures have none (the coffin's PSO descriptor is 0x211 in the CS 1.9 capture, 0x11 in PBR2Test1), so the wiki tells users to judge those shapes with the box off. The glint altar's capture adds ANISO_LIGHTING beside GLINT and sdc's defines do not; whether SLSF2 bit 21 survives the conversion to 21 is not checked. The hair golden (CookingStone01) has 0 evidence pixels on RT4, RT5 and the composite, and the glint subject is never swapped in extraction, so neither hair nor glint shading is proven against the game. `extraction_matches_capture` reports rows and asserts none, so a `write_pbr2` regression on the 7 matched groups would not fail a test.
+
+ARCHIVED (wording before the edit; superseded in part by Note IE5, 2026-11-16)
+- **ID43 Tree B's HLSL still reads `MaterialObjectRGBScale.xyz` as the MATO base colour scale (cs2 Lighting.hlsl:1937 with LL, 1941 without, under TRUE_PBR) and `.w` only as the fuzz roughness (2138), so `write_projected` writing three floats over `write_pbr2`'s (1, 1, 1, w) is right.** The HasFuzzRoughnessTexture two-layer/hair gate of ID36 is not in the HLSL (2145 tests only Fuzz) and cannot change a pixel: hair skips fuzz (PBR.hlsli:318, 487) and on two-layer `MultiLayerParallaxData.w`, the fuzz weight, is 0. The w clamp matches CreateFuzzLayer (PBR.hlsli:132, 0.01-1, negative = base roughness), except that a NaN sent raw would take the energy-conserving throughput (137) where our -1 takes the legacy one.
+
+ARCHIVED (wording before the edit; superseded in part by Note IE5, 2026-11-16)
+- **ID47 The PBR Landscape card hides the 8 CS 2.0 rows with the other landscape-unread rows (Note BM) while the PGPatcher box is off and the row holds no value.** Tree B's landscape PBR material reads per layer only the PBR params and glint (Lighting.hlsl `PerMaterial` under `TRUE_PBR && LANDSCAPE`); the fuzz code is not compiled for landscape.
+
+ARCHIVED (wording before the edit; superseded in part by Note IE5, 2026-11-16)
+- **ID52 CookingStone01's PBRParams2 is `(64, 0, 0, 0)` as integers in T2 and 0 in T2L in the capture itself; sdc writes 0 in both, because `write_pbr2` fills PBRParams2 only for two-layer or subsurface (ID36).** The value is inert: tree B reads PBRParams2 only under Subsurface, TwoLayer and InterlayerParallax (Lighting.hlsl 1232/1306, 2094, 2112), and hair (PBRFlags 0x402) has none of them; both frames replay bit-identically from the capture's bytes, and with sdc's material swapped in.
 
 ## Note IE — CS PBR 2.0 .csm materials (NIF team, 2026-11-15)
 
