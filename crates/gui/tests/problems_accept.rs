@@ -162,6 +162,18 @@ fn the_arrow_opens_the_picker_for_another_type() {
     assert_eq!(subtype(h.state(), TINT), Some(json!("backlight_tint")));
 }
 
+/// The "Accept all suggestions (n)" Buttons on screen.
+fn accept_all_buttons(h: &Harness<'static, AppModel>) -> usize {
+    use egui_kittest::kittest::NodeT;
+    h.query_all_by_role(egui::accesskit::Role::Button)
+        .filter(|b| {
+            b.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("Accept all suggestions ("))
+        })
+        .count()
+}
+
 #[test]
 fn accept_all_at_the_top_shows_the_count() {
     let d = tempfile::tempdir().unwrap();
@@ -186,6 +198,7 @@ fn accept_all_at_the_top_shows_the_count() {
             b.rect()
         );
     }
+    assert_eq!(accept_all_buttons(&h), 1, "the check below sees the button");
     h.get_by_label(&format!("Accept all suggestions ({n})"))
         .click();
     idle(&mut h);
@@ -196,9 +209,8 @@ fn accept_all_at_the_top_shows_the_count() {
         .all(|k| !matches!(m.subtype_question(k), Some(Some(_)))));
     assert_eq!(m.undo_label(), Some("Accept all suggestions"));
     assert_eq!(subtype(m, TINT), Some(json!("subsurface_tint")));
-    assert!(h
-        .query_by_label_contains("Accept all suggestions")
-        .is_none());
+    // The button is gone; the header Undo, named `Undo: Accept all suggestions` (E28), is not it.
+    assert_eq!(accept_all_buttons(&h), 0);
     assert!(m.is_dirty());
     assert_eq!(std::fs::read(&toml).ok(), on_disk, "only Save writes");
 }

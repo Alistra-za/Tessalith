@@ -88,9 +88,18 @@ fn the_rename_dialog_shows_a_collision_and_renames_on_a_free_name() {
         .expect("the rename field")
         .type_text("renamed-set");
     h.run();
+    use eframe::egui::accesskit::Role;
+    assert!(
+        h.query_by_role_and_label(Role::TextInput, "New set name")
+            .is_some(),
+        "the check below sees the dialog's field"
+    );
     h.get_by_label("OK").click();
     h.run();
-    assert!(h.query_by_label_contains("Rename ").is_none());
+    // The dialog is gone; the header Undo, named `Undo: Rename …` (E28), is not it.
+    assert!(h
+        .query_by_role_and_label(Role::TextInput, "New set name")
+        .is_none());
     let after: Vec<String> = set_views(&h.state().0).into_iter().map(|v| v.id).collect();
     assert!(after.contains(&"renamed-set".to_string()), "{after:?}");
 }
