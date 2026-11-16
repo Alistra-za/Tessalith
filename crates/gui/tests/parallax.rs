@@ -181,6 +181,8 @@ fn a_locked_ticked_box_has_a_reset() {
     assert_eq!(parallax(m, BOLT_M), Some(false));
 }
 
+use sdc_gui::model::cs_pbr::FUZZ_TEXTURE;
+
 const ROCK: &str = "landscape/rock01";
 const ROCK_P: &str = "landscape/rock01_p.png";
 
@@ -235,7 +237,7 @@ fn fuzz_fixture(dir: &Path, switch: bool) -> AppModel {
     m.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
     m.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
     if switch {
-        m.set_cs_value(ROCK, Kind::Txst, "fuzzRoughnessTexture", Some(json!(true)));
+        m.set_cs_value(ROCK, Kind::Txst, FUZZ_TEXTURE, Some(json!(true)));
     }
     idle(&mut m);
     let v = rock(&m);
@@ -272,7 +274,7 @@ fn problems_harness(mut m: AppModel) -> Harness<'static, AppModel> {
     h
 }
 
-/// Note IE16: with the switch on, a BC4 `_p` blocks Export with the brief's text; its Use BC5 button writes
+/// Note IE18: with the switch on, a BC4 `_p` blocks Export with the brief's text; its Use BC5 button writes
 /// `format = "bc5"` for the `_p` through the edit history, which clears the row, and one undo brings both back.
 #[test]
 fn fuzz_texture_needs_two_channels() {
@@ -319,7 +321,7 @@ fn fuzz_texture_bc5_ok() {
 }
 
 /// The switch off: a BC4 `_p` is fine and grey. Turning it on keeps the G and adds the row; fuzz off drops the row
-/// (the `.csm` then has no fuzz) but not the G (Note IE16: the engine follows the switch alone); undo of the switch
+/// (the `.csm` then has no fuzz) but not the G (Note IE18: the engine follows the switch alone); undo of the switch
 /// plans the grey `_p` again.
 #[test]
 fn switch_off_bc4_ok() {
@@ -328,7 +330,7 @@ fn switch_off_bc4_ok() {
     let mut m = fuzz_fixture(d.path(), false);
     assert!(fuzz_row(&m).is_none());
     assert!(!p_job(&m).profile.channels.keep_green);
-    m.set_cs_value(ROCK, Kind::Txst, "fuzzRoughnessTexture", Some(json!(true)));
+    m.set_cs_value(ROCK, Kind::Txst, FUZZ_TEXTURE, Some(json!(true)));
     idle(&mut m);
     assert!(p_job(&m).profile.channels.keep_green);
     assert!(fuzz_row(&m).is_some());
@@ -369,6 +371,46 @@ fn fuzz_texture_bc5_export_keeps_green() {
             "{x},{y}: {p:?}"
         );
     }
+}
+
+/// Fix round 1 (item 5): with the switch on, the BC5 `_p` the fix writes gets no row that contradicts it: no
+/// CHAN-NOT-GRAY (its G is meant to differ) and nothing that asks for BC4. The format list offers BC5 and BC1 for a
+/// `_p`. Switch off, the same source still gets its CHAN-NOT-GRAY row, so the query sees such rows.
+#[test]
+fn fuzz_texture_bc5_has_no_contradicting_row() {
+    use engine::codes::Code;
+    use engine::config::Format;
+    let grey_row = |m: &AppModel| {
+        sdc_gui::model::bottom::problems(m)
+            .iter()
+            .any(|p| p.code == Some(Code::ChanNotGray) || p.also.contains(&Code::ChanNotGray))
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fuzz_fixture(d.path(), true);
+    let formats: Vec<Format> = sdc_gui::model::fields::format_choices(m.target, &p_job(&m).profile)
+        .into_iter()
+        .map(|((f, _), _)| f)
+        .collect();
+    assert!(
+        formats.contains(&Format::Bc5) && formats.contains(&Format::Bc1),
+        "{formats:?}"
+    );
+    m.set_field(ROCK_P, "format", json!("bc5"));
+    idle(&mut m);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    assert!(!grey_row(&m), "switch on: no CHAN-NOT-GRAY");
+    assert!(
+        !rows.iter().any(|p| p.shown().contains("BC4")),
+        "nothing asks for BC4: {:?}",
+        rows.iter()
+            .map(|p| p.shown().into_owned())
+            .collect::<Vec<_>>()
+    );
+    let off = tempfile::tempdir().unwrap();
+    let mut m = fuzz_fixture(off.path(), false);
+    m.set_field(ROCK_P, "format", json!("bc5"));
+    idle(&mut m);
+    assert!(grey_row(&m), "switch off: the grey check still runs");
 }
 
 /// Fix round 1: an explicit `remove` hides the row with its own reason; each hidden field has its own reason.

@@ -194,7 +194,7 @@ pub enum Fix {
     RemoveAliases(PathBuf, String),
     /// Note HG: copy the winning record's current paths into the set's (by id) mapping.
     UseRecordPaths(String),
-    /// Note IE16: write `format = "bc5"` for this item, a fuzz roughness `_p` in a one-channel format.
+    /// Note IE18: write `format = "bc5"` for this item, a fuzz roughness `_p` in a one-channel format.
     UseBc5(String),
 }
 

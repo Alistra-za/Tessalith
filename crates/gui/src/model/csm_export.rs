@@ -43,7 +43,7 @@ pub const BLOCK_SWITCHES: [(&str, &str); 4] = [
     ("glintParameters.enabled", "PBRGlintEnabled"),
     ("thinSurface", "PBRThinSurfaceEnabled"),
     ("foliage", "PBRFoliageEnabled"),
-    ("fuzzRoughnessTexture", "PBRFuzzRoughnessTexture"),
+    (super::cs_pbr::FUZZ_TEXTURE, "PBRFuzzRoughnessTexture"),
 ];
 
 /// The block number outside `nif::pbr2::TXST_PARAMS`.

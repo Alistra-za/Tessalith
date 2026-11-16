@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 /// The fix button on a CHAN-NORMAL-LENGTH row (Note DP).
 pub const REBUILD_Z: &str = "Rebuild Z";
-/// The fix button on a fuzz roughness texture's one-channel `_p` row (Note IE16).
+/// The fix button on a fuzz roughness texture's one-channel `_p` row (Note IE18).
 pub const USE_BC5: &str = "Use BC5";
 /// The Undo of an Info row (R-fills-2, Z11); not the header's `Undo`, so the two have distinct names (rule 8.4).
 pub const UNDO_ROW: &str = "Undo this change";

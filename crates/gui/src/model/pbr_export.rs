@@ -355,14 +355,15 @@ pub fn missing_texture_texts(
     out
 }
 
-/// Note IE16: the blocker of a fuzz roughness texture in a one-channel `_p` (after `<set id>: `).
+/// Note IE18: the blocker of a fuzz roughness texture in a one-channel `_p` (after `<set id>: `). An Export blocker,
+/// not a CHK row: CHK rows never block, and the `.csm` relies on the G.
 pub const FUZZ_TWO_CHANNELS: &str =
     "Fuzz roughness texture needs two channels (height in R, fuzz roughness in G): use BC5 or BC1";
 
-/// Note IE16: the item key of set `v`'s own `_p` when the set's `.csm` (a PGPatcher JSON set, as `csm_sets`) turns
+/// Note IE18: the item key of set `v`'s own `_p` when the set's `.csm` (a PGPatcher JSON set, as `csm_sets`) turns
 /// the fuzz roughness texture on (the block's switch, in `fuzz_sets`, with fuzz on as the export resolves it, so the
-/// file holds both switches) and the `_p` is written in a one-channel format (BC4, R8), which has no G. Only a `pbr`
-/// pick counts: PBR grass reads no `_p`, and the engine keeps the G for `pbr` only.
+/// file holds both switches) and the `_p` is written in a format with no G ([`keeps_green`]). Only a `pbr` pick
+/// counts: PBR grass reads no `_p`, and the engine keeps the G for `pbr` only.
 fn one_channel_fuzz_p(m: &AppModel, v: &SetView, fuzz_sets: &BTreeSet<String>) -> Option<String> {
     let pbr = v
         .shader
@@ -390,11 +391,16 @@ fn one_channel_fuzz_p(m: &AppModel, v: &SetView, fuzz_sets: &BTreeSet<String>) -
         return None;
     };
     let format = m.item(item)?.job.as_ref()?.profile.format;
+    (!keeps_green(format)).then(|| item.clone())
+}
+
+/// Note IE18: the formats that store a G channel, so a fuzz roughness `_p` keeps its G; BC4 and R8 store R only.
+fn keeps_green(f: engine::config::Format) -> bool {
+    use engine::config::Format::*;
     matches!(
-        format,
-        engine::config::Format::Bc4 | engine::config::Format::R8
+        f,
+        Bc1 | Bc3 | Bc5 | Bc6hUf16 | Bc7 | Rgba8 | Rgb8 | Rg8 | Rgba16f
     )
-    .then(|| item.clone())
 }
 
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
@@ -436,7 +442,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                 ));
             }
         }
-        // Note IE16: the `.csm` reads fuzz roughness from the `_p` G, which a one-channel format drops. Before the
+        // Note IE18: the `.csm` reads fuzz roughness from the `_p` G, which a one-channel format drops. Before the
         // statics rule below: the `.csm` is written whatever it says (`csm_export::csm_sets`).
         if let Some(item) = one_channel_fuzz_p(m, v, &fuzz_sets) {
             out.push(ExportIssue {

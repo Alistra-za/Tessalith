@@ -94,8 +94,12 @@ pub const TXST2_FIELDS: [Field; 8] = [
     f("thinSurfaceBackSpecularWeight", Num, 0.0, 1.0, 0.5),
     f("thinSurfaceBackRoughnessScale", Num, 0.0, 3.0, 1.0),
     f("fuzzRoughness", Num, -1.0, 1.0, -1.0),
-    f("fuzzRoughnessTexture", Bool, 0.0, 0.0, 0.0),
+    f(FUZZ_TEXTURE, Bool, 0.0, 0.0, 0.0),
 ];
+
+/// The texture-set switch that reads fuzz roughness from the `_p` G (the `.csm`'s `PBRFuzzRoughnessTexture`; Note
+/// IE16 keeps that G).
+pub const FUZZ_TEXTURE: &str = "fuzzRoughnessTexture";
 
 const fn concat<const N: usize>(a: &[Field], b: &[Field]) -> [Field; N] {
     assert!(N == a.len() + b.len());
@@ -160,7 +164,7 @@ pub fn field_label(name: &str) -> &str {
         "thinSurfaceBackSpecularWeight" => "Thin-surface back specular weight",
         "thinSurfaceBackRoughnessScale" => "Thin-surface back roughness scale",
         "fuzzRoughness" => "Fuzz roughness",
-        "fuzzRoughnessTexture" => "Fuzz roughness from texture",
+        FUZZ_TEXTURE => "Fuzz roughness from texture",
         _ => name,
     }
 }
@@ -206,7 +210,7 @@ pub fn field_note(kind: Kind, name: &str) -> Option<&'static str> {
         }
         (Kind::Txst, "fuzzRoughness") => "A negative value uses the base roughness.",
         // Note ID46 (owner 2026-11-14): CS 2.0 reads the roughness from the parallax slot's G (cs2 Lighting.hlsl).
-        (Kind::Txst, "fuzzRoughnessTexture") => {
+        (Kind::Txst, FUZZ_TEXTURE) => {
             "Fuzz roughness comes from the green channel of the parallax (height) slot's texture, so that texture \
              holds two channels: encode it BC5 or BC1, not BC4."
         }
