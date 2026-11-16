@@ -8,7 +8,7 @@
 //!
 //! Paths: [`search_on`] runs the search on the path it is given. `Base` runs it as plain code; `Avx2` runs it inside
 //! `search_avx2`, a `#[target_feature(enable = "avx2")]` frame, where the search (`#[inline(always)]`, with the token
-//! first) is compiled again with AVX2 (Note HY21). Each loop hands its candidates to a [`Batch`] where it called
+//! first) is compiled again with AVX2 (Note HY21). Each loop hands its candidates to a `Batch` where it called
 //! `try_pair` before: on `Base` that is `try_pair`; on `Avx2` the batch scores two pairs at once in one 256-bit vector
 //! (`avx2::pair2`) and decides them in order (`apply`), and a lone last pair goes through `try_pair` when the loop
 //! flushes. No byte changes: each pair still gets `try_pair`'s verdict against the best of its moment (a strict `<`
@@ -413,6 +413,7 @@ impl<I: Isa> Batch<I> {
     }
 }
 
+#[inline]
 pub fn minmax(v: &[u8; 16]) -> (u8, u8) {
     (*v.iter().min().unwrap(), *v.iter().max().unwrap())
 }
@@ -1050,7 +1051,9 @@ mod tests {
         for v in gen::bc4_classes(0xE3_0001, 30) {
             // The best falls as in `the_pair_kernel_equals_the_scalar_one`, so later pairs meet a low best.
             let mut best = Best::new();
-            for &[a, b] in pairs_for(&v).as_chunks::<2>().0 {
+            let pairs = pairs_for(&v);
+            let (twos, rest) = pairs.as_chunks::<2>();
+            for &[a, b] in twos {
                 let (pa, pb) = (pal(a.0, a.1), pal(b.0, b.1));
                 let [ra, rb] = avx2::pair2(t, &v, &pa, &pb);
                 let from = best.err;
@@ -1077,6 +1080,19 @@ mod tests {
                     (want.err, want.e0, want.e1, want.sels),
                     "{}",
                     what()
+                );
+            }
+            // A lone last pair goes through `try_pair`, as `flush` sends it. `pairs_for` pushes the near pairs two at a
+            // time after 52 x 52 grid pairs, so today its count is even and this never runs.
+            for &(e0, e1) in rest {
+                let mut want = best;
+                want.try_pair_reference(&v, e0, e1);
+                best.try_pair(&v, e0, e1);
+                assert_eq!(
+                    (best.err, best.e0, best.e1, best.sels),
+                    (want.err, want.e0, want.e1, want.sels),
+                    "{v:?} last pair {:?}",
+                    (e0, e1)
                 );
             }
         }
