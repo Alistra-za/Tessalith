@@ -451,7 +451,7 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .hint_text("Search paths and mods")
             .desired_width(f32::INFINITY),
     );
-    super::name_input(r, "Search meshes and mods");
+    super::name_input(r, "Search paths and mods");
     mod_picker(ui, m);
     let project = m.project_nifs();
     // Note GH3: the pill's read runs on a worker and `poll` takes it; no pill until it lands.

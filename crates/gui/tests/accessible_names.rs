@@ -381,5 +381,5 @@ fn the_meshes_search_is_named() {
     let (_d, m) = scanned_meshes();
     let mut h = meshes_harness(m);
     h.run();
-    h.get_by_role_and_label(Role::TextInput, "Search meshes and mods");
+    h.get_by_role_and_label(Role::TextInput, "Search paths and mods");
 }
