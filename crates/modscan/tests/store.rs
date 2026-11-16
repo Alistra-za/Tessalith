@@ -1506,11 +1506,32 @@ fn material_location_folds() {
     let d = common::instance_fixture("+A\n");
     let r = d.path();
     common::put(r, "mods/A/Materials/PBR/X.csm", b"{}");
+    // An upper-case extension: the game finds it, so the loose walk's `csm` filter must too (final review).
+    common::put(r, "mods/A/Materials/Clutter/Rug01.CSM", b"{}");
     common::put(r, "mods/A/materials/pbr/notes.json", b"{}");
+    // An archive's names fold too (`BsaEntry::norm` is lower case), so its `.csm` test sees `.csm`.
+    let bsa = r.join("Game/Data/Skyrim - Materials.bsa");
+    common::put(
+        r,
+        "Game/Data/Skyrim - Materials.bsa",
+        &common::bsa(&[("Materials\\Clutter", "Rug02.CSM", b"{}")]),
+    );
     let s = mo2_scan(r);
     let (kind, root) = s.material_location("materials/pbr/x.csm").unwrap().unwrap();
     assert_eq!(kind, KIND_MOD);
     assert_eq!(std::path::Path::new(&root), r.join("mods").join("A"));
+    let (kind, root) = s
+        .material_location("materials/clutter/rug01.csm")
+        .unwrap()
+        .unwrap();
+    assert_eq!(kind, KIND_MOD);
+    assert_eq!(std::path::Path::new(&root), r.join("mods").join("A"));
+    let (kind, root) = s
+        .material_location("materials/clutter/rug02.csm")
+        .unwrap()
+        .unwrap();
+    assert_eq!(kind, modscan::store::KIND_BSA);
+    assert_eq!(std::path::Path::new(&root), bsa);
     assert!(s
         .material_location("materials/pbr/notes.json")
         .unwrap()

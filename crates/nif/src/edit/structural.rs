@@ -1,6 +1,6 @@
 //! Structural ops: shader type re-emit and alpha add/remove/split (spec §5, plan A9). Removal is unlink: the
 //! block stays as an orphan. New blocks are appended; refs inside opaque blocks are never rewritten.
-use super::validate::{ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
+use super::validate::{env_scale_guarded, ENV_SCALE_PBR, LSCC, LSCF, LSCF_VARS, TESTREF};
 use super::{Anchor, Op, Outcome, Role};
 use crate::clips::{
     encode_mttc, encode_palette, encode_sequence, read_mttc, read_palette, read_sequence_out,
@@ -10,7 +10,6 @@ use crate::ctrl::{read_manager, Manager, BASE_LEN, CB_LEN};
 use crate::extra::{encode_extra, ExtraValue, EDITABLE};
 use crate::header::Header;
 use crate::keys::{encode_data, read_data, KeyData, KeyGroup};
-use crate::material::SLSF2_TRUE_PBR;
 use crate::model::{NifModel, PropModel, ShapeModel};
 use crate::net::{encode_net, ObjectNet};
 use crate::props::encode_texture_set;
@@ -666,11 +665,11 @@ pub(crate) fn ctrl_op(
             if !var_ok {
                 return Err(format!("{class} does not take variable {var:?}."));
             }
-            let pbr = m
+            let guarded = m
                 .lighting
                 .get(&block)
-                .is_some_and(|l| l.lighting.slsf2 & SLSF2_TRUE_PBR != 0);
-            if class == LSCF && *var == Some(8) && pbr {
+                .is_some_and(|l| env_scale_guarded(l.lighting.slsf2, l.lighting.name.as_deref()));
+            if class == LSCF && *var == Some(8) && guarded {
                 return Err(ENV_SCALE_PBR.into());
             }
             if key_count(keys, float)? == 0 {

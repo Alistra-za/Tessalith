@@ -2465,6 +2465,30 @@ fn add_env_map_scale_is_refused_on_pbr() {
     assert_eq!(r.outcomes, vec![Outcome::Applied]);
 }
 
+/// Final review B-I2: the guard also covers a shape whose name field names a `.csm` (no v1 bit), as CS 2.0 may draw it
+/// PBR; whether CS 2.0 crashes there is not known, so it stays conservative (Note IE22).
+#[test]
+fn add_env_map_scale_is_refused_on_a_csm_shape() {
+    let keys = lin(&[(0.0, 1.0), (1.0, 2.0)]);
+    let csm = v1_scene(0, 0, Some(CSM));
+    let at = prop_anchor(&csm, Role::Shader);
+    let r = apply(&csm, &[add(at, LSCF, Some(8), keys.clone(), 1.0)]).unwrap();
+    assert_eq!(
+        r.outcomes[0],
+        Outcome::Refused("Env map scale crashes the game on PBR materials.".into())
+    );
+    // another name: not this refusal (the scene has no root node, so the BSX step refuses it later)
+    let plain = v1_scene(0, 0, Some("SomeToolsName"));
+    let at = prop_anchor(&plain, Role::Shader);
+    let r = apply(&plain, &[add(at, LSCF, Some(8), keys, 1.0)]).unwrap();
+    assert_eq!(
+        r.outcomes,
+        vec![Outcome::Refused(
+            "The root is not a node: the BSX Animated bit cannot be set.".into()
+        )]
+    );
+}
+
 // ---- clips the split reads, and the manager checks ----
 
 use nif::clips::{read_mttc, read_palette, read_sequence_out};

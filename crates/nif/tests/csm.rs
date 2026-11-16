@@ -911,14 +911,16 @@ fn canon_material_cases() {
 
 // --- the PBR value bridge (Note IE3) ---
 
-/// The params each feature owns (p0-p2 belong to every PBR material), written out here as the brief gives them.
-const OWNERS: [(u32, std::ops::RangeInclusive<usize>); 6] = [
+/// The params each feature owns (p0-p2 belong to every PBR material), written out here as the brief gives them; p21-p24
+/// are thin surface's and foliage's (CS 2.0 sets ThinSurface with Foliage).
+const OWNERS: [(u32, std::ops::RangeInclusive<usize>); 7] = [
     (0, 0..=2),
     (feat::SUBSURFACE, 3..=6),
     (feat::TWO_LAYER, 7..=12),
     (feat::FUZZ, 13..=16),
     (feat::GLINT, 17..=20),
     (feat::THIN_SURFACE, 21..=24),
+    (feat::FOLIAGE, 21..=24),
 ];
 const COLOUR_PARAMS: [usize; 9] = [3, 4, 5, 7, 8, 9, 13, 14, 15];
 
@@ -1130,6 +1132,46 @@ fn csm_from_values_clamps() {
         Value::Color([0xff, 0xff, 0xff])
     );
     assert!(csm::parse(&csm::to_text(&c)).is_ok());
+}
+
+/// Final review A-I2: CS 2.0 reads p21-p24 (`LightingEffectParams`) for foliage too, so a foliage material without
+/// thin surface keeps its thin-surface numbers through the `.csm` (the schema ties those keys to no switch).
+#[test]
+fn foliage_alone_keeps_the_thin_surface_numbers() {
+    let mut params = PBR2_DEFAULTS;
+    (params[21], params[22], params[23], params[24]) = (0.3, 0.2, 0.9, 2.5);
+    let v = PbrValues {
+        features: feat::FOLIAGE,
+        params,
+        fuzz_roughness: -1.0,
+    };
+    let c = csm_from_values(&v);
+    assert_eq!(c.values.get("PBRThinSurfaceEnabled"), None);
+    let back = pbr_values(&csm::parse(&csm::to_text(&c)).unwrap()).unwrap();
+    assert_eq!(back.features, feat::FOLIAGE);
+    assert_eq!(back.params[21..=24], params[21..=24]);
+}
+
+/// Final review A-I3: every number `csm_from_values` writes is inside its schema range, whatever the input, so our own
+/// `parse` (and CS) reads the file back.
+#[test]
+fn csm_from_values_stays_in_the_schema_ranges() {
+    let groups = [
+        feat::SUBSURFACE | feat::FUZZ | feat::THIN_SURFACE | feat::FOLIAGE,
+        feat::TWO_LAYER | feat::COLORED_COAT,
+        feat::GLINT | feat::SUBSURFACE,
+    ];
+    for x in [1e6, -1e6, f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        for features in groups {
+            let c = csm_from_values(&PbrValues {
+                features,
+                params: [x; nif::pbr2::PARAM_COUNT],
+                fuzz_roughness: x,
+            });
+            let text = csm::to_text(&c);
+            assert!(csm::parse(&text).is_ok(), "{x} {features:#x}: {text}");
+        }
+    }
 }
 
 #[test]

@@ -87,21 +87,20 @@ pub const GLOW_ON_EYE: &str = "Glow map has no effect on an Eye shader.";
 /// Note DK (owner): SLSF1 bit 17 Eye_Environment_Mapping belongs to the Eye shader; often set by mistake on type 1.
 pub const EYE_ENV_TYPE: &str =
     "Eye environment mapping is for the Eye shader type. Use Environment_Mapping here.";
-/// CM27 / Note GD6: on a PBR material CS's default white RMAOS sets metallic to 1, so an empty NIF slot 5 (index; the
-/// 1-based slot 6 of the set editor, Note GH7) is fully metallic.
-pub const EMPTY_RMAOS: &str = "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic";
-/// Start of every CS 2.0 Error (Note IE7; [`TYPE_22`] is the one left): CS 2.0 logs the block and draws nothing. [`always_blocks`] matches the
-/// prefix.
-pub const WONT_DRAW: &str = "CS 2.0 won't draw this shape: ";
+/// Note IE29: CS 2.0 reads no SLSF2 12 (v1 PBR read it as glint; a `.csm` sets glint now). Not on a v1 shape, whose
+/// Convert reads the bit.
+pub const FIT_SLOPE: &str = "Fit_Slope (SLSF2 12) has no effect on CS 2.0 (a .csm sets glint).";
 /// Note IE15: a v1 PBR shape (type 0 or 11 with SLSF2 23) and no `.csm` in its name field; its fix is "Convert to
 /// .csm" ([`super::convert_v1`]).
 pub const V1_VANILLA: &str = "Draws vanilla on CS 2.0";
 /// Note IE15: the action the GUI offers on [`V1_VANILLA`].
 pub const CONVERT_FIX: &str = "Convert to .csm";
-/// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected.
+/// Shader type 22 is CS's runtime landscape type; a NIF block with it is rejected (CS 2.0 logs it and draws nothing).
 pub const TYPE_22: &str = "CS 2.0 won't draw this shape: type 22 is runtime only";
-/// Errors that block export even when the source already has them: each one crashes or blacks out in game.
-const ALWAYS_BLOCK: [&str; 6] = [
+/// Errors that block export even when the source already has them: each one crashes, blacks out or draws nothing in
+/// game.
+const ALWAYS_BLOCK: [&str; 7] = [
+    TYPE_22,
     ENV_SCALE_PBR,
     SKIN_TINT_TYPE,
     FACEGEN_DETAIL_TYPE,
@@ -148,6 +147,13 @@ pub fn type_slsf2_fix(shader_type: u32, slsf2: u32) -> Option<(u32, u32, &'stati
         0,
         "Multi-layer parallax flag cleared: it needs shader type 11.",
     ))
+}
+
+/// Note IE26: Env map scale (LSCF var 8) is refused and an always-blocking Error ([`ENV_SCALE_PBR`]) on a shader with
+/// SLSF2 bit 23 (v1 PBR, B-P39) or whose name field names a `.csm`. Validation reads no files, so any `.csm` name
+/// counts: whether CS 2.0 crashes over a `.csm` PBR material is not known (Note IE22).
+pub fn env_scale_guarded(slsf2: u32, name: Option<&str>) -> bool {
+    slsf2 & SLSF2_TRUE_PBR != 0 || name.and_then(crate::path::canon_material).is_some()
 }
 
 /// Why an SLSF1 checkbox is greyed on `shader_type` (Note CS): the bit cannot apply to it.
@@ -335,9 +341,8 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
             });
             push(Level::Warn, fld(block, Field::Slsf1), EYE_ENV_TYPE, fix);
         }
-        if !pbr && lt.slsf2 & (1 << 12) != 0 {
-            let t = "Fit_Slope (SLSF2 12) does nothing without the PBR flag.";
-            push(Level::Warn, slsf2.clone(), t, None);
+        if !super::is_v1(lt.shader_type, lt.slsf2) && lt.slsf2 & (1 << 12) != 0 {
+            push(Level::Warn, slsf2.clone(), FIT_SLOPE, None);
         }
         // Note IE15: CS 2.0 reads no v1 flag; a shape whose name field names a `.csm` draws from it instead. The GUI
         // gives this text its Convert action (the set and its path are the project's, which validation never sees).
@@ -382,7 +387,9 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
         for (i, c) in chain.iter().enumerate() {
             let tgt = Target::Block { block: c.block };
             match (&*c.class, c.var) {
-                (LSCF, Some(8)) if pbr => push(Level::Error, tgt.clone(), ENV_SCALE_PBR, None),
+                (LSCF, Some(8)) if env_scale_guarded(lt.slsf2, lt.name.as_deref()) => {
+                    push(Level::Error, tgt.clone(), ENV_SCALE_PBR, None)
+                }
                 // B-P41: glossiness (9) too, per B9 I6-R10Z (CM22).
                 (LSCF, Some(9 | 10)) | (LSCC, Some(0)) if !specular => {
                     push(Level::Warn, tgt.clone(), SPECULAR_OFF, None)
@@ -532,20 +539,6 @@ pub fn validate(m: &NifModel, exists: Option<&dyn Fn(&str) -> bool>) -> Vec<Warn
     }
 
     for (&set, s) in m.texsets.iter().filter(|(_, s)| !s.users.is_empty()) {
-        // Note GD6: a slot the set does not have reads as empty too.
-        let pbr = s.users.iter().any(|u| {
-            m.lighting
-                .get(u)
-                .is_some_and(|l| l.lighting.slsf2 & SLSF2_TRUE_PBR != 0)
-        });
-        if pbr && s.raw.slots.get(5).is_none_or(|r| r.is_empty()) {
-            push(
-                Level::Warn,
-                Target::Slot { set, slot: 5 },
-                EMPTY_RMAOS,
-                None,
-            );
-        }
         let shape = s
             .users
             .iter()
@@ -699,10 +692,9 @@ pub fn demote_source(source: &[Warning], edited: &mut [Warning]) {
     }
 }
 
-/// An Error that blocks export even when the source already has it: an [`ALWAYS_BLOCK`] text, or a CS 2.0 Error (text
-/// starts with [`WONT_DRAW`]).
+/// An Error that blocks export even when the source already has it: an [`ALWAYS_BLOCK`] text.
 pub fn always_blocks(w: &Warning) -> bool {
-    ALWAYS_BLOCK.contains(&w.text.as_str()) || w.text.starts_with(WONT_DRAW)
+    ALWAYS_BLOCK.contains(&w.text.as_str())
 }
 
 /// Errors in `edited` that `source` does not already have (R14): an untouched source error never blocks export,

@@ -50,7 +50,6 @@ fn type_22_is_an_error_that_always_blocks() {
     );
     let w = warnings(&n.bytes());
     let x = only(&w, nif::edit::validate::TYPE_22, Level::Error);
-    assert!(x.text.starts_with(nif::edit::validate::WONT_DRAW));
     assert!(nif::edit::validate::always_blocks(&x));
     assert_eq!(new_errors(&w, &w).len(), 1);
 }
@@ -562,7 +561,7 @@ const NEEDS_MLP: &str =
     "Shader type 11 needs the Multi_Layer_Parallax flag (SLSF2 24) without PBR.";
 const MLP_NOT_11: &str = "Multi_Layer_Parallax (SLSF2 24) is set but the shader type is not 11.";
 const MLP_TYPE: &str = nif::edit::validate::MLP_TYPE;
-const FIT_SLOPE: &str = "Fit_Slope (SLSF2 12) does nothing without the PBR flag.";
+const FIT_SLOPE: &str = "Fit_Slope (SLSF2 12) has no effect on CS 2.0 (a .csm sets glint).";
 
 fn slsf_scene(shader_type: u32, slsf2: u32) -> Vec<Warning> {
     let trailer: &[f32] = match shader_type {
@@ -703,8 +702,11 @@ fn a_type_change_off_11_clears_the_mlp_flag() {
     assert_eq!(type_slsf2_fix(1, 0), None);
     assert_eq!(type_slsf2_fix(1, (1 << 24) | (1 << 23)), None, "PBR coat");
 }
+/// Final review A-M2: CS 2.0 reads no SLSF2 12 (v1 PBR's glint, which a `.csm` now sets), so it warns on every shape
+/// but a v1 one, whose Convert reads the bit (Note IE14) and which has its own V1_VANILLA line.
 #[test]
-fn slsf_fit_slope_without_pbr_warns() {
+fn slsf_fit_slope_warns_off_v1_shapes() {
+    assert_eq!(nif::edit::validate::FIT_SLOPE, FIT_SLOPE);
     let x = only(&slsf_scene(0, 1 << 12), FIT_SLOPE, Level::Warn);
     assert_eq!(
         x.target,
@@ -713,7 +715,30 @@ fn slsf_fit_slope_without_pbr_warns() {
             field: Field::Slsf2
         }
     );
+    // bit 23 on a type v1 never used is not v1: CS 2.0 reads neither bit
+    only(
+        &slsf_scene(1, (1 << 12) | (1 << 23)),
+        FIT_SLOPE,
+        Level::Warn,
+    );
     none(&slsf_scene(0, (1 << 12) | (1 << 23)), FIT_SLOPE);
+}
+
+/// Final review A-M2: the CS 1.x empty-RMAOS line (Note GD6) is gone. A v1 shape draws vanilla on CS 2.0 (its
+/// V1_VANILLA line says so), so "renders fully metallic" no longer holds for it.
+#[test]
+fn an_empty_rmaos_slot_on_a_v1_shape_has_no_metallic_line() {
+    let mut slots = ["textures\\a.dds"; 9].map(str::to_string);
+    slots[5].clear();
+    let refs: Vec<&str> = slots.iter().map(String::as_str).collect();
+    let b = put(
+        scenes::one_shape_set(&refs),
+        2,
+        Field::Slsf2,
+        Value::U32(1 << 23),
+    );
+    let w = warnings(&b);
+    assert!(w.iter().all(|x| !x.text.contains("RMAOS")), "{w:#?}");
 }
 
 #[test]
@@ -980,6 +1005,27 @@ fn env_map_scale_on_pbr_is_an_error_that_is_always_new() {
     let n = new_errors(&w, &w);
     assert_eq!(n.len(), 1, "{n:#?}");
     assert_eq!(n[0].text, ENV_PBR);
+}
+
+/// Final review B-I2: a shader whose name field names a `.csm` gets the same always-blocking Error (no file access, so
+/// any `.csm` name counts; whether CS 2.0 crashes there is not known, Note IE22). Another name does not.
+#[test]
+fn env_map_scale_on_a_csm_named_shader_is_an_error() {
+    let named = |name: &str| {
+        let mut n = builder::Nif::new(100);
+        let nm = n.string(name);
+        let mut body = scenes::lsp_body(1, &[], 1, &[1.0]);
+        body[4..8].copy_from_slice(&nm.to_le_bytes());
+        n.block("BSLightingShaderProperty", body);
+        let tail = builder::W::default().i32(-1).u32(8);
+        n.block(LSCF, scenes::ctrl_body(-1, 0x48, 0, tail));
+        warnings(&n.bytes())
+    };
+    let w = named("Materials\\PBR\\a.csm");
+    let x = only(&w, ENV_PBR, Level::Error);
+    assert_eq!(x.target, Target::Block { block: 1 });
+    assert_eq!(new_errors(&w, &w).len(), 1, "always blocks");
+    none(&named("SomeToolsName"), ENV_PBR);
 }
 
 #[test]

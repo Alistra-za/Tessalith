@@ -355,15 +355,41 @@ pub const CSM_PARAMS: [(&str, usize); 19] = [
     ("PBRThinSurfaceBackRoughnessScale", 24),
 ];
 
-/// The feature whose parameters include `i`; 0 for p0-p2, which every PBR material has.
+/// The features whose parameters include `i` (any one of them is enough); 0 for p0-p2, which every PBR material has.
+/// p21-p24 are thin surface's and foliage's: CS 2.0 sets ThinSurface with Foliage (`render3d::material::pbr2_flags`).
 fn param_owner(i: usize) -> u32 {
     match i {
         3..=6 => feat::SUBSURFACE,
         7..=12 => feat::TWO_LAYER,
         13..=16 => feat::FUZZ,
         17..=20 => feat::GLINT,
-        21..=24 => feat::THIN_SURFACE,
+        21..=24 => feat::THIN_SURFACE | feat::FOLIAGE,
         _ => 0,
+    }
+}
+
+/// `v` brought into the `.csm` schema range of parameter `i` (its `CSM_PARAMS` key's [`csm::KEYS`] range; a colour
+/// channel 0-1, all `#rrggbb` holds); the default when it is not finite. What [`csm_from_values`] writes, so the file
+/// it gives always passes [`csm::parse`].
+pub fn csm_clamp(i: usize, v: f32) -> f32 {
+    let Some(&d) = PBR2_DEFAULTS.get(i) else {
+        return v;
+    };
+    if !v.is_finite() {
+        return d;
+    }
+    let range = if COLOR_PARAMS.iter().any(|&c| (c..c + 3).contains(&i)) {
+        Some((0.0, 1.0))
+    } else {
+        CSM_PARAMS
+            .iter()
+            .find(|(_, j)| *j == i)
+            .and_then(|(k, _)| csm::KEYS.iter().find(|d| d.name == *k))
+            .and_then(|d| d.range)
+    };
+    match range {
+        Some((lo, hi)) => f64::from(v).clamp(lo, hi) as f32,
+        None => v,
     }
 }
 
@@ -408,8 +434,8 @@ pub fn clamp_fuzz_roughness(v: f32) -> f32 {
 
 /// The `.csm` that stands for `v`: `PBREnabled`, each switch that is on, p0-p2 and every parameter of a feature that
 /// is on. With fuzz on it also holds `PBRFuzzRoughness` and, when set, `PBRFuzzRoughnessTexture`; without fuzz,
-/// neither. Parameters are clamped by [`clamp_param`] (a colour to 0-1 by `#rrggbb`) and the fuzz roughness by
-/// [`clamp_fuzz_roughness`]; the caller reports clamps. No texture, generic key or root.
+/// neither. Parameters are clamped to the schema by [`csm_clamp`] and the fuzz roughness by [`clamp_fuzz_roughness`];
+/// the caller reports clamps. No texture, generic key or root.
 pub fn csm_from_values(v: &PbrValues) -> Csm {
     let mut values = BTreeMap::new();
     values.insert("PBREnabled", Value::Bool(true));
@@ -419,7 +445,7 @@ pub fn csm_from_values(v: &PbrValues) -> Csm {
             values.insert(key, Value::Bool(true));
         }
     }
-    let p: [f32; PARAM_COUNT] = std::array::from_fn(|i| clamp_param(i, v.params[i]));
+    let p: [f32; PARAM_COUNT] = std::array::from_fn(|i| csm_clamp(i, v.params[i]));
     for (key, i) in CSM_PARAMS {
         let owner = param_owner(i);
         if owner != 0 && v.features & owner == 0 {

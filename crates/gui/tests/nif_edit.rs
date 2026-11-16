@@ -4773,7 +4773,7 @@ fn slsf2_warning_shows_under_the_flags() {
     h.run_steps(2);
     open_flags(&mut h); // Meshes UI T6: the flag lists start closed
     set_slsf2(&mut h, a, 1 << 12);
-    h.get_by_label("Fit_Slope (SLSF2 12) does nothing without the PBR flag.");
+    h.get_by_label(nif::edit::validate::FIT_SLOPE);
 }
 
 // ---- v2 P14 (owner, 2026-10-20): the NIF export follows the Textures export folder ----
@@ -10041,55 +10041,6 @@ fn undo_target_carries_the_label() {
     assert_eq!(u.redo_label.as_deref(), Some("Set shader type"));
 }
 
-/// GD6 (CM27): a PBR material whose slot 5 (RMAOS) is empty renders fully metallic in game: an amber slot warning
-/// (an item-1 row), never blocking.
-#[test]
-fn empty_rmaos_slot_is_a_row() {
-    let mut m = direct(scenes::shared_alpha_and_set());
-    let a = select(&mut m, "A");
-    let rmaos = |m: &MeshesModel| {
-        m.edit
-            .as_ref()
-            .unwrap()
-            .warnings
-            .iter()
-            .filter(|w| w.text == nif::edit::validate::EMPTY_RMAOS)
-            .map(|w| (w.level, w.target.clone()))
-            .collect::<Vec<_>>()
-    };
-    assert!(rmaos(&m).is_empty(), "not PBR: no warning");
-    let mut h = view(m);
-    h.run_steps(2);
-    set_slsf2(&mut h, a, 1 << 23);
-    // The set has one slot: the warning shows under the Shader tab's slot rows.
-    h.get_by_label(nif::edit::validate::EMPTY_RMAOS);
-    let e = h.state().edit.as_ref().unwrap();
-    let set = e.model.lighting[&e.model.shape(a).unwrap().shader.unwrap()]
-        .texture_set
-        .unwrap();
-    assert_eq!(
-        rmaos(h.state()),
-        [(
-            nif::edit::validate::Level::Warn,
-            Target::Slot { set, slot: 5 }
-        )]
-    );
-    assert_eq!(
-        nif::edit::validate::EMPTY_RMAOS,
-        "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic"
-    );
-    // GD1: the worklist row; the slot is not a `Field`, so the row names it and has no field.
-    use sdc_gui::model::meshes::{NifLevel, NifTab};
-    let rows: Vec<_> = h
-        .state()
-        .nif_problems()
-        .iter()
-        .filter(|p| p.text == nif::edit::validate::EMPTY_RMAOS)
-        .map(|p| (p.level, p.tab, p.field))
-        .collect();
-    assert_eq!(rows, [(NifLevel::Warning, NifTab::Shader, None)]);
-}
-
 /// Note GD16: a trailer op's row names the field of the shader type in effect when it applied: edit Env map scale,
 /// then change the type to Skin Tint, and the earlier op still reads "Env map scale".
 #[test]
@@ -10165,9 +10116,13 @@ fn a_trailer_op_after_a_conflicting_type_change_is_named_by_the_real_type() {
     assert_eq!(e.op_label_at(1), "S: Hair tint R");
 }
 
-/// Note GD15: two texture sets with an empty RMAOS are two worklist rows; only repeats of one target merge.
+/// Note GD15: the same slot warning on two texture sets is two worklist rows; only repeats of one target merge. GD1: a
+/// slot row is a Warning on the Shader tab with no field. (It used the empty-RMAOS line until the final review
+/// removed that line, Note IE29.)
 #[test]
-fn two_sets_with_empty_rmaos_are_two_rows() {
+fn two_sets_with_the_same_slot_warning_are_two_rows() {
+    use sdc_gui::model::meshes::{NifLevel, NifTab};
+    const SLASH: &str = "Uses / instead of \\";
     let mut m = direct(scenes::shared_alpha_and_set());
     let (a, b) = (select(&mut m, "A"), select(&mut m, "B"));
     let set_of = |m: &MeshesModel, s: u32| {
@@ -10176,32 +10131,35 @@ fn two_sets_with_empty_rmaos_are_two_rows() {
             .texture_set
             .unwrap()
     };
-    // Note IE14: v1 PBR in the source (no edit sets bit 23).
-    for s in [a, b] {
-        source_slsf2(&mut m, s, V1_PBR, V1_PBR);
-    }
     let rows = |m: &MeshesModel| {
         m.nif_problems()
             .iter()
-            .filter(|p| p.text == nif::edit::validate::EMPTY_RMAOS)
-            .count()
+            .filter(|p| p.text == SLASH)
+            .map(|p| (p.level, p.tab, p.field))
+            .collect::<Vec<_>>()
     };
-    assert_eq!(rows(&m), 1, "one shared set: one row");
-    // A path edit on B copies the shared set for B: two sets, each with its own empty slot 5.
-    let e = m.edit.as_ref().unwrap();
-    let base = String::from_utf8_lossy(&e.model.texsets[&set_of(&m, b)].raw.slots[0]).into_owned();
-    let at = nif::edit::anchor_shape(&e.model, b);
-    m.edit_push(
-        vec![Op::SetTexturePath {
-            at,
-            slot: 0,
-            path: "textures\\b.dds".into(),
-            base,
-        }],
-        None,
-    );
+    assert!(rows(&m).is_empty());
+    let slash = |m: &mut MeshesModel, s: u32, path: &str| {
+        let e = m.edit.as_ref().unwrap();
+        let base =
+            String::from_utf8_lossy(&e.model.texsets[&set_of(m, s)].raw.slots[0]).into_owned();
+        let at = nif::edit::anchor_shape(&e.model, s);
+        m.edit_push(
+            vec![Op::SetTexturePath {
+                at,
+                slot: 0,
+                path: path.into(),
+                base,
+            }],
+            None,
+        );
+    };
+    // A path edit on B copies the shared set for B: one set with the warning, one row.
+    slash(&mut m, b, "textures/b.dds");
     assert_ne!(set_of(&m, a), set_of(&m, b), "B has its own set");
-    assert_eq!(rows(&m), 2);
+    assert_eq!(rows(&m), [(NifLevel::Warning, NifTab::Shader, None)]);
+    slash(&mut m, a, "textures/a.dds");
+    assert_eq!(rows(&m).len(), 2);
 }
 
 /// GD1: every warning and blocker of the open NIF edit is one worklist entry; the idle and no-folder reasons are not.
