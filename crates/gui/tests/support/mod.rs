@@ -211,11 +211,12 @@ pub fn pbr_ready(dir: &Path) -> AppModel {
 /// Note FB1: the header's Export button reads `Export {n} files` or `Review {n} files`; its label as drawn now (the
 /// Review panel's own `Export {n} files` button is below the header, so the header's rect picks the right one).
 pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
-    use eframe::egui::{accesskit::Role, containers::panel::PanelState, Id};
+    use eframe::egui::accesskit::Role;
     use egui_kittest::kittest::{NodeT, Queryable};
-    let header = PanelState::load(&h.ctx, Id::unique("header")).expect("the header was drawn");
+    let header =
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "header").expect("the header was drawn");
     h.query_all_by_role(Role::Button)
-        .filter(|n| header.outer_rect.contains_rect(n.rect()))
+        .filter(|n| header.contains_rect(n.rect()))
         .filter_map(|n| n.accesskit_node().label())
         .find(|l| {
             *l == "Export"
@@ -312,8 +313,7 @@ pub fn slot_rect<S>(h: &egui_kittest::Harness<'_, S>, label: &str) -> eframe::eg
 /// Layout v2 K11: whether `r` is inside the Sets column. Its cards' chips are named by their letter, and "RMAOS" is
 /// also the set editor's slot row.
 pub fn in_sets_column<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
-    use eframe::egui::{containers::panel::PanelState, Id};
-    PanelState::load(&h.ctx, Id::unique("sets")).is_some_and(|p| p.outer_rect.contains_rect(r))
+    sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").is_some_and(|p| p.contains_rect(r))
 }
 
 /// Floating windows on screen: an `egui::Window` is a Middle-order area, and so is a viewport embedded as one (Note

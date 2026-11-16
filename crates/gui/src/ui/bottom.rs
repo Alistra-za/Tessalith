@@ -58,7 +58,7 @@ pub fn draw(
     }
     if !model.bottom.open {
         // Its own id, so the strip's height never becomes the open panel's.
-        egui::Panel::bottom("bottom-strip").show(ui, |ui| {
+        super::panel_ids::bottom(ui, "bottom-strip").show(ui, |ui| {
             ui.horizontal(|ui| tab_buttons(ui, model));
         });
         return;
@@ -72,10 +72,11 @@ pub fn draw(
     };
     // Note FI18 (GH6/N6, ruling R3): room for the 3D frame's 160 px; Review's 40 % default obeys it too.
     let cap = nif_preview.then(|| (ui.available_height() - NIF_ROOM).max(120.0));
-    keep_users_height(ui.ctx(), egui::Id::unique(id), cap);
-    let mut panel = egui::Panel::bottom(id)
+    let mut panel = super::panel_ids::bottom(ui, id)
         .resizable(true)
         .default_size(cap.map_or(height, |c| height.min(c)));
+    // After the build above, which records the panel's id that this reads.
+    keep_users_height(ui.ctx(), id, cap);
     if let Some(c) = cap {
         panel = panel.max_size(c);
     }
@@ -101,10 +102,8 @@ pub fn draw(
             BottomTab::Review | BottomTab::Files => drawer::files_tab(ui, model, drawer),
         }
     });
-    // shortcut: egui 0.36's private resize handle id (`panel.rs::resize_widget_id`); recheck on an egui upgrade
-    // (`a_drag_to_the_cap_is_the_users_height` fails if it moves).
-    let resized = ui
-        .read_response(egui::Id::unique(id).with("__resize"))
+    let resized = super::panel_ids::panel_id(ui.ctx(), id)
+        .and_then(|p| ui.read_response(super::panel_ids::resize_id(p)))
         .is_some_and(|r| r.dragged() || r.drag_stopped());
     if cap.is_some() && resized {
         // Resized in the Meshes view, to the cap or below it: that is the user's height now.
@@ -122,9 +121,13 @@ const NIF_ROOM: f32 = 160.0 + 211.0;
 
 /// Note FI18: the cap is the view's limit, not the user's height. A taller height is kept aside while capped and
 /// given back once the cap no longer applies (the panel itself stores the clamped height).
-fn keep_users_height(ctx: &egui::Context, id: egui::Id, cap: Option<f32>) {
+fn keep_users_height(ctx: &egui::Context, salt: &str, cap: Option<f32>) {
     use egui::containers::panel::PanelState;
-    let (key, Some(state)) = (id.with("uncapped"), PanelState::load(ctx, id)) else {
+    let key = egui::Id::unique(salt).with("uncapped");
+    let Some(id) = super::panel_ids::panel_id(ctx, salt) else {
+        return;
+    };
+    let Some(state) = PanelState::load(ctx, id) else {
         return;
     };
     let rect = state.outer_rect;

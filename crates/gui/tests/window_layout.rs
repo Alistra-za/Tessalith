@@ -386,7 +386,6 @@ fn a_new_app_starts_from_the_saved_layout() {
 
 #[test]
 fn saved_column_widths_come_back_in_the_real_panels() {
-    use eframe::egui::containers::panel::PanelState;
     use sdc_gui::ui::State;
     let d = tempfile::tempdir().unwrap();
     let layout = LayoutSettings {
@@ -406,9 +405,90 @@ fn saved_column_widths_come_back_in_the_real_panels() {
     let mut h = h;
     h.run();
     h.run();
-    let w = |id: &str| PanelState::load(&h.ctx, egui::Id::unique(id)).map(|s| s.outer_rect.width());
+    let w = |id: &str| sdc_gui::ui::panel_ids::panel_rect(&h.ctx, id).map(|r| r.width());
     assert_eq!(w("textures"), Some(520.0));
     assert_eq!(w("sets"), Some(333.0));
+}
+
+/// The Meshes tree's saved width is applied when the view first builds the panel (egui 0.37 keys it per parent `Ui`).
+#[test]
+fn a_saved_meshes_tree_width_comes_back() {
+    use sdc_gui::model::meshes::MeshesModel;
+    let layout = LayoutSettings {
+        widths: [("meshes-tree".to_string(), 450.0)].into(),
+        ..LayoutSettings::default()
+    };
+    let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(move |ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            // Before the first frame, as the app does (`main.rs` calls `restore_ctx` from the creation context).
+            sdc_gui::layout::restore_ctx(ctx, &layout);
+        })
+        .with_size(vec2(1600.0, 800.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            {
+                // A scanned mod: a panel is as wide as what it holds, and "No scan yet." holds less than its minimum.
+                let mut m = MeshesModel::empty();
+                m.mods = vec![modscan::store::ModRow {
+                    id: 1,
+                    name: "A".into(),
+                    kind: 1,
+                    priority: 0,
+                    derived: false,
+                    nifs: 1,
+                }];
+                m
+            },
+        );
+    h.run();
+    assert_eq!(
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "meshes-tree").map(|r| r.width()),
+        Some(450.0)
+    );
+}
+
+/// Review round 1 (Critical): a width restored for a panel this session never builds is still what `capture` reads
+/// and what gui.toml keeps. `name`'s width is 450 in the saved layout; no frame is drawn, so the panel is never built.
+fn a_restored_width_survives_a_session_without(name: &str) {
+    use sdc_gui::app::SdcApp;
+    let d = tempfile::tempdir().unwrap();
+    let path = d.path().join("sdc/gui.toml");
+    let settings = GuiSettings {
+        layout: LayoutSettings {
+            widths: [(name.to_string(), 450.0)].into(),
+            ..LayoutSettings::default()
+        },
+        ..GuiSettings::default()
+    };
+    let model = sdc_gui::model::AppModel::new(settings, Some(path.clone()), support::session());
+    let mut app = SdcApp::new(model);
+    let ctx = egui::Context::default();
+    app.restore_ctx(&ctx);
+    let t0 = Instant::now();
+    app.sync_layout_at(&ctx, t0);
+    // One real change, so the debounce writes the file.
+    app.model.filter.warnings = true;
+    app.sync_layout_at(&ctx, t0 + Duration::from_millis(100));
+    app.sync_layout_at(&ctx, t0 + Duration::from_millis(2200));
+    assert!(path.exists(), "the change was written");
+    let (s, _) = GuiSettings::load(&path);
+    assert_eq!(s.layout.widths.get(name), Some(&450.0), "gui.toml");
+    assert_eq!(
+        sdc_gui::layout::panel_width(&ctx, name),
+        Some(450.0),
+        "panel_width"
+    );
+}
+
+#[test]
+fn a_restored_meshes_tree_width_survives_a_session_without_the_meshes_view() {
+    a_restored_width_survives_a_session_without("meshes-tree");
+}
+
+#[test]
+fn a_restored_preview_settings_width_survives_a_session_without_the_panel() {
+    a_restored_width_survives_a_session_without("preview-settings");
 }
 
 #[test]

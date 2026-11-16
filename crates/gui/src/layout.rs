@@ -9,7 +9,8 @@ use crate::settings::{
     LayoutSettings, LookSettings, WindowSettings, DETAILS_NAMES, FILTER_NAMES, SETS_FILTER_NAMES,
     WIDTH_IDS, WIDTH_RANGE,
 };
-use eframe::egui::{self, containers::panel::PanelState, pos2, vec2, Rect};
+use crate::ui::panel_ids;
+use eframe::egui::{self, pos2, vec2, Rect};
 use std::time::{Duration, Instant};
 
 /// The window size of a first start, and of a `gui.toml` without a usable window.
@@ -180,17 +181,16 @@ impl SaveDebounce {
     }
 }
 
-fn chosen_id(name: &str) -> egui::Id {
-    egui::Id::unique(name).with("chosen")
-}
-
-/// The width a panel has now, in points: the Textures and Sets columns keep the width the user dragged to apart from
-/// egui's own (see `ui::chosen_width_panel`).
-fn panel_width(ctx: &egui::Context, name: &str) -> Option<f32> {
+/// The width of panel `name` as egui has it, else the restored size not yet applied. The Textures and Sets columns
+/// keep the width the user dragged to apart from egui's own (see `ui::chosen_width_panel`).
+pub fn panel_width(ctx: &egui::Context, name: &str) -> Option<f32> {
     if matches!(name, "textures" | "sets") {
-        return ctx.data_mut(|d| d.get_persisted::<f32>(chosen_id(name)));
+        return ctx.data_mut(|d| d.get_persisted::<f32>(panel_ids::chosen_width_id(name)));
     }
-    PanelState::load(ctx, egui::Id::unique(name)).map(|s| s.outer_rect.width())
+    // Review round 1 (Critical): a panel not built this session keeps the width restored for it.
+    panel_ids::panel_rect(ctx, name)
+        .map(|r| r.width())
+        .or_else(|| panel_ids::pending_size(ctx, name))
 }
 
 /// Everything [`capture`] reads, in a form that is cheap to build and compare: the app captures (which allocates) only
@@ -415,10 +415,9 @@ fn window_now(ctx: &egui::Context, prev: Option<WindowSettings>) -> Option<Windo
 pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
     for (name, w) in &l.widths {
         if matches!(name.as_str(), "textures" | "sets") {
-            ctx.data_mut(|d| d.insert_persisted(chosen_id(name), *w));
+            ctx.data_mut(|d| d.insert_persisted(panel_ids::chosen_width_id(name), *w));
         } else {
-            let outer_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(*w, 100.0));
-            ctx.data_mut(|d| d.insert_persisted(egui::Id::unique(name), PanelState { outer_rect }));
+            panel_ids::restore_size(ctx, name.as_str(), *w);
         }
     }
     crate::ui::header::set_meshes_view(ctx, l.meshes_view);

@@ -60,13 +60,13 @@ fn keys(ctx: &egui::Context, v: &mut Viewport3d) {
 /// frame's response (None for an LE mesh, which draws none), for the Meshes view's right-click menu (Note GH9).
 pub fn show(ui: &mut egui::Ui, v: &mut Viewport3d) -> Option<egui::Response> {
     prelude(ui.ctx(), v);
-    egui::Panel::top("meshes-3d-bar")
+    super::panel_ids::top(ui, "meshes-3d-bar")
         .frame(egui::Frame::new())
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| toolbar(ui, v));
             warnings(ui, v);
         });
-    egui::Panel::bottom("meshes-3d-details")
+    super::panel_ids::bottom(ui, "meshes-3d-details")
         .frame(egui::Frame::new())
         .resizable(false)
         .show(ui, |ui| {

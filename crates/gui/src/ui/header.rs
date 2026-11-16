@@ -66,7 +66,7 @@ pub fn draw(
     scan: Option<&mut crate::model::meshes::MeshesModel>,
 ) {
     set_title(ui.ctx(), window_title(model));
-    egui::Panel::top("header").show(ui, |ui| {
+    super::panel_ids::top(ui, "header").show(ui, |ui| {
         // AG126: the row wraps in a narrow window instead of drawing controls on top of each other. A group that is one
         // nested layout (a combo, a disabled scope) is moved whole by `fit`.
         ui.horizontal_wrapped(|ui| row(ui, model, scan));
@@ -779,7 +779,7 @@ fn status(ui: &mut egui::Ui, model: &mut AppModel) {
     if model.status_line.is_empty() && model.banner.is_none() {
         return;
     }
-    egui::Panel::top("status").show(ui, |ui| {
+    super::panel_ids::top(ui, "status").show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             // Item 13: a bar with Cancel while a folder opens; a re-plan after an edit keeps the plain line.
             match model.plan_progress.filter(|_| model.can_cancel_open()) {

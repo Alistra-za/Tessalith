@@ -606,7 +606,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     // Note FC14: the footer's lists share one scroll area of at most a third of the tab, so the columns keep room.
     let footer_cap = ui.available_height() / 3.0;
     // The footer first, pinned to the bottom, so the columns scroll above it and it is never clipped.
-    egui::Panel::bottom("review-footer")
+    super::panel_ids::bottom(ui, "review-footer")
         .resizable(false)
         .show(ui, |ui| {
             // Note FC5: the NIF edits sit above the files rows; a blocked one is listed under its own heading.

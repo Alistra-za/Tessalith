@@ -84,7 +84,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
     let view = followed_set(m).and_then(|k| views.iter().find(|v| v.key == k));
     crate::ui::viewport3d::prelude(ui.ctx(), &mut s.v3);
     // One toolbar line, then what needs attention; the frame takes the rest above the collapsed Details.
-    egui::Panel::top("set-3d-bar")
+    super::panel_ids::top(ui, "set-3d-bar")
         .frame(egui::Frame::new())
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -136,7 +136,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
             }
             crate::ui::viewport3d::warnings(ui, &mut s.v3);
         });
-    egui::Panel::bottom("set-3d-details")
+    super::panel_ids::bottom(ui, "set-3d-details")
         .frame(egui::Frame::new())
         .resizable(false)
         .show(ui, |ui| {

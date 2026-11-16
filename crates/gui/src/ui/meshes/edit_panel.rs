@@ -43,7 +43,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .filter(|(p, _)| p.eq_ignore_ascii_case(&e.data_path))
             .map(|(_, l)| l.as_slice());
         // Meshes UI T3: a footer drawn before the tabs (rule 2.1), so a long tab never pushes it away.
-        egui::Panel::bottom("meshes-edit-export")
+        crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
             .resizable(false)
             .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
         let tab_id = egui::Id::unique("meshes-edit-tab");

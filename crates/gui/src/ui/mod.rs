@@ -21,6 +21,7 @@ pub mod marker_dialog;
 pub mod meshes;
 pub mod messages;
 mod number_input;
+pub mod panel_ids;
 pub mod path_picker;
 pub mod pgp_fields;
 pub mod presets;
@@ -139,7 +140,7 @@ pub fn draw_with_scan(
     if let Some(m) = scan {
         header::draw(ui, model, Some(&mut *m));
         if meshes::scan_row_shown(m) {
-            egui::Panel::top("textures-scan").show(ui, |ui| meshes::scan_row(ui, m));
+            panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, m));
         }
         meshes::scan_dialogs(ui.ctx(), m);
     } else {
@@ -523,7 +524,7 @@ fn column_panel(
     // Too narrow a window: the minimum wins, and egui caps the column at the width left (never below zero).
     let range = *range.start()..=range.end().max(*range.start());
     if collapsed {
-        let expand = egui::Panel::left(strip_id)
+        let expand = panel_ids::left(ui, strip_id)
             .resizable(false)
             .exact_size(columns::STRIP_WIDTH)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
@@ -537,7 +538,9 @@ fn column_panel(
             model.save_settings();
         }
     } else {
-        let panel = egui::Panel::left(id).default_size(width).size_range(range);
+        let panel = panel_ids::left(ui, id)
+            .default_size(width)
+            .size_range(range);
         chosen_width_panel(ui, id, width, panel, |ui| {
             // Text that would not fit truncates: otherwise it holds the column wider than the drag left it.
             ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
@@ -559,12 +562,13 @@ pub(crate) const SETS_W: f32 = 266.0;
 
 /// The width the user dragged panel `id` to (what `chosen_width_panel` stores), if any.
 fn chosen_width(ctx: &egui::Context, id: &str) -> Option<f32> {
-    ctx.data_mut(|d| d.get_persisted::<f32>(egui::Id::unique(id).with("chosen")))
+    ctx.data_mut(|d| d.get_persisted::<f32>(panel_ids::chosen_width_id(id)))
 }
 
-/// Shows `panel` (whose id is `id`) at the width the user dragged to, `<id>/chosen`, or `width` before any drag.
-/// egui stores the width it drew, clamped to `size_range` and the window; keeping the chosen width apart gives it back
-/// once the clamp lifts (a window widened again, a preview closed), and it is what gui.toml saves (`layout.rs`).
+/// Shows `panel` (built by `panel_ids` on `ui` under the salt `id`) at the width the user dragged to,
+/// `panel_ids::chosen_width_id(id)`, or `width` before any drag. egui stores the width it drew, clamped to `size_range`
+/// and the window; keeping the chosen width apart gives it back once the clamp lifts (a window widened again, a preview
+/// closed), and it is what gui.toml saves (`layout.rs`).
 pub(crate) fn chosen_width_panel(
     ui: &mut egui::Ui,
     id: &str,
@@ -573,8 +577,10 @@ pub(crate) fn chosen_width_panel(
     add: impl FnOnce(&mut egui::Ui),
 ) {
     use egui::containers::panel::PanelState;
-    let (panel_id, chosen) = (egui::Id::unique(id), egui::Id::unique(id).with("chosen"));
-    let resize = ui.ctx().read_response(panel_id.with("__resize"));
+    let panel_id =
+        panel_ids::panel_id(ui.ctx(), id).expect("the panel was built through panel_ids");
+    let chosen = panel_ids::chosen_width_id(id);
+    let resize = ui.ctx().read_response(panel_ids::resize_id(panel_id));
     let released = resize.as_ref().is_some_and(|r| r.drag_stopped());
     if !released && !resize.is_some_and(|r| r.dragged()) {
         let w = ui

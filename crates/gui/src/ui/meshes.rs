@@ -116,7 +116,7 @@ pub fn show(ui: &mut egui::Ui, m: &mut MeshesModel) {
 
 fn draw(ui: &mut egui::Ui, m: &mut MeshesModel) {
     if bar_has_content(m) {
-        egui::Panel::top("meshes-bar").show(ui, |ui| bar(ui, m));
+        super::panel_ids::top(ui, "meshes-bar").show(ui, |ui| bar(ui, m));
     }
     // Meshes UI T7 (rule 2.3): the column leaves the 3D view its minimum, and the edit panel its own while editing;
     // on a window too small for all three the minimum wins.
@@ -124,25 +124,22 @@ fn draw(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // the frame an edit opens has no width yet).
     // shortcut: after the user drags the edit panel wider, this cap is one frame stale; use the panel's response if
     // the 3D view's dip below its minimum for that frame shows.
-    let edit_w =
-        egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::unique("meshes-edit"))
-            .map_or(EDIT_DEFAULT + PANEL_MARGIN_X, |p| {
-                p.outer_rect.width().max(EDIT_MIN)
-            });
+    let edit_w = super::panel_ids::panel_rect(ui.ctx(), "meshes-edit")
+        .map_or(EDIT_DEFAULT + PANEL_MARGIN_X, |r| r.width().max(EDIT_MIN));
     let others = EDIT_CENTRE_MIN + if m.edit.is_some() { edit_w } else { 0.0 };
     // T7 review Minor 1 (controller ruling): also at most ~40% of the width, so the 3D view gets the slack.
     let avail = ui.available_width();
     let max = (avail - others - PANEL_MARGIN_X)
         .min(TREE_MAX_SHARE * avail)
         .max(TREE_MIN);
-    egui::Panel::left("meshes-tree")
+    super::panel_ids::left(ui, "meshes-tree")
         .default_size(420.0)
         .size_range(TREE_MIN..=max)
         .show(ui, |ui| tree(ui, m));
     if m.edit.is_some() {
         // The 3D view keeps at least EDIT_CENTRE_MIN; when the window is too small the panel's minimum wins.
         let max = (ui.available_width() - EDIT_CENTRE_MIN - PANEL_MARGIN_X).max(EDIT_MIN);
-        egui::Panel::right("meshes-edit")
+        super::panel_ids::right(ui, "meshes-edit")
             .default_size(EDIT_DEFAULT)
             .size_range(EDIT_MIN..=max)
             .show(ui, |ui| edit_panel::panel(ui, m));
@@ -763,7 +760,7 @@ fn detail(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // v2 B3: the controls first (a click this frame is ticked this frame), then the tick, then the 3D view, whose
     // request_frame then carries the new time and materials: one Render per frame.
     if anim {
-        egui::Panel::bottom("meshes-3d-anim")
+        super::panel_ids::bottom(ui, "meshes-3d-anim")
             .frame(egui::Frame::new())
             .resizable(false)
             .show(ui, |ui| {
@@ -799,10 +796,7 @@ const HEAD_MIN_H: f32 = 48.0;
 /// The most height the lines above the 3D frame may take: what is left after the frame's minimum and the panels
 /// around it. These panels' heights are last frame's, as the edit panel's width is in `draw`; the first frame has none.
 fn head_cap(ui: &egui::Ui, anim: bool) -> f32 {
-    let h = |id: &str| {
-        egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::unique(id))
-            .map_or(0.0, |p| p.outer_rect.height())
-    };
+    let h = |id: &str| super::panel_ids::panel_rect(ui.ctx(), id).map_or(0.0, |r| r.height());
     let around =
         h("meshes-3d-bar") + h("meshes-3d-details") + if anim { h("meshes-3d-anim") } else { 0.0 };
     (ui.available_height() - PREVIEW_MIN_H - around - ui.spacing().item_spacing.y).max(HEAD_MIN_H)

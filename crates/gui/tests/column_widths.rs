@@ -4,6 +4,7 @@ use eframe::egui::{self, containers::panel::PanelState, Event, Id, Modifiers, Po
 use egui_kittest::Harness;
 use sdc_gui::model::AppModel;
 use sdc_gui::ui::columns::{SETS_MIN, TEXTURES_MIN};
+use sdc_gui::ui::panel_ids;
 use sdc_gui::ui::set_preview::CENTRE_MIN;
 use sdc_gui::ui::State;
 use support::*;
@@ -34,15 +35,14 @@ fn right_edge(h: &H) -> f32 {
 }
 
 fn outer(h: &H, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
+    panel_ids::panel_rect(&h.ctx, id).unwrap_or_else(|| panic!("panel {id} was never built"))
 }
 
 /// Where the column's divider is drawn this frame. egui does not store a panel's size mid-drag; the handle moves.
 fn divider(h: &H, id: &str) -> f32 {
-    let r = h
-        .ctx
-        .read_response(Id::unique(id).with("__resize"))
-        .unwrap();
+    let panel =
+        panel_ids::panel_id(&h.ctx, id).unwrap_or_else(|| panic!("panel {id} was never built"));
+    let r = h.ctx.read_response(panel_ids::resize_id(panel)).unwrap();
     r.rect.center().x
 }
 
@@ -215,6 +215,31 @@ fn a_window_narrowed_and_widened_again_restores_the_column_widths() {
             "widths {before:?} came back as {after:?}"
         );
     }
+}
+
+/// egui 0.37 registers a panel's resize handle under its scoped id: the chosen width is read from that handle's
+/// release, so a window narrowed and widened again gives the dragged width back.
+#[test]
+fn a_dragged_width_is_read_from_the_panels_own_handle() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(d.path(), 1500.0);
+    let x = divider(&h, "sets") + 60.0;
+    let (_, dragged) = drag(&mut h, "sets", x);
+    // 1000, not 1100: at 1100 Sets has room for 326 px and is not clamped (measured), so nothing would be tested.
+    h.set_size(egui::vec2(1000.0, 800.0));
+    h.run_steps(3);
+    let narrowed = outer(&h, "sets").width();
+    assert!(
+        narrowed < dragged - 1.0,
+        "the narrow window did not clamp Sets: {narrowed}, dragged {dragged}"
+    );
+    h.set_size(egui::vec2(1500.0, 800.0));
+    h.run_steps(3);
+    let after = outer(&h, "sets").width();
+    assert!(
+        (after - dragged).abs() <= 1.0,
+        "Sets came back at {after}, dragged to {dragged}"
+    );
 }
 
 /// x positions on row `y` that no opaque fill covers, within its clip: there the window's clear colour shows (the

@@ -157,7 +157,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
     }
     // A10: below that the viewports keep PREVIEW_MIN; the settings collapse to a strip rather than squeeze them.
     if state.settings_open || ui.available_width() - SETTINGS_WIDTH >= PREVIEW_MIN {
-        egui::Panel::right("preview-settings")
+        super::panel_ids::right(ui, "preview-settings")
             .exact_size(SETTINGS_WIDTH)
             .show(ui, |ui| {
                 // I2: both axes, so settings wider than the panel scroll inside it instead of moving its left edge
@@ -170,7 +170,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
             });
     } else {
         // Its own id: a strip under "preview-settings" would store 24 px as that panel's width (A6).
-        egui::Panel::right("preview-settings-strip")
+        super::panel_ids::right(ui, "preview-settings-strip")
             .resizable(false)
             .exact_size(STRIP_WIDTH)
             .frame(egui::Frame::new().fill(ui.visuals().panel_fill))
@@ -187,13 +187,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 }
             });
     }
-    let toolbar_id = egui::Id::unique("preview-toolbar");
     let height = |ui: &egui::Ui| {
-        egui::containers::panel::PanelState::load(ui.ctx(), toolbar_id)
-            .map(|s| s.outer_rect.height())
+        super::panel_ids::panel_rect(ui.ctx(), "preview-toolbar").map(|r| r.height())
     };
     let before = height(ui);
-    let requests = egui::Panel::top(toolbar_id)
+    let requests = super::panel_ids::top(ui, "preview-toolbar")
         .show(ui, |ui| toolbar(ui, model, &info))
         .inner;
     // The panel clips to last frame's height: a row the toolbar just gained (first draw) shows next frame.
@@ -204,7 +202,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
         model.collapse();
         return;
     }
-    egui::Panel::bottom("preview-notes").show(ui, |ui| {
+    super::panel_ids::bottom(ui, "preview-notes").show(ui, |ui| {
         notes(ui, model, &info, gpu, state.readout.as_deref())
     });
     let rect = ui.available_rect_before_wrap();
