@@ -1147,7 +1147,13 @@ fn foliage_alone_keeps_the_thin_surface_numbers() {
     };
     let c = csm_from_values(&v);
     assert_eq!(c.values.get("PBRThinSurfaceEnabled"), None);
-    let back = pbr_values(&csm::parse(&csm::to_text(&c)).unwrap()).unwrap();
+    let parsed = csm::parse(&csm::to_text(&c)).unwrap();
+    assert!(
+        csm::rule_errors(&parsed).is_empty(),
+        "{:?}",
+        csm::rule_errors(&parsed)
+    );
+    let back = pbr_values(&parsed).unwrap();
     assert_eq!(back.features, feat::FOLIAGE);
     assert_eq!(back.params[21..=24], params[21..=24]);
 }

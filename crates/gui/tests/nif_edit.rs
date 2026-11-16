@@ -11835,6 +11835,7 @@ fn assert_pinned_in_one_step(app: &mut AppModel, label: &str) {
         .expect("the set's .csm")
         .1;
     assert_eq!(set.path, AUTO_CSM);
+    assert!(set.blocked.is_none(), "{:?}", set.blocked);
     assert_eq!(app.undo_label(), Some(label));
     app.undo();
     assert!(app.wait_idle(std::time::Duration::from_secs(60)));
