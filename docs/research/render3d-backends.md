@@ -10,8 +10,8 @@ Short answer:
 - **The shaders decide the backend.** FXC compiles 98 of 98 permutations unmodified. DXC compiles 0 of 98, to DXIL or to SPIR-V. Community Shaders (CS) itself compiles with FXC on every branch I read.
 - **DXVK runs the preview unchanged, on Windows.** With CS's own DXVK build under the same exe, the three scenes' frames match Microsoft's D3D11 (one pixel of 921,600 differs by 1 in one scene), and frame and load times are the same.
 - **The golden replay fails on DXVK,** and that was the parity line I set before the run: 123 of 149 captured draws are over its limits. Both causes I found are in how the replay uses the game's captures (8× anisotropic samplers, captured depth), not in the shaders. See [what DXVK did](#what-dxvk-did-on-windows).
-- **vkd3d cannot compile the shaders.** Wine's HLSL compiler (vkd3d 2.1) stops at the first `namespace` in 96 of 98 permutations. On Linux the bytecode has to come from Microsoft's compiler.
-- **The Windows build runs under Wine.** With DXVK and Microsoft's `d3dcompiler_47.dll`, 349 of 352 `render3d` tests pass on a Linux machine with software Vulkan, and none of the three failures is about rendering. The GUI needs a font in place of Segoe UI to start. See [what Wine did](#what-wine-did-on-linux).
+- **vkd3d cannot compile the shaders.** vkd3d 2.1's HLSL compiler, the one Wine's `d3dcompiler_47` is built on, stops at the first `namespace` in 96 of 98 permutations. On Linux the bytecode has to come from Microsoft's compiler.
+- **The Windows build's renderer tests pass under Wine.** With DXVK and Microsoft's `d3dcompiler_47.dll`, 349 of 352 `render3d` tests pass on a Linux machine with software Vulkan. Two of the three failures need `cargo`; the third is a frame hash pinned on another rasteriser. The GUI needs a font in place of Segoe UI to start. See [what Wine did](#what-wine-did-on-linux).
 
 My recommendation: keep the D3D11 API and FXC bytecode, with DXVK as the runtime to build towards. What is left for Linux is under [Recommendation and next step](#recommendation-and-next-step).
 
@@ -144,7 +144,7 @@ glslang fails for a different, structural reason: it does not resolve an unquali
 vkd3d fails before any of that: it has no namespaces. This is the compiler behind Wine's built-in `d3dcompiler_47`, run here as `vkd3d-compiler` 2.1 on Linux. All 96 failures are one error at the first `namespace` in the file, `E5000: syntax error, unexpected KW_NAMESPACE`, whether the target is DXBC or SPIR-V. The two that compile are the backdrop shaders, which use no namespace.
 - **It is the keyword, not CS's code.** A two-line shader with one function inside a `namespace` fails with the same error, and compiles once the function is moved out.
 - **It is the same in Wine's current source.** The lexer returns `KW_NAMESPACE` and the grammar declares the token, but no rule uses it.
-- **What else vkd3d would reject is unknown.** The parser stops at that first error. The cbuffer rewrite above keeps the namespaces, so it does not help here, and I did not write one that removes them.
+- **What else vkd3d would reject in the CS shaders is unknown.** The parser stops at that first error. The cbuffer rewrite above keeps the namespaces, so it does not help here, and I did not write one that removes them. The Wine run found [two more gaps](#what-wine-did-on-linux) in shaders that have no namespace.
 
 ## The five paths
 
@@ -218,7 +218,7 @@ Neither touches the preview: it samples trilinear and tests against its own dept
 
 #### What Wine did on Linux
 
-The same Windows test exes, built on Windows and not changed, ran under Wine 11.0 on a Linux virtual machine. The machine has no GPU, so Vulkan was Mesa's software driver (llvmpipe). This shows what runs, not how fast it is.
+The same Windows test exes, built on Windows and not changed, ran under Wine 11.0 on a Linux virtual machine. The machine has no GPU, so Vulkan was Mesa's software driver (llvmpipe). This shows what runs, not how fast it is. The suite has 352 tests here and 348 in the DXVK run on Windows, because the GPU readback conversion added four in between.
 
 | D3D11 runtime | `d3dcompiler_47` | `render3d` tests passing |
 |---|---|---:|
@@ -227,12 +227,12 @@ The same Windows test exes, built on Windows and not changed, ran under Wine 11.
 | DXVK 3.1.1 under Wine | Wine's own (vkd3d) | 320 of 352 |
 | Wine's own (wined3d) | Microsoft's | 317 of 352 |
 
-- **DXVK with Microsoft's compiler runs everything the tests ask for.** That covers the forward and deferred paths, the compute passes and the GPU readback conversion. The three failures are not about rendering: two tests call `cargo`, which that machine does not have, and one compares a frame hash that was pinned on WARP.
+- **DXVK with Microsoft's compiler passes all but three tests.** The passing ones cover the forward and deferred paths, the compute passes and the GPU readback conversion. Two failures are tests that call `cargo`, which that machine does not have. The third compares a frame hash that was pinned on WARP: the frame's bytes differ here, and I did not look at how. Both the D3D11 runtime and the rasteriser differ from the pinned run, so it says nothing about either alone ([the same case on Windows](#what-dxvk-did-on-windows)).
 - **Wine's own compiler fails wherever CS source is compiled.** This is `D3DCompile` through Wine's DLL, the route [the compile trial](#which-compilers-take-the-shaders) did not cover. 30 more tests fail: 22 report the same `namespace` error, 4 report two further gaps in small test and built-in shaders (`GetDimensions` on a `RWTexture2DArray`, and stores to a structured buffer), and 4 fail an assertion that I read as following from a shader that did not compile.
-- **Wine's own D3D11 runs the forward path only.** With wined3d the deferred preview stops with "this GPU cannot read R16G16B16A16_FLOAT through a UAV", which the composite needs. 32 of its 33 extra failures are that message; the other is the WARP hash.
-- **Tessalith starts, once it has a font.** `tessalith.exe` stops at start-up with "cannot load the system font C:\windows\Fonts\segoeui.ttf": the GUI requires Segoe UI, and Wine has none. With another font copied to that name, the main window draws through wgpu on the same software Vulkan. I did not open a project or a 3D preview in it.
+- **Wine's own D3D11 ran the forward path only, in this run.** With wined3d the deferred preview stops with "this GPU cannot read R16G16B16A16_FLOAT through a UAV", which the composite needs. 32 of its 33 extra failures are that message; the other is the WARP hash. This was on the software driver only, and I did not check which of wined3d's renderers was in use, so a GPU driver may differ.
+- **Tessalith starts, once it has a font.** `tessalith.exe` stops at start-up with "cannot load the system font C:\windows\Fonts\segoeui.ttf": the GUI requires Segoe UI, and Wine has none. With another font copied to that name, the main window draws. I did not check which wgpu backend drew it, and I did not open a project or a 3D preview in it.
 
-So the unchanged Windows build is usable on Linux through Wine when three things are there: DXVK, which Proton uses by default; Microsoft's `d3dcompiler_47.dll`, which the user has to add; and a font where the GUI looks for Segoe UI.
+So on Linux through Wine the unchanged Windows build passes its renderer tests and opens its window when three things are there: DXVK; Microsoft's `d3dcompiler_47.dll`, which the user has to add; and a font where the GUI looks for Segoe UI. I take Proton to ship DXVK as its default D3D11 runtime, but did not check that for this page.
 
 ### 3. D3D12
 
@@ -291,7 +291,7 @@ The graphics backend decides less here than it seems to:
 I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS compiles on every branch, and it is what the measurements support. Among the ways to grow from there, path 2 is the only one that adds native Linux and a Vulkan device without changing what the shaders compile to, and it is where CS's own drafts point. Its first test gave a split result. On Windows the unchanged renderer gives the same frames at the same speed on DXVK. The golden replay failed the parity line I set for it. I read that failure as a limit of the replay, because both causes I isolated are in the captured samplers and depth, and the five draws I probed match once those are taken out. That reading rests on five draws of 149. If you'd rather hold path 2 to the line as written, the test to add first is a replay that passes on DXVK: its own captures, taken with DXVK under the game.
 
 What is left is Linux, in this order:
-1. **Run the Windows build under Wine.** This is the route I'd take first, because it [already works](#what-wine-did-on-linux) with no backend code, and it is how Linux users run the game and its tools. It keeps Microsoft's compiler, so any CS shader tree still compiles. What it needs from Tessalith is small: a fallback when Segoe UI is missing, and a line in the docs naming DXVK and `d3dcompiler_47.dll`. It still wants a run on a real GPU, with a project open.
+1. **Run the Windows build under Wine.** This is the route I'd take first, because [the renderer's tests already pass there](#what-wine-did-on-linux) with no backend code. Skyrim has no Linux build, so I take Wine or Proton to be how Linux players already run the game and its tools; I did not look for a source. It keeps Microsoft's compiler, so any CS shader tree still compiles. What it needs from Tessalith is small: a fallback when Segoe UI is missing, and a line in the docs naming DXVK and `d3dcompiler_47.dll`. It still wants a run on a real GPU, with a project open.
 2. **A native Linux build of the renderer on DXVK-native,** only if Wine turns out not to be enough. vkd3d cannot be its compiler, so its bytecode would be compiled on Windows and shipped or cached; the preview's disk cache already stores it per permutation, but a CS tree the user installs later could not be compiled. This is also where the `windows` crate, `DXVK_WSI_DRIVER` and lavapipe get answered. It is backend code, so it is outside this page.
 
 The frame-time fix that needed no backend is done: the readback converts on the GPU and takes 1.6 ms at 1920×1080 and 6.2 ms at 4K. The zero-copy display removes the rest, but it is Windows-only work with a fallback path, and it pays only if that is still too much.
@@ -324,7 +324,7 @@ The frame-time fix that needed no backend is done: the readback converts on the 
 - **Only the D3D11 API ran,** on Microsoft's runtime and on DXVK. No D3D12, native Vulkan or wgpu frame was drawn.
 - **DXVK ran on Windows on one GPU and one driver, and on Linux on software Vulkan only.** Nothing ran on a Linux GPU driver, on AMD or Intel, or under Proton.
 - **The Wine runs are pass counts.** No frame from Linux was compared with a Windows frame beyond what the tests assert, and nothing was timed. The DXVK there is upstream 3.1.1 as Debian builds it, not CS's fork. The GUI was only started.
-- **vkd3d ran as its command-line compiler (2.1) and as Wine 11.0's `d3dcompiler_47`,** not as `D3DCompile` through vkd3d-utils, which I take to share the same HLSL parser (`vkd3d-shader`). I read Wine's bundled copy of the grammar, not vkd3d's own repository, which may be ahead of release 2.1.
+- **vkd3d ran as its command-line compiler (2.1) and as Wine 11.0's `d3dcompiler_47`,** not as `D3DCompile` through vkd3d-utils, which I take to share the same HLSL parser (`vkd3d-shader`). Which vkd3d release Wine 11.0 bundles was not checked: 2.1 is the command-line compiler's version and the one in Wine's `master`. I read Wine's bundled copy of the grammar, not vkd3d's own repository, which may be ahead of release 2.1.
 - **DXVK frames were compared in forward mode at one size.** The deferred path was compared only through the five replay probes.
 - **GPU time is below the probe's resolution** on this card, and the meshes cover 4% to 17% of the frame.
 - **Deferred frames were not timed.** Their permutations are in the compile trial.
@@ -350,7 +350,7 @@ Read at the commit shown, on 2026-11-16. The Mesa, WARP, PhysX and Vulkan refere
 | DXVK native build, the WSI requirement (`src/wsi/wsi_platform.cpp` line 37), interop interfaces (`src/dxgi/dxgi_interfaces.h`), `dxbc-spirv` since 3.0 (1f1dfc65fc) | https://github.com/doitsujin/dxvk, https://github.com/doitsujin/dxbc-spirv |
 | Rust on DXVK-native (small third-party projects) | https://github.com/MrJox/warscape_community_editor, https://github.com/VIRUXE/vespucci |
 | The `windows` crate does not target Linux | https://github.com/microsoft/windows-rs/issues/3361, https://github.com/microsoft/windows-rs/issues/3565 |
-| vkd3d: `D3DCompile` in vkd3d-utils, shader source and target types, device caps; Wine's `d3dcompiler_47` (wine 9f8c4ae4d3, vkd3d 2.1) | https://github.com/wine-mirror/wine |
+| vkd3d: `D3DCompile` in vkd3d-utils, shader source and target types, device caps; Wine's `d3dcompiler_47` (wine 9f8c4ae4d3, which bundles vkd3d 2.1; not the Wine 11.0 that was run) | https://github.com/wine-mirror/wine |
 | vkd3d's HLSL grammar has no namespace rule (`libs/vkd3d/libs/vkd3d-shader/hlsl.y` line 7117 and `hlsl.l` line 116, Wine `master` on 2026-11-16; `hlsl.y` last changed in 9226b10cd1, the import of vkd3d 2.1) | https://github.com/wine-mirror/wine |
 | Debian testing's `vkd3d-compiler` 2.1+ds-1 | https://packages.debian.org/forky/vkd3d-compiler |
 | vkd3d-proton: native build, DXR (f2963ee23c) | https://github.com/HansKristian-Work/vkd3d-proton |
