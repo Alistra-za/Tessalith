@@ -917,13 +917,18 @@ fn steel_key(m: &AppModel) -> String {
 
 /// `project` (Vanilla ticked when `ticked`) with the steel set selected and its Also export tab open (Note JI2).
 fn also_tab(d: &Path, ticked: bool) -> H {
+    also_tab_at(d, ticked, 1600.0)
+}
+
+/// `also_tab` drawn `w` wide.
+fn also_tab_at(d: &Path, ticked: bool, w: f32) -> H {
     let mut m = project(d);
     if ticked {
         tick(&mut m, AlsoTarget::Vanilla);
     }
     let k = steel_key(&m);
     m.select_set(&k);
-    let mut h = ui_harness(m, 1600.0);
+    let mut h = ui_harness(m, w);
     settle(&mut h);
     press(&mut h, |h| {
         h.get_by_role_and_label(Role::Button, "Also export")
@@ -977,6 +982,40 @@ fn the_recipe_is_greyed_while_both_ticks_are_off() {
     h.state_mut().set_also_tick(AlsoTarget::Cm, true);
     settle(&mut h);
     assert!(!brightness(&h).accesskit_node().is_disabled());
+}
+
+/// Note JK1: under the recipe one sentence names its scope. It is not greyed with the boxes (a blind reader on
+/// 2026-11-15 could not tell who the greyed boxes apply to), sits below the last box, and stays inside the centre at
+/// 1100 px.
+#[test]
+fn the_recipe_says_where_it_is_saved_and_when_it_is_used() {
+    const SCOPE: &str =
+        "Saved in this project's sdc.toml; used when Vanilla or Complex material is ticked";
+    for (ticked, w) in [(false, 1600.0), (false, 1100.0), (true, 1600.0)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = also_tab_at(d.path(), ticked, w);
+        let sentence = |h: &H| h.get_by_role_and_label(Role::Label, SCOPE).rect();
+        h.get_by_role_and_label(Role::Label, SCOPE).scroll_to_me();
+        h.run();
+        let node = h.get_by_role_and_label(Role::Label, SCOPE);
+        assert!(
+            !node.accesskit_node().is_disabled(),
+            "the sentence is not greyed (ticked {ticked}, {w} px)"
+        );
+        let last = h
+            .get_by_role_and_label(Role::SpinButton, "Dielectric env from gloss")
+            .rect();
+        let s = sentence(&h);
+        assert!(
+            s.min.y >= last.max.y,
+            "the sentence {s:?} is under the last box {last:?} ({w} px)"
+        );
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+        assert!(
+            s.max.x <= centre.max.x + 0.5,
+            "the sentence {s:?} fits the centre {centre:?} ({w} px)"
+        );
+    }
 }
 
 /// Note JI2: the recipe moved from the drawer to the Also export tab. A typed value and a drag of a box each end in

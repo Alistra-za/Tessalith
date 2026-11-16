@@ -13,6 +13,9 @@ use engine::presets::AlsoTarget;
 const SKIP_OFF: &str = "Turn on Also export as Vanilla or as Complex material below first";
 /// The recipe's hover while both project ticks are off (spec 2.3).
 const RECIPE_OFF: &str = "Turn on Also export as Vanilla or as Complex material to use these";
+/// The recipe's scope, under its boxes and never greyed with them (Note JK1).
+const RECIPE_SCOPE: &str =
+    "Saved in this project's sdc.toml; used when Vanilla or Complex material is ticked";
 
 enum Act {
     Skip(bool),
@@ -69,7 +72,8 @@ fn this_set(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut Vec<Act
     }
 }
 
-/// "All sets in this project": the ticks of Export to ▾ and Review, then the recipe, greyed while both ticks are off.
+/// "All sets in this project": the ticks of Export to ▾ and Review, then the recipe, greyed while both ticks are off,
+/// and the recipe's scope sentence.
 fn all_sets(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
     ui.strong("All sets in this project");
     let busy = model.export.running.is_some().then_some(EXPORT_RUNNING);
@@ -224,6 +228,8 @@ fn recipe(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                 }
             });
     });
+    // Outside the greyed block: it says who the boxes are for while they are off (Note JK1).
+    ui.add(egui::Label::new(RECIPE_SCOPE).wrap());
     if settled && p != now {
         acts.push(Act::Recipe(p));
     }
