@@ -3087,7 +3087,7 @@ fn rename_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
     // Only Esc cancels: a click outside could lose the typed name (AG11).
     let (keys, clicked) =
         super::dialogs::dialog(ctx, "set-rename", false, 420.0, &title, &buttons, |ui| {
-            let field = ui.text_edit_singleline(text);
+            let field = super::name_input(ui.text_edit_singleline(text), "New set name");
             if !field.has_focus() && !field.lost_focus() {
                 field.request_focus();
             }

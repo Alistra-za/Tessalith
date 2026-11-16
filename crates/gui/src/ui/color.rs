@@ -28,11 +28,13 @@ pub fn u8_to_unit(b: u8) -> f32 {
 
 /// Swatch + hex box for `rgb` (sRGB bytes). Returns the new value when the popup changed it, or when the hex was
 /// committed (Enter or focus loss) as a valid, different colour. Invalid text is outlined red and never returned;
-/// on focus loss it reverts to `rgb`. The caller stores the result through its usual commit path.
-pub fn color_field(ui: &mut egui::Ui, id: egui::Id, rgb: [u8; 3]) -> Option<[u8; 3]> {
+/// on focus loss it reverts to `rgb`. The caller stores the result through its usual commit path. `name` is what the
+/// colour is ("Background"): the swatch is named "{name} colour" and the box "{name} hex colour" (E28).
+pub fn color_field(ui: &mut egui::Ui, id: egui::Id, name: &str, rgb: [u8; 3]) -> Option<[u8; 3]> {
     let mut out = None;
     let mut picked = rgb;
-    if ui.color_edit_button_srgb(&mut picked).changed() {
+    let swatch = ui.color_edit_button_srgb(&mut picked);
+    if super::name_input(swatch, &format!("{name} colour")).changed() {
         out = Some(picked);
     }
     let buf = id.with("hex");
@@ -42,7 +44,10 @@ pub fn color_field(ui: &mut egui::Ui, id: egui::Id, rgb: [u8; 3]) -> Option<[u8;
         .data(|d| d.get_temp::<(String, u64)>(buf))
         .filter(|(_, f)| f + 1 >= frame)
         .map_or_else(|| format_hex(rgb), |(t, _)| t);
-    let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(64.0));
+    let r = super::name_input(
+        ui.add(egui::TextEdit::singleline(&mut text).desired_width(64.0)),
+        &format!("{name} hex colour"),
+    );
     if parse_hex(&text).is_none() {
         ui.painter().rect_stroke(
             r.rect,

@@ -1439,7 +1439,7 @@ fn subtype_decision(
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));
     let mut controls = |ui: &mut egui::Ui| {
-        egui::ComboBox::from_id_salt(id)
+        let r = egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
             .show_ui(ui, |ui| {
                 let grass = engine::policy::grass_context(cx.job);
@@ -1450,7 +1450,9 @@ fn subtype_decision(
                             .on_hover_text(st.id());
                     }
                 }
-            });
+            })
+            .response;
+        super::name_input(r, "Texture type");
     };
     let confirm = match left {
         Some(left) => {

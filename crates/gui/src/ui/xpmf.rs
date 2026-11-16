@@ -285,7 +285,7 @@ fn number_value(
     if let Some(r) = r.clone() {
         d = d.range(r);
     }
-    if ui.add(d).changed() {
+    if super::name_input(ui.add(d), &label_of(f.key)).changed() {
         // An AccessKit SetValue skips egui's clamp (`clamp_existing_to_range(false)`), so clamp what is written.
         let x = r.map_or(x, |r| x.clamp(*r.start(), *r.end()));
         acts.push(Act::Value(f.key, Some(json!(x))));
@@ -323,6 +323,7 @@ fn text_value(
             .hint_text(hint)
             .desired_width(width),
     );
+    let r = super::name_input(r, &label_of(f.key));
     // ui-rules §3.4: a clipped value stays readable on hover.
     let r = if text.is_empty() {
         r
@@ -400,6 +401,7 @@ fn patterns_value(
             .hint_text("EditorID or *wildcard*")
             .desired_width(140.0),
     );
+    let r = super::name_input(r, &format!("{} pattern to add", label_of(f.key)));
     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let add = ui.small_button("Add");
     let add = named(add, egui::Role::Button, format!("Add pattern to {}", f.key));

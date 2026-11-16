@@ -578,8 +578,8 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
     let combo = egui::ComboBox::from_id_salt("preset")
         .selected_text(text)
         .show_ui(ui, |ui| body(ui))
-        .response
-        .on_hover_ui(|ui| {
+        .response;
+    let combo = super::name_input(combo, "Preset").on_hover_ui(|ui| {
             ui.label(format!(
                 "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Settings…"
             ));

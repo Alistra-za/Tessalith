@@ -380,7 +380,7 @@ fn subsurface_selector(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     // The group's title names the row (layout v2 A3), so the combo has no label of its own.
     ui.horizontal(|ui| {
         let r = ui.add_enabled_ui(reason.is_none(), |ui| {
-            egui::ComboBox::from_id_salt(("pgp-subsurface", &c.set))
+            let r = egui::ComboBox::from_id_salt(("pgp-subsurface", &c.set))
                 .selected_text(sub_text(mode))
                 .show_ui(ui, |ui| {
                     for (m, l) in [
@@ -397,7 +397,9 @@ fn subsurface_selector(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                             }
                         }
                     }
-                });
+                })
+                .response;
+            super::name_input(r, "Subsurface mode");
         });
         if let Some(why) = reason {
             r.response.on_disabled_hover_text(why);
@@ -537,6 +539,7 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                         [field_w, ui.spacing().interact_size.y],
                         egui::TextEdit::singleline(&mut text),
                     );
+                    let r = super::name_input(r, &format!("{} match path", m.slot));
                     take_focus(ui, &r, &c.set, &format!("match{}", m.n));
                     if r.changed() {
                         ui.data_mut(|d| d.insert_temp(id, text.clone()));
@@ -694,6 +697,7 @@ pub(crate) fn control(
                         .range(0..=i64::from(max))
                         .speed(k.drag.speed),
                 );
+                let r = super::name_input(r, k.label);
                 if r.changed() && stored.map(i64::from) != Some(x) {
                     edits.push((key, Some(json!(x))));
                 }
@@ -742,7 +746,7 @@ pub(crate) fn control(
             }
             let r = ui
                 .horizontal(|ui| {
-                    let r = ui.add(drag);
+                    let r = super::name_input(ui.add(drag), k.label);
                     let r = match stored.and_then(|s| k.drag.stored_hover(s)) {
                         Some(t) => r.on_hover_text(t),
                         None => r,
@@ -778,6 +782,7 @@ pub(crate) fn control(
                     .hint_text(hint)
                     .desired_width(160.0),
             );
+            let r = super::name_input(r, k.label);
             take_focus(ui, &r, &c.set, k.key);
             if r.changed() {
                 ui.data_mut(|d| d.insert_temp(id, text.clone()));
@@ -805,21 +810,23 @@ pub(crate) fn control(
                 // 0-1 values, so a stored 1.25 survives opening the picker.
                 let shown = rgb.map(|x| super::color::unit_to_u8(x as f32));
                 let id = egui::Id::unique(("pgp-rgb", k.key, &c.set));
-                if let Some(n) = super::color::color_field(ui, id, shown) {
+                if let Some(n) = super::color::color_field(ui, id, k.label, shown) {
                     rgb = n.map(|b| f64::from(b) / 255.0);
                     changed = true;
                 }
-                for (i, l) in ["R", "G", "B"].iter().enumerate() {
-                    ui.label(*l);
-                    changed |= ui
-                        .add(
-                            egui::DragValue::new(&mut rgb[i])
-                                .range(0.0..=RGB_MAX)
-                                .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
-                                .speed(0.005)
-                                .fixed_decimals(3),
-                        )
-                        .changed();
+                for (i, (l, channel)) in [("R", "red"), ("G", "green"), ("B", "blue")]
+                    .into_iter()
+                    .enumerate()
+                {
+                    ui.label(l);
+                    let r = ui.add(
+                        egui::DragValue::new(&mut rgb[i])
+                            .range(0.0..=RGB_MAX)
+                            .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
+                            .speed(0.005)
+                            .fixed_decimals(3),
+                    );
+                    changed |= super::name_input(r, &format!("{} {channel}", k.label)).changed();
                 }
             });
             if changed {
@@ -953,6 +960,7 @@ fn alpha_section(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                                 .range(0..=255)
                                 .speed(spec("alphaprop_thresh").map_or(1.0, |k| k.drag.speed)),
                         );
+                        let r = super::name_input(r, "Alpha test threshold value");
                         if r.changed() && thresh != Some(x) {
                             edits.push(("alphaprop_thresh".into(), Some(json!(x))));
                         }
@@ -1038,8 +1046,8 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
             .data(|d| d.get_temp::<(String, u64)>(id))
             .filter(|(_, at)| at + 1 >= frame)
             .map_or_else(|| f.raw().to_string(), |(t, _)| t);
-        let r = ui
-            .add(egui::TextEdit::singleline(&mut text).desired_width(56.0))
+        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(56.0));
+        let r = super::name_input(r, "Alpha flags raw value")
             .on_hover_text("edit raw: a whole number from 0 to 65535");
         let ok = text.trim().parse::<u16>().ok();
         if ok.is_none() {
@@ -1072,14 +1080,17 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
     }
 }
 
+/// A combo over `list`, named by `id.0` (the label beside it).
 fn alpha_combo(ui: &mut egui::Ui, id: (&str, &String), v: &mut u8, list: &[&str]) {
-    egui::ComboBox::from_id_salt(id)
+    let r = egui::ComboBox::from_id_salt(id)
         .selected_text(list.get(usize::from(*v)).copied().unwrap_or("?"))
         .show_ui(ui, |ui| {
             for (i, name) in list.iter().enumerate() {
                 ui.selectable_value(v, i as u8, *name);
             }
-        });
+        })
+        .response;
+    super::name_input(r, id.0);
 }
 
 #[cfg(test)]

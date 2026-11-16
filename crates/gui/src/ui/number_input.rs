@@ -201,7 +201,8 @@ mod tests {
 
     fn held_box(ui: &mut egui::Ui, s: &mut St) {
         let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
-            ui.add(egui::DragValue::new(x).update_while_editing(false))
+            let r = ui.add(egui::DragValue::new(x).update_while_editing(false));
+            crate::ui::name_input(r, "fill")
         });
         s.take(done);
     }
@@ -221,7 +222,8 @@ mod tests {
 
     fn slider_box(ui: &mut egui::Ui, s: &mut St) {
         let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
-            ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false))
+            let r = ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false));
+            crate::ui::name_input(r, "fill")
         });
         s.take(done);
     }

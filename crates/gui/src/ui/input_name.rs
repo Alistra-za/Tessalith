@@ -716,7 +716,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
         let name = |n: u8| format!("Match {n} · {}", crate::model::sets::slot_name(true, n));
         // (The Match menu is TruePBR-only, so the PBR names.)
         if json {
-            egui::ComboBox::from_id_salt(slot_id)
+            let r = egui::ComboBox::from_id_salt(slot_id)
                 // Short in the header row, so it does not wrap a narrow 3D view's header; the list names the slots.
                 .selected_text(format!("Match {slot}"))
                 .width(64.0)
@@ -727,7 +727,8 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                             .on_hover_text(format!("match{n}"));
                     }
                 })
-                .response
+                .response;
+            super::name_input(r, "Match slot")
                 .on_hover_text(
                     "The slot the ▾ list picks for. Slot 1 renames this set's textures; slots 2–8 set that slot's \
                      match in the PGPatcher JSON.",

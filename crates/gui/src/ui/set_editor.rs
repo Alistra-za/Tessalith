@@ -697,14 +697,16 @@ fn row(
                 .or(field_lock(model.target, &job.profile, "format").map(str::to_string));
             let mut choice = (cur_f, cur_t);
             ui.add_enabled_ui(lock.is_none(), |ui| {
-                egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
+                let r = egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
                     .selected_text(format_label(cur_f, cur_t))
                     .width(COMBO_W)
                     .show_ui(ui, |ui| {
                         for (e, label) in encoding_options(model.target, &job.profile) {
                             ui.selectable_value(&mut choice, e, label);
                         }
-                    });
+                    })
+                    .response;
+                super::name_input(r, &format!("{} format", slot.label()));
             })
             .response
             .on_disabled_hover_text(lock.unwrap_or_default());
@@ -1014,7 +1016,7 @@ fn packed_controls(
                 }
             };
             let unbuildable = model.rfaos_unbuildable(&item.key);
-            egui::ComboBox::from_id_salt(("pack-recipe", &item.key))
+            let r = egui::ComboBox::from_id_salt(("pack-recipe", &item.key))
                 .selected_text(format!(
                     "{}{}",
                     label(pk.kind),
@@ -1041,7 +1043,9 @@ fn packed_controls(
                             acts.push(Act::Recipe(item.key.clone(), recipe(k)));
                         }
                     }
-                });
+                })
+                .response;
+            super::name_input(r, "Packed texture recipe");
         }
         fill_controls(ui, model, &item.key, acts);
     })

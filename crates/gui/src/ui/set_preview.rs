@@ -228,8 +228,9 @@ fn mesh_picker(ui: &mut egui::Ui, s: &mut SetPreview) {
                     }
                 }
             });
+        let r = super::name_input(r.response, "Preview mesh");
         if cut {
-            r.response.on_hover_text(current.as_str());
+            r.on_hover_text(current.as_str());
         }
     });
     if let Some(c) = chosen {

@@ -125,13 +125,13 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(NAME_LABEL);
-        let r = ui
-            .add_enabled(
-                editable,
-                egui::TextEdit::singleline(&mut t)
-                    .hint_text(json_name(model))
-                    .desired_width(NAME_FIELD_WIDTH),
-            )
+        let r = ui.add_enabled(
+            editable,
+            egui::TextEdit::singleline(&mut t)
+                .hint_text(json_name(model))
+                .desired_width(NAME_FIELD_WIDTH),
+        );
+        let r = super::name_input(r, "JSON file name")
             .on_hover_text(if model.export_folder_chosen().is_some() {
                 format!("The PGPatcher JSON is written to {path}")
             } else {
@@ -352,12 +352,21 @@ fn text_of<'a>(s: &'a Settings, key: &str) -> Option<&'a str> {
         .filter(|t| !t.is_empty())
 }
 
-/// A text box committed on Enter or focus loss: the new text, when it changed.
-fn text_box(ui: &mut egui::Ui, id: egui::Id, current: &str, width: f32) -> Option<String> {
+/// A text box named `name`, committed on Enter or focus loss: the new text, when it changed.
+fn text_box(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    name: &str,
+    current: &str,
+    width: f32,
+) -> Option<String> {
     let mut t = ui
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| current.to_string());
-    let r = ui.add(egui::TextEdit::singleline(&mut t).desired_width(width));
+    let r = super::name_input(
+        ui.add(egui::TextEdit::singleline(&mut t).desired_width(width)),
+        name,
+    );
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, t.clone()));
     }
@@ -424,7 +433,7 @@ fn match_pill(
 ) {
     pill(ui, |ui| {
         let mut picked_mode = mode;
-        egui::ComboBox::from_id_salt(("json-mode", owner.salt(), mode.key()))
+        let r = egui::ComboBox::from_id_salt(("json-mode", owner.salt(), mode.key()))
             .selected_text(egui::RichText::new(mode.label()).small())
             .show_ui(ui, |ui| {
                 for m in (1..=8u8).map(Mode::Exact).chain([Mode::Contains]) {
@@ -434,7 +443,8 @@ fn match_pill(
                     });
                 }
             })
-            .response
+            .response;
+        super::name_input(r, "Match type")
             .on_hover_text("Exact: a mesh's texture in this slot is exactly this path. Path contains: the diffuse path contains this text.");
         if picked_mode != mode && path.is_empty() {
             // Trace #20: a pill with no path yet is pending; the new mode takes its place (a store of "" is a no-op).
@@ -450,7 +460,7 @@ fn match_pill(
             acts.push(Act::Edits(owner.clone(), edits));
         }
         let id = egui::Id::unique(("json-match", owner.salt(), mode.key()));
-        if let Some(t) = text_box(ui, id, path, 260.0) {
+        if let Some(t) = text_box(ui, id, "Match path", path, 260.0) {
             let (k, v) = if t.is_empty() {
                 acts.push(Act::Unpend(owner.clone(), mode.key()));
                 unstore(owner, mode)
@@ -498,7 +508,7 @@ fn nif_pill(ui: &mut egui::Ui, model: &AppModel, owner: &Owner, value: &str, act
         ui.label(egui::RichText::new("mesh path contains").small())
             .on_hover_text("nif_filter: only meshes whose path contains this text");
         let id = egui::Id::unique(("json-nif", owner.salt()));
-        if let Some(t) = text_box(ui, id, value, 220.0) {
+        if let Some(t) = text_box(ui, id, "Mesh path contains", value, 220.0) {
             let t = t.replace('/', "\\");
             acts.push(Act::Edit(
                 owner.clone(),
@@ -1151,10 +1161,13 @@ fn toolbar(
             .add_enabled(on, egui::Button::new("Next error"))
             .on_hover_text("The next entry with an error, wrapping at the end (F8)")
             .clicked();
-        ui.add(
-            egui::TextEdit::singleline(&mut nav.query)
-                .hint_text("Search sets and paths")
-                .desired_width(220.0),
+        super::name_input(
+            ui.add(
+                egui::TextEdit::singleline(&mut nav.query)
+                    .hint_text("Search sets and paths")
+                    .desired_width(220.0),
+            ),
+            "Search sets and paths",
         );
         let shown = entries
             .iter()

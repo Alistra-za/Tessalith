@@ -150,7 +150,7 @@ pub fn toolbar(ui: &mut egui::Ui, v: &mut Viewport3d) {
         ui.weak(s);
     }
     if v.show_spinner(std::time::Instant::now()) {
-        ui.spinner();
+        super::name_input(ui.spinner(), "Working");
     }
 }
 
@@ -273,7 +273,7 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                 if !l.hdri {
                     // GUI suggestions item 2: one sRGB colour; the swatch's square and the hex box replace the grey slider.
                     let id = egui::Id::unique("viewport3d-bg");
-                    if let Some(rgb) = super::color::color_field(ui, id, l.bg.map(super::color::unit_to_u8)) {
+                    if let Some(rgb) = super::color::color_field(ui, id, "Background", l.bg.map(super::color::unit_to_u8)) {
                         l.bg = rgb.map(super::color::u8_to_unit);
                     }
                 }

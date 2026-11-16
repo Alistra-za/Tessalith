@@ -221,7 +221,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             .map(|_| pm.id())
             .filter(|s| !s.is_empty())
             .unwrap_or_else(|| "(none)".into());
-        egui::ComboBox::from_id_salt("presets-pick")
+        let r = egui::ComboBox::from_id_salt("presets-pick")
             .selected_text(shown)
             .show_ui(ui, |ui| {
                 for (id, builtin) in pm.list() {
@@ -234,7 +234,9 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                         acts.push(Act::Select(id));
                     }
                 }
-            });
+            })
+            .response;
+        super::name_input(r, "Preset");
         if ui
             .add_enabled(pm.draft.is_some(), egui::Button::new("Duplicate"))
             .on_hover_text("An editable copy under a new name (built-ins are read-only)")
@@ -255,8 +257,8 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Name");
             let mut id = pm.id();
-            if ui
-                .add(egui::TextEdit::singleline(&mut id).desired_width(180.0))
+            let r = ui.add(egui::TextEdit::singleline(&mut id).desired_width(180.0));
+            if super::name_input(r, "Preset name")
                 .on_hover_text("The preset's id and file name: lower-case letters, digits and '-'")
                 .changed()
             {
@@ -264,7 +266,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             }
             ui.label("Base");
             let base = pm.base();
-            egui::ComboBox::from_id_salt("presets-base")
+            let r = egui::ComboBox::from_id_salt("presets-base")
                 .selected_text(&base)
                 .show_ui(ui, |ui| {
                     for (b, _) in pm.list() {
@@ -272,7 +274,9 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                             acts.push(Act::Base(b));
                         }
                     }
-                });
+                })
+                .response;
+            super::name_input(r, "Base preset");
             ui.label("Target");
             let own = pm.own_target();
             let name = |t: Option<Target>| match t {
@@ -280,7 +284,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                 Some(Target::Vanilla) => "vanilla".to_string(),
                 None => "from the base".to_string(),
             };
-            egui::ComboBox::from_id_salt("presets-target")
+            let r = egui::ComboBox::from_id_salt("presets-target")
                 .selected_text(name(own))
                 .show_ui(ui, |ui| {
                     for t in [None, Some(Target::Cs), Some(Target::Vanilla)] {
@@ -288,7 +292,9 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                             acts.push(Act::Target(t));
                         }
                     }
-                });
+                })
+                .response;
+            super::name_input(r, "Target");
         });
     });
     ui.horizontal_wrapped(|ui| {
@@ -377,12 +383,13 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
         .id_salt("presets-toml")
         .show(ui, |ui| {
             let mut text = pm.toml_text();
-            ui.add(
+            let r = ui.add(
                 egui::TextEdit::multiline(&mut text)
                     .code_editor()
                     .interactive(false)
                     .desired_width(f32::INFINITY),
             );
+            super::name_input(r, "TOML preview");
         });
 }
 
@@ -637,14 +644,15 @@ fn field_row(
     let cur = value_of(p, field);
     let lock = field_lock(t, p, field);
     let r = ui.add_enabled_ui(lock.is_none(), |ui| {
-        combo_for(
+        let (v, c) = combo_for(
             field,
             ui,
             egui::Id::unique(("preset-field", st, scope, field)),
             &cur,
             &opts,
             false,
-        )
+        );
+        (v, super::name_input(c, label))
     });
     // Note FM43: Slowest on a BC6H row that sets no effort is the engine's default, not a stored value.
     let default_effort = field == "encoder.effort"
@@ -704,10 +712,8 @@ fn threshold_row(
     let st = row.subtype;
     ui.label("Threshold");
     let mut v = p.alpha.threshold;
-    if ui
-        .add(egui::DragValue::new(&mut v).range(engine::config::ALPHA_THRESHOLD))
-        .changed()
-    {
+    let r = ui.add(egui::DragValue::new(&mut v).range(engine::config::ALPHA_THRESHOLD));
+    if super::name_input(r, "Alpha threshold").changed() {
         acts.push(set(st, scope, "alpha.threshold", json!(v)));
     }
     let (h, name) = hint_profile(row, scope);
@@ -802,7 +808,10 @@ fn fills(
             ui.label(role);
             let cur = get(p, role);
             let mut v = cur.unwrap_or(0) as u8;
-            let r = ui.add(egui::DragValue::new(&mut v).range(0..=255));
+            let r = super::name_input(
+                ui.add(egui::DragValue::new(&mut v).range(0..=255)),
+                &format!("{} fill value", crate::model::labels::readable(role)),
+            );
             if cur.is_none() {
                 r.clone()
                     .on_hover_text("Not set: the neutral default is used");
@@ -938,13 +947,15 @@ fn canon_combo(ui: &mut egui::Ui, st: Subtype, salt: &str, own: &[&str], canon: 
         return;
     }
     ui.label("→");
-    egui::ComboBox::from_id_salt(("preset-canon", st, salt))
+    let r = egui::ComboBox::from_id_salt(("preset-canon", st, salt))
         .selected_text(format!("_{canon}"))
         .show_ui(ui, |ui| {
             for s in own {
                 ui.selectable_value(canon, s.to_string(), format!("_{s}"));
             }
-        });
+        })
+        .response;
+    super::name_input(r, "Alias maps to");
 }
 
 /// Channel remap (AM10, AP6): `channels.swizzle` of the scope, one source per output channel.
@@ -963,9 +974,17 @@ fn swizzle_row(
     grid(ui, st, scope, "s", |ui| {
         ui.label("Channels");
         ui.horizontal(|ui| {
-            for (i, out) in ["R", "G", "B", "A"].into_iter().enumerate() {
+            for (i, (out, name)) in [
+                ("R", "Red source"),
+                ("G", "Green source"),
+                ("B", "Blue source"),
+                ("A", "Alpha source"),
+            ]
+            .into_iter()
+            .enumerate()
+            {
                 ui.label(format!("{out} ="));
-                egui::ComboBox::from_id_salt(("preset-swz", st, scope, i))
+                let r = egui::ComboBox::from_id_salt(("preset-swz", st, scope, i))
                     .width(40.0)
                     .selected_text(swz.get(i).map_or(String::new(), char::to_string))
                     .show_ui(ui, |ui| {
@@ -979,7 +998,9 @@ fn swizzle_row(
                                 }
                             }
                         }
-                    });
+                    })
+                    .response;
+                super::name_input(r, name);
             }
         });
         let next: String = swz.iter().collect();

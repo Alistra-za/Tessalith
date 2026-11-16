@@ -45,15 +45,16 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
         egui::Grid::new("rename-recipe")
             .num_columns(4)
             .show(ui, |ui| {
-                ui.label("Find");
-                ui.text_edit_singleline(&mut d.recipe.find);
-                ui.label("Replace");
-                ui.text_edit_singleline(&mut d.recipe.replace);
+                // E28: each box is named by the label beside it.
+                let field = |ui: &mut egui::Ui, label: &str, text: &mut String| {
+                    let l = ui.label(label);
+                    ui.text_edit_singleline(text).labelled_by(l.id);
+                };
+                field(ui, "Find", &mut d.recipe.find);
+                field(ui, "Replace", &mut d.recipe.replace);
                 ui.end_row();
-                ui.label("Prefix");
-                ui.text_edit_singleline(&mut d.recipe.prefix);
-                ui.label("Suffix");
-                ui.text_edit_singleline(&mut d.recipe.suffix);
+                field(ui, "Prefix", &mut d.recipe.prefix);
+                field(ui, "Suffix", &mut d.recipe.suffix);
                 ui.end_row();
                 ui.checkbox(&mut d.recipe.regex, "Regex")
                     .on_hover_text("$1 or ${name} in Replace for a capture group");
@@ -66,13 +67,15 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
                         "Find, Replace, Prefix, Suffix and Case work on the output's folders under the export folder and its base name"
                     }
                 });
-                egui::ComboBox::from_id_salt("rename-case")
+                let r = egui::ComboBox::from_id_salt("rename-case")
                     .selected_text(case_label(d.recipe.case))
                     .show_ui(ui, |ui| {
                         for c in [Case::Keep, Case::Lower, Case::Upper] {
                             ui.selectable_value(&mut d.recipe.case, c, case_label(c));
                         }
-                    });
+                    })
+                    .response;
+                super::name_input(r, "Letter case");
                 ui.end_row();
             });
         match &plan.error {
@@ -252,6 +255,7 @@ fn row(
     let mut tick = |ui: &mut egui::Ui| {
         let mut on = r.included;
         let tick = ui.add_enabled(r.skipped.is_none(), egui::Checkbox::without_text(&mut on));
+        let tick = super::name_input(tick, &format!("Rename {}", r.old));
         if tick.changed() {
             if on {
                 d.exclude.remove(&r.key);

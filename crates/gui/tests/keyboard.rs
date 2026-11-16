@@ -125,7 +125,7 @@ fn no_shortcut_fires_from_a_text_field_except_ctrl_k_and_ctrl_s() {
                 if let Some(id) = actions::keys(ui.ctx(), m, false) {
                     *fired = Some(id);
                 }
-                let r = ui.text_edit_singleline(text);
+                let r = ui.text_edit_singleline(text).accessible_name("Test field");
                 if !r.has_focus() {
                     r.request_focus();
                 }
@@ -548,7 +548,7 @@ fn ctrl_s_in_a_field_saves() {
         .build_ui_state(
             |ui, (m, text): &mut (AppModel, String)| {
                 actions::keys(ui.ctx(), m, false);
-                let r = ui.text_edit_singleline(text);
+                let r = ui.text_edit_singleline(text).accessible_name("Test field");
                 if !r.has_focus() {
                     r.request_focus();
                 }

@@ -101,7 +101,7 @@ fn key_row(ui: &mut egui::Ui, k: &CmKey, cur: Option<&Json>, acts: &mut Vec<Act>
             }
             CmKind::Num => {
                 let mut x = cur.as_f64().unwrap_or(1.0);
-                if drag(ui, &mut x) {
+                if drag(ui, &mut x, &readable(k.name)) {
                     acts.push(Act::Value(k.name.into(), Some(json!(x))));
                 }
             }
@@ -111,9 +111,12 @@ fn key_row(ui: &mut egui::Ui, k: &CmKey, cur: Option<&Json>, acts: &mut Vec<Act>
                     .map(|a| a.iter().map(|x| x.as_f64().unwrap_or(1.0)).collect())
                     .unwrap_or_default();
                 let mut changed = false;
-                for (x, l) in c.iter_mut().zip(["R", "G", "B"]) {
+                for (x, (l, channel)) in
+                    c.iter_mut()
+                        .zip([("R", "red"), ("G", "green"), ("B", "blue")])
+                {
                     ui.label(l);
-                    changed |= drag(ui, x);
+                    changed |= drag(ui, x, &format!("{} {channel}", readable(k.name)));
                 }
                 if changed {
                     acts.push(Act::Value(k.name.into(), Some(json!(c))));
@@ -123,13 +126,13 @@ fn key_row(ui: &mut egui::Ui, k: &CmKey, cur: Option<&Json>, acts: &mut Vec<Act>
     });
 }
 
-/// ≥ 0 with no upper bound (D5, D8).
-fn drag(ui: &mut egui::Ui, x: &mut f64) -> bool {
-    ui.add(
+/// ≥ 0 with no upper bound (D5, D8), named `name`.
+fn drag(ui: &mut egui::Ui, x: &mut f64, name: &str) -> bool {
+    let r = ui.add(
         egui::DragValue::new(x)
             .range(0.0..=f64::INFINITY)
             .clamp_existing_to_range(false) // shortcut: Note FO3, an AccessKit SetValue skips the range; clamp what is written if that matters
             .speed(0.01),
-    )
-    .changed()
+    );
+    super::name_input(r, name).changed()
 }

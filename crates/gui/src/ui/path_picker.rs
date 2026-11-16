@@ -16,10 +16,13 @@ pub fn list(
     let id = egui::Id::unique(("path-picker", salt));
     let mut q = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_default();
     let mut picked = None;
-    let r = ui.add(
-        egui::TextEdit::singleline(&mut q)
-            .hint_text("Filter: words of the path")
-            .desired_width(360.0),
+    let r = super::name_input(
+        ui.add(
+            egui::TextEdit::singleline(&mut q)
+                .hint_text("Filter: words of the path")
+                .desired_width(360.0),
+        ),
+        "Filter paths",
     );
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, q.clone()));

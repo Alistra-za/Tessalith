@@ -176,7 +176,7 @@ fn block(
     let removable = !(card && kind == Kind::Txst);
     ui.horizontal(|ui| {
         ui.strong(kind.label());
-        egui::ComboBox::from_id_salt(("cs-template", kind.key(), v.id.as_str()))
+        let r = egui::ComboBox::from_id_salt(("cs-template", kind.key(), v.id.as_str()))
             .selected_text(b.template.clone().unwrap_or_else(|| "Template…".into()))
             .show_ui(ui, |ui| {
                 for t in templates().iter().filter(|t| t.kind == kind) {
@@ -188,7 +188,9 @@ fn block(
                         acts.push(Act::Template(kind, t.name.clone()));
                     }
                 }
-            });
+            })
+            .response;
+        super::name_input(r, &format!("{} template", kind.label()));
         if removable && ui.small_button("Remove").clicked() {
             acts.push(Act::Remove(kind));
         }
@@ -249,16 +251,17 @@ fn default_text(kind: Kind, f: &Field) -> String {
     }
 }
 
-fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field) -> bool {
-    ui.add(
+/// A number box for `f`, named `name`.
+fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field, name: &str) -> bool {
+    let r = ui.add(
         egui::DragValue::new(x)
             .range(f.range.0..=f.range.1)
             // Note FO3 (V6): a stored value is shown as it is; the default clamp would rewrite it on draw.
             // shortcut: an AccessKit SetValue then skips the range, upgrade by clamping what is written.
             .clamp_existing_to_range(false)
             .speed(0.01),
-    )
-    .changed()
+    );
+    super::name_input(r, name).changed()
 }
 
 fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts: &mut Vec<Act>) {
@@ -281,7 +284,7 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
         match f.kind {
             FieldKind::Num => {
                 let mut x = cur.as_f64().unwrap_or(f.default);
-                if drag(ui, &mut x, f) {
+                if drag(ui, &mut x, f, field_label(f.name)) {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(x))));
                 }
             }
@@ -291,8 +294,8 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                     .map(|a| a.iter().map(|x| x.as_f64().unwrap_or(0.0)).collect())
                     .unwrap_or_default();
                 let mut changed = false;
-                for x in c.iter_mut() {
-                    changed |= drag(ui, x, f);
+                for (x, channel) in c.iter_mut().zip(["red", "green", "blue"]) {
+                    changed |= drag(ui, x, f, &format!("{} {channel}", field_label(f.name)));
                 }
                 if changed {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(c))));
@@ -311,7 +314,7 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                     let mut x = cur.get(g.name).and_then(Json::as_f64).unwrap_or(g.default);
                     ui.label(field_label(g.name))
                         .on_hover_text(format!("JSON key: {}.{}", f.name, g.name));
-                    if drag(ui, &mut x, g) {
+                    if drag(ui, &mut x, g, field_label(g.name)) {
                         acts.push(Act::Value(
                             kind,
                             format!("{}.{}", f.name, g.name),
@@ -372,7 +375,7 @@ fn edids(
     let id = ui.make_persistent_id(("cs-edid-text", kind.key(), v.id.as_str()));
     let mut text: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
     ui.horizontal(|ui| {
-        ui.text_edit_singleline(&mut text);
+        super::name_input(ui.text_edit_singleline(&mut text), "EDID to add");
         if ui.button("Add EDID").clicked() && !text.trim().is_empty() {
             let mut l = b.edids.clone();
             l.push(text.trim().to_string());

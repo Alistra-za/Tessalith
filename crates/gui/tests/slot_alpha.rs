@@ -229,7 +229,8 @@ fn natural_widths() -> (f32, f32) {
                 let combo = egui::ComboBox::from_id_salt("measure")
                     .selected_text(alpha_label(engine::config::AlphaPolicy::CutoutBlend))
                     .show_ui(ui, |_| {})
-                    .response;
+                    .response
+                    .accessible_name("measure");
                 let confirm = ui.button("Confirm");
                 out.set((combo.rect.width(), confirm.rect.width()));
             });

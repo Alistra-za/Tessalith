@@ -299,7 +299,9 @@ fn drag_carries_a_payload_between_widgets() {
 #[test]
 fn the_tree_marks_focus_disabled_and_hover() {
     let mut h = tiny(|ui, s| {
-        let r = ui.text_edit_singleline(&mut s.text);
+        let r = ui
+            .text_edit_singleline(&mut s.text)
+            .accessible_name("Test field");
         if !s.init {
             r.request_focus();
             s.init = true;

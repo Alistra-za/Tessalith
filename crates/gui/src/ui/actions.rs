@@ -793,10 +793,13 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
                 i.consume_key(Modifiers::NONE, Key::ArrowDown),
             )
         });
-        let r = ui.add(
-            egui::TextEdit::singleline(&mut p.query)
-                .hint_text("Search actions, textures and sets")
-                .desired_width(f32::INFINITY),
+        let r = super::name_input(
+            ui.add(
+                egui::TextEdit::singleline(&mut p.query)
+                    .hint_text("Search actions, textures and sets")
+                    .desired_width(f32::INFINITY),
+            ),
+            "Search actions, textures and sets",
         );
         let enter = r.lost_focus() && ui.input(|i| i.key_pressed(Key::Enter));
         // The field keeps the focus while the palette is open: typing always searches.

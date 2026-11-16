@@ -391,10 +391,13 @@ fn mip_control(ui: &mut egui::Ui, view: &mut ViewState, info: &Info) {
         let room =
             ui.clip_rect().right() - ui.next_widget_position().x - ui.spacing().item_spacing.x;
         ui.spacing_mut().slider_width = room.clamp(40.0, 100.0);
-        let r = ui.add(
-            egui::Slider::new(&mut mip, info.first..=info.end - 1)
-                .step_by(1.0)
-                .show_value(false),
+        let r = super::name_input(
+            ui.add(
+                egui::Slider::new(&mut mip, info.first..=info.end - 1)
+                    .step_by(1.0)
+                    .show_value(false),
+            ),
+            "Mip level",
         );
         paint_ticks(ui, r.rect, info.first, info.end, mip);
         if r.changed() {

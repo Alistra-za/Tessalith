@@ -95,13 +95,15 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     let mut choice = st.mode[i].unwrap_or(current);
                     let before = choice;
                     ui.add_enabled_ui(editable, |ui| {
-                        egui::ComboBox::from_id_salt(("slot-cmd", n))
+                        let r = egui::ComboBox::from_id_salt(("slot-cmd", n))
                             .selected_text(CHOICES[choice])
                             .show_ui(ui, |ui| {
                                 for (c, name) in CHOICES.iter().enumerate() {
                                     ui.selectable_value(&mut choice, c, *name);
                                 }
-                            });
+                            })
+                            .response;
+                        super::name_input(r, &format!("Slot {n} command"));
                     })
                     .response
                     .on_disabled_hover_text(&why);
@@ -124,7 +126,10 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     ui.vertical(|ui| {
                         if choice == 1 {
                             ui.add_enabled_ui(editable, |ui| {
-                                let r = ui.text_edit_singleline(&mut st.text[i]);
+                                let r = super::name_input(
+                                    ui.text_edit_singleline(&mut st.text[i]),
+                                    &format!("Slot {n} path"),
+                                );
                                 let enter =
                                     r.lost_focus() && ui.input(|k| k.key_pressed(egui::Key::Enter));
                                 if ui.small_button("Apply").clicked() || enter {

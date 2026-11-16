@@ -270,6 +270,13 @@ pub(crate) fn commit_click(
     }
 }
 
+/// E28: names an input widget for AccessKit (screen readers, kittest finders) when nothing visible beside it does.
+/// The name says what the field is for; a combo's choice and a box's text stay its value. It wins over the hover
+/// sentence egui 0.37 copies into an empty name, whichever is set first.
+pub(crate) fn name_input(r: egui::Response, name: &str) -> egui::Response {
+    r.accessible_name(name)
+}
+
 /// Ends text input when the primary press lands in `rect`, so a commit-on-focus-loss field drawn later this frame
 /// commits before the release acts.
 pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {

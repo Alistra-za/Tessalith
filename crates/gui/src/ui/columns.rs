@@ -417,10 +417,13 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
         });
     }
     filter_row(ui, model);
-    ui.add(
-        egui::TextEdit::singleline(&mut model.search)
-            .hint_text("Search")
-            .desired_width(f32::INFINITY),
+    super::name_input(
+        ui.add(
+            egui::TextEdit::singleline(&mut model.search)
+                .hint_text("Search")
+                .desired_width(f32::INFINITY),
+        ),
+        "Search textures",
     );
     ui.separator();
     let visible = model.visible_shared();
@@ -719,10 +722,10 @@ fn role_chip(ui: &mut egui::Ui, role: &str, hand_set: bool) {
 }
 
 /// A compact combo: `name` and the current choice in one box (a label beside it would hold the column wider), the
-/// hover text says what it filters.
+/// hover text says what it filters. `a11y` is its accessible name (E28): short, where the hover is a sentence.
 fn pick<T: PartialEq + Copy>(
     ui: &mut egui::Ui,
-    name: &str,
+    (name, a11y): (&str, &str),
     hover: &str,
     current: &mut T,
     options: &[(T, String)],
@@ -731,7 +734,7 @@ fn pick<T: PartialEq + Copy>(
         .iter()
         .find(|o| o.0 == *current)
         .map_or("?", |o| o.1.as_str());
-    egui::ComboBox::from_id_salt(name)
+    let r = egui::ComboBox::from_id_salt(name)
         .width(ui.available_width())
         .selected_text(format!("{name}: {text}"))
         .show_ui(ui, |ui| {
@@ -739,15 +742,15 @@ fn pick<T: PartialEq + Copy>(
                 ui.selectable_value(current, *v, label);
             }
         })
-        .response
-        .on_hover_text(hover);
+        .response;
+    super::name_input(r, a11y).on_hover_text(hover);
 }
 
 /// "Any or a value" over a filter's `Option<String>`. The current value is listed even if the folder has none of it,
 /// so a saved filter is never invisible.
 fn value_combo(
     ui: &mut egui::Ui,
-    name: &str,
+    name: (&str, &str),
     hover: &str,
     current: &mut Option<String>,
     present: &[String],
@@ -773,7 +776,7 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
     match n {
         0 => value_combo(
             ui,
-            "Sub-type",
+            ("Sub-type", "Sub-type filter"),
             "Only textures of this sub-type (the sub-types in this folder)",
             &mut model.filter.subtype,
             &o.subtypes,
@@ -781,7 +784,7 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
         ),
         1 => value_combo(
             ui,
-            "Output format",
+            ("Output format", "Output format filter"),
             "Only textures that will be written in this DDS format",
             &mut model.filter.format,
             &o.formats,
@@ -789,14 +792,14 @@ fn combo_at(ui: &mut egui::Ui, model: &mut AppModel, o: &FilterOptions, n: usize
         ),
         2 => pick(
             ui,
-            "Set membership",
+            ("Set membership", "Set membership filter"),
             "Only textures in a set of more than one texture, or only those that are not",
             &mut model.filter.set,
             &SetFilter::ALL.map(|s| (s, s.label().to_string())),
         ),
         _ => pick(
             ui,
-            "Sort",
+            ("Sort", "Sort order"),
             "Order of the tiles. Source size lists the largest first; Status lists errors, warnings, undecided, \
              then the rest. Ties go by name.",
             &mut model.prefs.sort,
