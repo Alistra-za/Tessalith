@@ -111,7 +111,7 @@ In ms, single shots; a second run agreed within 80 ms on cold loads and 10 ms on
 
 ## Which compilers take the shaders
 
-98 distinct permutations were compiled: 70 from the golden captures (the define sets the game itself used), 24 from the three scenes in forward and deferred mode, and 4 built-in shaders. That is the set the captures, scenes and built-ins use, not every combination the define table can produce. The CS 2.0 tree from the unmerged `.csm` branch gave the same counts in every row.
+98 distinct permutations were compiled: 70 from the golden captures (the define sets the game itself used), 24 from the three scenes in forward and deferred mode, and 4 built-in shaders. That is the set the captures, scenes and built-ins use, not every combination the define table can produce. The CS 2.0 tree from the unmerged `.csm` branch gave the same counts in every row but vkd3d's, which ran on the bundled tree only.
 
 | Compiler | Source | Compiles |
 |---|---|---:|
@@ -274,7 +274,7 @@ I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS
 What is left is Linux, in this order:
 1. **Choose where the bytecode comes from.** vkd3d is out: it rejects 96 of the 98 permutations. That leaves two sources, and I tested neither:
    - Compile on Windows and ship or cache the bytecode. The preview's disk cache already stores it per permutation.
-   - Run Microsoft's `d3dcompiler_47.dll` under Wine, as people who run CS on Proton do for the game.
+   - Run the whole Windows exe under Wine with Microsoft's `d3dcompiler_47.dll`, as people who run CS on Proton do for the game. That is not a native build: a native one cannot load the DLL, so step 2 would not apply.
 2. **A Linux build of the renderer on DXVK-native.** That is where the `windows` crate, `DXVK_WSI_DRIVER` and lavapipe get answered. It is backend code, so it is outside this page.
 
 The frame-time fix that needed no backend is done: the readback converts on the GPU and takes 1.6 ms at 1920×1080 and 6.2 ms at 4K. The zero-copy display removes the rest, but it is Windows-only work with a fallback path, and it pays only if that is still too much.
@@ -332,7 +332,7 @@ Read at the commit shown, on 2026-11-16. The Mesa, WARP, PhysX and Vulkan refere
 | Rust on DXVK-native (small third-party projects) | https://github.com/MrJox/warscape_community_editor, https://github.com/VIRUXE/vespucci |
 | The `windows` crate does not target Linux | https://github.com/microsoft/windows-rs/issues/3361, https://github.com/microsoft/windows-rs/issues/3565 |
 | vkd3d: `D3DCompile` in vkd3d-utils, shader source and target types, device caps; Wine's `d3dcompiler_47` (wine 9f8c4ae4d3, vkd3d 2.1) | https://github.com/wine-mirror/wine |
-| vkd3d's HLSL grammar has no namespace rule (`libs/vkd3d/libs/vkd3d-shader/hlsl.y` line 7117, `hlsl.l` line 116; Wine `master` on 2026-11-16, both files as imported with vkd3d 2.1 in 9226b10cd1) | https://github.com/wine-mirror/wine |
+| vkd3d's HLSL grammar has no namespace rule (`libs/vkd3d/libs/vkd3d-shader/hlsl.y` line 7117 and `hlsl.l` line 116, Wine `master` on 2026-11-16; `hlsl.y` last changed in 9226b10cd1, the import of vkd3d 2.1) | https://github.com/wine-mirror/wine |
 | Debian testing's `vkd3d-compiler` 2.1+ds-1 | https://packages.debian.org/forky/vkd3d-compiler |
 | vkd3d-proton: native build, DXR (f2963ee23c) | https://github.com/HansKristian-Work/vkd3d-proton |
 | D3D12: DXR libraries, mesh shaders, SM 6.6 heaps | https://github.com/microsoft/DirectX-Specs |
@@ -348,4 +348,4 @@ Read at the commit shown, on 2026-11-16. The Mesa, WARP, PhysX and Vulkan refere
 
 Not found, so not claimed: a maintainer statement on CS's timeline or Linux plans; a list of what vkd3d's HLSL compiler lacks for shader model 5; any measurement of D3D11 against D3D12 or Vulkan overhead for scenes this small; any project importing a D3D11 texture into wgpu.
 
-Next: choose where Linux gets its FXC bytecode ([the next step](#recommendation-and-next-step)): shipped or cached from Windows, or Microsoft's DLL under Wine.
+Next: choose where Linux gets its FXC bytecode ([the next step](#recommendation-and-next-step)): shipped or cached from Windows, or the whole exe under Wine with Microsoft's DLL.
