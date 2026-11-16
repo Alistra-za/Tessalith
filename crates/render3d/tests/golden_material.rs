@@ -2,7 +2,7 @@
 //! replay: geometry, scene cbuffers, engine textures, samplers and depth from the capture; the material (PS b1 used
 //! variables, the PS b2 material fields, VS b1 TexcoordOffset, material textures) from sdc's own `Renderer::load`.
 //! Differences isolate material mapping (04 Q4-Q8). Needs SDC_GOLDEN and SDC_ACHERUS (the CS PBR2Test1 root, which
-//! the bundled CS 2.0 shaders replay, Notes ID49 and IE). The CS 2.0 subjects are their own v1 meshes pointed at a
+//! the bundled CS 2.0 shaders replay, Note IE5). The CS 2.0 subjects are their own v1 meshes pointed at a
 //! `.csm` built here (Note IE7).
 mod common;
 
@@ -21,7 +21,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::fmt::Write as _;
 use std::path::Path;
 
-/// The subjects (the CS PBR2Test1 root, Notes ID49 and IE): the CS 1.9 root's v1 subjects in the A1, A2 and A2S
+/// The subjects (the CS PBR2Test1 root, Note IE5):the CS 1.9 root's v1 subjects in the A1, A2 and A2S
 /// captures (no ShaderSpheres02 there), the type-21 subjects of T1 and T2, and T2L's CookingStone01 (PBRParams2
 /// differs between its T2 and T2L captures).
 const EXTRACTION: &[&str] = &[
@@ -49,7 +49,7 @@ const EXTRACTION: &[&str] = &[
 const B2_MATERIAL: &[&str] = &["MaterialData", "AlphaTestRef", "EmitColor"];
 
 /// Engine textures: bound by the game whatever the material (noise, shadow mask, and the scene depth that CS 2.0's
-/// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID42), and CS's glint noise
+/// Terrain Blending reads, `SharedData::DepthTexture`; no CS 1.9 capture binds t17, Note ID53), and CS's glint noise
 /// map at t20, which CS generates once for every GLINT draw (sdc's own copy is `render3d::glint_noise`; Note IE8).
 // shortcut: t20 keeps the game's glint noise, so the glint subject's pixels never test sdc's `glint_noise` port against
 // CS's map (`tests/glint_noise.rs` checks it against an independent computation only). Swap in sdc's map once the

@@ -3,7 +3,7 @@
 //! classes must match tests/fixtures/golden-baseline.txt (D-P20). D5 adds the Dynamic Cubemaps profiles A_DC and
 //! A_DC_N (A_DC_LOG is a define-log capture, R8): their composite reads the captured env cube (X3e); a subject whose
 //! capture saved none is class `no-env-cube` (MRTs asserted, composite not compared). The bundled CS 2.0 shaders
-//! replay the CS PBR2Test1 captures (`cs-1.9.0-d2026.11.14`, Notes ID49 and IE), with that root's own noise floor
+//! replay the CS PBR2Test1 captures (`cs-1.9.0-d2026.11.14`, Note IE5), with that root's own noise floor
 //! (`golden::noise_path`).
 use render3d::golden::{self, Diff, Noise, PROFILES};
 use render3d::Renderer;

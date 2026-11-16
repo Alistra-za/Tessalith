@@ -785,7 +785,7 @@ fn forward_dc_draw_samples_the_gpu_prefiltered_cube() {
     assert_eq!(r.env_builds(), 1);
 }
 
-/// Note GM1/GM2 against the CPU reference on the bundled tree: CS's SpecularIrradianceCS on the GPU vs
+/// Notes GM1 and IE5 against the CPU reference on the bundled tree: CS's SpecularIrradianceCS on the GPU vs
 /// [`render3d::hdri::specular_chain`] texel by texel, per level, and the GPU build time.
 #[test]
 fn bundled_prefilter_matches_the_cpu_chain() {
