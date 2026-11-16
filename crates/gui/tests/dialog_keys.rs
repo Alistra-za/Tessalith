@@ -36,8 +36,8 @@ fn undo_and_redo_are_disabled_with_no_history() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(opened(d.path()));
     h.run();
-    assert!(h.get_by_label("Undo").accesskit_node().is_disabled());
-    assert!(h.get_by_label("Redo").accesskit_node().is_disabled());
+    assert!(header_undo(&h, "Undo").accesskit_node().is_disabled());
+    assert!(header_undo(&h, "Redo").accesskit_node().is_disabled());
 }
 
 #[test]
@@ -45,18 +45,23 @@ fn the_buttons_enable_with_history_and_their_hover_text_carries_the_label() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(with_a_step(d.path()));
     h.run();
-    assert!(!h.get_by_label("Undo").accesskit_node().is_disabled());
-    assert!(h.get_by_label("Redo").accesskit_node().is_disabled());
-    h.get_by_label("Undo").hover();
+    assert!(!header_undo(&h, "Undo").accesskit_node().is_disabled());
+    assert!(header_undo(&h, "Redo").accesskit_node().is_disabled());
+    // E28: the name says the step.
+    assert_eq!(
+        header_undo(&h, "Undo").accesskit_node().label().as_deref(),
+        Some("Undo: hair")
+    );
+    header_undo(&h, "Undo").hover();
     h.run();
-    h.get_by_label_contains("Undo: hair");
-    h.get_by_label("Undo").click();
+    h.get_by_label_contains("Undo: hair  (");
+    header_undo(&h, "Undo").click();
     h.run();
     assert!(!h.state().can_undo() && h.state().can_redo());
-    assert!(!h.get_by_label("Redo").accesskit_node().is_disabled());
-    h.get_by_label("Redo").hover();
+    assert!(!header_undo(&h, "Redo").accesskit_node().is_disabled());
+    header_undo(&h, "Redo").hover();
     h.run();
-    h.get_by_label_contains("Redo: hair");
+    h.get_by_label_contains("Redo: hair  (");
 }
 
 #[test]

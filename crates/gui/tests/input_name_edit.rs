@@ -1456,10 +1456,7 @@ fn undo_click_commits_the_field_first() {
     assert!(h.state().0.can_undo(), "an older step to undo by mistake");
     focus(&mut h);
     clear_and_type(&mut h, "rock02");
-    let p = h
-        .get_by_role_and_label(Role::Button, "Undo")
-        .rect()
-        .center();
+    let p = header_undo(&h, "Undo").rect().center();
     press_release(&mut h, p, false);
     settle(&mut h);
     let m = &h.state().0;

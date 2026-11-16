@@ -398,8 +398,9 @@ fn open_menu(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-/// One header Undo or Redo button as drawn: its text, its accessible name (the text unshortened; `Undo (NIF edit
-/// history)` while the NIF history is the target), its hover (which holds the whole step).
+/// One header Undo or Redo button as drawn: its text, its accessible name (E28: `Undo: {step}` for the Textures
+/// history, `Undo (NIF edit history): {step}` while the NIF history is the target, without the step when there is
+/// none), its hover (which holds the whole step).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UndoButton {
     pub text: String,
@@ -415,31 +416,48 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
     const MAX: usize = 40;
     let verb = if undo { "Undo" } else { "Redo" };
     let keys = super::actions::keys_text(if undo { "undo" } else { "redo" });
-    // (the button's full text, what the hover says it does, enabled, the history)
-    let (full, does, enabled, history) = match nif {
+    // (the button's full text, what the hover says it does, enabled, the history, the accessible name). E28: the name
+    // says the step, unshortened; while the NIF history is the target it also says whose history it is.
+    let (full, does, enabled, history, name) = match nif {
         Some(t) => {
             let (can, label) = if undo {
                 (t.can_undo, &t.undo_label)
             } else {
                 (t.can_redo, &t.redo_label)
             };
-            let name = match label.as_deref().filter(|_| can) {
-                Some(l) => format!("{verb} NIF edit: {l}"),
-                None => format!("{verb} NIF edit"),
+            let (text, name) = match label.as_deref().filter(|_| can) {
+                Some(l) => (
+                    format!("{verb} NIF edit: {l}"),
+                    format!("{verb} (NIF edit history): {l}"),
+                ),
+                None => (
+                    format!("{verb} NIF edit"),
+                    format!("{verb} (NIF edit history)"),
+                ),
             };
             (
-                name.clone(),
-                name,
+                text.clone(),
+                text,
                 can,
                 "the NIF edit history; the Textures history is untouched",
+                name,
             )
         }
-        None => (
-            verb.to_string(),
-            textures.map_or_else(String::new, |s| format!("{verb}: {s}")),
-            textures.is_some(),
-            "the Textures history (sdc.toml and sdc-project.toml)",
-        ),
+        None => {
+            let does = textures.map_or_else(String::new, |s| format!("{verb}: {s}"));
+            let name = if textures.is_some() {
+                does.clone()
+            } else {
+                verb.to_string()
+            };
+            (
+                verb.to_string(),
+                does,
+                textures.is_some(),
+                "the Textures history (sdc.toml and sdc-project.toml)",
+                name,
+            )
+        }
     };
     let hover = match (enabled, nif.is_some()) {
         (false, true) => format!("Nothing to {} in the NIF edit history", verb.to_lowercase()),
@@ -449,13 +467,7 @@ pub fn undo_button(nif: Option<&UndoTarget>, undo: bool, textures: Option<&str>)
     let text = if full.chars().count() > MAX {
         format!("{}…", full.chars().take(MAX - 1).collect::<String>())
     } else {
-        full.clone()
-    };
-    // Fix round 1 (rule 8.4): the NIF panel's own buttons are `Undo NIF edit`, so the header's name says whose history
-    // it is; the step is in the hover.
-    let name = match nif {
-        Some(_) => format!("{verb} (NIF edit history)"),
-        None => full,
+        full
     };
     UndoButton {
         text,
@@ -819,4 +831,36 @@ fn status(ui: &mut egui::Ui, model: &mut AppModel) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn undo_names_the_step() {
+        assert_eq!(
+            undo_button(None, true, Some("set type of teeth_sss.png")).name,
+            "Undo: set type of teeth_sss.png"
+        );
+        assert_eq!(
+            undo_button(None, false, Some("set type of teeth_sss.png")).name,
+            "Redo: set type of teeth_sss.png"
+        );
+        assert_eq!(undo_button(None, true, None).name, "Undo");
+    }
+
+    #[test]
+    fn nif_undo_names_its_history_and_step() {
+        let t = UndoTarget {
+            can_undo: true,
+            can_redo: false,
+            undo_label: Some("move UV".into()),
+            redo_label: None,
+        };
+        assert_eq!(
+            undo_button(Some(&t), true, None).name,
+            "Undo (NIF edit history): move UV"
+        );
+    }
 }

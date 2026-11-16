@@ -225,6 +225,47 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
+/// E28: the header's Undo or Redo (`verb`), by role and exact name, with no rect (the header's `PanelState` is not
+/// there to scope by). Its name is `{verb}` or `{verb}: {step}` for the Textures history, `{verb} (NIF edit history)`
+/// or `{verb} (NIF edit history): {step}` for the NIF one. No other button is named so: the toast's and the Problems
+/// row's Undo say more, and the palette's rows exist only while it is open (then this panics with both).
+pub fn header_undo<'h, S>(
+    h: &'h egui_kittest::Harness<'_, S>,
+    verb: &str,
+) -> egui_kittest::Node<'h> {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let nif = format!("{verb} (NIF edit history)");
+    let is = |l: &str| {
+        l == verb
+            || l.starts_with(&format!("{verb}: "))
+            || l == nif
+            || l.starts_with(&format!("{nif}: "))
+    };
+    let mut hits: Vec<_> = h
+        .query_all_by_role(Role::Button)
+        .filter(|n| n.accesskit_node().label().is_some_and(|l| is(&l)))
+        .collect();
+    match hits.len() {
+        1 => hits.pop().unwrap(),
+        0 => {
+            let all: Vec<String> = h
+                .query_all_by_role(Role::Button)
+                .filter_map(|n| n.accesskit_node().label())
+                .filter(|l| l.starts_with("Undo") || l.starts_with("Redo"))
+                .collect();
+            panic!("no header {verb} button; Undo / Redo buttons on screen: {all:?}")
+        }
+        _ => {
+            let labels: Vec<_> = hits
+                .iter()
+                .filter_map(|n| n.accesskit_node().label())
+                .collect();
+            panic!("several header {verb} buttons: {labels:?}")
+        }
+    }
+}
+
 /// Note FM35: open the alpha dropdown that shows `shown` and pick `entry` in it. `place` names the dropdown as
 /// `alpha_dropdown` does: `""` (texture panel), `"Problems"` or `"Review"`.
 pub fn pick_alpha<S>(

@@ -2665,8 +2665,10 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     for l in ["Undo NIF edit", "Redo NIF edit"] {
         assert!(h.query_by_label(l).is_none(), "{l} is back in the panel");
     }
-    h.get_by_label("Undo (NIF edit history)");
-    h.get_by_label("Redo (NIF edit history)");
+    for verb in ["Undo", "Redo"] {
+        let l = header_button(&h, verb).accesskit_node().label().unwrap();
+        assert!(l.starts_with(&format!("{verb} (NIF edit history)")), "{l}");
+    }
     // Meshes UI T3: the footer sits under the tabs, inside the panel, with its blocked reason; Note GD2: its button
     // is Review…, not Export NIF.
     let footer = panel("meshes-edit-export");
@@ -4499,20 +4501,9 @@ fn textures(h: &AppH) -> (bool, bool, Option<String>) {
     (m.can_undo(), m.can_redo(), m.undo_label().map(String::from))
 }
 
-/// The header's Undo or Redo: `name` itself, or `{name} (NIF edit history)` while the NIF history is the target
-/// (Note FC12).
-fn header_button<'a>(h: &'a AppH, name: &'a str) -> egui_kittest::Node<'a> {
-    let header =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("header")).unwrap();
-    let nif = format!("{name} (NIF edit history)");
-    h.query_all_by_role(AkRole::Button)
-        .filter(|n| header.outer_rect.contains_rect(n.rect()))
-        .find(|n| {
-            n.accesskit_node()
-                .label()
-                .is_some_and(|l| l == name || l == nif)
-        })
-        .unwrap_or_else(|| panic!("no header button {name}"))
+/// The header's Undo or Redo, for either history (Note FC12, E28).
+fn header_button<'a>(h: &'a AppH, name: &str) -> egui_kittest::Node<'a> {
+    support::header_undo(h, name)
 }
 
 fn press(h: &mut AppH, mods: egui::Modifiers, key: egui::Key) {

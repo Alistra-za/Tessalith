@@ -15,11 +15,10 @@ type H = Harness<'static, (AppModel, State, MeshesModel)>;
 
 const WIDTHS: [f32; 4] = [1440.0, 1024.0, 800.0, 640.0];
 
-/// The controls every Textures header must show (plus "Export to: …", matched by its start).
-const CONTROLS: [&str; 9] = [
+/// The controls every Textures header must show (plus "Export to: …", matched by its start, and Undo / Redo, found by
+/// `header_undo`).
+const CONTROLS: [&str; 7] = [
     "Open",
-    "Undo",
-    "Redo",
     "MO2…",
     "Preset",
     "Textures view",
@@ -102,6 +101,8 @@ fn the_textures_header_never_overlaps() {
         for c in CONTROLS {
             h.get_by_label(c);
         }
+        header_undo(&h, "Undo");
+        header_undo(&h, "Redo");
         // Note FB1: Export reads "Review n files" until the project is clean.
         header_export_label(&h);
         h.get_by_label_contains("Export to: ");
@@ -166,8 +167,8 @@ fn the_header_is_one_row_from_1280() {
 fn assert_one_row_in_the_spec_order(h: &H) {
     let order = [
         ("Open", h.get_by_label("Open").rect()),
-        ("Undo", h.get_by_label("Undo").rect()),
-        ("Redo", h.get_by_label("Redo").rect()),
+        ("Undo", header_undo(h, "Undo").rect()),
+        ("Redo", header_undo(h, "Redo").rect()),
         ("Preset", h.get_by_label("Preset").rect()),
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
@@ -512,9 +513,10 @@ fn the_meshes_header_never_overlaps() {
     for w in WIDTHS {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, true);
         assert_no_overlap(&h, "header", w);
-        for c in ["Open", "Undo", "MO2…", "Meshes view", "Save"] {
+        for c in ["Open", "MO2…", "Meshes view", "Save"] {
             h.get_by_label(c);
         }
+        header_undo(&h, "Undo");
         header_export_label(&h);
         // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).
         assert!(outer(&h, "header").contains_rect(h.get_by_label("Settings…").rect()));

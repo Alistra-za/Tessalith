@@ -316,11 +316,19 @@ fn undo_text_does_not_move_the_header() {
     let d = tempfile::tempdir().unwrap();
     let mut h = undo_harness(d.path());
     h.run_steps(4);
-    let (mo2, undo) = (h.get_by_label("MO2…").rect(), h.get_by_label("Undo").rect());
+    let (mo2, undo) = (
+        h.get_by_label("MO2…").rect(),
+        header_undo(&h, "Undo").rect(),
+    );
     let long = "Add alpha to every shape";
     h.state_mut().2 = Some(long.to_string());
     h.run_steps(4);
-    let b = h.get_by_label("Undo (NIF edit history)");
+    let b = header_undo(&h, "Undo");
+    // E28: the name holds the whole step.
+    assert_eq!(
+        b.accesskit_node().label().as_deref(),
+        Some(format!("Undo (NIF edit history): {long}").as_str())
+    );
     assert_eq!(b.rect(), undo, "the slot");
     assert_eq!(h.get_by_label("MO2…").rect().min.x, mo2.min.x);
     // The text is cut in the slot; the whole step is on hover.

@@ -37,9 +37,10 @@ fn the_meshes_view_keeps_the_header() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(sdc_gui::ui::header::meshes_view_active(&h.ctx));
-    for l in ["Undo", "Save", "Meshes view", "MO2…"] {
+    for l in ["Save", "Meshes view", "MO2…"] {
         h.get_by_label(l);
     }
+    support::header_undo(&h, "Undo");
     // K3: the bottom panel's strip is drawn too, under the header.
     h.get_by_label("Files");
     header_export_label(&h);

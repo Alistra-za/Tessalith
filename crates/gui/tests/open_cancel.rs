@@ -174,22 +174,25 @@ fn undo_label_names_the_nif_history() {
     };
     let b = undo_button(Some(&nif), true, Some("Mode"));
     assert_eq!(b.text, "Undo NIF edit: Set shader type");
-    // Fix round 1 (rule 8.4): the NIF panel's buttons are `Undo NIF edit`; the header's name differs.
-    assert_eq!(b.name, "Undo (NIF edit history)");
+    // E28: the name says whose history it is and the step.
+    assert_eq!(b.name, "Undo (NIF edit history): Set shader type");
     assert!(b.enabled);
     assert!(b.hover.contains("NIF edit history"), "{}", b.hover);
     let r = undo_button(Some(&nif), false, Some("Mode"));
     assert_eq!(r.text, "Redo NIF edit");
+    assert_eq!(r.name, "Redo (NIF edit history)");
     assert!(!r.enabled);
     // The Textures history: the plain label, the step and the history on hover.
     let b = undo_button(None, true, Some("Mode"));
     assert_eq!(b.text, "Undo");
+    assert_eq!(b.name, "Undo: Mode");
     assert!(b.enabled);
     assert!(b.hover.starts_with("Undo: Mode"), "{}", b.hover);
     assert!(b.hover.contains("Textures history"), "{}", b.hover);
     let r = undo_button(None, false, None);
     assert_eq!((r.text.as_str(), r.enabled), ("Redo", false));
     assert_eq!(r.hover, "Nothing to redo");
+    assert_eq!(r.name, "Redo");
     // A long NIF step is shortened on the button; the full text stays in the hover.
     let long = UndoTarget {
         undo_label: Some("Set the emissive colour of every shape in the mesh".into()),
