@@ -695,9 +695,11 @@ use sdc_gui::model::target_mod::{overlaps, RECORDS_NOT_IN_SCAN, RECORDS_NO_PLUGI
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -1296,9 +1298,11 @@ fn text_colours(h: &Harness<'static, AppModel>, start: &str) -> Vec<egui::Color3
 
 fn tall(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 2400.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -1341,12 +1345,14 @@ fn a_typed_match_that_matches_nothing_stays_amber() {
         .iter()
         .all(|(v, _)| v.id != ROCK));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(700.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, ROCK),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let c = text_colours(&h, "matches nothing");
     assert!(!c.is_empty(), "the Matching header says so");

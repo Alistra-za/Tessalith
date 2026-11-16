@@ -14,9 +14,11 @@ type H = Harness<'static, AppModel>;
 
 fn harness(model: AppModel, size: egui::Vec2) -> H {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(size)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), model);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -130,7 +132,7 @@ fn the_set_editor_shows_its_bar_at_rest() {
 
 /// A side column's outer rect, cut at the window.
 fn column(h: &H, id: &str) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id))
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
         .unwrap_or_else(|| panic!("the {id} column is drawn"))
         .outer_rect
         .intersect(h.ctx.content_rect())

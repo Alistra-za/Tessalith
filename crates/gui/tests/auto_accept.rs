@@ -677,9 +677,11 @@ fn choose_preset_opens_the_preset_menu() {
     let mut m = support::opened_as_the_app(root, d.path().join("export"));
     m.toggle_tab(BottomTab::Problems);
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert!(h.query_by_label("Presets…").is_none(), "the menu is closed");
     h.get_by_label("Choose preset…").click();
@@ -713,9 +715,11 @@ fn saved_types(root: &Path) -> usize {
 
 fn harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
     let h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

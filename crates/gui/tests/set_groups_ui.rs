@@ -21,9 +21,11 @@ fn idle(m: &mut AppModel) {
 
 fn harness_at(m: AppModel, w: f32, h: f32) -> H {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, h))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -141,7 +143,7 @@ fn card_rect(h: &H, id: &str) -> egui::Rect {
 
 fn sets_panel(h: &H) -> egui::Rect {
     use egui::containers::panel::PanelState;
-    PanelState::load(&h.ctx, egui::Id::new("sets"))
+    PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets panel")
         .outer_rect
 }
@@ -928,10 +930,12 @@ fn render_the_groups() {
         m.set_group_excluded("Retired", true).unwrap();
         m.sets_filter.search = filter.into();
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, 800.0))
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         (h, d)
     };

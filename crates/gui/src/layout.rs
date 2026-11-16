@@ -181,7 +181,7 @@ impl SaveDebounce {
 }
 
 fn chosen_id(name: &str) -> egui::Id {
-    egui::Id::new(name).with("chosen")
+    egui::Id::unique(name).with("chosen")
 }
 
 /// The width a panel has now, in points: the Textures and Sets columns keep the width the user dragged to apart from
@@ -190,7 +190,7 @@ fn panel_width(ctx: &egui::Context, name: &str) -> Option<f32> {
     if matches!(name, "textures" | "sets") {
         return ctx.data_mut(|d| d.get_persisted::<f32>(chosen_id(name)));
     }
-    PanelState::load(ctx, egui::Id::new(name)).map(|s| s.outer_rect.width())
+    PanelState::load(ctx, egui::Id::unique(name)).map(|s| s.outer_rect.width())
 }
 
 /// Everything [`capture`] reads, in a form that is cheap to build and compare: the app captures (which allocates) only
@@ -418,7 +418,7 @@ pub fn restore_ctx(ctx: &egui::Context, l: &LayoutSettings) {
             ctx.data_mut(|d| d.insert_persisted(chosen_id(name), *w));
         } else {
             let outer_rect = Rect::from_min_size(pos2(0.0, 0.0), vec2(*w, 100.0));
-            ctx.data_mut(|d| d.insert_persisted(egui::Id::new(name), PanelState { outer_rect }));
+            ctx.data_mut(|d| d.insert_persisted(egui::Id::unique(name), PanelState { outer_rect }));
         }
     }
     crate::ui::header::set_meshes_view(ctx, l.meshes_view);

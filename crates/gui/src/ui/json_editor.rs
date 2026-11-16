@@ -103,7 +103,7 @@ pub const NAME_LABEL: &str = "JSON name:";
 /// Note BH7: the PGPatcher JSON name, the editor's top field (it was in the header). The default shows as hint text;
 /// empty restores it. One undo step per committed edit (`AppModel::set_json_name`), on focus loss.
 fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
-    let id = egui::Id::new("json-name");
+    let id = egui::Id::unique("json-name");
     let mut t = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
         model
             .sets_doc
@@ -185,7 +185,7 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
     let (entries, issues) = (&built.entries, &built.issues);
     let sections = model.sections();
     let hits = delete_hits(model);
-    let nav_id = egui::Id::new("json-editor-nav");
+    let nav_id = egui::Id::unique("json-editor-nav");
     let mut nav = ui.data(|d| d.get_temp::<Nav>(nav_id)).unwrap_or_default();
     ui.weak(format!(
         "{} set entr{} · {} delete section{}. Edits here and in a set's TruePBR settings are the same edits.",
@@ -337,12 +337,12 @@ fn remove_button(ui: &mut egui::Ui) -> bool {
 
 /// Keys added from the + menu that have no value yet (a text key cannot be stored empty).
 fn pending(ui: &egui::Ui, owner: &Owner) -> Vec<String> {
-    ui.data(|d| d.get_temp::<Vec<String>>(egui::Id::new(("json-pending", owner.salt()))))
+    ui.data(|d| d.get_temp::<Vec<String>>(egui::Id::unique(("json-pending", owner.salt()))))
         .unwrap_or_default()
 }
 
 fn set_pending(ui: &egui::Ui, owner: &Owner, keys: Vec<String>) {
-    ui.data_mut(|d| d.insert_temp(egui::Id::new(("json-pending", owner.salt())), keys));
+    ui.data_mut(|d| d.insert_temp(egui::Id::unique(("json-pending", owner.salt())), keys));
 }
 
 fn text_of<'a>(s: &'a Settings, key: &str) -> Option<&'a str> {
@@ -449,7 +449,7 @@ fn match_pill(
             ];
             acts.push(Act::Edits(owner.clone(), edits));
         }
-        let id = egui::Id::new(("json-match", owner.salt(), mode.key()));
+        let id = egui::Id::unique(("json-match", owner.salt(), mode.key()));
         if let Some(t) = text_box(ui, id, path, 260.0) {
             let (k, v) = if t.is_empty() {
                 acts.push(Act::Unpend(owner.clone(), mode.key()));
@@ -497,7 +497,7 @@ fn nif_pill(ui: &mut egui::Ui, model: &AppModel, owner: &Owner, value: &str, act
     pill(ui, |ui| {
         ui.label(egui::RichText::new("mesh path contains").small())
             .on_hover_text("nif_filter: only meshes whose path contains this text");
-        let id = egui::Id::new(("json-nif", owner.salt()));
+        let id = egui::Id::unique(("json-nif", owner.salt()));
         if let Some(t) = text_box(ui, id, value, 220.0) {
             let t = t.replace('/', "\\");
             acts.push(Act::Edit(
@@ -999,7 +999,7 @@ struct Built {
 }
 
 fn built(ui: &egui::Ui, model: &AppModel) -> Built {
-    let id = egui::Id::new("json-editor-built");
+    let id = egui::Id::unique("json-editor-built");
     let key = model.json_key();
     if let Some(b) = ui
         .data(|d| d.get_temp::<Built>(id))

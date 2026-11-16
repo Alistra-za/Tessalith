@@ -59,6 +59,9 @@ fn only_a_path_in_the_open_folder_has_the_button_and_a_click_asks_for_it() {
     // The users list of a texture names it too.
     m.tex_users = Some((PATH.to_string(), vec![]));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 800.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),

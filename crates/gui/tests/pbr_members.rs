@@ -194,9 +194,11 @@ fn the_subtype_combo_lists_the_pbr_group_first() {
     let mut m = fixture(d.path());
     m.select_item(DIFFUSE);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let combo = h
         .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
@@ -391,9 +393,11 @@ fn the_confirm_combo_uses_the_grouping() {
         .clone();
     m.select_item(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("Confirm");
     let confirm_y = h

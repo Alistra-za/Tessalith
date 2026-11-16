@@ -9,12 +9,14 @@ use support::*;
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -177,6 +179,9 @@ fn the_undo_note_asks_for_a_frame_when_it_runs_out() {
 fn ctrl_shift_z_with_nothing_to_redo_does_not_undo() {
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
@@ -195,6 +200,9 @@ fn ctrl_shift_z_with_nothing_to_redo_does_not_undo() {
 fn ctrl_z_waits_while_a_sets_column_box_is_open() {
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, (m, open): &mut (AppModel, bool)| {
@@ -218,12 +226,14 @@ fn enter_presses_ok_on_the_sets_column_refusal() {
     use sdc_gui::ui::State;
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (opened(d.path()), State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.state_mut().1.drops.pending = Some(Pending::Refused("no".into()));
     h.run();
     h.run();
@@ -252,6 +262,9 @@ fn the_undo_label_after_a_bulk_edit_is_the_bulk_steps_label() {
 fn ctrl_z_and_ctrl_y_work_in_the_meshes_view() {
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
@@ -260,7 +273,7 @@ fn ctrl_z_and_ctrl_y_work_in_the_meshes_view() {
             with_a_step(d.path()),
         );
     h.ctx
-        .data_mut(|d| d.insert_temp(egui::Id::new("sdc-meshes-view"), true));
+        .data_mut(|d| d.insert_temp(egui::Id::unique("sdc-meshes-view"), true));
     assert!(sdc_gui::ui::header::meshes_view_active(&h.ctx));
     h.run();
     h.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
@@ -416,6 +429,9 @@ fn delete_set_has_no_dialog_and_undoes() {
         .len();
     // The toasts are drawn by `app.rs` after `ui::draw`; this harness draws both, as a frame does.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .with_step_dt(0.05)
         .build_ui_state(
@@ -425,7 +441,6 @@ fn delete_set_has_no_dialog_and_undoes() {
             },
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     pill(&h, &id).click_secondary();
     h.run();
@@ -836,12 +851,14 @@ fn the_set_dialogs_enter_still_presses_what_it_pressed() {
     use sdc_gui::ui::State;
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (opened(d.path()), State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let steps = h.state().0.history.undo.len();
     // Enter does nothing on a Replace (K1) or a Choice; Esc cancels both.
     for p in [
@@ -1013,12 +1030,14 @@ fn focused_destructive_buttons_ignore_enter_and_space() {
         // Sets column Replace: the slot keeps its texture and the question stays.
         let d = tempfile::tempdir().unwrap();
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(1500.0, 900.0))
             .build_ui_state(
                 |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
                 (opened(d.path()), State::default()),
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         let steps = h.state().0.history.undo.len();
         let replace = Pending::Replace {
             item: "landscape/leaf.png".into(),
@@ -1090,7 +1109,7 @@ fn the_footer_order_is_plain_then_destructive_then_the_default() {
 /// I1: the modal `area` over 8 frames: its height settles by frame 4, and every node whose label contains one of
 /// `parts` lies on screen.
 fn assert_dialog_settles_on_screen<S>(h: &mut Harness<'static, S>, area: &str, parts: &[&str]) {
-    let id = egui::Id::new(area);
+    let id = egui::Id::unique(area);
     let mut heights = vec![];
     for _ in 0..8 {
         h.step();
@@ -1127,12 +1146,14 @@ fn a_long_texture_name_keeps_the_replace_dialog_on_screen() {
     use sdc_gui::ui::State;
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (opened(d.path()), State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let existing = format!("textures/{}.png", "t".repeat(111));
     h.state_mut().1.drops.pending = Some(Pending::Replace {
         item: "landscape/leaf.png".into(),

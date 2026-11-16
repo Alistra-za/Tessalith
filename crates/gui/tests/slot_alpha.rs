@@ -15,9 +15,11 @@ const LEAF: &str = "landscape/leaf.png";
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 1200.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -217,6 +219,9 @@ fn the_slot_alpha_waits_for_the_plan() {
 fn natural_widths() -> (f32, f32) {
     let out = std::cell::Cell::new((0.0, 0.0));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(600.0, 200.0))
         .build_ui(|ui| {
             ui.spacing_mut().combo_width = 0.0;
@@ -229,7 +234,6 @@ fn natural_widths() -> (f32, f32) {
                 out.set((combo.rect.width(), confirm.rect.width()));
             });
         });
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(3);
     out.get()
 }

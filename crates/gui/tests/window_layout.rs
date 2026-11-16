@@ -394,6 +394,9 @@ fn saved_column_widths_come_back_in_the_real_panels() {
         ..LayoutSettings::default()
     };
     let h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(vec2(1800.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (sdc_gui::model::AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
@@ -403,7 +406,7 @@ fn saved_column_widths_come_back_in_the_real_panels() {
     let mut h = h;
     h.run();
     h.run();
-    let w = |id: &str| PanelState::load(&h.ctx, egui::Id::new(id)).map(|s| s.outer_rect.width());
+    let w = |id: &str| PanelState::load(&h.ctx, egui::Id::unique(id)).map(|s| s.outer_rect.width());
     assert_eq!(w("textures"), Some(520.0));
     assert_eq!(w("sets"), Some(333.0));
 }

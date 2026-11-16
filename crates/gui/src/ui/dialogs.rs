@@ -48,8 +48,8 @@ pub fn modal_keys(
     fade_in: bool,
     add: impl FnOnce(&mut egui::Ui),
 ) -> Keys {
-    let modal = egui::Modal::new(egui::Id::new(id));
-    let area = egui::Modal::default_area(egui::Id::new(id)).fade_in(fade_in);
+    let modal = egui::Modal::new(egui::Id::unique(id));
+    let area = egui::Modal::default_area(egui::Id::unique(id)).fade_in(fade_in);
     let shown = modal.area(area).show(ctx, |ui| {
         ui.set_max_width(420.0);
         add(ui);
@@ -67,7 +67,10 @@ pub fn modal_keys(
 /// Whether dialog `id` was drawn the frame before this one; call once per frame it is drawn. False on the frame it
 /// opens, so the Enter that opened it (a palette pick) is not also the dialog's Enter.
 fn opened_before(ctx: &egui::Context, id: &str) -> bool {
-    let (seen, frame) = (egui::Id::new(("modal-seen", id)), ctx.cumulative_frame_nr());
+    let (seen, frame) = (
+        egui::Id::unique(("modal-seen", id)),
+        ctx.cumulative_frame_nr(),
+    );
     let was_open = ctx
         .data(|d| d.get_temp::<u64>(seen))
         .is_some_and(|f| f + 1 >= frame);

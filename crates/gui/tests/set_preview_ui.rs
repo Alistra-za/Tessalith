@@ -18,12 +18,14 @@ type H = Harness<'static, (AppModel, SetPreview)>;
 
 fn harness(m: AppModel, s: SetPreview) -> H {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(520.0, 1000.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, SetPreview)| sdc_gui::ui::set_preview::draw(ui, m, s),
             (m, s),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // The tech lines these tests read are in the Details footer, collapsed by default (AG132).
     sdc_gui::ui::viewport3d::set_details_open(&h.ctx, sdc_gui::ui::viewport3d::SET_DETAILS, true);
     h
@@ -327,12 +329,14 @@ fn the_textures_view_shows_the_panel_for_a_set_only_when_the_app_enables_it() {
         ..State::default()
     };
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1800.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, state),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // No poll in this harness: the 3D view may still be preparing.
     let shown = |h: &Harness<'static, (AppModel, sdc_gui::ui::State)>| {
@@ -346,12 +350,14 @@ fn the_textures_view_shows_the_panel_for_a_set_only_when_the_app_enables_it() {
     assert!(!shown(&h));
     // `ui::draw` (every existing kittest) uses `State::default()`: the panel stays off.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m),
             rock_selected(d.path()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert!(h.query_by_label(FRAME_LABEL).is_none());
     assert!(h

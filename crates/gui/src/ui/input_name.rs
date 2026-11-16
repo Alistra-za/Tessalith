@@ -46,7 +46,7 @@ pub fn scans() -> u32 {
 type Scanned = (Option<String>, Vec<String>);
 fn scan(ui: &egui::Ui, edit_id: egui::Id, paths: &Arc<Vec<String>>, text: &str) -> Arc<Scanned> {
     type Cached = (Arc<Vec<String>>, String, Arc<Scanned>);
-    let id = egui::Id::new(("input-name-scan", edit_id));
+    let id = egui::Id::unique(("input-name-scan", edit_id));
     if let Some((p, t, r)) = ui.data(|d| d.get_temp::<Cached>(id)) {
         if Arc::ptr_eq(&p, paths) && t == text {
             return r;
@@ -83,7 +83,7 @@ pub(super) fn paint_lock(painter: &egui::Painter, c: egui::Pos2, color: egui::Co
 
 /// The box's text edit id for set `set_id` (tests read its cursor through `TextEdit::load_state`).
 pub fn edit_id(set_id: &str) -> egui::Id {
-    egui::Id::new(("input-name", set_id)).with("edit")
+    egui::Id::unique(("input-name", set_id)).with("edit")
 }
 
 /// Rows in the live list under the box.
@@ -219,7 +219,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
     let why = model
         .toml_read_only_reason()
         .or_else(|| model.sets_read_only_reason());
-    let id = egui::Id::new(("input-name", &v.id));
+    let id = egui::Id::unique(("input-name", &v.id));
     let err_id = id.with("error");
     let edit_id = id.with("edit");
     let buf = id.with("buf");
@@ -257,7 +257,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
     // Keyed by the list itself (held, so its address is never reused while cached). It keeps the `textures/pbr/`
     // paths the offered list drops (Note AO8): they are still known textures, the project's own ones included.
     let known: Arc<HashSet<String>> = {
-        let kid = egui::Id::new(("input-name-known", salt));
+        let kid = egui::Id::unique(("input-name-known", salt));
         type Known = (Arc<Vec<String>>, Arc<HashSet<String>>);
         match ui.data(|d| d.get_temp::<Known>(kid)) {
             Some((pk, s)) if Arc::ptr_eq(&pk, &paths) => s,
@@ -675,7 +675,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                                     let selected = live.sel == Some(i);
                                     rr.widget_info(|| {
                                         egui::WidgetInfo::selected(
-                                            egui::WidgetType::Button,
+                                            egui::Role::Button,
                                             true,
                                             selected,
                                             &name,
@@ -751,7 +751,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                 let full = ui.data(|d| d.get_temp::<bool>(full_id)).unwrap_or(false);
                 let cut = if full { 0 } else { segment_start(&text) };
                 let pre = text[..cut].replace('\\', "/");
-                let under_key = (key.0, egui::Id::new((key.1, salt, &pre)).value());
+                let under_key = (key.0, egui::Id::unique((key.1, salt, &pre)).value());
                 let under = path_picker::cached(ui, "input-name-under", under_key, || {
                     paths
                         .iter()
@@ -780,7 +780,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             } else {
                 let what = if all { "any slot".to_string() } else { format!("slot {slot}") };
                 ui.label(egui::RichText::new(format!("Textures used in {what}")).strong());
-                let list_key = (key.0, egui::Id::new((key.1, slot, all)).value());
+                let list_key = (key.0, egui::Id::unique((key.1, slot, all)).value());
                 let list = path_picker::cached(ui, "input-name-slot", list_key, || {
                     let mut l = model.known_textures((!all).then_some(slot - 1));
                     // AO8: PGPatcher's own outputs are never a match.

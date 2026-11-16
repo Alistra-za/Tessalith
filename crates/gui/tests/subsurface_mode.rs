@@ -231,12 +231,14 @@ fn a_selector_change_is_one_undo_step() {
     m.select_set(&key);
     m.set_json_value(SET, "subsurface_foliage", Some(json!(true)));
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 1100.0))
         .build_ui_state(
             |ui, m: &mut sdc_gui::model::AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
         .find(|n| n.value().as_deref() == Some("Foliage"))
@@ -286,12 +288,14 @@ fn choosing_the_auto_mode_pins_it() {
         .clone();
     m.select_set(&key);
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 1100.0))
         .build_ui_state(
             |ui, m: &mut sdc_gui::model::AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("(auto)");
     let stored = |h: &egui_kittest::Harness<'_, sdc_gui::model::AppModel>| {

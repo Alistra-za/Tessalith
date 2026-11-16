@@ -177,7 +177,7 @@ fn alpha_dropdown(
         "" => format!("Alpha type: {}", alpha_label(shown)),
         p => format!("{p} alpha type: {}", alpha_label(shown)),
     };
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), &name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, r.enabled(), &name));
     if !why.is_empty() {
         r.on_disabled_hover_text(why);
     }
@@ -216,7 +216,7 @@ fn alpha_confirm(
         "" => "Confirm alpha".to_string(),
         p => format!("{p} confirm alpha"),
     };
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), &name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, r.enabled(), &name));
     let r = r.on_hover_text(format!(
         "Use {} and close this question",
         alpha_label(shown)
@@ -623,7 +623,7 @@ fn threshold(
     current: u8,
     mixed: bool,
 ) -> (Option<Value>, egui::Response) {
-    let id = egui::Id::new(("threshold", key));
+    let id = egui::Id::unique(("threshold", key));
     let (out, r) = commit_slider(
         ui,
         model_busy,
@@ -680,8 +680,7 @@ fn weighting_combo(
         .response;
     // M4: named for a screen reader, with the shown option as its value.
     r.widget_info(|| {
-        let mut i =
-            egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), "BC7 weighting");
+        let mut i = egui::WidgetInfo::labeled(egui::Role::ComboBox, r.enabled(), "BC7 weighting");
         i.current_text_value = Some(shown.to_string());
         i
     });
@@ -717,7 +716,7 @@ pub(super) fn editor(
             ) as u8;
             threshold(ui, busy, key, cur, mixed)
         }
-        WEIGHTING => weighting_combo(ui, egui::Id::new((key, f.field)), target, job, f, mixed),
+        WEIGHTING => weighting_combo(ui, egui::Id::unique((key, f.field)), target, job, f, mixed),
         field if checkbox_hover(field).is_some() => {
             let hover = checkbox_hover(field).flatten();
             let mut b = f.value.as_bool().unwrap_or(false);
@@ -727,7 +726,7 @@ pub(super) fn editor(
             }
             // The box has no text of its own, so it takes the row's label as its AccessKit name (FM42, Note HP M1).
             r.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), b, f.label)
+                egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), b, f.label)
             });
             (r.changed().then(|| json!(b)), r)
         }
@@ -741,7 +740,7 @@ pub(super) fn editor(
             combo_for(
                 field,
                 ui,
-                egui::Id::new((key, field)),
+                egui::Id::unique((key, field)),
                 &current,
                 &options,
                 mixed,
@@ -835,11 +834,7 @@ pub(super) fn help_mark(ui: &mut egui::Ui, name: &str, text: &str) -> egui::Resp
         color,
     );
     r.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            r.enabled(),
-            format!("Help: {name}"),
-        )
+        egui::WidgetInfo::labeled(egui::Role::Label, r.enabled(), format!("Help: {name}"))
     });
     help_hover(r, text)
 }
@@ -1037,11 +1032,11 @@ fn subtype_field(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> (Option<Value>, 
     let fill = egui::vec2(ui.available_width().min(CONTROL_W), 0.0);
     let r = ui.add(egui::Button::new(format!("{shown} \u{25BE}")).min_size(fill));
     r.widget_info(|| {
-        let mut i = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), f.label);
+        let mut i = egui::WidgetInfo::labeled(egui::Role::ComboBox, r.enabled(), f.label);
         i.current_text_value = Some(shown.clone());
         i
     });
-    let id = egui::Id::new(("sub-type-picker", cx.key));
+    let id = egui::Id::unique(("sub-type-picker", cx.key));
     let suggested = cx.job.suggestions.first().map(|s| s.subtype);
     let grass = engine::policy::grass_context(cx.job);
     let kind = TypeKind::SubType;
@@ -1059,7 +1054,7 @@ fn mipmaps_rows(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
         let r = ui.add_enabled(cx.edit_off.is_none(), egui::Checkbox::new(&mut on, ""));
         let on = on;
         r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), on, "Mipmaps")
+            egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), on, "Mipmaps")
         });
         (None, r)
     });
@@ -1330,7 +1325,7 @@ fn decision_box(
                     // strip keeps FM35's line); the engine's reason is the label's hover.
                     Decision::AlphaMeaning => {
                         if let Some(shown) = alpha {
-                            let id = egui::Id::new(("alpha-decision", cx.key));
+                            let id = egui::Id::unique(("alpha-decision", cx.key));
                             let mut picked = None;
                             let label = match left {
                                 Some(left) => decision_row(ui, left, "Alpha", |ui, _| {
@@ -1391,7 +1386,7 @@ fn decision_box(
         // Over every control of the box: a disabled widget shows no hover of its own here.
         ui.interact(
             frame.response.rect,
-            ui.id().with(("decision-why", cx.key)),
+            ui.scope_id().with(("decision-why", cx.key)),
             egui::Sense::hover(),
         )
         .on_hover_text(why);
@@ -1439,7 +1434,7 @@ fn subtype_decision(
     actions: &mut Vec<Action>,
 ) {
     ui.label("What kind of texture is this?");
-    let id = egui::Id::new(("confirm-subtype", cx.key));
+    let id = egui::Id::unique(("confirm-subtype", cx.key));
     let mut chosen: Subtype = ui
         .data(|d| d.get_temp(id))
         .unwrap_or_else(|| suggested.unwrap_or(cx.job.profile.subtype));

@@ -26,7 +26,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel) {
 
 /// `draw`'s toast half at clock `now`. A toast shows whole until its time runs out, then goes (Note FM25).
 pub fn draw_at(ctx: &egui::Context, model: &mut AppModel, now: Instant) {
-    let id = egui::Id::new("toast-rects");
+    let id = egui::Id::unique("toast-rects");
     let last: Rects = ctx.data(|d| d.get_temp(id)).unwrap_or_default();
     let pointer = ctx.pointer_hover_pos();
     let hovered: HashSet<u64> = last
@@ -46,7 +46,7 @@ pub fn draw_at(ctx: &egui::Context, model: &mut AppModel, now: Instant) {
         // Note FC8 (supersedes CA10's anchor): over an open bottom panel they sit above it, off Review's Export.
         let lift =
             super::bottom::open_top(ctx).map_or(0.0, |top| ctx.content_rect().bottom() - top);
-        egui::Area::new(egui::Id::new("toasts"))
+        egui::Area::new(egui::Id::unique("toasts"))
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-12.0, -12.0 - lift))
             .order(egui::Order::Foreground)
             // Clicks pass through, unless a toast has a button (Note FB5).
@@ -74,7 +74,7 @@ pub fn draw_at(ctx: &egui::Context, model: &mut AppModel, now: Instant) {
                                 ToastAction::UndoDeleteSet(..) => "Undo the deleted set",
                             };
                             b.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
+                                egui::WidgetInfo::labeled(egui::Role::Button, true, name)
                             });
                             if b.clicked() {
                                 clicked = Some((t.id, action));

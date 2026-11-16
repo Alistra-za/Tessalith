@@ -85,9 +85,11 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
 
 fn wide_harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 1600.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }

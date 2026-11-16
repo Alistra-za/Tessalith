@@ -23,7 +23,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Note GD1: a worklist fix opens its tab; its field takes focus when its widget is drawn.
     if let Some((tab, field)) = m.nif_tab.take() {
         ui.data_mut(|d| {
-            d.insert_temp(egui::Id::new("meshes-edit-tab"), tab.index());
+            d.insert_temp(egui::Id::unique("meshes-edit-tab"), tab.index());
             d.remove::<Field>(edit_fields::focus_id());
             if let Some(f) = field {
                 d.insert_temp(edit_fields::focus_id(), f);
@@ -46,7 +46,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         egui::Panel::bottom("meshes-edit-export")
             .resizable(false)
             .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
-        let tab_id = egui::Id::new("meshes-edit-tab");
+        let tab_id = egui::Id::unique("meshes-edit-tab");
         let mut tab: usize = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
         // Note HS15: a tab click draws the old tab once more, so a field it ended the typing in commits.
         let shown = tab;
@@ -55,9 +55,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 let r = ui.selectable_label(tab == i, *t);
                 // Meshes UI T7 (rule 8.1): "Alpha tab", not the same name as the fields and headings it opens.
                 let (on, name) = (tab == i, format!("{t} tab"));
-                r.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::SelectableLabel, true, on, &name)
-                });
+                r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, &name));
                 if r.clicked() {
                     tab = i;
                 }
@@ -129,7 +127,7 @@ fn top(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             .iter()
             .filter(|d| d.status == OpStatus::Conflict)
             .count();
-        let seen = egui::Id::new("meshes-edit-pending-red");
+        let seen = egui::Id::unique("meshes-edit-pending-red");
         let before: usize = ui.data(|d| d.get_temp(seen)).unwrap_or(0);
         ui.data_mut(|d| d.insert_temp(seen, red));
         let show = ui.data_mut(|d| d.remove_temp::<bool>(show_pending_id()));
@@ -159,7 +157,7 @@ const OPS_MAX_H: f32 = 120.0;
 
 /// The footer's Show asks the pending list to open (it is drawn before the footer, so on the next frame).
 fn show_pending_id() -> egui::Id {
-    egui::Id::new("meshes-edit-show-pending")
+    egui::Id::unique("meshes-edit-show-pending")
 }
 
 fn op_row(ui: &mut egui::Ui, e: &NifEdit, i: usize, label: &str, failed: bool, act: &mut Act) {
@@ -187,9 +185,7 @@ fn op_row(ui: &mut egui::Ui, e: &NifEdit, i: usize, label: &str, failed: bool, a
                 for (text, take) in [("Take source", true), ("Keep mine", false)] {
                     let r = ui.small_button(text);
                     let name = format!("{text} {}: {label}", i + 1);
-                    r.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
-                    });
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                     if r.clicked() {
                         match take {
                             true => act.take_source = Some(i),
@@ -202,7 +198,7 @@ fn op_row(ui: &mut egui::Ui, e: &NifEdit, i: usize, label: &str, failed: bool, a
                 // Several rows have a Revert: each is named after its edit.
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
+                        egui::Role::Button,
                         true,
                         format!("Revert {}: {label}", i + 1),
                     )
@@ -242,7 +238,7 @@ fn export_block(
                     ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
                 let c = ui.visuals().weak_text_color();
                 ui.painter().circle_filled(rect.center(), 4.0, c);
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, "idle"));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, "idle"));
                 ui.weak(if why == NO_EDITS {
                     NO_EDITS
                 } else {
@@ -261,7 +257,7 @@ fn export_block(
             if red {
                 let r = ui.small_button("Show");
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Show pending edits")
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, "Show pending edits")
                 });
                 if r.clicked() {
                     ui.data_mut(|d| d.insert_temp(show_pending_id(), true));
@@ -285,9 +281,7 @@ fn export_block(
         ui.horizontal(|ui| {
             ui.strong("The file on disk against the export");
             let r = ui.small_button("Close");
-            r.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Close the diff")
-            });
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, "Close the diff"));
             if r.clicked() {
                 act.diff = Some(false);
             }
@@ -301,7 +295,7 @@ fn export_block(
                     let r = ui.add(egui::Label::new(egui::RichText::new(l).monospace()).truncate());
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
-                            egui::WidgetType::Label,
+                            egui::Role::Label,
                             true,
                             format!("Diff line: {l}"),
                         )
@@ -322,7 +316,7 @@ fn export_block(
         let r = ui.add(
             egui::Label::new(format!("Writes {data} to {}", elide_middle(&full, chars))).truncate(),
         );
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &line));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &line));
         r.on_hover_text(&line);
         ui.add(
             egui::Label::new(

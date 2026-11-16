@@ -60,7 +60,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     // Review C15: named for what it does, and for which slot (eight boxes share the icon).
                     r.widget_info(|| {
                         egui::WidgetInfo::selected(
-                            egui::WidgetType::Checkbox,
+                            egui::Role::CheckBox,
                             editable,
                             on,
                             format!("Pin slot {n} (always use this file)"),

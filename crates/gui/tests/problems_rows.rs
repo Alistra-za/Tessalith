@@ -21,9 +21,11 @@ use support::*;
 fn harness(mut m: AppModel) -> Harness<'static, AppModel> {
     m.open_problems(None);
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -689,13 +691,14 @@ fn file_keys(m: &AppModel) -> Vec<String> {
 
 /// The unmatched row is an Info row, near the list's end: scroll the Problems list to its bottom, as a user would.
 fn scroll_to_end(h: &mut Harness<'static, AppModel>) {
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom"))
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom"))
         .expect("the bottom panel is open")
         .outer_rect;
     h.hover_at(panel.center());
     h.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, -5000.0),
+        source: egui::MouseWheelSource::Wheel,
         phase: egui::TouchPhase::Move,
         modifiers: egui::Modifiers::NONE,
     });

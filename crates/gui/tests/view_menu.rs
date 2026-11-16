@@ -14,6 +14,9 @@ const SLIDERS: [&str; 3] = [
 
 fn menu<'a>(width: f32) -> Harness<'a, Viewport3d> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(width, 700.0))
         .build_ui_state(
             |ui, v: &mut Viewport3d| {
@@ -21,7 +24,6 @@ fn menu<'a>(width: f32) -> Harness<'a, Viewport3d> {
             },
             Viewport3d::with_state(V3State::Ready),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
     h.run();

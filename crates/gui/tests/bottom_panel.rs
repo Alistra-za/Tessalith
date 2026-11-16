@@ -11,11 +11,15 @@ use std::time::Duration;
 use support::*;
 
 fn harness_at(model: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
-    let h = Harness::builder().with_size(size).build_ui_state(
-        |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
-        model,
-    );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(
+            |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
+            model,
+        );
     h
 }
 
@@ -24,7 +28,7 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
 }
 
 fn outer(h: &Harness<'static, AppModel>, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::new(id)).unwrap().outer_rect
+    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
 }
 
 #[test]
@@ -679,10 +683,12 @@ fn lookups_per_frame(m: AppModel) -> u64 {
     use sdc_gui::model::bottom::problem_lookups;
     // K8: the height catch-up takes a frame per newly exposed card.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .with_max_steps(16)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert!(!h.state().bottom.open);
     let before = problem_lookups(h.state());

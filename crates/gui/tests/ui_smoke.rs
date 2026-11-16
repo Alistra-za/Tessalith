@@ -8,12 +8,14 @@ use support::*;
 /// A harness over `model`. The crate bundles no fonts, so the harness needs the system fonts, as the app does.
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -784,13 +786,15 @@ fn a_double_click_in_a_viewport_collapses_the_preview() {
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     // Two clicks must land within egui's double-click delay: shorten the simulated frame.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // A point inside the encoded viewport, below its message.
     let label = h.get_by_label_contains("Not encoded").rect();
@@ -845,7 +849,7 @@ fn the_settings_strip_is_compact() {
 /// The preview's toolbar panel rect (A7: every toolbar lookup is scoped to it).
 fn toolbar_rect(h: &Harness<'static, AppModel>) -> eframe::egui::Rect {
     use eframe::egui::containers::panel::PanelState;
-    PanelState::load(&h.ctx, eframe::egui::Id::new("preview-toolbar"))
+    PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-toolbar"))
         .expect("the toolbar is drawn")
         .outer_rect
 }
@@ -910,12 +914,14 @@ fn expanded_at(width: f32) -> (Harness<'static, AppModel>, tempfile::TempDir) {
     model.expand("landscape/rock01_rmaos");
     assert!(model.wait_idle(std::time::Duration::from_secs(60)));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(width, 800.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     (h, d)
 }
@@ -995,12 +1001,14 @@ fn the_toolbar_pin_holds_at_three_widths() {
         model.expand("test/wall.png");
         assert!(model.wait_idle(std::time::Duration::from_secs(60)));
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(width, 800.0))
             .build_ui_state(
                 |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
                 model,
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         assert_toolbar_layout(&h, &[]);
     }
@@ -1032,7 +1040,7 @@ fn at_1200x800_the_preview_keeps_its_width_and_the_toolbar_fits() {
 fn the_collapsed_settings_strip_opens_the_settings() {
     use eframe::egui::containers::panel::PanelState;
     let (mut h, _d) = expanded_at_1200();
-    assert!(PanelState::load(&h.ctx, eframe::egui::Id::new("preview-settings-strip")).is_some());
+    assert!(PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-settings-strip")).is_some());
     assert!(h.query_by_label_contains("Compression").is_none());
     h.get_by_label("Preview settings").hover();
     h.run();
@@ -1080,12 +1088,14 @@ fn preview_settings_open_at_1280() {
         assert!(model.wait_idle(std::time::Duration::from_secs(60)));
         // Its own drawing state: `ui::draw`'s thread-local one would carry the last preview's settings over.
         let mut h: H = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(width, 800.0))
             .build_ui_state(
                 |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
                 (model, State::default()),
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         assert_eq!(open(&h), want, "{width}");
     }
@@ -1102,14 +1112,16 @@ fn the_preview_settings_panel_is_never_drawn_under_the_toolbar() {
         model.expand(key);
         assert!(model.wait_idle(std::time::Duration::from_secs(60)));
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1600.0, 1000.0))
             .build_ui_state(
                 |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
                 model,
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
-        let panel = PanelState::load(&h.ctx, eframe::egui::Id::new("preview-settings"))
+        let panel = PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-settings"))
             .expect("the settings are open at 1600 wide")
             .outer_rect;
         let bar = toolbar_rect(&h);
@@ -1161,12 +1173,14 @@ fn in_3d_the_preview_takes_the_drawers_width() {
         ..State::default()
     };
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(width, 800.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (model, state),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // The 3D view never goes idle.
     for _ in 0..6 {
         h.run_steps(3);
@@ -1322,13 +1336,15 @@ fn a_double_click_on_a_set_member_expands_it() {
     model.select_set(&key);
     // Two clicks must land within egui's double-click delay: shorten the simulated frame.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // The member name is in its slot row; the same name is also a tile in the Textures column to the left.
     let label = h
@@ -1376,13 +1392,15 @@ fn a_single_click_on_a_set_member_selects_it_after_the_double_click_delay() {
         .clone();
     model.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let label = h
         .query_all_by_label_contains("rock01_normal.png")
@@ -1431,13 +1449,15 @@ fn a_stale_pending_member_click_does_not_replace_a_set_opened_later() {
         .clone();
     model.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let label = h
         .query_all_by_label_contains("rock01_normal.png")
@@ -1782,10 +1802,12 @@ fn text_opacity(h: &Harness<'static, AppModel>, text: &str) -> Vec<f32> {
 fn opening_a_folder_shows_the_columns_at_full_opacity_at_once() {
     let small = |m: AppModel| {
         let h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1280.0, 800.0))
             .with_step_dt(0.05)
             .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h
     };
     let d = tempfile::tempdir().unwrap();

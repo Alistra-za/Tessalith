@@ -398,7 +398,7 @@ pub const PREPARING: &str = "Preparing the preview…";
 pub const SETTINGS_BUTTON: &str = "TruePBR settings…";
 /// The settings window's id: one window whatever it shows, so its place and size carry over.
 pub fn settings_window_id() -> egui::Id {
-    egui::Id::new("set-3d-settings-window")
+    egui::Id::unique("set-3d-settings-window")
 }
 
 /// What the settings window's size has been doing since it was first drawn this session (Note FM31).

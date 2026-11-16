@@ -74,9 +74,11 @@ fn view(m: &AppModel, key_end: &str) -> SetView {
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 2400.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -114,6 +116,9 @@ fn the_complex_material_card_shows_labels() {
 #[test]
 fn a_group_shows_its_value_in_the_header_and_folds() {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui(|ui| {
             sdc_gui::ui::group::group(ui, "g", "Coat", Some("on".into()), false, |ui| {

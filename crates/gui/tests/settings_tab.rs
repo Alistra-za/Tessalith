@@ -16,9 +16,11 @@ const APP_HEADING: &str = "App settings: these apply to every project";
 
 fn harness_sized(m: AppModel, size: egui::Vec2) -> H {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(size)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -186,7 +188,7 @@ fn the_settings_preset_combo_sets_the_project_preset() {
     assert_eq!(h.state().undo_label(), Some("Preset"));
     h.get_by_role_and_label(Role::ComboBox, &format!("Preset (this project): {want}"));
     // The header's Preset combo shows the same value.
-    let header = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("header"))
+    let header = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("header"))
         .expect("the header")
         .outer_rect;
     let shown: Vec<String> = h

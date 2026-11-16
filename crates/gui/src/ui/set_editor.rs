@@ -280,8 +280,8 @@ const SCROLL_ID: &str = "set-editor-tab-scroll";
 /// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
 pub fn show_also_tab(ctx: &egui::Context) {
     ctx.data_mut(|d| {
-        d.insert_temp(egui::Id::new(TAB_ID), SetTab::AlsoExport);
-        d.insert_temp(egui::Id::new(SCROLL_ID), true);
+        d.insert_temp(egui::Id::unique(TAB_ID), SetTab::AlsoExport);
+        d.insert_temp(egui::Id::unique(SCROLL_ID), true);
     });
 }
 
@@ -289,7 +289,7 @@ pub fn show_also_tab(ctx: &egui::Context) {
 /// (Note JI2).
 fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f32>) {
     let json = shows_json_panel(v, model.target);
-    let id = egui::Id::new(TAB_ID);
+    let id = egui::Id::unique(TAB_ID);
     let was = ui.data(|d| d.get_temp::<SetTab>(id)).unwrap_or_default();
     let mut tab = was;
     let row = ui.horizontal(|ui| {
@@ -316,7 +316,7 @@ fn tabs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Option<f
     });
     // A request made on the frame the editor opens wins over `View::to_top`'s offset (the area applies it last).
     if ui
-        .data_mut(|d| d.remove_temp::<bool>(egui::Id::new(SCROLL_ID)))
+        .data_mut(|d| d.remove_temp::<bool>(egui::Id::unique(SCROLL_ID)))
         .is_some()
     {
         row.response.scroll_to_me(Some(egui::Align::TOP));
@@ -446,7 +446,7 @@ fn rows(
     sizes: &HashMap<String, SizeEst>,
 ) {
     // The File cell takes what the other columns leave: their widest content last frame, plus the spacing.
-    let others_id = egui::Id::new(("slot-rows-others", &v.id));
+    let others_id = egui::Id::unique(("slot-rows-others", &v.id));
     let others = ui.data(|d| d.get_temp::<[f32; 5]>(others_id));
     // The column's floating scroll bar senses its full width over the content's right edge: the Status dot keeps
     // clear of it, or its hover would go to the bar.
@@ -518,8 +518,8 @@ fn row(
     // Explorer drop (item 17). It is registered before the cells, so they keep their own clicks.
     // By slot number; the XPMF maps (no number) by kind, so their two rows differ.
     let row_id = match slot.slot_number() {
-        Some(n) => egui::Id::new(("slot-row", &v.id, n)),
-        None => egui::Id::new(("slot-row", &v.id, slot)),
+        Some(n) => egui::Id::unique(("slot-row", &v.id, n)),
+        None => egui::Id::unique(("slot-row", &v.id, slot)),
     };
     if let Some(r) = ui.data(|d| d.get_temp::<egui::Rect>(row_id)) {
         let resp = ui.interact(r, row_id, egui::Sense::click());
@@ -583,7 +583,7 @@ fn row(
     // Thumbnail.
     let (rect, resp) = ui.allocate_exact_size(egui::vec2(THUMB, THUMB), egui::Sense::click());
     resp.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Image, true, format!("{title} thumbnail"))
+        egui::WidgetInfo::labeled(egui::Role::Image, true, format!("{title} thumbnail"))
     });
     slot_menu(&resp, model, v, slot, acts);
     // A PGPatcher-locked slot has one hover, the lock's, in place of the thumbnail's path.
@@ -768,7 +768,7 @@ fn row(
                 ui.spacing_mut().combo_width = ALPHA_W;
                 picked = alpha_choice(
                     ui,
-                    egui::Id::new(("slot-alpha", &v.id)),
+                    egui::Id::unique(("slot-alpha", &v.id)),
                     shown,
                     proposal.is_some(),
                     why,
@@ -785,11 +785,7 @@ fn row(
             if own_alpha {
                 let r = ui.add_enabled(off.is_none(), egui::Button::new("↺").small());
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
-                        r.enabled(),
-                        "Reset slot alpha",
-                    )
+                    egui::WidgetInfo::labeled(egui::Role::Button, r.enabled(), "Reset slot alpha")
                 });
                 if r.on_hover_text("Go back to the inherited alpha")
                     .on_disabled_hover_text(why)
@@ -956,7 +952,7 @@ fn select_or_expand(
     expand: Option<String>,
 ) {
     type Pending = (String, f64, u64);
-    let id = egui::Id::new(("set-editor-pending-select", set));
+    let id = egui::Id::unique(("set-editor-pending-select", set));
     let (now, pass) = (ui.input(|i| i.time), ui.ctx().cumulative_pass_nr());
     if let Some(k) = expand {
         ui.data_mut(|d| d.remove::<Pending>(id));
@@ -1069,7 +1065,7 @@ fn cached_helpers(
         u64,
         Vec<(String, String, engine::helper::HelperRole)>,
     );
-    let id = egui::Id::new("fill-source-helpers");
+    let id = egui::Id::unique("fill-source-helpers");
     let rev = model.items_rev();
     if let Some((k, r, v)) = ctx.data(|d| d.get_temp::<Slot>(id)) {
         if k == packed && r == rev {
@@ -1140,7 +1136,7 @@ fn source_picker(
         .inner;
     super::helper_panel::named(
         &r,
-        egui::WidgetType::ComboBox,
+        egui::Role::ComboBox,
         &format!("{} channel source", role_label(role)),
         Some(&shown),
     );

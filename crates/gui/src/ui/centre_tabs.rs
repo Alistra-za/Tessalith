@@ -71,12 +71,7 @@ fn strip_row(
                     .frame_when_inactive(true),
             );
             r.widget_info(|| {
-                egui::WidgetInfo::selected(
-                    egui::WidgetType::Button,
-                    true,
-                    on,
-                    format!("{title} tab"),
-                )
+                egui::WidgetInfo::selected(egui::Role::Button, true, on, format!("{title} tab"))
             });
             if tab == CentreTab::Selection {
                 r.clone().on_hover_text("The selected texture or set");
@@ -99,7 +94,7 @@ pub fn controls(ui: &mut egui::Ui, model: &mut AppModel, tab: CentreTab) {
     let button = |ui: &mut egui::Ui, text: &str, hover: &str| {
         let (r, enabled) = (ui.button(text), ui.is_enabled());
         r.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, format!("{text} {title}"))
+            egui::WidgetInfo::labeled(egui::Role::Button, enabled, format!("{text} {title}"))
         });
         if hover.is_empty() {
             r

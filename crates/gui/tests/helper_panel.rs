@@ -64,9 +64,11 @@ fn open(m: AppModel, key: &str, size: egui::Vec2) -> H {
     let mut m = m;
     m.select_item(key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(size)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.run();
     h
@@ -531,11 +533,13 @@ fn shots() {
         let mut m = fixture(d.path(), &files, toml);
         m.select_item(key);
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, hgt))
             .with_pixels_per_point(1.0)
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(10);
         let img = h.render().expect("render");
         let stem = key.trim_end_matches(".png");
@@ -686,7 +690,7 @@ fn read_only_disables_the_helper_role_row() {
     // The role combo is off too, with the same reason. The tick can't be clicked here, so set the ticked state the
     // tick keeps in egui temp data (`helper_panel::tick_id`, Note HI5).
     h.ctx
-        .data_mut(|d| d.insert_temp(egui::Id::new(("helper-tick", "x_mask.png")), true));
+        .data_mut(|d| d.insert_temp(egui::Id::unique(("helper-tick", "x_mask.png")), true));
     h.run();
     let role = h.get_by_role_and_label(Role::ComboBox, "Helper role");
     assert!(role.accesskit_node().is_disabled());

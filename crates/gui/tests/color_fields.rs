@@ -53,12 +53,14 @@ fn rock_with_emissive(dir: &std::path::Path) -> AppModel {
 
 fn panel(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, "landscape/rock01"),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -168,6 +170,9 @@ fn invalid_hex_commits_nothing_and_reverts() {
 #[test]
 fn background_grey_renders_a_hex_box() {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1000.0, 700.0))
         .build_ui_state(
             |ui, v: &mut Viewport3d| {
@@ -175,7 +180,6 @@ fn background_grey_renders_a_hex_box() {
             },
             Viewport3d::with_state(V3State::Ready),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label(sdc_gui::ui::viewport3d::VIEW_MENU).click();
     h.run();
@@ -210,6 +214,9 @@ fn a_stale_edit_buffer_is_dropped_when_the_row_goes_away() {
     let shown = std::rc::Rc::new(std::cell::Cell::new(true));
     let flag = shown.clone();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 900.0))
         .build_ui_state(
             move |ui, m: &mut AppModel| {
@@ -219,7 +226,6 @@ fn a_stale_edit_buffer_is_dropped_when_the_row_goes_away() {
             },
             rock_with_emissive(d.path()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let role = eframe::egui::accesskit::Role::TextInput;
     h.query_all_by_role(role)

@@ -17,9 +17,11 @@ const TINT: &str = "skin/x_s.png";
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -112,6 +114,9 @@ fn review_undecided_row_offers_the_problems_accept() {
     use sdc_gui::ui::review::{apply, undecided_row};
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(900.0, 300.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {

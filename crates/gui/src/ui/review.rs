@@ -162,7 +162,7 @@ fn fix_buttons_on(
                             // ▾ is what the plain button was: the picker, so it keeps its name.
                             arrow.widget_info(|| {
                                 egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
+                                    egui::Role::Button,
                                     arrow.enabled(),
                                     "Set type…",
                                 )
@@ -172,7 +172,7 @@ fn fix_buttons_on(
                         None => ui.button("Set type…"),
                     }
                     .on_disabled_hover_text(why);
-                    let id = egui::Id::new(("set-type-picker", key));
+                    let id = egui::Id::unique(("set-type-picker", key));
                     let kind = TypeKind::SetType;
                     let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
                     let (t, s) = (model.target, suggested);
@@ -184,7 +184,7 @@ fn fix_buttons_on(
                 // on it; Enter on the row confirms it, as Confirm does (Note HI8).
                 Decision::AlphaMeaning => {
                     if let Some(shown) = alpha_asked(item) {
-                        let id = egui::Id::new(("problems-alpha", key));
+                        let id = egui::Id::unique(("problems-alpha", key));
                         if let Some(p) = alpha_question(ui, id, shown, why, surface) {
                             pick = Some(RowPick::Answer(key.to_string(), Answer::Alpha(p)));
                         }
@@ -341,7 +341,7 @@ fn name_field(
     act: &mut Option<Act>,
 ) {
     // Keyed by the opened folder too: a draft never carries into another project (review M2).
-    let id = egui::Id::new(("also-name", which, root));
+    let id = egui::Id::unique(("also-name", which, root));
     let saved = saved.unwrap_or_default().to_string();
     let mut t: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| saved.clone());
     let r = ui.add(
@@ -420,7 +420,7 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
                 let chars = (ui.available_width() / glyph).floor().max(8.0) as usize;
                 let r = ui.add(egui::Label::new(super::header::elide_middle(&loc, chars)));
                 let name = format!("Also folders go in: {loc}");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
                 r.on_hover_text(&loc);
             },
             |ui| {
@@ -430,7 +430,7 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
                 );
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
-                        egui::WidgetType::Button,
+                        egui::Role::Button,
                         r.enabled(),
                         "Choose where the Also folders go…",
                     )
@@ -537,7 +537,7 @@ fn skip_list(ui: &mut egui::Ui, m: &AppModel, cfg: &ExportConfig, act: &mut Opti
             let mut now = on;
             let r = ui.checkbox(&mut now, super::dialogs::short_name(&v.id));
             r.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), now, &v.id)
+                egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), now, &v.id)
             });
             if r.on_hover_text(&v.id).changed() {
                 *act = Some(Act::Skip(v.id.clone(), now));
@@ -821,9 +821,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     let diff = ui.button("Diff…");
                     // ui-rules 8.4: the edit panel's footer has a Diff… too; this one names its NIF.
                     let name = format!("Diff… {}", r.path);
-                    diff.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
-                    });
+                    diff.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                     if diff
                         .on_hover_text(format!("Show the changed blocks of {}", r.path))
                         .clicked()

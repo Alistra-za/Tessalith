@@ -211,7 +211,7 @@ pub const SET_DETAILS: &str = "set-3d-details";
 /// A "Details" section, collapsed until opened; its state is kept in egui memory under `id` (and saved with the
 /// layout).
 pub fn details_footer(ui: &mut egui::Ui, id: &str, add: impl FnOnce(&mut egui::Ui)) {
-    let key = egui::Id::new(id);
+    let key = egui::Id::unique(id);
     let open = details_open(ui.ctx(), id);
     let r = egui::CollapsingHeader::new("Details")
         .id_salt(key)
@@ -232,12 +232,12 @@ const DETAILS_MAX: f32 = 220.0;
 
 /// Whether the Details footer `id` is open (closed until the user opens it).
 pub fn details_open(ctx: &egui::Context, id: &str) -> bool {
-    ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::new(id).with("open")))
+    ctx.data_mut(|d| d.get_persisted::<bool>(egui::Id::unique(id).with("open")))
         .unwrap_or(false)
 }
 
 pub fn set_details_open(ctx: &egui::Context, id: &str, open: bool) {
-    ctx.data_mut(|d| d.insert_persisted(egui::Id::new(id).with("open"), open));
+    ctx.data_mut(|d| d.insert_persisted(egui::Id::unique(id).with("open"), open));
 }
 
 /// The "View" section: debug view, background and lights. A look change only re-renders (the model sends a new
@@ -272,7 +272,7 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
                 ui.radio_value(&mut l.hdri, true, "Studio HDRI");
                 if !l.hdri {
                     // GUI suggestions item 2: one sRGB colour; the swatch's square and the hex box replace the grey slider.
-                    let id = egui::Id::new("viewport3d-bg");
+                    let id = egui::Id::unique("viewport3d-bg");
                     if let Some(rgb) = super::color::color_field(ui, id, l.bg.map(super::color::unit_to_u8)) {
                         l.bg = rgb.map(super::color::u8_to_unit);
                     }
@@ -312,7 +312,7 @@ fn look_controls(ui: &mut egui::Ui, v: &mut Viewport3d) {
 
 /// Where a panel keeps its frame texture.
 pub fn frame_cache_id(panel: &str) -> egui::Id {
-    egui::Id::new(("viewport3d-frame", panel))
+    egui::Id::unique(("viewport3d-frame", panel))
 }
 
 /// The frame, sized to the space left; asks the model for a frame of that size (physical pixels).
@@ -339,7 +339,7 @@ pub fn image(ui: &mut egui::Ui, v: &mut Viewport3d) -> egui::Response {
             v.orbit.zoom((-s * 0.002).exp());
         }
     }
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Image, true, FRAME_LABEL));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Image, true, FRAME_LABEL));
     let ppp = ui.ctx().pixels_per_point();
     v.request_frame(
         (rect.width() * ppp).round() as u32,

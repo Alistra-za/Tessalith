@@ -259,9 +259,11 @@ fn a_no_set_file_is_not_waiting() {
         assert!(m.is_no_set(&key));
         // Its tile reads `No set` in place of a question; the tile's hover text is built from the same flag.
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1500.0, 900.0))
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         use egui_kittest::kittest::Queryable;
         assert!(
@@ -696,13 +698,15 @@ fn a_no_set_helper_row_reads_no_set() {
             .collect()
     };
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), {
             m.remove_member("face/mouth", key).unwrap();
             idle(&mut m);
             m
         });
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.run();
     let found = rows(&h);
@@ -738,9 +742,11 @@ fn a_no_set_helper_panel_has_no_set_link() {
     let key = "face/mouth_rough.png";
     let draw = |m: AppModel| {
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1500.0, 900.0))
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         h
     };
@@ -770,9 +776,11 @@ fn delete_set_is_disabled_on_a_read_only_project_file() {
     assert!(m.sets_doc.as_ref().unwrap().read_only());
     let id = set_views(&m)[0].id.clone();
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.query_all_by_label(&id)
         .next()

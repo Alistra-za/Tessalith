@@ -79,7 +79,7 @@ fn row(
             let r = ui.label(format!("{name}: {shown}"));
             // Rule 8.4: every skin card has these rows; the block tells them apart.
             let label = format!("{name} of block {block}: {shown}");
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &label));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &label));
             r.on_hover_ui(|ui| {
                 ui.label(hover(m, s, map, picked));
             });
@@ -88,7 +88,7 @@ fn row(
             if picked.is_some() {
                 let r = ui.small_button("×").on_hover_text("Back to Auto");
                 let label = format!("{name} of block {block}: back to Auto");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
                 if r.clicked() {
                     act = Some(SkinAct::Pick(map, None));
                 }
@@ -96,7 +96,7 @@ fn row(
             let b = path_picker::menu(ui, "Browse", |ui| browse(ui, m, (block, map)));
             let label = format!("Browse for the {name} of block {block}");
             b.response
-                .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &label));
+                .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &label));
             if let Some(Some(p)) = b.inner {
                 act = Some(SkinAct::Pick(map, Some(p)));
             }
@@ -137,7 +137,7 @@ fn hover(m: &MeshesModel, s: &ShapeView, map: SkinMap, picked: Option<&str>) -> 
 
 /// The Browse popup: one filter over the mod list's scanned textures and the project's exported DDS files.
 fn browse(ui: &mut egui::Ui, m: &MeshesModel, salt: (u32, SkinMap)) -> Option<SkinPick> {
-    let fid = egui::Id::new(("skin-card-browse-filter", salt));
+    let fid = egui::Id::unique(("skin-card-browse-filter", salt));
     let mut q: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
     ui.add(
         egui::TextEdit::singleline(&mut q)

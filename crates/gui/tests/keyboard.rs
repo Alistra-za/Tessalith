@@ -14,6 +14,9 @@ use support::*;
 /// A UI that only reads the keys, as the app does first thing in a frame; the last action that ran is kept.
 fn keys_only(m: AppModel) -> Harness<'static, (AppModel, Option<&'static str>)> {
     Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, (m, fired): &mut (AppModel, Option<&'static str>)| {
@@ -113,6 +116,9 @@ fn no_shortcut_fires_from_a_text_field_except_ctrl_k_and_ctrl_s() {
     let mut m = AppModel::placeholder(GuiSettings::default());
     m.select_item("a");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, (m, fired, text): &mut (AppModel, Option<&'static str>, String)| {
@@ -360,9 +366,11 @@ fn the_palette_lists_at_most_200() {
 
 fn app_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -533,6 +541,9 @@ fn ctrl_s_in_a_field_saves() {
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(m.is_dirty());
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(400.0, 300.0))
         .build_ui_state(
             |ui, (m, text): &mut (AppModel, String)| {
@@ -597,10 +608,12 @@ fn first_and_rest(h: &mut Harness<'static, AppModel>) -> (u8, u8) {
 
 fn fast_app(m: AppModel) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .with_step_dt(0.02)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // kittest zeroes the stock animation time, which would turn every Area fade off.
     h.ctx.global_style_mut(|s| s.animation_time = 0.2);
     h.run();

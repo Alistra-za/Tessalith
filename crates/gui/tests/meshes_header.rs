@@ -26,12 +26,14 @@ fn the_meshes_view_keeps_the_header() {
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     let mut frame = eframe::Frame::_new_kittest();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
             app,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(sdc_gui::ui::header::meshes_view_active(&h.ctx));

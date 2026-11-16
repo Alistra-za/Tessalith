@@ -277,12 +277,14 @@ fn the_filtered_list_is_computed_once_per_change() {
 
 fn drawer_harness(m: AppModel) -> Harness<'static, (AppModel, DrawerState)> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1100.0, 500.0))
         .build_ui_state(
             |ui, (m, st): &mut (AppModel, DrawerState)| sdc_gui::ui::bottom::draw(ui, m, st, false),
             (m, DrawerState::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

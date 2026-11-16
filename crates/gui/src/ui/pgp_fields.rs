@@ -490,7 +490,7 @@ const FOCUS_PASSES: u64 = 10;
 /// Note FC3 (P13): the live `Fix path` request (set id, field), one-shot: it is dropped once taken or after
 /// `FOCUS_PASSES`, so it never holds the Advanced group open.
 fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
-    let id = egui::Id::new(super::problems::FOCUS_FIELD);
+    let id = egui::Id::unique(super::problems::FOCUS_FIELD);
     let (s, k, at) = ctx.data(|d| d.get_temp::<(String, String, u64)>(id))?;
     if ctx.cumulative_pass_nr() > at + FOCUS_PASSES {
         ctx.data_mut(|d| d.remove::<(String, String, u64)>(id));
@@ -503,7 +503,7 @@ fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
 fn take_focus(ui: &egui::Ui, r: &egui::Response, set: &str, key: &str) {
     if focus_request(ui.ctx()).is_some_and(|(s, k)| s == set && k == key) {
         ui.data_mut(|d| {
-            d.remove::<(String, String, u64)>(egui::Id::new(super::problems::FOCUS_FIELD))
+            d.remove::<(String, String, u64)>(egui::Id::unique(super::problems::FOCUS_FIELD))
         });
         r.request_focus();
         r.scroll_to_me(Some(egui::Align::Center));
@@ -529,7 +529,7 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
             .show(ui, |ui| {
                 for m in &c.matches {
                     ui.label(&m.slot);
-                    let id = egui::Id::new(("pgp-match", m.n, &c.set));
+                    let id = egui::Id::unique(("pgp-match", m.n, &c.set));
                     let mut text = ui
                         .data(|d| d.get_temp::<String>(id))
                         .unwrap_or_else(|| m.path.clone());
@@ -761,7 +761,7 @@ pub(crate) fn control(
             }
         }
         KeyKind::Text => {
-            let id = egui::Id::new(("pgp-text", k.key, &c.set));
+            let id = egui::Id::unique(("pgp-text", k.key, &c.set));
             let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
                 value
                     .and_then(|v| v.as_str().map(str::to_string))
@@ -804,7 +804,7 @@ pub(crate) fn control(
                 // Swatch + hex (AG2) show the colour clamped to 1.0; only a change made through them writes, as
                 // 0-1 values, so a stored 1.25 survives opening the picker.
                 let shown = rgb.map(|x| super::color::unit_to_u8(x as f32));
-                let id = egui::Id::new(("pgp-rgb", k.key, &c.set));
+                let id = egui::Id::unique(("pgp-rgb", k.key, &c.set));
                 if let Some(n) = super::color::color_field(ui, id, shown) {
                     rgb = n.map(|b| f64::from(b) / 255.0);
                     changed = true;
@@ -1031,7 +1031,7 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
     // The raw value, and a box to type one (0-65535; anything else is refused, outlined red).
     ui.horizontal(|ui| {
         ui.label(format!("= {}", f.raw()));
-        let id = egui::Id::new(("pgp-alpha-raw", &c.set));
+        let id = egui::Id::unique(("pgp-alpha-raw", &c.set));
         // The buffer carries the frame it was last drawn in: one left by a collapsed section is stale (as color.rs).
         let frame = ui.ctx().cumulative_frame_nr();
         let mut text = ui

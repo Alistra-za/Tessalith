@@ -613,7 +613,7 @@ fn live(area: Area, model: &AppModel, meshes_view: bool) -> bool {
 }
 
 fn focus_id() -> egui::Id {
-    egui::Id::new("sdc-keys-focus")
+    egui::Id::unique("sdc-keys-focus")
 }
 
 /// Note FC14: a text field has the keyboard focus (not any focused widget: a Problems row takes focus too). Save and

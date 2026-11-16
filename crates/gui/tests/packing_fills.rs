@@ -103,9 +103,11 @@ fn editor(mut m: AppModel) -> Harness<'static, AppModel> {
         .clone();
     m.select_set(&key);
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -489,9 +491,11 @@ fn the_open_dropdown_draws_the_skin_group_after_pbr_and_other_last() {
     let mut m = fixture(d.path());
     m.select_item(DIFFUSE);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1200.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
         .find(|n| n.value().as_deref() == Some("pbr albedo"))
@@ -991,9 +995,11 @@ fn a_dropped_fill_is_an_info_row_with_undo() {
     assert!(!counts_as_ready_problem(&r));
     m.open_problems(None);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label(sdc_gui::ui::problems::UNDO_ROW).click();
     h.run();

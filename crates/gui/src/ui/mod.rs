@@ -75,7 +75,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 fn centre_id() -> egui::Id {
-    egui::Id::new("centre-rect")
+    egui::Id::unique("centre-rect")
 }
 
 /// A9: the centre's rect as of the last frame: the CentralPanel's in the Sets view, the area under the header and
@@ -151,7 +151,7 @@ pub fn draw_with_scan(
     bottom::draw(ui, model, &mut state.drawer, false);
     // Note FB7: a new selection (or preview) brings the selection back to the front of the centre.
     let seen = (model.selection.clone(), model.expanded.clone());
-    let seen_id = egui::Id::new("centre-tab-seen");
+    let seen_id = egui::Id::unique("centre-tab-seen");
     if ui
         .data(|d| d.get_temp::<(Selection, Option<String>)>(seen_id))
         .is_some_and(|s| s != seen)
@@ -355,7 +355,7 @@ enum CentreShown {
 /// True on the frame the centre shows something other than it showed before: that area opens at its top. Call it
 /// once per frame.
 fn switched_to(ctx: &egui::Context, now: CentreShown) -> bool {
-    let id = egui::Id::new("centre-shown");
+    let id = egui::Id::unique("centre-shown");
     let before = ctx.data(|d| d.get_temp::<CentreShown>(id));
     let changed = before.as_ref() != Some(&now);
     if changed {
@@ -552,7 +552,7 @@ pub(crate) const SETS_W: f32 = 266.0;
 
 /// The width the user dragged panel `id` to (what `chosen_width_panel` stores), if any.
 fn chosen_width(ctx: &egui::Context, id: &str) -> Option<f32> {
-    ctx.data_mut(|d| d.get_persisted::<f32>(egui::Id::new(id).with("chosen")))
+    ctx.data_mut(|d| d.get_persisted::<f32>(egui::Id::unique(id).with("chosen")))
 }
 
 /// Shows `panel` (whose id is `id`) at the width the user dragged to, `<id>/chosen`, or `width` before any drag.
@@ -566,7 +566,7 @@ pub(crate) fn chosen_width_panel(
     add: impl FnOnce(&mut egui::Ui),
 ) {
     use egui::containers::panel::PanelState;
-    let (panel_id, chosen) = (egui::Id::new(id), egui::Id::new(id).with("chosen"));
+    let (panel_id, chosen) = (egui::Id::unique(id), egui::Id::unique(id).with("chosen"));
     let resize = ui.ctx().read_response(panel_id.with("__resize"));
     let released = resize.as_ref().is_some_and(|r| r.drag_stopped());
     if !released && !resize.is_some_and(|r| r.dragged()) {

@@ -52,9 +52,8 @@ pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u
                         }
                     });
                 let name = format!("Texture set of block {}: {shown}", s.block);
-                r.response.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, &name)
-                });
+                r.response
+                    .widget_info(|| egui::WidgetInfo::labeled(egui::Role::ComboBox, true, &name));
             });
             if let Some(why) = off {
                 r.response.on_hover_text(why);

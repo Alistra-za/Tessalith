@@ -213,7 +213,7 @@ pub fn pbr_ready(dir: &Path) -> AppModel {
 pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
     use eframe::egui::{accesskit::Role, containers::panel::PanelState, Id};
     use egui_kittest::kittest::{NodeT, Queryable};
-    let header = PanelState::load(&h.ctx, Id::new("header")).expect("the header was drawn");
+    let header = PanelState::load(&h.ctx, Id::unique("header")).expect("the header was drawn");
     h.query_all_by_role(Role::Button)
         .filter(|n| header.outer_rect.contains_rect(n.rect()))
         .filter_map(|n| n.accesskit_node().label())
@@ -272,7 +272,7 @@ pub fn slot_rect<S>(h: &egui_kittest::Harness<'_, S>, label: &str) -> eframe::eg
 /// also the set editor's slot row.
 pub fn in_sets_column<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
     use eframe::egui::{containers::panel::PanelState, Id};
-    PanelState::load(&h.ctx, Id::new("sets")).is_some_and(|p| p.outer_rect.contains_rect(r))
+    PanelState::load(&h.ctx, Id::unique("sets")).is_some_and(|p| p.outer_rect.contains_rect(r))
 }
 
 /// Floating windows on screen: an `egui::Window` is a Middle-order area, and so is a viewport embedded as one (Note

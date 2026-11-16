@@ -35,28 +35,32 @@ fn harness(m: AppModel, w: f32, meshes_view: bool) -> H {
 fn harness_sized(m: AppModel, size: egui::Vec2, meshes_view: bool) -> H {
     let mut meshes = MeshesModel::new(None, MeshesSettings::default());
     meshes.procs = sdc_gui::model::meshes::no_procs;
-    let mut h = Harness::builder().with_size(size).build_ui_state(
-        move |ui, (m, s, me): &mut (AppModel, State, MeshesModel)| {
-            sdc_gui::ui::header::set_meshes_view(ui.ctx(), meshes_view);
-            if meshes_view {
-                // K6: the app's Meshes branch (K3): the header, the bottom panel, then the view.
-                sdc_gui::ui::header::draw(ui, m, Some(&mut *me));
-                sdc_gui::ui::bottom::draw(ui, m, &mut s.drawer, false);
-                sdc_gui::ui::meshes::show(ui, me);
-            } else {
-                sdc_gui::ui::draw_with_scan(ui, m, s, Some(me));
-            }
-        },
-        (m, State::default(), meshes),
-    );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(
+            move |ui, (m, s, me): &mut (AppModel, State, MeshesModel)| {
+                sdc_gui::ui::header::set_meshes_view(ui.ctx(), meshes_view);
+                if meshes_view {
+                    // K6: the app's Meshes branch (K3): the header, the bottom panel, then the view.
+                    sdc_gui::ui::header::draw(ui, m, Some(&mut *me));
+                    sdc_gui::ui::bottom::draw(ui, m, &mut s.drawer, false);
+                    sdc_gui::ui::meshes::show(ui, me);
+                } else {
+                    sdc_gui::ui::draw_with_scan(ui, m, s, Some(me));
+                }
+            },
+            (m, State::default(), meshes),
+        );
     h.run_steps(4);
     h
 }
 
 /// The widgets inside the panel `id`, not the containers: (role, label, rect).
 fn widgets(h: &H, id: &str) -> Vec<(Role, String, egui::Rect)> {
-    let panel = PanelState::load(&h.ctx, Id::new(id)).unwrap().outer_rect;
+    let panel = PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect;
     h.query_all(by().predicate(|n| n.bounding_box().is_some()))
         .filter(|n| {
             matches!(
@@ -94,7 +98,7 @@ fn the_textures_header_never_overlaps() {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         assert_no_overlap(&h, "header", w);
         // Note AM: an idle scan row is not drawn (the source moved to MO2…).
-        assert!(PanelState::load(&h.ctx, Id::new("textures-scan")).is_none());
+        assert!(PanelState::load(&h.ctx, Id::unique("textures-scan")).is_none());
         for c in CONTROLS {
             h.get_by_label(c);
         }
@@ -120,7 +124,7 @@ fn the_textures_header_never_overlaps() {
 }
 
 fn outer(h: &H, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::new(id)).unwrap().outer_rect
+    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
 }
 
 #[test]
@@ -514,10 +518,10 @@ fn the_meshes_header_never_overlaps() {
         header_export_label(&h);
         // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).
         assert!(outer(&h, "header").contains_rect(h.get_by_label("Settings…").rect()));
-        assert!(PanelState::load(&h.ctx, Id::new("meshes-header")).is_none());
+        assert!(PanelState::load(&h.ctx, Id::unique("meshes-header")).is_none());
         // Note AM: an idle bar with no status holds nothing.
         // The bar is not drawn while it has nothing to show (layout v2 ask).
-        if PanelState::load(&h.ctx, Id::new("meshes-bar")).is_some()
+        if PanelState::load(&h.ctx, Id::unique("meshes-bar")).is_some()
             && !widgets(&h, "meshes-bar").is_empty()
         {
             assert_no_overlap(&h, "meshes-bar", w);
@@ -582,6 +586,9 @@ fn render_the_toolbar() {
     let mut meshes = MeshesModel::new(None, MeshesSettings::default());
     meshes.procs = sdc_gui::model::meshes::no_procs;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1440.0, 800.0))
         .with_pixels_per_point(scale)
         .wgpu()
@@ -591,7 +598,6 @@ fn render_the_toolbar() {
             },
             (m, State::default(), meshes),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(6);
     let edit = h
         .get(
@@ -611,5 +617,5 @@ fn render_the_toolbar() {
 fn meshes_bar_hidden_without_scan() {
     let d = tempfile::tempdir().unwrap();
     let h = harness(pbr_opened(d.path()), 1024.0, true);
-    assert!(PanelState::load(&h.ctx, Id::new("meshes-bar")).is_none());
+    assert!(PanelState::load(&h.ctx, Id::unique("meshes-bar")).is_none());
 }

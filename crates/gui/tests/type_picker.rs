@@ -20,12 +20,15 @@ struct State {
 /// A "Set type…" button `top` px down a 600×700 window, with the picker on it (subsurface tint suggested).
 fn bare(top: f32) -> Harness<'static, State> {
     Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(600.0, 700.0))
         .build_ui_state(
             |ui, s: &mut State| {
                 ui.add_space(s.top);
                 let b = ui.button("Set type…");
-                let id = egui::Id::new(PICKER);
+                let id = egui::Id::unique(PICKER);
                 let suggested = Some(Subtype::SubsurfaceTint);
                 let kind = TypeKind::SetType;
                 if let Some(st) =
@@ -40,7 +43,7 @@ fn bare(top: f32) -> Harness<'static, State> {
 
 fn popup_rect(h: &Harness<'static, State>) -> egui::Rect {
     h.ctx
-        .memory(|m| m.area_rect(egui::Id::new(PICKER)))
+        .memory(|m| m.area_rect(egui::Id::unique(PICKER)))
         .expect("the picker is drawn")
 }
 
@@ -164,9 +167,11 @@ fn subtype_button_is_disabled_on_a_read_only_sdc_toml() {
     assert!(m.project.as_ref().unwrap().read_only());
     m.select_item("landscape/rock01_normal.png");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let b = h.get_by_role_and_label(Role::ComboBox, "Sub-type");
     assert!(b.accesskit_node().is_disabled(), "Sub-type is enabled");
@@ -188,9 +193,11 @@ fn subtype_combo_uses_the_same_picker() {
     let key = "landscape/rock01.png";
     m.select_item(key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let inputs = |h: &Harness<'static, AppModel>| h.query_all_by_role(Role::TextInput).count();
     let before = inputs(&h);

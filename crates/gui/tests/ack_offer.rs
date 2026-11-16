@@ -65,9 +65,11 @@ fn blocked_by(m: &AppModel, key: &str, code: Code) {
 fn problems_tab(mut m: AppModel) -> Harness<'static, AppModel> {
     m.open_problems(None);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }

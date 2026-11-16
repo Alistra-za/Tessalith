@@ -72,7 +72,7 @@ pub fn draw(
     };
     // Note FI18 (GH6/N6, ruling R3): room for the 3D frame's 160 px; Review's 40 % default obeys it too.
     let cap = nif_preview.then(|| (ui.available_height() - NIF_ROOM).max(120.0));
-    keep_users_height(ui.ctx(), egui::Id::new(id), cap);
+    keep_users_height(ui.ctx(), egui::Id::unique(id), cap);
     let mut panel = egui::Panel::bottom(id)
         .resizable(true)
         .default_size(cap.map_or(height, |c| height.min(c)));
@@ -104,12 +104,12 @@ pub fn draw(
     // shortcut: egui 0.36's private resize handle id (`panel.rs::resize_widget_id`); recheck on an egui upgrade
     // (`a_drag_to_the_cap_is_the_users_height` fails if it moves).
     let resized = ui
-        .read_response(egui::Id::new(id).with("__resize"))
+        .read_response(egui::Id::unique(id).with("__resize"))
         .is_some_and(|r| r.dragged() || r.drag_stopped());
     if cap.is_some() && resized {
         // Resized in the Meshes view, to the cap or below it: that is the user's height now.
         ui.ctx()
-            .data_mut(|d| d.remove::<f32>(egui::Id::new(id).with("uncapped")));
+            .data_mut(|d| d.remove::<f32>(egui::Id::unique(id).with("uncapped")));
     }
     let (pass, top) = (ui.ctx().cumulative_pass_nr(), panel.response.rect.top());
     ui.ctx()
@@ -145,7 +145,7 @@ fn keep_users_height(ctx: &egui::Context, id: egui::Id, cap: Option<f32>) {
 }
 
 fn open_top_id() -> egui::Id {
-    egui::Id::new("bottom-open-top")
+    egui::Id::unique("bottom-open-top")
 }
 
 /// Note FC8: the top of the open bottom panel, when it was drawn this pass (the toasts sit above it).

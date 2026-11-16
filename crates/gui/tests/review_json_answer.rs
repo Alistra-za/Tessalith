@@ -103,12 +103,14 @@ fn nif_export_is_due_once_after_the_run_ends() {
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -190,9 +192,11 @@ fn a_foreign_nif_rows_diff_fits_at_1100_px() {
         }],
     );
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1100.0, 800.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let r = h
         .get_by_role_and_label(egui::accesskit::Role::Button, &format!("Diff… {path}"))

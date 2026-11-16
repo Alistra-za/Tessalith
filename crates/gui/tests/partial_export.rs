@@ -760,9 +760,11 @@ fn export_set_is_off_for_a_set_with_no_files() {
         .expect("the created set has a card");
     assert!(ghost.key.is_empty(), "no files, so no key");
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.query_all_by_label_contains("ghost")
         .next()
@@ -887,9 +889,11 @@ fn a_scoped_review_has_no_also_column() {
     use egui_kittest::kittest::Queryable;
     let also_column = |m: AppModel| {
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(1500.0, 900.0))
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         let shown = h.query_all_by_label("Also export as").next().is_some();
         shown
@@ -916,9 +920,11 @@ fn review_says_export_group_armor() {
     m.export_group("Armor");
     assert!(m.review.is_some());
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert!(
         h.query_all_by_label("Export group Armor").next().is_some(),

@@ -625,7 +625,7 @@ const GOLD_CARD: &str = "Set armor/gold, position 5 of 9";
 /// Sets the Sets column to width `w`, as a drag leaves it (`<id>/chosen`), and lets the layout follow.
 fn sets_width(h: &mut crate::app_harness::H, w: f32) {
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), w));
+        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), w));
     crate::app_harness::settle(h, 6);
 }
 
@@ -637,7 +637,7 @@ fn narrow_sets(h: &mut crate::app_harness::H) {
 fn widths(h: &crate::app_harness::H) -> (f32, f32, f32, f32) {
     use egui::containers::panel::PanelState;
     let panel = |id: &str| {
-        PanelState::load(&h.ctx, egui::Id::new(id))
+        PanelState::load(&h.ctx, egui::Id::unique(id))
             .unwrap()
             .outer_rect
     };
@@ -649,7 +649,7 @@ fn widths(h: &crate::app_harness::H) -> (f32, f32, f32, f32) {
         .width();
     let centre = h
         .ctx
-        .data(|d| d.get_temp::<egui::Rect>(egui::Id::new("centre-rect")))
+        .data(|d| d.get_temp::<egui::Rect>(egui::Id::unique("centre-rect")))
         .expect("the centre rect")
         .width();
     (
@@ -762,7 +762,7 @@ fn textures_with_gold_open(hidden: bool, collapsed: bool) -> f32 {
         .clone();
     h.state_mut().model.select_set(&key);
     crate::app_harness::settle(&mut h, 6);
-    PanelState::load(&h.ctx, egui::Id::new("textures"))
+    PanelState::load(&h.ctx, egui::Id::unique("textures"))
         .unwrap()
         .outer_rect
         .width()
@@ -806,7 +806,7 @@ fn closing_the_set_gives_textures_its_width_back() {
 fn card_and_panel(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
     let cards: Vec<_> = h.query_all_by_label(GOLD_CARD).map(|n| n.rect()).collect();
     assert_eq!(cards.len(), 1, "one {GOLD_CARD:?} node, got {cards:?}");
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets panel")
         .outer_rect;
     (cards[0], panel)
@@ -1007,10 +1007,11 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
             .filter(|(t, r)| t.starts_with("Filter") && in_sets_column(&h, *r))
             .map(|(_, r)| r.max.y)
             .fold(0.0, f32::max);
-        let panel_bottom = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
-            .expect("the Sets panel")
-            .outer_rect
-            .bottom();
+        let panel_bottom =
+            egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
+                .expect("the Sets panel")
+                .outer_rect
+                .bottom();
         for (id, leaf) in ids {
             let Some(title) = h
                 .query_all_by_label(id)
@@ -1624,7 +1625,7 @@ fn a_filter_change_reveals_the_open_set_when_it_stays_visible() {
             ],
         );
         let card = one_node(&h, "Set armor/gold, position");
-        let panel = PanelState::load(&h.ctx, egui::Id::new("sets"))
+        let panel = PanelState::load(&h.ctx, egui::Id::unique("sets"))
             .expect("the Sets panel")
             .outer_rect;
         assert!(
@@ -1896,7 +1897,7 @@ fn an_off_screen_card_scrolls_into_view_on_request() {
     // The card's rect must lie in the Sets list: below the filter row and above the panel's bottom (not under the
     // header rows, which the panel's outer rect also holds).
     let inside = |h: &crate::app_harness::H| {
-        let panel = PanelState::load(&h.ctx, egui::Id::new("sets"))
+        let panel = PanelState::load(&h.ctx, egui::Id::unique("sets"))
             .unwrap()
             .outer_rect;
         let top = one(h, "Filter, Sets shader filter").bottom();

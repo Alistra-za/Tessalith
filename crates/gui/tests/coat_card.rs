@@ -26,12 +26,14 @@ fn model(dir: &std::path::Path, edits: &[(&str, Value)]) -> AppModel {
 
 fn panel(m: AppModel) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 1100.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }

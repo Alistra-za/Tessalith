@@ -141,7 +141,7 @@ fn row(
                 let r = ui.small_button("Remove");
                 set_name(
                     &r,
-                    egui::WidgetType::Button,
+                    egui::Role::Button,
                     &scoped(root, &format!("Remove {name}")),
                     None,
                     None,
@@ -177,13 +177,7 @@ fn row(
                     .desired_rows(2)
                     .desired_width(ui.available_width()),
             );
-            set_name(
-                &r,
-                egui::WidgetType::TextEdit,
-                &vname,
-                None,
-                Some(buf.clone()),
-            );
+            set_name(&r, egui::Role::TextInput, &vname, None, Some(buf.clone()));
             if r.changed() && buf != **s {
                 edit(act, ExtraValue::Str(buf.into()), true);
             }
@@ -192,13 +186,7 @@ fn row(
         ExtraValue::Int(n) => {
             let mut x = *n;
             let r = ui.add(egui::DragValue::new(&mut x));
-            set_name(
-                &r,
-                egui::WidgetType::DragValue,
-                &vname,
-                Some(x as f64),
-                None,
-            );
+            set_name(&r, egui::Role::SpinButton, &vname, Some(x as f64), None);
             if r.changed() && x != *n {
                 edit(act, ExtraValue::Int(x), true);
             }
@@ -209,7 +197,7 @@ fn row(
             let r = ui.add(egui::Checkbox::without_text(&mut on));
             let (n, enabled, sel) = (vname.clone(), r.enabled(), on);
             r.widget_info(move || {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, sel, n.clone())
+                egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, sel, n.clone())
             });
             if r.changed() {
                 edit(act, ExtraValue::Bool(on as u8), false);
@@ -218,13 +206,7 @@ fn row(
         ExtraValue::Float(bits) => {
             let mut f = f32::from_bits(*bits);
             let r = ui.add(egui::DragValue::new(&mut f).speed(0.01));
-            set_name(
-                &r,
-                egui::WidgetType::DragValue,
-                &vname,
-                Some(f as f64),
-                None,
-            );
+            set_name(&r, egui::Role::SpinButton, &vname, Some(f as f64), None);
             if r.changed() && f.to_bits() != *bits {
                 edit(act, ExtraValue::Float(f.to_bits()), true);
             }
@@ -255,7 +237,7 @@ fn bsx(
                 let r = ui.add_enabled(!locked, egui::Checkbox::new(&mut on, *name));
                 let (n, enabled, sel) = (scoped(root, name), r.enabled(), on);
                 r.widget_info(move || {
-                    egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, sel, n.clone())
+                    egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, sel, n.clone())
                 });
                 if locked {
                     r.on_disabled_hover_text(ANIMATED_HOVER);
@@ -284,7 +266,7 @@ fn inv(
             let mut deg = rot[i] as f64 / 1000.0 * 180.0 / std::f64::consts::PI;
             let r = ui.add(egui::DragValue::new(&mut deg).speed(1.0).suffix("°"));
             let n = scoped(root, &format!("Rotation {axis}"));
-            set_name(&r, egui::WidgetType::DragValue, &n, Some(deg), None);
+            set_name(&r, egui::Role::SpinButton, &n, Some(deg), None);
             if r.changed() {
                 // shortcut: saturates outside 0-65535 (about 3754 degrees); no wrap-around.
                 new[i] = (deg.to_radians() * 1000.0).round().clamp(0.0, 65535.0) as u16;
@@ -297,7 +279,7 @@ fn inv(
         let r = ui.add(egui::DragValue::new(&mut z).speed(0.01));
         set_name(
             &r,
-            egui::WidgetType::DragValue,
+            egui::Role::SpinButton,
             &scoped(root, "Zoom"),
             Some(z as f64),
             None,
@@ -487,7 +469,7 @@ struct AddState {
 fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor, have: &[&Extra]) {
     // T5b review Important 1: keyed by the session too, so a pick or a typed value never reaches the same block of
     // another NIF or session.
-    let id = egui::Id::new(("meshes-edit-extra-add", e.session, root, at.block));
+    let id = egui::Id::unique(("meshes-edit-extra-add", e.session, root, at.block));
     let mut st: AddState = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| AddState {
         name: prefill(EDITABLE[0]).to_string(),
         ..Default::default()
@@ -523,7 +505,7 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
             .response;
         set_name(
             &r,
-            egui::WidgetType::ComboBox,
+            egui::Role::ComboBox,
             &scoped(root, "Known extra data"),
             None,
             Some(shown),
@@ -564,7 +546,7 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
         let n = scoped(root, "Add type");
         set_name(
             &r,
-            egui::WidgetType::ComboBox,
+            egui::Role::ComboBox,
             &n,
             None,
             Some(EDITABLE[kind].into()),
@@ -582,14 +564,14 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
         );
         set_name(
             &r,
-            egui::WidgetType::TextEdit,
+            egui::Role::TextInput,
             &scoped(root, "Name"),
             None,
             Some(name.clone()),
         );
         let r = ui.add_enabled(!name.is_empty(), egui::Button::new("Add"));
         let label = if root { "Add to root" } else { "Add to shape" };
-        set_name(&r, egui::WidgetType::Button, label, None, None);
+        set_name(&r, egui::Role::Button, label, None, None);
         if r.clicked() {
             let k = EDITABLE[kind];
             act.push = Some((
@@ -642,7 +624,7 @@ fn known_row(
             );
             set_name(
                 &r,
-                egui::WidgetType::TextEdit,
+                egui::Role::TextInput,
                 &scoped(root, "Value"),
                 None,
                 Some(st.text.clone()),
@@ -652,7 +634,7 @@ fn known_row(
         let ready = !matches!(k.value, KnownValue::Text(Some(_))) || !st.text.trim().is_empty();
         let r = ui.add_enabled(ready, egui::Button::new("Add"));
         let label = if root { "Add to root" } else { "Add to shape" };
-        set_name(&r, egui::WidgetType::Button, label, None, None);
+        set_name(&r, egui::Role::Button, label, None, None);
         if r.clicked() {
             let value = match k.value {
                 KnownValue::Text(_) => ExtraValue::Str(std::mem::take(&mut st.text).trim().into()),
@@ -730,7 +712,7 @@ fn heel_row(
         let r = ui.add(egui::DragValue::new(&mut z).speed(0.1).max_decimals(2));
         set_name(
             &r,
-            egui::WidgetType::DragValue,
+            egui::Role::SpinButton,
             &scoped(false, "Heel height"),
             Some(z as f64),
             None,
@@ -790,7 +772,7 @@ fn heel_row(
         );
     }
     let r = ui.add_enabled(!blocked, egui::Button::new("Set heel height"));
-    set_name(&r, egui::WidgetType::Button, "Set heel height", None, None);
+    set_name(&r, egui::Role::Button, "Set heel height", None, None);
     if !r.clicked() {
         r.on_disabled_hover_text(HEEL_HH_UNSET);
         return;

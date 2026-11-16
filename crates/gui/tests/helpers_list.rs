@@ -53,9 +53,11 @@ const XSET: [&str; 3] = ["x.png", "x_roughness.png", "x_opacity.png"];
 
 fn harness(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(size)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -67,7 +69,7 @@ fn app(m: AppModel) -> Harness<'static, AppModel> {
 }
 
 fn textures_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("textures"))
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("textures"))
         .expect("the Textures panel is drawn")
         .outer_rect
 }
@@ -671,11 +673,13 @@ fn shots() {
     for (w, hgt) in [(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)] {
         let m = fixture(d.path(), &files, toml);
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, hgt))
             .with_pixels_per_point(1.0)
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(10);
         let img = h.render().expect("render");
         img.save(Path::new(&out).join(format!("helpers-{w}.png")))
@@ -712,7 +716,7 @@ fn textures_heading_stays_one_line_with_ten_thousand_selected() {
     let mut h = harness(m, egui::vec2(1100.0, 800.0));
     // The user dragged the Textures column narrow.
     h.ctx.data_mut(|d| {
-        d.insert_persisted(egui::Id::new("textures").with("chosen"), 220.0f32);
+        d.insert_persisted(egui::Id::unique("textures").with("chosen"), 220.0f32);
     });
     h.run_steps(4);
     let panel = textures_rect(&h);

@@ -113,9 +113,9 @@ pub fn strip_button(ui: &mut egui::Ui, name: &str) -> egui::Response {
 
 fn strip_sensing(ui: &mut egui::Ui, name: &str, sense: egui::Sense) -> egui::Response {
     let widget = if sense.senses_click() {
-        egui::WidgetType::Button
+        egui::Role::Button
     } else {
-        egui::WidgetType::Label
+        egui::Role::Label
     };
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(STRIP_WIDTH, ui.available_height()), sense);
@@ -363,7 +363,7 @@ pub fn column_stats(ctx: &egui::Context, model: &mut AppModel) -> Arc<ColumnStat
         selection_rev: model.multi.selection_rev,
         sizes: model.sizes_rev(),
     };
-    let id = egui::Id::new("column-stats");
+    let id = egui::Id::unique("column-stats");
     if let Some((k, s)) = ctx.data(|d| d.get_temp::<(StatsKey, Arc<ColumnStats>)>(id)) {
         if k == key {
             return s;
@@ -551,7 +551,7 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
                             .frame(false),
                         );
                         r.widget_info(|| {
-                            egui::WidgetInfo::selected(egui::WidgetType::Button, true, open, &name)
+                            egui::WidgetInfo::selected(egui::Role::Button, true, open, &name)
                         });
                         let hover = if open {
                             "Collapse the helper files (AO, masks, layers…)"
@@ -580,7 +580,7 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
     }
     #[cfg(feature = "test-hooks")]
     ui.ctx()
-        .data_mut(|d| d.insert_temp(egui::Id::new(HELPER_ROWS_DRAWN), drawn));
+        .data_mut(|d| d.insert_temp(egui::Id::unique(HELPER_ROWS_DRAWN), drawn));
 }
 
 /// Where the helper rows laid out in the last frame are counted (tests: only the rows in view).
@@ -589,7 +589,7 @@ const HELPER_ROWS_DRAWN: &str = "helper-rows-drawn";
 
 #[cfg(feature = "test-hooks")]
 pub fn helper_rows_drawn(ctx: &egui::Context) -> usize {
-    ctx.data(|d| d.get_temp(egui::Id::new(HELPER_ROWS_DRAWN)))
+    ctx.data(|d| d.get_temp(egui::Id::unique(HELPER_ROWS_DRAWN)))
         .unwrap_or(0)
 }
 
@@ -623,7 +623,7 @@ fn helper_row(
     // Registered before the cells, so the truncated labels keep their hover (the topmost widget wins the click).
     let resp = ui.interact(
         rect,
-        ui.id().with(("helper-row", &key)),
+        ui.scope_id().with(("helper-row", &key)),
         egui::Sense::click_and_drag(),
     );
     // Note HH5: dropped on a set card, as a tile is (a no-set helper is on no card, so this is its one way there).
@@ -634,7 +634,7 @@ fn helper_row(
     } else {
         format!("Helper {}: {role}{by_you}, {target}", item.name)
     };
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
     if chosen.contains(&key) {
         ui.painter().rect_filled(
             rect,
@@ -880,7 +880,7 @@ fn filter_row(ui: &mut egui::Ui, model: &mut AppModel) {
             ),
         ] {
             let r = ui.add_enabled(enabled, egui::Button::new(glyph));
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, name));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, name));
             if r.on_hover_text(format!("{hover} ({lo} to {hi} points)"))
                 .clicked()
             {
@@ -898,7 +898,7 @@ const COMBO_MENU: &str = "sdc-combo-menu";
 /// egui's own popups, so Esc reaches the menu. A menu not drawn at the last pass (another view) is closed.
 pub(crate) fn combo_menu_open(ctx: &egui::Context) -> bool {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data(|d| d.get_temp::<(u64, egui::Id)>(egui::Id::new(COMBO_MENU)))
+    ctx.data(|d| d.get_temp::<(u64, egui::Id)>(egui::Id::unique(COMBO_MENU)))
         .is_some_and(|(p, _)| p + 1 == pass)
 }
 
@@ -912,7 +912,7 @@ pub(crate) fn combo_menu(
     label: &str,
     content: impl FnOnce(&mut egui::Ui),
 ) -> egui::Response {
-    let any = egui::Id::new(COMBO_MENU);
+    let any = egui::Id::unique(COMBO_MENU);
     let id = any.with(key);
     let pass = ui.ctx().cumulative_pass_nr();
     let button = ui.button(label);
@@ -1006,7 +1006,7 @@ pub(super) fn drag_ghost(ctx: &egui::Context, model: &AppModel, thumbs: &mut Thu
     let rect = egui::Rect::from_min_size(pos + egui::vec2(12.0, 12.0), egui::Vec2::splat(40.0));
     let painter = ctx.layer_painter(egui::LayerId::new(
         egui::Order::Tooltip,
-        egui::Id::new("drag-ghost"),
+        egui::Id::unique("drag-ghost"),
     ));
     match thumbs.get(ctx, item) {
         Some(t) => painter.image(

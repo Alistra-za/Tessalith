@@ -20,9 +20,11 @@ fn leaf(dir: &std::path::Path) -> AppModel {
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 1400.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -111,7 +113,7 @@ fn the_preview_strip_has_no_inspector() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
     let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("preview-settings"))
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
             .expect("the settings strip is open at 1600 wide")
             .outer_rect;
     // The strip is drawn: it holds the texture's Compression group, and no section.

@@ -98,7 +98,7 @@ pub(super) fn held_value(
     current: f64,
     add: impl FnOnce(&mut egui::Ui, &mut f64) -> egui::Response,
 ) -> (egui::Response, Option<f64>) {
-    let (out, r) = held(ui, egui::Id::new(id), current, false, false, add);
+    let (out, r) = held(ui, egui::Id::unique(id), current, false, false, add);
     (r, out)
 }
 
@@ -130,6 +130,9 @@ pub(super) mod gesture {
             commits: vec![],
         };
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(300.0, 100.0))
             .build_ui_state(draw, st);
         h.run();
@@ -232,6 +235,9 @@ mod tests {
             commits: vec![],
         };
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(300.0, 100.0))
             .build_ui_state(slider_box, st);
         h.run();

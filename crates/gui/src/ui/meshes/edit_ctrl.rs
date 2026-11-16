@@ -136,7 +136,7 @@ fn preview(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             .response;
         set_name(
             &r,
-            egui::WidgetType::ComboBox,
+            egui::Role::ComboBox,
             "Preview animation",
             None,
             Some(shown),
@@ -252,7 +252,7 @@ fn row(
             let r = ui.add_enabled(!managed, egui::Button::new("Remove").small());
             set_name(
                 &r,
-                egui::WidgetType::Button,
+                egui::Role::Button,
                 &format!("Remove {title} controller"),
                 None,
                 None,
@@ -289,7 +289,7 @@ fn row(
             .response;
         set_name(
             &r,
-            egui::WidgetType::ComboBox,
+            egui::Role::ComboBox,
             &format!("{title} cycle"),
             None,
             Some(shown),
@@ -309,7 +309,7 @@ fn row(
             let r = ui.add(egui::Checkbox::without_text(&mut on));
             let (name, enabled, sel) = (format!("{title} {what}"), r.enabled(), on);
             r.widget_info(move || {
-                egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, sel, name.clone())
+                egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, sel, name.clone())
             });
             if r.changed() {
                 act.push = Some((
@@ -506,7 +506,7 @@ fn keys_body(
                 .response;
             set_name(
                 &r,
-                egui::WidgetType::ComboBox,
+                egui::Role::ComboBox,
                 &format!("{title} interpolation"),
                 None,
                 Some(shown.into()),
@@ -517,7 +517,7 @@ fn keys_body(
         });
     }
     let cursor = clock.map(|k| nif::anim::ctrl_time(k.t, freq, phase, span.0, span.1, flags));
-    let id = egui::Id::new(("meshes-edit-curve", c.block, seq));
+    let id = egui::Id::unique(("meshes-edit-curve", c.block, seq));
     let out = curve::curve(ui, id, title, keys, span, cursor, editable);
     if let Some(k) = out.keys {
         push_keys(act, e, c, at, seq, k, keys, true);
@@ -546,7 +546,7 @@ fn cell(ui: &mut egui::Ui, v: f32, name: &str) -> (Option<f32>, bool) {
             .speed(speed)
             .custom_formatter(|v, _| (v as f32).to_string()),
     );
-    set_name(&r, egui::WidgetType::DragValue, name, Some(x as f64), None);
+    set_name(&r, egui::Role::SpinButton, name, Some(x as f64), None);
     let changed = (r.changed() && x.to_bits() != v.to_bits()).then_some(x);
     (changed, r.drag_stopped() || r.lost_focus())
 }
@@ -568,7 +568,7 @@ fn swatch(ui: &mut egui::Ui, keys: &KeyData, k: usize, name: &str) -> (Option<Ke
             (r, was, egui::Popup::is_id_open(ui.ctx(), popup))
         })
         .inner;
-    set_name(&r, egui::WidgetType::ColorButton, name, None, None);
+    set_name(&r, egui::Role::ColorWell, name, None, None);
     let done = (was && !open) || (open && ui.input(|i| i.pointer.any_released()));
     let changed = r.changed();
     if hdr {
@@ -682,7 +682,7 @@ fn key_table(
                     let r = ui.small_button("Remove");
                     set_name(
                         &r,
-                        egui::WidgetType::Button,
+                        egui::Role::Button,
                         &format!("Remove {title} key {num}"),
                         None,
                         None,
@@ -752,7 +752,7 @@ fn add_key(
     let r = ui.add_enabled(editable && t.is_some(), egui::Button::new("Add key"));
     set_name(
         &r,
-        egui::WidgetType::Button,
+        egui::Role::Button,
         &format!("Add key to {title}"),
         None,
         None,
@@ -880,7 +880,7 @@ fn add_row(
     prop: &PropModel,
 ) {
     let slsf2 = shape_slsf2(e, shape);
-    let id = egui::Id::new(("meshes-edit-ctrl-add", prop.block));
+    let id = egui::Id::unique(("meshes-edit-ctrl-add", prop.block));
     let (mut class_idx, mut var): (usize, u32) = ui.data(|d| d.get_temp(id)).unwrap_or((0, 20));
     if owner == Owner::Shader {
         ui.horizontal(|ui| {
@@ -898,7 +898,7 @@ fn add_row(
                 .response;
             set_name(
                 &r,
-                egui::WidgetType::ComboBox,
+                egui::Role::ComboBox,
                 "Add controller class",
                 None,
                 Some(classes[class_idx].into()),
@@ -938,7 +938,7 @@ fn add_row(
                 .response;
             set_name(
                 &r,
-                egui::WidgetType::ComboBox,
+                egui::Role::ComboBox,
                 "Add controller variable",
                 None,
                 Some(shown),
@@ -958,7 +958,7 @@ fn add_row(
     );
     set_name(
         &r,
-        egui::WidgetType::Button,
+        egui::Role::Button,
         &format!("Add controller to {what} property"),
         None,
         None,
@@ -1131,7 +1131,7 @@ fn variable(
             .response;
         set_name(
             &r,
-            egui::WidgetType::ComboBox,
+            egui::Role::ComboBox,
             &format!("{title} variable"),
             None,
             Some(shown),

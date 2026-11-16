@@ -61,13 +61,15 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
 
 fn harness_at(model: AppModel, w: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 1000.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

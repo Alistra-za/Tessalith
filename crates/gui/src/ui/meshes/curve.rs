@@ -557,11 +557,7 @@ pub(super) fn curve(
             }
         }
         sr.widget_info(|| {
-            egui::WidgetInfo::labeled(
-                egui::WidgetType::Other,
-                true,
-                format!("{name} colour strip"),
-            )
+            egui::WidgetInfo::labeled(egui::Role::Unknown, true, format!("{name} colour strip"))
         });
         let area = egui::Rect::from_x_y_ranges(plot.x_range(), strip.y_range());
         let painter = ui.painter_at(strip);

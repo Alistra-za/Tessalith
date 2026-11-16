@@ -125,7 +125,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
             let enabled = ui.is_enabled();
             r.widget_info(|| {
                 egui::WidgetInfo::labeled(
-                    egui::WidgetType::ComboBox,
+                    egui::Role::ComboBox,
                     enabled,
                     format!("Mode (this project): {}", target_name(model.target)),
                 )
@@ -167,7 +167,7 @@ fn preset_row(ui: &mut egui::Ui, model: &mut AppModel) -> Option<Option<String>>
             let enabled = ui.is_enabled();
             r.widget_info(|| {
                 egui::WidgetInfo::labeled(
-                    egui::WidgetType::ComboBox,
+                    egui::Role::ComboBox,
                     enabled,
                     format!("Preset (this project): {text}"),
                 )
@@ -220,7 +220,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                         let r = row_label(ui, "Export folder");
                         let enabled = ui.is_enabled();
                         r.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::Label, enabled, &name)
+                            egui::WidgetInfo::labeled(egui::Role::Label, enabled, &name)
                         });
                         r.on_hover_text(&hover);
                         ui.add(
@@ -235,7 +235,7 @@ fn export_folder_row(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
                         let button = |ui: &mut egui::Ui, on: bool, text: &str, name: &str| {
                             let r = ui.add_enabled(on, egui::Button::new(text));
                             r.widget_info(|| {
-                                egui::WidgetInfo::labeled(egui::WidgetType::Button, on, name)
+                                egui::WidgetInfo::labeled(egui::Role::Button, on, name)
                             });
                             r
                         };
@@ -278,12 +278,7 @@ fn app(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
         let r = ui.checkbox(&mut live, "Live encode");
         let enabled = ui.is_enabled();
         r.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::Checkbox,
-                enabled,
-                live,
-                "Live encode setting",
-            )
+            egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, live, "Live encode setting")
         });
         if r.on_hover_text(
             "Encode the expanded preview after every edit (otherwise use Encode now)",
@@ -306,7 +301,7 @@ fn app(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
         for (on, text, name) in boxes {
             let r = ui.checkbox(on, text);
             let v = *on;
-            r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, true, v, name));
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, true, v, name));
         }
         if c != now {
             acts.push(Act::Checks(c));
@@ -328,7 +323,7 @@ fn app(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
             let enabled = ui.is_enabled();
             r.widget_info(|| {
                 egui::WidgetInfo::selected(
-                    egui::WidgetType::Checkbox,
+                    egui::Role::CheckBox,
                     enabled,
                     v,
                     format!("{text} column"),

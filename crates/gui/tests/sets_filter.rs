@@ -28,14 +28,16 @@ fn visible_ids(m: &AppModel) -> Vec<String> {
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
 fn sets_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::new("sets"))
+    PanelState::load(&h.ctx, Id::unique("sets"))
         .expect("the Sets panel is drawn")
         .outer_rect
 }

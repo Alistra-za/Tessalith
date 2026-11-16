@@ -72,9 +72,11 @@ fn rock_rows(m: &AppModel) -> usize {
 
 fn ui_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -144,7 +146,7 @@ fn rock_bump_has_one_problems_row_and_no_card() {
     h.run();
     assert!(sets_column_labels(&h, "rock_bump").is_empty());
     assert!(!sets_column_labels(&h, "barrel").is_empty());
-    let textures = PanelState::load(&h.ctx, Id::new("textures")).expect("the Textures column");
+    let textures = PanelState::load(&h.ctx, Id::unique("textures")).expect("the Textures column");
     assert!(
         h.query_all_by_label("rock_bump.png")
             .any(|n| textures.outer_rect.contains_rect(n.rect())),

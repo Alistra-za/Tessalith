@@ -62,7 +62,7 @@ fn num(
         );
         let x = *v;
         r.widget_info(|| {
-            let mut i = egui::WidgetInfo::new(egui::WidgetType::DragValue);
+            let mut i = egui::WidgetInfo::new(egui::Role::SpinButton);
             i.enabled = r.enabled();
             i.label = Some(name.to_string());
             i.value = Some(x);
@@ -86,7 +86,7 @@ fn colour(
     }
     let mut c = pending.map_or(current, |p| p.0);
     let r = ui.color_edit_button_srgb(&mut c);
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, r.enabled(), name));
     if r.changed() {
         pending = Some((c, false));
     }
@@ -120,7 +120,7 @@ fn named_combo(
         .find(|(v, _)| v == current)
         .map_or_else(|| current.to_string(), |(_, l)| l.clone());
     r.widget_info(|| {
-        let mut i = egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, r.enabled(), name);
+        let mut i = egui::WidgetInfo::labeled(egui::Role::ComboBox, r.enabled(), name);
         i.current_text_value = Some(shown.clone());
         i
     });
@@ -130,7 +130,7 @@ fn named_combo(
 fn checkbox(ui: &mut egui::Ui, on: bool, name: &str) -> (Option<bool>, egui::Response) {
     let mut v = on;
     let r = ui.add(egui::Checkbox::new(&mut v, ""));
-    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, name));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), v, name));
     (r.changed().then_some(v), r)
 }
 
@@ -144,7 +144,7 @@ struct Cx<'a> {
 
 impl Cx<'_> {
     fn id(&self, field: &str) -> egui::Id {
-        egui::Id::new(("cube", self.key, field))
+        egui::Id::unique(("cube", self.key, field))
     }
 
     /// The engine's CFG-INVALID lines for `field`, shown under its row.
@@ -186,7 +186,7 @@ impl Cx<'_> {
             explain(
                 ui,
                 scope.response.rect,
-                ui.id().with(("cube-why", f.field)),
+                ui.scope_id().with(("cube-why", f.field)),
                 why,
             );
         }
@@ -467,7 +467,7 @@ fn faces(
             ui.add_enabled_ui(!off, |ui| {
                 let (p, _) = named_combo(
                     ui,
-                    egui::Id::new(("cube-rot", cx.key, i)),
+                    egui::Id::unique(("cube-rot", cx.key, i)),
                     &json!(rot[i]),
                     &opts("cubemap.face_rotate"),
                     &format!("Cubemap {face} rotation"),
@@ -478,7 +478,7 @@ fn faces(
                 }
                 let (p, _) = named_combo(
                     ui,
-                    egui::Id::new(("cube-flip", cx.key, i)),
+                    egui::Id::unique(("cube-flip", cx.key, i)),
                     &json!(flip[i]),
                     &opts("cubemap.face_flip"),
                     &format!("Cubemap {face} flip"),
@@ -493,7 +493,7 @@ fn faces(
             explain(
                 ui,
                 row.response.rect,
-                ui.id().with(("cube-why-face", i)),
+                ui.scope_id().with(("cube-why-face", i)),
                 why.clone(),
             );
         }
@@ -545,7 +545,7 @@ mod tests {
         let (done, _) = num(
             ui,
             false,
-            egui::Id::new("n"),
+            egui::Id::unique("n"),
             s.cur,
             0.0..=10.0,
             0.1,

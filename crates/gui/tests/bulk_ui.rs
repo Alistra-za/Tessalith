@@ -12,12 +12,14 @@ const LEAF: &str = "landscape/leaf.png";
 /// A harness over `model`. The crate bundles no fonts, so the harness needs the system fonts, as the app does.
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -116,12 +118,14 @@ fn esc_closes_the_slot_commands_modal_and_keeps_the_selection() {
     let mut state = sdc_gui::ui::State::default();
     state.slot_cmds.open = Some(key.clone());
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, state),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.key_press(Key::Escape);
     h.run();
@@ -375,9 +379,11 @@ fn the_bulk_panel_has_size_and_dds_header_rows() {
     m.click_item(LEAF, true, false);
     // Tall enough that the Size group is on screen.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 1600.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("2 textures selected");
     h.get_by_label("Size");

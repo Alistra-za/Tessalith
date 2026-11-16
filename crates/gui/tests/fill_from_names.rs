@@ -149,12 +149,14 @@ fn a_batch_never_adds_both_cnr_and_f() {
 
 fn harness(m: AppModel) -> Harness<'static, (AppModel, State)> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (model, state): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, model, state),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

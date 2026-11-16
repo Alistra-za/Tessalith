@@ -31,12 +31,14 @@ fn tall(mut model: AppModel) -> Harness<'static, AppModel> {
     let key = view(&model).key;
     model.select_set(&key);
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 2400.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -416,11 +418,13 @@ fn render_the_card() {
     m.select_set(&key);
     let scale = 1.5;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1440.0, 2400.0))
         .with_pixels_per_point(scale)
         .wgpu()
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(6);
     // The set card's kind pill (layout v2 A5) reads the same; the editor's card is the right-most node.
     let top = h

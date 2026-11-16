@@ -13,13 +13,15 @@ const ROCK: &str = "landscape/rock01";
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1600.0, 1000.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.ctx.global_style_mut(|s| {
         s.interaction.tooltip_delay = 0.0;
         s.interaction.show_tooltips_only_when_still = false;
@@ -103,7 +105,7 @@ fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     h.run();
     // The default column is too narrow for half a card to hold "PBR Landscape (auto)": widen it, as a drag leaves it.
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 460.0_f32));
+        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 460.0_f32));
     h.run();
     let card = card_rect(&h);
     let kind = on_card(&h, "PBR Landscape");
@@ -710,13 +712,15 @@ fn many(m: AppModel) -> SetsHarness {
 
 fn many_at(m: AppModel, width: f32) -> SetsHarness {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(width, 900.0))
         .with_max_steps(16)
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, sdc_gui::ui::State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -758,7 +762,7 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
     h.step();
     // The first card wholly past the panel is the next stop that is only a stand-in. (A card whose position label
     // is cut off by the bottom edge is drawn, so its Tab stops are its own parts, not a stand-in.)
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets panel")
         .outer_rect;
     let next = *off
@@ -848,7 +852,7 @@ fn card_heights_refresh_after_a_resize() {
         .for_each(|s| s.members = all.iter().cycle().take(all.len() * 4).cloned().collect());
     m.invalidate_views();
     let mut h = many_at(m, 2600.0);
-    let chosen = egui::Id::new("sets").with("chosen");
+    let chosen = egui::Id::unique("sets").with("chosen");
     h.ctx.data_mut(|d| d.insert_persisted(chosen, 520.0_f32));
     h.run();
     let far = measure_far_card(&mut h, 50);

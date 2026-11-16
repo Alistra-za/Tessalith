@@ -113,12 +113,14 @@ fn the_settings_panel_and_the_status_line_show_the_estimate() {
     m.select_item("landscape/rock01.png");
     let e = m.size_of("landscape/rock01.png").unwrap();
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, model: &mut sdc_gui::model::AppModel| sdc_gui::ui::draw(ui, model),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let line = format!(
         "Output: {} · 64×64 · {} mips · {} ≈ VRAM",
@@ -179,12 +181,14 @@ fn the_header_vram_line_is_cached_and_follows_landing_dims() {
     m.invalidate_views();
     m.select_item("landscape/rock01.png");
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, model: &mut sdc_gui::model::AppModel| sdc_gui::ui::draw(ui, model),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let line = |h: &egui_kittest::Harness<'static, sdc_gui::model::AppModel>| {
         use egui_kittest::kittest::NodeT;
         let n = h.get_by_label_contains("≈ VRAM: selection ");

@@ -52,7 +52,7 @@ pub fn window_title(model: &AppModel) -> String {
 
 /// Send the title only when it changes.
 fn set_title(ctx: &egui::Context, title: String) {
-    let id = egui::Id::new("sdc-window-title");
+    let id = egui::Id::unique("sdc-window-title");
     let same = ctx.data(|d| d.get_temp::<String>(id).is_some_and(|t| t == title));
     if !same {
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(title.clone()));
@@ -488,7 +488,7 @@ fn undo_redo(ui: &mut egui::Ui, model: &mut AppModel) {
                 ui.add_sized(slot, egui::Button::new(&b.text).truncate())
             })
             .inner;
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, b.enabled, &b.name));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, b.enabled, &b.name));
         let r = r
             .on_hover_text(b.hover.clone())
             .on_disabled_hover_text(b.hover);
@@ -589,7 +589,7 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
     // and honoured only within two passes of the click: one left while the combo was not drawn is dropped then, as
     // stale, and never opens the menu later.
     egui::Popup::menu(&combo)
-        .id(egui::Id::new("preset_choose_menu"))
+        .id(egui::Id::unique("preset_choose_menu"))
         .open_memory(request.then_some(egui::SetOpenCommand::Bool(true)))
         .show(|ui| body(ui));
     if presets {
@@ -621,7 +621,7 @@ pub fn view_toggle(ui: &mut egui::Ui) {
                 .min_size(egui::vec2(w, h)),
         );
         let enabled = ui.is_enabled();
-        r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, enabled, on, name));
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, enabled, on, name));
         r
     };
     fit(ui, view_tabs_width(ui));
@@ -644,12 +644,12 @@ fn view_tabs_width(ui: &egui::Ui) -> f32 {
 
 /// Switch the view (also the saved one coming back at start, AG17).
 pub fn set_meshes_view(ctx: &egui::Context, meshes: bool) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new("sdc-meshes-view"), meshes));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique("sdc-meshes-view"), meshes));
 }
 
 /// True when the Meshes view is shown instead of the Textures view.
 pub fn meshes_view_active(ctx: &egui::Context) -> bool {
-    ctx.data(|d| d.get_temp::<bool>(egui::Id::new("sdc-meshes-view")))
+    ctx.data(|d| d.get_temp::<bool>(egui::Id::unique("sdc-meshes-view")))
         .unwrap_or(false)
 }
 
@@ -735,7 +735,7 @@ fn export_to_menu(ui: &mut egui::Ui, model: &mut AppModel, text: String, full: O
     };
     let enabled = ui.is_enabled();
     r.response
-        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, &name));
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, enabled, &name));
     let root_open = model.root.is_some();
     r.response.on_hover_text(match full {
         Some(f) => f,

@@ -29,7 +29,7 @@ enum Edit {
 }
 
 /// Names `r` (a combo or a button with a short visible text) for a screen reader and tests.
-pub(super) fn named(r: &egui::Response, kind: egui::WidgetType, name: &str, value: Option<&str>) {
+pub(super) fn named(r: &egui::Response, kind: egui::Role, name: &str, value: Option<&str>) {
     r.widget_info(|| {
         let mut i = egui::WidgetInfo::labeled(kind, r.enabled(), name);
         i.current_text_value = value.map(str::to_string);
@@ -192,7 +192,7 @@ fn output_items(
     h: &HelperReport,
 ) -> Vec<(String, String)> {
     type Slot = (String, u64, Vec<(String, String)>);
-    let id = egui::Id::new("helper-panel-outputs");
+    let id = egui::Id::unique("helper-panel-outputs");
     let rev = model.items_rev();
     if let Some((k, r, v)) = ctx.data(|d| d.get_temp::<Slot>(id)) {
         if k == key && r == rev {
@@ -237,7 +237,7 @@ fn hint(ui: &mut egui::Ui, text: &str) {
 /// A small Reset button named `name` with `hover`, off with `ro`'s reason; the texture panel's Helper row uses it too.
 pub(crate) fn reset(ui: &mut egui::Ui, name: &str, hover: &str, ro: &Option<String>) -> bool {
     let r = ui.small_button("Reset");
-    named(&r, egui::WidgetType::Button, name, None);
+    named(&r, egui::Role::Button, name, None);
     why(r.on_hover_text(hover), ro).clicked()
 }
 
@@ -305,14 +305,14 @@ pub(crate) fn role_combo(
             }
         }
     });
-    named(&r, egui::WidgetType::ComboBox, "Helper role", Some(&shown));
+    named(&r, egui::Role::ComboBox, "Helper role", Some(&shown));
     why(r, ro);
     picked
 }
 
 /// The id of a texture's ticked Helper box while it has no role yet (Note HI5): egui temp data, never written.
 pub(crate) fn tick_id(key: &str) -> egui::Id {
-    egui::Id::new(("helper-tick", key))
+    egui::Id::unique(("helper-tick", key))
 }
 
 /// The Helper tick (Note HI4), named "Helper". `shared_with` other sets stop using the file when it is unticked (HI16).
@@ -324,9 +324,7 @@ pub(crate) fn helper_tick(
 ) -> egui::Response {
     let mut v = on;
     let r = ui.add_enabled(ro.is_none(), egui::Checkbox::new(&mut v, ""));
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, "Helper")
-    });
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), v, "Helper"));
     let r = match shared_with {
         0 => r,
         1 => r.on_hover_text("Also used by 1 other set: it stops using it too."),
@@ -377,7 +375,7 @@ fn fills_rows(
             );
             let hover = format!("Stop filling {}", fill_text(*t));
             let r = ui.small_button("✕");
-            named(&r, egui::WidgetType::Button, &hover, None);
+            named(&r, egui::Role::Button, &hover, None);
             if why(r.on_hover_text(&hover), ro).clicked() {
                 // Removing one fill writes the rest as hand-set: the list is the user's from now on.
                 let rest = now.iter().copied().filter(|x| x != t).collect();
@@ -418,7 +416,7 @@ fn fills_rows(
             });
             named(
                 &r,
-                egui::WidgetType::ComboBox,
+                egui::Role::ComboBox,
                 "Add fill target",
                 Some("Add target"),
             );
@@ -451,7 +449,7 @@ fn read_rows(
             }
         }
     });
-    named(&r, egui::WidgetType::ComboBox, "Read from", Some(shown));
+    named(&r, egui::Role::ComboBox, "Read from", Some(shown));
     why(r, ro);
     hint(ui, "the helper's channel used");
     ui.end_row();

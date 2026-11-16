@@ -54,6 +54,9 @@ fn the_instance_lists_its_profiles_and_the_hover_names_both() {
 fn the_popup_picks_a_profile_and_stays_open_until_a_click_outside() {
     let d = instance();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(900.0, 600.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| {

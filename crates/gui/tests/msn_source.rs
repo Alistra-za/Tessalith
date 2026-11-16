@@ -74,9 +74,11 @@ fn the_panel_shows_baked_in_for_an_msn() {
     let mut m = fixture(d.path());
     m.select_item(MSN);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(4);
     h.get_by_label("Baked in");
     h.state_mut().select_item(DIFFUSE);

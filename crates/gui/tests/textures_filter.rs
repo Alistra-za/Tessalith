@@ -219,9 +219,11 @@ fn keys_and_ranges_follow_the_sorted_order() {
 
 fn app_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -288,7 +290,7 @@ fn no_filter_no_message() {
 
 /// The Textures panel's rect: the mips "Filter" field and Task 3.4's Sets button also match "Filter" (K15).
 fn textures_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("textures"))
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("textures"))
         .expect("the Textures panel is drawn")
         .outer_rect
 }

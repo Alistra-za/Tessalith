@@ -165,12 +165,14 @@ fn both_pitfalls_fire() {
 
 fn panel(m: AppModel) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(800.0, 1400.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // Layout v2 A3: the group starts collapsed, set or not.
     h.run();
     h.get_by_label("NiAlphaProperty").click();
@@ -411,12 +413,14 @@ fn the_json_editor_reads_integers_as_floats_too() {
     m.set_json_value(SET, "alphaprop_flags", Some(json!(4844.0)));
     m.json_editor_open = true;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1000.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::json_editor::view(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label_contains("stored -2 is not valid; clamped to a whole number 0-255");
     assert!(
@@ -513,12 +517,14 @@ fn esc_cancels_truepbr_rename_and_match_edits() {
     m.set_json_name("mine");
     m.json_editor_open = true;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1000.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::json_editor::view(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     type_raw(&mut h, "aaa_one", "bbb_two", esc);
     assert_eq!(

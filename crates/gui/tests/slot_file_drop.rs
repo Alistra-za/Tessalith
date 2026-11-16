@@ -156,12 +156,14 @@ impl eframe::egui::DroppedFile for Dropped {
 
 fn harness(m: AppModel) -> Harness<'static, (AppModel, State)> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (model, state): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, model, state),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -237,13 +239,15 @@ fn drop_on_card_scrolled_out_of_view_opens_folder_not_slot() {
         .key;
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         // A low window, so the column scrolls.
         .with_size(eframe::egui::vec2(1400.0, 240.0))
         .build_ui_state(
             |ui, (model, state): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, model, state),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let card = slot_rect(&h, "Diffuse");
     // Note FB2: the set editor is one scroll area filling the centre (its heading scrolls too); the window header is
@@ -254,6 +258,7 @@ fn drop_on_card_scrolled_out_of_view_opens_folder_not_slot() {
     h.event(eframe::egui::Event::MouseWheel {
         unit: eframe::egui::MouseWheelUnit::Point,
         delta: eframe::egui::vec2(0.0, -(card.top() - y + 30.0)),
+        source: eframe::egui::MouseWheelSource::Wheel,
         phase: eframe::egui::TouchPhase::Move,
         modifiers: eframe::egui::Modifiers::NONE,
     });

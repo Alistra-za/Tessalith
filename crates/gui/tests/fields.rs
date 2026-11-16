@@ -594,12 +594,14 @@ fn the_one_bit_alpha_box_shows_only_for_bc1() {
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m.select_item(LEAF);
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, model: &mut sdc_gui::model::AppModel| sdc_gui::ui::draw(ui, model),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let top = |h: &egui_kittest::Harness<'_, sdc_gui::model::AppModel>, label: &str| {
         h.query_all_by_label(label).next().map(|n| n.rect().top())

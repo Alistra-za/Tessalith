@@ -737,12 +737,14 @@ type H = Harness<'static, (AppModel, SetPreview)>;
 
 fn panel(m: AppModel) -> H {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(520.0, 1000.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, SetPreview)| sdc_gui::ui::set_preview::draw(ui, m, s),
             (m, SetPreview::new(None, DEFAULT_CAP)),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

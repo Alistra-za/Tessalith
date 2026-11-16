@@ -30,7 +30,7 @@ fn field_text(field: &str) -> String {
 
 /// The "only what differs" tick lives in egui memory: one value for the app, kept across selections (Note JI3).
 fn only_differences_id() -> egui::Id {
-    egui::Id::new("inspector-only-differences")
+    egui::Id::unique("inspector-only-differences")
 }
 
 /// Folded by default; the body draws only while open, so a closed section costs one header.
@@ -108,9 +108,7 @@ fn body(ui: &mut egui::Ui, model: &AppModel, key: &str) {
                             .show_tooltip_when_elided(false),
                     )
                     .on_hover_text(&name);
-                key_label.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name)
-                });
+                key_label.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
                 ui.add(egui::Label::new(text(value_text(&r.value))).truncate());
                 ui.add(
                     egui::Label::new(

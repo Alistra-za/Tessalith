@@ -361,9 +361,11 @@ fn statics_are_off(mut m: AppModel) {
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -1003,10 +1005,12 @@ fn render_shared_set_shots() {
         let key = view(&m, X).key;
         m.select_set(&key);
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, 700.0))
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::new())
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         for _ in 0..8 {
             h.run_steps(1);
             std::thread::sleep(Duration::from_millis(40));
@@ -2654,10 +2658,12 @@ fn render_picker_shots() {
     };
     let build = |m: AppModel, w: f32| {
         let h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, 760.0))
             .renderer(egui_kittest::wgpu::WgpuTestRenderer::new())
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h
     };
     for w in [1100.0f32, 1280.0, 1600.0] {

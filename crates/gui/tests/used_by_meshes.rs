@@ -158,6 +158,9 @@ fn no_scan_database_hides_the_list_and_a_database_reads_it_off_the_ui_thread() {
     m.select_item(key);
     assert!(m.used_by_for(key).is_none(), "no database: hidden");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run();

@@ -118,6 +118,9 @@ type T = Harness<'static, Tiny>;
 
 fn tiny(ui: impl FnMut(&mut egui::Ui, &mut Tiny) + 'static) -> T {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(vec2(400.0, 300.0))
         .build_ui_state(
             ui,
@@ -126,7 +129,6 @@ fn tiny(ui: impl FnMut(&mut egui::Ui, &mut Tiny) + 'static) -> T {
                 ..Tiny::default()
             },
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(3);
     h
 }
@@ -275,7 +277,7 @@ fn typing_without_a_focused_field_is_refused() {
 #[test]
 fn drag_carries_a_payload_between_widgets() {
     let mut h = tiny(|ui, s| {
-        ui.dnd_drag_source(egui::Id::new("src"), 7u32, |ui| {
+        ui.dnd_drag_source(egui::Id::unique("src"), 7u32, |ui| {
             ui.label("a");
         });
         ui.add_space(40.0);
@@ -589,8 +591,12 @@ type Shared = std::rc::Rc<std::cell::Cell<egui::Rect>>;
 
 /// Findings of every check on one frame of a tiny UI in a `w`x`h` window.
 fn found(w: f32, h: f32, ui: impl FnMut(&mut egui::Ui) + 'static) -> Vec<Finding> {
-    let mut h = Harness::builder().with_size(vec2(w, h)).build_ui(ui);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(vec2(w, h))
+        .build_ui(ui);
     h.run();
     run_checks(&snapshot(&h))
 }
@@ -610,7 +616,7 @@ fn tile(
     paint: impl FnOnce(&egui::Painter, egui::Rect),
 ) -> egui::Rect {
     let (r, resp) = ui.allocate_exact_size(vec2(32.0, 32.0), egui::Sense::click());
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
     paint(ui.painter(), r);
     r
 }
@@ -716,8 +722,8 @@ fn off_window_flags_a_button_cut_by_the_edge() {
 #[test]
 fn overlap_spares_a_badge_centred_on_a_chip_corner() {
     let hit = |ui: &mut egui::Ui, at: egui::Rect, name: &str| {
-        let r = ui.interact(at, ui.id().with(name), egui::Sense::click());
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name));
+        let r = ui.interact(at, ui.scope_id().with(name), egui::Sense::click());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
     };
     let chip = egui::Rect::from_min_size(egui::pos2(100.0, 60.0), vec2(32.0, 32.0));
     let overlaps = |badge: egui::Rect| {
@@ -860,9 +866,7 @@ fn painted_only_matches_whole_words_and_skips_glyphs() {
                 ("Smaller tiles", "\u{2212}"),
             ] {
                 let (r, resp) = ui.allocate_exact_size(vec2(90.0, 30.0), egui::Sense::click());
-                resp.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, name)
-                });
+                resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
                 ui.painter().text(
                     r.center(),
                     egui::Align2::CENTER_CENTER,

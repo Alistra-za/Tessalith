@@ -36,9 +36,11 @@ fn broken(dir: &std::path::Path) -> AppModel {
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1200.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| json_editor::view(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let mut h = h;
     h.run();
     h

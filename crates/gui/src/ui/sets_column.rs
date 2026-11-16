@@ -293,7 +293,7 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
     } else {
         letter.to_string()
     };
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
     r
 }
 
@@ -490,7 +490,7 @@ fn check_badge(ui: &mut egui::Ui, v: &SetView, checks: &[(&str, &Warning)], acts
     ));
     r.widget_info(|| {
         egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
+            egui::Role::Button,
             true,
             if n == 0 {
                 "Check results: info only".to_string()
@@ -830,7 +830,9 @@ fn draw_dock(
                 let Some(item) = model.item(&d.helper) else {
                     continue;
                 };
-                let id = ui.id().with(("dock", &v.id, &d.helper, d.slot, d.channel));
+                let id = ui
+                    .scope_id()
+                    .with(("dock", &v.id, &d.helper, d.slot, d.channel));
                 let r = ui.interact(hit, id, egui::Sense::click_and_drag());
                 if ui.is_rect_visible(rect) {
                     match thumbs.get(ui.ctx(), item) {
@@ -854,7 +856,7 @@ fn draw_dock(
                         .rect_stroke(rect, 1.0, stroke, egui::StrokeKind::Inside);
                 }
                 let name = format!("{}, fills {}", item.name, fill_text(d.target));
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                 member_acts(model, v, &d.helper, None, true, &r, acts, member_menu);
                 let target = item
                     .helper
@@ -869,7 +871,9 @@ fn draw_dock(
                 let k = *k;
                 let hidden = &entries[entries.len() - k..];
                 let slot = chip_letter(v, hidden[0].slot);
-                let id = ui.id().with(("dock-more", &v.id, hidden[0].slot, pos));
+                let id = ui
+                    .scope_id()
+                    .with(("dock-more", &v.id, hidden[0].slot, pos));
                 let r = ui.interact(hit, id, egui::Sense::hover());
                 if ui.is_rect_visible(rect) {
                     let font = egui::TextStyle::Small.resolve(ui.style());
@@ -889,7 +893,7 @@ fn draw_dock(
                     );
                 }
                 let name = format!("{k} more helpers fill {slot}");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &name));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
                 let lines: Vec<String> = hidden
                     .iter()
                     .map(|d| {
@@ -1040,7 +1044,7 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
         })
         .response;
         // The Textures column has its own "Filter ▾", so this one is named apart.
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         r.on_hover_text("Only sets with this shader");
     });
 }
@@ -1332,7 +1336,7 @@ fn group_header(
     let (_, rect) = ui.allocate_space(egui::vec2(ui.available_width(), height));
     let resp = ui.interact(
         rect,
-        ui.id().with(("set-group", &h.name)),
+        ui.scope_id().with(("set-group", &h.name)),
         egui::Sense::click(),
     );
     let over_set = editing.on
@@ -1367,7 +1371,7 @@ fn group_header(
             chevron(ui, h.collapsed);
             // Cut short, the whole name is on hover and in the AccessKit name.
             let name = ui.add(egui::Label::new(egui::RichText::new(&h.name).strong()).truncate());
-            name.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &h.name));
+            name.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &h.name));
         },
         |ui| {
             super::status::dot(ui, h.status);
@@ -1390,7 +1394,7 @@ fn group_header(
         },
     );
     let name = h.node_name();
-    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
     ui.ctx()
         .accesskit_node_builder(resp.id, |n| n.set_expanded(!h.collapsed));
     if resp.clicked() {
@@ -1665,7 +1669,7 @@ pub fn draw(
             };
             let v = &views[index];
             let h = st.card_h.get(&v.id).copied().unwrap_or(est);
-            let id = ui.id().with(("set-card", &v.key, &v.id));
+            let id = ui.scope_id().with(("set-card", &v.key, &v.id));
             let selected = !v.key.is_empty() && sel_sets.contains(&v.key);
             let mut card = |ui: &mut egui::Ui| {
                 let probe =
@@ -1765,7 +1769,7 @@ pub fn draw(
             new_set_area(ui, &editing, &mut acts);
         }
     });
-    st.view = Some((out.state.offset.y, out.inner_rect.height()));
+    st.view = Some((out.state.clamped_offset().y, out.inner_rect.height()));
     st.anchor = anchor;
     st.reveal_seen = reveal.clone().filter(|_| reveal_drawn);
     let go_to = reveal.is_some();
@@ -1999,11 +2003,7 @@ fn position_label(ui: &mut egui::Ui, n: usize, total: usize) {
     ui.painter().galley(at, galley, color);
     // K6: the number carries the name; the card's own response has none.
     r.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            true,
-            format!("Position {n} of {total}"),
-        )
+        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("Position {n} of {total}"))
     });
 }
 
@@ -2043,7 +2043,7 @@ fn move_to_hits(views: &[SetView], query: &str) -> MoveHits {
 /// The dashed area at the bottom: a texture dropped here starts a new set.
 fn new_set_area(ui: &mut egui::Ui, editing: &Editing, acts: &mut Vec<Act>) {
     // Note HN F6: weak text, the selection accent while last frame's zone had a dragged texture over it.
-    let hot_id = ui.id().with("new_set_hint_hot");
+    let hot_id = ui.scope_id().with("new_set_hint_hot");
     let hot = ui.data(|d| d.get_temp::<bool>(hot_id)).unwrap_or(false);
     let colour = if hot {
         ui.visuals().selection.stroke.color
@@ -2193,7 +2193,7 @@ fn pill(
         .fill(fill);
     let card_margin = card.total_margin();
     let builder = egui::UiBuilder::new()
-        .id(look.id)
+        .scope_id(look.id)
         .sense(egui::Sense::click());
     let scoped = ui.scope_builder(builder, |ui| {
         if look.dragging {
@@ -2294,9 +2294,7 @@ fn pill(
                             egui::Label::new(egui::RichText::new(&shown).strong())
                                 .wrap_mode(egui::TextWrapMode::Extend),
                         );
-                        r.widget_info(|| {
-                            egui::WidgetInfo::labeled(egui::WidgetType::Label, true, &v.id)
-                        });
+                        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &v.id));
                         if shown != v.id {
                             r.on_hover_text(&v.id);
                         }
@@ -2532,7 +2530,7 @@ fn chip_row<'a>(
         }
         let entries: Vec<&Docked> = dock.iter().filter(|d| d.slot == k).collect();
         let name = chip_name(model, &letter, mk, &entries);
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         plans.push(plan_dock(
             model,
             r.rect,
@@ -2549,7 +2547,7 @@ fn chip_row<'a>(
         fixed.push(r.rect);
         let text = m.text();
         r.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, format!("Missing: {text}"))
+            egui::WidgetInfo::labeled(egui::Role::Button, true, format!("Missing: {text}"))
         });
         let r = r.on_hover_text(format!("no file matches {text}"));
         *member_menu |= r.secondary_clicked();
@@ -2616,7 +2614,7 @@ fn chip_row<'a>(
         if let Some(r) = r {
             fixed.push(r.rect);
             let name = format!("{}, {role}", item.name);
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
         }
     }
     (plans, fixed)
@@ -2667,7 +2665,7 @@ fn shader_combo(
                 });
                 super::helper_panel::named(
                     &r,
-                    egui::WidgetType::ComboBox,
+                    egui::Role::ComboBox,
                     &format!("Shader for {}", v.id),
                     Some(&text),
                 );
@@ -3339,7 +3337,7 @@ fn target_row(
             let (rect, resp) =
                 ui.allocate_exact_size(egui::vec2(ui.available_width(), h), egui::Sense::click());
             resp.widget_info(|| {
-                egui::WidgetInfo::selected(egui::WidgetType::Button, why.is_none(), selected, &name)
+                egui::WidgetInfo::selected(egui::Role::Button, why.is_none(), selected, &name)
             });
             if !ui.is_rect_visible(rect) {
                 return resp;
@@ -3485,7 +3483,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
                         );
                         r.widget_info(|| {
                             egui::WidgetInfo::labeled(
-                                egui::WidgetType::Label,
+                                egui::Role::Label,
                                 true,
                                 format!("Target mod folder: {full}"),
                             )
@@ -3575,7 +3573,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
             }
             // `show_rows` builds only the rows on screen, so a moved highlight scrolls by offset, from last frame's
             // offset and view height.
-            let view_id = egui::Id::new("map-target-list-view");
+            let view_id = egui::Id::unique("map-target-list-view");
             let (off_y, view) = ui
                 .data(|d| d.get_temp::<(f32, f32)>(view_id))
                 .unwrap_or((0.0, row_h * 9.0));
@@ -3606,7 +3604,12 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
                     }
                 }
             });
-            ui.data_mut(|d| d.insert_temp(view_id, (out.state.offset.y, out.inner_rect.height())));
+            ui.data_mut(|d| {
+                d.insert_temp(
+                    view_id,
+                    (out.state.clamped_offset().y, out.inner_rect.height()),
+                )
+            });
             if let Some(p) = sel.as_ref() {
                 ui.separator();
                 let head = match p {
@@ -3734,7 +3737,11 @@ mod tests {
             exporting: false,
         };
         let mut acts = vec![];
-        let mut h = egui_kittest::Harness::new_ui(|ui| group_menu(ui, &head, &editing, &mut acts));
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .build_ui(|ui| group_menu(ui, &head, &editing, &mut acts));
         h.run();
         for off in ["Exclude from export", "Rename…", "Ungroup"] {
             assert!(h.get_by_label(off).accesskit_node().is_disabled(), "{off}");

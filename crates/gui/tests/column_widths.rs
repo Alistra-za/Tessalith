@@ -13,12 +13,14 @@ type H = Harness<'static, (AppModel, State)>;
 fn harness(d: &std::path::Path, w: f32) -> H {
     let m = pbr_opened(d);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 800.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(6);
     h
 }
@@ -32,12 +34,15 @@ fn right_edge(h: &H) -> f32 {
 }
 
 fn outer(h: &H, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::new(id)).unwrap().outer_rect
+    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
 }
 
 /// Where the column's divider is drawn this frame. egui does not store a panel's size mid-drag; the handle moves.
 fn divider(h: &H, id: &str) -> f32 {
-    let r = h.ctx.read_response(Id::new(id).with("__resize")).unwrap();
+    let r = h
+        .ctx
+        .read_response(Id::unique(id).with("__resize"))
+        .unwrap();
     r.rect.center().x
 }
 
@@ -239,7 +244,7 @@ fn every_column_width_paints_the_whole_row() {
         let mut h = harness(d.path(), w);
         for chosen in (140..900).step_by(23) {
             h.ctx
-                .data_mut(|m| m.insert_persisted(Id::new(id).with("chosen"), chosen as f32));
+                .data_mut(|m| m.insert_persisted(Id::unique(id).with("chosen"), chosen as f32));
             h.run_steps(2);
             let holes = unpainted(&h, 400.0);
             assert!(
@@ -303,7 +308,7 @@ fn a_saved_column_width_survives_the_start_screen() {
         m.root = None;
     }
     h.run_steps(3);
-    assert!(PanelState::load(&h.ctx, Id::new("textures")).is_some());
+    assert!(PanelState::load(&h.ctx, Id::unique("textures")).is_some());
     h.state_mut().0.root = Some(root);
     h.run_steps(3);
     assert_eq!(outer(&h, "textures").width(), w);

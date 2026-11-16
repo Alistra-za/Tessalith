@@ -170,9 +170,11 @@ fn the_panel_lists_newest_first_and_clear_empties_it() {
     m.messages.log(Severity::Warning, "second note");
     m.messages.set_open(true);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(700.0, 500.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::messages::tab(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let first = h.get_by_label("first note").rect().min.y;
     let second = h.get_by_label("second note").rect().min.y;
@@ -196,9 +198,11 @@ fn the_panel_counts_one_message_in_the_singular() {
     m.messages.log(Severity::Info, "only note");
     m.messages.set_open(true);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(700.0, 500.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::messages::tab(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("1 message");
 }
@@ -214,9 +218,11 @@ fn the_messages_tab_shows_the_unread_count_and_opens_the_panel() {
     m.messages.log(Severity::Info, "a");
     m.messages.log(Severity::Info, "b");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1200.0, 700.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("Messages (2)").click();
     h.run();
@@ -235,6 +241,9 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
     m.messages.notify(Severity::Info, "Saved");
     let t0 = Instant::now();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(800.0, 600.0))
         .build_ui_state(
             move |ui, (m, at): &mut (AppModel, f32)| {
@@ -242,7 +251,6 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
             },
             (m, 0.0),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.step();
     let r = h.get_by_label("Saved").rect();
     assert!(r.max.x > 600.0 && r.max.y > 450.0, "{r:?}");
@@ -266,6 +274,9 @@ fn toasts_sit_above_an_open_bottom_panel() {
     m.toggle_tab(sdc_gui::model::bottom::BottomTab::Messages);
     assert!(m.bottom.open);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1200.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
@@ -274,12 +285,11 @@ fn toasts_sit_above_an_open_bottom_panel() {
             },
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // `step`, not `run`: a toast keeps asking for frames while it shows.
     for _ in 0..6 {
         h.step();
     }
-    let panel = PanelState::load(&h.ctx, egui::Id::new("bottom"))
+    let panel = PanelState::load(&h.ctx, egui::Id::unique("bottom"))
         .expect("the panel is open")
         .outer_rect;
     // The log row in the Messages tab says "Saved" too, at the left; the toast is the rightmost.
@@ -362,6 +372,9 @@ fn toast_harness(first: &str) -> ToastHarness {
     m.messages.notify(Severity::Info, first);
     let t0 = Instant::now();
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(800.0, 600.0))
         .with_step_dt(0.05)
         .build_ui_state(
@@ -370,7 +383,6 @@ fn toast_harness(first: &str) -> ToastHarness {
             },
             (m, 0.0),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

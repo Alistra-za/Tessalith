@@ -1212,6 +1212,9 @@ fn a_pbr_grass_set_with_a_g_member_exports_no_emissive() {
         .clone();
     m.select_set(&key);
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 1100.0))
         .build_ui_state(
             |ui, m: &mut sdc_gui::model::AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),

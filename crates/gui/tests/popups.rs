@@ -24,12 +24,14 @@ fn harness() -> (tempfile::TempDir, H) {
         .key;
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1600.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // Note FC12: the selector starts at the set's lowest unused match; the slot-1 list is the one under test.
     h.get_by_value("Match 2").click();

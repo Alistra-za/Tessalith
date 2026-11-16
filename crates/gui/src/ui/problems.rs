@@ -40,7 +40,7 @@ pub fn status_of(l: Level) -> Status {
 /// A row's focus id (Note FB9): by what the row is, not where it is, so focus stays on a row while the rows above it
 /// leave the list.
 pub fn row_id(p: &Problem) -> egui::Id {
-    egui::Id::new(("problem-row", p.level, &p.at, &p.text))
+    egui::Id::unique(("problem-row", p.level, &p.at, &p.text))
 }
 
 /// A row's accessible name: where, then what (Note FB9).
@@ -77,7 +77,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let all = problems(model);
     let f = model.bottom.filter.clone();
     let hidden_kinds = model.hidden_kinds();
-    let id = egui::Id::new("problems-rows");
+    let id = egui::Id::unique("problems-rows");
     if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
         if Arc::ptr_eq(&l.all, &all) && l.filter == f && l.hidden_kinds == hidden_kinds {
             return l;
@@ -156,7 +156,7 @@ const ROW_FOCUS: &str = "problems-row-focus";
 
 /// The Problems tab is not drawn: forget the focused row, so coming back never moves focus into the list.
 pub fn forget_focus(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.remove::<(egui::Id, usize)>(egui::Id::new(ROW_FOCUS)));
+    ctx.data_mut(|d| d.remove::<(egui::Id, usize)>(egui::Id::unique(ROW_FOCUS)));
 }
 
 enum Act {
@@ -200,7 +200,7 @@ fn click_only_button(
 ) -> bool {
     let r = ui.add_enabled(off.is_none(), b);
     if let Some(name) = name {
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, r.enabled(), name));
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, r.enabled(), name));
     }
     let by_key = r.has_focus()
         && ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Space));
@@ -225,7 +225,7 @@ fn fix_button(
     if let Fix::OpenInEditor(path) = fix {
         let r = ui.button("Reload");
         r.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Reload sdc-project.toml")
+            egui::WidgetInfo::labeled(egui::Role::Button, true, "Reload sdc-project.toml")
         });
         if r.on_hover_text("Read sdc-project.toml again (asks first when something is unsaved)")
             .clicked()
@@ -270,7 +270,7 @@ fn fix_button(
             };
             let b = ui.add_enabled(sets_off.is_none(), egui::Button::new(label));
             b.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::WidgetType::Button, sets_off.is_none(), &name)
+                egui::WidgetInfo::labeled(egui::Role::Button, sets_off.is_none(), &name)
             });
             match sets_off {
                 Some(why) => b.on_disabled_hover_text(why),
@@ -442,11 +442,7 @@ fn unmatched_buttons(
                             let b = ui.add_enabled(off.is_none(), egui::Button::new("Remove"));
                             let name = format!("Remove {k}");
                             b.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::WidgetType::Button,
-                                    off.is_none(),
-                                    &name,
-                                )
+                                egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name)
                             });
                             let b = match off {
                                 Some(why) => b.on_disabled_hover_text(why),
@@ -558,7 +554,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let m = &*model;
     // Review Focus 5: the focused row left the list (its question was answered) and egui dropped the focus, so the
     // row now at its index takes it, or the last row.
-    let focus_key = egui::Id::new(ROW_FOCUS);
+    let focus_key = egui::Id::unique(ROW_FOCUS);
     let last: Option<(egui::Id, usize)> = ui.data(|d| d.get_temp(focus_key));
     let focused = ui.memory(|mem| mem.focused());
     if let (None, Some((rid, i)), Some(end)) = (focused, last, list.len().checked_sub(1)) {
@@ -583,7 +579,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 let rid = row_id(p);
                 let row = ui.interact(rect, rid, egui::Sense::focusable_noninteractive());
                 row.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Other, true, row_name(p))
+                    egui::WidgetInfo::labeled(egui::Role::Unknown, true, row_name(p))
                 });
                 if row.has_focus() {
                     // Once a frame: the next row takes focus in this same frame and sees the same key press.
@@ -787,7 +783,7 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
             if let Some(id) = id {
                 let at = ui.ctx().cumulative_pass_nr();
                 ui.ctx()
-                    .data_mut(|d| d.insert_temp(egui::Id::new(FOCUS_FIELD), (id, field, at)));
+                    .data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIELD), (id, field, at)));
             }
         }
         Fix::UndoLast => model.undo(),

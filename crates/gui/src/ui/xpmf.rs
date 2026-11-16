@@ -20,7 +20,7 @@ const TOGGLE_HOVER: &str =
 const RESET_HOVER: &str = "Back to the default";
 
 /// ui-rules 8.4: a repeated control gets a name with its key (call after `ui.add`).
-fn named(r: egui::Response, kind: egui::WidgetType, name: String) -> egui::Response {
+fn named(r: egui::Response, kind: egui::Role, name: String) -> egui::Response {
     let on = r.enabled();
     r.widget_info(|| egui::WidgetInfo::labeled(kind, on, name.clone()));
     r
@@ -177,7 +177,7 @@ fn row(
         if cur.is_some() {
             let r = ui.small_button("Reset").on_hover_text(RESET_HOVER);
             let name = format!("Reset {}", f.key);
-            if named(r, egui::WidgetType::Button, name).clicked() {
+            if named(r, egui::Role::Button, name).clicked() {
                 acts.push(Act::Value(f.key, None));
             }
         }
@@ -202,9 +202,7 @@ fn bool_value(
     };
     let r = ui.checkbox(&mut on, text);
     let (enabled, name) = (r.enabled(), format!("{} enabled", label_of(f.key)));
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, on, name.clone())
-    });
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, on, name.clone()));
     if r.changed() {
         acts.push(Act::Value(f.key, Some(json!(on))));
     }
@@ -270,7 +268,7 @@ fn number_value(
         let b = ui
             .small_button("Override")
             .on_hover_text("Write a value of your own");
-        if named(b, egui::WidgetType::Button, format!("Override {}", f.key)).clicked() {
+        if named(b, egui::Role::Button, format!("Override {}", f.key)).clicked() {
             acts.push(Act::Value(
                 f.key,
                 Some(json!(override_start(f, cx.noise_uv, &r))),
@@ -304,7 +302,7 @@ fn text_value(
     dflt: Option<&Value>,
     acts: &mut Vec<Act>,
 ) {
-    let id = egui::Id::new(("xpmf-text", f.key, v.id.as_str()));
+    let id = egui::Id::unique(("xpmf-text", f.key, v.id.as_str()));
     let mut text = ui
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| cur.and_then(Value::as_str).unwrap_or_default().to_string());
@@ -388,14 +386,14 @@ fn patterns_value(
             ui.monospace(p);
             let r = ui.small_button("×").on_hover_text("Remove this pattern");
             let name = format!("Remove pattern {p} from {}", f.key);
-            if named(r, egui::WidgetType::Button, name).clicked() {
+            if named(r, egui::Role::Button, name).clicked() {
                 let mut l = list.clone();
                 l.remove(i);
                 acts.push(set(l));
             }
         }
     }
-    let id = egui::Id::new(("xpmf-pattern", f.key, v.id.as_str()));
+    let id = egui::Id::unique(("xpmf-pattern", f.key, v.id.as_str()));
     let mut text: String = ui.data(|d| d.get_temp(id).unwrap_or_default());
     let r = ui.add(
         egui::TextEdit::singleline(&mut text)
@@ -404,11 +402,7 @@ fn patterns_value(
     );
     let enter = r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let add = ui.small_button("Add");
-    let add = named(
-        add,
-        egui::WidgetType::Button,
-        format!("Add pattern to {}", f.key),
-    );
+    let add = named(add, egui::Role::Button, format!("Add pattern to {}", f.key));
     let t = text.trim().to_string();
     if (add.clicked() || enter) && !t.is_empty() && !list.contains(&t) {
         let mut l = list.clone();
@@ -428,7 +422,7 @@ fn patterns_value(
         ui.weak("From the scan:");
         for (e, label) in new {
             let r = ui.small_button(format!("+ {label}"));
-            if named(r, egui::WidgetType::Button, format!("Add {e} to {}", f.key)).clicked() {
+            if named(r, egui::Role::Button, format!("Add {e} to {}", f.key)).clicked() {
                 let mut l = list.clone();
                 l.push(e.clone());
                 acts.push(set(l));

@@ -41,7 +41,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel) {
             ui.horizontal(|ui| {
                 let r = ui.color_edit_button_srgb(&mut d.rgb);
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, "Marker colour")
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, "Marker colour")
                 });
                 code_field(ui, "R", &mut d.rgb[0]);
                 code_field(ui, "G", &mut d.rgb[1]);

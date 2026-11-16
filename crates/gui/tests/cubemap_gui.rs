@@ -106,9 +106,11 @@ const FLAT: &str = "a/flat.png";
 fn section(d: &std::path::Path, selected: &str) -> Harness<'static, AppModel> {
     let m = cube_model(d, selected);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1600.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -183,6 +185,9 @@ fn the_section_guard_hides_a_mixed_selection() {
     m.click_item(FLAT, true, false);
     assert!(m.in_bulk());
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(800.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
@@ -307,9 +312,11 @@ fn a_square_cube_has_no_layout_combo() {
         "{problems:#?}"
     );
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1600.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // The settings panel's box shows the engine's own reason (with the size); the Problems row's shorter text has no
     // size, so this label can only come from the box of the selected square cube.
@@ -348,6 +355,9 @@ fn a_square_cube_has_no_layout_combo() {
     // The Review row: the same sentence, and no menu.
     let d = tempfile::tempdir().unwrap();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(800.0, 300.0))
         .build_ui_state(
             |ui, m: &mut AppModel| {
@@ -393,9 +403,11 @@ fn preview(d: &std::path::Path, key: &str) -> Harness<'static, AppModel> {
     m.expand(key);
     assert!(m.wait_idle(Duration::from_secs(60)));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1600.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -471,9 +483,11 @@ fn broken_six_face_set_shows_the_error() {
     m.expand(&key);
     assert!(m.wait_idle(Duration::from_secs(60)));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1600.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert!(matches!(
         h.state().preview.encoded,
@@ -647,6 +661,9 @@ fn the_source_face_selector_shows_the_processed_face_of_its_cell() {
     };
     let mut ui_state = PreviewUi::default();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1600.0, 900.0))
         .build_ui_state(
             move |ui, model: &mut AppModel| {
@@ -814,12 +831,14 @@ mod marker {
 
     fn dialog_harness(m: AppModel) -> Harness<'static, AppModel> {
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(900.0, 700.0))
             .build_ui_state(
                 |ui, m: &mut AppModel| sdc_gui::ui::marker_dialog::draw(ui.ctx(), m),
                 m,
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         // The modal's first frames size and fade it in; a click before they pass lands on the old layout.
         h.run_steps(6);
         h
@@ -1006,12 +1025,14 @@ mod marker {
     fn the_export_menu_offers_the_tool() {
         let d = tempfile::tempdir().unwrap();
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(1400.0, 900.0))
             .build_ui_state(
                 |ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m),
                 cube_model(d.path(), FLAT),
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
         h.get_by_label_contains("Export to").click();
         h.run();

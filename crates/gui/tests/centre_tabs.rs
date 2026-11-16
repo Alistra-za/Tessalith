@@ -12,9 +12,11 @@ type H = Harness<'static, AppModel>;
 
 fn harness(m: AppModel) -> H {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 1000.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -192,6 +194,9 @@ fn the_tab_strip_keeps_later_auto_ids() {
         }
         let id = std::cell::Cell::new(None);
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(800.0, 400.0))
             .build_ui_state(
                 |ui, m: &mut AppModel| {
@@ -226,9 +231,11 @@ fn sized(width: f32, m: AppModel) -> H {
 
 fn sized_tall(width: f32, height: f32, m: AppModel) -> H {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(width, height))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }

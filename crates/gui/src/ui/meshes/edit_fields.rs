@@ -86,7 +86,7 @@ pub(super) fn warnings(ui: &mut egui::Ui, e: &NifEdit, target: &Target, act: &mu
                 // Meshes UI T7 (rule 8.4): several rows can carry the same button; each is named after its warning.
                 // T7 review Minor 3: with what it applies to, so the same text on two targets still differs.
                 let name = format!("{label}: {} ({})", w.text, target_name(target));
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name));
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                 if r.clicked() {
                     act.push = Some((vec![fix.clone()], None));
                 }
@@ -125,7 +125,7 @@ pub(super) fn float_named(
         let mut x = v;
         let speed = (v.abs() as f64 * 0.01).max(0.01);
         let r = ui.add(egui::DragValue::new(&mut x).speed(speed));
-        set_name(&r, egui::WidgetType::DragValue, name, Some(x as f64), None);
+        set_name(&r, egui::Role::SpinButton, name, Some(x as f64), None);
         take_focus(ui, &r, field);
         if r.changed() && x.to_bits() != v.to_bits() {
             let op = Op::SetField {
@@ -154,7 +154,7 @@ pub(super) fn float_named(
 
 /// Where a worklist fix's field waits for its widget (Note GD1).
 pub(super) fn focus_id() -> egui::Id {
-    egui::Id::new("meshes-edit-focus")
+    egui::Id::unique("meshes-edit-focus")
 }
 
 /// A worklist fix asked for `field`, and no widget has taken the request yet.
@@ -175,7 +175,7 @@ pub(super) fn take_focus(ui: &egui::Ui, r: &egui::Response, field: Field) {
 /// Gives `r` (after `ui.add`) the role `typ` and the accessible name `name`, with its numeric or text value.
 pub(super) fn set_name(
     r: &egui::Response,
-    typ: egui::WidgetType,
+    typ: egui::Role,
     name: &str,
     value: Option<f64>,
     text: Option<String>,
@@ -234,7 +234,7 @@ fn color(
             .inner;
         // The step ends when the popup closes, or a drag in it is released (like the key swatch).
         done |= (was && !open) || (open && ui.input(|i| i.pointer.any_released()));
-        set_name(&r, egui::WidgetType::ColorButton, name, None, None);
+        set_name(&r, egui::Role::ColorWell, name, None, None);
         let r = r.on_disabled_hover_text(OUT_OF_RANGE);
         if r.changed() {
             x = from_picker(v, lin, picked);
@@ -244,7 +244,7 @@ fn color(
             let mut f = x[i];
             let r = ui.add(egui::DragValue::new(&mut f).speed(0.005));
             let n = format!("{name} {c}");
-            set_name(&r, egui::WidgetType::DragValue, &n, Some(f as f64), None);
+            set_name(&r, egui::Role::SpinButton, &n, Some(f as f64), None);
             take_focus(ui, &r, field(i as u8));
             if r.changed() {
                 x[i] = f;
@@ -369,7 +369,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 }
             })
             .response;
-        let typ = egui::WidgetType::ComboBox;
+        let typ = egui::Role::ComboBox;
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
         r.on_hover_text(TYPE_HOVER);
@@ -456,7 +456,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         let r = ui.add(egui::DragValue::new(&mut c));
         set_name(
             &r,
-            egui::WidgetType::DragValue,
+            egui::Role::SpinButton,
             "Clamp mode",
             Some(c as f64),
             None,
@@ -585,7 +585,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                             (format!("{name} (PBR: {m})"), r.enabled(), on);
                         r.widget_info(move || {
                             egui::WidgetInfo::selected(
-                                egui::WidgetType::Checkbox,
+                                egui::Role::CheckBox,
                                 enabled,
                                 checked,
                                 full.clone(),
@@ -728,9 +728,7 @@ fn texture_slots(
                 if let Some(fix) = &w.fix {
                     let r = ui.small_button("Fix");
                     let name = format!("Fix slot {n}: {}", w.text);
-                    r.widget_info(|| {
-                        egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &name)
-                    });
+                    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
                     if r.clicked() {
                         act.push = Some((vec![fix.clone()], None));
                     }
@@ -751,7 +749,7 @@ fn texture_slots(
                     super::super::path_picker::menu(ui, "Browse", |ui| browse(ui, m, &mut commit));
                 let bname = format!("Browse for {name} (slot {n})");
                 browse.response.widget_info(move || {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, bname.clone())
+                    egui::WidgetInfo::labeled(egui::Role::Button, true, bname.clone())
                 });
                 path_field(
                     ui,
@@ -793,7 +791,7 @@ fn path_field(
     text: &str,
     commit: &mut Option<String>,
 ) {
-    let id = egui::Id::new(("meshes-edit-slot", set, slot));
+    let id = egui::Id::unique(("meshes-edit-slot", set, slot));
     let mut buf = ui
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| text.to_string());
@@ -802,13 +800,7 @@ fn path_field(
             .id(id.with("field"))
             .desired_width(ui.available_width()),
     );
-    set_name(
-        &r,
-        egui::WidgetType::TextEdit,
-        name,
-        None,
-        Some(buf.clone()),
-    );
+    set_name(&r, egui::Role::TextInput, name, None, Some(buf.clone()));
     if r.lost_focus() {
         ui.data_mut(|d| d.remove::<String>(id));
         if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
@@ -823,8 +815,8 @@ fn path_field(
 
 /// The Browse popup: a filter and the scanned winning textures that match it; a click picks `textures\…`.
 fn browse(ui: &mut egui::Ui, m: &MeshesModel, commit: &mut Option<String>) {
-    let fid = egui::Id::new("meshes-edit-browse-filter");
-    let cid = egui::Id::new("meshes-edit-browse-list");
+    let fid = egui::Id::unique("meshes-edit-browse-filter");
+    let cid = egui::Id::unique("meshes-edit-browse-list");
     let mut filter: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
     ui.add(
         egui::TextEdit::singleline(&mut filter)
@@ -966,7 +958,7 @@ pub(super) fn alpha_tab(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
                     }
                 })
                 .response;
-            set_name(&r, egui::WidgetType::ComboBox, name, None, Some(label(cur)));
+            set_name(&r, egui::Role::ComboBox, name, None, Some(label(cur)));
             take_focus(ui, &r, Field::AlphaFlags);
             if v != cur {
                 let mask = ((1u32 << width) - 1) << shift;
@@ -996,13 +988,7 @@ pub(super) fn alpha_tab(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
         row_label(ui, "Threshold");
         let mut t = a.alpha.threshold;
         let r = ui.add(egui::Slider::new(&mut t, 0..=255));
-        set_name(
-            &r,
-            egui::WidgetType::Slider,
-            "Threshold",
-            Some(t as f64),
-            None,
-        );
+        set_name(&r, egui::Role::Slider, "Threshold", Some(t as f64), None);
         take_focus(ui, &r, Field::AlphaThreshold);
         if t != a.alpha.threshold {
             let op = Op::SetField {

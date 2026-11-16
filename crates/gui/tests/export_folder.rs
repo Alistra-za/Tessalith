@@ -228,9 +228,11 @@ fn without_a_chosen_folder_the_text_is_review_even_when_everything_is_decided() 
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -285,6 +287,9 @@ fn undo_harness(dir: &std::path::Path) -> UndoH {
     let mut meshes = MeshesModel::new(None, MeshesSettings::default());
     meshes.procs = sdc_gui::model::meshes::no_procs;
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 800.0))
         .build_ui_state(
             |ui, (m, me, step): &mut (AppModel, MeshesModel, Option<String>)| {
@@ -295,13 +300,13 @@ fn undo_harness(dir: &std::path::Path) -> UndoH {
                     undo_label: Some(s.clone()),
                     redo_label: None,
                 });
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(eframe::egui::Id::new("nif-undo-target"), target));
+                ui.ctx().data_mut(|d| {
+                    d.insert_temp(eframe::egui::Id::unique("nif-undo-target"), target)
+                });
                 sdc_gui::ui::header::draw(ui, m, Some(&mut *me));
             },
             (fresh(dir), meshes, None),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -383,9 +388,11 @@ fn the_export_folder_row_shows_in_the_stacked_review() {
     let mut m = fresh(d.path());
     m.open_review();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1000.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("Blockers (1)");
     assert!(h.query_all_by_label(NO_FOLDER).count() >= 1);
@@ -415,9 +422,11 @@ fn no_sdc_out_path_is_shown_before_a_folder_is_chosen() {
     assert!(m.also_on() && m.export_folder_chosen().is_none());
     m.open_review();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1400.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     // Every label and value in the window, then the hover of the two Choose buttons.
     let all = |h: &Harness<'static, AppModel>| -> Vec<String> {

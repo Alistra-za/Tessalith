@@ -98,9 +98,11 @@ fn egui_textures_do_not_grow_over_frames() {
     let keys: Vec<String> = m.items.iter().map(|i| i.key.clone()).collect();
     assert!(keys.len() > 1);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let round = |h: &mut Harness<'static, AppModel>| {
         for (i, k) in keys.iter().enumerate() {
             h.state_mut().select_item(k);

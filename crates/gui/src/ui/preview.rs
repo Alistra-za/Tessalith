@@ -180,14 +180,14 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 // of its own (rule 8.3: set after the strip's own).
                 let enabled = r.enabled();
                 r.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, "Preview settings")
+                    egui::WidgetInfo::labeled(egui::Role::Button, enabled, "Preview settings")
                 });
                 if r.on_hover_text("Show the texture settings").clicked() {
                     state.settings_open = true;
                 }
             });
     }
-    let toolbar_id = egui::Id::new("preview-toolbar");
+    let toolbar_id = egui::Id::unique("preview-toolbar");
     let height = |ui: &egui::Ui| {
         egui::containers::panel::PanelState::load(ui.ctx(), toolbar_id)
             .map(|s| s.outer_rect.height())
@@ -327,7 +327,7 @@ fn view_cluster(ui: &mut egui::Ui, model: &mut AppModel, info: &Info, requests: 
                 "Name each face on the cross: +X east, −X west, +Y north, −Y south, +Z up, −Z down",
             );
         r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Button, r.enabled(), on, "Face labels")
+            egui::WidgetInfo::selected(egui::Role::Button, r.enabled(), on, "Face labels")
         });
         if r.clicked() {
             model.view.face_labels = !on;
@@ -805,7 +805,7 @@ fn face_selector(ui: &mut egui::Ui, visible: Rect, current: usize) -> Option<usi
                 let name = format!("Source face {label}");
                 let on = current == i;
                 r.widget_info(|| {
-                    egui::WidgetInfo::selected(egui::WidgetType::Button, r.enabled(), on, &name)
+                    egui::WidgetInfo::selected(egui::Role::Button, r.enabled(), on, &name)
                 });
                 if r.clicked() {
                     pick = Some(i);

@@ -231,6 +231,9 @@ fn the_actions_and_buttons_are_disabled_while_a_dialog_is_open() {
         "the Open folder action reports disabled"
     );
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(900.0, 200.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::header::draw(ui, m, None),
@@ -275,6 +278,9 @@ fn the_export_folder_cannot_change_while_an_export_runs() {
     assert!(m.status_line.contains("an export is running"));
     // Export to ▾'s Choose export folder… is off, with the reason (K7).
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run_steps(2);

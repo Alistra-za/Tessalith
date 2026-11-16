@@ -77,9 +77,11 @@ fn editor(mut m: AppModel, size: egui::Vec2) -> H {
         .clone();
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(size)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.run();
     h
@@ -442,11 +444,13 @@ fn shots() {
                 .clone();
             m.select_set(&key);
             let mut h = Harness::builder()
+                .with_context_setup(|ctx| {
+                    sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+                })
                 .with_size(egui::vec2(w, hgt))
                 .with_pixels_per_point(1.0)
                 .wgpu()
                 .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-            sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
             h.run_steps(10);
             if open {
                 h.get_by_role_and_label(Role::ComboBox, AO_SOURCE)

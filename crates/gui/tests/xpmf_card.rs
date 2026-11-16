@@ -41,9 +41,11 @@ fn opened(dir: &std::path::Path) -> AppModel {
 
 fn harness(m: AppModel, w: f32, h: f32) -> H {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, h))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -419,11 +421,13 @@ fn xpmf_card_screenshots() {
             json!({"editorIds": ["MatoA", "NoSuchMato"], "shelterFade": 40, "comment": "a long comment to see how the row wraps"}),
         );
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, ht))
             .with_pixels_per_point(1.0)
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(6);
         // The card's top (toggle, name, patterns) and its bottom rows.
         for (part, label) in [("top", "Editor IDs"), ("bottom", "Shelter fade")] {

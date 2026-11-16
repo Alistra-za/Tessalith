@@ -14,9 +14,11 @@ use support::*;
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -311,12 +313,14 @@ fn the_number_slot_has_one_width_for_one_and_two_digits() {
     let d = tempfile::tempdir().unwrap();
     // CF7: only cards on screen are laid out, so the window is tall enough to show all 12.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 1600.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m),
             twelve_sets(d.path()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let widths: Vec<f32> = h
         .query_all_by_label_contains("Position ")
@@ -409,10 +413,12 @@ fn move_to_is_off_on_a_read_only_project() {
 /// K8: the height catch-up takes a frame per newly exposed card, so `run` gets more steps.
 fn big_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .with_max_steps(16)
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -459,6 +465,7 @@ fn wheel(h: &mut Harness<'static, AppModel>) {
     h.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,
         delta: egui::vec2(0.0, -300.0),
+        source: egui::MouseWheelSource::Wheel,
         phase: egui::TouchPhase::Move,
         modifiers: Default::default(),
     });
@@ -665,11 +672,13 @@ fn a_reveal_lands_at_once() {
         let m = many_sets(d.path(), 500);
         // Steps of 0.01 s, so 2 steps sit inside egui's 0.1-0.3 s scroll glide.
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(1500.0, 900.0))
             .with_step_dt(0.01)
             .with_max_steps(64)
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         // kittest turns egui's scroll animation off; the app runs with the stock one.
         h.ctx
             .all_styles_mut(|s| s.scroll_animation = egui::style::ScrollAnimation::default());

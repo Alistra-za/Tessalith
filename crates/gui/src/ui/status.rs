@@ -48,7 +48,7 @@ impl Status {
 pub fn dot(ui: &mut egui::Ui, s: Status) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
     ui.painter().circle_filled(rect.center(), 4.0, s.color(ui));
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, s.label()));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, s.label()));
     r
 }
 

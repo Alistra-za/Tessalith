@@ -136,9 +136,11 @@ fn detail_normal_card_says_cs_does_not_draw_it() {
     let key = view(&m).key;
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 2400.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.ctx.global_style_mut(|st| {
         st.interaction.tooltip_delay = 0.0;
         st.interaction.show_tooltips_only_when_still = false;
@@ -173,9 +175,11 @@ fn right_click_on_the_projected_noise_card_opens_no_menu() {
     let key = view(&m).key;
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 2400.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(4);
     h.get_by_label("Projected noise thumbnail")
         .click_secondary();

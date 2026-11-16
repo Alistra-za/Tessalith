@@ -1476,12 +1476,14 @@ fn an_edited_nif_keeps_its_failed_shader_message_in_the_app() {
     }];
     let mut frame = eframe::Frame::_new_kittest();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
             app,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     h.get_by_label("Edited: shader failed: boom");
@@ -1647,12 +1649,14 @@ use nif::extra::ExtraValue;
 /// The Meshes view alone, as `meshes_view.rs` draws it.
 fn view(m: MeshesModel) -> Harness<'static, MeshesModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -2595,12 +2599,14 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     let mut frame = eframe::Frame::_new_kittest();
     let (w, hgt) = (1280.0, 800.0);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, hgt))
         .build_ui_state(
             move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
             app,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(6);
     // The shared header and the open bottom panel are still there.
@@ -2609,7 +2615,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     }
     support::header_export_label(&h);
     let panel = |id: &str| {
-        PanelState::load(&h.ctx, egui::Id::new(id))
+        PanelState::load(&h.ctx, egui::Id::unique(id))
             .unwrap()
             .outer_rect
     };
@@ -4450,11 +4456,15 @@ fn in_the_meshes_view_sized(
         app.meshes.edit.as_mut().unwrap().flush();
     }
     let mut frame = eframe::Frame::_new_kittest();
-    let mut h = Harness::builder().with_size(size).build_ui_state(
-        move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
-        app,
-    );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(
+            move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
+            app,
+        );
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     (d, h)
@@ -4493,7 +4503,7 @@ fn textures(h: &AppH) -> (bool, bool, Option<String>) {
 /// (Note FC12).
 fn header_button<'a>(h: &'a AppH, name: &'a str) -> egui_kittest::Node<'a> {
     let header =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("header")).unwrap();
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("header")).unwrap();
     let nif = format!("{name} (NIF edit history)");
     h.query_all_by_role(AkRole::Button)
         .filter(|n| header.outer_rect.contains_rect(n.rect()))
@@ -5777,15 +5787,17 @@ fn the_clock_row_fits_the_centre_column() {
     for w in [1100.0, 1280.0, 1600.0] {
         let (_d, m, _cmds) = playing_session();
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, 800.0))
             .build_ui_state(
                 |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
                 m,
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(3);
         let rect = |id: &str| {
-            egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id))
+            egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
                 .unwrap_or_else(|| panic!("{id} is drawn"))
                 .outer_rect
         };
@@ -7300,16 +7312,18 @@ fn controllers_tab_combos_fit_the_edit_panel() {
     // A colour controller: its key rows (with the picker swatch) must fit too.
     add_colour_ctrl(&mut m, shape, [0.2, 0.4, 0.6], [0.8, 0.6, 0.4]);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1100.0, 1600.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(2);
     tab(&mut h, "Controllers");
     h.run_steps(3);
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
+    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
         .expect("the edit panel")
         .outer_rect;
     let combos: Vec<_> = h
@@ -8232,12 +8246,14 @@ fn controllers_tab_names_pbr_variables_as_the_shader_tab_does() {
     let s = select(&mut m, "S");
     // Tall, so the Add controller row is on screen.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 1800.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(2);
     tab(&mut h, "Controllers");
     h.get_by_role_and_label(AkRole::ComboBox, "Glossiness variable");
@@ -8384,12 +8400,14 @@ fn add_controller_offers_no_env_map_scale_on_pbr() {
     let mut m = direct(ctrl_scene(0x82));
     let s = select(&mut m, "S");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 1800.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(2);
     tab(&mut h, "Controllers");
     h.get_by_role_and_label(AkRole::ComboBox, "Add controller variable")
@@ -9548,20 +9566,23 @@ fn app_edit(w: f32, hgt: f32, gpu: bool) -> (tempfile::TempDir, AppH) {
     let (shape, _) = lit_shape(app.meshes.edit.as_ref().unwrap());
     app.meshes.select_edit(Selection::Shape(shape));
     let mut frame = eframe::Frame::_new_kittest();
-    let b = Harness::builder().with_size(egui::vec2(w, hgt));
+    let b = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(w, hgt));
     let b = if gpu { b.wgpu() } else { b };
     let mut h = b.build_ui_state(
         move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
         app,
     );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(6);
     (d, h)
 }
 
 fn panel_rect(h: &AppH, id: &str) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new(id))
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
         .unwrap()
         .outer_rect
 }
@@ -11177,6 +11198,9 @@ fn the_set_preview_has_no_export_menu() {
     m.select_set(&key);
     m.settings.set_view_3d = true;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(520.0, 1000.0))
         .build_ui_state(
             |ui, (m, s): &mut (sdc_gui::model::AppModel, SetPreview)| {
@@ -11184,7 +11208,6 @@ fn the_set_preview_has_no_export_menu() {
             },
             (m, SetPreview::new(None, DEFAULT_CAP)),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     for _ in 0..3 {
         h.run_steps(4);
         let (m, s) = h.state_mut();
@@ -11202,7 +11225,7 @@ fn the_set_preview_has_no_export_menu() {
 fn the_edit_panel_has_no_undo_redo_of_its_own() {
     use egui::containers::panel::PanelState;
     let (_t, _d, mut h) = both_histories(1);
-    let edit = PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
+    let edit = PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
         .unwrap()
         .outer_rect;
     for l in ["Undo NIF edit", "Redo NIF edit"] {
@@ -11267,7 +11290,10 @@ fn the_preview_keeps_160_px_with_review_open() {
             egui::vec2(w - 16.0, review_h),
         );
         h.ctx.data_mut(|d| {
-            d.insert_persisted(egui::Id::new("bottom-review"), PanelState { outer_rect: r })
+            d.insert_persisted(
+                egui::Id::unique("bottom-review"),
+                PanelState { outer_rect: r },
+            )
         });
         h.run_steps(8);
         let frame = h
@@ -11310,12 +11336,14 @@ fn the_meshes_side_gets_a_new_output_path_on_the_next_frame() {
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
     let mut frame = eframe::Frame::_new_kittest();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
             app,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run_steps(4);
     let rev = h.state().model.output_game_paths().0;
     let builds = h.state().meshes.project_builds;
@@ -11367,7 +11395,10 @@ fn the_bottom_panel_is_capped_only_in_the_meshes_view_with_a_nif() {
         let r =
             egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
         h.ctx.data_mut(|d| {
-            d.insert_persisted(egui::Id::new("bottom-review"), PanelState { outer_rect: r })
+            d.insert_persisted(
+                egui::Id::unique("bottom-review"),
+                PanelState { outer_rect: r },
+            )
         });
         h.run_steps(8);
     };
@@ -11405,7 +11436,10 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
     h.run_steps(8);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
     h.ctx.data_mut(|d| {
-        d.insert_persisted(egui::Id::new("bottom-review"), PanelState { outer_rect: r })
+        d.insert_persisted(
+            egui::Id::unique("bottom-review"),
+            PanelState { outer_rect: r },
+        )
     });
     h.run_steps(8);
     let capped = review_height(&h);
@@ -11418,7 +11452,7 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
 }
 
 fn review_height(h: &AppH) -> f32 {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom-review"))
+    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
         .unwrap()
         .outer_rect
         .height()
@@ -11453,7 +11487,10 @@ fn the_meshes_cap_keeps_the_users_review_height() {
     h.run_steps(4);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
     h.ctx.data_mut(|d| {
-        d.insert_persisted(egui::Id::new("bottom-review"), PanelState { outer_rect: r })
+        d.insert_persisted(
+            egui::Id::unique("bottom-review"),
+            PanelState { outer_rect: r },
+        )
     });
     h.run_steps(4);
     assert_eq!(review_height(&h), 600.0, "Textures view: Review");
@@ -11480,7 +11517,10 @@ fn a_drag_to_the_cap_is_the_users_height() {
     h.run_steps(4);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
     h.ctx.data_mut(|d| {
-        d.insert_persisted(egui::Id::new("bottom-review"), PanelState { outer_rect: r })
+        d.insert_persisted(
+            egui::Id::unique("bottom-review"),
+            PanelState { outer_rect: r },
+        )
     });
     h.run_steps(4);
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
@@ -11530,7 +11570,7 @@ fn texture_slots_are_numbered_from_one_with_the_nif_index_on_hover() {
     h.get_by_role_and_label(AkRole::TextInput, "Diffuse path (slot 1)");
     h.get_by_role_and_label(AkRole::Button, "Browse for Diffuse (slot 1)");
     assert!(h.query_by_label_contains("(slot 0)").is_none());
-    let edit = PanelState::load(&h.ctx, egui::Id::new("meshes-edit"))
+    let edit = PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
         .unwrap()
         .outer_rect;
     let name = h

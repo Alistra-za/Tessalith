@@ -40,9 +40,11 @@ fn model(dir: &std::path::Path, edits: &[(&str, Value)]) -> AppModel {
 
 fn panel(m: AppModel) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(700.0, 1400.0))
         .build_ui_state(|ui, m: &mut AppModel| pgp_fields::panel(ui, m, SET), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -60,9 +62,11 @@ fn editor(dir: &std::path::Path, edits: &[(&str, Value)]) -> Harness<'static, Ap
         m.set_json_value(SET, k, Some(v.clone()));
     }
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1200.0, 1800.0))
         .build_ui_state(|ui, m: &mut AppModel| json_editor::view(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     assert_eq!(h.query_all_by_label("+ key").count(), 1, "one open entry");
     h

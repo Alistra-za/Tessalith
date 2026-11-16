@@ -123,12 +123,14 @@ fn the_card_shows_the_rounded_value_and_hovers_the_stored_one() {
     m.select_set(&key);
     m.set_json_value(SET, "roughness_scale", Some(serde_json::json!(0.123_456)));
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 1100.0))
         .build_ui_state(
             |ui, m: &mut sdc_gui::model::AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, SET),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.ctx.global_style_mut(|s| {
         s.interaction.tooltip_delay = 0.0;
         s.interaction.show_tooltips_only_when_still = false;

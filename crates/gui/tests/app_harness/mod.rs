@@ -198,6 +198,9 @@ fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
         egui::Theme::Dark
     };
     let mut b = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(render.size[0] as f32, render.size[1] as f32))
         .with_pixels_per_point(render.pixels_per_point)
         .with_theme(theme)
@@ -209,7 +212,6 @@ fn build(mut app: SdcApp, rs: Option<egui_wgpu::RenderState>) -> H {
         move |ui, app: &mut SdcApp| eframe::App::ui(app, ui, &mut frame),
         app,
     );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

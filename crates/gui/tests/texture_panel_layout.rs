@@ -50,9 +50,11 @@ fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
 
 fn sized_harness(m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, height))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -672,12 +674,14 @@ fn window_harness(dir: &std::path::Path) -> H3 {
         ..Default::default()
     };
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, state),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // The 3D view never idles: step and poll, as set_preview_layout does.
     for _ in 0..6 {
         h.run_steps(3);
@@ -726,7 +730,7 @@ fn strip_harness(dir: &std::path::Path) -> (Harness<'static, AppModel>, Rect) {
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
     let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("preview-settings"))
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
             .expect("the settings strip is open at 1600 wide")
             .outer_rect;
     (h, strip)
@@ -769,7 +773,7 @@ fn a_strip_reset_stays_beside_its_combo() {
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
     let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("preview-settings"))
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
             .expect("the settings strip is open at 1600 wide")
             .outer_rect;
     let resets: Vec<Rect> = h

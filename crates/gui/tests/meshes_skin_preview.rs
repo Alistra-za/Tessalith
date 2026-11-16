@@ -10,12 +10,14 @@ use std::sync::Arc;
 
 fn harness(m: MeshesModel) -> Harness<'static, MeshesModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

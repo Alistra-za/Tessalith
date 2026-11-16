@@ -41,12 +41,14 @@ fn harness_with(
         ..State::default()
     };
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 800.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, state),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     for _ in 0..6 {
         h.run_steps(3);
         let (m, s) = h.state_mut();
@@ -56,7 +58,7 @@ fn harness_with(
 }
 
 fn outer(h: &H, id: &str) -> Option<egui::Rect> {
-    PanelState::load(&h.ctx, Id::new(id)).map(|p| p.outer_rect)
+    PanelState::load(&h.ctx, Id::unique(id)).map(|p| p.outer_rect)
 }
 
 fn check(w: f32, collapsed: bool) {
@@ -221,11 +223,15 @@ fn harness_on(mut m: AppModel, size: egui::Vec2, prep: impl FnOnce(&mut AppModel
         set3d: SetPreview::new(None, DEFAULT_CAP),
         ..State::default()
     };
-    let mut h = Harness::builder().with_size(size).build_ui_state(
-        |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
-        (m, state),
-    );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(
+            |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
+            (m, state),
+        );
     settle(&mut h);
     h
 }

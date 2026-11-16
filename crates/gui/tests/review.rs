@@ -675,12 +675,13 @@ fn review_still_gates_on_blockers_and_overwrites() {
 /// The labels of the widgets Review draws, sorted: the tab's panel rect, every role that carries text. Paths under
 /// `skip` (the test's temp folder) show it as `<tmp>`.
 fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("bottom-review"))
-        .expect("the Review panel")
-        .outer_rect;
+    let panel =
+        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
+            .expect("the Review panel")
+            .outer_rect;
     // The Sets list scrolls under this panel: a card or the drop hint scrolled out of view still has a box in the
     // panel's rect once the cards are tall enough (Note HP). Everything under the Sets column's own node is left out.
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets column")
         .outer_rect;
     let search = h
@@ -755,9 +756,11 @@ fn review_has_no_half_size_or_stale_group() {
     ]);
     m.open_review();
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let skip = d.path().to_string_lossy().into_owned();
     let got = review_labels(&h, &skip);

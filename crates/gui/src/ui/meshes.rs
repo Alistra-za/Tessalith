@@ -56,8 +56,8 @@ const MAX_LISTED: usize = 200;
 
 fn undo_ids() -> (egui::Id, egui::Id) {
     (
-        egui::Id::new("nif-undo-target"),
-        egui::Id::new("nif-undo-request"),
+        egui::Id::unique("nif-undo-target"),
+        egui::Id::unique("nif-undo-request"),
     )
 }
 
@@ -124,10 +124,11 @@ fn draw(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // the frame an edit opens has no width yet).
     // shortcut: after the user drags the edit panel wider, this cap is one frame stale; use the panel's response if
     // the 3D view's dip below its minimum for that frame shows.
-    let edit_w = egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::new("meshes-edit"))
-        .map_or(EDIT_DEFAULT + PANEL_MARGIN_X, |p| {
-            p.outer_rect.width().max(EDIT_MIN)
-        });
+    let edit_w =
+        egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::unique("meshes-edit"))
+            .map_or(EDIT_DEFAULT + PANEL_MARGIN_X, |p| {
+                p.outer_rect.width().max(EDIT_MIN)
+            });
     let others = EDIT_CENTRE_MIN + if m.edit.is_some() { edit_w } else { 0.0 };
     // T7 review Minor 1 (controller ruling): also at most ~40% of the width, so the 3D view gets the slack.
     let avail = ui.available_width();
@@ -586,7 +587,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
         None => "Any mod".to_string(),
     };
     let mut pick = None;
-    let query_id = egui::Id::new("meshes-mod-picker-filter");
+    let query_id = egui::Id::unique("meshes-mod-picker-filter");
     let pass = ui.ctx().cumulative_pass_nr();
     // Rule 3.5: the combo's width is a minimum, so it gets an exact slot.
     let size = egui::vec2(ui.available_width(), ui.spacing().interact_size.y);
@@ -711,12 +712,12 @@ fn chips_cell(ui: &mut egui::Ui, m: &MeshesModel, n: &NifRow, origin: &str) {
     for &(color, short, full) in &chips {
         let r = chip(ui, color, short);
         if short != full {
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, full));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, full));
         }
     }
     let cover = ui.interact(
         ui.max_rect(),
-        ui.id().with("row-chips"),
+        ui.scope_id().with("row-chips"),
         egui::Sense::hover(),
     );
     cover.on_hover_ui(|ui| {
@@ -794,7 +795,7 @@ const HEAD_MIN_H: f32 = 48.0;
 /// around it. These panels' heights are last frame's, as the edit panel's width is in `draw`; the first frame has none.
 fn head_cap(ui: &egui::Ui, anim: bool) -> f32 {
     let h = |id: &str| {
-        egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::new(id))
+        egui::containers::panel::PanelState::load(ui.ctx(), egui::Id::unique(id))
             .map_or(0.0, |p| p.outer_rect.height())
     };
     let around =
@@ -1168,7 +1169,7 @@ fn header(ui: &mut egui::Ui, on: bool, title: &str, kind: &str, name: &str, bloc
         .truncate()
         .min_size(egui::vec2(ui.available_width(), 0.0));
     let r = ui.add(b);
-    r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Button, true, on, name));
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::Button, true, on, name));
     let clicked = r.clicked();
     r.on_hover_ui(|ui| {
         ui.label(format!(
@@ -1361,7 +1362,7 @@ fn shape(
         // One "Details" per card: each is named after its shape (rule 8.4).
         let label = format!("Details of NIF block {}", s.block);
         details.header_response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::WidgetType::CollapsingHeader, true, &label)
+            egui::WidgetInfo::labeled(egui::Role::DisclosureTriangle, true, &label)
         });
     }
     (clicked, picked)
@@ -1397,7 +1398,7 @@ fn shape_details(ui: &mut egui::Ui, winners: &[(usize, String)]) {
 fn dialogs(ctx: &egui::Context, m: &mut MeshesModel) {
     if let Some(d) = m.dialog.clone() {
         let (mut use_it, mut choose, mut folder) = (false, false, false);
-        egui::Modal::new(egui::Id::new("meshes-mo2")).show(ctx, |ui| {
+        egui::Modal::new(egui::Id::unique("meshes-mo2")).show(ctx, |ui| {
             ui.set_max_width(480.0);
             ui.label(d.text());
             ui.horizontal(|ui| {

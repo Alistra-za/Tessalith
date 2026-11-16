@@ -125,6 +125,9 @@ fn plan_rename_scales_linearly() {
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1500.0, 900.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::dialogs::draw(ui.ctx(), model),

@@ -665,10 +665,12 @@ type H = egui_kittest::Harness<'static, AppModel>;
 
 fn ui_harness(m: AppModel, w: f32) -> H {
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_step_dt(0.25)
         .with_size(eframe::egui::vec2(w, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -1162,7 +1164,7 @@ fn recipe_link_over_the_settings_tab_shows_the_also_export_tab() {
     brightness(&h);
     let left = h
         .ctx
-        .data(|d| d.get_temp::<bool>(eframe::egui::Id::new("set-editor-tab-scroll")));
+        .data(|d| d.get_temp::<bool>(eframe::egui::Id::unique("set-editor-tab-scroll")));
     assert_eq!(left, None, "the scroll request was used");
 }
 
@@ -1351,10 +1353,12 @@ fn the_header_export_hover_names_the_folders() {
 
 fn ui_harness_sized(m: AppModel, w: f32, hgt: f32) -> H {
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_step_dt(0.25)
         .with_size(eframe::egui::vec2(w, hgt))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -1559,6 +1563,7 @@ fn a_long_skip_list_scrolls_and_its_last_row_works() {
         h.input_mut().events.push(eframe::egui::Event::MouseWheel {
             unit: eframe::egui::MouseWheelUnit::Point,
             delta: eframe::egui::vec2(0.0, -400.0),
+            source: eframe::egui::MouseWheelSource::Wheel,
             phase: eframe::egui::TouchPhase::Move,
             modifiers: Modifiers::NONE,
         });

@@ -9,6 +9,9 @@ use std::time::{Duration, Instant};
 
 fn harness(v: Viewport3d) -> Harness<'static, Viewport3d> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1000.0, 700.0))
         .build_ui_state(
             |ui, v: &mut Viewport3d| {
@@ -16,7 +19,6 @@ fn harness(v: Viewport3d) -> Harness<'static, Viewport3d> {
             },
             v,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     // The toggle, the footer and the notes these tests read are in the Details footer (AG132).
     sdc_gui::ui::viewport3d::set_details_open(
         &h.ctx,
@@ -2166,6 +2168,9 @@ fn two_panels_with_the_same_frame_id_keep_their_own_textures() {
     b.panel = "set_preview";
     b.frame = frame(200);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(400.0, 700.0))
         .build_ui_state(
             |ui, (a, b): &mut (Viewport3d, Viewport3d)| {

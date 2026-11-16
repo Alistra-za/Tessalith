@@ -190,7 +190,7 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
 }
 
 fn add_error_id(st: Subtype) -> egui::Id {
-    egui::Id::new(("preset-add-error", st))
+    egui::Id::unique(("preset-add-error", st))
 }
 
 fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
@@ -640,7 +640,7 @@ fn field_row(
         combo_for(
             field,
             ui,
-            egui::Id::new(("preset-field", st, scope, field)),
+            egui::Id::unique(("preset-field", st, scope, field)),
             &cur,
             &opts,
             false,
@@ -762,9 +762,7 @@ fn tick_row(
         None => r.on_hover_text(t.hover),
     };
     // The box has no text of its own, so name it for AccessKit.
-    r.widget_info(|| {
-        egui::WidgetInfo::selected(egui::WidgetType::Checkbox, r.enabled(), v, t.label)
-    });
+    r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, r.enabled(), v, t.label));
     if r.changed() {
         acts.push(set(st, scope, t.field, json!(v)));
     }
@@ -836,7 +834,7 @@ fn text_state(ui: &egui::Ui, id: egui::Id) -> String {
 
 /// The flag that opens a new alias's branch on the next frame (AP: Add alias opens its branch).
 fn open_branch_id(st: Subtype, alias: &str) -> egui::Id {
-    egui::Id::new(("preset-branch-open", st, alias))
+    egui::Id::unique(("preset-branch-open", st, alias))
 }
 
 /// Suffixes: one branch per suffix that names the sub-type (built in, then the aliases), the ORM example under
@@ -899,8 +897,8 @@ fn suffixes(ui: &mut egui::Ui, pm: &PresetsModel, row: &Row, acts: &mut Vec<Act>
                 });
         }
     });
-    let id = egui::Id::new(("preset-alias", st));
-    let cid = egui::Id::new(("preset-alias-canon", st));
+    let id = egui::Id::unique(("preset-alias", st));
+    let cid = egui::Id::unique(("preset-alias-canon", st));
     let mut text = text_state(ui, id);
     let mut canon = ui
         .data(|d| d.get_temp::<String>(cid))
@@ -1002,7 +1000,7 @@ fn swizzle_row(
 }
 
 fn discard_id() -> egui::Id {
-    egui::Id::new("presets-discard")
+    egui::Id::unique("presets-discard")
 }
 
 /// AM15: Select, New or Duplicate over unsaved edits asks first. Discard goes on; Cancel, Esc or a click outside
@@ -1049,6 +1047,9 @@ mod tests {
 
     fn top_bar_of(pm: PresetsModel) -> egui_kittest::Harness<'static, PresetsModel> {
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(900.0, 400.0))
             .build_ui_state(|ui, pm: &mut PresetsModel| top_bar(ui, pm, &mut vec![]), pm);
         h.run();

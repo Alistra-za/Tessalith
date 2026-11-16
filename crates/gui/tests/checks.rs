@@ -559,13 +559,15 @@ fn the_green_guess_is_a_check_row_with_treat_as_opengl() {
 
 fn harness(model: AppModel, width: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(width, 1000.0))
         .with_step_dt(0.02)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -602,7 +604,7 @@ fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
         h.query_all_by_label_contains("⚠").next().is_none(),
         "no ⚠ button"
     );
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets column")
         .outer_rect;
     assert!(
@@ -628,12 +630,12 @@ fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
     let mut h = harness(m, 1100.0);
     // The Sets column at its minimum: its card is under WIDE_CARD (CD9).
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 0.0f32));
+        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 0.0f32));
     h.run();
     let b = h
         .get_by_role_and_label(egui::accesskit::Role::Button, "Check results: 1")
         .rect();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets column")
         .outer_rect;
     assert!(sets.width() < 200.0, "{sets:?}");
@@ -714,9 +716,9 @@ fn mead_card(width: f32, warned: bool) -> (Harness<'static, AppModel>, egui::Rec
     }
     let mut h = harness(m, 1600.0);
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), width));
+        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), width));
     h.run();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets column")
         .outer_rect;
     assert!((sets.width() - width).abs() < 40.0, "{width}: {sets:?}");
@@ -753,7 +755,7 @@ fn the_drop_zone_hint_is_whole() {
     let m = pbr_sets(d.path(), &[("mead_bottle", true)], true);
     let mut h = harness(m, 1100.0);
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::new("sets").with("chosen"), 0.0f32));
+        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 0.0f32));
     h.run();
     assert_eq!(
         painted_text(&h, "Drop here to start a new set").as_deref(),

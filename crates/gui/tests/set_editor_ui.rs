@@ -6,12 +6,14 @@ use support::*;
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -53,12 +55,14 @@ fn the_rename_dialog_shows_a_collision_and_renames_on_a_free_name() {
     let ids: Vec<String> = set_views(&model).into_iter().map(|v| v.id).collect();
     assert!(ids.len() >= 2, "the fixture has two sets: {ids:?}");
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(
             |ui, (model, state): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, model, state),
             (model, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.state_mut().1.drops.pending = Some(Pending::Rename {
         id: ids[0].clone(),
         text: String::new(),
@@ -105,9 +109,11 @@ fn the_set_editor_shows_slot_rows_alpha_and_slot_commands() {
     m.select_set(&key);
     // Tall enough for the packed card's recipe choice and fill rows, which push the commands button down.
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1200.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     for label in [
         "Diffuse",
@@ -417,12 +423,14 @@ fn an_unset_number_shows_the_fixed_default_and_an_edit_is_the_sets_own() {
 /// The PGPatcher panel of `landscape/rock01` alone.
 fn panel_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 900.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, "landscape/rock01"),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -808,12 +816,14 @@ fn a_read_only_sets_doc_disables_the_controls_and_explains_why() {
     std::fs::write(bad.join("sdc-project.toml"), "this is = = not toml\n").unwrap();
     m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(&bad));
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(700.0, 500.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::pgp_fields::panel(ui, m, "landscape/rock01"),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     instant_tooltips(&h);
     h.run();
     let n = h.get_by_label("Parallax");
@@ -1103,9 +1113,11 @@ fn a_coat_source_titles_the_subsurface_card_coat_colour_and_strength() {
     let mut m = pbr_opened(d.path());
     rock_selected(&mut m);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 1200.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("Coat colour + strength");
     assert!(h.query_by_label("Subsurface _s").is_none());
@@ -1455,10 +1467,12 @@ fn click_harness() -> (
     let (rock, leaf) = (key(&m, "landscape/rock01"), key(&m, "landscape/leaf"));
     m.select_set(&rock);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .with_step_dt(1.0 / 60.0)
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     (d, h, rock, leaf)
 }
@@ -1516,9 +1530,11 @@ fn rows_harness(d: &std::path::Path, height: f32) -> Harness<'static, AppModel> 
     let mut m = pbr_opened_plain(d);
     rock_selected(&mut m);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, height))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }
@@ -1611,6 +1627,7 @@ fn wheel(h: &mut Harness<'static, AppModel>, at: eframe::egui::Pos2, dy: f32) {
     h.event(eframe::egui::Event::MouseWheel {
         unit: eframe::egui::MouseWheelUnit::Point,
         delta: eframe::egui::vec2(0.0, dy),
+        source: eframe::egui::MouseWheelSource::Wheel,
         modifiers: eframe::egui::Modifiers::NONE,
         phase: eframe::egui::TouchPhase::Move,
     });
@@ -1621,9 +1638,11 @@ fn wheel(h: &mut Harness<'static, AppModel>, at: eframe::egui::Pos2, dy: f32) {
 /// Short, so both the texture panel and the set editor overflow and scroll.
 fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 300.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 

@@ -97,7 +97,7 @@ fn field_row(
             let mut on = c.as_bool().unwrap_or(default);
             let r = ui.checkbox(&mut on, "");
             let en = ui.is_enabled();
-            r.widget_info(|| egui::WidgetInfo::selected(egui::WidgetType::Checkbox, en, on, &name));
+            r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, en, on, &name));
             if r.changed() {
                 edits.push((f.key, Some(json!(on))));
             }
@@ -110,7 +110,7 @@ fn field_row(
             ui.weak(hint);
             let b = ui.small_button("set");
             let en = ui.is_enabled();
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &set_name));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, en, &set_name));
             if b.clicked() {
                 edits.push((f.key, Some(value)));
             }
@@ -119,7 +119,7 @@ fn field_row(
     }
     let b = ui.small_button("↺").on_hover_text("Back to not set");
     let en = ui.is_enabled();
-    b.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, en, &reset_name));
+    b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, en, &reset_name));
     if b.clicked() {
         edits.push((f.key, None));
     }

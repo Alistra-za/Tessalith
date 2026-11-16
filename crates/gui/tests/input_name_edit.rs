@@ -100,6 +100,9 @@ fn harness_on(mut m: AppModel, set: &str, dt: f32) -> H {
         .key;
     m.select_set(&key);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1600.0, 900.0))
         .with_step_dt(dt)
         // Note FB2: the name box sits in the set editor's scroll area, whose floating bar fades in while the pointer
@@ -109,7 +112,6 @@ fn harness_on(mut m: AppModel, set: &str, dt: f32) -> H {
             |ui, (m, s): &mut (AppModel, State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h
 }

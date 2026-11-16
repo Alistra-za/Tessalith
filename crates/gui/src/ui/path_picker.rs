@@ -13,7 +13,7 @@ pub fn list(
     paths: &[String],
     typed: bool,
 ) -> Option<String> {
-    let id = egui::Id::new(("path-picker", salt));
+    let id = egui::Id::unique(("path-picker", salt));
     let mut q = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_default();
     let mut picked = None;
     let r = ui.add(
@@ -64,7 +64,7 @@ pub fn cached(
     key: (usize, u64),
     make: impl FnOnce() -> Vec<String>,
 ) -> Arc<Vec<String>> {
-    let id = egui::Id::new(("path-picker-cache", salt));
+    let id = egui::Id::unique(("path-picker-cache", salt));
     if let Some((k, v)) = ui.data(|d| d.get_temp::<((usize, u64), Arc<Vec<String>>)>(id)) {
         if k == key {
             return v;

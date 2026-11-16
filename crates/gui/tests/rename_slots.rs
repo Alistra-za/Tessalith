@@ -272,9 +272,11 @@ fn the_set_editor_adds_a_match_to_a_renamed_set() {
         .clone();
     m.select_set(&key);
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let mut h = h;
     h.run();
     let toggle = || h.query_all_by_label("Match on this").nth(1).unwrap();
@@ -975,11 +977,13 @@ fn shots() {
         r.recipe.replace = "armor/plate".into();
         dlg(&mut m).typed.insert(IRON_SET.into(), r"..\x".into());
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(w, hgt))
             .with_pixels_per_point(1.0)
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(10);
         let img = h.render().expect("render");
         img.save(std::path::Path::new(&out).join(format!("rename-outputs-{w}.png")))
@@ -1011,6 +1015,9 @@ fn matching_shots() {
             m.select_set(&key);
         }
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1280.0, 1200.0))
             .with_pixels_per_point(1.0)
             .wgpu()
@@ -1018,7 +1025,6 @@ fn matching_shots() {
                 |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
                 (m, sdc_gui::ui::State::default()),
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(10);
         if !json {
             if let Some(n) = h
@@ -1045,12 +1051,14 @@ fn the_json_editor_adds_a_match_to_a_renamed_set() {
     let mut m = renamed(d.path(), &[]);
     m.open_json_editor();
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1280.0, 1200.0))
         .build_ui_state(
             |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
             (m, sdc_gui::ui::State::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     let mut h = h;
     h.run();
     let pills = |h: &Harness<'static, (AppModel, sdc_gui::ui::State)>| {
@@ -1098,12 +1106,14 @@ fn the_match_fields_fit_at_1280() {
             m.select_set(&key);
         }
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(eframe::egui::vec2(1280.0, 1200.0))
             .build_ui_state(
                 |ui, (m, s): &mut (AppModel, sdc_gui::ui::State)| sdc_gui::ui::draw_with(ui, m, s),
                 (m, sdc_gui::ui::State::default()),
             );
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(5);
         if !json {
             if let Some(n) = h

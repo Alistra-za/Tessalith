@@ -215,7 +215,7 @@ fn row(
                 if r.field == "format" {
                     return combo(
                         ui,
-                        egui::Id::new((id, r.field)),
+                        egui::Id::unique((id, r.field)),
                         &view.value,
                         formats,
                         mixed,

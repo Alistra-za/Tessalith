@@ -716,9 +716,11 @@ fn an_output_name_on_a_sharing_set_names_its_packed_output() {
 
 fn harness(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(w, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.run();
     h
@@ -908,7 +910,7 @@ fn a_helper_row_drags_onto_a_card() {
         })
         .expect("the helper row")
         .rect();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::new("sets"))
+    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
         .expect("the Sets column")
         .outer_rect;
     let card = h
@@ -982,11 +984,13 @@ fn shots() {
         let d = d.path().join(format!("{w}"));
         let m = editing_b(&d, long);
         let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(w, 900.0))
             .with_pixels_per_point(1.0)
             .wgpu()
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run_steps(10);
         let img = h.render().expect("render");
         img.save(Path::new(&out).join(format!("helper-share-editor-{w}.png")))

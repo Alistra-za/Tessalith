@@ -15,12 +15,14 @@ use std::time::{Duration, Instant};
 /// A harness over `m`, with the system fonts as the app has them (see `ui_smoke.rs`).
 fn harness(m: MeshesModel) -> Harness<'static, MeshesModel> {
     let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 800.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h
 }
 
@@ -489,12 +491,14 @@ fn the_header_toggles_between_textures_and_meshes() {
     use sdc_gui::model::AppModel;
     use sdc_gui::settings::GuiSettings;
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(eframe::egui::vec2(1400.0, 800.0))
         .build_ui_state(
             |ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m),
             AppModel::placeholder(GuiSettings::default()),
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     h.get_by_label("Textures view");
     assert!(!sdc_gui::ui::header::meshes_view_active(&h.ctx));
@@ -1095,15 +1099,17 @@ fn at_1100_px_a_long_row_truncates_and_stays_in_its_columns() {
     let rows = Arc::new(vec![(row, name.to_string())]);
     m.winners = Arc::new(vec![(nif(1, "meshes/rock.nif"), "A".to_string())]);
     let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1100.0, 800.0))
         .build_ui_state(
             |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
     let rect = |h: &Harness<'static, MeshesModel>| {
-        PanelState::load(&h.ctx, egui::Id::new("meshes-tree"))
+        PanelState::load(&h.ctx, egui::Id::unique("meshes-tree"))
             .unwrap()
             .outer_rect
     };

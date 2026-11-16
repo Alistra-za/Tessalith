@@ -197,13 +197,15 @@ fn the_drawn_toast_has_an_undo_button_that_rejects_the_recovery() {
     let (m, _, rec) = crashed(d.path(), ORIGINAL, CRASHED);
     let t0 = std::time::Instant::now();
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(800.0, 600.0))
         .with_step_dt(0.05)
         .build_ui_state(
             move |ui, m: &mut AppModel| sdc_gui::ui::messages::draw_at(ui.ctx(), m, t0),
             m,
         );
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     for _ in 0..6 {
         h.step();
     }

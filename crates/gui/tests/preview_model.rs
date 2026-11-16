@@ -432,11 +432,13 @@ fn toolbar_controls(m: AppModel) -> (Vec<String>, Vec<(String, eframe::egui::Pos
     use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
     use egui_kittest::kittest::{NodeT, Queryable};
     let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
     h.run();
-    let bar = PanelState::load(&h.ctx, egui::Id::new("preview-toolbar"))
+    let bar = PanelState::load(&h.ctx, egui::Id::unique("preview-toolbar"))
         .expect("the toolbar is drawn")
         .outer_rect;
     let mut out = vec![];
@@ -480,11 +482,13 @@ fn no_toolbar_control_is_clipped_at_narrow_widths() {
         m.expand("landscape/rock01_rmaos");
         settle(&mut m);
         let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
             .with_size(egui::vec2(width, 810.0))
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-        sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
         h.run();
-        let bar = PanelState::load(&h.ctx, egui::Id::new("preview-toolbar"))
+        let bar = PanelState::load(&h.ctx, egui::Id::unique("preview-toolbar"))
             .expect("the toolbar is drawn")
             .outer_rect;
         for role in [Role::Button, Role::CheckBox, Role::Slider] {

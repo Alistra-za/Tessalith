@@ -85,9 +85,7 @@ fn all_sets(ui: &mut egui::Ui, model: &AppModel, acts: &mut Vec<Act>) {
         // Rule 8.4: Export to ▾ shows the same text, and both can be on screen at once.
         let name = format!("All sets: {}", text.replacen("Also", "also", 1));
         let enabled = r.enabled();
-        r.widget_info(|| {
-            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, now, &name)
-        });
+        r.widget_info(|| egui::WidgetInfo::selected(egui::Role::CheckBox, enabled, now, &name));
         let r = match &why {
             Some(w) => r.on_disabled_hover_text(w),
             None => r.on_hover_text(hover),
