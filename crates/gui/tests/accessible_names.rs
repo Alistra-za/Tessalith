@@ -97,7 +97,14 @@ fn every_input_has_a_name_in_presets_and_rename() {
     h.run();
     h.get_by_label("TOML preview").click();
     h.run();
-    for n in ["Base preset", "Red source"] {
+    // Rule 8.4: the header's "Preset" and the tab's own combos have distinct names.
+    for n in [
+        "Preset",
+        "Preset to edit",
+        "Preset target",
+        "Base preset",
+        "Red source",
+    ] {
         h.get_by_role_and_label(Role::ComboBox, n);
     }
     h.get_by_role_and_label(Role::TextInput, "Preset name");
@@ -117,6 +124,36 @@ fn every_input_has_a_name_in_presets_and_rename() {
         h.get_by_role_and_label(Role::TextInput, n);
     }
     h.get_by_role_and_label(Role::ComboBox, "Letter case");
+}
+
+/// The Files tab's bar while an export runs (`drawer.rs`): a `ProgressIndicator`, which kittest's check does not
+/// cover. A held `running` stands in for the export, as in `also_export.rs`.
+#[test]
+fn an_export_in_progress_names_its_bar() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.export.running = Some(Default::default());
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1600.0, 600.0))
+        .build_ui_state(
+            |ui, m: &mut AppModel| {
+                let mut st = sdc_gui::ui::drawer::DrawerState::default();
+                sdc_gui::ui::drawer::files_tab(ui, m, &mut st);
+            },
+            m,
+        );
+    // The bar asks for repaints while the export runs: steps, not `run()`.
+    h.run_steps(3);
+    h.get_by_role_and_label(Role::ProgressIndicator, "Export progress");
+    assert!(
+        unnamed_progress(&h).is_empty(),
+        "{:?}",
+        unnamed_progress(&h)
+    );
+    h.state_mut().export.running = None;
 }
 
 /// The 3D view's busy spinner (survey row 48): a `ProgressIndicator`, which kittest's check does not cover.

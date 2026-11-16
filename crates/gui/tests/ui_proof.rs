@@ -644,7 +644,10 @@ fn names_flags_an_unnamed_button() {
             ui.label("side");
         });
         ui.horizontal(|ui| {
-            e2.set(ui.add(egui::Button::new("")).rect);
+            // A clickable painted widget with no role and no name: egui_kittest 0.37 checks only input roles
+            // (`egui::accessibility::is_input`), so this one reaches the detector, which flags any interactive node.
+            let r = ui.allocate_response(vec2(16.0, 21.0), egui::Sense::click());
+            e2.set(r.rect);
             let _ = ui.button("Save");
         });
     });

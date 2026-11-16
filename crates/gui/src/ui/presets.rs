@@ -236,7 +236,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                 }
             })
             .response;
-        super::name_input(r, "Preset");
+        super::name_input(r, "Preset to edit");
         if ui
             .add_enabled(pm.draft.is_some(), egui::Button::new("Duplicate"))
             .on_hover_text("An editable copy under a new name (built-ins are read-only)")
@@ -294,7 +294,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
                     }
                 })
                 .response;
-            super::name_input(r, "Target");
+            super::name_input(r, "Preset target");
         });
     });
     ui.horizontal_wrapped(|ui| {
