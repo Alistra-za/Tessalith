@@ -320,6 +320,7 @@ fn text_value(
     };
     let r = ui.add(
         egui::TextEdit::singleline(&mut text)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text(hint)
             .desired_width(width),
     );
@@ -398,6 +399,7 @@ fn patterns_value(
     let mut text: String = ui.data(|d| d.get_temp(id).unwrap_or_default());
     let r = ui.add(
         egui::TextEdit::singleline(&mut text)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text("EditorID or *wildcard*")
             .desired_width(140.0),
     );

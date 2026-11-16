@@ -66,7 +66,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         ui.add(egui::Label::new(editing_line(e)).truncate());
         ui.separator();
         // Both ways: a wide row scrolls instead of widening the panel; thin bars stay visible without hover.
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
         egui::ScrollArea::both()
             .id_salt("meshes-edit-scroll")
             .auto_shrink([false, false])

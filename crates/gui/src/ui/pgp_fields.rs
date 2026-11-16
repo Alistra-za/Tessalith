@@ -537,7 +537,7 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                         .unwrap_or_else(|| m.path.clone());
                     let r = ui.add_sized(
                         [field_w, ui.spacing().interact_size.y],
-                        egui::TextEdit::singleline(&mut text),
+                        egui::TextEdit::singleline(&mut text).margin(crate::look::TEXT_EDIT_MARGIN),
                     );
                     let r = super::name_input(r, &format!("{} match path", m.slot));
                     take_focus(ui, &r, &c.set, &format!("match{}", m.n));
@@ -779,6 +779,7 @@ pub(crate) fn control(
             };
             let r = ui.add(
                 egui::TextEdit::singleline(&mut text)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text(hint)
                     .desired_width(160.0),
             );
@@ -1046,7 +1047,11 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
             .data(|d| d.get_temp::<(String, u64)>(id))
             .filter(|(_, at)| at + 1 >= frame)
             .map_or_else(|| f.raw().to_string(), |(t, _)| t);
-        let r = ui.add(egui::TextEdit::singleline(&mut text).desired_width(56.0));
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
+                .desired_width(56.0),
+        );
         let r = super::name_input(r, "Alpha flags raw value")
             .on_hover_text("edit raw: a whole number from 0 to 65535");
         let ok = text.trim().parse::<u16>().ok();

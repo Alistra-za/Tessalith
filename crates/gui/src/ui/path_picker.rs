@@ -19,6 +19,7 @@ pub fn list(
     let r = super::name_input(
         ui.add(
             egui::TextEdit::singleline(&mut q)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
                 .hint_text("Filter: words of the path")
                 .desired_width(360.0),
         ),

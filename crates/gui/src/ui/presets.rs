@@ -257,7 +257,11 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
         ui.horizontal_wrapped(|ui| {
             ui.label("Name");
             let mut id = pm.id();
-            let r = ui.add(egui::TextEdit::singleline(&mut id).desired_width(180.0));
+            let r = ui.add(
+                egui::TextEdit::singleline(&mut id)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
+                    .desired_width(180.0),
+            );
             if super::name_input(r, "Preset name")
                 .on_hover_text("The preset's id and file name: lower-case letters, digits and '-'")
                 .changed()
@@ -385,6 +389,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             let mut text = pm.toml_text();
             let r = ui.add(
                 egui::TextEdit::multiline(&mut text)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .code_editor()
                     .interactive(false)
                     .desired_width(f32::INFINITY),
@@ -915,8 +920,12 @@ fn suffixes(ui: &mut egui::Ui, pm: &PresetsModel, row: &Row, acts: &mut Vec<Act>
         .unwrap_or_else(|| own[0].to_string());
     ui.horizontal(|ui| {
         let l = ui.label("New alias _");
-        ui.add(egui::TextEdit::singleline(&mut text).desired_width(120.0))
-            .labelled_by(l.id);
+        ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
+                .desired_width(120.0),
+        )
+        .labelled_by(l.id);
         canon_combo(ui, st, "alias", &own, &mut canon);
         let check = (!text.is_empty()).then(|| pm.check_alias(&text, &canon));
         if ui

@@ -45,6 +45,7 @@ pub fn show(
             let hint = "Search types";
             let r = ui.add(
                 egui::TextEdit::singleline(&mut q)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .id(query_id.with("edit"))
                     .hint_text(hint),
             );
@@ -78,7 +79,7 @@ pub fn show(
                 offered(target, s) || (kind == TypeKind::SubType && current == Some(s))
             });
             // ui-rules 3.2: a bar drawn without hover, so a list that overflows says so.
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+            ui.spacing_mut().scroll = crate::look::thin_scroll();
             egui::ScrollArea::vertical()
                 .id_salt(id.with("list"))
                 .max_height(LIST_HEIGHT)

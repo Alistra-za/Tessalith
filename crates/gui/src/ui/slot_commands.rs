@@ -127,7 +127,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                         if choice == 1 {
                             ui.add_enabled_ui(editable, |ui| {
                                 let r = super::name_input(
-                                    ui.text_edit_singleline(&mut st.text[i]),
+                                    ui.add(egui::TextEdit::singleline(&mut st.text[i]).margin(crate::look::TEXT_EDIT_MARGIN)),
                                     &format!("Slot {n} path"),
                                 );
                                 let enter =

@@ -797,6 +797,7 @@ fn path_field(
         .unwrap_or_else(|| text.to_string());
     let r = ui.add(
         egui::TextEdit::singleline(&mut buf)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .id(id.with("field"))
             .desired_width(ui.available_width()),
     );
@@ -820,6 +821,7 @@ fn browse(ui: &mut egui::Ui, m: &MeshesModel, commit: &mut Option<String>) {
     let mut filter: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
     let r = ui.add(
         egui::TextEdit::singleline(&mut filter)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text("Filter textures")
             .desired_width(320.0),
     );

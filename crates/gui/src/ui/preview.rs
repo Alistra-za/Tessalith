@@ -163,7 +163,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, state: &mut PreviewUi, gpu:
                 // I2: both axes, so settings wider than the panel scroll inside it instead of moving its left edge
                 // under the toolbar (egui cuts an over-wide right panel from the left). Thin bars show without hover.
                 // Its combos have one exact width (Note HI3).
-                ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+                ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::both()
                     .auto_shrink([false, false])
                     .show(ui, |ui| settings_panel::draw(ui, model, &key, true));

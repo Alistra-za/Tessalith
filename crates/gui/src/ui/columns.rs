@@ -420,6 +420,7 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
     super::name_input(
         ui.add(
             egui::TextEdit::singleline(&mut model.search)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
                 .hint_text("Search")
                 .desired_width(f32::INFINITY),
         ),
@@ -497,7 +498,7 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
     let mut drawn = 0usize;
     // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its widest (10 px, hovered) stays inside the tiles'
     // `SCROLL_ALLOWANCE`.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+    ui.spacing_mut().scroll = crate::look::thin_scroll();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {

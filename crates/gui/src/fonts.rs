@@ -59,9 +59,11 @@ fn definitions_from(dir: &Path) -> Result<egui::FontDefinitions, String> {
     Ok(defs)
 }
 
-/// Installs Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas from `%WINDIR%\Fonts`.
+/// Installs Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas from `%WINDIR%\Fonts`, and pins egui 0.36.2's
+/// look in both themes (`look`).
 pub fn install_system_fonts(ctx: &egui::Context) -> Result<(), String> {
     ctx.set_fonts(definitions_from(&fonts_dir())?);
+    ctx.all_styles_mut(crate::look::pin_036_style);
     Ok(())
 }
 

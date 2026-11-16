@@ -415,7 +415,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
         }
         Selection::Item(key) => {
             // ui-rules 3.2 (Note JI7): a bar drawn without hover, so a panel taller than the window says so.
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+            ui.spacing_mut().scroll = crate::look::thin_scroll();
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-texture")
                 .auto_shrink([false, false]);

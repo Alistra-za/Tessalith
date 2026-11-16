@@ -954,6 +954,7 @@ const CLEAR_TO_REORDER: &str = "Clear the filter to reorder sets, or use Move to
 fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
     let search = ui.add(
         egui::TextEdit::singleline(&mut model.sets_filter.search)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text("Search sets")
             .desired_width(f32::INFINITY),
     );
@@ -1543,7 +1544,7 @@ pub fn draw(
     let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x + 2.0 * DOCK_INSET;
     // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its 6 px gutter keeps the cards out from under the bar at
     // rest; hovered, the 10 px bar reaches only the cards' frame margin.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+    ui.spacing_mut().scroll = crate::look::thin_scroll();
     // The cards' width beside the bar's gutter, whether or not the bar shows: a card is estimated only off screen, and
     // then the list overflows and the bar shows. A width that followed the bar would make its appearing a re-flow,
     // which scrolls to the open set.
@@ -3087,7 +3088,10 @@ fn rename_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) {
     // Only Esc cancels: a click outside could lose the typed name (AG11).
     let (keys, clicked) =
         super::dialogs::dialog(ctx, "set-rename", false, 420.0, &title, &buttons, |ui| {
-            let field = super::name_input(ui.text_edit_singleline(text), "New set name");
+            let field = super::name_input(
+                ui.add(egui::TextEdit::singleline(text).margin(crate::look::TEXT_EDIT_MARGIN)),
+                "New set name",
+            );
             if !field.has_focus() && !field.lost_focus() {
                 field.request_focus();
             }
@@ -3126,7 +3130,8 @@ fn group_name_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
     // Only Esc cancels: a click outside could lose the typed name (AG11).
     let (keys, clicked) =
         super::dialogs::dialog(ctx, "group-name", false, 420.0, &title, &buttons, |ui| {
-            let field = ui.text_edit_singleline(text);
+            let field =
+                ui.add(egui::TextEdit::singleline(text).margin(crate::look::TEXT_EDIT_MARGIN));
             // A TextEdit takes no label from its text, so the box gets its name here.
             field.widget_info(|| egui::WidgetInfo {
                 label: Some("Group name".into()),
@@ -3189,6 +3194,7 @@ fn move_to_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropState) 
             });
             let field = ui.add(
                 egui::TextEdit::singleline(query)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text("Number or name")
                     .desired_width(f32::INFINITY),
             );
@@ -3519,6 +3525,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
             });
             let field = ui.add(
                 egui::TextEdit::singleline(query)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text("EDID, plugin, FormID or path")
                     .desired_width(f32::INFINITY),
             );
@@ -3578,7 +3585,7 @@ fn map_target_modal(ctx: &egui::Context, model: &mut AppModel, st: &mut DropStat
                 .data(|d| d.get_temp::<(f32, f32)>(view_id))
                 .unwrap_or((0.0, row_h * 9.0));
             // A bar that shows without hovering (egui-ui-rules 3.2); the dialog's own ui, so nothing else changes.
-            ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+            ui.spacing_mut().scroll = crate::look::thin_scroll();
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("map-target-list")
                 .max_height(row_h * 9.0)
@@ -3710,11 +3717,13 @@ mod tests {
     /// exactly five with no gutter; with it, four).
     #[test]
     fn the_default_sets_width_holds_five_chips_beside_the_bar() {
-        let style = egui::Style::default();
+        // The app's style: `fonts::install_system_fonts` applies the pinned 0.36.2 look.
+        let mut style = egui::Style::default();
+        crate::look::pin_036_style(&mut style);
         let frame_x = egui::Frame::group(&style).total_margin().sum().x + 2.0 * DOCK_INSET;
         let card = crate::ui::SETS_W
             - super::super::columns::PANEL_CHROME
-            - egui::style::ScrollStyle::thin().allocated_width();
+            - crate::look::thin_scroll().allocated_width();
         assert_eq!(chips_per_row(card, frame_x), 5, "a card {card} px wide");
     }
 

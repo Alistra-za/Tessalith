@@ -796,6 +796,7 @@ fn palette(ctx: &egui::Context, model: &mut AppModel) {
         let r = super::name_input(
             ui.add(
                 egui::TextEdit::singleline(&mut p.query)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text("Search actions, textures and sets")
                     .desired_width(f32::INFINITY),
             ),

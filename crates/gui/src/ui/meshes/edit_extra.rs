@@ -174,6 +174,7 @@ fn row(
             let mut buf = s.to_string();
             let r = ui.add(
                 egui::TextEdit::multiline(&mut buf)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .desired_rows(2)
                     .desired_width(ui.available_width()),
             );
@@ -559,6 +560,7 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
     ui.horizontal(|ui| {
         let r = ui.add(
             egui::TextEdit::singleline(&mut name)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
                 .hint_text("Name")
                 .desired_width(150.0),
         );
@@ -619,6 +621,7 @@ fn known_row(
         if let KnownValue::Text(_) = k.value {
             let r = ui.add(
                 egui::TextEdit::singleline(&mut st.text)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text("Value")
                     .desired_width(ui.available_width().min(240.0)),
             );

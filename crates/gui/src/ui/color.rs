@@ -45,7 +45,11 @@ pub fn color_field(ui: &mut egui::Ui, id: egui::Id, name: &str, rgb: [u8; 3]) ->
         .filter(|(_, f)| f + 1 >= frame)
         .map_or_else(|| format_hex(rgb), |(t, _)| t);
     let r = super::name_input(
-        ui.add(egui::TextEdit::singleline(&mut text).desired_width(64.0)),
+        ui.add(
+            egui::TextEdit::singleline(&mut text)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
+                .desired_width(64.0),
+        ),
         &format!("{name} hex colour"),
     );
     if parse_hex(&text).is_none() {

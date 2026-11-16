@@ -313,7 +313,7 @@ const STACK_BELOW: f32 = 1200.0;
 fn column(ui: &mut egui::Ui, key: &str, heading: &str, body: impl FnOnce(&mut egui::Ui)) {
     ui.strong(heading);
     // ui-rules 3.2: a bar drawn without hover, so a column that overflows says so.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+    ui.spacing_mut().scroll = crate::look::thin_scroll();
     egui::ScrollArea::vertical()
         .id_salt(("review", key))
         .auto_shrink([false, true])
@@ -346,6 +346,7 @@ fn name_field(
     let mut t: String = ui.data(|d| d.get_temp(id)).unwrap_or_else(|| saved.clone());
     let r = ui.add(
         egui::TextEdit::singleline(&mut t)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text(hint)
             .desired_width(f32::INFINITY),
     );
@@ -552,7 +553,7 @@ fn skip_list(ui: &mut egui::Ui, m: &AppModel, cfg: &ExportConfig, act: &mut Opti
     }
     let row_h = ui.spacing().interact_size.y;
     ui.scope(|ui| {
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
         egui::ScrollArea::vertical()
             .id_salt("also-skip")
             .max_height(8.0 * (row_h + ui.spacing().item_spacing.y))
@@ -644,7 +645,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
             ui.scope(|ui| {
-                ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+                ui.spacing_mut().scroll = crate::look::thin_scroll();
                 egui::ScrollArea::vertical()
                     .id_salt("review-footer-lists")
                     .max_height(footer_cap.max(3.0 * stride))
@@ -863,7 +864,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     }
     if ui.ctx().content_rect().width() < STACK_BELOW {
         // Note FB10: one scrolling column, the sections one under another.
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
         egui::ScrollArea::vertical()
             .id_salt(("review", "stacked"))
             .auto_shrink([false, true])

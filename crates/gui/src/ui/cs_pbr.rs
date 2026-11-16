@@ -379,7 +379,10 @@ fn edids(
     let id = ui.make_persistent_id(("cs-edid-text", kind.key(), v.id.as_str()));
     let mut text: String = ui.data_mut(|d| d.get_temp(id).unwrap_or_default());
     ui.horizontal(|ui| {
-        super::name_input(ui.text_edit_singleline(&mut text), "EDID to add");
+        super::name_input(
+            ui.add(egui::TextEdit::singleline(&mut text).margin(crate::look::TEXT_EDIT_MARGIN)),
+            "EDID to add",
+        );
         if ui.button("Add EDID").clicked() && !text.trim().is_empty() {
             let mut l = b.edids.clone();
             l.push(text.trim().to_string());

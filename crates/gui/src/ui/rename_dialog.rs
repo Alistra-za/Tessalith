@@ -48,7 +48,8 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
                 // E28: each box is named by the label beside it.
                 let field = |ui: &mut egui::Ui, label: &str, text: &mut String| {
                     let l = ui.label(label);
-                    ui.text_edit_singleline(text).labelled_by(l.id);
+                    let edit = egui::TextEdit::singleline(text).margin(crate::look::TEXT_EDIT_MARGIN);
+                    ui.add(edit).labelled_by(l.id);
                 };
                 field(ui, "Find", &mut d.recipe.find);
                 field(ui, "Replace", &mut d.recipe.replace);
@@ -184,7 +185,7 @@ fn table_row(
 /// The header and the rows, drawn with `show_rows`: only the rows in view are laid out (Note FA).
 fn rows_table(ui: &mut egui::Ui, plan: &RenamePlan, d: &mut RenameDialog) {
     ui.scope(|ui| {
-        ui.style_mut().spacing.scroll = egui::style::ScrollStyle::thin();
+        ui.style_mut().spacing.scroll = crate::look::thin_scroll();
         ui.style_mut().spacing.item_spacing.y = 2.0;
         let gap = ui.spacing().item_spacing.x;
         let height = ui.spacing().interact_size.y;

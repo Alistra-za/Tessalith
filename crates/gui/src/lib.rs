@@ -7,6 +7,7 @@ pub mod app;
 pub mod crash_log;
 pub mod fonts;
 pub mod layout;
+pub mod look;
 pub mod model;
 pub mod pgp;
 pub mod project;

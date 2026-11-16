@@ -188,7 +188,7 @@ fn assert_column_bar_at_rest(h: &H, id: &str, what: &str) {
         .map(|(r, _)| *r)
         .max_by(|a, b| a.height().total_cmp(&b.height()))
         .unwrap();
-    let hovered = track.max.x - egui::style::ScrollStyle::thin().bar_width;
+    let hovered = track.max.x - sdc_gui::look::thin_scroll().bar_width;
     for n in h
         .query_all_by_role(egui::accesskit::Role::Button)
         .chain(h.query_all_by_role(egui::accesskit::Role::Image))

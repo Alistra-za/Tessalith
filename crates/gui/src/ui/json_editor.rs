@@ -128,6 +128,7 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
         let r = ui.add_enabled(
             editable,
             egui::TextEdit::singleline(&mut t)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
                 .hint_text(json_name(model))
                 .desired_width(NAME_FIELD_WIDTH),
         );
@@ -364,7 +365,11 @@ fn text_box(
         .data(|d| d.get_temp::<String>(id))
         .unwrap_or_else(|| current.to_string());
     let r = super::name_input(
-        ui.add(egui::TextEdit::singleline(&mut t).desired_width(width)),
+        ui.add(
+            egui::TextEdit::singleline(&mut t)
+                .margin(crate::look::TEXT_EDIT_MARGIN)
+                .desired_width(width),
+        ),
         name,
     );
     if r.changed() {
@@ -1164,6 +1169,7 @@ fn toolbar(
         super::name_input(
             ui.add(
                 egui::TextEdit::singleline(&mut nav.query)
+                    .margin(crate::look::TEXT_EDIT_MARGIN)
                     .hint_text("Search sets and paths")
                     .desired_width(220.0),
             ),

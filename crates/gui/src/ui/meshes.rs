@@ -398,7 +398,7 @@ fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) 
 /// one search box and the filter chips over it.
 fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Meshes UI T7 (rule 3.2): thin bars that stay visible without hover, for every list in this column.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+    ui.spacing_mut().scroll = crate::look::thin_scroll();
     // Rule 3.6: long paths and mod names are cut, not let widen the column.
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
     // Meshes UI T2 (owner decision 2): while Edit is open the column stays on the shapes, the only way to pick one.
@@ -448,6 +448,7 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
     }
     let r = ui.add(
         egui::TextEdit::singleline(&mut m.search)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text("Search paths and mods")
             .desired_width(f32::INFINITY),
     );
@@ -608,6 +609,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                     };
                     let r = ui.add(
                         egui::TextEdit::singleline(&mut q)
+                            .margin(crate::look::TEXT_EDIT_MARGIN)
                             .hint_text("Filter: words of the mod name")
                             .desired_width(f32::INFINITY),
                     );
@@ -751,7 +753,7 @@ fn detail(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Note GH6 (N6): the lines above the 3D view scroll when the window is short, so the frame keeps its minimum.
     let cap = head_cap(ui, anim);
     ui.scope(|ui| {
-        ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
         egui::ScrollArea::vertical()
             .id_salt("meshes-detail-head")
             .max_height(cap)

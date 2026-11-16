@@ -141,6 +141,7 @@ fn browse(ui: &mut egui::Ui, m: &MeshesModel, salt: (u32, SkinMap)) -> Option<Sk
     let mut q: String = ui.data(|d| d.get_temp(fid)).unwrap_or_default();
     let r = ui.add(
         egui::TextEdit::singleline(&mut q)
+            .margin(crate::look::TEXT_EDIT_MARGIN)
             .hint_text("Filter textures")
             .desired_width(360.0),
     );
