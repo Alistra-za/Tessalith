@@ -164,7 +164,8 @@ pub(super) fn store(q: V4, sels: &mut [u8; 16]) {
     sels[8..].copy_from_slice(&(_mm_cvtsi128_si64(_mm_unpackhi_epi64(b, b)) as u64).to_le_bytes());
 }
 
-/// The searches, 4 texels per vector, with the contracts of `sels::find_sels4`, `find_sels3` and `find_sels3_masked`.
+/// The 4-colour search (`sels::find_sels4`'s contract), 4 texels per vector: per texel the least error over palette
+/// entries 0 to 3 and its selector.
 #[target_feature(enable = "sse2")]
 #[inline]
 fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
@@ -205,6 +206,9 @@ fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     total
 }
 
+/// The 3-colour search (`sels::find_sels3`'s contract), 4 texels per vector: per texel the least error over palette
+/// entries 0, 1 and 2 and its selector, the first entry on a tie. Three entries instead of four, so the bounds of the
+/// module doc hold.
 #[target_feature(enable = "sse2")]
 #[inline]
 fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {

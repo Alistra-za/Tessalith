@@ -123,7 +123,8 @@ fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
     total
 }
 
-/// The SSE2 `sels3`, 8 texels per vector.
+/// The SSE2 `sels3`, 8 texels per vector: per texel the least error over palette entries 0, 1 and 2 and its selector
+/// (the first entry on a tie), each lane within the bounds of `sse2.rs`'s module doc.
 #[target_feature(enable = "avx2")]
 #[inline]
 fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {

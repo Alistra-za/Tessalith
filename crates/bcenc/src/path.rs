@@ -217,8 +217,9 @@ thread_local! {
         const { std::cell::Cell::new([0; Wide::ALL.len()]) };
 }
 
-/// Counts one run of wide kernel `k` on this thread (unit tests only; the kernel's safe wrapper calls it).
-#[cfg(test)]
+/// Counts one run of wide kernel `k` on this thread (unit tests only; the kernel's safe wrapper calls it). The wide
+/// kernels exist only under the x86 cfg, and so does this.
+#[cfg(all(test, target_arch = "x86_64", target_feature = "sse2"))]
 pub(crate) fn kernel_ran(k: Wide) {
     KERNEL_RUNS.with(|c| {
         let mut runs = c.get();
@@ -241,15 +242,18 @@ pub(crate) fn tested_paths() -> Vec<Path> {
 }
 
 /// Whether the unit tests run the AVX2 path ([`tested_paths`], which panics when `SDC_BCENC_PATHS` names a path this
-/// machine lacks); prints the skip when they do not.
+/// machine lacks); prints the skip, once per process, when they do not.
 #[cfg(all(test, target_arch = "x86_64", target_feature = "sse2"))]
 pub(crate) fn avx2_tested() -> bool {
+    static SKIP_LINE: std::sync::Once = std::sync::Once::new();
     let tested = tested_paths().contains(&Path::Avx2);
     if !tested {
-        eprintln!(
-            "avx2 path skipped: {}",
-            Path::Avx2.missing().unwrap_or("not named")
-        );
+        SKIP_LINE.call_once(|| {
+            eprintln!(
+                "avx2 path skipped: {}",
+                Path::Avx2.missing().unwrap_or("not named")
+            )
+        });
     }
     tested
 }
