@@ -11,10 +11,12 @@
 //! first) is compiled again with AVX2 (Note HY21). Each loop hands its candidates to a `Batch` where it called
 //! `try_pair` before: on `Base` that is `try_pair`; on `Avx2` the batch scores two pairs at once in one 256-bit vector
 //! (`avx2::pair2`) and decides them in order (`apply`), and a lone last pair goes through `try_pair` when the loop
-//! flushes. No byte changes: each pair still gets `try_pair`'s verdict against the best of its moment (a strict `<`
-//! on the full total, which is what `pair` returning `None` means), in the order written, and no candidate of a loop
-//! is computed from the best inside that loop, so scoring the second pair before the first is decided changes neither
-//! the pairs nor their order. Each loop flushes before anything reads its best.
+//! flushes. `Avx512` runs the search inside `search_avx512`, a frame with the AVX-512 set, where the batch scores
+//! four pairs at once in one 512-bit vector (`avx512::pair4`) and `flush` sends the last two through `pair2` and a
+//! lone one through `try_pair`. No byte changes: each pair still gets `try_pair`'s verdict against the best of its
+//! moment (a strict `<` on the full total, which is what `pair` returning `None` means), in the order written, and no
+//! candidate of a loop is computed from the best inside that loop, so scoring later pairs before the earlier ones are
+//! decided changes neither the pairs nor their order. Each loop flushes before anything reads its best.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
 
@@ -22,7 +24,7 @@
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-use crate::path::Avx2;
+use crate::path::{Avx2, Avx512};
 use crate::path::{Base, Isa, Path};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.
@@ -329,16 +331,108 @@ mod avx2 {
     }
 }
 
+/// Four endpoint pairs scored at once, for the AVX-512 path: palette `p[k]` in the 128-bit quarter `k` of each
+/// vector, the block's 16 texels in every quarter. Each quarter runs exactly the SSE2 kernel's steps (`mod sse2`) in
+/// the `_mm512_*` byte and word forms: the saturating differences or-ed into distances, their least per texel, the
+/// squares summed with `vpmaddwd` and the adds, and the selectors blended from the last palette value to the first
+/// (`vpcmpeqb` into a mask and `vpblendmb`, where the SSE2 kernel ands and or-s with the compare's bytes; the same
+/// bytes stay). The 512-bit `unpack`, `madd` and `shuffle` work within each 128-bit quarter, so no quarter sees
+/// another's lanes, each lane holds the SSE2 kernel's bits and the bounds of that kernel's doc hold per quarter (a
+/// total at most 1,040,400). Like `pair2` it returns every full total and selector set; `apply` decides them.
+///
+/// Exactness: as `pair2`'s (HY11): four totals computed first and then decided in order, each against the best of its
+/// moment, give each pair its old verdict. Integer code only; called only through the safe wrapper `pair4`, which takes
+/// the `Avx512` token.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod avx512 {
+    use crate::path::Avx512;
+    use core::arch::x86_64::*;
+
+    #[target_feature(enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq")]
+    #[inline]
+    fn pair4_kernel(v: &[u8; 16], p: [&[u8; 8]; 4]) -> [(u32, [u8; 16]); 4] {
+        let half = |a: &[u8]| i64::from_le_bytes([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]]);
+        let (lo8, hi8) = (half(&v[..8]), half(&v[8..]));
+        let x = _mm512_set_epi64(hi8, lo8, hi8, lo8, hi8, lo8, hi8, lo8);
+        // |x - q| per byte, q holding palette k's value j in quarter k.
+        let dist = |j: usize| {
+            let b = |k: usize| i32::from_ne_bytes([p[k][j]; 4]);
+            let (b0, b1, b2, b3) = (b(0), b(1), b(2), b(3));
+            let q = _mm512_set_epi32(
+                b3, b3, b3, b3, b2, b2, b2, b2, b1, b1, b1, b1, b0, b0, b0, b0,
+            );
+            _mm512_or_si512(_mm512_subs_epu8(x, q), _mm512_subs_epu8(q, x))
+        };
+        let d = [
+            dist(0),
+            dist(1),
+            dist(2),
+            dist(3),
+            dist(4),
+            dist(5),
+            dist(6),
+            dist(7),
+        ];
+        let mut m = d[0];
+        for dj in &d[1..] {
+            m = _mm512_min_epu8(m, *dj);
+        }
+        // The SSE2 kernel's sum per quarter: `unpack` takes each quarter's own texels 0..8 and 8..16.
+        let zero = _mm512_setzero_si512();
+        let (lo, hi) = (_mm512_unpacklo_epi8(m, zero), _mm512_unpackhi_epi8(m, zero));
+        let s = _mm512_add_epi32(_mm512_madd_epi16(lo, lo), _mm512_madd_epi16(hi, hi));
+        let s = _mm512_add_epi32(s, _mm512_shuffle_epi32::<0b01_00_11_10>(s));
+        let s = _mm512_add_epi32(s, _mm512_shuffle_epi32::<0b00_00_00_01>(s));
+        // From the last palette value to the first, so the first nearest one is what stays.
+        let mut sel = zero;
+        for j in (0..8).rev() {
+            let eq = _mm512_cmpeq_epi8_mask(d[j], m);
+            sel = _mm512_mask_blend_epi8(eq, sel, _mm512_set1_epi8(j as i8));
+        }
+        let quarters = |a: __m512i| {
+            [
+                _mm512_castsi512_si128(a),
+                _mm512_extracti32x4_epi32::<1>(a),
+                _mm512_extracti32x4_epi32::<2>(a),
+                _mm512_extracti32x4_epi32::<3>(a),
+            ]
+        };
+        let (sq, selq) = (quarters(s), quarters(sel));
+        let bytes = |h: __m128i| {
+            let mut sels = [0u8; 16];
+            sels[..8].copy_from_slice(&(_mm_cvtsi128_si64(h) as u64).to_le_bytes());
+            sels[8..].copy_from_slice(
+                &(_mm_cvtsi128_si64(_mm_unpackhi_epi64(h, h)) as u64).to_le_bytes(),
+            );
+            sels
+        };
+        std::array::from_fn(|k| {
+            debug_assert!((0..=1_040_400).contains(&_mm_cvtsi128_si32(sq[k])));
+            (_mm_cvtsi128_si32(sq[k]) as u32, bytes(selq[k]))
+        })
+    }
+
+    /// The full total and the selectors of the block under each palette of `p`, in order, on the AVX-512 path.
+    /// Counts its runs in the unit tests.
+    #[inline]
+    pub(super) fn pair4(_t: Avx512, v: &[u8; 16], p: [&[u8; 8]; 4]) -> [(u32, [u8; 16]); 4] {
+        #[cfg(test)]
+        crate::path::kernel_ran(crate::path::Wide::Pair4);
+        // SAFETY: `_t` exists, so `Avx512::require` found the AVX-512 set.
+        unsafe { pair4_kernel(v, p) }
+    }
+}
+
 /// One scored candidate as [`apply`] takes it: the ends, the full total and the selectors.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 type Scored = (u8, u8, u32, [u8; 16]);
 
-/// Two scored pairs decided in order, as two `try_pair` calls decide them: `a`, then `b`, each replacing `best` only
-/// when its total is strictly below `best.err` at that moment, so a tie keeps the earlier block.
+/// Scored pairs decided in order, as `try_pair` calls decide them: each replaces `best` only when its total is
+/// strictly below `best.err` at that moment, after the ones before it, so a tie keeps the earlier block.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 #[inline(always)]
-fn apply(best: &mut Best, a: Scored, b: Scored) {
-    for (e0, e1, err, sels) in [a, b] {
+fn apply<const N: usize>(best: &mut Best, outcomes: [Scored; N]) {
+    for (e0, e1, err, sels) in outcomes {
         if err < best.err {
             hit!(Hit::PairImproved);
             *best = Best { err, e0, e1, sels };
@@ -348,10 +442,23 @@ fn apply(best: &mut Best, a: Scored, b: Scored) {
     }
 }
 
-/// The shadow check of a batch: the two pairs `ends`, in order, through the scalar reference from `start`, must leave
+/// Two pairs scored in one vector (`pair2`) and decided in order (`apply`): the AVX2 path's batch, and the last two
+/// of a flushed batch on the AVX-512 path.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[inline(always)]
+fn decide2(t: Avx2, best: &mut Best, v: &[u8; 16], (a0, a1): (u8, u8), (b0, b1): (u8, u8)) {
+    let [ra, rb] = avx2::pair2(t, v, &pal(a0, a1), &pal(b0, b1));
+    #[cfg(test)]
+    let start = *best;
+    apply(best, [(a0, a1, ra.0, ra.1), (b0, b1, rb.0, rb.1)]);
+    #[cfg(test)]
+    check_batch(v, start, [(a0, a1), (b0, b1)], best);
+}
+
+/// The shadow check of a batch: the pairs `ends`, in order, through the scalar reference from `start`, must leave
 /// what `apply` left in `best`. Unit tests only, so every batch they search is checked.
 #[cfg(all(test, target_arch = "x86_64", target_feature = "sse2"))]
-fn check_batch(v: &[u8; 16], start: Best, ends: [(u8, u8); 2], best: &Best) {
+fn check_batch<const N: usize>(v: &[u8; 16], start: Best, ends: [(u8, u8); N], best: &Best) {
     let mut want = start;
     for (e0, e1) in ends {
         want.try_pair_reference(v, e0, e1);
@@ -367,47 +474,86 @@ fn check_batch(v: &[u8; 16], start: Best, ends: [(u8, u8); 2], best: &Best) {
 /// A loop's candidates on their way to its best: [`Batch::push`] where the loop called `try_pair`, [`Batch::flush`] at
 /// the loop's end. One per loop (per mode, round or cut), on the stack.
 struct Batch<I: Isa> {
-    // Read only by the AVX2 branch of `push`, which a build without the wide paths does not have.
+    // Read only by the wide branches of `push` and `flush`, which a build without the wide paths does not have.
     #[cfg_attr(
         not(all(target_arch = "x86_64", target_feature = "sse2")),
         allow(dead_code)
     )]
     isa: I,
-    /// The first pair of two, waiting for the second (AVX2 path only).
-    pending: Option<(u8, u8)>,
+    /// The pairs waiting, in order, in `pending[..waiting]`: at most one on the AVX2 path (the first of two), at most
+    /// three on the AVX-512 path (the first three of four), none on the base path.
+    pending: [(u8, u8); 3],
+    waiting: usize,
 }
 
 impl<I: Isa> Batch<I> {
     #[inline(always)]
     fn new(isa: I) -> Self {
-        Batch { isa, pending: None }
+        Batch {
+            isa,
+            pending: [(0, 0); 3],
+            waiting: 0,
+        }
     }
 
     /// `best.try_pair(v, e0, e1)` on the base path. On the AVX2 path the first pair of two waits; the second scores
-    /// both in one vector and `apply` decides them in order.
+    /// both in one vector and `apply` decides them in order. On the AVX-512 path the first three of four wait; the
+    /// fourth scores all four in one vector, decided in order the same way.
     #[inline(always)]
     fn push(&mut self, best: &mut Best, v: &[u8; 16], e0: u8, e1: u8) {
         #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-        if let Some(t) = self.isa.avx2() {
-            let Some((a0, a1)) = self.pending.take() else {
-                self.pending = Some((e0, e1));
+        if let Some(t) = self.isa.avx512() {
+            if self.waiting < 3 {
+                self.pending[self.waiting] = (e0, e1);
+                self.waiting += 1;
                 return;
-            };
-            let [ra, rb] = avx2::pair2(t, v, &pal(a0, a1), &pal(e0, e1));
+            }
+            self.waiting = 0;
+            let [a, b, c] = self.pending;
+            let ends = [a, b, c, (e0, e1)];
+            // Written out: `ends.map(..)` stayed a call in the frame.
+            let p = [pal(a.0, a.1), pal(b.0, b.1), pal(c.0, c.1), pal(e0, e1)];
+            let r = avx512::pair4(t, v, p.each_ref());
             #[cfg(test)]
             let start = *best;
-            apply(best, (a0, a1, ra.0, ra.1), (e0, e1, rb.0, rb.1));
+            apply::<4>(
+                best,
+                std::array::from_fn(|k| (ends[k].0, ends[k].1, r[k].0, r[k].1)),
+            );
             #[cfg(test)]
-            check_batch(v, start, [(a0, a1), (e0, e1)], best);
+            check_batch(v, start, ends, best);
+            return;
+        }
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        if let Some(t) = self.isa.avx2() {
+            if self.waiting == 0 {
+                self.pending[0] = (e0, e1);
+                self.waiting = 1;
+                return;
+            }
+            self.waiting = 0;
+            decide2(t, best, v, self.pending[0], (e0, e1));
             return;
         }
         best.try_pair(v, e0, e1);
     }
 
-    /// A lone pending pair through `try_pair`; nothing on the base path, where no pair waits.
+    /// The pairs still waiting, in order: on the AVX-512 path the first two of two or three through `pair2`, then a
+    /// lone one through `try_pair`; on the AVX2 path a lone pair through `try_pair`; nothing on the base path, where
+    /// no pair waits.
     #[inline(always)]
     fn flush(&mut self, best: &mut Best, v: &[u8; 16]) {
-        if let Some((e0, e1)) = self.pending.take() {
+        let pending = self.pending;
+        let rest = &pending[..std::mem::take(&mut self.waiting)];
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        let rest = match (self.isa.avx512(), self.isa.avx2(), rest) {
+            (Some(_), Some(t), [a, b, more @ ..]) => {
+                decide2(t, best, v, *a, *b);
+                more
+            }
+            _ => rest,
+        };
+        for &(e0, e1) in rest {
             best.try_pair(v, e0, e1);
         }
     }
@@ -784,9 +930,19 @@ pub fn search_on(path: Path, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u
             // SAFETY: `t` exists, so `Avx2::require` found AVX2.
             unsafe { search_avx2(t, v, radius, guard) }
         }
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        Path::Avx512 => {
+            let t = Avx512::require();
+            // SAFETY: `t` exists, so `Avx512::require` found the AVX-512 set.
+            unsafe { search_avx512(t, v, radius, guard) }
+        }
         #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
         Path::Avx2 => {
             unreachable!("path avx2 is not built here; the _on entry asserted availability")
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+        Path::Avx512 => {
+            unreachable!("path avx512 is not built here; the _on entry asserted availability")
         }
     }
 }
@@ -797,6 +953,16 @@ pub fn search_on(path: Path, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u
 fn search_avx2(t: Avx2, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     #[cfg(test)]
     crate::path::frame_ran(Path::Avx2);
+    search_in(t, v, radius, guard)
+}
+
+/// The AVX-512 frame of the search: the whole search compiled with the AVX-512 set, its loops scoring four pairs per
+/// vector.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[target_feature(enable = "avx2,avx512f,avx512bw,avx512vl,avx512dq")]
+fn search_avx512(t: Avx512, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
+    #[cfg(test)]
+    crate::path::frame_ran(Path::Avx512);
     search_in(t, v, radius, guard)
 }
 
@@ -832,7 +998,7 @@ mod tests {
     use crate::gen;
     use crate::path::Base;
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    use crate::path::{avx2_tested, Avx2};
+    use crate::path::{avx2_tested, avx512_tested, Avx2, Avx512};
 
     /// The endpoint pairs tried for a block: every pair with both ends on a stride of 5, then every pair within 3 of
     /// the block's least and greatest value.
@@ -1007,6 +1173,26 @@ mod tests {
                 }
             }
         }
+        // The four-pair kernel with four different palettes of the list, one per quarter, each window of four in
+        // turn: each quarter is the full scalar result.
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        if avx512_tested() {
+            let t = Avx512::require();
+            for v in &blocks {
+                for i in 0..ends.len() {
+                    let q: [(u8, u8); 4] = std::array::from_fn(|k| ends[(i + k) % ends.len()]);
+                    let p = q.map(|(e0, e1)| pal(e0, e1));
+                    let r = avx512::pair4(t, v, p.each_ref());
+                    for k in 0..4 {
+                        assert_eq!(
+                            Some(r[k]),
+                            pair_scalar(v, &p[k], u32::MAX),
+                            "{v:?} quarters {q:?}, quarter {k}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     /// A best of error `err` whose ends and selectors carry `tag`, so an assert shows which candidate stayed.
@@ -1029,12 +1215,41 @@ mod tests {
         for (ea, eb, stays) in [(100, 100, 1), (100, 99, 2), (600, 499, 2), (500, 600, 0)] {
             let (a, b) = (tagged(ea, 20), tagged(eb, 30));
             let mut best = start;
-            apply(&mut best, cand(a), cand(b));
+            apply(&mut best, [cand(a), cand(b)]);
             let want = [start, a, b][stays];
             assert_eq!(
                 (best.err, best.e0, best.e1, best.sels),
                 (want.err, want.e0, want.e1, want.sels),
                 "a {ea}, b {eb}"
+            );
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn a_batch_of_four_takes_each_against_the_ones_before() {
+        let start = tagged(500, 10);
+        let cand = |b: Best| (b.e0, b.e1, b.err, b.sels);
+        // (errors of the four outcomes, which one stays: 0 the start, 1..=4 the outcomes in order)
+        let cases: [([u32; 4], usize); 8] = [
+            ([100, 100, 100, 100], 1),
+            ([400, 300, 200, 100], 4),
+            ([600, 300, 400, 700], 2),
+            ([600, 300, 300, 500], 2),
+            ([600, 300, 250, 250], 3),
+            ([500, 499, 499, 498], 4),
+            ([500, 600, 700, 800], 0),
+            ([700, 450, 450, 449], 4),
+        ];
+        for (errs, stays) in cases {
+            let outs: [Best; 4] = std::array::from_fn(|i| tagged(errs[i], 20 + 10 * i as u8));
+            let mut best = start;
+            apply(&mut best, outs.map(cand));
+            let want = [start, outs[0], outs[1], outs[2], outs[3]][stays];
+            assert_eq!(
+                (best.err, best.e0, best.e1, best.sels),
+                (want.err, want.e0, want.e1, want.sels),
+                "outcomes {errs:?}"
             );
         }
     }
@@ -1074,7 +1289,7 @@ mod tests {
                 for (half, (e0, e1)) in [a, b].into_iter().enumerate() {
                     kinds[half][usize::from(e0 <= e1)] += 1;
                 }
-                apply(&mut best, (a.0, a.1, ra.0, ra.1), (b.0, b.1, rb.0, rb.1));
+                apply(&mut best, [(a.0, a.1, ra.0, ra.1), (b.0, b.1, rb.0, rb.1)]);
                 assert_eq!(
                     (best.err, best.e0, best.e1, best.sels),
                     (want.err, want.e0, want.e1, want.sels),
@@ -1099,6 +1314,83 @@ mod tests {
         assert!(
             kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0,
             "a kind was never reached: [low, high] x [8-value, 6-value] {kinds:?}, taken {taken}, refused {refused}"
+        );
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn four_pairs_in_a_vector_equal_four_scalar_calls() {
+        if !avx512_tested() {
+            return;
+        }
+        let t = Avx512::require();
+        // Per quarter: palettes of the 8-value kind, then of the 6-value kind; and the blocks whose last pairs went
+        // through `pair2` in `flush`.
+        let (mut kinds, mut taken, mut refused, mut flushed2) =
+            ([[0usize; 2]; 4], 0usize, 0usize, 0usize);
+        for v in gen::bc4_classes(0xE6_0001, 30) {
+            // The best falls as in `the_pair_kernel_equals_the_scalar_one`, so later pairs meet a low best.
+            let mut best = Best::new();
+            let pairs = pairs_for(&v);
+            let (fours, rest) = pairs.as_chunks::<4>();
+            for ends in fours {
+                let p = ends.map(|(e0, e1)| pal(e0, e1));
+                let r = avx512::pair4(t, &v, p.each_ref());
+                let from = best.err;
+                let what = || format!("{v:?} quarters {ends:?}, best {from}");
+                for k in 0..4 {
+                    assert_eq!(
+                        Some(r[k]),
+                        pair_scalar(&v, &p[k], u32::MAX),
+                        "quarter {k}: {}",
+                        what()
+                    );
+                    kinds[k][usize::from(ends[k].0 <= ends[k].1)] += 1;
+                }
+                // Each outcome in order: the scalar call against the best of that moment.
+                let mut want = best;
+                for (&(e0, e1), pk) in ends.iter().zip(&p) {
+                    match pair_scalar(&v, pk, want.err) {
+                        Some((err, sels)) => {
+                            want = Best { err, e0, e1, sels };
+                            taken += 1;
+                        }
+                        None => refused += 1,
+                    }
+                }
+                apply::<4>(
+                    &mut best,
+                    std::array::from_fn(|k| (ends[k].0, ends[k].1, r[k].0, r[k].1)),
+                );
+                assert_eq!(
+                    (best.err, best.e0, best.e1, best.sels),
+                    (want.err, want.e0, want.e1, want.sels),
+                    "{}",
+                    what()
+                );
+            }
+            // The last one to three pairs wait in a batch and go out as `flush` sends them: two through `pair2`, a
+            // lone one through `try_pair`.
+            let mut want = best;
+            for &(e0, e1) in rest {
+                want.try_pair_reference(&v, e0, e1);
+            }
+            let mut batch = Batch::new(t);
+            for &(e0, e1) in rest {
+                batch.push(&mut best, &v, e0, e1);
+            }
+            batch.flush(&mut best, &v);
+            flushed2 += usize::from(rest.len() >= 2);
+            assert_eq!(
+                (best.err, best.e0, best.e1, best.sels),
+                (want.err, want.e0, want.e1, want.sels),
+                "{v:?} last pairs {rest:?}"
+            );
+        }
+        assert!(
+            kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0 && flushed2 > 0,
+            "a kind was never reached: quarters x [8-value, 6-value] {kinds:?}, taken {taken}, refused {refused}, \
+             flushes through pair2 {flushed2}"
         );
     }
 }

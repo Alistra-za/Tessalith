@@ -278,7 +278,8 @@ fn the_frames_run_on_their_path() {
 /// Each wide kernel runs in its frame: on every tested path, the blocks of `gen::colour_classes(0xE0_0003, 4)`
 /// through `bc1_encode_block_on` (3-colour blocks allowed) and through `bc1_encode_block_alpha_on` with every mask of
 /// `gen::alpha_masks(0xE0_0004, 8)`, and the blocks of `gen::bc4_classes(0xE0_0008, 4)` through `bc4_encode_block_on`
-/// (radius 5). On `Avx2` every kernel of [`Wide::ALL`] runs; on `Base` none does.
+/// (radius 5). On `Avx512` every kernel of [`Wide::ALL`] runs (the AVX2 ones, and `Pair4`); on `Avx2` every one but
+/// `Pair4`; on `Base` none.
 #[test]
 fn the_wide_kernels_run_in_their_frame() {
     let blocks = gen::colour_classes(0xE0_0003, 4);
@@ -300,7 +301,10 @@ fn the_wide_kernels_run_in_their_frame() {
             let runs = after[k as usize] - before[k as usize];
             match p {
                 Path::Base => assert_eq!(runs, 0, "{k:?} ran on path base"),
-                Path::Avx2 => assert!(runs > 0, "{k:?} never ran on path avx2"),
+                Path::Avx2 if k == Wide::Pair4 => assert_eq!(runs, 0, "{k:?} ran on path avx2"),
+                Path::Avx2 | Path::Avx512 => {
+                    assert!(runs > 0, "{k:?} never ran on path {}", p.name())
+                }
             }
         }
     }
