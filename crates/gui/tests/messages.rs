@@ -264,7 +264,6 @@ fn toasts_draw_at_the_bottom_right_and_are_gone_after_their_time() {
 /// its buttons (Review's Export); with it collapsed they keep the window's bottom-right corner.
 #[test]
 fn toasts_sit_above_an_open_bottom_panel() {
-    use egui::containers::panel::PanelState;
     let mut m = AppModel::new(
         sdc_gui::settings::GuiSettings::default(),
         None,
@@ -289,9 +288,7 @@ fn toasts_sit_above_an_open_bottom_panel() {
     for _ in 0..6 {
         h.step();
     }
-    let panel = PanelState::load(&h.ctx, egui::Id::unique("bottom"))
-        .expect("the panel is open")
-        .outer_rect;
+    let panel = support::panel(&h.ctx, "bottom");
     // The log row in the Messages tab says "Saved" too, at the left; the toast is the rightmost.
     let toast = h
         .query_all_by_label("Saved")

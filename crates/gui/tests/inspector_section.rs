@@ -112,10 +112,7 @@ fn the_preview_strip_has_no_inspector() {
     m.expand("landscape/leaf.png");
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
-    let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
-            .expect("the settings strip is open at 1600 wide")
-            .outer_rect;
+    let strip = support::panel(&h.ctx, "preview-settings");
     // The strip is drawn: it holds the texture's Compression group, and no section.
     assert!(h
         .query_all_by_label("Compression")

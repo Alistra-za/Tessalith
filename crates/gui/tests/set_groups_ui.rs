@@ -142,10 +142,7 @@ fn card_rect(h: &H, id: &str) -> egui::Rect {
 }
 
 fn sets_panel(h: &H) -> egui::Rect {
-    use egui::containers::panel::PanelState;
-    PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets panel")
-        .outer_rect
+    support::panel(&h.ctx, "sets")
 }
 
 /// Click a header (the row toggles).

@@ -104,8 +104,9 @@ fn a_card_shows_name_pill_and_a_right_aligned_shader() {
     let mut h = harness(pbr_opened(d.path()));
     h.run();
     // The default column is too narrow for half a card to hold "PBR Landscape (auto)": widen it, as a drag leaves it.
-    h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 460.0_f32));
+    h.ctx.data_mut(|d| {
+        d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), 460.0_f32)
+    });
     h.run();
     let card = card_rect(&h);
     let kind = on_card(&h, "PBR Landscape");
@@ -762,9 +763,7 @@ fn off_screen_set_cards_have_accesskit_nodes_and_tab_stops() {
     h.step();
     // The first card wholly past the panel is the next stop that is only a stand-in. (A card whose position label
     // is cut off by the bottom edge is drawn, so its Tab stops are its own parts, not a stand-in.)
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets panel")
-        .outer_rect;
+    let panel = support::panel(&h.ctx, "sets");
     let next = *off
         .iter()
         .find(|&&n| {
@@ -852,7 +851,7 @@ fn card_heights_refresh_after_a_resize() {
         .for_each(|s| s.members = all.iter().cycle().take(all.len() * 4).cloned().collect());
     m.invalidate_views();
     let mut h = many_at(m, 2600.0);
-    let chosen = egui::Id::unique("sets").with("chosen");
+    let chosen = sdc_gui::ui::panel_ids::chosen_width_id("sets");
     h.ctx.data_mut(|d| d.insert_persisted(chosen, 520.0_f32));
     h.run();
     let far = measure_far_card(&mut h, 50);

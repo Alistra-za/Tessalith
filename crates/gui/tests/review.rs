@@ -675,15 +675,10 @@ fn review_still_gates_on_blockers_and_overwrites() {
 /// The labels of the widgets Review draws, sorted: the tab's panel rect, every role that carries text. Paths under
 /// `skip` (the test's temp folder) show it as `<tmp>`.
 fn review_labels(h: &Harness<'static, AppModel>, skip: &str) -> Vec<String> {
-    let panel =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
-            .expect("the Review panel")
-            .outer_rect;
+    let panel = support::panel(&h.ctx, "bottom-review");
     // The Sets list scrolls under this panel: a card or the drop hint scrolled out of view still has a box in the
     // panel's rect once the cards are tall enough (Note HP). Everything under the Sets column's own node is left out.
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets column")
-        .outer_rect;
+    let sets = support::panel(&h.ctx, "sets");
     let search = h
         .root()
         .children_recursive()

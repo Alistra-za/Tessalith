@@ -2576,7 +2576,6 @@ fn a_colour_drag_is_three_ops_with_the_original_bases() {
 /// Layout v2: the edit panel sits beside the 3D view under the shared header, above the open bottom panel.
 #[test]
 fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
-    use egui::containers::panel::PanelState;
     use sdc_gui::app::SdcApp;
     app_data();
     let d = files(false);
@@ -2614,11 +2613,7 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
         h.get_by_label(l);
     }
     support::header_export_label(&h);
-    let panel = |id: &str| {
-        PanelState::load(&h.ctx, egui::Id::unique(id))
-            .unwrap()
-            .outer_rect
-    };
+    let panel = |id: &str| support::panel(&h.ctx, id);
     let (edit, tree, bottom) = (panel("meshes-edit"), panel("meshes-tree"), panel("bottom"));
     assert!(
         edit.max.x <= w + 0.5,
@@ -5787,11 +5782,7 @@ fn the_clock_row_fits_the_centre_column() {
                 m,
             );
         h.run_steps(3);
-        let rect = |id: &str| {
-            egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
-                .unwrap_or_else(|| panic!("{id} is drawn"))
-                .outer_rect
-        };
+        let rect = |id: &str| support::panel(&h.ctx, id);
         rect("meshes-3d-anim");
         // A panel grows to its content, so the bound is the centre column: between the tree and the edit panel.
         let (lo, hi) = (rect("meshes-tree").max.x, rect("meshes-edit").min.x);
@@ -7314,9 +7305,7 @@ fn controllers_tab_combos_fit_the_edit_panel() {
     h.run_steps(2);
     tab(&mut h, "Controllers");
     h.run_steps(3);
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
-        .expect("the edit panel")
-        .outer_rect;
+    let panel = support::panel(&h.ctx, "meshes-edit");
     let combos: Vec<_> = h
         .query_all(egui_kittest::kittest::by().role(AkRole::ComboBox))
         .filter(|n| n.rect().min.x >= panel.min.x)
@@ -9573,9 +9562,7 @@ fn app_edit(w: f32, hgt: f32, gpu: bool) -> (tempfile::TempDir, AppH) {
 }
 
 fn panel_rect(h: &AppH, id: &str) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
-        .unwrap()
-        .outer_rect
+    support::panel(&h.ctx, id)
 }
 
 /// T7: at 1100 px with an edit open the left column gives way, so the 3D view keeps its 240 px minimum.
@@ -11214,11 +11201,8 @@ fn the_set_preview_has_no_export_menu() {
 /// GH2 (N2): the panel has no Undo / Redo of its own; the header's pair and Ctrl+Z step the NIF history.
 #[test]
 fn the_edit_panel_has_no_undo_redo_of_its_own() {
-    use egui::containers::panel::PanelState;
     let (_t, _d, mut h) = both_histories(1);
-    let edit = PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
-        .unwrap()
-        .outer_rect;
+    let edit = support::panel(&h.ctx, "meshes-edit");
     for l in ["Undo NIF edit", "Redo NIF edit"] {
         assert!(h.query_by_label(l).is_none(), "{l} is in the panel");
     }
@@ -11280,12 +11264,10 @@ fn the_preview_keeps_160_px_with_review_open() {
             egui::pos2(8.0, hgt - review_h),
             egui::vec2(w - 16.0, review_h),
         );
-        h.ctx.data_mut(|d| {
-            d.insert_persisted(
-                egui::Id::unique("bottom-review"),
-                PanelState { outer_rect: r },
-            )
-        });
+        let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+            .expect("the Review panel was built");
+        h.ctx
+            .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
         h.run_steps(8);
         let frame = h
             .get_by_label(sdc_gui::model::viewport3d::FRAME_LABEL)
@@ -11385,12 +11367,10 @@ fn the_bottom_panel_is_capped_only_in_the_meshes_view_with_a_nif() {
     let tall = |h: &mut AppH| {
         let r =
             egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-        h.ctx.data_mut(|d| {
-            d.insert_persisted(
-                egui::Id::unique("bottom-review"),
-                PanelState { outer_rect: r },
-            )
-        });
+        let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+            .expect("the Review panel was built");
+        h.ctx
+            .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
         h.run_steps(8);
     };
     tall(&mut h);
@@ -11426,12 +11406,10 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
     h.state_mut().model.open_review();
     h.run_steps(8);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    h.ctx.data_mut(|d| {
-        d.insert_persisted(
-            egui::Id::unique("bottom-review"),
-            PanelState { outer_rect: r },
-        )
-    });
+    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+        .expect("the Review panel was built");
+    h.ctx
+        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
     h.run_steps(8);
     let capped = review_height(&h);
     assert!(capped < 600.0, "Review {capped}");
@@ -11443,10 +11421,7 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
 }
 
 fn review_height(h: &AppH) -> f32 {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
-        .unwrap()
-        .outer_rect
-        .height()
+    support::panel(&h.ctx, "bottom-review").height()
 }
 
 /// Note FI18 (2): Review's 40 % default obeys the cap too. At 1536x600 the default (240) is over it.
@@ -11477,12 +11452,10 @@ fn the_meshes_cap_keeps_the_users_review_height() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    h.ctx.data_mut(|d| {
-        d.insert_persisted(
-            egui::Id::unique("bottom-review"),
-            PanelState { outer_rect: r },
-        )
-    });
+    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+        .expect("the Review panel was built");
+    h.ctx
+        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
     h.run_steps(4);
     assert_eq!(review_height(&h), 600.0, "Textures view: Review");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
@@ -11507,12 +11480,10 @@ fn a_drag_to_the_cap_is_the_users_height() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
     let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    h.ctx.data_mut(|d| {
-        d.insert_persisted(
-            egui::Id::unique("bottom-review"),
-            PanelState { outer_rect: r },
-        )
-    });
+    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+        .expect("the Review panel was built");
+    h.ctx
+        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
     h.run_steps(4);
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
@@ -11553,7 +11524,6 @@ fn a_drag_to_the_cap_is_the_users_height() {
 /// GH7 (N7): the shader form numbers slots from 1, and the NIF's own index is on hover.
 #[test]
 fn texture_slots_are_numbered_from_one_with_the_nif_index_on_hover() {
-    use egui::containers::panel::PanelState;
     let mut m = direct(scenes::shared_alpha_and_set());
     select(&mut m, "A");
     let mut h = view(m);
@@ -11561,9 +11531,7 @@ fn texture_slots_are_numbered_from_one_with_the_nif_index_on_hover() {
     h.get_by_role_and_label(AkRole::TextInput, "Diffuse path (slot 1)");
     h.get_by_role_and_label(AkRole::Button, "Browse for Diffuse (slot 1)");
     assert!(h.query_by_label_contains("(slot 0)").is_none());
-    let edit = PanelState::load(&h.ctx, egui::Id::unique("meshes-edit"))
-        .unwrap()
-        .outer_rect;
+    let edit = support::panel(&h.ctx, "meshes-edit");
     let name = h
         .query_all_by_label("Diffuse")
         .find(|n| edit.contains(n.rect().center()))

@@ -1,6 +1,6 @@
 //! The bottom panel (layout v2 A1, A9): Files and Messages tabs, its placement under the columns.
 mod support;
-use eframe::egui::{self, containers::panel::PanelState, Id};
+use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::bottom::BottomTab;
@@ -28,7 +28,7 @@ fn harness(model: AppModel) -> Harness<'static, AppModel> {
 }
 
 fn outer(h: &Harness<'static, AppModel>, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
+    support::panel(&h.ctx, id)
 }
 
 #[test]

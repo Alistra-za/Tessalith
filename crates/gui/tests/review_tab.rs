@@ -448,10 +448,7 @@ fn the_edited_json_offers_keep_and_overwrite() {
 /// The clipped (clickable) rect of the widget labelled `label`, from the last pass.
 fn hit_rect(h: &Harness<'static, AppModel>, label: &str) -> egui::Rect {
     // The Files column lists the same names above the panel: take the one inside the Review panel.
-    let panel =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
-            .expect("the Review panel")
-            .outer_rect;
+    let panel = support::panel(&h.ctx, "bottom-review");
     let rect = h
         .query_all_by_label(label)
         .map(|n| n.rect())
@@ -597,9 +594,7 @@ fn review_at(dir: &std::path::Path, size: egui::Vec2) -> Harness<'static, AppMod
 fn review_opens_at_least_40_percent_tall() {
     let d = tempfile::tempdir().unwrap();
     let h = review_at(d.path(), egui::vec2(1400.0, 864.0));
-    let p = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom-review"))
-        .expect("the Review panel")
-        .outer_rect;
+    let p = support::panel(&h.ctx, "bottom-review");
     assert!(p.height() >= 0.4 * 864.0 - 1.0, "{p:?}");
 }
 
@@ -644,7 +639,8 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     use egui::containers::panel::PanelState;
     let d = tempfile::tempdir().unwrap();
     let mut h = review_at(d.path(), egui::vec2(1400.0, 864.0));
-    let id = egui::Id::unique("bottom-review");
+    let id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+        .expect("the Review panel was built");
     let height =
         |h: &Harness<'static, AppModel>| PanelState::load(&h.ctx, id).unwrap().outer_rect.height();
     let before = height(&h);

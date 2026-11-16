@@ -429,7 +429,7 @@ fn encode_now_during_an_export_runs_when_the_export_ends() {
 
 /// The labels of the expanded preview's toolbar controls, sorted.
 fn toolbar_controls(m: AppModel) -> (Vec<String>, Vec<(String, eframe::egui::Pos2)>) {
-    use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
+    use eframe::egui::{self, accesskit::Role};
     use egui_kittest::kittest::{NodeT, Queryable};
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
@@ -438,9 +438,7 @@ fn toolbar_controls(m: AppModel) -> (Vec<String>, Vec<(String, eframe::egui::Pos
         .with_size(egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run();
-    let bar = PanelState::load(&h.ctx, egui::Id::unique("preview-toolbar"))
-        .expect("the toolbar is drawn")
-        .outer_rect;
+    let bar = support::panel(&h.ctx, "preview-toolbar");
     let mut out = vec![];
     for role in [
         Role::Button,
@@ -474,7 +472,7 @@ fn toolbar_controls(m: AppModel) -> (Vec<String>, Vec<(String, eframe::egui::Pos
 /// wraps whole widgets).
 #[test]
 fn no_toolbar_control_is_clipped_at_narrow_widths() {
-    use eframe::egui::{self, accesskit::Role, containers::panel::PanelState};
+    use eframe::egui::{self, accesskit::Role};
     use egui_kittest::kittest::{NodeT, Queryable};
     for width in [960.0, 1100.0, 1280.0, 1600.0] {
         let d = tempfile::tempdir().unwrap();
@@ -488,9 +486,7 @@ fn no_toolbar_control_is_clipped_at_narrow_widths() {
             .with_size(egui::vec2(width, 810.0))
             .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
         h.run();
-        let bar = PanelState::load(&h.ctx, egui::Id::unique("preview-toolbar"))
-            .expect("the toolbar is drawn")
-            .outer_rect;
+        let bar = support::panel(&h.ctx, "preview-toolbar");
         for role in [Role::Button, Role::CheckBox, Role::Slider] {
             for n in h.query_all_by_role(role) {
                 let r = n.rect();

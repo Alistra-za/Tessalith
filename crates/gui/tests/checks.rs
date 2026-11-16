@@ -604,9 +604,7 @@ fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
         h.query_all_by_label_contains("⚠").next().is_none(),
         "no ⚠ button"
     );
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets column")
-        .outer_rect;
+    let sets = support::panel(&h.ctx, "sets");
     assert!(
         h.query_all_by_label("ready")
             .any(|n| sets.contains_rect(n.rect())),
@@ -630,14 +628,12 @@ fn the_card_shows_check_results_on_an_info_badge_outside_the_warning_count() {
     let mut h = harness(m, 1100.0);
     // The Sets column at its minimum: its card is under WIDE_CARD (CD9).
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 0.0f32));
+        .data_mut(|d| d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), 0.0f32));
     h.run();
     let b = h
         .get_by_role_and_label(egui::accesskit::Role::Button, "Check results: 1")
         .rect();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets column")
-        .outer_rect;
+    let sets = support::panel(&h.ctx, "sets");
     assert!(sets.width() < 200.0, "{sets:?}");
     // Review M7: inside the card's own frame, the smallest painted rect around the set's name and the chips below.
     let name = h
@@ -716,11 +712,9 @@ fn mead_card(width: f32, warned: bool) -> (Harness<'static, AppModel>, egui::Rec
     }
     let mut h = harness(m, 1600.0);
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), width));
+        .data_mut(|d| d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), width));
     h.run();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets column")
-        .outer_rect;
+    let sets = support::panel(&h.ctx, "sets");
     assert!((sets.width() - width).abs() < 40.0, "{width}: {sets:?}");
     let name = h
         .query_all_by_label("test/mead_bottle")
@@ -755,7 +749,7 @@ fn the_drop_zone_hint_is_whole() {
     let m = pbr_sets(d.path(), &[("mead_bottle", true)], true);
     let mut h = harness(m, 1100.0);
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), 0.0f32));
+        .data_mut(|d| d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), 0.0f32));
     h.run();
     assert_eq!(
         painted_text(&h, "Drop here to start a new set").as_deref(),

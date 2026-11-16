@@ -1085,7 +1085,7 @@ fn a_nif_selected_under_any_mod_is_selected_again_after_a_reload() {
 /// their order, and nothing of the row reaches past the column's edge.
 #[test]
 fn at_1100_px_a_long_row_truncates_and_stays_in_its_columns() {
-    use eframe::egui::{self, containers::panel::PanelState};
+    use eframe::egui;
     let long = format!("meshes/{}rock.nif", "a_very_long_folder_name/".repeat(12));
     let name = "A mod with a long name that keeps going past its column";
     let mut m = MeshesModel::empty();
@@ -1109,9 +1109,7 @@ fn at_1100_px_a_long_row_truncates_and_stays_in_its_columns() {
         );
     h.run();
     let rect = |h: &Harness<'static, MeshesModel>| {
-        PanelState::load(&h.ctx, egui::Id::unique("meshes-tree"))
-            .unwrap()
-            .outer_rect
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "meshes-tree").expect("the panel was built")
     };
     // A short row first: the long one must not widen the column (a panel grows to fit what it holds).
     let panel = rect(&h);

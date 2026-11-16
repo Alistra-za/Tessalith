@@ -1,7 +1,7 @@
 //! AG126: the header row never overlaps itself at any window width, and every control stays in the row. Layout v2 A4:
 //! one row, Export to ▾ · Save · Export at the right edge; the header is the same in the Meshes view (C7).
 mod support;
-use eframe::egui::{self, accesskit::Role, containers::panel::PanelState, Id};
+use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{by, NodeT as _, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::model::meshes::MeshesModel;
@@ -59,7 +59,7 @@ fn harness_sized(m: AppModel, size: egui::Vec2, meshes_view: bool) -> H {
 
 /// The widgets inside the panel `id`, not the containers: (role, label, rect).
 fn widgets(h: &H, id: &str) -> Vec<(Role, String, egui::Rect)> {
-    let panel = PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect;
+    let panel = support::panel(&h.ctx, id);
     h.query_all(by().predicate(|n| n.bounding_box().is_some()))
         .filter(|n| {
             matches!(
@@ -97,7 +97,8 @@ fn the_textures_header_never_overlaps() {
         let h = harness(pbr_opened(&d.path().join(format!("{w}"))), w, false);
         assert_no_overlap(&h, "header", w);
         // Note AM: an idle scan row is not drawn (the source moved to MO2…).
-        assert!(PanelState::load(&h.ctx, Id::unique("textures-scan")).is_none());
+        assert!(!panel_never_built(&h.ctx, "header"));
+        assert!(panel_never_built(&h.ctx, "textures-scan"));
         for c in CONTROLS {
             h.get_by_label(c);
         }
@@ -125,7 +126,7 @@ fn the_textures_header_never_overlaps() {
 }
 
 fn outer(h: &H, id: &str) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::unique(id)).unwrap().outer_rect
+    support::panel(&h.ctx, id)
 }
 
 #[test]
@@ -520,10 +521,11 @@ fn the_meshes_header_never_overlaps() {
         header_export_label(&h);
         // Note JI1: Settings… shows in the Meshes view too (the eyes it replaced did not).
         assert!(outer(&h, "header").contains_rect(h.get_by_label("Settings…").rect()));
-        assert!(PanelState::load(&h.ctx, Id::unique("meshes-header")).is_none());
+        assert!(!panel_never_built(&h.ctx, "header"));
+        assert!(panel_never_built(&h.ctx, "meshes-header"));
         // Note AM: an idle bar with no status holds nothing.
         // The bar is not drawn while it has nothing to show (layout v2 ask).
-        if PanelState::load(&h.ctx, Id::unique("meshes-bar")).is_some()
+        if sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "meshes-bar").is_some()
             && !widgets(&h, "meshes-bar").is_empty()
         {
             assert_no_overlap(&h, "meshes-bar", w);
@@ -619,5 +621,6 @@ fn render_the_toolbar() {
 fn meshes_bar_hidden_without_scan() {
     let d = tempfile::tempdir().unwrap();
     let h = harness(pbr_opened(d.path()), 1024.0, true);
-    assert!(PanelState::load(&h.ctx, Id::unique("meshes-bar")).is_none());
+    assert!(!panel_never_built(&h.ctx, "header"));
+    assert!(panel_never_built(&h.ctx, "meshes-bar"));
 }

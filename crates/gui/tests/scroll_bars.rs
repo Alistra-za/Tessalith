@@ -132,10 +132,7 @@ fn the_set_editor_shows_its_bar_at_rest() {
 
 /// A side column's outer rect, cut at the window.
 fn column(h: &H, id: &str) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique(id))
-        .unwrap_or_else(|| panic!("the {id} column is drawn"))
-        .outer_rect
-        .intersect(h.ctx.content_rect())
+    support::panel(&h.ctx, id).intersect(h.ctx.content_rect())
 }
 
 /// `opened` with `n` more diffuse textures, each a set of its own, so both columns run past a short window.

@@ -1,7 +1,7 @@
 //! Layout v2, owner addition (R17): the Sets column's search box, filter pills and shader filter. Filters only hide
 //! (Review Focus 5): the selection, the editor and the bulk panel stay.
 mod support;
-use eframe::egui::{self, accesskit::Role, containers::panel::PanelState, Id};
+use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{by, NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::shader::Shader;
@@ -37,9 +37,7 @@ fn harness(m: AppModel) -> Harness<'static, AppModel> {
 }
 
 fn sets_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    PanelState::load(&h.ctx, Id::unique("sets"))
-        .expect("the Sets panel is drawn")
-        .outer_rect
+    support::panel(&h.ctx, "sets")
 }
 
 /// K15: the Sets column's shader filter, named "Filter, Sets shader filter" ("Filter (1), ..." with ": <shader>" once one is chosen).

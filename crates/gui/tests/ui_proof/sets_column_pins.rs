@@ -1,7 +1,6 @@
 //! kittest pins for the Sets column polish, Note HN, on the driver's fixtures.
 use crate::support::in_sets_column;
 use eframe::egui::{self, accesskit::Role};
-use egui::containers::panel::PanelState;
 use egui_kittest::kittest::{NodeT, Queryable};
 use engine::helper::{AlphaTarget as A, FillTarget as F};
 use sdc_gui::model::helpers::{docked, fill_channel, fill_slot};
@@ -625,7 +624,7 @@ const GOLD_CARD: &str = "Set armor/gold, position 5 of 9";
 /// Sets the Sets column to width `w`, as a drag leaves it (`<id>/chosen`), and lets the layout follow.
 fn sets_width(h: &mut crate::app_harness::H, w: f32) {
     h.ctx
-        .data_mut(|d| d.insert_persisted(egui::Id::unique("sets").with("chosen"), w));
+        .data_mut(|d| d.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id("sets"), w));
     crate::app_harness::settle(h, 6);
 }
 
@@ -635,12 +634,7 @@ fn narrow_sets(h: &mut crate::app_harness::H) {
 
 /// (Sets width, Textures width, "Search sets" box width, centre width) of the last frame.
 fn widths(h: &crate::app_harness::H) -> (f32, f32, f32, f32) {
-    use egui::containers::panel::PanelState;
-    let panel = |id: &str| {
-        PanelState::load(&h.ctx, egui::Id::unique(id))
-            .unwrap()
-            .outer_rect
-    };
+    let panel = |id: &str| crate::support::panel(&h.ctx, id);
     let search = h
         .query_all_by_role(Role::TextInput)
         .find(|n| n.accesskit_node().placeholder() == Some("Search sets"))
@@ -762,10 +756,7 @@ fn textures_with_gold_open(hidden: bool, collapsed: bool) -> f32 {
         .clone();
     h.state_mut().model.select_set(&key);
     crate::app_harness::settle(&mut h, 6);
-    PanelState::load(&h.ctx, egui::Id::unique("textures"))
-        .unwrap()
-        .outer_rect
-        .width()
+    crate::support::panel(&h.ctx, "textures").width()
 }
 
 #[test]
@@ -806,9 +797,7 @@ fn closing_the_set_gives_textures_its_width_back() {
 fn card_and_panel(h: &crate::app_harness::H) -> (egui::Rect, egui::Rect) {
     let cards: Vec<_> = h.query_all_by_label(GOLD_CARD).map(|n| n.rect()).collect();
     assert_eq!(cards.len(), 1, "one {GOLD_CARD:?} node, got {cards:?}");
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets panel")
-        .outer_rect;
+    let panel = crate::support::panel(&h.ctx, "sets");
     (cards[0], panel)
 }
 
@@ -1007,11 +996,7 @@ fn keep_leaf_at(w: u32, h_px: u32, open: bool, scrolls: &[u32]) {
             .filter(|(t, r)| t.starts_with("Filter") && in_sets_column(&h, *r))
             .map(|(_, r)| r.max.y)
             .fold(0.0, f32::max);
-        let panel_bottom =
-            egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-                .expect("the Sets panel")
-                .outer_rect
-                .bottom();
+        let panel_bottom = crate::support::panel(&h.ctx, "sets").bottom();
         for (id, leaf) in ids {
             let Some(title) = h
                 .query_all_by_label(id)
@@ -1625,9 +1610,7 @@ fn a_filter_change_reveals_the_open_set_when_it_stays_visible() {
             ],
         );
         let card = one_node(&h, "Set armor/gold, position");
-        let panel = PanelState::load(&h.ctx, egui::Id::unique("sets"))
-            .expect("the Sets panel")
-            .outer_rect;
+        let panel = crate::support::panel(&h.ctx, "sets");
         assert!(
             card.top() >= panel.top() - 0.5 && card.bottom() <= panel.bottom() + 0.5,
             "at {w}x{h_px}: the open card {card:?} inside the Sets panel {panel:?}"
@@ -1897,9 +1880,7 @@ fn an_off_screen_card_scrolls_into_view_on_request() {
     // The card's rect must lie in the Sets list: below the filter row and above the panel's bottom (not under the
     // header rows, which the panel's outer rect also holds).
     let inside = |h: &crate::app_harness::H| {
-        let panel = PanelState::load(&h.ctx, egui::Id::unique("sets"))
-            .unwrap()
-            .outer_rect;
+        let panel = crate::support::panel(&h.ctx, "sets");
         let top = one(h, "Filter, Sets shader filter").bottom();
         let card = h.get_by_label(LAST).rect();
         card.top() >= top

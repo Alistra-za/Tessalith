@@ -290,9 +290,7 @@ fn no_filter_no_message() {
 
 /// The Textures panel's rect: the mips "Filter" field and Task 3.4's Sets button also match "Filter" (K15).
 fn textures_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("textures"))
-        .expect("the Textures panel is drawn")
-        .outer_rect
+    support::panel(&h.ctx, "textures")
 }
 
 fn in_textures<'a>(

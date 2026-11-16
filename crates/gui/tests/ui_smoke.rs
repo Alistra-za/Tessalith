@@ -848,10 +848,7 @@ fn the_settings_strip_is_compact() {
 
 /// The preview's toolbar panel rect (A7: every toolbar lookup is scoped to it).
 fn toolbar_rect(h: &Harness<'static, AppModel>) -> eframe::egui::Rect {
-    use eframe::egui::containers::panel::PanelState;
-    PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-toolbar"))
-        .expect("the toolbar is drawn")
-        .outer_rect
+    support::panel(&h.ctx, "preview-toolbar")
 }
 
 /// The topmost node labelled `label` (or containing it, with `contains`) that starts within the toolbar's x range, at or
@@ -1038,9 +1035,8 @@ fn at_1200x800_the_preview_keeps_its_width_and_the_toolbar_fits() {
 /// A6, A7, A10: the strip opens the settings, and they stay open for this preview.
 #[test]
 fn the_collapsed_settings_strip_opens_the_settings() {
-    use eframe::egui::containers::panel::PanelState;
     let (mut h, _d) = expanded_at_1200();
-    assert!(PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-settings-strip")).is_some());
+    assert!(sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "preview-settings-strip").is_some());
     assert!(h.query_by_label_contains("Compression").is_none());
     h.get_by_label("Preview settings").hover();
     h.run();
@@ -1105,7 +1101,6 @@ fn preview_settings_open_at_1280() {
 /// left strip. The centre ends at the panel's left edge, and the group headings start inside the panel.
 #[test]
 fn the_preview_settings_panel_is_never_drawn_under_the_toolbar() {
-    use eframe::egui::containers::panel::PanelState;
     for key in ["landscape/rock01_rmaos", "landscape/rock01_normal.png"] {
         let d = tempfile::tempdir().unwrap();
         let mut model = opened(d.path());
@@ -1121,9 +1116,7 @@ fn the_preview_settings_panel_is_never_drawn_under_the_toolbar() {
                 model,
             );
         h.run();
-        let panel = PanelState::load(&h.ctx, eframe::egui::Id::unique("preview-settings"))
-            .expect("the settings are open at 1600 wide")
-            .outer_rect;
+        let panel = support::panel(&h.ctx, "preview-settings");
         let bar = toolbar_rect(&h);
         assert!(
             bar.right() <= panel.left() + 0.5,

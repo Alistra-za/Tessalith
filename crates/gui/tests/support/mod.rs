@@ -226,8 +226,20 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
-/// E28: the header's Undo or Redo (`verb`), by role and exact name, with no rect (the header's `PanelState` is not
-/// there to scope by). Its name is `{verb}` or `{verb}: {step}` for the Textures history, `{verb} (NIF edit history)`
+/// Panel `name`'s outer rect as egui stored it last frame (`ui::panel_ids`); panics when the panel was never built.
+pub fn panel(ctx: &eframe::egui::Context, name: &str) -> eframe::egui::Rect {
+    sdc_gui::ui::panel_ids::panel_rect(ctx, name)
+        .unwrap_or_else(|| panic!("panel {name} was never built"))
+}
+
+/// Whether panel `name` was never built in `ctx`. A test that checks a panel is absent pairs it with a panel the same
+/// frame does build, so a renamed or unrecorded panel cannot make the check pass.
+pub fn panel_never_built(ctx: &eframe::egui::Context, name: &str) -> bool {
+    sdc_gui::ui::panel_ids::panel_id(ctx, name).is_none()
+}
+
+/// E28: the header's Undo or Redo (`verb`), by role and exact name, with no rect: the name alone tells the button
+/// apart, so the finder does not depend on where the header lays it out. Its name is `{verb}` or `{verb}: {step}` for the Textures history, `{verb} (NIF edit history)`
 /// or `{verb} (NIF edit history): {step}` for the NIF one. No other button is named so: the toast's and the Problems
 /// row's Undo say more, and the palette's rows exist only while it is open (then this panics with both).
 pub fn header_undo<'h, S>(

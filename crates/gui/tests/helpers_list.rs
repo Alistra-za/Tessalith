@@ -69,9 +69,7 @@ fn app(m: AppModel) -> Harness<'static, AppModel> {
 }
 
 fn textures_rect(h: &Harness<'static, AppModel>) -> egui::Rect {
-    egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("textures"))
-        .expect("the Textures panel is drawn")
-        .outer_rect
+    support::panel(&h.ctx, "textures")
 }
 
 /// The helper rows drawn now, by their accessible name.
@@ -716,7 +714,10 @@ fn textures_heading_stays_one_line_with_ten_thousand_selected() {
     let mut h = harness(m, egui::vec2(1100.0, 800.0));
     // The user dragged the Textures column narrow.
     h.ctx.data_mut(|d| {
-        d.insert_persisted(egui::Id::unique("textures").with("chosen"), 220.0f32);
+        d.insert_persisted(
+            sdc_gui::ui::panel_ids::chosen_width_id("textures"),
+            220.0f32,
+        );
     });
     h.run_steps(4);
     let panel = textures_rect(&h);

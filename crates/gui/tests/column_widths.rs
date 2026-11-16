@@ -1,6 +1,6 @@
 //! The Textures view's resizable columns keep their minimum width, and a divider drag stops at it.
 mod support;
-use eframe::egui::{self, containers::panel::PanelState, Event, Id, Modifiers, PointerButton};
+use eframe::egui::{self, Event, Modifiers, PointerButton};
 use egui_kittest::Harness;
 use sdc_gui::model::AppModel;
 use sdc_gui::ui::columns::{SETS_MIN, TEXTURES_MIN};
@@ -268,8 +268,9 @@ fn every_column_width_paints_the_whole_row() {
     for (w, id) in [(1280.0, "textures"), (1280.0, "sets"), (800.0, "textures")] {
         let mut h = harness(d.path(), w);
         for chosen in (140..900).step_by(23) {
-            h.ctx
-                .data_mut(|m| m.insert_persisted(Id::unique(id).with("chosen"), chosen as f32));
+            h.ctx.data_mut(|m| {
+                m.insert_persisted(sdc_gui::ui::panel_ids::chosen_width_id(id), chosen as f32)
+            });
             h.run_steps(2);
             let holes = unpainted(&h, 400.0);
             assert!(
@@ -333,7 +334,7 @@ fn a_saved_column_width_survives_the_start_screen() {
         m.root = None;
     }
     h.run_steps(3);
-    assert!(PanelState::load(&h.ctx, Id::unique("textures")).is_some());
+    assert!(sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures").is_some());
     h.state_mut().0.root = Some(root);
     h.run_steps(3);
     assert_eq!(outer(&h, "textures").width(), w);

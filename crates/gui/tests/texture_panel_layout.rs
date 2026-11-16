@@ -729,10 +729,7 @@ fn strip_harness(dir: &std::path::Path) -> (Harness<'static, AppModel>, Rect) {
     m.expand(KEY);
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
-    let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
-            .expect("the settings strip is open at 1600 wide")
-            .outer_rect;
+    let strip = support::panel(&h.ctx, "preview-settings");
     (h, strip)
 }
 
@@ -772,10 +769,7 @@ fn a_strip_reset_stays_beside_its_combo() {
     m.expand(KEY);
     assert!(m.wait_idle(Duration::from_secs(60)));
     let h = harness(m, 1600.0);
-    let strip =
-        egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("preview-settings"))
-            .expect("the settings strip is open at 1600 wide")
-            .outer_rect;
+    let strip = support::panel(&h.ctx, "preview-settings");
     let resets: Vec<Rect> = h
         .query_all_by_label("↺")
         .map(|n| n.rect())

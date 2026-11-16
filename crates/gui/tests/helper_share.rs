@@ -910,9 +910,7 @@ fn a_helper_row_drags_onto_a_card() {
         })
         .expect("the helper row")
         .rect();
-    let sets = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("sets"))
-        .expect("the Sets column")
-        .outer_rect;
+    let sets = support::panel(&h.ctx, "sets");
     let card = h
         .query_all_by_label(B)
         .map(|n| n.rect())

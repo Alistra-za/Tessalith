@@ -2,7 +2,6 @@
 //! row and one Review row, an amber tile, no set card, and it writes nothing until a type is assigned.
 mod support;
 use eframe::egui::accesskit::Role;
-use eframe::egui::{containers::panel::PanelState, Id};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::Subtype;
@@ -146,10 +145,10 @@ fn rock_bump_has_one_problems_row_and_no_card() {
     h.run();
     assert!(sets_column_labels(&h, "rock_bump").is_empty());
     assert!(!sets_column_labels(&h, "barrel").is_empty());
-    let textures = PanelState::load(&h.ctx, Id::unique("textures")).expect("the Textures column");
+    let textures = panel(&h.ctx, "textures");
     assert!(
         h.query_all_by_label("rock_bump.png")
-            .any(|n| textures.outer_rect.contains_rect(n.rect())),
+            .any(|n| textures.contains_rect(n.rect())),
         "the tile is drawn"
     );
 }

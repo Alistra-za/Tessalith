@@ -691,9 +691,7 @@ fn file_keys(m: &AppModel) -> Vec<String> {
 
 /// The unmatched row is an Info row, near the list's end: scroll the Problems list to its bottom, as a user would.
 fn scroll_to_end(h: &mut Harness<'static, AppModel>) {
-    let panel = egui::containers::panel::PanelState::load(&h.ctx, egui::Id::unique("bottom"))
-        .expect("the bottom panel is open")
-        .outer_rect;
+    let panel = support::panel(&h.ctx, "bottom");
     h.hover_at(panel.center());
     h.event(egui::Event::MouseWheel {
         unit: egui::MouseWheelUnit::Point,

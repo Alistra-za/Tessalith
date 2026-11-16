@@ -1,7 +1,7 @@
 //! The set's 3D view inside the whole Textures view (no GPU, no scan DB). AG78: the 2D | 3D switch swaps the
 //! centre pane in place; there is no side panel, and the 3D image stays inside the centre.
 mod support;
-use eframe::egui::{self, containers::panel::PanelState, Id};
+use eframe::egui;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use sdc_gui::model::set_preview::{SetPreview, DEFAULT_CAP};
@@ -58,13 +58,14 @@ fn harness_with(
 }
 
 fn outer(h: &H, id: &str) -> Option<egui::Rect> {
-    PanelState::load(&h.ctx, Id::unique(id)).map(|p| p.outer_rect)
+    sdc_gui::ui::panel_ids::panel_rect(&h.ctx, id)
 }
 
 fn check(w: f32, collapsed: bool) {
     let d = tempfile::tempdir().unwrap();
     let h = harness(d.path(), collapsed, w, true);
-    assert!(outer(&h, "set-3d").is_none(), "no side panel at {w}");
+    assert!(!panel_never_built(&h.ctx, "header"));
+    assert!(panel_never_built(&h.ctx, "set-3d"), "no side panel at {w}");
     let left = ["textures", "sets", "textures-strip", "sets-strip"]
         .iter()
         .filter_map(|i| outer(&h, i))
@@ -119,7 +120,8 @@ fn in_2d_the_centre_is_the_set_editor_and_no_3d_view_exists() {
     let h = harness(d.path(), false, 1280.0, false);
     assert!(h.query_all_by_label("Match on this").count() >= 1);
     assert!(h.query_by_label(FRAME_LABEL).is_none());
-    assert!(outer(&h, "set-3d").is_none());
+    assert!(!panel_never_built(&h.ctx, "header"));
+    assert!(panel_never_built(&h.ctx, "set-3d"));
 }
 
 /// AG87 (owner: "Keep 3D up", fix round 2): with 3D on, any set member shows its set's 3D view with its settings
