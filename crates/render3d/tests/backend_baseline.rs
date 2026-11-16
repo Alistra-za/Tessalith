@@ -41,7 +41,7 @@ const SCENES: [(&str, &str, &str); 3] = [
         r"meshes\srider\srex\statics\srexmarkarthfrontwall.nif",
     ),
 ];
-const RES: [(u32, u32); 3] = [(1280, 720), (1920, 1080), (3840, 2160)];
+const RES: [(u32, u32); 4] = [(1280, 720), (1600, 900), (1920, 1080), (3840, 2160)];
 const WARMUP: usize = 20;
 /// The golden profiles `tests/golden.rs` replays.
 const PROFILES: &[&str] = &["A", "A_RT", "A_RT2", "A_DC", "A_DC_N"];
