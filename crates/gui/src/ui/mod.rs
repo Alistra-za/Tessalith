@@ -546,8 +546,9 @@ fn column_panel(
 /// The Textures column's width before the user drags it.
 const TEXTURES_W: f32 = 380.0;
 
-/// The Sets column's width before the user drags it.
-const SETS_W: f32 = 260.0;
+/// The Sets column's width before the user drags it: five chips a card row, beside the thin bar's 6 px gutter
+/// (Note JJ2; 260 before the gutter).
+pub(crate) const SETS_W: f32 = 266.0;
 
 /// The width the user dragged panel `id` to (what `chosen_width_panel` stores), if any.
 fn chosen_width(ctx: &egui::Context, id: &str) -> Option<f32> {

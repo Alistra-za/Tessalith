@@ -20,7 +20,7 @@ const TILE_STROKE: f32 = 2.0;
 /// Scroll bar and margin allowance when fitting tiles to a row.
 const SCROLL_ALLOWANCE: f32 = 18.0;
 /// A side panel's own chrome: `Frame::side_top_panel`'s 8 px margins and the 1 px separator.
-const PANEL_CHROME: f32 = 2.0 * 8.0 + 1.0;
+pub(crate) const PANEL_CHROME: f32 = 2.0 * 8.0 + 1.0;
 /// A set pill's chrome (`Frame::group`: 6 px margin and 1 px stroke a side).
 const PILL_CHROME: f32 = 2.0 * (6.0 + 1.0);
 /// The Textures column's narrowest width: its heading over one tile.

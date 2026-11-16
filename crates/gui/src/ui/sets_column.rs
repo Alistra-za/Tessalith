@@ -164,10 +164,14 @@ fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
     let chips = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)).len()
         + v.missing.len()
         + v.members.len().saturating_sub(v.slots.len());
-    let per_row = ((width - frame_x + DOCK_GAP_X) / (CHIP + DOCK_GAP_X))
+    chips.div_ceil(chips_per_row(width, frame_x))
+}
+
+/// The chips one row of a card `width` wide holds (at least one).
+fn chips_per_row(width: f32, frame_x: f32) -> usize {
+    ((width - frame_x + DOCK_GAP_X) / (CHIP + DOCK_GAP_X))
         .floor()
-        .max(1.0) as usize;
-    chips.div_ceil(per_row)
+        .max(1.0) as usize
 }
 
 /// Note FM32: a new column width moves every remembered card height by the chip rows it adds or removes, so a card off
@@ -1533,11 +1537,14 @@ pub fn draw(
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
     let gap = ui.spacing().item_spacing;
     let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x + 2.0 * DOCK_INSET;
-    // shortcut: the column's width, not the cards': while the thin bar shows (Note JJ2) the cards are its 6 px
-    // allocation narrower, so a chip-row estimate can be one row off near a wrap point (drawing corrects it, FM32).
-    // Measuring inside the area would make the bar's appearing a re-flow, and a re-flow scrolls to the open set;
-    // upgrade if a scroll jump shows.
-    let reflowed = reflow_heights(st, &views, ui.available_width(), frame_x);
+    // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its 6 px gutter keeps the cards out from under the bar at
+    // rest; hovered, the 10 px bar reaches only the cards' frame margin.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
+    // The cards' width beside the bar's gutter, whether or not the bar shows: a card is estimated only off screen, and
+    // then the list overflows and the bar shows. A width that followed the bar would make its appearing a re-flow,
+    // which scrolls to the open set.
+    let card_w = ui.available_width() - ui.spacing().scroll.allocated_width();
+    let reflowed = reflow_heights(st, &views, card_w, frame_x);
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
     if reflowed && model.nav.reveal_set.is_none() {
         if let [k] = model.selected_sets().as_slice() {
@@ -1633,9 +1640,6 @@ pub fn draw(
     let mut reveal_drawn = false;
     // The first card in view (id, top in the content) and the off-screen card that took the focus, if any.
     let (mut anchor, mut focused) = (None::<(String, f32)>, None::<String>);
-    // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its 6 px allocation keeps the cards out from under the bar at
-    // rest; hovered, the 10 px bar reaches only the cards' frame margin.
-    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     if let Some(y) = target {
         area = area.vertical_scroll_offset(y);
@@ -3698,6 +3702,18 @@ mod tests {
     use super::*;
     use egui_kittest::kittest::{NodeT, Queryable};
     use engine::codes::Code;
+
+    /// Note JJ2: a fresh layout's Sets column still holds five chips a row beside the thin bar's gutter (260 held
+    /// exactly five with no gutter; with it, four).
+    #[test]
+    fn the_default_sets_width_holds_five_chips_beside_the_bar() {
+        let style = egui::Style::default();
+        let frame_x = egui::Frame::group(&style).total_margin().sum().x + 2.0 * DOCK_INSET;
+        let card = crate::ui::SETS_W
+            - super::super::columns::PANEL_CHROME
+            - egui::style::ScrollStyle::thin().allocated_width();
+        assert_eq!(chips_per_row(card, frame_x), 5, "a card {card} px wide");
+    }
 
     /// Note HF6: the header menu's edits are off with the reason while `sdc-project.toml` is read-only, and Select all
     /// sets still works. A read-only document holds no groups, so no header shows then; the menu is drawn on its own.
