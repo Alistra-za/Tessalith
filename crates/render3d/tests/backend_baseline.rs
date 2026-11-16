@@ -4,6 +4,8 @@
 //!   [`SCENES`] on the hardware GPU and on WARP. `SDC_R3D_FRAMES` (default 200) sets the timed frames per resolution;
 //!   `SDC_R3D_WARP_BUDGET_S` (default 150) caps the seconds one WARP resolution may take (fewer frames, reported as
 //!   `n`). `SDC_R3D_PROBE=<path;path>` (NIFs relative to the MO2 instance) prints only their scene stats.
+//!   `SDC_R3D_FRAME_OUT=<dir>` writes each scene's last warm-up frame at the first resolution as raw RGBA8
+//!   (`<scene>-<device>-<w>x<h>.rgba`), to compare one D3D11 runtime with another (DXVK beside the test exe).
 //! - `dump_permutations` (`SDC_R3D_DUMP=<dir>`, with `SDC_GOLDEN` and/or `SDC_ACHERUS`; `SDC_R3D_SHADERS=<folder>`
 //!   reads another CS tree instead of the bundled one): writes every distinct (source, target, entry, defines) that
 //!   render3d compiles as `<n>.hlsl` (include-expanded, what D3DCompile sees) and `<n>.json`, for
@@ -200,6 +202,7 @@ fn cell(v: &mut [f64]) -> String {
 
 /// One device's numbers for one scene, as Markdown lines.
 fn run_device(
+    label: &str,
     device: &str,
     make_gpu: &dyn Fn() -> Result<Gpu, String>,
     parsed: &ParsedNif,
@@ -358,6 +361,10 @@ fn run_device(
             s.gpu.push(ft.gpu_ms);
             s.readback.push(ft.readback_ms);
             black_box(&px);
+        }
+        if let (Ok(dir), true) = (std::env::var("SDC_R3D_FRAME_OUT"), (w, h) == RES[0]) {
+            let file = Path::new(&dir).join(format!("{label}-{device}-{w}x{h}.rgba"));
+            std::fs::write(&file, &last).map_err(|e| format!("{}: {e}", file.display()))?;
         }
         let bg = [last[0], last[1], last[2]];
         let covered = last.chunks(4).filter(|p| p[..3] != bg).count();
@@ -531,7 +538,7 @@ fn render_backend_baseline() {
             ("hardware", &Gpu::new as &dyn Fn() -> Result<Gpu, String>),
             ("WARP", &Gpu::new_warp),
         ] {
-            match run_device(device, make, &parsed, &tex, frames, warp_budget_s) {
+            match run_device(label, device, make, &parsed, &tex, frames, warp_budget_s) {
                 Ok(lines) => md.extend(lines),
                 Err(e) => md.push(format!("### {device}: failed: {e}\n")),
             }

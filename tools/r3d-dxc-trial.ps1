@@ -5,8 +5,9 @@
 # For each permutation, serially, one process at a time, timed from start to exit:
 #   fxc      fxc.exe /T <target> /E <entry> /O3 /D K=V ...                      (the baseline: what render3d does today)
 #   dxil     dxc.exe -T <vs|ps|cs>_6_0 -E <entry> -O3 -D K=V ...                (the D3D12 SM6 route)
-#   spirv    dxc.exe ... -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout    (Vulkan / wgpu route; skipped with a
-#            note when this dxc was built without SPIR-V codegen, as the Windows SDK's is)
+#   spirv    dxc.exe ... -spirv -fspv-target-env=vulkan1.2 -fvk-use-dx-layout, registers shifted as for glslang
+#            (Vulkan / wgpu route; skipped with a note when this dxc was built without SPIR-V codegen, as the
+#            Windows SDK's is: pass -Dxc <dxc.exe from a github.com/microsoft/DirectXShaderCompiler release>)
 #   glslang  glslangValidator -D -V -e <entry> -S <vert|frag|comp> --target-env vulkan1.2 --hlsl-iomap, registers
 #            shifted per class (t +0, s +200, b +300, u +400) so they do not collide in set 0
 # A failed dxil or spirv compile is retried once with -HV 2018 (row compiler "<name>-hv2018").
@@ -17,7 +18,8 @@
 # Normalised = from the first "error" on, without file, line and column.
 #
 #   .\tools\r3d-dxc-trial.ps1 -Dump <dir> -Out <dir> [-Only <id,id>] [-Limit <n>] [-TimeoutS 180]
-#                             [-SdkBin <Windows SDK bin\x64>] [-Glslang <glslangValidator.exe>] [-Skip <fxc,dxil,...>]
+#                             [-SdkBin <Windows SDK bin\x64>] [-Dxc <dxc.exe>] [-Glslang <glslangValidator.exe>]
+#                             [-Skip <fxc,dxil,...>]
 param(
     [Parameter(Mandatory)] [string]$Dump,
     [Parameter(Mandatory)] [string]$Out,
@@ -25,12 +27,13 @@ param(
     [int]$Limit = 0,
     [int]$TimeoutS = 180,
     [string]$SdkBin = 'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64',
+    [string]$Dxc = '',
     [string]$Glslang = 'F:\ai\dds\tools\RenderDoc_1.43_64\plugins\spirv\glslangValidator.exe',
     [string]$Skip = ''
 )
 $ErrorActionPreference = 'Stop'
 $fxc = Join-Path $SdkBin 'fxc.exe'
-$dxc = Join-Path $SdkBin 'dxc.exe'
+$dxc = if ($Dxc) { $Dxc } else { Join-Path $SdkBin 'dxc.exe' }
 $skipSet = @($Skip -split ',' | Where-Object { $_ })
 New-Item -ItemType Directory -Force $Out, (Join-Path $Out 'bin'), (Join-Path $Out 'tmp') | Out-Null
 $Out = (Resolve-Path $Out).Path
@@ -106,7 +109,9 @@ function Get-Args([string]$compiler, $j, [string]$in, [string]$bin, [bool]$hv201
             return @{ exe = $dxc; argv = $a + @('-Fo', $bin, $in) }
         }
         'spirv' {
-            $a = @('-T', "${stage}_6_0", '-E', $j.entry, '-O3', '-spirv', '-fspv-target-env=vulkan1.2', '-fvk-use-dx-layout')
+            # Without the shifts b0, t0 and s0 would all ask for binding 0 of set 0.
+            $a = @('-T', "${stage}_6_0", '-E', $j.entry, '-O3', '-spirv', '-fspv-target-env=vulkan1.2', '-fvk-use-dx-layout',
+                '-fvk-t-shift', '0', '0', '-fvk-s-shift', '200', '0', '-fvk-b-shift', '300', '0', '-fvk-u-shift', '400', '0')
             if ($hv2018) { $a += @('-HV', '2018') }
             foreach ($d in $defs) { $a += @('-D', $d) }
             return @{ exe = $dxc; argv = $a + @('-Fo', $bin, $in) }
@@ -182,7 +187,7 @@ foreach ($f in $jsons) {
 $rows | Export-Csv -NoTypeInformation -Encoding utf8 (Join-Path $Out 'results.csv')
 
 $md = @("# r3d-dxc-trial summary", '', "Dump: $Dump; permutations: $($jsons.Count); run $(Get-Date -Format s)", '')
-$md += "fxc: $fxc ($((Get-Item $fxc).VersionInfo.FileVersion)); dxc: $dxc ($((Get-Item (Join-Path $SdkBin 'dxcompiler.dll')).VersionInfo.FileVersion)); glslang: $Glslang"
+$md += "fxc: $fxc ($((Get-Item $fxc).VersionInfo.FileVersion)); dxc: $dxc ($((Get-Item (Join-Path (Split-Path $dxc) 'dxcompiler.dll')).VersionInfo.FileVersion)); glslang: $Glslang"
 $md += ''
 $md += $notes
 $md += ''
