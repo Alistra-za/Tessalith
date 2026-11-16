@@ -5,10 +5,10 @@ Whether `render3d`, the crate that draws the 3D preview, should stay on Direct3D
 Measured on one NVIDIA RTX 4090 and AMD Ryzen 7 9800X3D on 2026-11-16, from `main` 40589a43. Sources were fetched the same day and are pinned under [Sources](#sources). No backend code was written: every statement about a path other than today's D3D11 is either cited or marked untested.
 
 Short answer:
-- **Frame time is not a backend question.** GPU time is under the 0.6 ms the probe can resolve, at every size. Reading the frame back to the CPU is 78% to 97% of a frame.
+- **Frame time is not a backend question.** GPU time is under the 0.6 ms or so the probe can resolve, at every size. Reading the frame back to the CPU is 77% to 97% of a frame.
 - **Cold load is shader compile.** FXC takes 0.83 to 1.34 s of a 0.87 to 1.39 s cold load.
 - **The shaders decide the backend.** FXC compiles 98 of 98 permutations unmodified. DXC compiles 0 of 98. Community Shaders (CS) itself compiles with FXC on every branch I read.
-- **Linux is shown only through Wine or Proton.** Every native-Linux route rests on a link nobody has tested with these shaders.
+- **The sources show Linux in use only through Wine or Proton.** Every native-Linux route rests on a link nobody has tested with these shaders.
 - **My recommendation is provisional:** keep the D3D11 API and FXC bytecode, and test DXVK underneath them. [The first step](#recommendation-and-first-step) is two tests that could rule that out.
 
 **Not delivered:** the DXC to SPIR-V trial. The Windows SDK's `dxc` lists `-spirv` but has no SPIR-V code generator, so the Vulkan and wgpu compile columns are empty. See [Limits](#limits).
@@ -21,8 +21,8 @@ So each path below is judged first by one question: **how does it run FXC's byte
 
 What CS is doing, as of 2026-11-16:
 - **CS compiles with FXC, `*_5_0` profiles, on its `dev` branch and on its Vulkan branch.** Its one attempt to compile HLSL to SPIR-V with DXC (PR 2558) was closed unmerged on 2026-07-21. That PR's description says shaders with samplers or groupshared memory had to fall back to FXC bytecode.
-- **The "Vulkan" work is DXVK under the game.** Three draft PRs (2632, 2670, 2196) load a CS fork of DXVK before Skyrim creates its D3D11 device. The game still issues D3D11 calls; DXVK translates them, and the FXC bytecode with them, to Vulkan. Upscaling and frame generation then use DXVK's Vulkan device directly.
-- **Nothing is decided.** All three are drafts, no maintainer has stated a timeline, and the Vulkan branch keeps a `CS_NATIVE_D3D11=1` switch back to plain D3D11. A related fix (PR 2662) was closed unmerged on 2026-11-14.
+- **The "Vulkan" work is DXVK under the game.** Two draft PRs (2632 and 2670) load a CS fork of DXVK before Skyrim creates its D3D11 device. The fork is based on DXVK 3.1.0. The game still issues D3D11 calls; DXVK translates them, and the FXC bytecode with them, to Vulkan. Upscaling and frame generation then use DXVK's Vulkan device directly.
+- **Nothing is decided.** Both are drafts, as is the ray tracing PR (2196), no maintainer has stated a timeline, and the Vulkan branch keeps a `CS_NATIVE_D3D11=1` switch back to plain D3D11. A related fix (PR 2662) was closed unmerged on 2026-11-14.
 - **D3D12 points both ways.** PR 2632 deletes CS's D3D12 swap-chain bridge. The ray tracing draft (PR 2196) adds a D3D12 header and Streamline's D3D12 build.
 - **Ray tracing is a separate plugin with a separate compiler.** [CreationEngineRaytracing](https://github.com/Gistix/CreationEngineRaytracing) (CER) takes a device from CS: either D3D12 handles, or DXVK's Vulkan device. It renders through NVRHI and compiles its own shaders with DXC, to DXIL on D3D12 and to SPIR-V on Vulkan. It needs `VK_KHR_ray_query` or ray tracing pipelines.
 
@@ -30,35 +30,35 @@ What CS is doing, as of 2026-11-16:
 
 The preview draws offscreen on D3D11, copies the frame to the CPU, and the GUI uploads it again as an egui texture. `Renderer::last_timing()` splits a frame into recording the draws (`draw_ms`), waiting for the GPU (`gpu_ms`) and the readback (`readback_ms`).
 
-Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene is shown; `skinned` and `pbr` are within 0.2 ms of it at every size.
+Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene is shown; `skinned` and `pbr` are within 0.2 ms of it up to 1920×1080 and within 2 ms at 4K.
 
 | Size | draw | GPU wait | readback | whole `render()` | readback share |
 |---|---:|---:|---:|---:|---:|
-| 1280×720 | 0.04 | 0.57 | 2.20 | 2.82 | 78% |
+| 1280×720 | 0.04 | 0.59 | 2.37 | 3.00 | 79% |
 | 1600×900 | 0.04 | 0.59 | 3.62 | 4.27 | 85% |
-| 1920×1080 | 0.04 | 0.58 | 4.85 | 5.47 | 89% |
-| 3840×2160 | 0.05 | 0.61 | 19.81 | 20.47 | 97% |
+| 1920×1080 | 0.04 | 0.60 | 5.26 | 5.91 | 89% |
+| 3840×2160 | 0.10 | 0.66 | 22.69 | 23.45 | 97% |
 
-- **The GPU wait is flat** at 0.56 to 0.61 ms for every scene and size. The probe polls an event query and sleeps 200 µs between polls, so I read this as the probe's floor, not GPU time. Real GPU time on this card is below it. That is an inference; timestamp queries would settle it.
+- **The GPU wait is flat** at 0.56 to 0.66 ms for every scene and size. The probe polls an event query and sleeps 200 µs between polls, so I read this as the probe's floor, not GPU time. Real GPU time on this card is below it. That is an inference; timestamp queries would settle it.
 - **Recording the draws is small:** 0.02 ms for 2 shapes, 0.10 to 0.15 ms for 147.
-- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; the p95 is 33 to 35 ms. Copying the 33 MB result alone takes 0.85 ms, so the bytes are not the cost. The staging copy and the conversion were not timed apart.
+- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes 0.85 ms, so the bytes are not the cost. The staging copy and the conversion were not timed apart.
 - **Not measured:** the second half of the round trip, the GUI's upload of the frame into its own wgpu texture.
 
 Software rasteriser (WARP, the same D3D11 code), whole `render()` median in ms:
 
 | Size | static | skinned | pbr |
 |---|---:|---:|---:|
-| 1280×720 | 11.4 | 6.2 | 7.4 |
+| 1280×720 | 11.8 | 6.4 | 7.4 |
 | 1600×900 | 17.0 | 9.3 | 13.7 |
-| 1920×1080 | 20.5 | 11.5 | 13.3 |
-| 3840×2160 | 71.3 | 39.6 | 43.3 |
+| 1920×1080 | 20.3 | 12.0 | 13.4 |
+| 3840×2160 | 72.6 | 40.3 | 43.3 |
 
-On WARP the drawing dominates (53 ms of the 71 ms static 4K frame). The meshes cover only 4% to 17% of the frame with the automatic camera, so a close-up costs more.
+On WARP the drawing dominates (53 ms of the 73 ms static 4K frame). The `pbr` scene cost slightly more at 1600×900 than at 1920×1080 in this run; I did not chase why. The meshes cover only 4% to 17% of the frame with the automatic camera, so a close-up costs more.
 
 What this says about the backends:
 - **A lower-overhead API has nothing to win here.** D3D12 and Vulkan cut CPU cost per draw; the preview spends 0.02 to 0.15 ms on draws. No other backend was run, so this is an inference from the D3D11 numbers.
 - **Zero-copy display is the frame-time lever, and it does not need a new backend.** A D3D11 shared texture can be imported into the GUI's wgpu device: wgpu-hal 30.0.1 has `vulkan::Device::texture_from_d3d11_shared_handle` and `dx12::Device::texture_from_raw`, and egui-wgpu's `register_native_texture` shows the result. That texture must be `Rgba8Unorm`, so the half-to-8-bit step moves to the GPU. I found no project that does this import with wgpu.
-- **The old gate still holds at its own size.** The October plan skipped zero-copy unless readback passed 4 ms at 1600×900. It measures 3.6 to 3.7 ms there. It passes 4 ms from 1920×1080 up.
+- **The old gate still holds at its own size.** The October plan skipped zero-copy unless readback passed 4 ms at 1600×900. It measures 3.6 to 3.7 ms there. It passes 4 ms from 1920×1080 up (4.9 to 5.3 ms).
 
 ## What a load costs today
 
@@ -94,7 +94,7 @@ Two things stop DXC:
 - **Cbuffers inside namespaces (96 of 98).** CS declares `cbuffer SharedData : register(b5)` inside `namespace SharedData`, and the same for `Permutation`, `Skin` and `FrameBuffer`. FXC scopes the members to the namespace, so `SharedData::MipBias` resolves. DXC makes them global, so the name is not found, and `DirLightColor` then collides with `Lighting.hlsl`'s own. There are 410 `SharedData::` uses in 27 files. No flag I tried changes this.
 - **A vector condition in `?:` (97 of 98).** DXC's default language version wants `select()`. `-HV 2018` restores FXC's behaviour.
 
-The rewrite was a scratch experiment on expanded copies, to see whether anything else hides behind the first error. Nothing does. It is not a proposed patch: the DXIL was validated by `dxc` but never run on a device, and its code was not compared with FXC's.
+The rewrite was a scratch experiment on expanded copies, to see whether anything else hides behind the first error. Nothing does. It turned each member `M` of a cbuffer declared inside namespace `N` into a global `N_M`, and added `static const T M = N_M;` inside the namespace right after the cbuffer. The script was not kept. It is not a proposed patch: the DXIL was validated by `dxc` but never run on a device, and its code was not compared with FXC's.
 
 Compile time on the rewritten text, one process per shader, median ms: pixel shaders 123 (DXC) against 254 (FXC), with a worst case of 246 against 991. Vertex shaders are equal at 66 to 67.
 
@@ -111,9 +111,9 @@ glslang fails for a different, structural reason: it does not resolve an unquali
 
 ### 2. D3D11 on DXVK
 
-The same D3D11 calls and the same bytecode, with DXVK as the runtime: Microsoft's D3D11 stays the default on Windows, and DXVK's native build (`libdxvk_d3d11.so`) replaces it on Linux. DXVK translates the bytecode to SPIR-V with its own `dxbc-spirv` compiler.
+The same D3D11 calls and the same bytecode, with DXVK as the runtime: Microsoft's D3D11 stays the default on Windows, and DXVK's native build (its meson build names the library `dxvk_d3d11` off Windows) replaces it on Linux. DXVK translates the bytecode to SPIR-V with its own `dxbc-spirv` compiler.
 
-- **Shaders:** unchanged where FXC exists. This is the path the CS drafts put the game itself on, so a preview on DXVK would run the same translator as the game.
+- **Shaders:** unchanged where FXC exists. This is the path the CS drafts put the game itself on. A preview on CS's own fork would run the translator those drafts use; an upstream DXVK release is a different build (the fork's `interop` branch is 64 commits ahead of and 235 behind upstream `master`).
 - **Enables:** everything in path 1, plus whatever Vulkan offers beside it. DXVK hands out its Vulkan instance, device and queue (`IDXGIVkInteropDevice`) and the Vulkan image behind a D3D11 texture. CER's Vulkan path does its ray tracing exactly this way.
 - **Linux:** native. Two small Rust projects do it: they bind DXVK's headers with bindgen instead of the `windows` crate. The software fallback is Mesa's lavapipe; one of those projects reports rendering headless through it.
 - **Open links, all untested here:**
@@ -168,7 +168,7 @@ The graphics backend decides less here than it seems to:
 
 | Path | CS shaders | Linux | Adds | Use for |
 |---|---|---|---|---|
-| 1. D3D11 as it is | shown: 98 of 98, golden replay | Wine or Proton only (cited) | nothing new | the parity baseline; today's preview |
+| 1. D3D11 as it is | shown: compiles 98 of 98; the repo's golden replay test pins its pixels (not re-run for this page) | Wine or Proton only (cited) | nothing new | the parity baseline; today's preview |
 | 2. D3D11 on DXVK | untested; same bytecode, the route CS's drafts take | native (cited, third-party) | a Vulkan device beside the raster: ray tracing, compute, lavapipe | the path to test next |
 | 3. D3D12 | likely, not shown; needs root signatures | Wine or Proton only (cited) | DXR, DXIL, bindless, software ray tracing in WARP | ray tracing on Windows if path 2 fails |
 | 4. Vulkan | needs a translator or DXC plus a source rewrite (unmeasured) | native (cited) | the same as path 2, without D3D11 | new renderers that don't use CS shaders |
@@ -179,7 +179,7 @@ The graphics backend decides less here than it seems to:
 I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS compiles on every branch, and it is the one thing measured to work. Among the ways to grow from there, path 2 is the only one that could add native Linux and a Vulkan device without changing what the shaders compile to. It is also where CS's own drafts point. That makes it the path to test, not yet the path to build: it rests on four untested links.
 
 Two tests could rule it out. Both need a download, so both wait for the owner's word:
-1. **Golden replay on DXVK, on Windows.** Put a DXVK release's `d3d11.dll` and `dxgi.dll` beside the replay test binary and run the existing replay. No code changes. It answers parity and gives DXVK frame times on the same scenes.
+1. **Golden replay and the timing baseline on DXVK, on Windows.** Put DXVK's `d3d11.dll` and `dxgi.dll` beside the test binaries, then run the existing golden replay (parity) and `render_backend_baseline` (frame and load times on the same scenes). No code changes. Which DXVK is the owner's choice: upstream's release, or a build of CS's fork, which is what the game would run.
 2. **A vkd3d row in the compile trial.** Add vkd3d's `D3DCompile` to `tools\r3d-dxc-trial.ps1` and run the 98 permutations. If it rejects namespaced cbuffers, native Linux needs another source of FXC bytecode. I have not checked whether a prebuilt Windows binary of vkd3d exists; a Linux VM is the fallback.
 
 A third download, the Vulkan SDK's `dxc`, fills in the missing SPIR-V column for paths 4 and 5.
@@ -192,7 +192,7 @@ If you want frame time back before any of that, the zero-copy display on today's
 - **Script:** `tools\r3d-dxc-trial.ps1 -Dump <dir> -Out <dir>` runs each compiler over a dump and writes a CSV and a summary.
 - **Build:** `cargo test --release --offline -p render3d -p sdc --test backend_baseline -- --ignored --nocapture --test-threads=1 <test>`.
 - **Machine:** RTX 4090, driver 32.0.16.1088; Ryzen 7 9800X3D; Windows 11 build 26200; `fxc` 10.0.26100.7705; `dxc` 1.8.2502.11; glslang 16.5.0 (RenderDoc 1.43's copy).
-- **Frames:** 20 warm-up frames, then 200 timed, per size, per scene, on the hardware GPU and on WARP. Forward mode, default CS features, black background, automatic camera. The 1600×900 rows come from a third run that added that size; the other sizes agreed with the first two runs.
+- **Frames:** 20 warm-up frames, then 200 timed, per size, per scene, on the hardware GPU and on WARP. Forward mode, default CS features, black background, automatic camera. Three runs; the frame tables are the third, which added 1600×900. The first two ran up to 0.2 ms lower at 1280×720, 0.5 ms lower at 1920×1080 and 3 ms lower at 4K on the hardware GPU. Load numbers are the first run.
 - **Golden root:** `cs-1.9.0-d2026.10.11.0`, the one `tests/fixtures/golden-baseline.txt` matches.
 
 | Scene | Mesh | Shapes | Triangles | Textures |
@@ -213,13 +213,13 @@ If you want frame time back before any of that, the zero-copy display on today's
 
 ## Sources
 
-Read at the commit shown, on 2026-11-16.
+Read at the commit shown, on 2026-11-16. The Mesa, WARP, PhysX and Vulkan reference pages were read through a page summariser, so what this page says from them is a paraphrase; check the page before relying on a detail.
 
 | What | Where |
 |---|---|
 | CS compiles with FXC `*_5_0` (`src/ShaderCache.cpp`, `dev` efe34f9ff5 lines 156-158 and 1852-1854; `codex/vulkan-clean` 29726c766e lines 109-111 and 1491) | https://github.com/community-shaders/skyrim-community-shaders |
 | CS Vulkan drafts, the closed DXC attempt, the Proton reports | PRs [2632](https://github.com/community-shaders/skyrim-community-shaders/pull/2632), [2670](https://github.com/community-shaders/skyrim-community-shaders/pull/2670), [2196](https://github.com/community-shaders/skyrim-community-shaders/pull/2196), [2558](https://github.com/community-shaders/skyrim-community-shaders/pull/2558), [2662](https://github.com/community-shaders/skyrim-community-shaders/pull/2662), [3002](https://github.com/community-shaders/skyrim-community-shaders/pull/3002) |
-| CS's DXVK fork (`interop` a6c294487f, `FORK.md`) | https://github.com/community-shaders/dxvk |
+| CS's DXVK fork (`interop` a6c294487f: `FORK.md`, `meson.build` version 3.1.0) | https://github.com/community-shaders/dxvk |
 | CER: devices, DXC arguments, extensions (55ccb60a12: `src/API.h`, `src/Renderer.cpp`, `src/ShaderUtils.cpp`, `cmake/NVRHI.cmake`) | https://github.com/Gistix/CreationEngineRaytracing |
 | DXVK native build, the WSI requirement (`src/wsi/wsi_platform.cpp` line 37), interop interfaces (`src/dxgi/dxgi_interfaces.h`), `dxbc-spirv` since 3.0 (1f1dfc65fc) | https://github.com/doitsujin/dxvk, https://github.com/doitsujin/dxbc-spirv |
 | Rust on DXVK-native (small third-party projects) | https://github.com/MrJox/warscape_community_editor, https://github.com/VIRUXE/vespucci |
