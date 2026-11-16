@@ -1,0 +1,13 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+ID5	ID			IE29		archive-item	2026-11-16		final review A-M5: TYPE_22 is in ALWAYS_BLOCK, WONT_DRAW gone
+ID7	ID			IE30		partial	2026-11-16		render3d::pbr_flags deleted
+IE3	IE			IE28		partial	2026-11-16		
+IE6	IE			IE27,IE30		partial	2026-11-16		
+IE13	IE			IE33,IE34		partial	2026-11-16		
+IE14	IE			IE38		partial	2026-11-16		
+IE15	IE			IE10		partial	2026-11-16		cite fix (final review B-M6)
+IE22	IE			IE26,IE29		partial	2026-11-16		two open questions added
+IE24	IE			IE24		partial	2026-11-16		the hover was updated (final review item 13)
+Digest¶- On a PBR shape the Shader tab shows	Digest			IE26,IE29		partial	2026-11-16		
+Digest¶- Controllers tab: curve graph	Digest			IE26		partial	2026-11-16		
+Digest¶- Env map scale (LSCF 8) on a PBR shape	Digest			IE26,IE29		partial	2026-11-16		

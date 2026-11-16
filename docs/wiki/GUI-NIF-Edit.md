@@ -33,20 +33,22 @@ The set is the project's PBR set whose diffuse is the shape's slot 1. The button
 
 ### A v1 PBR shape
 
-A v1 PBR shape (type 0 or 11 with the PBR flag, SLSF2 23) has the amber warning "Draws vanilla on CS 2.0" ([why](Previews.md#csm-materials-in-3d)).
+A v1 PBR shape (type 0 or 11 with the PBR flag, SLSF2 23) has the amber warning "Draws vanilla on CS 2.0" ([why](Previews.md#csm-materials-in-3d)). It keeps the warning when its name field names a `.csm` that doesn't load. <!-- D:IE37 -->
 
 1. Click **Convert to .csm** on that warning.
 2. A set that holds no PBR values yet gets the shape's values. When the set's values differ, the window **The set holds other PBR values** lists them, set beside shape. **Use the set's values** (Enter) leaves the set alone; **Replace the set's values** (red) writes the shape's values into it, and is greyed while the sets can't be edited or when the shape's switches would block the set's `.csm`. A row that is a PGPatcher setting can't be replaced here: change it in the set's PGPatcher settings.
 
 Either way the shape ends up on the set's `.csm`: the convert clears the v1 PBR flags (SLSF2 12, 23 to 27 and 30), sets type 0, keeps the texture slots and writes the `.csm` path into the name field, as one edit. The set's values are a step on the Textures history and the shape change a step on the NIF edit history, so you undo them separately. <!-- D:IE14 -->
 
+A set whose shader is **Auto** is set to **PBR** in the same step, because a texture-set block alone would make it PBR Landscape, which writes no `.csm`. If the set still gets no `.csm`, the convert stops with a notice and the shape is left alone. <!-- D:IE25 -->
+
 ### When the shape already has a material name
 
-The name field is replaced without asking when it's empty or already a `.csm` path. Any other name asks first, in **Replace the material name?**, because another tool may use it: **Replace <name>** (red) or **Keep the name** (Enter), which changes nothing. <!-- D:IE14 -->
+The name field is replaced without asking when it's empty or already the set's `.csm`. Any other name, another `.csm` included, asks first, in **Replace the material name?**, because another tool may use it: **Replace <name>** (red) or **Keep the name** (Enter), which changes nothing. <!-- D:IE14,IE38 -->
 
 ### No edit writes v1 PBR
 
-- The PBR flag (SLSF2 23) is read-only, and its hover points at **Convert to .csm**.
+- The PBR flag (SLSF2 23) can't be turned on, and its hover points at **Convert to .csm**. A flag that is already on can be cleared, for example a stray one on another shader type. <!-- D:IE31 -->
 - An edit that turns the flag on, or a shader type change that makes a shape with the flag v1 PBR, is a red **Pending edits** row, "v1 PBR is gone; use Convert to .csm". It blocks the NIF's export, so an old saved edit that did this can't slip through. <!-- D:IE14 -->
 
 The 3D view draws the shape with the set's `.csm`, unsaved set edits included ([.csm materials in 3D](Previews.md#csm-materials-in-3d)). <!-- D:IE15 -->
@@ -61,9 +63,9 @@ The panel says when a block has more than one user.
 
 ## Warnings
 
-On a PBR shape, the SLSF2 flags that CS reads differently (Fit_Slope, Multi_Layer_Parallax, Soft, Back, Rim and Effect lighting) get a dimmer "PBR: <meaning>" label, and the same text in their hover; a non-PBR shape shows only the vanilla names.
+Names follow the material the 3D view loaded. On a shape that draws CS 2.0 PBR from a `.csm`, **Glossiness** reads **Specular level**, **Specular strength** reads **Roughness scale**, and the slot labels take their PBR names. Every other shape keeps the vanilla names, a v1 PBR shape included, because CS 2.0 draws it vanilla. The SLSF2 flags always keep their vanilla names. <!-- D:IE26 -->
 
-Values are never clamped. A value outside the range the game expects, or a flag combination that looks wrong, shows an amber warning under the field (red for an error), sometimes with a **Fix** button. A red error that your edit introduced blocks the NIF's export. An error that was already in the source only warns. Three flag warnings come from the corpus census: shader type 11 without the Multi_Layer_Parallax flag (SLSF2 24) and without PBR; SLSF2 24 on a shader type other than 11; Fit_Slope (SLSF2 12) without PBR. On a True PBR shape an empty RMAOS slot is amber: "Slot 6 (RMAOS) is empty: in game the mesh renders fully metallic".
+Values are never clamped. A value outside the range the game expects, or a flag combination that looks wrong, shows an amber warning under the field (red for an error), sometimes with a **Fix** button. A red error that your edit introduced blocks the NIF's export. An error that was already in the source only warns. Three flag warnings come from the corpus census: shader type 11 without the Multi_Layer_Parallax flag (SLSF2 24) and without PBR; SLSF2 24 on a shader type other than 11; Fit_Slope (SLSF2 12) on a shape that isn't v1 PBR, "Fit_Slope (SLSF2 12) has no effect on CS 2.0 (a .csm sets glint)." <!-- D:IE29 -->
 
 **Flags that need a shader type.** The skin tint flag (SLSF1 21) works only on the Skin Tint type and the FaceGen detail flag (SLSF1 10) only on Face Tint (which needs it) or Skin Tint: a mismatch is a red error that always blocks the NIF's export, even in an untouched file, with a **Clear the flag** or **Set the flag** button; a type change fixes the flag in the same undo step and says so in a line under the type, and a flag that cannot apply to the current type is greyed with the reason on hover.
 

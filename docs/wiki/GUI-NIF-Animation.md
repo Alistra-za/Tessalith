@@ -30,12 +30,12 @@ On a shader property, pick **Float** or **Colour** and the **Variable**. An alph
 
 ## Controllers on a .csm shape
 
-On a shape that draws CS 2.0 PBR from a `.csm`, a shader controller on **Specular level**, **Roughness scale** or the specular colour (float 9 and 10, colour 0) gets the amber warning "CS 2.0 may not animate values a .csm sets". Nobody has checked yet whether CS 2.0 runs those controllers over a `.csm` material, so check it in game. <!-- D:IE15 -->
+On a shape that draws CS 2.0 PBR from a `.csm`, a shader controller on **Specular level**, **Roughness scale** or the specular colour (float 9 and 10, colour 0) gets the amber warning "CS 2.0 may not animate values a .csm sets". Nobody has checked yet whether CS 2.0 runs those controllers over a `.csm` material, so check it in game. <!-- D:IE15 --> An Env map scale controller there gets "Env map scale over a .csm: CS 1.x crashed on it over PBR, and CS 2.0 is untested", beside the red warning below. <!-- D:IE26 -->
 
 ## Warnings
 
 These come from an in-game check of each controller and show under the controller.
-- Red: "Env map scale crashes the game on PBR materials." On a PBR shape, Env map scale (8) is greyed in both Variable lists with this text. A controller that already has it blocks the NIF's export, even when the source file had it.
+- Red: "Env map scale crashes the game on PBR materials." On a v1 PBR shape, or one that names or draws a `.csm`, Env map scale (8) is greyed in both Variable lists with this text. A controller that already has it blocks the NIF's export, even when the source file had it.
 - Amber, from the last In game simulation: the same PGPatcher warning as on the shape cards ([In game and Source while editing](GUI-NIF-Export.md#in-game-and-source-while-editing)), shown on the Env map scale controller. It does not block export, since PGPatcher's output depends on the JSON at play time.
 - Amber, no effect in game: "This controller has no effect: Specular is off when the mesh loads." and "…specular strength is 0 when the mesh loads." (glossiness, specular strength or colour on a non-PBR shape); "This controller has no effect: alpha test is off."; "Refraction strength has no visible effect in game."; "Two controllers drive <name>: only the last one plays."
 

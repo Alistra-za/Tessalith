@@ -42,23 +42,25 @@ Each case is an amber Problems row naming the set. That set's `PBRTextureSets` f
 - **"no .csm written:" followed by a rule.** The switches break a `.csm` rule, for example hair beside another feature. Change the set's PGPatcher settings.
 - **"the set writes no .csm this run (it has no PGPatcher entry)".** The `.csm` is built from the entry, so a set without one gets none ([Why is my set missing from the JSON?](GUI-PGPatcher-JSON.md#quick-qa)).
 
-The set editor's head shows the same reason in amber, ending "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)", and the set preview draws no `.csm` for that set.
+Each reason adds "a .csm and texture-set JSON from an earlier export stay in force in game until removed": Tessalith doesn't delete them, so remove them by hand if the game shouldn't use them. <!-- D:IE35 -->
+
+The set editor's head shows the same reason in amber, and the set preview draws no `.csm` for that set. A blocked set's line ends "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)"; a set with no PGPatcher entry ends "PGPatcher has no entry for this set, so nothing patches its meshes; they keep the material their NIF names". <!-- D:IE34 -->
 
 ## Fuzz roughness from a texture
 
-**Fuzz roughness from texture** reads the fuzz roughness from the green channel of the parallax (height) slot's texture, so that texture holds two channels: encode it BC5 or BC1, not BC4. <!-- D:ID46 --> With the switch on, the set's `_p` keeps the source's green channel and takes the height from red. <!-- D:IE16 -->
+**Fuzz roughness from texture** reads the fuzz roughness from the green channel of the parallax (height) slot's texture, so that texture holds two channels: encode it BC5 or BC1, not BC4. <!-- D:ID46 --> With the switch on, the set's `_p` keeps the source's green channel and takes the height from red. <!-- D:IE16 --> A `channels.grayscale_source` other than `r` on that file isn't used, and Review lists a row saying so. <!-- D:IE36 -->
 
 With the switch and **Fuzz** both on, a `_p` in a format with no green channel blocks Export: "<set>: Fuzz roughness texture needs two channels (height in R, fuzz roughness in G): use BC5 or BC1". **Use BC5** on the row sets the `_p` to BC5, as an undoable edit. <!-- D:IE18 -->
 
 ## CS PBR records
 
-A set can write Community Shaders' own runtime files: a **PBR texture set** (`<export>\PBRTextureSets\<EDID>.json`) and a **PBR material object** (`<export>\PBRMaterialObjects\<EDID>.json`). On a landscape set they're on the [PBR Landscape card](PBR-Landscape.md#pbr-landscape-sets); on any other set, open **CS PBR records** in the Material tab and add either block.
+A set can write Community Shaders' own runtime files: a **PBR texture set** (`<export>\PBRTextureSets\<EDID>.json`) and a **PBR material object** (`<export>\PBRMaterialObjects\<EDID>.json`). On a landscape set they're on the [PBR Landscape card](PBR-Landscape.md#pbr-landscape-sets); on any other set, open **CS PBR records** in the Material tab and add either block. Adding a texture set to a set whose shader is **Auto** sets it to **PBR** in the same step, so it keeps its `.csm` instead of becoming PBR Landscape. <!-- D:IE25 -->
 
 - **A PBR texture set** of a set that writes a `.csm` holds only the `.csm` path, `{"csm": "materials\\pbr\\architecture\\stone\\cobble.csm"}`; the values are in the `.csm`. A PBR Landscape set's file holds the block's values. <!-- D:IE10 -->
 - **Template** fills a block from the built-in library: PBR landscape template values by Faultier (https://www.nexusmods.com/profile/Faultierfan?gameId=1704), from Faultier's PBR landscape modders resource. It never removes EDIDs you added.
 - **EDIDs** are the records the file is for, and the file name is the EDID exactly, case included, because Community Shaders matches the exact case. After a plugin scan, texture-set EDIDs are suggested from the texture sets that use the diffuse, and material objects can be picked from the scanned records. An amber line flags an EDID that isn't in the scan; a material object that isn't single-pass is ignored by Community Shaders. An EDID that can't be a file name, or that two sets bind, isn't written.
 - A texture set also drives the set's PGPatcher entry (roughness, specular, displacement, subsurface, coat and glint come from the block, so the two files can't drift). With no scan the entry isn't written. After a scan it's written whether or not a mesh (not LOD) uses the diffuse yet, and an info row says when none does; **PGPatcher entry for statics** forces it on or off.
-- **IMPORTANT** A record or `.csm` you edited outside Tessalith is never overwritten: the export report says so, and you delete it to let Tessalith write it again. A file Tessalith wrote that no set writes any more is reported, not deleted.
+- **IMPORTANT** A record or `.csm` you edited outside Tessalith is never overwritten: the export report says so, and you delete it to let Tessalith write it again. A file Tessalith wrote that no set writes any more is reported, not deleted. For a `.csm`, the note adds that meshes may still name the old path: **Use the set's .csm** in the NIF editor points a mesh at its set's new one. <!-- D:IE35 -->
 
 ### Material object layer
 
