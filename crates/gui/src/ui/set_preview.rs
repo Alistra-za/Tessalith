@@ -175,34 +175,63 @@ fn mesh_picker(ui: &mut egui::Ui, s: &mut SetPreview) {
         MeshChoice::Auto => format!("Mesh: Auto ({pick_name})"),
         _ => format!("Mesh: {pick_name}"),
     };
-    egui::ComboBox::from_id_salt("set-3d-mesh")
-        .selected_text(current)
-        .show_ui(ui, |ui| {
-            if ui
-                .selectable_label(s.choice() == MeshChoice::Auto, "Auto")
-                .clicked()
-            {
-                chosen = Some(MeshChoice::Auto);
-            }
-            if let Candidates::Ready(list) = &s.candidates {
-                for c in list {
-                    let sel = matches!(&pick, Pick::Nif(p) if p.load_copy_id == c.load_copy_id);
-                    let r = ui
-                        .add_enabled_ui(!c.le_mesh, |ui| ui.selectable_label(sel, c.label()))
-                        .inner;
-                    if r.clicked() {
-                        chosen = Some(MeshChoice::Nif(c.load_copy_id));
+    // Note JJ1 (ui-rules 3.5): an exact-width slot. The combo lays itself out in a child `horizontal`, which the
+    // toolbar's wrapped row places before its width is known, so it ran past the window instead of taking the next
+    // row. The slot's width is the whole text's, so the row wraps first; a row narrower than that truncates the text,
+    // with the whole of it on hover (and in the accessible value).
+    let sp = ui.spacing();
+    let need = egui::WidgetText::from(current.as_str())
+        .into_galley(
+            ui,
+            Some(egui::TextWrapMode::Extend),
+            f32::INFINITY,
+            egui::TextStyle::Button,
+        )
+        .size()
+        .x
+        + sp.icon_spacing
+        + sp.icon_width
+        + 2.0 * sp.button_padding.x;
+    let width = need.min(ui.max_rect().width());
+    let slot = egui::vec2(width, ui.spacing().interact_size.y);
+    ui.allocate_ui(slot, |ui| {
+        let cut = width < need;
+        if cut {
+            ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+        }
+        let r = egui::ComboBox::from_id_salt("set-3d-mesh")
+            .width(width)
+            .selected_text(current.as_str())
+            .show_ui(ui, |ui| {
+                if ui
+                    .selectable_label(s.choice() == MeshChoice::Auto, "Auto")
+                    .clicked()
+                {
+                    chosen = Some(MeshChoice::Auto);
+                }
+                if let Candidates::Ready(list) = &s.candidates {
+                    for c in list {
+                        let sel = matches!(&pick, Pick::Nif(p) if p.load_copy_id == c.load_copy_id);
+                        let r = ui
+                            .add_enabled_ui(!c.le_mesh, |ui| ui.selectable_label(sel, c.label()))
+                            .inner;
+                        if r.clicked() {
+                            chosen = Some(MeshChoice::Nif(c.load_copy_id));
+                        }
                     }
                 }
-            }
-            ui.separator();
-            for (b, name) in BUILTINS {
-                let sel = matches!(pick, Pick::Builtin(x) if x == b);
-                if ui.selectable_label(sel, name).clicked() {
-                    chosen = Some(MeshChoice::Builtin(b));
+                ui.separator();
+                for (b, name) in BUILTINS {
+                    let sel = matches!(pick, Pick::Builtin(x) if x == b);
+                    if ui.selectable_label(sel, name).clicked() {
+                        chosen = Some(MeshChoice::Builtin(b));
+                    }
                 }
-            }
-        });
+            });
+        if cut {
+            r.response.on_hover_text(current.as_str());
+        }
+    });
     if let Some(c) = chosen {
         s.choose(c);
     }

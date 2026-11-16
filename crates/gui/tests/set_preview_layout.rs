@@ -396,3 +396,24 @@ fn warnings_stay_above_the_viewport_outside_details() {
         sdc_gui::ui::viewport3d::SET_DETAILS
     ));
 }
+
+/// Note JJ1 (B4 of the Settings-plan UI proof): at 1100x800 the toolbar's "Mesh: Auto (…)" combo stays inside the
+/// centre; it ran past the window's right edge.
+#[test]
+fn the_mesh_combo_stays_inside_the_window_at_1100() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let (w, hh) = (1100.0, 800.0);
+    let h = harness_at(d.path(), egui::vec2(w, hh), |_| {});
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .find(|n| n.value().is_some_and(|v| v.starts_with("Mesh:")))
+        .expect("the mesh combo is on the toolbar");
+    let r = combo.rect();
+    // Nothing is right of the centre but the harness' 8 px margin (as `check`).
+    let right = (w - 8.0).min(h.ctx.content_rect().max.x);
+    assert!(
+        r.max.x <= right + 0.5,
+        "the mesh combo {r:?} runs past the window's {right}"
+    );
+}
