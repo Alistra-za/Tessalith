@@ -52,6 +52,17 @@ struct Out {
 /// Plan and run the fixture as a set picked `shader`, listed in `fuzz_texture_sets` when `listed`, its `_p` written
 /// as `format`.
 fn convert(dir: &Path, shader: Shader, listed: bool, format: &str) -> Out {
+    convert_with(
+        dir,
+        shader,
+        listed,
+        &[&format!("file:**/rock_p.png.format={format}")],
+        OnExisting::Overwrite,
+    )
+}
+
+/// `convert` with the `--set` overrides `sets` and `on_existing`.
+fn convert_with(dir: &Path, shader: Shader, listed: bool, sets: &[&str], on: OnExisting) -> Out {
     let mut req = BatchRequest::new(
         vec![dir.join("in")],
         dir.join("out"),
@@ -59,12 +70,12 @@ fn convert(dir: &Path, shader: Shader, listed: bool, format: &str) -> Out {
     );
     req.recursive = true;
     req.accept = AcceptSuggestions::High;
-    req.on_existing = OnExisting::Overwrite;
+    req.on_existing = on;
     req.set_shaders = [(SET.to_string(), shader)].into();
     if listed {
         req.fuzz_texture_sets = [SET.to_string()].into();
     }
-    req.overrides = vec![parse_set(&format!("file:**/rock_p.png.format={format}")).unwrap()];
+    req.overrides = sets.iter().map(|s| parse_set(s).unwrap()).collect();
     let sink = Arc::new(VecSink::default());
     let rep = Reporter::new(sink.clone(), "fuzz-height");
     let e = Engine::new().unwrap();
@@ -163,9 +174,65 @@ fn an_unlisted_or_non_pbr_set_keeps_the_grey_p() {
     }
 }
 
-/// A layer cannot turn it on: only the plan's listing does.
+/// Fix round 1 (item 1): under `if-changed`, turning the switch on re-encodes an existing BC5 `_p` with its G kept, a
+/// second run with the switch still on skips it, and turning it off re-encodes the grey `_p`. Only the `_p` changes.
 #[test]
-fn a_layer_value_is_cleared() {
+fn if_changed_re_encodes_when_the_switch_turns() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let bc5 = ["file:**/rock_p.png.format=bc5"];
+    let run = |listed| convert_with(d.path(), Shader::Pbr, listed, &bc5, OnExisting::IfChanged);
+    let o = run(false);
+    assert_eq!(o.summary.converted, 4, "{:?}", o.summary);
+    assert_rg(&mip0(d.path()), |x, _| height(x), 6, "first run");
+    let o = run(true);
+    assert_eq!(
+        o.summary.converted, 1,
+        "switch on: the _p only: {:?}",
+        o.summary
+    );
+    assert_rg(&mip0(d.path()), |_, y| fuzz(y), 6, "switch on");
+    let o = run(true);
+    assert_eq!(o.summary.converted, 0, "unchanged: {:?}", o.summary);
+    let o = run(false);
+    assert_eq!(
+        o.summary.converted, 1,
+        "switch off: the _p only: {:?}",
+        o.summary
+    );
+    assert_rg(&mip0(d.path()), |x, _| height(x), 6, "switch off");
+}
+
+/// Fix round 1 (item 2): the height stays the source's R even when the `_p` names another grey pick, here G on a
+/// source whose G varies far more than its R.
+#[test]
+fn the_height_stays_in_r_whatever_the_grey_pick() {
+    let d = tempfile::tempdir().unwrap();
+    fixture(d.path());
+    let small = |x: u32| (100 + x / 4) as u8;
+    put(d.path(), "rock_p.png", |x, y| [small(x), fuzz(y), 0]);
+    let sets = [
+        "file:**/rock_p.png.format=bc5",
+        "file:**/rock_p.png.channels.grayscale_source=g",
+    ];
+    let o = convert_with(d.path(), Shader::Pbr, true, &sets, OnExisting::Overwrite);
+    assert_eq!(o.summary.converted, 4, "{:?}", o.summary);
+    let near = |a: u8, b: u8| (i32::from(a) - i32::from(b)).abs() <= 6;
+    for (i, p) in mip0(d.path()).iter().enumerate() {
+        let (x, y) = (i as u32 % W, i as u32 / W);
+        assert!(
+            near(p[0], small(x)) && near(p[1], fuzz(y)),
+            "{x},{y}: {p:?}, want R {} G {}",
+            small(x),
+            fuzz(y)
+        );
+    }
+}
+
+/// Fix round 1 (item 3): a layer that writes `channels.keep_green` is refused by name, as the planner's other fields
+/// are: only the plan's listing turns it on.
+#[test]
+fn a_layer_value_is_refused() {
     let d = tempfile::tempdir().unwrap();
     fixture(d.path());
     let cfg: engine::presets::ConfigFile =
@@ -181,14 +248,17 @@ fn a_layer_value_is_cleared() {
     req.set_shaders = [(SET.to_string(), Shader::Pbr)].into();
     req.project_config_inline = Some(cfg);
     let rep = Reporter::new(Arc::new(VecSink::default()), "fuzz-height");
-    let p = Engine::new()
+    let e = match Engine::new()
         .unwrap()
         .plan(req, &rep, &CancelToken::default())
-        .unwrap();
-    let j = p
-        .jobs
-        .iter()
-        .find(|j| j.input.ends_with("rock_p.png"))
-        .expect("the _p job");
-    assert!(!j.profile.channels.keep_green);
+    {
+        Ok(_) => panic!("a layer's keep_green planned"),
+        Err(e) => e.to_string(),
+    };
+    assert!(
+        e.contains("[subtypes.height]")
+            && e.contains("'channels.keep_green'")
+            && e.contains("remove it"),
+        "{e}"
+    );
 }

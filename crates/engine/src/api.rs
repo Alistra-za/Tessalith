@@ -713,8 +713,9 @@ fn input_bytes(w: u32, h: u32) -> u64 {
 
 /// Note IE16 (owner, 2026-11-16): in a set the GUI lists in `fuzz_texture_sets` and picked as `pbr` (the one shader
 /// with a `.csm` and a `_p` slot), a plain `height` job (no pack, derive, cube or fill) keeps its source's G, CS 2.0's
-/// fuzz roughness texture. Its source is meant to differ between R and G, so CHAN-NOT-GRAY goes. Any other job is
-/// untouched, so its bytes and profile hash hold. Runs after the picks, before `file_planned`.
+/// fuzz roughness texture. Its source is meant to differ between R and G, so CHAN-NOT-GRAY goes, and the height is
+/// always R (a `channels.grayscale_source` pick is overruled: G is the fuzz roughness). Any other job is untouched,
+/// so its bytes and profile hash hold. Runs after the picks, before `file_planned`.
 fn keep_fuzz_green(req: &BatchRequest, jobs: &mut [ResolvedJob]) {
     if req.fuzz_texture_sets.is_empty() {
         return;
@@ -734,6 +735,7 @@ fn keep_fuzz_green(req: &BatchRequest, jobs: &mut [ResolvedJob]) {
             && sets.contains(&j.set_key)
     }) {
         j.profile.channels.keep_green = true;
+        j.profile.channels.grayscale_source = crate::config::GraySource::R;
         j.warnings.retain(|w| w.code != Code::ChanNotGray);
     }
 }

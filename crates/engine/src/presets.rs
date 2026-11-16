@@ -1073,6 +1073,16 @@ pub fn check_chain(
                     return Err(invalid(format!("{at} {table}: '{key}': {why}; remove it")));
                 }
             }
+            // Note IE16: only the plan's fuzz roughness listing turns it on (`api::keep_fuzz_green`).
+            if v.get("channels")
+                .and_then(|c| c.get("keep_green"))
+                .is_some()
+            {
+                return Err(invalid(format!(
+                    "{at} {table}: 'channels.keep_green': the planner sets it for a set whose texture-set block \
+                     turns the fuzz roughness texture on; remove it"
+                )));
+            }
         }
     }
     let rules: Vec<(String, &Rule)> = chain

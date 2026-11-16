@@ -502,9 +502,9 @@ pub struct ChannelSpec {
     #[serde(default, skip_serializing_if = "MsnSource::is_skyrim")]
     pub msn_source: MsnSource,
     /// Note IE16: a `height` (`_p`) keeps its source's G (CS 2.0's fuzz roughness texture) where the grey pick would
-    /// fill it; R and B stay the height. Set by the plan only, for a `pbr` set in `BatchRequest::fuzz_texture_sets`:
-    /// Resolve clears it, so no layer turns it on, and it is no `[files]` field or schema property. Not serialised
-    /// when off, so every other profile hash holds.
+    /// fill it; R and B stay the height (read from R). Set by the plan only, for a `pbr` set in
+    /// `BatchRequest::fuzz_texture_sets`: a layer that writes it is refused (`presets::check_chain`), Resolve clears
+    /// it, and it is no `[files]` field or schema property. Not serialised when off, so every other profile hash holds.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[schemars(skip)]
     pub keep_green: bool,
