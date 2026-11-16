@@ -20,11 +20,11 @@ A new note goes at the end of this file and adds its letter to the index line of
 - Manifest and outputs: F, M, N, S, Y, AE, AF, AL, BJ, BQ, BV, CN, CT, DM, DY, FC, FM, FZ, HB, HE, HQ, HF, HR, HS, HZ, JA, JB, JC
 - Exports (PGPatcher, CS PBR, CM, XPMF, Also): P, V, AA, AB, AC, AD, AF, AG, AN, AT, BO, BR, BV, BY, CN, CO, CV, GE, GI, FM, FN, FO, FP, FT, FW, FV, HB, GV, GW, HL, HQ, HF, HJ, HT, HS, JH, JI
 - CLI: I, J, K, X, BC, BQ, CN, DY, FC, FM, FX, GV, GW, GY, IB, HS, JA
-- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI
+- GUI Files and Inspector: N, P, S, U, Z, AA, AE, AF, AG, AM, AN, AO, AV, AY, BH, BI, BN, BO, BR, BS, BV, BY, CA, CC, CD, CE, CF, CG, CV, DN, DO, DP, DU, DZ, FA, FB, FC, FD, FI, FK, FL, FM, FN, FO, FP, FT, FS, FW, FU, FY, HB, HC, HE, HG, GV, HM, HN, GW, GY, HP, IA, HL, HF, IB, HJ, HR, HV, HS, JE, JD, JF, JG, JH, JI, JK
 - GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, HY, JF, JG, JI
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS
 - GUI Preview and 3D: N, AG, AQ, AU, BS, CE, CJ, CL, CM, DT, FA, GD, GG, GH, GJ, GK, GL, GM, FM, FO, GQ, FS, FT, FY, FZ, GR, GT, GU, GX, GZ, IB, HS, HX, JH, JI
-- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS, JA, JF, JI
+- GUI Dialogs and Export: AG, BH, BO, BR, BV, BY, CA, CD, CE, CF, CN, CV, DT, FB, FC, FI, FM, FN, FO, FP, FS, FW, FU, GU, HB, HC, HE, GV, GY, HL, HF, HQ, HH, HI, HJ, HR, HS, JA, JF, JI, JK
 - modscan: BE, BQ, BT, BU, BW, BY, CK, CM, CN, CV, CW, DA, GA, GB, GC, GD, GJ, GO, GP, GQ, HK, IB
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
@@ -1572,3 +1572,7 @@ The owner approved the design on 2026-11-15 ("doc approved, yes add a this proje
   - **Scroll bars.** The moved rows make the centre's panels taller, so the texture panel, the bulk panel and the set editor each scope `ScrollStyle::thin()` on their scroll area (rule 3.2, as CC21 and CN86): the bar shows without hover. The set editor's had been the floating default since FB2's one column. `hint_and_reset`, the set editor's File cell and the shared row's ✕ keep their `bar_width + bar_outer_margin` reserve: the thin bar takes 6 px beside the content and senses 10 px, so 4 of them lie over it. Tests in `crates/gui/tests/scroll_bars.rs` read the paint (a bar has no AccessKit node).
   - **Old keys.** A `gui.toml` with `advanced_open` or a `[layout.widths] advanced` width loads without a message, and the keys are dropped on the next save. The column widget ids shift once, since the drawer's `skip_ahead_auto_ids(1)` branch is gone.
   - Amends CC5 (3D routing), CD18 (the start screen), CE17 (the drawer's 260 px minimum is gone with it), FN2, FY1, HE6 (no strip to skip), FM14, FM15, FM16, FM45 and FO3 (their drawer wording). Tests `set_panel::no_window_edge_strip_in_any_state` and `settings::old_advanced_keys_load_and_are_dropped_on_save`.
+
+## Note JK — The Also export tab's recipe names its scope (owner, 2026-11-16)
+
+- **JK1 One sentence under the recipe (owner pick: "Sentence only").** A blind reader of the Also export tab on 2026-11-15 could not tell who the 9 `[export.legacy]` boxes apply to: they are greyed while both Also ticks are off, and the "All sets in this project" heading did not read as covering them. Under the boxes the tab now reads "Saved in this project's sdc.toml; used when Vanilla or Complex material is ticked" (`also_tab::RECIPE_SCOPE`). It is drawn outside the greyed block, so it is never greyed, and as a plain label, not weak text, so it does not look greyed beside the boxes. It wraps, and at 1100 px it fits on one line. The boxes' greying and their hover reason are unchanged (JI2): the owner chose the sentence over keeping the boxes editable while both ticks are off, and over doing both. Test `also_export::the_recipe_says_where_it_is_saved_and_when_it_is_used`.

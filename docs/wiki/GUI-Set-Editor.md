@@ -50,7 +50,7 @@ The set editor's second tab holds the [Also export as Vanilla and CM](Set-Shader
 ![The Also export tab of a PBR set: the Skip tick, the two Also export as ticks and the recipe numbers.](../img/gui/GUI-Set-Editor/also-export-tab.png)
 
 - **This set:** **Skip vanilla/CM for this set** keeps a PBR set out of the Vanilla and CM folders. It stays greyed until you turn on one of the two ticks below. A set that isn't PBR reads "Also export reads PBR sets only; this set is not one".
-- **All sets in this project:** **Also export as Vanilla** and **Also export as Complex material** (the same ticks as in **Export to ▾**), then the [recipe](Set-Shaders.md#the-recipe) numbers. The numbers stay greyed until a tick is on, and they apply to every set.
+- **All sets in this project:** **Also export as Vanilla** and **Also export as Complex material** (the same ticks as in **Export to ▾**), then the [recipe](Set-Shaders.md#the-recipe) numbers. The numbers stay greyed until a tick is on, and they apply to every set. The line under them says so: they're saved in this project's `sdc.toml` and used when **Vanilla** or **Complex material** is ticked. <!-- D:JK1 -->
 - Hover a greyed control for the reason: an export is running, or `sdc.toml` is read-only. Outside the `cs` mode an unticked **Also export as** box is greyed too.
 
 ## Shared helpers
