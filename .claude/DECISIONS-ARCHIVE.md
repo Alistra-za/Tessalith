@@ -305,6 +305,12 @@ ARCHIVED (wording before the edit; superseded in part by Note IE, 2026-11-16)
 - GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, ID
 - pgpsim: AU, CM, GE, ID
 
+ARCHIVED (wording at the task base b06542ad; superseded in part by Note IE, 2026-11-16)
+- GUI Settings panel: S, V, X, Z, AF, AG, AJ, AN, AS, AW, BM, BS, CC, CL, CV, FB, FC, FM, FS, FT, FY, GU, GV, GW, HP, IA, IB, HI, HJ, HV, ID, IE
+- GUI Meshes view: BA, BT, CV, CZ, FC, FI, GC, GD, GH, GJ, GK, GN, GO, GP, FO, GQ, GR, HS, ID, IE
+- pgpsim: AU, CM, GE, ID, IE
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ
+
 ## Digest
 
 ARCHIVED (superseded by Note FM, 2026-11-03)
