@@ -136,6 +136,23 @@ fn recreating_the_target_unbinds_the_old_views_first() {
     assert_eq!(r.target_dims(), vec![(64, 64); 10]);
 }
 
+/// A frame's bytes equal the CPU conversion of the same target, deferred and forward (Note IF1): whatever the
+/// composite leaves on the compute stage, the conversion pass still reads the colour target.
+#[test]
+fn a_frame_reads_back_as_the_cpu_conversion() {
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = two_planes(cache.path());
+    for deferred in [true, false] {
+        r.set_deferred(deferred).unwrap();
+        let px = r.render(&Scene::neutral(), 64, 64).unwrap();
+        assert_eq!(px, r.read_display_cpu().unwrap(), "deferred {deferred}");
+        assert!(
+            px.chunks(4).any(|p| p[..3] != [0, 0, 0]),
+            "deferred {deferred}: the frame is not black"
+        );
+    }
+}
+
 /// A forward program writes SV_Target1/2 too (CS's forward PS_OUTPUT): drawn after an opaque deferred shape, it must
 /// leave that shape's RT1/RT2 untouched, so RT1-7 are never bound for it.
 #[test]

@@ -5,6 +5,7 @@ pub mod cache;
 pub mod cbuffer;
 pub mod compile;
 pub mod composite;
+mod convert;
 pub mod cs_settings;
 pub mod debug;
 pub mod device;
@@ -100,11 +101,11 @@ pub struct FrameTiming {
     pub draw_ms: f64,
     /// Waiting for the GPU to finish the draws (an event query after a flush).
     pub gpu_ms: f64,
-    /// Copy to a staging texture, `Map`, and the half → RGBA8 conversion; the GPU is idle by then, so this is
-    /// the readback cost alone (the B9 zero-copy gate).
+    /// The half → RGBA8 conversion pass (Note IF), the copy to a staging texture, `Map`, and copying the rows
+    /// out; the GPU is idle when it starts, so this is the readback cost alone (the B9 zero-copy gate).
     pub readback_ms: f64,
-    /// The part of `readback_ms` before `Map` returned: the staging copy and the transfer to CPU memory. The
-    /// rest is the conversion and the output buffer.
+    /// The part of `readback_ms` before `Map` returned: the conversion pass, the staging copy and the transfer to
+    /// CPU memory. The rest is copying the rows into the output buffer.
     pub map_ms: f64,
 }
 
@@ -2182,6 +2183,15 @@ impl Renderer {
     pub fn read_mrt(&self, rt: usize) -> Result<Vec<f32>, String> {
         let t = self.target.as_ref().ok_or("no frame rendered")?;
         t.read_f32(&self.gpu, rt, [0, 0, t.width, t.height])
+    }
+
+    /// Test hook: the current target through the CPU conversion that [`Renderer::render`]'s bytes must equal
+    /// (Note IF1).
+    #[cfg(feature = "test-hooks")]
+    #[doc(hidden)]
+    pub fn read_display_cpu(&self) -> Result<Vec<u8>, String> {
+        let t = self.target.as_ref().ok_or("no frame rendered")?;
+        t.readback_display_cpu(&self.gpu, self.encode_srgb)
     }
 
     /// Drops the current target (render's recreation branch). The context holds references to bound

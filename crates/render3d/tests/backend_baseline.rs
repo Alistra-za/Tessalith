@@ -194,7 +194,7 @@ struct Series {
     gpu: Vec<f64>,
     readback: Vec<f64>,
     map: Vec<f64>,
-    convert: Vec<f64>,
+    rows: Vec<f64>,
     total: Vec<f64>,
 }
 
@@ -332,7 +332,7 @@ fn run_device(
         "Frames (`render()` on the warm renderer, `Scene::neutral()`, forward; ms median / p95; {WARMUP} warm-up frames):\n"
     ));
     out.push(
-        "| res | n | draw_ms | gpu_ms | readback_ms | of which copy + Map | of which convert | whole render() | covered px % | bytes/frame |".into(),
+        "| res | n | draw_ms | gpu_ms | readback_ms | of which convert pass + copy + Map | of which rows copied out | whole render() | covered px % | bytes/frame |".into(),
     );
     out.push("|---|---:|---|---|---|---|---|---|---:|---:|".into());
     for (w, h) in RES {
@@ -363,7 +363,7 @@ fn run_device(
             s.gpu.push(ft.gpu_ms);
             s.readback.push(ft.readback_ms);
             s.map.push(ft.map_ms);
-            s.convert.push(ft.readback_ms - ft.map_ms);
+            s.rows.push(ft.readback_ms - ft.map_ms);
             black_box(&px);
         }
         if let (Ok(dir), true) = (std::env::var("SDC_R3D_FRAME_OUT"), (w, h) == RES[0]) {
@@ -378,7 +378,7 @@ fn run_device(
             cell(&mut s.gpu),
             cell(&mut s.readback),
             cell(&mut s.map),
-            cell(&mut s.convert),
+            cell(&mut s.rows),
             cell(&mut s.total),
             100.0 * covered as f64 / (w * h) as f64,
             w * h * 4
@@ -418,9 +418,8 @@ fn copy_floor() -> Vec<String> {
     out
 }
 
-/// The readback's conversion on ordinary memory: `w*h` half-float RGBA pixels through a 65536-entry table into a
-/// new `Vec`, the loop shape `Target::read` uses on the mapped staging texture. Median of 50. The gap between this
-/// and the measured "convert" column is what reading the mapped memory adds.
+/// What the readback's conversion cost on the CPU before it moved to the GPU (Note IF): `w*h` half-float RGBA
+/// pixels through a 65536-entry table into a new `Vec`, on ordinary memory. Median of 50.
 fn convert_floor() -> Vec<String> {
     let table: Vec<u8> = (0..=u16::MAX).map(|b| (b >> 8) as u8).collect();
     let mut out = vec![

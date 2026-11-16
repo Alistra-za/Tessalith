@@ -5,7 +5,7 @@ Whether `render3d`, the crate that draws the 3D preview, should stay on Direct3D
 Measured on one NVIDIA RTX 4090 and AMD Ryzen 7 9800X3D on 2026-11-16, from `main` 40589a43. Sources were fetched the same day and are pinned under [Sources](#sources). No backend code was written. The unchanged renderer was run on DXVK on Windows; every other statement about a path other than today's D3D11 is either cited or marked untested.
 
 Short answer:
-- **Frame time is not a backend question.** GPU time is under the 0.6 ms or so the probe can resolve, at every size. Reading the frame back to the CPU is 77% to 97% of a frame.
+- **Frame time is not a backend question.** GPU time is under the 0.6 ms or so the probe can resolve, at every size. Reading the frame back to the CPU was 77% to 97% of a frame. Its conversion has since moved to the GPU, which cut the readback from 5.0 to 1.6 ms at 1920×1080 ([the split](#what-a-frame-costs-today)).
 - **Cold load is shader compile.** FXC takes 0.83 to 1.34 s of a 0.87 to 1.39 s cold load.
 - **The shaders decide the backend.** FXC compiles 98 of 98 permutations unmodified. DXC compiles 0 of 98, to DXIL or to SPIR-V. Community Shaders (CS) itself compiles with FXC on every branch I read.
 - **DXVK runs the preview unchanged, on Windows.** With CS's own DXVK build under the same exe, the three scenes' frames match Microsoft's D3D11 (one pixel of 921,600 differs by 1 in one scene), and frame and load times are the same.
@@ -58,7 +58,20 @@ The readback split, hardware GPU, `static` scene, median ms (a fourth run, so th
 - **The other two scenes agree** within 0.1 ms up to 1920×1080 and 0.2 ms at 4K.
 - **WARP converts in the same time** (1.60, 2.50, 3.60 and 14.8 ms), so the conversion cost is CPU work, not slow GPU memory.
 - **The 4K spikes are in the copy, not the conversion:** the p95 of copy and `Map` is 19.9 ms against a 5.1 ms median, on all three scenes.
-- **So a smaller fix exists.** Converting on the GPU and reading back 8-bit pixels removes the conversion and halves the bytes copied. My estimate, not measured: about 1 to 1.5 ms of readback at 1920×1080 instead of 5.0, and 3 to 6 ms at 4K instead of 20. It needs no shared texture and works on WARP and DXVK alike.
+- **So a smaller fix existed, and it is now in.** The conversion runs on the GPU and the readback copies 8-bit pixels (Note IF). The bytes are identical: a test compares every half value with the old CPU table on both devices. It needs no shared texture; it was not re-run on DXVK.
+
+Every table on this page except the next one was measured before that change. After it, same machine and scene, median ms:
+
+| Size | readback before | readback after | whole `render()` before | after |
+|---|---:|---:|---:|---:|
+| 1280×720 | 2.23 | 0.73 | 2.85 | 1.35 |
+| 1600×900 | 3.45 | 1.09 | 4.06 | 1.69 |
+| 1920×1080 | 4.99 | 1.57 | 5.63 | 2.18 |
+| 3840×2160 | 20.11 | 6.20 | 20.80 | 6.85 |
+
+- **The 4K spikes are gone:** the readback's p95 is 7.0 ms, from 34.6.
+- **WARP gains less:** its readback is 1.33, 2.12, 2.96 and 12.0 ms, from 1.70, 2.62, 3.77 and 17.8, because the conversion pass itself runs on the CPU there.
+- **What is left at 4K** is 2.7 ms for the pass, the copy and `Map`, and 3.5 ms to copy the rows into a new buffer.
 
 Software rasteriser (WARP, the same D3D11 code), whole `render()` median in ms:
 
@@ -254,7 +267,7 @@ What is left is Linux, in this order:
 
 If step 1 fails, the fallback is to compile on Windows and ship or cache the bytecode, which the preview's disk cache already stores per permutation.
 
-If you want frame time back before any of that, start with the GPU conversion and an 8-bit readback: the conversion is 72% to 74% of the readback. The zero-copy display removes the rest, but it is Windows-only work with a fallback path, and it pays only if 1 to 6 ms of readback is still too much.
+The frame-time fix that needed no backend is done: the readback converts on the GPU and takes 1.6 ms at 1920×1080 and 6.2 ms at 4K. The zero-copy display removes the rest, but it is Windows-only work with a fallback path, and it pays only if that is still too much.
 
 ## Method
 
@@ -263,7 +276,7 @@ If you want frame time back before any of that, start with the GPU conversion an
 - **Build:** `cargo test --release --offline -p render3d -p sdc --test backend_baseline -- --ignored --nocapture --test-threads=1 <test>`.
 - **Machine:** RTX 4090, driver 32.0.16.1088; Ryzen 7 9800X3D; Windows 11 build 26200; `fxc` 10.0.26100.7705; `dxc` 1.8.2502.11 (Windows SDK) and 1.9.2609.5 (Microsoft's release `dxc_2026_09_29.zip`); glslang 16.5.0 (RenderDoc 1.43's copy).
 - **Frames:** 20 warm-up frames, then 200 timed, per size, per scene, on the hardware GPU and on WARP. Forward mode, default CS features, black background, automatic camera. Three runs; the frame tables are the third, which added 1600×900. The first two ran up to 0.2 ms lower at 1280×720, 0.5 ms lower at 1920×1080 and 3 ms lower at 4K on the hardware GPU. Load numbers are the first run.
-- **Readback split:** `FrameTiming::map_ms` is the time until `Map` returns; the test reports the rest of `readback_ms` as the conversion, and times the same table loop on an ordinary buffer.
+- **Readback split:** `FrameTiming::map_ms` is the time until `Map` returns. In the split table the rest of `readback_ms` was the CPU conversion; since Note IF the conversion pass is inside `map_ms` and the rest is the rows copied out. The test also times the old table loop on an ordinary buffer.
 - **Golden root:** `cs-1.9.0-d2026.10.11.0`, the one `tests/fixtures/golden-baseline.txt` matches.
 - **DXVK:** CS's fork at b926a24c, the commit PR 2632 pins as `extern/dxvk`; the build is the fork's own Actions artifact `dxvk-interop-b926a24c…` (DXVK 3.1.0, x64, gcc 16.2). The fork names its files `dxvk_d3d11.dll` and `dxvk_dxgi.dll` and CS loads them by path. For these runs they were copied beside copies of the test exes as `d3d11.dll` and `dxgi.dll`, with `dxvk_dxgi.dll` kept too because the first imports it by name. Only `DXVK_LOG_PATH` and `DXVK_LOG_LEVEL` were set; CS also sets `DXVK_HDR` and `DXVK_DEBUG`, which these runs did not.
 - **File identities (SHA-256):** `dxvk_d3d11.dll`, 7,495,694 bytes, `9B44DA108260B27360DB0C0294324583B5E7CAA2F427EFEE3695A0D528FEE421`. `dxvk_dxgi.dll`, 5,427,214 bytes, `795736BDE0267ED9649E7A7E3D37C2C9CAB571489C09CDDEF46E5CEEF3227747`. `dxc_2026_09_29.zip`, 32,287,592 bytes, `AD31B1FC8443175D204F77A611FDB3EF2EC42759BDC2F1167368DE24A4A7E7F1`. An Actions artifact expires, so the hashes are what identifies the DXVK build later.
