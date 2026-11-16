@@ -31,7 +31,7 @@ What CS is doing, as of 2026-11-16:
 
 The preview draws offscreen on D3D11, copies the frame to the CPU, and the GUI uploads it again as an egui texture. `Renderer::last_timing()` splits a frame into recording the draws (`draw_ms`), waiting for the GPU (`gpu_ms`) and the readback (`readback_ms`).
 
-Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene is shown; `skinned` and `pbr` are within 0.2 ms of it up to 1920×1080 and within 2 ms at 4K.
+The table and the bullets under it are the state before the conversion moved to the GPU (Note IF); [the table after it](#after-the-gpu-conversion) is the preview today. Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene is shown; `skinned` and `pbr` are within 0.2 ms of it up to 1920×1080 and within 2 ms at 4K.
 
 | Size | draw | GPU wait | readback | whole `render()` | readback share |
 |---|---:|---:|---:|---:|---:|
@@ -42,7 +42,7 @@ Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene
 
 - **The GPU wait is flat** at 0.56 to 0.66 ms for every scene and size. The probe polls an event query and sleeps 200 µs between polls, so I read this as the probe's floor, not GPU time. Real GPU time on this card is below it. That is an inference; timestamp queries would settle it.
 - **Recording the draws is small:** 0.02 ms for 2 shapes, 0.10 to 0.16 ms for 147.
-- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes about 1 ms (0.7 to 1.1 over the three runs), so the bytes are not the cost.
+- **The readback was the frame.** At 4K it read 66 MB of half floats and converted every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes about 1 ms (0.7 to 1.1 over the three runs), so the bytes are not the cost.
 - **Three quarters of the readback is the CPU conversion.** A later run timed the two halves apart; see the table below.
 - **Not measured:** the second half of the round trip, the GUI's upload of the frame into its own wgpu texture.
 
@@ -60,6 +60,8 @@ The readback split, hardware GPU, `static` scene, median ms (a fourth run, so th
 - **The 4K spikes are in the copy, not the conversion:** the p95 of copy and `Map` is 19.9 ms against a 5.1 ms median, on all three scenes.
 - **So a smaller fix existed, and it is now in.** The conversion runs on the GPU and the readback copies 8-bit pixels (Note IF). The bytes are identical: a test compares every half value with the old CPU table on both devices. It needs no shared texture; it was not re-run on DXVK.
 
+#### After the GPU conversion
+
 Every table on this page except the next one was measured before that change. After it, same machine and scene, median ms:
 
 | Size | readback before | readback after | whole `render()` before | after |
@@ -69,6 +71,8 @@ Every table on this page except the next one was measured before that change. Af
 | 1920×1080 | 4.99 | 1.57 | 5.63 | 2.18 |
 | 3840×2160 | 20.11 | 6.20 | 20.80 | 6.85 |
 
+- **A second run agrees:** readback 0.68, 0.93, 1.41 and 6.60 ms at the committed code.
+- **The golden replay still passes** at that commit on Microsoft's D3D11: 0 of 149 over the limit.
 - **The 4K spikes are gone:** the readback's p95 is 7.0 ms, from 34.6.
 - **WARP gains less:** its readback is 1.33, 2.12, 2.96 and 12.0 ms, from 1.70, 2.62, 3.77 and 17.8, because the conversion pass itself runs on the CPU there.
 - **What is left at 4K** is 2.7 ms for the pass, the copy and `Map`, and 3.5 ms to copy the rows into a new buffer.
@@ -87,7 +91,7 @@ On WARP the drawing dominates (53 ms of the 73 ms static 4K frame). The `pbr` sc
 What this says about the backends:
 - **A lower-overhead API has nothing to win here.** D3D12 and Vulkan cut CPU cost per draw; the preview spends 0.02 to 0.16 ms on draws. No other backend was run, so this is an inference from the D3D11 numbers.
 - **Zero-copy display is the frame-time lever, and it does not need a new backend.** A D3D11 shared texture can be imported into the GUI's wgpu device: wgpu-hal 30.0.1 has `vulkan::Device::texture_from_d3d11_shared_handle` and `dx12::Device::texture_from_raw`, and egui-wgpu's `register_native_texture` shows the result. That texture must be `Rgba8Unorm`, so the half-to-8-bit step moves to the GPU. I found no project that does this import with wgpu.
-- **The old gate still holds at its own size.** The October plan skipped zero-copy unless readback passed 4 ms at 1600×900. It measures 3.6 to 3.7 ms there. It passes 4 ms from 1920×1080 up (5.3 ms; 4.8 to 5.0 ms in the two earlier runs).
+- **The October gate now holds everywhere but 4K.** That plan skipped zero-copy unless readback passed 4 ms at 1600×900. Before the GPU conversion it measured 3.6 to 3.7 ms there and passed 4 ms from 1920×1080 up. After it, readback is 1.1 ms at 1600×900 and 1.6 ms at 1920×1080, and passes 4 ms only at 3840×2160 (6.2 ms).
 
 ## What a load costs today
 
