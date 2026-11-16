@@ -363,6 +363,20 @@ fn pbr2_flags_table() {
             | PBR_HAS_FEATURES0
             | PBR_HAS_FEATURES1
     );
+    // Each Has-bit follows its own register only (01 §3.3; ported from the v1 `pbr_flags` test, Note IE30). The values
+    // carry no slot paths, so a path alone never sets one.
+    let plain = values(0);
+    for (reg, want) in [
+        (6, PBR_HAS_EMISSIVE),
+        (4, PBR_HAS_DISPLACEMENT),
+        (12, PBR_HAS_FEATURES0),
+        (9, PBR_HAS_FEATURES1),
+    ] {
+        assert_eq!(pbr2_flags(&plain, &bound(&[reg])), want, "t{reg}");
+    }
+    assert_eq!(pbr2_flags(&plain, &bound(&[0, 1, 2, 3, 5, 7, 8])), 0);
+    // 01 §5.2: emissive + parallax = 3.
+    assert_eq!(pbr2_flags(&plain, &bound(&[0, 1, 4, 5, 6])), 3);
 }
 
 /// Note ID33: the CS 2.0 cbuffer packing, member by member (cs2 Lighting.hlsl:536, 545, 566-570).
