@@ -235,7 +235,13 @@ fn the_override_and_threshold_boxes_write_their_defaults() {
     h.get_by_label_contains("Override flags").click();
     h.run();
     assert_eq!(stored(h.state(), "alphaprop_flags"), Some(json!(4844)));
-    h.get_by_label_contains("Alpha test threshold").click();
+    // egui 0.37: the value box beside it is "Alpha test threshold value"; the click is the box's tick.
+    support::widget(
+        &h,
+        eframe::egui::accesskit::Role::CheckBox,
+        "Alpha test threshold",
+    )
+    .click();
     h.run();
     assert_eq!(stored(h.state(), "alphaprop_thresh"), Some(json!(128)));
     h.get_by_label_contains("Override flags").click();

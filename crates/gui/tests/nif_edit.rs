@@ -6474,10 +6474,10 @@ fn dragging_one_colour_channel_changes_only_it() {
 
 /// Sets the popup DragValue (sRGB byte) of the open colour picker at `index` (0 R, 1 G, 2 B) to `byte`.
 fn type_picker_byte(h: &mut Harness<'static, MeshesModel>, index: usize, byte: u8) {
-    // The picker's own R/G/B DragValues are the only unnamed ones on screen.
+    // The picker's own R/G/B DragValues: egui 0.37 names each by its prefix (0.36.2 left them unnamed).
     let mut spins: Vec<_> = h
         .query_all(egui_kittest::kittest::by().role(AkRole::SpinButton))
-        .filter(|n| n.accesskit_node().label().is_none())
+        .filter(|n| picker_channel(&n.accesskit_node()))
         .map(|n| (n.rect().min.x, n.accesskit_node().id()))
         .collect();
     assert_eq!(spins.len(), 3, "the picker's R, G and B");
@@ -6554,11 +6554,17 @@ fn key_table_colour_picker_sets_the_key_colour() {
     assert_eq!(bits(&pos_keys(h.state(), ctrl).keys[1]), bits(b));
 }
 
-/// The open colour picker's R, G and B bytes (its own unnamed DragValues), left to right.
+/// Whether `n` is one of the open colour picker's channel boxes: egui 0.37 names a DragValue by its prefix, and the
+/// picker's are "R ", "G " and "B " (the key table's own boxes say "… key 2 G").
+fn picker_channel(n: &egui_kittest::kittest::AccessKitNode<'_>) -> bool {
+    matches!(n.label().as_deref(), Some("R" | "G" | "B"))
+}
+
+/// The open colour picker's R, G and B bytes (its own DragValues, named by their prefix), left to right.
 fn picker_bytes(h: &Harness<'static, MeshesModel>) -> Vec<f64> {
     let mut spins: Vec<_> = h
         .query_all(egui_kittest::kittest::by().role(AkRole::SpinButton))
-        .filter(|n| n.accesskit_node().label().is_none())
+        .filter(|n| picker_channel(&n.accesskit_node()))
         .map(|n| (n.rect().min.x, n.accesskit_node().numeric_value().unwrap()))
         .collect();
     spins.sort_by(|a, b| a.0.total_cmp(&b.0));

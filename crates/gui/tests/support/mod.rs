@@ -280,6 +280,42 @@ pub fn header_undo<'h, S>(
     }
 }
 
+/// egui 0.37: the one node of `role` named `name`. A bare label query now also finds the Label beside a named control,
+/// or a panel, popup or tooltip of that name; this panics with every node of that name when there is not exactly one.
+pub fn widget<'t, 'n, N: egui_kittest::kittest::NodeT<'t> + 't>(
+    h: &'n impl egui_kittest::kittest::Queryable<'t, 'n, N>,
+    role: eframe::egui::accesskit::Role,
+    name: &'t str,
+) -> N {
+    let mut hits: Vec<N> = h.query_all_by_role_and_label(role, name).collect();
+    if hits.len() == 1 {
+        return hits.pop().unwrap();
+    }
+    let all: Vec<String> = h
+        .query_all_by_label(name)
+        .map(|n| format!("{:?}", n.accesskit_node().role()))
+        .collect();
+    panic!(
+        "{} {role:?} nodes named {name:?}; the roles of every node of that name: {all:?}",
+        hits.len()
+    )
+}
+
+/// egui 0.37 copies an `on_hover_text` into the name (and the description) of a widget that has none, so a name can
+/// hold words that are on screen only while the tooltip shows. The nodes whose name contains `text`, leaving out those
+/// copies: a shown tooltip's text is a Label of its own and is kept.
+pub fn shown_containing<'t, 'n, N: egui_kittest::kittest::NodeT<'t> + 't>(
+    h: &'n impl egui_kittest::kittest::Queryable<'t, 'n, N>,
+    text: &'t str,
+) -> Vec<N> {
+    h.query_all(
+        egui_kittest::kittest::by()
+            .label_contains(text)
+            .predicate(|n| n.description().is_none() || n.label() != n.description()),
+    )
+    .collect()
+}
+
 /// Note FM35: open the alpha dropdown that shows `shown` and pick `entry` in it. `place` names the dropdown as
 /// `alpha_dropdown` does: `""` (texture panel), `"Problems"` or `"Review"`.
 pub fn pick_alpha<S>(

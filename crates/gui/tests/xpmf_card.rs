@@ -72,12 +72,10 @@ fn has(h: &H, s: &str) -> bool {
     h.query_all_by_label(s).next().is_some()
 }
 
-/// The rect of the row label `label` (the card's row labels are unique on the page).
+/// The rect of the row label `label` (the card's row labels are unique on the page). egui 0.37 names the row's box
+/// with the same words, so the Label is found by its role.
 fn row_rect(h: &H, label: &str) -> egui::Rect {
-    h.query_all_by_label(label)
-        .map(|n| n.rect())
-        .next()
-        .unwrap_or_else(|| panic!("no row {label:?}"))
+    support::widget(h, Role::Label, label).rect()
 }
 
 #[test]
@@ -133,7 +131,7 @@ fn out_of_range_number_clamps() {
     set_block(&mut m, json!({"shelterFade": 40}));
     let mut h = tall(m);
     h.run_steps(4);
-    h.get_by_label("Shelter fade").scroll_to_me();
+    support::widget(&h, Role::Label, "Shelter fade").scroll_to_me();
     h.run_steps(4);
     let row = row_rect(&h, "Shelter fade");
     let spin = h

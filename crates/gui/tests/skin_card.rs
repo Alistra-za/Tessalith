@@ -423,7 +423,7 @@ fn a_skin_set_has_no_json_entry_no_truepbr_card_and_no_export_button() {
     m.select_set(&k);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Specular level");
+    widget(&h, Role::SpinButton, "Specular level");
     h.get_by_label("PBR → JSON");
 }
 

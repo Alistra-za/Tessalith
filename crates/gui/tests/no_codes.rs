@@ -73,7 +73,11 @@ fn no_code_text_in_problems_rows() {
     h.run();
     h.run();
     h.get_by_label_contains("LOSS-ALPHA-DATA");
-    h.get_by_label_contains("alpha is lost in this format");
+    // egui 0.37 also names the hovered area with this hover text; the shown tooltip is the one that counts.
+    assert_eq!(
+        shown_containing(&h, "alpha is lost in this format").len(),
+        1
+    );
 }
 
 #[test]
@@ -95,13 +99,15 @@ fn a_failed_row_and_a_decide_row_say_it_in_words() {
     let decide = format!("Undecided: {words}");
     h.get_by_label(&failed);
     assert!(h.query_all_by_label(&decide).count() >= 1, "{decide}");
-    assert_eq!(h.query_all_by_label_contains("DIM-NPOT").count(), 0);
+    // egui 0.37 copies a hover text into the name of a widget that has none, so the code is in such a name before any
+    // hover; only shown text counts, and the same query finds the code once a tooltip shows it.
+    assert_eq!(shown_containing(&h, "DIM-NPOT").len(), 0);
     // The hover of each keeps the code.
     for row in [&failed, &decide] {
         h.query_all_by_label(row).next().unwrap().hover();
         h.run();
         h.run();
-        h.get_by_label_contains("DIM-NPOT");
+        assert_eq!(shown_containing(&h, "DIM-NPOT").len(), 1, "{row}");
     }
 }
 

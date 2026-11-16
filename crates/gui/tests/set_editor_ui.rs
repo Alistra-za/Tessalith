@@ -344,7 +344,11 @@ fn feature_toggles_grey_their_exclusions_and_reveal_their_groups() {
     rock_selected(&mut m);
     let mut h = harness(m);
     h.run();
-    h.get_by_label("Specular level");
+    widget(
+        &h,
+        eframe::egui::accesskit::Role::SpinButton,
+        "Specular level",
+    );
     assert!(
         h.query_by_label("Displacement scale").is_none(),
         "parallax group hidden while off"
@@ -352,7 +356,11 @@ fn feature_toggles_grey_their_exclusions_and_reveal_their_groups() {
     reveal(&mut h, "Parallax");
     h.get_by_label("Parallax").click();
     h.run();
-    h.get_by_label("Displacement scale");
+    widget(
+        &h,
+        eframe::egui::accesskit::Role::SpinButton,
+        "Displacement scale",
+    );
     reveal(&mut h, "Hair");
     h.get_by_label("Hair").click();
     h.run();
@@ -714,7 +722,11 @@ fn glint_and_fuzz_switch_the_gui_keys_and_exclude_each_other() {
     reveal(&mut h, "Glint");
     h.get_by_label("Glint").click();
     h.run();
-    h.get_by_label("Screen-space scale");
+    widget(
+        &h,
+        eframe::egui::accesskit::Role::SpinButton,
+        "Screen-space scale",
+    );
     let s = rock_settings(&h);
     assert_eq!(s["glint_on"], serde_json::json!(true));
     assert!(
@@ -921,14 +933,11 @@ fn advanced_truepbr_settings_are_collapsed_and_hold_the_advanced_keys() {
     }
     h.get_by_label("Advanced TruePBR settings").click();
     h.run();
-    for l in [
-        "Path contains",
-        "Mesh path contains",
-        "Rename",
-        "Lock diffuse",
-    ] {
-        h.get_by_label(l);
+    // egui 0.37: a text key's Label and its box share the name; the box is the field.
+    for l in ["Path contains", "Mesh path contains", "Rename"] {
+        widget(&h, eframe::egui::accesskit::Role::TextInput, l);
     }
+    h.get_by_label("Lock diffuse");
     assert!(h.query_by_label_contains("Match slot").is_none());
 }
 
@@ -1003,15 +1012,16 @@ fn hovering_a_pills_warning_badge_lists_the_warnings() {
     let mut h = harness(m);
     instant_tooltips(&h);
     h.run();
+    // egui 0.37 also names the badge with its hover text; only the shown tooltip counts.
     assert!(
-        h.query_by_label_contains("the alpha would be lost")
-            .is_none(),
+        shown_containing(&h, "the alpha would be lost").is_empty(),
         "the warning shows only on hover"
     );
     h.get_by_label(&format!("⚠ {total}")).hover();
     h.run();
     h.run();
-    h.get_by_label_contains(&format!("{name}: LOSS-ALPHA-DATA the alpha would be lost"));
+    let line = format!("{name}: LOSS-ALPHA-DATA the alpha would be lost");
+    assert_eq!(shown_containing(&h, &line).len(), 1, "{line}");
 }
 
 /// Every item of a PBR project carries exactly `ws` as its warnings.
@@ -1444,8 +1454,16 @@ fn a_pbr_grass_panel_shows_only_the_grass_keys() {
             "{gone} is hidden on PBR grass"
         );
     }
-    h.get_by_label("Roughness scale");
-    h.get_by_label("Specular level");
+    widget(
+        &h,
+        eframe::egui::accesskit::Role::SpinButton,
+        "Roughness scale",
+    );
+    widget(
+        &h,
+        eframe::egui::accesskit::Role::SpinButton,
+        "Specular level",
+    );
     // DECISIONS AS8: main's selector replaces the checkbox; without an `_s` nothing turns it back on, so Off removes it.
     h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
         .find(|n| n.value().as_deref() == Some("Standard"))
@@ -1772,19 +1790,22 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     assert!(m.in_bulk());
     let mut h = short_harness(m);
     h.run();
-    // The bulk panel's first group header (Note HI2: the Colour group is gone).
+    // The bulk panel's first group header (Note HI2: the Colour group is gone). egui 0.37 reports the header as a
+    // `DisclosureTriangle` named for the title (0.36.2: a `Button`).
     let type_header_y = |h: &Harness<'static, AppModel>| {
-        h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Type")
+        widget(h, eframe::egui::accesskit::Role::DisclosureTriangle, "Type")
             .rect()
             .min
             .y
     };
-    let x = h
-        .get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Type")
-        .rect()
-        .min
-        .x
-        + 40.0;
+    let x = widget(
+        &h,
+        eframe::egui::accesskit::Role::DisclosureTriangle,
+        "Type",
+    )
+    .rect()
+    .min
+    .x + 40.0;
     // The set editor is scrolled first; the bulk panel then opens at its top, not at that offset.
     rock_selected(h.state_mut());
     h.run();

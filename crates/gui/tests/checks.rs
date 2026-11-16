@@ -885,7 +885,8 @@ fn a_check_row_click_selects_its_texture() {
     m.open_problems(None);
     let mut h = harness(m, 1400.0);
     h.run();
-    h.get_by_label("test/wall_p.png").click();
+    // egui 0.37 also names the row's hover area with its hover text, the path; the row's link is the click target.
+    support::widget(&h, egui::accesskit::Role::Link, "test/wall_p.png").click();
     h.run();
     assert_eq!(
         h.state().selected_items(),

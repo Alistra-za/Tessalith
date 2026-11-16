@@ -82,18 +82,19 @@ fn an_opened_folder_shows_items_filters_and_the_undecided_count() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(opened(d.path()));
     h.run();
+    // egui 0.37 also names each tile with its hover text ("landscape/leaf.png\nUndecided\n…"); only shown text counts.
     for label in ["leaf.png", "rock01_normal.png", "Undecided", "Not in a set"] {
-        h.get_by_label_contains(label);
+        assert_eq!(shown_containing(&h, label).len(), 1, "{label}");
     }
     // The packed output's tile alone: the two raw maps' helper rows say "fills RMAOS R" without the file (Note HP).
     // (Note HN: the Sets column's RMAOS chip is named for its file too, so the count leaves that column out.)
-    let in_grid = h
-        .query_all_by_label_contains("rock01_rmaos")
+    let in_grid = shown_containing(&h, "rock01_rmaos")
+        .into_iter()
         .filter(|n| !in_sets_column(&h, n.rect()))
         .count();
     assert_eq!(in_grid, 1);
-    assert_eq!(h.query_all_by_label_contains("fills RMAOS R").count(), 2);
-    h.get_by_label_contains(" undecided");
+    assert_eq!(shown_containing(&h, "fills RMAOS R").len(), 2);
+    assert_eq!(shown_containing(&h, " undecided").len(), 1);
     // A set is named by its path under the export folder.
     h.get_by_label("landscape/rock01");
 }
@@ -114,7 +115,9 @@ fn clicking_a_tile_selects_it_and_the_needs_decision_filter_narrows_the_grid() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness(opened(d.path()));
     h.run();
-    h.get_by_label_contains("rock01_normal.png").click();
+    let mut tile = shown_containing(&h, "rock01_normal.png");
+    assert_eq!(tile.len(), 1, "the tile's file name");
+    tile.pop().unwrap().click();
     h.run();
     assert!(
         matches!(&h.state().selection, Selection::Item(k) if k.ends_with("rock01_normal.png")),
@@ -125,10 +128,11 @@ fn clicking_a_tile_selects_it_and_the_needs_decision_filter_narrows_the_grid() {
     h.get_by_label(&pill).click();
     h.run();
     assert!(h.state().filter.needs_decision);
-    h.get_by_label_contains("leaf.png");
+    assert_eq!(shown_containing(&h, "leaf.png").len(), 1);
     // The helper's badge still sits on the set card (Note HN); the grid no longer shows it.
     assert_eq!(
-        h.query_all_by_label_contains("rock01_roughness.png")
+        shown_containing(&h, "rock01_roughness.png")
+            .into_iter()
             .filter(|n| !in_sets_column(&h, n.rect()))
             .count(),
         0
@@ -197,7 +201,8 @@ fn selecting_a_texture_shows_its_decisions_and_groups() {
         0
     );
     h.get_by_label("Undecided");
-    h.get_by_label_contains(unstated.as_str());
+    // egui 0.37 also names the tile with its hover text, which holds the message; the Info line is the shown one.
+    assert_eq!(shown_containing(&h, unstated.as_str()).len(), 1);
     // Exact labels: "Input content" and "DDS tag" also name their `?` ("Help: Input content", Note HI9).
     for label in ["Input content", "DDS tag", "Compression"] {
         h.get_by_label(label);
@@ -596,9 +601,9 @@ fn the_threshold_commits_when_the_drag_stops_not_while_dragging() {
         .profile
         .alpha
         .threshold;
-    let rect = h
-        .get_by_role_and_label(eframe::egui::accesskit::Role::Slider, "Alpha threshold")
-        .rect();
+    // egui 0.37: the slider takes its name from the row's "Threshold" Label it is `labelled_by` (0.36.2: from its
+    // `widget_info`, "Alpha threshold").
+    let rect = widget(&h, eframe::egui::accesskit::Role::Slider, "Threshold").rect();
     let at = |f: f32| {
         eframe::egui::pos2(
             rect.left() + 10.0 + (rect.width() - 20.0) * f,
@@ -1642,7 +1647,8 @@ fn coverage_sits_under_alpha_for_cutout_policies_only() {
     assert!(y("Coverage") < tick_y, "inside the Alpha group");
     let h = leaf_with_policy(engine::config::AlphaPolicy::Blend);
     assert!(h.query_by_label("Coverage").is_none());
-    h.get_by_label("Threshold"); // locked, but still listed
+    // Locked, but still listed. egui 0.37's slider is two nodes, the bar and its number box, both named by the row.
+    widget(&h, Role::Slider, "Threshold");
 }
 
 #[test]

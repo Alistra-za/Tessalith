@@ -533,7 +533,12 @@ fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
     m.encode_now();
     settle(&mut m);
     let (got, panes) = toolbar_controls(m);
-    assert_eq!(got, base);
+    // The mip slider of a texture with mips: E28 (Task 2) named it "Mip level"; on 0.36.2 it had no name, so the list
+    // left it out.
+    let mut want: Vec<&str> = base.to_vec();
+    want.push("Mip level");
+    want.sort();
+    assert_eq!(got, want);
     // Side by side is the only layout: the Source pane starts left of the Encoded one, on the same row.
     let at = |name: &str| panes.iter().find(|(n, _)| n == name).map(|(_, p)| *p);
     let (src, enc) = (
@@ -557,7 +562,8 @@ fn preview_offers_side_by_side_heatmap_lens_tile_and_exposure_only() {
     settle(&mut m);
     let (got, _) = toolbar_controls(m);
     let mut want: Vec<&str> = base.to_vec();
-    want.push("Exposure");
+    // egui 0.37: a slider's number box shares the slider's name, so the exposure slider lists "Exposure" twice.
+    want.extend(["Mip level", "Exposure", "Exposure"]);
     want.sort();
     assert_eq!(got, want);
 }

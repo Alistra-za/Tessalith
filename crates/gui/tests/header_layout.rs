@@ -17,14 +17,15 @@ const WIDTHS: [f32; 4] = [1440.0, 1024.0, 800.0, 640.0];
 
 /// The controls every Textures header must show (plus "Export to: …", matched by its start, and Undo / Redo, found by
 /// `header_undo`).
-const CONTROLS: [&str; 7] = [
-    "Open",
-    "MO2…",
-    "Preset",
-    "Textures view",
-    "Meshes view",
-    "Settings…",
-    "Save",
+/// Found by role and name: egui 0.37 names the Preset combo like the "Preset" Label beside it.
+const CONTROLS: [(Role, &str); 7] = [
+    (Role::Button, "Open"),
+    (Role::Button, "MO2…"),
+    (Role::ComboBox, "Preset"),
+    (Role::Button, "Textures view"),
+    (Role::Button, "Meshes view"),
+    (Role::Button, "Settings…"),
+    (Role::Button, "Save"),
 ];
 
 fn harness(m: AppModel, w: f32, meshes_view: bool) -> H {
@@ -99,8 +100,8 @@ fn the_textures_header_never_overlaps() {
         // Note AM: an idle scan row is not drawn (the source moved to MO2…).
         assert!(!panel_never_built(&h.ctx, "header"));
         assert!(panel_never_built(&h.ctx, "textures-scan"));
-        for c in CONTROLS {
-            h.get_by_label(c);
+        for (role, c) in CONTROLS {
+            widget(&h, role, c);
         }
         header_undo(&h, "Undo");
         header_undo(&h, "Redo");
@@ -170,7 +171,7 @@ fn assert_one_row_in_the_spec_order(h: &H) {
         ("Open", h.get_by_label("Open").rect()),
         ("Undo", header_undo(h, "Undo").rect()),
         ("Redo", header_undo(h, "Redo").rect()),
-        ("Preset", h.get_by_label("Preset").rect()),
+        ("Preset", widget(h, Role::ComboBox, "Preset").rect()),
         ("Textures view", h.get_by_label("Textures view").rect()),
         ("Meshes view", h.get_by_label("Meshes view").rect()),
         ("Settings…", h.get_by_label("Settings…").rect()),
@@ -361,7 +362,7 @@ fn the_header_has_no_mode_control() {
             }),
             "at {w}: the header has a Mode combo"
         );
-        h.get_by_label("Preset");
+        widget(&h, Role::ComboBox, "Preset");
         h.get_by_label("MO2…");
     }
 }

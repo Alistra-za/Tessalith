@@ -544,8 +544,10 @@ fn one_line_replaces_the_three_alpha_lines() {
         "What does the alpha channel mean?",
         "Undecided: what its alpha means",
     ];
+    // egui 0.37 copies a hover text into the name of a widget that has none (the engine's message is in a hover); only
+    // shown text counts.
     for g in gone {
-        assert_eq!(h.query_all_by_label_contains(g).count(), 0, "{g}");
+        assert_eq!(shown_containing(&h, g).len(), 0, "{g}");
     }
     // (odd.png's own row keeps its Acknowledge; leaf's has none.)
     for l in [
@@ -575,6 +577,19 @@ fn one_line_replaces_the_three_alpha_lines() {
         .cloned()
         .unwrap();
     assert_eq!(row.codes_text().as_deref(), Some("LOSS-ALPHA-DATA"));
+    // Positive control for the "gone" lines: the engine's message is a hover text (egui 0.37 copies it into a name);
+    // hovered, it shows, and the same query finds it.
+    let g = "non-constant alpha would be discarded";
+    let at = h
+        .query_all_by_label_contains(g)
+        .next()
+        .unwrap_or_else(|| panic!("a widget whose hover says {g:?}"))
+        .rect()
+        .center();
+    h.hover_at(at);
+    h.run();
+    h.run();
+    assert_eq!(shown_containing(&h, g).len(), 1, "{g} on hover");
 }
 
 /// Note HI7: a Problems row lays out right to left; its Confirm still reads after the dropdown.

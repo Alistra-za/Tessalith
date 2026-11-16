@@ -488,7 +488,8 @@ fn alpha_row_shows_the_proposal() {
         .expect("the Alpha row");
     assert_eq!(row.value().as_deref(), Some("Cutout"));
     h.get_by_label("proposed: confirm above");
-    let slider = h.get_by_role_and_label(Role::Slider, "Alpha threshold");
+    // egui 0.37: the slider takes its name from the row's "Threshold" Label (0.36.2: "Alpha threshold").
+    let slider = widget(&h, Role::Slider, "Threshold");
     assert!(
         !slider.accesskit_node().is_disabled(),
         "the threshold is off"
@@ -805,10 +806,14 @@ fn compact_strip_has_no_colour_rows() {
         "Resize",
         "Size floor",
     ] {
-        assert!(
-            h.query_by_label_contains(name).is_none(),
-            "{name} in the strip"
-        );
+        // egui 0.37 names every panel's resize handle "Resize panel" (a `Splitter`); those are not the Resize row.
+        let rows: Vec<_> = h
+            .query_all(
+                by().label_contains(name)
+                    .predicate(|n| n.role() != Role::Splitter),
+            )
+            .collect();
+        assert!(rows.is_empty(), "{name} in the strip");
     }
 }
 

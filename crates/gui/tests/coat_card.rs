@@ -1,5 +1,6 @@
 //! The coat settings sit under the Multilayer checkbox (DECISIONS AJ1-AJ6) and every colour key has the colour field.
 mod support;
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::Harness;
 use sdc_gui::model::AppModel;
@@ -64,13 +65,19 @@ fn hex_box(h: &Harness<'static, AppModel>, shown: &str) -> bool {
 fn the_coat_group_shows_under_multilayer_and_not_in_advanced() {
     let d = tempfile::tempdir().unwrap();
     let mut h = panel(model(d.path(), &[("multilayer", json!(true))]));
-    for l in ["Coat", "Coat colour", "Inner UV scale"] {
+    for l in ["Coat", "Coat colour"] {
         h.get_by_label(l);
     }
+    // egui 0.37: the row's Label and its box are both named "Inner UV scale"; the box is the field.
+    widget(&h, Role::SpinButton, "Inner UV scale");
     h.get_by_label("Advanced TruePBR settings").click();
     h.run();
     assert_eq!(h.get_all_by_label("Coat colour").count(), 1);
-    assert_eq!(h.get_all_by_label("Inner UV scale").count(), 1);
+    assert_eq!(
+        h.get_all_by_role_and_label(Role::SpinButton, "Inner UV scale")
+            .count(),
+        1
+    );
     assert_eq!(h.get_all_by_label("Coat").count(), 1);
 }
 
@@ -89,7 +96,7 @@ fn the_coat_group_keeps_its_values_while_multilayer_is_off() {
     h.run();
     // Note FM33: with values stored Coat stays listed, "off", open, with the "kept, not used" line and its rows.
     h.get_by_label("Coat colour");
-    h.get_by_label("Inner UV scale");
+    widget(&h, Role::SpinButton, "Inner UV scale");
     h.get_by_label("Coat");
     h.get_by_label("kept, not used");
     assert_eq!(stored(&h, "coat_color"), Some(json!([10, 20, 30])));

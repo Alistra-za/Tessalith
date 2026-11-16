@@ -753,7 +753,9 @@ fn the_set_menu_has_move_to_group() {
     h.run();
     right_click_card(&mut h, "g/c");
     h.run();
-    h.get_by_label("Move to group ⏵").click();
+    // egui 0.37 paints a submenu's ⏵ as a shape, so the entry's name is its text alone (0.36.2: "Move to group ⏵");
+    // the role and exact name keep it apart from the "Move to group {name}" entries.
+    widget(&h, Role::Button, "Move to group").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Armor");
     h.get_by_label("New group…");
@@ -767,7 +769,7 @@ fn the_set_menu_has_move_to_group() {
     // And out again. Its own group is off in the menu (nothing to move).
     right_click_card(&mut h, "g/c");
     h.run();
-    h.get_by_label("Move to group ⏵").click();
+    widget(&h, Role::Button, "Move to group").click();
     h.run();
     assert!(h
         .get_by_role_and_label(Role::Button, "Armor")
@@ -791,7 +793,7 @@ fn the_bulk_menu_has_move_to_group() {
     h.run();
     right_click_card(&mut h, "g/d");
     h.run();
-    h.get_by_label("Move to group ⏵").click();
+    widget(&h, Role::Button, "Move to group").click();
     h.run();
     h.get_by_label("New group…");
     h.get_by_label("No group");
@@ -815,7 +817,7 @@ fn new_group_asks_for_a_name_and_refuses_a_taken_one() {
     h.run();
     right_click_card(&mut h, "g/c");
     h.run();
-    h.get_by_label("Move to group ⏵").click();
+    widget(&h, Role::Button, "Move to group").click();
     h.run();
     h.get_by_label("New group…").click();
     h.run();
@@ -883,7 +885,7 @@ fn a_read_only_project_disables_with_the_reason() {
     h.run();
     right_click_card(&mut h, "g/a");
     h.run();
-    let entry = h.get_by_label("Move to group ⏵");
+    let entry = widget(&h, Role::Button, "Move to group");
     assert!(entry.accesskit_node().is_disabled(), "disabled");
     let before = h.query_all_by_label_contains("sdc-project.toml").count();
     entry.hover();

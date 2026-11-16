@@ -294,7 +294,7 @@ fn the_settings_window_toggles_and_its_edits_reach_the_preview() {
     settle(&mut h);
     assert!(h.state().0.settings.set_settings_open, "remembered");
     h.get_by_label("TruePBR settings");
-    h.get_by_label("Specular level");
+    widget(&h, egui::accesskit::Role::SpinButton, "Specular level");
     let before = h.state().1.set3d.fp.clone().expect("a fingerprint");
     h.get(
         egui_kittest::kittest::by()

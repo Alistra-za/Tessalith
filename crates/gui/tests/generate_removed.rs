@@ -268,15 +268,14 @@ fn a_generated_file_beside_a_real_height_is_replaced_quietly() {
         .expect("the Height row shows rock01_p.png");
     h.hover_at(file.center());
     h.run();
-    // Positive control: the File cell's hover drew, so "no replaced by" means something.
+    // Positive control: the File cell's hover drew, so "no replaced by" means something. egui 0.37 also copies hover
+    // texts into the names of widgets that have none, without a hover, so both read shown text.
     assert!(
-        h.query_all_by_label_contains("rock01_p.png\n")
-            .next()
-            .is_some(),
+        !shown_containing(&h, "rock01_p.png\n").is_empty(),
         "the File cell's hover did not draw"
     );
     for s in ["replaced by", "stale", "Generated from"] {
-        assert!(h.query_all_by_label_contains(s).next().is_none(), "{s:?}");
+        assert!(shown_containing(&h, s).is_empty(), "{s:?}");
     }
     card_menu(&mut h, ROCK_SET);
     for l in ENTRIES {

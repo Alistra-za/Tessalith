@@ -131,7 +131,7 @@ fn only_active_feature_cards_show() {
         assert!(!has(&h, t), "no {t} card");
     }
     h.get_by_label("Material");
-    h.get_by_label("Displacement scale");
+    widget(&h, Role::SpinButton, "Displacement scale");
     // Subsurface and NiAlphaProperty hold their own switch (the selector, the flag boxes): they stay, closed.
     h.get_by_label("Subsurface");
     h.get_by_label("NiAlphaProperty");
@@ -184,7 +184,7 @@ fn a_blocked_feature_with_stored_values_shows_rows_and_the_line() {
     ));
     h.get_by_label("Glint settings");
     h.get_by_label(KEPT);
-    h.get_by_label("Screen-space scale");
+    widget(&h, Role::SpinButton, "Screen-space scale");
     assert_eq!(stored(&h, "glint.screen_space_scale"), Some(json!(2.0)));
     assert!(written(&h).get("glint").is_none(), "blocked: not written");
     h.state_mut()
@@ -202,7 +202,7 @@ fn ticking_glint_shows_its_card() {
     h.get_by_label("Glint").click();
     h.run();
     h.get_by_label("Glint settings");
-    h.get_by_label("Screen-space scale");
+    widget(&h, Role::SpinButton, "Screen-space scale");
     assert_eq!(stored(&h, "glint_on"), Some(json!(true)));
     h.get_by_label("Glint").click();
     h.run();
@@ -233,8 +233,9 @@ fn parallax_puts_displacement_scale_under_roughness_scale() {
     h.get_by_label("Parallax").click();
     h.run();
     assert!(!has(&h, "Parallax settings"), "Parallax has no card");
-    let rough = h.get_by_label("Roughness scale").rect();
-    let disp = h.get_by_label("Displacement scale").rect();
+    // egui 0.37: each row's box carries the row's name too; the rows are compared by their Labels.
+    let rough = widget(&h, Role::Label, "Roughness scale").rect();
+    let disp = widget(&h, Role::Label, "Displacement scale").rect();
     let features = h.get_by_label("Features").rect();
     assert!(
         disp.min.y > rough.max.y - 1.0 && (disp.min.x - rough.min.x).abs() < 1.0,
@@ -263,7 +264,7 @@ fn parallax_puts_displacement_scale_under_roughness_scale() {
         ],
     );
     assert!(!has(&h, "Parallax settings"));
-    h.get_by_label_contains("Displacement scale");
+    widget(&h, Role::SpinButton, "Displacement scale");
     type_value(&mut h, "0.4", "0.7");
     assert_eq!(stored(&h, "displacement_scale"), Some(json!(0.7)));
     assert_eq!(written(&h)["displacement_scale"], json!(0.7));
@@ -285,8 +286,8 @@ fn a_feature_off_with_stored_values_says_kept_not_used() {
     h.run();
     h.get_by_label("Glint settings");
     h.get_by_label(KEPT);
-    h.get_by_label("Screen-space scale");
-    h.get_by_label("Microfacet roughness");
+    widget(&h, Role::SpinButton, "Screen-space scale");
+    widget(&h, Role::SpinButton, "Microfacet roughness");
     for (k, v) in &values {
         assert_eq!(stored(&h, k).as_ref(), Some(v), "{k} is kept as written");
     }
@@ -307,7 +308,7 @@ fn a_feature_off_with_stored_values_says_kept_not_used() {
     h.get_by_label("Glint").click();
     h.run();
     assert!(!has(&h, KEPT));
-    h.get_by_label("Screen-space scale");
+    widget(&h, Role::SpinButton, "Screen-space scale");
 
     // Parallax: the Displacement scale row stays, with the line.
     let d = tempfile::tempdir().unwrap();
@@ -321,7 +322,7 @@ fn a_feature_off_with_stored_values_says_kept_not_used() {
     assert!(!has(&h, KEPT));
     h.get_by_label("Parallax").click();
     h.run();
-    h.get_by_label("Displacement scale");
+    widget(&h, Role::SpinButton, "Displacement scale");
     h.get_by_label(KEPT);
     assert_eq!(stored(&h, "displacement_scale"), Some(json!(0.4)));
     assert!(written(&h).get("displacement_scale").is_none());
