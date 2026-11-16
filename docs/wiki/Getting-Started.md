@@ -53,7 +53,7 @@ Click `ironplate` in the Sets column. **Shader** should read `pbr` (auto). TrueP
 
 ![The Review tab in the demo project.](../img/gui/GUI-Review-and-Export/review-tab.png)
 
-You get the DDS tree, plus `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported completely.
+You get the DDS tree, plus `<export folder>\PBRNIFPatcher\<name>.json` for every PBR set that exported completely, and a `.csm` material per PBR set under `materials` ([CS PBR records and .csm materials](CS-PBR-Records.md)).
 
 On the command line: [quick start](CLI-Reference.md#quick-start).
 

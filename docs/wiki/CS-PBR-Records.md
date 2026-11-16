@@ -38,11 +38,11 @@ Notice: texture paths are relative to `textures` and use `/`, as the `.csm` form
 
 Each case is an amber Problems row naming the set. That set's `PBRTextureSets` file isn't written either, because it would point at a missing file; the rest of the export goes on. <!-- D:IE10 -->
 
-- **"no .csm written: the set has no RMAOS texture; Community Shaders PBR needs Diffuse, Normal and RMAOS".** The slot is empty and not locked. Fill it, or lock it so the mesh keeps its own texture.
+- **"no .csm written: the set has no RMAOS texture; Community Shaders PBR needs Diffuse, Normal and RMAOS"**, naming whichever of the three is missing. The slot is empty and not locked. Fill it, or lock it so the mesh keeps its own texture.
 - **"no .csm written:" followed by a rule.** The switches break a `.csm` rule, for example hair beside another feature. Change the set's PGPatcher settings.
 - **"the set writes no .csm this run (it has no PGPatcher entry)".** The `.csm` is built from the entry, so a set without one gets none ([Why is my set missing from the JSON?](GUI-PGPatcher-JSON.md#quick-qa)).
 
-The 3D views say the same: a blocked set draws no `.csm`, and its line ends "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)".
+The set editor's head shows the same reason in amber, ending "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)", and the set preview draws no `.csm` for that set.
 
 ## Fuzz roughness from a texture
 

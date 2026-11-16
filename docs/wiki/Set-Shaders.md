@@ -1,6 +1,6 @@
 # Set shaders and Also export
 
-For modders converting whole materials: which shader a set is made for, what maps it needs, and how to ship one PBR mod as Vanilla and Complex material (CM) versions too. Grass, landscape and skin cards have their own page: [Community Shaders materials](PBR-Landscape.md).
+For modders converting whole materials: which shader a set is made for, what maps it needs, and how to ship one PBR mod as Vanilla and Complex material (CM) versions too. Grass, landscape and skin cards have their own page: [PBR Landscape, Advanced skin, grass and XPMF](PBR-Landscape.md).
 
 ## Which maps each shader needs
 

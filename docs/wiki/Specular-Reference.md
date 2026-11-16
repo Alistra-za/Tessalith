@@ -11,7 +11,7 @@ Community Shaders computes `F0 = _rmaos alpha × Specular level`, so you can typ
 3. Several materials in one texture: set **Specular level** to the highest F0 and paint each material's alpha as its F0 ÷ that level. Leather at 0.044 beside a material at 0.055: level 0.055, leather alpha 204 (0.80), the other 255.
 4. A metal uses neither: paint its colour from [Metals](#metals) into the albedo and set metallic to 255.
 
-**Specular level** is on the Shader tab of a PBR shape ([Editing a NIF](GUI-NIF-Edit.md)) and is `specular_level` in the JSON ([PGPatcher settings](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)).
+**Specular level** is in the set's texture-set block, which writes it into the set's `.csm` as `PBRSpecularLevel` ([CS PBR records](CS-PBR-Records.md#cs-pbr-records)), and is `specular_level` in the PGPatcher JSON ([PGPatcher settings](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)).
 
 ## Non-metals
 
