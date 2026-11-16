@@ -301,17 +301,27 @@ pub fn widget<'t, 'n, N: egui_kittest::kittest::NodeT<'t> + 't>(
     )
 }
 
-/// egui 0.37 copies an `on_hover_text` into the name (and the description) of a widget that has none, so a name can
-/// hold words that are on screen only while the tooltip shows. The nodes whose name contains `text`, leaving out those
-/// copies: a shown tooltip's text is a Label of its own and is kept.
+/// The nodes whose name contains `text` (kittest's `label_contains`), leaving out one kind: an interaction area with no
+/// widget role of its own (`Role::Unknown`, no `labelled_by`) whose name equals its description. That is the name
+/// egui 0.37 copies from `on_hover_text` into a node that has none (`Response::describe_for_accessibility`, egui
+/// `response.rs:797-816`: label and description both set to the hover text), so its words are on screen only while
+/// the tooltip shows. Every other node is kept: a `Label` (egui never copies onto one; a cut-short Label named by its
+/// full text is on screen), any widget with a role of its own, and a shown tooltip's text, which is a Label.
 pub fn shown_containing<'t, 'n, N: egui_kittest::kittest::NodeT<'t> + 't>(
     h: &'n impl egui_kittest::kittest::Queryable<'t, 'n, N>,
     text: &'t str,
 ) -> Vec<N> {
+    use eframe::egui::accesskit::Role;
     h.query_all(
         egui_kittest::kittest::by()
             .label_contains(text)
-            .predicate(|n| n.description().is_none() || n.label() != n.description()),
+            .predicate(|n| {
+                let copied = n.role() == Role::Unknown
+                    && n.labelled_by().next().is_none()
+                    && n.description().is_some()
+                    && n.label() == n.description();
+                !copied
+            }),
     )
     .collect()
 }

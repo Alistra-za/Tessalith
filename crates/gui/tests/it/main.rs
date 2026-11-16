@@ -279,6 +279,8 @@ mod sets_model;
 mod settings;
 #[path = "../settings_tab.rs"]
 mod settings_tab;
+#[path = "../shown_text.rs"]
+mod shown_text;
 #[path = "../skin_card.rs"]
 mod skin_card;
 #[path = "../slot_alpha.rs"]
