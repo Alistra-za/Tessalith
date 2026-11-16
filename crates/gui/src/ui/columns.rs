@@ -492,6 +492,9 @@ pub fn textures(ui: &mut egui::Ui, model: &mut AppModel, thumbs: &mut ThumbCache
     let total = tiles_h + header_h + shown as f32 * helper_h;
     let mut toggle = false;
     let mut drawn = 0usize;
+    // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its widest (10 px, hovered) stays inside the tiles'
+    // `SCROLL_ALLOWANCE`.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show_viewport(ui, |ui, viewport| {

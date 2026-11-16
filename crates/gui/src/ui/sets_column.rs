@@ -1533,6 +1533,10 @@ pub fn draw(
     let mut rects: HashMap<usize, egui::Rect> = HashMap::new();
     let gap = ui.spacing().item_spacing;
     let frame_x = egui::Frame::group(ui.style()).total_margin().sum().x + 2.0 * DOCK_INSET;
+    // shortcut: the column's width, not the cards': while the thin bar shows (Note JJ2) the cards are its 6 px
+    // allocation narrower, so a chip-row estimate can be one row off near a wrap point (drawing corrects it, FM32).
+    // Measuring inside the area would make the bar's appearing a re-flow, and a re-flow scrolls to the open set;
+    // upgrade if a scroll jump shows.
     let reflowed = reflow_heights(st, &views, ui.available_width(), frame_x);
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
     if reflowed && model.nav.reveal_set.is_none() {
@@ -1629,6 +1633,9 @@ pub fn draw(
     let mut reveal_drawn = false;
     // The first card in view (id, top in the content) and the off-screen card that took the focus, if any.
     let (mut anchor, mut focused) = (None::<(String, f32)>, None::<String>);
+    // ui-rules 3.2 (Note JJ2): a bar drawn without hover. Its 6 px allocation keeps the cards out from under the bar at
+    // rest; hovered, the 10 px bar reaches only the cards' frame margin.
+    ui.spacing_mut().scroll = egui::style::ScrollStyle::thin();
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     if let Some(y) = target {
         area = area.vertical_scroll_offset(y);
