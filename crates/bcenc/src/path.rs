@@ -102,8 +102,8 @@ impl Path {
 }
 
 /// The code a hot function is compiled for, passed first to every function between a frame entry and the kernels (the
-/// frames are in `bc1/frames.rs`). Each instance has a concrete `Isa`, so a kernel choice on [`Isa::avx2`] folds at
-/// compile time.
+/// frames are in `bc1/frames.rs` and `bc4.rs`). Each instance has a concrete `Isa`, so a kernel choice on
+/// [`Isa::avx2`] folds at compile time.
 pub(crate) trait Isa: Copy {
     /// The path this code runs on.
     #[allow(dead_code)] // Nothing reads it yet: the run counters are keyed by frame (`Path`) and kernel (`Wide`).
@@ -184,16 +184,18 @@ pub(crate) enum Wide {
     Sels3Masked,
     Keys4,
     Keys3,
+    Pair2,
 }
 
 #[cfg(test)]
 impl Wide {
-    pub(crate) const ALL: [Wide; 5] = [
+    pub(crate) const ALL: [Wide; 6] = [
         Wide::Sels4,
         Wide::Sels3,
         Wide::Sels3Masked,
         Wide::Keys4,
         Wide::Keys3,
+        Wide::Pair2,
     ];
 }
 

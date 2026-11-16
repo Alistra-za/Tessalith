@@ -5,8 +5,8 @@
 //! `#[target_feature(enable = "sse2")]` function of a module compiled only where the target has SSE2
 //! (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and `mod sse2` in `bc4.rs`), where Rust asks for the block even though
 //! the feature is always on; and calling a `#[target_feature(enable = "avx2")]` function (the AVX2 frames of
-//! `bc1/frames.rs` and the AVX2 kernels) while holding a `path::Avx2`, a token only `Avx2::require` creates,
-//! after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the unit tests
+//! `bc1/frames.rs` and `bc4.rs`, and the AVX2 kernels) while holding a `path::Avx2`, a token only `Avx2::require`
+//! creates, after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the unit tests
 //! run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by
 //! default; the `_with` functions take a [`Bc1Search`], whose `Fast` is a lower level (Note HY16). Each call runs on
@@ -93,7 +93,7 @@ pub fn bc4_encode_block_on(
     path.assert_available();
     assert!(channel < 4, "channel {channel} is not 0..4");
     let v: [u8; 16] = std::array::from_fn(|i| px[i][channel]);
-    bc4::search(&v, search_radius, None)
+    bc4::search_on(path, &v, search_radius, None)
 }
 
 /// `rgbcx::encode_bc5_hq`: channel 0 then channel 1, each as [`bc4_encode_block`].
@@ -197,7 +197,7 @@ pub fn bc4_encode_alpha_on(path: Path, alpha: &[u8; 16], search_radius: u32, cut
         hits::hit!(hits::Hit::CutDefault);
         128
     };
-    bc4::search(alpha, search_radius, Some(cut))
+    bc4::search_on(path, alpha, search_radius, Some(cut))
 }
 
 /// `rgbcx::encode_bc1_alpha(18, ..)` in `cBC1Dual` mode: BC1 with one-bit alpha, bit i of `transparent` marking

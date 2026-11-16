@@ -6,6 +6,7 @@ use crate::bc1::frames::{encode_alpha_on, encode_level_on, encode_on};
 use crate::bc1::palette::{build_single_tables, dual_palette, single_tables};
 use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6};
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
+use crate::bc4::search_on;
 use crate::gen;
 use crate::hits::{counts, Hit};
 use crate::path::{frame_runs, kernel_runs, tested_paths, Base, Wide};
@@ -247,9 +248,9 @@ fn the_public_functions_run_the_best_path() {
 }
 
 /// Each frame entry runs its path's frame once per call: on every tested path, 4 blocks (one from each of the first 4
-/// colour classes) through `encode_on` and `encode_alpha_on` (with texels 0 and 15 transparent, so the alpha encode
-/// does not hand on to the plain one) count 8 frames on that path and none on another. `Base` counts too: its entry is
-/// the match arm.
+/// colour classes) through `encode_on`, `encode_alpha_on` (with texels 0 and 15 transparent, so the alpha encode
+/// does not hand on to the plain one) and BC4's `search_on` (their green channel, radius 5) count 12 frames on that
+/// path and none on another. `Base` counts too: its entry is the match arm.
 #[test]
 fn the_frames_run_on_their_path() {
     let blocks = &gen::colour_classes(0xE0_0007, 1)[..4];
@@ -258,10 +259,11 @@ fn the_frames_run_on_their_path() {
         for px in blocks {
             encode_on::<18>(p, px, true, PLAIN);
             encode_alpha_on::<18>(p, px, 0x8001, PLAIN);
+            search_on(p, &std::array::from_fn(|i| px[i][1]), 5, None);
         }
         let after = frame_runs();
         for q in Path::ALL {
-            let want = if q == p { 8 } else { 0 };
+            let want = if q == p { 12 } else { 0 };
             assert_eq!(
                 after[q as usize] - before[q as usize],
                 want,
@@ -275,11 +277,13 @@ fn the_frames_run_on_their_path() {
 
 /// Each wide kernel runs in its frame: on every tested path, the blocks of `gen::colour_classes(0xE0_0003, 4)`
 /// through `bc1_encode_block_on` (3-colour blocks allowed) and through `bc1_encode_block_alpha_on` with every mask of
-/// `gen::alpha_masks(0xE0_0004, 8)`. On `Avx2` every kernel of [`Wide::ALL`] runs; on `Base` none does.
+/// `gen::alpha_masks(0xE0_0004, 8)`, and the blocks of `gen::bc4_classes(0xE0_0008, 4)` through `bc4_encode_block_on`
+/// (radius 5). On `Avx2` every kernel of [`Wide::ALL`] runs; on `Base` none does.
 #[test]
 fn the_wide_kernels_run_in_their_frame() {
     let blocks = gen::colour_classes(0xE0_0003, 4);
     let masks = gen::alpha_masks(0xE0_0004, 8);
+    let grey = gen::bc4_classes(0xE0_0008, 4);
     for p in tested_paths() {
         let before = kernel_runs();
         for px in &blocks {
@@ -287,6 +291,9 @@ fn the_wide_kernels_run_in_their_frame() {
             for &mask in &masks {
                 bc1_encode_block_alpha_on(p, px, mask, false, Bc1Search::Default);
             }
+        }
+        for v in &grey {
+            bc4_encode_block_on(p, &channels(v), 0, 5);
         }
         let after = kernel_runs();
         for k in Wide::ALL {

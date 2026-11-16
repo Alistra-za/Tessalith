@@ -5,14 +5,28 @@
 //! The vendored C++ is patched to equal [`search`] byte for byte, so the tie rules here are the contract: the first
 //! minimum per texel, a strict `<` to replace the best, and candidates tried in the order written.
 //! The test inputs `Rng` and `blocks` live in `tests/support/gen.rs`.
+//!
+//! Paths: [`search_on`] runs the search on the path it is given. `Base` runs it as plain code; `Avx2` runs it inside
+//! `search_avx2`, a `#[target_feature(enable = "avx2")]` frame, where the search (`#[inline(always)]`, with the token
+//! first) is compiled again with AVX2 (Note HY21). Each loop hands its candidates to a [`Batch`] where it called
+//! `try_pair` before: on `Base` that is `try_pair`; on `Avx2` the batch scores two pairs at once in one 256-bit vector
+//! (`avx2::pair2`) and decides them in order (`apply`), and a lone last pair goes through `try_pair` when the loop
+//! flushes. No byte changes: each pair still gets `try_pair`'s verdict against the best of its moment (a strict `<`
+//! on the full total, which is what `pair` returning `None` means), in the order written, and no candidate of a loop
+//! is computed from the best inside that loop, so scoring the second pair before the first is decided changes neither
+//! the pairs nor their order. Each loop flushes before anything reads its best.
 // Index loops mirror the C++ they port.
 #![allow(clippy::needless_range_loop)]
 
 // `hit!` expands to nothing outside the unit tests, which leaves `Hit` unused there.
 #[cfg_attr(not(test), allow(unused_imports))]
 use crate::hits::{hit, Hit};
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+use crate::path::Avx2;
+use crate::path::{Base, Isa, Path};
 
 /// The bcdec / patched-rgbcx BC4 palette (`get_block_values`); checked against the FFI for all 65536 pairs.
+#[inline(always)]
 pub fn pal(e0: u8, e1: u8) -> [u8; 8] {
     let (l, h) = (e0 as u32, e1 as u32);
     let w = |a: u32, b: u32| ((a * l + b * h + 32768) >> 16) as u8;
@@ -76,6 +90,7 @@ impl Best {
         o
     }
     /// Try one endpoint pair exactly as rgbcx does (first minimum per texel, early out, strict improvement).
+    #[inline(always)]
     pub fn try_pair(&mut self, v: &[u8; 16], e0: u8, e1: u8) {
         let p = pal(e0, e1);
         let Some((err, sels)) = pair(v, &p, self.err) else {
@@ -103,6 +118,7 @@ impl Best {
 /// first least difference; the loop returns early exactly when its running total reaches `best`, because the total only
 /// grows and ends at the block's total, so "not below `best`" is the same test on the full total.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[inline(always)]
 fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
     let r = sse2::pair(v, p, best);
     #[cfg(test)]
@@ -111,6 +127,7 @@ fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
 }
 
 #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+#[inline(always)]
 fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
     pair_scalar(v, p, best)
 }
@@ -156,6 +173,7 @@ mod sse2 {
     use core::arch::x86_64::*;
 
     #[target_feature(enable = "sse2")]
+    #[inline]
     fn pair_sse2(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
         let half = |a: &[u8]| i64::from_le_bytes([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]]);
         let x = _mm_set_epi64x(half(&v[8..]), half(&v[..8]));
@@ -208,9 +226,190 @@ mod sse2 {
         Some((err, sels))
     }
 
+    #[inline(always)]
     pub(super) fn pair(v: &[u8; 16], p: &[u8; 8], best: u32) -> Option<(u32, [u8; 16])> {
         // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
         unsafe { pair_sse2(v, p, best) }
+    }
+}
+
+/// Two endpoint pairs scored at once, for the AVX2 path: palette `pa` in the low 128-bit half of each vector and `pb`
+/// in the high half, the block's 16 texels in both. Each half runs exactly the SSE2 kernel's steps (`mod sse2`): the
+/// saturating differences or-ed into distances, their least per texel, the squares summed with `vpmaddwd` and the
+/// adds, and the selectors blended from the last palette value to the first. The 256-bit `unpack`, `madd` and
+/// `shuffle` work within each half, so neither half sees the other's lanes, each lane holds the SSE2 kernel's bits and
+/// the bounds of that kernel's doc hold per half (a total at most 1,040,400). Unlike the SSE2 kernel it returns both
+/// full totals and both selector sets; `apply` decides them.
+///
+/// Exactness: `pair` returns `None` exactly when the full total is not below the best (HY11), so two totals computed
+/// first and then decided in order, each against the best of its moment, give each pair its old verdict; a tie is not
+/// strictly lower, so the first pair keeps it. Integer code only; called only through the safe wrapper `pair2`, which
+/// takes the `Avx2` token.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod avx2 {
+    use crate::path::Avx2;
+    use core::arch::x86_64::*;
+
+    #[target_feature(enable = "avx2")]
+    #[inline]
+    fn pair2_kernel(v: &[u8; 16], pa: &[u8; 8], pb: &[u8; 8]) -> [(u32, [u8; 16]); 2] {
+        let half = |a: &[u8]| i64::from_le_bytes([a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]]);
+        let (lo8, hi8) = (half(&v[..8]), half(&v[8..]));
+        let x = _mm256_set_epi64x(hi8, lo8, hi8, lo8);
+        // |x - q| per byte, q holding palette a's value j in the low half and palette b's in the high half.
+        let dist = |j: usize| {
+            let q = _mm256_set_m128i(_mm_set1_epi8(pb[j] as i8), _mm_set1_epi8(pa[j] as i8));
+            _mm256_or_si256(_mm256_subs_epu8(x, q), _mm256_subs_epu8(q, x))
+        };
+        let d = [
+            dist(0),
+            dist(1),
+            dist(2),
+            dist(3),
+            dist(4),
+            dist(5),
+            dist(6),
+            dist(7),
+        ];
+        let mut m = d[0];
+        for dj in &d[1..] {
+            m = _mm256_min_epu8(m, *dj);
+        }
+        // The SSE2 kernel's sum per half: `unpack` takes each half's own texels 0..8 and 8..16.
+        let zero = _mm256_setzero_si256();
+        let (lo, hi) = (_mm256_unpacklo_epi8(m, zero), _mm256_unpackhi_epi8(m, zero));
+        let s = _mm256_add_epi32(_mm256_madd_epi16(lo, lo), _mm256_madd_epi16(hi, hi));
+        let s = _mm256_add_epi32(s, _mm256_shuffle_epi32::<0b01_00_11_10>(s));
+        let s = _mm256_add_epi32(s, _mm256_shuffle_epi32::<0b00_00_00_01>(s));
+        let (sa, sb) = (_mm256_castsi256_si128(s), _mm256_extracti128_si256::<1>(s));
+        debug_assert!((0..=1_040_400).contains(&_mm_cvtsi128_si32(sa)));
+        debug_assert!((0..=1_040_400).contains(&_mm_cvtsi128_si32(sb)));
+        // From the last palette value to the first, so the first nearest one is what stays.
+        let mut sel = zero;
+        for j in (0..8).rev() {
+            let eq = _mm256_cmpeq_epi8(d[j], m);
+            sel = _mm256_or_si256(
+                _mm256_and_si256(eq, _mm256_set1_epi8(j as i8)),
+                _mm256_andnot_si256(eq, sel),
+            );
+        }
+        let bytes = |h: __m128i| {
+            let mut sels = [0u8; 16];
+            sels[..8].copy_from_slice(&(_mm_cvtsi128_si64(h) as u64).to_le_bytes());
+            sels[8..].copy_from_slice(
+                &(_mm_cvtsi128_si64(_mm_unpackhi_epi64(h, h)) as u64).to_le_bytes(),
+            );
+            sels
+        };
+        [
+            (
+                _mm_cvtsi128_si32(sa) as u32,
+                bytes(_mm256_castsi256_si128(sel)),
+            ),
+            (
+                _mm_cvtsi128_si32(sb) as u32,
+                bytes(_mm256_extracti128_si256::<1>(sel)),
+            ),
+        ]
+    }
+
+    /// The full total and the selectors of the block under palette `pa` (`[0]`) and under `pb` (`[1]`), on the AVX2
+    /// path. Counts its runs in the unit tests.
+    #[inline]
+    pub(super) fn pair2(
+        _t: Avx2,
+        v: &[u8; 16],
+        pa: &[u8; 8],
+        pb: &[u8; 8],
+    ) -> [(u32, [u8; 16]); 2] {
+        #[cfg(test)]
+        crate::path::kernel_ran(crate::path::Wide::Pair2);
+        // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
+        unsafe { pair2_kernel(v, pa, pb) }
+    }
+}
+
+/// One scored candidate as [`apply`] takes it: the ends, the full total and the selectors.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+type Scored = (u8, u8, u32, [u8; 16]);
+
+/// Two scored pairs decided in order, as two `try_pair` calls decide them: `a`, then `b`, each replacing `best` only
+/// when its total is strictly below `best.err` at that moment, so a tie keeps the earlier block.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[inline(always)]
+fn apply(best: &mut Best, a: Scored, b: Scored) {
+    for (e0, e1, err, sels) in [a, b] {
+        if err < best.err {
+            hit!(Hit::PairImproved);
+            *best = Best { err, e0, e1, sels };
+        } else {
+            hit!(Hit::PairEarlyOut);
+        }
+    }
+}
+
+/// The shadow check of a batch: the two pairs `ends`, in order, through the scalar reference from `start`, must leave
+/// what `apply` left in `best`. Unit tests only, so every batch they search is checked.
+#[cfg(all(test, target_arch = "x86_64", target_feature = "sse2"))]
+fn check_batch(v: &[u8; 16], start: Best, ends: [(u8, u8); 2], best: &Best) {
+    let mut want = start;
+    for (e0, e1) in ends {
+        want.try_pair_reference(v, e0, e1);
+    }
+    assert_eq!(
+        (best.err, best.e0, best.e1, best.sels),
+        (want.err, want.e0, want.e1, want.sels),
+        "{v:?} {ends:?} from {}",
+        start.err
+    );
+}
+
+/// A loop's candidates on their way to its best: [`Batch::push`] where the loop called `try_pair`, [`Batch::flush`] at
+/// the loop's end. One per loop (per mode, round or cut), on the stack.
+struct Batch<I: Isa> {
+    // Read only by the AVX2 branch of `push`, which a build without the wide paths does not have.
+    #[cfg_attr(
+        not(all(target_arch = "x86_64", target_feature = "sse2")),
+        allow(dead_code)
+    )]
+    isa: I,
+    /// The first pair of two, waiting for the second (AVX2 path only).
+    pending: Option<(u8, u8)>,
+}
+
+impl<I: Isa> Batch<I> {
+    #[inline(always)]
+    fn new(isa: I) -> Self {
+        Batch { isa, pending: None }
+    }
+
+    /// `best.try_pair(v, e0, e1)` on the base path. On the AVX2 path the first pair of two waits; the second scores
+    /// both in one vector and `apply` decides them in order.
+    #[inline(always)]
+    fn push(&mut self, best: &mut Best, v: &[u8; 16], e0: u8, e1: u8) {
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        if let Some(t) = self.isa.avx2() {
+            let Some((a0, a1)) = self.pending.take() else {
+                self.pending = Some((e0, e1));
+                return;
+            };
+            let [ra, rb] = avx2::pair2(t, v, &pal(a0, a1), &pal(e0, e1));
+            #[cfg(test)]
+            let start = *best;
+            apply(best, (a0, a1, ra.0, ra.1), (e0, e1, rb.0, rb.1));
+            #[cfg(test)]
+            check_batch(v, start, [(a0, a1), (e0, e1)], best);
+            return;
+        }
+        best.try_pair(v, e0, e1);
+    }
+
+    /// A lone pending pair through `try_pair`; nothing on the base path, where no pair waits.
+    #[inline(always)]
+    fn flush(&mut self, best: &mut Best, v: &[u8; 16]) {
+        if let Some((e0, e1)) = self.pending.take() {
+            best.try_pair(v, e0, e1);
+        }
     }
 }
 
@@ -225,7 +424,8 @@ pub fn clampi(x: i32) -> u8 {
 /// rgbcx's candidates (`rgbcx::encode_bc4_hq(.., rad, BC4_USE_ALL_MODES)`) searched per mode, each on its own fresh
 /// best: `[0]` the 8-value mode (e0 > e1), `[1]` the 6-value mode. For a solid block `[0]` is the exact block and `[1]`
 /// is `Best::new()`.
-pub fn v0_modes(v: &[u8; 16], rad: i32) -> [Best; 2] {
+#[inline(always)]
+pub(crate) fn v0_modes(isa: impl Isa, v: &[u8; 16], rad: i32) -> [Best; 2] {
     let (mn, mx) = minmax(v);
     if mn == mx {
         hit!(Hit::V0Solid);
@@ -239,6 +439,7 @@ pub fn v0_modes(v: &[u8; 16], rad: i32) -> [Best; 2] {
     }
     let mut m = [Best::new(); 2];
     for (mode, b) in m.iter_mut().enumerate() {
+        let mut batch = Batch::new(isa);
         for lo in -rad..=rad {
             for hi in -rad..=rad {
                 let (mut e0, mut e1) = (clampi(mx as i32 + hi), clampi(mn as i32 + lo));
@@ -254,9 +455,10 @@ pub fn v0_modes(v: &[u8; 16], rad: i32) -> [Best; 2] {
                     }
                     std::mem::swap(&mut e0, &mut e1);
                 }
-                b.try_pair(v, e0, e1);
+                batch.push(b, v, e0, e1);
             }
         }
+        batch.flush(b, v);
     }
     m
 }
@@ -270,6 +472,7 @@ pub fn v0_modes(v: &[u8; 16], rad: i32) -> [Best; 2] {
 /// 6-value mode's least error, which is also `modes[1]` (a fresh best takes the first pair reaching the mode's least
 /// error). If no 6-value pair is strictly below the 8-value best, the 8-value best stays, which is `modes[0]`. A tie
 /// keeps `modes[0]`.
+#[inline(always)]
 fn v0_pick(modes: &[Best; 2]) -> Best {
     if modes[1].err < modes[0].err {
         hit!(Hit::V0SixValueWins);
@@ -281,8 +484,9 @@ fn v0_pick(modes: &[Best; 2]) -> Best {
 }
 
 /// Port of `rgbcx::encode_bc4_hq(.., rad, BC4_USE_ALL_MODES)`.
-pub fn v0(v: &[u8; 16], rad: i32) -> Best {
-    v0_pick(&v0_modes(v, rad))
+#[inline(always)]
+pub(crate) fn v0(isa: impl Isa, v: &[u8; 16], rad: i32) -> Best {
+    v0_pick(&v0_modes(isa, v, rad))
 }
 
 /// Today's `v0`: both modes' candidates on one best. The reference for `v0_pick`.
@@ -316,7 +520,8 @@ fn v0_reference(v: &[u8; 16], rad: i32) -> Best {
 }
 
 /// The 6-value-mode search rgbcx cannot reach: endpoints around the inner range, so 0 and 255 come from the palette.
-pub fn inner6(v: &[u8; 16], b: &mut Best, rad: i32) {
+#[inline(always)]
+pub(crate) fn inner6(isa: impl Isa, v: &[u8; 16], b: &mut Best, rad: i32) {
     if !v.iter().any(|&x| x == 0 || x == 255) {
         hit!(Hit::Inner6NoExtreme);
         return;
@@ -326,20 +531,23 @@ pub fn inner6(v: &[u8; 16], b: &mut Best, rad: i32) {
         hit!(Hit::Inner6NoInner);
         return;
     };
+    let mut batch = Batch::new(isa);
     for lo in -rad..=rad {
         for hi in -rad..=rad {
             let (e0, e1) = (clampi(imn as i32 + lo), clampi(imx as i32 + hi));
             if e0 <= e1 {
                 hit!(Hit::Inner6Pair);
-                b.try_pair(v, e0, e1);
+                batch.push(b, v, e0, e1);
             } else {
                 hit!(Hit::Inner6Skip);
             }
         }
     }
+    batch.flush(b, v);
 }
 
 /// Fraction of e1 in texel value for selector `s` (None = fixed 0/255 in the 6-value mode).
+#[inline(always)]
 fn frac(mode8: bool, s: u8) -> Option<f64> {
     match (mode8, s) {
         (_, 0) => Some(0.0),
@@ -351,7 +559,8 @@ fn frac(mode8: bool, s: u8) -> Option<f64> {
 }
 
 /// Least-squares refit of the endpoints for the current selectors, then the +-1 neighbourhood in the same mode.
-pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
+#[inline(always)]
+pub(crate) fn ls_refine(isa: impl Isa, v: &[u8; 16], b: &mut Best) {
     for _ in 0..3 {
         let mode8 = b.e0 > b.e1;
         let (mut aa, mut ab, mut bb, mut av, mut bv) = (0.0, 0.0, 0.0, 0.0, 0.0);
@@ -375,17 +584,19 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
         let a = (av * bb - bv * ab) / det;
         let c = (bv * aa - av * ab) / det;
         let before = b.err;
+        let mut batch = Batch::new(isa);
         for da in -1..=1 {
             for dc in -1..=1 {
                 let (e0, e1) = (clampi(a.round() as i32 + da), clampi(c.round() as i32 + dc));
                 if (e0 > e1) == mode8 {
                     hit!(Hit::LsPair);
-                    b.try_pair(v, e0, e1);
+                    batch.push(b, v, e0, e1);
                 } else {
                     hit!(Hit::LsModeSkip);
                 }
             }
         }
+        batch.flush(b, v);
         if b.err >= before {
             hit!(Hit::LsNoGain);
             return;
@@ -402,8 +613,9 @@ pub fn ls_refine(v: &[u8; 16], b: &mut Best) {
 /// `modes[1]` (6-value) when `b` is in the 8-value mode and `modes[0]` otherwise. `ls_refine` of `b` changes `b`
 /// only, and the mode is read after it, as before. In the unit tests `search` compares both entries of `modes` with
 /// the old search (`check_modes`).
-pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2]) {
-    ls_refine(v, b);
+#[inline(always)]
+pub(crate) fn refit_both(isa: impl Isa, v: &[u8; 16], b: &mut Best, modes: &[Best; 2]) {
+    ls_refine(isa, v, b);
     let (mn, mx) = minmax(v);
     if mn != mx {
         let mode8 = b.e0 > b.e1;
@@ -414,7 +626,7 @@ pub fn refit_both(v: &[u8; 16], b: &mut Best, modes: &[Best; 2]) {
             hit!(Hit::RefitOtherEightValue);
             modes[0]
         };
-        ls_refine(v, &mut o);
+        ls_refine(isa, v, &mut o);
         if o.err < b.err {
             hit!(Hit::RefitOtherBetter);
             *b = o;
@@ -470,7 +682,8 @@ fn other_mode_reference(v: &[u8; 16], mode8: bool, rad: i32) -> Best {
 }
 
 /// 6-value mode with near-extreme texels left to the palette's 0/255: inner range = values in (t, 255 - t).
-pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
+#[inline(always)]
+pub(crate) fn trimmed6(isa: impl Isa, v: &[u8; 16], b: &mut Best) {
     for t in [2u8, 6, 12, 24, 48] {
         if !v.iter().any(|&x| x <= t || x >= 255 - t) {
             hit!(Hit::TrimNoExtreme);
@@ -486,20 +699,22 @@ pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
             continue;
         };
         let mut c = *b;
+        let mut batch = Batch::new(isa);
         for lo in -2..=2 {
             for hi in -2..=2 {
                 let (e0, e1) = (clampi(imn as i32 + lo), clampi(imx as i32 + hi));
                 if e0 <= e1 {
                     hit!(Hit::TrimPair);
-                    c.try_pair(v, e0, e1);
+                    batch.push(&mut c, v, e0, e1);
                 } else {
                     hit!(Hit::TrimSkip);
                 }
             }
         }
+        batch.flush(&mut c, v);
         if c.e0 <= c.e1 {
             hit!(Hit::TrimRefit);
-            ls_refine(v, &mut c);
+            ls_refine(isa, v, &mut c);
         } else {
             hit!(Hit::TrimNoRefit);
         }
@@ -513,19 +728,22 @@ pub fn trimmed6(v: &[u8; 16], b: &mut Best) {
 }
 
 /// Exhaustive +-3 around the current best, same mode.
-pub fn local(v: &[u8; 16], b: &mut Best) {
+#[inline(always)]
+pub(crate) fn local(isa: impl Isa, v: &[u8; 16], b: &mut Best) {
     let (c0, c1, m8) = (b.e0 as i32, b.e1 as i32, b.e0 > b.e1);
+    let mut batch = Batch::new(isa);
     for d0 in -3..=3 {
         for d1 in -3..=3 {
             let (e0, e1) = (clampi(c0 + d0), clampi(c1 + d1));
             if (e0 > e1) == m8 {
                 hit!(Hit::LocalPair);
-                b.try_pair(v, e0, e1);
+                batch.push(b, v, e0, e1);
             } else {
                 hit!(Hit::LocalModeSkip);
             }
         }
     }
+    batch.flush(b, v);
 }
 
 /// Texels whose alpha-test result (pass when alpha >= `cut`) differs from the source.
@@ -538,23 +756,62 @@ pub fn flips(v: &[u8; 16], b: &Best, cut: u8) -> u32 {
 
 /// The upstream search: `rgbcx::encode_bc4_hq` with all modes, as bytes.
 pub fn upstream(v: &[u8; 16], radius: u32) -> [u8; 8] {
-    v0(v, radius as i32).bytes()
+    v0(Base, v, radius as i32).bytes()
 }
 
 /// The measured search (probe variant v4; v5 with `guard = Some(cut)`, which falls back to the upstream block when it
 /// would flip more texels across the alpha-test cutoff `cut`, 128 by default). Never worse than [`upstream`] in SSE.
-/// `cut` is the cutoff itself: reading a 0 as 128, as rgbcx's flags do, is `bc4_encode_alpha`'s job.
+/// `cut` is the cutoff itself: reading a 0 as 128, as rgbcx's flags do, is `bc4_encode_alpha`'s job. Runs on
+/// [`Path::best`].
 pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
+    search_on(Path::best(), v, radius, guard)
+}
+
+/// [`search`] on `path`: one dispatch per call. Panics if this machine cannot run `path`.
+#[doc(hidden)]
+pub fn search_on(path: Path, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
+    path.assert_available();
+    match path {
+        Path::Base => {
+            #[cfg(test)]
+            crate::path::frame_ran(Path::Base);
+            search_in(Base, v, radius, guard)
+        }
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        Path::Avx2 => {
+            let t = Avx2::require();
+            // SAFETY: `t` exists, so `Avx2::require` found AVX2.
+            unsafe { search_avx2(t, v, radius, guard) }
+        }
+        #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
+        Path::Avx2 => {
+            unreachable!("path avx2 is not built here; the _on entry asserted availability")
+        }
+    }
+}
+
+/// The AVX2 frame of the search: the whole search compiled with AVX2, its loops scoring two pairs per vector.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+#[target_feature(enable = "avx2")]
+fn search_avx2(t: Avx2, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
+    #[cfg(test)]
+    crate::path::frame_ran(Path::Avx2);
+    search_in(t, v, radius, guard)
+}
+
+/// The body of [`search`], compiled for `isa`.
+#[inline(always)]
+fn search_in(isa: impl Isa, v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
     let rad = radius as i32;
-    let modes = v0_modes(v, rad);
+    let modes = v0_modes(isa, v, rad);
     let base = v0_pick(&modes);
     let mut b = base;
-    inner6(v, &mut b, rad);
+    inner6(isa, v, &mut b, rad);
     #[cfg(test)]
     check_modes(v, &modes, rad);
-    refit_both(v, &mut b, &modes);
-    trimmed6(v, &mut b);
-    local(v, &mut b);
+    refit_both(isa, v, &mut b, &modes);
+    trimmed6(isa, v, &mut b);
+    local(isa, v, &mut b);
     if let Some(cut) = guard {
         if flips(v, &b, cut) > flips(v, &base, cut) {
             hit!(Hit::GuardFallback);
@@ -572,6 +829,9 @@ pub fn search(v: &[u8; 16], radius: u32, guard: Option<u8>) -> [u8; 8] {
 mod tests {
     use super::*;
     use crate::gen;
+    use crate::path::Base;
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    use crate::path::{avx2_tested, Avx2};
 
     /// The endpoint pairs tried for a block: every pair with both ends on a stride of 5, then every pair within 3 of
     /// the block's least and greatest value.
@@ -598,7 +858,7 @@ mod tests {
         let (mut six, mut eight, mut solid) = (0usize, 0usize, 0usize);
         for v in gen::bc4_classes(0xB4B4_0006, 200) {
             for rad in [0, 1, 4, 5, 10] {
-                let (a, b) = (v0(&v, rad), v0_reference(&v, rad));
+                let (a, b) = (v0(Base, &v, rad), v0_reference(&v, rad));
                 assert_eq!(
                     (a.err, a.e0, a.e1, a.sels),
                     (b.err, b.e0, b.e1, b.sels),
@@ -627,7 +887,7 @@ mod tests {
                 continue;
             }
             for rad in [0, 1, 4, 5, 10] {
-                let m = v0_modes(&v, rad);
+                let m = v0_modes(Base, &v, rad);
                 for mode8 in [false, true] {
                     // `other_mode_reference(.., mode8, ..)` searches the mode opposite to `mode8`.
                     let (a, b) = (m[usize::from(mode8)], other_mode_reference(&v, mode8, rad));
@@ -650,7 +910,7 @@ mod tests {
     fn a_tie_between_the_modes_keeps_the_8_value_block() {
         // Values 0 and 255 only: both modes reach error 0; `v0` must return e0 > e1.
         let v: [u8; 16] = std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 });
-        let b = v0(&v, 5);
+        let b = v0(Base, &v, 5);
         assert!(b.err == 0 && b.e0 > b.e1);
     }
 
@@ -697,17 +957,18 @@ mod tests {
             std::array::from_fn(|i| if i % 2 == 0 { 0 } else { 255 }),
             std::array::from_fn(|i| (i * 17) as u8),
         ];
+        let ends: [(u8, u8); 7] = [
+            (255, 254),
+            (254, 255),
+            (1, 0),
+            (0, 1),
+            (255, 0),
+            (0, 255),
+            (7, 7),
+        ];
         let mut largest = 0;
         for v in &blocks {
-            for (e0, e1) in [
-                (255, 254),
-                (254, 255),
-                (1, 0),
-                (0, 1),
-                (255, 0),
-                (0, 255),
-                (7, 7),
-            ] {
+            for (e0, e1) in ends {
                 let p = pal(e0, e1);
                 for best in [u32::MAX, 1_040_400, 1_032_256, 1_032_255, 1, 0] {
                     let (a, b) = (pair(v, &p, best), pair_scalar(v, &p, best));
@@ -721,6 +982,107 @@ mod tests {
         assert!(
             largest >= 1_000_000,
             "no case came near the largest total: {largest}"
+        );
+        // The two-pair kernel with a different palette of the list in each half: each half is the full scalar result.
+        #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+        if avx2_tested() {
+            let t = Avx2::require();
+            for v in &blocks {
+                for (i, a) in ends.iter().enumerate() {
+                    for (_, b) in ends.iter().enumerate().filter(|&(j, _)| j != i) {
+                        let (pa, pb) = (pal(a.0, a.1), pal(b.0, b.1));
+                        let [ra, rb] = avx2::pair2(t, v, &pa, &pb);
+                        assert_eq!(
+                            Some(ra),
+                            pair_scalar(v, &pa, u32::MAX),
+                            "{v:?} low {a:?}, high {b:?}"
+                        );
+                        assert_eq!(
+                            Some(rb),
+                            pair_scalar(v, &pb, u32::MAX),
+                            "{v:?} low {a:?}, high {b:?}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// A best of error `err` whose ends and selectors carry `tag`, so an assert shows which candidate stayed.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    fn tagged(err: u32, tag: u8) -> Best {
+        Best {
+            err,
+            e0: tag,
+            e1: tag + 1,
+            sels: [tag % 8; 16],
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn a_batch_takes_the_second_only_against_the_first() {
+        let start = tagged(500, 10);
+        let cand = |b: Best| (b.e0, b.e1, b.err, b.sels);
+        // (error of a, error of b, which one stays: 0 the start, 1 a, 2 b)
+        for (ea, eb, stays) in [(100, 100, 1), (100, 99, 2), (600, 499, 2), (500, 600, 0)] {
+            let (a, b) = (tagged(ea, 20), tagged(eb, 30));
+            let mut best = start;
+            apply(&mut best, cand(a), cand(b));
+            let want = [start, a, b][stays];
+            assert_eq!(
+                (best.err, best.e0, best.e1, best.sels),
+                (want.err, want.e0, want.e1, want.sels),
+                "a {ea}, b {eb}"
+            );
+        }
+    }
+
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn two_pairs_in_a_vector_equal_two_scalar_calls() {
+        if !avx2_tested() {
+            return;
+        }
+        let t = Avx2::require();
+        // Per half (0 low, 1 high): palettes of the 8-value kind, then of the 6-value kind.
+        let (mut kinds, mut taken, mut refused) = ([[0usize; 2]; 2], 0usize, 0usize);
+        for v in gen::bc4_classes(0xE3_0001, 30) {
+            // The best falls as in `the_pair_kernel_equals_the_scalar_one`, so later pairs meet a low best.
+            let mut best = Best::new();
+            for &[a, b] in pairs_for(&v).as_chunks::<2>().0 {
+                let (pa, pb) = (pal(a.0, a.1), pal(b.0, b.1));
+                let [ra, rb] = avx2::pair2(t, &v, &pa, &pb);
+                let from = best.err;
+                let what = || format!("{v:?} low {a:?}, high {b:?}, best {from}");
+                assert_eq!(Some(ra), pair_scalar(&v, &pa, u32::MAX), "{}", what());
+                assert_eq!(Some(rb), pair_scalar(&v, &pb, u32::MAX), "{}", what());
+                // Each outcome in order: the scalar call against the best of that moment.
+                let mut want = best;
+                for ((e0, e1), p) in [(a, pa), (b, pb)] {
+                    match pair_scalar(&v, &p, want.err) {
+                        Some((err, sels)) => {
+                            want = Best { err, e0, e1, sels };
+                            taken += 1;
+                        }
+                        None => refused += 1,
+                    }
+                }
+                for (half, (e0, e1)) in [a, b].into_iter().enumerate() {
+                    kinds[half][usize::from(e0 <= e1)] += 1;
+                }
+                apply(&mut best, (a.0, a.1, ra.0, ra.1), (b.0, b.1, rb.0, rb.1));
+                assert_eq!(
+                    (best.err, best.e0, best.e1, best.sels),
+                    (want.err, want.e0, want.e1, want.sels),
+                    "{}",
+                    what()
+                );
+            }
+        }
+        assert!(
+            kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0,
+            "a kind was never reached: [low, high] x [8-value, 6-value] {kinds:?}, taken {taken}, refused {refused}"
         );
     }
 }
