@@ -353,9 +353,13 @@ const pending = () => { try { return Object.values(JSON.parse(fs.readFileSync(JO
   const { edits } = planSettingsEdits(ORIG_TEXT, ov)
   const touched = new Set(edits.map(e => e.line))
   before.forEach((l, i) => { if (!touched.has(i + 1)) assert.ok(after.includes(l), `line ${i + 1} kept`) })
-  // An inserted section ("Developer Tools" when the file has none) spans its pretty-printed lines; a scalar key one.
+  // A scalar key inserts one line; an inserted section ("Developer Tools" when the file has none) one line per line of
+  // its pretty print. Assumes planSettingsEdits prints inserted values one member per line (JSON.stringify with an
+  // indent unit), as it does. The synthetic fixture gets a literal count: Developer Tools 5 lines, DynamicCubemaps and
+  // Skin 1 each; RenderDoc, Frame Annotations, Log Level and upscaleMethod are replaced in place.
   const insertedLines = edits.filter(e => e.before === null).reduce((n, e) => n + JSON.stringify(JSON.parse(e.after), null, 1).split('\n').length, 0)
-  assert.equal(after.length - before.length, insertedLines, 'new lines = the inserted keys, sections at their printed height')
+  const wantLines = process.env.GOLDEN_TEST_SETTINGS || process.env.GOLDEN_TEST_PLAN ? insertedLines : 7
+  assert.equal(after.length - before.length, wantLines, 'new lines = the inserted keys, sections at their printed height')
   assert.equal(fs.readFileSync(path.join(RUN_A, 'SettingsUser.applied.json'), 'utf8'), live.toString('utf8'), 'applied copy for P04_SETTINGS')
 
   // Review #1: another profile in another run dir must refuse while A is pending (and not back up A's edits).

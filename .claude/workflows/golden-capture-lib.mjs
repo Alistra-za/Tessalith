@@ -42,7 +42,9 @@ export function layoutOf(plan) {
 }
 // Always on for a capture run, whatever the profile says: RenderDoc + Frame Annotations (base workflow). RenderDoc is
 // written twice: CS 2.0 builds key feature sections by GetName() ("Developer Tools", with a space; PBR2Test1, DLL
-// 1.9.0.0), CS 1.x reads the top-level RenderDoc section; each build ignores the other's. Log Level is NOT
+// 1.9.0.0), CS 1.x reads the top-level RenderDoc section. PBR2Test1 accepted the extra top-level key (run 6017bbb0);
+// a CS 1.x build with the inserted "Developer Tools" section is unchecked until its first run; restore puts the
+// file back byte for byte either way. Log Level is NOT
 // forced (owner 2026-10-18): Log Level <= 1 turns on CS developer mode, which compiles D3DCOMPILE_DEBUG shaders into the
 // owner's disk cache. W2 uses the DevBench shadercache tool; X6 decodes descriptors offline (cslog_defines.py).
 const CAPTURE_KEYS = {
