@@ -113,6 +113,10 @@ pub struct BatchRequest {
     /// GUI (Note BM): ids of the sets with a `[sets.cs_txst]` block. A PBR set listed here auto-picks `pbr_landscape`
     /// under CS. Empty for the CLI.
     pub cs_txst_sets: BTreeSet<String>,
+    /// GUI (Note IE16): ids of the sets whose texture-set block turns CS 2.0's fuzz roughness texture on. In such a
+    /// set picked as `pbr`, a plain `height` (`_p`) job keeps its source's G (`channels.keep_green`). Empty for the
+    /// CLI.
+    pub fuzz_texture_sets: BTreeSet<String>,
     pub recursive: bool,
     pub on_existing: OnExisting,
     /// Worker threads; 0 = one per logical core.
@@ -188,6 +192,7 @@ impl BatchRequest {
             gras_diffuses: BTreeSet::new(),
             gras_all_diffuses: BTreeSet::new(),
             cs_txst_sets: BTreeSet::new(),
+            fuzz_texture_sets: BTreeSet::new(),
             recursive: false,
             on_existing: OnExisting::IfChanged,
             jobs: 0,
@@ -264,6 +269,7 @@ impl BatchRequest {
             gras_diffuses,
             gras_all_diffuses,
             cs_txst_sets,
+            fuzz_texture_sets,
             recursive,
             on_existing,
             jobs,
@@ -277,7 +283,7 @@ impl BatchRequest {
             // Note HF9: the run's filter, not a planning input (the export plan does not use the skeleton).
             write_only: _,
         } = self;
-        let fields: [&dyn std::fmt::Debug; 32] = [
+        let fields: [&dyn std::fmt::Debug; 33] = [
             inputs,
             output_root,
             target,
@@ -301,6 +307,7 @@ impl BatchRequest {
             gras_diffuses,
             gras_all_diffuses,
             cs_txst_sets,
+            fuzz_texture_sets,
             recursive,
             on_existing,
             jobs,
@@ -702,6 +709,33 @@ fn input_dims(path: &Path) -> Option<(u32, u32)> {
 /// [`estimated_bytes`] of a `w`×`h` input.
 fn input_bytes(w: u32, h: u32) -> u64 {
     u64::from(w) * u64::from(h) * 16 * 134 / 100 * 3
+}
+
+/// Note IE16 (owner, 2026-11-16): in a set the GUI lists in `fuzz_texture_sets` and picked as `pbr` (the one shader
+/// with a `.csm` and a `_p` slot), a plain `height` job (no pack, derive, cube or fill) keeps its source's G, CS 2.0's
+/// fuzz roughness texture. Its source is meant to differ between R and G, so CHAN-NOT-GRAY goes. Any other job is
+/// untouched, so its bytes and profile hash hold. Runs after the picks, before `file_planned`.
+fn keep_fuzz_green(req: &BatchRequest, jobs: &mut [ResolvedJob]) {
+    if req.fuzz_texture_sets.is_empty() {
+        return;
+    }
+    let sets: BTreeSet<String> = req
+        .fuzz_texture_sets
+        .iter()
+        .map(|id| crate::sets::set_key(&req.output_root, id))
+        .collect();
+    for j in jobs.iter_mut().filter(|j| {
+        j.profile.subtype == Subtype::Height
+            && j.pack.is_none()
+            && j.derive.is_none()
+            && j.cube.is_none()
+            && j.fill.is_none()
+            && j.shader.as_ref().is_some_and(|p| p.shader == Shader::Pbr)
+            && sets.contains(&j.set_key)
+    }) {
+        j.profile.channels.keep_green = true;
+        j.warnings.retain(|w| w.code != Code::ChanNotGray);
+    }
 }
 
 /// The size `job` holds its input at: its own, or for a pack, a derive or an alpha fill the common size its sources
@@ -2669,6 +2703,7 @@ impl Engine {
         for j in &mut jobs {
             j.shader = picks.get(&j.set_key).cloned();
         }
+        keep_fuzz_green(req, &mut jobs);
         let helpers = crate::helper::report::reports(&ctx, &sets, files, &jobs, &fills);
         let bake_cx = crate::bake::plan::BakeCtx {
             target,

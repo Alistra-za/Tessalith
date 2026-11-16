@@ -857,6 +857,8 @@ fn layered_profile_with(
     }
     let mut profile = finish_profile(doc, ctx.target, st)?;
     profile.category = st.category();
+    // Note IE16: only the plan's `fuzz_texture_sets` turns it on (`api::keep_fuzz_green`), never a layer.
+    profile.channels.keep_green = false;
     emissive_hdr_choice(ctx, &mut profile, &mut prov, f);
     // Note FM43: BC6H encodes in the peak-preserving mode unless a layer above the hidden base chose the effort.
     // Runs on the final format, so an LDR emissive that fell back to BC7 keeps the base effort.

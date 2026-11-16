@@ -152,8 +152,13 @@ pub fn preprocess_with(mut img: Rgba32F, p: &Profile, transfer: SourceTransfer) 
             }
         }
         if grayscale {
+            let green = px[1];
             let g = p.channels.grayscale_source.read(px);
             px[..3].fill(g);
+            // Note IE16: a fuzz-roughness `_p` keeps its source's G.
+            if p.channels.keep_green {
+                px[1] = green;
+            }
         }
         if !alpha_present {
             px[3] = 1.0; // the dropped alpha, read just above when A was picked
