@@ -678,6 +678,9 @@ pub enum V3Cmd {
         content: u64,
         id: ShapeId,
         material: MaterialState,
+        /// Note IE27: an animation frame (`Renderer::set_frame_material`), which never asks for a missing `.csm`
+        /// again; an edit does.
+        frame: bool,
     },
     /// New DDS bytes for a texture path as one variant (`Renderer::replace_texture`); empty bytes drop that copy.
     /// Applied after the load it follows; a later load in the same batch drops it.
@@ -1163,6 +1166,16 @@ impl Viewport3d {
     /// thread after the load it follows. False when no load of this content has been sent yet (the caller then puts
     /// the material into a new content instead).
     pub fn set_material(&mut self, id: ShapeId, material: MaterialState) -> bool {
+        self.send_material(id, material, false)
+    }
+
+    /// Note IE27: [`Self::set_material`] for an animation frame: the render thread keeps a `.csm` it found missing
+    /// (no resolver call per tick); only an edit or a load asks again.
+    pub fn set_frame_material(&mut self, id: ShapeId, material: MaterialState) -> bool {
+        self.send_material(id, material, true)
+    }
+
+    fn send_material(&mut self, id: ShapeId, material: MaterialState, frame: bool) -> bool {
         if !matches!(
             self.content,
             Some(Content::Parsed { .. } | Content::Builtin { .. })
@@ -1180,6 +1193,7 @@ impl Viewport3d {
             content,
             id,
             material,
+            frame,
         };
         if t.send(cmd).is_err() {
             return false;
@@ -1949,12 +1963,22 @@ fn log_for_replay<T>(r: &Result<T, String>) -> bool {
     )
 }
 
-/// One material edit on the loaded content.
-fn edit(r: &mut Renderer, c: &Content, id: ShapeId, m: MaterialState) -> Result<EditKind, String> {
+/// One material edit on the loaded content; an animation `frame` keeps a missing `.csm` unasked (Note IE27).
+fn edit(
+    r: &mut Renderer,
+    c: &Content,
+    id: ShapeId,
+    m: MaterialState,
+    frame: bool,
+) -> Result<EditKind, String> {
     let bsas = RefCell::new(HashMap::new());
     let errors = RefCell::new(vec![]);
     let textures = resolver(c.files(), &bsas, &errors);
-    r.set_material(id, m, &textures)
+    if frame {
+        r.set_frame_material(id, m, &textures)
+    } else {
+        r.set_material(id, m, &textures)
+    }
 }
 
 /// The render thread: owns the `Renderer` and the compile pool; batches queued commands, applies material edits
@@ -2067,7 +2091,7 @@ fn render_loop(
         // A settings or features change: cbuffers rewritten, programs maybe swapped or queued; no reload.
         let mut restyled = false;
         let mut debug_changed = false;
-        let mut pending: Vec<(u64, ShapeId, MaterialState)> = vec![];
+        let mut pending: Vec<(u64, ShapeId, MaterialState, bool)> = vec![];
         let mut tex_cmds: Vec<TexCmd> = vec![];
         for c in std::iter::once(first).chain(rx.try_iter()) {
             let content = match c {
@@ -2143,8 +2167,9 @@ fn render_loop(
                     content,
                     id,
                     material,
+                    frame,
                 } => {
-                    pending.push((content, id, material));
+                    pending.push((content, id, material, frame));
                     None
                 }
                 V3Cmd::SetLoadVariant(v) => {
@@ -2264,11 +2289,11 @@ fn render_loop(
         let pending_was_empty = pending.is_empty();
         if !pending.is_empty() {
             if let Some((lid, c)) = &last {
-                for (content, id, m) in pending {
+                for (content, id, m, frame) in pending {
                     if content != *lid {
                         continue;
                     }
-                    let result = edit(&mut r, c, id, m.clone());
+                    let result = edit(&mut r, c, id, m.clone(), frame);
                     if log_for_replay(&result) {
                         edits.insert(id, m);
                     }

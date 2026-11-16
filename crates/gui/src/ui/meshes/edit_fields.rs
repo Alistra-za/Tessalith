@@ -1,7 +1,9 @@
 //! The edit panel's Shader and Alpha tabs (spec §7, plan A17). Widgets only read the session; every change is
 //! collected in an [`Act`] that `edit_panel::panel` applies after drawing.
 use crate::model::meshes::csm_actions::CsmAction;
-use crate::model::meshes::nif_edit::{edit_slot_label, edit_slot_shown, NifEdit, Selection};
+use crate::model::meshes::nif_edit::{
+    edit_slot_label, edit_slot_shown, label_slsf2, NifEdit, Selection,
+};
 use crate::model::meshes::pg_entries::pg_ignore;
 use crate::model::meshes::{shader_type_name, MeshesModel, SHADER_TYPES};
 use crate::pgp::alpha::{AlphaFlags, BLEND_MODES, DEFAULT_FLAGS, DEFAULT_THRESH, TEST_FUNCS};
@@ -48,9 +50,13 @@ pub(super) struct Act {
 
 const LABEL_W: f32 = 132.0;
 const SKINNED_HOVER: &str = "Set by the mesh; changing it breaks skinning.";
-/// Note IE14: the v1 PBR flag is read-only (no edit writes v1 PBR); a v1 shape's warning carries Convert to .csm.
-const PBR_HOVER: &str =
-    "The v1 PBR flag: read-only. CS 2.0 draws a v1 shape vanilla; use Convert to .csm on its warning.";
+/// Note IE14: no edit sets the v1 PBR flag; a v1 shape's warning carries Convert to .csm. Note IE31: a set flag can
+/// be cleared (a stray bit 23 on another shader type), so the box is enabled only while it is on.
+pub const PBR_HOVER: &str =
+    "The v1 PBR flag cannot be set: CS 2.0 draws a v1 shape vanilla; use Convert to .csm on its warning.";
+/// Note IE31: the hover of a set v1 PBR flag, which can be cleared only.
+pub const PBR_CLEAR_HOVER: &str =
+    "The v1 PBR flag can be cleared but not set again: CS 2.0 draws a v1 shape vanilla; Convert to .csm on its warning keeps its PBR values.";
 const TYPE_HOVER: &str = "Changing the type changes the trailer fields.";
 const BROWSE_LIMIT: usize = 200;
 
@@ -366,7 +372,8 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         );
     }
     let (lt, p) = (&l.lighting, &l.lighting.params);
-    let pbr = lt.slsf2 & SLSF2_TRUE_PBR != 0;
+    // Note IE26: the names follow the loaded material (a v1 shape draws vanilla on CS 2.0).
+    let pbr = m.loaded_csm_pbr(shape.block).is_some();
     // Meshes UI T6 (Note CZ21): the texture slots first, as the shape's identity.
     texture_slots(ui, m, e, shape, l, act);
     material_row(ui, m, shape.block, l, act);
@@ -575,15 +582,22 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                 for (bit, name) in names.iter().enumerate() {
                     let mask = 1u32 << bit;
                     let mut on = v & mask != 0;
+                    let v1_flag = field == Field::Slsf2 && mask == SLSF2_TRUE_PBR;
                     let locked = match field {
                         Field::Slsf1 if bit == 1 => Some(SKINNED_HOVER),
-                        Field::Slsf2 if bit == 23 => Some(PBR_HOVER),
+                        // Note IE31: on, it can be cleared; off, it cannot be set.
+                        Field::Slsf2 if v1_flag && !on => Some(PBR_HOVER),
                         Field::Slsf1 => type_flag_lock(lt.shader_type, bit as u32),
                         _ => None,
                     };
                     // Note IE26: no "PBR: <meaning>" suffix. CS 2.0 reads the SLSF2 bits with their vanilla meaning
                     // on a v1 shape (drawn vanilla) and takes a `.csm` shape's PBR features from the file.
                     let r = ui.add_enabled(locked.is_none(), egui::Checkbox::new(&mut on, *name));
+                    let r = if v1_flag && locked.is_none() {
+                        r.on_hover_text(PBR_CLEAR_HOVER)
+                    } else {
+                        r
+                    };
                     if locked.is_none() {
                         take_focus(ui, &r, field);
                     }
@@ -727,10 +741,12 @@ fn texture_slots(
     }
     let lt = &l.lighting;
     let anchor = anchor_shape(&e.model, shape.block);
+    // Note IE26: the slot names follow the loaded material, not the NIF's bit 23.
+    let flags = label_slsf2(lt.slsf2, m.loaded_csm_pbr(shape.block));
     for (i, raw) in ts.raw.slots.iter().enumerate() {
         // Note GH7: the set editor's name where it has one; slots count from 1, the NIF's own index is on hover.
-        let name = edit_slot_shown(lt.shader_type, lt.slsf1, lt.slsf2, i);
-        let own = edit_slot_label(lt.shader_type, lt.slsf1, lt.slsf2, i);
+        let name = edit_slot_shown(lt.shader_type, lt.slsf1, flags, i);
+        let own = edit_slot_label(lt.shader_type, lt.slsf1, flags, i);
         let n = i + 1;
         let text = nif::text::lossy(raw);
         let norm = nif::path::canon_texture(raw).norm;
@@ -813,13 +829,6 @@ fn texture_slots(
                 None,
             ));
         }
-    }
-    // Note GD6: a warning on a slot the set does not have (an empty RMAOS slot 5 past a short set) has no row above.
-    for w in e.warnings.iter().filter(|w| {
-        matches!(w.target, Target::Slot { set: s, slot } if s == set && slot as usize >= ts.raw.slots.len())
-    }) {
-        let color = if w.level == Level::Error { RED } else { AMBER };
-        ui.add(egui::Label::new(egui::RichText::new(&w.text).color(color)).wrap());
     }
 }
 

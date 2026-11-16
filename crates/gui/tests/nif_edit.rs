@@ -2364,8 +2364,9 @@ fn skinned_and_pbr_bits_are_greyed() {
     assert!(!h.get_by_label("Specular").accesskit_node().is_disabled());
     assert!(h.query_by_label("Specular level").is_none());
     h.get_by_label("Glossiness");
-    // A PBR shape (Note IE14: in the source): Glossiness and Specular Strength read as CS uses them.
-    set_slsf2(&mut h, a, V1_PBR);
+    // A shape whose loaded material is a `.csm` (Note IE26): Glossiness and Specular Strength read as CS uses them.
+    load_csm(h.state_mut(), a, 0);
+    h.run_steps(2);
     h.get_by_label("Specular level");
     h.get_by_label("Roughness scale");
     assert!(h.query_by_label("Glossiness").is_none());
@@ -5753,6 +5754,53 @@ fn playback_is_cbuffer_only() {
     assert!((renders[29] - 0.5).abs() < 1e-4);
 }
 
+/// Note IE27 (final review A-I1): playback ticks send their materials as frames, which never ask the resolver for a
+/// missing `.csm` again; an edit's material is not a frame, so it does.
+#[test]
+fn playback_sends_frames_and_an_edit_does_not() {
+    let (_d, mut m, cmds) = playing_session();
+    m.v3.clock.as_mut().unwrap().play();
+    let mut frames = vec![];
+    for _ in 0..5 {
+        m.tick_anim(1.0 / 60.0);
+        for c in cmds.try_iter() {
+            if let V3Cmd::SetMaterial { frame, .. } = c {
+                frames.push(frame);
+            }
+        }
+    }
+    assert!(
+        !frames.is_empty() && frames.iter().all(|f| *f),
+        "{frames:?}"
+    );
+    let shape = m.edit.as_ref().unwrap().frame_materials(0.0)[0].0 .0;
+    let e = m.edit.as_ref().unwrap();
+    let at = nif::edit::anchor_role(&e.model, Some(shape), Role::Shader).unwrap();
+    let base = e.model.lighting[&e.model.shape(shape).unwrap().shader.unwrap()]
+        .lighting
+        .params
+        .glossiness;
+    m.edit_push(
+        vec![Op::SetField {
+            at,
+            field: Field::Glossiness,
+            value: Value::F32(12.5f32.to_bits()),
+            base: Value::F32(base.to_bits()),
+        }],
+        None,
+    );
+    let edit: Vec<bool> = cmds
+        .try_iter()
+        .filter_map(|c| match c {
+            V3Cmd::SetMaterial {
+                material, frame, ..
+            } if material.params.glossiness == 12.5 => Some(frame),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(edit, vec![false]);
+}
+
 #[test]
 fn scrub_sets_time_and_pauses() {
     let (_d, mut m, cmds) = playing_session();
@@ -8290,7 +8338,9 @@ fn controllers_tab_names_pbr_variables_as_the_shader_tab_does() {
     tab(&mut h, "Controllers");
     h.get_by_role_and_label(AkRole::ComboBox, "Glossiness variable");
     h.get_by_role_and_label(AkRole::ComboBox, "Specular strength variable");
-    set_slsf2(&mut h, s, 1 << 23);
+    // Note IE26: the PBR names follow a loaded `.csm`, not SLSF2 bit 23.
+    load_csm(h.state_mut(), s, 0);
+    h.run_steps(2);
     assert!(h.query_by_label("Glossiness").is_none());
     h.get_by_role_and_label(AkRole::ComboBox, "Specular level variable");
     h.get_by_role_and_label(AkRole::ComboBox, "Roughness scale variable");
@@ -8304,13 +8354,15 @@ fn controllers_tab_names_pbr_variables_as_the_shader_tab_does() {
 
 #[test]
 fn controllers_tab_names_lscc_specular_colour_by_pbr_material() {
+    use nif::pbr2::feat;
+    // Note IE26: the name follows the loaded `.csm`'s features; a v1 shape (bits 23 and 24) draws vanilla.
     let cases = [
-        (1u32 << 23, "Specular colour (no effect on PBR)"),
-        ((1 << 23) | (1 << 24), "Coat colour"),
-        ((1 << 23) | (1 << 26), "Subsurface colour"),
-        (1 << 24, "Specular colour"), // not PBR: bits 24 and 26 mean nothing
+        (Some(0), 0, "Specular colour (no effect on PBR)"),
+        (Some(feat::TWO_LAYER), 0, "Coat colour"),
+        (Some(feat::SUBSURFACE), 0, "Subsurface colour"),
+        (None, (1u32 << 23) | (1 << 24), "Specular colour"),
     ];
-    for (bits, want) in cases {
+    for (csm, bits, want) in cases {
         let mut m = direct(ctrl_scene(0x82));
         let s = select(&mut m, "S");
         let e = m.edit.as_ref().unwrap();
@@ -8341,6 +8393,10 @@ fn controllers_tab_names_lscc_specular_colour_by_pbr_material() {
         let mut h = view(m);
         h.run_steps(2);
         set_slsf2(&mut h, s, bits);
+        if let Some(f) = csm {
+            load_csm(h.state_mut(), s, f);
+            h.run_steps(2);
+        }
         tab(&mut h, "Controllers");
         h.get_by_role_and_label(AkRole::ComboBox, &format!("{want} variable"));
     }
@@ -11629,6 +11685,11 @@ const ROCK_CSM: &str = "materials\\pbr\\landscape\\rock01.csm";
 /// Shape "S" (0) -> BSLSP (1) of `shader_type` with `slsf2`, its name field `name` (None: -1), glossiness 0.3 and
 /// specular strength 0.8 (v1 specular level and roughness scale) -> texture set (2) on the rock01 set's outputs.
 fn v1_rock(shader_type: u32, slsf2: u32, name: Option<&str>) -> Vec<u8> {
+    v1_rock_in("landscape", shader_type, slsf2, name)
+}
+
+/// `v1_rock` with the texture set under `textures\pbr\<dir>\`.
+fn v1_rock_in(dir: &str, shader_type: u32, slsf2: u32, name: Option<&str>) -> Vec<u8> {
     let mut n = Nif::new(100);
     let s = n.string("S");
     let nm = name.map_or(-1, |x| n.string(x));
@@ -11652,19 +11713,11 @@ fn v1_rock(shader_type: u32, slsf2: u32, name: Option<&str>) -> Vec<u8> {
         .0;
     n.block("BSTriShape", one_tri(s, 1)); // a triangle, so the preview draws it
     n.block("BSLightingShaderProperty", body);
+    let p = |s: &str| format!("textures\\pbr\\{dir}\\rock01{s}.dds");
+    let (d, nm, rm) = (p(""), p("_n"), p("_rmaos"));
     n.block(
         "BSShaderTextureSet",
-        scenes::texset(&[
-            "textures\\pbr\\landscape\\rock01.dds",
-            "textures\\pbr\\landscape\\rock01_n.dds",
-            "",
-            "",
-            "",
-            "textures\\pbr\\landscape\\rock01_rmaos.dds",
-            "",
-            "",
-            "",
-        ]),
+        scenes::texset(&[&d, &nm, "", "", "", &rm, "", "", ""]),
     );
     n.bytes()
 }
@@ -11755,6 +11808,89 @@ fn convert_copies_values_into_empty_set() {
             .iter()
             .all(|w| w.text != V1_VANILLA),
         "converted: no v1 warning"
+    );
+}
+
+/// The Auto fixture's set (`support::pbr_opened_auto`) and its `.csm`.
+const AUTO_ROCK: &str = "furniture/rock01";
+const AUTO_CSM: &str = "materials\\pbr\\furniture\\rock01.csm";
+
+fn rock_view(app: &AppModel, id: &str) -> sdc_gui::model::sets::SetView {
+    sdc_gui::model::sets::views(app)
+        .iter()
+        .find(|v| v.id == id)
+        .cloned()
+        .expect("the set")
+}
+
+/// Note IE25: the set is pinned to `pbr`, still gets its `.csm`, and one undo takes the block and the pin back.
+fn assert_pinned_in_one_step(app: &mut AppModel, label: &str) {
+    assert!(app.wait_idle(std::time::Duration::from_secs(60)));
+    let v = rock_view(app, AUTO_ROCK);
+    assert!(sdc_gui::model::csm_export::gets_csm(&v), "{:?}", v.shader);
+    assert_eq!(v.shader_choice, Some(engine::shader::Shader::Pbr));
+    let set = sdc_gui::model::csm_export::csm_sets(app)
+        .into_iter()
+        .find(|(v, _)| v.id == AUTO_ROCK)
+        .expect("the set's .csm")
+        .1;
+    assert_eq!(set.path, AUTO_CSM);
+    assert_eq!(app.undo_label(), Some(label));
+    app.undo();
+    assert!(app.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(app.cs_block(AUTO_ROCK, CsKind::Txst), None);
+    assert_eq!(rock_view(app, AUTO_ROCK).shader_choice, None);
+}
+
+/// Note IE25: Convert on an Auto set whose pick is plain PBR pins it to `pbr` with the copied values (one undo
+/// step), so the block the copy makes does not turn it PBR Landscape (Note BM) and the `.csm` the shape names exists.
+#[test]
+fn convert_on_an_auto_set_pins_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    let mut app = support::pbr_opened_auto(d.path());
+    let v = rock_view(&app, AUTO_ROCK);
+    assert_eq!(v.shader_choice, None);
+    assert!(
+        sdc_gui::model::csm_export::gets_csm(&v),
+        "Auto picks PBR off a landscape path"
+    );
+    let mut m = direct(v1_rock_in("furniture", 0, V1_PBR, None));
+    select(&mut m, "S");
+    m.sync_project_csms(&app);
+    m.convert_to_csm(0);
+    assert_eq!(m.csm_ask, None);
+    apply_csm_write(&mut app, &mut m);
+    assert_eq!(lighting(&m).name.as_deref(), Some(AUTO_CSM));
+    assert_pinned_in_one_step(&mut app, "Copy the shape's PBR values");
+}
+
+/// Note IE25: adding the texture-set block by hand on such a set pins it too.
+#[test]
+fn adding_a_block_on_an_auto_set_pins_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    let mut app = support::pbr_opened_auto(d.path());
+    app.add_cs_block(AUTO_ROCK, CsKind::Txst);
+    assert!(app.cs_block(AUTO_ROCK, CsKind::Txst).is_some());
+    assert_pinned_in_one_step(&mut app, &format!("Add {}", CsKind::Txst.label()));
+}
+
+/// Note IE25: a set that no longer gets a `.csm` when the Convert is answered (made PBR Landscape since the ask)
+/// keeps the shape as it was, with a notice.
+#[test]
+fn convert_refuses_when_the_set_gets_no_csm_after_the_write() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut app, mut m) = rock_edit(d.path(), v1_rock(0, V1_PBR, None));
+    m.convert_to_csm(0);
+    assert!(m.csm_write.is_some());
+    app.set_shader(ROCK, Some(engine::shader::Shader::PbrLandscape));
+    assert!(app.wait_idle(std::time::Duration::from_secs(60)));
+    apply_csm_write(&mut app, &mut m);
+    assert!(ops(&m).is_empty(), "{:?}", ops(&m));
+    assert_eq!(lighting(&m).name, None);
+    assert!(
+        notice(&m).unwrap().ends_with(NO_CSM_AFTER_WRITE),
+        "{:?}",
+        notice(&m)
     );
 }
 
@@ -11950,13 +12086,52 @@ fn bit_23_cannot_be_set() {
     let mut h = view(m);
     h.run_steps(2);
     open_flags(&mut h);
+    h.get_by_label("Unused01 (TruePBR)").scroll_to_me();
+    h.run_steps(12);
     let flag = h.get_by_label("Unused01 (TruePBR)");
     assert!(flag.accesskit_node().is_disabled(), "read-only");
     flag.hover();
     h.run_steps(30);
-    h.get_by_label_contains("use Convert to .csm");
-    // Type 11 stays in the shader type combo (vanilla multi-layer parallax).
-    assert!(sdc_gui::model::meshes::SHADER_TYPES.len() > 11);
+    h.get_by_label_contains("The v1 PBR flag cannot be set");
+    // Final review B-M5: type 11 stays offered in the shader type combo (vanilla multi-layer parallax).
+    let eleven = format!("{} (11)", sdc_gui::model::meshes::SHADER_TYPES[11]);
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .scroll_to_me();
+    h.run_steps(12);
+    h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+        .click();
+    h.run_steps(3);
+    h.get_by_label(&eleven);
+}
+
+/// Note IE31 (final review B-M2): a stray bit 23 (here on type 2, Glow, which no PBR reads) can be cleared from the
+/// raw list; the box is enabled while it is on, and its hover says it cannot be set again.
+#[test]
+fn a_set_bit_23_can_be_cleared() {
+    let mut m = direct(v1_rock(2, V1_PBR, None));
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    open_flags(&mut h);
+    h.get_by_label("Unused01 (TruePBR)").scroll_to_me();
+    h.run_steps(12);
+    let flag = h.get_by_label("Unused01 (TruePBR)");
+    assert!(
+        !flag.accesskit_node().is_disabled(),
+        "on: it can be cleared"
+    );
+    flag.hover();
+    h.run_steps(30);
+    h.get_by_label_contains("can be cleared but not set again");
+    h.get_by_label("Unused01 (TruePBR)").click();
+    h.run_steps(3);
+    let e = h.state().edit.as_ref().unwrap();
+    assert_eq!(e.outcomes, vec![nif::edit::Outcome::Applied]);
+    assert!(e
+        .model
+        .lighting
+        .values()
+        .all(|l| l.lighting.slsf2 & V1_PBR == 0));
 }
 
 /// Design §5.4, §7: a shader controller on a value a .csm sets warns on a shape whose loaded material is CS 2.0 PBR.
@@ -12011,6 +12186,182 @@ fn csm_controller_warns() {
     h.run_steps(2);
     tab(&mut h, "Controllers");
     h.get_by_label(CSM_CTRL);
+}
+
+/// Shape `s`'s loaded material as a resolved `.csm` with `features` (the 3D view's Shapes reply, as a poll takes it).
+fn load_csm(m: &mut MeshesModel, s: u32, features: u32) {
+    let mut material = nif::material::MaterialState::builtin_default();
+    material.csm_path = Some("materials/pbr/a.csm".into());
+    material.pbr = Some(nif::pbr2::PbrValues {
+        features,
+        params: nif::pbr2::PBR2_DEFAULTS,
+        fuzz_roughness: -1.0,
+    });
+    m.v3.shapes = vec![render3d::ShapeInfo {
+        id: ShapeId(s),
+        name: "S".into(),
+        material,
+        status: render3d::ShapeStatus::Drawing,
+    }];
+    m.v3.shapes_rev += 1;
+    m.poll();
+}
+
+/// Note IE26: the editor's names follow the loaded material, not SLSF2 bit 23: a v1 shape (drawn vanilla on CS 2.0)
+/// gets the vanilla names, a loaded `.csm` the PBR ones, its coat from the `.csm`'s features.
+#[test]
+fn names_follow_the_loaded_material() {
+    let mut m = direct(pbr_on(&ctrl_scene_vars(0x82, [9, 20])));
+    let s = select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    h.get_by_role_and_label(AkRole::ComboBox, "Glossiness variable");
+    load_csm(h.state_mut(), s, 0);
+    h.run_steps(2);
+    h.get_by_role_and_label(AkRole::ComboBox, "Specular level variable");
+    // Slot 3 of a type-0 shape: "Rim / back-light" vanilla, "Emissive / Skin" on PBR.
+    let mut m = direct(v1_rock(0, V1_PBR, None));
+    let s = select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(2);
+    h.get_by_label("Rim / back-light path (slot 3)");
+    load_csm(h.state_mut(), s, 0);
+    h.run_steps(2);
+    h.get_by_label("Emissive / Skin path (slot 3)");
+}
+
+/// Note IE38 (final review B-M1): "Use the set's .csm" on a shape whose name field holds another `.csm` asks before
+/// replacing it, as for a foreign name; Replace then points it at the set's.
+#[test]
+fn use_set_csm_asks_before_replacing_another_csm() {
+    let d = tempfile::tempdir().unwrap();
+    let other = "materials\\pbr\\other.csm";
+    let (_app, mut m) = rock_edit(d.path(), v1_rock(0, 0, Some(other)));
+    assert_eq!(m.use_set_csm_off(0), None);
+    m.point_at_set_csm(0);
+    assert_eq!(
+        m.csm_ask,
+        Some(CsmAsk::Name {
+            shape: 0,
+            old: other.into(),
+            then: CsmAction::Point
+        })
+    );
+    assert!(ops(&m).is_empty(), "nothing before the answer");
+    m.answer_csm(CsmAnswer::ReplaceName);
+    assert_eq!(lighting(&m).name.as_deref(), Some(ROCK_CSM));
+}
+
+/// Note IE38 (final review B-M7): a lookup that fails (no such shape) turns "Use the set's .csm" off with a reason.
+#[test]
+fn use_set_csm_off_has_a_reason_when_the_lookup_fails() {
+    let d = tempfile::tempdir().unwrap();
+    let (_app, m) = rock_edit(d.path(), v1_rock(0, 0, None));
+    assert_eq!(m.use_set_csm_off(0), None);
+    assert_eq!(m.use_set_csm_off(99).as_deref(), Some(NO_LIGHTING));
+}
+
+/// Note IE37 (final review A-M3): a v1 shape whose name field names a `.csm` has no V1_VANILLA from validation (it
+/// reads no files); when that `.csm` loads no PBR values (missing here), the shape draws vanilla, and the loaded
+/// material adds the warning with its Convert button.
+#[test]
+fn a_v1_shape_naming_a_missing_csm_warns() {
+    let mut m = direct(v1_rock(0, V1_PBR, Some("materials\\pbr\\gone.csm")));
+    let s = select(&mut m, "S");
+    let v1 = |m: &MeshesModel| {
+        let e = m.edit.as_ref().unwrap();
+        e.warnings
+            .iter()
+            .chain(&e.csm_warnings)
+            .filter(|w| w.text == V1_VANILLA)
+            .count()
+    };
+    assert_eq!(v1(&m), 0, "named: validation leaves it off");
+    let mut material = nif::material::MaterialState::builtin_default();
+    material.csm_path = Some("materials/pbr/gone.csm".into());
+    material.csm_error = Some("not found".into());
+    m.v3.shapes = vec![render3d::ShapeInfo {
+        id: ShapeId(s),
+        name: "S".into(),
+        material,
+        status: render3d::ShapeStatus::Drawing,
+    }];
+    m.v3.shapes_rev += 1;
+    m.poll();
+    assert_eq!(v1(&m), 1);
+    let mut h = view(m);
+    h.run_steps(3);
+    h.get_by_label_contains(&format!("{CONVERT_FIX}: {V1_VANILLA}"));
+    // It loads as PBR: the warning goes.
+    load_csm(h.state_mut(), s, 0);
+    assert_eq!(v1(h.state()), 0);
+}
+
+/// Note IE26: the colour controller's name on a `.csm` follows the `.csm`'s two-layer feature, not SLSF2 bit 24.
+#[test]
+fn colour_controller_name_reads_the_csm_features() {
+    use nif::edit::validate::var_label;
+    use sdc_gui::model::meshes::nif_edit::label_slsf2;
+    const LSCC: &str = "BSLightingShaderPropertyColorController";
+    let two_layer_bit = 1 << 24;
+    assert_eq!(
+        var_label(LSCC, 0, label_slsf2(two_layer_bit | V1_PBR, None)),
+        "Specular colour"
+    );
+    assert_eq!(
+        var_label(LSCC, 0, label_slsf2(two_layer_bit, Some(0))),
+        "Specular colour (no effect on PBR)"
+    );
+    assert_eq!(
+        var_label(LSCC, 0, label_slsf2(0, Some(nif::pbr2::feat::TWO_LAYER))),
+        "Coat colour"
+    );
+}
+
+/// Note IE26: Env map scale stays refused on a shape whose loaded material is a `.csm` (no bit 23, no `.csm` name in
+/// the scene), and an existing var-8 controller over it warns with its own row.
+#[test]
+fn env_map_scale_on_a_loaded_csm() {
+    let mut m = direct(ctrl_scene(0x82));
+    let s = select(&mut m, "S");
+    load_csm(&mut m, s, 0);
+    let mut h = Harness::builder()
+        .with_size(egui::vec2(1400.0, 1800.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        );
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h.run_steps(2);
+    tab(&mut h, "Controllers");
+    h.get_by_role_and_label(AkRole::ComboBox, "Add controller variable")
+        .click();
+    h.run_steps(3);
+    assert!(h
+        .get_by_label("Env map scale (8)")
+        .accesskit_node()
+        .is_disabled());
+    let mut m = direct(ctrl_scene_vars(0x82, [8, 20]));
+    let s = select(&mut m, "S");
+    load_csm(&mut m, s, 0);
+    let e = m.edit.as_ref().unwrap();
+    let env = *e
+        .model
+        .ctrls
+        .iter()
+        .find(|(_, c)| c.var == Some(8))
+        .unwrap()
+        .0;
+    assert_eq!(
+        e.csm_warnings,
+        vec![nif::edit::validate::Warning {
+            level: nif::edit::validate::Level::Warn,
+            target: Target::Block { block: env },
+            text: CSM_ENV_SCALE.into(),
+            fix: None,
+        }]
+    );
 }
 
 /// Resolution (IE14): a name field Tessalith did not write is replaced only after a dialog naming it; Enter keeps it;

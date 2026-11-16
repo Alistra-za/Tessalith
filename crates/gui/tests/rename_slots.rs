@@ -864,6 +864,12 @@ fn the_outputs_leave_the_pbr_folder_safely() {
         .lines()
         .partition(|l| l.contains("steel.csm: no pbr set writes this .csm any more"));
     assert_eq!(csm.len(), 1, "{notes:?}");
+    // Note IE35 (final review B-M4): it says meshes may still name the old path (notes are lowercased above).
+    assert!(
+        csm[0].contains("meshes may still name this path"),
+        "{}",
+        csm[0]
+    );
     assert!(root.join("materials/pbr/arm/steel.csm").is_file());
     assert!(root.join("materials/armor/plate.csm").is_file());
     let notes = notes.join("\n");

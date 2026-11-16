@@ -394,6 +394,37 @@ fn one_channel_fuzz_p(m: &AppModel, v: &SetView, fuzz_sets: &BTreeSet<String>) -
     (!keeps_green(format)).then(|| item.clone())
 }
 
+/// Note IE36 (final review item 11): a fuzz roughness `_p` the engine keeps the G of (Note IE16) reads its height from
+/// R whatever the user picked; a per-file `channels.grayscale_source` other than R gets a row naming the override.
+pub const GRAY_PICK_OVERRULED: &str =
+    "reads its height from R: G holds the fuzz roughness the set's .csm reads, so its channels.grayscale_source pick";
+
+fn gray_pick_overruled(m: &AppModel) -> Vec<ExportIssue> {
+    let Some(project) = m.project.as_ref() else {
+        return vec![];
+    };
+    let mut out = vec![];
+    for v in set_views(m).iter().filter(|v| m.in_run(&v.key)) {
+        let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Height) else {
+            continue;
+        };
+        let kept = m
+            .item(item)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| j.profile.channels.keep_green);
+        let pick = project.file_value(item, "channels.grayscale_source");
+        if let Some(serde_json::Value::String(s)) = pick.filter(|_| kept) {
+            if !s.eq_ignore_ascii_case("r") {
+                out.push(issue(
+                    v,
+                    format!("{}: {item} {GRAY_PICK_OVERRULED} \"{s}\" is not used", v.id),
+                ));
+            }
+        }
+    }
+    out
+}
+
 /// Note IE18: the formats that store a G channel, so a fuzz roughness `_p` keeps its G; BC4 and R8 store R only.
 fn keeps_green(f: engine::config::Format) -> bool {
     use engine::config::Format::*;
@@ -404,12 +435,19 @@ fn keeps_green(f: engine::config::Format) -> bool {
 }
 
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
-/// set views (audit 7, DECISIONS Note Y7).
+/// set views (audit 7, DECISIONS Note Y7), plus `evidence_rev` (Note IE32: the PGPatcher entries and the fuzz `_p`
+/// check read the auto flags, which read the mesh evidence).
 pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
+    let rev = m.evidence_rev;
     super::cached(
         m,
-        |c| c.blocks.clone(),
-        |c, b| c.blocks = Some(b),
+        |c| {
+            c.blocks
+                .as_ref()
+                .filter(|(r, _)| *r == rev)
+                .map(|(_, b)| b.clone())
+        },
+        |c, b| c.blocks = Some((rev, b)),
         || Arc::new(build_blocks(m)),
     )
 }
@@ -675,6 +713,7 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
                 .map(move |w| issue(v, format!("{}: {w}", v.id)))
         })
         .collect();
+    out.extend(gray_pick_overruled(m));
     // Note IE10: a set's clamped or left-out `.csm` values, and why its `.csm` is not written. Here, not in Problems'
     // own loops, so a partial plan carries them over with the other asks (Note FL7).
     let csms = super::csm_export::csm_sets(m);
@@ -703,9 +742,10 @@ fn build_asks(m: &AppModel) -> Vec<ExportIssue> {
         out.push(issue(
             v,
             format!(
-                "{}: its PBR texture set files are not written: {}",
+                "{}: its PBR texture set files are not written: {}; {}",
                 v.id,
-                super::csm_export::NO_ENTRY
+                super::csm_export::NO_ENTRY,
+                super::csm_export::EARLIER_EXPORT
             ),
         ));
     }

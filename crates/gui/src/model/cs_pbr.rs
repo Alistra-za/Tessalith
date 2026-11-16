@@ -502,6 +502,19 @@ impl AppModel {
                 super::sets::fuzz_texture_sets(m),
             )
         };
+        // Note IE25: the first texture-set block on an Auto set whose pick is plain PBR would turn it PBR Landscape
+        // (Note BM) and drop its `.csm`, so the shader is pinned to `pbr` in the same undo step.
+        if self.pins_pbr(set) {
+            let l = label.to_string();
+            self.batch_edit(label, move |m| {
+                let id = s.clone();
+                m.edit_docs(&l, merge, false, move |_, d| f(d, &id));
+                if m.cs_block(&s, Kind::Txst).is_some() {
+                    m.set_shader(&s, Some(engine::shader::Shader::Pbr));
+                }
+            });
+            return;
+        }
         let before = inputs(self);
         self.edit_docs(label, merge, false, move |_, d| f(d, &s));
         // Note BM: a texture-set block that comes or goes is shader-pick input, so that edit plans again; so is the
@@ -509,6 +522,42 @@ impl AppModel {
         if inputs(self) != before {
             // A sets-document edit: no partial plan.
             self.replan_after_edit(false);
+        }
+    }
+
+    /// Note IE25: set `set` is on Auto with no texture-set block, on the CS target, and its pick gets a `.csm`.
+    fn pins_pbr(&self, set: &str) -> bool {
+        self.target == engine::config::Target::Cs
+            && self.cs_block(set, Kind::Txst).is_none()
+            && super::sets::views(self).iter().any(|v| {
+                same_id(&v.id, set) && v.shader_choice.is_none() && super::csm_export::gets_csm(v)
+            })
+    }
+
+    /// Note IE25: whether set `set` gets a `.csm` by its saved shader and texture-set block, so it holds while the
+    /// plan of an edit is still in flight: a chosen PBR shader but PBR Landscape, or on Auto a plain PBR pick and no
+    /// block (a block on Auto picks PBR Landscape on the CS target, Note BM).
+    pub fn keeps_csm(&self, set: &str) -> bool {
+        use engine::shader::Shader;
+        if self.target != engine::config::Target::Cs {
+            return false;
+        }
+        let views = super::sets::views(self);
+        let Some(v) = views.iter().find(|v| same_id(&v.id, set)) else {
+            return false;
+        };
+        let entries = self
+            .sets_doc
+            .as_ref()
+            .map(|d| d.entries())
+            .unwrap_or_default();
+        let choice = entries
+            .iter()
+            .find(|e| same_id(&e.id, set))
+            .and_then(|e| e.shader);
+        match choice {
+            Some(s) => s.is_pbr_family() && s != Shader::PbrLandscape,
+            None => self.cs_block(set, Kind::Txst).is_none() && super::csm_export::gets_csm(v),
         }
     }
 

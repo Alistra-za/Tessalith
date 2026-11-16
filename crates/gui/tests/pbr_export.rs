@@ -28,6 +28,18 @@ fn the_cached_blocks_are_handed_out_without_a_copy() {
     assert!(std::sync::Arc::ptr_eq(&a, &b));
 }
 
+/// Note IE32 (final review item 7): new mesh evidence (here Tree_Anim, which only `evidence_rev` follows) builds the
+/// export blocks again: the PGPatcher entries they check read the auto flags.
+#[test]
+fn new_mesh_evidence_builds_the_blocks_again() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    let a = export_blocks(&m);
+    assert!(std::sync::Arc::ptr_eq(&a, &export_blocks(&m)));
+    m.set_tree_anim([("landscape/rock01".to_string(), true)].into());
+    assert!(!std::sync::Arc::ptr_eq(&a, &export_blocks(&m)));
+}
+
 #[test]
 fn a_feature_without_its_texture_blocks() {
     let d = tempfile::tempdir().unwrap();

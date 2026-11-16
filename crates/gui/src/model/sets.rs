@@ -139,9 +139,9 @@ impl SlotKind {
     }
 }
 
-/// Note GI (X16): the Detail normal card's hover in a landscape set.
-pub const DETAIL_NORMAL_HOVER: &str =
-    "Community Shaders doesn't draw the projected detail normal in this build; it shows without CS.";
+/// Note GI (X16), Note IE24: the Detail normal card's hover in a landscape set. CS 1.9 did not draw it; the cs2
+/// shaders sample it, so the 3D preview draws it, and CS 2.0 in game is not captured.
+pub const DETAIL_NORMAL_HOVER: &str = "The 3D preview draws the projected detail normal, as the CS 2.0 shaders sample it; whether CS 2.0 draws it in game is untested (CS 1.9 did not).";
 
 /// The card title of `slot` holding item `key`: a `_coat` source in the Subsurface slot is the coat colour + strength
 /// (M6 Track E spec §3.1, DECISIONS Note U2), decided by the file name.

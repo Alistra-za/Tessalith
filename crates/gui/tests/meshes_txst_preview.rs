@@ -341,7 +341,8 @@ fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
     assert!(spec(&m).txst.is_empty());
 }
 
-/// The render thread loads a scanned mesh with the pick's slots in place of the shape's own (WARP, stand-in shaders).
+/// The render thread loads a scanned mesh with the pick's slots in place of the shape's own (stand-in shaders). It
+/// runs on the real device (`Gpu::new`, hardware first), so its name holds `render_` and it runs with the GPU tests.
 #[test]
 fn the_render_thread_loads_the_picked_slots() {
     use sdc_gui::model::viewport3d::{FileSource, MeshSpec, Viewport3d};

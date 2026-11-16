@@ -6,17 +6,16 @@ use super::edit_fields::{
     fit_width, float_named, from_picker, row_label, selected, set_name, take_focus, warnings, Act,
     OUT_OF_RANGE,
 };
-use crate::model::meshes::nif_edit::{NifEdit, Playing};
+use crate::model::meshes::nif_edit::{label_slsf2, NifEdit, Playing};
 use crate::model::meshes::MeshesModel;
 use crate::model::viewport3d::Clock;
 use crate::ui::status::AMBER;
 use eframe::egui;
 use nif::ctrl::{Sequence, TimeCtrl};
-use nif::edit::validate::{ctrl_title, var_label, Target, ENV_SCALE_PBR};
+use nif::edit::validate::{ctrl_title, env_scale_guarded, var_label, Target, ENV_SCALE_PBR};
 use nif::edit::{anchor_role, anchor_shape, merge_key, Anchor, Op, Owner, Role};
 use nif::fields::{Field, Value};
 use nif::keys::{Key, KeyData, KeyGroup};
-use nif::material::SLSF2_TRUE_PBR;
 use nif::model::{PropModel, ShapeModel};
 use nif::props::LightingTrailer;
 
@@ -28,12 +27,28 @@ const FLOAT_VARS: [u32; 10] = [0, 8, 9, 10, 11, 12, 20, 21, 22, 23];
 const COLOR_VARS: [u32; 2] = [0, 1];
 const CYCLES: [&str; 3] = ["Loop", "Reverse", "Clamp"];
 
-/// The shape's shader flags, 0 without a lit shader: the variable labels and the PBR guard (B-P39) read them.
-fn shape_slsf2(e: &NifEdit, shape: &ShapeModel) -> u32 {
-    shape
-        .shader
-        .and_then(|b| e.model.lighting.get(&b))
-        .map_or(0, |l| l.lighting.slsf2)
+/// What a shape's controller rows read from its shader (0 and unguarded without a lit shader).
+#[derive(Clone, Copy)]
+struct ShapeFlags {
+    /// The flags the variable names read (Note IE26: bit 23 when the loaded material is `.csm` PBR).
+    label: u32,
+    /// B-P39, Note IE26: Env map scale (LSCF 8) is refused: a v1 PBR flag, a `.csm` name, or a loaded `.csm` PBR
+    /// material.
+    env_guard: bool,
+}
+
+fn shape_flags(m: &MeshesModel, e: &NifEdit, shape: &ShapeModel) -> ShapeFlags {
+    let Some(l) = shape.shader.and_then(|b| e.model.lighting.get(&b)) else {
+        return ShapeFlags {
+            label: 0,
+            env_guard: false,
+        };
+    };
+    let csm = m.loaded_csm_pbr(shape.block);
+    ShapeFlags {
+        label: label_slsf2(l.lighting.slsf2, csm),
+        env_guard: csm.is_some() || env_scale_guarded(l.lighting.slsf2, l.lighting.name.as_deref()),
+    }
 }
 
 /// The class without its Bethesda prefix, for the small grey tag beside a row's title.
@@ -70,7 +85,7 @@ pub(super) fn controllers_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, a
     }
     for (owner, title, prop) in &chains {
         ui.strong(*title);
-        chain(ui, e, act, shape, *owner, prop, clock);
+        chain(ui, m, e, act, shape, *owner, prop, clock);
         ui.separator();
     }
 }
@@ -148,8 +163,10 @@ fn preview(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn chain(
     ui: &mut egui::Ui,
+    m: &MeshesModel,
     e: &NifEdit,
     act: &mut Act,
     shape: &ShapeModel,
@@ -157,7 +174,7 @@ fn chain(
     prop: &PropModel,
     clock: Option<Clock>,
 ) {
-    let slsf2 = shape_slsf2(e, shape);
+    let flags = shape_flags(m, e, shape);
     let users = prop.users.len();
     let mut locked = false;
     // D9: only a shared alpha must split before an add (clip controllers included, C4). A shared shader adds in
@@ -184,11 +201,11 @@ fn chain(
     ui.add_enabled_ui(!locked, |ui| {
         for i in 0..prop.ctrls.len() {
             if let Some((c, at)) = ctrl_anchor(e, shape, owner, prop, i) {
-                ui.group(|ui| row(ui, e, act, c, &at, clock, slsf2));
+                ui.group(|ui| row(ui, e, act, c, &at, clock, flags));
             }
         }
     });
-    add_row(ui, e, act, shape, owner, prop);
+    add_row(ui, m, e, act, shape, owner, prop);
 }
 
 /// Controller `i` of `prop` and its row's anchor: class, variable, and how many earlier controllers share both.
@@ -226,10 +243,10 @@ fn row(
     c: &TimeCtrl,
     at: &Anchor,
     clock: Option<Clock>,
-    slsf2: u32,
+    flags: ShapeFlags,
 ) {
     let managed = e.model.managed(c.block);
-    let title = ctrl_title(c, slsf2);
+    let title = ctrl_title(c, flags.label);
     egui::Sides::new().shrink_left().truncate().show(
         ui,
         |ui| {
@@ -271,7 +288,7 @@ fn row(
         return;
     }
     if let Some(v) = c.var {
-        variable(ui, e, act, c, at, &title, v, managed, slsf2);
+        variable(ui, e, act, c, at, &title, v, managed, flags);
     }
     let cycle = (c.flags >> 1) & 3;
     ui.horizontal(|ui| {
@@ -873,13 +890,17 @@ fn push_keys(
 /// Adds a controller to `prop` (D9). Shader: a class (Float | Colour) and variable picker; alpha: TestRef only.
 fn add_row(
     ui: &mut egui::Ui,
+    m: &MeshesModel,
     e: &NifEdit,
     act: &mut Act,
     shape: &ShapeModel,
     owner: Owner,
     prop: &PropModel,
 ) {
-    let slsf2 = shape_slsf2(e, shape);
+    let ShapeFlags {
+        label: slsf2,
+        env_guard,
+    } = shape_flags(m, e, shape);
     let id = egui::Id::new(("meshes-edit-ctrl-add", prop.block));
     let (mut class_idx, mut var): (usize, u32) = ui.data(|d| d.get_temp(id)).unwrap_or((0, 20));
     if owner == Owner::Shader {
@@ -907,9 +928,9 @@ fn add_row(
                 var = if class_idx == 0 { 20 } else { 1 };
             }
         });
-        // B-P39: env map scale on PBR crashed the game. A remembered 8 falls back to the default.
-        let pbr = slsf2 & SLSF2_TRUE_PBR != 0;
-        let env_blocked = |class_idx: usize, v: u32| pbr && class_idx == 0 && v == 8;
+        // B-P39: env map scale on PBR crashed the game (Note IE26: a `.csm` too). A remembered 8 falls back to the
+        // default.
+        let env_blocked = |class_idx: usize, v: u32| env_guard && class_idx == 0 && v == 8;
         if env_blocked(class_idx, var) {
             var = 20;
         }
@@ -1098,8 +1119,9 @@ fn variable(
     title: &str,
     v: u32,
     managed: bool,
-    slsf2: u32,
+    flags: ShapeFlags,
 ) {
+    let slsf2 = flags.label;
     ui.horizontal(|ui| {
         row_label(ui, "Variable");
         let offered: &[u32] = if &*c.class == LSCC {
@@ -1120,7 +1142,7 @@ fn variable(
                 for &o in extra.iter().chain(offered) {
                     let text = format!("{} ({o})", var_label(&c.class, o, slsf2));
                     // B-P40: as in the Add picker. A current 8 stays shown (selected text) with its Error.
-                    if &*c.class == LSCF && o == 8 && slsf2 & SLSF2_TRUE_PBR != 0 {
+                    if &*c.class == LSCF && o == 8 && flags.env_guard {
                         ui.add_enabled(false, egui::Button::selectable(pick == o, text))
                             .on_disabled_hover_text(ENV_SCALE_PBR);
                     } else {

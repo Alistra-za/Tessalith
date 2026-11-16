@@ -591,6 +591,8 @@ fn a_csm_set_without_a_csm_writes_no_inline_json() {
         .into_iter()
         .find(|t| t.contains(ROCK) && t.contains(NO_ENTRY));
     assert!(row.is_some(), "{:?}", problem_texts(&m));
+    // Note IE35 (final review B-M3): the row says an earlier export's files stay in force.
+    assert!(row.unwrap().contains(EARLIER_EXPORT));
 }
 
 /// The set's PGPatcher entry as the export builds it.
@@ -805,7 +807,7 @@ fn txst_csms_blocks_a_set_with_no_pgpatcher_entry() {
     let got = txst_csms(&m, &edids(&["Rock01"]));
     assert_eq!(
         got["Rock01"].blocked.as_deref(),
-        Some(format!("{ROCK}: {NO_ENTRY}").as_str())
+        Some(format!("{ROCK}: {NO_ENTRY}; {EARLIER_EXPORT}").as_str())
     );
     assert_eq!(got["Rock01"].path, ROCK_CSM);
 }

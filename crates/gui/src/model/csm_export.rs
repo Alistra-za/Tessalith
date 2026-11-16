@@ -83,6 +83,19 @@ fn number_key(key: &str) -> Option<NumberKey> {
 /// Why a set that gets a `.csm` has none this run, so its texture-set file is not written either.
 pub const NO_ENTRY: &str = "the set writes no .csm this run (it has no PGPatcher entry)";
 
+/// Note IE35: the end of every blocked set's reason. A blocked set writes no `.csm` and no texture-set JSON, but the
+/// files an earlier export wrote are kept (refused paths are not orphans), so the game still reads them.
+pub const EARLIER_EXPORT: &str =
+    "a .csm and texture-set JSON from an earlier export stay in force in game until removed";
+
+/// Note IE35 (final review B-M4): the export note on a `.csm` no set writes any more, after its path.
+pub const CSM_ORPHAN: &str = "no PBR set writes this .csm any more; the file was left in place, and meshes may still name this path (Use the set's .csm in Meshes points one at its set's new .csm)";
+
+/// A blocked set's reason: `{id}: {why}; ` and [`EARLIER_EXPORT`].
+fn blocked_text(id: &str, why: &str) -> String {
+    format!("{id}: {why}; {EARLIER_EXPORT}")
+}
+
 /// The texture-set key a `.csm` has no key for: dropped, with a warning when the block holds a non-default value.
 pub const NO_CSM_KEY: &str = "innerLayerDisplacementOffset";
 
@@ -276,11 +289,14 @@ fn build_any(
             .map(|w| format!("{id}: {w}")),
     );
     let blocked = if missing.is_empty() {
-        invalid(&c).map(|why| format!("{id}: no .csm written: {why}"))
+        invalid(&c).map(|why| blocked_text(id, &format!("no .csm written: {why}")))
     } else {
-        Some(format!(
-            "{id}: no .csm written: the set has no {} texture; Community Shaders PBR needs Diffuse, Normal and RMAOS",
-            missing.join(" or ")
+        Some(blocked_text(
+            id,
+            &format!(
+                "no .csm written: the set has no {} texture; Community Shaders PBR needs Diffuse, Normal and RMAOS",
+                missing.join(" or ")
+            ),
         ))
     };
     SetCsm {
@@ -494,7 +510,7 @@ fn no_entry(v: &SetView) -> SetCsm {
         path: csm_path(v.prefix.as_deref().unwrap_or(&v.id)),
         csm: Csm::default(),
         warnings: vec![],
-        blocked: Some(format!("{}: {NO_ENTRY}", v.id)),
+        blocked: Some(blocked_text(&v.id, NO_ENTRY)),
     }
 }
 
@@ -528,6 +544,13 @@ pub fn csm_sets(m: &AppModel) -> Vec<(SetView, SetCsm)> {
 pub const CSM_BLOCKED_TAIL: &str =
     "the shapes draw as PGPatcher 2.3.1 patches them (vanilla in CS 2.0)";
 
+/// Note IE34: the end of a [`NO_ENTRY`] line: with no entry PGPatcher patches none of the set's meshes.
+pub const NO_ENTRY_TAIL: &str = "PGPatcher has no entry for this set, so nothing patches its meshes; they keep the material their NIF names";
+
+/// Note IE33: the end of a PBR Landscape set's blocked preview material line (it is never exported).
+pub const LANDSCAPE_PREVIEW_TAIL: &str =
+    "the preview draws the plane vanilla (the game reads the set's texture-set JSON, not a .csm)";
+
 /// Note IE13: one set's `.csm` as the set editor and the set preview show it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct ViewCsm {
@@ -536,7 +559,7 @@ pub struct ViewCsm {
     /// CS 2.0 draws landscape from), built from the same PGPatcher entry and block, so the preview's plane draws PBR.
     pub preview_only: bool,
     /// The set editor's lines about it: [`super::set_preview::PGPATCHER_V1`], then a blocked `.csm`'s reason with
-    /// [`CSM_BLOCKED_TAIL`]. None for a preview-only one.
+    /// [`CSM_BLOCKED_TAIL`]. A preview-only one has a line only when blocked, with [`LANDSCAPE_PREVIEW_TAIL`].
     pub lines: Vec<String>,
 }
 
@@ -569,23 +592,42 @@ fn build_view_csm(m: &AppModel, key: &str) -> Option<ViewCsm> {
     if super::sets::is_pbr_landscape(&v) {
         // No entry: no simulation either, the plane shows the plain textures.
         let e = e?;
+        let csm = build_any(&v, &e.settings, block, &e.slots);
+        // Note IE33 (design §5.1): a blocked preview material draws vanilla; the line names the file and why.
+        let lines = csm
+            .blocked
+            .as_ref()
+            .map(|why| {
+                // Never exported: the earlier-export tail does not apply.
+                let why = why
+                    .strip_suffix(&format!("; {EARLIER_EXPORT}"))
+                    .unwrap_or(why);
+                format!(
+                    "{} (preview only): {why}; {LANDSCAPE_PREVIEW_TAIL}",
+                    csm.path
+                )
+            })
+            .into_iter()
+            .collect();
         return Some(ViewCsm {
-            csm: build_any(&v, &e.settings, block, &e.slots),
+            csm,
             preview_only: true,
-            lines: vec![],
+            lines,
         });
     }
+    // Note IE34: with no entry PGPatcher patches nothing, so the tail says the meshes keep their own material.
+    let tail = if e.is_some() {
+        CSM_BLOCKED_TAIL
+    } else {
+        NO_ENTRY_TAIL
+    };
     let csm = match e {
         Some(e) => entry_csm(&v, &e, block)?,
         None if gets_csm(&v) => no_entry(&v),
         None => return None,
     };
     let lines = std::iter::once(super::set_preview::PGPATCHER_V1.to_string())
-        .chain(
-            csm.blocked
-                .as_ref()
-                .map(|why| format!("{why}; {CSM_BLOCKED_TAIL}")),
-        )
+        .chain(csm.blocked.as_ref().map(|why| format!("{why}; {tail}")))
         .collect();
     Some(ViewCsm {
         csm,
@@ -668,10 +710,7 @@ pub fn finish(
         .into_iter()
         .filter(|_| !p.scoped)
     {
-        notes.push(format!(
-            "{}: no PBR set writes this .csm any more; the file was left in place",
-            path.display()
-        ));
+        notes.push(format!("{}: {}", path.display(), CSM_ORPHAN));
     }
     out
 }

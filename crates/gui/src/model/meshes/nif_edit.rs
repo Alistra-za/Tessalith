@@ -310,6 +310,27 @@ const PBR_SLOTS: [&str; 9] = [
     "Unused",
 ];
 
+/// Note IE26: the shader flags the editor's names read. Bit 23 stands for "the material is CS 2.0 `.csm` PBR" (`csm`:
+/// its feature bits), never for the NIF's own v1 bit: CS 2.0 draws a v1 shape vanilla, so it gets the vanilla names.
+/// On a `.csm` material the two-layer and subsurface bits (24, 26) are its features', not the NIF's.
+pub fn label_slsf2(slsf2: u32, csm: Option<u32>) -> u32 {
+    use nif::pbr2::feat;
+    // `var_label`'s CS 1.x PBR reading of SLSF2 bits 24 and 26.
+    const SLSF2_TWO_LAYER: u32 = 1 << 24;
+    const SLSF2_SUBSURFACE: u32 = 1 << 26;
+    let Some(f) = csm else {
+        return slsf2 & !SLSF2_TRUE_PBR;
+    };
+    let mut out = (slsf2 & !(SLSF2_TWO_LAYER | SLSF2_SUBSURFACE)) | SLSF2_TRUE_PBR;
+    if f & feat::TWO_LAYER != 0 {
+        out |= SLSF2_TWO_LAYER;
+    }
+    if f & feat::SUBSURFACE != 0 {
+        out |= SLSF2_SUBSURFACE;
+    }
+    out
+}
+
 /// The Shader tab's name of texture-set slot `slot` (spec §7, F§1.3).
 pub fn edit_slot_label(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) -> &'static str {
     if slsf2 & SLSF2_TRUE_PBR != 0 {
@@ -1714,7 +1735,16 @@ pub(crate) fn card_ctrls(m: &NifModel) -> HashMap<u32, String> {
         .filter_map(|s| {
             let other = s.shader.is_some_and(|b| !m.lighting.contains_key(&b));
             let lit = s.shader.and_then(|b| m.lighting.get(&b));
-            let slsf2 = lit.map_or(0, |l| l.lighting.slsf2);
+            // Note IE26: no loaded material here (the cards read the file), so a `.csm` name stands for it, with no
+            // features.
+            let slsf2 = lit.map_or(0, |l| {
+                let csm = l
+                    .lighting
+                    .name
+                    .as_deref()
+                    .and_then(nif::path::canon_material);
+                label_slsf2(l.lighting.slsf2, csm.map(|_| 0))
+            });
             let props = [
                 lit.map(|l| &l.prop),
                 s.alpha.and_then(|b| m.alphas.get(&b)).map(|a| &a.prop),
@@ -2053,8 +2083,9 @@ impl MeshesModel {
                     .filter(|(id, _)| e.anim_last.contains(id) && !now.contains(id))
                     .collect();
                 for (id, m) in gone {
-                    // false: no load sent yet; the next load carries the file material
-                    self.v3.set_material(id, m);
+                    // false: no load sent yet; the next load carries the file material. A frame (Note IE27): the
+                    // material did not change, so a missing `.csm` is not asked for again.
+                    self.v3.set_frame_material(id, m);
                 }
             }
             e.anim_last = now;
@@ -2097,8 +2128,9 @@ impl MeshesModel {
             return;
         }
         for (id, m) in e.frame_materials(t) {
-            // false: no load of this content sent yet (a reload); the next frame tries again.
-            if !self.v3.set_material(id, m) {
+            // false: no load of this content sent yet (a reload); the next frame tries again. Note IE27: a frame
+            // never asks for a missing `.csm` again.
+            if !self.v3.set_frame_material(id, m) {
                 return;
             }
         }

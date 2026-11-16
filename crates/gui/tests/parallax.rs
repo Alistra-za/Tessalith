@@ -304,6 +304,35 @@ fn fuzz_texture_needs_two_channels() {
     assert!(fuzz_row(m).is_some(), "undo brings the row back");
 }
 
+/// Note IE36 (final review item 11): a per-file `channels.grayscale_source` other than R on a fuzz `_p` whose G the
+/// engine keeps is overruled (Note IE16), and a row names the override; R itself, or no pick, gets none.
+#[test]
+fn an_overruled_gray_pick_has_a_row() {
+    use sdc_gui::model::pbr_export::{export_asks, GRAY_PICK_OVERRULED};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fuzz_fixture(d.path(), true);
+    let rows = |m: &AppModel| -> Vec<String> {
+        export_asks(m)
+            .into_iter()
+            .map(|i| i.text)
+            .filter(|t| t.contains(GRAY_PICK_OVERRULED))
+            .collect()
+    };
+    assert!(rows(&m).is_empty(), "no pick: {:?}", rows(&m));
+    m.set_field(ROCK_P, "channels.grayscale_source", json!("g"));
+    idle(&mut m);
+    assert!(p_job(&m).profile.channels.keep_green);
+    assert_eq!(
+        rows(&m),
+        [format!(
+            "{ROCK}: {ROCK_P} {GRAY_PICK_OVERRULED} \"g\" is not used"
+        )]
+    );
+    m.set_field(ROCK_P, "channels.grayscale_source", json!("r"));
+    idle(&mut m);
+    assert!(rows(&m).is_empty(), "R: {:?}", rows(&m));
+}
+
 /// Two-channel formats pass; R8, one channel like BC4, is refused too.
 #[test]
 fn fuzz_texture_bc5_ok() {

@@ -2555,6 +2555,8 @@ fn a_blocked_set_csm_keeps_the_shape_material_with_the_reason() {
     assert!(
         lines.iter().any(|l| l.starts_with(ROCK)
             && l.contains("no .csm written")
+            // Note IE35: an earlier export's files stay in force
+            && l.contains(sdc_gui::model::csm_export::EARLIER_EXPORT)
             && l.ends_with(CSM_BLOCKED_TAIL)),
         "{lines:?}"
     );
@@ -2570,7 +2572,7 @@ fn a_blocked_set_csm_keeps_the_shape_material_with_the_reason() {
 #[test]
 fn a_pbr_set_with_no_pgpatcher_entry_shows_its_reason_in_place_of_needs_cs() {
     use egui_kittest::kittest::Queryable;
-    use sdc_gui::model::csm_export::{CSM_BLOCKED_TAIL, NO_ENTRY};
+    use sdc_gui::model::csm_export::{EARLIER_EXPORT, NO_ENTRY, NO_ENTRY_TAIL};
     let dir = tempfile::tempdir().unwrap();
     let mut m = fuzzy_rock(dir.path());
     let key = rock(&m).0.key;
@@ -2580,7 +2582,7 @@ fn a_pbr_set_with_no_pgpatcher_entry_shows_its_reason_in_place_of_needs_cs() {
         csm_lines(&m, &key),
         [
             PGPATCHER_V1.to_string(),
-            format!("{ROCK}: {NO_ENTRY}; {CSM_BLOCKED_TAIL}")
+            format!("{ROCK}: {NO_ENTRY}; {EARLIER_EXPORT}; {NO_ENTRY_TAIL}")
         ]
     );
     let mut s = SetPreview::new(None, DEFAULT_CAP);
@@ -2597,7 +2599,9 @@ fn a_pbr_set_with_no_pgpatcher_entry_shows_its_reason_in_place_of_needs_cs() {
     m.settings.set_view_3d = false;
     let mut h = app_ui(m);
     h.run_steps(4);
-    h.get_by_label(&format!("{ROCK}: {NO_ENTRY}; {CSM_BLOCKED_TAIL}"));
+    h.get_by_label(&format!(
+        "{ROCK}: {NO_ENTRY}; {EARLIER_EXPORT}; {NO_ENTRY_TAIL}"
+    ));
 }
 
 /// Note IE13 (fix round 1, t10 item 9): a switch off CS drops the set's `.csm` (the view key holds the target), so its
@@ -2674,6 +2678,32 @@ fn a_pbr_landscape_plane_draws_a_preview_only_csm() {
     );
     let p = sdc_gui::model::csm_export::prepare(&m).expect("CS");
     assert!(p.files.is_empty(), "never exported: {:?}", p.files);
+}
+
+/// Note IE33 (final review item 8, design §5.1): a PBR Landscape set whose preview material is blocked draws its plane
+/// vanilla, and the set editor says so, naming the file and the reason.
+#[test]
+fn a_blocked_landscape_preview_material_has_a_line() {
+    use sdc_gui::model::csm_export::{EARLIER_EXPORT, LANDSCAPE_PREVIEW_TAIL};
+    let dir = tempfile::tempdir().unwrap();
+    let mut m = landscape_rock(dir.path());
+    let key = rock(&m).0.key;
+    m.set_json_value(ROCK, "slot6", Some(json!("")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let c = sdc_gui::model::csm_export::view_csm(&m, &key).expect("a preview-only material");
+    assert!(c.preview_only);
+    let blocked = c.csm.blocked.clone().expect("blocked: no RMAOS");
+    // Never exported: no earlier-export tail on this line.
+    let why = blocked
+        .strip_suffix(&format!("; {EARLIER_EXPORT}"))
+        .unwrap_or(&blocked);
+    assert!(why.contains("no RMAOS"), "{why}");
+    assert_eq!(
+        csm_lines(&m, &key),
+        [format!(
+            "materials\\pbr\\landscape\\rock01.csm (preview only): {why}; {LANDSCAPE_PREVIEW_TAIL}"
+        )]
+    );
 }
 
 /// Note IE13 (fix round 1, t10 item 10): on the real device the plane's material is PBR.

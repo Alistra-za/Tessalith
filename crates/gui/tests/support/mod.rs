@@ -154,6 +154,33 @@ pub fn pbr_opened_plain(dir: &Path) -> AppModel {
     m
 }
 
+/// Note IE25: `pbr_opened` with the fixture under `textures/furniture/` (set `furniture/rock01`, outputs
+/// `textures\pbr\furniture\rock01*`), so rock01's Auto shader picks plain PBR: no landscape path (Note BM).
+pub fn pbr_opened_auto(dir: &Path) -> AppModel {
+    let root = mod_folder(dir);
+    std::fs::rename(root.join("landscape"), root.join("furniture")).unwrap();
+    let settings = GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(root);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    choose_export(&mut m, dir.join("export"));
+    m.decide("furniture/rock01.png", Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(
+        "furniture/rock01_normal.png",
+        Answer::Subtype(Subtype::PbrNormal),
+    );
+    m.decide(
+        "furniture/rock01_normal.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
 /// A model built as the app builds it (no test overrides), opened on `root` with exports under `export`.
 pub fn opened_as_the_app(root: PathBuf, export: PathBuf) -> AppModel {
     let settings = GuiSettings {

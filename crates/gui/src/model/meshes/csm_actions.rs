@@ -23,6 +23,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 /// Why Convert to .csm (or Use the set's .csm) is refused: no project set owns the shape's diffuse.
 pub const NO_SET: &str = "Make a texture set for these textures first.";
+/// Note IE38: "Use the set's .csm" on a shape the edit has no lit shader for (or no edit at all).
+pub const NO_LIGHTING: &str = "This shape has no BSLightingShaderProperty to name a .csm.";
 /// Off the Community Shaders target there is no `.csm` export.
 pub const NOT_CS: &str =
     "A .csm is a Community Shaders file: set the project's target to Community Shaders first.";
@@ -31,6 +33,11 @@ pub const SETS_LOCKED: &str =
     "The project's texture sets cannot be edited now, so the shape's values have nowhere to go.";
 /// Note IE15 (design §5.4, §7): CS 2.0 may draw a `.csm` value where a controller animates the NIF's.
 pub const CSM_CTRL: &str = "CS 2.0 may not animate values a .csm sets";
+/// Note IE26: Env map scale animated over a `.csm` material; CS 1.x crashed on it over v1 PBR (B-P39).
+pub const CSM_ENV_SCALE: &str =
+    "Env map scale over a .csm: CS 1.x crashed on it over PBR, and CS 2.0 is untested";
+/// The float controller class whose variable 8 is Env map scale.
+const LSCF: &str = "BSLightingShaderPropertyFloatController";
 /// The `fuzzRoughness` block key: a number, not in `TXST_PARAMS`.
 const FUZZ_ROUGHNESS: &str = "fuzzRoughness";
 
@@ -226,8 +233,8 @@ fn is_switch(key: &str) -> bool {
     BLOCK_SWITCHES.iter().any(|(k, _)| *k == key)
 }
 
-/// The block values that stand for `v`: the numbers `csm_from_values` writes (clamped to the spec; a colour to 0-1,
-/// which is all `#rrggbb` holds), the fuzz roughness when it is not -1, and the glint, thin-surface, foliage and
+/// The block values that stand for `v`: the numbers `csm_from_values` writes (`pbr2::csm_clamp`: the `.csm` schema's
+/// ranges, Note IE28; a colour to 0-1, which is all `#rrggbb` holds), the fuzz roughness when it is not -1, and the glint, thin-surface, foliage and
 /// fuzz-roughness-texture switches that are on.
 pub fn shape_block(v: &PbrValues) -> BTreeMap<String, Json> {
     let c = pbr2::csm_from_values(v);
@@ -237,7 +244,7 @@ pub fn shape_block(v: &PbrValues) -> BTreeMap<String, Json> {
         match c.values.get(name) {
             Some(Value::Color(_)) => {
                 let rgb: Vec<f64> = (i..i + 3)
-                    .map(|j| csm::num(pbr2::clamp_param(j, v.params[j]).clamp(0.0, 1.0)))
+                    .map(|j| csm::num(pbr2::csm_clamp(j, v.params[j])))
                     .collect();
                 out.insert(key.to_string(), json!(rgb));
             }
@@ -462,7 +469,14 @@ impl MeshesModel {
     /// Why "Use the set's .csm" is off for shape `shape` (None: on): off CS, a v1 shape (Convert does it), no project
     /// set owns its diffuse, or its name is that `.csm` already.
     pub fn use_set_csm_off(&self, shape: u32) -> Option<String> {
-        let l = lighting_of(&self.edit.as_ref()?.model, shape)?;
+        // Note IE38 (final review B-M7): a failed lookup turns it off with a reason, never on.
+        let Some(l) = self
+            .edit
+            .as_ref()
+            .and_then(|e| lighting_of(&e.model, shape))
+        else {
+            return Some(NO_LIGHTING.into());
+        };
         if let Some(why) = self.target_off() {
             return Some(why.into());
         }
@@ -533,6 +547,16 @@ impl MeshesModel {
             .unwrap_or("")
             .to_string();
         let force = agreed.is_some_and(|a| a == current);
+        // Note IE38 (final review B-M1): a name field holding another `.csm` than the set's asks before it is replaced,
+        // as a foreign name does.
+        let canon = nif::path::canon_material;
+        if !force && canon(&current).is_some_and(|c| Some(c) != canon(&set.path)) {
+            return Ok(Step::Ask(CsmAsk::Name {
+                shape,
+                old: current,
+                then,
+            }));
+        }
         let name_asks = |r: EditError| match r {
             EditError::NameInUse(old) => Ok(Step::Ask(CsmAsk::Name { shape, old, then })),
             r => Err(r.to_string()),
@@ -661,6 +685,17 @@ impl MeshesModel {
         }
     }
 
+    /// Note IE26: the feature bits of shape `block`'s loaded material when it is CS 2.0 `.csm` PBR (`v3.shapes`, from
+    /// its resolved `.csm`); None for any other material, or before the shape loads.
+    pub fn loaded_csm_pbr(&self, block: u32) -> Option<u32> {
+        self.v3
+            .shapes
+            .iter()
+            .find(|s| s.id.0 == block)
+            .and_then(|s| s.material.pbr.as_ref())
+            .map(|p| p.features)
+    }
+
     /// [`Self::refresh_csm_warnings`] when the edit (`rev`) or the loaded shapes (`v3.shapes_rev`, which land later
     /// than the edit) changed since the last build; an idle poll builds nothing (Note FI18).
     pub(super) fn poll_csm_warnings(&mut self) {
@@ -694,7 +729,8 @@ impl MeshesModel {
 
 /// [`MeshesModel::refresh_csm_warnings`]'s rows: the PBR value controllers are those whose variable means another
 /// value on a PBR shape (`var_label` with and without the PBR flag: LSCF 9 and 10, LSCC 0), on lighting properties
-/// with a user whose loaded material has PBR values.
+/// with a user whose loaded material has PBR values; Env map scale there has its own row (Note IE26). Also
+/// `V1_VANILLA` on a v1 shape whose name field names a `.csm` that loaded no PBR values (Note IE37).
 pub fn csm_ctrl_warnings(m: &NifModel, loaded: &[ShapeInfo]) -> Vec<Warning> {
     let pbr_shapes: BTreeSet<u32> = loaded
         .iter()
@@ -702,6 +738,29 @@ pub fn csm_ctrl_warnings(m: &NifModel, loaded: &[ShapeInfo]) -> Vec<Warning> {
         .map(|s| s.id.0)
         .collect();
     let mut out = vec![];
+    // Note IE37 (final review A-M3): validation reads no files, so it leaves V1_VANILLA off any `.csm`-named shape; a
+    // `.csm` that is missing, broken or has PBREnabled off draws the shape vanilla all the same.
+    let vanilla: BTreeSet<u32> = loaded
+        .iter()
+        .filter(|s| s.material.csm_path.is_some() && s.material.pbr.is_none())
+        .map(|s| s.id.0)
+        .collect();
+    for (&block, l) in &m.lighting {
+        let lt = &l.lighting;
+        if nif::edit::is_v1(lt.shader_type, lt.slsf2)
+            && l.prop.users.iter().any(|u| vanilla.contains(u))
+        {
+            out.push(Warning {
+                level: Level::Warn,
+                target: Target::Field {
+                    block,
+                    field: nif::fields::Field::Slsf2,
+                },
+                text: nif::edit::validate::V1_VANILLA.into(),
+                fix: None,
+            });
+        }
+    }
     for l in m.lighting.values() {
         if !l.prop.users.iter().any(|u| pbr_shapes.contains(u)) {
             continue;
@@ -709,14 +768,20 @@ pub fn csm_ctrl_warnings(m: &NifModel, loaded: &[ShapeInfo]) -> Vec<Warning> {
         for c in &l.prop.ctrls {
             let Some(t) = m.ctrls.get(c) else { continue };
             let Some(v) = t.var else { continue };
-            if var_label(&t.class, v, SLSF2_TRUE_PBR) != var_label(&t.class, v, 0) {
-                out.push(Warning {
-                    level: Level::Warn,
-                    target: Target::Block { block: *c },
-                    text: CSM_CTRL.into(),
-                    fix: None,
-                });
-            }
+            // Note IE26: Env map scale (LSCF 8) over a `.csm` gets its own row; whether CS 2.0 crashes is IE22's question.
+            let text = if &*t.class == LSCF && v == 8 {
+                CSM_ENV_SCALE
+            } else if var_label(&t.class, v, SLSF2_TRUE_PBR) != var_label(&t.class, v, 0) {
+                CSM_CTRL
+            } else {
+                continue;
+            };
+            out.push(Warning {
+                level: Level::Warn,
+                target: Target::Block { block: *c },
+                text: text.into(),
+                fix: None,
+            });
         }
     }
     out
@@ -732,8 +797,20 @@ pub fn apply_csm_write(app: &mut AppModel, m: &mut MeshesModel) {
         }
         return;
     }
+    // Note IE25: the shape is pointed only at a `.csm` the set still gets after the write (another edit may have made it
+    // PBR Landscape since the ask).
+    if !app.keeps_csm(&w.set_id) {
+        if let Some(e) = &mut m.edit {
+            e.notice = Some(format!("{} {}", w.set_id, NO_CSM_AFTER_WRITE));
+        }
+        return;
+    }
     m.edit_push(vec![w.op], None);
     if let Some(e) = &mut m.edit {
         e.notice = Some(w.notice);
     }
 }
+
+/// Note IE25: the end of the notice when a Convert's set gets no `.csm` after its values were written.
+pub const NO_CSM_AFTER_WRITE: &str =
+    "took the values but gets no .csm (its shader is PBR Landscape or not PBR), so the shape was not converted.";

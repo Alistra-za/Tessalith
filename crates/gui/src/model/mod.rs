@@ -268,7 +268,9 @@ pub(crate) struct ViewCache {
     pub no_set_sets: Option<Arc<std::collections::HashSet<String>>>,
     /// Note HF9: the set keys of the excluded groups.
     pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
-    pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
+    /// `export_blocks`, keyed by `evidence_rev` inside the view_key cell (Note IE32: the auto flags it reads take the
+    /// mesh evidence).
+    pub blocks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
     /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,

@@ -674,7 +674,7 @@ fn parsed_content_loads_once_and_material_edits_follow_the_load() {
     assert!(v.set_material(ShapeId(3), m.clone()));
     assert!(matches!(
         cmds.try_recv(),
-        Ok(v3::V3Cmd::SetMaterial { content, id: ShapeId(3), material }) if material == m && content == id
+        Ok(v3::V3Cmd::SetMaterial { content, id: ShapeId(3), material, frame: false }) if material == m && content == id
     ));
     assert!(v.busy());
     loaded(
@@ -2721,7 +2721,7 @@ fn s_block(m: &MeshesModel) -> u32 {
 /// Design §5.5: a shape whose name field is a `.csm` the scan has is PBR, and the textures the `.csm` names are read
 /// through the scan too.
 #[test]
-fn mesh_with_csm_previews_pbr() {
+fn render_mesh_with_csm_previews_pbr() {
     let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
     let s = csm_shape(&mut m);
     assert_eq!(s.material.csm_path.as_deref(), Some("materials/a.csm"));
@@ -2739,7 +2739,7 @@ fn mesh_with_csm_previews_pbr() {
 
 /// A `.csm` the scan does not have: drawn vanilla, and the panel's problems say which file.
 #[test]
-fn missing_csm_warns() {
+fn render_missing_csm_warns() {
     let (_i, _c, mut m) = csm_meshes(&[]);
     let s = csm_shape(&mut m);
     assert_eq!(s.material.pbr, None);
@@ -2751,7 +2751,7 @@ fn missing_csm_warns() {
 
 /// A broken `.csm` gets its own row with the error's text.
 #[test]
-fn a_broken_csm_is_its_own_row() {
+fn render_a_broken_csm_is_its_own_row() {
     let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", "{ not json")]);
     let s = csm_shape(&mut m);
     assert_eq!(s.material.pbr, None);
@@ -2767,7 +2767,7 @@ fn a_broken_csm_is_its_own_row() {
 /// The design's TXST-JSON rule: a picked TXST whose EDID a project set's `cs_txst` block binds draws that set's
 /// in-memory `.csm`, not the name field's file and not the scan's copy at the set's path. A set edit reaches the view.
 #[test]
-fn txst_json_csm_wins() {
+fn render_txst_json_csm_wins() {
     use sdc_gui::model::cs_pbr::Kind;
     use serde_json::json;
     const ROCK: &str = "landscape/rock01";
@@ -2846,7 +2846,7 @@ fn the_txst_csm_hand_over_builds_only_on_a_change() {
 /// Fix round 1 (ruling): a picked set whose `.csm` is blocked writes no texture-set file, so, as in game, the shape
 /// keeps its name field's material (never the scan's copy at the set's path), with a row saying why.
 #[test]
-fn a_blocked_set_keeps_the_name_field_with_a_row() {
+fn render_a_blocked_set_keeps_the_name_field_with_a_row() {
     use sdc_gui::model::csm_export::SetCsm;
     let store_copy = r#"{"Version": 1, "PBREnabled": true, "PBRRoughnessScale": 0.9}"#;
     let (_i, _c, mut m) = csm_meshes(&[
@@ -2881,7 +2881,7 @@ fn a_blocked_set_keeps_the_name_field_with_a_row() {
 /// Fix round 1 (t9 item 5): the set's `.csm` is built as the export builds it (`entry_csm`), so a Normal the set
 /// borrows from another set is the path its PGPatcher entry names, and the pick draws PBR.
 #[test]
-fn a_borrowed_normal_draws_pbr() {
+fn render_a_borrowed_normal_draws_pbr() {
     use engine::config::{GreenConvention, Subtype};
     use sdc_gui::model::cs_pbr::Kind;
     use sdc_gui::model::{csm_export, pbr_export, Answer};
@@ -2945,7 +2945,7 @@ fn a_borrowed_normal_draws_pbr() {
 /// Fix round 1 (t9 item 2): the spec carries the scan it was built from, so a rescan that changes only the `.csm`
 /// reloads the view and draws the new values.
 #[test]
-fn a_rescan_draws_a_changed_csm() {
+fn render_a_rescan_draws_a_changed_csm() {
     let (inst, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
     assert_eq!(
         csm_shape(&mut m).material.pbr.map(|p| p.params[0]),
@@ -2971,7 +2971,8 @@ fn a_rescan_draws_a_changed_csm() {
 }
 
 /// Fix round 1 (t9 item 3): the render thread opens the scan database once and keeps it across loads (a texture set
-/// pick and its undo reload the view); a rescan opens it again. Its open connection does not block the scan (`rescan` checks the scan's error).
+/// pick and its undo reload the view); a rescan opens it again. It needs the real device (`csm_meshes` drives the
+/// render thread), and its name holds `render_`, so it runs with the GPU tests. Its open connection does not block the scan (`rescan` checks the scan's error).
 #[test]
 fn the_render_thread_opens_the_scan_once_per_revision() {
     let (inst, _c, mut m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
@@ -2993,7 +2994,7 @@ fn the_render_thread_opens_the_scan_once_per_revision() {
 
 /// The Meshes view's edit preview (a parsed NIF) reads a `.csm` through the scan too.
 #[test]
-fn a_parsed_preview_reads_the_csm_through_the_scan() {
+fn render_a_parsed_preview_reads_the_csm_through_the_scan() {
     let (inst, cache, _m) = csm_meshes(&[("materials/a.csm", A_CSM)]);
     let mut v = Viewport3d::new();
     v.use_shader_folder(standin_root());
@@ -3018,7 +3019,7 @@ fn a_parsed_preview_reads_the_csm_through_the_scan() {
 
 /// A `.csm`'s root chain is read through the scan on demand: a materials-relative `RootMaterialPath` in the mod.
 #[test]
-fn a_csm_root_is_read_through_the_scan() {
+fn render_a_csm_root_is_read_through_the_scan() {
     let child = r#"{"Version": 1, "PBREnabled": true, "RootMaterialPath": "base\\b.csm"}"#;
     let root = r#"{"Version": 1, "PBREnabled": true, "PBRSpecularLevel": 0.5}"#;
     let (_i, _c, mut m) = csm_meshes(&[("materials/a.csm", child), ("materials/base/b.csm", root)]);

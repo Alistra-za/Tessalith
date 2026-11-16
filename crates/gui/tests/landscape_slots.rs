@@ -128,9 +128,14 @@ fn cs_detail_output_name() {
     assert_eq!(p.file_name().unwrap(), "rock01_detail.dds", "{p:?}");
 }
 
-/// X16: the Detail normal card of a landscape set says CS does not draw it in this build.
+/// X16, Note IE24 (final review item 13): the Detail normal card of a landscape set says the preview draws it and
+/// CS 2.0 in game is untested (not CS 1.9's "doesn't draw").
 #[test]
-fn detail_normal_card_says_cs_does_not_draw_it() {
+fn detail_normal_card_hover_follows_cs2() {
+    assert!(
+        DETAIL_NORMAL_HOVER.contains("preview draws") && DETAIL_NORMAL_HOVER.contains("untested"),
+        "{DETAIL_NORMAL_HOVER}"
+    );
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path(), None, Some("rock01_detail.png"));
     let key = view(&m).key;
