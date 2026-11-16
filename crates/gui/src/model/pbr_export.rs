@@ -359,11 +359,19 @@ pub fn missing_texture_texts(
 pub const FUZZ_TWO_CHANNELS: &str =
     "Fuzz roughness texture needs two channels (height in R, fuzz roughness in G): use BC5 or BC1";
 
-/// Note IE16: the item key of set `v`'s own `_p` when the set's `.csm` (a PGPatcher JSON set, as `csm_sets`) turns the fuzz roughness texture on (the
-/// block's switch, in `fuzz_sets`, with fuzz on as the export resolves it, so the file holds both switches) and the
-/// `_p` is written in a one-channel format (BC4, R8), which has no G.
+/// Note IE16: the item key of set `v`'s own `_p` when the set's `.csm` (a PGPatcher JSON set, as `csm_sets`) turns
+/// the fuzz roughness texture on (the block's switch, in `fuzz_sets`, with fuzz on as the export resolves it, so the
+/// file holds both switches) and the `_p` is written in a one-channel format (BC4, R8), which has no G. Only a `pbr`
+/// pick counts: PBR grass reads no `_p`, and the engine keeps the G for `pbr` only.
 fn one_channel_fuzz_p(m: &AppModel, v: &SetView, fuzz_sets: &BTreeSet<String>) -> Option<String> {
-    if !v.json || !fuzz_sets.iter().any(|id| same_id(id, &v.id)) || !super::csm_export::gets_csm(v)
+    let pbr = v
+        .shader
+        .as_ref()
+        .is_some_and(|p| p.shader == engine::shader::Shader::Pbr);
+    if !v.json
+        || !pbr
+        || !fuzz_sets.iter().any(|id| same_id(id, &v.id))
+        || !super::csm_export::gets_csm(v)
     {
         return None;
     }
