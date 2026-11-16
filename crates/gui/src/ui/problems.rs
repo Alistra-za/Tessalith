@@ -425,14 +425,11 @@ fn unmatched_buttons(
     .clicked();
     // Final review I4: the entries still in `[files]` (none in the empty document a read-only `sdc.toml` leaves); with
     // none, `Entries ▾` is off with Remove all's reason rather than opening on nothing.
-    let listed: Vec<&String> = {
-        let have = m
-            .project
-            .as_ref()
-            .map(|d| d.file_keys())
-            .unwrap_or_default();
-        keys.iter().filter(|k| have.contains(k)).collect()
-    };
+    // A lookup per unmatched key, not a copy of every `[files]` key: this runs on each frame the row is drawn.
+    let listed: Vec<&String> = keys
+        .iter()
+        .filter(|k| m.project.as_ref().is_some_and(|d| d.has_file_key(k)))
+        .collect();
     let menu = ui.add_enabled_ui(!listed.is_empty(), |ui| {
         super::path_picker::menu(ui, "Entries ▾", |ui| {
             let mut pick = None;

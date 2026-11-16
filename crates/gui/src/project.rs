@@ -683,6 +683,11 @@ impl ProjectDoc {
             .unwrap_or_default()
     }
 
+    /// Whether `[files]` has an entry spelled exactly `key` (as `file_keys` lists it), without copying the keys.
+    pub fn has_file_key(&self, key: &str) -> bool {
+        self.files().is_some_and(|t| t.contains_key(key))
+    }
+
     pub fn remove_file_entry(&mut self, key: &str) {
         if self.read_only() {
             return;
