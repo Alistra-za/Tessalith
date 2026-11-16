@@ -757,7 +757,8 @@ fn dump_permutations() {
         println!("(b) skipped: set SDC_ACHERUS");
     }
 
-    // (c) The built-in compute and backdrop shaders (builtin.rs and hdri.rs compile nothing).
+    // (c) The built-in compute and backdrop shaders (builtin.rs and hdri.rs compile nothing). The readback
+    // conversion's compute shader (convert.rs, Note IF) came after the compile trial and is not in this list.
     let cs: Vec<String> = std::iter::once("CSHADER".to_string())
         .chain(features.iter().cloned())
         .map(|d| kv(&d))

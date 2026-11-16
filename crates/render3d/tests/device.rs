@@ -77,30 +77,57 @@ fn gpu_conversion_matches_the_cpu_table_for_every_half() {
     }
 }
 
-/// The conversion pass binds the render targets again after it runs (Note IF3), and a target whose sides are not
-/// multiples of the pass's 8×8 groups reads back whole.
+/// The conversion pass binds the render targets again after it runs (Note IF3): one for a forward target, all eight
+/// for a deferred one. A target whose sides are not multiples of the pass's 8×8 groups reads back whole.
 #[test]
 fn readback_leaves_the_render_targets_bound() {
     use windows::Win32::Graphics::Direct3D11::{ID3D11DepthStencilView, ID3D11RenderTargetView};
     let gpu = Gpu::new_warp().unwrap();
-    let t = Target::new(&gpu, 3, 5).unwrap();
+    for deferred in [false, true] {
+        let t = if deferred {
+            Target::new_deferred(&gpu, 3, 5).unwrap()
+        } else {
+            Target::new(&gpu, 3, 5).unwrap()
+        };
+        t.clear(&gpu, [1.0, 0.5, 0.0, 1.0]);
+        let bound = t.rtvs();
+        assert_eq!(bound.len(), if deferred { 8 } else { 1 });
+        // SAFETY: live views of this device.
+        unsafe { gpu.ctx.OMSetRenderTargets(Some(&bound), &t.dsv) };
+        assert_eq!(
+            t.readback_display(&gpu, false).unwrap(),
+            [255, 128, 0, 255].repeat(15),
+            "deferred {deferred}"
+        );
+        let mut rtvs: [Option<ID3D11RenderTargetView>; 8] = Default::default();
+        let mut dsv: Option<ID3D11DepthStencilView> = None;
+        // SAFETY: the out-pointers are live locals.
+        unsafe { gpu.ctx.OMGetRenderTargets(Some(&mut rtvs), Some(&mut dsv)) };
+        assert_eq!(rtvs[..bound.len()], bound[..], "deferred {deferred}");
+        assert!(rtvs[bound.len()..].iter().all(Option::is_none));
+        assert_eq!(dsv.as_ref(), Some(&t.dsv));
+        // SAFETY: unbinding needs no live view.
+        unsafe { gpu.ctx.OMSetRenderTargets(None, None) };
+    }
+}
+
+/// A compute view of the colour target that an earlier pass left bound does not blank the frame (Note IF3): D3D11
+/// gives a null input for a texture that is bound for output, so the pass clears the compute outputs first. Slot 3,
+/// because the pass's own output replaces whatever is in slot 0.
+#[test]
+fn readback_ignores_a_compute_output_left_on_the_colour_target() {
+    let gpu = Gpu::new_warp().unwrap();
+    let t = Target::new_deferred(&gpu, 3, 5).unwrap();
     t.clear(&gpu, [1.0, 0.5, 0.0, 1.0]);
-    // SAFETY: live views of this device.
+    // SAFETY: a live view of this device.
     unsafe {
         gpu.ctx
-            .OMSetRenderTargets(Some(&[Some(t.rtv.clone())]), &t.dsv)
+            .CSSetUnorderedAccessViews(3, 1, Some(&t.main_uav.clone()), None)
     };
     assert_eq!(
         t.readback_display(&gpu, false).unwrap(),
         [255, 128, 0, 255].repeat(15)
     );
-    let mut rtvs: [Option<ID3D11RenderTargetView>; 8] = Default::default();
-    let mut dsv: Option<ID3D11DepthStencilView> = None;
-    // SAFETY: the out-pointers are live locals.
-    unsafe { gpu.ctx.OMGetRenderTargets(Some(&mut rtvs), Some(&mut dsv)) };
-    assert_eq!(rtvs[0].as_ref(), Some(&t.rtv));
-    assert!(rtvs[1..].iter().all(Option::is_none));
-    assert_eq!(dsv.as_ref(), Some(&t.dsv));
 }
 
 /// Deferred target: RT0 (`color`, RTV|SRV|UAV) + RT1-7 in the capture's formats, and RT0 as a UAV (D3 step 1).

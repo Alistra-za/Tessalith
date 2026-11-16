@@ -136,8 +136,8 @@ fn recreating_the_target_unbinds_the_old_views_first() {
     assert_eq!(r.target_dims(), vec![(64, 64); 10]);
 }
 
-/// A frame's bytes equal the CPU conversion of the same target, deferred and forward (Note IF1): whatever the
-/// composite leaves on the compute stage, the conversion pass still reads the colour target.
+/// A frame's bytes equal the CPU conversion of the same target, deferred and forward (Note IF1): with the frame's
+/// render targets still bound, the conversion pass still reads the colour target.
 #[test]
 fn a_frame_reads_back_as_the_cpu_conversion() {
     let cache = tempfile::tempdir().unwrap();
