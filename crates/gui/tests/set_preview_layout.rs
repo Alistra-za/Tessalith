@@ -417,3 +417,37 @@ fn the_mesh_combo_stays_inside_the_window_at_1100() {
         "the mesh combo {r:?} runs past the window's {right}"
     );
 }
+
+/// Note JJ1: a mesh label wider than the toolbar row (a scanned NIF's path, origin and shape count) truncates inside
+/// the window, and the combo's accessible value keeps the whole text.
+#[test]
+fn a_long_mesh_label_truncates_inside_the_window() {
+    use egui::accesskit::Role;
+    use sdc_gui::model::set_preview::{Candidate, Candidates};
+    let d = tempfile::tempdir().unwrap();
+    let (w, hh) = (1100.0, 800.0);
+    let mut h = harness_at(d.path(), egui::vec2(w, hh), |_| {});
+    let nif = r"meshes\architecture\whiterun\wrbuildings\wrhouse01longnamevariantwithmanyparts.nif";
+    h.state_mut().1.set3d.candidates = Candidates::Ready(vec![Candidate {
+        load_copy_id: 1,
+        copy_id: 1,
+        nif_path: nif.into(),
+        origin: "Some Long Mod Name - Whiterun Overhaul".into(),
+        le_mesh: false,
+        derived: false,
+        shapes: vec![(0, None)],
+    }]);
+    h.run_steps(3);
+    let combo = h
+        .query_all_by_role(Role::ComboBox)
+        .find(|n| n.value().is_some_and(|v| v.starts_with("Mesh:")))
+        .expect("the mesh combo is on the toolbar");
+    let value = combo.value().unwrap();
+    assert!(value.contains(nif), "the whole label is the value: {value}");
+    let r = combo.rect();
+    let right = (w - 8.0).min(h.ctx.content_rect().max.x);
+    assert!(
+        r.max.x <= right + 0.5,
+        "the mesh combo {r:?} runs past the window's {right}"
+    );
+}
