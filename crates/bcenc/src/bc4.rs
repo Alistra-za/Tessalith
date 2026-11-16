@@ -1297,19 +1297,9 @@ mod tests {
                     what()
                 );
             }
-            // A lone last pair goes through `try_pair`, as `flush` sends it. `pairs_for` pushes the near pairs two at a
-            // time after 52 x 52 grid pairs, so today its count is even and this never runs.
-            for &(e0, e1) in rest {
-                let mut want = best;
-                want.try_pair_reference(&v, e0, e1);
-                best.try_pair(&v, e0, e1);
-                assert_eq!(
-                    (best.err, best.e0, best.e1, best.sels),
-                    (want.err, want.e0, want.e1, want.sels),
-                    "{v:?} last pair {:?}",
-                    (e0, e1)
-                );
-            }
+            // `pairs_for` gives 52 x 52 = 2,704 grid pairs and pushes the near pairs two at a time (2,704 + 2k in all), so
+            // no pair is left over here; a lone pair's `flush` is tested in `a_batch_flushes_every_pair_in_order`.
+            assert!(rest.is_empty(), "{v:?}: {} pairs left over", rest.len());
         }
         assert!(
             kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0,
@@ -1369,8 +1359,9 @@ mod tests {
                     what()
                 );
             }
-            // The last one to three pairs wait in a batch and go out as `flush` sends them: two through `pair2`, a
-            // lone one through `try_pair`.
+            // The pairs after the last four wait in a batch and go out as `flush` sends them. `pairs_for` gives 2,704 grid
+            // pairs (a multiple of 4) and pushes the near pairs two at a time, so here 0 or 2 wait, and the 2 go through
+            // `pair2`; one or three waiting are tested in `a_batch_flushes_every_pair_in_order`.
             let mut want = best;
             for &(e0, e1) in rest {
                 want.try_pair_reference(&v, e0, e1);
@@ -1391,6 +1382,55 @@ mod tests {
             kinds.iter().flatten().all(|&n| n > 0) && taken > 0 && refused > 0 && flushed2 > 0,
             "a kind was never reached: quarters x [8-value, 6-value] {kinds:?}, taken {taken}, refused {refused}, \
              flushes through pair2 {flushed2}"
+        );
+    }
+
+    /// A batch on the AVX-512 path sends every pair through, in order: n = 1..=9 pairs pushed, then flushed (0 to 3
+    /// waiting at the flush, after up to two four-pair runs), leave what `try_pair_reference` in order leaves. The
+    /// pairs come in order of falling error, so the last one is the best and a pair `flush` dropped would show.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn a_batch_flushes_every_pair_in_order() {
+        if !avx512_tested() {
+            return;
+        }
+        let t = Avx512::require();
+        // How often 0, 1, 2 and 3 pairs were waiting at the flush.
+        let mut waiting = [0usize; 4];
+        for v in gen::bc4_classes(0xE6_0002, 10) {
+            // The block's pairs by full error, one per error, falling; the 9 best.
+            let mut by_err: Vec<(u32, (u8, u8))> = pairs_for(&v)
+                .into_iter()
+                .filter_map(|(e0, e1)| {
+                    pair_scalar(&v, &pal(e0, e1), u32::MAX).map(|(err, _)| (err, (e0, e1)))
+                })
+                .collect();
+            by_err.sort_by_key(|&(err, _)| std::cmp::Reverse(err));
+            by_err.dedup_by_key(|e| e.0);
+            assert!(by_err.len() >= 9, "{v:?}: {} distinct errors", by_err.len());
+            let ends: Vec<(u8, u8)> = by_err[by_err.len() - 9..].iter().map(|&(_, e)| e).collect();
+            for n in 1..=9 {
+                let pairs = &ends[9 - n..];
+                let mut want = Best::new();
+                for &(e0, e1) in pairs {
+                    want.try_pair_reference(&v, e0, e1);
+                }
+                let (mut best, mut batch) = (Best::new(), Batch::new(t));
+                for &(e0, e1) in pairs {
+                    batch.push(&mut best, &v, e0, e1);
+                }
+                waiting[batch.waiting] += 1;
+                batch.flush(&mut best, &v);
+                assert_eq!(
+                    (best.err, best.e0, best.e1, best.sels),
+                    (want.err, want.e0, want.e1, want.sels),
+                    "{v:?}, {n} pairs {pairs:?}"
+                );
+            }
+        }
+        assert!(
+            waiting[1] > 0 && waiting[3] > 0,
+            "flushes with 1 and 3 pairs waiting were not both reached: {waiting:?}"
         );
     }
 }
