@@ -45,6 +45,8 @@ pub(crate) fn keys4<const LEVEL: u32>(
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
         let keys = if let Some(_t) = isa.avx2() {
+            #[cfg(test)]
+            crate::path::kernel_ran(crate::path::Wide::Keys4);
             // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
             unsafe { sse2::keys4_avx2::<LEVEL>(total, sums, row, tables, single_key) }
         } else {
@@ -90,6 +92,8 @@ pub(crate) fn keys3<const LEVEL: u32>(
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
         let keys = if let Some(_t) = isa.avx2() {
+            #[cfg(test)]
+            crate::path::kernel_ran(crate::path::Wide::Keys3);
             // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
             unsafe { sse2::keys3_avx2::<LEVEL>(total, sums, row, tables, single_key) }
         } else {
@@ -194,13 +198,7 @@ mod tests {
     use super::*;
     use crate::path::Base;
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    use crate::path::{tested_paths, Avx2, Path};
-
-    /// Whether the unit tests run the AVX2 path, whose kernels are the AVX2 stamps.
-    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-    fn avx2_tested() -> bool {
-        tested_paths().contains(&Path::Avx2)
-    }
+    use crate::path::{avx2_tested, Avx2};
 
     /// Rows that together hold every 4-colour ordering index.
     fn rows4() -> Vec<[u16; MAX_TOTAL_ORDERINGS4]> {

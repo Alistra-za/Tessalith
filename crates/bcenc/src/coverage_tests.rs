@@ -8,7 +8,7 @@ use crate::bc1::{build_order_tables, order_tables, precise_round_565, to_5, to_6
 use crate::bc1::{params, Params, LEVELS, PERCEPTUAL, PLAIN};
 use crate::gen;
 use crate::hits::{counts, Hit};
-use crate::path::{frame_runs, tested_paths, Base};
+use crate::path::{frame_runs, kernel_runs, tested_paths, Base, Wide};
 use crate::{
     bc1_encode_block, bc1_encode_block_alpha, bc1_encode_block_alpha_on,
     bc1_encode_block_alpha_with, bc1_encode_block_level, bc1_encode_block_level_on,
@@ -269,6 +269,32 @@ fn the_frames_run_on_their_path() {
                 q.name(),
                 p.name()
             );
+        }
+    }
+}
+
+/// Each wide kernel runs in its frame: on every tested path, the blocks of `gen::colour_classes(0xE0_0003, 4)`
+/// through `bc1_encode_block_on` (3-colour blocks allowed) and through `bc1_encode_block_alpha_on` with every mask of
+/// `gen::alpha_masks(0xE0_0004, 8)`. On `Avx2` every kernel of [`Wide::ALL`] runs; on `Base` none does.
+#[test]
+fn the_wide_kernels_run_in_their_frame() {
+    let blocks = gen::colour_classes(0xE0_0003, 4);
+    let masks = gen::alpha_masks(0xE0_0004, 8);
+    for p in tested_paths() {
+        let before = kernel_runs();
+        for px in &blocks {
+            bc1_encode_block_on(p, px, true, false, Bc1Search::Default);
+            for &mask in &masks {
+                bc1_encode_block_alpha_on(p, px, mask, false, Bc1Search::Default);
+            }
+        }
+        let after = kernel_runs();
+        for k in Wide::ALL {
+            let runs = after[k as usize] - before[k as usize];
+            match p {
+                Path::Base => assert_eq!(runs, 0, "{k:?} ran on path base"),
+                Path::Avx2 => assert!(runs > 0, "{k:?} never ran on path avx2"),
+            }
         }
     }
 }

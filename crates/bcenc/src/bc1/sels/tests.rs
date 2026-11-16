@@ -7,7 +7,7 @@ use super::*;
 use crate::gen;
 use crate::path::Base;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-use crate::path::{tested_paths, Avx2, Path};
+use crate::path::{avx2_tested, Avx2};
 
 fn blocks() -> Vec<[[u8; 4]; 16]> {
     gen::colour_classes(0x5E15_0001, 40)
@@ -84,17 +84,17 @@ impl Kernel for Public {
         find_sels3(Base, t, e, sels, cutoff)
     }
 }
-/// The public searches on the AVX2 path (the kernels' AVX2 stamps).
+/// The public searches on the AVX2 path (the kernels' AVX2 stamps); the texels are `Public`'s.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 struct OnAvx2;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 impl Kernel for OnAvx2 {
     type T = Texels;
     fn new(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2]) -> Texels {
-        Texels::new(px, w, dec)
+        Public::new(px, w, dec)
     }
     fn masked(px: &[[u8; 4]; 16], w: [i32; 3], dec: [i32; 2], mask: u32) -> Texels {
-        Texels::masked(px, w, dec, mask)
+        Public::masked(px, w, dec, mask)
     }
     fn f3m(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
         find_sels3_masked(Avx2::require(), t, e, sels)
@@ -105,13 +105,6 @@ impl Kernel for OnAvx2 {
     fn f3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
         find_sels3(Avx2::require(), t, e, sels, cutoff)
     }
-}
-
-/// Whether the unit tests run the AVX2 path (`path::tested_paths`, which panics when `SDC_BCENC_PATHS` names a path
-/// this machine lacks).
-#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
-fn avx2_tested() -> bool {
-    tested_paths().contains(&Path::Avx2)
 }
 
 struct Portable;

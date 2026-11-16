@@ -106,7 +106,7 @@ impl Path {
 /// compile time.
 pub(crate) trait Isa: Copy {
     /// The path this code runs on.
-    #[allow(dead_code)] // First read by a wide kernel's run counter, with the first AVX2 kernel.
+    #[allow(dead_code)] // Nothing reads it yet: the run counters are keyed by frame (`Path`) and kernel (`Wide`).
     const PATH: Path;
     /// The token of the AVX2 path, when this is it.
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
@@ -175,11 +175,83 @@ pub(crate) fn frame_runs() -> [u64; Path::ALL.len()] {
     FRAME_RUNS.with(|c| c.get())
 }
 
+/// A wide kernel: each one's safe wrapper counts its runs in the unit tests, so a test proves the wide code ran.
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Wide {
+    Sels4,
+    Sels3,
+    Sels3Masked,
+    Keys4,
+    Keys3,
+}
+
+#[cfg(test)]
+impl Wide {
+    pub(crate) const ALL: [Wide; 5] = [
+        Wide::Sels4,
+        Wide::Sels3,
+        Wide::Sels3Masked,
+        Wide::Keys4,
+        Wide::Keys3,
+    ];
+}
+
+// Each kernel's place in `ALL` is its discriminant, which the counters index by.
+#[cfg(test)]
+const _: () = {
+    let mut i = 0;
+    while i < Wide::ALL.len() {
+        assert!(
+            Wide::ALL[i] as usize == i,
+            "Wide::ALL is not in declaration order"
+        );
+        i += 1;
+    }
+};
+
+#[cfg(test)]
+thread_local! {
+    /// How often this thread ran each wide kernel, by place in [`Wide::ALL`].
+    static KERNEL_RUNS: std::cell::Cell<[u64; Wide::ALL.len()]> =
+        const { std::cell::Cell::new([0; Wide::ALL.len()]) };
+}
+
+/// Counts one run of wide kernel `k` on this thread (unit tests only; the kernel's safe wrapper calls it).
+#[cfg(test)]
+pub(crate) fn kernel_ran(k: Wide) {
+    KERNEL_RUNS.with(|c| {
+        let mut runs = c.get();
+        runs[k as usize] += 1;
+        c.set(runs);
+    });
+}
+
+/// How often this thread ran each wide kernel, by place in [`Wide::ALL`].
+#[cfg(test)]
+pub(crate) fn kernel_runs() -> [u64; Wide::ALL.len()] {
+    KERNEL_RUNS.with(|c| c.get())
+}
+
 /// The paths the unit tests run: `tests/support/paths.rs`'s `paths()`, with the same line and the same
 /// `SDC_BCENC_PATHS` checks.
 #[cfg(test)]
 pub(crate) fn tested_paths() -> Vec<Path> {
     crate::test_paths::paths()
+}
+
+/// Whether the unit tests run the AVX2 path ([`tested_paths`], which panics when `SDC_BCENC_PATHS` names a path this
+/// machine lacks); prints the skip when they do not.
+#[cfg(all(test, target_arch = "x86_64", target_feature = "sse2"))]
+pub(crate) fn avx2_tested() -> bool {
+    let tested = tested_paths().contains(&Path::Avx2);
+    if !tested {
+        eprintln!(
+            "avx2 path skipped: {}",
+            Path::Avx2.missing().unwrap_or("not named")
+        );
+    }
+    tested
 }
 
 #[cfg(test)]
@@ -225,5 +297,23 @@ mod tests {
             );
         }
         assert!(Path::Base.available());
+    }
+
+    /// On a CPU without AVX2 the token cannot be had: `Avx2::require` panics and says why. Runs only on such a machine.
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    #[test]
+    fn the_avx2_token_needs_avx2() {
+        if Path::Avx2.available() {
+            eprintln!("the_avx2_token_needs_avx2 skipped: this CPU has avx2");
+            return;
+        }
+        let Err(payload) = std::panic::catch_unwind(Avx2::require) else {
+            panic!("Avx2::require gave a token on a CPU without avx2");
+        };
+        let msg = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .unwrap_or_default();
+        assert_eq!(msg, "path avx2 is not available: CPU lacks avx2");
     }
 }

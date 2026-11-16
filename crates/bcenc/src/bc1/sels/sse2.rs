@@ -281,6 +281,8 @@ searches!("avx2", sels4_avx2, sels3_avx2, sels3_masked_avx2);
 #[inline(always)]
 pub(super) fn find_sels3_masked(isa: impl Isa, t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
     if let Some(_t) = isa.avx2() {
+        #[cfg(test)]
+        crate::path::kernel_ran(crate::path::Wide::Sels3Masked);
         // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
         unsafe { sels3_masked_avx2(t, e, sels) }
     } else {
@@ -298,6 +300,8 @@ pub(super) fn find_sels4(
     cutoff: u32,
 ) -> u32 {
     if let Some(_t) = isa.avx2() {
+        #[cfg(test)]
+        crate::path::kernel_ran(crate::path::Wide::Sels4);
         // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
         unsafe { sels4_avx2(t, e, sels, cutoff) }
     } else {
@@ -315,6 +319,8 @@ pub(super) fn find_sels3(
     cutoff: u32,
 ) -> u32 {
     if let Some(_t) = isa.avx2() {
+        #[cfg(test)]
+        crate::path::kernel_ran(crate::path::Wide::Sels3);
         // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
         unsafe { sels3_avx2(t, e, sels, cutoff) }
     } else {
