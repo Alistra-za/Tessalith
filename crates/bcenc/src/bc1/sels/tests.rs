@@ -1,7 +1,7 @@
 //! Tests of the selector searches: every test runs on the public path, on `portable` and, when the unit tests run the
-//! AVX2 path, on the kernels' AVX2 stamps.
+//! AVX2 path, on the 256-bit kernels of `avx2.rs`.
 
-use super::super::palette::dual_palette;
+use super::super::palette::{dual_palette, DualPalette};
 use super::super::{PERCEPTUAL, PLAIN};
 use super::*;
 use crate::gen;
@@ -84,7 +84,7 @@ impl Kernel for Public {
         find_sels3(Base, t, e, sels, cutoff)
     }
 }
-/// The public searches on the AVX2 path (the kernels' AVX2 stamps); the texels are `Public`'s.
+/// The public searches on the AVX2 path (the 256-bit kernels); the texels are `Public`'s.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 struct OnAvx2;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
@@ -421,6 +421,63 @@ fn ties_and_exact_texels() {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     if avx2_tested() {
         ties_and_exact::<OnAvx2>();
+    }
+}
+
+/// The selector of each texel in `each_texel_keeps_its_own_selector`: every row differs from the others, so do the
+/// two halves of each 256-bit vector (rows 0 and 1, rows 2 and 3).
+const SEL: [u8; 16] = [0, 1, 2, 3, 3, 2, 1, 0, 1, 3, 0, 2, 2, 0, 3, 1];
+
+/// Texel i coloured as entry `want[i]` of `p`: per channel the mean of the two decoders' values.
+fn coloured_as(p: &DualPalette, want: &[u8; 16]) -> [[u8; 4]; 16] {
+    let pal = [&p.r, &p.g, &p.b];
+    std::array::from_fn(|i| {
+        let j = want[i] as usize;
+        let c = |c: usize| ((pal[c][0][j] + pal[c][1][j] + 1) / 2) as u8;
+        [c(0), c(1), c(2), 255]
+    })
+}
+
+fn own_selectors<K: Kernel>() {
+    let e = Ends {
+        l: [0; 3],
+        h: [31, 63, 31],
+    };
+    for w in [PLAIN, PERCEPTUAL] {
+        for four in [true, false] {
+            let want = if four { SEL } else { SEL.map(|s| s % 3) };
+            let p = dual_palette(!four, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+            let px = coloured_as(&p, &want);
+            let t = K::new(&px, w, DUAL);
+            let (mut scalar_sels, mut got) = ([0xEEu8; 16], [0xEEu8; 16]);
+            let (full, total) = if four {
+                (
+                    scalar::find_sels4(&px, w, &e, &mut scalar_sels, u32::MAX),
+                    K::f4(&t, &e, &mut got, u32::MAX),
+                )
+            } else {
+                (
+                    scalar::find_sels3(&px, w, &e, &mut scalar_sels, u32::MAX),
+                    K::f3(&t, &e, &mut got, u32::MAX),
+                )
+            };
+            assert_eq!(
+                scalar_sels, want,
+                "premise: the scalar search, four {four} {w:?}"
+            );
+            assert_eq!(got, want, "selectors, four {four} {w:?}");
+            assert_eq!(total, 2 * full, "total, four {four} {w:?}");
+        }
+    }
+}
+
+#[test]
+fn each_texel_keeps_its_own_selector() {
+    own_selectors::<Public>();
+    own_selectors::<Portable>();
+    #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+    if avx2_tested() {
+        own_selectors::<OnAvx2>();
     }
 }
 

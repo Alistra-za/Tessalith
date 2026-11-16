@@ -14,9 +14,10 @@
 //! a tie with the least of selectors 0 to 2 unless that least is 0 (the C++ loop stops at error 0, so 3 never
 //! replaces a 0); a 3-colour block has no such rule (a later selector replaces the best only when strictly better).
 //!
-//! Three private modules: `scalar` is rgbcx's loops (the reference of every test, with a variant that takes the
+//! Four private modules: `scalar` is rgbcx's loops (the reference of every test, with a variant that takes the
 //! decoder weights and no cutoff), `portable` is the kernel's interface over those loops (correct, not tuned, with no
-//! early exit; the unit tests run it on every target, and a target without SSE2 uses it), and `sse2` is the kernel.
+//! early exit; the unit tests run it on every target, and a target without SSE2 uses it), `sse2` is the kernel, and
+//! `avx2` the same kernel in 256-bit vectors for the AVX2 path.
 //!
 //! Why the kernel is a sum of products and not of squares (measured, survey section 5): with `W = dec[0] + dec[1]`,
 //! palette values `a` (NVIDIA) and `b` (AMD) of a channel and `s = dec[0] * a + dec[1] * b`,
@@ -168,6 +169,9 @@ fn check_against_scalar(
 // workspace's target, always), the portable one elsewhere.
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2;
+// The AVX2 path's kernels, which `sse2`'s searches call when they hold the `Avx2` token.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod avx2;
 #[cfg(not(all(target_arch = "x86_64", target_feature = "sse2")))]
 use portable as imp;
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]

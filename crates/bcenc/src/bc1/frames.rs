@@ -1,6 +1,6 @@
 //! The frame entries of the BC1 encode: one dispatch per call, on the path the caller names. `Base` runs the encode as
 //! plain code; `Avx2` runs it inside a `#[target_feature(enable = "avx2")]` function, where every hot function
-//! (`#[inline(always)]`) is compiled again with AVX2 and calls the kernels' AVX2 stamps (Note HY21). The bytes are the
+//! (`#[inline(always)]`) is compiled again with AVX2 and calls the AVX2 kernels (Note HY21). The bytes are the
 //! same on every path. Each `_on` entry of `lib.rs` has asserted that its path is available before it calls these.
 
 use super::alpha::encode_alpha;

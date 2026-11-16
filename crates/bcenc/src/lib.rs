@@ -5,7 +5,7 @@
 //! `#[target_feature(enable = "sse2")]` function of a module compiled only where the target has SSE2
 //! (`bc1/sels/sse2.rs`, `bc1/order_keys/sse2.rs` and `mod sse2` in `bc4.rs`), where Rust asks for the block even though
 //! the feature is always on; and calling a `#[target_feature(enable = "avx2")]` function (the AVX2 frames of
-//! `bc1/frames.rs` and the kernels' AVX2 stamps) while holding a `path::Avx2`, a token only `Avx2::require` creates,
+//! `bc1/frames.rs` and the AVX2 kernels) while holding a `path::Avx2`, a token only `Avx2::require` creates,
 //! after std's detection found AVX2 (Note HY21). A target without SSE2 runs portable code instead, which the unit tests
 //! run on every target.
 //! The engine encodes BC1, BC3, BC4 and BC5 with it (Note HY7). The BC1 colour search runs at rgbcx level 18 by

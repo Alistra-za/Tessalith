@@ -1,8 +1,9 @@
 //! The selector kernel: all 16 texels of a candidate at once, in SSE2 integer intrinsics (the maths, and why it is a sum
 //! of products, are in the module doc of `sels.rs`). Compiled only where the target has SSE2 (the `cfg` on `mod sse2`),
 //! so the `target_feature(enable = "sse2")` functions here are always callable; Rust still wants an `unsafe` block for
-//! the call from plain code, and `Texels::masked` and the three searches of this module carry them. The searches are
-//! also stamped with AVX2 for the AVX2 frame; those are called only while holding the `Avx2` token. Integer code only.
+//! the call from plain code, and `Texels::masked` and the three searches of this module carry them. On the AVX2 path
+//! the searches call the 256-bit kernels of `avx2.rs` instead, which read these `Texels` and reuse `entry`, `hsum` and
+//! `store`. Integer code only.
 //!
 //! Intrinsics and `as i16` wrap silently, so the bounds below are what keep the integers exact. They hold for channel
 //! weights `w[c]` in 1..=256 summing to at most 256 and decoder weights summing to `W <= 4`, which `sels::Texels::masked`
@@ -26,10 +27,10 @@ type V4 = [__m128i; 4];
 
 /// Row `v` of each field holds texels `4v..4v+3`.
 pub(super) struct Texels {
-    xa: V4,   // per texel the i16 pair (x[0], x[1])
-    xb: V4,   // per texel the i16 pair (x[2], 0)
-    t: V4,    // per texel t as i32
-    keep: V4, // per texel all ones when opaque, zero when transparent (the masked search)
+    pub(super) xa: V4,   // per texel the i16 pair (x[0], x[1])
+    pub(super) xb: V4,   // per texel the i16 pair (x[2], 0)
+    pub(super) t: V4,    // per texel t as i32
+    pub(super) keep: V4, // per texel all ones when opaque, zero when transparent (the masked search)
     off: [i32; 3],
     w: [i32; 3],
     dec: [i32; 2],
@@ -101,7 +102,7 @@ fn load(
 /// (`m[c] = -2 * W * s`, `k_j = sum over c of ( w[c] * (s^2 + dec[0] * dec[1] * (a - b)^2) - 2 * W * off[c] * s )`, for
 /// `a`, `b` the entry's NVIDIA and AMD values of channel `c`).
 #[inline(always)]
-fn entry(t: &Texels, p: &DualPalette, j: usize) -> (i32, i32, i32) {
+pub(super) fn entry(t: &Texels, p: &DualPalette, j: usize) -> (i32, i32, i32) {
     let ws = t.dec[0] + t.dec[1];
     let pal = [&p.r, &p.g, &p.b];
     let (mut m, mut k) = ([0i32; 3], 0i32);
@@ -148,7 +149,7 @@ fn min32(a: __m128i, b: __m128i) -> __m128i {
 /// The four i32 lanes summed, wrapping, read as u32.
 #[target_feature(enable = "sse2")]
 #[inline]
-fn hsum(v: __m128i) -> u32 {
+pub(super) fn hsum(v: __m128i) -> u32 {
     let s = _mm_add_epi32(v, _mm_shuffle_epi32::<0b01_00_11_10>(v));
     let s = _mm_add_epi32(s, _mm_shuffle_epi32::<0b00_00_00_01>(s));
     _mm_cvtsi128_si32(s) as u32
@@ -157,134 +158,120 @@ fn hsum(v: __m128i) -> u32 {
 /// Four rows of selectors (i32 lanes holding 0..=3) as 16 bytes.
 #[target_feature(enable = "sse2")]
 #[inline]
-fn store(q: V4, sels: &mut [u8; 16]) {
+pub(super) fn store(q: V4, sels: &mut [u8; 16]) {
     let b = _mm_packus_epi16(_mm_packs_epi32(q[0], q[1]), _mm_packs_epi32(q[2], q[3]));
     sels[..8].copy_from_slice(&(_mm_cvtsi128_si64(b) as u64).to_le_bytes());
     sels[8..].copy_from_slice(&(_mm_cvtsi128_si64(_mm_unpackhi_epi64(b, b)) as u64).to_le_bytes());
 }
 
-/// The three searches, stamped with target feature `$f` under the names given: `sels4`, `sels3` and `sels3_masked`
-/// with SSE2 (every path's kernels), and `sels4_avx2`, `sels3_avx2` and `sels3_masked_avx2` with AVX2, which the
-/// wrappers below pick on the AVX2 path. The compiler does not inline an `#[inline]` kernel into the AVX2 frame, so
-/// without the second stamp the frame would call the SSE2 build (Note HY21). One body, so both stamps are the same
-/// code: the helpers they call are `#[inline]` SSE2 functions, which inline into either.
-macro_rules! searches {
-    ($f:literal, $sels4:ident, $sels3:ident, $sels3_masked:ident) => {
-        #[target_feature(enable = $f)]
-        #[inline]
-        fn $sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-            let p = dual_palette(false, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
-            let r = [
-                rest(t, entry(t, &p, 0)),
-                rest(t, entry(t, &p, 1)),
-                rest(t, entry(t, &p, 2)),
-                rest(t, entry(t, &p, 3)),
-            ];
-            let zero = _mm_setzero_si128();
-            let (mut least, mut sum) = ([zero; 4], zero);
-            // The index is the row of several arrays at once.
-            #[allow(clippy::needless_range_loop)]
-            for v in 0..4 {
-                least[v] = min32(min32(r[0][v], r[1][v]), min32(r[2][v], r[3][v]));
-                sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
-            }
-            let total = hsum(sum);
-            if total < cutoff {
-                let (one, three) = (_mm_set1_epi32(1), _mm_set1_epi32(3));
-                let mut q = [zero; 4];
-                #[allow(clippy::needless_range_loop)]
-                for v in 0..4 {
-                    let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
-                    let (eq0, eq1, eq2, eq3) = (eq(0), eq(1), eq(2), eq(3));
-                    // The first of entries 0, 1, 2 holding the least, else 3. A true compare is -1: 3 + eq2 is 2 or 3.
-                    let s23 = _mm_add_epi32(three, eq2);
-                    let s123 = _mm_or_si128(_mm_and_si128(eq1, one), _mm_andnot_si128(eq1, s23));
-                    let first = _mm_andnot_si128(eq0, s123);
-                    // Selector 3 wins a tie unless the error is 0.
-                    let exact = _mm_cmpeq_epi32(_mm_add_epi32(t.t[v], least[v]), zero);
-                    let take3 = _mm_andnot_si128(exact, eq3);
-                    q[v] =
-                        _mm_or_si128(_mm_and_si128(take3, three), _mm_andnot_si128(take3, first));
-                }
-                store(q, sels);
-            }
-            total
+/// The searches, 4 texels per vector, with the contracts of `sels::find_sels4`, `find_sels3` and `find_sels3_masked`.
+#[target_feature(enable = "sse2")]
+#[inline]
+fn sels4(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    let p = dual_palette(false, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+    let r = [
+        rest(t, entry(t, &p, 0)),
+        rest(t, entry(t, &p, 1)),
+        rest(t, entry(t, &p, 2)),
+        rest(t, entry(t, &p, 3)),
+    ];
+    let zero = _mm_setzero_si128();
+    let (mut least, mut sum) = ([zero; 4], zero);
+    // The index is the row of several arrays at once.
+    #[allow(clippy::needless_range_loop)]
+    for v in 0..4 {
+        least[v] = min32(min32(r[0][v], r[1][v]), min32(r[2][v], r[3][v]));
+        sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
+    }
+    let total = hsum(sum);
+    if total < cutoff {
+        let (one, three) = (_mm_set1_epi32(1), _mm_set1_epi32(3));
+        let mut q = [zero; 4];
+        #[allow(clippy::needless_range_loop)]
+        for v in 0..4 {
+            let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
+            let (eq0, eq1, eq2, eq3) = (eq(0), eq(1), eq(2), eq(3));
+            // The first of entries 0, 1, 2 holding the least, else 3. A true compare is -1: 3 + eq2 is 2 or 3.
+            let s23 = _mm_add_epi32(three, eq2);
+            let s123 = _mm_or_si128(_mm_and_si128(eq1, one), _mm_andnot_si128(eq1, s23));
+            let first = _mm_andnot_si128(eq0, s123);
+            // Selector 3 wins a tie unless the error is 0.
+            let exact = _mm_cmpeq_epi32(_mm_add_epi32(t.t[v], least[v]), zero);
+            let take3 = _mm_andnot_si128(exact, eq3);
+            q[v] = _mm_or_si128(_mm_and_si128(take3, three), _mm_andnot_si128(take3, first));
         }
-
-        #[target_feature(enable = $f)]
-        #[inline]
-        fn $sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
-            let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
-            let r = [
-                rest(t, entry(t, &p, 0)),
-                rest(t, entry(t, &p, 1)),
-                rest(t, entry(t, &p, 2)),
-            ];
-            let zero = _mm_setzero_si128();
-            let (mut least, mut sum) = ([zero; 4], zero);
-            #[allow(clippy::needless_range_loop)]
-            for v in 0..4 {
-                least[v] = min32(min32(r[0][v], r[1][v]), r[2][v]);
-                sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
-            }
-            let total = hsum(sum);
-            if total < cutoff {
-                let two = _mm_set1_epi32(2);
-                let mut q = [zero; 4];
-                #[allow(clippy::needless_range_loop)]
-                for v in 0..4 {
-                    let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
-                    // 0 where entry 0 holds the least, else 1 where entry 1 does, else 2 (a true compare is -1).
-                    q[v] = _mm_andnot_si128(eq(0), _mm_add_epi32(two, eq(1)));
-                }
-                store(q, sels);
-            }
-            total
-        }
-
-        /// `sels3` with no cutoff and a block's transparent texels dropped: `keep` zeroes a transparent texel's error and
-        /// puts selector 3 in its lane. The total only gets smaller than `sels3`'s, so the bounds of the module doc hold.
-        #[target_feature(enable = $f)]
-        #[inline]
-        fn $sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-            let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
-            let r = [
-                rest(t, entry(t, &p, 0)),
-                rest(t, entry(t, &p, 1)),
-                rest(t, entry(t, &p, 2)),
-            ];
-            let (zero, two, three) = (_mm_setzero_si128(), _mm_set1_epi32(2), _mm_set1_epi32(3));
-            let mut sum = zero;
-            let mut q = [zero; 4];
-            #[allow(clippy::needless_range_loop)]
-            for v in 0..4 {
-                let least = min32(min32(r[0][v], r[1][v]), r[2][v]);
-                sum = _mm_add_epi32(sum, _mm_and_si128(t.keep[v], _mm_add_epi32(t.t[v], least)));
-                let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least);
-                // As `sels3`: 0 where entry 0 holds the least, else 1 where entry 1 does, else 2; a transparent texel is 3.
-                let first = _mm_andnot_si128(eq(0), _mm_add_epi32(two, eq(1)));
-                q[v] = _mm_or_si128(
-                    _mm_and_si128(t.keep[v], first),
-                    _mm_andnot_si128(t.keep[v], three),
-                );
-            }
-            store(q, sels);
-            hsum(sum)
-        }
-    };
+        store(q, sels);
+    }
+    total
 }
 
-searches!("sse2", sels4, sels3, sels3_masked);
-searches!("avx2", sels4_avx2, sels3_avx2, sels3_masked_avx2);
+#[target_feature(enable = "sse2")]
+#[inline]
+fn sels3(t: &Texels, e: &Ends, sels: &mut [u8; 16], cutoff: u32) -> u32 {
+    let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+    let r = [
+        rest(t, entry(t, &p, 0)),
+        rest(t, entry(t, &p, 1)),
+        rest(t, entry(t, &p, 2)),
+    ];
+    let zero = _mm_setzero_si128();
+    let (mut least, mut sum) = ([zero; 4], zero);
+    #[allow(clippy::needless_range_loop)]
+    for v in 0..4 {
+        least[v] = min32(min32(r[0][v], r[1][v]), r[2][v]);
+        sum = _mm_add_epi32(sum, _mm_add_epi32(t.t[v], least[v]));
+    }
+    let total = hsum(sum);
+    if total < cutoff {
+        let two = _mm_set1_epi32(2);
+        let mut q = [zero; 4];
+        #[allow(clippy::needless_range_loop)]
+        for v in 0..4 {
+            let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least[v]);
+            // 0 where entry 0 holds the least, else 1 where entry 1 does, else 2 (a true compare is -1).
+            q[v] = _mm_andnot_si128(eq(0), _mm_add_epi32(two, eq(1)));
+        }
+        store(q, sels);
+    }
+    total
+}
 
-// Each search runs the stamp of the path `isa` names; the choice folds at compile time.
+/// `sels3` with no cutoff and a block's transparent texels dropped: `keep` zeroes a transparent texel's error and
+/// puts selector 3 in its lane. The total only gets smaller than `sels3`'s, so the bounds of the module doc hold.
+#[target_feature(enable = "sse2")]
+#[inline]
+fn sels3_masked(t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
+    let p = dual_palette(true, e.l[0], e.l[1], e.l[2], e.h[0], e.h[1], e.h[2]);
+    let r = [
+        rest(t, entry(t, &p, 0)),
+        rest(t, entry(t, &p, 1)),
+        rest(t, entry(t, &p, 2)),
+    ];
+    let (zero, two, three) = (_mm_setzero_si128(), _mm_set1_epi32(2), _mm_set1_epi32(3));
+    let mut sum = zero;
+    let mut q = [zero; 4];
+    #[allow(clippy::needless_range_loop)]
+    for v in 0..4 {
+        let least = min32(min32(r[0][v], r[1][v]), r[2][v]);
+        sum = _mm_add_epi32(sum, _mm_and_si128(t.keep[v], _mm_add_epi32(t.t[v], least)));
+        let eq = |j: usize| _mm_cmpeq_epi32(r[j][v], least);
+        // As `sels3`: 0 where entry 0 holds the least, else 1 where entry 1 does, else 2; a transparent texel is 3.
+        let first = _mm_andnot_si128(eq(0), _mm_add_epi32(two, eq(1)));
+        q[v] = _mm_or_si128(
+            _mm_and_si128(t.keep[v], first),
+            _mm_andnot_si128(t.keep[v], three),
+        );
+    }
+    store(q, sels);
+    hsum(sum)
+}
+
+// Each search runs the kernel of the path `isa` names (the 256-bit ones of `avx2.rs` on the AVX2 path); the choice
+// folds at compile time.
 #[inline(always)]
 pub(super) fn find_sels3_masked(isa: impl Isa, t: &Texels, e: &Ends, sels: &mut [u8; 16]) -> u32 {
-    if let Some(_t) = isa.avx2() {
-        #[cfg(test)]
-        crate::path::kernel_ran(crate::path::Wide::Sels3Masked);
-        // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
-        unsafe { sels3_masked_avx2(t, e, sels) }
+    if let Some(tok) = isa.avx2() {
+        super::avx2::find_sels3_masked(tok, t, e, sels)
     } else {
         // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
         unsafe { sels3_masked(t, e, sels) }
@@ -299,11 +286,8 @@ pub(super) fn find_sels4(
     sels: &mut [u8; 16],
     cutoff: u32,
 ) -> u32 {
-    if let Some(_t) = isa.avx2() {
-        #[cfg(test)]
-        crate::path::kernel_ran(crate::path::Wide::Sels4);
-        // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
-        unsafe { sels4_avx2(t, e, sels, cutoff) }
+    if let Some(tok) = isa.avx2() {
+        super::avx2::find_sels4(tok, t, e, sels, cutoff)
     } else {
         // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
         unsafe { sels4(t, e, sels, cutoff) }
@@ -318,11 +302,8 @@ pub(super) fn find_sels3(
     sels: &mut [u8; 16],
     cutoff: u32,
 ) -> u32 {
-    if let Some(_t) = isa.avx2() {
-        #[cfg(test)]
-        crate::path::kernel_ran(crate::path::Wide::Sels3);
-        // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
-        unsafe { sels3_avx2(t, e, sels, cutoff) }
+    if let Some(tok) = isa.avx2() {
+        super::avx2::find_sels3(tok, t, e, sels, cutoff)
     } else {
         // SAFETY: this module is compiled only where SSE2 is enabled for the target (the `cfg` on `mod sse2`).
         unsafe { sels3(t, e, sels, cutoff) }
