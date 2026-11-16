@@ -12,7 +12,7 @@ It reads **Review n files** while something is undecided, blocked or waiting, an
 2. Opens [Review](#review) instead of exporting when something needs an answer.
 3. Plans again if a source changed on disk (**Reload** in the Textures column re-reads just those files).
 4. Opens the [Files tab](#the-files-tab).
-5. Writes the PGPatcher JSON after a complete export ([Where the JSON goes](GUI-PGPatcher-JSON.md#where-the-json-goes)), then any NIF edits ([Editing a NIF](GUI-NIF-Edit.md)).
+5. Writes the PGPatcher JSON after a complete export ([Where the JSON goes](GUI-PGPatcher-JSON.md#where-the-json-goes)) and the `.csm` materials ([CS PBR records](CS-PBR-Records.md)), then any NIF edits ([Exporting an edited NIF](GUI-NIF-Export.md)).
 
 Export can't write into the folder it reads. With no export folder chosen, Review blocks: see [Export to](GUI-Main-Window.md#export-to). With **Also export** on, Review always opens and its **Export** writes three folders ([Set shaders and Also export](Set-Shaders.md#also-export-as-vanilla-and-cm)).
 
@@ -39,12 +39,12 @@ Review opens in the bottom panel, not a dialog, for a blocker, an undecided text
 
 - **Blockers** (red) have **Go to set** or their own button. A missing export folder, a missing preset (**Choose preset…**) and a read-only `sdc.toml` count as blockers. <!-- D:FP8 --> Export stays greyed with the reason ("Fix 2 blockers first").
 - **Undecided** rows carry the same buttons as Problems, and **Accept all suggestions**: [Deciding from the list](GUI-Problems.md#deciding-from-the-list). Warnings aren't listed here; they are Problems rows and never hold back Export.
-- **What will be written** counts the DDS files and gives each JSON a state. **NIF edits** lists each edited NIF; one that can't be exported is listed in amber with its reason and never holds back the textures. A cancelled export writes no NIF edits.
+- **What will be written** counts the DDS files and gives each JSON and `.csm` a state. **NIF edits** lists each edited NIF; one that can't be exported is listed in amber with its reason and never holds back the textures. A cancelled export writes no NIF edits.
 - **Export 20 files (skip 2 undecided)** exports the decided textures and never decides for you. **Close** cancels an export it had queued.
 
 ### Overwrite questions
 
-A PGPatcher JSON edited outside Tessalith, or a NIF whose export path holds a file Tessalith didn't write, asks **Keep the edited file** or **Overwrite it**. Neither is preselected, and Review's **Export** stays off until each is answered. The answer is tied to the file as it is now and applies to the next export only. The Community Shaders PBR and complex-material JSON are never overwritten when edited outside; they are kept, with a note.
+A PGPatcher JSON edited outside Tessalith, or a NIF whose export path holds a file Tessalith didn't write, asks **Keep the edited file** or **Overwrite it**. Neither is preselected, and Review's **Export** stays off until each is answered. The answer is tied to the file as it is now and applies to the next export only. The Community Shaders PBR JSON, the `.csm` materials and the complex-material JSON are never overwritten when edited outside; they are kept, with a note.
 
 ## The Files tab
 

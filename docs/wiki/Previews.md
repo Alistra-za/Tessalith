@@ -18,24 +18,26 @@ Double-click a tile (or a set member), or select it and press **Enter** or **Spa
 
 ## See the set on a mesh (3D)
 
-The 3D view renders with Direct3D 11 and the Community Shaders shader files built into Tessalith, so you can check a material close to the game before exporting. It uses Community Shaders 1.9.0 (AIO build 2026-10-03) with default settings, whatever CS you run; your own CS settings or a newer CS can look different in game. <!-- D:GT4 --> With **CS PBR 2.0 (experimental)** ticked it uses the TruePBR 2.0 test build instead ([below](#cs-pbr-20-preview-experimental)).
+The 3D view renders with Direct3D 11 and the Community Shaders shader files built into Tessalith, so you can check a material close to the game before exporting. It uses Community Shaders 2.0's test build PBR2Test1 with default settings, whatever CS you run; your own CS settings or another CS build can look different in game. <!-- D:GT4,IE5 --> The test build ships no settings file, so the defaults are CS 1.9.0's, with the test build's own feature list. <!-- D:ID27,ID29 -->
 
 - **The 2D | 3D switch** in a set's heading row swaps the centre pane in place. *2D* (the default) is the [set editor](GUI-Set-Editor.md); *3D* fills the centre. It is remembered in `gui.toml`.
 - **TruePBR settings…** in the heading row opens a window you can move and resize, with the set's settings (the coat settings, the skin card, the PBR Landscape card, CS PBR records, the complex material card, whichever the set has). An edit there shows in 3D right away. While the switch is on 3D, selecting any texture of a set shows that set's view, and the window follows the selection.
 - **Encoded or Source:** *Encoded (exact export)* shows the bytes Export would write; *Source (faster, no compression)* shows the prepared source.
 - **Mesh:** *Auto* picks a scanned mesh that uses the diffuse, loose files before BSA ones; or choose a built-in shape (Sphere, Plane, Cube, Material ball).
 - **Copy image** (**Ctrl+Shift+C**) copies the last frame at the size it was rendered.
-- **Material object layer:** a set with CS PBR records can draw the snow or ash layer; see [CS PBR records](PBR-Landscape.md#cs-pbr-records).
+- **Material object layer:** a set with CS PBR records can draw the snow or ash layer; see [Material object layer](CS-PBR-Records.md#material-object-layer).
 - The **Meshes** view has the same panel ([Mod scanning](Mod-Scanning.md)).
 
-## CS PBR 2.0 preview (experimental)
+## .csm materials in 3D
 
-For authors trying shader type 21 on Community Shaders' TruePBR 2.0 test build. Tick **CS PBR 2.0 (experimental)** in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental): both 3D views (Meshes and the set preview) switch to the shaders of that build (PBR2Test1, built into Tessalith) and recompile every shape, keeping the last frame on screen until they finish. <!-- D:ID26,ID30,ID31 --> The test build ships no settings file, so the view uses CS 1.9.0's default settings with the test build's own feature list. <!-- D:ID27,ID29 -->
+A shape draws Community Shaders 2.0 PBR from the `.csm` its material name field names, as in game. What makes the `.csm` is on [CS PBR records and .csm materials](CS-PBR-Records.md).
 
-- **A type-21 shape** draws with CS 2.0 shading. A shape that breaks a CS 2.0 rule isn't drawn, as in game, and the **notes** list under the view gives the rule ("CS 2.0 won't draw this shape: …"). <!-- D:ID38 -->
-- **A v1 PBR shape** (type 0 or 11 with the PBR flag) draws as vanilla, because CS 2.0 hands it to the vanilla shader. <!-- D:ID33 -->
-- **With the box off**, a type-21 shape draws as the v1 PBR shape a conversion would write, and the notes say "Approximate: tick CS PBR 2.0 to preview CS 2.0 shading". Thin surface and foliage have no v1 shading. <!-- D:ID33,ID40 -->
-- **How far to trust it:** the test shapes for base, subsurface, two-layer, fuzz, thin surface and foliage (one mesh per feature) matched in-game captures of the test build pixel for pixel, checked once. Glint and hair weren't checked. Vanilla and v1 shapes get lighting options the game left off, so judge those with the box off. <!-- D:ID51,ID53,ID56 -->
+- **The Meshes view** reads the `.csm`, its root files and the textures it names from your scanned mods, loose files before BSAs. A `.csm` that can't be read draws vanilla, with an amber Problems row: "Material file materials\a.csm not found; drawn vanilla", or the file and the error. <!-- D:IE6,IE12 -->
+- **A v1 PBR shape** (the PBR flag, SLSF2 23, and no `.csm`) draws vanilla, because CS 2.0 hands v1 PBR to the vanilla shader. <!-- D:IE5 -->
+- **A texture set record a project set binds** (its EDID in the set's CS PBR records) draws that set's `.csm` as the export would write it, unsaved edits included. A set whose `.csm` is blocked leaves the shape on the material its NIF names, and the Problems row says why. <!-- D:IE12 -->
+- **The set preview** draws the set's `.csm` on every shape PGPatcher patches with the set; a shape PGPatcher skips or doesn't match keeps its own material. A PBR Landscape set always previews on a plane, which draws the values of its texture-set block. <!-- D:IE13 -->
+- **The set's own textures** are its encodes in the set preview. The Meshes view reads them from the scan, so they're magenta until you export them into a scanned mod and rescan. <!-- D:IE12 -->
+- **How far to trust it:** one mesh per CS 2.0 feature (base, subsurface, two-layer, fuzz, glint, hair, thin surface, foliage), drawn with Tessalith's own `.csm` values, matched in-game captures of the test build within the capture noise, checked once. The hair capture lit too few pixels to judge hair shading. <!-- D:IE8,ID56 -->
 
 ## Move the camera and light
 
@@ -51,5 +53,5 @@ For authors trying shader type 21 on Community Shaders' TruePBR 2.0 test build. 
 - **A real mesh needs a scan** ([Mod scanning](Mod-Scanning.md)). "No scanned mesh uses this diffuse" means the scan found none. Meshes from Skyrim LE aren't drawn, and a built-in shape can't match an entry's match keys, so it shows plain textures.
 - **Your JSON wins** over other mods' PGPatcher configs.
 - **Large textures** are previewed at a capped size ("Preview at N px, export writes full size").
-- **These Community Shaders features are off:** Light Limit Fix, Skylighting, Screen-Space Shadows, Subsurface Scattering, Image-Based Lighting, Physical Sky, Wetness, Cloud Shadows, terrain effects, water, fog, Volumetric Shadows.
+- **These Community Shaders features are off:** Light Limit Fix, Skylighting, Screen-Space Shadows, Subsurface Scattering, Image-Based Lighting, Wetness, Cloud Shadows, terrain effects, water, fog, Volumetric Shadows.
 - **PBR grass** is drawn with the object PBR shader, so it can look different from in game ([PBR grass](PBR-Landscape.md#pbr-grass)). The exported files aren't affected.

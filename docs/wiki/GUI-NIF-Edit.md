@@ -1,6 +1,6 @@
 # Editing a NIF
 
-How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers are on [NIF animation](GUI-NIF-Animation.md); existing clips play there.
+How to edit a mesh's shader, alpha, controllers and extra data in the Meshes view, and export an edited copy. For mod authors fixing or tuning meshes. Your source file is never changed. Controllers are on [NIF animation](GUI-NIF-Animation.md); existing clips play there. Exporting the edit, and how PGPatcher's copy relates to it, is on [Exporting an edited NIF](GUI-NIF-Export.md).
 
 ## Before you start
 
@@ -20,33 +20,36 @@ How to edit a mesh's shader, alpha, controllers and extra data in the Meshes vie
 - **Controllers** lists the shape's controllers (alpha, shader float and colour, texture transform) with their start, stop, frequency, phase, cycle and the animated value, and edits their keys ([NIF animation](GUI-NIF-Animation.md#the-controllers-tab)). Controllers of other classes are read-only.
 - **Extra data** lists the extra data of the root or the selected shape: BSXFlags bits, string, integer, boolean and float values, BSInvMarker. **Add to root**, **Add to shape** and **Remove** change the list. Each row shows its own warnings under it, for example "BSXFlags must be named BSX". A **Known** list above the type and name fills in an entry the game or a plugin reads, with its type, name and a starting value. On a shape: **AnisotropicAlphaMaterial** (Community Shaders see-through look; starts at 3, woven fabric). On the root: **BSX**, **INV**, **HDT Skinned Mesh Physics Object** (type the physics xml path in **Value**; Add stays off until you do) and **Prn (unconfirmed)** (the skeleton node the item attaches to; not checked against a source yet). An entry that goes on the other owner is greyed ("Goes on the root", "Goes on a shape"), and so is one this owner already has ("Already on this root"). **Custom…** keeps free typing for anything else. BODYTRI is not offered: BodySlide and Outfit Studio write it. **Heel height (RaceMenu)** (shapes only; on the root: "The game ignores heel height here. Put it on a shape.") raises the actor so heels stand on the ground. It starts at the shape's stored value, **Calculate** fills it from the lowest point of the shape in bind pose (rounded to 0.1, still editable), and **Set heel height** writes it: the shape's HH_OFFSET is changed in place or added, and an SDTA the shape already has gets the same height in its NPC entry (a new SDTA only when **Also write SDTA** is ticked). It says when an earlier shape's heel height wins, and for `_0`/`_1` files it reminds you to apply the same value to the other weight file. Heel data anywhere but on a shape, and on a shape after the first shape in the scene that has some, warns under its row. A negative height says it lowers the actor. When the shape's HH_OFFSET is not a number the editor can set (another type), Set heel height stays off until that row is removed.
 
-## CS PBR 2.0 shaders (experimental)
+## Point a shape at a .csm
 
-For moving a mesh to Community Shaders TruePBR 2.0 (shader type 21). It needs the [CS PBR 2.0 box](GUI-Texture-Panel.md#cs-pbr-20-experimental) ticked.
+Use this when a mesh should take its PBR material from one of your sets. CS 2.0 reads a shape's PBR material from the `.csm` file its material name field names, and Tessalith writes one `.csm` per PBR set ([CS PBR records and .csm materials](CS-PBR-Records.md)). Both buttons below need the project's target on Community Shaders.
 
-### Convert a shape to type 21
+### A shape without v1 PBR
 
 1. Select the shape's card and open the **Shader** tab.
-2. Pick **TruePBR 2.0 (21)** in the shader type list. It is listed on Skyrim SE meshes only. <!-- D:ID21 -->
-3. Read the notice under the type. From type 0 or 11 with the PBR flag set, the features and values carry over: "Converted from v1 PBR: <features>", plus a line for each parameter clamped into CS 2.0's range. Any other shape starts at CS 2.0's defaults with no features. Each flag type 21 doesn't use is cleared and named ("<flag> flag cleared: type 21 doesn't use it"). <!-- D:ID10,ID13 -->
+2. The **Material** row shows the name field, "(none)" when it's empty. Click **Use the set's .csm** beside it; its hover names the path and the set.
 
-Controllers CS 2.0 doesn't animate are unlinked in the same step ([NIF animation](GUI-NIF-Animation.md#type-21-controllers)). **Undo** gives the shape back as it was.
+The set is the project's PBR set whose diffuse is the shape's slot 1. The button is greyed, with the reason on hover, when there's no such set ("Make a texture set for these textures first."), when the target isn't Community Shaders, on a v1 PBR shape (use the convert below), or when the shape already names that `.csm`. <!-- D:IE14 -->
 
-### Edit a type-21 shape
+### A v1 PBR shape
 
-- After refraction the Shader tab shows the PBR version, ten feature checkboxes and the parameters of the features that are on; glossiness, specular and the trailer don't exist on type 21. A feature that would break one of CS 2.0's combination rules is greyed, and its hover names the rule. <!-- D:ID22 -->
-- Texture slots, here and on the shape card, carry the 2.0 names (RMAOS and the two feature textures among them). The v1 PBR flags are hidden, and flags CS 2.0 forbids are locked off. <!-- D:ID23,ID25 -->
-- With the box off a type-21 shape still opens: its type, features and parameters are locked, while textures, alpha, UV, emissive and flags stay editable. <!-- D:ID21 -->
+A v1 PBR shape (type 0 or 11 with the PBR flag, SLSF2 23) has the amber warning "Draws vanilla on CS 2.0" ([why](Previews.md#csm-materials-in-3d)).
 
-### What blocks a type-21 export
+1. Click **Convert to .csm** on that warning.
+2. A set that holds no PBR values yet gets the shape's values. When the set's values differ, the window **The set holds other PBR values** lists them, set beside shape. **Use the set's values** (Enter) leaves the set alone; **Replace the set's values** (red) writes the shape's values into it, and is greyed while the sets can't be edited or when the shape's switches would block the set's `.csm`. A row that is a PGPatcher setting can't be replaced here: change it in the set's PGPatcher settings.
 
-- **Red, always blocks:** "CS 2.0 won't draw this shape: <reason>", even when the source file had it, because CS 2.0 skips such a shape in game. Reasons include a PBR version other than 2, a broken feature rule, a parameter out of range, a forbidden flag, an empty required slot and a controller CS 2.0 doesn't read. <!-- D:ID5 -->
-- **Amber:** a v1 PBR flag still set, with a **Fix** that clears it; a PBRThinSurface without 4 floats or a PBRFuzz without 2 ("CS ignores it"). <!-- D:ID6 -->
-- **In game** leaves a type-21 shape as it is, because PGPatcher 2.3.1 doesn't know type 21. <!-- D:ID6 -->
+Either way the shape ends up on the set's `.csm`: the convert clears the v1 PBR flags (SLSF2 12, 23 to 27 and 30), sets type 0, keeps the texture slots and writes the `.csm` path into the name field, as one edit. The set's values are a step on the Textures history and the shape change a step on the NIF edit history, so you undo them separately. <!-- D:IE14 -->
 
-### Convert back
+### When the shape already has a material name
 
-Pick type 0 or 11 to write a v1 PBR shape. The notice lists under "Dropped:" every feature v1 can't carry, such as thin surface, foliage, or glint beside fuzz. Type 0 has no trailer, so it also drops two-layer, fuzz and glint. Any other type writes plain vanilla values at their defaults. <!-- D:ID11,ID14 -->
+The name field is replaced without asking when it's empty or already a `.csm` path. Any other name asks first, in **Replace the material name?**, because another tool may use it: **Replace <name>** (red) or **Keep the name** (Enter), which changes nothing. <!-- D:IE14 -->
+
+### No edit writes v1 PBR
+
+- The PBR flag (SLSF2 23) is read-only, and its hover points at **Convert to .csm**.
+- An edit that turns the flag on, or a shader type change that makes a shape with the flag v1 PBR, is a red **Pending edits** row, "v1 PBR is gone; use Convert to .csm". It blocks the NIF's export, so an old saved edit that did this can't slip through. <!-- D:IE14 -->
+
+The 3D view draws the shape with the set's `.csm`, unsaved set edits included ([.csm materials in 3D](Previews.md#csm-materials-in-3d)). <!-- D:IE15 -->
 
 ## Shared blocks
 
@@ -72,48 +75,6 @@ Values are never clamped. A value outside the range the game expects, or a flag 
 
 **Source changed.** If the source NIF changes on disk (a mod update), the edits are re-applied by name and role, not by position. The panel says "Source changed: N applied, M conflicts". A conflicting edit has **Take source** (drop your edit) and **Keep mine** (keep it on top of the new source).
 
-## Export
-
-The bottom of the edit panel stays under the tabs however long a tab is. Its first line is a status: a green dot and **Ready**, a grey dot and "No edits to export." while nothing is edited, a grey dot and "Skipped until an export folder is chosen" once there are edits and no folder (Review lists the same), or a red dot and **Blocked:** with the reason: an edit cannot be applied, conflicts are open, or an edit introduced an error. When a pending row is red, **Show** opens the pending list. When a file Tessalith did not write is already at the export path, **Diff…** opens a list of the blocks that differ between that file and what the export writes, read at the click; **Close** shuts it. Then "Writes meshes\…\x.nif to <export folder>\meshes\…\x.nif" (hover for the full path) and "The source file is never changed. Change the folder with Export to ▾ in the header."
-
-**Review…** opens Review in the bottom panel: NIF edits export from there, with the textures, when you press Review's Export. <!-- D:GD2 --> The button itself never writes. In Review each NIF with edits is a row: its mod, how many unused blocks the export leaves out, and the result after the export (written, or skipped and why). A blocked NIF row is skipped and never blocks the texture export. Each write puts "Exported <path> to <mod>." in Messages, with a placement line when the mod order is wrong: when the export folder is a mod folder in the MO2 instance's `mods`, the export checks the mod order and says whether that mod must be enabled, or dragged below the highest source or above the lowest PGPatcher output; any other folder says "The export folder is not an MO2 mod here: load order not checked." and still exports. With no folder open (no project), Review still exports NIF edits: its button reads "Export 1 NIF edit", it needs an export folder (**Choose the export folder…**; the `gui.toml` one), writes the NIFs there and starts no texture run.
-
-### Export this NIF (right-click)
-
-While an edit is open, a right-click on the 3D view (a click, not a drag) opens a menu with **Export this NIF**. It writes the open NIF to the export folder at once, with no Review and no texture run, and reports as Review's export does (Messages, a toast, the per-file lines). It is greyed with the reason on hover: "No edits to export.", the NIF's own blocked reason, "An export is running", or "No export folder chosen", in which case **Choose export folder…** appears under it and opens the header's picker. A file Tessalith did not write at the destination is never overwritten this way: the click opens Review on that row, and once you have answered Overwrite there the next **Export this NIF** writes. Right-drag still orbits and Shift+right-drag still turns the sun; the set preview's 3D view has no menu.
-
-### Changing the export folder
-
-Open edits stay in memory and the next save goes to the new folder. If that folder already holds saved edits for the NIF, your open edit wins: the old saved edits are moved aside to `<name>.<seconds>.toml` beside them, never overwritten, and Messages names the file. If the new folder's edit document can't be opened, the edit stays blocked and saves go to the autosave in `%LOCALAPPDATA%\sdc\nif-edits` until you pick a folder that works. Once the NIF is edited, a folder that holds the mesh the edit applies to is refused, so an export never replaces its source: the folder is not taken, and the NIF's row is blocked with the reason until you pick another one. <!-- D:HS12 -->
-
-### After an export
-
-After an export, the worklist has a Warning row "Re-run PGPatcher so its output includes this edit." when the NIF has a PGPatcher copy. The exported file leaves out the blocks your edits added that nothing uses any more (a removed controller), so it can have fewer blocks than the edit shows. When that cleanup cannot read the file, an Info row says "Exports without cleanup: the file has a block Tessalith does not understand", and the export writes the file as edited.
-
-### A file Tessalith did not write
-
-If the file at the destination is not the one Tessalith last wrote, its Review row waits for an answer, keep the file on disk or overwrite it, with neither picked. Until you answer, the export skips that NIF. An answer counts for one export, and only while the file on disk is the one you answered for: a file that changed since says "changed on disk since you answered" and asks again. The row's **Diff…** switches to the Meshes view and opens the edit panel's list of the blocks that differ.
-
-## PGPatcher and the game
-
-The toggle reads **In game** and **Source** with or without an edit open; while editing, In game is simulated and Source is your edited NIF, as their hovers say ([below](#in-game-and-source-while-editing)). Once you have exported, the amber line "PGPatcher output predates your edit: re-run PGPatcher." shows: the game still loads PGPatcher's copy, which was made from the unedited NIF, until you re-run PGPatcher. If the edit preview cannot be shown, the line "Your edit could not be shown. Switch to In game or Source to retry." says so; edits you make meanwhile still count.
-
-### In game and Source while editing
-
-In game runs Tessalith's PGPatcher simulation on your edited NIF and shows still materials (the clock pauses). It follows PGPatcher 2.3.1: loose JSON only, no modrules priority, read at the last scan. The JSON is read in the background when the edit opens, and a folder scan has no MO2 instance, so In game says no JSON was read. PGPatcher's real output, made from the unedited NIF, is not shown while you edit. For the selected shape a line says what happened:
-
-- No JSON matches it, it is already PBR, or a file is not applied (amber, with the reason; the next file can still match).
-- PGPatcher skips it (`PG_IGNORE`, amber).
-- The shape carries a `PG_STOCK` block (amber): PGPatcher reverts such a shape to its recorded stock state first, and the preview shows it as loaded.
-- **IMPORTANT** A match key such as `match_diffuse` or `nif_filter` that isn't a string, in any JSON the instance loads, crashes PGPatcher 2.3: the run stops, so every shape shows one red line per such file, even shapes PGPatcher would leave alone. The set preview in the Textures view shows the same lines.
-- PGPatcher makes the shape PBR while it has an Env map scale controller (red): that crashes the game.
-
-The simulation leaves out:
-
-- JSON inside BSAs, and PGPatcher's own mod priority (`modrules.json`; the MO2 order stands in);
-- plugin alternate textures (TXST), and the plugin and mesh-blocklist rules that decide which meshes PGPatcher patches;
-- complex-material and parallax competition, and shapes with no texture set;
-- JSON changed on disk since it was read (rescan), and the `PG_STOCK` revert.
 ## Not supported
 
 - A Skyrim LE NIF opens without a 3D preview ("LE mesh: no 3D preview").

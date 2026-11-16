@@ -1,6 +1,6 @@
 # NIF animation
 
-For mod authors animating glow, colour or alpha: play a NIF's clips and edit the keys of its shader and alpha controllers. The edit preview plays the controllers of the NIF you are editing; a NIF shown without **Edit** does not animate. Opening a NIF for editing, and the **In game** simulation, are on [Editing a NIF](GUI-NIF-Edit.md). Clips can't be created, removed or renamed; the keys of the clip shown in **Preview** can be edited.
+For mod authors animating glow, colour or alpha: play a NIF's clips and edit the keys of its shader and alpha controllers. The edit preview plays the controllers of the NIF you are editing; a NIF shown without **Edit** does not animate. Opening a NIF for editing is on [Editing a NIF](GUI-NIF-Edit.md), and the **In game** simulation on [Exporting an edited NIF](GUI-NIF-Export.md#in-game-and-source-while-editing). Clips can't be created, removed or renamed; the keys of the clip shown in **Preview** can be edited.
 
 ## Playback
 
@@ -28,20 +28,15 @@ On a shader property, pick **Float** or **Colour** and the **Variable**. An alph
 
 **PBR names.** On a PBR shape, as on the Shader tab, glossiness reads **Specular level**, specular strength **Roughness scale**, and specular colour **Coat colour**, **Subsurface colour** or "Specular colour (no effect on PBR)".
 
-## Type-21 controllers
+## Controllers on a .csm shape
 
-On a CS TruePBR 2.0 shape (shader type 21, [Editing a NIF](GUI-NIF-Edit.md#cs-pbr-20-shaders-experimental)) the tab follows what CS 2.0 animates: refraction strength, emissive multiple, alpha, the UV offsets and scales, and emissive colour.
-
-- **Picking type 21** unlinks every shader float or colour controller CS 2.0 refuses (Env map scale among them) and deletes no block. The notice names each one ("Unlinked the <name> controller", plus "from clip <clip>" when a clip held it). The pick is refused when such a controller is shared by several properties, or when the shader's controller chain is broken. <!-- D:ID16 -->
-- **Add controller** lists the animated variables, then glossiness, specular strength and specular colour with the hover "Runs, but CS 2.0 shows no change". <!-- D:ID17,ID24 -->
-- **On those three** the value row reads "—", the preview doesn't animate them, and an amber warning says so. <!-- D:ID18,ID25 -->
-- **A type-21 NIF from another tool** keeps a refused controller when it opens. The shape gets the red "CS 2.0 won't draw this shape" error, which blocks the export until you remove the controller ([What blocks a type-21 export](GUI-NIF-Edit.md#what-blocks-a-type-21-export)).
+On a shape that draws CS 2.0 PBR from a `.csm`, a shader controller on **Specular level**, **Roughness scale** or the specular colour (float 9 and 10, colour 0) gets the amber warning "CS 2.0 may not animate values a .csm sets". Nobody has checked yet whether CS 2.0 runs those controllers over a `.csm` material, so check it in game. <!-- D:IE15 -->
 
 ## Warnings
 
 These come from an in-game check of each controller and show under the controller.
 - Red: "Env map scale crashes the game on PBR materials." On a PBR shape, Env map scale (8) is greyed in both Variable lists with this text. A controller that already has it blocks the NIF's export, even when the source file had it.
-- Amber, from the last In game simulation: the same PGPatcher warning as on the shape cards ([In game and Source while editing](GUI-NIF-Edit.md#in-game-and-source-while-editing)), shown on the Env map scale controller. It does not block export, since PGPatcher's output depends on the JSON at play time.
+- Amber, from the last In game simulation: the same PGPatcher warning as on the shape cards ([In game and Source while editing](GUI-NIF-Export.md#in-game-and-source-while-editing)), shown on the Env map scale controller. It does not block export, since PGPatcher's output depends on the JSON at play time.
 - Amber, no effect in game: "This controller has no effect: Specular is off when the mesh loads." and "…specular strength is 0 when the mesh loads." (glossiness, specular strength or colour on a non-PBR shape); "This controller has no effect: alpha test is off."; "Refraction strength has no visible effect in game."; "Two controllers drive <name>: only the last one plays."
 
 ## Clips

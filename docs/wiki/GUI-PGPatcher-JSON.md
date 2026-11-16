@@ -20,7 +20,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 | Emissive, Glint, Fuzz settings | Their own values. Shown while the feature is on. |
 | NiAlphaProperty | The `alphaprop_*` keys ([below](#nialphaproperty)). |
 | Matching | The texture paths the entry matches (`match1` to `match8`). |
-| CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
+| CS PBR records | Community Shaders' records and the `.csm` material ([CS PBR records](CS-PBR-Records.md#cs-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, [Rename](#rename), UV and cubemap, vertex colours and depth, texture locks. |
 
 Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.

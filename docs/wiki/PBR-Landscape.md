@@ -1,6 +1,6 @@
-# PBR Landscape, Advanced skin, grass, XPMF and CS PBR records
+# PBR Landscape, Advanced skin, grass and XPMF
 
-This page is for terrain, projected-material (snow, ash), skin and grass authors targeting Community Shaders. It covers what each material writes: PBR Landscape sets, Community Shaders' own PBR record files, Advanced skin and its `.csskin.json`, XPMF profiles, PBR grass and complex grass. The ordinary TruePBR settings are on [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md).
+This page is for terrain, projected-material (snow, ash), skin and grass authors targeting Community Shaders. It covers what each material writes: PBR Landscape sets, Advanced skin and its `.csskin.json`, XPMF profiles, PBR grass and complex grass. The ordinary TruePBR settings are on [PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md), and Community Shaders' own PBR records and `.csm` materials on [CS PBR records and .csm materials](CS-PBR-Records.md).
 
 ## PBR Landscape sets
 
@@ -9,38 +9,10 @@ Under the `cs` target, a PBR set gets the **PBR Landscape** shader on its own wh
 ![The PBR Landscape card.](../img/gui/PBR-Landscape/landscape-card.png)
 
 - **Also write into the PGPatcher JSON** follows the scan until you click it: after a scan it's ticked either way, with "Used by N meshes" when meshes that aren't LOD use the diffuse, and with a note (an info row in [Problems](GUI-Problems.md)) when none do yet. **Back to auto** returns it to the scan. A set whose colour map is a landscape diffuse rather than a PBR albedo has no PGPatcher entry; the box is off and says how to change that.
-- The card edits the same texture set and material object blocks as [CS PBR records](#cs-pbr-records), with a **Shared** section for the glint parameters so one edit writes both.
+- The card edits the same texture set and material object blocks as [CS PBR records](CS-PBR-Records.md#cs-pbr-records), with a **Shared** section for the glint parameters so one edit writes both.
 - Roughness and specular are separate rows: the texture set's values multiply the `_rmaos` map, while the material object's replace it.
 - Community Shaders' landscape shader reads only roughness, displacement, specular and glint, so the other rows stay hidden while the box is off, unless they hold a value.
 - **PGPatcher JSON settings**, under the card, holds the TruePBR settings: open while the entry is written, marked "not written" while it isn't.
-
-## CS PBR records
-
-A set can write Community Shaders' own runtime files: a **PBR texture set** (`<export>\PBRTextureSets\<EDID>.json`) and a **PBR material object** (`<export>\PBRMaterialObjects\<EDID>.json`). On a landscape set they're on the card above; on any other set, open **CS PBR records** in the Material tab and add either block.
-
-- **Template** fills a block from the built-in library: PBR landscape template values by Faultier (https://www.nexusmods.com/profile/Faultierfan?gameId=1704), from Faultier's PBR landscape modders resource. It never removes EDIDs you added.
-- **EDIDs** are the records the file is for, and the file name is the EDID exactly, case included, because Community Shaders matches the exact case. After a plugin scan, texture-set EDIDs are suggested from the texture sets that use the diffuse, and material objects can be picked from the scanned records. An amber line flags an EDID that isn't in the scan; a material object that isn't single-pass is ignored by Community Shaders. An EDID that can't be a file name, or that two sets bind, isn't written.
-- A texture set also drives the set's PGPatcher entry (roughness, specular, displacement, subsurface, coat and glint come from the block, so the two files can't drift). With no scan the entry isn't written. After a scan it's written whether or not a mesh (not LOD) uses the diffuse yet, and an info row says when none does; **PGPatcher entry for statics** forces it on or off.
-- **IMPORTANT** A file you edited outside Tessalith is never overwritten: the export report says so, and you delete it to let Tessalith write it again. A file Tessalith wrote for an EDID no set binds any more is reported, not deleted.
-- **Material object layer** in the 3D preview draws the snow or ash layer the game puts on statics that use the object, from the block's values and the record's DATA in your load order. Coverage goes on most non-skinned shapes; the block's material values (colour scale, roughness, specular, glint) change PBR shapes only. <!-- D:GI10,GZ1,GZ3 -->
-- When the set has an [XPMF profile](#xpmf-profiles), the layer takes the profile's four texture paths, `falloffScale`, `falloffBias` and `noiseUVScale` in place of the load order's. <!-- D:GI17 -->
-
-### CS PBR 2.0 keys
-
-With **CS PBR 2.0 (experimental)** ticked in the [Advanced drawer](GUI-Texture-Panel.md#cs-pbr-20-experimental), the texture set block gets eight more rows, and the `PBRTextureSets` file writes the ones that hold a value. Unticked, the rows are hidden and the file is written without them. <!-- D:ID44 --> The PBR Landscape card hides the eight rows like its other unread rows: while **Also write into the PGPatcher JSON** is off and a row holds no value, because CS's landscape shader doesn't read them. <!-- D:ID47 -->
-
-| Row | Key | Value |
-|---|---|---|
-| **Subsurface balance** | `subsurfaceBalance` | 0 to 1, default 0.75 |
-| **Thin surface** | `thinSurface` | true or false, default false |
-| **Foliage** | `foliage` | true or false, default false |
-| **Thin-surface specular weight** | `thinSurfaceSpecularWeight` | 0 to 1, default 0.5 |
-| **Thin-surface back specular weight** | `thinSurfaceBackSpecularWeight` | 0 to 1, default 0.5 |
-| **Thin-surface back roughness scale** | `thinSurfaceBackRoughnessScale` | 0 to 3, default 1 |
-| **Fuzz roughness** | `fuzzRoughness` | -1 to 1, default -1; a negative value uses the base roughness |
-| **Fuzz roughness from texture** | `fuzzRoughnessTexture` | true or false, default false; see below |
-
-**Fuzz roughness from texture** reads the roughness from the green channel of the parallax (height) slot's texture, so that texture holds two channels: encode it BC5 or BC1, not BC4. <!-- D:ID46 -->
 
 ## Advanced skin
 

@@ -65,7 +65,7 @@ The docs grew too large, mostly from over-explaining and over-stating limits. Wr
   - GUI-Main-Window, GUI-Texture-Panel, GUI-Sets-Column, GUI-Set-Editor, GUI-Bulk-and-Rename;
   - GUI-Problems and GUI-Review-and-Export;
   - GUI-PGPatcher-JSON;
-  - GUI-NIF-Edit and GUI-NIF-Animation.
+  - GUI-NIF-Edit, GUI-NIF-Export and GUI-NIF-Animation.
   
   GUI-Guide.md is the one-screen overview: an annotated main-window picture that links to each area page. Split further along the same lines when a page outgrows the budget.
 - **Every page opens with one to three lines** saying what the page covers and who it is for.
