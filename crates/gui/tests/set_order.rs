@@ -284,7 +284,12 @@ fn a_number_past_the_end_never_picks_a_set_named_with_it() {
     assert_eq!(before[1], "extra/s04");
     let rows_with_armor = |h: &Harness<'static, AppModel>| {
         h.query_all_by_label_contains("armor_13")
-            .filter(|n| !in_sets_column(h, n.rect()))
+            // The card is named "Set …"; by rect, the dialog (over the columns) can sit inside the Sets column too.
+            .filter(|n| {
+                !n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l.starts_with("Set "))
+            })
             .count()
     };
     open_move_to(&mut h, "extra/s04");
