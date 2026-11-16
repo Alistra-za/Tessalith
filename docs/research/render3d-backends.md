@@ -21,7 +21,7 @@ So each path below is judged first by one question: **how does it run FXC's byte
 
 What CS is doing, as of 2026-11-16:
 - **CS compiles with FXC, `*_5_0` profiles, on its `dev` branch and on its Vulkan branch.** Its one attempt to compile HLSL to SPIR-V with DXC (PR 2558) was closed unmerged on 2026-07-21. That PR's description says shaders with samplers or groupshared memory had to fall back to FXC bytecode.
-- **The "Vulkan" work is DXVK under the game.** Two draft PRs (2632 and 2670) load a CS fork of DXVK before Skyrim creates its D3D11 device. The fork is based on DXVK 3.1.0. The game still issues D3D11 calls; DXVK translates them, and the FXC bytecode with them, to Vulkan. Upscaling and frame generation then use DXVK's Vulkan device directly.
+- **The "Vulkan" work is DXVK under the game.** Two draft PRs (2632 and 2670) load a CS fork of DXVK before Skyrim creates its D3D11 device. The fork's build file reports version 3.1.0. The game still issues D3D11 calls; DXVK translates them, and the FXC bytecode with them, to Vulkan. Upscaling and frame generation then use DXVK's Vulkan device directly.
 - **Nothing is decided.** Both are drafts, as is the ray tracing PR (2196), no maintainer has stated a timeline, and the Vulkan branch keeps a `CS_NATIVE_D3D11=1` switch back to plain D3D11. A related fix (PR 2662) was closed unmerged on 2026-11-14.
 - **D3D12 points both ways.** PR 2632 deletes CS's D3D12 swap-chain bridge. The ray tracing draft (PR 2196) adds a D3D12 header and Streamline's D3D12 build.
 - **Ray tracing is a separate plugin with a separate compiler.** [CreationEngineRaytracing](https://github.com/Gistix/CreationEngineRaytracing) (CER) takes a device from CS: either D3D12 handles, or DXVK's Vulkan device. It renders through NVRHI and compiles its own shaders with DXC, to DXIL on D3D12 and to SPIR-V on Vulkan. It needs `VK_KHR_ray_query` or ray tracing pipelines.
@@ -40,8 +40,8 @@ Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene
 | 3840×2160 | 0.10 | 0.66 | 22.69 | 23.45 | 97% |
 
 - **The GPU wait is flat** at 0.56 to 0.66 ms for every scene and size. The probe polls an event query and sleeps 200 µs between polls, so I read this as the probe's floor, not GPU time. Real GPU time on this card is below it. That is an inference; timestamp queries would settle it.
-- **Recording the draws is small:** 0.02 ms for 2 shapes, 0.10 to 0.15 ms for 147.
-- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes 0.85 ms, so the bytes are not the cost. The staging copy and the conversion were not timed apart.
+- **Recording the draws is small:** 0.02 ms for 2 shapes, 0.10 to 0.16 ms for 147.
+- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes about 1 ms (0.7 to 1.1 over the three runs), so the bytes are not the cost. The staging copy and the conversion were not timed apart.
 - **Not measured:** the second half of the round trip, the GUI's upload of the frame into its own wgpu texture.
 
 Software rasteriser (WARP, the same D3D11 code), whole `render()` median in ms:
@@ -56,9 +56,9 @@ Software rasteriser (WARP, the same D3D11 code), whole `render()` median in ms:
 On WARP the drawing dominates (53 ms of the 73 ms static 4K frame). The `pbr` scene cost slightly more at 1600×900 than at 1920×1080 in this run; I did not chase why. The meshes cover only 4% to 17% of the frame with the automatic camera, so a close-up costs more.
 
 What this says about the backends:
-- **A lower-overhead API has nothing to win here.** D3D12 and Vulkan cut CPU cost per draw; the preview spends 0.02 to 0.15 ms on draws. No other backend was run, so this is an inference from the D3D11 numbers.
+- **A lower-overhead API has nothing to win here.** D3D12 and Vulkan cut CPU cost per draw; the preview spends 0.02 to 0.16 ms on draws. No other backend was run, so this is an inference from the D3D11 numbers.
 - **Zero-copy display is the frame-time lever, and it does not need a new backend.** A D3D11 shared texture can be imported into the GUI's wgpu device: wgpu-hal 30.0.1 has `vulkan::Device::texture_from_d3d11_shared_handle` and `dx12::Device::texture_from_raw`, and egui-wgpu's `register_native_texture` shows the result. That texture must be `Rgba8Unorm`, so the half-to-8-bit step moves to the GPU. I found no project that does this import with wgpu.
-- **The old gate still holds at its own size.** The October plan skipped zero-copy unless readback passed 4 ms at 1600×900. It measures 3.6 to 3.7 ms there. It passes 4 ms from 1920×1080 up (4.9 to 5.3 ms).
+- **The old gate still holds at its own size.** The October plan skipped zero-copy unless readback passed 4 ms at 1600×900. It measures 3.6 to 3.7 ms there. It passes 4 ms from 1920×1080 up (5.3 ms; 4.8 to 5.0 ms in the two earlier runs).
 
 ## What a load costs today
 
@@ -178,8 +178,8 @@ The graphics backend decides less here than it seems to:
 
 I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS compiles on every branch, and it is the one thing measured to work. Among the ways to grow from there, path 2 is the only one that could add native Linux and a Vulkan device without changing what the shaders compile to. It is also where CS's own drafts point. That makes it the path to test, not yet the path to build: it rests on four untested links.
 
-Two tests could rule it out. Both need a download, so both wait for the owner's word:
-1. **Golden replay and the timing baseline on DXVK, on Windows.** Put DXVK's `d3d11.dll` and `dxgi.dll` beside the test binaries, then run the existing golden replay (parity) and `render_backend_baseline` (frame and load times on the same scenes). No code changes. Which DXVK is the owner's choice: upstream's release, or a build of CS's fork, which is what the game would run.
+Two tests could rule it out. Both need a download, so neither has been run:
+1. **Golden replay and the timing baseline on DXVK, on Windows.** Put DXVK's `d3d11.dll` and `dxgi.dll` beside the test binaries, then run the existing golden replay (parity) and `render_backend_baseline` (frame and load times on the same scenes). I expect no renderer changes, but that is untested. The replay creates the software device (`Gpu::new_warp()`) and its goldens were pinned there; what DXVK does with that request, and whether its pixels pass the replay's comparison, is unknown, so the test may need a way to pick the device. The baseline's WARP rows would not be WARP under DXVK either. I haven't picked which DXVK: upstream's release, or a build of CS's fork, which is what the game would run.
 2. **A vkd3d row in the compile trial.** Add vkd3d's `D3DCompile` to `tools\r3d-dxc-trial.ps1` and run the 98 permutations. If it rejects namespaced cbuffers, native Linux needs another source of FXC bytecode. I have not checked whether a prebuilt Windows binary of vkd3d exists; a Linux VM is the fallback.
 
 A third download, the Vulkan SDK's `dxc`, fills in the missing SPIR-V column for paths 4 and 5.
