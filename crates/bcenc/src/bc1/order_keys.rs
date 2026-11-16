@@ -30,7 +30,8 @@ const _: () = assert!(MAX_TOTAL_ORDERINGS3 == 32);
 /// (`params.rs` asserts it is inside the clamp). The level is a const generic so that the count is a constant in each
 /// instance.
 ///
-/// The kernel is the stamp compiled for `isa`'s path (as in [`keys3`]); the scalar code where the target lacks SSE2.
+/// The kernel is `isa`'s path's (as in [`keys3`]): the SSE2 one on the base path, the 256-bit one (two orderings per
+/// vector) on the AVX2 path, the scalar code where the target lacks SSE2.
 ///
 /// [`Seen`]: super::seen::Seen
 #[inline(always)]
@@ -44,11 +45,8 @@ pub(crate) fn keys4<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS4] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        let keys = if let Some(_t) = isa.avx2() {
-            #[cfg(test)]
-            crate::path::kernel_ran(crate::path::Wide::Keys4);
-            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
-            unsafe { sse2::keys4_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        let keys = if let Some(t) = isa.avx2() {
+            avx2::fit_keys4::<LEVEL>(t, total, sums, row, tables, single_key)
         } else {
             // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
             unsafe { sse2::keys4::<LEVEL>(total, sums, row, tables, single_key) }
@@ -91,11 +89,8 @@ pub(crate) fn keys3<const LEVEL: u32>(
 ) -> [u32; MAX_TOTAL_ORDERINGS3] {
     #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
     let keys = {
-        let keys = if let Some(_t) = isa.avx2() {
-            #[cfg(test)]
-            crate::path::kernel_ran(crate::path::Wide::Keys3);
-            // SAFETY: `_t` exists, so `Avx2::require` found AVX2.
-            unsafe { sse2::keys3_avx2::<LEVEL>(total, sums, row, tables, single_key) }
+        let keys = if let Some(t) = isa.avx2() {
+            avx2::fit_keys3::<LEVEL>(t, total, sums, row, tables, single_key)
         } else {
             // SAFETY: this arm is compiled only where the target has SSE2 (the cfg above).
             unsafe { sse2::keys3::<LEVEL>(total, sums, row, tables, single_key) }
@@ -120,6 +115,10 @@ pub(crate) fn keys3<const LEVEL: u32>(
 // The kernel the encode uses where the target has SSE2 (`x86_64-pc-windows-msvc`, the workspace's target, always).
 #[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
 mod sse2;
+
+// The AVX2 path's kernel: the SSE2 one with two orderings per 256-bit vector.
+#[cfg(all(target_arch = "x86_64", target_feature = "sse2"))]
+mod avx2;
 
 /// The per-trial code `total_orderings` and `try_3color_block` ran before the kernel, one ordering at a time: the
 /// kernel's reference, and what a target without SSE2 runs.
@@ -283,7 +282,7 @@ mod tests {
                         assert_eq!(
                             keys3::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
                             keys,
-                            "AVX2 stamp, {px:?} along {axis:?}"
+                            "AVX2 kernel, {px:?} along {axis:?}"
                         );
                     }
                     for (q, &s) in row.iter().enumerate() {
@@ -323,7 +322,7 @@ mod tests {
                         assert_eq!(
                             keys4::<18>(Avx2::require(), total, &sums, row, tables, SINGLE),
                             keys,
-                            "AVX2 stamp, {px:?} along {axis:?}"
+                            "AVX2 kernel, {px:?} along {axis:?}"
                         );
                     }
                     for (q, &s) in row.iter().enumerate() {
@@ -341,44 +340,60 @@ mod tests {
         use super::super::super::encode::round_ls;
         use super::super::super::fit::{MIDPOINT5, MIDPOINT6};
         use super::super::super::seen::Seen;
+        use super::super::avx2::round_key2_of;
         use super::super::sse2::round_key_of;
+        use crate::path::avx2_tested;
 
-        /// The kernel's rounding of (`xl`, `xh`) against the scalar code's.
-        fn check(xl: [f32; 3], xh: [f32; 3]) {
-            assert_eq!(
-                round_key_of(xl, xh),
-                Seen::key(&round_ls(&xl, &xh)),
-                "xl {xl:?} xh {xh:?}"
-            );
+        /// The SSE2 kernel's rounding of (`xl`, `xh`) against the scalar code's; with `avx2`, also the AVX2 kernel's,
+        /// with (`xl`, `xh`) in the low half and then in the high half, the other half holding a different fit.
+        fn check(xl: [f32; 3], xh: [f32; 3], avx2: bool) {
+            let want = Seen::key(&round_ls(&xl, &xh));
+            assert_eq!(round_key_of(xl, xh), want, "xl {xl:?} xh {xh:?}");
+            if avx2 {
+                let other = [0.25f32; 3];
+                let other_want = Seen::key(&round_ls(&other, &other));
+                assert_eq!(
+                    round_key2_of([xl, other], [xh, other]),
+                    [want, other_want],
+                    "AVX2 low half: xl {xl:?} xh {xh:?}"
+                );
+                assert_eq!(
+                    round_key2_of([other, xl], [other, xh]),
+                    [other_want, want],
+                    "AVX2 high half: xl {xl:?} xh {xh:?}"
+                );
+            }
         }
 
         /// `x` in each of the six positions in turn (three of `xl`, three of `xh`), the other five at `rest`.
-        fn check_each_position(x: f32, rest: f32) {
+        fn check_each_position(x: f32, rest: f32, avx2: bool) {
             for i in 0..6 {
                 let mut v = [rest; 6];
                 v[i] = x;
-                check([v[0], v[1], v[2]], [v[3], v[4], v[5]]);
+                check([v[0], v[1], v[2]], [v[3], v[4], v[5]], avx2);
             }
         }
 
         #[test]
         fn the_rounding_steps_exactly_at_each_threshold() {
+            let avx2 = avx2_tested();
             // The last threshold of each table (1e37) is left out: no fit reaches it.
             for &m in MIDPOINT5[..31].iter().chain(&MIDPOINT6[..63]) {
                 for x in [m.next_down(), m, m.next_up()] {
-                    check_each_position(x, 0.5);
+                    check_each_position(x, 0.5, avx2);
                 }
             }
             for c in 0..=31 {
-                check_each_position(c as f32 / 31.0, 0.5);
+                check_each_position(c as f32 / 31.0, 0.5, avx2);
             }
             for c in 0..=63 {
-                check_each_position(c as f32 / 63.0, 0.5);
+                check_each_position(c as f32 / 63.0, 0.5, avx2);
             }
         }
 
         #[test]
         fn out_of_range_fits_clamp_as_the_scalar_code() {
+            let avx2 = avx2_tested();
             // 41,500 is above the largest real fit: |iz| is at most 3/255 x 144 and the sums at most 12,240, two terms.
             let values = [
                 -41_500.0,
@@ -410,7 +425,7 @@ mod tests {
                     for &i in group {
                         v[i] = x;
                     }
-                    check([v[0], v[1], v[2]], [v[3], v[4], v[5]]);
+                    check([v[0], v[1], v[2]], [v[3], v[4], v[5]], avx2);
                 }
             }
         }

@@ -3,13 +3,12 @@
 //! of one SSE2 vector (lane 3 is 0 everywhere: 0 sums, scale 0, maximum 0, so it adds nothing to the key). Compiled only
 //! where the target has SSE2 (the `cfg` on `mod sse2`), so the `target_feature(enable = "sse2")` functions here are
 //! always callable; Rust still wants an `unsafe` block for the call from plain code, and `order_keys::keys4` and
-//! `keys3` carry it (as does the test-only `round_key_of`). `keys4` and `keys3` are also stamped with AVX2 for the
-//! AVX2 frame (`keys4_avx2`, `keys3_avx2`, called only while holding the `Avx2` token): the same body and the same
-//! float operations, which the features do not change (Note HY21). This is the crate's one float kernel: the scalar
-//! code it replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered` or `ls_endpoints3_ordered` and
-//! `precise_round_565` through `round_ls`) is its reference, and every real call in the unit tests also runs that code
-//! and asserts the same keys (all `MAX_TOTAL_ORDERINGS4` of `keys4`, `MAX_TOTAL_ORDERINGS3` of `keys3`, the unfitted
-//! tail 0 on both sides).
+//! `keys3` carry it (as does the test-only `round_key_of`). On the AVX2 path `order_keys` runs the 256-bit kernel of
+//! `avx2.rs` instead, which fits two orderings per vector with these per-lane steps and reuses `prefix_vectors` (Note
+//! HY21). The scalar code this kernel replaces (`order_keys::scalar`, which runs `ls_endpoints4_ordered` or
+//! `ls_endpoints3_ordered` and `precise_round_565` through `round_ls`) is the reference of both, and every real call in
+//! the unit tests also runs that code and asserts the same keys (all `MAX_TOTAL_ORDERINGS4` of `keys4`,
+//! `MAX_TOTAL_ORDERINGS3` of `keys3`, the unfitted tail 0 on both sides).
 //!
 //! Why it gives the scalar code's bits, step by step:
 //! - Integers. With `S` the prefix sums of one channel, `S[16]` the block total (`sorted_sums` stores it there) and
@@ -63,85 +62,73 @@ use super::super::tables::{MAX_TOTAL_ORDERINGS4, UNIQUE_TOTAL_ORDERS3, UNIQUE_TO
 use super::MAX_TOTAL_ORDERINGS3;
 use core::arch::x86_64::*;
 
-/// The two kernels, stamped with target feature `$f` under the names given: `keys4` and `keys3` with SSE2 (every
-/// path's kernels), and `keys4_avx2` and `keys3_avx2` with AVX2, which `order_keys::keys4` and `keys3` pick on the AVX2
-/// path. The compiler does not inline an `#[inline]` kernel into the AVX2 frame, so without the second stamp the frame
-/// would call the SSE2 build. One body, so both stamps are the same code: the helpers they call are `#[inline]` SSE2
-/// functions, which inline into either.
-macro_rules! kernels {
-    ($f:literal, $keys4:ident, $keys3:ident) => {
-        /// `order_keys::keys4` on SSE2 vectors.
-        #[target_feature(enable = $f)]
-        #[inline]
-        pub(super) fn $keys4<const LEVEL: u32>(
-            total: [i32; 3],
-            sums: &[[u32; 17]; 3],
-            row: &[u16; MAX_TOTAL_ORDERINGS4],
-            tables: &OrderTables,
-            single_key: u32,
-        ) -> [u32; MAX_TOTAL_ORDERINGS4] {
-            let n = const { params(LEVEL).orderings4 };
-            let v = prefix_vectors(sums);
-            let t3 = _mm_set_epi32(0, total[2] * 3, total[1] * 3, total[0] * 3);
+/// `order_keys::keys4` on SSE2 vectors.
+#[target_feature(enable = "sse2")]
+#[inline]
+pub(super) fn keys4<const LEVEL: u32>(
+    total: [i32; 3],
+    sums: &[[u32; 17]; 3],
+    row: &[u16; MAX_TOTAL_ORDERINGS4],
+    tables: &OrderTables,
+    single_key: u32,
+) -> [u32; MAX_TOTAL_ORDERINGS4] {
+    let n = const { params(LEVEL).orderings4 };
+    let v = prefix_vectors(sums);
+    let t3 = _mm_set_epi32(0, total[2] * 3, total[1] * 3, total[0] * 3);
 
-            let mut keys = [0u32; MAX_TOTAL_ORDERINGS4];
-            for (key, &s) in keys.iter_mut().zip(row).take(n) {
-                let s = s as usize;
-                let [o0, o1, o2, o3] = UNIQUE_TOTAL_ORDERS4[s];
-                let (f1, f2, f3) = (o0 as usize, (o0 + o1) as usize, (o0 + o1 + o2) as usize);
-                let q10 = _mm_add_epi32(_mm_add_epi32(v[f1], v[f2]), v[f3]);
-                let uq00 = _mm_sub_epi32(t3, q10);
-                let fitted = fit_key(q10, uq00, tables.factors[s]);
-                *key = if (o0 | o1 | o2 | o3) & 16 != 0 {
-                    single_key
-                } else {
-                    fitted
-                };
-            }
-            keys
-        }
-
-        /// `order_keys::keys3` on SSE2 vectors: the same fit with two positions. `f1 = o0` and `f2 = o0 + o2` (BC1's 3-colour
-        /// order along the axis is selector 0, 2, 1), `q10 = S[f1] + S[f2]` and `uq00 = 2 total - q10`.
-        #[target_feature(enable = $f)]
-        #[inline]
-        pub(super) fn $keys3<const LEVEL: u32>(
-            total: [i32; 3],
-            sums: &[[u32; 17]; 3],
-            row: &[u8; MAX_TOTAL_ORDERINGS3],
-            tables: &OrderTables,
-            single_key: u32,
-        ) -> [u32; MAX_TOTAL_ORDERINGS3] {
-            let n = const { params(LEVEL).orderings3 };
-            let v = prefix_vectors(sums);
-            let t2 = _mm_set_epi32(0, total[2] * 2, total[1] * 2, total[0] * 2);
-
-            let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
-            for (key, &s) in keys.iter_mut().zip(row).take(n) {
-                let s = s as usize;
-                let [o0, o1, o2] = UNIQUE_TOTAL_ORDERS3[s];
-                let (f1, f2) = (o0 as usize, (o0 + o2) as usize);
-                let q10 = _mm_add_epi32(v[f1], v[f2]);
-                let uq00 = _mm_sub_epi32(t2, q10);
-                let fitted = fit_key(q10, uq00, tables.factors3[s]);
-                *key = if (o0 | o1 | o2) & 16 != 0 {
-                    single_key
-                } else {
-                    fitted
-                };
-            }
-            keys
-        }
-    };
+    let mut keys = [0u32; MAX_TOTAL_ORDERINGS4];
+    for (key, &s) in keys.iter_mut().zip(row).take(n) {
+        let s = s as usize;
+        let [o0, o1, o2, o3] = UNIQUE_TOTAL_ORDERS4[s];
+        let (f1, f2, f3) = (o0 as usize, (o0 + o1) as usize, (o0 + o1 + o2) as usize);
+        let q10 = _mm_add_epi32(_mm_add_epi32(v[f1], v[f2]), v[f3]);
+        let uq00 = _mm_sub_epi32(t3, q10);
+        let fitted = fit_key(q10, uq00, tables.factors[s]);
+        *key = if (o0 | o1 | o2 | o3) & 16 != 0 {
+            single_key
+        } else {
+            fitted
+        };
+    }
+    keys
 }
 
-kernels!("sse2", keys4, keys3);
-kernels!("avx2", keys4_avx2, keys3_avx2);
+/// `order_keys::keys3` on SSE2 vectors: the same fit with two positions. `f1 = o0` and `f2 = o0 + o2` (BC1's 3-colour
+/// order along the axis is selector 0, 2, 1), `q10 = S[f1] + S[f2]` and `uq00 = 2 total - q10`.
+#[target_feature(enable = "sse2")]
+#[inline]
+pub(super) fn keys3<const LEVEL: u32>(
+    total: [i32; 3],
+    sums: &[[u32; 17]; 3],
+    row: &[u8; MAX_TOTAL_ORDERINGS3],
+    tables: &OrderTables,
+    single_key: u32,
+) -> [u32; MAX_TOTAL_ORDERINGS3] {
+    let n = const { params(LEVEL).orderings3 };
+    let v = prefix_vectors(sums);
+    let t2 = _mm_set_epi32(0, total[2] * 2, total[1] * 2, total[0] * 2);
+
+    let mut keys = [0u32; MAX_TOTAL_ORDERINGS3];
+    for (key, &s) in keys.iter_mut().zip(row).take(n) {
+        let s = s as usize;
+        let [o0, o1, o2] = UNIQUE_TOTAL_ORDERS3[s];
+        let (f1, f2) = (o0 as usize, (o0 + o2) as usize);
+        let q10 = _mm_add_epi32(v[f1], v[f2]);
+        let uq00 = _mm_sub_epi32(t2, q10);
+        let fitted = fit_key(q10, uq00, tables.factors3[s]);
+        *key = if (o0 | o1 | o2) & 16 != 0 {
+            single_key
+        } else {
+            fitted
+        };
+    }
+    keys
+}
 
 /// Prefix sum `i` of the three channels as one vector. Every sum is at most 4,080, so `as i32` is exact.
 #[target_feature(enable = "sse2")]
 #[inline]
-fn prefix_vectors(sums: &[[u32; 17]; 3]) -> [__m128i; 17] {
+pub(super) fn prefix_vectors(sums: &[[u32; 17]; 3]) -> [__m128i; 17] {
     std::array::from_fn(|i| {
         _mm_set_epi32(0, sums[2][i] as i32, sums[1][i] as i32, sums[0][i] as i32)
     })
