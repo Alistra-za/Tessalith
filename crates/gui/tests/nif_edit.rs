@@ -4747,8 +4747,10 @@ fn set_slsf2(h: &mut Harness<'static, MeshesModel>, a: u32, mask: u32) {
     h.run_steps(2);
 }
 
+/// Note IE26 (final review B-I2): CS 2.0 draws a v1 shape vanilla, so its SLSF2 bits keep their vanilla names; no
+/// "PBR: <meaning>" suffix (CS 1.x's remap) on any shape.
 #[test]
-fn pbr_shape_labels_slsf2_bits_and_non_pbr_does_not() {
+fn slsf2_bits_keep_their_vanilla_names_on_a_v1_shape() {
     let mut m = direct(scenes::shared_alpha_and_set());
     let a = select(&mut m, "A");
     let mut h = view(m);
@@ -4756,13 +4758,8 @@ fn pbr_shape_labels_slsf2_bits_and_non_pbr_does_not() {
     open_flags(&mut h); // Meshes UI T6: the flag lists start closed
     assert!(h.query_all_by_label_contains("PBR:").next().is_none());
     set_slsf2(&mut h, a, (1 << 23) | (1 << 24) | (1 << 25));
-    h.get_by_label("PBR: Two-layer coat");
-    h.get_by_label("PBR: Inner-layer parallax");
-    // The checkbox keeps its name and adds the PBR meaning.
-    h.get_by_role_and_label(
-        egui::accesskit::Role::CheckBox,
-        "Multi_Layer_Parallax (PBR: Two-layer coat)",
-    );
+    assert!(h.query_all_by_label_contains("PBR:").next().is_none());
+    h.get_by_role_and_label(egui::accesskit::Role::CheckBox, "Multi_Layer_Parallax");
 }
 
 #[test]

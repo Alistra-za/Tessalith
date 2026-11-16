@@ -58,8 +58,7 @@ impl DebugOutput {
         }
     }
 
-    /// TruePBR (v1 or a `.csm`, as the material is: [`DebugOutput::availability_drawn`] asks of the drawn material):
-    /// Exact for all.
+    /// TruePBR (a `.csm`; a v1 shape draws vanilla, Note IE30): Exact for all.
     /// Non-PBR: Albedo and NormalWorld Exact; Roughness StandIn("1 − specular mask"); Metallic
     /// None (CS's non-PBR material has no metallic term); Ao StandIn("vertex AO"), None for shader types 4, 5, 6 and
     /// 16 (FaceGen, FaceGen tint, Hair, Eye: vertexAO is the constant 1, L:2673, 2689).
@@ -245,7 +244,11 @@ mod tests {
         use Availability::*;
         let mut v = MaterialState::builtin_default();
         let mut p = v.clone();
-        p.slsf2 |= nif::material::SLSF2_TRUE_PBR;
+        p.pbr = Some(nif::pbr2::PbrValues {
+            features: 0,
+            params: nif::pbr2::PBR2_DEFAULTS,
+            fuzz_roughness: -1.0,
+        });
         for d in DebugOutput::ALL {
             assert_eq!(d.availability(&p), Exact, "{d:?} TruePBR");
         }
@@ -284,7 +287,7 @@ mod tests {
         let m = DebugOutput::Metallic;
         assert_eq!(m.availability(&csm), Exact, "a .csm shape is PBR");
         assert_eq!(m.availability_drawn(&csm), Exact);
-        assert_eq!(m.availability(&v1), Exact, "v1 as the material is");
-        assert_eq!(m.availability_drawn(&v1), None, "v1 draws vanilla");
+        assert_eq!(m.availability(&v1), None, "v1 draws vanilla");
+        assert_eq!(m.availability_drawn(&v1), None);
     }
 }

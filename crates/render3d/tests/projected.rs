@@ -46,9 +46,14 @@ fn snow() -> ProjectedLayer {
     }
 }
 
+/// A CS 2.0 PBR material: a `.csm`'s default values (Note IE30: SLSF2 bit 23 draws vanilla).
 fn pbr() -> MaterialState {
     let mut m = MaterialState::builtin_default();
-    m.slsf2 |= 1 << 23;
+    m.pbr = Some(nif::pbr2::PbrValues {
+        features: 0,
+        params: nif::pbr2::PBR2_DEFAULTS,
+        fuzz_roughness: -1.0,
+    });
     m
 }
 

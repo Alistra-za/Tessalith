@@ -188,7 +188,7 @@ pub struct ToV2 {
     pub clamped: Vec<(usize, f32, f32)>,
 }
 
-// The SLSF2 bits of the v1 PBR remap, as `render3d::pbr_flags` reads them; all are in `V1_SLSF2` except 24.
+// The SLSF2 bits of CS 1.x's v1 PBR remap (01 §3.1); all are in `V1_SLSF2` except 24.
 const SLSF2_FIT_SLOPE: u32 = 1 << 12;
 const SLSF2_PBR: u32 = 1 << 23;
 const SLSF2_MLP: u32 = 1 << 24;
@@ -205,7 +205,8 @@ const _: () = assert!(
 );
 
 /// The v2 features and parameters a v1 PBR shape means (design: v1 to v2 conversion table). The flag precedence is
-/// `render3d::pbr_flags`'s: two-layer (SLSF2 24), else hair (27), else subsurface (26) with fuzz (25) or glint (12).
+/// CS 1.x's load remap (01 §3.1): two-layer (SLSF2 24), else hair (27), else subsurface (26) with fuzz (25) or glint
+/// (12).
 /// A shape without SLSF2 23 is not PBR: no features, and the shared three parameters only. The type-11 trailer
 /// feeds the coat, fuzz and glint rows; any other shape keeps their defaults.
 pub fn from_v1(shader_type: u32, slsf2: u32, p: &LightingParams) -> ToV2 {

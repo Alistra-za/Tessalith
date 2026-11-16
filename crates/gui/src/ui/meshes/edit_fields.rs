@@ -581,36 +581,9 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                         Field::Slsf1 => type_flag_lock(lt.shader_type, bit as u32),
                         _ => None,
                     };
-                    let pbr_meaning = if field == Field::Slsf2 {
-                        render3d::pbr_bit_meaning(v, bit as u32)
-                    } else {
-                        None
-                    };
-                    let mut r = ui
-                        .horizontal(|ui| {
-                            let r = ui
-                                .add_enabled(locked.is_none(), egui::Checkbox::new(&mut on, *name));
-                            if let Some(m) = pbr_meaning {
-                                ui.weak(format!("PBR: {m}"));
-                            }
-                            r
-                        })
-                        .inner;
-                    if let Some(m) = pbr_meaning {
-                        let (full, enabled, checked) =
-                            (format!("{name} (PBR: {m})"), r.enabled(), on);
-                        r.widget_info(move || {
-                            egui::WidgetInfo::selected(
-                                egui::WidgetType::Checkbox,
-                                enabled,
-                                checked,
-                                full.clone(),
-                            )
-                        });
-                        r = r.on_hover_ui(|ui| {
-                            ui.label(format!("With the PBR flag CS reads this bit as: {m}."));
-                        });
-                    }
+                    // Note IE26: no "PBR: <meaning>" suffix. CS 2.0 reads the SLSF2 bits with their vanilla meaning
+                    // on a v1 shape (drawn vanilla) and takes a `.csm` shape's PBR features from the file.
+                    let r = ui.add_enabled(locked.is_none(), egui::Checkbox::new(&mut on, *name));
                     if locked.is_none() {
                         take_focus(ui, &r, field);
                     }

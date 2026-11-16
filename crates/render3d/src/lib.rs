@@ -29,9 +29,7 @@ pub use builtin::{builtin_mesh, Builtin};
 pub use composite::Composite;
 pub use debug::{Availability, DebugOutput};
 pub use includes::ShaderSource;
-pub use material::{
-    classify, pbr_bit_meaning, pbr_flags, Bound, EditKind, Glint, Pipe, ProjectedLayer,
-};
+pub use material::{classify, Bound, EditKind, Glint, Pipe, ProjectedLayer};
 pub use parse::{parse, ParsedNif, ParsedShape, ShapeId};
 pub use pool::{run_job, CompileDone, CompileJob, CompilePool};
 #[cfg(feature = "test-hooks")]
@@ -402,7 +400,8 @@ pub struct Renderer {
     /// `replace_texture` that recreates the entry keeps `TexEntry::missing` from here. Cleared per load.
     evicted_missing: HashSet<String>,
     /// `.csm` chains resolved since the last load, by canonical path (Note IE6): edits and animation ticks apply them
-    /// again without reading the files.
+    /// again without reading the files. An edit drops the missing ones first, so they are asked for again; an
+    /// animation tick ([`Renderer::set_frame_material`]) keeps them (Note IE27).
     csm_cache: HashMap<String, Result<nif::csm::Csm, nif::csm::CsmError>>,
     /// The variant the resolver's bytes of the next loads count as ([`Renderer::set_load_variant`]).
     load_variant: Variant,
@@ -1831,7 +1830,21 @@ impl Renderer {
         if let Some(s) = self.shapes.get(&id) {
             m.skin_preview.clone_from(&s.material.skin_preview);
         }
-        self.apply_material(id, m, textures)
+        self.apply_material(id, m, textures, true)
+    }
+
+    /// An animation tick's material for shape `id`: [`Renderer::set_material`], except that a `.csm` the resolver
+    /// lacked stays missing (Note IE27), so a playing clip never asks for it again each frame. An edit or a load asks.
+    pub fn set_frame_material(
+        &mut self,
+        id: ShapeId,
+        mut m: MaterialState,
+        textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+    ) -> Result<EditKind, String> {
+        if let Some(s) = self.shapes.get(&id) {
+            m.skin_preview.clone_from(&s.material.skin_preview);
+        }
+        self.apply_material(id, m, textures, false)
     }
 
     /// The Meshes view's Advanced Skin card (Note GN): shape `id`'s preview-only RFAOS / wetness picks and wetness,
@@ -1851,14 +1864,16 @@ impl Renderer {
             .material
             .clone();
         m.set_skin(p);
-        self.apply_material(id, m, textures)
+        self.apply_material(id, m, textures, true)
     }
 
+    /// `ask_missing`: a `.csm` the resolver lacked is asked for again (an edit), or stays missing (an animation tick).
     fn apply_material(
         &mut self,
         id: ShapeId,
         mut m: MaterialState,
         textures: &dyn Fn(&str) -> Option<Vec<u8>>,
+        ask_missing: bool,
     ) -> Result<EditKind, String> {
         let name = self
             .shapes
@@ -1866,8 +1881,11 @@ impl Renderer {
             .ok_or_else(|| format!("no shape with id {} is loaded", id.0))?
             .name
             .clone();
-        // A file the resolver lacked is asked for again, as a missing texture is (a `.csm` exported since shows).
-        self.csm_cache.retain(|_, r| !csm_missing(r));
+        // A file the resolver lacked is asked for again on an edit, as a missing texture is (a `.csm` exported since
+        // shows); never on an animation tick (Note IE27).
+        if ask_missing {
+            self.csm_cache.retain(|_, r| !csm_missing(r));
+        }
         // an edit's `.csm` note was the load's; the material keeps `csm_error`
         self.with_csm(&mut m, &name, textures, &mut LoadReport::default());
         let (kind, rebuild) = {

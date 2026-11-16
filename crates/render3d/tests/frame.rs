@@ -122,8 +122,11 @@ fn resolved_fields_write_same_bytes_as_by_name() {
         [2.0, 0.0, 0.0, -7.0],
         [0.0, 0.0, 2.0, 11.0],
     ];
-    let mut m = MaterialState::builtin_default();
-    m.slsf2 |= (1 << 23) | (1 << 26);
+    // A `.csm` subsurface material, so the PBR fields are written too (Note IE30: bit 23 is no PBR on CS 2.0).
+    let m = common::as_csm(
+        MaterialState::builtin_default(),
+        nif::pbr2::feat::SUBSURFACE,
+    );
     let bound = Bound {
         regs: [12].into_iter().collect(),
     };

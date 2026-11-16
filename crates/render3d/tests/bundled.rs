@@ -189,8 +189,9 @@ fn lighting_compiles() {
         shader_type,
         slsf1,
         slsf2,
+        // bit 23 only marks a TruePBR material here: a `.csm` on CS 2.0 (Note IE30)
         pbr: if slsf2 & (1 << 23) != 0 {
-            Pbr::V1
+            Pbr::V2
         } else {
             Pbr::None
         },

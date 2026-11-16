@@ -265,12 +265,12 @@ fn only_vanilla_hair_reads_the_scene_depth() {
         };
         let pbr = Material {
             slsf2: (1 << 23) | (1 << 21),
-            pbr: Pbr::V1,
+            pbr: Pbr::V2,
             ..all
         };
         let pbr_projected = Material {
             slsf2: 1 << 23,
-            pbr: Pbr::V1,
+            pbr: Pbr::V2,
             projected_glint: true,
             ..projected
         };

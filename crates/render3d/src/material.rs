@@ -1,5 +1,5 @@
-//! Community Shaders' TruePBR load remap and the material cbuffer fields, from an owned `MaterialState`
-//! (03 §1.2-1.3; 01 §3.1-3.4). `write_material`, `pack_specular` and `pbr_params` moved here from `draw.rs`
+//! Community Shaders' PBR flags and the material cbuffer fields, from an owned `MaterialState`
+//! (03 §1.2-1.3; 01 §3.3-3.4). `write_material` and `pack_specular` moved here from `draw.rs`
 //! (P0 borrowed `nif::props::Lighting`).
 use crate::cbuffer::CbWriter;
 pub use crate::permutation::Pbr;
@@ -11,7 +11,7 @@ use nif::props::{LightingParams, LightingTrailer};
 use std::borrow::Cow;
 use std::collections::HashSet;
 
-/// Registers bound to a real (non-default) texture in one draw. `pbr_flags` reads t4, t6, t9 and t12;
+/// Registers bound to a real (non-default) texture in one draw. `has_bits` reads t4, t6, t9 and t12;
 /// `EnvmapData.y` reads t5.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Bound {
@@ -51,13 +51,12 @@ pub fn pbr_mode(m: &MaterialState) -> Pbr {
     }
 }
 
-/// The mode a drawn material ([`drawn`]) carries: PBR values are V2, else SLSF2 bit 23 is V1. The cbuffer, permutation
-/// and texture functions of this module read it, so they take a drawn material.
+/// The mode a drawn material ([`drawn`]) carries: PBR values are V2, anything else None. The cbuffer, permutation and
+/// texture functions of this module read it, so they take a drawn material. (The v1 TruePBR draw path, which read
+/// SLSF2 bit 23 here, went with CS 1.x: Note IE30.)
 pub fn own_pbr(m: &MaterialState) -> Pbr {
     if m.is_pbr2() {
         Pbr::V2
-    } else if m.is_pbr() {
-        Pbr::V1
     } else {
         Pbr::None
     }
@@ -110,8 +109,8 @@ fn has_bits(bound: &Bound) -> u32 {
 }
 
 /// `PBRFlags` of CS 2.0 PBR values (Notes ID33 and IE6): each payload feature bit maps to its CS `PBR::Flags` value
-/// (cs2 PBRMath.hlsli:24-39), Foliage also sets ThinSurface, `FUZZ_ROUGHNESS_TEXTURE` sets HasFuzzRoughnessTexture,
-/// and the Has-bits come from `bound` as in v1.
+/// (cs2 PBRMath.hlsli:24-39), Foliage also sets ThinSurface, `FUZZ_ROUGHNESS_TEXTURE` with FUZZ sets
+/// HasFuzzRoughnessTexture, and the Has-bits come from `bound` as in v1.
 pub fn pbr2_flags(v: &PbrValues, bound: &Bound) -> u32 {
     use nif::pbr2::feat;
     let features = v.features & feat::PAYLOAD_FEATURES;
@@ -130,7 +129,9 @@ pub fn pbr2_flags(v: &PbrValues, bound: &Bound) -> u32 {
     .into_iter()
     .filter(|(bit, _)| features & bit != 0)
     .fold(0, |f, (_, flag)| f | flag);
-    let texture = if v.features & feat::FUZZ_ROUGHNESS_TEXTURE != 0 {
+    // Only with fuzz, as `csm_from_values` writes the switch (final review A-M4): a foreign `.csm`'s switch alone is
+    // ignored.
+    let texture = if v.features & feat::FUZZ_ROUGHNESS_TEXTURE != 0 && features & feat::FUZZ != 0 {
         PBR_HAS_FUZZ_ROUGHNESS_TEXTURE
     } else {
         0
@@ -208,12 +209,12 @@ pub const fn is_mlp(shader_type: u32, slsf2: u32) -> bool {
 /// The layer applies to `m`: not skinned (CS's VS has no projection under SKINNED), not FaceGen (4, 5) or sparkle
 /// snow (14), and on a vanilla shape not parallax (3), MLP (11) or SLSF2.24 (MLP), whose `PROJECTED_UV` branches
 /// differ (Lighting.hlsl:1740-1748). TruePBR drops the parallax and MLP techniques, so a PBR shape of type 3 or 11
-/// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, IE23). A CS 2.0 PBR
-/// material (a `.csm`) counts as PBR here (Note IE6).
+/// gets the layer, and a PBR SLSF2.24 is the coat (TwoLayer), which CS projects onto (Note GZ1, IE23). PBR here is a
+/// CS 2.0 PBR material (a `.csm`, Note IE6); a v1 shape draws vanilla (Note IE30).
 /// Also not eye (16) or model-space normals (SLSF1.12): those permutations do not compile with `PROJECTED_UV` (EYE
 /// takes the `VS_OUTPUT` arm that holds `TexProj`, Lighting.hlsl:77-84 vs 255; MSN has no PS `tbnTr`, 950-967 vs 1728).
 pub fn projected_eligible(m: &MaterialState) -> bool {
-    let pbr = m.is_pbr() || m.is_pbr2();
+    let pbr = m.is_pbr2();
     // shortcut: a vanilla type 11 without SLSF2.24, or SLSF2.24 on another type, draws the Default technique (Note
     // IE9), whose `PROJECTED_UV` branch is the plain one, yet stays excluded: no capture shows whether the game
     // projects a material object onto such a shape. Use `is_mlp` here once one does.
@@ -226,7 +227,7 @@ pub fn projected_eligible(m: &MaterialState) -> bool {
 /// The layer's constants as the capture shows them (mato-capture-results.md). `ProjectedUVParams.z` is the noise
 /// UV scale's inverse, 0 when the scale is not positive. PBR only: `MaterialObjectRGBScale`, `ParallaxOccData`
 /// (roughness, specular level) and, with glint, `SparkleParams` and `PBRFlags` |= ProjectedGlint (ORed into what
-/// `write_pbr` wrote). Fields a layout lacks are skipped (`CbWriter::set`). `model`: the shape's NIF transform, for
+/// `write_pbr2` wrote). Fields a layout lacks are skipped (`CbWriter::set`). `model`: the shape's NIF transform, for
 /// `TextureProj` row 2.
 pub fn write_projected(w: &mut CbWriter, l: &ProjectedLayer, pbr: bool, model: &Mat3x4) {
     let inv_noise = if l.noise_uv_scale > 0.0 {
@@ -279,75 +280,6 @@ const fn bit(v: u32, b: u32) -> bool {
     v & (1 << b) != 0
 }
 
-/// CS's Glint flag from the NIF flags (01 §3.1): TruePBR (SLSF2.23) and Fit_Slope (SLSF2.12), and none of the
-/// branches CS tests first: MLP (24), Back (27), Soft (25). Drives both `PBRFlags` bit 2048 and the `GLINT`
-/// define (P1 spec §2.2: not SLSF2.21, which CS clears at load).
-pub fn remapped_glint(slsf2: u32) -> bool {
-    bit(slsf2, 23) && bit(slsf2, 12) && !bit(slsf2, 24) && !bit(slsf2, 25) && !bit(slsf2, 27)
-}
-
-/// `PBRFlags` as CS packs it at load (01 §3.1 remap + §3.3 bound textures); 0 for non-PBR materials.
-/// ```text
-/// SLSF2.24 (MLP): TwoLayer; +InterlayerParallax if .25; +CoatNormal if .27; +ColoredCoat if .30
-/// elif .27 (Back): HairMarschner
-/// else: Subsurface if .26; Fuzz if .25, else Glint if .12
-/// t6 → HasEmissive, t4 → HasDisplacement, t12 → HasFeatures0, t9 → HasFeatures1 (only when in `bound`)
-/// ```
-/// Capture oracle: Arch_Eye_Moisture ev6721 = 428 (answers.md Q1.3).
-pub fn pbr_flags(m: &MaterialState, bound: &Bound) -> u32 {
-    if !m.is_pbr() {
-        return 0;
-    }
-    let f2 = m.slsf2;
-    let mut f = 0;
-    if bit(f2, 24) {
-        f |= PBR_TWO_LAYER;
-        if bit(f2, 25) {
-            f |= PBR_INTERLAYER_PARALLAX;
-        }
-        if bit(f2, 27) {
-            f |= PBR_COAT_NORMAL;
-        }
-        if bit(f2, 30) {
-            f |= PBR_COLORED_COAT;
-        }
-    } else if bit(f2, 27) {
-        f |= PBR_HAIR_MARSCHNER;
-    } else {
-        if bit(f2, 26) {
-            f |= PBR_SUBSURFACE;
-        }
-        if bit(f2, 25) {
-            f |= PBR_FUZZ;
-        } else if bit(f2, 12) {
-            f |= PBR_GLINT;
-        }
-    }
-    f | has_bits(bound)
-}
-
-/// What CS does with SLSF2 `bit` on a PBR material, by the same precedence as [`pbr_flags`]; `None` for a
-/// non-PBR material or a bit CS's PBR remap does not read.
-pub fn pbr_bit_meaning(slsf2: u32, bit_no: u32) -> Option<&'static str> {
-    if !bit(slsf2, 23) {
-        return None;
-    }
-    let (mlp, soft, back) = (bit(slsf2, 24), bit(slsf2, 25), bit(slsf2, 27));
-    const NONE: &str = "No effect with PBR";
-    Some(match bit_no {
-        24 => "Two-layer coat",
-        25 if mlp => "Inner-layer parallax",
-        25 if !back => "Fuzz",
-        27 if mlp => "Coat normal",
-        27 => "Hair (Marschner)",
-        30 if mlp => "Coloured coat",
-        26 if !mlp && !back => "Subsurface",
-        12 if !mlp && !soft && !back => "Glint",
-        12 | 25 | 26 | 30 => NONE,
-        _ => return None,
-    })
-}
-
 /// The permutation-relevant subset of a drawn material ([`drawn`]); `pbr` is its [`own_pbr`].
 pub fn perm_material(m: &MaterialState) -> Material {
     Material {
@@ -372,8 +304,8 @@ pub fn perm_material(m: &MaterialState) -> Material {
 /// `PerMaterial.SpecularColor` as the engine uploads it (answers.md Q5, frame11178 ev4217/5488/5536/6544):
 /// `xyz = sRGB→linear(NIF specular colour) × NIF specular strength`, `w = NIF glossiness` (shininess,
 /// iLH:973). The linearisation is the Linear Lighting effect (owner's CS has LL on); with LL off it is
-/// `colour × strength` [Inference, Q5 open item]. Written only with the Specular lighting flag; the PBR path
-/// uses [`pbr_params`] instead.
+/// `colour × strength` [Inference, Q5 open item]. Written only with the Specular lighting flag, never on a PBR
+/// material.
 pub fn pack_specular(p: &LightingParams, linear_lighting: bool) -> [f32; 4] {
     let c = p.specular_color.map(|c| {
         if linear_lighting {
@@ -386,67 +318,8 @@ pub fn pack_specular(p: &LightingParams, linear_lighting: bool) -> [f32; 4] {
     [c[0] * s, c[1] * s, c[2] * s, p.glossiness]
 }
 
-/// TruePBR `(PBRParams1, PBRParams2)` (answers.md Q5, Arch_Eye ev3891 = NIF exactly):
-/// `PBRParams1 = (specStrength → roughness scale, lightingEffect2 → displacement scale, glossiness →
-/// specular level)`, `PBRParams2 = (specular colour raw — not linearised —, lightingEffect1)`.
-pub fn pbr_params(p: &LightingParams) -> ([f32; 3], [f32; 4]) {
-    (
-        [p.specular_strength, p.lighting_effect_2, p.glossiness],
-        [
-            p.specular_color[0],
-            p.specular_color[1],
-            p.specular_color[2],
-            p.lighting_effect_1,
-        ],
-    )
-}
-
-/// The TruePBR block (01 §3.4): `PBRFlags` and `PBRParams1` always; `PBRParams2` only for TwoLayer or
-/// Subsurface; `MultiLayerParallaxData` only for TwoLayer (coat roughness, coat specular level, 0, 0), Fuzz
-/// (r, g, b, weight) or Glint (screen-space scale, 40 − log microfacet density, roughness, randomization).
-/// The four MultiLayer floats are loaded only for shader type 11; CS zeroes them otherwise, so a leaked
-/// Fit_Slope on type 0 packs (0, 40, 0, 0).
-fn write_pbr(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
-    let flags = pbr_flags(m, bound);
-    let (p1, p2) = pbr_params(&m.params);
-    w.set_u32("PBRFlags", &[flags]);
-    w.set("PBRParams1", &p1);
-    if flags & (PBR_TWO_LAYER | PBR_SUBSURFACE) != 0 {
-        w.set("PBRParams2", &p2);
-    }
-    let f = match (m.shader_type, &m.params.trailer) {
-        (
-            11,
-            LightingTrailer::MultiLayer {
-                inner_thickness,
-                refraction_scale,
-                inner_texture_scale,
-                ..
-            },
-        ) => [
-            *inner_thickness,
-            *refraction_scale,
-            inner_texture_scale[0],
-            inner_texture_scale[1],
-        ],
-        _ => [0.0; 4],
-    };
-    let mlpd = if flags & PBR_TWO_LAYER != 0 {
-        Some([f[0], f[1], 0.0, 0.0])
-    } else if flags & PBR_FUZZ != 0 {
-        Some(f)
-    } else if flags & PBR_GLINT != 0 {
-        Some([f[0], 40.0 - f[1], f[2], f[3]])
-    } else {
-        None
-    };
-    if let Some(v) = mlpd {
-        w.set("MultiLayerParallaxData", &v);
-    }
-}
-
 /// P0's per-technique trailer fields, for non-PBR materials only (CS's PBR material has no envmap, tint,
-/// parallax-occlusion or eye data; its MultiLayer floats go through [`write_pbr`]).
+/// parallax-occlusion or eye data; its MultiLayer floats come from the `.csm`, [`write_pbr2`]).
 fn write_trailer(w: &mut CbWriter, p: &LightingParams, has_env_mask: bool) {
     let mask = if has_env_mask { 1.0 } else { 0.0 };
     // TintColor is not linearised (answers.md Q5: hair 6544 = NIF hairTint).
@@ -518,7 +391,7 @@ pub fn write_skin_flags(w: &mut CbWriter, m: &MaterialState, bound: &Bound) {
     w.set("skinPerGeometry", &[wet, 0.0, 0.0, 0.0]);
 }
 
-/// Writes the fields of drawn material `m` ([`drawn`]; its [`own_pbr`] picks v1, v2 or vanilla) into one cbuffer of
+/// Writes the fields of drawn material `m` ([`drawn`]; its [`own_pbr`] picks v2 or vanilla) into one cbuffer of
 /// any stage. The writer must be zero (fresh from
 /// `CbWriter::new` or after `CbWriter::zero`): fields a branch does not write must read 0, never a previous
 /// material's value. `bound` = registers bound to a real texture in this draw. `projected`: the renderer's MATO
@@ -546,10 +419,9 @@ pub fn write_material(
     match mode {
         // also LightingEffectParams and MaterialObjectRGBScale
         Pbr::V2 => write_pbr2(w, m, bound),
-        Pbr::V1 => write_pbr(w, m, bound),
         Pbr::None => write_trailer(w, p, bound.regs.contains(&5)),
     }
-    if mode != Pbr::V2 {
+    if mode == Pbr::None {
         w.set(
             "LightingEffectParams",
             &[p.lighting_effect_1, p.lighting_effect_2, 0.0, 0.0],

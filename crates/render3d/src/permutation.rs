@@ -1,12 +1,11 @@
 //! NIF material → CS Lighting.hlsl permutation defines (plan 04 §1.2, corrected by real captures:
 //! tools/rdc-out/p04/answers.md Q4, controller ruling RB7).
 
-/// How a drawn material uses TruePBR (Note ID33): not at all, the v1 form (SLSF2 bit 23; `material::drawn` clears it,
-/// Note IE) or CS 2.0's, from a `.csm`. [`crate::material::pbr_mode`] picks it.
+/// How a drawn material uses TruePBR (Note ID33): not at all, or CS 2.0's, from a `.csm`. A v1 shape (SLSF2 bit 23)
+/// draws vanilla on CS 2.0, so it is None (Note IE30). [`crate::material::pbr_mode`] picks it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Pbr {
     None,
-    V1,
     V2,
 }
 
@@ -107,16 +106,11 @@ pub fn defines(m: &Material, stage: Stage, features: &[&str], deferred: bool) ->
     if ps && m.shader_type == 6 && (bit(m.slsf1, 26) || bit(m.slsf1, 27)) {
         out.push("DEPTH_WRITE_DECALS");
     }
-    // TruePBR: CS enables glint from its remapped Glint flag (Fit_Slope without MLP/Soft/Back; 01 §3.1, P1 spec
-    // §2.2); SLSF2.21 is cleared at load. Vanilla: Anisotropic_Lighting (SLSF2.21) → ANISO_LIGHTING.
-    // Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture 18019). A `.csm` has its own
-    // Glint feature bit (Note ID33). CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (its debug log, 28 GLINT
-    // keys; Note IE8); only VanillaSpecular reads it, which TruePBR never calls.
-    let own_glint = match m.pbr {
-        Pbr::V1 => crate::material::remapped_glint(m.slsf2),
-        Pbr::V2 => m.pbr2_glint,
-        Pbr::None => false,
-    };
+    // TruePBR: a `.csm` has its Glint feature bit (Note ID33); SLSF2.21 is not read. Vanilla: Anisotropic_Lighting
+    // (SLSF2.21) → ANISO_LIGHTING. Projected glint (CS PBR::Flags::ProjectedGlint) needs the same GLINT code (capture
+    // 18019). CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (its debug log, 28 GLINT keys; Note IE8); only
+    // VanillaSpecular reads it, which TruePBR never calls.
+    let own_glint = m.pbr == Pbr::V2 && m.pbr2_glint;
     if pbr && (own_glint || (m.projected && m.projected_glint)) {
         out.push("GLINT");
         out.push("ANISO_LIGHTING");

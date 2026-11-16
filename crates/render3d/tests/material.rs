@@ -1,26 +1,16 @@
-//! CS's TruePBR load remap (01 §3.1-3.4) and the material cbuffer fields, writer-level (no GPU).
+//! CS 2.0's PBR flags and the material cbuffer fields, writer-level (no GPU). The v1 TruePBR remap's tests went with
+//! its draw path (Note IE30).
 use nif::material::MaterialState;
 use nif::props::LightingTrailer;
 use render3d::cbuffer::CbWriter;
 use render3d::compile::{CbLayout, CbVar, VarKind};
 use render3d::material::{
-    pbr2_flags, pbr_flags, perm_material, remapped_glint, write_material, Bound, PBR_COAT_NORMAL,
-    PBR_COLORED_COAT, PBR_FOLIAGE, PBR_FUZZ, PBR_GLINT, PBR_HAIR_MARSCHNER, PBR_HAS_DISPLACEMENT,
-    PBR_HAS_EMISSIVE, PBR_HAS_FEATURES0, PBR_HAS_FEATURES1, PBR_HAS_FUZZ_ROUGHNESS_TEXTURE,
-    PBR_INTERLAYER_PARALLAX, PBR_SUBSURFACE, PBR_THIN_SURFACE, PBR_TWO_LAYER,
+    pbr2_flags, write_material, Bound, PBR_COAT_NORMAL, PBR_COLORED_COAT, PBR_FOLIAGE, PBR_FUZZ,
+    PBR_GLINT, PBR_HAIR_MARSCHNER, PBR_HAS_DISPLACEMENT, PBR_HAS_EMISSIVE, PBR_HAS_FEATURES0,
+    PBR_HAS_FEATURES1, PBR_HAS_FUZZ_ROUGHNESS_TEXTURE, PBR_INTERLAYER_PARALLAX, PBR_SUBSURFACE,
+    PBR_THIN_SURFACE, PBR_TWO_LAYER,
 };
-use render3d::permutation::{defines, Stage};
 use render3d::scene::srgb_to_linear;
-
-/// `builtin_default` with the TruePBR bit and the given SLSF2 bits.
-fn pbr(bits: &[u32]) -> MaterialState {
-    let mut m = MaterialState::builtin_default();
-    m.slsf2 |= 1 << 23;
-    for b in bits {
-        m.slsf2 |= 1 << b;
-    }
-    m
-}
 
 fn bound(regs: &[u32]) -> Bound {
     Bound {
@@ -37,118 +27,6 @@ fn mlp(m: &mut MaterialState, f: [f32; 4]) {
         inner_texture_scale: [f[2], f[3]],
         envmap_strength: 0.5,
     };
-}
-
-#[test]
-fn pbr_flags_eye_moisture_is_428() {
-    // Capture oracle (answers.md Q4 table + Q1.3): Arch_Eye_Moisture, type 11, SLSF2 bits 4,7,15,23,24,25,27.
-    // ev6721 binds t9 and t12 (plus the always-bound t0/t1/t5): 256 + 128 + 32 + 8 + 4 = 428.
-    let mut m = pbr(&[4, 7, 15, 24, 25, 27]);
-    m.shader_type = 11;
-    assert_eq!(pbr_flags(&m, &bound(&[0, 1, 5, 9, 12])), 428);
-    // ev6595 also binds the displacement map at t4: 430.
-    assert_eq!(pbr_flags(&m, &bound(&[0, 1, 4, 5, 9, 12])), 430);
-}
-
-#[test]
-fn pbr_flags_arch_eye_is_20() {
-    // answers.md Q4 table: Arch_Eye type 0, SLSF2 8,15,23,26 → 20 = Features0 + Subsurface.
-    assert_eq!(pbr_flags(&pbr(&[8, 15, 26]), &bound(&[0, 1, 5, 12])), 20);
-}
-
-#[test]
-fn pbr_flags_branch_table() {
-    let none = bound(&[]);
-    let rows: &[(&[u32], u32, &str)] = &[
-        (&[], 0, "plain"),
-        (&[27], PBR_HAIR_MARSCHNER, "hair"),
-        (
-            &[27, 26, 25, 12],
-            PBR_HAIR_MARSCHNER,
-            "hair excludes subsurface/fuzz/glint",
-        ),
-        (&[26], PBR_SUBSURFACE, "subsurface"),
-        (&[25], PBR_FUZZ, "fuzz"),
-        (&[25, 12], PBR_FUZZ, "fuzz excludes glint"),
-        (&[12], PBR_GLINT, "glint, also a leaked Fit_Slope"),
-        (
-            &[26, 25],
-            PBR_SUBSURFACE | PBR_FUZZ,
-            "subsurface is independent of fuzz",
-        ),
-        (&[26, 12], PBR_SUBSURFACE | PBR_GLINT, "subsurface + glint"),
-        (&[24], PBR_TWO_LAYER, "two layer"),
-        (
-            &[24, 25, 27, 30],
-            PBR_TWO_LAYER | PBR_INTERLAYER_PARALLAX | PBR_COAT_NORMAL | PBR_COLORED_COAT,
-            "coat cave",
-        ),
-        (
-            &[24, 26, 12],
-            PBR_TWO_LAYER,
-            "two layer excludes subsurface/glint",
-        ),
-        (&[21], 0, "SLSF2.21 is not glint"),
-        (&[30], 0, "Effect_Lighting alone"),
-    ];
-    for (bits, want, what) in rows {
-        assert_eq!(pbr_flags(&pbr(bits), &none), *want, "{what}");
-    }
-}
-
-#[test]
-fn has_bits_follow_bound_registers_only() {
-    let m = pbr(&[]);
-    // Non-empty slot paths are not enough: a Has* bit needs the register bound to a real texture (01 §3.3).
-    let mut with_paths = m.clone();
-    for i in [2, 3, 6, 7] {
-        with_paths.set_slot_raw(i, "textures\\x.dds");
-    }
-    assert_eq!(pbr_flags(&with_paths, &bound(&[])), 0);
-    assert_eq!(pbr_flags(&m, &bound(&[6])), PBR_HAS_EMISSIVE);
-    assert_eq!(pbr_flags(&m, &bound(&[4])), PBR_HAS_DISPLACEMENT);
-    assert_eq!(pbr_flags(&m, &bound(&[12])), PBR_HAS_FEATURES0);
-    assert_eq!(pbr_flags(&m, &bound(&[9])), PBR_HAS_FEATURES1);
-    assert_eq!(pbr_flags(&m, &bound(&[0, 1, 2, 3, 5, 7, 8])), 0);
-    // 01 §5.2 classes: emissive + parallax = 3; the coat cave with t4/t9/t12 resolved = 494.
-    assert_eq!(pbr_flags(&m, &bound(&[0, 1, 4, 5, 6])), 3);
-    let mut cave = pbr(&[24, 25, 27, 30]);
-    cave.shader_type = 11;
-    assert_eq!(
-        pbr_flags(&cave, &bound(&[0, 1, 4, 5, 9, 12])),
-        32 + 128 + 256 + 64 + 2 + 8 + 4
-    );
-    // Not PBR: always 0, whatever is bound.
-    let mut v = MaterialState::builtin_default();
-    v.slsf2 |= 1 << 24;
-    assert_eq!(pbr_flags(&v, &bound(&[4, 6, 9, 12])), 0);
-}
-
-#[test]
-fn glint_define_matches_the_glint_flag() {
-    let rows: [&[u32]; 8] = [
-        &[],
-        &[12],
-        &[12, 25],
-        &[12, 24],
-        &[12, 27],
-        &[12, 26],
-        &[21],
-        &[21, 12],
-    ];
-    for bits in rows {
-        let m = pbr(bits);
-        let flag = pbr_flags(&m, &Bound::default()) & PBR_GLINT != 0;
-        assert_eq!(remapped_glint(m.slsf2), flag, "{bits:?}");
-        let d = defines(&perm_material(&m), Stage::Pixel, &[], false);
-        assert_eq!(d.0.iter().any(|(k, _)| k == "GLINT"), flag, "{bits:?}");
-        // CS 2.0 compiles ANISO_LIGHTING with every GLINT (Note IE8); SLSF2.21 alone gives neither.
-        assert_eq!(
-            d.0.iter().any(|(k, _)| k == "ANISO_LIGHTING"),
-            flag,
-            "{bits:?}"
-        );
-    }
 }
 
 /// A synthetic PerMaterial layout, one 16-byte register per field.
@@ -206,83 +84,6 @@ fn written(m: &MaterialState, regs: &[u32], linear_lighting: bool) -> CbWriter {
 }
 
 #[test]
-fn pbr_params_and_mlpd_follow_the_cs_branches() {
-    let mut plain = pbr(&[]);
-    plain.params.specular_color = [0.9, 0.7, 0.8];
-    plain.params.lighting_effect_1 = 0.85;
-    plain.params.specular_strength = 0.5;
-    plain.params.lighting_effect_2 = 0.2;
-    plain.params.glossiness = 0.08;
-    let w = written(&plain, &[], false);
-    assert_eq!(floats(&w, "PBRParams1"), [0.5, 0.2, 0.08]);
-    assert_eq!(
-        floats(&w, "PBRParams2"),
-        [0.0; 4],
-        "not written outside TwoLayer/Subsurface"
-    );
-    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.0; 4]);
-    assert_eq!(
-        floats(&w, "SpecularColor"),
-        [0.0; 4],
-        "no SPECULAR under PBR"
-    );
-    assert_eq!(flags(&w), 0);
-
-    let mut ss = plain.clone();
-    ss.slsf2 |= 1 << 26;
-    let w = written(&ss, &[12], false);
-    assert_eq!(flags(&w), PBR_SUBSURFACE | PBR_HAS_FEATURES0);
-    assert_eq!(
-        floats(&w, "PBRParams2"),
-        [0.9, 0.7, 0.8, 0.85],
-        "colour raw, not linearised"
-    );
-    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.0; 4]);
-
-    let mut coat = plain.clone();
-    coat.slsf2 |= 1 << 24;
-    mlp(&mut coat, [0.3, 0.018, 1.0, 1.0]);
-    let w = written(&coat, &[], false);
-    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.3, 0.018, 0.0, 0.0]);
-    assert_eq!(floats(&w, "PBRParams2"), [0.9, 0.7, 0.8, 0.85]);
-
-    let mut fuzz = plain.clone();
-    fuzz.slsf2 |= 1 << 25;
-    mlp(&mut fuzz, [0.13, 0.13, 0.13, 1.0]);
-    let w = written(&fuzz, &[], false);
-    assert_eq!(
-        floats(&w, "MultiLayerParallaxData"),
-        [0.13, 0.13, 0.13, 1.0]
-    );
-    assert_eq!(floats(&w, "PBRParams2"), [0.0; 4]);
-
-    let mut glint = plain.clone();
-    glint.slsf2 |= 1 << 12;
-    mlp(&mut glint, [4.0, 15.0, 1.0, 5.0]);
-    let w = written(&glint, &[], false);
-    assert_eq!(
-        floats(&w, "MultiLayerParallaxData"),
-        [4.0, 25.0, 1.0, 5.0],
-        "y = 40 − L"
-    );
-
-    // Leaked Fit_Slope on type 0: CS zeroes the MLP floats, so glint with zero parameters → (0, 40, 0, 0).
-    let mut leak = plain.clone();
-    leak.slsf2 |= 1 << 12;
-    let w = written(&leak, &[], false);
-    assert_eq!(flags(&w), PBR_GLINT);
-    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.0, 40.0, 0.0, 0.0]);
-
-    // PBR never writes P0's raw trailer: a PBR type-11 shape outside the MLP branches leaves MLPD and
-    // EnvmapData at 0.
-    let mut t11 = plain.clone();
-    mlp(&mut t11, [1.0, 2.0, 3.0, 4.0]);
-    let w = written(&t11, &[5], false);
-    assert_eq!(floats(&w, "EnvmapData"), [0.0; 4]);
-    assert_eq!(floats(&w, "MultiLayerParallaxData"), [0.0; 4]);
-}
-
-#[test]
 fn vanilla_trailer_is_unchanged_from_p0() {
     let mut v = MaterialState::builtin_default();
     mlp(&mut v, [1.0, 2.0, 3.0, 4.0]);
@@ -301,7 +102,7 @@ fn vanilla_trailer_is_unchanged_from_p0() {
 #[test]
 fn edit_rewrites_from_zero() {
     // 03 T-E2: a PBR → vanilla rewrite leaves no PBR bytes behind.
-    let ss = pbr(&[26]);
+    let ss = csm(nif::pbr2::feat::SUBSURFACE, nif::pbr2::PBR2_DEFAULTS, -1.0);
     let mut w = writer();
     write_material(&mut w, &ss, &bound(&[12]), false, None);
     assert_ne!(floats(&w, "PBRParams2"), [0.0; 4]);
@@ -325,7 +126,7 @@ fn edit_rewrites_from_zero() {
 #[test]
 fn emissive_d1() {
     // PBR (spec D1, captures C1/frame6171): sRGB-to-linear(NIF colour) × multiple with LL on; raw × multiple without.
-    let mut p = pbr(&[]);
+    let mut p = csm(0, nif::pbr2::PBR2_DEFAULTS, -1.0);
     p.params.emissive_color = [0.5, 0.25, 1.0];
     p.params.emissive_multiple = 2.0;
     assert_eq!(
@@ -424,12 +225,12 @@ fn classify_table() {
         classify(&t11_plain, &t11_mlp, &f, false),
         EditKind::Permutation
     );
-    // PBR on/off is TRUE_PBR; under PBR, roughness and the shader type (technique 0) are cbuffer edits,
-    // Rim (→ Subsurface) too, but Fit_Slope toggles GLINT.
-    let pbr = with(&|m| m.slsf2 |= 1 << 23);
+    // A `.csm`'s PBR values on or off is TRUE_PBR; under PBR a value and the shader type (technique 0) are cbuffer
+    // edits, Rim too, but the Glint feature toggles GLINT. SLSF2 bit 23 is no PBR on CS 2.0 (Note IE30).
+    let pbr = csm(0, nif::pbr2::PBR2_DEFAULTS, -1.0);
     assert_eq!(classify(&base, &pbr, &f, false), EditKind::Permutation);
     let mut rough = pbr.clone();
-    rough.params.specular_strength = 0.25;
+    rough.pbr.as_mut().unwrap().params[0] = 0.25;
     assert_eq!(classify(&pbr, &rough, &f, false), EditKind::Cbuffer);
     let mut t11 = pbr.clone();
     t11.shader_type = 11;
@@ -437,8 +238,7 @@ fn classify_table() {
     let mut rim = pbr.clone();
     rim.slsf2 |= 1 << 26;
     assert_eq!(classify(&pbr, &rim, &f, false), EditKind::Cbuffer);
-    let mut glint = pbr.clone();
-    glint.slsf2 |= 1 << 12;
+    let glint = csm(nif::pbr2::feat::GLINT, nif::pbr2::PBR2_DEFAULTS, -1.0);
     assert_eq!(classify(&pbr, &glint, &f, false), EditKind::Permutation);
 }
 
@@ -482,46 +282,6 @@ fn pipe_reads_alpha_and_shader_flags() {
         threshold: 128,
     }); // blend off
     assert_eq!(pipe(&m).blend, None);
-}
-
-#[test]
-fn pbr_bit_meaning_agrees_with_pbr_flags() {
-    use render3d::pbr_bit_meaning;
-    const BITS: [u32; 6] = [12, 24, 25, 26, 27, 30];
-    // Meaning -> the pbr_flags bit it must set (None: "No effect with PBR").
-    let feature = |s: &str| match s {
-        "Two-layer coat" => PBR_TWO_LAYER,
-        "Inner-layer parallax" => PBR_INTERLAYER_PARALLAX,
-        "Fuzz" => PBR_FUZZ,
-        "Coat normal" => PBR_COAT_NORMAL,
-        "Hair (Marschner)" => PBR_HAIR_MARSCHNER,
-        "Coloured coat" => PBR_COLORED_COAT,
-        "Subsurface" => PBR_SUBSURFACE,
-        "Glint" => PBR_GLINT,
-        "No effect with PBR" => 0,
-        other => panic!("{other}"),
-    };
-    for mask in 0..64u32 {
-        let on: Vec<u32> = (0..6)
-            .filter(|i| mask >> i & 1 != 0)
-            .map(|i| BITS[i])
-            .collect();
-        let m = pbr(&on);
-        let flags = pbr_flags(&m, &Bound::default());
-        let mut labelled = 0;
-        for b in BITS {
-            let want = pbr_bit_meaning(m.slsf2, b);
-            if m.slsf2 >> b & 1 == 0 {
-                continue;
-            }
-            let f = feature(want.unwrap());
-            labelled |= f;
-            assert!(f == 0 || flags & f != 0, "{on:?} bit {b}");
-        }
-        assert_eq!(flags, labelled, "{on:?}: a feature has no labelling bit");
-    }
-    assert_eq!(pbr_bit_meaning(1 << 24, 24), None, "not PBR");
-    assert_eq!(pbr_bit_meaning(1 << 23, 5), None);
 }
 
 /// The builtin material with the PBR values a `.csm` gives (Note IE7): `features`, `params`, fuzz roughness `fuzz`.
@@ -578,6 +338,12 @@ fn pbr2_flags_table() {
             feat::FUZZ | feat::FUZZ_ROUGHNESS_TEXTURE,
             PBR_FUZZ | PBR_HAS_FUZZ_ROUGHNESS_TEXTURE,
             "fuzz roughness from slot 3",
+        ),
+        // Final review A-M4: a foreign `.csm`'s texture switch without fuzz sets no flag, as `csm_from_values` drops it.
+        (
+            feat::FUZZ_ROUGHNESS_TEXTURE,
+            0,
+            "fuzz roughness texture without fuzz",
         ),
     ];
     let values = |features: u32| {
@@ -651,8 +417,8 @@ fn write_pbr2_packs_params() {
         [1.0, 0.5, 2.0]
     );
 
-    // Pin of the v1 and vanilla writes these members kept.
-    let mut v = pbr(&[]);
+    // Pin of the vanilla write these members kept.
+    let mut v = MaterialState::builtin_default();
     v.params.lighting_effect_1 = 0.3;
     v.params.lighting_effect_2 = 2.0;
     let w = written(&v, &[], false);

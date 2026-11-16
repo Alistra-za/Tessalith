@@ -18,13 +18,15 @@ fn compile(
     render3d::compile::compile(&src, d, target, cache)
 }
 
+/// A permutation material. SLSF2 bit 23 here only marks a TruePBR material, which on CS 2.0 is a `.csm` (`Pbr::V2`):
+/// the drawn material never has the bit (Note IE30).
 fn m(shader_type: u32, slsf1: u32, slsf2: u32, skinned: bool) -> Material {
     Material {
         shader_type,
         slsf1,
         slsf2,
         pbr: if slsf2 & (1 << 23) != 0 {
-            Pbr::V1
+            Pbr::V2
         } else {
             Pbr::None
         },
@@ -86,33 +88,22 @@ fn define_table() {
         names(&defines(&m(6, 0, 1 << 21, true), Stage::Pixel, &[], false))
             .contains(&"ANISO_LIGHTING")
     );
-    // TruePBR: GLINT comes from CS's remapped Glint flag (Fit_Slope 12 without MLP 24 / Soft 25 / Back 27),
-    // never from SLSF2.21, which CS clears at load (P1 spec §2.2).
-    let pbr_ps = |slsf2: u32| -> Vec<String> {
-        names(&defines(
-            &m(11, 0, slsf2 | (1 << 23), false),
-            Stage::Pixel,
-            &[],
-            false,
-        ))
-        .iter()
-        .map(|s| s.to_string())
-        .collect()
+    // TruePBR: GLINT comes from the `.csm`'s Glint feature (Note ID33), never from SLSF2 12 or 21.
+    let pbr_ps = |slsf2: u32, glint: bool| -> Vec<String> {
+        let mut pm = m(11, 0, slsf2 | (1 << 23), false);
+        pm.pbr2_glint = glint;
+        names(&defines(&pm, Stage::Pixel, &[], false))
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     };
     let has = |v: &[String], n: &str| v.iter().any(|x| x == n);
-    assert!(!has(&pbr_ps(1 << 21), "GLINT") && !has(&pbr_ps(1 << 21), "ANISO_LIGHTING"));
-    // CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (Note IE8).
-    assert!(has(&pbr_ps(1 << 12), "GLINT") && has(&pbr_ps(1 << 12), "ANISO_LIGHTING"));
-    assert!(
-        has(&pbr_ps((1 << 12) | (1 << 26)), "GLINT"),
-        "subsurface + glint"
-    );
-    for blocker in [24, 25, 27] {
-        assert!(
-            !has(&pbr_ps((1 << 12) | (1 << blocker)), "GLINT"),
-            "{blocker}"
-        );
+    for bits in [1 << 21, 1 << 12] {
+        let d = pbr_ps(bits, false);
+        assert!(!has(&d, "GLINT") && !has(&d, "ANISO_LIGHTING"), "{bits:#x}");
     }
+    // CS 2.0 compiles ANISO_LIGHTING into every GLINT permutation (Note IE8).
+    assert!(has(&pbr_ps(0, true), "GLINT") && has(&pbr_ps(0, true), "ANISO_LIGHTING"));
     assert!(
         !names(&defines(&m(0, 0, 1 << 12, false), Stage::Pixel, &[], false)).contains(&"GLINT")
     );
@@ -351,7 +342,8 @@ fn bundled_cs_lighting_compiles() {
     // with Glint.
     let mut hair = m(6, 1, (1 << 21) | (1 << 25) | (1 << 26) | (1 << 27), true);
     hair.alpha_test = true;
-    let pbr = m(0, 1, (1 << 21) | (1 << 23), false);
+    let mut pbr = m(0, 1, (1 << 21) | (1 << 23), false);
+    pbr.pbr2_glint = true;
     let mut decal_hair = m(6, (1 << 26) | (1 << 27), 1 << 27, true);
     decal_hair.alpha_test = true;
     let mlp_pbr = m(11, 0, (1 << 23) | (1 << 25) | (1 << 27), false);

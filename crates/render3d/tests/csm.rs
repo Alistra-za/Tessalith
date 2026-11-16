@@ -198,6 +198,35 @@ fn a_missing_csm_is_asked_again_on_edit() {
     assert_eq!(cb(&r, "PBRParams1")[0], 0.7);
 }
 
+/// Note IE27 (final review A-I1): an animation tick never asks the resolver again for a `.csm` it lacked; an edit
+/// does, once.
+#[test]
+fn animation_ticks_do_not_ask_for_a_missing_csm_again() {
+    use std::cell::Cell;
+    let cache = tempfile::tempdir().unwrap();
+    let mut r = renderer(cache.path());
+    let asks = Cell::new(0);
+    let read = |p: &str| {
+        if p.ends_with(".csm") {
+            asks.set(asks.get() + 1);
+        }
+        None
+    };
+    r.load(&csm_nif("materials\\t.csm"), &read);
+    assert_eq!(asks.get(), 1, "the load asks once");
+    let parsed = parse(&csm_nif("materials\\t.csm")).shapes[0]
+        .material
+        .clone();
+    for i in 0..5 {
+        let mut m = parsed.clone();
+        m.params.alpha = 0.5 + 0.05 * i as f32;
+        r.set_frame_material(SHAPE, m, &read).unwrap();
+    }
+    assert_eq!(asks.get(), 1, "5 ticks: no new asks");
+    r.set_material(SHAPE, parsed, &read).unwrap();
+    assert_eq!(asks.get(), 2, "an edit asks again");
+}
+
 /// An edit that clears the `.csm` name drops the PBR values, though the edited material still carries the stored
 /// ones: the renderer never keeps them from the incoming material (Note IE7). The shape draws vanilla.
 #[test]
