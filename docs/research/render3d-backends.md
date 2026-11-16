@@ -8,7 +8,8 @@ Short answer:
 - **Frame time is not a backend question.** GPU time is under the 0.6 ms or so the probe can resolve, at every size. Reading the frame back to the CPU is 77% to 97% of a frame.
 - **Cold load is shader compile.** FXC takes 0.83 to 1.34 s of a 0.87 to 1.39 s cold load.
 - **The shaders decide the backend.** FXC compiles 98 of 98 permutations unmodified. DXC compiles 0 of 98, to DXIL or to SPIR-V. Community Shaders (CS) itself compiles with FXC on every branch I read.
-- **DXVK runs the preview unchanged, on Windows.** With CS's own DXVK build under the same exe, the three scenes' frames match Microsoft's D3D11 (one pixel of 921,600 differs by 1 in one scene), frame and load times are the same, and 345 of 348 `render3d` tests pass. See [what DXVK did](#what-dxvk-did-on-windows).
+- **DXVK runs the preview unchanged, on Windows.** With CS's own DXVK build under the same exe, the three scenes' frames match Microsoft's D3D11 (one pixel of 921,600 differs by 1 in one scene), and frame and load times are the same.
+- **The golden replay fails on DXVK,** and that was the parity line I set before the run: 123 of 149 captured draws are over its limits. Both causes I found are in how the replay uses the game's captures (8× anisotropic samplers, captured depth), not in the shaders. See [what DXVK did](#what-dxvk-did-on-windows).
 - **Native Linux is still untested.** The open link is the compiler: where FXC bytecode comes from without Windows.
 
 My recommendation: keep the D3D11 API and FXC bytecode, with DXVK as the runtime to build towards. [The next step](#recommendation-and-next-step) is the Linux compiler test.
@@ -100,7 +101,7 @@ Two things stop DXC:
 
 The rewrite was a scratch experiment on expanded copies, to see whether anything else hides behind the first error. Nothing does. It turned each member `M` of a cbuffer declared inside namespace `N` into a global `N_M`, and added `static const T M = N_M;` inside the namespace right after the cbuffer. The script is `tools\r3d-ns-rewrite.py`. It is not a proposed patch: the DXIL and SPIR-V were validated by `dxc` but never run on a device, and their code was not compared with FXC's.
 
-The SPIR-V that compiles is still not ready for wgpu. naga rejects 57 of the 98 files at the first check: the `FeatureData` cbuffer has a struct member at offset 4, and wgpu's uniform rules want 16. That offset is HLSL's packing, which I kept on purpose (`-fvk-use-dx-layout`) so the cbuffer bytes the renderer already builds would still fit. Without the flag DXC repacks the cbuffers and the CPU side has to follow. I did not look past that first error.
+The SPIR-V that compiles is still not ready for wgpu. naga rejects 57 of the 98 files at its first check: all 55 `Lighting.hlsl` pixel shaders and 2 of the 3 deferred composite compute shaders. The error is a uniform alignment rule: inside the `FeatureData` cbuffer a struct member sits at offset 4 where naga requires a multiple of 16. I compiled with HLSL's own packing (`-fvk-use-dx-layout`) so the cbuffer bytes the renderer already builds would still fit, and suspected that flag. It is not the flag: without it the same 57 fail with the same error. I did not find which member it is, or look past that first error.
 
 Compile time on the rewritten text, one process per shader, median ms: pixel shaders 125 (DXC to DXIL) and 155 (DXC to SPIR-V) against 293 (FXC). Vertex shaders are 60 to 74 on all three. Other tests were running at the same time, so read these as rough.
 
@@ -123,7 +124,7 @@ The same D3D11 calls and the same bytecode, with DXVK as the runtime: Microsoft'
 - **Enables:** everything in path 1, plus whatever Vulkan offers beside it. DXVK hands out its Vulkan instance, device and queue (`IDXGIVkInteropDevice`) and the Vulkan image behind a D3D11 texture. CER's Vulkan path does its ray tracing exactly this way.
 - **Linux:** native. Two small Rust projects do it: they bind DXVK's headers with bindgen instead of the `windows` crate. The software fallback is Mesa's lavapipe; one of those projects reports rendering headless through it.
 
-Open links on Linux, all untested here:
+Open links on Linux. None was tested on Linux; the software fallback was seen on Windows:
 - **The compiler.** On native Linux `D3DCompile` comes from vkd3d-utils. Its output is not FXC's, and nobody has fed it this source. The namespace scoping that stops DXC and glslang is exactly the risk.
 - **Headless.** DXVK-native throws at start-up unless `DXVK_WSI_DRIVER` names a window backend, even for offscreen work. Whether that backend needs a display is not in DXVK's sources.
 - **Software fallback.** DXVK has none of its own: asked for WARP, it logs "Unsupported driver type 5" and returns the hardware GPU (measured). lavapipe would have to be chosen on the Vulkan side.
@@ -132,6 +133,18 @@ Open links on Linux, all untested here:
 #### What DXVK did on Windows
 
 CS's DXVK build sat beside the unchanged test exes, so the same Rust code and the same FXC bytecode ran on Vulkan. DXVK's log confirms it created the device on the RTX 4090 for every run.
+
+The pass and fail lines were written down before any DXVK output was read:
+
+| Line | Pass means | Result |
+|---|---|---|
+| Loaded | DXVK's log names the Vulkan adapter | pass |
+| Parity | every golden replay case that passes on Microsoft's D3D11 passes on DXVK, test unchanged | **fail**: 123 of 149 over the limit |
+| Frame time | DXVK's median is at most 1.5× Microsoft's in the same session | pass: at most 1.07× |
+| Warm load | at most 2× | pass |
+| Cold load, first frame | recorded, no verdict | recorded |
+
+The comparison of the preview's own frames was not one of those lines, so it carries no verdict set in advance.
 
 Frames at 1280×720, hardware GPU, 8-bit output, compared byte by byte:
 
@@ -152,16 +165,16 @@ Whole `render()` median in ms, three runs back to back: Microsoft's D3D11, DXVK,
 
 - **Frames cost the same.** DXVK is within 0.2 ms of the nearer Microsoft run up to 1920×1080 and within 0.7 ms at 4K. The readback dominates on both.
 - **Loads cost the same.** Cold load 868 to 1436 ms on DXVK against 910 to 1416 ms; warm load 36 to 95 ms against 38 to 134 ms. The compile is FXC either way.
-- **No first-frame stall.** The first frame after a cold load took 40 to 56 ms on DXVK against 39 to 61 ms. I expected DXVK to pay for building its pipelines there; it did not show.
-- **The test suite: 345 of 348 pass** (348 of 348 on Microsoft's D3D11). The three failures are exact-value pins: two composite tests off by one half-float step (0.7495 for 0.75), and one frame hash pinned to WARP's rasteriser.
+- **No first-frame stall.** The first frame after a cold load took 40 to 56 ms on DXVK against 39 to 61 ms. I expected DXVK to pay for building its pipelines there; it did not show. Neither DXVK's nor the driver's shader cache was cleared first, so this is not a cold-cache figure.
+- **The test suite: 345 of 348 pass** (348 of 348 on Microsoft's D3D11). The three failures are exact-value pins: two composite tests off by one half-float step (0.7495 for 0.75), and one frame hash. All three ask for WARP and their values were pinned there. DXVK gave them the RTX 4090 instead, so each failure mixes two changes, the runtime and the rasteriser. I did not separate them.
 
-The golden replay does not pass on DXVK, and the reason matters more than the count. It replays 149 draws captured from the game and allows almost no difference, because on Microsoft's D3D11 the replay is bit-identical to the capture. On DXVK 123 of the 149 are over the limit. Two causes, each confirmed by changing one thing on a few subjects:
+The golden replay does not pass on DXVK, and the reason matters more than the count. It replays 149 draws captured from the game and compares all eight render targets with the capture. Its limit is a small tolerance per pixel format plus the noise measured between captures of two neighbouring frames, and no pixel may be over it. On Microsoft's D3D11 none is. On DXVK 123 of the 149 draws have pixels over it. Two causes, each confirmed by changing one thing on a few subjects:
 - **8× anisotropic sampling differs between the two runtimes.** The captures use the game's 8× anisotropic samplers. With those samplers three of the eight targets differ, by 0.0005 to 0.007 on average and by up to 0.15. With them swapped for trilinear, three subjects are bit-identical on all eight targets, bar one value in one of them.
 - **A captured depth buffer does not match DXVK's depth exactly.** 76 subjects test `Equal` against the depth the game's prepass wrote. On DXVK 61 of them come out at least 90% wrong, and the one I opened had drawn nothing at all. With `LessEqual` instead, two subjects match Microsoft's D3D11 except for at most 9 values by one step. I did not separate DXVK's rasterised depth from the copy that seeds the captured depth.
 
 Neither touches the preview: it samples trilinear and tests against its own depth, which is why its frames match. What it does mean:
 - **The replay cannot gate DXVK as it stands.** Its limits assume the runtime the captures came from.
-- **The translation itself held up.** With sampling and depth taken out, the game's deferred `Lighting.hlsl` gives the same bits through DXVK's `dxbc-spirv` as through Microsoft's D3D11. Five subjects were probed this way, not all 149.
+- **The translation held up where I probed it.** With sampling and depth taken out, the game's deferred `Lighting.hlsl` through DXVK's `dxbc-spirv` is identical to Microsoft's D3D11 on three subjects and within one step on two. That is five subjects of 149, so the other 144 failures are explained by pattern, not checked one by one.
 - **If the game moves to DXVK, captures should too.** Captures taken on Microsoft's D3D11 would no longer be what players see wherever anisotropic filtering shows.
 
 ### 3. D3D12
@@ -180,7 +193,7 @@ Neither touches the preview: it samples trilinear and tests against its own dept
 
 ### 5. wgpu, on the GUI's device
 
-- **Shaders:** naga has no HLSL input. FXC or DXC output can only be passed through unparsed (`PASSTHROUGH_SHADERS`), with explicit pipeline layouts, on DX12 for HLSL and DXIL and on Vulkan for SPIR-V. So this path inherits path 3's or path 4's shader problem and adds wgpu's binding model on top. Its own checks already object: naga validates only 41 of the 98 SPIR-V files DXC produced, because of cbuffer packing.
+- **Shaders:** naga has no HLSL input. FXC or DXC output can only be passed through unparsed (`PASSTHROUGH_SHADERS`), with explicit pipeline layouts, on DX12 for HLSL and DXIL and on Vulkan for SPIR-V. So this path inherits path 3's or path 4's shader problem and adds wgpu's binding model on top. Its own checks already object: naga validates only 41 of the 98 SPIR-V files DXC produced, stopping on a cbuffer alignment rule.
 - **Enables:** one device for the GUI and the preview, so display is free. Ray queries are experimental; ray tracing pipelines are Vulkan only and experimental. Binding arrays and compute are available.
 - **Linux:** native (Vulkan), with `force_fallback_adapter` for software.
 
@@ -211,14 +224,14 @@ The graphics backend decides less here than it seems to:
 | Path | CS shaders | Linux | Adds | Use for |
 |---|---|---|---|---|
 | 1. D3D11 as it is | shown: compiles 98 of 98; the repo's golden replay test pins its pixels (re-run for this page: 0 of 149 failing) | Wine or Proton only (cited) | nothing new | the parity baseline; today's preview |
-| 2. D3D11 on DXVK | shown on Windows: same bytecode, same frames, same speed; the route CS's drafts take | native (cited, third-party); compiler untested | a Vulkan device beside the raster: ray tracing, compute, lavapipe | the path to build towards |
+| 2. D3D11 on DXVK | shown on Windows: same bytecode, same preview frames, same speed; the golden replay fails on captured samplers and depth; the route CS's drafts take | native (cited, third-party); compiler untested | a Vulkan device beside the raster: ray tracing, compute, lavapipe | the path to build towards |
 | 3. D3D12 | likely, not shown; needs root signatures | Wine or Proton only (cited) | DXR, DXIL, bindless, software ray tracing in WARP | ray tracing on Windows if path 2's Linux links fail |
 | 4. Vulkan | a translator (which is path 2), or DXC plus a source rewrite: compiles 98 of 98, never run | native (cited) | the same as path 2, without D3D11 | new renderers that don't use CS shaders |
 | 5. wgpu | passthrough only; naga validates 41 of 98 | native (cited) | one device with the GUI | drawing that never needed CS shaders |
 
 ## Recommendation and next step
 
-I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS compiles on every branch, and it is what the measurements support. Among the ways to grow from there, path 2 is the only one that adds native Linux and a Vulkan device without changing what the shaders compile to, and it is where CS's own drafts point. Its first test passed: on Windows the unchanged renderer gives the same frames at the same speed on DXVK.
+I'd keep the D3D11 API and FXC bytecode as the contract, because that is what CS compiles on every branch, and it is what the measurements support. Among the ways to grow from there, path 2 is the only one that adds native Linux and a Vulkan device without changing what the shaders compile to, and it is where CS's own drafts point. Its first test gave a split result. On Windows the unchanged renderer gives the same frames at the same speed on DXVK. The golden replay failed the parity line I set for it. I read that failure as a limit of the replay, because both causes I isolated are in the captured samplers and depth, and the five draws I probed match once those are taken out. That reading rests on five draws of 149. If you'd rather hold path 2 to the line as written, the test to add first is a replay that passes on DXVK: its own captures, taken with DXVK under the game.
 
 What is left is Linux, in this order:
 1. **A vkd3d row in the compile trial.** Run the 98 permutations through vkd3d's `D3DCompile`. If it rejects namespaced cbuffers as DXC does, native Linux needs another source of FXC bytecode. I found no prebuilt Windows build of vkd3d's compiler (MSYS2 has no package, and vkd3d-proton ships D3D12 only), so this needs a Wine package's `d3dcompiler_47.dll` or a Linux machine.
@@ -237,6 +250,8 @@ If you want frame time back before any of that, the zero-copy display on today's
 - **Frames:** 20 warm-up frames, then 200 timed, per size, per scene, on the hardware GPU and on WARP. Forward mode, default CS features, black background, automatic camera. Three runs; the frame tables are the third, which added 1600×900. The first two ran up to 0.2 ms lower at 1280×720, 0.5 ms lower at 1920×1080 and 3 ms lower at 4K on the hardware GPU. Load numbers are the first run.
 - **Golden root:** `cs-1.9.0-d2026.10.11.0`, the one `tests/fixtures/golden-baseline.txt` matches.
 - **DXVK:** CS's fork at b926a24c, the commit PR 2632 pins as `extern/dxvk`; the build is the fork's own Actions artifact `dxvk-interop-b926a24c…` (DXVK 3.1.0, x64, gcc 16.2). The fork names its files `dxvk_d3d11.dll` and `dxvk_dxgi.dll` and CS loads them by path. For these runs they were copied beside copies of the test exes as `d3d11.dll` and `dxgi.dll`, with `dxvk_dxgi.dll` kept too because the first imports it by name. Only `DXVK_LOG_PATH` and `DXVK_LOG_LEVEL` were set; CS also sets `DXVK_HDR` and `DXVK_DEBUG`, which these runs did not.
+- **File identities (SHA-256):** `dxvk_d3d11.dll`, 7,495,694 bytes, `9B44DA108260B27360DB0C0294324583B5E7CAA2F427EFEE3695A0D528FEE421`. `dxvk_dxgi.dll`, 5,427,214 bytes, `795736BDE0267ED9649E7A7E3D37C2C9CAB571489C09CDDEF46E5CEEF3227747`. `dxc_2026_09_29.zip`, 32,287,592 bytes, `AD31B1FC8443175D204F77A611FDB3EF2EC42759BDC2F1167368DE24A4A7E7F1`. An Actions artifact expires, so the hashes are what identifies the DXVK build later.
+- **naga:** a scratch program on naga 30.0.1 from the local cargo registry parsed and validated each `.spv` with every capability on. It is not in the repo.
 - **DXVK frames:** `SDC_R3D_FRAME_OUT=<dir>` makes `render_backend_baseline` write each scene's frame as raw RGBA. The DXVK timing run used a 10 s WARP budget; its "WARP" rows are the hardware GPU.
 - **Replay probes:** a throwaway test replayed five golden subjects on both runtimes, with the samplers or the depth test changed as described. It is not in the repo.
 
