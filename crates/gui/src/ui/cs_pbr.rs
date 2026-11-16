@@ -251,17 +251,16 @@ fn default_text(kind: Kind, f: &Field) -> String {
     }
 }
 
-/// A number box for `f`, named `name`.
-fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field, name: &str) -> bool {
-    let r = ui.add(
+/// A number box for `f`; the caller names it (E28).
+fn drag(ui: &mut egui::Ui, x: &mut f64, f: &Field) -> egui::Response {
+    ui.add(
         egui::DragValue::new(x)
             .range(f.range.0..=f.range.1)
             // Note FO3 (V6): a stored value is shown as it is; the default clamp would rewrite it on draw.
             // shortcut: an AccessKit SetValue then skips the range, upgrade by clamping what is written.
             .clamp_existing_to_range(false)
             .speed(0.01),
-    );
-    super::name_input(r, name).changed()
+    )
 }
 
 fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts: &mut Vec<Act>) {
@@ -284,7 +283,10 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
         match f.kind {
             FieldKind::Num => {
                 let mut x = cur.as_f64().unwrap_or(f.default);
-                if drag(ui, &mut x, f, field_label(f.name)) {
+                // The tick beside it carries the field's name, so the box is its value (rule 8.4).
+                let r = drag(ui, &mut x, f);
+                let name = format!("{} value", field_label(f.name));
+                if super::name_input(r, &name).changed() {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(x))));
                 }
             }
@@ -295,7 +297,8 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                     .unwrap_or_default();
                 let mut changed = false;
                 for (x, channel) in c.iter_mut().zip(["red", "green", "blue"]) {
-                    changed |= drag(ui, x, f, &format!("{} {channel}", field_label(f.name)));
+                    let name = format!("{} {channel}", field_label(f.name));
+                    changed |= super::name_input(drag(ui, x, f), &name).changed();
                 }
                 if changed {
                     acts.push(Act::Value(kind, f.name.into(), Some(json!(c))));
@@ -312,9 +315,10 @@ fn field_row(ui: &mut egui::Ui, kind: Kind, f: &Field, cur: Option<&Json>, acts:
                 }
                 for g in &GLINT_FIELDS {
                     let mut x = cur.get(g.name).and_then(Json::as_f64).unwrap_or(g.default);
-                    ui.label(field_label(g.name))
+                    let l = ui
+                        .label(field_label(g.name))
                         .on_hover_text(format!("JSON key: {}.{}", f.name, g.name));
-                    if drag(ui, &mut x, g, field_label(g.name)) {
+                    if drag(ui, &mut x, g).labelled_by(l.id).changed() {
                         acts.push(Act::Value(
                             kind,
                             format!("{}.{}", f.name, g.name),

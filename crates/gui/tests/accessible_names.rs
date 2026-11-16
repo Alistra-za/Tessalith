@@ -5,6 +5,7 @@ mod support;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use sdc_gui::model::cs_pbr::Kind;
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
@@ -59,18 +60,24 @@ fn every_input_has_a_name_in_the_textures_view() {
 fn every_input_has_a_name_in_the_set_editor_and_json_editor() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
-    let key = m
-        .sets
-        .iter()
-        .find(|s| s.key.ends_with("rock01"))
-        .unwrap()
-        .key
-        .clone();
+    let s = m.sets.iter().find(|s| s.key.ends_with("rock01")).unwrap();
+    let key = s.key.clone();
+    let id = m.set_of_item_probe(&s.members[0]).unwrap().id;
     m.select_set(&key);
+    // The CS texture set's value shows its number box beside the tick.
+    m.add_cs_block(&id, Kind::Txst);
+    m.set_cs_value(
+        &id,
+        Kind::Txst,
+        "specularLevel",
+        Some(serde_json::json!(0.02)),
+    );
     let mut h = harness(m);
     h.run();
     h.get_by_role_and_label(Role::ComboBox, "Packed texture recipe");
     h.get_by_role_and_label(Role::TextInput, "EDID to add");
+    // Rule 8.4: a number box beside a named tick is "{label} value", never the tick's own name.
+    h.get_by_role_and_label(Role::SpinButton, "Specular level value");
     // The JSON editor is a centre tab: it takes the set editor's place.
     h.state_mut().open_json_editor();
     h.run();

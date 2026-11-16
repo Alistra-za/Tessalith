@@ -639,7 +639,7 @@ fn field_row(
 ) {
     let st = row.subtype;
     let t = pm.target;
-    ui.label(label);
+    let l = ui.label(label);
     let opts = field_options(field, t, p);
     let cur = value_of(p, field);
     let lock = field_lock(t, p, field);
@@ -652,7 +652,7 @@ fn field_row(
             &opts,
             false,
         );
-        (v, super::name_input(c, label))
+        (v, c.labelled_by(l.id))
     });
     // Note FM43: Slowest on a BC6H row that sets no effort is the engine's default, not a stored value.
     let default_effort = field == "encoder.effort"

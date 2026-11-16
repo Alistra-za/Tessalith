@@ -101,7 +101,8 @@ fn key_row(ui: &mut egui::Ui, k: &CmKey, cur: Option<&Json>, acts: &mut Vec<Act>
             }
             CmKind::Num => {
                 let mut x = cur.as_f64().unwrap_or(1.0);
-                if drag(ui, &mut x, &readable(k.name)) {
+                // The tick beside it carries the key's name, so the box is its value (rule 8.4).
+                if drag(ui, &mut x, &format!("{} value", readable(k.name))) {
                     acts.push(Act::Value(k.name.into(), Some(json!(x))));
                 }
             }
