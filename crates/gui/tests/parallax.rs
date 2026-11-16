@@ -181,6 +181,196 @@ fn a_locked_ticked_box_has_a_reset() {
     assert_eq!(parallax(m, BOLT_M), Some(false));
 }
 
+const ROCK: &str = "landscape/rock01";
+const ROCK_P: &str = "landscape/rock01_p.png";
+
+/// The `_p` source's height (R): a ramp across x.
+fn p_height(x: u32) -> u8 {
+    (20 + x * 3) as u8
+}
+
+/// The `_p` source's fuzz roughness (G): a ramp down y.
+fn p_fuzz(y: u32) -> u8 {
+    (230 - y * 3) as u8
+}
+
+fn rock(m: &AppModel) -> sdc_gui::model::sets::SetView {
+    sdc_gui::model::sets::views(m)
+        .iter()
+        .find(|v| v.id == ROCK)
+        .cloned()
+        .expect("the rock01 set")
+}
+
+fn p_job(m: &AppModel) -> engine::policy::ResolvedJob {
+    m.item(ROCK_P)
+        .unwrap()
+        .job
+        .clone()
+        .expect("the _p is planned")
+}
+
+/// The fuzz roughness blocker of rock01, with its fix.
+fn fuzz_row(m: &AppModel) -> Option<sdc_gui::model::pbr_export::ExportIssue> {
+    let text = format!("{ROCK}: {}", sdc_gui::model::pbr_export::FUZZ_TWO_CHANNELS);
+    sdc_gui::model::pbr_export::export_blocks(m)
+        .iter()
+        .find(|i| i.text == text)
+        .cloned()
+}
+
+/// Note IE16: the support PBR fixture (rock01 picked `pbr`) with a `_p` holding a height in R and a fuzz roughness in
+/// G, a texture-set block, fuzz on and the block's fuzz roughness texture switch `switch`. The set gets a `.csm` (a
+/// block alone would pick PBR Landscape, which gets none) and, with the switch, the file holds both switches.
+fn fuzz_fixture(dir: &Path, switch: bool) -> AppModel {
+    use sdc_gui::model::cs_pbr::Kind;
+    let mut m = support::pbr_opened_plain(dir);
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([p_height(x), p_fuzz(y), 0]))
+        .save(dir.join("textures/landscape/rock01_p.png"))
+        .unwrap();
+    m.replan();
+    idle(&mut m);
+    m.decide(ROCK_P, sdc_gui::model::Answer::Subtype(Subtype::Height));
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.set_cs_edids(ROCK, Kind::Txst, &["Rock01".into()]);
+    m.set_json_value(ROCK, "fuzz_on", Some(json!(true)));
+    if switch {
+        m.set_cs_value(ROCK, Kind::Txst, "fuzzRoughnessTexture", Some(json!(true)));
+    }
+    idle(&mut m);
+    let v = rock(&m);
+    assert!(sdc_gui::model::csm_export::gets_csm(&v), "{:?}", v.shader);
+    assert!(v
+        .slots
+        .contains_key(&sdc_gui::model::sets::SlotKind::Height));
+    let pgp = sdc_gui::model::auto_flags::resolved_for(
+        v.json,
+        &v.slots,
+        &v.settings,
+        &sdc_gui::model::auto_flags::hint(&m, &v),
+    );
+    let c = sdc_gui::model::csm_export::set_csm(&v, &pgp, m.cs_block(ROCK, Kind::Txst).as_ref())
+        .expect("a .csm");
+    let on = |k: &str| c.csm.values.get(k) == Some(&nif::csm::Value::Bool(true));
+    assert!(on("PBRFuzzEnabled"), "{:?}", c.csm);
+    assert_eq!(on("PBRFuzzRoughnessTexture"), switch, "{:?}", c.csm);
+    assert_eq!(c.blocked, None);
+    assert_eq!(
+        p_job(&m).profile.format,
+        engine::config::Format::Bc4,
+        "the _p default"
+    );
+    m
+}
+
+fn problems_harness(mut m: AppModel) -> Harness<'static, AppModel> {
+    m.open_problems(None);
+    let h = Harness::builder()
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    sdc_gui::fonts::install_system_fonts(&h.ctx).expect("system fonts");
+    h
+}
+
+/// Note IE16: with the switch on, a BC4 `_p` blocks Export with the brief's text; its Use BC5 button writes
+/// `format = "bc5"` for the `_p` through the edit history, which clears the row, and one undo brings both back.
+#[test]
+fn fuzz_texture_needs_two_channels() {
+    use sdc_gui::model::bottom::Fix;
+    let d = tempfile::tempdir().unwrap();
+    let m = fuzz_fixture(d.path(), true);
+    let row = fuzz_row(&m).expect("a fuzz roughness row");
+    assert_eq!(row.fix, Some(Fix::UseBc5(ROCK_P.into())));
+    assert!(
+        p_job(&m).profile.channels.keep_green,
+        "the switch keeps the _p G"
+    );
+    let mut h = problems_harness(m);
+    h.run();
+    h.get_by_label(sdc_gui::ui::problems::USE_BC5).click();
+    settle(&mut h);
+    let m = h.state_mut();
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(ROCK_P, "format"),
+        Some(json!("bc5"))
+    );
+    assert_eq!(p_job(m).profile.format, engine::config::Format::Bc5);
+    assert!(fuzz_row(m).is_none());
+    m.undo();
+    idle(m);
+    assert_eq!(p_job(m).profile.format, engine::config::Format::Bc4);
+    assert!(fuzz_row(m).is_some(), "undo brings the row back");
+}
+
+/// Two-channel formats pass; R8, one channel like BC4, is refused too.
+#[test]
+fn fuzz_texture_bc5_ok() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fuzz_fixture(d.path(), true);
+    for (format, refused) in [("bc5", false), ("bc1", false), ("r8", true)] {
+        m.set_field(ROCK_P, "format", json!(format));
+        idle(&mut m);
+        assert_eq!(
+            serde_json::to_value(p_job(&m).profile.format).unwrap(),
+            json!(format)
+        );
+        assert_eq!(fuzz_row(&m).is_some(), refused, "{format}");
+    }
+}
+
+/// The switch off: a BC4 `_p` is fine and grey. Turning it on keeps the G and adds the row; fuzz off drops the row
+/// (the `.csm` then has no fuzz) but not the G (Note IE16: the engine follows the switch alone); undo of the switch
+/// plans the grey `_p` again.
+#[test]
+fn switch_off_bc4_ok() {
+    use sdc_gui::model::cs_pbr::Kind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fuzz_fixture(d.path(), false);
+    assert!(fuzz_row(&m).is_none());
+    assert!(!p_job(&m).profile.channels.keep_green);
+    m.set_cs_value(ROCK, Kind::Txst, "fuzzRoughnessTexture", Some(json!(true)));
+    idle(&mut m);
+    assert!(p_job(&m).profile.channels.keep_green);
+    assert!(fuzz_row(&m).is_some());
+    m.set_json_value(ROCK, "fuzz_on", Some(json!(false)));
+    idle(&mut m);
+    assert!(fuzz_row(&m).is_none(), "fuzz off: the .csm reads no fuzz");
+    assert!(p_job(&m).profile.channels.keep_green);
+    m.undo();
+    m.undo();
+    idle(&mut m);
+    assert!(!p_job(&m).profile.channels.keep_green, "undo plans again");
+    assert!(fuzz_row(&m).is_none());
+}
+
+/// The exported `_p` after the row's fix holds the source's height in R and its fuzz roughness in G.
+#[test]
+fn fuzz_texture_bc5_export_keeps_green() {
+    use engine::decode::{decode_level, Decoded};
+    let d = tempfile::tempdir().unwrap();
+    let mut h = problems_harness(fuzz_fixture(d.path(), true));
+    h.run();
+    h.get_by_label(sdc_gui::ui::problems::USE_BC5).click();
+    settle(&mut h);
+    let m = h.state_mut();
+    support::export_through(m);
+    assert!(m.wait_idle(Duration::from_secs(120)), "export");
+    let out = p_job(m).output;
+    let f = engine::dds::read_dds(&std::fs::read(&out).unwrap()).unwrap();
+    let (w, hgt, r) = f.levels[0].clone();
+    let Decoded::Ldr(px) = decode_level(f.format, w, hgt, &f.data[r]).unwrap() else {
+        panic!("HDR output for a _p");
+    };
+    let near = |a: u8, b: u8| (i32::from(a) - i32::from(b)).abs() <= 6;
+    for (i, p) in px.iter().enumerate() {
+        let (x, y) = (i as u32 % 64, i as u32 / 64);
+        assert!(
+            near(p[0], p_height(x)) && near(p[1], p_fuzz(y)),
+            "{x},{y}: {p:?}"
+        );
+    }
+}
+
 /// Fix round 1: an explicit `remove` hides the row with its own reason; each hidden field has its own reason.
 #[test]
 fn hidden_rows_say_why() {

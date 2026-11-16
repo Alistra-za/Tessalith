@@ -355,6 +355,40 @@ pub fn missing_texture_texts(
     out
 }
 
+/// Note IE16: the blocker of a fuzz roughness texture in a one-channel `_p` (after `<set id>: `).
+pub const FUZZ_TWO_CHANNELS: &str =
+    "Fuzz roughness texture needs two channels (height in R, fuzz roughness in G): use BC5 or BC1";
+
+/// Note IE16: the item key of set `v`'s own `_p` when the set's `.csm` (a PGPatcher JSON set, as `csm_sets`) turns the fuzz roughness texture on (the
+/// block's switch, in `fuzz_sets`, with fuzz on as the export resolves it, so the file holds both switches) and the
+/// `_p` is written in a one-channel format (BC4, R8), which has no G.
+fn one_channel_fuzz_p(m: &AppModel, v: &SetView, fuzz_sets: &BTreeSet<String>) -> Option<String> {
+    if !v.json || !fuzz_sets.iter().any(|id| same_id(id, &v.id)) || !super::csm_export::gets_csm(v)
+    {
+        return None;
+    }
+    let pgp = super::auto_flags::resolved_for(
+        v.json,
+        &v.slots,
+        &v.settings,
+        &super::auto_flags::hint(m, v),
+    );
+    if pgp.get("fuzz_on") != Some(&Value::Bool(true)) {
+        return None;
+    }
+    // shortcut: a borrowed `_p` is planned in its lender's set, whose own switch decides its G; it is not checked
+    // here. Upgrade if sets start borrowing a fuzz roughness `_p`.
+    let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Height) else {
+        return None;
+    };
+    let format = m.item(item)?.job.as_ref()?.profile.format;
+    matches!(
+        format,
+        engine::config::Format::Bc4 | engine::config::Format::R8
+    )
+    .then(|| item.clone())
+}
+
 /// What stops Export (spec §6.3). On CS the PBR sets are checked; slot clashes apply to every set. Cached with the
 /// set views (audit 7, DECISIONS Note Y7).
 pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
@@ -380,6 +414,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
             });
         }
     }
+    let fuzz_sets = super::sets::fuzz_texture_sets(m);
     // Note HF9: a set outside the run gates nothing; the project-wide checks below still block.
     for v in set_views(m).iter().filter(|v| m.in_run(&v.key)) {
         // A value CS would reject voids the whole `.csskin.json`; it is not a PGPatcher entry, so it comes first.
@@ -392,6 +427,14 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                     ),
                 ));
             }
+        }
+        // Note IE16: the `.csm` reads fuzz roughness from the `_p` G, which a one-channel format drops. Before the
+        // statics rule below: the `.csm` is written whatever it says (`csm_export::csm_sets`).
+        if let Some(item) = one_channel_fuzz_p(m, v, &fuzz_sets) {
+            out.push(ExportIssue {
+                fix: Some(Fix::UseBc5(item)),
+                ..issue(v, format!("{}: {FUZZ_TWO_CHANNELS}", v.id))
+            });
         }
         // Design §5.1: a set whose entry the statics rule drops writes no JSON, so nothing of it blocks.
         if m.target == Target::Cs && !m.pgp_entry_wanted(v) {

@@ -480,7 +480,7 @@ impl AppModel {
     }
 
     /// One undoable, JSON-only edit of the sets document (design §3; nothing is planned, DECISIONS P7, except when a
-    /// texture-set block comes or goes: Note BM4).
+    /// texture-set block comes or goes: Note BM4, or its fuzz roughness texture switch moves: Note IE16).
     fn cs_edit(
         &mut self,
         set: &str,
@@ -492,10 +492,17 @@ impl AppModel {
             return;
         }
         let s = set.to_string();
-        let txst = super::sets::cs_txst_sets(self);
+        let inputs = |m: &Self| {
+            (
+                super::sets::cs_txst_sets(m),
+                super::sets::fuzz_texture_sets(m),
+            )
+        };
+        let before = inputs(self);
         self.edit_docs(label, merge, false, move |_, d| f(d, &s));
-        // Note BM: a texture-set block that comes or goes is shader-pick input, so that edit plans again.
-        if super::sets::cs_txst_sets(self) != txst {
+        // Note BM: a texture-set block that comes or goes is shader-pick input, so that edit plans again; so is the
+        // fuzz roughness texture switch (Note IE16: it keeps the `_p` G).
+        if inputs(self) != before {
             // A sets-document edit: no partial plan.
             self.replan_after_edit(false);
         }

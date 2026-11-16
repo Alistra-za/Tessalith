@@ -1737,6 +1737,27 @@ pub fn cs_txst_sets(m: &AppModel) -> BTreeSet<String> {
         .collect()
 }
 
+/// Note IE16: the ids of the sets whose texture-set block turns the fuzz roughness texture on (sent as
+/// `BatchRequest::fuzz_texture_sets`; the engine keeps such a `pbr` set's `_p` G). Empty off CS.
+pub fn fuzz_texture_sets(m: &AppModel) -> BTreeSet<String> {
+    if m.target != Target::Cs {
+        return BTreeSet::new();
+    }
+    let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
+    entries
+        .iter()
+        .filter(|e| {
+            e.cs_txst
+                .as_ref()
+                .is_some_and(|b| b.values.get(FUZZ_TEXTURE) == Some(&serde_json::Value::Bool(true)))
+        })
+        .map(|e| e.id.clone())
+        .collect()
+}
+
+/// The texture-set block switch that reads fuzz roughness from the `_p` G (`.csm` `PBRFuzzRoughnessTexture`).
+pub const FUZZ_TEXTURE: &str = "fuzzRoughnessTexture";
+
 /// The Shader dropdown's choices for `target` (after "Auto").
 pub fn shader_options(target: Target) -> Vec<Shader> {
     Shader::available(target).to_vec()

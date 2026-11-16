@@ -20,6 +20,8 @@ use std::sync::Arc;
 
 /// The fix button on a CHAN-NORMAL-LENGTH row (Note DP).
 pub const REBUILD_Z: &str = "Rebuild Z";
+/// The fix button on a fuzz roughness texture's one-channel `_p` row (Note IE16).
+pub const USE_BC5: &str = "Use BC5";
 /// The Undo of an Info row (R-fills-2, Z11); not the header's `Undo`, so the two have distinct names (rule 8.4).
 pub const UNDO_ROW: &str = "Undo this change";
 /// The `Checks` filter pill (Note FC3: Problems shows one count; checks are a filter of it, rule 6.5).
@@ -357,6 +359,12 @@ fn fix_button(
             "Use new paths",
             "Write the record's current paths to this set's mapping; its outputs follow them",
             sets_off,
+        ),
+        Fix::UseBc5(_) => button(
+            ui,
+            USE_BC5,
+            "Write this _p as BC5: height in R, fuzz roughness in G (format = \"bc5\" in sdc.toml)",
+            off,
         ),
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
@@ -706,6 +714,7 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         Fix::TagAsGrass(k) => model.tag_as_grass(&k),
         Fix::StraightAlpha(k) => model.set_field(&k, "alpha.exr_straight", json!(true)),
         Fix::RemoveMatch(id, n) => model.set_json_value(&id, &format!("match{n}"), None),
+        Fix::UseBc5(k) => model.set_field(&k, "format", json!("bc5")),
         Fix::UseRecordPaths(id) => {
             if let Err(why) = model.use_record_paths(&id) {
                 model.status_line = why;

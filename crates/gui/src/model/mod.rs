@@ -225,6 +225,7 @@ struct EngineInputs {
     gras_diffuses: std::collections::BTreeSet<String>,
     gras_all_diffuses: std::collections::BTreeSet<String>,
     cs_txst_sets: std::collections::BTreeSet<String>,
+    fuzz_texture_sets: std::collections::BTreeSet<String>,
 }
 
 impl EngineInputs {
@@ -242,6 +243,7 @@ impl EngineInputs {
             gras_diffuses: m.gras_diffuses.clone(),
             gras_all_diffuses: m.gras_all_diffuses.clone(),
             cs_txst_sets: sets::cs_txst_sets(m),
+            fuzz_texture_sets: sets::fuzz_texture_sets(m),
         }
     }
 }
@@ -1167,6 +1169,7 @@ impl AppModel {
         req.gras_diffuses = self.gras_diffuses.clone();
         req.gras_all_diffuses = self.gras_all_diffuses.clone();
         req.cs_txst_sets = sets::cs_txst_sets(self);
+        req.fuzz_texture_sets = sets::fuzz_texture_sets(self);
         Some(req)
     }
 
@@ -1380,6 +1383,7 @@ impl AppModel {
             gras_diffuses: req.gras_diffuses.clone(),
             gras_all_diffuses: req.gras_all_diffuses.clone(),
             cs_txst_sets: req.cs_txst_sets.clone(),
+            fuzz_texture_sets: req.fuzz_texture_sets.clone(),
         });
         // Note FL7: only a changed value moves the views key, so a `[files]` edit keeps the views cache a partial
         // splices. The compare is O(size of these request maps), the same order as the clones above.
