@@ -26,7 +26,7 @@
 - The set editor's diffuse row has an alpha dropdown in place of the **Opaque** toggle, with **Confirm** while the alpha is still a proposal and ↺ to go back to the inherited alpha. In a narrow window, the Textures and Sets columns give up about 184 px more while a set is open in 2D.
 - Saved `[files]` entries that name no file in the current mode are one Problems row, with **Entries ▾** to remove them one at a time and **Remove all**.
 - The **Advanced** drawer at the window's right edge is gone; its settings are in the places above. An older `gui.toml` still loads.
-- The Textures and Sets columns show their scroll bar when the pointer is not over them, so a list longer than the window says so. In the set's 3D view the **Mesh** dropdown moves to the next toolbar row when the row is full; at 1100 px wide it used to run past the window's right edge.
+- The Textures and Sets columns show their scroll bar when the pointer is not over them, so a list longer than the window says so. The Sets column starts 6 px wider, so a set card still holds five map chips a row beside the bar. In the set's 3D view the **Mesh** dropdown moves to the next toolbar row when the row is full; at 1100 px wide it used to run past the window's right edge.
 
 ## 3.0.0
 
