@@ -193,6 +193,8 @@ struct Series {
     draw: Vec<f64>,
     gpu: Vec<f64>,
     readback: Vec<f64>,
+    map: Vec<f64>,
+    convert: Vec<f64>,
     total: Vec<f64>,
 }
 
@@ -330,9 +332,9 @@ fn run_device(
         "Frames (`render()` on the warm renderer, `Scene::neutral()`, forward; ms median / p95; {WARMUP} warm-up frames):\n"
     ));
     out.push(
-        "| res | n | draw_ms | gpu_ms | readback_ms | whole render() | covered px % | bytes/frame |".into(),
+        "| res | n | draw_ms | gpu_ms | readback_ms | of which copy + Map | of which convert | whole render() | covered px % | bytes/frame |".into(),
     );
-    out.push("|---|---:|---|---|---|---|---:|---:|".into());
+    out.push("|---|---:|---|---|---|---|---|---|---:|---:|".into());
     for (w, h) in RES {
         let mut last = vec![];
         let mut warm_t = vec![];
@@ -360,6 +362,8 @@ fn run_device(
             s.draw.push(ft.draw_ms);
             s.gpu.push(ft.gpu_ms);
             s.readback.push(ft.readback_ms);
+            s.map.push(ft.map_ms);
+            s.convert.push(ft.readback_ms - ft.map_ms);
             black_box(&px);
         }
         if let (Ok(dir), true) = (std::env::var("SDC_R3D_FRAME_OUT"), (w, h) == RES[0]) {
@@ -369,10 +373,12 @@ fn run_device(
         let bg = [last[0], last[1], last[2]];
         let covered = last.chunks(4).filter(|p| p[..3] != bg).count();
         out.push(format!(
-            "| {w}x{h} | {n} | {} | {} | {} | {} | {:.1} | {} |",
+            "| {w}x{h} | {n} | {} | {} | {} | {} | {} | {} | {:.1} | {} |",
             cell(&mut s.draw),
             cell(&mut s.gpu),
             cell(&mut s.readback),
+            cell(&mut s.map),
+            cell(&mut s.convert),
             cell(&mut s.total),
             100.0 * covered as f64 / (w * h) as f64,
             w * h * 4
@@ -407,6 +413,44 @@ fn copy_floor() -> Vec<String> {
             "| {w}x{h} | {n} | {:.3} | {:.3} |",
             q(&mut a, 0.5),
             q(&mut b, 0.5)
+        ));
+    }
+    out
+}
+
+/// The readback's conversion on ordinary memory: `w*h` half-float RGBA pixels through a 65536-entry table into a
+/// new `Vec`, the loop shape `Target::read` uses on the mapped staging texture. Median of 50. The gap between this
+/// and the measured "convert" column is what reading the mapped memory adds.
+fn convert_floor() -> Vec<String> {
+    let table: Vec<u8> = (0..=u16::MAX).map(|b| (b >> 8) as u8).collect();
+    let mut out = vec![
+        "| res | source bytes | table conversion into a new `Vec`, ms median |".into(),
+        "|---|---:|---:|".into(),
+    ];
+    for (w, h) in RES {
+        let (w, h) = (w as usize, h as usize);
+        let src: Vec<u8> = (0..w * h * 8).map(|i| (i * 31 % 251) as u8).collect();
+        let mut t = vec![];
+        for _ in 0..50 {
+            let start = Instant::now();
+            let mut px = Vec::with_capacity(w * h * 4);
+            for row in black_box(&src).chunks_exact(w * 8) {
+                px.extend(row.as_chunks::<2>().0.iter().enumerate().map(|(i, c)| {
+                    let bits = u16::from_le_bytes(*c) as usize;
+                    if i % 4 == 3 {
+                        255
+                    } else {
+                        table[bits]
+                    }
+                }));
+            }
+            black_box(&px);
+            t.push(ms(start));
+        }
+        out.push(format!(
+            "| {w}x{h} | {} | {:.3} |",
+            w * h * 8,
+            q(&mut t, 0.5)
         ));
     }
     out
@@ -487,6 +531,8 @@ fn render_backend_baseline() {
         "### Readback floor (CPU copy of the frame bytes alone)\n".to_string(),
     ];
     md.extend(copy_floor());
+    md.push(String::new());
+    md.extend(convert_floor());
     md.push(String::new());
     for (label, modname, rel) in SCENES {
         let path = acherus.join("mods").join(modname).join(rel);

@@ -103,6 +103,9 @@ pub struct FrameTiming {
     /// Copy to a staging texture, `Map`, and the half → RGBA8 conversion; the GPU is idle by then, so this is
     /// the readback cost alone (the B9 zero-copy gate).
     pub readback_ms: f64,
+    /// The part of `readback_ms` before `Map` returned: the staging copy and the transfer to CPU memory. The
+    /// rest is the conversion and the output buffer.
+    pub map_ms: f64,
 }
 
 /// What a loaded shape is doing on screen.
@@ -2703,6 +2706,9 @@ impl Renderer {
             t1.elapsed().as_secs_f64() * 1000.0,
             std::time::Instant::now(),
         );
+        #[cfg(feature = "test-hooks")]
+        let (px, map_ms) = target.readback_display_timed(gpu, self.encode_srgb)?;
+        #[cfg(not(feature = "test-hooks"))]
         let px = target.readback_display(gpu, self.encode_srgb)?;
         // Only a fully successful frame may suppress the next one's writes.
         self.last_frame = Some((scene.clone(), view));
@@ -2712,6 +2718,7 @@ impl Renderer {
                 draw_ms,
                 gpu_ms,
                 readback_ms: t2.elapsed().as_secs_f64() * 1000.0,
+                map_ms,
             };
         }
         Ok(px)

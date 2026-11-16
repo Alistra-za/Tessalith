@@ -42,8 +42,23 @@ Hardware GPU, forward rendering, median of 200 frames, in ms. The `static` scene
 
 - **The GPU wait is flat** at 0.56 to 0.66 ms for every scene and size. The probe polls an event query and sleeps 200 µs between polls, so I read this as the probe's floor, not GPU time. Real GPU time on this card is below it. That is an inference; timestamp queries would settle it.
 - **Recording the draws is small:** 0.02 ms for 2 shapes, 0.10 to 0.16 ms for 147.
-- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes about 1 ms (0.7 to 1.1 over the three runs), so the bytes are not the cost. The staging copy and the conversion were not timed apart.
+- **The readback is the frame.** At 4K it reads 66 MB of half floats and converts every channel to 8 bits on the CPU; its p95 was 23 to 34 ms, depending on the scene and the run. Copying the 33 MB result alone takes about 1 ms (0.7 to 1.1 over the three runs), so the bytes are not the cost.
+- **Three quarters of the readback is the CPU conversion.** A later run timed the two halves apart; see the table below.
 - **Not measured:** the second half of the round trip, the GUI's upload of the frame into its own wgpu texture.
+
+The readback split, hardware GPU, `static` scene, median ms (a fourth run, so the totals are a little below the table above). "Copy and `Map`" is the staging copy and the transfer to CPU memory. "Convert" is the half-to-8-bit table lookup, one thread, into a new buffer.
+
+| Size | readback | copy and `Map` | convert | convert share | the same conversion on ordinary memory |
+|---|---:|---:|---:|---:|---:|
+| 1280×720 | 2.23 | 0.61 | 1.61 | 72% | 1.17 |
+| 1600×900 | 3.45 | 0.93 | 2.51 | 73% | 1.81 |
+| 1920×1080 | 4.99 | 1.32 | 3.66 | 73% | 2.56 |
+| 3840×2160 | 20.11 | 5.11 | 14.98 | 74% | 10.40 |
+
+- **The other two scenes agree** within 0.1 ms up to 1920×1080 and 0.2 ms at 4K.
+- **WARP converts in the same time** (1.60, 2.50, 3.60 and 14.8 ms), so the conversion cost is CPU work, not slow GPU memory.
+- **The 4K spikes are in the copy, not the conversion:** the p95 of copy and `Map` is 19.9 ms against a 5.1 ms median, on all three scenes.
+- **So a smaller fix exists.** Converting on the GPU and reading back 8-bit pixels removes the conversion and halves the bytes copied. My estimate, not measured: about 1 to 1.5 ms of readback at 1920×1080 instead of 5.0, and 3 to 6 ms at 4K instead of 20. It needs no shared texture and works on WARP and DXVK alike.
 
 Software rasteriser (WARP, the same D3D11 code), whole `render()` median in ms:
 
@@ -239,7 +254,7 @@ What is left is Linux, in this order:
 
 If step 1 fails, the fallback is to compile on Windows and ship or cache the bytecode, which the preview's disk cache already stores per permutation.
 
-If you want frame time back before any of that, the zero-copy display on today's D3D11 is designed and its wgpu calls exist. It pays from 1920×1080 up.
+If you want frame time back before any of that, start with the GPU conversion and an 8-bit readback: the conversion is 72% to 74% of the readback. The zero-copy display removes the rest, but it is Windows-only work with a fallback path, and it pays only if 1 to 6 ms of readback is still too much.
 
 ## Method
 
@@ -248,6 +263,7 @@ If you want frame time back before any of that, the zero-copy display on today's
 - **Build:** `cargo test --release --offline -p render3d -p sdc --test backend_baseline -- --ignored --nocapture --test-threads=1 <test>`.
 - **Machine:** RTX 4090, driver 32.0.16.1088; Ryzen 7 9800X3D; Windows 11 build 26200; `fxc` 10.0.26100.7705; `dxc` 1.8.2502.11 (Windows SDK) and 1.9.2609.5 (Microsoft's release `dxc_2026_09_29.zip`); glslang 16.5.0 (RenderDoc 1.43's copy).
 - **Frames:** 20 warm-up frames, then 200 timed, per size, per scene, on the hardware GPU and on WARP. Forward mode, default CS features, black background, automatic camera. Three runs; the frame tables are the third, which added 1600×900. The first two ran up to 0.2 ms lower at 1280×720, 0.5 ms lower at 1920×1080 and 3 ms lower at 4K on the hardware GPU. Load numbers are the first run.
+- **Readback split:** `FrameTiming::map_ms` is the time until `Map` returns; the test reports the rest of `readback_ms` as the conversion, and times the same table loop on an ordinary buffer.
 - **Golden root:** `cs-1.9.0-d2026.10.11.0`, the one `tests/fixtures/golden-baseline.txt` matches.
 - **DXVK:** CS's fork at b926a24c, the commit PR 2632 pins as `extern/dxvk`; the build is the fork's own Actions artifact `dxvk-interop-b926a24c…` (DXVK 3.1.0, x64, gcc 16.2). The fork names its files `dxvk_d3d11.dll` and `dxvk_dxgi.dll` and CS loads them by path. For these runs they were copied beside copies of the test exes as `d3d11.dll` and `dxgi.dll`, with `dxvk_dxgi.dll` kept too because the first imports it by name. Only `DXVK_LOG_PATH` and `DXVK_LOG_LEVEL` were set; CS also sets `DXVK_HDR` and `DXVK_DEBUG`, which these runs did not.
 - **File identities (SHA-256):** `dxvk_d3d11.dll`, 7,495,694 bytes, `9B44DA108260B27360DB0C0294324583B5E7CAA2F427EFEE3695A0D528FEE421`. `dxvk_dxgi.dll`, 5,427,214 bytes, `795736BDE0267ED9649E7A7E3D37C2C9CAB571489C09CDDEF46E5CEEF3227747`. `dxc_2026_09_29.zip`, 32,287,592 bytes, `AD31B1FC8443175D204F77A611FDB3EF2EC42759BDC2F1167368DE24A4A7E7F1`. An Actions artifact expires, so the hashes are what identifies the DXVK build later.

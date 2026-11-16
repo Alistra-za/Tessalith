@@ -593,10 +593,18 @@ impl Target {
     /// their diffuse alpha into the target (CS `psout.Diffuse.w = baseColor.w`); the frame is already drawn
     /// over the clear colour, so its alpha must not make the viewer see through an opaque mesh.
     pub fn readback_display(&self, gpu: &Gpu, srgb: bool) -> Result<Vec<u8>, String> {
+        Ok(self.read(gpu, srgb, true)?.0)
+    }
+
+    /// [`Self::readback_display`], plus the milliseconds until `Map` returned: the copy to the staging texture
+    /// and the transfer to CPU memory. The rest of the call is the half → RGBA8 conversion.
+    #[cfg(feature = "test-hooks")]
+    pub fn readback_display_timed(&self, gpu: &Gpu, srgb: bool) -> Result<(Vec<u8>, f64), String> {
         self.read(gpu, srgb, true)
     }
 
-    fn read(&self, gpu: &Gpu, srgb: bool, opaque: bool) -> Result<Vec<u8>, String> {
+    fn read(&self, gpu: &Gpu, srgb: bool, opaque: bool) -> Result<(Vec<u8>, f64), String> {
+        let start = std::time::Instant::now();
         let colour = if srgb {
             table(&SRGB8, srgb8)
         } else {
@@ -612,6 +620,7 @@ impl Target {
                 .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
                 .map_err(|e| gpu.fail("Map", e))?;
         }
+        let map_ms = start.elapsed().as_secs_f64() * 1000.0;
         let (w, h) = (self.width as usize, self.height as usize);
         let pitch = mapped.RowPitch as usize;
         let mut out = Vec::with_capacity(w * h * 4);
@@ -639,7 +648,7 @@ impl Target {
         if out.len() != w * h * 4 {
             return Err(gpu.fail("Map", "null pointer returned"));
         }
-        Ok(out)
+        Ok((out, map_ms))
     }
 
     #[cfg(feature = "test-hooks")]
