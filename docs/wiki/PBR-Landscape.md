@@ -88,7 +88,7 @@ A Landscape or PBR Landscape set has two optional slots that feed the profile: *
 - **Projected noise** is the sub-type `projected_noise`, suffix `_noise`. It's written as BC4 (one linear channel, full mips), half the size of BC7, because Community Shaders reads only its red channel. <!-- D:GI14 --> In a landscape set a `_noise` file is read as projected noise without asking. <!-- D:GI21 -->
 - **Detail normal** is the sub-type `detail_normal`. In a landscape set a file with the suffix `_detail`, `_detailnorm` or `_detail_n` is the detail normal ([Detail names](Texture-Types.md#detail-names)). <!-- D:GI13 -->
 - **A set made only for a material object needs no `_rmaos`.** The projected layer samples only the noise, normal, detail and diffuse textures; roughness, metallic and specular come from the `cs_mato` values. <!-- D:GI15 -->
-- **The Community Shaders build the preview uses doesn't draw the projected normal and detail samples** ([which build](Previews.md)). They show without Community Shaders, or in a later version of it. The slot still exports. <!-- D:GI16 -->
+- **The 3D preview draws the projected normal and detail samples**, as its Community Shaders 2.0 shaders sample them ([which build](Previews.md)). Community Shaders 1.9 doesn't draw them in game, and CS 2.0 in game isn't checked yet. The slot still exports. <!-- D:IE24 -->
 
 ### Problems and Review
 

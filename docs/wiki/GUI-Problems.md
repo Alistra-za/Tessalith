@@ -38,6 +38,9 @@ A row you must act on has its fix as a button.
 | *Colour divided by alpha on load (premultiplied EXR)* | **Straight alpha**, which writes `alpha.exr_straight = true`. <!-- D:FC10 --> |
 | *No albedo in this set; the mesh keeps {path}…* (a PBR set with no albedo) | No button: the set still exports. |
 | *No mesh of the latest scan uses this diffuse yet…* (the PGPatcher entry is still written; LOD meshes don't count) | No button: the set still exports. |
+| *<set>: no .csm written: …* or *the set writes no .csm this run…* | **Go to set**: [Why is my set's .csm missing?](CS-PBR-Records.md#why-is-my-sets-csm-missing) |
+| *<set>: Fuzz roughness texture needs two channels…* (a blocker) | **Use BC5**: [Fuzz roughness from a texture](CS-PBR-Records.md#fuzz-roughness-from-a-texture). |
+| *Material file … not found; drawn vanilla* (a 3D view) | No button: [.csm materials in 3D](Previews.md#csm-materials-in-3d). |
 | *No texture set of the latest scan uses this texture* (grey) | No button: the set still exports. |
 | *Replaces {file} of the target mod in the load order* (an output the target mod already ships) | No button: the set still exports. Rename its outputs to keep the target's file ([Renaming](GUI-Bulk-and-Rename.md#renaming)). <!-- D:HL6 --> |
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}**: [Presets and targets](Presets-and-Targets.md#checking-and-installing). |

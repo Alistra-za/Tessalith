@@ -38,7 +38,7 @@ A shape draws Community Shaders 2.0 PBR from the `.csm` its material name field 
 - **The set preview** draws the set's `.csm` on every shape PGPatcher patches with the set; a shape PGPatcher skips or doesn't match keeps its own material. A PBR Landscape set always previews on a plane, which draws the values of its texture-set block. <!-- D:IE13 -->
 - **The set's own textures** are its encodes in the set preview. The Meshes view reads them from the scan, so they're magenta until you export them into a scanned mod and rescan. <!-- D:IE12 -->
 
-**How far to trust it:** one mesh per CS 2.0 feature (base, subsurface, two-layer, fuzz, glint, hair, thin surface, foliage), drawn with Tessalith's own `.csm` values, matched in-game captures of the test build within the capture noise, checked once. The hair capture lit too few pixels to judge hair shading. <!-- D:IE8,ID56 -->
+**How far to trust it:** one mesh per CS 2.0 feature (base, subsurface, two-layer, fuzz, glint, hair, thin surface, foliage), drawn with Tessalith's own `.csm` values, matched in-game captures of the test build within the capture noise, checked once. Two parts of that compare use the game's values: the rug's colour above 1.0, which a `.csm` can't hold, and the glint noise map. The hair capture lit too few pixels to judge hair shading. <!-- D:IE7,IE8,ID56 -->
 
 ## Move the camera and light
 

@@ -8,7 +8,7 @@ For TruePBR authors on Community Shaders 2.0: the `.csm` material file each PBR 
 2. Export. After a clean export, Tessalith writes `materials\<output path>.csm` into the export folder. The set `architecture/stone/cobble`, whose textures go to `textures\pbr\architecture\stone\cobble…`, gets `materials\pbr\architecture\stone\cobble.csm`. Review lists it under **What will be written**.
 3. Point the meshes at it: a shape uses a `.csm` when its material name field holds the `.csm` path. In the NIF editor that's **Use the set's .csm**, or **Convert to .csm** for a v1 PBR shape ([Point a shape at a .csm](GUI-NIF-Edit.md#point-a-shape-at-a-csm)).
 
-PGPatcher 2.3.1 writes v1 PBR into the meshes it patches, and Community Shaders 2.0 draws v1 PBR as vanilla. So a set that gets a `.csm` shows, in the set editor's head, "PGPatcher 2.3.1 writes v1 PBR, which CS 2.0 draws vanilla. A PGPatcher with .csm support is needed for these meshes in game." Until such a PGPatcher exists, only meshes whose name field names the `.csm` draw the set's material. <!-- D:IE13 -->
+PGPatcher 2.3.1 writes v1 PBR into the meshes it patches, and Community Shaders 2.0 draws v1 PBR as vanilla. So a set that gets a `.csm` shows, in the set editor's head, "PGPatcher 2.3.1 writes v1 PBR, which CS 2.0 draws vanilla. A PGPatcher with .csm support is needed for these meshes in game." Until such a PGPatcher exists, a mesh draws the set's material only through one of two routes: its name field names the `.csm`, or its texture set record is one the set's PBR texture set file binds (that file holds `{"csm": …}`, [CS PBR records](#cs-pbr-records)). <!-- D:IE13 -->
 
 ## What the .csm holds
 
@@ -31,7 +31,7 @@ Notice: texture paths are relative to `textures` and use `/`, as the `.csm` form
 - **Textures** are the ones the set's PGPatcher entry names. A locked slot is left out, so the mesh keeps its own texture there; a cleared slot is written as `""`. <!-- D:IE10 -->
 - **Switches** come from the set's PGPatcher settings (subsurface, foliage, hair, Multilayer and its coat options, fuzz) and from its texture-set block (glint, thin surface, foliage, fuzz roughness from texture). The coat options count only with **Multilayer** on, because a `.csm` coat needs the two-layer feature.
 - **Numbers** are only the ones the texture-set block holds, clamped to the `.csm` range with a Problems row. A colour is `#rrggbb`, so a value above 1.0 is written as 1.0. <!-- D:IE1,IE7 -->
-- **Foliage** is written as `PBRFoliageEnabled`, a key Community Shaders hasn't defined yet. I write it only when foliage is on, because a CS that rejects unknown keys would draw the file vanilla. <!-- D:IE1 -->
+- **Foliage** is written as `PBRFoliageEnabled`, a key Community Shaders hasn't defined yet. Tessalith writes it only when foliage is on, because a CS that rejects unknown keys would draw the file vanilla. <!-- D:IE1 -->
 - `innerLayerDisplacementOffset` has no `.csm` key: its row is hidden on such a set, and a value other than the default gets a Problems row.
 
 ## Why is my set's .csm missing?
@@ -62,7 +62,7 @@ A set can write Community Shaders' own runtime files: a **PBR texture set** (`<e
 
 ### Material object layer
 
-**Material object layer** in the 3D preview draws the snow or ash layer the game puts on statics that use the object, from the block's values and the record's DATA in your load order. Coverage goes on most non-skinned shapes; the block's material values (colour scale, roughness, specular, glint) change PBR shapes only. <!-- D:GI10,GZ1,GZ3 --> When the set has an [XPMF profile](PBR-Landscape.md#xpmf-profiles), the layer takes the profile's four texture paths, `falloffScale`, `falloffBias` and `noiseUVScale` in place of the load order's. <!-- D:GI17 -->
+**Material object layer** in the 3D preview draws the snow or ash layer the game puts on statics that use the object, from the block's values and the record's DATA in your load order. Coverage goes on most non-skinned shapes; the block's material values (colour scale, roughness, specular, glint) change PBR shapes only. <!-- D:GI10,GZ1,IE23 --> When the set has an [XPMF profile](PBR-Landscape.md#xpmf-profiles), the layer takes the profile's four texture paths, `falloffScale`, `falloffBias` and `noiseUVScale` in place of the load order's. <!-- D:GI17 -->
 
 ### CS PBR 2.0 keys
 
