@@ -70,8 +70,8 @@ fn each_light_label_sits_on_its_sliders_row_in_a_narrow_panel() {
     }
 }
 
-/// Owner 2026-11-02: clicking the background swatch closed the View menu (egui 0.36 keeps one popup open, and the
-/// colour popup took that slot from the menu).
+/// Owner 2026-11-02: clicking the background swatch closed the View menu (egui keeps one popup open per viewport, in
+/// 0.37 as in 0.36, and the colour popup took that slot from the menu).
 #[test]
 fn the_background_swatch_opens_its_picker_and_keeps_the_menu() {
     let mut h = menu(1000.0);
@@ -85,8 +85,15 @@ fn the_background_swatch_opens_its_picker_and_keeps_the_menu() {
         "the colour picker opened ({} spin buttons, {before} before)",
         spins.len()
     );
-    // A click inside the picker keeps both; a click outside closes the picker first, then the menu.
-    let inside = bounds(spins.last().unwrap());
+    // A click inside the picker keeps both; a click outside closes the picker first, then the menu. The picker's B
+    // box, by name: egui 0.37 nests a popup's nodes under the widget that opened it, so the picker's boxes now come
+    // before the menu's sliders and the last spin button is the menu's own radius box, outside the picker.
+    let inside = bounds(
+        spins
+            .iter()
+            .find(|n| n.accesskit_node().label().as_deref() == Some("B"))
+            .expect("the picker's B box"),
+    );
     h.get_by_role(Role::ColorWell); // still drawn
     let p = egui::pos2(inside.x0 as f32 + 2.0, inside.y0 as f32 + 2.0);
     h.event(egui::Event::PointerMoved(p));

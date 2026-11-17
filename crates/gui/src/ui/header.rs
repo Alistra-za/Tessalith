@@ -597,9 +597,9 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
             ));
         });
     // Note FC1 (AM14): a Problems row's `Choose preset…` opens the same menu under the combo, as a popup the header
-    // owns (egui 0.36 has no public way to open a combo). A request is taken by the next pass that draws this combo
-    // and honoured only within two passes of the click: one left while the combo was not drawn is dropped then, as
-    // stale, and never opens the menu later.
+    // owns (egui 0.37, as 0.36, has no public way to open a combo: `ComboBox::widget_to_popup_id` is private). A
+    // request is taken by the next pass that draws this combo and honoured only within two passes of the click: one
+    // left while the combo was not drawn is dropped then, as stale, and never opens the menu later.
     egui::Popup::menu(&combo)
         .id(egui::Id::unique("preset_choose_menu"))
         .open_memory(request.then_some(egui::SetOpenCommand::Bool(true)))

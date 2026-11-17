@@ -548,7 +548,7 @@ fn a_drag_released_after_the_source_scrolled_away_still_reorders() {
     let mut h = big_harness(m);
     h.run();
     start_drag(&mut h, 1, 60);
-    // K7: the wheel is ignored during a drag (R1), so shift the content as a reveal does.
+    // K7: shift the content as a reveal does (egui 0.37's wheel scrolls during a drag too; that has its own test).
     h.state_mut().nav.reveal_set = Some(target_key);
     for _ in 0..12 {
         h.step();
@@ -587,24 +587,53 @@ fn a_drag_released_after_the_source_scrolled_away_still_reorders() {
 }
 
 #[test]
-fn the_wheel_does_not_scroll_the_sets_during_a_drag() {
-    // R1's limit (egui 0.36.2 `scroll_area.rs:1215-1217`).
+fn the_wheel_scrolls_the_sets_during_a_drag() {
+    // Owner ruling (egui 0.37): the wheel scrolls a list while a set is dragged, which lifts R1's limit for the wheel.
     let d = tempfile::tempdir().unwrap();
-    let mut h = big_harness(many_sets(d.path(), 60));
+    let m = many_sets(d.path(), 60);
+    let before = ids(&m);
+    let mut h = big_harness(m);
     h.run();
-    let at = start_drag(&mut h, 1, 60);
+    start_drag(&mut h, 1, 60);
     let y = pos_rect(&h, 2, 60).unwrap().top();
     wheel(&mut h);
     h.run_steps(3);
-    assert_eq!(pos_rect(&h, 2, 60).map(|r| r.top()), Some(y));
-    // The control: dropped on its own card (nothing moves), the same wheel scrolls.
-    h.event(press(at, false));
-    h.run_steps(3);
-    wheel(&mut h);
-    h.run_steps(5);
     assert!(
         pos_rect(&h, 2, 60).is_none_or(|r| r.top() < y - 1.0),
-        "with no drag the wheel scrolls"
+        "the wheel scrolls during a drag"
+    );
+    // Wait until the cards stand still: `contains_pointer` reads the previous frame's rects.
+    let mut last = Vec::new();
+    for _ in 0..12 {
+        let now = positions(&h);
+        if now == last {
+            break;
+        }
+        last = now;
+        h.step();
+    }
+    // A release on the lowest card the wheel brought up (whole in the column) moves the set to that card's position.
+    let (n, to) = (3..=60)
+        .rev()
+        .find_map(|n| {
+            let name = h
+                .query_all_by_label(&before[n - 1])
+                .map(|l| l.rect())
+                .find(|r| in_sets_column(&h, *r))?;
+            pos_rect(&h, n, 60).map(|_| (n, name.center()))
+        })
+        .expect("a card under the drag is on screen");
+    h.event(egui::Event::PointerMoved(to));
+    h.step();
+    h.step();
+    h.event(press(to, false));
+    h.run_steps(3);
+    // The doc's order, not `views`: the reorder re-plans, which brings back the fixture's own sets.
+    let order = h.state().sets_doc.as_ref().unwrap().order();
+    assert_eq!(
+        order.get(n - 1),
+        Some(&before[0]),
+        "position {n}: {order:?}"
     );
 }
 

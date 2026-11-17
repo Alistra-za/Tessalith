@@ -11,6 +11,8 @@
 // of another crate (`nif`, `esp`, `modscan`) the same way. So those files are loaded as a module more than once.
 #![allow(clippy::duplicate_mod)]
 
+#[path = "../accepted_037.rs"]
+mod accepted_037;
 #[path = "../accessible_names.rs"]
 mod accessible_names;
 #[path = "../ack_offer.rs"]

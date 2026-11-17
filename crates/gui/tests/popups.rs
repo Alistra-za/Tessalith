@@ -108,3 +108,66 @@ fn a_click_outside_or_esc_closes_the_input_name_popup() {
     h.run();
     assert!(h.query_by_label(HEADING).is_none(), "Esc");
 }
+
+/// Accepted for the owner to overrule (spec 7a, Plan 1 round 1, ruling 6): egui 0.37 moves between a menu's rows with
+/// the arrow keys (`menu.rs:232-288`). The input-name dropdown is a real menu (`path_picker::menu`), and with its
+/// filter box focused every arrow key stays in the box: no key the filter needs is taken, and Down does not move to a
+/// row. A click on the listed path still reaches its row.
+#[test]
+fn arrow_keys_and_typing_stay_in_the_input_name_filter() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::NodeT;
+    let (_d, mut h) = harness();
+    let r = filter_box(&h);
+    click_at(&mut h, r.center());
+    let typed = |h: &mut H, text: &str| {
+        h.input_mut().events.push(egui::Event::Text(text.into()));
+        h.run();
+    };
+    let key = |h: &mut H, k: egui::Key| {
+        h.key_press(k);
+        h.run();
+    };
+    let rock_focused = |h: &H, step: &str| {
+        let b = h.get(by().role(Role::TextInput).value("rock"));
+        assert!(
+            b.accesskit_node().is_focused(),
+            "{step}: the box keeps the focus"
+        );
+    };
+    typed(&mut h, "rck");
+    key(&mut h, egui::Key::ArrowLeft);
+    key(&mut h, egui::Key::ArrowLeft);
+    typed(&mut h, "o");
+    rock_focused(&h, "Left, Left, o");
+    key(&mut h, egui::Key::Home);
+    key(&mut h, egui::Key::End);
+    key(&mut h, egui::Key::ArrowRight);
+    key(&mut h, egui::Key::Backspace);
+    typed(&mut h, "k");
+    rock_focused(&h, "Home, End, Right, Backspace, k");
+    for k in [
+        egui::Key::ArrowDown,
+        egui::Key::ArrowDown,
+        egui::Key::ArrowUp,
+    ] {
+        key(&mut h, k);
+    }
+    rock_focused(&h, "Down, Down, Up");
+    h.get_by_label(HEADING);
+    // The one listed path is the set's own name. A click on it reaches the row: the pick is refused (T35, a pick of
+    // the set's own name) and the menu stays open to say why, with the filter cleared by the pick. What a pick of
+    // another path writes, and that it closes the menu, is `input_name_edit`'s to test.
+    const PATH: &str = "textures/landscape/rock01";
+    h.get_by_label("1 of 3 paths");
+    h.query_all_by_role(Role::Button)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(PATH))
+        .expect("the listed path")
+        .click();
+    h.run();
+    h.get_by_label("the set already has this name");
+    h.get_by_label("3 of 3 paths");
+    h.get_by_label(HEADING);
+    let name = h.get_by_role_and_label(Role::TextInput, "Input name");
+    assert_eq!(name.accesskit_node().value().as_deref(), Some(PATH));
+}

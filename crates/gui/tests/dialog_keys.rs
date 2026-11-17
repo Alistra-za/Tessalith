@@ -930,24 +930,21 @@ fn enter_right_after_typing_in_find_applies_the_rename() {
         .open_rename(sdc_gui::model::rename::RenameMode::Inputs);
     h.run();
     h.run();
-    // The Find field: the first text box right of the "Find" label, on its row.
-    let label = h.get_by_label("Find").rect();
-    let find = h
-        .query_all_by_role(Role::TextInput)
-        .map(|n| n.rect())
-        .filter(|r| (r.center().y - label.center().y).abs() < 6.0 && r.min.x > label.max.x)
-        .min_by(|a, b| a.min.x.total_cmp(&b.min.x))
-        .expect("the Find field");
-    h.query_all_by_role(Role::TextInput)
-        .find(|n| n.rect() == find)
-        .unwrap()
-        .focus();
+    // The Find field, named by its label (`labelled_by`, E28). kittest returns the labelled box, not the Label, for a
+    // label lookup, so "the first box right of the Find label" was Replace.
+    h.get_by_role_and_label(Role::TextInput, "Find").focus();
     h.run();
-    h.query_all_by_role(Role::TextInput)
-        .find(|n| n.rect() == find)
-        .unwrap()
+    h.get_by_role_and_label(Role::TextInput, "Find")
         .type_text("leaf");
     h.run();
+    assert_eq!(
+        h.get_by_role_and_label(Role::TextInput, "Find")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("leaf"),
+        "typed into Find"
+    );
     h.key_press(Key::Enter);
     h.run();
     assert!(h.state().dialog.is_none(), "Enter applied");

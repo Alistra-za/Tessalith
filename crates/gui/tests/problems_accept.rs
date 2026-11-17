@@ -2,7 +2,7 @@
 //! type picker; "Accept all suggestions (n)" sits at the top. Every accept edits the in-memory document only.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::config::Subtype;
 use sdc_gui::model::bottom::{filtered, problems, At, Level, Problem, ProblemsFilter};
@@ -412,4 +412,45 @@ fn enter_on_a_proposed_alpha_row_confirms_the_shown_type() {
     assert!(doc.allow(leaf).is_empty());
     assert!(!decide_row(h.state(), leaf), "the row leaves the list");
     assert!(h.state().is_dirty());
+}
+
+/// Owner ruling (egui 0.37): a popup closes only on a click whose press started while it was open. A missing preset's
+/// `Choose preset…` opens the header's preset list from a click in the Problems tab, and the list stays open for the
+/// pick; the pick closes it and writes the preset into the in-memory `sdc.toml`.
+#[test]
+fn choose_preset_opens_the_preset_list_and_a_pick_closes_it() {
+    use egui::accesskit::Role;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    let p = root.join("a/rock_n.png");
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    image::ImageBuffer::from_fn(16, 16, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(p)
+        .unwrap();
+    std::fs::write(root.join("sdc.toml"), "preset = \"ghost\"\n").unwrap();
+    let mut m = opened_as_the_app(root, d.path().join("export"));
+    m.toggle_tab(sdc_gui::model::bottom::BottomTab::Problems);
+    let mut h = harness(m);
+    h.run();
+    assert!(!egui::Popup::is_any_open(&h.ctx), "no popup yet");
+    h.get_by_label("Choose preset…").click();
+    h.run();
+    assert!(egui::Popup::is_any_open(&h.ctx), "the preset list is open");
+    let default = h
+        .query_all_by_role(Role::Button)
+        .find(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.starts_with("default ("))
+        })
+        .expect("the list's default entry");
+    default.click();
+    h.run();
+    assert!(
+        !egui::Popup::is_any_open(&h.ctx),
+        "the pick closes the list"
+    );
+    assert_eq!(h.state().project_preset(), None, "the default was picked");
+    let text = h.state().project.as_ref().unwrap().text();
+    assert!(!text.contains("ghost"), "sdc.toml's preset changed: {text}");
 }
