@@ -25,6 +25,27 @@ fn with_warnings(ws: &[Warning]) -> (tempfile::TempDir, AppModel) {
     (d, m)
 }
 
+/// `inject`, with `ws` on rock01's set instead of a member (`SetItem` has `key`, not `id`).
+fn inject_set(m: &mut AppModel, ws: &[Warning]) {
+    for i in m.items.iter_mut() {
+        i.warnings = vec![];
+    }
+    for s in m.sets.iter_mut() {
+        s.warnings.clear();
+    }
+    let key = rock01(m).key;
+    m.sets.iter_mut().find(|s| s.key == key).unwrap().warnings = ws.to_vec();
+    m.invalidate_views();
+}
+
+/// A PBR project whose only warnings are `ws`, on rock01's set.
+fn with_set_warnings(ws: &[Warning]) -> (tempfile::TempDir, AppModel) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    inject_set(&mut m, ws);
+    (d, m)
+}
+
 fn rock01(m: &AppModel) -> sdc_gui::model::sets::SetView {
     sdc_gui::model::sets::set_views(m)
         .into_iter()
@@ -160,4 +181,70 @@ fn an_also_only_input_keeps_its_row_text() {
         .iter()
         .any(|p| p.text == "Read only by Also export; not written on its own"));
     assert!(!rows.iter().any(|p| p.shown().contains("isn't used")));
+}
+
+/// Controller ruling 4 on a last-export File row: the Also-only case runs before the Note rule there too.
+#[test]
+fn an_also_only_note_from_the_last_export_keeps_its_row_text() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, At, Level};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let msg = format!("x_curves.png: {}; not converted", engine::pack::ALSO_ONLY);
+    m.export.rows[0]
+        .warnings
+        .push(Warning::new(Code::PackUnusedInput, msg));
+    m.invalidate_views();
+    let rows = problems(&m);
+    let r = rows
+        .iter()
+        .find(|p| p.text == "Read only by Also export; not written on its own")
+        .expect("the Also-only row");
+    assert!(matches!(r.at, At::File(_)), "{:?}", r.at);
+    assert_eq!(
+        (r.level, r.code, r.fix.is_none()),
+        (Level::Info, None, true)
+    );
+    assert!(!rows.iter().any(|p| p.shown().contains("isn't used")));
+}
+
+/// The SHADER-EXTRA-MAP note reads the engine's `data` (`engine/src/shader.rs`: `member`, `shader`).
+#[test]
+fn an_extra_map_note_names_the_file_and_the_shader() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::code_text::note_sentence;
+    let bare = Warning::new(Code::ShaderExtraMap, "m");
+    let w = bare
+        .clone()
+        .with_data(serde_json::json!({"member": "lamp_p.dds", "shader": "glow"}));
+    assert_eq!(
+        note_sentence(&w),
+        "lamp_p.dds isn't read by the glow shader. It is still converted, so nothing breaks."
+    );
+    assert_eq!(note_sentence(&bare), "m", "no data: the message unchanged");
+}
+
+/// A Note-class warning on a set (SHADER-EXTRA-MAP arrives there) is a note row too.
+#[test]
+fn a_set_note_is_a_note_row() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{counts_as_ready_problem, problems, At, Level};
+    let w = Warning::new(Code::ShaderExtraMap, "m")
+        .with_data(serde_json::json!({"member": "rock01_x.png", "shader": "pbr"}));
+    let (_d, m) = with_set_warnings(&[w]);
+    let rows = problems(&m);
+    let r = rows
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderExtraMap))
+        .expect("the set's row");
+    assert!(matches!(r.at, At::Set { .. }), "{:?}", r.at);
+    assert_eq!(r.level, Level::Info);
+    assert_eq!(
+        r.shown(),
+        "rock01_x.png isn't read by the pbr shader. It is still converted, so nothing breaks."
+    );
+    assert!(!counts_as_ready_problem(r));
 }

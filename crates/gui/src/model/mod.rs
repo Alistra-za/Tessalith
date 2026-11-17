@@ -91,7 +91,8 @@ fn sidecar_only_note(written: &std::io::Result<()>) -> String {
 const UNDO_NOTE_FOR: Duration = Duration::from_secs(5);
 
 /// Whether a warning makes a Problems row (a problem or a note): Warning, Error or Blocking severity. Info lines
-/// stay in the texture's own warnings list only, but the few `build_problems` names.
+/// stay in the texture's own warnings list only, except the few that `build_problems` names (CHK-GREEN-GUESS,
+/// DERIVE-NIF-SUGGEST).
 pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
     use engine::codes::Severity;
     matches!(

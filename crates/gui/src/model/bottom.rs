@@ -397,6 +397,19 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         detail: None,
         carried: false,
     };
+    // Review E2: the Info row of a warning that is a note, for the item, set and File loops alike; `None` for a
+    // problem. FC7 (CN3), controller ruling 4: a `_curves`/cavity map no recipe reads is Also export's input, not a
+    // mistake, so it keeps its own row with no code and no button, ahead of the general note.
+    // shortcut: matched on the shared `ALSO_ONLY` text; give the warning a reason flag if a second row needs one.
+    let note_row = |at: &At, w: &engine::codes::Warning| {
+        if w.code == Code::PackUnusedInput && w.message.contains(engine::pack::ALSO_ONLY) {
+            let text = "Read only by Also export; not written on its own".to_string();
+            return Some(row(Level::Info, at.clone(), text, None));
+        }
+        // The code stays, so Kinds can still hide the row.
+        (row_class(w.code) == RowClass::Note)
+            .then(|| row(Level::Info, at.clone(), note_sentence(w), Some(w.code)))
+    };
     let mut out = vec![];
     // Note FC1 (AM14): the plan runs on the fallback so the window is not empty, but the export waits for a preset.
     if let Some((text, detail)) = m.missing_preset_text() {
@@ -532,18 +545,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     {
         for w in i.warnings.iter().filter(|w| makes_a_row(w)) {
             let at = At::Texture(i.key.clone());
-            // FC7 (CN3): a `_curves`/cavity map no recipe reads is Also export's input, not a mistake: an Info row
-            // with no button (the generic PACK-UNUSED-INPUT sentence says to remove it).
-            // shortcut: matched on the shared `ALSO_ONLY` text; give the warning a reason flag if a second row needs one.
-            if w.code == Code::PackUnusedInput && w.message.contains(engine::pack::ALSO_ONLY) {
-                let text = "Read only by Also export; not written on its own".to_string();
-                out.push(row(Level::Info, at, text, None));
-                continue;
-            }
-            // Review E2: a Note-class warning is an Info row that says why the output is fine; its code stays, so
-            // Kinds can still hide it.
-            if row_class(w.code) == RowClass::Note {
-                out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
+            if let Some(p) = note_row(&at, w) {
+                out.push(p);
                 continue;
             }
             // Note DP: a short normal's row rebuilds Z in place.
@@ -558,8 +561,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
             // Review E2: SHADER-EXTRA-MAP arrives here.
-            if row_class(w.code) == RowClass::Note {
-                out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
+            if let Some(p) = note_row(&at, w) {
+                out.push(p);
                 continue;
             }
             out.push(row(Level::Warning, at, w.message.clone(), Some(w.code)));
@@ -750,9 +753,9 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     _ => None,
                 };
                 let at = At::File(r.job_key.clone());
-                // Review E2: a Note-class code from the last export gets the same note row as a live one.
-                if row_class(w.code) == RowClass::Note {
-                    out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
+                // Review E2: a note from the last export gets the same row as a live one.
+                if let Some(p) = note_row(&at, w) {
+                    out.push(p);
                     continue;
                 }
                 // The suggested NIF values are the engine message; the row shows the sentence, the hover the values.
