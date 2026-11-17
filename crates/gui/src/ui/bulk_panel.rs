@@ -1,7 +1,9 @@
 //! The centre panel for two or more textures or sets (M6 Track F3a, design §3-4). Drawing only: every edit is a
 //! model call, made after drawing.
 use super::columns::AMBER;
-use super::settings_panel::{combo, editor, field_label, Options, RowEdit, GROUPS};
+use super::settings_panel::{
+    combo, editor, field_label, own_name_after_link, Options, RowEdit, GROUPS,
+};
 use crate::model::bulk::{BulkField, BulkOp};
 use crate::model::fields::{effort_field, field_help, group_of, FieldView, EFFORT_FIELDS};
 use crate::model::sets::SlotKind;
@@ -224,8 +226,9 @@ fn row(
                 editor(ui, id, target, job, busy, &view, mixed)
             })
             .inner;
-        // Review finding 16: a combo's text is its value, so the control takes the row's label as its name.
-        control.labelled_by(label.id);
+        // Review finding 16: a combo's text is its value, so the control takes the row's label as its name; the
+        // threshold slider keeps its own (E28).
+        own_name_after_link(control.labelled_by(label.id), r.field);
         if let Some(v) = set {
             edit = Some(RowEdit::Set(v));
         }

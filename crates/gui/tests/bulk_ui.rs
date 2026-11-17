@@ -325,6 +325,8 @@ fn a_mixed_slider_shows_mixed_and_an_idle_frame_writes_nothing() {
     h.run();
     h.run();
     assert!(h.query_all_by_value("— mixed").count() >= 1);
+    // The slider keeps its own name, which says more than the row's "Threshold" label (E28).
+    widget(&h, eframe::egui::accesskit::Role::Slider, "Alpha threshold");
     assert_eq!(h.state_mut().bulk_view().rows, before);
 }
 

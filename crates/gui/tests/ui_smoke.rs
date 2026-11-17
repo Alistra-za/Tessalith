@@ -601,9 +601,8 @@ fn the_threshold_commits_when_the_drag_stops_not_while_dragging() {
         .profile
         .alpha
         .threshold;
-    // egui 0.37: the slider takes its name from the row's "Threshold" Label it is `labelled_by` (0.36.2: from its
-    // `widget_info`, "Alpha threshold").
-    let rect = widget(&h, eframe::egui::accesskit::Role::Slider, "Threshold").rect();
+    // The slider keeps its own name, which says more than the row's "Threshold" label (E28).
+    let rect = widget(&h, eframe::egui::accesskit::Role::Slider, "Alpha threshold").rect();
     let at = |f: f32| {
         eframe::egui::pos2(
             rect.left() + 10.0 + (rect.width() - 20.0) * f,
@@ -1647,8 +1646,8 @@ fn coverage_sits_under_alpha_for_cutout_policies_only() {
     assert!(y("Coverage") < tick_y, "inside the Alpha group");
     let h = leaf_with_policy(engine::config::AlphaPolicy::Blend);
     assert!(h.query_by_label("Coverage").is_none());
-    // Locked, but still listed. egui 0.37's slider is two nodes, the bar and its number box, both named by the row.
-    widget(&h, Role::Slider, "Threshold");
+    // Locked, but still listed, under its own name (E28).
+    widget(&h, Role::Slider, "Alpha threshold");
 }
 
 #[test]

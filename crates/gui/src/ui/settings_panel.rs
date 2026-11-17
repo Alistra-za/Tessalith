@@ -630,10 +630,25 @@ fn threshold(
         id,
         u32::from(current),
         u32::from(*ALPHA_THRESHOLD.start())..=u32::from(*ALPHA_THRESHOLD.end()),
-        "Alpha threshold",
+        THRESHOLD_NAME,
         mixed,
     );
     (out.map(|v| json!(v)), r)
+}
+
+/// The threshold slider's own name: it says more than its row's "Threshold" label.
+const THRESHOLD_NAME: &str = "Alpha threshold";
+
+/// E28: an [`editor`] linked to its row's label with `labelled_by`, which in egui 0.37 clears the control's own name
+/// (`response.rs:1065-1071`; 0.36.2 kept it, and a screen reader reads a control's own name first). Call it after the
+/// link: it names again the one editor whose own name says more than the label, the threshold slider, as 0.36.2
+/// announced it. Every other editor's own name is the label's words (a tick box, BC7 weighting) or nothing (a combo,
+/// whose text is its value), so the label names it.
+pub(super) fn own_name_after_link(r: egui::Response, field: &str) -> egui::Response {
+    match field {
+        "alpha.threshold" => super::name_input(r, THRESHOLD_NAME),
+        _ => r,
+    }
 }
 
 /// The BC7 weighting dropdown (DECISIONS Note CP): every option with one line of hover text; Perceptual disabled with
@@ -938,6 +953,7 @@ pub fn field_row(ui: &mut egui::Ui, cx: &Ctx, f: &FieldView) -> Option<RowEdit> 
         })
         .inner
     });
+    let r = own_name_after_link(r, f.field);
     // Note CL40: on a `normal` in a complex material set, renormalize_bake is the opt-in gloss bake.
     let r = if f.field == "mips.normal"
         && cx.job.profile.subtype == Subtype::Normal

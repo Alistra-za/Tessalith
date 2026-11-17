@@ -488,8 +488,8 @@ fn alpha_row_shows_the_proposal() {
         .expect("the Alpha row");
     assert_eq!(row.value().as_deref(), Some("Cutout"));
     h.get_by_label("proposed: confirm above");
-    // egui 0.37: the slider takes its name from the row's "Threshold" Label (0.36.2: "Alpha threshold").
-    let slider = widget(&h, Role::Slider, "Threshold");
+    // The slider keeps its own name, which says more than the row's "Threshold" label (E28).
+    let slider = widget(&h, Role::Slider, "Alpha threshold");
     assert!(
         !slider.accesskit_node().is_disabled(),
         "the threshold is off"
