@@ -261,6 +261,14 @@ pub enum Fix {
     /// Note JI6: remove these unmatched `[files]` entries, one undo step. The row carries every entry; its
     /// `Entries ▾` menu asks for one at a time.
     RemoveUnmatched(Vec<String>),
+    /// Review E10 (ALPHA-PARALLAX-NO-ALPHA): write `alpha.parallax = false` for this item.
+    ParallaxOff(String),
+    /// Review E10 (SHADER-EXTRA-MAP): take the member `item` (an item key) out of the set `set_id`.
+    RemoveMember { set_id: String, item: String },
+    /// Review E10 (SHADER-UNAVAILABLE, SHADER-MISSING-MAP, SHADER-EXTRA-MAP): pick another shader for the set (by id).
+    ChangeShader(String),
+    /// Review E10 (SUG-CONTRADICTION): the undecided rows' type picker, for this item.
+    SetType(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -273,6 +281,8 @@ pub struct Problem {
     pub also: Vec<engine::codes::Code>,
     /// Note FC3: the row's action button (the Decide rows' buttons and `Go to set` are drawn from the level and `at`).
     pub fix: Option<Fix>,
+    /// Review E10 (controller ruling 2): a second button, drawn after `fix`; `Some` only when `fix` is.
+    pub second_fix: Option<Fix>,
     /// Note FB9: a Decide row's suggested sub-type, which its ✓ button, Enter and Space accept.
     pub suggested: Option<engine::config::Subtype>,
     /// Note FC1: more for the row's hover (the combined row lists what it covers), one line each.
@@ -568,6 +578,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         code,
         also: vec![],
         fix: None,
+        second_fix: None,
         suggested: None,
         detail: None,
         carried: false,
@@ -735,8 +746,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 out.push(p);
                 continue;
             }
-            // Note DP: a short normal's row rebuilds Z in place.
-            let fix = (w.code == Code::ChanNormalLength).then(|| Fix::RebuildZ(i.key.clone()));
+            // Note DP: a short normal's row rebuilds Z in place. Review E10: the table's other item fixes.
+            let k = || i.key.clone();
+            let fix = match w.code {
+                Code::ChanNormalLength => Some(Fix::RebuildZ(k())),
+                Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
+                Code::GrassDetectSource => Some(Fix::TagAsGrass(k())),
+                Code::SugContradiction => Some(Fix::SetType(k())),
+                _ => None,
+            };
             out.push(Problem {
                 fix,
                 ..row(Level::Warning, at, w.message.clone(), Some(w.code))
@@ -746,12 +764,38 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for v in views.iter() {
         for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
-            // Review E2: SHADER-EXTRA-MAP arrives here.
+            let shader = || Some(Fix::ChangeShader(v.id.clone()));
+            // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
+            // names, then Change shader…; with no such member, Change shader… alone.
             if let Some(p) = note_row(&at, w) {
-                out.push(p);
+                let (fix, second_fix) = match w.code {
+                    Code::ShaderExtraMap => match extra_member(m, v, w) {
+                        Some(item) => (
+                            Some(Fix::RemoveMember {
+                                set_id: v.id.clone(),
+                                item,
+                            }),
+                            shader(),
+                        ),
+                        None => (shader(), None),
+                    },
+                    _ => (None, None),
+                };
+                out.push(Problem {
+                    fix,
+                    second_fix,
+                    ..p
+                });
                 continue;
             }
-            out.push(row(Level::Warning, at, w.message.clone(), Some(w.code)));
+            let fix = match w.code {
+                Code::ShaderUnavailable | Code::ShaderMissingMap => shader(),
+                _ => None,
+            };
+            out.push(Problem {
+                fix,
+                ..row(Level::Warning, at, w.message.clone(), Some(w.code))
+            });
         }
     }
     // Note DU3: a set entry that matches no file, with its removal as the fix.
@@ -888,7 +932,12 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     {
         for w in m.check_warnings(&i.key).iter().filter(|w| check_row(w)) {
             let at = At::Texture(i.key.clone());
-            let fix = (w.code == Code::ChkGreenGuess).then(|| Fix::TreatAsOpenGl(i.key.clone()));
+            // Review E10: CHK-Z-SIGN's sentence names Rebuild Z.
+            let fix = match w.code {
+                Code::ChkGreenGuess => Some(Fix::TreatAsOpenGl(i.key.clone())),
+                Code::ChkZSign => Some(Fix::RebuildZ(i.key.clone())),
+                _ => None,
+            };
             out.push(Problem {
                 fix,
                 ..row(Level::Check, at, w.message.clone(), Some(w.code))
@@ -1145,6 +1194,23 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out
 }
 
+/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's `data.member` names. The engine writes the member's
+/// output file name (`engine::api` `shader_members`); a source file name is matched too.
+fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
+    let name = w.data.get("member")?.as_str()?;
+    v.members
+        .iter()
+        .find(|k| {
+            m.item(k).is_some_and(|i| {
+                i.name == name
+                    || i.job
+                        .as_ref()
+                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name))
+            })
+        })
+        .cloned()
+}
+
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
 pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
 /// Note HL6: an output the target mod already ships (it wins or loses by load order).
@@ -1301,6 +1367,7 @@ mod tests {
             code: None,
             also: vec![],
             fix,
+            second_fix: None,
             suggested: None,
             detail: None,
             carried: false,

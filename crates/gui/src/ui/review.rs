@@ -149,35 +149,8 @@ fn fix_buttons_on(
                         Decision::Subtype { suggested } => *suggested,
                         _ => None,
                     };
-                    let opener = match suggested {
-                        Some(st) => {
-                            let (accept, arrow) = split_button(ui, &accept_text(st));
-                            if accept
-                                .on_hover_text("Use the suggested type")
-                                .on_disabled_hover_text(why)
-                                .clicked()
-                            {
-                                pick = Some(RowPick::Decide(key.to_string(), st));
-                            }
-                            // ▾ is what the plain button was: the picker, so it keeps its name.
-                            arrow.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::Role::Button,
-                                    arrow.enabled(),
-                                    "Set type…",
-                                )
-                            });
-                            arrow.on_hover_text("Pick another type")
-                        }
-                        None => ui.button("Set type…"),
-                    }
-                    .on_disabled_hover_text(why);
-                    let id = egui::Id::unique(("set-type-picker", key));
-                    let kind = TypeKind::SetType;
-                    let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
-                    let (t, s) = (model.target, suggested);
-                    if let Some(st) = type_picker::show(ui, id, &opener, None, s, kind, t, grass) {
-                        pick = Some(RowPick::Decide(key.to_string(), st));
+                    if let Some(p) = set_type_button(ui, model, key, suggested, why) {
+                        pick = Some(p);
                     }
                 }
                 // Note FM35 (supersedes FI11's Decide… menu): the row's line names the type, and this dropdown opens
@@ -209,6 +182,47 @@ fn fix_buttons_on(
             }
         }
     });
+    pick
+}
+
+/// Note FB9 (owner amendment A): `[Set type: {suggestion} ✓] ▾`, the main part accepts, ▾ opens the type picker;
+/// without a suggestion the plain "Set type…" opens it. `why` is the disabled hover. Review E10: the Problems rows of
+/// SUG-CONTRADICTION use it too, on a decided texture, with no suggestion.
+pub(super) fn set_type_button(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    key: &str,
+    suggested: Option<Subtype>,
+    why: &str,
+) -> Option<RowPick> {
+    let item = model.item(key)?;
+    let mut pick = None;
+    let opener = match suggested {
+        Some(st) => {
+            let (accept, arrow) = split_button(ui, &accept_text(st));
+            if accept
+                .on_hover_text("Use the suggested type")
+                .on_disabled_hover_text(why)
+                .clicked()
+            {
+                pick = Some(RowPick::Decide(key.to_string(), st));
+            }
+            // ▾ is what the plain button was: the picker, so it keeps its name.
+            arrow.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, arrow.enabled(), "Set type…")
+            });
+            arrow.on_hover_text("Pick another type")
+        }
+        None => ui.button("Set type…"),
+    }
+    .on_disabled_hover_text(why);
+    let id = egui::Id::unique(("set-type-picker", key));
+    let kind = TypeKind::SetType;
+    let grass = item.job.as_ref().is_some_and(engine::policy::grass_context);
+    let (t, s) = (model.target, suggested);
+    if let Some(st) = type_picker::show(ui, id, &opener, None, s, kind, t, grass) {
+        pick = Some(RowPick::Decide(key.to_string(), st));
+    }
     pick
 }
 

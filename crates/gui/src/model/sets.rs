@@ -2900,6 +2900,21 @@ impl AppModel {
     /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
     /// in, the only member). Refused for a packed map (it follows its raw maps).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
+        let i = self.remove_member_check(id, item)?;
+        let it = item.to_string();
+        self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
+            s.remove_member(&i, &it)
+        });
+        Ok(())
+    }
+
+    /// Review E10: why `remove_member(id, item)` would refuse, or `None` (the Problems row's disabled hover).
+    pub fn remove_member_refusal(&self, id: &str, item: &str) -> Option<String> {
+        self.remove_member_check(id, item).err()
+    }
+
+    /// `remove_member`'s refusals, in its order; the set's id when it may go ahead.
+    fn remove_member_check(&self, id: &str, item: &str) -> Result<String, String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
@@ -2913,11 +2928,7 @@ impl AppModel {
             return Err(format!("{item} is not in {}", v.id));
         }
         self.leaves_locked(item)?;
-        let (i, it) = (v.id.clone(), item.to_string());
-        self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
-            s.remove_member(&i, &it)
-        });
-        Ok(())
+        Ok(v.id)
     }
 
     /// Note HE2: a set line (`add` or `remove`) naming a file that is gone from disk clears itself, with an Info line

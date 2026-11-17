@@ -1912,3 +1912,288 @@ fn a_marked_warning_leaves_every_amber_badge() {
         );
     }
 }
+
+/// The Normal member: `pbr_opened` decides rock01_normal.png as PbrNormal. `remove_member` refuses only the packed
+/// output, so any raw member would do; members are picked by slot, never by index.
+fn normal_member(m: &AppModel) -> (String, String) {
+    use sdc_gui::model::sets::{slot_of, SlotKind};
+    let k = rock01(m)
+        .members
+        .iter()
+        .find(|k| m.item(k).and_then(slot_of) == Some(SlotKind::Normal))
+        .cloned()
+        .unwrap();
+    let name = m.item(&k).unwrap().name.clone();
+    (k, name)
+}
+
+/// The note sentence `extra_map(name)`'s row shows (the table's SHADER-EXTRA-MAP row).
+fn extra_note(name: &str) -> String {
+    format!("{name} isn't read by the pbr shader. It is still converted, so nothing breaks.")
+}
+
+fn extra_map(name: &str) -> engine::codes::Warning {
+    engine::codes::Warning::new(
+        engine::codes::Code::ShaderExtraMap,
+        format!("{name} is not used by the pbr shader; it is still converted"),
+    )
+    .with_data(serde_json::json!({"member": name, "shader": "pbr"}))
+}
+
+/// The button labelled `label` whose centre is nearest `to`'s: an open popup's item, not a same-named widget elsewhere
+/// (a popup's nodes follow its opener in tree order, so `last()` is not the popup's).
+fn nearest<'a>(
+    h: &'a Harness<'static, AppModel>,
+    label: &'a str,
+    to: egui::Rect,
+) -> egui_kittest::Node<'a> {
+    h.query_all_by_role_and_label(egui::accesskit::Role::Button, label)
+        .min_by(|a, b| {
+            let d = |n: &egui_kittest::Node<'_>| n.rect().center().distance(to.center());
+            d(a).total_cmp(&d(b))
+        })
+        .expect("a match")
+}
+
+#[test]
+fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (_k, member) = normal_member(&m);
+    inject_set(&mut m, &[extra_map(&member)]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let note = extra_note(&member);
+    let remove = format!("Remove {member} from landscape/rock01");
+    // Controller ruling 2: left to right, the fix, the second fix, then Go to set.
+    let xs: Vec<f32> = [
+        remove.as_str(),
+        "Change shader for landscape/rock01",
+        "Go to set",
+    ]
+    .iter()
+    .map(|l| on_row(&h, &note, l).rect().center().x)
+    .collect();
+    assert!(xs[0] < xs[1] && xs[1] < xs[2], "row order: {xs:?}");
+    on_row(&h, &note, &remove).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert!(!rock01(h.state())
+        .members
+        .iter()
+        .any(|k| h.state().item(k).unwrap().name == member));
+}
+
+/// Controller ruling: SUG-CONTRADICTION offers the fix its sentence names. A diffuse whose contents are a
+/// tangent-space normal gets Set type…; choosing the type the contents suggest removes the row.
+/// Trigger: the engine's policy raises SUG-CONTRADICTION when a Color file's contents read as a normal map
+/// (`normal_len_err < NORMAL_LEN_TOL` and a blue mean of at least 0.75), which a flat (128, 128, 255) image meets.
+#[test]
+fn a_type_contradiction_row_offers_set_type_and_the_right_type_clears_it() {
+    use engine::codes::Code;
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    image::ImageBuffer::from_fn(32, 32, |_, _| image::Rgb([128u8, 128, 255]))
+        .save(root.join("landscape/wall.png"))
+        .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(d.path().join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(root);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let key = "landscape/wall.png";
+    m.decide(key, sdc_gui::model::Answer::Subtype(Subtype::Diffuse));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let has = |m: &AppModel| {
+        sdc_gui::model::bottom::problems(m).iter().any(|p| {
+            p.code == Some(Code::SugContradiction)
+                && matches!(&p.at, sdc_gui::model::bottom::At::Texture(k) if k == key)
+        })
+    };
+    assert!(has(&m), "the contents look like a normal map");
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::SugContradiction);
+    let opener = on_row(&h, sentence, "Set type…");
+    let at = opener.rect();
+    opener.click();
+    h.run();
+    let normal = sdc_gui::ui::settings_panel::subtype_label(Subtype::Normal);
+    // The picker's list scrolls: bring the item into view before the pointer click.
+    nearest(&h, &normal, at).scroll_to_me();
+    h.run();
+    nearest(&h, &normal, at).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert!(
+        !has(h.state()),
+        "Normal is what the contents suggest; the row is gone"
+    );
+}
+
+#[test]
+fn a_parallax_row_offers_turn_parallax_off() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::AlphaParallaxNoAlpha, "p")]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("Turn parallax off for ").click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    let key = rock01(h.state()).members[0].clone();
+    let v = h
+        .state()
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value(&key, "alpha.parallax");
+    assert_eq!(v, Some(serde_json::json!(false)));
+}
+
+#[test]
+fn a_missing_map_row_offers_change_shader() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_set_warnings(&[Warning::new(Code::ShaderMissingMap, "no _n")
+        .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))]);
+    let target = m.target;
+    let current = rock01(&m).shader_choice;
+    // Pick a shader the set does not have, so the test cannot pass by leaving the choice alone.
+    let first = sdc_gui::model::sets::shader_options(target)
+        .into_iter()
+        .find(|s| current.as_ref() != Some(s))
+        .expect("precondition: the target offers a shader other than the set's");
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let at = opener.rect();
+    opener.click();
+    h.run();
+    nearest(&h, first.label(), at).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(rock01(h.state()).shader_choice, Some(first));
+}
+
+/// Review E10: each code's row carries the fix the table gives it, and SHADER-EXTRA-MAP's member is matched by the
+/// name the engine writes (the member's output file, `api.rs` `shader_members`) as well as by its source name.
+#[test]
+fn each_row_carries_the_tables_fix() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, Fix};
+    let fixes = |m: &AppModel, code: Code| {
+        let rows = problems(m);
+        let r = rows
+            .iter()
+            .find(|p| p.code == Some(code))
+            .unwrap_or_else(|| panic!("a {code:?} row"));
+        (r.fix.clone(), r.second_fix.clone())
+    };
+    let (_d, m) = with_warnings(&[
+        Warning::new(Code::AlphaParallaxNoAlpha, "p"),
+        Warning::new(Code::GrassDetectSource, "g"),
+        Warning::new(Code::SugContradiction, "s"),
+    ]);
+    let k = rock01(&m).members[0].clone();
+    assert_eq!(
+        fixes(&m, Code::AlphaParallaxNoAlpha),
+        (Some(Fix::ParallaxOff(k.clone())), None)
+    );
+    assert_eq!(
+        fixes(&m, Code::GrassDetectSource),
+        (Some(Fix::TagAsGrass(k.clone())), None)
+    );
+    assert_eq!(
+        fixes(&m, Code::SugContradiction),
+        (Some(Fix::SetType(k)), None)
+    );
+    let shader = || Some(Fix::ChangeShader("landscape/rock01".into()));
+    for code in [Code::ShaderUnavailable, Code::ShaderMissingMap] {
+        let (_d, m) = with_set_warnings(&[Warning::new(code, "m")]);
+        assert_eq!(fixes(&m, code), (shader(), None), "{code:?}");
+    }
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (nk, name) = normal_member(&m);
+    let out = m.item(&nk).unwrap().job.as_ref().unwrap().output.clone();
+    let out = out.file_name().unwrap().to_string_lossy().into_owned();
+    assert_ne!(
+        out, name,
+        "precondition: the output name is not the source's"
+    );
+    let remove = Some(Fix::RemoveMember {
+        set_id: "landscape/rock01".into(),
+        item: nk,
+    });
+    for member in [&name, &out] {
+        inject_set(&mut m, &[extra_map(member)]);
+        assert_eq!(
+            fixes(&m, Code::ShaderExtraMap),
+            (remove.clone(), shader()),
+            "{member}"
+        );
+    }
+    // No member of that name, or no `data`: Change shader… is the row's one button.
+    inject_set(&mut m, &[extra_map("nowhere.png")]);
+    assert_eq!(fixes(&m, Code::ShaderExtraMap), (shader(), None));
+    inject_set(&mut m, &[Warning::new(Code::ShaderExtraMap, "m")]);
+    assert_eq!(fixes(&m, Code::ShaderExtraMap), (shader(), None));
+}
+
+/// Review E10: a CHK-Z-SIGN check row offers Rebuild Z (`give_a_check` plans one on rock01's normal).
+#[test]
+fn a_z_sign_check_offers_rebuild_z() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{problems, Fix};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    give_a_check(&mut m, d.path());
+    let (nk, _) = normal_member(&m);
+    let rows = problems(&m);
+    let r = rows
+        .iter()
+        .find(|p| p.code == Some(Code::ChkZSign))
+        .expect("precondition: the check ran");
+    assert_eq!(r.fix, Some(Fix::RebuildZ(nk)));
+}
+
+/// Review E18 (Task 6 review, made live by Task 7): under a Set filter whose only hidden row is a note with a button
+/// (SHADER-EXTRA-MAP's Remove from set), while a problem row elsewhere in the project is hidden, the empty text is
+/// about this list, which hid no problem. The other hidden problem is a last-export File row in no set: `pbr_opened`
+/// has one set with members (leaf.png and odd.png stay undecided, in none), and a File row is the cheap way to give the
+/// project a hidden problem outside rock01.
+#[test]
+fn a_sets_hidden_note_with_a_button_keeps_the_hidden_rows_text() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{cached_tab_counts, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (_k, member) = normal_member(&m);
+    inject_set(&mut m, &[extra_map(&member)]);
+    m.export.rows = vec![export_row(
+        "derived/x",
+        vec![Warning::new(Code::ChanNotGray, "not grey")],
+    )];
+    m.invalidate_views();
+    m.set_kind_hidden(Code::ShaderExtraMap, true);
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    let project = cached_tab_counts(&m).hidden;
+    assert!(project > 0, "the project hides a problem row");
+    m.open_problems(Some(ProblemsFilter::Set(rock01(&m).key)));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Every row here is hidden — see Kinds");
+    assert_eq!(h.query_all_by_label(ALL_HIDDEN).count(), 0);
+    h.get_by_label_contains("hidden in this project");
+}

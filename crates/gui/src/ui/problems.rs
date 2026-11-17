@@ -10,13 +10,14 @@ use crate::model::bottom::{
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::meshes::NifTab;
-use crate::model::sets::Missing;
+use crate::model::sets::{shader_options, Missing};
 use crate::model::shell::ShellRequest;
 use crate::model::{Answer, AppModel};
 use crate::pgp::settings::feature_key;
 use crate::sets_doc::IntendedKey;
 use eframe::egui;
 use engine::codes::Code;
+use engine::shader::Shader;
 use serde_json::json;
 use std::sync::Arc;
 
@@ -264,6 +265,8 @@ enum Act {
     HideKind(Code, bool),
     /// Review E2: mark a row as intended or take the mark off: its key, on or off, and its name for the undo step.
     Mark(IntendedKey, bool, String),
+    /// Review E10: Change shader…'s pick, for the set (by id).
+    Shader(String, Shader),
 }
 
 /// The pill's state and where a click takes the filter: on with a set keeps the set (review M2).
@@ -350,16 +353,69 @@ fn click_only_button(
     r.clicked() && !by_key
 }
 
-/// The fix a row's button asks for this frame (Note FC3), or `None`; nothing for a row whose fix is drawn from its
-/// level. P8's row has two buttons (Note FC10), so the answer is the fix, not a click.
+/// What the button of `fix`, one of the row `p`'s fixes, asks for this frame (Note FC3), or `None`. Most ask for the
+/// fix; a menu or a picker asks for what was picked in it (Review E10).
 fn fix_button(
     ui: &mut egui::Ui,
     m: &AppModel,
     p: &Problem,
+    fix: &Fix,
+    off: Option<&str>,
+    sets_off: Option<&str>,
+) -> Option<Act> {
+    match fix {
+        Fix::ChangeShader(id) => return shader_menu(ui, m, id, off.or(sets_off)),
+        // Review E10: the undecided rows' own picker, with no default (the warning names no type).
+        Fix::SetType(k) => {
+            return ui
+                .add_enabled_ui(off.is_none(), |ui| {
+                    super::review::set_type_button(ui, m, k, None, off.unwrap_or_default())
+                })
+                .inner
+                .map(Act::Pick);
+        }
+        _ => {}
+    }
+    fix_click(ui, m, p, fix, off, sets_off).map(|f| Act::Apply(f, p.at.clone()))
+}
+
+/// Review E10: **Change shader…** for the set `id`, a menu of the target's shaders by the names the sets column's
+/// shader combo shows. Off with `off` as its hover (`set_shader` writes nothing on a read-only project).
+fn shader_menu(ui: &mut egui::Ui, m: &AppModel, id: &str, off: Option<&str>) -> Option<Act> {
+    let r = ui.add_enabled_ui(off.is_none(), |ui| {
+        crate::look::menu_button_036(ui, "Change shader…", |ui| {
+            let mut pick = None;
+            for s in shader_options(m.target) {
+                if ui.selectable_label(false, s.label()).clicked() {
+                    pick = Some(s);
+                }
+            }
+            if pick.is_some() {
+                ui.close();
+            }
+            pick
+        })
+    });
+    let menu = r.inner;
+    let name = format!("Change shader for {id}");
+    menu.response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
+    if let Some(why) = off {
+        menu.response.on_disabled_hover_text(why);
+    }
+    menu.inner.flatten().map(|s| Act::Shader(id.to_string(), s))
+}
+
+/// The fix a row's button asks for this frame, or `None`. P8's row has two buttons (Note FC10), so the answer is the
+/// fix, not a click.
+fn fix_click(
+    ui: &mut egui::Ui,
+    m: &AppModel,
+    p: &Problem,
+    fix: &Fix,
     off: Option<&str>,
     sets_off: Option<&str>,
 ) -> Option<Fix> {
-    let fix = p.fix.as_ref()?;
     // Right to left: Reload is the rightmost. Named for its file: the banner has a Reload of its own (rule 8.4).
     if let Fix::OpenInEditor(path) = fix {
         let r = ui.button("Reload");
@@ -504,6 +560,35 @@ fn fix_button(
         ),
         // Drawn above by `unmatched_buttons`.
         Fix::RemoveUnmatched(_) => false,
+        Fix::ParallaxOff(k) => {
+            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
+            let b = ui.add_enabled(off.is_none(), egui::Button::new("Turn parallax off"));
+            let name = format!("Turn parallax off for {file}");
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
+            match off {
+                Some(why) => b.on_disabled_hover_text(why),
+                None => b.on_hover_text(
+                    "Switch parallax off for this texture. It needs an alpha channel to work.",
+                ),
+            }
+            .clicked()
+        }
+        Fix::RemoveMember { set_id, item } => {
+            let file = m.item(item).map_or(item.as_str(), |i| i.name.as_str());
+            let why = off
+                .map(str::to_string)
+                .or_else(|| m.remove_member_refusal(set_id, item));
+            let b = ui.add_enabled(why.is_none(), egui::Button::new("Remove from set"));
+            let name = format!("Remove {file} from {set_id}");
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, why.is_none(), &name));
+            match why {
+                Some(why) => b.on_disabled_hover_text(why),
+                None => b.on_hover_text(format!("Take {file} out of this set. It goes to No set.")),
+            }
+            .clicked()
+        }
+        // Drawn by `fix_button`.
+        Fix::ChangeShader(_) | Fix::SetType(_) => false,
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
             ui,
@@ -866,8 +951,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         } else {
                             off.clone()
                         };
-                        // Review E2: the row reads, left to right, fix, Mark as intended, Go to set. The layout is
-                        // right to left, so Go to set is drawn first.
+                        // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to
+                        // set. The layout is right to left, so Go to set is drawn first.
                         let mut a = None;
                         if let At::Set { key, .. } = &p.at {
                             if ui.button("Go to set").clicked() {
@@ -877,8 +962,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
                             a = Some(mark);
                         }
-                        if let Some(f) = fix_button(ui, m, p, off.as_deref(), sets_off.as_deref()) {
-                            a = Some(Act::Apply(f, p.at.clone()));
+                        for fix in [&p.second_fix, &p.fix].into_iter().flatten() {
+                            if let Some(f) =
+                                fix_button(ui, m, p, fix, off.as_deref(), sets_off.as_deref())
+                            {
+                                a = Some(f);
+                            }
                         }
                         if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
                             if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
@@ -944,6 +1033,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::HideKind(code, hide)) => model.set_kind_hidden(code, hide),
         Some(Act::Mark(key, on, row)) => model.mark_intended(key, on, &row),
+        Some(Act::Shader(id, s)) => model.set_shader(&id, Some(s)),
         None => {}
     }
 }
@@ -1008,6 +1098,14 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
             }
         }
         Fix::RemoveUnmatched(keys) => model.remove_unmatched_keys(&keys),
+        Fix::ParallaxOff(k) => model.set_field(&k, "alpha.parallax", json!(false)),
+        Fix::RemoveMember { set_id, item } => {
+            if let Err(why) = model.remove_member(&set_id, &item) {
+                model.status_line = why;
+            }
+        }
+        // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
+        Fix::ChangeShader(_) | Fix::SetType(_) => {}
     }
 }
 
@@ -1017,8 +1115,8 @@ mod tests {
 
     /// Review E18 fix round 1, item 1: a Set filter whose only hidden row is a note with a button, while another set
     /// hides problem rows. The empty text is about this list, which hid no problem, so it is the plain hidden-rows
-    /// text; the hidden line keeps the project's numbers. Pinned here: no fixture builds a set note with a button
-    /// before Task 7.
+    /// text; the hidden line keeps the project's numbers. End to end: `problems_notes::
+    /// a_sets_hidden_note_with_a_button_keeps_the_hidden_rows_text`.
     #[test]
     fn first_line_empty_text_follows_this_lists_hidden_problems() {
         let set = LineCounts {
