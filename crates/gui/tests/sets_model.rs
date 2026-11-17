@@ -2095,6 +2095,294 @@ fn deleting_the_middle_of_a_chain_passes_the_share_on() {
     undo_restores(&mut m, &before);
 }
 
+/// Note J?5: leaf and odd both share rock01's normal (slot 2); leaf sorts first.
+fn normal_lent_twice(d: &std::path::Path) -> sdc_gui::model::AppModel {
+    let mut m = pbr_opened(d);
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    m
+}
+
+/// Note J?5 (B2-6, owner: option 1): deleting a lender hands its shared normal to the first set sharing it, as that
+/// set's own file; the other one (its slot locked) shares it from there; one undo step; the toast says where it went.
+#[test]
+fn deleting_a_lender_hands_its_shared_file_to_the_first_borrower() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normal_lent_twice(d.path());
+    m.edit_docs("t", None, true, |_, s| s.set_lock("landscape/odd", 2, true));
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, Some(("landscape/odd", 2)), |m| {
+        m.delete_set_with_toast("landscape/rock01")
+    });
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/rock01 (3 textures now in no set). rock01_normal.png went to landscape/leaf, which \
+         shared it; 1 other set now shares it from there."
+    );
+    assert!(!m.is_no_set(&normal));
+    let views = set_views(&m);
+    assert_eq!(
+        view(&views, "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(&SlotFill::Own {
+            item: normal.clone()
+        })
+    );
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2), None, "no self-borrow");
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/leaf")
+    );
+    assert!(matches!(
+        view(&views, "landscape/odd").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/leaf" && *item == normal
+    ));
+    assert!(engine_inputs(&m).0.iter().any(|e| matches!(
+        e,
+        engine::sets::SetEdit::Move { file, to } if *file == normal && to == "landscape/leaf"
+    )));
+    undo_restores(&mut m, &before);
+}
+
+/// Note J?5 (B2-7): a set whose slot is locked is skipped for the next one, and its share is rewritten to that one,
+/// lock kept, in one undo step (Remove from set).
+#[test]
+fn a_borrower_that_cannot_take_the_file_is_skipped_for_the_next() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normal_lent_twice(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_lock("landscape/leaf", 2, true)
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
+        m.remove_member("landscape/rock01", &normal).unwrap()
+    });
+    assert_eq!(
+        message_starting(&m, "rock01_normal.png"),
+        "rock01_normal.png went to landscape/odd, which shared it; 1 other set now shares it from there."
+    );
+    let views = set_views(&m);
+    assert_eq!(
+        view(&views, "landscape/odd").slots.get(&SlotKind::Normal),
+        Some(&SlotFill::Own {
+            item: normal.clone()
+        })
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/odd")
+    );
+    assert!(view(&views, "landscape/leaf").locks.contains(&2));
+    undo_restores(&mut m, &before);
+}
+
+/// Note J?5 (B2-7): a set that has its own file of that kind is skipped; "first" is the Sets column's order, not the
+/// id's.
+#[test]
+fn a_borrower_with_its_own_file_of_that_kind_is_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock02", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_order(&[
+            "landscape/rock02".to_string(),
+            "landscape/rock01".into(),
+            "landscape/leaf".into(),
+        ]);
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.remove_member("landscape/rock01", &normal).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        message_starting(&m, "rock01_normal.png"),
+        "rock01_normal.png went to landscape/leaf, which shared it; 1 other set now shares it from there."
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/rock02", 2).as_deref(),
+        Some("landscape/leaf")
+    );
+}
+
+/// Note J?5 (B2-7): a set that cannot take a drop (`drop_target`) cannot take the file either. `landscape/ghost` is
+/// an entry with no files that the user did not create (a view with an empty key, `NoFilesLeft`); leaf's only file
+/// went to no set, so it has no view. Both are skipped, odd takes the file, and both lines now name odd.
+#[test]
+fn borrowers_with_no_files_or_no_view_are_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normal_lent_twice(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/ghost", 2, Some("landscape/rock01"))
+    });
+    idle(&mut m);
+    let leaf = key_of(&m, "leaf.png");
+    m.remove_member("landscape/leaf", &leaf).unwrap();
+    idle(&mut m);
+    let views = set_views(&m);
+    let ghost = view(&views, "landscape/ghost");
+    assert!(
+        ghost.key.is_empty() && !ghost.created,
+        "ghost: no files, not created"
+    );
+    let normal = key_of(&m, "rock01_normal.png");
+    m.remove_member("landscape/rock01", &normal).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        message_starting(&m, "rock01_normal.png"),
+        "rock01_normal.png went to landscape/odd, which shared it; 2 other sets now share it from there."
+    );
+    for id in ["landscape/ghost", "landscape/leaf"] {
+        assert_eq!(
+            borrow_of(&m, id, 2).as_deref(),
+            Some("landscape/odd"),
+            "{id}"
+        );
+    }
+}
+
+/// Note J?5 (B2-7): slot 3 holds two kinds. Leaf owns an emissive `_g` there, so it cannot take rock01's `_sk`
+/// (it would hold both kinds of slot 3); odd takes it. A kind-only check would hand it to leaf.
+#[test]
+fn a_borrower_with_its_own_file_in_that_slot_number_is_skipped() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = slot3_opened(d.path(), false, true);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 3, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 3, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let sk = key_of(&m, "rock01_sk.png");
+    m.remove_member("landscape/rock01", &sk).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        message_starting(&m, "rock01_sk.png"),
+        "rock01_sk.png went to landscape/odd, which shared it; 1 other set now shares it from there."
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 3).as_deref(),
+        Some("landscape/odd")
+    );
+}
+
+/// Note J?5: a Delete set that hands two files to one set in one undo step. `landscape/heir` is a set the user
+/// created with no files (so it may take files, `drop_target`), and it shares rock01's diffuse and normal; both
+/// become its own, and odd, which shared the normal too, shares it from there.
+#[test]
+fn deleting_a_lender_hands_each_shared_file_to_its_own_heir() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("landscape/heir");
+        s.set_borrow("landscape/heir", 1, Some("landscape/rock01"));
+        s.set_borrow("landscape/heir", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let (diffuse, normal) = (key_of(&m, "rock01.png"), key_of(&m, "rock01_normal.png"));
+    let before = one_step(&mut m, None, |m| {
+        m.delete_set_with_toast("landscape/rock01")
+    });
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/rock01 (2 textures now in no set). rock01.png went to landscape/heir, which shared \
+         it. rock01_normal.png went to landscape/heir, which shared it; 1 other set now shares it from there."
+    );
+    let views = set_views(&m);
+    let heir = view(&views, "landscape/heir");
+    assert_eq!(
+        heir.slots.get(&SlotKind::Diffuse),
+        Some(&SlotFill::Own { item: diffuse })
+    );
+    assert_eq!(
+        heir.slots.get(&SlotKind::Normal),
+        Some(&SlotFill::Own { item: normal })
+    );
+    assert_eq!(borrow_of(&m, "landscape/heir", 1), None);
+    assert_eq!(borrow_of(&m, "landscape/heir", 2), None);
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/heir")
+    );
+    undo_restores(&mut m, &before);
+}
+
+/// Note J?5 (B2-8): rock01 holds both kinds of slot 3. Removing the one leaf's share resolves to hands nothing over:
+/// rock01 still fills slot 3, leaf keeps its line and now reads the other file, and no toast is shown.
+#[test]
+fn removing_one_of_two_files_in_a_slot_hands_nothing_over() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = slot3_opened(d.path(), true, false);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 3, Some("landscape/rock01"))
+    });
+    idle(&mut m);
+    let shared = |m: &sdc_gui::model::AppModel| {
+        view(&set_views(m), "landscape/leaf")
+            .slots
+            .iter()
+            .find_map(|(k, f)| match f {
+                SlotFill::Borrowed { item, .. } if k.slot_number() == Some(3) => Some(item.clone()),
+                _ => None,
+            })
+            .expect("leaf shares slot 3")
+    };
+    let first = shared(&m);
+    let name = first.rsplit('/').next().unwrap().to_string();
+    m.remove_member("landscape/rock01", &first).unwrap();
+    idle(&mut m);
+    assert!(m.is_no_set(&first), "nothing handed over");
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 3).as_deref(),
+        Some("landscape/rock01")
+    );
+    assert_ne!(shared(&m), first, "leaf reads rock01's other slot-3 file");
+    assert!(
+        m.messages.entries().all(|e| !e.text.starts_with(&name)),
+        "the slot is not empty, so nothing is said"
+    );
+}
+
+/// Note J?5 (B2-11 narrowed): rock01 owns its normal AND has a hand-edited share line for slot 2 to leaf; odd shares
+/// slot 2 from rock01, so it used rock01's own normal. Deleting rock01 hands that normal to odd as its own file; odd
+/// is not pointed at leaf (the B2-11 pass-on is only for a slot the deleted set has no file of its own in).
+#[test]
+fn deleting_a_lender_with_its_own_file_and_a_share_line_hands_its_own_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/leaf"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, None, |m| {
+        m.delete_set_with_toast("landscape/rock01")
+    });
+    assert!(!m.is_no_set(&normal));
+    assert_eq!(
+        view(&set_views(&m), "landscape/odd")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own {
+            item: normal.clone()
+        })
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2),
+        None,
+        "odd owns the file, no line to leaf"
+    );
+    undo_restores(&mut m, &before);
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).

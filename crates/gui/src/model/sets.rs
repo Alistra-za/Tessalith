@@ -2057,12 +2057,46 @@ pub(crate) struct LostShares {
     pub slots: usize,
 }
 
-/// What `delete_counted` did (Task 5 adds `handoffs`).
+/// Note J?5 (B2-6, B2-7): a shared file that leaves its set for the first set sharing it that can take it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Handoff {
+    /// The file's item key.
+    pub file: String,
+    /// Its file name, for the toast.
+    pub name: String,
+    /// The set it leaves, and its slot number there.
+    pub lender: String,
+    pub slot: u8,
+    /// The set that takes it.
+    pub heir: String,
+    /// How many other sets share it from the heir afterwards: every other entry in `sdc-project.toml` whose line
+    /// named the lender for slot `n`, the skipped ones included. Counted from the entries, NOT the views: a set
+    /// whose files are all in no set has no view (`all_no_set`, `card_hidden`) yet its line is rewritten too.
+    pub others: usize,
+}
+
+/// What `delete_counted` did.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub(crate) struct Deleted {
     /// How many textures went to no set.
     pub moved: usize,
     pub lost: LostShares,
+    /// The files handed to a sharing set, in slot order (Note J?5).
+    pub handoffs: Vec<Handoff>,
+}
+
+/// Note J?5: the toast sentence for one hand-over.
+fn handoff_text(h: &Handoff) -> String {
+    let (name, heir) = (&h.name, &h.heir);
+    match h.others {
+        0 => format!("{name} went to {heir}, which shared it."),
+        1 => {
+            format!("{name} went to {heir}, which shared it; 1 other set now shares it from there.")
+        }
+        k => format!(
+            "{name} went to {heir}, which shared it; {k} other sets now share it from there."
+        ),
+    }
 }
 
 /// Note J?4: "a", "a and b", "a, b and c", or "a, b, c and 2 more" (at most three names).
@@ -2486,6 +2520,82 @@ impl AppModel {
                         .iter()
                         .any(|i| i.input == s.path && self.is_no_set(&i.key))
             })
+    }
+
+    /// Note J?5 (B2-6, B2-7, B2-8): where `item` goes instead of no set when it leaves its set together with the
+    /// files `leaving` (`[item]` for Remove from set, every member for Delete set); `None` when it stays a no-set
+    /// file. Call it before the edit (B2-9).
+    pub(crate) fn handoff(&self, item: &str, leaving: &[String]) -> Option<Handoff> {
+        if self.is_packed(item) {
+            return None;
+        }
+        let (lender, n) = self.lent_slot(item)?;
+        let t = self.item(item)?;
+        let kind = slot_of(t)?;
+        let views = views(self);
+        let kinds_of = |v: &SetView, skip: &[String]| -> Vec<SlotKind> {
+            v.members
+                .iter()
+                .filter(|k| !skip.contains(k))
+                .filter_map(|k| self.item(k))
+                .filter_map(slot_of)
+                .collect()
+        };
+        // B2-8: the lender keeps a file in slot number `n`, so the slot stays filled from it.
+        let lv = views.iter().find(|v| same_id(&v.id, &lender))?;
+        if kinds_of(lv, leaving)
+            .iter()
+            .any(|k| k.slot_number() == Some(n))
+        {
+            return None;
+        }
+        let entries = self.sets_doc.as_ref()?.entries();
+        let sharing: Vec<&str> = entries
+            .iter()
+            .filter(|e| !same_id(&e.id, &lender))
+            .filter(|e| e.borrow.get(&n).is_some_and(|f| same_id(f, &lender)))
+            .map(|e| e.id.as_str())
+            .collect();
+        // B2-7: the first in display order that can take it.
+        let heir = views.iter().find(|v| {
+            if !sharing.iter().any(|s| same_id(s, &v.id)) {
+                return false;
+            }
+            if v.locks.contains(&n) || (v.key.is_empty() && !v.created) {
+                return false;
+            }
+            let own = kinds_of(v, &[]);
+            if own.iter().any(|k| k.slot_number() == Some(n)) {
+                return false;
+            }
+            // B2-7; the slot-number check above already covers it for one handed file.
+            slot_conflict(&own, kind).is_none()
+        })?;
+        Some(Handoff {
+            file: item.to_string(),
+            name: t.name.clone(),
+            lender,
+            slot: n,
+            heir: heir.id.clone(),
+            others: sharing.len() - 1,
+        })
+    }
+
+    /// Note J?5: the slot numbers set `v` fills with a file of its own (the fills `lent_slot` reads, before any
+    /// share).
+    fn own_slot_numbers(&self, v: &SetView) -> BTreeSet<u8> {
+        self.sets
+            .iter()
+            .find(|s| s.key == v.key)
+            .map(|s| {
+                base_view(self, &self.sets_root(), s)
+                    .slots
+                    .into_iter()
+                    .filter(|(_, f)| matches!(f, SlotFill::Own { .. }))
+                    .filter_map(|(k, _)| k.slot_number())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     fn is_packed(&self, item: &str) -> bool {
@@ -3082,26 +3192,59 @@ impl AppModel {
             .filter(|k| !self.is_packed(k))
             .cloned()
             .collect();
-        let moved = files.len();
+        // Note J?5 (B2-6, owner: "Option 1, hand it over"; B2-7, B2-8): a file other sets share goes to the first of
+        // them that can take it, in this step; amends HF1.
+        let mut handoffs: Vec<Handoff> = files
+            .iter()
+            .filter_map(|f| self.handoff(f, &v.members))
+            .collect();
+        handoffs.sort_by_key(|h| h.slot);
+        let rest: Vec<String> = v
+            .members
+            .iter()
+            .filter(|k| !handoffs.iter().any(|h| h.file == **k))
+            .cloned()
+            .collect();
         // Note J?4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
-        let lost = self.sets_sharing(&v.members, &v.id);
+        let lost = self.sets_sharing(&rest, &v.id);
+        let own = self.own_slot_numbers(&v);
         let i = id.to_string();
+        let moved = files.len() - handoffs.len();
+        let handed = handoffs.clone();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
             // Note J?4 (B2-11): a share that passed through this set is passed on to the set it shared from, before
-            // the entry goes.
+            // the entry goes. Only for a slot number this set has no file of its own in: where it has one, the sharing
+            // sets used that file, and the hand-over below (or the lost sentence) covers them. A hand-over is always
+            // a slot number with an own file (`lent_slot`), so the two rewrites never touch the same slot number.
             let through: Vec<(u8, String)> = s
                 .entries()
                 .iter()
                 .find(|e| same_id(&e.id, &i))
-                .map(|e| e.borrow.iter().map(|(n, x)| (*n, x.clone())).collect())
+                .map(|e| {
+                    e.borrow
+                        .iter()
+                        .filter(|(n, _)| !own.contains(n))
+                        .map(|(n, x)| (*n, x.clone()))
+                        .collect()
+                })
                 .unwrap_or_default();
             for (n, x) in &through {
                 s.retarget_slot_borrows(&i, *n, x);
             }
-            s.delete_set(&i, &files)
+            s.delete_set(&i, &files);
+            // Note J?5 (B2-6, owner: "Option 1, hand it over"; B2-7, B2-8): a file other sets share goes to the first
+            // of them that can take it, in this step; amends HF1.
+            for h in &handed {
+                s.add_member(&h.heir, &h.file);
+                s.retarget_slot_borrows(&h.lender, h.slot, &h.heir);
+            }
         });
         self.prune_collapsed();
-        Some(Deleted { moved, lost })
+        Some(Deleted {
+            moved,
+            lost,
+            handoffs,
+        })
     }
 
     /// `delete_counted`, as done or not.
@@ -3110,8 +3253,8 @@ impl AppModel {
     }
 
     /// Note FC5 (supersedes AG13's confirm): the set menu's Delete set: no question, one undo step and a toast
-    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1), followed by the sets left with an empty
-    /// shared slot (Note J?4).
+    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1), followed by where each shared file went
+    /// (Note J?5) and the sets left with an empty shared slot (Note J?4).
     pub fn delete_set_with_toast(&mut self, id: &str) {
         let Some(d) = self.delete_counted(id) else {
             return;
@@ -3122,8 +3265,10 @@ impl AppModel {
             1 => format!("Deleted set {id} (1 texture now in no set)"),
             n => format!("Deleted set {id} ({n} textures now in no set)"),
         };
-        if let Some(s) = lost_share_text(&d.lost, &list_ids(&d.lost.files)) {
-            text = format!("{text}. {s}");
+        let mut sentences: Vec<String> = d.handoffs.iter().map(handoff_text).collect();
+        sentences.extend(lost_share_text(&d.lost, &list_ids(&d.lost.files)));
+        if !sentences.is_empty() {
+            text = format!("{text}. {}", sentences.join(" "));
         }
         self.messages.notify_with(
             super::messages::Severity::Info,
@@ -3145,7 +3290,8 @@ impl AppModel {
     }
 
     /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
-    /// in, the only member). Refused for a packed map (it follows its raw maps). When sets shared the file, a toast
+    /// in, the only member). Refused for a packed map (it follows its raw maps). A file other sets share goes to the
+    /// first of them that can take it, and a toast says where (Note J?5); else, when sets shared the file, a toast
     /// names them (Note J?4).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
         if !self.sets_editable() {
@@ -3170,11 +3316,30 @@ impl AppModel {
                 .filter(|p| self.last_raw_map_of(item, p))
                 .cloned(),
         );
+        // Note J?5 (B2-6, owner: "Option 1, hand it over"; B2-7, B2-8): a file other sets share goes to the first of
+        // them that can take it, in this step; amends HF1.
+        let h = self.handoff(item, &[item.to_string()]);
         // Note J?4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
-        let lost = self.sets_sharing(&gone, &v.id);
+        // A handed file is never a pack's last raw map: `handoff` needs a `slot_of`, and a pack's raw map is a
+        // `PackedInto` item (`items.rs`), whose own job the engine drops (`pack::plan`), so `gone` is `[item]` then.
+        let lost = if h.is_some() {
+            LostShares::default()
+        } else {
+            self.sets_sharing(&gone, &v.id)
+        };
+        let handed = h.clone();
         self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
-            s.remove_member(&i, &it)
+            s.remove_member(&i, &it);
+            if let Some(h) = &handed {
+                s.add_member(&h.heir, &h.file);
+                s.retarget_slot_borrows(&h.lender, h.slot, &h.heir);
+            }
         });
+        if let Some(h) = h {
+            self.messages
+                .notify(super::messages::Severity::Info, handoff_text(&h));
+            return Ok(());
+        }
         let name = self.item(item).map_or(item, |t| t.name.as_str());
         let what = if lost.files == [name] {
             "it".to_string()
