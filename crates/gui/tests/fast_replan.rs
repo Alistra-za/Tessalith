@@ -310,6 +310,66 @@ fn needs_full_waits_for_full() {
     );
 }
 
+/// Note J?10: `spawn_partial` patches the skeleton the edit handed it, not the one the session holds when the thread
+/// runs. Here the edit's full plan has already stored the skeleton that holds the edit (the race, made certain), and
+/// the partial still answers that the re-encode needs a full plan. The control: handed that stored skeleton, the same
+/// partial finds nothing to do, which is what the thread saw when it read the skeleton itself.
+#[test]
+fn a_partial_patches_the_skeleton_from_the_edit_not_the_stored_one() {
+    use sdc_gui::worker::{spawn_partial, PartialEdit};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |root| bc1_dds(&root.join(DDS)));
+    let root = m.root.clone().unwrap();
+    let base = m.request().unwrap();
+    m.set_reencode(&[DDS.to_string()], true);
+    let req = m.request().unwrap();
+    let files =
+        |r: &engine::api::BatchRequest| r.project_config_inline.as_ref().unwrap().files.clone();
+    let entry = files(&req)
+        .get(DDS)
+        .map(|v| serde_json::from_value::<toml::Table>(v.clone()).unwrap());
+    assert!(
+        entry.is_some() && files(&base).get(DDS).is_none(),
+        "{entry:?}"
+    );
+    let changed = vec![(DDS.to_string(), entry)];
+
+    // A session of the test's own: the base full plan, the edit-time skeleton, then the edit's full plan.
+    let session = session();
+    let (rep, cancel) = (
+        engine::events::Reporter::new(std::sync::Arc::new(engine::events::VecSink::default()), "t"),
+        engine::api::CancelToken::default(),
+    );
+    session.plan_and_keep(base, &rep, &cancel).unwrap();
+    let at_edit = session.skeleton().expect("a full plan keeps a skeleton");
+    session.plan_and_keep(req.clone(), &rep, &cancel).unwrap();
+    let stored = session.skeleton().unwrap();
+    assert!(!std::sync::Arc::ptr_eq(&at_edit, &stored));
+
+    let run = |skeleton| {
+        let (tx, rx) = std::sync::mpsc::channel();
+        let edit = PartialEdit {
+            skeleton: Some(skeleton),
+            req: req.clone(),
+            changed: changed.clone(),
+            seq: 1,
+        };
+        let latest = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(1));
+        spawn_partial(tx, session.clone(), edit, latest, root.clone());
+        match rx.recv_timeout(Duration::from_secs(60)).unwrap() {
+            WorkerMsg::Partial { seq: 1, result } => result.map(|_| ()),
+            _ => panic!("not this edit's partial"),
+        }
+    };
+    let got = run(at_edit);
+    assert!(
+        got.as_ref().is_err_and(|why| why.contains("reencode")),
+        "{got:?}"
+    );
+    let stale = run(stored);
+    assert!(stale.is_ok(), "{stale:?}");
+}
+
 /// Note FL: a partial frees the texture panel only. Export clicked after it queues, Review says "Planning…",
 /// and the export runs on the full plan once it lands.
 #[test]
