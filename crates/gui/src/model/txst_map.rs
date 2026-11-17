@@ -4,14 +4,13 @@
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
 use super::sets::{
-    entry_of, map_slot, recipe_suffix, renamed_output, DefaultOutputs, SetView, SlotFill, SlotKind,
-    LAST_GAME_SLOT, READ_ONLY,
+    entry_of, missing_map_slot, recipe_suffix, renamed_output, DefaultOutputs, SetView, SlotFill,
+    SlotKind, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
 use crate::pgp::prefix::check_rel_path;
 use crate::sets_doc::{SetEntry, TxstMap};
-use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::sets::{same_id, OutputKey};
 use engine::shader::Shader;
@@ -308,10 +307,8 @@ pub(super) fn fill_from_records(
     for v in views.iter_mut() {
         let (filled, supplied) = (&v.filled, &v.record_supplied);
         v.set_warnings.retain(|w| {
-            let n = (w.code == Code::ShaderMissingMap)
-                .then(|| w.data["map"].as_str().and_then(map_slot))
-                .flatten();
-            !n.is_some_and(|n| filled.contains_key(&n) || supplied.contains_key(&n))
+            !missing_map_slot(w)
+                .is_some_and(|n| filled.contains_key(&n) || supplied.contains_key(&n))
         });
     }
 }

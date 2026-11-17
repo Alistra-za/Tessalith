@@ -11,7 +11,7 @@ use crate::pgp::prefix::{
 use crate::pgp::settings::Settings;
 use crate::sets_doc::{SetEntry, SetsDoc, TxstMap};
 use engine::codes::{Code, Warning};
-use engine::config::{Subtype, Target};
+use engine::config::{Category, Subtype, Target};
 use engine::group::{base_of, split_vocab, VocabRole};
 use engine::overrides::path_key_matches;
 use engine::pack::RecipeKind;
@@ -1038,6 +1038,52 @@ pub fn map_slot(label: &str) -> Option<u8> {
     }
 }
 
+/// The slot number of the map a `SHADER-MISSING-MAP` names (`map_slot`); `None` for any other warning. A number, not
+/// a `SlotKind`: `_i` has slot 7 and no kind.
+pub(crate) fn missing_map_slot(w: &Warning) -> Option<u8> {
+    (w.code == Code::ShaderMissingMap)
+        .then(|| w.data["map"].as_str().and_then(map_slot))
+        .flatten()
+}
+
+/// A tangent-space normal: the twin of the engine's private `policy::takes_green` (a normal-category sub-type that is
+/// not model-space).
+fn tangent_space_normal(st: Subtype) -> bool {
+    st.category() == Category::Normal && st != Subtype::Msn
+}
+
+/// Note HH8: whether a resolved borrow fills the slot of the missing map `w` names with a file whose sub-type answers
+/// the role the set's shader needs for it. B1-5: the engine's `MapRole::matches` decides (sub-type only, so a role
+/// matched by suffix, such as `_i`, is never answered by a borrow). B1-6: a role a tangent-space normal answers takes
+/// any tangent-space normal, since the borrower only names the lender's exported file.
+fn borrow_answers(m: &AppModel, v: &SetView, w: &Warning) -> bool {
+    let Some(n) = missing_map_slot(w) else {
+        return false;
+    };
+    let Some(spec) = v.shader.as_ref().map(|p| p.shader.spec_for(m.target)) else {
+        return false;
+    };
+    let Some(role) = spec
+        .required
+        .iter()
+        .find(|r| w.data["map"].as_str() == Some(r.label))
+    else {
+        return false;
+    };
+    let takes_normal = [Subtype::Normal, Subtype::PbrNormal]
+        .into_iter()
+        .any(|st| role.matches(None, Some(st)));
+    let answers =
+        |st: Subtype| role.matches(None, Some(st)) || takes_normal && tangent_space_normal(st);
+    v.slots.iter().any(|(k, f)| match f {
+        SlotFill::Borrowed { item, .. } if k.slot_number() == Some(n) => m
+            .item(item)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| answers(j.profile.subtype)),
+        _ => false,
+    })
+}
+
 /// Note HE4: a missing-map warning goes when a live mesh's texture set or a winning TXST that names this set's
 /// diffuse (under the name the set is read as) has that map's slot filled. The scan is not asked whether the game
 /// uses it (owner's word).
@@ -1058,14 +1104,8 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
     let Some(&bits) = m.known.supplies.get(&diffuse) else {
         return;
     };
-    v.set_warnings.retain(|w| {
-        let supplied = w.code == Code::ShaderMissingMap
-            && w.data["map"]
-                .as_str()
-                .and_then(map_slot)
-                .is_some_and(|n| bits & (1 << (n - 1)) != 0);
-        !supplied
-    });
+    v.set_warnings
+        .retain(|w| !missing_map_slot(w).is_some_and(|n| bits & (1 << (n - 1)) != 0));
 }
 
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
@@ -1122,6 +1162,11 @@ fn entry_view(
             v.missing.push(borrow(true));
         }
     }
+    // Note HH8: a slot a resolved borrow fills answers the shader's missing-map warning when the borrowed file's type
+    // fits the role. An unresolved borrow (a `Missing::Borrow`) fills nothing and keeps it.
+    let mut warnings = std::mem::take(&mut v.set_warnings);
+    warnings.retain(|w| !borrow_answers(m, v, w));
+    v.set_warnings = warnings;
 }
 
 /// `derive_match_diffuse` of a texture path (`textures/a/b.dds`, any slashes, `.dds` optional).
