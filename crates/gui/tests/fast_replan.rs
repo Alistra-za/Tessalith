@@ -329,7 +329,7 @@ fn a_partial_patches_the_skeleton_from_the_edit_not_the_stored_one() {
         .get(DDS)
         .map(|v| serde_json::from_value::<toml::Table>(v.clone()).unwrap());
     assert!(
-        entry.is_some() && files(&base).get(DDS).is_none(),
+        entry.is_some() && !files(&base).contains_key(DDS),
         "{entry:?}"
     );
     let changed = vec![(DDS.to_string(), entry)];
