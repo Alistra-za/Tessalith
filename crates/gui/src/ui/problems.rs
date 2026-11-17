@@ -4,8 +4,8 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    cached_tab_counts, can_hide, count_in_set, filtered, flagged, is_hidden, kinds, problems, At,
-    Fix, Level, Problem, ProblemsFilter,
+    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
+    kinds, problems, At, Fix, Level, Problem, ProblemsFilter,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -96,7 +96,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     // The Checks pill under a set's list or its notes leads to the set's checks, so it counts those.
     let checks = match &f {
         Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
-            count_in_set(model, k, |p| p.level == Level::Check)
+            count_in_set(model, k, counts_as_check)
         }
         _ => flagged(model).check_rows,
     };

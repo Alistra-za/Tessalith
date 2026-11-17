@@ -7,7 +7,7 @@ use super::columns::{
 use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
-use crate::model::bottom::{counts_for, At};
+use crate::model::bottom::{check_listed, counts_for, At};
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files};
@@ -2245,23 +2245,33 @@ fn pill(
                         .collect();
                     // Kept apart from `rows`: the "⚠ n" never counts check results. Undecided members are left out,
                     // as in Problems (review I1).
+                    // Review E4: a marked result leaves the badge, as its row leaves the Checks pill.
+                    let set_checks = model.set_check_warnings(&v.key);
+                    let set_check_at = (!set_checks.is_empty()).then(|| At::Set {
+                        key: v.key.clone(),
+                        id: v.id.clone(),
+                    });
                     let checks: Vec<(&str, &Warning)> = v
                         .members
                         .iter()
                         .filter_map(|k| model.item(k))
                         .filter(|i| i.status != crate::model::items::ItemStatus::NeedsDecision)
                         .flat_map(|i| {
-                            model
-                                .check_warnings(&i.key)
+                            let found = model.check_warnings(&i.key);
+                            let at = (!found.is_empty()).then(|| At::Texture(i.key.clone()));
+                            found
                                 .iter()
+                                .filter(move |w| {
+                                    at.as_ref().is_some_and(|a| check_listed(model, a, w))
+                                })
                                 .map(move |w| (i.name.as_str(), w))
                         })
-                        .chain(
-                            model
-                                .set_check_warnings(&v.key)
+                        .chain(set_check_at.iter().flat_map(|at| {
+                            set_checks
                                 .iter()
-                                .map(|w| (v.id.as_str(), w)),
-                        )
+                                .filter(|w| check_listed(model, at, w))
+                                .map(|w| (v.id.as_str(), w))
+                        }))
                         .collect();
                     // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
                     // (Notes FI13, HP12).

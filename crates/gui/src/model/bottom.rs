@@ -177,17 +177,30 @@ pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     if !counts_toward_badge(w) || checks::check_of(w.code).is_some() {
         return false;
     }
+    !marked(m, at, w)
+}
+
+/// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
+fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
-        return true;
+        return false;
     };
-    // Tiles and cards ask every frame: only a warning whose code a mark names builds its key.
-    !doc.intended_keys()
+    // Tiles and cards ask every frame: only a warning whose code a mark names builds its key. This holds because a
+    // key's `code` is stored and compared verbatim: `sets_doc::folded` folds only the `subject`. A fold of the code
+    // there must fold it here too.
+    doc.intended_keys()
         .iter()
         .any(|k| k.code == w.code.as_str())
-        || {
+        && {
             let shown = code_text::shown_for(Some(w.code), &w.message);
-            !doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
+            doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
         }
+}
+
+/// Review E4: a row the Checks pill counts and its filter lists: a check row not marked as intended (a marked one is
+/// a note, listed under Notes).
+pub fn counts_as_check(p: &Problem) -> bool {
+    p.level == Level::Check && !p.intended
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -455,7 +468,7 @@ pub fn flagged(m: &AppModel) -> Arc<Flagged> {
     let mut f = Flagged::default();
     for p in all.iter() {
         if !counts_as_ready_problem(p) {
-            f.check_rows += usize::from(p.level == Level::Check);
+            f.check_rows += usize::from(counts_as_check(p));
             continue;
         }
         f.ready_rows += 1;
@@ -495,6 +508,13 @@ pub fn item_warned(m: &AppModel, item: &super::items::TextureItem) -> bool {
         let at = At::Texture(item.key.clone());
         item.warnings.iter().any(|w| counts_for(m, &at, w))
     }
+}
+
+/// Review E4: artist-check result `w` at `at` is on its set card's ⓘ badge: not marked as intended, as its row
+/// (`counts_as_check`). The mark test is `counts_for`'s, with its code prefilter (`marked`: a key's code is compared
+/// verbatim, `sets_doc::folded` folds only the subject), so a project with no mark on a check code builds no key.
+pub fn check_listed(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
+    !marked(m, at, w)
 }
 
 #[cfg(feature = "test-hooks")]
@@ -1194,11 +1214,9 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             .filter(|p| p.level == Level::Decide)
             .cloned()
             .collect(),
-        Some(ProblemsFilter::Checks) => all
-            .iter()
-            .filter(|p| p.level == Level::Check)
-            .cloned()
-            .collect(),
+        Some(ProblemsFilter::Checks) => {
+            all.iter().filter(|p| counts_as_check(p)).cloned().collect()
+        }
         Some(ProblemsFilter::Set(k)) => {
             let members = set_members(m, k);
             worklist(&|p| in_set(p, k, &members))
@@ -1206,7 +1224,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         Some(ProblemsFilter::SetChecks(k)) => {
             let members = set_members(m, k);
             all.iter()
-                .filter(|p| p.level == Level::Check && in_set(p, k, &members))
+                .filter(|p| counts_as_check(p) && in_set(p, k, &members))
                 .cloned()
                 .collect()
         }

@@ -1530,9 +1530,135 @@ fn a_marked_warning_leaves_the_warnings_pill_filter_and_status_sort() {
     assert_eq!(m.visible_items()[0], idx, "a warned texture sorts first");
     mark_first(&mut m, Code::ValMipError);
     assert_eq!(m.filter_counts().warnings, warned - 1, "the pill's count");
-    assert_ne!(m.visible_items()[0], idx, "sorted as a clean texture");
+    let undecided = m
+        .items
+        .iter()
+        .position(|i| i.status == sdc_gui::model::items::ItemStatus::NeedsDecision)
+        .expect("the fixture's undecided texture");
+    let at = |n: usize| m.visible_items().iter().position(|&i| i == n).unwrap();
+    assert!(
+        at(idx) > at(undecided),
+        "sorted after an undecided texture, as a clean one"
+    );
     m.filter.warnings = true;
     assert!(!m.visible_items().contains(&idx), "gone from Has warnings");
+}
+
+/// Review E4: in the set editor, the status dot of the slot whose only warning is marked turns from "warning" to
+/// "ready" (`tile_ready`). Counted in the centre only: the side columns and the bottom panel draw dots of their own.
+#[test]
+fn the_set_editors_dot_is_ready_once_its_warning_is_marked() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let centre = |h: &Harness<'static, AppModel>, label: &str| {
+        let sides: Vec<egui::Rect> = ["header", "sets", "textures", "bottom"]
+            .into_iter()
+            .filter_map(|n| sdc_gui::ui::panel_ids::panel_rect(&h.ctx, n))
+            .collect();
+        h.query_all_by_label(label)
+            .filter(|n| !sides.iter().any(|r| r.contains(n.rect().center())))
+            .count()
+    };
+    let ready = centre(&h, "ready");
+    assert_eq!(centre(&h, "warning"), 1, "the slot's dot before the mark");
+    mark_first(h.state_mut(), Code::ValMipError);
+    h.run();
+    assert_eq!(centre(&h, "warning"), 0, "no warning dot once marked");
+    assert_eq!(centre(&h, "ready"), ready + 1, "the slot's dot is ready");
+}
+
+/// `checks.rs::pbr_wall(dir, true, false)`, copied: one PBR set under `textures/test` whose flat `wall_p.png` raises
+/// one CHK-PARALLAX check row, opened as the app opens a folder, shader Pbr.
+fn flat_parallax_wall(dir: &std::path::Path) -> AppModel {
+    use image::{ImageBuffer, Rgb};
+    let r = dir.join("textures/test");
+    std::fs::create_dir_all(&r).unwrap();
+    let flat = |rgb: [u8; 3], name: &str| {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb(rgb))
+            .save(r.join(name))
+            .unwrap()
+    };
+    flat([128, 128, 128], "wall.png");
+    flat([128, 128, 128], "wall_p.png");
+    flat([128, 10, 200], "wall_rmaos.png");
+    flat([128, 128, 255], "wall_n.png");
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("wall"))
+        .expect("the set")
+        .id
+        .clone();
+    m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// Review E4: a marked check leaves the card's ⓘ badge, the Checks pill (project and set) and the Checks lists, and
+/// moves one row from Problems to Notes in the tab; Undo mark brings all of it back.
+#[test]
+fn a_marked_check_leaves_the_card_badge_and_the_checks_pill() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{
+        cached_tab_counts, filtered, problems, Level, ProblemsFilter, TabCounts,
+    };
+    use sdc_gui::ui::problems::CHECKS_PILL;
+    let d = tempfile::tempdir().unwrap();
+    let m = flat_parallax_wall(d.path());
+    let set = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("wall"))
+        .unwrap()
+        .key
+        .clone();
+    let mut h = harness_at(m, egui::vec2(1600.0, 1000.0));
+    h.run();
+    let check = problems(h.state())
+        .iter()
+        .find(|p| p.level == Level::Check)
+        .cloned()
+        .unwrap();
+    assert_eq!(check.code, Some(Code::ChkParallax), "precondition");
+    let before = cached_tab_counts(h.state());
+    // (card badges, Checks pill shown on the project's list, on the set's list, the Checks list, the set's Checks list)
+    let seen = |h: &mut Harness<'static, AppModel>| {
+        let card = h.query_all_by_label_contains("Check results").count();
+        let mut pill = vec![];
+        for f in [None, Some(ProblemsFilter::Set(set.clone()))] {
+            h.state_mut().open_problems(f);
+            h.run();
+            pill.push(h.query_by_label(CHECKS_PILL).is_some());
+        }
+        let listed = |f| filtered(h.state(), Some(&f)).len();
+        (
+            card,
+            pill,
+            listed(ProblemsFilter::Checks),
+            listed(ProblemsFilter::SetChecks(set.clone())),
+        )
+    };
+    assert_eq!(seen(&mut h), (1, vec![true, true], 1, 1), "before");
+    h.state_mut()
+        .mark_intended(check.mark.clone().unwrap(), true, "row");
+    h.run();
+    assert_eq!(seen(&mut h), (0, vec![false, false], 0, 0), "marked");
+    assert_eq!(
+        cached_tab_counts(h.state()),
+        TabCounts {
+            problems: before.problems - 1,
+            notes: before.notes + 1,
+            ..before
+        }
+    );
+    h.state_mut()
+        .mark_intended(check.mark.clone().unwrap(), false, "row");
+    h.run();
+    assert_eq!(seen(&mut h), (1, vec![true, true], 1, 1), "mark undone");
+    assert_eq!(cached_tab_counts(h.state()), before);
 }
 
 /// Review E4: after a mark, the tile's ⚠, the set card's "⚠ n" and the pill's ⚠ all go, for a member's warning and
