@@ -2,6 +2,7 @@
 //! Preset and the export folder, saved in the folder's files) comes first, then "App settings" (gui.toml). Drawing
 //! only: every edit is collected and applied once the tab is drawn.
 use super::header::{self, target_help, target_name};
+use crate::look::Combo036 as _;
 use crate::model::{AppModel, CentreTab};
 use crate::settings::ChecksSettings;
 use eframe::egui;
@@ -115,7 +116,7 @@ fn mode_row(ui: &mut egui::Ui, model: &AppModel) -> Option<Target> {
         ui.add_enabled_ui(off.is_none(), |ui| {
             let r = egui::ComboBox::from_id_salt("mode")
                 .selected_text(target_name(model.target))
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for t in [Target::Cs, Target::Vanilla] {
                         ui.selectable_value(&mut picked, t, target_name(t))
                             .on_hover_text(target_help(t));
@@ -162,7 +163,7 @@ fn preset_row(ui: &mut egui::Ui, model: &mut AppModel) -> Option<Option<String>>
         ui.add_enabled_ui(off.is_none(), |ui| {
             let r = egui::ComboBox::from_id_salt("settings-preset")
                 .selected_text(&text)
-                .show_ui(ui, |ui| picked = header::preset_entries(ui, model))
+                .show_ui_036(ui, |ui| picked = header::preset_entries(ui, model))
                 .response;
             let enabled = ui.is_enabled();
             r.widget_info(|| {

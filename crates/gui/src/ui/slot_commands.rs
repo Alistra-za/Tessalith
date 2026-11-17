@@ -1,6 +1,7 @@
 //! The Slot commands dialog (M3b spec §4.2): per slot 1–8, from this set / a path / clear, and the slot pin (F3a
 //! Task 8).
 use super::dialogs::{dialog, Role};
+use crate::look::Combo036 as _;
 use crate::model::bulk::MenuAction;
 use crate::model::sets::{slot_gives, slot_name, views, SlotCommand, SLOT_LOCKED};
 use crate::model::AppModel;
@@ -97,7 +98,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     ui.add_enabled_ui(editable, |ui| {
                         let r = egui::ComboBox::from_id_salt(("slot-cmd", n))
                             .selected_text(CHOICES[choice])
-                            .show_ui(ui, |ui| {
+                            .show_ui_036(ui, |ui| {
                                 for (c, name) in CHOICES.iter().enumerate() {
                                     ui.selectable_value(&mut choice, c, *name);
                                 }

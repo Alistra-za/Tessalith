@@ -1,5 +1,6 @@
 //! The shape card's Texture set row (Note GO): the TXSTs plugins assign to the shape's 3D index, previewed in the
 //! 3D view, to check that a record's alternate textures land on the shape they were made for.
+use crate::look::Combo036 as _;
 use crate::model::meshes::txst_preview::TxstChoice;
 use crate::model::meshes::MeshesModel;
 use crate::ui::status::AMBER;
@@ -38,7 +39,7 @@ pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u
                     .selected_text(&shown)
                     .width(size.x)
                     .truncate()
-                    .show_ui(ui, |ui| {
+                    .show_ui_036(ui, |ui| {
                         if ui.selectable_label(picked.is_none(), FROM_NIF).clicked() {
                             out = Some(None);
                         }

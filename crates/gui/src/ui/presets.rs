@@ -2,6 +2,7 @@
 //! Drawing only: every edit is collected and applied to the `PresetsModel` after the view is drawn.
 use super::columns::RED;
 use super::settings_panel::{combo_for, options_of, subtype_label, Options};
+use crate::look::Combo036 as _;
 use crate::model::fields::{
     encoding_options, field_hidden, field_lock, filter_option_lock, format_label, is_cutout,
     BC1_ALPHA_HOVER, PERCEPTUAL_HOVER,
@@ -223,7 +224,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             .unwrap_or_else(|| "(none)".into());
         let r = egui::ComboBox::from_id_salt("presets-pick")
             .selected_text(shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for (id, builtin) in pm.list() {
                     let label = if builtin {
                         format!("{id} (built-in)")
@@ -272,7 +273,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             let base = pm.base();
             let r = egui::ComboBox::from_id_salt("presets-base")
                 .selected_text(&base)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for (b, _) in pm.list() {
                         if b != pm.id() && ui.selectable_label(b == base, &b).clicked() {
                             acts.push(Act::Base(b));
@@ -290,7 +291,7 @@ fn top_bar(ui: &mut egui::Ui, pm: &PresetsModel, acts: &mut Vec<Act>) {
             };
             let r = egui::ComboBox::from_id_salt("presets-target")
                 .selected_text(name(own))
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for t in [None, Some(Target::Cs), Some(Target::Vanilla)] {
                         if ui.selectable_label(t == own, name(t)).clicked() && t != own {
                             acts.push(Act::Target(t));
@@ -958,7 +959,7 @@ fn canon_combo(ui: &mut egui::Ui, st: Subtype, salt: &str, own: &[&str], canon: 
     ui.label("→");
     let r = egui::ComboBox::from_id_salt(("preset-canon", st, salt))
         .selected_text(format!("_{canon}"))
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for s in own {
                 ui.selectable_value(canon, s.to_string(), format!("_{s}"));
             }
@@ -996,7 +997,7 @@ fn swizzle_row(
                 let r = egui::ComboBox::from_id_salt(("preset-swz", st, scope, i))
                     .width(40.0)
                     .selected_text(swz.get(i).map_or(String::new(), char::to_string))
-                    .show_ui(ui, |ui| {
+                    .show_ui_036(ui, |ui| {
                         for c in SWIZZLE_SOURCES {
                             if ui
                                 .selectable_label(swz.get(i) == Some(&c), c.to_string())

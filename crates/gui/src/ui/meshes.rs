@@ -1,4 +1,5 @@
 //! The Meshes view (plan A Task 12): a flat list of meshes (Note GC) | shapes of the selected NIF. Draws `MeshesModel`; every store read happens in the model on a click, never here.
+use crate::look::Combo036 as _;
 use crate::model::meshes::export::DocBadge;
 use crate::model::meshes::nif_edit::{Selection, ANIM_INVALID, EDIT_HIDDEN};
 use crate::model::meshes::pg_entries::{
@@ -598,7 +599,7 @@ fn mod_picker(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 .truncate()
                 // A click in the filter box keeps the list open; a pick closes it below.
                 .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     // (text, last pass drawn): a list not drawn at the last pass has just opened.
                     let (mut q, fresh) = match ui.data(|d| d.get_temp::<(String, u64)>(query_id)) {
                         Some((q, p)) if p + 1 == pass => (q, false),

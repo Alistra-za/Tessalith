@@ -3,6 +3,7 @@
 use super::columns::{AMBER, RED};
 use super::status::code_hover;
 use super::type_picker::TypeKind;
+use crate::look::Combo036 as _;
 use crate::model::code_text::{
     alpha_confirm_text, alpha_label, change_line, code_line, not_a_cube, shown_for,
 };
@@ -164,7 +165,7 @@ fn alpha_dropdown(
     let mut picked = None;
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(alpha_label(shown))
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for p in ALPHA_POLICIES {
                 let r = ui.selectable_label(p == shown, alpha_label(p));
                 if r.on_hover_text(alpha_hint(p)).clicked() {
@@ -516,7 +517,7 @@ pub(super) fn combo_for(
     let mut picked = None;
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(shown)
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for (v, label) in options {
                 // A null value is a non-selectable group heading.
                 if v.is_null() {
@@ -673,7 +674,7 @@ fn weighting_combo(
     let mut picked = None;
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(shown)
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for (v, label, hover) in WEIGHTING_OPTIONS {
                 let lock = weighting_option_lock(target, &job.profile, v);
                 let r = ui.add_enabled(
@@ -1120,7 +1121,7 @@ fn filter_row(ui: &mut egui::Ui, cx: &Ctx, actions: &mut Vec<Action>) {
     let (_, r) = control_cell(ui, cx, f.label, help, |ui| {
         let r = egui::ComboBox::from_id_salt((cx.key, f.field))
             .selected_text(OPTIONS.iter().find(|o| o.0 == current).map_or("", |o| o.1))
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for ((m, label), lock) in OPTIONS.into_iter().zip(locks) {
                     let r = ui.add_enabled(
                         lock.is_none(),
@@ -1457,7 +1458,7 @@ fn subtype_decision(
     let mut controls = |ui: &mut egui::Ui| {
         let r = egui::ComboBox::from_id_salt(id)
             .selected_text(subtype_label(chosen))
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 let grass = engine::policy::grass_context(cx.job);
                 for (heading, members) in offered_groups(cx.target, grass) {
                     ui.label(egui::RichText::new(heading).weak());

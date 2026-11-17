@@ -147,6 +147,8 @@ mod known_paths_txst;
 mod labels;
 #[path = "../landscape_slots.rs"]
 mod landscape_slots;
+#[path = "../look_036.rs"]
+mod look_036;
 #[path = "../m3b_flow.rs"]
 mod m3b_flow;
 #[path = "../match_mode_undo.rs"]

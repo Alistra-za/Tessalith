@@ -6,6 +6,7 @@ use super::settings_panel::alpha_choice;
 use super::slot_commands::SlotCmdState;
 use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
+use crate::look::Combo036 as _;
 use crate::model::bottom::tile_ready;
 use crate::model::bulk::MenuAction;
 use crate::model::fields::{
@@ -700,7 +701,7 @@ fn row(
                 let r = egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
                     .selected_text(format_label(cur_f, cur_t))
                     .width(COMBO_W)
-                    .show_ui(ui, |ui| {
+                    .show_ui_036(ui, |ui| {
                         for (e, label) in encoding_options(model.target, &job.profile) {
                             ui.selectable_value(&mut choice, e, label);
                         }
@@ -1023,7 +1024,7 @@ fn packed_controls(
                     if auto { " (auto)" } else { "" }
                 ))
                 .width(COMBO_W)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for k in [RecipeKind::Rmaos, RecipeKind::Rfaos] {
                         // Final review I2: RFAOS is offered only where the set can build it.
                         let why = unbuildable.filter(|_| k == RecipeKind::Rfaos);
@@ -1103,7 +1104,7 @@ fn source_picker(
                 .width(SOURCE_W)
                 .truncate()
                 .selected_text(&shown)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     let now = current.map(|(k, _)| k);
                     let helpers = cached_helpers(ui.ctx(), model, packed);
                     // Review I1: only a helper's `helper.fills` can give the channel up; a file the engine does not

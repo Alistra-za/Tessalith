@@ -4,6 +4,7 @@ mod support;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use sdc_gui::look::Combo036 as _;
 use sdc_gui::model::code_text::alpha_label;
 use sdc_gui::model::AppModel;
 use serde_json::json;
@@ -228,7 +229,7 @@ fn natural_widths() -> (f32, f32) {
             ui.horizontal(|ui| {
                 let combo = egui::ComboBox::from_id_salt("measure")
                     .selected_text(alpha_label(engine::config::AlphaPolicy::CutoutBlend))
-                    .show_ui(ui, |_| {})
+                    .show_ui_036(ui, |_| {})
                     .response
                     .accessible_name("measure");
                 let confirm = ui.button("Confirm");

@@ -7,6 +7,7 @@ use super::path_picker;
 use super::pgp_fields::{
     alpha_default, context_of, control, disabled_reason, edit_key, kept_line, kept_unused, Ctx,
 };
+use crate::look::Combo036 as _;
 use crate::model::pbr_export::{json_issues, json_name, written_json_entries, JsonIssues};
 use crate::model::sections::{delete_hits, not_written_reason, DeleteHit};
 use crate::model::sets::{slot_matches, SetView};
@@ -440,7 +441,7 @@ fn match_pill(
         let mut picked_mode = mode;
         let r = egui::ComboBox::from_id_salt(("json-mode", owner.salt(), mode.key()))
             .selected_text(egui::RichText::new(mode.label()).small())
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for m in (1..=8u8).map(Mode::Exact).chain([Mode::Contains]) {
                     let free = m == mode || !taken.contains(&m);
                     ui.add_enabled_ui(free, |ui| {

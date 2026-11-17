@@ -3,6 +3,7 @@
 //! and (texture sets) the statics line or the PGPatcher box. Drawing only: every change is a model call made after
 //! drawing.
 use super::columns::{AMBER, RED};
+use crate::look::Combo036 as _;
 use crate::model::cs_pbr::{
     check_edid, check_text, field_label, fields, pgp_box_text, set_key, single_pass_text,
     statics_text, templates, CsBlock, EdidCheck, Field, FieldKind, Kind, ScanRecords, Statics,
@@ -178,7 +179,7 @@ fn block(
         ui.strong(kind.label());
         let r = egui::ComboBox::from_id_salt(("cs-template", kind.key(), v.id.as_str()))
             .selected_text(b.template.clone().unwrap_or_else(|| "Template…".into()))
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for t in templates().iter().filter(|t| t.kind == kind) {
                     let sel = b.template.as_deref() == Some(t.name.as_str());
                     if ui

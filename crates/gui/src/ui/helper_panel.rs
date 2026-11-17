@@ -1,5 +1,6 @@
 //! Note DY17: a helper's panel (helper textures spec Goal 6): its role, the channels it fills, the channel it is read
 //! from and whether it is inverted. Every value shown is the engine's `HelperReport`; the GUI only writes the keys.
+use crate::look::Combo036 as _;
 use crate::model::fields::HELPER_HELP;
 use crate::model::helpers::{fill_text, target_file};
 use crate::model::sets::Tails;
@@ -116,7 +117,7 @@ pub(super) fn combo(
             .width(w)
             .truncate()
             .selected_text(shown)
-            .show_ui(ui, f)
+            .show_ui_036(ui, f)
             .response
     })
     .inner

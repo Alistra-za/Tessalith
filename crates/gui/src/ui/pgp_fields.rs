@@ -1,6 +1,7 @@
 //! PGPatcher settings controls (M3b spec §4.3–4.5): the main groups for a set, and the advanced keys under
 //! "Advanced TruePBR settings". Drawing only; edits go through `AppModel::set_json_value` after drawing.
 use super::columns::AMBER;
+use crate::look::Combo036 as _;
 use crate::model::auto_flags::{auto_flags_for, hint, resolved_for};
 use crate::model::sets::{
     is_pbr_grass, slot_matches, views, SetView, SlotFill, SlotKind, SlotMatch,
@@ -382,7 +383,7 @@ fn subsurface_selector(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
         let r = ui.add_enabled_ui(reason.is_none(), |ui| {
             let r = egui::ComboBox::from_id_salt(("pgp-subsurface", &c.set))
                 .selected_text(sub_text(mode))
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for (m, l) in [
                         (SubMode::Off, "Off"),
                         (SubMode::Standard, "Standard"),
@@ -1089,7 +1090,7 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
 fn alpha_combo(ui: &mut egui::Ui, id: (&str, &String), v: &mut u8, list: &[&str]) {
     let r = egui::ComboBox::from_id_salt(id)
         .selected_text(list.get(usize::from(*v)).copied().unwrap_or("?"))
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for (i, name) in list.iter().enumerate() {
                 ui.selectable_value(v, i as u8, *name);
             }

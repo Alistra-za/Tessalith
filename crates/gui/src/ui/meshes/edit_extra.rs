@@ -1,6 +1,7 @@
 //! The edit panel's Extra data tab (spec §7, plan A18): the selected shape's extra data and the root's. Editable
 //! types are changed in place, added and removed; every other type is a read-only row.
 use super::edit_fields::{row_label, set_name, warnings, Act};
+use crate::look::Combo036 as _;
 use crate::model::meshes::nif_edit::{heel_z_of, sdta_npc_z, sdta_with_npc_z, NifEdit, Selection};
 use crate::ui::status::AMBER;
 use eframe::egui;
@@ -483,7 +484,7 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
         let r = egui::ComboBox::from_id_salt(id.with("known"))
             .width(200.0)
             .selected_text(&shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 ui.selectable_value(&mut st.known, None, "Custom…");
                 for (i, k) in KNOWN.iter().enumerate() {
                     let off = known_off(k, root, have);
@@ -538,7 +539,7 @@ fn add_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, root: bool, at: Anchor
         let r = egui::ComboBox::from_id_salt(id.with("type"))
             .width(170.0)
             .selected_text(EDITABLE[kind])
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for (i, k) in EDITABLE.iter().enumerate() {
                     ui.selectable_value(&mut kind, i, *k);
                 }

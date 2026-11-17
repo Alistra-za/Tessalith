@@ -2,6 +2,7 @@
 //! one model call.
 use super::columns::{AMBER, RED};
 use super::dialogs::{dialog, Role};
+use crate::look::Combo036 as _;
 use crate::model::rename::{Case, RenameDialog, RenameMode, RenamePlan, RenameRow};
 use crate::model::{AppModel, Dialog};
 use eframe::egui;
@@ -70,7 +71,7 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, mut d: RenameDialog) {
                 });
                 let r = egui::ComboBox::from_id_salt("rename-case")
                     .selected_text(case_label(d.recipe.case))
-                    .show_ui(ui, |ui| {
+                    .show_ui_036(ui, |ui| {
                         for c in [Case::Keep, Case::Lower, Case::Upper] {
                             ui.selectable_value(&mut d.recipe.case, c, case_label(c));
                         }

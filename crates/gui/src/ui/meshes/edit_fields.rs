@@ -1,5 +1,6 @@
 //! The edit panel's Shader and Alpha tabs (spec §7, plan A17). Widgets only read the session; every change is
 //! collected in an [`Act`] that `edit_panel::panel` applies after drawing.
+use crate::look::Combo036 as _;
 use crate::model::meshes::nif_edit::{edit_slot_label, edit_slot_shown, NifEdit, Selection};
 use crate::model::meshes::pg_entries::pg_ignore;
 use crate::model::meshes::{shader_type_name, MeshesModel, SHADER_TYPES};
@@ -363,7 +364,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         let r = egui::ComboBox::from_id_salt("meshes-edit-shader-type")
             .width(200.0)
             .selected_text(&shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for (i, n) in SHADER_TYPES.iter().enumerate() {
                     ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
                 }
@@ -955,7 +956,7 @@ pub(super) fn alpha_tab(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             let r = egui::ComboBox::from_id_salt(("meshes-edit-alpha", name))
                 .width(180.0)
                 .selected_text(label(cur))
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for c in 0..n {
                         ui.selectable_value(&mut v, c, format!("{} ({c})", label(c)));
                     }

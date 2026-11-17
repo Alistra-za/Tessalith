@@ -21,6 +21,29 @@ pub fn pin_036_style(style: &mut egui::Style) {
     };
 }
 
+/// Shows a `ComboBox` as 0.36.2 did: inside a `ui.horizontal` row of its own (`R\egui-0.36.2\src\containers\
+/// combo_box.rs:234`). 0.37 draws it in the caller's layout (`R\egui-0.37.0\src\containers\combo_box.rs:265`), so a
+/// long value wraps in a vertical layout (the row gave it `TextWrapMode::Extend`, `R\egui-0.36.2\src\ui.rs:589`) and
+/// a combo beside a 19 pt button sits half a point higher. Every `ComboBox` in `ui` goes through it
+/// (`look::tests::every_combo_box_is_shown_through_show_ui_036`).
+pub trait Combo036 {
+    fn show_ui_036<R>(
+        self,
+        ui: &mut egui::Ui,
+        menu_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>>;
+}
+
+impl Combo036 for egui::ComboBox<'_> {
+    fn show_ui_036<R>(
+        self,
+        ui: &mut egui::Ui,
+        menu_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> egui::InnerResponse<Option<R>> {
+        ui.horizontal(|ui| self.show_ui(ui, menu_contents)).inner
+    }
+}
+
 /// `ScrollStyle::thin()` without 0.37's rubber band, for the areas that scope a thin bar.
 pub fn thin_scroll() -> egui::style::ScrollStyle {
     let mut s = egui::style::ScrollStyle::thin();
@@ -190,7 +213,7 @@ mod tests {
                 s.combo = egui::ComboBox::from_id_salt("look-combo")
                     .width(120.0)
                     .selected_text("A")
-                    .show_ui(ui, |_| {})
+                    .show_ui_036(ui, |_| {})
                     .response
                     .rect
                     .size();
@@ -463,5 +486,48 @@ mod tests {
         let mut s = egui::Style::default();
         pin_036_style(&mut s);
         assert!(!s.spacing.scroll.kinetic.rubber_band);
+    }
+
+    #[test]
+    fn every_combo_box_is_shown_through_show_ui_036() {
+        // `ComboBox::show_ui` and `show_index` are the only ways to show one (egui 0.37 `containers/combo_box.rs:237`,
+        // `:298`), so a builder returned from a function is caught where it is shown.
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let re = regex::Regex::new(r"\.show_(ui|index)\(").unwrap();
+        let mut files = vec![];
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let (mut hits, mut own, mut through) = (vec![], false, 0);
+        for f in &files {
+            let text = std::fs::read_to_string(f).unwrap();
+            through += text.matches(".show_ui_036(").count();
+            for (n, line) in text.lines().enumerate() {
+                if !re.is_match(line) {
+                    continue;
+                }
+                if f.file_name().is_some_and(|n| n == "look.rs") && line.contains("self.show_ui(") {
+                    own = true;
+                } else {
+                    hits.push(format!("{}:{}", f.display(), n + 1));
+                }
+            }
+        }
+        assert!(own, "the scan found no show_ui in Combo036 itself");
+        assert!(through > 30, "the scan found {through} show_ui_036 calls");
+        assert!(
+            hits.is_empty(),
+            "combo boxes shown without look::Combo036: {hits:#?}"
+        );
     }
 }

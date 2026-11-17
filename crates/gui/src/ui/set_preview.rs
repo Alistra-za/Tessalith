@@ -1,6 +1,7 @@
 //! The set preview (P1-A, spec §2.3): the set's 3D view, in the centre pane under the set editor's header row while
 //! the 2D | 3D switch is on 3D (AG78). Draws `SetPreview`; the frame, the CS toggle and the problem lists are the shared
 //! `ui::viewport3d::show`. No logic beyond mapping input to model calls.
+use crate::look::Combo036 as _;
 use crate::model::set_preview::{
     badge_text, builtin_name, cap_text, count_text, followed_set, Candidates, EncState, MeshChoice,
     Outcome, Pick, PreviewMode, SetPreview, BUILTINS, GRASS_APPROX, JSON_WINS, MATO_HOVER,
@@ -202,7 +203,7 @@ fn mesh_picker(ui: &mut egui::Ui, s: &mut SetPreview) {
         let r = egui::ComboBox::from_id_salt("set-3d-mesh")
             .width(width)
             .selected_text(current.as_str())
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 if ui
                     .selectable_label(s.choice() == MeshChoice::Auto, "Auto")
                     .clicked()

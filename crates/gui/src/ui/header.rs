@@ -1,6 +1,7 @@
 //! The header (layout v2 A4): one row, Open ▾ · Undo · Redo | MO2… · Preset | the view tabs · Settings…, then
 //! Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
 use super::meshes::UndoTarget;
+use crate::look::Combo036 as _;
 use crate::model::picker::{self, PickerPurpose};
 use crate::model::{also, AppModel};
 use eframe::egui;
@@ -589,7 +590,7 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
     };
     let combo = egui::ComboBox::from_id_salt("preset")
         .selected_text(text)
-        .show_ui(ui, |ui| body(ui))
+        .show_ui_036(ui, |ui| body(ui))
         .response;
     let combo = super::name_input(combo, "Preset").on_hover_ui(|ui| {
             ui.label(format!(

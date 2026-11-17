@@ -3,6 +3,7 @@
 //! `AppModel::set_input_name`.
 use super::columns::{AMBER, RED};
 use super::path_picker;
+use crate::look::Combo036 as _;
 use crate::model::input_name::{
     bare_name, closest_first, completion, in_form_of, is_sep, live_rows, replace_segment,
     segment_at, segment_choices, segment_index, segment_start, snap_to_segments, tab_part, Choice,
@@ -728,7 +729,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                 // Short in the header row, so it does not wrap a narrow 3D view's header; the list names the slots.
                 .selected_text(format!("Match {slot}"))
                 .width(64.0)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for n in 1..=8 {
                         // The PGPatcher key rides on hover.
                         ui.selectable_value(&mut slot, n, name(n))

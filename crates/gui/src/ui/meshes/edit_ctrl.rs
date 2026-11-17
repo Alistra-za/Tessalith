@@ -6,6 +6,7 @@ use super::edit_fields::{
     fit_width, float_named, from_picker, row_label, selected, set_name, take_focus, warnings, Act,
     OUT_OF_RANGE,
 };
+use crate::look::Combo036 as _;
 use crate::model::meshes::nif_edit::{NifEdit, Playing};
 use crate::model::meshes::MeshesModel;
 use crate::model::viewport3d::Clock;
@@ -127,7 +128,7 @@ fn preview(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
             .width(fit_width(ui, 200.0))
             .truncate()
             .selected_text(&shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 ui.selectable_value(&mut pick, Playing::Free, "Free chains");
                 for s in &e.model.sequences {
                     ui.selectable_value(&mut pick, Playing::Clip(s.block), clip_name(s));
@@ -281,7 +282,7 @@ fn row(
         let r = egui::ComboBox::from_id_salt(("meshes-edit-ctrl-cycle", c.block))
             .width(120.0)
             .selected_text(&shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 for (i, n) in CYCLES.iter().enumerate() {
                     ui.selectable_value(&mut pick, i as u16, *n);
                 }
@@ -499,7 +500,7 @@ fn keys_body(
             let r = egui::ComboBox::from_id_salt(("meshes-edit-ctrl-interp", c.block, seq))
                 .width(120.0)
                 .selected_text(shown)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     ui.selectable_value(&mut pick, false, "Linear");
                     ui.selectable_value(&mut pick, true, "Quadratic");
                 })
@@ -890,7 +891,7 @@ fn add_row(
             let r = egui::ComboBox::from_id_salt(id.with("class"))
                 .width(80.0)
                 .selected_text(classes[class_idx])
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for (i, n) in classes.iter().enumerate() {
                         ui.selectable_value(&mut class_idx, i, *n);
                     }
@@ -924,7 +925,7 @@ fn add_row(
                 .width(fit_width(ui, 180.0))
                 .truncate()
                 .selected_text(&shown)
-                .show_ui(ui, |ui| {
+                .show_ui_036(ui, |ui| {
                     for &o in offered {
                         let text = format!("{} ({o})", var_label(class, o, slsf2));
                         if env_blocked(class_idx, o) {
@@ -1114,7 +1115,7 @@ fn variable(
             .width(fit_width(ui, 180.0))
             .truncate()
             .selected_text(&shown)
-            .show_ui(ui, |ui| {
+            .show_ui_036(ui, |ui| {
                 // A value outside the list stays selectable, so the current one is never lost.
                 let extra = (!offered.contains(&v)).then_some(v);
                 for &o in extra.iter().chain(offered) {

@@ -1,5 +1,6 @@
 //! The Textures and Sets columns (M3a spec §2.2–2.3). Drawing only: every click is a call on the model.
 use super::thumbs::ThumbCache;
+use crate::look::Combo036 as _;
 use crate::model::bulk::{MenuAction, MenuEntry};
 use crate::model::items::{ItemStatus, TextureItem};
 use crate::model::texture_view::{ColumnPrefs, FilterOptions, SetFilter, SortKey};
@@ -738,7 +739,7 @@ fn pick<T: PartialEq + Copy>(
     let r = egui::ComboBox::from_id_salt(name)
         .width(ui.available_width())
         .selected_text(format!("{name}: {text}"))
-        .show_ui(ui, |ui| {
+        .show_ui_036(ui, |ui| {
             for (v, label) in options {
                 ui.selectable_value(current, *v, label);
             }
