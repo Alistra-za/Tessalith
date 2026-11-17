@@ -38,7 +38,7 @@ Fold the sets you've finished into a group, so the column shows only what you're
 
 ## Reordering and deleting sets
 
-Drag the **≡** handle, or use **Move up** and **Move down**. They are off while a Sets filter is on, because a hidden set would shift the numbers. **Move to…** stays on and takes a position or a name; it is also how you make a long move, since a drag only reaches the cards on screen.
+Drag the **≡** handle, or use **Move up** and **Move down**. They are off while a Sets filter is on, because a hidden set would shift the numbers. **Move to…** stays on and takes a position or a name; it is also the quick way to make a long move; while you drag, the mouse wheel scrolls the list. <!-- D:J?6 -->
 
 **Delete set** works on every set and asks nothing: it is one undo step, and the toast (`Deleted set {name} (3 textures now in no set)`) has an **Undo** button. The textures are not deleted. They go to *no set* and the automatic set does not come back, so a delete sticks after a new plan or a reopen. A set with no files left just goes. <!-- D:HF1 -->
 
