@@ -660,9 +660,11 @@ mod tests {
                     let calls = chain_calls(&text, at + needle.len() - 1);
                     let margin = calls.iter().find(|(name, _)| name == "margin");
                     // A custom `.frame(..)` brings its own inner margin and egui ignores `.margin(..)` then
-                    // (`R\egui-0.37.0\src\widgets\text_edit\builder.rs:693-695`; 0.36.2 `:713` alike): the
-                    // input-name box is such a site.
-                    let own_frame = calls.iter().any(|(name, _)| name == "frame");
+                    // (`R\egui-0.37.0\src\widgets\text_edit\builder.rs:693-695`; 0.36.2 `:713` alike). The
+                    // input-name box is the one such site, so only `ui/input_name.rs` is exempt: a framed
+                    // TextEdit anywhere else must set the margin through its frame and be added here by name.
+                    let own_frame = f.ends_with("ui/input_name.rs")
+                        && calls.iter().any(|(name, _)| name == "frame");
                     if margin.is_some_and(|(_, arg)| arg.contains("TEXT_EDIT_MARGIN")) || own_frame
                     {
                         through += 1;
