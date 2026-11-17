@@ -312,8 +312,8 @@ fn the_settings_window_toggles_and_its_edits_reach_the_preview() {
     assert!(h.query_by_label("Specular level").is_none());
 }
 
-/// Note FM31 (supersedes CE21's creep shortcut): egui draws the window a few points bigger than it was asked for, and
-/// the layout takes that off, so a saved W×H comes back as W×H and is saved again unchanged (it grew 3 points per start).
+/// Note FM31 (supersedes CE21's creep shortcut): a saved W×H comes back as W×H and is saved again unchanged (it grew
+/// 3 points per start). The layout takes off whatever egui draws past `default_rect`; here that is nothing.
 #[test]
 fn a_saved_window_size_reopens_at_the_same_size() {
     for saved in [[200.0, 100.0, 700.0, 500.0], [120.0, 120.0, 460.0, 620.0]] {
@@ -326,9 +326,14 @@ fn a_saved_window_size_reopens_at_the_same_size() {
             .ctx
             .memory(|m| m.area_rect(sdc_gui::ui::set_preview::settings_window_id()))
             .expect("the settings window is drawn");
-        assert!(
-            drawn.width() > saved[2],
-            "egui does draw it bigger: {drawn:?}"
+        // Was "drawn wider than saved" (706×506 and 466×626 on egui 0.36.2). That excess came from the harness: the
+        // system fonts went in after kittest's first frames, and while no text had glyphs the window grew 1 point a
+        // frame, which `Resize` keeps (`egui-0.36.2\src\containers\resize.rs:269`). The fonts now go in before the
+        // first frame (egui_kittest 0.37 lays out text there), so the window holds its `default_rect`.
+        assert_eq!(
+            drawn.size(),
+            egui::vec2(saved[2], saved[3]),
+            "drawn at the size asked: {drawn:?}"
         );
         let r = sdc_gui::layout::settings_window_now(&h.ctx).expect("the size has settled");
         assert_eq!(
