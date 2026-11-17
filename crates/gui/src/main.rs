@@ -74,20 +74,18 @@ fn main() -> eframe::Result {
         sdc_gui::PRODUCT_NAME,
         options,
         Box::new(|cc| {
-            // The app has no usable font without the system fonts: show why and exit.
-            if let Err(e) = fonts::install_system_fonts(&cc.egui_ctx) {
-                rfd::MessageDialog::new()
-                    .set_level(rfd::MessageLevel::Error)
-                    .set_title(sdc_gui::PRODUCT_NAME)
-                    .set_description(e.as_str())
-                    .show();
-                return Err(e.into());
-            }
+            // Never fails: without the usual fonts the app starts on its built-in ones and says so (Note JM).
+            let Ok(font_choice) = fonts::install_system_fonts(&cc.egui_ctx);
             if let Some(rs) = &cc.wgpu_render_state {
                 sdc_gui::crash_log::watch_device(rs, sdc_gui::crash_log::run_log_path());
             }
             // No render state means no usable adapter: the app still starts, without a preview.
             let mut model = build_model();
+            if let Some(text) = font_choice.message() {
+                model
+                    .messages
+                    .log(sdc_gui::model::messages::Severity::Warning, text);
+            }
             if let Some(Some(folder)) = reopen {
                 model.open_folder(folder);
             }

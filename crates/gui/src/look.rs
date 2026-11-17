@@ -203,6 +203,7 @@ pub(crate) fn src_rs_files() -> Vec<std::path::PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fonts::FontChoice;
 
     fn near(a: f32, b: f32) -> bool {
         (a - b).abs() < 0.05
@@ -230,7 +231,9 @@ mod tests {
     }
 
     /// A dark-theme context with `setup` applied (the app's `install_system_fonts`).
-    fn context(setup: fn(&egui::Context) -> Result<(), String>) -> egui::Context {
+    fn context(
+        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
+    ) -> egui::Context {
         let ctx = egui::Context::default();
         ctx.set_theme(egui::Theme::Dark);
         setup(&ctx).expect("system fonts");
@@ -248,7 +251,9 @@ mod tests {
     }
 
     /// Each widget's size after 4 passes; then the DragValue is focused (edit mode) and 4 more passes run.
-    fn sizes_after(setup: fn(&egui::Context) -> Result<(), String>) -> Sizes {
+    fn sizes_after(
+        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
+    ) -> Sizes {
         let ctx = context(setup);
         let (mut text, mut on, mut value) = (String::from("x"), false, 0.0_f32);
         let mut s = Sizes::default();
@@ -399,7 +404,9 @@ mod tests {
     }
 
     /// Dark theme: 4 passes, then the TextEdit is focused and 4 more passes run; the painted rects of the last pass.
-    fn painted_after(setup: fn(&egui::Context) -> Result<(), String>) -> Painted {
+    fn painted_after(
+        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
+    ) -> Painted {
         let ctx = context(setup);
         let (mut text, mut on) = (String::new(), false);
         let edit_id = egui::Id::unique("look-edit");

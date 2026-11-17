@@ -3177,6 +3177,7 @@ dependencies = [
  "engine",
  "epaint_default_fonts",
  "esp",
+ "fontique",
  "half",
  "hex",
  "image",

@@ -1,72 +1,113 @@
-//! Windows system fonts, loaded at run time, the shared system font provider for characters they lack, and the per-OS
-//! resolver with its embedded floor (Ubuntu Light, Hack, egui-icons) that Task 3 of the fonts plan wires in (Note JM).
+//! Interface fonts: the OS's own by family name, then an embedded floor; missing characters come from the system on demand (Note JM).
+//!
+//! The order ([`resolve`]): the proportional family takes the first font found of the OS's named list, or the OS's
+//! generic `sans-serif` answer, generic first where [`OsFonts::generic_first`] says so (Linux); then every extra of
+//! the table that is found. The monospace family does the same with its own list and `monospace`, and falls back to
+//! the proportional system font. Where nothing is found, the embedded floor (Ubuntu Light, Hack, egui-icons) is used.
+//! On Windows that is Segoe UI with Segoe UI Symbol and Segoe UI Emoji, and Consolas with Segoe UI Symbol.
 use eframe::egui;
 use std::collections::HashMap;
 use std::panic::AssertUnwindSafe;
-use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
-fn fonts_dir() -> PathBuf {
-    std::env::var_os("WINDIR")
-        .map(|w| PathBuf::from(w).join("Fonts"))
-        .unwrap_or_else(|| PathBuf::from(r"C:\Windows\Fonts"))
+/// The system's fonts asked by family name, through the OS's own font list (DirectWrite, fontconfig, CoreText).
+pub struct SystemLookup {
+    collection: fontique::Collection,
+    sources: fontique::SourceCache,
 }
 
-/// The font definitions built from `dir`: Segoe UI (proportional) and Consolas (monospace) with
-/// Segoe UI Symbol and Segoe UI Emoji as fallbacks. A missing optional font is skipped; a missing
-/// `segoeui.ttf` is an error naming its path.
-fn definitions_from(dir: &Path) -> Result<egui::FontDefinitions, String> {
-    let primary = dir.join("segoeui.ttf");
-    let primary_bytes = std::fs::read(&primary)
-        .map_err(|e| format!("cannot load the system font {}: {e}", primary.display()))?;
-    let mut defs = egui::FontDefinitions::empty();
-    defs.font_data.insert(
-        "segoeui".to_owned(),
-        Arc::new(egui::FontData::from_owned(primary_bytes)),
-    );
-    let mut proportional = vec!["segoeui".to_owned()];
-    let mut monospace = Vec::new();
-    for (name, file, proportional_fallback, monospace_use) in [
-        ("seguisym", "seguisym.ttf", true, true),
-        ("seguiemj", "seguiemj.ttf", true, false),
-        ("consola", "consola.ttf", false, true),
-    ] {
-        let Ok(bytes) = std::fs::read(dir.join(file)) else {
-            continue;
+impl SystemLookup {
+    /// Enumerates the system fonts on the calling thread.
+    pub fn new() -> Self {
+        SystemLookup {
+            collection: fontique::Collection::new(fontique::CollectionOptions {
+                shared: false,
+                system_fonts: true,
+            }),
+            sources: fontique::SourceCache::default(),
+        }
+    }
+
+    /// The family's regular face (normal width, upright, weight 400). A variable font draws its default instance.
+    fn face(&mut self, family: &fontique::FamilyInfo) -> Option<Found> {
+        let font = family.match_font(
+            fontique::FontWidth::NORMAL,
+            fontique::FontStyle::Normal,
+            fontique::FontWeight::NORMAL,
+            false,
+        )?;
+        let blob = font.load(Some(&mut self.sources))?;
+        Some(Found {
+            family: family.name().to_owned(),
+            data: egui::FontData::from_blob(blob.into_raw_parts().0, font.index()),
+        })
+    }
+}
+
+impl Default for SystemLookup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl FontLookup for SystemLookup {
+    fn family(&mut self, name: &str) -> Option<Found> {
+        let family = self.collection.family_by_name(name)?;
+        self.face(&family)
+    }
+
+    /// The first family of the OS's generic list. On Windows the lists are fixed names filtered by presence (Arial,
+    /// Consolas), so without Consolas the monospace answer is `None`.
+    fn generic(&mut self, generic: Generic) -> Option<Found> {
+        let generic = match generic {
+            Generic::SansSerif => fontique::GenericFamily::SansSerif,
+            Generic::Monospace => fontique::GenericFamily::Monospace,
         };
-        defs.font_data
-            .insert(name.to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
-        if proportional_fallback {
-            proportional.push(name.to_owned());
-        }
-        if monospace_use {
-            // Consolas leads the monospace family; symbols follow it.
-            if name == "consola" {
-                monospace.insert(0, name.to_owned());
-            } else {
-                monospace.push(name.to_owned());
-            }
-        }
+        let id = self.collection.generic_families(generic).next()?;
+        let family = self.collection.family(id)?;
+        self.face(&family)
     }
-    if monospace.is_empty() || monospace[0] != "consola" {
-        // No Consolas: fall back to the proportional face so monospace text still renders.
-        monospace.insert(0, "segoeui".to_owned());
-    }
-    defs.families
-        .insert(egui::FontFamily::Proportional, proportional);
-    defs.families.insert(egui::FontFamily::Monospace, monospace);
-    Ok(defs)
 }
 
-/// Installs Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas from `%WINDIR%\Fonts`, then the one system font
-/// provider for characters they lack (CJK, Arabic, …), and pins egui 0.36.2's look in both themes (`look`). The
-/// providers are replaced, not added to, so eframe's own or a second call's never stacks (Note JM).
-pub fn install_system_fonts(ctx: &egui::Context) -> Result<(), String> {
-    ctx.set_fonts(definitions_from(&fonts_dir())?);
+/// `f`'s definitions, or the embedded floor with `lookup_failed` when it panics (DirectWrite that cannot start). The
+/// panic is logged as one line, not as a crash (`crash_log::catch_expected`).
+pub fn guarded(
+    f: impl FnOnce() -> (egui::FontDefinitions, FontChoice) + std::panic::UnwindSafe,
+) -> (egui::FontDefinitions, FontChoice) {
+    crate::crash_log::catch_expected("font lookup failed", f).unwrap_or_else(|_| {
+        let (defs, choice) = embedded();
+        (
+            defs,
+            FontChoice {
+                lookup_failed: true,
+                ..choice
+            },
+        )
+    })
+}
+
+/// This OS's fonts, looked up once per process; a clone shares the font data.
+fn system_definitions() -> (egui::FontDefinitions, FontChoice) {
+    static DEFS: OnceLock<(egui::FontDefinitions, FontChoice)> = OnceLock::new();
+    DEFS.get_or_init(|| {
+        // Starts the provider's enumeration thread first, so it overlaps the lookup's own enumeration.
+        let _ = system_provider();
+        guarded(|| resolve(&mut SystemLookup::new(), os_fonts()))
+    })
+    .clone()
+}
+
+/// Installs this OS's interface fonts (or the embedded floor), then the one system font provider for characters they
+/// lack (CJK, Arabic, …), and pins egui 0.36.2's look in both themes (`look`). The providers are replaced, not added
+/// to, so eframe's own or a second call's never stacks (Note JM). Never fails: the `Result` keeps every
+/// `with_context_setup` call's `.expect("system fonts")` compiling. The choice says whether a floor font is used.
+pub fn install_system_fonts(ctx: &egui::Context) -> Result<FontChoice, std::convert::Infallible> {
+    let (defs, choice) = system_definitions();
+    ctx.set_fonts(defs);
     ctx.set_font_providers(vec![system_provider()]);
     ctx.all_styles_mut(crate::look::pin_036_style);
-    Ok(())
+    Ok(choice)
 }
 
 /// The process-wide system font provider: every context (the app's, each test harness's) shares one, so the system
@@ -83,7 +124,8 @@ pub fn system_provider() -> Arc<dyn egui::FontProvider> {
 }
 
 /// A font provider that answers `None` when its inner provider panics, and from then on: a failed enumeration thread
-/// makes `SystemFontProvider` panic at every later lookup, and a missing glyph is better than a crash.
+/// makes `SystemFontProvider` panic at every later lookup, and a missing glyph is better than a crash. After any caught
+/// panic, `fonts_for_family` answers nothing too. Each caught panic is one crash-log line (`crash_log::catch_expected`).
 pub struct Guarded<P: egui::FontProvider> {
     inner: P,
     failed: AtomicBool,
@@ -102,8 +144,10 @@ impl<P: egui::FontProvider> Guarded<P> {
         if self.failed.load(Ordering::Relaxed) {
             return None;
         }
-        // shortcut: the panic is swallowed, not logged; Task 3 switches this to `crash_log::catch_expected`.
-        let answer = std::panic::catch_unwind(AssertUnwindSafe(|| ask(&self.inner)));
+        let answer = crate::crash_log::catch_expected(
+            "font lookup failed",
+            AssertUnwindSafe(|| ask(&self.inner)),
+        );
         if answer.is_err() {
             self.failed.store(true, Ordering::Relaxed);
         }
@@ -247,7 +291,7 @@ pub trait FontLookup {
 pub enum FontSource {
     /// A system font, with the family name the OS reported.
     System(String),
-    /// The built-in floor (Ubuntu Light, Hack).
+    /// The built-in floor (Ubuntu Light, Hack, egui-icons).
     Embedded,
 }
 
@@ -352,7 +396,12 @@ impl Asker<'_> {
 }
 
 /// Builds the font definitions from what `lookup` finds for `os`'s candidates, with the embedded floor (Ubuntu Light,
-/// Hack, egui-icons) where nothing is found. The rules are in the plan's Task 1 (Note JM).
+/// Hack, egui-icons) where nothing is found (Note JM). Rule 0: a face that does not parse counts as not found. Rule 1:
+/// the proportional primary is the first named candidate found, then the generic `sans-serif` answer (the other way
+/// round when `generic_first`). Rule 2: every extra found follows its primary, in table order. Rule 3: the monospace
+/// primary comes from its own list and the `monospace` answer, with the proportional system font before the floor
+/// (and, when named lists come first, before the `monospace` answer). Rules 4 and 6: the floor's data is added
+/// whenever a chain names it, and each family name is asked once.
 pub fn resolve(lookup: &mut dyn FontLookup, os: &OsFonts) -> (egui::FontDefinitions, FontChoice) {
     let mut ask = Asker {
         lookup,
@@ -489,7 +538,7 @@ pub fn embedded() -> (egui::FontDefinitions, FontChoice) {
     resolve(&mut NoFonts, &none)
 }
 
-/// Every non-ASCII character in `crates/gui/src` except the CJK test string (`ui_symbols_cover_the_source`).
+/// Every non-ASCII character in `crates/gui/src` outside this file, CJK aside (`ui_symbols_cover_the_source`).
 #[cfg(test)]
 pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥≈≡✓ⓘẞ°±Δ²α↔üïÄ✎●←‹›äÖΩω≠π▼◀▶▸✖“”🔗é⏵";
 
@@ -553,6 +602,160 @@ mod tests {
 
     use epaint_default_fonts::{EGUI_ICONS, HACK_REGULAR as HACK, UBUNTU_LIGHT as UBUNTU};
     const JUNK: &[u8] = b"this is not a font file";
+
+    #[cfg(windows)]
+    fn windows_fonts_dir() -> std::path::PathBuf {
+        std::env::var_os("WINDIR")
+            .map(|w| std::path::PathBuf::from(w).join("Fonts"))
+            .unwrap_or_else(|| std::path::PathBuf::from(r"C:\Windows\Fonts"))
+    }
+
+    /// The definitions the app built before Note JM, from `%WINDIR%\Fonts`: Segoe UI (proportional) and Consolas
+    /// (monospace) with Segoe UI Symbol and Segoe UI Emoji as fallbacks. A missing optional font is skipped; no
+    /// Consolas puts Segoe UI first in the monospace family. The pins below compare the new definitions with these.
+    #[cfg(windows)]
+    fn legacy_definitions() -> egui::FontDefinitions {
+        let dir = windows_fonts_dir();
+        let primary_bytes = std::fs::read(dir.join("segoeui.ttf")).expect("segoeui.ttf");
+        let mut defs = egui::FontDefinitions::empty();
+        defs.font_data.insert(
+            "segoeui".to_owned(),
+            Arc::new(egui::FontData::from_owned(primary_bytes)),
+        );
+        let mut proportional = vec!["segoeui".to_owned()];
+        let mut monospace = Vec::new();
+        for (name, file, proportional_fallback, monospace_use) in [
+            ("seguisym", "seguisym.ttf", true, true),
+            ("seguiemj", "seguiemj.ttf", true, false),
+            ("consola", "consola.ttf", false, true),
+        ] {
+            let Ok(bytes) = std::fs::read(dir.join(file)) else {
+                continue;
+            };
+            defs.font_data
+                .insert(name.to_owned(), Arc::new(egui::FontData::from_owned(bytes)));
+            if proportional_fallback {
+                proportional.push(name.to_owned());
+            }
+            if monospace_use {
+                if name == "consola" {
+                    monospace.insert(0, name.to_owned());
+                } else {
+                    monospace.push(name.to_owned());
+                }
+            }
+        }
+        if monospace.is_empty() || monospace[0] != "consola" {
+            monospace.insert(0, "segoeui".to_owned());
+        }
+        defs.families
+            .insert(egui::FontFamily::Proportional, proportional);
+        defs.families.insert(egui::FontFamily::Monospace, monospace);
+        defs
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn segoe_ui_is_the_same_file_as_before() {
+        let (defs, choice) = system_definitions();
+        assert_eq!(defs.families[&egui::FontFamily::Proportional][0], "segoeui");
+        assert_eq!(choice.proportional, FontSource::System("Segoe UI".into()));
+        for (key, file) in [
+            ("segoeui", "segoeui.ttf"),
+            ("seguisym", "seguisym.ttf"),
+            ("seguiemj", "seguiemj.ttf"),
+            ("consola", "consola.ttf"),
+        ] {
+            let Ok(want) = std::fs::read(windows_fonts_dir().join(file)) else {
+                continue;
+            };
+            let got = &defs.font_data[key];
+            assert_eq!(got.index, 0, "{key}");
+            assert!(got.bytes() == want.as_slice(), "{key} is not {file}");
+        }
+        assert_eq!(choice.message(), None);
+    }
+
+    /// The plan's width pin: today's definitions and the new ones lay text out to the same width.
+    #[cfg(windows)]
+    #[test]
+    fn text_is_as_wide_as_before() {
+        let sample = "Cutout + Blend · Coat normal / Fuzz (slot 7) ↺ ▾ ⚠ 🔒 — ×";
+        let width = |defs: egui::FontDefinitions, id: egui::FontId| {
+            let mut f = egui::epaint::text::Fonts::new(Default::default(), defs);
+            f.with_pixels_per_point(1.0)
+                .layout_no_wrap(sample.into(), id, egui::Color32::WHITE)
+                .size()
+                .x
+        };
+        for id in [
+            egui::FontId::proportional(14.0),
+            egui::FontId::monospace(13.0),
+        ] {
+            assert_eq!(
+                width(system_definitions().0, id.clone()),
+                width(legacy_definitions(), id)
+            );
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn ui_symbols_resolve_to_the_same_fonts_as_before() {
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            let owner = |defs: egui::FontDefinitions| {
+                let mut f = egui::epaint::text::Fonts::new(Default::default(), defs);
+                let mut v = f.with_pixels_per_point(1.0);
+                let map = v.characters(&family).clone();
+                UI_SYMBOLS
+                    .chars()
+                    .map(|c| (c, map.get(&c).and_then(|n| n.first().cloned())))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(
+                owner(system_definitions().0),
+                owner(legacy_definitions()),
+                "{family:?}"
+            );
+        }
+    }
+
+    /// Review Focus 2: a lookup that panics (DirectWrite cannot start) still gives fonts.
+    #[test]
+    fn a_lookup_that_panics_falls_back_to_the_floor() {
+        let (defs, choice) = guarded(|| panic!("no DirectWrite"));
+        assert_eq!(choice.proportional, FontSource::Embedded);
+        assert_eq!(choice.message(), Some(FLOOR_LOOKUP_FAILED));
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional][0],
+            "Ubuntu-Light"
+        );
+    }
+
+    #[test]
+    fn install_reports_the_choice() {
+        let ctx = egui::Context::default();
+        let Ok(choice) = install_system_fonts(&ctx);
+        assert_eq!(choice, system_definitions().1);
+    }
+
+    /// Plan 1's pinned 0.36.2 look is still applied by the rewritten installer, for both themes. `pin_036_style` only
+    /// assigns fixed values, so applying it again changes nothing; without the line the default 0.37 style differs
+    /// (`button_padding`, corner radii).
+    #[test]
+    fn install_still_applies_the_pinned_look() {
+        let ctx = egui::Context::default();
+        let Ok(_) = install_system_fonts(&ctx);
+        for theme in [egui::Theme::Dark, egui::Theme::Light] {
+            let mut want = (*ctx.style_of(theme)).clone();
+            crate::look::pin_036_style(&mut want);
+            assert_eq!(
+                *ctx.style_of(theme),
+                want,
+                "{theme:?}: pin_036_style not applied"
+            );
+        }
+    }
 
     #[test]
     fn the_generic_guard_wants_latin_and_the_right_pitch() {
@@ -656,8 +859,9 @@ mod tests {
         }
     }
 
-    /// Every non-ASCII character in the GUI source, except the CJK test string, is in `UI_SYMBOLS`, so the floor-gap
-    /// and owner pins cover new UI text. On a failure add the reported characters to `UI_SYMBOLS` and rerun the pins.
+    /// Every non-ASCII character in the GUI source (this file and the CJK test string aside) is in `UI_SYMBOLS`, so the
+    /// floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in the source. On a
+    /// failure add or remove the reported characters and rerun the pins.
     #[test]
     fn ui_symbols_cover_the_source() {
         fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -676,19 +880,15 @@ mod tests {
             std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
             &mut files,
         );
-        let mut missing = std::collections::BTreeSet::new();
-        for f in files {
-            let text = std::fs::read_to_string(&f).unwrap();
-            missing.extend(
-                text.chars()
-                    .filter(|c| !c.is_ascii() && !cjk(*c) && !UI_SYMBOLS.contains(*c)),
-            );
+        let mut used = std::collections::BTreeSet::new();
+        for f in files.iter().filter(|f| !f.ends_with("fonts.rs")) {
+            let text = std::fs::read_to_string(f).unwrap();
+            used.extend(text.chars().filter(|c| !c.is_ascii() && !cjk(*c)));
         }
-        assert!(
-            missing.is_empty(),
-            "add to UI_SYMBOLS: {}",
-            missing.iter().collect::<String>()
-        );
+        let missing: String = used.iter().filter(|c| !UI_SYMBOLS.contains(**c)).collect();
+        assert!(missing.is_empty(), "add to UI_SYMBOLS: {missing}");
+        let stale: String = UI_SYMBOLS.chars().filter(|c| !used.contains(c)).collect();
+        assert!(stale.is_empty(), "remove from UI_SYMBOLS: {stale}");
     }
 
     #[test]
@@ -929,21 +1129,23 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
     #[test]
     fn system_fonts_install_and_fill_the_proportional_family() {
         let ctx = egui::Context::default();
         install_system_fonts(&ctx).expect("Windows system fonts");
-        let defs = definitions_from(&fonts_dir()).unwrap();
+        let defs = system_definitions().0;
         assert!(!defs.families[&egui::FontFamily::Proportional].is_empty());
         assert_eq!(defs.families[&egui::FontFamily::Proportional][0], "segoeui");
         assert!(!defs.families[&egui::FontFamily::Monospace].is_empty());
     }
 
     /// Spec 5.4 / Review Focus 5: CJK comes from the system in the same call that asks for it, with no eager CJK font.
+    #[cfg(windows)]
     #[test]
     fn cjk_comes_from_the_system_without_eager_loads() {
-        let dir = fonts_dir();
-        let defs = definitions_from(&dir).unwrap();
+        let dir = windows_fonts_dir();
+        let defs = system_definitions().0;
         for key in ["msyh", "yugothm", "malgun"] {
             assert!(
                 !defs.font_data.contains_key(key),
@@ -1073,12 +1275,5 @@ mod tests {
             ui.label("Cutout + Blend · Coat normal ↺ ▾ ⚠ 🔒 — ×");
         });
         eprintln!("font start: {} ms", t.elapsed().as_millis());
-    }
-
-    #[test]
-    fn a_missing_primary_font_names_its_path() {
-        let d = std::env::temp_dir().join("sdc-no-such-fonts-dir");
-        let err = definitions_from(&d).unwrap_err();
-        assert!(err.contains("segoeui.ttf"), "{err}");
     }
 }

@@ -298,6 +298,28 @@ pub fn recovery_note(file: &Path, doc_text: &str, held: bool) -> Option<String> 
     ))
 }
 
+thread_local! {
+    /// The label of the [`catch_expected`] call running on this thread, `None` outside one.
+    static EXPECTED: std::cell::Cell<Option<&'static str>> = const { std::cell::Cell::new(None) };
+}
+
+/// The label of the [`catch_expected`] call running on this thread, if any.
+fn expected_label() -> Option<&'static str> {
+    EXPECTED.try_with(std::cell::Cell::get).ok().flatten()
+}
+
+/// `catch_unwind` for a panic the caller handles on purpose (Note JM): the hook logs it as one line under `label`,
+/// with no backtrace, and writes no recovery files.
+pub fn catch_expected<R>(
+    label: &'static str,
+    f: impl FnOnce() -> R + std::panic::UnwindSafe,
+) -> std::thread::Result<R> {
+    let old = EXPECTED.replace(Some(label));
+    let result = std::panic::catch_unwind(f);
+    EXPECTED.set(old);
+    result
+}
+
 /// [`install_in`] the `%LOCALAPPDATA%\sdc\logs` folder.
 pub fn install() {
     install_in(log_dir());
@@ -305,7 +327,8 @@ pub fn install() {
 
 /// Install the hook: append the panic to this run's crash log in `dir`, write the unsaved documents to their
 /// recovery files when the panic is on the main thread (a worker's panic is caught and shown, the app lives on), then
-/// run the previous hook. Failures to write are ignored (a panic hook cannot report them anywhere).
+/// run the previous hook. A panic inside [`catch_expected`] gets one line and nothing else. Failures to write are
+/// ignored (a panic hook cannot report them anywhere).
 pub fn install_in(dir: Option<PathBuf>) {
     let log = dir.map(|d| d.join(format!("crash-{}.log", now_stamp())));
     if let Some(path) = &log {
@@ -323,6 +346,19 @@ pub fn install_in(dir: Option<PathBuf>) {
             .location()
             .map_or("(unknown)".to_string(), ToString::to_string);
         let thread = std::thread::current();
+        if let Some(label) = expected_label() {
+            if let Some(path) = &log {
+                append(
+                    path,
+                    &format!(
+                        "{} {label} (caught, Note JM) in thread '{}' at {location}: {message}\n",
+                        now_stamp(),
+                        thread.name().unwrap_or("(unnamed)")
+                    ),
+                );
+            }
+            return;
+        }
         let line = format_panic(
             thread.name().unwrap_or("(unnamed)"),
             message,

@@ -52,6 +52,11 @@ path = "tests/ui_proof.rs"
 name = "crash_recovery"
 path = "tests/crash_recovery.rs"
 
+# Installs the panic hook.
+[[test]]
+name = "fonts_crash_hook"
+path = "tests/fonts_crash_hook.rs"
+
 # Sets the device-lost flag, which nothing clears: the next `SdcApp` frame in the process would open the restart
 # dialog, wait for a click, then start the test exe again and exit.
 [[test]]
@@ -70,7 +75,7 @@ serde.workspace = true
 serde_json.workspace = true
 toml.workspace = true
 half.workspace = true
-# Default features minus default_fonts (system fonts are loaded at run time, see fonts.rs). wgpu is used only through eframe::egui_wgpu::wgpu. No "links": the GUI never opens a URL (Explorer actions spawn explorer.exe, AG34), so a future ui.hyperlink would do nothing.
+# Default features minus default_fonts and system_fonts: fonts.rs picks the fonts and installs the system font provider itself (Note JM). wgpu is used only through eframe::egui_wgpu::wgpu. No "links": the GUI never opens a URL (Explorer actions spawn explorer.exe, AG34), so a future ui.hyperlink would do nothing.
 eframe = { version = "=0.37.0", default-features = false, features = ["accesskit", "wgpu"] }
 # The embedded floor fonts (Ubuntu-Light, Hack, egui-icons) when no system font is found (fonts.rs). Licences in LICENSES/.
 epaint_default_fonts = "=0.37.0"
@@ -78,6 +83,8 @@ epaint_default_fonts = "=0.37.0"
 skrifa = "=0.44.0"
 # Characters the chosen fonts lack (CJK, Arabic, …) come from the system on demand (fonts.rs). Turns on epaint's color_fonts.
 egui_system_font_provider = "=0.37.0"
+# Interface fonts by family name from DirectWrite, fontconfig (opened at run time, no build-time library) or CoreText (fonts.rs). Already in the tree through egui_system_font_provider.
+fontique = { version = "=0.11.1", default-features = false, features = ["system", "fontconfig-dlopen"] }
 rfd = "=0.17.2"
 toml_edit = "0.25"
 sha2.workspace = true
