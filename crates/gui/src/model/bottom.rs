@@ -1360,14 +1360,64 @@ fn in_set(p: &Problem, key: &str, members: &HashSet<String>) -> bool {
     }
 }
 
-/// How many rows of `problems` the set and its members have, notes with no button included (more than
-/// `filtered(m, Some(Set(key)))` lists since review E2), without cloning them.
-pub fn set_problem_count(m: &AppModel, key: &str) -> usize {
-    let members = set_members(m, key);
+/// Review E4: one reason a set is not ready, as the set editor's first line names it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Reason {
+    pub text: String,
+    pub go: ReasonGo,
+}
+
+/// Where a reason's button goes: the empty slot's **Assign…**, or the row in Problems (boxed: a `Problem` is large).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReasonGo {
+    Slot(sets::SlotKind),
+    Row(Box<Problem>),
+}
+
+/// Review E4: the rows of the set (an engine set key) and of its members that take "ready" away (the rows
+/// `set_ready` reads), hidden kinds included, in list order. A missing map with a known slot goes to that slot's
+/// **Assign…**; every other row goes to itself in Problems.
+pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
+    let views = sets::views(m);
+    let Some(v) = views.iter().find(|v| v.key == key) else {
+        return vec![];
+    };
+    let members: HashSet<String> = v.members.iter().cloned().collect();
     problems(m)
         .iter()
-        .filter(|p| in_set(p, key, &members))
-        .count()
+        .filter(|p| counts_as_ready_problem(p) && in_set(p, key, &members))
+        .map(|p| match (p.code, &p.target) {
+            // The DERIVE-NO-ALBEDO arm has no producer today: the engine raises it only from the Also export planner,
+            // whose rows are not set rows.
+            (Some(Code::ShaderMissingMap | Code::DeriveNoAlbedo), Some(SlotTarget::Slot(kind))) => {
+                Reason {
+                    text: format!("no {} (Assign…)", v.slot_label(*kind, "")),
+                    go: ReasonGo::Slot(*kind),
+                }
+            }
+            _ => Reason {
+                text: reason_text(p),
+                go: ReasonGo::Row(Box::new(p.clone())),
+            },
+        })
+        .collect()
+}
+
+/// A row reason's words: its code's sentence up to " — ", or a code-less row's text cut at 60 characters.
+fn reason_text(p: &Problem) -> String {
+    const MAX: usize = 60;
+    match p.code {
+        Some(c) => code_text::code_line(c)
+            .split(" — ")
+            .next()
+            .unwrap_or_default()
+            .to_string(),
+        None if p.text.chars().count() > MAX => {
+            let cut: String = p.text.chars().take(MAX).collect();
+            format!("{cut}…")
+        }
+        None => p.text.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -1403,6 +1453,38 @@ mod tests {
             .map(|p| p.text)
             .collect();
         assert_eq!(texts, ["problem", "note"]);
+    }
+
+    /// Review E4: a reason names a code's row by its sentence up to " — ", and a code-less row by its text, cut at 60
+    /// characters with "…".
+    #[test]
+    fn a_reason_is_the_sentence_before_its_dash_or_the_text_cut_at_60() {
+        let row = |text: &str, code| Problem {
+            level: Level::Warning,
+            at: At::Project,
+            text: text.into(),
+            code,
+            also: vec![],
+            fix: None,
+            second_fix: None,
+            suggested: None,
+            detail: None,
+            carried: false,
+            intended: false,
+            mark: None,
+            target: None,
+        };
+        assert_eq!(
+            reason_text(&row("mip 3", Some(Code::ValMipError))),
+            "A mip level strays from its source"
+        );
+        let long = "é".repeat(61);
+        assert_eq!(
+            reason_text(&row(&long, None)),
+            format!("{}…", "é".repeat(60))
+        );
+        let sixty = "a".repeat(60);
+        assert_eq!(reason_text(&row(&sixty, None)), sixty);
     }
 
     /// Pins the engine's IN-UNREADABLE message shape (`skipped: <path>: <error>`) that `unreadable_folder` parses.

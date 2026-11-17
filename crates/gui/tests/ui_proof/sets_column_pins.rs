@@ -1605,7 +1605,8 @@ fn a_filter_change_reveals_the_open_set_when_it_stays_visible() {
                 resize.as_str(),
                 r#"{"op":"scroll","at":{"label":"Set armor/gold, position 5 of 9"},"dir":"down","times":5}"#,
                 r#"{"op":"settle","frames":2}"#,
-                r#"{"op":"click","at":{"starts":"Ready"}}"#,
+                // The pill: the open set's editor reads "Ready: …" on its first line too (review E4).
+                r#"{"op":"click","at":{"starts":"Ready","role":"Button"}}"#,
                 r#"{"op":"settle","frames":6}"#,
             ],
         );

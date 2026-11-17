@@ -250,6 +250,35 @@ fn first_lines(c: &LineCounts, tab: TabCounts) -> FirstLines {
 /// the row now at that index, or the last one (Review Focus 5).
 const ROW_FOCUS: &str = "problems-row-focus";
 
+/// Review E4: a row the set editor's status line asked for (`focus_row`); the tab's next draw takes it.
+const FOCUS_FIX: &str = "problems-row-focus-fix";
+
+/// Review E4: the next draw of the row `id` (`row_id`) scrolls to it and moves focus to the first of its fix, its
+/// second fix and its **Mark as intended** that it draws enabled (never its link or Go to set). A row with none of
+/// them, or not in the list, takes no focus.
+pub fn focus_row(ctx: &egui::Context, id: egui::Id) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIX), id));
+}
+
+/// How many widgets `ui`'s layer holds so far this pass.
+fn widgets_so_far(ui: &egui::Ui) -> usize {
+    ui.ctx()
+        .viewport(|v| v.this_pass.widgets.get_layer(ui.layer_id()).count())
+}
+
+/// The last enabled widget that can take focus that `ui`'s layer took after its first `from`.
+fn last_focusable_since(ui: &egui::Ui, from: usize) -> Option<egui::Id> {
+    ui.ctx().viewport(|v| {
+        v.this_pass
+            .widgets
+            .get_layer(ui.layer_id())
+            .skip(from)
+            .filter(|w| w.enabled && w.sense.is_focusable())
+            .last()
+            .map(|w| w.id)
+    })
+}
+
 /// The Problems tab is not drawn: forget the focused row, so coming back never moves focus into the list.
 pub fn forget_focus(ctx: &egui::Context) {
     ctx.data_mut(|d| d.remove::<(egui::Id, usize)>(egui::Id::unique(ROW_FOCUS)));
@@ -848,158 +877,175 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         }
     }
     let mut focus_now = None;
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show_rows(ui, row_h, list.len(), |ui, range| {
-            for (i, p) in list[range.clone()].iter().enumerate() {
-                let i = range.start + i;
-                // Note FB9: the row is focusable (registered first, it takes no click from its cells); Enter or
-                // Space accepts its suggestion and moves to the next row. A row without one ignores both, and no
-                // row's fix runs from a key (Review Focus 3).
-                let rect = egui::Rect::from_min_size(
-                    ui.cursor().min,
-                    egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
-                );
-                let rid = row_id(p);
-                let row = ui.interact(rect, rid, egui::Sense::focusable_noninteractive());
-                row.widget_info(|| {
-                    egui::WidgetInfo::labeled(egui::Role::Unknown, true, row_name(p))
-                });
-                if row.has_focus() {
-                    // Once a frame: the next row takes focus in this same frame and sees the same key press.
-                    let first = focus_now.replace((rid, i)).is_none();
-                    if row.gained_focus() {
-                        row.scroll_to_me(None);
-                    }
-                    let stroke = ui.visuals().selection.stroke;
-                    ui.painter()
-                        .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-                    // Note FM35: a row that asks only its alpha confirms the type it shows. With a sub-type question
-                    // too, Enter must not answer just one of the two, so it does nothing there.
-                    let alpha = match &p.at {
-                        At::Texture(k) => m.item(k).filter(|i| {
-                            !i.decisions
-                                .iter()
-                                .any(|d| matches!(d, Decision::Subtype { .. }))
-                        }),
-                        _ => None,
-                    }
-                    .and_then(alpha_asked);
-                    // Consumed only when the row acts, so the Grid's Enter (open the preview) never sees it too.
-                    let acting = matches!((first, &off, &p.at), (true, None, At::Texture(_)))
-                        && (p.suggested.is_some() || alpha.is_some());
-                    let pressed = acting
-                        && ui.input_mut(|k| {
-                            k.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                                || k.consume_key(egui::Modifiers::NONE, egui::Key::Space)
-                        });
-                    if let (true, At::Texture(k)) = (pressed, &p.at) {
-                        let k = k.clone();
-                        act = p
-                            .suggested
-                            .map(|st| RowPick::Decide(k.clone(), st))
-                            .or(alpha.map(|a| RowPick::Answer(k, Answer::Alpha(a))))
-                            .map(Act::Pick);
-                        // The last row keeps focus: no wrap to the top.
-                        if let Some(next) = list.get(i + 1) {
-                            ui.memory_mut(|mem| mem.request_focus(row_id(next)));
-                        }
-                    }
+    // Review E4: a row `focus_row` asked for, taken on this draw: scrolled to the top of the list, so it is drawn.
+    let fix_key = egui::Id::unique(FOCUS_FIX);
+    let fix_focus = ui
+        .data_mut(|d| {
+            let id = d.get_temp::<egui::Id>(fix_key);
+            d.remove::<egui::Id>(fix_key);
+            id
+        })
+        .and_then(|id| list.iter().position(|p| row_id(p) == id).map(|i| (id, i)));
+    let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
+    if let Some((_, i)) = fix_focus {
+        area = area.vertical_scroll_offset(i as f32 * row_h);
+    }
+    area.show_rows(ui, row_h, list.len(), |ui, range| {
+        for (i, p) in list[range.clone()].iter().enumerate() {
+            let i = range.start + i;
+            // Note FB9: the row is focusable (registered first, it takes no click from its cells); Enter or
+            // Space accepts its suggestion and moves to the next row. A row without one ignores both, and no
+            // row's fix runs from a key (Review Focus 3).
+            let rect = egui::Rect::from_min_size(
+                ui.cursor().min,
+                egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+            );
+            let rid = row_id(p);
+            let row = ui.interact(rect, rid, egui::Sense::focusable_noninteractive());
+            row.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Unknown, true, row_name(p)));
+            if row.has_focus() {
+                // Once a frame: the next row takes focus in this same frame and sees the same key press.
+                let first = focus_now.replace((rid, i)).is_none();
+                if row.gained_focus() {
+                    row.scroll_to_me(None);
                 }
-                // Review E2: a row marked as intended shows it (only the Notes list holds one).
-                let status = if p.intended {
-                    Status::Intended
-                } else {
-                    status_of(p.level)
-                };
-                // The fix buttons are laid out first, so the sentence is cut to the room left (I2).
-                let (l, r) = egui::Sides::new().shrink_left().truncate().show(
-                    ui,
-                    |ui| {
-                        let mut a = None;
-                        dot(ui, status);
-                        match &p.at {
-                            At::Texture(k) => {
-                                if ui.link(k).clicked() {
-                                    a = Some(Act::Texture(k.clone()));
-                                }
-                            }
-                            At::Set { key, id } => {
-                                if ui.link(id).clicked() {
-                                    a = Some(Act::Set(key.clone(), None));
-                                }
-                            }
-                            At::File(k) => {
-                                if ui.link(k).clicked() {
-                                    a = Some(Act::File(k.clone()));
-                                }
-                            }
-                            // A NIF's link opens it, as its fix does.
-                            At::Nif(path) => {
-                                if ui.link(path).clicked() {
-                                    a = p.fix.clone().map(|f| Act::Apply(f, p.at.clone()));
-                                }
-                            }
-                            At::Project => {
-                                ui.label("Project");
-                            }
-                        }
-                        // Note FB8: a sentence that names the action; the engine's text and the code are the hover.
-                        let mut text = egui::RichText::new(&*p.shown());
-                        // Note FC3: check and Info rows are drawn weak.
-                        if status.weak() {
-                            text = text.weak();
-                        }
-                        ui.add(egui::Label::new(text).truncate()).on_hover_ui(|ui| {
-                            ui.label(&p.text);
-                            if let Some(d) = &p.detail {
-                                ui.label(d);
-                            }
-                            if let Some(c) = p.codes_text() {
-                                ui.weak(c);
-                            }
-                        });
-                        a
-                    },
-                    |ui| {
-                        // Right to left: the last widget added is the leftmost.
-                        // Note FL: a carried block or ask row's fix waits for the full plan.
-                        let off = if p.carried {
-                            m.fix_off_for(p)
-                        } else {
-                            off.clone()
-                        };
-                        // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to
-                        // set. The layout is right to left, so Go to set is drawn first.
-                        let mut a = None;
-                        if let At::Set { key, .. } = &p.at {
-                            if ui.button("Go to set").clicked() {
-                                a = Some(Act::Set(key.clone(), p.target.clone()));
-                            }
-                        }
-                        if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
-                            a = Some(mark);
-                        }
-                        for fix in [&p.second_fix, &p.fix].into_iter().flatten() {
-                            if let Some(f) =
-                                fix_button(ui, m, p, fix, off.as_deref(), sets_off.as_deref())
-                            {
-                                a = Some(f);
-                            }
-                        }
-                        if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
-                            if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
-                                a = Some(Act::Pick(pick));
-                            }
-                        }
-                        a
-                    },
-                );
-                if let Some(a) = l.or(r) {
-                    act = Some(a);
+                let stroke = ui.visuals().selection.stroke;
+                ui.painter()
+                    .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+                // Note FM35: a row that asks only its alpha confirms the type it shows. With a sub-type question
+                // too, Enter must not answer just one of the two, so it does nothing there.
+                let alpha = match &p.at {
+                    At::Texture(k) => m.item(k).filter(|i| {
+                        !i.decisions
+                            .iter()
+                            .any(|d| matches!(d, Decision::Subtype { .. }))
+                    }),
+                    _ => None,
+                }
+                .and_then(alpha_asked);
+                // Consumed only when the row acts, so the Grid's Enter (open the preview) never sees it too.
+                let acting = matches!((first, &off, &p.at), (true, None, At::Texture(_)))
+                    && (p.suggested.is_some() || alpha.is_some());
+                let pressed = acting
+                    && ui.input_mut(|k| {
+                        k.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                            || k.consume_key(egui::Modifiers::NONE, egui::Key::Space)
+                    });
+                if let (true, At::Texture(k)) = (pressed, &p.at) {
+                    let k = k.clone();
+                    act = p
+                        .suggested
+                        .map(|st| RowPick::Decide(k.clone(), st))
+                        .or(alpha.map(|a| RowPick::Answer(k, Answer::Alpha(a))))
+                        .map(Act::Pick);
+                    // The last row keeps focus: no wrap to the top.
+                    if let Some(next) = list.get(i + 1) {
+                        ui.memory_mut(|mem| mem.request_focus(row_id(next)));
+                    }
                 }
             }
-        });
+            // Review E2: a row marked as intended shows it (only the Notes list holds one).
+            let status = if p.intended {
+                Status::Intended
+            } else {
+                status_of(p.level)
+            };
+            // The fix buttons are laid out first, so the sentence is cut to the room left (I2).
+            let (l, r) = egui::Sides::new().shrink_left().truncate().show(
+                ui,
+                |ui| {
+                    let mut a = None;
+                    dot(ui, status);
+                    match &p.at {
+                        At::Texture(k) => {
+                            if ui.link(k).clicked() {
+                                a = Some(Act::Texture(k.clone()));
+                            }
+                        }
+                        At::Set { key, id } => {
+                            if ui.link(id).clicked() {
+                                a = Some(Act::Set(key.clone(), None));
+                            }
+                        }
+                        At::File(k) => {
+                            if ui.link(k).clicked() {
+                                a = Some(Act::File(k.clone()));
+                            }
+                        }
+                        // A NIF's link opens it, as its fix does.
+                        At::Nif(path) => {
+                            if ui.link(path).clicked() {
+                                a = p.fix.clone().map(|f| Act::Apply(f, p.at.clone()));
+                            }
+                        }
+                        At::Project => {
+                            ui.label("Project");
+                        }
+                    }
+                    // Note FB8: a sentence that names the action; the engine's text and the code are the hover.
+                    let mut text = egui::RichText::new(&*p.shown());
+                    // Note FC3: check and Info rows are drawn weak.
+                    if status.weak() {
+                        text = text.weak();
+                    }
+                    ui.add(egui::Label::new(text).truncate()).on_hover_ui(|ui| {
+                        ui.label(&p.text);
+                        if let Some(d) = &p.detail {
+                            ui.label(d);
+                        }
+                        if let Some(c) = p.codes_text() {
+                            ui.weak(c);
+                        }
+                    });
+                    a
+                },
+                |ui| {
+                    // Right to left: the last widget added is the leftmost.
+                    // Note FL: a carried block or ask row's fix waits for the full plan.
+                    let off = if p.carried {
+                        m.fix_off_for(p)
+                    } else {
+                        off.clone()
+                    };
+                    // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to
+                    // set. The layout is right to left, so Go to set is drawn first.
+                    let mut a = None;
+                    if let At::Set { key, .. } = &p.at {
+                        if ui.button("Go to set").clicked() {
+                            a = Some(Act::Set(key.clone(), p.target.clone()));
+                        }
+                    }
+                    // Review E4: the widgets from here to the fix are Mark, the second fix and the fix; the last
+                    // one that can take focus is the leftmost, the first the row reads.
+                    let from = fix_focus
+                        .filter(|(id, _)| *id == rid)
+                        .map(|_| widgets_so_far(ui));
+                    if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
+                        a = Some(mark);
+                    }
+                    for fix in [&p.second_fix, &p.fix].into_iter().flatten() {
+                        if let Some(f) =
+                            fix_button(ui, m, p, fix, off.as_deref(), sets_off.as_deref())
+                        {
+                            a = Some(f);
+                        }
+                    }
+                    if let Some(id) = from.and_then(|from| last_focusable_since(ui, from)) {
+                        ui.memory_mut(|mem| mem.request_focus(id));
+                    }
+                    if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
+                        if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
+                            a = Some(Act::Pick(pick));
+                        }
+                    }
+                    a
+                },
+            );
+            if let Some(a) = l.or(r) {
+                act = Some(a);
+            }
+        }
+    });
     // Kept while a row has focus, and over the frame its row leaves the list (egui drops the focus at that frame's
     // end; the next frame moves it, so ask for that frame).
     let keep = focus_now.or(last.filter(|(rid, _)| focused == Some(*rid)));

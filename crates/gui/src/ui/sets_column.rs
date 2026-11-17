@@ -358,11 +358,20 @@ fn tag_text(helper_fills: Option<&[engine::helper::FillTarget]>, tail: &str) -> 
     }
 }
 
-/// The pill's hover (R15): the long badge, then one line each for blocked, owns, missing entries and recipes.
-fn pill_hover(model: &AppModel, v: &SetView, blocked: bool) -> String {
+/// Review E4 (controller ruling 10): what Ready means, on the Ready pill and a ready card's status hover.
+pub const READY_MEANS: &str = "Ready: no problem row in the set or its textures. Notes, rows you marked as intended and checks don't count.";
+/// Review E4 (controller ruling 10): what Not ready means, on the Not ready pill and an amber card's status hover.
+pub const NOT_READY_MEANS: &str = "Not ready: a problem row in the set or one of its textures. Notes, rows you marked as intended and checks don't count.";
+
+/// The pill's hover (R15): the long badge, then what the status `s` means (review E4) or blocked, then one line each
+/// for owns, missing entries and recipes.
+pub fn pill_hover(model: &AppModel, v: &SetView, s: Status) -> String {
     let mut lines = vec![badge_text(model, v).to_string()];
-    if blocked {
-        lines.push("blocked".to_string());
+    match s {
+        Status::Blocks => lines.push("blocked".to_string()),
+        Status::Ready => lines.push(READY_MEANS.to_string()),
+        Status::Warning => lines.push(NOT_READY_MEANS.to_string()),
+        _ => {}
     }
     lines.extend(v.owns.iter().map(|s| format!("owns {}", v.slot_text(*s))));
     lines.extend(
@@ -533,7 +542,7 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, v: &SetView, s: Status) {
             }
         })
         .response
-        .on_hover_text(pill_hover(model, v, s == Status::Blocks));
+        .on_hover_text(pill_hover(model, v, s));
 }
 
 /// A member's thumbnail on the card with today's behaviours: click selects, double-click expands, a slot member has
@@ -973,19 +982,19 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
                 &mut f.attention,
                 format!("Not ready {}", c.attention),
                 c.attention,
-                "Only sets that are not ready: a problem in the set or one of its textures",
+                format!("Only sets that are not ready. {NOT_READY_MEANS}"),
             ),
             (
                 &mut f.ready,
                 format!("Ready {}", c.ready),
                 c.ready,
-                "Only sets with no problem",
+                format!("Only sets that are ready. {READY_MEANS}"),
             ),
             (
                 &mut f.no_json,
                 format!("No JSON {}", c.no_json),
                 c.no_json,
-                "Only sets that write no JSON",
+                "Only sets that write no JSON".to_string(),
             ),
         ] {
             // Note HP SC5: a pill that would show nothing is weak, and stays clickable.

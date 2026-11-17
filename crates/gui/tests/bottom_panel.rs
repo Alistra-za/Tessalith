@@ -593,15 +593,27 @@ fn the_set_editor_points_to_problems_instead_of_listing_codes() {
     let mut m = opened(d.path());
     let key = rock01(&m).key;
     m.select_set(&key);
+    // Review E4: the status line's first reason is a row in Problems, so its click opens Problems on the set.
+    let reasons = sdc_gui::model::bottom::set_reasons(&m, &key);
+    assert!(
+        matches!(
+            reasons.first().map(|r| &r.go),
+            Some(sdc_gui::model::bottom::ReasonGo::Row(_))
+        ),
+        "{reasons:?}"
+    );
     let mut h = harness(m);
     h.run();
     assert!(h
         .query_all_by_label_contains("IN-GREEN-UNSTATED:")
         .next()
         .is_none());
-    h.get_by_label_contains("in this set — Show in Problems")
-        .click();
-    h.run();
+    let first = h
+        .query_all_by_label_contains(" — go to the fix")
+        .min_by(|a, b| a.rect().left().total_cmp(&b.rect().left()))
+        .expect("a reason on the status line");
+    first.click();
+    idle(&mut h);
     assert_eq!(h.state().bottom.filter, Some(ProblemsFilter::Set(key)));
 }
 

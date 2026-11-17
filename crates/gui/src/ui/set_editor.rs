@@ -7,13 +7,14 @@ use super::slot_commands::SlotCmdState;
 use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
-use crate::model::bottom::tile_ready;
+use crate::model::bottom::{is_hidden, set_reasons, tile_ready, ProblemsFilter, ReasonGo};
 use crate::model::bulk::MenuAction;
 use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
     PARALLAX_HOVER,
 };
 use crate::model::items::{self, ItemKind, ItemStatus, TextureItem};
+use crate::model::nav::SlotTarget;
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::sets::{
@@ -83,6 +84,86 @@ enum Act {
     RemoveMember(String, String),
     /// Note HH: the set stops sharing a helper (set id, item).
     StopSharing(String, String),
+    /// Review E4: a status line reason's button.
+    Reason(ReasonGo),
+    /// Review E4: the status line's "+k more in Problems".
+    Problems,
+}
+
+/// Review E4: a Slot reason asks the empty slot's **Assign…** (by its id salt, `assign_id`) for focus; the row takes
+/// it on its next draw, and a draw that does not take it drops it.
+const ASSIGN_FOCUS: &str = "set-editor-assign-focus";
+
+/// The reasons the status line names; the rest are "+k more in Problems".
+const STATUS_REASONS: usize = 3;
+
+/// A slot row's id: by slot number, so the two kinds of a shared card are one row; the XPMF maps (no number) by kind.
+fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
+    match slot.slot_number() {
+        Some(n) => egui::Id::unique(("slot-row", set_id, n)),
+        None => egui::Id::unique(("slot-row", set_id, slot)),
+    }
+}
+
+/// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
+fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
+    let reasons = set_reasons(model, &v.key);
+    let mut act = None;
+    ui.horizontal_wrapped(|ui| {
+        if reasons.is_empty() {
+            dot(ui, Status::Ready);
+            ui.label("Ready: nothing in this set needs you.");
+            return;
+        }
+        dot(ui, Status::Warning);
+        ui.label("Not ready:");
+        let hidden = model.hidden_kinds();
+        for (i, r) in reasons.iter().take(STATUS_REASONS).enumerate() {
+            if i > 0 {
+                ui.weak("·");
+            }
+            let b = ui.button(&r.text);
+            let name = format!("{} — go to the fix", r.text);
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+            // Hiding never changes readiness, so a hidden kind's row is still a reason.
+            let tip = match &r.go {
+                ReasonGo::Row(p) if is_hidden(p, &hidden) => {
+                    "Go to the control that fixes this.\nThis kind is hidden; this shows it again."
+                }
+                _ => "Go to the control that fixes this.",
+            };
+            if b.on_hover_text(tip).clicked() {
+                act = Some(Act::Reason(r.go.clone()));
+            }
+        }
+        let more = reasons.len().saturating_sub(STATUS_REASONS);
+        if more > 0 && ui.link(format!("+{more} more in Problems")).clicked() {
+            act = Some(Act::Problems);
+        }
+    });
+    act
+}
+
+/// Review E4: what a status line click asks for, applied after drawing.
+fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act) {
+    match act {
+        Act::Reason(ReasonGo::Slot(kind)) => {
+            model.go_to_set(&v.key, Some(SlotTarget::Slot(kind)));
+            let id = slot_row_id(&v.id, kind).with("assign");
+            ui.data_mut(|d| d.insert_temp(egui::Id::unique(ASSIGN_FOCUS), id));
+        }
+        Act::Reason(ReasonGo::Row(p)) => {
+            // The row it focuses must be in the list.
+            if let Some(code) = p.code.filter(|_| is_hidden(&p, &model.hidden_kinds())) {
+                model.set_kind_hidden(code, false);
+            }
+            model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));
+            super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
+        }
+        Act::Problems => model.open_problems(Some(ProblemsFilter::Set(v.key.clone()))),
+        // `status_line` makes no other act.
+        _ => {}
+    }
 }
 
 /// How the set editor shares the view with the 3D preview panel.
@@ -116,11 +197,19 @@ pub fn draw(
         ui.weak("This set is no longer in the plan.");
         return;
     };
+    // Review E4: the first line, in both views, above the scrolling column so it stays in sight.
+    let status = status_line(ui, model, v);
+    let assign_focus = egui::Id::unique(ASSIGN_FOCUS);
     if view.three_d {
         // 3D (AG132): the set's 3D view takes the rest of this pane (`ui::centre`); the TruePBR settings and the skin
         // card are in the TruePBR settings… window, as are the CS PBR section and the complex material card, so an edit
         // still shows live in 3D.
         head(ui, model, v, view);
+        // No slot rows here: a waiting Assign… focus is dropped.
+        ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
+        if let Some(a) = status {
+            status_act(ui, model, v, a);
+        }
         return;
     }
     // `size_of` needs the model mutably, which the drawing below does not have.
@@ -129,7 +218,7 @@ pub fn draw(
         .iter()
         .filter_map(|k| model.size_of(k).map(|e| (k.clone(), e)))
         .collect();
-    let mut acts = vec![];
+    let mut acts: Vec<Act> = status.into_iter().collect();
     // Item 17: where a file from Explorer was dropped this frame, if one waits for a slot card.
     let drop_at = drops.file.as_ref().and_then(|f| f.pos);
     let off = model.sets_read_only_reason();
@@ -169,6 +258,8 @@ pub fn draw(
         tabs(ui, model, v, view.noise_uv);
     });
     super::row_reveal::end(ui.ctx());
+    // The slot rows took a waiting Assign… focus, or it has no Assign… to go to (a filled slot): either way it is gone.
+    ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
     let (mut select, mut expand) = (None, None);
     for a in acts {
         match a {
@@ -206,6 +297,7 @@ pub fn draw(
                     });
                 }
             }
+            a @ (Act::Reason(_) | Act::Problems) => status_act(ui, model, v, a),
         }
     }
     select_or_expand(ui, model, &v.id, select, expand);
@@ -396,28 +488,14 @@ fn slot_note(ui: &mut egui::Ui, drops: &DropState, set: &str) {
     }
 }
 
-/// The recipe lines, the set's warnings (each member's, each once) and what matches nothing.
-fn under_grid(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
+/// The recipe lines and what matches nothing (the set's problems are on the status line, review E4).
+fn under_grid(ui: &mut egui::Ui, model: &AppModel, v: &SetView) {
     let Some(set) = model.sets.iter().find(|s| s.key == v.key) else {
         return;
     };
     for r in &set.recipes {
         ui.add_space(4.0);
         recipe(ui, r);
-    }
-    // R10: the codes live in Problems; one line points there.
-    let n = crate::model::bottom::set_problem_count(model, &v.key);
-    if n > 0 {
-        ui.add_space(6.0);
-        let text = format!(
-            "{n} problem{} in this set — Show in Problems",
-            if n == 1 { "" } else { "s" }
-        );
-        if ui.link(text).clicked() {
-            model.open_problems(Some(crate::model::bottom::ProblemsFilter::Set(
-                v.key.clone(),
-            )));
-        }
     }
     for m in &v.missing {
         ui.colored_label(AMBER, format!("no file matches {}", m.text()));
@@ -523,11 +601,7 @@ fn row(
     let fill = &cell.fill;
     // K1: a Grid cell cannot hold the whole row, so last frame's row rect takes the right-click (F3a Task 8) and the
     // Explorer drop (item 17). It is registered before the cells, so they keep their own clicks.
-    // By slot number; the XPMF maps (no number) by kind, so their two rows differ.
-    let row_id = match slot.slot_number() {
-        Some(n) => egui::Id::unique(("slot-row", &v.id, n)),
-        None => egui::Id::unique(("slot-row", &v.id, slot)),
-    };
+    let row_id = slot_row_id(&v.id, slot);
     if let Some(r) = ui.data(|d| d.get_temp::<egui::Rect>(row_id)) {
         let resp = ui.interact(r, row_id, egui::Sense::click());
         slot_menu(&resp, model, v, slot, acts);
@@ -688,10 +762,21 @@ fn row(
     let format_w = ui
         .vertical(|ui| {
             if item.is_none() {
-                let menu = crate::look::menu_button_036(ui, "Assign…", |ui| {
-                    // C14: the slot label once ("Emissive / Skin (slot 3)").
-                    bulk_menu(ui, v.slot_label(slot, ""), &model.slot_menu(&v.id, slot))
-                });
+                // Review E4: salted by the row, so a status line reason can ask this button for focus.
+                let assign_id = row_id.with("assign");
+                let menu = ui
+                    .push_id(assign_id, |ui| {
+                        crate::look::menu_button_036(ui, "Assign…", |ui| {
+                            // C14: the slot label once ("Emissive / Skin (slot 3)").
+                            bulk_menu(ui, v.slot_label(slot, ""), &model.slot_menu(&v.id, slot))
+                        })
+                    })
+                    .inner;
+                let focus_key = egui::Id::unique(ASSIGN_FOCUS);
+                if ui.data(|d| d.get_temp::<egui::Id>(focus_key)) == Some(assign_id) {
+                    ui.data_mut(|d| d.remove::<egui::Id>(focus_key));
+                    menu.response.request_focus();
+                }
                 if let Some(Some(a)) = menu.inner {
                     acts.push(Act::Slot(a));
                 }

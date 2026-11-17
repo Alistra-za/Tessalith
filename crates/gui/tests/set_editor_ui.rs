@@ -1200,7 +1200,16 @@ fn the_card_toggles_mirror_the_matching_rows() {
     h.run();
     assert_eq!(rock_settings(&h)["match1"], serde_json::json!(""));
     assert_eq!(match_toggles(&h), vec![false, false]);
-    h.get_by_label_contains("this entry matches nothing");
+    // Review E4: the row is also a reason on the set editor's status line; the warning is the other node.
+    assert_eq!(
+        h.query_all_by_label_contains("this entry matches nothing")
+            .filter(|n| !n
+                .accesskit_node()
+                .label()
+                .is_some_and(|l| l.ends_with(" — go to the fix")))
+            .count(),
+        1
+    );
     h.query_all_by_label("Match on this")
         .nth(1)
         .unwrap()

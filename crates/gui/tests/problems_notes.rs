@@ -1793,11 +1793,20 @@ fn the_set_editors_dot_is_ready_once_its_warning_is_marked() {
             .count()
     };
     let ready = centre(&h, "ready");
-    assert_eq!(centre(&h, "warning"), 1, "the slot's dot before the mark");
+    // Task 9: the status line's dot is the second; it turns ready with the slot's.
+    assert_eq!(
+        centre(&h, "warning"),
+        2,
+        "the slot's dot and the status line's before the mark"
+    );
     mark_first(h.state_mut(), Code::ValMipError);
     h.run();
     assert_eq!(centre(&h, "warning"), 0, "no warning dot once marked");
-    assert_eq!(centre(&h, "ready"), ready + 1, "the slot's dot is ready");
+    assert_eq!(
+        centre(&h, "ready"),
+        ready + 2,
+        "the slot's dot and the status line's are ready"
+    );
 }
 
 /// `checks.rs::pbr_wall(dir, true, false)`, copied: one PBR set under `textures/test` whose flat `wall_p.png` raises
@@ -2725,6 +2734,238 @@ fn install_follows_the_os_value_on_both_themes() {
     assert!(!reduced(&ctx));
     assert_eq!(*ctx.style_of(Theme::Dark), *before.0);
     assert_eq!(*ctx.style_of(Theme::Light), *before.1);
+}
+
+/// Controller ruling for Task 9: a click, then `run`, `wait_idle`, `run` (`bottom_panel.rs`'s `idle`).
+fn click_and_settle(h: &mut Harness<'static, AppModel>, label: &str) {
+    h.get_by_label(label).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+}
+
+/// Tooltips at once, wherever the pointer is (`bottom_panel.rs`'s hover tests).
+fn tooltips_now(h: &Harness<'static, AppModel>) {
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+}
+
+const MIP_REASON: &str = "A mip level strays from its source — go to the fix";
+
+/// Review E4 acceptance: an amber set's editor names a reason first, and the reason is a button that moves focus to
+/// its fix.
+#[test]
+fn a_not_ready_set_says_why_on_its_first_line_and_each_reason_moves_focus() {
+    use engine::codes::{Code, Warning};
+    assert!(
+        baseline().1,
+        "precondition: rock01 is ready with no injected warning, so VAL-MIP-ERROR is its one reason"
+    );
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let line = h.get_by_label("Not ready:");
+    let reason = h.get_by_label(MIP_REASON);
+    assert!(
+        (reason.rect().top() - line.rect().top()).abs() < 4.0,
+        "on the same first line"
+    );
+    click_and_settle(&mut h, MIP_REASON);
+    assert_eq!(
+        h.state().bottom.filter,
+        Some(sdc_gui::model::bottom::ProblemsFilter::Set(key))
+    );
+    let mark = on_row(
+        &h,
+        sdc_gui::model::code_text::code_sentence(Code::ValMipError),
+        "Mark as intended: ",
+    );
+    assert!(
+        mark.accesskit_node().is_focused(),
+        "focus is on the row's fix control"
+    );
+}
+
+/// A row with a fix: focus goes to the fix, the leftmost of the row's controls, not to Mark as intended.
+#[test]
+fn a_reason_with_a_fix_focuses_the_fix() {
+    use egui::accesskit::Role;
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let what = sdc_gui::model::code_text::code_line(Code::ChanNormalLength)
+        .split(" — ")
+        .next()
+        .unwrap()
+        .to_string();
+    click_and_settle(&mut h, &format!("{what} — go to the fix"));
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
+    let y = h.get_by_label(sentence).rect().center().y;
+    let fix = h
+        .query_all_by_role_and_label(Role::Button, sdc_gui::ui::problems::REBUILD_Z)
+        .find(|n| (n.rect().center().y - y).abs() <= 4.0)
+        .expect("Rebuild Z on the row");
+    assert!(fix.accesskit_node().is_focused(), "Rebuild Z has focus");
+    assert!(!on_row(&h, sentence, "Mark as intended: ")
+        .accesskit_node()
+        .is_focused());
+}
+
+#[test]
+fn a_hidden_reason_shows_its_kind_again_and_takes_focus() {
+    use engine::codes::{Code, Warning};
+    assert!(
+        baseline().1,
+        "precondition: rock01 is ready with no injected warning"
+    );
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    m.set_kind_hidden(Code::ValMipError, true);
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    tooltips_now(&h);
+    h.run();
+    h.get_by_label(MIP_REASON).hover();
+    h.run();
+    h.get_by_label_contains("This kind is hidden; this shows it again.");
+    click_and_settle(&mut h, MIP_REASON);
+    assert!(h.state().hidden_kinds().is_empty());
+    let mark = on_row(
+        &h,
+        sdc_gui::model::code_text::code_sentence(Code::ValMipError),
+        "Mark as intended: ",
+    );
+    assert!(mark.accesskit_node().is_focused());
+}
+
+/// Controller ruling for Task 9: the Normal member leaves, not the diffuse (the set could dissolve); the empty slot's
+/// Assign… takes focus.
+#[test]
+fn a_missing_map_reason_focuses_the_slot_assign_button() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::sets::SlotKind;
+    let missing = || {
+        Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))
+    };
+    let (_d, mut m) = with_set_warnings(&[missing()]);
+    let (n, _) = normal_member(&m);
+    m.remove_member(&rock01(&m).id, &n).unwrap();
+    // remove_member plans again, which replaces injected warnings
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject_set(&mut m, &[missing()]);
+    let v = rock01(&m);
+    let text = format!("no {} (Assign…)", v.slot_label(SlotKind::Normal, ""));
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &format!("{text} — go to the fix"));
+    // The reason button's own label contains "Assign…" too; leave it out so a focus that stayed on it fails.
+    let focused: Vec<_> = h
+        .query_all_by_label_contains("Assign")
+        .filter(|n| {
+            !n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("go to the fix"))
+        })
+        .filter(|n| n.accesskit_node().is_focused())
+        .collect();
+    assert_eq!(
+        focused.len(),
+        1,
+        "the empty Normal slot's Assign… has focus"
+    );
+}
+
+/// The DERIVE-NO-ALBEDO slot case: no production row reaches it today (the engine raises the code only from the Also
+/// export planner), so the row is injected, as Task 8's target test does.
+#[test]
+fn a_no_albedo_set_row_is_a_slot_reason() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    use sdc_gui::model::sets::SlotKind;
+    let (_d, m) = with_set_warnings(&[Warning::new(Code::DeriveNoAlbedo, "no albedo")]);
+    let r = set_reasons(&m, &rock01(&m).key);
+    assert_eq!(r.len(), 1, "{r:?}");
+    assert_eq!(r[0].go, ReasonGo::Slot(SlotKind::Diffuse));
+    assert_eq!(r[0].text, "no Diffuse (Assign…)");
+}
+
+/// Four reasons: three buttons, then a link to the rest.
+#[test]
+fn more_than_three_reasons_link_to_problems() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage"),
+        Warning::new(Code::LossReencode, "again"),
+        Warning::new(Code::ChanNotGray, "colour"),
+    ]);
+    let key = rock01(&m).key;
+    assert_eq!(
+        sdc_gui::model::bottom::set_reasons(&m, &key).len(),
+        4 + usize::from(!baseline().1)
+    );
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.query_all_by_label_contains(" — go to the fix").count(), 3);
+    let more = format!("+{} more in Problems", 1 + usize::from(!baseline().1));
+    click_and_settle(&mut h, &more);
+    assert_eq!(
+        h.state().bottom.filter,
+        Some(sdc_gui::model::bottom::ProblemsFilter::Set(key))
+    );
+}
+
+#[test]
+fn a_set_with_only_notes_reads_ready() {
+    use engine::codes::{Code, Warning};
+    assert!(
+        baseline().1,
+        "precondition: rock01 is ready with no injected warning"
+    );
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::DimNpot, "npot")]);
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Ready: nothing in this set needs you.");
+    assert!(
+        h.query_by_label_contains("in this set — Show in Problems")
+            .is_none(),
+        "the old line is gone (CA18)"
+    );
+}
+
+/// Controller ruling 10: the filter pills and the card's status hover both say what ready means.
+#[test]
+fn the_pills_and_the_card_say_what_ready_means() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::ui::sets_column::{pill_hover, NOT_READY_MEANS, READY_MEANS};
+    use sdc_gui::ui::status::Status;
+    let (_d, m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let v = rock01(&m);
+    assert!(pill_hover(&m, &v, Status::Warning).contains(NOT_READY_MEANS));
+    assert!(pill_hover(&m, &v, Status::Ready).contains(READY_MEANS));
+    assert!(!pill_hover(&m, &v, Status::Blocks).contains(READY_MEANS));
+    assert!(!pill_hover(&m, &v, Status::Blocks).contains(NOT_READY_MEANS));
+    let mut h = harness(m);
+    tooltips_now(&h);
+    h.run();
+    h.get_by_label_contains("Not ready ").hover();
+    h.run();
+    h.get_by_label(&format!("Only sets that are not ready. {NOT_READY_MEANS}"));
+    h.get_by_label_contains("Ready ").hover();
+    h.run();
+    h.get_by_label(&format!("Only sets that are ready. {READY_MEANS}"));
 }
 
 /// Review fix 5: the app reads the OS value at start.

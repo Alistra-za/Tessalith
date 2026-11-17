@@ -254,7 +254,12 @@ fn drop_on_card_scrolled_out_of_view_opens_folder_not_slot() {
     // above it.
     let header = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
     let y = header.top() - 6.0;
-    h.hover_at(eframe::egui::pos2(card.center().x, card.bottom() + 40.0));
+    // Inside the set editor's scroll area (the centre less its margin): the editor's status line (review E4) leaves
+    // less than 40 px under the card here.
+    h.hover_at(eframe::egui::pos2(
+        card.center().x,
+        (card.bottom() + 40.0).min(header.bottom() - 16.0),
+    ));
     h.event(eframe::egui::Event::MouseWheel {
         unit: eframe::egui::MouseWheelUnit::Point,
         delta: eframe::egui::vec2(0.0, -(card.top() - y + 30.0)),
