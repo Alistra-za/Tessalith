@@ -4,8 +4,8 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    cached_tab_counts, can_hide, filtered, flagged, kinds, problems, At, Fix, Level, Problem,
-    ProblemsFilter,
+    cached_tab_counts, can_hide, count_in_set, filtered, flagged, is_hidden, kinds, problems, At,
+    Fix, Level, Problem, ProblemsFilter,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -74,6 +74,8 @@ struct Listed {
     hideable: bool,
     /// Review E2: the listed rows that are not notes (the empty and first-line texts).
     problem_rows: usize,
+    /// Review E2: the set's notes, not hidden, while a set filter is on (the Notes pill and the first line).
+    set_notes: Option<usize>,
 }
 
 /// `filtered` at most once per change: keyed on the (cached) problems build, the filter and the hidden kinds. Also
@@ -90,18 +92,36 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         }
     }
     let out: Rows = filtered(model, f.as_ref());
+    // The Checks pill under a set's list or its notes leads to the set's checks, so it counts those.
     let checks = match &f {
-        Some(ProblemsFilter::Set(_)) => out.iter().filter(|p| p.level == Level::Check).count(),
+        Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
+            count_in_set(model, k, |p| p.level == Level::Check)
+        }
         _ => flagged(model).check_rows,
     };
-    let is_hidden = |p: &Problem| can_hide(p) && p.code.is_some_and(|c| hidden_kinds.contains(&c));
-    let hidden = out.iter().filter(|p| is_hidden(p)).count();
+    // Review E2: under any set filter the Notes pill leads to the set's notes, so it counts those (hidden left out, as
+    // the tab's count); otherwise it reads the tab's count.
+    let set_notes = match &f {
+        Some(
+            ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
+        ) => Some(count_in_set(model, k, |p| {
+            p.is_note() && !is_hidden(p, &hidden_kinds)
+        })),
+        _ => None,
+    };
+    let hidden = out.iter().filter(|p| is_hidden(p, &hidden_kinds)).count();
     let rows: Rows = if hidden == 0 {
         out
     } else {
-        Arc::new(out.iter().filter(|p| !is_hidden(p)).cloned().collect())
+        Arc::new(
+            out.iter()
+                .filter(|p| !is_hidden(p, &hidden_kinds))
+                .cloned()
+                .collect(),
+        )
     };
     let l = Listed {
+        set_notes,
         problem_rows: rows.iter().filter(|p| !p.is_note()).count(),
         suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
         hideable: all.iter().any(can_hide),
@@ -507,10 +527,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         hidden,
         hideable,
         problem_rows,
+        set_notes,
         ..
     } = rows(ui, model);
-    // Review E2: the tab's own cached counts, so the pill scans no row on a settled frame.
-    let notes = cached_tab_counts(model).notes;
+    // Review E2: the set's notes under a set filter, else the tab's own cached count; neither scans a row on a
+    // settled frame.
+    let notes = set_notes.unwrap_or_else(|| cached_tab_counts(model).notes);
     let off = model.fix_off();
     let sets_off = model.sets_read_only_reason();
     let mut act = None;
@@ -600,7 +622,15 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             "No problems. {NOTES_PILL} ({notes}) lists what Tessalith did for you."
         ));
     } else if list.is_empty() {
-        ui.weak("No problems");
+        let notes_list = matches!(
+            model.bottom.filter,
+            Some(ProblemsFilter::Notes | ProblemsFilter::SetNotes(_))
+        );
+        ui.weak(if notes_list {
+            "No notes"
+        } else {
+            "No problems"
+        });
     }
     let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let m = &*model;

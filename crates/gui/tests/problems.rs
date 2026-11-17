@@ -175,12 +175,16 @@ fn the_set_filter_keeps_the_sets_rows_and_its_members_rows() {
 }
 
 #[test]
-fn the_unfiltered_list_is_the_problems_list_itself() {
+fn the_unfiltered_list_is_the_worklist() {
     let d = tempfile::tempdir().unwrap();
     let m = opened(d.path());
-    // Review E2: every worklist row of `problems`, and only those.
-    let worklist = problems(&m).iter().filter(|p| p.in_worklist()).count();
-    assert_eq!(filtered(&m, None).len(), worklist);
+    // Review E2: the worklist rows of `problems`, in order, and only those.
+    let worklist: Vec<_> = problems(&m)
+        .iter()
+        .filter(|p| p.in_worklist())
+        .cloned()
+        .collect();
+    assert_eq!(*filtered(&m, None), worklist);
 }
 
 #[test]

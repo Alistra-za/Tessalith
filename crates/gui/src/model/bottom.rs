@@ -262,12 +262,16 @@ pub struct TabCounts {
     pub notes: usize,
 }
 
-/// The tab counts of `all` with the kinds in `hidden` hidden (the same test as the list's, `can_hide`).
+/// Note HC4: a row that one of the `hidden` kinds takes out of the list; the tab counts and the list share it.
+pub fn is_hidden(p: &Problem, hidden: &[Code]) -> bool {
+    can_hide(p) && p.code.is_some_and(|k| hidden.contains(&k))
+}
+
+/// The tab counts of `all` with the kinds in `hidden` hidden (`is_hidden`, as the list).
 pub fn tab_counts(all: &[Problem], hidden: &[Code]) -> TabCounts {
     let mut c = TabCounts::default();
     for p in all {
-        let is_hidden = can_hide(p) && p.code.is_some_and(|k| hidden.contains(&k));
-        match (p.is_note(), is_hidden) {
+        match (p.is_note(), is_hidden(p, hidden)) {
             (true, true) => {}
             (true, false) => c.notes += 1,
             (false, true) => c.hidden += 1,
@@ -1075,14 +1079,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
-    // Review E2 (rule 1.2, controller ruling 5): one worklist, the problem rows, then the notes with a button.
-    let worklist = |keep: &dyn Fn(&Problem) -> bool| -> Vec<Problem> {
-        let (notes, rows): (Vec<&Problem>, Vec<&Problem>) = all
-            .iter()
-            .filter(|p| p.in_worklist() && keep(p))
-            .partition(|p| p.is_note());
-        rows.into_iter().chain(notes).cloned().collect()
-    };
+    let worklist = |keep: &dyn Fn(&Problem) -> bool| worklist(&all, keep);
     Arc::new(match f {
         None => worklist(&|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
@@ -1117,6 +1114,25 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
     })
 }
 
+/// Review E2 (rule 1.2, controller ruling 5): one worklist of the `keep` rows, the problem rows, then the notes with a
+/// button, each group in build order.
+fn worklist(all: &[Problem], keep: &dyn Fn(&Problem) -> bool) -> Vec<Problem> {
+    let (notes, rows): (Vec<&Problem>, Vec<&Problem>) = all
+        .iter()
+        .filter(|p| p.in_worklist() && keep(p))
+        .partition(|p| p.is_note());
+    rows.into_iter().chain(notes).cloned().collect()
+}
+
+/// How many of the set's (an engine set key) own rows and members' rows pass `keep`, without cloning them.
+pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) -> usize {
+    let members = set_members(m, key);
+    problems(m)
+        .iter()
+        .filter(|p| in_set(p, key, &members) && keep(p))
+        .count()
+}
+
 fn set_members(m: &AppModel, key: &str) -> HashSet<String> {
     sets::views(m)
         .iter()
@@ -1133,7 +1149,8 @@ fn in_set(p: &Problem, key: &str, members: &HashSet<String>) -> bool {
     }
 }
 
-/// How many problems `filtered(m, Some(Set(key)))` lists, without cloning them.
+/// How many rows of `problems` the set and its members have, notes with no button included (more than
+/// `filtered(m, Some(Set(key)))` lists since review E2), without cloning them.
 pub fn set_problem_count(m: &AppModel, key: &str) -> usize {
     let members = set_members(m, key);
     problems(m)
@@ -1145,6 +1162,34 @@ pub fn set_problem_count(m: &AppModel, key: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Review E2 (controller ruling 5): a note with a button built before a problem row is listed after it. No row
+    /// `build_problems` makes today comes in that order, so the rows are written out here.
+    #[test]
+    fn the_worklist_lists_the_problems_before_the_notes_with_a_button() {
+        let row = |level, text: &str, fix| Problem {
+            level,
+            at: At::Project,
+            text: text.into(),
+            code: None,
+            also: vec![],
+            fix,
+            suggested: None,
+            detail: None,
+            carried: false,
+            intended: false,
+        };
+        let all = [
+            row(Level::Info, "note", Some(Fix::UndoLast)),
+            row(Level::Info, "bare note", None),
+            row(Level::Warning, "problem", None),
+        ];
+        let texts: Vec<_> = worklist(&all, &|_| true)
+            .into_iter()
+            .map(|p| p.text)
+            .collect();
+        assert_eq!(texts, ["problem", "note"]);
+    }
 
     /// Pins the engine's IN-UNREADABLE message shape (`skipped: <path>: <error>`) that `unreadable_folder` parses.
     #[test]

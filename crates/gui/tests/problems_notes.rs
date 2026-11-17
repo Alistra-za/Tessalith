@@ -343,9 +343,10 @@ fn notes_leave_the_problems_list_and_show_under_the_notes_pill() {
 fn a_note_with_a_button_stays_in_the_list_and_never_counts() {
     use engine::codes::{Code, Warning};
     let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    // The same fixture without the note: the note must leave this count as it is.
+    let ready = sdc_gui::model::bottom::flagged(&m).ready_rows;
     m.unmatched_keys = vec!["gone.png".into()];
     m.invalidate_views();
-    let ready = sdc_gui::model::bottom::flagged(&m).ready_rows;
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
@@ -440,4 +441,84 @@ fn a_new_problems_build_is_counted_again() {
         .push(Warning::new(Code::DimNpot, "npot"));
     m.evidence_rev += 1;
     assert_eq!(cached_tab_counts(&m), TabCounts { notes: 1, ..one });
+}
+
+/// Review E2 fix 1: under a set filter the Notes pill and the first line count the set's notes, which the pill opens;
+/// the tab keeps the project's count. Here: one note on rock01's member, one on the project.
+#[test]
+fn under_a_set_filter_the_notes_pill_counts_the_sets_notes() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{cached_tab_counts, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::DimNpot, "npot")]);
+    m.unmatched_keys = vec!["gone.png".into()];
+    m.invalidate_views();
+    assert_eq!(cached_tab_counts(&m).notes, 2, "the project's notes");
+    let key = rock01(&m).key;
+    m.open_problems(Some(ProblemsFilter::Set(key)));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Notes (1)");
+    assert_eq!(h.query_all_by_label("Notes (2)").count(), 0);
+    h.get_by_label("No problems. Notes (1) lists what Tessalith did for you.");
+}
+
+/// Review E2 fix 1: a set with no note shows no Notes pill and the plain empty line, whatever the project has.
+#[test]
+fn a_set_with_no_notes_shows_no_notes_pill() {
+    use sdc_gui::model::bottom::{cached_tab_counts, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[]);
+    m.unmatched_keys = vec!["gone.png".into()];
+    m.invalidate_views();
+    assert_eq!(cached_tab_counts(&m).notes, 1, "the project's note");
+    let key = rock01(&m).key;
+    m.open_problems(Some(ProblemsFilter::Set(key)));
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.query_all_by_label("Notes (1)").count(), 0, "no pill");
+    h.get_by_label("No problems");
+}
+
+/// Review E2 fix 2: with the set's notes listed, the Checks pill counts the set's checks, which its click opens. The
+/// project's one check is a last-export File row, in no set.
+#[test]
+fn under_a_sets_notes_the_checks_pill_counts_the_sets_checks() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{filtered, flagged, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    decide_all(&mut m);
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    m.export.rows[0]
+        .warnings
+        .push(Warning::new(Code::ChkLowDetail, "low detail"));
+    m.invalidate_views();
+    let key = rock01(&m).key;
+    assert!(flagged(&m).check_rows > 0, "the project has a check");
+    let set_checks = ProblemsFilter::SetChecks(key.clone());
+    assert!(
+        filtered(&m, Some(&set_checks)).is_empty(),
+        "rock01 has none"
+    );
+    m.open_problems(Some(ProblemsFilter::SetNotes(key)));
+    let mut h = harness(m);
+    h.run();
+    assert!(h
+        .query_by_label(sdc_gui::ui::problems::CHECKS_PILL)
+        .is_none());
+}
+
+/// Review E2 fix 6 and the pill ruling: an empty Notes list says so, and its pill stays to turn the filter off.
+#[test]
+fn an_empty_notes_list_says_no_notes_and_its_pill_turns_it_off() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.open_problems(Some(ProblemsFilter::Notes));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("No notes");
+    h.get_by_label("Notes (0)").click();
+    h.run();
+    assert_eq!(h.state().bottom.filter, None);
 }
