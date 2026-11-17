@@ -815,7 +815,7 @@ fn row(
             if let Some(i) = item {
                 let s = match i.status {
                     ItemStatus::Failed(_) | ItemStatus::Error(_) => Status::Blocks,
-                    _ if tile_ready(i) => Status::Ready,
+                    _ if tile_ready(model, i) => Status::Ready,
                     _ => Status::Warning,
                 };
                 let r = dot(ui, s);

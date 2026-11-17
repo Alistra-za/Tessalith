@@ -269,7 +269,7 @@ fn tile(
                 let mut badges = vec![];
                 if no_set {
                     badges.push("No set".to_string());
-                } else if item.warnings.iter().any(super::counts_toward_badge) {
+                } else if crate::model::bottom::item_warned(model, item) {
                     badges.push("⚠".to_string());
                 }
                 if let ItemStatus::PackedInto(j) = &item.status {
@@ -281,7 +281,7 @@ fn tile(
                 if let Some(a) = &read_as {
                     badges.push(format!("read as {a}"));
                 }
-                let ready = !no_set && crate::model::bottom::tile_ready(item);
+                let ready = !no_set && crate::model::bottom::tile_ready(model, item);
                 ui.horizontal(|ui| {
                     if ready {
                         super::status::dot(ui, super::status::Status::Ready);

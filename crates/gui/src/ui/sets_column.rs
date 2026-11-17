@@ -7,6 +7,7 @@ use super::columns::{
 use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
+use crate::model::bottom::{counts_for, At};
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files};
@@ -2217,22 +2218,30 @@ fn pill(
                             egui::pos2(r.max.x + m.right, f32::MAX),
                         )
                     };
+                    // Review E4: `counts_for`, as the tiles; each `At` is built only for a card member or set
+                    // with warnings.
+                    let set_at = (!v.set_warnings.is_empty()).then(|| At::Set {
+                        key: v.key.clone(),
+                        id: v.id.clone(),
+                    });
                     let rows: Vec<(&str, &Warning)> = v
                         .members
                         .iter()
                         .filter_map(|k| model.item(k))
+                        .filter(|i| !i.warnings.is_empty())
                         .flat_map(|i| {
+                            let at = At::Texture(i.key.clone());
                             i.warnings
                                 .iter()
-                                .filter(|w| super::counts_toward_badge(w))
+                                .filter(move |w| counts_for(model, &at, w))
                                 .map(move |w| (i.name.as_str(), w))
                         })
-                        .chain(
+                        .chain(set_at.iter().flat_map(|at| {
                             v.set_warnings
                                 .iter()
-                                .filter(|w| super::counts_toward_badge(w))
-                                .map(|w| (v.id.as_str(), w)),
-                        )
+                                .filter(|w| counts_for(model, at, w))
+                                .map(|w| (v.id.as_str(), w))
+                        }))
                         .collect();
                     // Kept apart from `rows`: the "⚠ n" never counts check results. Undecided members are left out,
                     // as in Problems (review I1).

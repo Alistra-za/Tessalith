@@ -1,7 +1,8 @@
 //! The Textures column's filters, sort order and tile size (item 8, DECISIONS AG4 and AG46-AG55), and the cached list
 //! of what it shows.
+use super::bottom::item_warned;
 use super::items::{ItemKind, ItemStatus, TextureItem};
-use super::{counts_toward_badge, AppModel};
+use super::AppModel;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -158,10 +159,10 @@ struct ListKey {
 }
 
 /// Lower is shown first: errors, warnings, undecided, ok (AG4).
-fn status_rank(i: &TextureItem) -> u8 {
+fn status_rank(m: &AppModel, i: &TextureItem) -> u8 {
     if matches!(i.status, ItemStatus::Failed(_) | ItemStatus::Error(_)) {
         0
-    } else if i.warnings.iter().any(counts_toward_badge) {
+    } else if item_warned(m, i) {
         1
     } else if i.status == ItemStatus::NeedsDecision {
         2
@@ -240,7 +241,7 @@ impl AppModel {
             // Note HF1: a no-set texture's undecided state and warnings count for nothing.
             let counts = self.item_in_run(i);
             c.needs_decision += usize::from(counts && i.status == ItemStatus::NeedsDecision);
-            c.warnings += usize::from(counts && i.warnings.iter().any(counts_toward_badge));
+            c.warnings += usize::from(counts && item_warned(self, i));
             c.failed += usize::from(matches!(
                 i.status,
                 ItemStatus::Failed(_) | ItemStatus::Error(_)
@@ -324,7 +325,7 @@ impl AppModel {
                     && (!f.needs_decision
                         || i.status == ItemStatus::NeedsDecision && self.item_in_run(i))
                     && (!f.warnings
-                        || i.warnings.iter().any(counts_toward_badge) && self.item_in_run(i))
+                        || item_warned(self, i) && self.item_in_run(i))
                     && (!f.failed
                         || matches!(i.status, ItemStatus::Failed(_) | ItemStatus::Error(_)))
                     && (!f.not_in_set || !in_set(i))
@@ -346,7 +347,7 @@ impl AppModel {
         match self.prefs.sort {
             SortKey::Name => {}
             SortKey::Size => out.sort_by_key(|&n| std::cmp::Reverse(source_size(&self.items[n]))),
-            SortKey::Status => out.sort_by_key(|&n| status_rank(&self.items[n])),
+            SortKey::Status => out.sort_by_key(|&n| status_rank(self, &self.items[n])),
         }
         out
     }

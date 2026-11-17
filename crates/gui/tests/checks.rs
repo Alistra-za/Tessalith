@@ -501,7 +501,7 @@ fn soft_check_rows_are_listed_but_leave_ready_alone() {
     let v = views.iter().find(|v| v.key.ends_with("wall")).unwrap();
     assert!(bottom::set_ready(&m, v), "green set dot");
     let wall = m.item("test/wall.png").unwrap();
-    assert!(bottom::tile_ready(wall));
+    assert!(bottom::tile_ready(&m, wall));
     assert!(wall
         .warnings
         .iter()

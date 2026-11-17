@@ -521,7 +521,7 @@ fn the_problems_tab_draws_only_the_rows_on_screen() {
 /// What the columns should draw: a dot per ready tile and per ready set.
 fn ready_dots(m: &AppModel) -> (usize, usize) {
     use sdc_gui::model::bottom::{set_ready, tile_ready};
-    let tiles = m.items.iter().filter(|i| tile_ready(i)).count();
+    let tiles = m.items.iter().filter(|i| tile_ready(m, i)).count();
     let sets = sdc_gui::model::sets::set_views(m)
         .iter()
         .filter(|v| set_ready(m, v))
@@ -536,7 +536,7 @@ fn a_ready_set_and_tile_show_a_green_dot() {
     let m = opened(d.path());
     let v = rock01(&m);
     assert!(!set_ready(&m, &v), "undecided members");
-    assert!(!tile_ready(m.item("landscape/rock01.png").unwrap()));
+    assert!(!tile_ready(&m, m.item("landscape/rock01.png").unwrap()));
     let (tiles, sets) = ready_dots(&m);
     let mut h = harness(m);
     h.run();

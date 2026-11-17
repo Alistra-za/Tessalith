@@ -53,10 +53,14 @@ fn parts_on(f: &SetsFilter) -> Vec<&'static str> {
     .collect()
 }
 
-/// Not ready: a Problems row that is not Info or Check, on the set itself or on one of its member textures.
+/// Not ready: a Problems row that is not Info, Check or Queued and not marked as intended (review E4), on the set
+/// itself or on one of its member textures. Restated here, not `counts_as_ready_problem`, so a wrong rule shows.
 fn not_ready(problems: &[bottom::Problem], v: &SetView) -> bool {
     problems.iter().any(|p| {
-        !matches!(p.level, bottom::Level::Info | bottom::Level::Check)
+        !matches!(
+            p.level,
+            bottom::Level::Info | bottom::Level::Check | bottom::Level::Queued
+        ) && !p.intended
             && match &p.at {
                 At::Set { key, .. } => *key == v.key,
                 At::Texture(t) => v.members.contains(t),

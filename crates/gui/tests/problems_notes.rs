@@ -1467,3 +1467,93 @@ fn a_stored_key_never_unblocks_a_row_that_is_not_markable() {
     }
     assert_eq!(flagged(&m).ready_rows, ready, "Ready unchanged");
 }
+
+/// Marks the first Problems row of `code` as intended, as its **Mark as intended** button does.
+fn mark_first(m: &mut AppModel, code: engine::codes::Code) {
+    let p = sdc_gui::model::bottom::problems(m)
+        .iter()
+        .find(|p| p.code == Some(code))
+        .cloned()
+        .unwrap();
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+}
+
+/// Review E4: one readiness rule. A marked row takes "ready" away from neither its tile nor its set.
+#[test]
+fn a_set_tile_and_badge_agree_once_a_row_is_marked() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_ready, tile_ready};
+    use sdc_gui::model::items::ItemStatus;
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let v = rock01(&m);
+    let key = v.members[0].clone();
+    assert_eq!(
+        m.item(&key).unwrap().status,
+        ItemStatus::Ready,
+        "precondition"
+    );
+    assert!(!set_ready(&m, &v));
+    assert!(!tile_ready(&m, m.item(&key).unwrap()));
+    mark_first(&mut m, Code::ValMipError);
+    let v = rock01(&m);
+    assert_eq!(
+        set_ready(&m, &v),
+        baseline().1,
+        "the set is as ready as with no warning"
+    );
+    assert!(tile_ready(&m, m.item(&key).unwrap()), "the tile is ready");
+    let w = &m.item(&key).unwrap().warnings[0];
+    assert!(!sdc_gui::model::bottom::counts_for(
+        &m,
+        &sdc_gui::model::bottom::At::Texture(key.clone()),
+        w
+    ));
+}
+
+/// Review E4: the Textures column's "Has warnings" pill, its filter and the Status sort drop a marked warning.
+#[test]
+fn a_marked_warning_leaves_the_warnings_pill_filter_and_status_sort() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::texture_view::SortKey;
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let key = rock01(&m).members[0].clone();
+    let idx = m.items.iter().position(|i| i.key == key).unwrap();
+    let warned = m.filter_counts().warnings;
+    assert!(warned >= 1);
+    m.filter.warnings = true;
+    assert!(
+        m.visible_items().contains(&idx),
+        "listed under Has warnings"
+    );
+    m.filter.warnings = false;
+    m.prefs.sort = SortKey::Status;
+    assert_eq!(m.visible_items()[0], idx, "a warned texture sorts first");
+    mark_first(&mut m, Code::ValMipError);
+    assert_eq!(m.filter_counts().warnings, warned - 1, "the pill's count");
+    assert_ne!(m.visible_items()[0], idx, "sorted as a clean texture");
+    m.filter.warnings = true;
+    assert!(!m.visible_items().contains(&idx), "gone from Has warnings");
+}
+
+/// Review E4: after a mark, the tile's ⚠, the set card's "⚠ n" and the pill's ⚠ all go, for a member's warning and
+/// for the set's own.
+#[test]
+fn a_marked_warning_leaves_every_amber_badge() {
+    use engine::codes::{Code, Warning};
+    let ws = [Warning::new(Code::ValMipError, "mip 3")];
+    for (what, (_d, m)) in [
+        ("member", with_warnings(&ws)),
+        ("set", with_set_warnings(&ws)),
+    ] {
+        let mut h = harness(m);
+        h.run();
+        h.get_by_label("⚠ 1");
+        mark_first(h.state_mut(), Code::ValMipError);
+        h.run();
+        assert_eq!(
+            h.query_all_by_label_contains("⚠").count(),
+            0,
+            "{what}: no amber badge"
+        );
+    }
+}

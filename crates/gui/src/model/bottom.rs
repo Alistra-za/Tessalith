@@ -180,11 +180,14 @@ pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     let Some(doc) = m.sets_doc.as_ref() else {
         return true;
     };
-    // Only a project with marks builds a key per warning.
-    doc.intended_keys().is_empty() || {
-        let shown = code_text::shown_for(Some(w.code), &w.message);
-        !doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
-    }
+    // Tiles and cards ask every frame: only a warning whose code a mark names builds its key.
+    !doc.intended_keys()
+        .iter()
+        .any(|k| k.code == w.code.as_str())
+        || {
+            let shown = code_text::shown_for(Some(w.code), &w.message);
+            !doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
+        }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -479,9 +482,19 @@ pub fn set_ready(m: &AppModel, v: &sets::SetView) -> bool {
     set_ready_in(&flagged(m), v)
 }
 
-/// A tile shows a green dot: ready, with nothing that counts toward its badge.
-pub fn tile_ready(item: &super::items::TextureItem) -> bool {
-    item.status == ItemStatus::Ready && !item.warnings.iter().any(counts_toward_badge)
+/// A tile shows a green dot: ready, with no warning that `counts_for` it (review E4: a note or a marked row never
+/// keeps it from Ready).
+pub fn tile_ready(m: &AppModel, item: &super::items::TextureItem) -> bool {
+    item.status == ItemStatus::Ready && !item_warned(m, item)
+}
+
+/// Review E4: `item` has a warning that takes "ready" away (`counts_for`): the tile's ⚠, the "Has warnings" pill and
+/// filter, and the Status sort. Its `At` is built only when a warning could count.
+pub fn item_warned(m: &AppModel, item: &super::items::TextureItem) -> bool {
+    item.warnings.iter().any(counts_toward_badge) && {
+        let at = At::Texture(item.key.clone());
+        item.warnings.iter().any(|w| counts_for(m, &at, w))
+    }
 }
 
 #[cfg(feature = "test-hooks")]
