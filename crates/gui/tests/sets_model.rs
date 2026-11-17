@@ -2010,6 +2010,91 @@ fn removing_a_lent_file_names_the_set_that_lost_it() {
     );
 }
 
+/// Note J?4 (B2-3): a packed output leaves its set with the last of its raw maps, while the set keeps other files.
+/// Removing that raw map names the sets that shared the pack; removing the set's last file afterwards adds nothing.
+#[test]
+fn removing_the_last_raw_map_of_a_lent_pack_names_the_sets_that_shared_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lent_to_leaf_and_odd(d.path());
+    let rmaos = key_of(&m, "rock01_rmaos");
+    let odd_rmaos = |m: &sdc_gui::model::AppModel| {
+        view(&set_views(m), "landscape/odd")
+            .slots
+            .get(&SlotKind::Rmaos)
+            .cloned()
+    };
+    for f in ["rock01_normal.png", "rock01_roughness.png"] {
+        let k = key_of(&m, f);
+        m.remove_member("landscape/rock01", &k).unwrap();
+        idle(&mut m);
+    }
+    assert_eq!(
+        odd_rmaos(&m),
+        Some(SlotFill::Borrowed {
+            from: "landscape/rock01".into(),
+            item: rmaos
+        }),
+        "the pack still fills the slot while one of its raw maps stays"
+    );
+    let odd_named = |m: &sdc_gui::model::AppModel| {
+        m.messages
+            .entries()
+            .filter(|e| e.text.contains("landscape/odd"))
+            .count()
+    };
+    assert_eq!(odd_named(&m), 0, "no earlier removal names odd");
+    let ao = key_of(&m, "rock01_ao.png");
+    m.remove_member("landscape/rock01", &ao).unwrap();
+    idle(&mut m);
+    assert_eq!(odd_rmaos(&m), None, "the pack left with its last raw map");
+    assert_eq!(
+        message_starting(&m, "rock01_ao.png"),
+        "rock01_ao.png is in no set now. landscape/odd shared rock01_rmaos; that slot is empty now."
+    );
+    let diffuse = key_of(&m, "rock01.png");
+    m.remove_member("landscape/rock01", &diffuse).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        odd_named(&m),
+        1,
+        "the set's last file does not name odd again"
+    );
+}
+
+/// Note J?4 (B2-11): a share that passes through a deleted set is passed on to the set it shared from, in the same
+/// undo step; nothing is lost, so the toast names nobody.
+#[test]
+fn deleting_the_middle_of_a_chain_passes_the_share_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"));
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, None, |m| m.delete_set_with_toast("landscape/leaf"));
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/rock01")
+    );
+    assert_eq!(
+        view(&set_views(&m), "landscape/odd")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Borrowed {
+            from: "landscape/rock01".into(),
+            item: normal
+        })
+    );
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/leaf (1 texture now in no set)"
+    );
+    undo_restores(&mut m, &before);
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).

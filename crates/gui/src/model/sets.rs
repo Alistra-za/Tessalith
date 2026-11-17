@@ -2420,7 +2420,8 @@ impl AppModel {
     /// `except`, in display order, with an explicit share that resolves to one of `items` (a `SlotFill::Borrowed` on
     /// a slot that is not in `SetView::filled`, so not a record fill; through a chain too), and the slot would be
     /// empty after the edit: a share is not counted when `except` keeps a member outside `items` whose `slot_of` has
-    /// that slot number (B2-8: the slot stays filled from the lender).
+    /// that slot number (B2-8: the slot stays filled from the lender). A set with no card is never counted (it is out
+    /// of the run).
     pub(crate) fn sets_sharing(&self, items: &[String], except: &str) -> LostShares {
         let views = views(self);
         let kept: BTreeSet<u8> = views
@@ -2448,17 +2449,43 @@ impl AppModel {
                     continue;
                 }
                 slots.insert(n);
-                if let Some(i) = self.item(item) {
-                    files.insert(i.name.clone());
-                }
+                files.insert(item.clone());
             }
             if !slots.is_empty() {
                 lost.sets.push(v.id.clone());
                 lost.slots += slots.len();
             }
         }
-        lost.files = files.into_iter().collect();
+        // By key, so two files of one name in different folders both print.
+        lost.files = files
+            .iter()
+            .filter_map(|k| self.item(k).map(|i| i.name.clone()))
+            .collect();
+        lost.files.sort();
         lost
+    }
+
+    /// Note J?4: `pack` is a packed output that `item` is a raw map of, and every other raw map of it is in no set
+    /// already, so taking `item` out takes the pack out of its set's slots.
+    fn last_raw_map_of(&self, item: &str, pack: &str) -> bool {
+        let Some(input) = self.item(item).map(|i| &i.input) else {
+            return false;
+        };
+        let Some(pk) = self
+            .item(pack)
+            .filter(|p| p.kind == ItemKind::Packed)
+            .and_then(|p| p.job.as_ref()?.pack.as_ref())
+        else {
+            return false;
+        };
+        pk.sources.iter().any(|s| s.path == *input)
+            && pk.sources.iter().all(|s| {
+                s.path == *input
+                    || self
+                        .items
+                        .iter()
+                        .any(|i| i.input == s.path && self.is_no_set(&i.key))
+            })
     }
 
     fn is_packed(&self, item: &str) -> bool {
@@ -3060,6 +3087,17 @@ impl AppModel {
         let lost = self.sets_sharing(&v.members, &v.id);
         let i = id.to_string();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
+            // Note J?4 (B2-11): a share that passed through this set is passed on to the set it shared from, before
+            // the entry goes.
+            let through: Vec<(u8, String)> = s
+                .entries()
+                .iter()
+                .find(|e| same_id(&e.id, &i))
+                .map(|e| e.borrow.iter().map(|(n, x)| (*n, x.clone())).collect())
+                .unwrap_or_default();
+            for (n, x) in &through {
+                s.retarget_slot_borrows(&i, *n, x);
+            }
             s.delete_set(&i, &files)
         });
         self.prune_collapsed();
@@ -3124,13 +3162,26 @@ impl AppModel {
         }
         self.leaves_locked(item)?;
         let (i, it) = (v.id.clone(), item.to_string());
+        // A packed output of the set leaves it with the last of its raw maps (Note HF1).
+        let mut gone = vec![item.to_string()];
+        gone.extend(
+            v.members
+                .iter()
+                .filter(|p| self.last_raw_map_of(item, p))
+                .cloned(),
+        );
         // Note J?4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
-        let lost = self.sets_sharing(&[item.to_string()], &v.id);
+        let lost = self.sets_sharing(&gone, &v.id);
         self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
             s.remove_member(&i, &it)
         });
-        if let Some(sentence) = lost_share_text(&lost, "it") {
-            let name = self.item(item).map_or(item, |t| t.name.as_str());
+        let name = self.item(item).map_or(item, |t| t.name.as_str());
+        let what = if lost.files == [name] {
+            "it".to_string()
+        } else {
+            list_ids(&lost.files)
+        };
+        if let Some(sentence) = lost_share_text(&lost, &what) {
             let text = format!("{name} is in no set now. {sentence}");
             self.messages.notify(super::messages::Severity::Info, text);
         }
@@ -3916,5 +3967,36 @@ mod badge_tests {
         assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
         m.target = Target::Cs;
         assert_eq!(kind_text(&m, &v), "PBR → JSON");
+    }
+}
+
+#[cfg(test)]
+mod lost_share_tests {
+    use super::*;
+
+    fn lost(sets: &[&str], files: &[&str], slots: usize) -> LostShares {
+        let own = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect();
+        LostShares {
+            sets: own(sets),
+            files: own(files),
+            slots,
+        }
+    }
+
+    /// Note J?4: one set that lost several slots says "those slots" with its id; more than three sets are cut to
+    /// three names and "N more".
+    #[test]
+    fn the_lost_share_sentence_follows_the_counts() {
+        let one = lost(&["a/one"], &["x.png", "y"], 2);
+        assert_eq!(
+            lost_share_text(&one, &list_ids(&one.files)).as_deref(),
+            Some("a/one shared x.png and y; those slots are empty now.")
+        );
+        let five = lost(&["s/1", "s/2", "s/3", "s/4", "s/5"], &["x.png"], 5);
+        assert_eq!(
+            lost_share_text(&five, "it").as_deref(),
+            Some("5 sets shared it; those slots are empty now: s/1, s/2, s/3 and 2 more.")
+        );
+        assert_eq!(lost_share_text(&lost(&[], &[], 0), "it"), None);
     }
 }
