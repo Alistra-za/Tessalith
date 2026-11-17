@@ -27,6 +27,17 @@
 - Saved `[files]` entries that name no file in the current mode are one Problems row, with **Entries ▾** to remove them one at a time and **Remove all**.
 - The **Advanced** drawer at the window's right edge is gone; its settings are in the places above. An older `gui.toml` still loads.
 - The Textures and Sets columns show their scroll bar when the pointer is not over them, so a list longer than the window says so. The Sets column starts 6 px wider, so a set card still holds five map chips a row beside the bar. In the set's 3D view the **Mesh** dropdown moves to the next toolbar row when the row is full; at 1100 px wide it used to run past the window's right edge.
+- The GUI runs on egui 0.37. Buttons, lists, text boxes and colours keep their old sizes and look; text may sit a fraction of a pixel differently. What changed:
+  - Screen readers now hear a name for every box, list and number field (for example "Search textures" and "Preset"), and Undo and Redo say which step they undo.
+  - While you drag a set, the mouse wheel scrolls the Sets list.
+  - A list or menu opened with a click no longer risks closing on the same click.
+  - Once a list inside a panel reaches its end, the wheel scrolls the panel.
+  - In a menu of buttons, Up and Down move between the entries and Enter picks one. In a menu that starts with a filter box, Down puts the cursor in the box, and from then on the arrow keys stay in the box.
+  - A trackpad or touch fling coasts a little differently.
+  - A scroll bar only takes clicks along its own length.
+  - A panel inside another panel or window no longer draws past its parent's edge.
+  - A text box's focus outline is drawn inside its margin; no visible change in Tessalith.
+- After an edit that needs a full re-plan, the Sets panel could show the edit as done until your next change: the quick re-plan answered that nothing needed re-encoding when the full plan had finished first. The quick re-plan now works from the plan as it stood when you made the edit, and waits for the full plan when the edit needs one.
 
 ## 3.0.0
 
