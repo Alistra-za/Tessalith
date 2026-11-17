@@ -427,10 +427,15 @@ const FIT_MAX_EXTRA: f32 = 16.0;
 /// and a narrower one is drawn at the content's width (262.1 points for a set's TruePBR settings; both measured in the
 /// kittest harness). This is the drawn rect less that excess, which is what `default_rect` takes back: save and
 /// restore are the identity. None until the size has settled.
-// shortcut: the excess is measured once per session from the content on show then, and it depends on that content;
-// a window whose content later changes saves off by the difference. Upgrade when the window's content can change its
-// minimum width within a session, or a saved size is seen to drift: then save the size the user dragged the window
-// to, kept apart from the drawn rect (as `column_panel` keeps a chosen width), so no excess is measured.
+// shortcut: the excess is measured once per session, from the content shown first. The content already changes with
+// the selection (a texture's own settings, the JSON panel, skin, CS and complex material cards), though in the kittest
+// fixture its minimum width stayed 262.1 for the set, each member and other sets' textures. When later content is
+// wider, egui widens the window and never narrows it (`Resize` keeps the largest size), so the wider width less the
+// first excess is saved: a saved width can step up to the widest content's minimum, never past it, and holds there.
+// A drag in a session that measured an excess is saved that excess (at most `FIT_MAX_EXTRA`) narrower. Upgrade when
+// a saved width is seen to pass the widest content's minimum, or a dragged width must come back exactly: then save the
+// size the user dragged the window to, kept apart from the drawn rect (as `column_panel` keeps a chosen width), so no
+// excess is measured.
 pub fn settings_window_saved_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     let id = settings_window_id();
     let r = ctx.memory(|m| m.area_rect(id))?;

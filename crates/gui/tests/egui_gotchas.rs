@@ -271,8 +271,9 @@ fn open_menu(h: &mut Harness<'static, Combos>) {
 
 /// Pins egui (see the file comment). G22: two `ComboBox`es in a `MenuButton` that closes on a click outside. Held as
 /// the skill states it: egui keeps one open popup per viewport (`memory/mod.rs:1115-1129`, `open_popup` replaces the
-/// one entry; the menu's close test is `popup.rs:659-676`), so a click that opens either combo closes the menu, the combo's list never shows and nothing can be
-/// picked. A click outside and Esc still close the menu. Tessalith's own `combo_menu` is the way round it.
+/// one entry; the menu's close test is `popup.rs:659-676`), so a click that opens either combo closes the menu, the
+/// combo's list never shows and nothing can be picked. A click outside and Esc still close the menu. Tessalith's own
+/// `combo_menu` is the way round it.
 #[test]
 fn two_combos_in_a_menu_open_and_close_in_order() {
     let mut h = combos_in_a_menu();
