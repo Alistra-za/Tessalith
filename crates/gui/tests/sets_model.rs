@@ -1085,12 +1085,23 @@ fn needs_rows(m: &sdc_gui::model::AppModel, id: &str, map: &str) -> usize {
         .count()
 }
 
-/// The set's own part of the card's "⚠ n" (`sets_column`'s `rows` adds the members' warnings, which a shared normal
-/// also changes: the member `_rmaos` loses its `SET-MISSING-COMPANION`).
+/// The set's own part of the card's "⚠ n" (`sets_column`'s `rows`: its `set_warnings` that count toward the badge).
 fn set_badge(m: &sdc_gui::model::AppModel, id: &str) -> usize {
     view(&set_views(m), id)
         .set_warnings
         .iter()
+        .filter(|w| sdc_gui::model::counts_toward_badge(w))
+        .count()
+}
+
+/// The members' part of the card's "⚠ n" (`sets_column`'s `rows`: the member items' warnings that count). A shared
+/// normal leaves it alone: the `SET-MISSING-COMPANION` it takes off the member `_rmaos` is Info and never counts.
+fn member_badge(m: &sdc_gui::model::AppModel, id: &str) -> usize {
+    view(&set_views(m), id)
+        .members
+        .iter()
+        .filter_map(|k| m.item(k))
+        .flat_map(|i| i.warnings.iter())
         .filter(|w| sdc_gui::model::counts_toward_badge(w))
         .count()
 }
@@ -1122,6 +1133,7 @@ fn a_borrowed_normal_answers_the_missing_map_warning() {
     );
     assert!(!ready(&m, id).0, "not Ready before the borrow");
     let badge_before = set_badge(&m, id);
+    let members_before = member_badge(&m, id);
     let normal = key_of(&m, "rock01_normal.png");
     assert_eq!(
         m.drop_choice(&normal, id, DropChoice::Share),
@@ -1146,6 +1158,11 @@ fn a_borrowed_normal_answers_the_missing_map_warning() {
         set_badge(&m, id),
         badge_before - 1,
         "the badge drops by one"
+    );
+    assert_eq!(
+        member_badge(&m, id),
+        members_before,
+        "the members' part is unchanged, so the card's total drops by one"
     );
     let d2 = tempfile::tempdir().unwrap();
     let twin = rock02_opened(d2.path(), true, true);
@@ -1188,6 +1205,67 @@ fn a_borrow_from_a_set_without_that_slot_keeps_the_missing_map_warning() {
         v.missing
     );
     assert_eq!(missing_maps(&m, id), ["_n"]);
+    assert_eq!(needs_rows(&m, id, "_n"), 1);
+    // The lender set is gone.
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock02", 2, Some("landscape/nosuch"))
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    let v = view(&views, id);
+    assert!(
+        v.missing.iter().any(|x| matches!(
+            x,
+            Missing::Borrow {
+                slot: 2,
+                empty: false,
+                ..
+            }
+        )),
+        "{:?}",
+        v.missing
+    );
+    assert_eq!(missing_maps(&m, id), ["_n"], "no lender set");
+    assert_eq!(needs_rows(&m, id, "_n"), 1);
+}
+
+/// Note HH8 (B1-5): a borrowed map answers the warning only when its type fits the role the shader needs. Plain
+/// `pbr` needs a `pbr_normal`; a lender's normal decided as a plain `normal` fills the slot but not the role.
+#[test]
+fn a_borrowed_normal_of_another_type_keeps_the_missing_map_warning() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    // PBR Landscape (the auto pick under `textures/landscape/`) takes a plain normal too; plain `pbr` does not.
+    m.set_shader(id, Some(engine::shader::Shader::Pbr));
+    m.decide(
+        "landscape/rock01_normal.png",
+        Answer::Subtype(Subtype::Normal),
+    );
+    idle(&mut m);
+    assert!(missing_maps(&m, id).contains(&"_n".to_string()));
+    let normal = key_of(&m, "rock01_normal.png");
+    assert_eq!(
+        m.item(&normal)
+            .and_then(|i| i.job.as_ref())
+            .map(|j| j.profile.subtype),
+        Some(Subtype::Normal)
+    );
+    assert_eq!(
+        m.drop_choice(&normal, id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(matches!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert!(
+        missing_maps(&m, id).contains(&"_n".to_string()),
+        "a plain normal does not answer pbr's _n"
+    );
     assert_eq!(needs_rows(&m, id, "_n"), 1);
 }
 
