@@ -113,8 +113,7 @@ fn retarget_slot_borrows_moves_one_slot_and_never_makes_a_self_borrow() {
          [[sets]]\nid = \"b/two\"\nborrow = { slot2 = \"L/End\" }\n\n\
          [[sets]]\nid = \"c/three\"\nborrow = { slot2 = \"x/other\" }\n",
     ));
-    let changed = s.retarget_slot_borrows("l/end", 2, "b/two");
-    assert_eq!(changed, ["a/one", "b/two"]);
+    s.retarget_slot_borrows("l/end", 2, "b/two");
     let b = |s: &SetsDoc, id: &str, n: u8| {
         s.entries()
             .iter()
@@ -129,6 +128,25 @@ fn retarget_slot_borrows_moves_one_slot_and_never_makes_a_self_borrow() {
         .entries()
         .iter()
         .any(|e| e.id == "a/one" && e.lock.contains(&2)));
+}
+
+/// Note JN2 (t2): set ids fold case (Note BF), so a target named in another case than its entry still drops that
+/// entry's own line (no self-borrow); the other entry gets the target as given.
+#[test]
+fn retarget_slot_borrows_matches_the_target_in_any_case() {
+    let (_d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\nborrow = { slot2 = \"l/end\" }\n\n\
+         [[sets]]\nid = \"b/two\"\nborrow = { slot2 = \"l/end\" }\n",
+    ));
+    s.retarget_slot_borrows("l/end", 2, "B/Two");
+    let b = |id: &str| {
+        s.entries()
+            .iter()
+            .find(|e| e.id == id)
+            .and_then(|e| e.borrow.get(&2).cloned())
+    };
+    assert_eq!(b("b/two"), None, "no self-borrow");
+    assert_eq!(b("a/one").as_deref(), Some("B/Two"));
 }
 
 #[test]

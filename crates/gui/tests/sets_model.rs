@@ -1464,9 +1464,9 @@ fn a_borrowed_tangent_space_normal_keeps_the_eye_shaders_model_space_warning() {
 }
 
 /// Note JN1 (B2-2): a cycle fills nothing and reads "(it has none)"; a set that borrows from itself keeps its own
-/// file and is reported too. Nothing hangs.
+/// file, is reported too, and sends no `X → X` share to the engine. Nothing hangs.
 #[test]
-fn a_borrow_cycle_or_a_self_borrow_fills_nothing_and_is_reported() {
+fn a_borrow_cycle_fills_nothing_and_a_self_borrow_keeps_its_own_file() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     idle(&mut m);
@@ -1488,12 +1488,16 @@ fn a_borrow_cycle_or_a_self_borrow_fills_nothing_and_is_reported() {
             v.missing.contains(&Missing::Borrow {
                 slot: 2,
                 from: from.into(),
-                empty: true
+                empty: true,
+                itself: id == from,
             }),
             "{id}: {:?}",
             v.missing
         );
     }
+    let borrowed = borrowed_normal(&m);
+    assert!(borrowed.is_empty(), "{borrowed:?}");
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
     for id in ["landscape/leaf", "landscape/odd"] {
         assert!(
             !view(&views, id).slots.contains_key(&SlotKind::Normal),
@@ -1622,7 +1626,9 @@ fn moving_a_lent_normal_to_another_set_moves_its_borrowers_in_one_step() {
     undo_restores(&mut m, &before);
 }
 
-/// Note JN2 (B2-1): the set a lent file moves into owns it now, so it shares that slot from nobody.
+/// Note JN2 (B2-1): the set a lent file moves into owns it now, so it shares that slot from nobody, and the other set
+/// sharing the file follows it there. The no-self-borrow assert is a pin (the Move-replace's `clear_slot` already
+/// dropped rock02's line before JN2); leaf's line naming rock02 is what JN2 added.
 #[test]
 fn moving_a_lent_normal_into_its_borrower_leaves_no_self_borrow() {
     let d = tempfile::tempdir().unwrap();
@@ -1788,28 +1794,30 @@ fn moving_the_lent_kind_of_a_two_kind_slot_takes_its_borrowers_and_the_other_doe
     let lent = slot3_share(&m, "landscape/leaf");
     let (g, sk) = (key_of(&m, "rock01_g.png"), key_of(&m, "rock01_sk.png"));
     let other = if lent == g { sk } else { g };
-    assert_eq!(
-        m.drop_choice(&other, "landscape/odd", DropChoice::Move),
-        DropOutcome::Joined
-    );
-    idle(&mut m);
+    let before = one_step(&mut m, None, |m| {
+        assert_eq!(
+            m.drop_choice(&other, "landscape/odd", DropChoice::Move),
+            DropOutcome::Joined
+        );
+    });
     assert_eq!(
         borrow_of(&m, "landscape/leaf", 3).as_deref(),
         Some("landscape/rock01"),
         "the file leaf does not read moved: leaf stays"
     );
-    m.undo();
-    idle(&mut m);
-    assert_eq!(
-        m.drop_choice(&lent, "landscape/odd", DropChoice::Move),
-        DropOutcome::Joined
-    );
-    idle(&mut m);
+    undo_restores(&mut m, &before);
+    let before = one_step(&mut m, None, |m| {
+        assert_eq!(
+            m.drop_choice(&lent, "landscape/odd", DropChoice::Move),
+            DropOutcome::Joined
+        );
+    });
     assert_eq!(
         borrow_of(&m, "landscape/leaf", 3).as_deref(),
         Some("landscape/odd"),
         "the file leaf reads moved: leaf follows it"
     );
+    undo_restores(&mut m, &before);
 }
 
 /// Note JN3 (B2-1b): a Share that replaces a lent file points the sets sharing that slot at the new source's set,
@@ -1843,7 +1851,119 @@ fn replacing_a_lent_file_by_a_share_points_its_borrowers_at_the_new_source() {
         view(&set_views(&m), "landscape/leaf").slots.get(&SlotKind::Normal),
         Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
     ));
+    let borrowed = borrowed_normal(&m);
+    assert_eq!(
+        borrowed.get("landscape/leaf").map(String::as_str),
+        Some("landscape/rock01")
+    );
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
     undo_restores(&mut m, &before);
+}
+
+/// Note JN3 (B2-1b): a Share into an empty slot that another set shares passes that set to the new source. odd shares
+/// slot 2 from leaf, which has no normal; sharing rock01's normal into leaf points odd at rock01, in one undo step.
+#[test]
+fn a_share_into_an_empty_shared_slot_points_its_borrowers_at_the_new_source() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"))
+    });
+    idle(&mut m);
+    let before = one_step(&mut m, None, |m| {
+        assert_eq!(
+            m.drop_choice(&normal, "landscape/leaf", DropChoice::Share),
+            DropOutcome::Joined
+        );
+    });
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock01")
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/rock01"),
+        "no chain is written"
+    );
+    let borrowed = borrowed_normal(&m);
+    for id in ["landscape/leaf", "landscape/odd"] {
+        assert_eq!(
+            borrowed.get(id).map(String::as_str),
+            Some("landscape/rock01"),
+            "{id}"
+        );
+    }
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
+    undo_restores(&mut m, &before);
+}
+
+/// Note JN3 (B2-1b): a Share that replaces a share passes the slot's sharing sets to the new source. leaf shares
+/// rock02's normal and odd shares leaf's slot; sharing rock01's normal into leaf points both at rock01.
+#[test]
+fn a_share_that_replaces_a_share_points_its_borrowers_at_the_new_source() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock02"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"));
+    });
+    idle(&mut m);
+    assert!(matches!(
+        m.drop_choice(&normal, "landscape/leaf", DropChoice::Share),
+        DropOutcome::AskReplace { .. }
+    ));
+    let before = one_step(&mut m, None, |m| {
+        m.drop_replace(&normal, "landscape/leaf", DropChoice::Share)
+            .unwrap()
+    });
+    for id in ["landscape/leaf", "landscape/odd"] {
+        assert_eq!(
+            borrow_of(&m, id, 2).as_deref(),
+            Some("landscape/rock01"),
+            "{id}"
+        );
+    }
+    assert!(matches!(
+        view(&set_views(&m), "landscape/odd").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
+    ));
+    let borrowed = borrowed_normal(&m);
+    assert_eq!(
+        borrowed.get("landscape/odd").map(String::as_str),
+        Some("landscape/rock01")
+    );
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
+    undo_restores(&mut m, &before);
+}
+
+/// Note JN3 (t3): a Share refused (the target slot is locked) changes no line: the set sharing that slot stays on it.
+/// A pin: it fails if `occupant` loses its `lock_refusal` (the Share then runs and rewrites leaf's line).
+#[test]
+fn a_refused_share_leaves_the_sharing_sets_lines() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock02"));
+        s.set_lock("landscape/rock02", 2, true);
+    });
+    idle(&mut m);
+    let before = m.sets_doc.as_ref().unwrap().text();
+    let steps = m.history.undo.len();
+    assert!(matches!(
+        m.drop_choice(&normal, "landscape/rock02", DropChoice::Share),
+        DropOutcome::Refused(_)
+    ));
+    idle(&mut m);
+    assert_eq!(m.history.undo.len(), steps);
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before);
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock02")
+    );
 }
 
 /// Note JN3 (B2-1b): a set that shared the slot and is the new source owns the file: it drops its line (no cycle).
@@ -1861,8 +1981,9 @@ fn a_borrower_that_is_the_new_source_drops_its_borrow() {
         m.drop_choice(&normal, id, DropChoice::Share),
         DropOutcome::AskReplace { .. }
     ));
-    m.drop_replace(&normal, id, DropChoice::Share).unwrap();
-    idle(&mut m);
+    let before = one_step(&mut m, None, |m| {
+        m.drop_replace(&normal, id, DropChoice::Share).unwrap()
+    });
     assert_eq!(borrow_of(&m, "landscape/rock01", 2), None);
     let views = set_views(&m);
     assert_eq!(
@@ -1877,11 +1998,19 @@ fn a_borrower_that_is_the_new_source_drops_its_borrow() {
         view(&views, id).slots.get(&SlotKind::Normal),
         Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
     ));
+    let borrowed = borrowed_normal(&m);
+    assert_eq!(
+        borrowed.get(id).map(String::as_str),
+        Some("landscape/rock01")
+    );
+    assert!(!borrowed.contains_key("landscape/rock01"), "{borrowed:?}");
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
+    undo_restores(&mut m, &before);
 }
 
 /// Note JN3 (B2-1b): a Move, a Duplicate or a Fill from names that replaces a lent file leaves the sharing sets on
-/// the lender; they get
-/// the new file ("share rock02's normal" keeps meaning rock02's normal).
+/// the lender; they get the new file ("share rock02's normal" keeps meaning rock02's normal). The Fill leg fills a
+/// file from another set (odd), so a Share-style rewrite to that set would fail it.
 #[test]
 fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_the_lender() {
     use engine::config::{GreenConvention, Subtype};
@@ -1926,9 +2055,16 @@ fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_th
             item: copy.into()
         })
     );
-    // Fill from names: rock02_n.png went to no set when the copy replaced it, still decided a `pbr_normal`, and its
-    // name matches the set's base, so Fill offers it for the Normal slot, replacing the copy.
+    // Fill from names: rock02_n.png went to no set when the copy replaced it, still decided a `pbr_normal`. It is moved
+    // into odd first, so the Fill takes it from another set; its name matches rock02's base, so Fill offers it for the
+    // Normal slot, replacing the copy.
     let n02 = key_of(&m, "rock02_n.png");
+    assert_eq!(
+        m.drop_choice(&n02, "landscape/odd", DropChoice::Move),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(view(&set_views(&m), "landscape/odd").members.contains(&n02));
     assert_eq!(m.fill_from_names(id, std::slice::from_ref(&n02)), Ok(1));
     idle(&mut m);
     assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
@@ -2212,9 +2348,10 @@ fn a_borrower_with_its_own_file_of_that_kind_is_skipped() {
 
 /// Note JN5 (B2-7): a set that cannot take a drop (`drop_target`) cannot take the file either. `landscape/ghost` is
 /// an entry with no files that the user did not create (a view with an empty key, `NoFilesLeft`); leaf's only file
-/// went to no set, so it has no view. Both are skipped, odd takes the file, and both lines now name odd.
+/// went to no set, which leaves leaf the same (its entry keeps a view with an empty key). Both are skipped, odd takes
+/// the file, and both lines now name odd. A set with no view is never an heir: heirs come from `views()`.
 #[test]
-fn borrowers_with_no_files_or_no_view_are_skipped() {
+fn borrowers_with_no_files_are_skipped() {
     let d = tempfile::tempdir().unwrap();
     let mut m = normal_lent_twice(d.path());
     m.edit_docs("t", None, true, |_, s| {
@@ -2313,6 +2450,40 @@ fn deleting_a_lender_hands_each_shared_file_to_its_own_heir() {
     undo_restores(&mut m, &before);
 }
 
+/// Notes JN4, JN5: one Delete set that hands rock01's normal to leaf and leaves odd's share of the packed rmaos
+/// empty (a packed map is never handed over): the toast gives the hand-over sentence, then the lost one.
+#[test]
+fn deleting_a_lender_hands_one_file_over_and_names_the_set_left_empty() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 6, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, None, |m| {
+        m.delete_set_with_toast("landscape/rock01")
+    });
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/rock01 (3 textures now in no set). rock01_normal.png went to landscape/leaf, which \
+         shared it. landscape/odd shared rock01_rmaos; that slot is empty now."
+    );
+    assert_eq!(
+        view(&set_views(&m), "landscape/leaf")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own { item: normal })
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 6).as_deref(),
+        Some("landscape/rock01")
+    );
+    undo_restores(&mut m, &before);
+}
+
 /// Note JN5 (B2-8): rock01 holds both kinds of slot 3. Removing the one leaf's share resolves to hands nothing over:
 /// rock01 still fills slot 3, leaf keeps its line and now reads the other file, and no toast is shown.
 #[test]
@@ -2381,6 +2552,135 @@ fn deleting_a_lender_with_its_own_file_and_a_share_line_hands_its_own_file() {
         "odd owns the file, no line to leaf"
     );
     undo_restores(&mut m, &before);
+}
+
+/// Note JN4 (final review Important 2): rock01 owns its normal and has a hand-edited share line for slot 2 to rock02,
+/// so its card shows rock02's normal. When rock02's normal leaves, rock01's own file fills the slot again, so the
+/// toast does not call rock01's slot empty.
+#[test]
+fn removing_a_file_a_set_shares_over_its_own_does_not_call_that_slot_empty() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    let n02 = key_of(&m, "rock02_n.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    idle(&mut m);
+    m.remove_member("landscape/rock02", &n02).unwrap();
+    idle(&mut m);
+    assert!(m.is_no_set(&n02));
+    assert_eq!(
+        view(&set_views(&m), "landscape/rock01")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own { item: normal })
+    );
+    let named: Vec<String> = m
+        .messages
+        .entries()
+        .filter(|e| e.text.starts_with("rock02_n.png"))
+        .map(|e| e.text.clone())
+        .collect();
+    assert!(named.is_empty(), "{named:?}");
+}
+
+/// Note JN4 (B2-12): odd shares slot 2 from leaf, which shares it from rock01 and has no normal of its own. Clearing
+/// leaf's share passes odd on to rock01, in the same undo step and with no toast; leaf's slot is empty.
+#[test]
+fn clearing_the_middle_of_a_chain_passes_the_share_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"));
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let toasts = m.messages.entries().count();
+    let before = one_step(&mut m, None, |m| {
+        m.set_slot_command("landscape/leaf", 2, SlotCommand::Clear)
+            .unwrap()
+    });
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2), None);
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/rock01")
+    );
+    let views = set_views(&m);
+    assert_eq!(
+        view(&views, "landscape/odd").slots.get(&SlotKind::Normal),
+        Some(&SlotFill::Borrowed {
+            from: "landscape/rock01".into(),
+            item: normal
+        })
+    );
+    assert!(!view(&views, "landscape/leaf")
+        .slots
+        .contains_key(&SlotKind::Normal));
+    assert_eq!(m.messages.entries().count(), toasts, "no toast");
+    undo_restores(&mut m, &before);
+}
+
+/// Note JN5 (t5 Minor 5): rock01 has a hand-edited share line for slot 2 naming itself. When its normal is handed to
+/// leaf, that line goes (rock01 would share back the file it gave away); it is not counted among the sets that share
+/// the file from leaf.
+#[test]
+fn a_hand_over_drops_the_lenders_share_line_to_itself() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normal_lent_twice(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock01"))
+    });
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    let before = one_step(&mut m, None, |m| {
+        m.remove_member("landscape/rock01", &normal).unwrap()
+    });
+    assert_eq!(
+        message_starting(&m, "rock01_normal.png"),
+        "rock01_normal.png went to landscape/leaf, which shared it; 1 other set now shares it from there."
+    );
+    assert_eq!(borrow_of(&m, "landscape/rock01", 2), None);
+    assert_eq!(
+        view(&set_views(&m), "landscape/leaf")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own { item: normal })
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/leaf")
+    );
+    undo_restores(&mut m, &before);
+}
+
+/// Note JN1 (t1 Minor 1): a set whose share line names itself keeps its own file, and its card's line says so instead
+/// of "(it has none)"; a two-set loop keeps "(it has none)".
+#[test]
+fn a_share_from_the_set_itself_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/leaf", 2, Some("landscape/odd"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"));
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    let texts =
+        |id: &str| -> Vec<String> { view(&views, id).missing.iter().map(Missing::text).collect() };
+    assert_eq!(
+        texts("landscape/rock01"),
+        ["slot2 from landscape/rock01 (this set itself)"]
+    );
+    assert_eq!(
+        texts("landscape/leaf"),
+        ["slot2 from landscape/odd (it has none)"]
+    );
 }
 
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)

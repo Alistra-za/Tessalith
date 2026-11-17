@@ -1074,6 +1074,57 @@ fn a_host_without_the_texture_gets_an_amber_row() {
     );
 }
 
+/// Note JN4 (B2-12): c shares the wet slot from b, which shares it from a and has no `_wet` of its own. Clearing b's
+/// share passes c on to a, in the same undo step.
+#[test]
+fn clearing_a_wet_share_in_the_middle_of_a_chain_passes_it_on() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    std::fs::create_dir_all(&r).unwrap();
+    for s in ["", "_rfaos", "_wet", "_detail_n"] {
+        colour(&r, &format!("a{s}.png"));
+    }
+    for f in ["b.png", "b_rfaos.png", "c.png", "c_rfaos.png"] {
+        colour(&r, f);
+    }
+    let mut m = opened_skin(d.path());
+    let (a, b, c) = (id_of(&m, "x/a"), id_of(&m, "x/b"), id_of(&m, "x/c"));
+    let (a2, b2, c2) = (a.clone(), b.clone(), c.clone());
+    m.edit_docs("t", None, true, move |_, s| {
+        s.set_borrow(&b2, 9, Some(&a2));
+        s.set_borrow(&c2, 9, Some(&b2));
+    });
+    idle(&mut m);
+    let line = |m: &AppModel, id: &str| {
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .find(|e| e.id == id)
+            .and_then(|e| e.borrow.get(&9).cloned())
+    };
+    let before = m.sets_doc.as_ref().unwrap().text();
+    let steps = m.history.undo.len();
+    m.clear_slot_borrow(&b, 9).unwrap();
+    idle(&mut m);
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+    assert_eq!(line(&m, &b), None);
+    assert_eq!(line(&m, &c), Some(a.clone()));
+    assert!(matches!(
+        set_views(&m)
+            .iter()
+            .find(|v| v.id == c)
+            .unwrap()
+            .slots
+            .get(&SlotKind::SkinWet),
+        Some(SlotFill::Borrowed { from, .. }) if *from == a
+    ));
+    m.undo();
+    idle(&mut m);
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), before);
+}
+
 #[test]
 fn bad_skin_value_blocks_export() {
     use sdc_gui::model::pbr_export::export_blocks;
