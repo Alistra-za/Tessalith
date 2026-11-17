@@ -310,7 +310,7 @@ fn needs_full_waits_for_full() {
     );
 }
 
-/// Note J?10: `spawn_partial` patches the skeleton the edit handed it, not the one the session holds when the thread
+/// Note JL10: `spawn_partial` patches the skeleton the edit handed it, not the one the session holds when the thread
 /// runs. Here the edit's full plan has already stored the skeleton that holds the edit (the race, made certain), and
 /// the partial still answers that the re-encode needs a full plan. The control: handed that stored skeleton, the same
 /// partial finds nothing to do, which is what the thread saw when it read the skeleton itself.

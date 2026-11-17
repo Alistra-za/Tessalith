@@ -51,7 +51,7 @@ pub const SUBMENU_ARROW_036: &str = "⏵";
 /// `Ui::menu_button` as 0.36.2 drew it. Inside a menu, 0.37 paints the submenu arrow as a 14 pt triangle atom
 /// (`R\egui-0.37.0\src\containers\menu.rs:492-511`), so the entry is 1 px wider than 0.36.2's 13 pt "⏵" glyph and the
 /// arrow sits 2 px higher. This puts the glyph back through `SubMenuButton::from_button`, the hook 0.37 gives for it
-/// (`:514-518`), and keeps the accessible name the entry's text, as J?4 records (0.36.2 read "Move to group ⏵").
+/// (`:514-518`), and keeps the accessible name the entry's text, as JL4 records (0.36.2 read "Move to group ⏵").
 /// Outside a menu it is `MenuButton::new`, as `Ui::menu_button` is (`R\egui-0.37.0\src\ui.rs:2927-2931`). Every
 /// menu button in `ui` goes through it (`look::tests::every_menu_button_goes_through_menu_button_036`).
 pub fn menu_button_036<R>(
