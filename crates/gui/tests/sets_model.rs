@@ -2657,6 +2657,40 @@ fn a_hand_over_drops_the_lenders_share_line_to_itself() {
     undo_restores(&mut m, &before);
 }
 
+/// Note JN5 (t5 Minor 5): the same on Delete set. The lender's entry goes with its self line, and no entry for it
+/// comes back from the hand-over.
+#[test]
+fn deleting_a_lender_with_a_share_line_to_itself_hands_over_and_leaves_no_entry() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = normal_lent_twice(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock01"))
+    });
+    idle(&mut m);
+    let before = one_step(&mut m, None, |m| {
+        m.delete_set_with_toast("landscape/rock01")
+    });
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/rock01 (3 textures now in no set). rock01_normal.png went to landscape/leaf, which \
+         shared it; 1 other set now shares it from there."
+    );
+    let ids: Vec<String> = m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .map(|e| e.id.clone())
+        .collect();
+    assert!(!ids.iter().any(|i| i == "landscape/rock01"), "{ids:?}");
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 2).as_deref(),
+        Some("landscape/leaf")
+    );
+    undo_restores(&mut m, &before);
+}
+
 /// Note JN1 (t1 Minor 1): a set whose share line names itself keeps its own file, and its card's line says so instead
 /// of "(it has none)"; a two-set loop keeps "(it has none)".
 #[test]

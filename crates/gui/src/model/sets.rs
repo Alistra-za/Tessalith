@@ -2281,6 +2281,8 @@ fn takes_files(v: &SetView) -> bool {
 /// the slot from the lender share it from the heir.
 fn hand_over(s: &mut SetsDoc, h: &Handoff) {
     s.add_member(&h.heir, &h.file);
+    // Fresh: a `SetsDoc` mutator that changes the entries bumps the revision (`delete_set` does). On Delete set the
+    // lender's entry is gone already, so nothing is written for it (`set_borrow` would make the entry again).
     let self_line = s.entries().iter().any(|e| {
         same_id(&e.id, &h.lender) && e.borrow.get(&h.slot).is_some_and(|f| same_id(f, &h.lender))
     });
