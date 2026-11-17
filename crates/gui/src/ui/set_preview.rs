@@ -426,7 +426,8 @@ const FIT_MAX_EXTRA: f32 = 16.0;
 /// 0.37 with the pinned look the excess is the content's minimum width: a size at least that wide is drawn as asked,
 /// and a narrower one is drawn at the content's width (262.1 points for a set's TruePBR settings; both measured in the
 /// kittest harness). This is the drawn rect less that excess, which is what `default_rect` takes back: save and
-/// restore are the identity. None until the size has settled.
+/// restore are the identity while no content wider than the first is shown and the window is not dragged (the
+/// `shortcut:` below says what those two cases save). None until the size has settled.
 // shortcut: the excess is measured once per session, from the content shown first. The content already changes with
 // the selection (a texture's own settings, the JSON panel, skin, CS and complex material cards), though in the kittest
 // fixture its minimum width stayed 262.1 for the set, each member and other sets' textures. When later content is
