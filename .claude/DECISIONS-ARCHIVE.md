@@ -167,6 +167,15 @@ ARCHIVED (wording before the edit; superseded in part by Note JL1, 2026-11-16)
   - **Step 1.** Live: every ruling. The three `shortcut:` comments in `sets_column.rs` are gone.
   - Supersedes: In part: CF7 (the Tab and screen-reader limit, the stale off-screen heights, the shift after a jump, the least-scroll jump) and FC8 (CF7 as a kept shortcut).
 
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- **FM24 Review keeps its gate; the half-size question, the warning ticks and the stale-outputs list are out (plan task 13, 2026-11-03).**
+  - **The gate.** Review lists and gates on: Blockers (`export_blocks`, no export folder), Undecided textures, the Keep or Overwrite questions (an edited PGPatcher JSON, a NIF file Tessalith did not write) and the Also folders. `review_gate` is, in order: read-only `sdc.toml`, no export folder, an export running, a missing preset, a blocker, the Also gate, an unanswered overwrite question. A texture left undecided is skipped by the export, as before. An overwrite answer still stores the file's hash and is checked again at write time (CA7).
+  - **Warnings are Problems rows.** `export_asks` (the PGPatcher set pitfalls, the CS PBR pitfalls) feed Problems as ordinary Warning rows (`carried`) and nothing else: no Warnings column in Review, no tick, no Acknowledge all, no `{n} warnings in Problems` link, no block. A pitfall alone does not open Review, so the header Export runs when nothing else needs an answer. A set with no match (V4) is one of these rows too. A NIF edit that cannot be written is listed in the Review footer under `NIF edits skipped (n)`, one amber `{path}: {reason}` row each, and never blocks.
+  - **Half size.** There is no Review question, no `Review.half_size`, no `Measure whether full size adds anything` switch (an old `[checks] drop_top_mip` key in `gui.toml` is ignored on load) and no `LowDetailMode::Hold`, `Keep::Measure` or `Processed::UpToDate`: the engine writes a flagged texture at its planned size and `Warn` only adds the warning (`drop_top_mip` went in FM29). Encoded bytes and `identity.json` are unchanged.
+  - **Stale outputs.** `engine::manifest::stale_outputs`, `StaleOutput`, the Review group `Stale outputs`, its Delete, the Problems row with `Review…`, `AppModel.stale` and `stale_json` are gone. An output the project no longer makes stays in the export folder and is left alone, as before FC11. The sidecar `_sdc/generated.json`, its reconcile on open and the hash records stay (FC11).
+  - **Tests.** `review::{a_pgpatcher_pitfall_is_a_problems_row_not_a_gate, review_still_gates_on_blockers_and_overwrites, review_has_no_half_size_or_stale_group}`; the last lists every label the Review panel draws for one fixture, so a renamed or returning group fails it.
+  - Supersedes: CA4 (whole), and the FC14 bullets on stale JSON rows, the half-size write and the half step. In part: CN62, CN64, CN66, CL (the Carried to Task 5 bullet), CL25, FL (the gate timing), the FC14 Review footer bullet, CA5, CL15, CL20 (Hold, the flagged-again bullet), CL26, FC2 (the Review question and the engine Hold pieces), FC5 (the half-size order, the Warnings row of a blocked NIF edit), FC11 (stale outputs in Review; the sidecar stays), FC12 (the portrait photo is a Problems row), the `Half size has one meaning` bullet of FC, the two FC bullets on `stale_outputs`, DS26, V4 (the ask before export), AA2, AD5, AG90, AT (Untick or orphan), DR9 and DV7 (the Review stale row). CL24, CL27 and CL43 were already archived by FC2.
+
 ## Note HA — README encoder charts: NVTT back as a reference, GPU-decoder scoring (main team, 2026-11-04)
 
 ARCHIVED (wording before the edit; superseded in part by Note HA3, 2026-11-04)
@@ -749,6 +758,15 @@ ARCHIVED (wording before the edit; superseded in part by Note HS9, 2026-11-10)
 ARCHIVED (wording before the edit; superseded in part by Note HS12, 2026-11-10)
 - Edit source and documents: `pick_source` compares roots ignoring path spelling and never takes the edit mod's own copy or any `sdc NIF Edits` folder, nor any folder holding our edit document for this NIF. An autosave is deleted only when this session holds it; a session stays unsaved until its save succeeds; a root change waits for the live edit to move (else blocked with the reason, retried when that file changes); the newer of autosave and folder document wins. [CV1, GD11, GD12, GD13, GD20, GD21, GD24, GD27, GD28, GQ3]
 
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- The Problems list owns every fix button; `fix_off()` is the one definition of "fix buttons off". [CA11, CA12]
+
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- The set editor is one scrolling column; its room comes from Textures first, then Sets (HP6). [FB2, HP6]
+
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- The set editor's warnings block is one line "N problems in this set - Show in Problems"; a Textures-column "{n} undecided" count and a set's warning badge open Problems narrowed. [CA18]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -805,6 +823,12 @@ ARCHIVED (wording before the edit; superseded in part by Note GV1, 2026-11-07)
 
 ARCHIVED (wording before the edit; superseded in part by Note HL5, 2026-11-08)
 - **HC5 A PBR pick without a PBR albedo is not called vanilla (owner's screenshot, 2026-11-05).** The shader pick reads any PBR map (a lone `_f`), while `SetView::pbr` and the JSON need a `pbr_albedo` diffuse, so the card said "PBR (auto)" over a "vanilla" pill. The pill now says "PBR, no JSON". Nothing else changes: the set still writes no JSON. Test `pbr_landscape::a_pbr_pick_without_a_pbr_albedo_is_not_called_vanilla`.
+
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- **HC2 A row about a missing or unused map says which (owner, 2026-11-05; amends FB8).** "Add the missing map" never named the map, and the name was only on the hover. `PACK-DEFAULTED`, `PACK-CONFLICT`, `PACK-UNUSED-INPUT`, `SHADER-EXTRA-MAP` and `SHADER-MISSING-MAP` show the engine's text, without its code: "x_rmaos.dds A: no specular source; neutral default 0.04". Every other code keeps its action sentence, and the table keeps these five for lines with no engine text (`code_line`, banners). Test `code_text::a_row_about_a_missing_map_names_the_map`.
+
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- **HC4 `Kinds ▾` hides kinds of Problems row (owner, 2026-11-05).** One missing specular filled the list. The menu ticks each kind (`Code`) with its row count; a hidden kind leaves the Problems list only, for this project, and `gui.toml` keeps it (`problems_hidden`, by project root). My calls: Warning and Info rows only, as a block or a question must stay in reach; the tab count, the ready counts and Review ignore it, as Review's safety rules read every warning (a hidden row is not acknowledged); no Clear button, since the rows come back on every plan. Tests `bottom_panel::a_hidden_kind_leaves_the_list_but_not_the_ready_count`, `a_question_is_no_kind_to_hide`.
 
 ## Note HE — 2.1 leftovers (main team, 2026-11-06)
 
@@ -978,7 +1002,18 @@ ARCHIVED (wording before the edit; superseded in part by Note JI1, 2026-11-15)
   - `CFG-UNAVAILABLE` with no fallback: the type picker (**Set type…** on a row, the sub-type dropdown and **Confirm** in the panel), and the sentence "This type isn't available in this mode — set another type, or change the mode in Presets…" (`code_text::change_line`). When the texture already asks for its type, that question is the answer and no second one is added.
   - The engine is unchanged, and `sdc.toml` files that hold such an `allow` entry are read as before. Tests in `crates/gui/tests/ack_offer.rs`.
 
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- **JF4 The `Kinds ▾` hover says what a hidden row still does.** It said "Export's review still lists every warning"; since FM24 Review lists none. It now ends "A hidden row still counts in the tab's number and in the ready counts", which is HC4's rule; the wiki line in GUI-Problems.md says the same. HC4's reason ("Review's safety rules read every warning") predates FM24 and is not the reason any more: the counts ignore the hiding because a hidden row is not fixed. Test `bottom_panel::the_kinds_hover_says_what_a_hidden_row_still_does`.
+
 ## Note JA — if-changed keeps outputs of an older encode version or a lower target; --ev re-encodes them (main team, 2026-11-14)
 
 ARCHIVED (wording before the edit; superseded in part by Note JL6, 2026-11-16)
 - **JA12 Re-encode every output is a one-shot item in Export to ▾ (controller ruling, Task 8 review).** It is a checkable item in the header's **Export to ▾** menu, below the Also export ticks, not a header checkbox: every user sees the default 1400 pt window at first launch, and a box in the header moved CD2's one-row threshold from about 1280 pt to about 1450 pt, so that window wrapped. The menu belongs to Export, which meets "beside Export"; the cost is one click to reach it. The header keeps CD1's Save/Export grouping and CD2's 1280 pt threshold. The item is off at start, never saved, greyed with no folder open, and the menu stays open on a tick (egui 0.36's `CloseOnClickOutside`, as for the Also export ticks). It turns itself off when an export pass starts with it ticked (one-shot, any export kind: **Export**, **Export set**, **Export group**), so a tick hidden in the closed menu never carries over to a later export. A tick during a running export applies to the next one.
+
+## Note JI — Settings tab, and no Advanced drawer (owner, 2026-11-15)
+
+ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
+- **JI6 Unmatched `[files]` entries are a Problems row.** `CFG-FILE-UNMATCHED` entries from the last full plan are one Info row at the project, "{n} saved settings name no file in this mode ({mode})" (n = 1: "1 saved setting names no file in this mode ({mode})"), with every entry on hover, an `Entries ▾` menu that lists each entry still in `[files]` with its own **Remove** (accessible `Remove {key}`), and **Remove all**. Unmatched means in the mode of that plan (`model.target`), since some planning is cs-only. Like any Info row it counts in the tab number and takes nothing from "ready".
+  - **Gates.** Each Remove waits on `fix_off()`, as every Problems row's fix does. Remove all is on when `project.target().is_none_or(|t| t == model.target)`, no full plan is pending and no partial plan is out, and its hover lists what it deletes. One entry is one step "Remove entry"; Remove all is one step "Remove {n} entries". While no entry is left in `[files]` (a read-only `sdc.toml`'s empty document), `Entries ▾` is off too, with Remove all's reason on hover.
+  - **Code.** The Kinds ▾ name of the row is "Unmatched [files] entries" (FB8: no raw codes). `ProjectDoc::target()` reads the raw `target` key without a full parse, since the row asks every frame. `target_name` moved to `model/code_text.rs`.
+  - It replaces the drawer's last section. Amends nothing: no live ruling described that section (FM16's drawer wording is edited under JI7). Tests in `crates/gui/tests/problems_rows.rs` (`unmatched_entries_show_as_one_info_row` and the tests after it).

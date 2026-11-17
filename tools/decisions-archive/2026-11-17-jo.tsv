@@ -1,0 +1,10 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+FM24	FM		back	JO		partial	2026-11-17		goes: no way to keep a warning (JO4: Mark as intended in Problems); stays: the gate, warnings as Problems rows, half size, stale outputs
+FM¶- **Motion.**	FM		back	JO		partial	2026-11-17		goes: ui/motion.rs is gone (JO8: a new ui/motion.rs is the reduced-motion switch); stays: every removed motion; already archived verbatim under FM25 (JI1, JI7), so --apply skips it
+HC2	HC		back	JO		partial	2026-11-17		goes: PACK-DEFAULTED, PACK-UNUSED-INPUT and SHADER-EXTRA-MAP show the engine's text (JO2: a note sentence that still names the map); stays: PACK-CONFLICT and SHADER-MISSING-MAP, the table's fallback
+HC4	HC		back	JO		partial	2026-11-17		goes: the tab count ignores hiding (JO6: the tab leaves hidden rows out of n and shows '· N hidden'); stays: what can hide, per project in gui.toml, ready and Review ignore it
+JF4	JF		back	JO		partial	2026-11-17		goes: the hover text (JO6's text); stays: Review lists no warning, the counts ignore hiding because a hidden row is not fixed
+JI6	JI		back	JO		partial	2026-11-17		goes: an Info row counts in the tab number (JO3: a note counts under Notes, and with its buttons stays in the default list); stays: the row, its menu, gates and code
+Digest¶- The Problems list owns every fix button	Digest		back	JO		partial	2026-11-17		goes: nothing (JO10 adds the row layout); stays: the whole line
+Digest¶- The set editor is one scrolling column	Digest		back	JO		partial	2026-11-17		goes: nothing (JO7 adds the fixed status line above the column, amending FB2's scrolling heading); stays: the whole line
+Digest¶- The set editor's warnings block is one line	Digest		back	JO		partial	2026-11-17		goes: the one line 'N problems in this set - Show in Problems' (JO7: the status line); stays: the undecided count and the warning badge open Problems narrowed
