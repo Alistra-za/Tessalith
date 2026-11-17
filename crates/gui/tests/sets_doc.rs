@@ -104,7 +104,7 @@ fn create_rename_delete_and_order() {
     assert!(!b.created);
 }
 
-/// Note J?2 (B2-1): one slot's borrowers of one lender follow it to `to`, a locked slot too; `to` drops its own
+/// Note JN2 (B2-1): one slot's borrowers of one lender follow it to `to`, a locked slot too; `to` drops its own
 /// borrow of that slot; other slots, other lenders and the lock stay.
 #[test]
 fn retarget_slot_borrows_moves_one_slot_and_never_makes_a_self_borrow() {

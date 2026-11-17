@@ -1358,7 +1358,7 @@ fn a_borrowed_packed_rmaos_answers_the_missing_map_warning() {
     assert_eq!(needs_rows(&m, id, "_rmaos"), 0);
 }
 
-/// Note J?1 (B2-2): a borrow whose lender borrows that slot too follows it to the set that owns the file. The fill
+/// Note JN1 (B2-2): a borrow whose lender borrows that slot too follows it to the set that owns the file. The fill
 /// names that set, the engine bakes the borrower's own rmaos from its normal, and the slot answers "needs _n" as a
 /// direct borrow does (HH8, B1-5: rock01's normal is a `pbr_normal`).
 #[test]
@@ -1402,7 +1402,7 @@ fn a_borrow_from_a_lender_that_borrows_the_slot_fills_from_the_source() {
     assert!(b.normal.ends_with("rock01_normal.png"), "{:?}", b.normal);
 }
 
-/// Note J?1 (B1-5, B1-6 carried over): a chain to a model-space normal fills the slot but keeps pbr's "needs _n"
+/// Note JN1 (B1-5, B1-6 carried over): a chain to a model-space normal fills the slot but keeps pbr's "needs _n"
 /// (a plain `normal` would answer it, B1-6, as `a_borrowed_vanilla_normal_answers_the_pbr_missing_normal` pins).
 #[test]
 fn a_chain_to_a_model_space_normal_keeps_the_missing_normal() {
@@ -1429,7 +1429,7 @@ fn a_chain_to_a_model_space_normal_keeps_the_missing_normal() {
     assert_eq!(needs_rows(&m, id, "_n"), 1);
 }
 
-/// Notes HH8, J?1 (B1-6 guard, a pin): the "any tangent-space normal" rule is only for a role that takes a tangent-space
+/// Notes HH8, JN1 (B1-6 guard, a pin): the "any tangent-space normal" rule is only for a role that takes a tangent-space
 /// normal. `eye`'s `_n (model-space)` takes `msn` only, so a borrowed tangent-space normal keeps "needs" there. Fails
 /// if `borrow_answers` loses its `takes_normal &&`.
 #[test]
@@ -1463,7 +1463,7 @@ fn a_borrowed_tangent_space_normal_keeps_the_eye_shaders_model_space_warning() {
     }
 }
 
-/// Note J?1 (B2-2): a cycle fills nothing and reads "(it has none)"; a set that borrows from itself keeps its own
+/// Note JN1 (B2-2): a cycle fills nothing and reads "(it has none)"; a set that borrows from itself keeps its own
 /// file and is reported too. Nothing hangs.
 #[test]
 fn a_borrow_cycle_or_a_self_borrow_fills_nothing_and_is_reported() {
@@ -1508,7 +1508,7 @@ fn a_borrow_cycle_or_a_self_borrow_fills_nothing_and_is_reported() {
     );
 }
 
-/// Note J?1 (planner's call): a lender holding its own file and a borrow line for the same slot lends its own file,
+/// Note JN1 (planner's call): a lender holding its own file and a borrow line for the same slot lends its own file,
 /// as a single hop did before the follow. Its own card shows the borrow.
 #[test]
 fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
@@ -1532,7 +1532,7 @@ fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
     ));
 }
 
-/// Note J?2: what `sdc-project.toml` says set `id` borrows for slot `n`.
+/// Note JN2: what `sdc-project.toml` says set `id` borrows for slot `n`.
 fn borrow_of(m: &sdc_gui::model::AppModel, id: &str, n: u8) -> Option<String> {
     m.sets_doc
         .as_ref()
@@ -1543,7 +1543,7 @@ fn borrow_of(m: &sdc_gui::model::AppModel, id: &str, n: u8) -> Option<String> {
         .and_then(|e| e.borrow.get(&n).cloned())
 }
 
-/// Note J?2: runs `edit` and waits for the plan; checks that it made exactly one undo step and, for `locked =
+/// Note JN2: runs `edit` and waits for the plan; checks that it made exactly one undo step and, for `locked =
 /// Some((id, n))`, that set `id` still locks slot `n` in `sdc-project.toml`. Returns the file's text from before the
 /// edit, for `undo_restores`.
 fn one_step(
@@ -1570,7 +1570,7 @@ fn one_step(
     before
 }
 
-/// Note J?2: one undo puts `sdc-project.toml` back to `before`, every set's line with it.
+/// Note JN2: one undo puts `sdc-project.toml` back to `before`, every set's line with it.
 fn undo_restores(m: &mut sdc_gui::model::AppModel, before: &str) {
     m.undo();
     idle(m);
@@ -1581,7 +1581,7 @@ fn undo_restores(m: &mut sdc_gui::model::AppModel, before: &str) {
     );
 }
 
-/// Note J?2 (B2-1): moving a lent normal to another set rewrites every set sharing it, a locked slot too, in one
+/// Note JN2 (B2-1): moving a lent normal to another set rewrites every set sharing it, a locked slot too, in one
 /// undo step.
 #[test]
 fn moving_a_lent_normal_to_another_set_moves_its_borrowers_in_one_step() {
@@ -1622,7 +1622,7 @@ fn moving_a_lent_normal_to_another_set_moves_its_borrowers_in_one_step() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?2 (B2-1): the set a lent file moves into owns it now, so it shares that slot from nobody.
+/// Note JN2 (B2-1): the set a lent file moves into owns it now, so it shares that slot from nobody.
 #[test]
 fn moving_a_lent_normal_into_its_borrower_leaves_no_self_borrow() {
     let d = tempfile::tempdir().unwrap();
@@ -1655,7 +1655,7 @@ fn moving_a_lent_normal_into_its_borrower_leaves_no_self_borrow() {
     assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
 }
 
-/// Note J?2 (B2-1): a new set made from a lent file takes its borrowers, and Fill from names brings them back; each
+/// Note JN2 (B2-1): a new set made from a lent file takes its borrowers, and Fill from names brings them back; each
 /// in one undo step, a locked borrower slot rewritten too.
 #[test]
 fn a_new_set_from_a_lent_file_and_fill_from_names_take_its_borrowers() {
@@ -1720,7 +1720,7 @@ fn renaming_a_lender_rewrites_its_borrowers() {
     ));
 }
 
-/// Note J?2: the slot-3 fixture (Tasks 2 and 5). rock01 gets `rock01_sk.png` (a skin `_sk`) and, with `lender_g`,
+/// Note JN2: the slot-3 fixture (Tasks 2 and 5). rock01 gets `rock01_sk.png` (a skin `_sk`) and, with `lender_g`,
 /// `rock01_g.png` (a PBR emissive); leaf gets `leaf_g.png` (a PBR emissive) with `leaf_g`. All decided; grouped by
 /// name.
 fn slot3_opened(d: &std::path::Path, lender_g: bool, leaf_g: bool) -> sdc_gui::model::AppModel {
@@ -1775,7 +1775,7 @@ fn slot3_share(m: &sdc_gui::model::AppModel, id: &str) -> String {
         .expect("shares slot 3")
 }
 
-/// Note J?2 (planner's call, lent by slot number): rock01 holds both kinds of slot 3 and lends one of them. Moving
+/// Note JN2 (planner's call, lent by slot number): rock01 holds both kinds of slot 3 and lends one of them. Moving
 /// the other one out leaves leaf on rock01; moving the lent one out takes leaf with it.
 #[test]
 fn moving_the_lent_kind_of_a_two_kind_slot_takes_its_borrowers_and_the_other_does_not() {
@@ -1812,7 +1812,7 @@ fn moving_the_lent_kind_of_a_two_kind_slot_takes_its_borrowers_and_the_other_doe
     );
 }
 
-/// Note J?3 (B2-1b): a Share that replaces a lent file points the sets sharing that slot at the new source's set,
+/// Note JN3 (B2-1b): a Share that replaces a lent file points the sets sharing that slot at the new source's set,
 /// in the same step, so no chain is written.
 #[test]
 fn replacing_a_lent_file_by_a_share_points_its_borrowers_at_the_new_source() {
@@ -1846,7 +1846,7 @@ fn replacing_a_lent_file_by_a_share_points_its_borrowers_at_the_new_source() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?3 (B2-1b): a set that shared the slot and is the new source owns the file: it drops its line (no cycle).
+/// Note JN3 (B2-1b): a set that shared the slot and is the new source owns the file: it drops its line (no cycle).
 #[test]
 fn a_borrower_that_is_the_new_source_drops_its_borrow() {
     let d = tempfile::tempdir().unwrap();
@@ -1879,7 +1879,7 @@ fn a_borrower_that_is_the_new_source_drops_its_borrow() {
     ));
 }
 
-/// Note J?3 (B2-1b): a Move, a Duplicate or a Fill from names that replaces a lent file leaves the sharing sets on
+/// Note JN3 (B2-1b): a Move, a Duplicate or a Fill from names that replaces a lent file leaves the sharing sets on
 /// the lender; they get
 /// the new file ("share rock02's normal" keeps meaning rock02's normal).
 #[test]
@@ -1941,8 +1941,8 @@ fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_th
     );
 }
 
-/// Note J?4: leaf shares rock01's normal with its slot locked, odd shares rock01's packed rmaos. Neither can take
-/// the file when it leaves rock01 (Note J?5: a locked slot, a packed map), so both slots go empty.
+/// Note JN4: leaf shares rock01's normal with its slot locked, odd shares rock01's packed rmaos. Neither can take
+/// the file when it leaves rock01 (Note JN5: a locked slot, a packed map), so both slots go empty.
 fn lent_to_leaf_and_odd(d: &std::path::Path) -> sdc_gui::model::AppModel {
     let mut m = pbr_opened(d);
     idle(&mut m);
@@ -1965,7 +1965,7 @@ fn message_starting(m: &sdc_gui::model::AppModel, start: &str) -> String {
         .unwrap_or_else(|| panic!("no message starting {start:?}"))
 }
 
-/// Note J?4 (B2-3): deleting a lender names the sets left with an empty shared slot; their lines stay (HE3).
+/// Note JN4 (B2-3): deleting a lender names the sets left with an empty shared slot; their lines stay (HE3).
 #[test]
 fn deleting_a_lender_keeps_the_borrows_and_names_the_sets_that_lost_a_texture() {
     let d = tempfile::tempdir().unwrap();
@@ -1987,7 +1987,7 @@ fn deleting_a_lender_keeps_the_borrows_and_names_the_sets_that_lost_a_texture() 
     );
 }
 
-/// Note J?4 (B2-3): removing a lent file says which set lost it; a file no set shares adds nothing.
+/// Note JN4 (B2-3): removing a lent file says which set lost it; a file no set shares adds nothing.
 #[test]
 fn removing_a_lent_file_names_the_set_that_lost_it() {
     let d = tempfile::tempdir().unwrap();
@@ -2010,7 +2010,7 @@ fn removing_a_lent_file_names_the_set_that_lost_it() {
     );
 }
 
-/// Note J?4 (B2-3): a packed output leaves its set with the last of its raw maps, while the set keeps other files.
+/// Note JN4 (B2-3): a packed output leaves its set with the last of its raw maps, while the set keeps other files.
 /// Removing that raw map names the sets that shared the pack; removing the set's last file afterwards adds nothing.
 #[test]
 fn removing_the_last_raw_map_of_a_lent_pack_names_the_sets_that_shared_it() {
@@ -2061,7 +2061,7 @@ fn removing_the_last_raw_map_of_a_lent_pack_names_the_sets_that_shared_it() {
     );
 }
 
-/// Note J?4 (B2-11): a share that passes through a deleted set is passed on to the set it shared from, in the same
+/// Note JN4 (B2-11): a share that passes through a deleted set is passed on to the set it shared from, in the same
 /// undo step; nothing is lost, so the toast names nobody.
 #[test]
 fn deleting_the_middle_of_a_chain_passes_the_share_on() {
@@ -2095,7 +2095,7 @@ fn deleting_the_middle_of_a_chain_passes_the_share_on() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?5: leaf and odd both share rock01's normal (slot 2); leaf sorts first.
+/// Note JN5: leaf and odd both share rock01's normal (slot 2); leaf sorts first.
 fn normal_lent_twice(d: &std::path::Path) -> sdc_gui::model::AppModel {
     let mut m = pbr_opened(d);
     idle(&mut m);
@@ -2107,7 +2107,7 @@ fn normal_lent_twice(d: &std::path::Path) -> sdc_gui::model::AppModel {
     m
 }
 
-/// Note J?5 (B2-6, owner: option 1): deleting a lender hands its shared normal to the first set sharing it, as that
+/// Note JN5 (B2-6, owner: option 1): deleting a lender hands its shared normal to the first set sharing it, as that
 /// set's own file; the other one (its slot locked) shares it from there; one undo step; the toast says where it went.
 #[test]
 fn deleting_a_lender_hands_its_shared_file_to_the_first_borrower() {
@@ -2148,7 +2148,7 @@ fn deleting_a_lender_hands_its_shared_file_to_the_first_borrower() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?5 (B2-7): a set whose slot is locked is skipped for the next one, and its share is rewritten to that one,
+/// Note JN5 (B2-7): a set whose slot is locked is skipped for the next one, and its share is rewritten to that one,
 /// lock kept, in one undo step (Remove from set).
 #[test]
 fn a_borrower_that_cannot_take_the_file_is_skipped_for_the_next() {
@@ -2181,7 +2181,7 @@ fn a_borrower_that_cannot_take_the_file_is_skipped_for_the_next() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?5 (B2-7): a set that has its own file of that kind is skipped; "first" is the Sets column's order, not the
+/// Note JN5 (B2-7): a set that has its own file of that kind is skipped; "first" is the Sets column's order, not the
 /// id's.
 #[test]
 fn a_borrower_with_its_own_file_of_that_kind_is_skipped() {
@@ -2210,7 +2210,7 @@ fn a_borrower_with_its_own_file_of_that_kind_is_skipped() {
     );
 }
 
-/// Note J?5 (B2-7): a set that cannot take a drop (`drop_target`) cannot take the file either. `landscape/ghost` is
+/// Note JN5 (B2-7): a set that cannot take a drop (`drop_target`) cannot take the file either. `landscape/ghost` is
 /// an entry with no files that the user did not create (a view with an empty key, `NoFilesLeft`); leaf's only file
 /// went to no set, so it has no view. Both are skipped, odd takes the file, and both lines now name odd.
 #[test]
@@ -2246,7 +2246,7 @@ fn borrowers_with_no_files_or_no_view_are_skipped() {
     }
 }
 
-/// Note J?5 (B2-7): slot 3 holds two kinds. Leaf owns an emissive `_g` there, so it cannot take rock01's `_sk`
+/// Note JN5 (B2-7): slot 3 holds two kinds. Leaf owns an emissive `_g` there, so it cannot take rock01's `_sk`
 /// (it would hold both kinds of slot 3); odd takes it. A kind-only check would hand it to leaf.
 #[test]
 fn a_borrower_with_its_own_file_in_that_slot_number_is_skipped() {
@@ -2270,7 +2270,7 @@ fn a_borrower_with_its_own_file_in_that_slot_number_is_skipped() {
     );
 }
 
-/// Note J?5: a Delete set that hands two files to one set in one undo step. `landscape/heir` is a set the user
+/// Note JN5: a Delete set that hands two files to one set in one undo step. `landscape/heir` is a set the user
 /// created with no files (so it may take files, `drop_target`), and it shares rock01's diffuse and normal; both
 /// become its own, and odd, which shared the normal too, shares it from there.
 #[test]
@@ -2313,7 +2313,7 @@ fn deleting_a_lender_hands_each_shared_file_to_its_own_heir() {
     undo_restores(&mut m, &before);
 }
 
-/// Note J?5 (B2-8): rock01 holds both kinds of slot 3. Removing the one leaf's share resolves to hands nothing over:
+/// Note JN5 (B2-8): rock01 holds both kinds of slot 3. Removing the one leaf's share resolves to hands nothing over:
 /// rock01 still fills slot 3, leaf keeps its line and now reads the other file, and no toast is shown.
 #[test]
 fn removing_one_of_two_files_in_a_slot_hands_nothing_over() {
@@ -2349,7 +2349,7 @@ fn removing_one_of_two_files_in_a_slot_hands_nothing_over() {
     );
 }
 
-/// Note J?5 (B2-11 narrowed): rock01 owns its normal AND has a hand-edited share line for slot 2 to leaf; odd shares
+/// Note JN5 (B2-11 narrowed): rock01 owns its normal AND has a hand-edited share line for slot 2 to leaf; odd shares
 /// slot 2 from rock01, so it used rock01's own normal. Deleting rock01 hands that normal to odd as its own file; odd
 /// is not pointed at leaf (the B2-11 pass-on is only for a slot the deleted set has no file of its own in).
 #[test]

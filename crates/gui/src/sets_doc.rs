@@ -1088,7 +1088,7 @@ impl SetsDoc {
         self.rename_in_groups(from, to);
     }
 
-    /// Note J?2 (B2-1): every entry whose `borrow.slot<slot>` names set `lender` now names `to`, a locked slot too (as
+    /// Note JN2 (B2-1): every entry whose `borrow.slot<slot>` names set `lender` now names `to`, a locked slot too (as
     /// `rename_refs` rewrites borrows); the entry of `to` itself drops that borrow instead, because it owns the file now
     /// (never a self-borrow). Other slots and other lenders stay. Returns the ids of the entries it changed, in file
     /// order.

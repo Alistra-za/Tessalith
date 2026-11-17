@@ -41,6 +41,10 @@
 - After an edit that needs a full re-plan (such as re-encoding a DDS), the texture panel could take edits for a moment before that plan had landed. This happened when the full re-plan finished before the quick one: the quick re-plan then answered that the edit needed no full plan. The quick re-plan now works from the plan as it stood when you made the edit, so the panel waits for the full plan.
 - Tessalith no longer refuses to start when Segoe UI is missing. It asks the system for its fonts by name. If Segoe UI is missing it uses Arial or another common font it finds (Noto Sans, DejaVu Sans and others), and if it finds none it uses its own built-in fonts (Ubuntu Light and Hack) and says so in Messages. On a normal Windows install nothing looks different. Chinese, Japanese and Korean text in file names now uses a font Windows already has for that script (on an English Windows, Chinese characters can show in a Japanese font) instead of always Microsoft YaHei, and those fonts are no longer loaded at start, which saves 47.1 MB of memory when no such name is shown. Emoji in file names can now show in colour.
 - Fixed: a set that borrows its normal or packed map from another set no longer says the shader needs that map.
+- A shared slot now follows its texture: moving the texture to another set, or sharing another texture into the slot, keeps every set that shared it pointing at the right file, in one undo step.
+- Deleting a set, or removing a texture from it, no longer leaves the sets that shared that texture with an empty slot: the texture goes to the first of them as its own, and the toast says where. If none can take it, the toast names the sets that lost it.
+- A slot shared from a set that itself shares it now finds the texture, and a loop of shares is reported instead of filling the slot wrongly.
+- If your project already has such a slot (sharing a texture into a slot other sets shared could make one), the next export fills it: its PGPatcher JSON names the texture, a vanilla set gets its copy of it, and its roughness bakes from that normal. Before, that slot was left empty.
 
 ## 3.0.0
 

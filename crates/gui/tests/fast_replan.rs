@@ -554,7 +554,7 @@ fn views_after_a_partial_equal_a_fresh_build() {
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
 
-    // Note J?1 (B2-2): a chain. The leaf borrows the odd set's normal slot, and the odd set borrows the wall's: the
+    // Note JN1 (B2-2): a chain. The leaf borrows the odd set's normal slot, and the odd set borrows the wall's: the
     // leaf fills from the wall. A partial of the wall alone must rebuild the leaf too, two hops away.
     let d = tempfile::tempdir().unwrap();
     let mut m = open(d.path(), wall);
@@ -593,7 +593,7 @@ fn views_after_a_partial_equal_a_fresh_build() {
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
 
-    // Note J?1 (B2-2): the same chain on slot 3. The engine's partial groups hold a normal's borrowers (so the chain
+    // Note JN1 (B2-2): the same chain on slot 3. The engine's partial groups hold a normal's borrowers (so the chain
     // above is re-planned whole), not a glow's: a partial of the wall alone must still rebuild the leaf, two hops away.
     let d = tempfile::tempdir().unwrap();
     let mut m = open(d.path(), wall);
