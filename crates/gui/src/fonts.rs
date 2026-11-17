@@ -190,7 +190,7 @@ pub struct Candidate {
     pub key: &'static str,
 }
 
-/// A candidate whose key is its family name (Linux, macOS).
+/// A candidate whose key is its family name (Linux, macOS, the Windows late lists).
 const fn named(family: &'static str) -> Candidate {
     Candidate {
         family,
@@ -203,19 +203,47 @@ pub struct OsFonts {
     /// Ask the OS's own `sans-serif` / `monospace` answer before the named lists (Linux: the desktop's choice).
     pub generic_first: bool,
     pub proportional: &'static [Candidate],
+    /// Asked last for the proportional primary, after the generic answer and right before the floor.
+    pub proportional_late: &'static [Candidate],
     /// Fallbacks after the proportional primary, every one that is found.
     pub proportional_extra: &'static [Candidate],
     pub monospace: &'static [Candidate],
+    /// Asked right after `monospace`, before the proportional system font stands in.
+    pub monospace_late: &'static [Candidate],
     /// Fallbacks after the monospace primary, every one that is found.
     pub monospace_extra: &'static [Candidate],
 }
 
+/// The common Linux interface families, in preference order: `LINUX`'s named list, and `WINDOWS`'s late list for
+/// the Windows build under Wine.
+const LINUX_PROPORTIONAL: &[Candidate] = &[
+    named("Noto Sans"),
+    named("DejaVu Sans"),
+    named("Liberation Sans"),
+    named("Cantarell"),
+    named("Ubuntu Sans"),
+    named("Ubuntu"),
+    named("Adwaita Sans"),
+    named("Inter"),
+    named("FreeSans"),
+];
+
+/// The common Linux fixed-width families, shared the same way as [`LINUX_PROPORTIONAL`].
+const LINUX_MONOSPACE: &[Candidate] = &[
+    named("DejaVu Sans Mono"),
+    named("Liberation Mono"),
+    named("Noto Sans Mono"),
+    named("Ubuntu Mono"),
+];
+
+/// Segoe UI and Consolas, then (for the same exe under Wine) the common Linux families before the floor.
 pub const WINDOWS: OsFonts = OsFonts {
     generic_first: false,
     proportional: &[Candidate {
         family: "Segoe UI",
         key: "segoeui",
     }],
+    proportional_late: LINUX_PROPORTIONAL,
     proportional_extra: &[
         Candidate {
             family: "Segoe UI Symbol",
@@ -230,6 +258,7 @@ pub const WINDOWS: OsFonts = OsFonts {
         family: "Consolas",
         key: "consola",
     }],
+    monospace_late: LINUX_MONOSPACE,
     monospace_extra: &[Candidate {
         family: "Segoe UI Symbol",
         key: "seguisym",
@@ -238,32 +267,21 @@ pub const WINDOWS: OsFonts = OsFonts {
 
 pub const LINUX: OsFonts = OsFonts {
     generic_first: true,
-    proportional: &[
-        named("Noto Sans"),
-        named("DejaVu Sans"),
-        named("Liberation Sans"),
-        named("Cantarell"),
-        named("Ubuntu Sans"),
-        named("Ubuntu"),
-        named("Adwaita Sans"),
-        named("Inter"),
-        named("FreeSans"),
-    ],
+    proportional: LINUX_PROPORTIONAL,
+    proportional_late: &[],
     proportional_extra: &[],
-    monospace: &[
-        named("DejaVu Sans Mono"),
-        named("Liberation Mono"),
-        named("Noto Sans Mono"),
-        named("Ubuntu Mono"),
-    ],
+    monospace: LINUX_MONOSPACE,
+    monospace_late: &[],
     monospace_extra: &[],
 };
 
 pub const MACOS: OsFonts = OsFonts {
     generic_first: false,
     proportional: &[named("SF Pro Text"), named("Helvetica Neue")],
+    proportional_late: &[],
     proportional_extra: &[],
     monospace: &[named("Menlo")],
+    monospace_late: &[],
     monospace_extra: &[],
 };
 
@@ -415,9 +433,10 @@ impl Asker<'_> {
 /// Builds the font definitions from what `lookup` finds for `os`'s candidates, with the embedded floor (Ubuntu Light,
 /// Hack, egui-icons) where nothing is found (Note JM). Rule 0: a face that does not parse counts as not found. Rule 1:
 /// the proportional primary is the first named candidate found, then the generic `sans-serif` answer (the other way
-/// round when `generic_first`). Rule 2: every extra found follows its primary, in table order. Rule 3: the monospace
-/// primary comes from its own list and the `monospace` answer, with the proportional system font before the floor
-/// (and, when named lists come first, before the `monospace` answer). Rules 4 and 6: the floor's data is added
+/// round when `generic_first`), then the first of `proportional_late`. Rule 2: every extra found follows its primary,
+/// in table order. Rule 3: the monospace primary is the first of `monospace`, then the first of `monospace_late`, then
+/// the proportional system font, then the generic `monospace` answer (when `generic_first`, that answer is asked
+/// first instead). Rules 4 and 6: the floor's data is added
 /// whenever a chain names it, and each family name is asked once.
 pub fn resolve(lookup: &mut dyn FontLookup, os: &OsFonts) -> (egui::FontDefinitions, FontChoice) {
     let mut ask = Asker {
@@ -427,21 +446,24 @@ pub fn resolve(lookup: &mut dyn FontLookup, os: &OsFonts) -> (egui::FontDefiniti
     };
     let mut defs = egui::FontDefinitions::empty();
 
-    // Rule 1: the proportional primary.
+    // Rule 1: the proportional primary; the late list comes last.
     let proportional = if os.generic_first {
         ask.generic(Generic::SansSerif)
             .or_else(|| ask.first(os.proportional))
     } else {
         ask.first(os.proportional)
             .or_else(|| ask.generic(Generic::SansSerif))
-    };
-    // Rule 3: the monospace primary; the proportional system font comes before the floor.
+    }
+    .or_else(|| ask.first(os.proportional_late));
+    // Rule 3: the monospace primary; the late list, then the proportional system font, come before the floor.
     let monospace = if os.generic_first {
         ask.generic(Generic::Monospace)
             .or_else(|| ask.first(os.monospace))
+            .or_else(|| ask.first(os.monospace_late))
             .or_else(|| proportional.clone())
     } else {
         ask.first(os.monospace)
+            .or_else(|| ask.first(os.monospace_late))
             .or_else(|| proportional.clone())
             .or_else(|| ask.generic(Generic::Monospace))
     };
@@ -548,8 +570,10 @@ pub fn embedded() -> (egui::FontDefinitions, FontChoice) {
     let none = OsFonts {
         generic_first: false,
         proportional: &[],
+        proportional_late: &[],
         proportional_extra: &[],
         monospace: &[],
+        monospace_late: &[],
         monospace_extra: &[],
     };
     resolve(&mut NoFonts, &none)
@@ -1109,6 +1133,103 @@ mod tests {
         );
         assert_eq!(choice.proportional, FontSource::System("Arial".into()));
         assert_eq!(f.asked[0], "Segoe UI");
+    }
+
+    /// The Windows build under Wine: no Segoe UI, Consolas or generic answer, but a Linux family is installed.
+    #[test]
+    fn windows_without_segoe_ui_or_arial_takes_a_linux_family() {
+        let mut f = Fake::with(&["DejaVu Sans", "DejaVu Sans Mono"]);
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional][0],
+            "DejaVu Sans"
+        );
+        assert_eq!(
+            defs.families[&egui::FontFamily::Monospace][0],
+            "DejaVu Sans Mono"
+        );
+        assert_eq!(
+            choice,
+            FontChoice {
+                proportional: FontSource::System("DejaVu Sans".into()),
+                monospace: FontSource::System("DejaVu Sans Mono".into()),
+                lookup_failed: false
+            }
+        );
+        assert_eq!(choice.message(), None);
+    }
+
+    #[test]
+    fn windows_takes_the_linux_families_in_table_order() {
+        let mut f = Fake::with(&["Liberation Sans", "Noto Sans", "Cantarell"]);
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional][0],
+            "Noto Sans"
+        );
+        assert_eq!(choice.proportional, FontSource::System("Noto Sans".into()));
+    }
+
+    /// Pin: the late list is asked only after the generic answer (Arial on Windows).
+    #[test]
+    fn windows_prefers_arial_to_a_linux_family() {
+        let mut f = Fake {
+            sans: Some(("Arial", UBUNTU)),
+            ..Fake::with(&["Noto Sans"])
+        };
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional][0],
+            "sans-serif"
+        );
+        assert_eq!(choice.proportional, FontSource::System("Arial".into()));
+    }
+
+    #[test]
+    fn windows_fixed_width_takes_a_monospace_family_before_the_stand_in() {
+        let mut f = Fake::with(&["Segoe UI", "Liberation Mono"]);
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Monospace][0],
+            "Liberation Mono"
+        );
+        assert_eq!(
+            choice.monospace,
+            FontSource::System("Liberation Mono".into())
+        );
+    }
+
+    /// Pin: the late lists are Windows-only, and sharing the Linux lists did not change `LINUX`'s names or order.
+    #[test]
+    fn linux_and_macos_have_no_late_lists() {
+        let names = |c: &[Candidate]| c.iter().map(|c| c.family).collect::<Vec<_>>();
+        for os in [&LINUX, &MACOS] {
+            assert!(os.proportional_late.is_empty());
+            assert!(os.monospace_late.is_empty());
+        }
+        assert_eq!(
+            names(LINUX.proportional),
+            [
+                "Noto Sans",
+                "DejaVu Sans",
+                "Liberation Sans",
+                "Cantarell",
+                "Ubuntu Sans",
+                "Ubuntu",
+                "Adwaita Sans",
+                "Inter",
+                "FreeSans"
+            ]
+        );
+        assert_eq!(
+            names(LINUX.monospace),
+            [
+                "DejaVu Sans Mono",
+                "Liberation Mono",
+                "Noto Sans Mono",
+                "Ubuntu Mono"
+            ]
+        );
     }
 
     #[test]
