@@ -759,6 +759,9 @@ fn review_has_no_half_size_or_stale_group() {
     h.run();
     let skip = d.path().to_string_lossy().into_owned();
     let got = review_labels(&h, &skip);
+    // Review E2: the tab's label counts problems and notes apart; it is computed, not written out.
+    let tab =
+        sdc_gui::model::bottom::tab_label(sdc_gui::model::bottom::cached_tab_counts(h.state()));
     let expected: Vec<&str> = vec![
         "1 DDS file",
         "Accept all suggestions",
@@ -780,7 +783,7 @@ fn review_has_no_half_size_or_stale_group() {
         "None",
         "PBR",
         "PBR folder name",
-        "Problems (8)",
+        &tab,
         "Recipe settings…",
         "Review",
         "Set type: landscape diffuse ✓",

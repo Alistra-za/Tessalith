@@ -279,6 +279,13 @@ pub(crate) struct ViewCache {
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
     /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,
+    /// Review E2: `bottom::cached_tab_counts`, keyed on the `problems` build it counted (held, so its address is never
+    /// reused) and the hidden kinds.
+    pub tab_counts: Option<(
+        Arc<Vec<bottom::Problem>>,
+        Vec<engine::codes::Code>,
+        bottom::TabCounts,
+    )>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -541,6 +548,9 @@ pub struct AppModel {
     /// Task 6: `bottom::problems` calls and `export_files` builds (see `bottom::problem_lookups`).
     #[cfg(feature = "test-hooks")]
     pub(crate) problem_lookups: std::cell::Cell<u64>,
+    /// Review E2: the row scans `bottom::cached_tab_counts` ran (see `bottom::tab_count_scans`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) tab_count_scans: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
@@ -853,6 +863,8 @@ impl AppModel {
             filter_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
             problem_lookups: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            tab_count_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]

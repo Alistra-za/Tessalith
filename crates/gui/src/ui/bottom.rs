@@ -1,17 +1,14 @@
 //! The bottom panel (layout v2 A1, A9): one strip of tab buttons, a body below while open. Full window width, drawn
 //! before the columns (R7). Tabs: Problems, Review (while open), Messages and Files.
 use super::{drawer, messages, problems, review};
-use crate::model::bottom::BottomTab;
+use crate::model::bottom::{cached_tab_counts, tab_label, BottomTab};
 use crate::model::AppModel;
 use eframe::egui;
 
 /// The tabs that have a body, in their fixed order. Review is listed only while it is open (R7).
 fn tabs(model: &AppModel) -> Vec<(BottomTab, String)> {
-    let n = crate::model::bottom::problems(model).len();
-    let problems = match n {
-        0 => "Problems".to_string(),
-        n => format!("Problems ({n})"),
-    };
+    // Review E2: from the cached counts, so a settled frame scans no row.
+    let problems = tab_label(cached_tab_counts(model));
     let mut t = vec![(BottomTab::Problems, problems)];
     if model.review.is_some() {
         t.push((BottomTab::Review, "Review".to_string()));

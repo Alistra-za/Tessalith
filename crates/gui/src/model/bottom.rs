@@ -135,11 +135,14 @@ pub enum Level {
     Check,
     /// Note FC3: a result with an action and no consequence for the export (a dropped fill, a cleared format).
     Info,
+    /// Review E2: a note whose fix is already queued for the next export.
+    Queued,
 }
 
-/// Whether a row takes "ready" away: every row but an artist check's (owner answer 1) and an Info row (Note FC3).
+/// Whether a row takes "ready" away: every row but an artist check's (owner answer 1), a note (Note FC3, review E2)
+/// and a row the user marked as intended.
 pub fn counts_as_ready_problem(p: &Problem) -> bool {
-    !matches!(p.level, Level::Check | Level::Info)
+    !matches!(p.level, Level::Check | Level::Info | Level::Queued) && !p.intended
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -218,6 +221,8 @@ pub struct Problem {
     pub detail: Option<String>,
     /// Note FL: a block or ask row, checked on the last full plan (`AppModel::fix_off_for`).
     pub carried: bool,
+    /// Review E2: the user marked this row as intended, so it is a note.
+    pub intended: bool,
 }
 
 impl Problem {
@@ -236,6 +241,75 @@ impl Problem {
     pub fn shown(&self) -> std::borrow::Cow<'_, str> {
         code_text::shown_for(self.code, &self.text)
     }
+
+    /// Review E2: a row that needs nothing from the user: an Info or queued row, or one marked as intended.
+    pub fn is_note(&self) -> bool {
+        matches!(self.level, Level::Info | Level::Queued) || self.intended
+    }
+
+    /// Review E2 (controller ruling 5): a row of the default list. A note with a button stays; a row the user marked
+    /// leaves it, fix or not.
+    pub fn in_worklist(&self) -> bool {
+        !self.is_note() || (self.fix.is_some() && !self.intended)
+    }
+}
+
+/// Review E2: what the Problems tab's label counts. A hidden note counts nowhere.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct TabCounts {
+    pub problems: usize,
+    pub hidden: usize,
+    pub notes: usize,
+}
+
+/// The tab counts of `all` with the kinds in `hidden` hidden (the same test as the list's, `can_hide`).
+pub fn tab_counts(all: &[Problem], hidden: &[Code]) -> TabCounts {
+    let mut c = TabCounts::default();
+    for p in all {
+        let is_hidden = can_hide(p) && p.code.is_some_and(|k| hidden.contains(&k));
+        match (p.is_note(), is_hidden) {
+            (true, true) => {}
+            (true, false) => c.notes += 1,
+            (false, true) => c.hidden += 1,
+            (false, false) => c.problems += 1,
+        }
+    }
+    c
+}
+
+/// `tab_counts`, scanned once per new `problems()` build or hidden-kinds change (review E2; ui-rules §9.1). The cache
+/// holds the counted `Arc`, so `Arc::ptr_eq` can't match a new list at a freed address.
+pub fn cached_tab_counts(m: &AppModel) -> TabCounts {
+    // Both before the borrow: `problems` writes the same cell.
+    let all = problems(m);
+    let hidden = m.hidden_kinds();
+    if let Some((_, _, c)) = m
+        .views
+        .borrow()
+        .tab_counts
+        .as_ref()
+        .filter(|(p, h, _)| Arc::ptr_eq(p, &all) && *h == hidden)
+    {
+        return *c;
+    }
+    #[cfg(feature = "test-hooks")]
+    m.tab_count_scans.set(m.tab_count_scans.get() + 1);
+    let c = tab_counts(&all, &hidden);
+    m.views.borrow_mut().tab_counts = Some((all, hidden, c));
+    c
+}
+
+/// The Problems tab's label: `Problems (n)`, `Problems (n · h hidden)`, then ` · Notes (m)` when there are notes.
+pub fn tab_label(c: TabCounts) -> String {
+    let problems = match (c.problems, c.hidden, c.notes) {
+        (0, 0, 0) => "Problems".to_string(),
+        (n, 0, _) => format!("Problems ({n})"),
+        (n, h, _) => format!("Problems ({n} · {h} hidden)"),
+    };
+    match c.notes {
+        0 => problems,
+        m => format!("{problems} · Notes ({m})"),
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -247,6 +321,10 @@ pub enum ProblemsFilter {
     Checks,
     /// Only the artist checks' rows of one set (an engine set key): "Checks {n}" pressed while `Set` is on.
     SetChecks(String),
+    /// Review E2: every note row.
+    Notes,
+    /// Review E2: every note row of one set (an engine set key): the Notes pill pressed while `Set` is on.
+    SetNotes(String),
 }
 
 impl AppModel {
@@ -374,6 +452,12 @@ pub fn problem_lookups(m: &AppModel) -> u64 {
     m.problem_lookups.get()
 }
 
+/// Every `tab_counts` scan `cached_tab_counts` ran (review E2), not its cached answers.
+#[cfg(feature = "test-hooks")]
+pub fn tab_count_scans(m: &AppModel) -> u64 {
+    m.tab_count_scans.get()
+}
+
 /// `AppModel::export_files` counts that were not served from the cache.
 #[cfg(feature = "test-hooks")]
 pub fn export_files_builds(m: &AppModel) -> u64 {
@@ -396,6 +480,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         suggested: None,
         detail: None,
         carried: false,
+        intended: false,
     };
     // Review E2: the Info row of a warning that is a note, for the item, set and File loops alike; `None` for a
     // problem. FC7 (CN3), controller ruling 4: a `_curves`/cavity map no recipe reads is Also export's input, not a
@@ -985,13 +1070,29 @@ fn unreadable_folder(message: &str) -> Option<PathBuf> {
 }
 
 /// The list narrowed by `f`: a set keeps its own rows and its members' rows; `Undecided` keeps the Decide rows.
-/// `None` is `problems(m)` itself, not a copy.
+/// `None` and `Set` list the worklist (`Problem::in_worklist`); `Notes` and `SetNotes` list every note.
 pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
+    // Review E2 (rule 1.2, controller ruling 5): one worklist, the problem rows, then the notes with a button.
+    let worklist = |keep: &dyn Fn(&Problem) -> bool| -> Vec<Problem> {
+        let (notes, rows): (Vec<&Problem>, Vec<&Problem>) = all
+            .iter()
+            .filter(|p| p.in_worklist() && keep(p))
+            .partition(|p| p.is_note());
+        rows.into_iter().chain(notes).cloned().collect()
+    };
     Arc::new(match f {
-        None => return all,
+        None => worklist(&|_| true),
+        Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
+        Some(ProblemsFilter::SetNotes(k)) => {
+            let members = set_members(m, k);
+            all.iter()
+                .filter(|p| p.is_note() && in_set(p, k, &members))
+                .cloned()
+                .collect()
+        }
         Some(ProblemsFilter::Undecided) => all
             .iter()
             .filter(|p| p.level == Level::Decide)
@@ -1004,10 +1105,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             .collect(),
         Some(ProblemsFilter::Set(k)) => {
             let members = set_members(m, k);
-            all.iter()
-                .filter(|p| in_set(p, k, &members))
-                .cloned()
-                .collect()
+            worklist(&|p| in_set(p, k, &members))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
             let members = set_members(m, k);

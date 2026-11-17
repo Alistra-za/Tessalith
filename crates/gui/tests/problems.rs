@@ -169,14 +169,18 @@ fn the_set_filter_keeps_the_sets_rows_and_its_members_rows() {
     assert!(filtered(&m, Some(&ProblemsFilter::Undecided))
         .iter()
         .all(|p| p.level == Level::Decide));
-    assert_eq!(filtered(&m, None).len(), problems(&m).len());
+    // Review E2: the unfiltered list is the worklist.
+    let worklist = problems(&m).iter().filter(|p| p.in_worklist()).count();
+    assert_eq!(filtered(&m, None).len(), worklist);
 }
 
 #[test]
 fn the_unfiltered_list_is_the_problems_list_itself() {
     let d = tempfile::tempdir().unwrap();
     let m = opened(d.path());
-    assert!(std::sync::Arc::ptr_eq(&filtered(&m, None), &problems(&m)));
+    // Review E2: every worklist row of `problems`, and only those.
+    let worklist = problems(&m).iter().filter(|p| p.in_worklist()).count();
+    assert_eq!(filtered(&m, None).len(), worklist);
 }
 
 #[test]

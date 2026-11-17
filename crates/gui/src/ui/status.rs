@@ -16,6 +16,10 @@ pub enum Status {
     Check,
     /// Note FC3: a result with an action and no consequence for the export.
     Info,
+    /// Review E2: a note whose fix is queued for the next export.
+    Queued,
+    /// Review E2: a row the user marked as intended.
+    Intended,
 }
 
 impl Status {
@@ -23,8 +27,8 @@ impl Status {
         match self {
             Status::Blocks => RED,
             Status::Warning => AMBER,
-            Status::Ready => GREEN,
-            Status::Check | Status::Info => ui.visuals().weak_text_color(),
+            Status::Ready | Status::Queued => GREEN,
+            Status::Check | Status::Info | Status::Intended => ui.visuals().weak_text_color(),
         }
     }
 
@@ -35,12 +39,14 @@ impl Status {
             Status::Ready => "ready",
             Status::Check => "check",
             Status::Info => "info",
+            Status::Queued => "queued",
+            Status::Intended => "intended",
         }
     }
 
     /// Whether a row of this status draws its sentence weak (Note FC3).
     pub fn weak(self) -> bool {
-        matches!(self, Status::Check | Status::Info)
+        matches!(self, Status::Check | Status::Info | Status::Intended)
     }
 }
 

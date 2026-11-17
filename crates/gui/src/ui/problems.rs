@@ -4,7 +4,8 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    can_hide, filtered, flagged, kinds, problems, At, Fix, Level, Problem, ProblemsFilter,
+    cached_tab_counts, can_hide, filtered, flagged, kinds, problems, At, Fix, Level, Problem,
+    ProblemsFilter,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -24,6 +25,8 @@ pub const REBUILD_Z: &str = "Rebuild Z";
 pub const UNDO_ROW: &str = "Undo this change";
 /// The `Checks` filter pill (Note FC3: Problems shows one count; checks are a filter of it, rule 6.5).
 pub const CHECKS_PILL: &str = "Checks";
+/// Review E2: the `Notes ({m})` filter pill; the notes leave the default list unless they have a button (rule 6.5).
+pub const NOTES_PILL: &str = "Notes";
 /// Note FC3: `Fix path` asks the PGPatcher field `(set id, key)` for focus; the field takes it when drawn.
 pub const FOCUS_FIELD: &str = "fix-path-focus";
 
@@ -34,6 +37,7 @@ pub fn status_of(l: Level) -> Status {
         // Note FC3 (amends CL18): checks are not amber; Info rows are not a status either.
         Level::Check => Status::Check,
         Level::Info => Status::Info,
+        Level::Queued => Status::Queued,
     }
 }
 
@@ -68,6 +72,8 @@ struct Listed {
     hidden: usize,
     /// Any row of the project can be hidden, so `Kinds ▾` shows.
     hideable: bool,
+    /// Review E2: the listed rows that are not notes (the empty and first-line texts).
+    problem_rows: usize,
 }
 
 /// `filtered` at most once per change: keyed on the (cached) problems build, the filter and the hidden kinds. Also
@@ -96,6 +102,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         Arc::new(out.iter().filter(|p| !is_hidden(p)).cloned().collect())
     };
     let l = Listed {
+        problem_rows: rows.iter().filter(|p| !p.is_note()).count(),
         suggestions: all.iter().filter(|p| p.suggested.is_some()).count(),
         hideable: all.iter().any(can_hide),
         all,
@@ -173,10 +180,28 @@ enum Act {
 /// The pill's state and where a click takes the filter: on with a set keeps the set (review M2).
 fn checks_pill(f: &Option<ProblemsFilter>) -> (bool, Option<ProblemsFilter>) {
     match f {
-        None | Some(ProblemsFilter::Undecided) => (false, Some(ProblemsFilter::Checks)),
+        None | Some(ProblemsFilter::Undecided | ProblemsFilter::Notes) => {
+            (false, Some(ProblemsFilter::Checks))
+        }
         Some(ProblemsFilter::Checks) => (true, None),
-        Some(ProblemsFilter::Set(k)) => (false, Some(ProblemsFilter::SetChecks(k.clone()))),
+        Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
+            (false, Some(ProblemsFilter::SetChecks(k.clone())))
+        }
         Some(ProblemsFilter::SetChecks(k)) => (true, Some(ProblemsFilter::Set(k.clone()))),
+    }
+}
+
+/// The Notes pill's state and where a click takes the filter: on with a set keeps the set, as the Checks pill.
+fn notes_pill(f: &Option<ProblemsFilter>) -> (bool, Option<ProblemsFilter>) {
+    match f {
+        None | Some(ProblemsFilter::Undecided | ProblemsFilter::Checks) => {
+            (false, Some(ProblemsFilter::Notes))
+        }
+        Some(ProblemsFilter::Notes) => (true, None),
+        Some(ProblemsFilter::Set(k) | ProblemsFilter::SetChecks(k)) => {
+            (false, Some(ProblemsFilter::SetNotes(k.clone())))
+        }
+        Some(ProblemsFilter::SetNotes(k)) => (true, Some(ProblemsFilter::Set(k.clone()))),
     }
 }
 
@@ -481,8 +506,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         suggestions,
         hidden,
         hideable,
+        problem_rows,
         ..
     } = rows(ui, model);
+    // Review E2: the tab's own cached counts, so the pill scans no row on a settled frame.
+    let notes = cached_tab_counts(model).notes;
     let off = model.fix_off();
     let sets_off = model.sets_read_only_reason();
     let mut act = None;
@@ -493,7 +521,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .map_or(k.clone(), |v| v.id.clone())
     };
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
-    if model.bottom.filter.is_some() || checks > 0 || suggestions > 0 || hideable {
+    let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
+    if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {
         ui.horizontal(|ui| {
             // Note FB9 (owner amendment A): the project's suggestions, one undo step; written by Save.
             if suggestions > 0 {
@@ -520,7 +549,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 Some(ProblemsFilter::SetChecks(k)) => {
                     Some((format!("Set: {} ×", label(k)), Some(ProblemsFilter::Checks)))
                 }
-                None | Some(ProblemsFilter::Checks) => None,
+                Some(ProblemsFilter::SetNotes(k)) => {
+                    Some((format!("Set: {} ×", label(k)), Some(ProblemsFilter::Notes)))
+                }
+                None | Some(ProblemsFilter::Checks | ProblemsFilter::Notes) => None,
             };
             if let Some((text, back)) = chip {
                 if ui.button(text).clicked() {
@@ -536,6 +568,21 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     act = Some(Act::Filter(pill_to.clone()));
                 }
             }
+            // Review E2: kept while on, as Checks, so a filter with no note left can still be turned off.
+            if notes > 0 || notes_on {
+                let r = ui
+                    .add(
+                        egui::Button::selectable(notes_on, format!("{NOTES_PILL} ({notes})"))
+                            .frame_when_inactive(true),
+                    )
+                    .on_hover_text(
+                        "Rows that need nothing from you: what a default did, and rows you marked as intended. \
+                         They never count against Ready. Notes with a button also show in the main list.",
+                    );
+                if r.clicked() {
+                    act = Some(Act::Filter(notes_to.clone()));
+                }
+            }
             if hideable {
                 if let Some(a) = kinds_menu(ui, model, hidden) {
                     act = Some(a);
@@ -543,12 +590,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         });
     }
-    if list.is_empty() {
-        if hidden > 0 {
-            ui.weak("Every row here is hidden — see Kinds");
-        } else {
-            ui.weak("No problems");
-        }
+    // Review E2 (controller ruling 5): the first line says what the default list holds; drawn above the notes with a
+    // button, so those never read as problems.
+    let worklist = matches!(model.bottom.filter, None | Some(ProblemsFilter::Set(_)));
+    if list.is_empty() && hidden > 0 {
+        ui.weak("Every row here is hidden — see Kinds");
+    } else if worklist && problem_rows == 0 && notes > 0 {
+        ui.weak(format!(
+            "No problems. {NOTES_PILL} ({notes}) lists what Tessalith did for you."
+        ));
+    } else if list.is_empty() {
+        ui.weak("No problems");
     }
     let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let m = &*model;
@@ -622,7 +674,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         }
                     }
                 }
-                let status = status_of(p.level);
+                // Review E2: a row marked as intended shows it (only the Notes list holds one).
+                let status = if p.intended {
+                    Status::Intended
+                } else {
+                    status_of(p.level)
+                };
                 // The fix buttons are laid out first, so the sentence is cut to the room left (I2).
                 let (l, r) = egui::Sides::new().shrink_left().truncate().show(
                     ui,

@@ -175,9 +175,10 @@ fn idle(h: &mut Harness<'static, AppModel>) {
 fn a_hidden_kind_leaves_the_list_but_not_the_ready_count() {
     use engine::codes::{Code, Warning};
     use sdc_gui::model::bottom::{flagged, kinds};
-    let row = "x_rmaos.dds A: no specular source; neutral default 0.04";
+    // Review E2: PACK-DEFAULTED is a note with no button now, so it is not in this list; a Problem code stands in.
+    let row = sdc_gui::model::code_text::code_sentence(Code::LossReencode);
     let (_d, mut m) = with_only_warnings(&[
-        Warning::new(Code::PackDefaulted, row),
+        Warning::new(Code::LossReencode, "re-encoded"),
         Warning::new(Code::ChanNotGray, "not grey"),
     ]);
     let grey = sdc_gui::model::code_text::code_sentence(Code::ChanNotGray);
@@ -186,16 +187,18 @@ fn a_hidden_kind_leaves_the_list_but_not_the_ready_count() {
     let mut h = harness(m);
     h.run();
     let shown = |h: &Harness<'static, AppModel>, t: &str| h.query_all_by_label(t).count();
-    assert_eq!(shown(&h, row), 1, "the row names its map (Note HC2)");
+    assert_eq!(shown(&h, row), 1, "the row shows");
     assert_eq!(shown(&h, grey), 1);
     h.get_by_label("Kinds ▾").click();
     h.run();
-    let tick = "A packed channel had no input and got a default (1)";
+    let what = sdc_gui::model::code_text::code_line(Code::LossReencode);
+    let tick = format!("{} (1)", what.split(" — ").next().unwrap());
+    let tick = tick.as_str();
     h.get_by_label(tick).click();
     h.run();
     assert_eq!(shown(&h, row), 0, "hidden");
     assert_eq!(shown(&h, grey), 1, "the other kind stays");
-    assert_eq!(h.state().hidden_kinds(), [Code::PackDefaulted]);
+    assert_eq!(h.state().hidden_kinds(), [Code::LossReencode]);
     assert_eq!(
         flagged(h.state()).ready_rows,
         ready,

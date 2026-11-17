@@ -200,10 +200,11 @@ fn checks_are_not_amber_and_not_blocking() {
 fn problems_shows_one_count() {
     let d = tempfile::tempdir().unwrap();
     let m = wall_with_a_check(d.path());
-    let n = problems(&m).len();
+    // Review E2: the label counts problems and notes apart.
+    let label = bottom::tab_label(bottom::cached_tab_counts(&m));
     let mut h = harness(m);
     h.run();
-    h.get_by_label(&format!("Problems ({n})"));
+    h.get_by_label(&label);
     assert!(
         h.query_all_by_label_contains("Checks ").next().is_none(),
         "no second count"
