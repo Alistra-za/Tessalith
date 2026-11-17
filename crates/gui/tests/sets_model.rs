@@ -2624,6 +2624,46 @@ fn clearing_the_middle_of_a_chain_passes_the_share_on() {
     undo_restores(&mut m, &before);
 }
 
+/// Note JN4 (B2-12), a pin: rock01 has its own normal and a share line for slot 2 to rock02, and leaf shares slot 2
+/// from rock01, so leaf reads rock01's own file (JN1). Clearing rock01's share passes nothing on: leaf's line still
+/// names rock01 and leaf still reads rock01's own normal.
+#[test]
+fn clearing_the_share_of_a_set_with_its_own_file_passes_nothing_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    idle(&mut m);
+    let before = one_step(&mut m, None, |m| {
+        m.set_slot_command("landscape/rock01", 2, SlotCommand::Clear)
+            .unwrap()
+    });
+    assert_eq!(borrow_of(&m, "landscape/rock01", 2), None);
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock01")
+    );
+    assert_eq!(
+        view(&set_views(&m), "landscape/leaf")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Borrowed {
+            from: "landscape/rock01".into(),
+            item: normal
+        })
+    );
+    let borrowed = borrowed_normal(&m);
+    assert_eq!(
+        borrowed.get("landscape/leaf").map(String::as_str),
+        Some("landscape/rock01")
+    );
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
+    undo_restores(&mut m, &before);
+}
+
 /// Note JN5 (t5 Minor 5): rock01 has a hand-edited share line for slot 2 naming itself. When its normal is handed to
 /// leaf, that line goes (rock01 would share back the file it gave away); it is not counted among the sets that share
 /// the file from leaf.
