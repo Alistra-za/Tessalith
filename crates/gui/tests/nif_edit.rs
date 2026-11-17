@@ -6632,7 +6632,7 @@ fn shader_colour_picker_is_disabled_outside_0_1() {
         assert!(sw.accesskit_node().is_disabled(), "{v:?}");
         let c = sw.rect().center();
         h.hover_at(c);
-        h.run_steps(3);
+        h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
         h.get_by_label("Values outside 0-1: edit R, G and B directly.");
     }
 }
@@ -10948,6 +10948,13 @@ fn meshes_only_waits_for_a_foreign_answer() {
 const EXPORT_THIS_NIF: &str = "Export this NIF";
 
 /// Right-click the Meshes view's 3D image (the click lands on the image centre) and let the menu open.
+/// Steps from `hover_at` until a hover text is in the AccessKit tree, with kittest's 0.25 s step and egui's 0.5 s
+/// tooltip delay. The delay ends on step 3, where the tooltip's area runs its first frame as an invisible sizing
+/// pass (`egui-0.37.0\src\containers\area.rs:691-692`, as in 0.36.2); it is painted on step 4 in both versions.
+/// egui 0.36.2 put that invisible frame's text in the tree on step 3; 0.37 leaves an invisible widget out of it
+/// (`egui-0.37.0\src\context.rs:655` through `is_accesskit_visible`, `:4957`). Measured: 3 steps fail, 4 pass.
+const TOOLTIP_STEPS: usize = 4;
+
 fn right_click_3d<S>(h: &mut Harness<'static, S>) {
     h.get_by_label(sdc_gui::model::viewport3d::FRAME_LABEL)
         .click_secondary();
@@ -11096,7 +11103,7 @@ fn quick_export_hover_says_a_foreign_file_opens_review() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(3);
+    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
     h.get_by_label(
         "The file on disk was not written by Tessalith: opens Review to answer Keep or Overwrite",
     );
@@ -11123,7 +11130,7 @@ fn quick_export_is_off_without_a_folder_and_offers_the_picker() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(3);
+    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
     assert!(
         h.query_all_by_label("No export folder chosen").count() >= 1,
         "the hover says why"
@@ -11155,7 +11162,7 @@ fn quick_export_is_off_while_an_export_runs() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(3);
+    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
     h.get_by_label("An export is running");
     h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
         .click();
