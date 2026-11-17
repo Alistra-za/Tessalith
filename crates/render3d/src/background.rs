@@ -52,6 +52,17 @@ float4 ps(VsOut i) : SV_Target
 fn compile(entry: &str, target: &str) -> Result<Vec<u8>, String> {
     // `YAW` is the one definition shared with the CPU side (`hdri::dir_to_uv`).
     let src = format!("#define YAW ({YAW:.6})\n{SOURCE}");
+    compile_source(&src, c"background.hlsl", entry, target)
+}
+
+/// FXC bytecode of a built-in shader's `entry` for `target` (e.g. "cs_5_0"); `name` only labels compiler messages.
+/// No includes, no cache: for the few small shaders the crate carries itself.
+pub(crate) fn compile_source(
+    src: &str,
+    name: &std::ffi::CStr,
+    entry: &str,
+    target: &str,
+) -> Result<Vec<u8>, String> {
     let (e, t) = (CString::new(entry).unwrap(), CString::new(target).unwrap());
     let (mut code, mut errs): (Option<ID3DBlob>, Option<ID3DBlob>) = (None, None);
     // SAFETY: source and names outlive the call; out-pointers are locals.
@@ -59,7 +70,7 @@ fn compile(entry: &str, target: &str) -> Result<Vec<u8>, String> {
         D3DCompile(
             src.as_ptr() as _,
             src.len(),
-            PCSTR(c"background.hlsl".as_ptr() as _),
+            PCSTR(name.as_ptr() as _),
             None,
             None,
             PCSTR(e.as_ptr() as _),

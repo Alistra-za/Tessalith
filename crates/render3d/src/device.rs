@@ -43,7 +43,7 @@ use windows::Win32::Graphics::Direct3D11::{
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT, DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_R10G10B10A2_UNORM, DXGI_FORMAT_R11G11B10_FLOAT,
     DXGI_FORMAT_R16G16B16A16_FLOAT, DXGI_FORMAT_R16G16_FLOAT, DXGI_FORMAT_R16_UNORM,
-    DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_TYPELESS, DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_R32_FLOAT, DXGI_FORMAT_R32_TYPELESS, DXGI_FORMAT_R8G8B8A8_UINT, DXGI_SAMPLE_DESC,
 };
 use windows::Win32::Graphics::Dxgi::{
     CreateDXGIFactory1, IDXGIAdapter, IDXGIAdapter1, IDXGIDevice, IDXGIFactory1,
@@ -63,6 +63,8 @@ pub struct Gpu {
     pub warp: bool,
     /// Adapter description, e.g. "NVIDIA GeForce RTX 4090".
     pub adapter: String,
+    /// The readback's conversion pass, made on the first readback that can build it (Note IF).
+    convert: OnceLock<crate::convert::Convert>,
 }
 
 fn adapter_name(desc: &DXGI_ADAPTER_DESC1) -> String {
@@ -112,6 +114,7 @@ fn create(adapter: Option<&IDXGIAdapter>, driver: D3D_DRIVER_TYPE) -> Result<Gpu
         ctx,
         warp: driver == D3D_DRIVER_TYPE_WARP || software,
         adapter: desc.as_ref().map(adapter_name).unwrap_or_default(),
+        convert: OnceLock::new(),
     })
 }
 
@@ -280,7 +283,12 @@ pub struct Target {
     pub rtv: ID3D11RenderTargetView,
     pub depth: ID3D11Texture2D,
     pub dsv: ID3D11DepthStencilView,
-    /// CPU-readable copy target for the readback, created with the target (03 §7).
+    /// `color` as the conversion pass's input (Note IF).
+    pub(crate) color_srv: ID3D11ShaderResourceView,
+    /// The frame as R8G8B8A8_UINT, written by the conversion pass (Note IF), and its UAV.
+    pub(crate) rgba8: ID3D11Texture2D,
+    pub(crate) rgba8_uav: ID3D11UnorderedAccessView,
+    /// CPU-readable copy of `rgba8` for the readback, created with the target (03 §7).
     pub staging: ID3D11Texture2D,
     /// Deferred only: RT0..RT7 (texture, RTV, SRV) in [`MRT_FORMATS`] order; mrt[0] is `color`. Empty = forward
     /// target.
@@ -371,6 +379,56 @@ fn table(cell: &'static OnceLock<Vec<u8>>, f: fn(u16) -> u8) -> &'static [u8] {
 }
 static UNORM8: OnceLock<Vec<u8>> = OnceLock::new();
 static SRGB8: OnceLock<Vec<u8>> = OnceLock::new();
+
+impl Gpu {
+    /// The readback's conversion pass, built on first use with the two tables above.
+    fn convert(&self) -> Result<&crate::convert::Convert, String> {
+        if let Some(c) = self.convert.get() {
+            return Ok(c);
+        }
+        // A failure is not kept: the next readback tries again, and reports a removed device as one.
+        let c = crate::convert::Convert::new(self, table(&UNORM8, unorm8), table(&SRGB8, srgb8))?;
+        Ok(self.convert.get_or_init(|| c))
+    }
+}
+
+/// Copies `src` to `staging` (same size and format), maps it and hands `row` each of the `h` rows, `row_bytes`
+/// long. Returns the moment `Map` returned. A null mapping is an error.
+fn map_rows(
+    gpu: &Gpu,
+    staging: &ID3D11Texture2D,
+    src: &ID3D11Texture2D,
+    h: usize,
+    row_bytes: usize,
+    mut row: impl FnMut(&[u8]),
+) -> Result<std::time::Instant, String> {
+    let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
+    // SAFETY: both resources belong to `gpu.device`; `mapped` is a local.
+    unsafe {
+        gpu.ctx.CopyResource(staging, src);
+        gpu.ctx
+            .Map(staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
+            .map_err(|e| gpu.fail("Map", e))?;
+    }
+    let mapped_at = std::time::Instant::now();
+    let pitch = mapped.RowPitch as usize;
+    let ok = !mapped.pData.is_null();
+    if ok {
+        for y in 0..h {
+            // SAFETY: while mapped, `pData` points to `h` rows spaced `RowPitch` bytes apart, each holding at
+            // least `row_bytes` bytes. Read as bytes, so no alignment assumption.
+            row(unsafe {
+                std::slice::from_raw_parts((mapped.pData as *const u8).add(y * pitch), row_bytes)
+            });
+        }
+    }
+    // SAFETY: paired with the successful Map above; nothing between them can return early.
+    unsafe { gpu.ctx.Unmap(staging, 0) };
+    if !ok {
+        return Err(gpu.fail("Map", "null pointer returned"));
+    }
+    Ok(mapped_at)
+}
 
 /// Bytes per texel of an [`MRT_FORMATS`] format.
 #[cfg(feature = "test-hooks")]
@@ -476,9 +534,10 @@ impl Target {
 
     fn build(gpu: &Gpu, w: u32, h: u32, deferred: bool) -> Result<Target, String> {
         let mut cd = tex2d_desc(w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
-        cd.BindFlags = D3D11_BIND_RENDER_TARGET.0 as u32;
+        // A shader resource on every target: the readback's conversion pass reads it (Note IF).
+        cd.BindFlags = (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32;
         if deferred {
-            cd.BindFlags |= (D3D11_BIND_SHADER_RESOURCE.0 | D3D11_BIND_UNORDERED_ACCESS.0) as u32;
+            cd.BindFlags |= D3D11_BIND_UNORDERED_ACCESS.0 as u32;
         }
         let color = create_tex(gpu, &cd)?;
         // Typeless, so the composite can read it as R32_FLOAT (D5 R6) and `depth_copy` stays in its format family
@@ -494,13 +553,22 @@ impl Target {
             ViewDimension: D3D11_DSV_DIMENSION_TEXTURE2D,
             ..Default::default()
         };
-        let mut sd = tex2d_desc(w, h, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        let mut od = tex2d_desc(w, h, DXGI_FORMAT_R8G8B8A8_UINT);
+        od.BindFlags = D3D11_BIND_UNORDERED_ACCESS.0 as u32;
+        let rgba8 = create_tex(gpu, &od)?;
+        let mut sd = tex2d_desc(w, h, DXGI_FORMAT_R8G8B8A8_UINT);
         sd.Usage = D3D11_USAGE_STAGING;
         sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
         let staging = create_tex(gpu, &sd)?;
-        let (mut rtv, mut dsv) = (None, None);
+        let (mut rtv, mut dsv, mut color_srv, mut rgba8_uav) = (None, None, None, None);
         // SAFETY: live resources and local out-pointers.
         unsafe {
+            gpu.device
+                .CreateShaderResourceView(&color, None, Some(&mut color_srv))
+                .map_err(|e| gpu.fail("CreateShaderResourceView (colour)", e))?;
+            gpu.device
+                .CreateUnorderedAccessView(&rgba8, None, Some(&mut rgba8_uav))
+                .map_err(|e| gpu.fail("CreateUnorderedAccessView (readback)", e))?;
             gpu.device
                 .CreateRenderTargetView(&color, None, Some(&mut rtv))
                 .map_err(|e| gpu.fail("CreateRenderTargetView", e))?;
@@ -556,6 +624,12 @@ impl Target {
             rtv,
             depth,
             dsv: dsv.ok_or_else(|| gpu.fail("CreateDepthStencilView", "no view returned"))?,
+            color_srv: color_srv
+                .ok_or_else(|| gpu.fail("CreateShaderResourceView (colour)", "no view returned"))?,
+            rgba8,
+            rgba8_uav: rgba8_uav.ok_or_else(|| {
+                gpu.fail("CreateUnorderedAccessView (readback)", "no view returned")
+            })?,
             staging,
             mrt,
             main_uav,
@@ -589,56 +663,62 @@ impl Target {
         }
     }
 
-    /// The frame for display: as the plain readback, but alpha is 255 everywhere. Opaque shapes write
+    /// The frame for display, as RGBA8 with alpha 255 everywhere. Opaque shapes write
     /// their diffuse alpha into the target (CS `psout.Diffuse.w = baseColor.w`); the frame is already drawn
     /// over the clear colour, so its alpha must not make the viewer see through an opaque mesh.
     pub fn readback_display(&self, gpu: &Gpu, srgb: bool) -> Result<Vec<u8>, String> {
-        self.read(gpu, srgb, true)
+        Ok(self.read(gpu, srgb)?.0)
     }
 
-    fn read(&self, gpu: &Gpu, srgb: bool, opaque: bool) -> Result<Vec<u8>, String> {
+    /// [`Self::readback_display`], plus the milliseconds until `Map` returned: the conversion pass, the copy to
+    /// the staging texture and the transfer to CPU memory. The rest of the call copies the rows out.
+    #[cfg(feature = "test-hooks")]
+    pub fn readback_display_timed(&self, gpu: &Gpu, srgb: bool) -> Result<(Vec<u8>, f64), String> {
+        self.read(gpu, srgb)
+    }
+
+    /// The conversion on the GPU, then 4 bytes per pixel copied out (Note IF).
+    fn read(&self, gpu: &Gpu, srgb: bool) -> Result<(Vec<u8>, f64), String> {
+        let start = std::time::Instant::now();
+        gpu.convert()?.run(
+            gpu,
+            &self.color_srv,
+            &self.rgba8_uav,
+            (self.width, self.height),
+            srgb,
+        );
+        let (w, h) = (self.width as usize, self.height as usize);
+        let mut out = Vec::with_capacity(w * h * 4);
+        let mapped_at = map_rows(gpu, &self.staging, &self.rgba8, h, w * 4, |row| {
+            out.extend_from_slice(row)
+        })?;
+        Ok((out, (mapped_at - start).as_secs_f64() * 1000.0))
+    }
+
+    /// The conversion [`Self::readback_display`] must reproduce byte for byte: the half-float target copied to
+    /// the CPU and each colour channel looked up in the table there. Tests compare the two (Note IF1).
+    #[cfg(feature = "test-hooks")]
+    pub fn readback_display_cpu(&self, gpu: &Gpu, srgb: bool) -> Result<Vec<u8>, String> {
         let colour = if srgb {
             table(&SRGB8, srgb8)
         } else {
             table(&UNORM8, unorm8)
         };
-        let alpha = table(&UNORM8, unorm8);
-        let alpha = |bits: usize| if opaque { 255 } else { alpha[bits] };
-        let mut mapped = D3D11_MAPPED_SUBRESOURCE::default();
-        // SAFETY: both resources belong to `gpu.device`; `mapped` is a local.
-        unsafe {
-            gpu.ctx.CopyResource(&self.staging, &self.color);
-            gpu.ctx
-                .Map(&self.staging, 0, D3D11_MAP_READ, 0, Some(&mut mapped))
-                .map_err(|e| gpu.fail("Map", e))?;
-        }
+        let mut sd = tex2d_desc(self.width, self.height, DXGI_FORMAT_R16G16B16A16_FLOAT);
+        sd.Usage = D3D11_USAGE_STAGING;
+        sd.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+        let staging = create_tex(gpu, &sd)?;
         let (w, h) = (self.width as usize, self.height as usize);
-        let pitch = mapped.RowPitch as usize;
         let mut out = Vec::with_capacity(w * h * 4);
-        if !mapped.pData.is_null() {
-            for y in 0..h {
-                // SAFETY: while mapped, `pData` points to `h` rows spaced
-                // `RowPitch` bytes apart, each holding at least `w × 8` bytes
-                // (4 × f16). Read as bytes, so no alignment assumption.
-                let row = unsafe {
-                    std::slice::from_raw_parts((mapped.pData as *const u8).add(y * pitch), w * 8)
-                };
-                out.extend(row.as_chunks::<2>().0.iter().enumerate().map(|(i, c)| {
-                    let bits = u16::from_le_bytes(*c) as usize;
-                    if i % 4 == 3 {
-                        alpha(bits)
-                    } else {
-                        colour[bits]
-                    }
-                }));
-            }
-        }
-        // SAFETY: paired with the successful Map above; nothing between
-        // them can return early.
-        unsafe { gpu.ctx.Unmap(&self.staging, 0) };
-        if out.len() != w * h * 4 {
-            return Err(gpu.fail("Map", "null pointer returned"));
-        }
+        map_rows(gpu, &staging, &self.color, h, w * 8, |row| {
+            out.extend(row.as_chunks::<2>().0.iter().enumerate().map(|(i, c)| {
+                if i % 4 == 3 {
+                    255
+                } else {
+                    colour[u16::from_le_bytes(*c) as usize]
+                }
+            }))
+        })?;
         Ok(out)
     }
 

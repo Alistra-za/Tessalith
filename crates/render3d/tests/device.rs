@@ -37,6 +37,99 @@ fn display_readback_is_opaque() {
     assert_eq!(t.readback_display(&gpu, true).unwrap()[3], 255);
 }
 
+/// The GPU conversion gives the bytes the CPU table gives, for every half bit pattern in every colour channel, on
+/// both devices, forward and deferred, sRGB on and off (Note IF1). The bits are written raw, so every NaN payload
+/// and denormal is there.
+#[test]
+fn gpu_conversion_matches_the_cpu_table_for_every_half() {
+    // Odd multipliers, so each channel still walks all 65536 patterns, in a different order.
+    let raw: Vec<u8> = (0..=u16::MAX)
+        .flat_map(|b| [b, b.wrapping_mul(3), b.wrapping_mul(5).wrapping_add(77), b])
+        .flat_map(u16::to_le_bytes)
+        .collect();
+    let hardware = Gpu::new().unwrap();
+    eprintln!("adapter: {} (warp: {})", hardware.adapter, hardware.warp);
+    for gpu in [hardware, Gpu::new_warp().unwrap()] {
+        for deferred in [false, true] {
+            let t = if deferred {
+                Target::new_deferred(&gpu, 256, 256).unwrap()
+            } else {
+                Target::new(&gpu, 256, 256).unwrap()
+            };
+            // SAFETY: `raw` holds 256 rows of 256 × 8 bytes, the whole colour texture.
+            unsafe {
+                gpu.ctx
+                    .UpdateSubresource(&t.color, 0, None, raw.as_ptr() as _, 256 * 8, 0)
+            };
+            for srgb in [false, true] {
+                let (got, want) = (
+                    t.readback_display(&gpu, srgb).unwrap(),
+                    t.readback_display_cpu(&gpu, srgb).unwrap(),
+                );
+                let who = format!("{} deferred {deferred} srgb {srgb}", gpu.adapter);
+                assert_eq!(got.len(), want.len(), "{who}");
+                let bad = got.iter().zip(&want).position(|(a, b)| a != b);
+                assert_eq!(bad, None, "{who}: first differing byte");
+                // Not a table of zeros: mid grey is there.
+                assert!(want.contains(&128), "{who}");
+            }
+        }
+    }
+}
+
+/// The conversion pass binds the render targets again after it runs (Note IF3): one for a forward target, all eight
+/// for a deferred one. A target whose sides are not multiples of the pass's 8×8 groups reads back whole.
+#[test]
+fn readback_leaves_the_render_targets_bound() {
+    use windows::Win32::Graphics::Direct3D11::{ID3D11DepthStencilView, ID3D11RenderTargetView};
+    let gpu = Gpu::new_warp().unwrap();
+    for deferred in [false, true] {
+        let t = if deferred {
+            Target::new_deferred(&gpu, 3, 5).unwrap()
+        } else {
+            Target::new(&gpu, 3, 5).unwrap()
+        };
+        t.clear(&gpu, [1.0, 0.5, 0.0, 1.0]);
+        let bound = t.rtvs();
+        assert_eq!(bound.len(), if deferred { 8 } else { 1 });
+        // SAFETY: live views of this device.
+        unsafe { gpu.ctx.OMSetRenderTargets(Some(&bound), &t.dsv) };
+        assert_eq!(
+            t.readback_display(&gpu, false).unwrap(),
+            [255, 128, 0, 255].repeat(15),
+            "deferred {deferred}"
+        );
+        let mut rtvs: [Option<ID3D11RenderTargetView>; 8] = Default::default();
+        let mut dsv: Option<ID3D11DepthStencilView> = None;
+        // SAFETY: the out-pointers are live locals.
+        unsafe { gpu.ctx.OMGetRenderTargets(Some(&mut rtvs), Some(&mut dsv)) };
+        assert_eq!(rtvs[..bound.len()], bound[..], "deferred {deferred}");
+        assert!(rtvs[bound.len()..].iter().all(Option::is_none));
+        assert_eq!(dsv.as_ref(), Some(&t.dsv));
+        // SAFETY: unbinding needs no live view.
+        unsafe { gpu.ctx.OMSetRenderTargets(None, None) };
+    }
+}
+
+/// A compute view of the colour target that an earlier pass left bound does not blank the frame (Note IF3): D3D11
+/// gives a null input for a texture that is bound for output, so the pass clears the compute outputs first. Slot 3,
+/// because the pass's own output replaces whatever is in slot 0.
+#[test]
+fn readback_ignores_a_compute_output_left_on_the_colour_target() {
+    let gpu = Gpu::new_warp().unwrap();
+    let t = Target::new_deferred(&gpu, 3, 5).unwrap();
+    t.clear(&gpu, [1.0, 0.5, 0.0, 1.0]);
+    // SAFETY: a live view of this device.
+    unsafe {
+        gpu.ctx
+            .CSSetUnorderedAccessViews(3, 1, Some(&t.main_uav.clone()), None)
+    };
+    assert_eq!(
+        t.readback_display(&gpu, false).unwrap(),
+        [255, 128, 0, 255].repeat(15)
+    );
+}
+
 /// Deferred target: RT0 (`color`, RTV|SRV|UAV) + RT1-7 in the capture's formats, and RT0 as a UAV (D3 step 1).
 #[test]
 fn new_deferred_makes_eight_targets_and_a_main_uav() {

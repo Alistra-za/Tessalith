@@ -29,7 +29,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - vfs: AV, BP, BU, CV
 - esp: GG, GO, GQ
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
-- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX
+- render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF
 - pgpsim: AU, CM, GE
 - Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, J?
 
@@ -1583,6 +1583,16 @@ Two layout bugs from the Settings plan's UI proof (2026-11-15), B4 and B5, both 
 ## Note JK — The Also export tab's recipe names its scope (owner, 2026-11-16)
 
 - **JK1 One sentence under the recipe (owner pick: "Sentence only").** A blind reader of the Also export tab on 2026-11-15 could not tell who the 9 `[export.legacy]` boxes apply to: they are greyed while both Also ticks are off, and the "All sets in this project" heading did not read as covering them. Under the boxes the tab now reads "Saved in this project's sdc.toml; used when Vanilla or Complex material is ticked" (`also_tab::RECIPE_SCOPE`). It is drawn outside the greyed block, so it is never greyed, and as a plain label, not weak text, so it does not look greyed beside the boxes. It wraps, and at 1100 px it fits on one line. The boxes' greying and their hover reason are unchanged (JI2): the owner chose the sentence over keeping the boxes editable while both ticks are off, and over doing both. Test `also_export::the_recipe_says_where_it_is_saved_and_when_it_is_used`.
+
+## Note IF — The display readback converts on the GPU (owner's "do the gpu conversion", 2026-11-16; details are agent rulings)
+
+Measured on 2026-11-16 (`docs/research/render3d-backends.md`): 72% to 74% of the readback was the CPU's half-to-8-bit table lookup, not the copy from the GPU.
+
+- **IF1 The bytes do not change.** A compute pass (`crates/render3d/src/convert.rs`) takes each colour channel's half bits with `f32tof16` and looks them up in a 256×256 `R8_UINT` texture that holds the same 65536-entry table the CPU used (`unorm8` or `srgb8` in `device.rs`); alpha is written as 255, as the display readback always did. I chose a table over shader arithmetic because `pow` and float-to-UNORM rounding may differ by a step between GPUs, and tests pin frame bytes. Test `device::gpu_conversion_matches_the_cpu_table_for_every_half` compares the pass with the old CPU loop (`Target::readback_display_cpu`, test-hooks only) for every half bit pattern in each colour channel, forward and deferred, sRGB on and off, on the default device and on WARP. The test writes the bits raw, so every NaN payload and denormal is in the target. `deferred::a_frame_reads_back_as_the_cpu_conversion` does the same comparison on frames drawn through `Renderer`. Run on one NVIDIA GPU and on WARP; on other GPUs the identity rests on the table, not on a run.
+- **IF2 What a target holds now.** The colour texture is a shader resource on forward targets too. The target adds an `R8G8B8A8_UINT` texture the pass writes, and the staging texture is that format (it was half float), so the copy to the CPU is half the bytes. The pass and its two tables are made once per `Gpu`, on the first readback. A failure to build them fails that readback and is not kept: the next readback tries again.
+- **IF3 The pass restores the render targets and nothing else.** It must unbind them, because D3D11 gives a shader a null view of a texture still bound for output; it binds them again afterwards. A frame has always ended with its targets bound, and `deferred::recreating_the_target_unbinds_the_old_views_first` relies on that (it failed before the rebind was added); `device::readback_leaves_the_render_targets_bound` checks it directly. For the same reason the pass first clears compute UAV slots 0 to 7: the deferred composite writes the colour texture through one. It leaves the compute stage unbound (shader, t0, t1, u0 to u7); every compute pass in the crate binds what it uses before it dispatches.
+- **IF4 `FrameTiming::map_ms` (test-hooks only)** is the part of `readback_ms` before `Map` returns: the pass, the staging copy and the transfer. The rest is copying the rows into the returned `Vec`.
+- **IF5 Not done:** the rows are still copied into a new `Vec` each frame (3.5 ms of the 6.2 ms readback at 3840×2160), and the frame still goes to the CPU and back to the GUI's device. Sharing the texture with the GUI is the report's later step.
 
 ## Note J? — egui 0.37 (main team, 2026-11-16)
 
