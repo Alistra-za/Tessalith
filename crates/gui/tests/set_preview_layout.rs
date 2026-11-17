@@ -346,7 +346,8 @@ fn a_saved_window_size_reopens_at_the_same_size() {
 
 /// Note FM31 with an excess: a saved width a few points under what the window's content needs (262.1 here) is drawn
 /// at that width. The excess comes off what is saved, so the same narrow size is saved again and the next start draws
-/// the same rect; an excess past `FIT_MAX_EXTRA` (16 points) is a clamp, and nothing comes off.
+/// the same rect; an excess past `FIT_MAX_EXTRA` (16 points), here a saved width far under the content's, takes
+/// nothing off.
 #[test]
 fn a_saved_size_under_the_content_width_takes_the_excess_off() {
     let open = |saved: [f32; 4]| {
@@ -374,10 +375,14 @@ fn a_saved_size_under_the_content_width_takes_the_excess_off() {
     assert_eq!(again, drawn, "the next start draws the same rect");
     assert_eq!(saved_again, asked, "and saves the same size");
 
-    // 62 points past a 200-point width: a clamp, saved as drawn.
+    // 62 points past a 200-point width (the content's minimum): over `FIT_MAX_EXTRA`, saved as drawn.
     let (wide, saved) = open([200.0, 100.0, 200.0, 500.0]);
     assert!(wide.width() - 200.0 > 16.0, "{wide:?}");
-    assert_eq!(saved[2], wide.width(), "nothing comes off a clamp");
+    assert_eq!(
+        saved[2],
+        wide.width(),
+        "nothing comes off past FIT_MAX_EXTRA"
+    );
 }
 
 #[test]

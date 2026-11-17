@@ -418,16 +418,18 @@ struct SizeFit {
 /// Frames the drawn size must hold before the extra is taken, and the most it may take.
 const FIT_STILL: u32 = 3;
 const FIT_MAX_FRAMES: u32 = 60;
-/// An excess past this is a clamp to the window (or the user's resize), not egui's margin: nothing is taken off.
+/// An excess past this is not taken off, and the window is saved as drawn. On egui 0.37 that is a saved width far
+/// under the content's minimum width, a clamp to the window, or the user's resize.
 const FIT_MAX_EXTRA: f32 = 16.0;
 
 /// egui can draw a `Window` bigger than `default_rect` asks, and then a saved size would grow at every start. On egui
-/// 0.37 with the pinned look it draws the size asked, except that a size narrower than the content needs is drawn at
-/// the content's width (262 points for a set's TruePBR settings). This is the drawn rect less that excess, which is
-/// what `default_rect` takes back: save and restore are the identity. None until the size has settled.
+/// 0.37 with the pinned look the excess is the content's minimum width: a size at least that wide is drawn as asked,
+/// and a narrower one is drawn at the content's width (262.1 points for a set's TruePBR settings; both measured in the
+/// kittest harness). This is the drawn rect less that excess, which is what `default_rect` takes back: save and
+/// restore are the identity. None until the size has settled.
 // shortcut: the excess is measured once per session from the content on show then, and it depends on that content;
-// a window whose content later changes saves off by the difference. An excess over `FIT_MAX_EXTRA` is taken as a clamp
-// and ignored. Upgrade when egui's Window sizing stops adding to `default_rect`.
+// a window whose content later changes saves off by the difference. Upgrade by saving the size the user dragged the
+// window to, kept apart from the drawn rect (as `column_panel` keeps a chosen width), so no excess is measured.
 pub fn settings_window_saved_rect(ctx: &egui::Context) -> Option<egui::Rect> {
     let id = settings_window_id();
     let r = ctx.memory(|m| m.area_rect(id))?;
