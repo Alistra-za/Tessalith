@@ -2725,6 +2725,9 @@ impl AppModel {
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {
                     clear_slot(s, &id, slot, &existing);
                     s.set_borrow(&id, n, Some(&fid));
+                    // Note J?3 (B2-1b): the slot's sharing sets follow the slot to the new source, so no chain is
+                    // written; a set that is the new source owns the file and shares nothing.
+                    s.retarget_slot_borrows(&id, n, &fid);
                 });
                 Ok(())
             }

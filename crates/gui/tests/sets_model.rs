@@ -1812,6 +1812,135 @@ fn moving_the_lent_kind_of_a_two_kind_slot_takes_its_borrowers_and_the_other_doe
     );
 }
 
+/// Note J?3 (B2-1b): a Share that replaces a lent file points the sets sharing that slot at the new source's set,
+/// in the same step, so no chain is written.
+#[test]
+fn replacing_a_lent_file_by_a_share_points_its_borrowers_at_the_new_source() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let id = "landscape/rock02";
+    let normal = key_of(&m, "rock01_normal.png");
+    let n02 = key_of(&m, "rock02_n.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock02"));
+        s.set_lock("landscape/leaf", 2, true);
+    });
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice(&normal, id, DropChoice::Share),
+        DropOutcome::AskReplace { existing: n02 }
+    );
+    let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
+        m.drop_replace(&normal, id, DropChoice::Share).unwrap();
+    });
+    assert_eq!(borrow_of(&m, id, 2).as_deref(), Some("landscape/rock01"));
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock01"),
+        "no chain is written"
+    );
+    assert!(matches!(
+        view(&set_views(&m), "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
+    ));
+    undo_restores(&mut m, &before);
+}
+
+/// Note J?3 (B2-1b): a set that shared the slot and is the new source owns the file: it drops its line (no cycle).
+#[test]
+fn a_borrower_that_is_the_new_source_drops_its_borrow() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let id = "landscape/rock02";
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"))
+    });
+    idle(&mut m);
+    assert!(matches!(
+        m.drop_choice(&normal, id, DropChoice::Share),
+        DropOutcome::AskReplace { .. }
+    ));
+    m.drop_replace(&normal, id, DropChoice::Share).unwrap();
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, "landscape/rock01", 2), None);
+    let views = set_views(&m);
+    assert_eq!(
+        view(&views, "landscape/rock01")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own {
+            item: normal.clone()
+        })
+    );
+    assert!(matches!(
+        view(&views, id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
+    ));
+}
+
+/// Note J?3 (B2-1b): a Move, a Duplicate or a Fill from names that replaces a lent file leaves the sharing sets on
+/// the lender; they get
+/// the new file ("share rock02's normal" keeps meaning rock02's normal).
+#[test]
+fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_the_lender() {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let id = "landscape/rock02";
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock02"))
+    });
+    idle(&mut m);
+    let leaf_fill = |m: &sdc_gui::model::AppModel| {
+        view(&set_views(m), "landscape/leaf")
+            .slots
+            .get(&SlotKind::Normal)
+            .cloned()
+    };
+    m.drop_replace(&normal, id, DropChoice::Move).unwrap();
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
+    assert_eq!(
+        leaf_fill(&m),
+        Some(SlotFill::Borrowed {
+            from: id.into(),
+            item: normal.clone()
+        })
+    );
+    m.undo();
+    idle(&mut m);
+    m.drop_replace(&normal, id, DropChoice::Duplicate).unwrap();
+    idle(&mut m);
+    let copy = "landscape/rock02_normal.png";
+    m.decide(copy, Answer::Subtype(Subtype::PbrNormal));
+    m.decide(copy, Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
+    assert_eq!(
+        leaf_fill(&m),
+        Some(SlotFill::Borrowed {
+            from: id.into(),
+            item: copy.into()
+        })
+    );
+    // Fill from names: rock02_n.png went to no set when the copy replaced it, still decided a `pbr_normal`, and its
+    // name matches the set's base, so Fill offers it for the Normal slot, replacing the copy.
+    let n02 = key_of(&m, "rock02_n.png");
+    assert_eq!(m.fill_from_names(id, std::slice::from_ref(&n02)), Ok(1));
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
+    assert_eq!(
+        leaf_fill(&m),
+        Some(SlotFill::Borrowed {
+            from: id.into(),
+            item: n02
+        })
+    );
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).
