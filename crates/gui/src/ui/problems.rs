@@ -638,16 +638,15 @@ fn fix_click(
         Fix::RemoveUnmatched(_) => false,
         Fix::ParallaxOff(k) => {
             let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
-            let b = ui.add_enabled(off.is_none(), egui::Button::new("Turn parallax off"));
             let name = format!("Turn parallax off for {file}");
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
-            match off {
-                Some(why) => b.on_disabled_hover_text(why),
-                None => b.on_hover_text(
-                    "Switch parallax off for this texture. It needs an alpha channel to work.",
-                ),
-            }
-            .clicked()
+            // FC5: switching off runs on a pointer click only (a reason click focuses it).
+            click_only_button(
+                ui,
+                egui::Button::new("Turn parallax off"),
+                Some(&name),
+                "Switch parallax off for this texture. It needs an alpha channel to work.",
+                off,
+            )
         }
         Fix::RemoveMember { set_id, item } => {
             let file = m.item(item).map_or(item.as_str(), |i| i.name.as_str());

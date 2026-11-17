@@ -1378,36 +1378,65 @@ pub enum ReasonGo {
 /// `set_ready` reads), hidden kinds included, in list order. A missing map whose slot the set editor draws a row for
 /// goes to that slot's **Assign…**; every other row goes to itself in Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
+    with_counted_rows(m, key, |v, rows| {
+        let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
+        rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
+    })
+    .unwrap_or_default()
+}
+
+/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key`, slot reasons' rows included
+/// (what "+k more in Problems" shows again).
+pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
+    let hidden = m.hidden_kinds();
+    with_counted_rows(m, key, |_, rows| {
+        rows.into_iter()
+            .filter(|p| is_hidden(p, &hidden))
+            .filter_map(|p| p.code)
+            .collect()
+    })
+    .unwrap_or_default()
+}
+
+/// `f` on the set `key`'s view and the rows that take its "ready" away, in list order; `None` for a set gone from
+/// the plan or ready (the cached answer the cards read, so a ready set never scans the rows).
+fn with_counted_rows<T>(
+    m: &AppModel,
+    key: &str,
+    f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
+) -> Option<T> {
     let views = sets::views(m);
-    let Some(v) = views.iter().find(|v| v.key == key) else {
-        return vec![];
-    };
-    // A ready set (the cached answer the cards read) has no reason: no scan of the rows.
+    let v = views.iter().find(|v| v.key == key)?;
     if set_ready_in(&flagged(m), v) {
-        return vec![];
+        return None;
     }
     let members: HashSet<String> = v.members.iter().cloned().collect();
-    let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
-    problems(m)
+    let all = problems(m);
+    let rows = all
         .iter()
         .filter(|p| counts_as_ready_problem(p) && in_set(p, key, &members))
-        .map(|p| match (p.code, &p.target) {
-            // The DERIVE-NO-ALBEDO arm has no producer today: the engine raises it only from the Also export planner,
-            // whose rows are not set rows.
-            (Some(Code::ShaderMissingMap | Code::DeriveNoAlbedo), Some(SlotTarget::Slot(kind)))
-                if drawn.contains(kind) =>
-            {
-                Reason {
-                    text: format!("no {} (Assign…)", v.slot_label(*kind, "")),
-                    go: ReasonGo::Slot(*kind),
-                }
+        .collect();
+    Some(f(v, rows))
+}
+
+/// One counted row as a reason: a missing map whose slot the editor draws goes to the slot.
+fn reason(v: &sets::SetView, p: &Problem, drawn: &[sets::SlotKind]) -> Reason {
+    match (p.code, &p.target) {
+        // The DERIVE-NO-ALBEDO arm has no producer today: the engine raises it only from the Also export planner,
+        // whose rows are not set rows.
+        (Some(Code::ShaderMissingMap | Code::DeriveNoAlbedo), Some(SlotTarget::Slot(kind)))
+            if drawn.contains(kind) =>
+        {
+            Reason {
+                text: format!("no {} (Assign…)", v.slot_label(*kind, "")),
+                go: ReasonGo::Slot(*kind),
             }
-            _ => Reason {
-                text: reason_text(p),
-                go: ReasonGo::Row(Box::new(p.clone())),
-            },
-        })
-        .collect()
+        }
+        _ => Reason {
+            text: reason_text(p),
+            go: ReasonGo::Row(Box::new(p.clone())),
+        },
+    }
 }
 
 /// A row reason's words: its code's sentence up to " — ", or a code-less row's text cut at 60 characters.

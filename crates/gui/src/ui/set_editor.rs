@@ -7,7 +7,9 @@ use super::slot_commands::SlotCmdState;
 use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
-use crate::model::bottom::{is_hidden, set_reasons, tile_ready, ProblemsFilter, ReasonGo};
+use crate::model::bottom::{
+    hidden_reason_kinds, is_hidden, set_reasons, tile_ready, ProblemsFilter, ReasonGo,
+};
 use crate::model::bulk::MenuAction;
 use crate::model::fields::{
     channel_text, encoding_options, field_hidden, field_lock, field_view, format_label,
@@ -204,16 +206,9 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
         Act::Problems => {
-            // The list shows at least the rows the link counts: their hidden kinds show again, as a reason's does.
-            let hidden = model.hidden_kinds();
-            let codes: Vec<_> = set_reasons(model, &v.key)
-                .iter()
-                .filter_map(|r| match &r.go {
-                    ReasonGo::Row(p) if is_hidden(p, &hidden) => p.code,
-                    _ => None,
-                })
-                .collect();
-            for code in codes {
+            // The list shows at least the rows the link counts, a slot reason's row too: their hidden kinds show
+            // again, as a reason's does.
+            for code in hidden_reason_kinds(model, &v.key) {
                 model.set_kind_hidden(code, false);
             }
             model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));

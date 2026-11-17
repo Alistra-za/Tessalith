@@ -3360,6 +3360,85 @@ fn the_status_line_fits_the_centres_floor_width() {
     }
 }
 
+/// Fix round 2 item 1: "Turn parallax off" takes focus from its reason but never runs on Enter or Space; a click
+/// still runs it.
+#[test]
+fn turn_parallax_off_focused_by_a_reason_ignores_enter_and_space() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::AlphaParallaxNoAlpha, "p")]);
+    let v = rock01(&m);
+    let k = v.members[0].clone();
+    let file = m.item(&k).unwrap().name.clone();
+    let parallax = |m: &AppModel| m.project.as_ref().unwrap().file_value(&k, "alpha.parallax");
+    let before = parallax(&m);
+    assert_ne!(before, Some(serde_json::json!(false)), "precondition");
+    let r = sdc_gui::model::bottom::set_reasons(&m, &v.key);
+    let name = format!("{} — go to the fix", r[0].text);
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &name);
+    let button = format!("Turn parallax off for {file}");
+    assert!(
+        h.get_by_label(&button).accesskit_node().is_focused(),
+        "focus shows where the fix is"
+    );
+    for key in [egui::Key::Enter, egui::Key::Space] {
+        h.key_press(key);
+        h.run();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+        assert_eq!(parallax(h.state()), before, "{key:?} wrote nothing");
+    }
+    click_and_settle(&mut h, &button);
+    assert_eq!(parallax(h.state()), Some(serde_json::json!(false)));
+}
+
+/// Fix round 2 item 2: "+k more in Problems" shows a hidden kind behind a slot reason past the third too.
+#[test]
+fn more_in_problems_shows_a_hidden_slot_reasons_row() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, set_reasons, ReasonGo};
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage"),
+        Warning::new(Code::LossReencode, "again"),
+    ]);
+    let key = rock01(&m).key;
+    // Set rows come after the item rows, so the missing `_p` (Height, an empty slot row) is the fourth reason.
+    m.sets.iter_mut().find(|s| s.key == key).unwrap().warnings =
+        vec![Warning::new(Code::ShaderMissingMap, "no _p")
+            .with_data(serde_json::json!({"map": "_p", "shader": "pbr"}))];
+    m.invalidate_views();
+    let r = set_reasons(&m, &key);
+    let slot = r
+        .iter()
+        .position(|r| matches!(r.go, ReasonGo::Slot(_)))
+        .unwrap_or_else(|| panic!("a slot reason: {r:?}"));
+    assert!(slot >= 3, "past the third: {r:?}");
+    let shown = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderMissingMap))
+        .unwrap()
+        .shown()
+        .to_string();
+    m.set_kind_hidden(Code::ShaderMissingMap, true);
+    assert_eq!(
+        m.hidden_kinds(),
+        vec![Code::ShaderMissingMap],
+        "precondition"
+    );
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &format!("+{} more in Problems", r.len() - 3));
+    assert!(h.state().hidden_kinds().is_empty());
+    assert!(
+        h.query_all_by_label_contains(&shown).count() >= 1,
+        "the row is listed"
+    );
+}
+
 /// The DERIVE-NO-ALBEDO slot case: no production row reaches it today (the engine raises the code only from the Also
 /// export planner), so the row is injected, as Task 8's target test does.
 #[test]
