@@ -214,7 +214,7 @@ fn a_hidden_kind_leaves_the_list_but_not_the_ready_count() {
 }
 
 /// Note FM24 took the warnings out of Review, so the `Kinds ▾` hover no longer says Review lists them; it says what a
-/// hidden row still does (Note HC4: the counts ignore the hiding).
+/// hidden row still does (Note HC4: Ready ignores the hiding) and its scope, this project (review E18).
 #[test]
 fn the_kinds_hover_says_what_a_hidden_row_still_does() {
     use engine::codes::{Code, Warning};
@@ -234,8 +234,9 @@ fn the_kinds_hover_says_what_a_hidden_row_still_does() {
             .is_none(),
         "Review lists no warning (Note FM24)"
     );
-    h.get_by_label_contains(
-        "A hidden row still counts in the tab's number and in the ready counts",
+    h.get_by_label(
+        "Hide kinds of row you don't need in this project. Blocks and questions always show. A hidden row still \
+         counts for Ready, and the tab shows how many are hidden.",
     );
 }
 

@@ -553,6 +553,154 @@ fn an_empty_notes_list_says_no_notes_and_its_pill_turns_it_off() {
     assert_eq!(h.state().bottom.filter, None);
 }
 
+/// Review E18: the hidden kinds' first line, as the list's line above its rows.
+fn hidden_line(kinds: usize, rows: usize) -> String {
+    use sdc_gui::model::code_text::counted;
+    format!(
+        "{} hidden in this project ({}). Hidden rows still count for Ready.",
+        counted(kinds, "kind", "kinds"),
+        counted(rows, "row", "rows")
+    )
+}
+
+const ALL_HIDDEN: &str = "Every problem here is hidden. Open Kinds ▾ to show them.";
+
+/// Review E18: with every problem kind hidden the list names the scope (this project) and Ready is unchanged.
+#[test]
+fn hiding_every_problem_kind_names_the_scope_and_keeps_ready() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ChanNotGray, "a"),
+        Warning::new(Code::ValMipError, "b"),
+        Warning::new(Code::ValMipError, "c"),
+    ]);
+    let ready = sdc_gui::model::bottom::flagged(&m).ready_rows;
+    let header = m.header_export_text();
+    let clean = m.export_is_clean();
+    let (b, _) = baseline();
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.set_kind_hidden(Code::ValMipError, true);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&label(b, 0, 3, 0));
+    h.get_by_label("2 kinds hidden in this project (3 rows). Hidden rows still count for Ready.");
+    assert_eq!(sdc_gui::model::bottom::flagged(h.state()).ready_rows, ready);
+    assert_eq!(h.state().header_export_text(), header);
+    assert_eq!(h.state().export_is_clean(), clean);
+}
+
+/// Review E18 (Task 2's review, Minor 2): every problem hidden and a note with a button still listed. The list is not
+/// empty and problems exist, so "No problems." is not drawn; the hidden line is.
+#[test]
+fn with_every_problem_hidden_a_listed_note_never_reads_no_problems() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.unmatched_keys = vec!["gone.png".into()];
+    m.invalidate_views();
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Problems (0 · 1 hidden) · Notes (1)");
+    assert_eq!(
+        h.query_all_by_label_contains("No problems").count(),
+        0,
+        "problems exist, hidden"
+    );
+    h.get_by_label(&hidden_line(1, 1));
+    assert_eq!(
+        h.query_all_by_label(ALL_HIDDEN).count(),
+        0,
+        "a row is listed"
+    );
+}
+
+/// Review E18 (controller ruling 6): a list empty because its rows are hidden says how to show them; a list empty
+/// with nothing hidden keeps "No problems".
+#[test]
+fn an_empty_list_says_why_only_when_rows_are_hidden() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&hidden_line(1, 1));
+    h.get_by_label(ALL_HIDDEN);
+    assert_eq!(h.query_all_by_label("No problems").count(), 0);
+
+    let (_d, mut m) = only(&[]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("No problems");
+    assert_eq!(h.query_all_by_label(ALL_HIDDEN).count(), 0);
+    assert_eq!(
+        h.query_all_by_label_contains("hidden in this project")
+            .count(),
+        0,
+        "nothing hidden"
+    );
+}
+
+/// Review E18 (controller ruling 5): under a Set filter the line keeps the project's numbers ("in this project"),
+/// never the set's. Here the set's row is hidden, and one more of the kind's rows is a File row in no set.
+#[test]
+fn under_a_set_filter_the_hidden_line_gives_the_projects_numbers() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{cached_tab_counts, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    let (b, _) = baseline();
+    let set = rock01(&m);
+    // A last-export File row of a job in no set.
+    m.export.rows = vec![export_row(
+        "derived/x",
+        vec![Warning::new(Code::ChanNotGray, "not grey")],
+    )];
+    m.invalidate_views();
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    let project = cached_tab_counts(&m).hidden;
+    assert_eq!(project, b.hidden + 2, "rock01's row and the File row");
+    m.open_problems(Some(ProblemsFilter::Set(set.key)));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&hidden_line(1, project));
+    assert_eq!(
+        h.query_all_by_label(&hidden_line(1, 1)).count(),
+        0,
+        "not the set's own number"
+    );
+}
+
+/// Review E18 (controller ruling 10): at a narrow window the hidden line wraps inside the window; its node keeps the
+/// full text.
+#[test]
+fn the_hidden_line_wraps_at_a_narrow_window() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let one_line = h.get_by_label(&hidden_line(1, 1)).rect().height();
+    // The line is about 400 px on one line.
+    let w = 360.0;
+    h.set_size(egui::vec2(w, 900.0));
+    h.run();
+    let line = h.get_by_label(&hidden_line(1, 1)).rect();
+    let panel = support::panel(&h.ctx, "bottom");
+    assert!(
+        line.max.x <= panel.max.x.min(w),
+        "the line ends at {} past the panel {panel:?}",
+        line.max.x
+    );
+    assert!(
+        line.height() > 1.5 * one_line,
+        "the line wraps: {line:?}, one line is {one_line}"
+    );
+}
+
 /// A `SetsDoc` over `sdc-project.toml` holding `text`.
 fn doc_with(text: &str) -> (tempfile::TempDir, sdc_gui::sets_doc::SetsDoc) {
     let d = tempfile::tempdir().unwrap();

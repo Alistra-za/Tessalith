@@ -172,8 +172,8 @@ fn kinds_menu(ui: &mut egui::Ui, model: &AppModel, hidden_rows: usize) -> Option
         }
     });
     button.on_hover_text(
-        "Hide the kinds of warning and info row you don't need. Blocks and questions always show. A hidden row still \
-         counts in the tab's number and in the ready counts.",
+        "Hide kinds of row you don't need in this project. Blocks and questions always show. A hidden row still \
+         counts for Ready, and the tab shows how many are hidden.",
     );
     act
 }
@@ -644,9 +644,27 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     // Review E2 (controller ruling 5): the first line says what the default list holds; drawn above the notes with a
     // button, so those never read as problems.
     let worklist = matches!(model.bottom.filter, None | Some(ProblemsFilter::Set(_)));
+    // Review E18: while this list has hidden rows, its first line names the scope with the project's numbers (the
+    // tab's "· N hidden"), never a set's; it replaces "No problems. …". The Notes lists keep their own text.
+    let project_hidden = cached_tab_counts(model).hidden;
+    let hidden_line = worklist && hidden > 0 && project_hidden > 0;
+    if hidden_line {
+        let text = format!(
+            "{} hidden in this project ({}). Hidden rows still count for Ready.",
+            code_text::counted(model.hidden_kinds().len(), "kind", "kinds"),
+            code_text::counted(project_hidden, "row", "rows")
+        );
+        // Wraps at a narrow window, so the whole sentence stays on screen and in its name (rule 3.4).
+        ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
+    }
     if list.is_empty() && hidden > 0 {
-        ui.weak("Every row here is hidden — see Kinds");
-    } else if worklist && problem_rows == 0 && notes > 0 {
+        // Only hidden notes leave the list empty without the line: "problem" would be false there.
+        ui.weak(if hidden_line {
+            "Every problem here is hidden. Open Kinds ▾ to show them."
+        } else {
+            "Every row here is hidden — see Kinds"
+        });
+    } else if worklist && !hidden_line && problem_rows == 0 && notes > 0 {
         ui.weak(format!(
             "No problems. {NOTES_PILL} ({notes}) lists what Tessalith did for you."
         ));

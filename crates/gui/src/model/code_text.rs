@@ -378,10 +378,22 @@ pub fn banner_line(line: &str) -> String {
     }
 }
 
+/// `n` and its noun, singular for one: "1 kind", "2 kinds" (review E18).
+pub fn counted(n: usize, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use engine::codes::Severity;
+
+    #[test]
+    fn counted_says_one_and_many() {
+        assert_eq!(counted(0, "kind", "kinds"), "0 kinds");
+        assert_eq!(counted(1, "kind", "kinds"), "1 kind");
+        assert_eq!(counted(2, "row", "rows"), "2 rows");
+    }
 
     #[test]
     fn every_code_a_row_can_show_has_a_sentence_without_a_code_in_it() {
