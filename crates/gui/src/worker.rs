@@ -321,22 +321,34 @@ pub fn spawn_plan(
     });
 }
 
-/// Fast re-plan (R2 §5): `Session::replan_sets` for `changed` (the current entry of every `[files]` key changed
-/// since the last landed full plan), sent as `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it.
-/// When `latest` (the newest edit's `seq`, with a partial or not) has moved past `seq` before the work starts, it is
-/// skipped and an `Err` is sent. `skeleton` is the session's when the edit was made, read before its full plan starts:
-/// read here, it could be the one that plan stored meanwhile, which already holds the edit.
-#[allow(clippy::too_many_arguments)]
+/// One edit's inputs to a fast re-plan (`spawn_partial`).
+pub struct PartialEdit {
+    /// The session's skeleton when the edit was made, read before its full plan starts: read in the partial's thread,
+    /// it could be the one that plan stored meanwhile, which already holds the edit.
+    pub skeleton: Option<Arc<engine::skeleton::Skeleton>>,
+    pub req: BatchRequest,
+    /// The current entry of every `[files]` key changed since the last landed full plan (`None`: removed).
+    pub changed: Vec<(String, Option<toml::Table>)>,
+    /// The edit's `edit_seq`.
+    pub seq: u64,
+}
+
+/// Fast re-plan (R2 §5): `Session::replan_sets_on` the edit's skeleton for its changed keys, sent as
+/// `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it. When `latest` (the newest edit's `seq`, with a
+/// partial or not) has moved past `seq` before the work starts, it is skipped and an `Err` is sent.
 pub fn spawn_partial(
     tx: Sender<WorkerMsg>,
     session: Arc<Session>,
-    skeleton: Option<Arc<engine::skeleton::Skeleton>>,
-    req: BatchRequest,
-    changed: Vec<(String, Option<toml::Table>)>,
-    seq: u64,
+    edit: PartialEdit,
     latest: Arc<std::sync::atomic::AtomicU64>,
     root: PathBuf,
 ) {
+    let PartialEdit {
+        skeleton,
+        req,
+        changed,
+        seq,
+    } = edit;
     spawn_guarded(tx, "partial plan", move |tx| {
         if latest.load(Ordering::SeqCst) > seq {
             let result = Err("superseded by a newer partial plan".to_string());

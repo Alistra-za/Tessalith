@@ -59,7 +59,7 @@ use crate::project::{ProjectDoc, SaveError};
 use crate::settings::GuiSettings;
 use crate::worker::{
     spawn_dds_thumbs, spawn_export, spawn_guarded, spawn_partial, spawn_plan, MeshEvidence,
-    PlanFailure, WorkerMsg,
+    PartialEdit, PlanFailure, WorkerMsg,
 };
 use engine::api::{BatchRequest, CancelToken};
 use engine::codes::Code;
@@ -1433,13 +1433,16 @@ impl AppModel {
             .collect();
         let Some(changed) = changed else { return };
         self.partial_pending = true;
+        let edit = PartialEdit {
+            skeleton: session.skeleton(),
+            req: req.clone(),
+            changed,
+            seq: self.edit_seq,
+        };
         spawn_partial(
             self.tx.clone(),
             session.clone(),
-            session.skeleton(),
-            req.clone(),
-            changed,
-            self.edit_seq,
+            edit,
             self.partial_latest.clone(),
             root.to_path_buf(),
         );
