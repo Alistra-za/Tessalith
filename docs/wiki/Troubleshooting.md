@@ -34,7 +34,7 @@ The Helpers row says "not used" with the reason, with the reason (`PACK-UNUSED-I
 
 `sdc.toml` failed to load or was rejected. The banner names the problem: fix the file in a text editor and press **Reload**. If `sdc-project.toml` failed, only sets and the JSON are read-only; its red Problems row names the line and has **Open in editor** and **Reload**. A save refused because the file has Windows' read-only flag leaves a row with **Clear read-only flag**.
 
-### The GUI won't start
+### Why are the previews off?
 
 The previews need a GPU; without one they're off and everything else works.
 
