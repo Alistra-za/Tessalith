@@ -3803,3 +3803,19 @@ fn a_row_sized_from_the_last_frame_settles_wide_and_narrow() {
         "Mark at {mark:?} is outside the panel {panel:?} or the window"
     );
 }
+
+#[test]
+fn one_problem_reads_singular_in_the_export_hover() {
+    use engine::codes::{Code, Warning};
+    let (_d, m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    let t = sdc_gui::ui::header::export_hover(&m);
+    assert!(t.ends_with(", 1 problem"), "{t}");
+    assert_eq!(
+        sdc_gui::model::code_text::counted(1, "note", "notes"),
+        "1 note"
+    );
+    assert_eq!(
+        sdc_gui::model::code_text::counted(0, "message", "messages"),
+        "0 messages"
+    );
+}

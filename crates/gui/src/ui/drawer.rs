@@ -1,6 +1,7 @@
 //! The Files tab of the bottom panel (M3a spec 2.5, layout v2 A1): progress and the report of the last export, by file.
 //! Open export folder, Show in Explorer, the progress line with pace, and a virtualised Files list with filters.
 //! DECISIONS AG34-AG37, CA16. A file's warnings show on hover of its row (R9).
+use crate::model::code_text::counted;
 use crate::model::export::{cli_command, warning_line, FileFilter, FilesIndex, RowState};
 use crate::model::picker::{self, PickerKind, PickerPurpose, PickerSpec};
 use crate::model::shell::StatCache;
@@ -214,7 +215,7 @@ fn files(
                     ui.label(r.state.label());
                     if !r.warnings.is_empty() {
                         let lines: Vec<String> = r.warnings.iter().map(warning_line).collect();
-                        ui.label(format!("{} warnings", r.warnings.len()))
+                        ui.label(counted(r.warnings.len(), "warning", "warnings"))
                             .on_hover_text(lines.join("\n"));
                     }
                     // The written output once it exists, otherwise the source.

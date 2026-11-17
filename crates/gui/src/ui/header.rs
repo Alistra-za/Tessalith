@@ -2,6 +2,7 @@
 //! Export to ▾ · Save · Export at the right edge; then the status line and banner. Drawn in both views (C7).
 use super::meshes::UndoTarget;
 use crate::look::Combo036 as _;
+use crate::model::code_text::counted;
 use crate::model::picker::{self, PickerPurpose};
 use crate::model::{also, AppModel};
 use eframe::egui;
@@ -293,14 +294,12 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
 /// {m} problems" (Note JF1: the count is the PBR folder's).
 pub fn export_hover(model: &AppModel) -> String {
     let n = crate::model::bottom::flagged(model).ready_rows;
-    let files = model.export_files();
+    let files = counted(model.export_files(), "file", "files");
+    let n = counted(n, "problem", "problems");
     if model.also_on() {
-        format!(
-            "{files} files + {}, {n} problems",
-            model.also_extra_folders()
-        )
+        format!("{files} + {}, {n}", model.also_extra_folders())
     } else {
-        format!("{files} files, {n} problems")
+        format!("{files}, {n}")
     }
 }
 

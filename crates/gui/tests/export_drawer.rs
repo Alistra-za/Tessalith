@@ -384,7 +384,7 @@ fn a_files_row_lists_its_warnings_on_hover() {
     let mut h = drawer_harness(model_with(d.path(), x));
     h.run();
     h.run();
-    h.get_by_label("1 warnings").hover();
+    h.get_by_label("1 warning").hover();
     h.run();
     h.run();
     let line = warning_line(&h.state().0.export.rows[0].warnings[0]);

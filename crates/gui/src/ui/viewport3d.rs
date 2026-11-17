@@ -194,13 +194,17 @@ pub fn details(ui: &mut egui::Ui, v: &mut Viewport3d) {
     }
     footer(ui, v);
     if let Some(r) = v.report.as_ref().filter(|r| !r.warnings.is_empty()) {
-        egui::CollapsingHeader::new(format!("{} notes", r.warnings.len()))
-            .id_salt("viewport3d-warnings")
-            .show(ui, |ui| {
-                for w in r.warnings.iter().take(MAX_LISTED) {
-                    ui.weak(w);
-                }
-            });
+        egui::CollapsingHeader::new(crate::model::code_text::counted(
+            r.warnings.len(),
+            "note",
+            "notes",
+        ))
+        .id_salt("viewport3d-warnings")
+        .show(ui, |ui| {
+            for w in r.warnings.iter().take(MAX_LISTED) {
+                ui.weak(w);
+            }
+        });
     }
 }
 
