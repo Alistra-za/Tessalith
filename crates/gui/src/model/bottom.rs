@@ -3,6 +3,7 @@ use super::code_text::{note_sentence, row_class, RowClass};
 use super::cs_pbr::{set_key, statics_text, Kind, StaticsStatus, NO_TXST_USES};
 use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
+use super::nav::SlotTarget;
 use super::{
     checks, code_text, counts_toward_badge, makes_a_row, pbr_export, sets, AppModel, ItemStatus,
 };
@@ -293,6 +294,8 @@ pub struct Problem {
     pub intended: bool,
     /// Review E2: the key **Mark as intended** and **Undo mark** write; `Some` exactly on a `markable` row.
     pub mark: Option<IntendedKey>,
+    /// Review E10: the slot or file a set row's Go to set outlines; `None` lands on the set alone.
+    pub target: Option<SlotTarget>,
 }
 
 impl Problem {
@@ -584,6 +587,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         carried: false,
         intended: false,
         mark: None,
+        target: None,
     };
     // Review E2: a row with no code is marked by its kind, named where it is built.
     let kinded = |p: Problem, kind: &str| Problem {
@@ -767,22 +771,25 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.
             if let Some(p) = note_row(&at, w) {
-                let (fix, second_fix) = match w.code {
+                // Go to set outlines the member's row (review E10).
+                let (fix, second_fix, target) = match w.code {
                     Code::ShaderExtraMap => match extra_member(m, v, w) {
                         Some(item) => (
                             Some(Fix::RemoveMember {
                                 set_id: v.id.clone(),
-                                item,
+                                item: item.clone(),
                             }),
                             shader(),
+                            Some(SlotTarget::Item(item)),
                         ),
-                        None => (shader(), None),
+                        None => (shader(), None, None),
                     },
-                    _ => (None, None),
+                    _ => (None, None, None),
                 };
                 out.push(Problem {
                     fix,
                     second_fix,
+                    target,
                     ..p
                 });
                 continue;
@@ -791,8 +798,18 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::ShaderUnavailable | Code::ShaderMissingMap => shader(),
                 _ => None,
             };
+            // Review E10: Go to set outlines the slot the missing map goes in.
+            let target = match w.code {
+                Code::ShaderMissingMap => w.data["map"]
+                    .as_str()
+                    .and_then(sets::slot_for_shader_map)
+                    .map(SlotTarget::Slot),
+                Code::DeriveNoAlbedo => Some(SlotTarget::Slot(sets::SlotKind::Diffuse)),
+                _ => None,
+            };
             out.push(Problem {
                 fix,
+                target,
                 ..row(Level::Warning, at, w.message.clone(), Some(w.code))
             });
         }
@@ -1372,6 +1389,7 @@ mod tests {
             carried: false,
             intended: false,
             mark: None,
+            target: None,
         };
         let all = [
             row(Level::Info, "note", Some(Fix::UndoLast)),

@@ -2292,3 +2292,287 @@ fn a_sets_hidden_note_with_a_button_keeps_the_hidden_rows_text() {
     assert_eq!(h.query_all_by_label(ALL_HIDDEN).count(), 0);
     h.get_by_label_contains("hidden in this project");
 }
+
+#[test]
+fn reveal_holds_two_seconds_then_fades_unless_motion_is_reduced() {
+    use sdc_gui::ui::row_reveal::reveal_alpha;
+    assert_eq!(reveal_alpha(0.0, false), 1.0);
+    assert_eq!(reveal_alpha(1.99, false), 1.0);
+    assert!(reveal_alpha(2.06, false) > 0.0 && reveal_alpha(2.06, false) < 1.0);
+    assert_eq!(reveal_alpha(2.12, false), 0.0);
+    assert_eq!(reveal_alpha(1.99, true), 1.0);
+    assert_eq!(reveal_alpha(2.0, true), 0.0, "reduced: no fade");
+}
+
+#[test]
+fn reduced_follows_the_style_and_the_test_seam() {
+    let ctx = egui::Context::default();
+    assert!(!sdc_gui::ui::motion::reduced(&ctx));
+    sdc_gui::ui::motion::force_reduced(&ctx, true);
+    assert!(sdc_gui::ui::motion::reduced(&ctx));
+    let ctx = egui::Context::default();
+    ctx.global_style_mut(|s| s.animation_time = 0.0);
+    assert!(sdc_gui::ui::motion::reduced(&ctx));
+}
+
+/// The brief's labels, and those `map_slot` knows beyond them (controller ruling for Task 8).
+#[test]
+fn a_shader_map_label_names_its_slot_card() {
+    use sdc_gui::model::sets::{slot_for_shader_map, SlotKind};
+    for (label, want) in [
+        ("albedo", Some(SlotKind::Diffuse)),
+        ("diffuse", Some(SlotKind::Diffuse)),
+        ("skin_albedo", Some(SlotKind::Diffuse)),
+        ("_n", Some(SlotKind::Normal)),
+        ("_n/_msn", Some(SlotKind::Normal)),
+        ("_n (model-space)", Some(SlotKind::Normal)),
+        ("_rmaos", Some(SlotKind::Rmaos)),
+        ("_p", Some(SlotKind::Height)),
+        ("_g", Some(SlotKind::Emissive)),
+        ("_i", None),
+        ("complex_grass", None),
+        ("no such map", None),
+    ] {
+        assert_eq!(slot_for_shader_map(label), want, "{label}");
+    }
+}
+
+/// Each set row that names a slot or a file carries it for Go to set; the others carry nothing.
+#[test]
+fn set_rows_carry_their_go_to_set_target() {
+    use engine::codes::Code;
+    use sdc_gui::model::{nav::SlotTarget, sets::SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (key, name) = normal_member(&m);
+    inject_set(
+        &mut m,
+        &[
+            extra_map(&name),
+            Warning::new(Code::ShaderMissingMap, "no _rmaos")
+                .with_data(serde_json::json!({"map": "_rmaos", "shader": "pbr"})),
+            Warning::new(Code::DeriveNoAlbedo, "no albedo"),
+            Warning::new(Code::DeriveDdsSource, "a dds source"),
+        ],
+    );
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let target = |c: Code| {
+        rows.iter()
+            .find(|p| p.code == Some(c))
+            .unwrap_or_else(|| panic!("a {c:?} row"))
+            .target
+            .clone()
+    };
+    assert_eq!(target(Code::ShaderExtraMap), Some(SlotTarget::Item(key)));
+    assert_eq!(
+        target(Code::ShaderMissingMap),
+        Some(SlotTarget::Slot(SlotKind::Rmaos))
+    );
+    assert_eq!(
+        target(Code::DeriveNoAlbedo),
+        Some(SlotTarget::Slot(SlotKind::Diffuse))
+    );
+    assert_eq!(target(Code::DeriveDdsSource), None);
+}
+
+/// The extra-map fixture of Task 7 (`normal_member`, `extra_map`) at 1280x800.
+fn extra_map_at_1280(
+    reduced: bool,
+) -> (
+    tempfile::TempDir,
+    Harness<'static, AppModel>,
+    String,
+    String,
+) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (key, name) = normal_member(&m);
+    inject_set(&mut m, &[extra_map(&name)]);
+    m.open_problems(None);
+    let mut h = Harness::builder()
+        .with_context_setup(move |ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            sdc_gui::ui::motion::force_reduced(ctx, reduced);
+        })
+        .with_size(egui::vec2(1280.0, 800.0))
+        .with_step_dt(0.25)
+        .with_max_steps(64)
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    if !reduced {
+        // kittest turns egui's animations off (`animation_time` 0, after the context setup), which
+        // `motion::reduced` reads as reduced motion: give them back.
+        let on = egui::Style::default().animation_time;
+        h.ctx.all_styles_mut(|s| s.animation_time = on);
+    }
+    h.run();
+    (d, h, key, name)
+}
+
+/// The frame just drawn asked for the next one at once (`requested_repaint_last_pass` reports the frame before).
+fn asks_now(h: &Harness<'static, AppModel>) -> bool {
+    h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay == std::time::Duration::ZERO
+}
+
+/// A node labelled `label` lies inside the centre panel (`assert_in_centre`, scoped: the file name is on a Textures
+/// tile too).
+fn shown_in_centre(h: &Harness<'static, AppModel>, label: &str) {
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let rects: Vec<egui::Rect> = h.query_all_by_label(label).map(|n| n.rect()).collect();
+    assert!(
+        rects.iter().any(|r| c.expand(0.5).contains_rect(*r)),
+        "no {label} inside the centre {c:?}: {rects:?}"
+    );
+}
+
+/// Review E10 acceptance: after Go to set the named file's row is visible and outlined, and a button on the
+/// Problems row removes that row. Not reduced: it fades and is gone after 2 s, and the frame goes idle.
+#[test]
+fn go_to_set_shows_and_outlines_the_file_the_row_names() {
+    use sdc_gui::model::nav::SlotTarget;
+    use sdc_gui::ui::row_reveal::revealed;
+    let (_d, mut h, key, name) = extra_map_at_1280(false);
+    on_row(&h, &extra_note(&name), "Go to set").click();
+    h.step();
+    h.step();
+    assert_eq!(revealed(&h.ctx), Some((SlotTarget::Item(key.clone()), 1.0)));
+    shown_in_centre(&h, &name);
+    on_row(
+        &h,
+        &extra_note(&name),
+        &format!("Remove {name} from landscape/rock01"),
+    );
+    // The Sets column settles its own scroll to the selected card first (see the reduced-motion test).
+    h.run_steps(3); // 1.25 s
+                    // To 2.75 s. The fade's frame shows the outline and asks for the next frame at once (reduced motion never does).
+    let mut fading = false;
+    for _ in 0..6 {
+        h.step();
+        fading |= revealed(&h.ctx).is_some() && asks_now(&h);
+    }
+    assert!(fading, "a fade frame");
+    assert_eq!(revealed(&h.ctx), None);
+    h.step();
+    assert!(
+        !h.ctx.requested_repaint_last_pass(),
+        "idle after the outline"
+    );
+}
+
+/// Spec section 6, E10 ("no motion if reduced motion is set"); full strength with no fade is the planner's call:
+/// reduced motion draws the outline at full strength, no fade and no repaint loop.
+#[test]
+fn with_reduced_motion_the_outline_holds_full_then_goes_without_a_fade() {
+    use sdc_gui::ui::row_reveal::revealed;
+    let (_d, mut h, _key, name) = extra_map_at_1280(true);
+    on_row(&h, &extra_note(&name), "Go to set").click();
+    // The click's last frame starts the reveal, a step after the release, so each later step is 0.25 s past it.
+    h.step();
+    h.step(); // 0.5 s
+    assert_eq!(revealed(&h.ctx).map(|r| r.1), Some(1.0));
+    // The Sets column scrolls the newly selected set's card into view over these frames, as any selection does (its
+    // own reveal and scroll animation); the outline asks for nothing then either.
+    h.run_steps(3); // 1.25 s
+    for _ in 0..3 {
+        // up to 1.75 s
+        assert_eq!(revealed(&h.ctx).map(|r| r.1), Some(1.0));
+        assert!(!asks_now(&h), "no repaint loop while held");
+        assert!(
+            !h.ctx.requested_repaint_last_pass(),
+            "no repaint loop while held"
+        );
+        h.step();
+    }
+    for _ in 0..3 {
+        // past 2 s: the outline goes in one step, with no fade frame
+        assert!(revealed(&h.ctx).is_none_or(|_| !asks_now(&h)), "no fade");
+        h.step();
+    }
+    assert_eq!(revealed(&h.ctx), None);
+}
+
+/// The jump: with the set's editor already open and scrolled past its slot rows, Go to set brings the row back.
+#[test]
+fn go_to_set_scrolls_an_editor_scrolled_away_back_to_the_row() {
+    let (_d, mut h, _key, name) = extra_map_at_1280(true);
+    let set = rock01(h.state()).key;
+    h.state_mut().select_set(&set);
+    h.run();
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    h.event(egui::Event::PointerMoved(c.center()));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -1500.0),
+        source: egui::MouseWheelSource::Wheel,
+        phase: egui::TouchPhase::Move,
+        modifiers: Default::default(),
+    });
+    h.run_steps(4);
+    assert!(
+        !h.query_all_by_label(&name)
+            .any(|n| c.expand(0.5).contains_rect(n.rect())),
+        "the editor is scrolled past {name}'s row"
+    );
+    on_row(&h, &extra_note(&name), "Go to set").click();
+    // egui draws the jump two frames after the frame that asked for it (the area stores the target, then moves to it
+    // at once); no frame shows a position in between.
+    h.step();
+    h.step();
+    h.step();
+    shown_in_centre(&h, &name);
+}
+
+#[test]
+fn a_missing_map_go_to_set_outlines_the_empty_slot() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::{nav::SlotTarget, sets::SlotKind};
+    let (_d, mut m) = with_set_warnings(&[Warning::new(Code::ShaderMissingMap, "no _n")
+        .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))]);
+    // empty the Normal slot: take its member out of the set (this plans again, so inject after it)
+    let (n, _) = normal_member(&m);
+    m.remove_member(&rock01(&m).id, &n).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject_set(
+        &mut m,
+        &[Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
+    );
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    on_row(&h, "no _n", "Go to set").click();
+    h.step();
+    h.step();
+    assert_eq!(
+        sdc_gui::ui::row_reveal::revealed(&h.ctx).map(|r| r.0),
+        Some(SlotTarget::Slot(SlotKind::Normal))
+    );
+}
+
+/// Controller ruling for Task 8: a target the set editor draws no row for selects the set, outlines nothing, and
+/// leaves no reveal waiting.
+#[test]
+fn a_target_with_no_row_selects_the_set_and_outlines_nothing() {
+    use sdc_gui::model::nav::SlotTarget;
+    let (_d, m) = with_set_warnings(&[]);
+    let key = rock01(&m).key;
+    let mut h = harness(m);
+    h.run();
+    h.state_mut()
+        .go_to_set(&key, Some(SlotTarget::Item("no/such/item".into())));
+    h.step();
+    h.step();
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(key.clone())
+    );
+    assert!(h.state().nav.reveal_slot.is_none(), "the reveal was taken");
+    assert_eq!(sdc_gui::ui::row_reveal::revealed(&h.ctx), None);
+    h.run();
+    assert_eq!(sdc_gui::ui::row_reveal::revealed(&h.ctx), None);
+    // Nothing waits on it: a reveal left pending would wake the frame at the end of its hold.
+    let wake = h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    assert!(
+        wake.as_secs_f64() >= sdc_gui::ui::row_reveal::REVEAL_SECS,
+        "{wake:?}"
+    );
+}

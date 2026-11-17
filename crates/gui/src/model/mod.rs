@@ -3212,6 +3212,17 @@ impl AppModel {
         self.centre_tab = CentreTab::Selection;
     }
 
+    /// Review E10: a Problems row's Go to set. Selects the set, and leaves `target` for the set editor to scroll to and
+    /// outline when it next draws the set (`ui::set_editor`); with no target, the same as `select_set`. The switch to
+    /// the Textures view is the caller's: the model has no egui context.
+    pub fn go_to_set(&mut self, key: &str, target: Option<nav::SlotTarget>) {
+        self.select_set(key);
+        self.nav.reveal_slot = target.map(|target| nav::RevealSlot {
+            set_key: key.to_string(),
+            target,
+        });
+    }
+
     pub fn expand(&mut self, key: &str) {
         self.select_item(key);
         self.expanded = Some(key.to_string());

@@ -2,6 +2,7 @@
 //! `ui::actions`; this is what they do to the model.
 use super::items::ItemKind;
 use super::preview::SourceState;
+use super::sets::SlotKind;
 use super::view::Channel;
 use super::{AppModel, Selection, ViewKey};
 use std::sync::Arc;
@@ -21,12 +22,30 @@ pub struct Nav {
     /// A texture or set to scroll into view in its column on the next frame.
     pub reveal_item: Option<String>,
     pub reveal_set: Option<String>,
+    /// Review E10: Go to set's slot or file, for the set editor to scroll to and outline when it next draws that set.
+    pub reveal_slot: Option<RevealSlot>,
     /// The F1 shortcut sheet is open.
     pub sheet: bool,
     /// The Ctrl+K palette, while open.
     pub palette: Option<Palette>,
     /// The textures and sets that match a query, by query and by what the plan and documents were.
     cache: Option<(String, ViewKey, Arc<Vec<Hit>>)>,
+}
+
+/// Review E10: what a Problems row's Go to set lands on in the set editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotTarget {
+    /// A slot card, filled or empty (SHADER-MISSING-MAP, DERIVE-NO-ALBEDO).
+    Slot(SlotKind),
+    /// The slot row that holds this item (an item key; SHADER-EXTRA-MAP).
+    Item(String),
+}
+
+/// Review E10: a Go to set waiting for the set editor.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RevealSlot {
+    pub set_key: String,
+    pub target: SlotTarget,
 }
 
 /// The palette's search field and the highlighted row.

@@ -10,6 +10,7 @@ use crate::model::bottom::{
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::meshes::NifTab;
+use crate::model::nav::SlotTarget;
 use crate::model::sets::{shader_options, Missing};
 use crate::model::shell::ShellRequest;
 use crate::model::{Answer, AppModel};
@@ -256,7 +257,8 @@ pub fn forget_focus(ctx: &egui::Context) {
 
 enum Act {
     Texture(String),
-    Set(String),
+    /// The set (by key) and, from Go to set, the slot or file to outline (review E10).
+    Set(String, Option<SlotTarget>),
     File(String),
     Pick(RowPick),
     Apply(Fix, At),
@@ -924,7 +926,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                             }
                             At::Set { key, id } => {
                                 if ui.link(id).clicked() {
-                                    a = Some(Act::Set(key.clone()));
+                                    a = Some(Act::Set(key.clone(), None));
                                 }
                             }
                             At::File(k) => {
@@ -972,7 +974,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         let mut a = None;
                         if let At::Set { key, .. } = &p.at {
                             if ui.button("Go to set").clicked() {
-                                a = Some(Act::Set(key.clone()));
+                                a = Some(Act::Set(key.clone(), p.target.clone()));
                             }
                         }
                         if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
@@ -1027,8 +1029,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             model.select_item(&k);
             to_textures(ui);
         }
-        Some(Act::Set(k)) => {
-            model.select_set(&k);
+        Some(Act::Set(k, target)) => {
+            model.go_to_set(&k, target);
             to_textures(ui);
         }
         // Re-check A5: a Vanilla or CM row of the last Also export names no texture; its file is shown in Explorer.

@@ -96,9 +96,11 @@ impl SdcApp {
         }
     }
 
-    /// Puts the saved panel widths and the Textures | Meshes view into egui, before the first frame.
+    /// Puts the saved panel widths and the Textures | Meshes view into egui, and the OS's reduced-motion setting
+    /// (`ui::motion`), before the first frame.
     pub fn restore_ctx(&self, ctx: &egui::Context) {
         crate::layout::restore_ctx(ctx, &self.model.settings.layout);
+        crate::ui::motion::install(ctx);
     }
 
     /// Takes the window and arrangement as they are now into the settings. `gui.toml` is written once the change has

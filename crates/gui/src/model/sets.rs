@@ -614,6 +614,24 @@ pub fn slot_of(item: &TextureItem) -> Option<SlotKind> {
     slot_kind(item.job.as_ref()?.profile.subtype)
 }
 
+/// Review E10: the slot card a shader map role (`MapRole::label`, a SHADER-MISSING-MAP's `data.map`) goes in, for Go
+/// to set's outline; `None` for a role with no card (`_i`, `complex_grass`) or a label nothing knows.
+pub fn slot_for_shader_map(label: &str) -> Option<SlotKind> {
+    // Not in `map_slot`: that table answers which slot a missing map a record or a borrow could fill, and nothing
+    // fills the diffuse slot there.
+    if matches!(label, "albedo" | "diffuse" | "skin_albedo") {
+        return Some(SlotKind::Diffuse);
+    }
+    // `map_slot`'s numbers name these kinds; 7 is `_i`, which has no card (Coat and Fuzz share the number).
+    match map_slot(label)? {
+        2 => Some(SlotKind::Normal),
+        3 => Some(SlotKind::Emissive),
+        4 => Some(SlotKind::Height),
+        6 => Some(SlotKind::Rmaos),
+        _ => None,
+    }
+}
+
 /// The slot cards shader `s` can use (F1 spec §5, DECISIONS V8): each role's sub-types mapped through `slot_kind`.
 /// Roles matched by suffix only (`_e`, `_i`, `_sk` on Skin/Eye) map to none.
 pub fn usable_slots(s: Shader) -> BTreeSet<SlotKind> {
