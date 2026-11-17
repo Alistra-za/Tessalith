@@ -171,30 +171,19 @@ pub fn markable(level: Level, code: Option<Code>) -> bool {
         && code.is_none_or(|c| matches!(c.severity(), Severity::Warning | Severity::Info))
 }
 
-/// Whether `keys` (`SetsDoc::intended_keys`, `set:` ids folded) holds `k`.
-fn is_marked(keys: &std::collections::BTreeSet<IntendedKey>, k: &IntendedKey) -> bool {
-    match k.subject.strip_prefix("set:") {
-        Some(id) => keys.contains(&IntendedKey {
-            subject: format!("set:{}", engine::sets::fold_id(id)),
-            ..k.clone()
-        }),
-        None => keys.contains(k),
-    }
-}
-
 /// Review E2: whether warning `w` at `at` takes "ready" away: it counts toward the badge, is no artist check (they
 /// count in the tab only, Note CL), and has no mark on the sentence its row shows, so a tile and its row agree.
 pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     if !counts_toward_badge(w) || checks::check_of(w.code).is_some() {
         return false;
     }
-    let Some(keys) = m.sets_doc.as_ref().map(|s| s.intended_keys()) else {
+    let Some(doc) = m.sets_doc.as_ref() else {
         return true;
     };
     // Only a project with marks builds a key per warning.
-    keys.is_empty() || {
+    doc.intended_keys().is_empty() || {
         let shown = code_text::shown_for(Some(w.code), &w.message);
-        !is_marked(&keys, &intended_key(at, w.code.as_str(), &shown))
+        !doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
     }
 }
 
@@ -1091,7 +1080,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out.extend(nif_rows(NifLevel::Info, Level::Info));
     // Review E2 (controller ruling 7): each markable row's mark, by code or by the kind named above, and whether the
     // project holds it. A row that is not markable keeps none, so a stale mark never takes it out of Ready.
-    let keys = m.sets_doc.as_ref().map(|s| s.intended_keys());
+    let doc = m.sets_doc.as_ref();
     for p in &mut out {
         if !markable(p.level, p.code) {
             p.mark = None;
@@ -1100,10 +1089,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         if let (None, Some(c)) = (&p.mark, p.code) {
             p.mark = Some(intended_key(&p.at, c.as_str(), &p.shown()));
         }
-        p.intended = match (&keys, &p.mark) {
-            (Some(keys), Some(k)) => is_marked(keys, k),
-            _ => false,
-        };
+        // A codeless row gets its kind where it is built (`kinded`); one without is a row with no Mark button.
+        debug_assert!(
+            p.mark.is_some(),
+            "a markable row with no kind: {:?}",
+            p.text
+        );
+        p.intended = doc
+            .zip(p.mark.as_ref())
+            .is_some_and(|(d, k)| d.is_intended(k));
     }
     out
 }

@@ -889,6 +889,10 @@ impl SetsDoc {
         *self.intended_cache.borrow_mut() = Some((rev, k.clone()));
         k
     }
+    /// Whether `key` is marked, its `set:` id compared folded as `set_intended` stores and finds it.
+    pub fn is_intended(&self, key: &IntendedKey) -> bool {
+        self.intended_keys().contains(&folded(key))
+    }
     /// Mark `key` as intended (`on`) or take the mark off; no edit when it already is as asked. Controller ruling 9:
     /// the stored array is edited in place, so other entries (unreadable ones too) stay where and as they were.
     pub fn set_intended(&mut self, key: &IntendedKey, on: bool) {

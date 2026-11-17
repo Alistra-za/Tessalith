@@ -796,8 +796,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         } else {
                             off.clone()
                         };
-                        // Review E2: left to right the fix, Mark as intended, then Go to set (fix round 1: beside
-                        // the fix), so Go to set is drawn first.
+                        // Review E2: the row reads, left to right, fix, Mark as intended, Go to set. The layout is
+                        // right to left, so Go to set is drawn first.
                         let mut a = None;
                         if let At::Set { key, .. } = &p.at {
                             if ui.button("Go to set").clicked() {

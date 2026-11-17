@@ -1241,3 +1241,229 @@ fn a_set_mark_is_found_under_its_id_in_any_case() {
     assert!(!counts_for(&m, &at("landscape/rock01"), &w));
     assert!(!counts_for(&m, &at("Landscape/Rock01"), &w), "folded");
 }
+
+/// A NIF edit's problem of `level` on `path`, as the Meshes view hands them over.
+fn nif(level: sdc_gui::model::meshes::NifLevel, path: &str) -> sdc_gui::model::meshes::NifProblem {
+    sdc_gui::model::meshes::NifProblem {
+        level,
+        path: path.into(),
+        text: format!("{path} needs a look"),
+        tab: sdc_gui::model::meshes::NifTab::Shader,
+        field: None,
+    }
+}
+
+/// A last-export File row source: job `job` with `ws`.
+fn export_row(job: &str, ws: Vec<Warning>) -> sdc_gui::model::export::Row {
+    sdc_gui::model::export::Row {
+        job_key: job.into(),
+        path: job.into(),
+        state: sdc_gui::model::export::RowState::Done { passed: true },
+        warnings: ws,
+    }
+}
+
+/// Review E2 fix round 1 (the E2 acceptance): every markable row has its mark, and no other row has one. Walks the
+/// widest fixtures: item, set and project warnings, codeless rows of every built kind, NIF rows of each level, last-export
+/// File rows, and a real PGPatcher pitfall.
+#[test]
+fn every_markable_row_has_its_mark_and_no_other_row_has_one() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{markable, problems};
+    use sdc_gui::model::meshes::NifLevel;
+    let check = |m: &AppModel, what: &str| {
+        let rows = problems(m);
+        assert!(!rows.is_empty(), "{what}: no rows");
+        for p in rows.iter() {
+            assert_eq!(
+                markable(p.level, p.code),
+                p.mark.is_some(),
+                "{what}: {:?} {:?} {:?}",
+                p.level,
+                p.code,
+                p.text
+            );
+        }
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_json_value(
+        "landscape/rock01",
+        "alphaprop_delete",
+        Some(serde_json::json!(true)),
+    );
+    m.set_json_value(
+        "landscape/rock01",
+        "alphaprop_thresh",
+        Some(serde_json::json!(10)),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        problems(&m)
+            .iter()
+            .any(|p| p.carried && p.level == sdc_gui::model::bottom::Level::Warning),
+        "precondition: a pitfall row"
+    );
+    check(&m, "pbr_opened with a pitfall");
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ChanNotGray, "not grey"),
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::SugContradiction, "name vs content"),
+        Warning::new(Code::ChanNormalLength, "short"),
+        Warning::new(Code::DimNpot, "npot"),
+    ]);
+    let root = m.root.clone().unwrap();
+    m.read_only_flags = vec![root.join("sdc.toml")];
+    m.skipped_user_presets = vec![
+        (
+            "p/x.toml".into(),
+            "preset parse error: p/x.toml: bad".into(),
+        ),
+        (
+            "p/y.toml".into(),
+            "preset 'y': suffix alias 'zz' is already declared by preset 'a'".into(),
+        ),
+    ];
+    m.unreadable = vec![Warning::new(
+        Code::InUnreadable,
+        r"skipped: C:\mods\a\locked: Access is denied. (os error 5)",
+    )];
+    m.set_nif_problems(std::sync::Arc::new(vec![
+        nif(NifLevel::Blocks, "meshes/a.nif"),
+        nif(NifLevel::Warning, "meshes/b.nif"),
+        nif(NifLevel::Info, "meshes/c.nif"),
+    ]));
+    m.export.rows = vec![export_row(
+        "derived/x",
+        vec![
+            Warning::new(Code::DeriveNifSuggest, "flags 4845"),
+            Warning::new(Code::ValHeader, "bad header"),
+            Warning::new(Code::ChkLowDetail, "low detail"),
+            Warning::new(Code::ValMipError, "mip 1"),
+        ],
+    )];
+    m.invalidate_views();
+    check(&m, "item, project, NIF and File rows");
+    let (_d, m) = with_set_warnings(&[
+        Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(serde_json::json!({"map": "_n", "shader": "pbr"})),
+        Warning::new(Code::ShaderExtraMap, "m")
+            .with_data(serde_json::json!({"member": "rock01_x.png", "shader": "pbr"})),
+        Warning::new(Code::PackConflict, "two sources"),
+    ]);
+    check(&m, "set rows");
+}
+
+/// `with_warnings(ws)`, saved, with `sdc-project.toml` then rewritten to `text` and both documents reloaded; `ws`
+/// injected again after the plan. Returns the file's path.
+fn reloaded_with(ws: &[Warning], text: &str) -> (tempfile::TempDir, AppModel, std::path::PathBuf) {
+    let (d, mut m) = with_warnings(ws);
+    assert!(m.save().is_ok());
+    let file = m.root.clone().unwrap().join("sdc-project.toml");
+    std::fs::write(&file, text).unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject(&mut m, ws);
+    (d, m, file)
+}
+
+/// Review E2 fix round 1: `mark_intended` itself writes nothing on a read-only document or a non-array `intended`.
+/// The guard in `mark_intended`, `set_intended`'s `intended_editable` check and `edit_docs`' equal-snapshot check
+/// refuse the same cases, so this pins the behaviour, not one line.
+#[test]
+fn mark_intended_writes_nothing_where_mark_is_off() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::problems;
+    let ws = [Warning::new(Code::ChanNotGray, "not grey")];
+    for text in ["[project\n", "[project]\nintended = \"x\"\n"] {
+        let (_d, mut m, file) = reloaded_with(&ws, text);
+        assert!(m.mark_off_reason().is_some(), "{text:?}");
+        let p = problems(&m)
+            .iter()
+            .find(|p| p.code == Some(Code::ChanNotGray))
+            .cloned()
+            .expect("the row");
+        let before = (
+            std::fs::read(&file).unwrap(),
+            m.sets_doc.as_ref().unwrap().text(),
+        );
+        m.mark_intended(p.mark.clone().unwrap(), true, "row");
+        assert_eq!(
+            (
+                std::fs::read(&file).unwrap(),
+                m.sets_doc.as_ref().unwrap().text()
+            ),
+            before,
+            "{text:?}"
+        );
+        assert!(!m.can_undo(), "{text:?}: nothing to undo");
+    }
+}
+
+/// Review E2 fix round 1 (controller ruling 7): a stored key equal to what a Blocks, an Error File or a Decide row
+/// would have never takes it out of the worklist or of Ready.
+#[test]
+fn a_stored_key_never_unblocks_a_row_that_is_not_markable() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{
+        counts_as_ready_problem, filtered, flagged, intended_key, problems, At, Level, Problem,
+    };
+    use sdc_gui::model::meshes::NifLevel;
+    let (_d, mut m) = with_warnings(&[]);
+    m.set_nif_problems(std::sync::Arc::new(vec![nif(
+        NifLevel::Blocks,
+        "meshes/a.nif",
+    )]));
+    m.export.rows = vec![export_row(
+        "derived/x",
+        vec![Warning::new(Code::ValHeader, "bad header")],
+    )];
+    m.invalidate_views();
+    let pick = |m: &AppModel| -> Vec<Problem> {
+        problems(m)
+            .iter()
+            .filter(|p| {
+                matches!(p.at, At::Nif(_))
+                    || p.code == Some(Code::ValHeader)
+                    || p.level == Level::Decide
+            })
+            .cloned()
+            .collect()
+    };
+    let rows = pick(&m);
+    assert!(
+        rows.iter().any(|p| p.level == Level::Blocks),
+        "precondition: a NIF block"
+    );
+    assert!(
+        rows.iter().any(|p| p.level == Level::Decide),
+        "precondition: a Decide row"
+    );
+    assert!(
+        rows.iter().any(|p| p.code == Some(Code::ValHeader)),
+        "precondition: an Error File row"
+    );
+    let ready = flagged(&m).ready_rows;
+    // The kind each would be marked under: a NIF row's, its code, or (a Decide row has none) an empty one.
+    let doc = m.sets_doc.as_mut().unwrap();
+    for p in &rows {
+        let kind = match (&p.at, p.code) {
+            (At::Nif(_), _) => "NIF-WARNING",
+            (_, Some(c)) => c.as_str(),
+            _ => "",
+        };
+        doc.set_intended(&intended_key(&p.at, kind, &p.shown()), true);
+    }
+    assert_eq!(doc.intended().len(), rows.len(), "every key stored");
+    let list = filtered(&m, None);
+    for p in pick(&m) {
+        assert!(!p.intended && p.mark.is_none(), "{:?}", p.text);
+        assert!(counts_as_ready_problem(&p), "{:?}", p.text);
+        assert!(
+            list.iter().any(|r| r.text == p.text),
+            "{:?} left the worklist",
+            p.text
+        );
+    }
+    assert_eq!(flagged(&m).ready_rows, ready, "Ready unchanged");
+}
