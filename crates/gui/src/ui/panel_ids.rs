@@ -141,27 +141,14 @@ mod tests {
 
     #[test]
     fn no_panel_is_built_outside_panel_ids() {
-        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for e in std::fs::read_dir(dir).unwrap() {
-                let p = e.unwrap().path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p.extension().is_some_and(|x| x == "rs") {
-                    out.push(p);
-                }
-            }
-        }
+        // egui 0.37 has no `SidePanel` / `TopBottomPanel` alias left (none in `R\egui-0.37.0\src`), so `Panel::` is
+        // the one spelling. A comment that names a panel constructor is not a call.
         let re = regex::Regex::new(r"\bPanel::(left|right|top|bottom)\(").unwrap();
-        let mut files = vec![];
-        walk(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut files,
-        );
         let (mut hits, mut own) = (vec![], false);
-        for f in &files {
+        for f in &crate::look::src_rs_files() {
             let text = std::fs::read_to_string(f).unwrap();
             for (n, line) in text.lines().enumerate() {
-                if !re.is_match(line) {
+                if !re.is_match(line) || line.trim_start().starts_with("//") {
                     continue;
                 }
                 if f.file_name().is_some_and(|n| n == "panel_ids.rs") {

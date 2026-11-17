@@ -4,7 +4,8 @@
 use eframe::egui;
 
 /// 0.36.2's TextEdit margin (`R\egui-0.36.2\src\widgets\text_edit\builder.rs:136`). 0.37 takes `button_padding`
-/// instead, which is 2 pt short under the pinned (4, 1). Every `TextEdit` in `ui` sets it.
+/// instead, which is 2 pt short under the pinned (4, 1). Every `TextEdit` in `ui` sets it, or a frame of its own
+/// (`look::tests::every_text_edit_carries_the_036_margin`).
 pub const TEXT_EDIT_MARGIN: egui::Margin = egui::Margin::symmetric(4, 2);
 
 /// Sets `style` to 0.36.2's defaults where 0.37 changed them (survey 4.2a): `button_padding`, `interact_size`, the
@@ -176,6 +177,27 @@ fn widgets_036_light() -> egui::style::Widgets {
             2,
         ),
     }
+}
+
+/// Every `.rs` file under `crates/gui/src`, for the source scans here and in `ui::panel_ids`.
+#[cfg(test)]
+pub(crate) fn src_rs_files() -> Vec<std::path::PathBuf> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = vec![];
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+        &mut files,
+    );
+    files
 }
 
 #[cfg(test)]
@@ -540,24 +562,9 @@ mod tests {
     fn every_combo_box_is_shown_through_show_ui_036() {
         // `ComboBox::show_ui` and `show_index` are the only ways to show one (egui 0.37 `containers/combo_box.rs:237`,
         // `:298`), so a builder returned from a function is caught where it is shown.
-        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for e in std::fs::read_dir(dir).unwrap() {
-                let p = e.unwrap().path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p.extension().is_some_and(|x| x == "rs") {
-                    out.push(p);
-                }
-            }
-        }
         let re = regex::Regex::new(r"\.show_(ui|index)\(").unwrap();
-        let mut files = vec![];
-        walk(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut files,
-        );
         let (mut hits, mut own, mut through) = (vec![], false, 0);
-        for f in &files {
+        for f in &src_rs_files() {
             let text = std::fs::read_to_string(f).unwrap();
             through += text.matches(".show_ui_036(").count();
             for (n, line) in text.lines().enumerate() {
@@ -579,29 +586,110 @@ mod tests {
         );
     }
 
+    /// The method names and argument texts of the builder chain that starts at `text[open..]` (an opening `(`):
+    /// `(..).margin(..).hint_text(..)` gives `[("margin", ".."), ("hint_text", "..")]`. Line comments between the
+    /// calls are skipped; a string literal holding an unmatched bracket would end the chain early (none does).
+    fn chain_calls(text: &str, open: usize) -> Vec<(String, String)> {
+        let b = text.as_bytes();
+        // The index just past the `)` that closes the `(` at `i`.
+        let close = |mut i: usize| {
+            let mut depth = 0;
+            loop {
+                match b[i] {
+                    b'(' => depth += 1,
+                    b')' => {
+                        depth -= 1;
+                        if depth == 0 {
+                            return i + 1;
+                        }
+                    }
+                    _ => {}
+                }
+                i += 1;
+            }
+        };
+        let mut calls = vec![];
+        let mut i = close(open);
+        loop {
+            while i < b.len() && b[i].is_ascii_whitespace() {
+                i += 1;
+            }
+            if text[i..].starts_with("//") {
+                i += text[i..].find('\n').unwrap_or(text.len() - i);
+                continue;
+            }
+            if b.get(i) != Some(&b'.') {
+                return calls;
+            }
+            let name_end = i
+                + 1
+                + text[i + 1..]
+                    .find(|c: char| !c.is_alphanumeric() && c != '_')
+                    .unwrap();
+            if b[name_end] != b'(' {
+                return calls; // a field, not a call
+            }
+            let end = close(name_end);
+            calls.push((
+                text[i + 1..name_end].to_string(),
+                text[name_end + 1..end - 1].to_string(),
+            ));
+            i = end;
+        }
+    }
+
+    #[test]
+    fn every_text_edit_carries_the_036_margin() {
+        // `TextEdit::singleline` / `multiline` take 0.37's `button_padding` margin unless `.margin(..)` is set
+        // (`R\egui-0.37.0\src\widgets\text_edit\builder.rs:85`, `:693-701`), 2 pt short under the pin; `Ui`'s two
+        // shorthands cannot set one (`R\egui-0.37.0\src\ui.rs:1927-1941`). The needles are built here, so this
+        // file's own scan text is not a site.
+        let kinds = ["singleline", "multiline"];
+        let builders = kinds.map(|k| format!("TextEdit::{k}("));
+        let shorthands = kinds.map(|k| format!(".text_edit_{k}("));
+        let (mut bare, mut through) = (vec![], 0);
+        for f in &src_rs_files() {
+            let text = std::fs::read_to_string(f).unwrap();
+            let line =
+                |at: usize| format!("{}:{}", f.display(), text[..at].matches('\n').count() + 1);
+            for s in &shorthands {
+                bare.extend(text.match_indices(s.as_str()).map(|(at, _)| line(at)));
+            }
+            for needle in &builders {
+                for (at, _) in text.match_indices(needle.as_str()) {
+                    let calls = chain_calls(&text, at + needle.len() - 1);
+                    let margin = calls.iter().find(|(name, _)| name == "margin");
+                    // A custom `.frame(..)` brings its own inner margin and egui ignores `.margin(..)` then
+                    // (`R\egui-0.37.0\src\widgets\text_edit\builder.rs:693-695`; 0.36.2 `:713` alike): the
+                    // input-name box is such a site.
+                    let own_frame = calls.iter().any(|(name, _)| name == "frame");
+                    if margin.is_some_and(|(_, arg)| arg.contains("TEXT_EDIT_MARGIN")) || own_frame
+                    {
+                        through += 1;
+                    } else {
+                        bare.push(line(at));
+                    }
+                }
+            }
+        }
+        assert!(
+            through >= 30,
+            "the scan found {through} TextEdits with the margin"
+        );
+        assert!(
+            bare.is_empty(),
+            "TextEdits without look::TEXT_EDIT_MARGIN: {bare:#?}"
+        );
+    }
+
     #[test]
     fn every_menu_button_goes_through_menu_button_036() {
         // `Ui::menu_button` and `SubMenuButton` are the ways to draw a submenu entry (egui 0.37 `ui.rs:2927-2931`;
         // `menu_image_button` and `menu_image_text_button` are caught too). A top-level `MenuButton` draws no arrow.
-        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
-            for e in std::fs::read_dir(dir).unwrap() {
-                let p = e.unwrap().path();
-                if p.is_dir() {
-                    walk(&p, out);
-                } else if p.extension().is_some_and(|x| x == "rs") {
-                    out.push(p);
-                }
-            }
-        }
         let re =
             regex::Regex::new(r"\.menu_(image_)?(text_)?button\(|SubMenuButton|SubMenu::").unwrap();
-        let mut files = vec![];
-        walk(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
-            &mut files,
-        );
         let (mut hits, mut through) = (vec![], 0);
-        for f in &files {
+        for f in &src_rs_files() {
             let text = std::fs::read_to_string(f).unwrap();
             if f.file_name().is_some_and(|n| n == "look.rs") {
                 continue;
