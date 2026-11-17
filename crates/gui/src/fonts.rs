@@ -203,7 +203,7 @@ pub struct OsFonts {
     /// Ask the OS's own `sans-serif` / `monospace` answer before the named lists (Linux: the desktop's choice).
     pub generic_first: bool,
     pub proportional: &'static [Candidate],
-    /// Asked last for the proportional primary, after the generic answer and right before the floor.
+    /// Asked last for the proportional primary, after the named list and the generic answer, right before the floor.
     pub proportional_late: &'static [Candidate],
     /// Fallbacks after the proportional primary, every one that is found.
     pub proportional_extra: &'static [Candidate],
@@ -436,8 +436,8 @@ impl Asker<'_> {
 /// round when `generic_first`), then the first of `proportional_late`. Rule 2: every extra found follows its primary,
 /// in table order. Rule 3: the monospace primary is the first of `monospace`, then the first of `monospace_late`, then
 /// the proportional system font, then the generic `monospace` answer (when `generic_first`, that answer is asked
-/// first instead). Rules 4 and 6: the floor's data is added
-/// whenever a chain names it, and each family name is asked once.
+/// first instead). Rules 4 and 6: the floor's data is added whenever a chain names it, and each family name is asked
+/// once.
 pub fn resolve(lookup: &mut dyn FontLookup, os: &OsFonts) -> (egui::FontDefinitions, FontChoice) {
     let mut ask = Asker {
         lookup,
@@ -1025,6 +1025,8 @@ mod tests {
         );
     }
 
+    /// Pins each table's `generic_first`, the Linux and macOS names in order, and that the Windows late lists hold the
+    /// Linux names in the same order.
     #[test]
     fn the_linux_lists_are_pinned() {
         let names = |c: &[Candidate]| c.iter().map(|c| c.family).collect::<Vec<_>>();
@@ -1061,6 +1063,9 @@ mod tests {
         );
         assert_eq!(names(MACOS.proportional), ["SF Pro Text", "Helvetica Neue"]);
         assert_eq!(names(MACOS.monospace), ["Menlo"]);
+        // By names, not `ptr::eq`: Rust does not promise one address for every use of a `const`.
+        assert_eq!(names(WINDOWS.proportional_late), names(LINUX.proportional));
+        assert_eq!(names(WINDOWS.monospace_late), names(LINUX.monospace));
     }
 
     #[test]
@@ -1199,37 +1204,37 @@ mod tests {
         );
     }
 
-    /// Pin: the late lists are Windows-only, and sharing the Linux lists did not change `LINUX`'s names or order.
+    /// Pin: the late lists are Windows-only (the Linux names they hold are pinned in `the_linux_lists_are_pinned`).
     #[test]
     fn linux_and_macos_have_no_late_lists() {
-        let names = |c: &[Candidate]| c.iter().map(|c| c.family).collect::<Vec<_>>();
         for os in [&LINUX, &MACOS] {
             assert!(os.proportional_late.is_empty());
             assert!(os.monospace_late.is_empty());
         }
+    }
+
+    /// A `generic_first` table with only late lists: they are asked after the generic answers and the (empty) named
+    /// lists, before the floor.
+    #[test]
+    fn a_generic_first_table_asks_its_late_lists_last() {
+        const LATE_ONLY: OsFonts = OsFonts {
+            proportional: &[],
+            monospace: &[],
+            proportional_late: LINUX_PROPORTIONAL,
+            monospace_late: LINUX_MONOSPACE,
+            ..LINUX
+        };
+        let mut f = Fake::with(&["DejaVu Sans", "DejaVu Sans Mono"]);
+        let (defs, choice) = resolve(&mut f, &LATE_ONLY);
         assert_eq!(
-            names(LINUX.proportional),
-            [
-                "Noto Sans",
-                "DejaVu Sans",
-                "Liberation Sans",
-                "Cantarell",
-                "Ubuntu Sans",
-                "Ubuntu",
-                "Adwaita Sans",
-                "Inter",
-                "FreeSans"
-            ]
+            defs.families[&egui::FontFamily::Proportional][0],
+            "DejaVu Sans"
         );
         assert_eq!(
-            names(LINUX.monospace),
-            [
-                "DejaVu Sans Mono",
-                "Liberation Mono",
-                "Noto Sans Mono",
-                "Ubuntu Mono"
-            ]
+            defs.families[&egui::FontFamily::Monospace][0],
+            "DejaVu Sans Mono"
         );
+        assert_eq!(choice.message(), None);
     }
 
     #[test]
