@@ -55,6 +55,33 @@ fn row_name(p: &Problem) -> String {
     format!("{}: {}", row_subject(p), p.shown())
 }
 
+/// Review E29: room left after a row's sentence, so a row exactly as wide as its content never flips between two
+/// widths (rule 3.7).
+const ROW_MARGIN: f32 = 8.0;
+
+/// Review E29: the width of a row's dot, link and whole sentence, without the spacing between them, in the row's own
+/// font. egui's galley cache keeps this layout from frame to frame, as it keeps the row's.
+fn lead_width(ui: &egui::Ui, p: &Problem) -> f32 {
+    let width = |t: &str| {
+        egui::WidgetText::from(t)
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::FontSelection::Default,
+            )
+            .size()
+            .x
+    };
+    let link = match &p.at {
+        At::Texture(k) | At::File(k) | At::Nif(k) => k.as_str(),
+        At::Set { id, .. } => id.as_str(),
+        At::Project => "Project",
+    };
+    // The status dot is 8 px (`status::dot`).
+    8.0 + width(link) + width(&p.shown())
+}
+
 /// Note FM35: the alpha type a texture row that asks only its alpha confirms on Enter. With a sub-type question too,
 /// Enter must not answer just one of the two, so there is none there.
 fn row_alpha(m: &AppModel, p: &Problem) -> Option<engine::config::AlphaPolicy> {
@@ -970,105 +997,128 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             } else {
                 status_of(p.level)
             };
-            // The fix buttons are laid out first, so the sentence is cut to the room left (I2).
-            let (l, r) = egui::Sides::new().shrink_left().truncate().show(
-                ui,
-                |ui| {
-                    let mut a = None;
-                    dot(ui, status);
-                    match &p.at {
-                        At::Texture(k) => {
-                            if ui.link(k).clicked() {
-                                a = Some(Act::Texture(k.clone()));
+            // Review E29: the row is as wide as its whole sentence and last frame's buttons, so on a wide window the
+            // buttons follow the sentence. Unknown on a row's first frame, or wider than the list: the full width,
+            // where the fix buttons are laid out first and the sentence is cut to the room left (I2). Every frame
+            // goes through the same wrapper, so the row's ids do not change when the width becomes known.
+            let w_key = rid.with("buttons-w");
+            let stored: Option<f32> = ui.data(|d| d.get_temp(w_key));
+            let full = ui.available_width();
+            let width = stored.map_or(full, |b| {
+                let gaps = 3.0 * ui.spacing().item_spacing.x;
+                (lead_width(ui, p) + gaps + b + ROW_MARGIN).min(full)
+            });
+            let size = egui::vec2(width, ui.spacing().interact_size.y);
+            let ((l, r), buttons) = ui
+                .allocate_ui(size, |ui| {
+                    let mut buttons = 0.0;
+                    let sides = egui::Sides::new().shrink_left().truncate().show(
+                        ui,
+                        |ui| {
+                            let mut a = None;
+                            dot(ui, status);
+                            match &p.at {
+                                At::Texture(k) => {
+                                    if ui.link(k).clicked() {
+                                        a = Some(Act::Texture(k.clone()));
+                                    }
+                                }
+                                At::Set { key, id } => {
+                                    if ui.link(id).clicked() {
+                                        a = Some(Act::Set(key.clone(), None));
+                                    }
+                                }
+                                At::File(k) => {
+                                    if ui.link(k).clicked() {
+                                        a = Some(Act::File(k.clone()));
+                                    }
+                                }
+                                // A NIF's link opens it, as its fix does.
+                                At::Nif(path) => {
+                                    if ui.link(path).clicked() {
+                                        a = p.fix.clone().map(|f| Act::Apply(f, p.at.clone()));
+                                    }
+                                }
+                                At::Project => {
+                                    ui.label("Project");
+                                }
                             }
-                        }
-                        At::Set { key, id } => {
-                            if ui.link(id).clicked() {
-                                a = Some(Act::Set(key.clone(), None));
+                            // Note FB8: a sentence that names the action; the engine's text and the code are the hover.
+                            let mut text = egui::RichText::new(&*p.shown());
+                            // Note FC3: check and Info rows are drawn weak.
+                            if status.weak() {
+                                text = text.weak();
                             }
-                        }
-                        At::File(k) => {
-                            if ui.link(k).clicked() {
-                                a = Some(Act::File(k.clone()));
+                            ui.add(egui::Label::new(text).truncate()).on_hover_ui(|ui| {
+                                ui.label(&p.text);
+                                if let Some(d) = &p.detail {
+                                    ui.label(d);
+                                }
+                                if let Some(c) = p.codes_text() {
+                                    ui.weak(c);
+                                }
+                            });
+                            a
+                        },
+                        |ui| {
+                            // Right to left: the last widget added is the leftmost.
+                            // Note FL: a carried block or ask row's fix waits for the full plan.
+                            let off = if p.carried {
+                                m.fix_off_for(p)
+                            } else {
+                                off.clone()
+                            };
+                            // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to
+                            // set. The layout is right to left, so Go to set is drawn first.
+                            let mut a = None;
+                            if let At::Set { key, .. } = &p.at {
+                                if ui.button("Go to set").clicked() {
+                                    a = Some(Act::Set(key.clone(), p.target.clone()));
+                                }
                             }
-                        }
-                        // A NIF's link opens it, as its fix does.
-                        At::Nif(path) => {
-                            if ui.link(path).clicked() {
-                                a = p.fix.clone().map(|f| Act::Apply(f, p.at.clone()));
+                            // Review E4: the widgets from here to the fix are Mark, the second fix and the fix; the last
+                            // one that can take focus is the leftmost, the first the row reads.
+                            let from = fix_focus
+                                .filter(|(id, _)| *id == rid)
+                                .map(|_| widgets_so_far(ui));
+                            if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
+                                a = Some(mark);
                             }
-                        }
-                        At::Project => {
-                            ui.label("Project");
-                        }
-                    }
-                    // Note FB8: a sentence that names the action; the engine's text and the code are the hover.
-                    let mut text = egui::RichText::new(&*p.shown());
-                    // Note FC3: check and Info rows are drawn weak.
-                    if status.weak() {
-                        text = text.weak();
-                    }
-                    ui.add(egui::Label::new(text).truncate()).on_hover_ui(|ui| {
-                        ui.label(&p.text);
-                        if let Some(d) = &p.detail {
-                            ui.label(d);
-                        }
-                        if let Some(c) = p.codes_text() {
-                            ui.weak(c);
-                        }
-                    });
-                    a
-                },
-                |ui| {
-                    // Right to left: the last widget added is the leftmost.
-                    // Note FL: a carried block or ask row's fix waits for the full plan.
-                    let off = if p.carried {
-                        m.fix_off_for(p)
-                    } else {
-                        off.clone()
-                    };
-                    // Review E2, E10: the row reads, left to right, fix, second fix, Mark as intended, Go to
-                    // set. The layout is right to left, so Go to set is drawn first.
-                    let mut a = None;
-                    if let At::Set { key, .. } = &p.at {
-                        if ui.button("Go to set").clicked() {
-                            a = Some(Act::Set(key.clone(), p.target.clone()));
-                        }
-                    }
-                    // Review E4: the widgets from here to the fix are Mark, the second fix and the fix; the last
-                    // one that can take focus is the leftmost, the first the row reads.
-                    let from = fix_focus
-                        .filter(|(id, _)| *id == rid)
-                        .map(|_| widgets_so_far(ui));
-                    if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
-                        a = Some(mark);
-                    }
-                    for fix in [&p.second_fix, &p.fix].into_iter().flatten() {
-                        if let Some(f) =
-                            fix_button(ui, m, p, fix, off.as_deref(), sets_off.as_deref())
-                        {
-                            a = Some(f);
-                        }
-                    }
-                    // The leftmost takes focus only when enabled: focus never passes to Mark because a fix is off. With
-                    // none to take it, the row does, unless a key on it would decide.
-                    if let Some(from) = from {
-                        let to = match last_focusable_since(ui, from) {
-                            Some((id, true)) => Some(id),
-                            _ => (!row_decides(m, p)).then_some(rid),
-                        };
-                        if let Some(id) = to {
-                            ui.memory_mut(|mem| mem.request_focus(id));
-                        }
-                    }
-                    if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
-                        if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
-                            a = Some(Act::Pick(pick));
-                        }
-                    }
-                    a
-                },
-            );
+                            for fix in [&p.second_fix, &p.fix].into_iter().flatten() {
+                                if let Some(f) =
+                                    fix_button(ui, m, p, fix, off.as_deref(), sets_off.as_deref())
+                                {
+                                    a = Some(f);
+                                }
+                            }
+                            // The leftmost takes focus only when enabled: focus never passes to Mark because a fix is off. With
+                            // none to take it, the row does, unless a key on it would decide.
+                            if let Some(from) = from {
+                                let to = match last_focusable_since(ui, from) {
+                                    Some((id, true)) => Some(id),
+                                    _ => (!row_decides(m, p)).then_some(rid),
+                                };
+                                if let Some(id) = to {
+                                    ui.memory_mut(|mem| mem.request_focus(id));
+                                }
+                            }
+                            if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
+                                if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
+                                    a = Some(Act::Pick(pick));
+                                }
+                            }
+                            buttons = ui.min_rect().width();
+                            a
+                        },
+                    );
+                    (sides, buttons)
+                })
+                .inner;
+            // A row whose buttons changed (a fix applied, a plan landed) is drawn once more with the new width.
+            if stored.is_none_or(|b| (b - buttons).abs() > 0.5) {
+                ui.data_mut(|d| d.insert_temp(w_key, buttons));
+                ui.ctx().request_repaint();
+            }
             if let Some(a) = l.or(r) {
                 act = Some(a);
             }

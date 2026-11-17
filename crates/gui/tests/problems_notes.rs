@@ -3660,3 +3660,146 @@ fn restore_ctx_reads_the_os_motion_setting() {
     app.restore_ctx(&ctx);
     assert!(sdc_gui::ui::motion::os_value(&ctx).is_some());
 }
+
+/// Review E29: on a wide window a row's button follows its sentence, not the panel's right edge.
+#[test]
+fn at_1600_a_short_row_keeps_its_button_within_40_px_of_the_sentence() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    h.run();
+    let sentence = h
+        .get_by_label(sdc_gui::model::code_text::code_sentence(Code::ChanNotGray))
+        .rect();
+    let button = h.get_by_label_contains("Mark as intended: ").rect();
+    assert!(
+        button.left() - sentence.right() <= 40.0,
+        "gap {}",
+        button.left() - sentence.right()
+    );
+}
+
+/// Review E29: a row with a fix and Mark as intended keeps them in that order, the second one just after the first.
+#[test]
+fn at_1600_a_row_with_two_controls_keeps_both_after_the_sentence() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    let text = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
+    let sentence = h.get_by_label(text).rect();
+    // By role: the row's own name contains the sentence, which names Rebuild Z.
+    let fix = h
+        .query_all_by_role_and_label(
+            egui::accesskit::Role::Button,
+            sdc_gui::ui::problems::REBUILD_Z,
+        )
+        .find(|n| (n.rect().center().y - sentence.center().y).abs() <= 4.0)
+        .expect("Rebuild Z on the row")
+        .rect();
+    let mark = on_row(&h, text, "Mark as intended: ").rect();
+    assert!(
+        sentence.right() < fix.left() && fix.right() < mark.left(),
+        "sentence {sentence:?}, fix {fix:?}, mark {mark:?}"
+    );
+    assert!(
+        mark.left() - sentence.right() <= 40.0 + fix.width(),
+        "gap {}",
+        mark.left() - sentence.right()
+    );
+}
+
+/// Review E29: a row with no button (a note) still shows its whole sentence on a wide window.
+#[test]
+fn at_1600_a_row_with_no_button_keeps_its_whole_sentence() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let (_d, mut m) = only(&[Warning::new(Code::DimNpot, "npot")]);
+    m.open_problems(Some(ProblemsFilter::Notes));
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    let text = "Keeps a size that isn't a power of two. That's fine: it has no mips.";
+    let sentence = h.get_by_label(text).rect();
+    let full = whole_width(&h, text);
+    assert!(
+        (sentence.width() - full).abs() < 1.0,
+        "the sentence is {} px of {full}",
+        sentence.width()
+    );
+}
+
+/// The width of `text` drawn whole in the body font, to tell a whole sentence from a cut one.
+fn whole_width<S>(h: &Harness<'_, S>, text: &str) -> f32 {
+    let font = egui::TextStyle::Body.resolve(&h.ctx.global_style());
+    h.ctx.fonts_mut(|f| {
+        f.layout_no_wrap(text.to_string(), font, egui::Color32::WHITE)
+            .size()
+            .x
+    })
+}
+
+/// Review E29: a row's buttons change under the same row (Mark as intended becomes the narrower Undo mark, and back):
+/// the width stored for it follows, so the button stays close and the sentence is never cut.
+#[test]
+fn a_row_whose_button_changes_follows_the_new_width() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    let text = sdc_gui::model::code_text::code_sentence(Code::ChanNotGray);
+    let whole = whole_width(&h, text);
+    for (click, list, now) in [
+        (
+            "Mark as intended: ",
+            Some(ProblemsFilter::Notes),
+            "Undo mark: ",
+        ),
+        ("Undo mark: ", None, "Mark as intended: "),
+    ] {
+        h.get_by_label_contains(click).click();
+        h.run();
+        h.state_mut().open_problems(list);
+        h.run();
+        let sentence = h.get_by_label(text).rect();
+        let button = h.get_by_label_contains(now).rect();
+        assert!(
+            button.left() - sentence.right() <= 40.0,
+            "{now} gap {}",
+            button.left() - sentence.right()
+        );
+        assert!(
+            (sentence.width() - whole).abs() < 1.0,
+            "with {now} the sentence is {} px of {whole}",
+            sentence.width()
+        );
+    }
+}
+
+/// Review E29: the row's width comes from the last frame, so the list must settle (`run` panics if it never goes idle),
+/// wide and at 1280×800 with a row longer than the panel, whose button stays inside it.
+#[test]
+fn a_row_sized_from_the_last_frame_settles_wide_and_narrow() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    let (_d2, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.items[0].key = format!("t/{}", "a_very_long_folder_name/".repeat(40));
+    m.invalidate_views();
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1280.0, 800.0));
+    h.run();
+    // Against the window, not the panel: a row wider than the window would widen the panel's rect with it.
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "bottom").expect("the bottom panel");
+    let mark = h.get_by_label_contains("Mark as intended: ").rect();
+    assert!(
+        mark.right() <= panel.right().min(1280.0) && mark.left() >= panel.left(),
+        "Mark at {mark:?} is outside the panel {panel:?} or the window"
+    );
+}
