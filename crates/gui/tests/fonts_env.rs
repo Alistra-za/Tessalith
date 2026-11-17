@@ -6,6 +6,8 @@ use sdc_gui::fonts::{FontChoice, FontSource, FLOOR_NO_FONT};
 #[test]
 fn sdc_font_embedded_installs_the_floor() {
     std::env::set_var("SDC_FONT", "embedded"); // edition 2021 (root Cargo.toml:7), as app_no_local_store.rs:9
+
+    // Never unset: this binary holds this one test.
     let ctx = egui::Context::default();
     let Ok(choice) = sdc_gui::fonts::install_system_fonts(&ctx);
     assert_eq!(

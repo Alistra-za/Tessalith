@@ -230,10 +230,11 @@ mod tests {
         out
     }
 
+    /// A context setup, as `fonts::install_system_fonts`.
+    type Setup = fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>;
+
     /// A dark-theme context with `setup` applied (the app's `install_system_fonts`).
-    fn context(
-        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
-    ) -> egui::Context {
+    fn context(setup: Setup) -> egui::Context {
         let ctx = egui::Context::default();
         ctx.set_theme(egui::Theme::Dark);
         setup(&ctx).expect("system fonts");
@@ -251,9 +252,7 @@ mod tests {
     }
 
     /// Each widget's size after 4 passes; then the DragValue is focused (edit mode) and 4 more passes run.
-    fn sizes_after(
-        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
-    ) -> Sizes {
+    fn sizes_after(setup: Setup) -> Sizes {
         let ctx = context(setup);
         let (mut text, mut on, mut value) = (String::from("x"), false, 0.0_f32);
         let mut s = Sizes::default();
@@ -404,9 +403,7 @@ mod tests {
     }
 
     /// Dark theme: 4 passes, then the TextEdit is focused and 4 more passes run; the painted rects of the last pass.
-    fn painted_after(
-        setup: fn(&egui::Context) -> Result<FontChoice, std::convert::Infallible>,
-    ) -> Painted {
+    fn painted_after(setup: Setup) -> Painted {
         let ctx = context(setup);
         let (mut text, mut on) = (String::new(), false);
         let edit_id = egui::Id::unique("look-edit");

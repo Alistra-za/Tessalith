@@ -12,7 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 
 /// The system's fonts asked by family name, through the OS's own font list (DirectWrite, fontconfig, CoreText).
-pub struct SystemLookup {
+pub(crate) struct SystemLookup {
     collection: fontique::Collection,
     sources: fontique::SourceCache,
 }
@@ -42,12 +42,6 @@ impl SystemLookup {
             family: family.name().to_owned(),
             data: egui::FontData::from_blob(blob.into_raw_parts().0, font.index()),
         })
-    }
-}
-
-impl Default for SystemLookup {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -637,6 +631,7 @@ mod tests {
     /// The definitions the app built before Note JM, from `%WINDIR%\Fonts`: Segoe UI (proportional) and Consolas
     /// (monospace) with Segoe UI Symbol and Segoe UI Emoji as fallbacks. A missing optional font is skipped; no
     /// Consolas puts Segoe UI first in the monospace family. The pins below compare the new definitions with these.
+    /// Panics without `segoeui.ttf`: the Windows pins need Segoe UI, as before.
     #[cfg(windows)]
     fn legacy_definitions() -> egui::FontDefinitions {
         let dir = windows_fonts_dir();
@@ -753,6 +748,8 @@ mod tests {
 
     /// Note JM3: on Windows no UI string reaches the system provider, because every UI symbol has a configured font
     /// in both families. A new UI character none of them draws fails here, not silently through the provider.
+    /// Needs this machine's Segoe UI, Segoe UI Symbol and Consolas to draw every UI symbol; a failure on another
+    /// machine names the characters its fonts lack.
     #[cfg(windows)]
     #[test]
     fn every_ui_symbol_has_a_configured_font_on_windows() {
@@ -921,8 +918,8 @@ mod tests {
     }
 
     /// Every non-ASCII character in the GUI source (this file's tests, its `UI_SYMBOLS` literal and CJK aside) is in
-    /// `UI_SYMBOLS`, so the floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in the
-    /// source. On a failure add or remove the reported characters and rerun the pins.
+    /// `UI_SYMBOLS`, so the floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in
+    /// the source. On a failure add or remove the reported characters and rerun the pins.
     #[test]
     fn ui_symbols_cover_the_source() {
         fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -1208,15 +1205,24 @@ mod tests {
         }
     }
 
+    /// The context's installed definitions are the system lookup's: Segoe UI first, and a monospace family.
     #[cfg(windows)]
     #[test]
     fn system_fonts_install_and_fill_the_proportional_family() {
         let ctx = egui::Context::default();
         install_system_fonts(&ctx).expect("Windows system fonts");
-        let defs = system_definitions().0;
-        assert!(!defs.families[&egui::FontFamily::Proportional].is_empty());
-        assert_eq!(defs.families[&egui::FontFamily::Proportional][0], "segoeui");
-        assert!(!defs.families[&egui::FontFamily::Monospace].is_empty());
+        // A dropped `FullOutput` with unapplied texture deltas panics in a debug build (mistakes/gui.md).
+        ctx.run_ui(Default::default(), |_| {})
+            .textures_delta
+            .clear();
+        let installed = ctx.fonts(|f| f.definitions().families.clone());
+        let want = system_definitions().0;
+        assert_eq!(
+            installed[&egui::FontFamily::Proportional][0],
+            want.families[&egui::FontFamily::Proportional][0]
+        );
+        assert_eq!(installed[&egui::FontFamily::Proportional][0], "segoeui");
+        assert!(!installed[&egui::FontFamily::Monospace].is_empty());
     }
 
     /// Spec 5.4 / Review Focus 5: CJK comes from the system in the same call that asks for it, with no eager CJK font.
@@ -1406,9 +1412,11 @@ mod tests {
         let t = std::time::Instant::now();
         let ctx = egui::Context::default();
         install_system_fonts(&ctx).expect("system fonts");
-        let _ = ctx.run_ui(Default::default(), |ui| {
+        ctx.run_ui(Default::default(), |ui| {
             ui.label("Cutout + Blend · Coat normal ↺ ▾ ⚠ 🔒 — ×");
-        });
+        })
+        .textures_delta
+        .clear();
         eprintln!("font start: {} ms", t.elapsed().as_millis());
     }
 }
