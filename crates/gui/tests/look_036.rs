@@ -81,6 +81,54 @@ fn a_long_combo_value_in_a_grid_cell_stays_on_one_line_as_on_036() {
     );
 }
 
+fn texts(s: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
+    match s {
+        egui::Shape::Vec(v) => v.iter().for_each(|s| texts(s, out)),
+        egui::Shape::Text(t) => out.push((
+            t.galley.text().to_owned(),
+            egui::Rect::from_min_size(t.pos, t.galley.size()),
+        )),
+        _ => {}
+    }
+}
+
+/// S5 of the egui 0.37 doc shots: a submenu entry ends in 0.36.2's "⏵" glyph (13 pt wide, on the label's text row,
+/// `egui-0.36.2 containers/menu.rs:347`), not 0.37's 14 pt painted triangle, which made the set card's menu 1 px
+/// wider and the arrow 2 px higher. Its accessible name stays the entry's text (J?4).
+#[test]
+fn a_submenu_entry_ends_in_036s_arrow_glyph() {
+    let mut h = bare(egui::vec2(400.0, 300.0), |ui| {
+        let _ = egui::menu::MenuButton::new("Set").ui(ui, |ui| {
+            let _ = sdc_gui::look::menu_button_036(ui, "Move to group", |ui| {
+                let _ = ui.button("Group A");
+            });
+            let _ = ui.button("Delete set");
+        });
+    });
+    h.get_by_role_and_label(Role::Button, "Set").click();
+    h.run();
+    let entry = h
+        .get_by_role_and_label(Role::Button, "Move to group")
+        .rect();
+    let mut shown = vec![];
+    h.output()
+        .shapes
+        .iter()
+        .for_each(|c| texts(&c.shape, &mut shown));
+    let arrow = shown
+        .iter()
+        .find(|(t, r)| t == "⏵" && entry.contains_rect(*r))
+        .unwrap_or_else(|| panic!("no ⏵ glyph in the entry {entry:?}: {shown:?}"));
+    let label = shown.iter().find(|(t, _)| t == "Move to group").unwrap().1;
+    assert!(
+        near(arrow.1.min.y, label.min.y)
+            && near(arrow.1.width(), 13.0)
+            && near(entry.max.x - arrow.1.max.x, label.min.x - entry.min.x),
+        "glyph {:?} beside label {label:?} in entry {entry:?}",
+        arrow.1
+    );
+}
+
 /// S1 of the egui 0.37 doc shots: the PBR set's Height _p format combo ("BC4 · linear (one channel)") is one line and
 /// wider than `COMBO_W`, so the Format column keeps its 0.36.2 width and place.
 #[test]

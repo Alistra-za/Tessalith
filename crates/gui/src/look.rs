@@ -44,6 +44,30 @@ impl Combo036 for egui::ComboBox<'_> {
     }
 }
 
+/// 0.36.2's submenu arrow, a text glyph (`R\egui-0.36.2\src\containers\menu.rs:344-347`).
+pub const SUBMENU_ARROW_036: &str = "⏵";
+
+/// `Ui::menu_button` as 0.36.2 drew it. Inside a menu, 0.37 paints the submenu arrow as a 14 pt triangle atom
+/// (`R\egui-0.37.0\src\containers\menu.rs:492-511`), so the entry is 1 px wider than 0.36.2's 13 pt "⏵" glyph and the
+/// arrow sits 2 px higher. This puts the glyph back through `SubMenuButton::from_button`, the hook 0.37 gives for it
+/// (`:514-518`), and keeps the accessible name the entry's text, as J?4 records (0.36.2 read "Move to group ⏵").
+/// Outside a menu it is `MenuButton::new`, as `Ui::menu_button` is (`R\egui-0.37.0\src\ui.rs:2927-2931`). Every
+/// menu button in `ui` goes through it (`look::tests::every_menu_button_goes_through_menu_button_036`).
+pub fn menu_button_036<R>(
+    ui: &mut egui::Ui,
+    text: &str,
+    add_contents: impl FnOnce(&mut egui::Ui) -> R,
+) -> egui::InnerResponse<Option<R>> {
+    let (response, inner) = if egui::menu::is_in_menu(ui) {
+        let button = egui::Button::new(text).right_text(SUBMENU_ARROW_036);
+        let (r, inner) = egui::menu::SubMenuButton::from_button(button).ui(ui, add_contents);
+        (r.accessible_name(text), inner)
+    } else {
+        egui::menu::MenuButton::new(text).ui(ui, add_contents)
+    };
+    egui::InnerResponse::new(inner.map(|i| i.inner), response)
+}
+
 /// `ScrollStyle::thin()` without 0.37's rubber band, for the areas that scope a thin bar.
 pub fn thin_scroll() -> egui::style::ScrollStyle {
     let mut s = egui::style::ScrollStyle::thin();
@@ -528,6 +552,50 @@ mod tests {
         assert!(
             hits.is_empty(),
             "combo boxes shown without look::Combo036: {hits:#?}"
+        );
+    }
+
+    #[test]
+    fn every_menu_button_goes_through_menu_button_036() {
+        // `Ui::menu_button` and `SubMenuButton` are the ways to draw a submenu entry (egui 0.37 `ui.rs:2927-2931`;
+        // `menu_image_button` and `menu_image_text_button` are caught too). A top-level `MenuButton` draws no arrow.
+        fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap() {
+                let p = e.unwrap().path();
+                if p.is_dir() {
+                    walk(&p, out);
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p);
+                }
+            }
+        }
+        let re =
+            regex::Regex::new(r"\.menu_(image_)?(text_)?button\(|SubMenuButton|SubMenu::").unwrap();
+        let mut files = vec![];
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut files,
+        );
+        let (mut hits, mut through) = (vec![], 0);
+        for f in &files {
+            let text = std::fs::read_to_string(f).unwrap();
+            if f.file_name().is_some_and(|n| n == "look.rs") {
+                continue;
+            }
+            through += text.matches("look::menu_button_036(").count();
+            for (n, line) in text.lines().enumerate() {
+                if re.is_match(line) {
+                    hits.push(format!("{}:{}", f.display(), n + 1));
+                }
+            }
+        }
+        assert!(
+            through >= 12,
+            "the scan found {through} menu_button_036 calls"
+        );
+        assert!(
+            hits.is_empty(),
+            "menu buttons drawn without look::menu_button_036: {hits:#?}"
         );
     }
 }

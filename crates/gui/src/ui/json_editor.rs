@@ -820,8 +820,8 @@ fn add_set_key_menu(
     acts: &mut Vec<Act>,
 ) {
     let derived = v.derived_match.clone().unwrap_or_default();
-    ui.menu_button("+ key", |ui| {
-        ui.menu_button("Match", |ui| {
+    crate::look::menu_button_036(ui, "+ key", |ui| {
+        crate::look::menu_button_036(ui, "Match", |ui| {
             let (_, addable) = slot_matches(v);
             for n in 1..=8u8 {
                 if taken.contains(&Mode::Exact(n)) {
@@ -966,7 +966,7 @@ fn section_entry(
                 ui.label(egui::RichText::new("delete: true").small())
                     .on_hover_text("PGPatcher deletes every trishape this section matches");
             });
-            ui.menu_button("+ key", |ui| {
+            crate::look::menu_button_036(ui, "+ key", |ui| {
                 for n in 1..=8u8 {
                     if !taken.contains(&Mode::Exact(n))
                         && ui.button(Mode::Exact(n).label()).clicked()

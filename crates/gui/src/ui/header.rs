@@ -371,7 +371,7 @@ fn button_width(ui: &egui::Ui, text: &str) -> f32 {
 fn open_menu(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut open = None;
     let mut pick = false;
-    ui.menu_button("Open", |ui| {
+    crate::look::menu_button_036(ui, "Open", |ui| {
         if picker::button(ui, &model.picker, egui::Button::new("Open folder…")) {
             pick = true;
             ui.close();

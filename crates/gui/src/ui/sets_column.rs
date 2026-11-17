@@ -2730,7 +2730,7 @@ fn menu(
     acts: &mut Vec<Act>,
 ) {
     // First: it only reads, so it works while sets are not editable (the disable below cannot be undone).
-    ui.menu_button("Show in Explorer", |ui| {
+    crate::look::menu_button_036(ui, "Show in Explorer", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());
             let off = model.reveal_problem(mk);
@@ -2776,7 +2776,7 @@ fn menu(
         }
     };
     // Item 23: one "Rename" submenu; each entry says what it renames. F2 stays on Rename outputs.
-    let rename = ui.menu_button("Rename", |ui| {
+    let rename = crate::look::menu_button_036(ui, "Rename", |ui| {
         for (label, hover, act) in rename_entries(&v.id, model.renames_outputs(v)) {
             if tip(ui.button(label).on_hover_text(hover)).clicked() {
                 acts.push(act);
@@ -2789,7 +2789,7 @@ fn menu(
         acts.push(Act::Select(v.key.clone()));
         ui.close();
     }
-    let remove = ui.menu_button("Remove member", |ui| {
+    let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
         for mk in &v.members {
             let name = model.item(mk).map_or(mk.as_str(), |i| i.name.as_str());
             if ui.button(name).clicked() {

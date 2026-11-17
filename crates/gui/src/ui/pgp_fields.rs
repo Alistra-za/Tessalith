@@ -573,7 +573,7 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                 }
             });
         if !c.addable.is_empty() {
-            ui.menu_button("+", |ui| {
+            crate::look::menu_button_036(ui, "+", |ui| {
                 for a in &c.addable {
                     if ui.button(format!("{} · {}", a.n, a.slot)).clicked() {
                         edits.push(match_toggle(a.n, true, &a.path));

@@ -1142,7 +1142,7 @@ pub(super) fn group_submenu(
     let mut picked = None;
     let r = ui
         .add_enabled_ui(head.disabled.is_none(), |ui| {
-            ui.menu_button(&head.label, |ui| {
+            crate::look::menu_button_036(ui, &head.label, |ui| {
                 for l in items {
                     let r = ui.add_enabled(l.disabled.is_none(), egui::Button::new(&l.label));
                     let r = match &l.disabled {
@@ -1206,7 +1206,7 @@ pub(super) fn bulk_menu(
         if e.action == MenuAction::FromAnotherSet {
             let r = ui
                 .add_enabled_ui(e.disabled.is_none(), |ui| {
-                    ui.menu_button(&e.label, |ui| {
+                    crate::look::menu_button_036(ui, &e.label, |ui| {
                         for l in &links {
                             let r =
                                 ui.add_enabled(l.disabled.is_none(), egui::Button::new(&l.label));
@@ -1248,7 +1248,7 @@ pub(super) fn bulk_menu(
         }
     }
     if !kinds.is_empty() {
-        ui.menu_button("Select members of kind", |ui| {
+        crate::look::menu_button_036(ui, "Select members of kind", |ui| {
             for e in kinds {
                 if ui.button(&e.label).clicked() {
                     picked = Some(e.action.clone());

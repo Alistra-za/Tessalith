@@ -682,7 +682,7 @@ fn row(
     let format_w = ui
         .vertical(|ui| {
             if item.is_none() {
-                let menu = ui.menu_button("Assign…", |ui| {
+                let menu = crate::look::menu_button_036(ui, "Assign…", |ui| {
                     // C14: the slot label once ("Emissive / Skin (slot 3)").
                     bulk_menu(ui, v.slot_label(slot, ""), &model.slot_menu(&v.id, slot))
                 });
