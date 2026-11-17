@@ -142,6 +142,8 @@ pub fn system_provider() -> Arc<dyn egui::FontProvider> {
 /// A font provider that answers `None` when its inner provider panics, and from then on: a failed enumeration thread
 /// makes `SystemFontProvider` panic at every later lookup, and a missing glyph is better than a crash. After any caught
 /// panic, `fonts_for_family` answers nothing too. Each caught panic is one crash-log line (`crash_log::catch_expected`).
+/// It also drops every face the inner provider answers that does not parse (`parses`, rule 0), which epaint would panic
+/// on; a dropped face is not a provider failure, so later lookups still reach the inner provider.
 pub struct Guarded<P: egui::FontProvider> {
     inner: P,
     failed: AtomicBool,
@@ -173,12 +175,17 @@ impl<P: egui::FontProvider> Guarded<P> {
 
 impl<P: egui::FontProvider> egui::FontProvider for Guarded<P> {
     fn fonts_for_family(&self, family: &egui::FontFamily) -> Vec<egui::FontInsert> {
-        self.guard(|p| p.fonts_for_family(family))
-            .unwrap_or_default()
+        let mut fonts = self
+            .guard(|p| p.fonts_for_family(family))
+            .unwrap_or_default();
+        fonts.retain(|f| parses(&f.data));
+        fonts
     }
 
     fn font_for(&self, request: &egui::FallbackRequest<'_>) -> Option<egui::FontInsert> {
-        self.guard(|p| p.font_for(request)).flatten()
+        self.guard(|p| p.font_for(request))
+            .flatten()
+            .filter(|f| parses(&f.data))
     }
 }
 
@@ -1334,6 +1341,62 @@ mod tests {
         };
         assert!(g.font_for(&req).is_none());
         assert!(g.fonts_for_family(&family).is_empty());
+    }
+
+    /// Review Important 1: a provider's face that does not parse is dropped, so epaint never gets it (it panics on a
+    /// face it cannot parse); dropping one is not a provider failure, so the provider is still asked afterwards.
+    #[test]
+    fn a_provider_face_that_does_not_parse_is_dropped() {
+        fn insert(name: &str, bytes: &'static [u8], family: &egui::FontFamily) -> egui::FontInsert {
+            egui::FontInsert::new(
+                name,
+                egui::FontData::from_static(bytes),
+                vec![egui::InsertFontFamily {
+                    family: family.clone(),
+                    priority: egui::FontPriority::Lowest,
+                }],
+            )
+        }
+        /// Answers `JUNK` (and Hack up front), counting its fallback lookups.
+        struct Junk(Arc<AtomicUsize>);
+        impl egui::FontProvider for Junk {
+            fn fonts_for_family(&self, family: &egui::FontFamily) -> Vec<egui::FontInsert> {
+                vec![insert("junk", JUNK, family), insert("hack", HACK, family)]
+            }
+            fn font_for(&self, request: &egui::FallbackRequest<'_>) -> Option<egui::FontInsert> {
+                self.0.fetch_add(1, Ordering::Relaxed);
+                Some(insert("junk-fallback", JUNK, request.family))
+            }
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let g = Guarded::new(Junk(calls.clone()));
+        let family = egui::FontFamily::Proportional;
+        let req = egui::FallbackRequest {
+            cluster: "日",
+            family: &family,
+        };
+        assert!(g.font_for(&req).is_none());
+        assert!(g.font_for(&req).is_none());
+        assert_eq!(
+            calls.load(Ordering::Relaxed),
+            2,
+            "a dropped face set the failed latch"
+        );
+        let up_front: Vec<String> = g
+            .fonts_for_family(&family)
+            .into_iter()
+            .map(|f| f.name)
+            .collect();
+        assert_eq!(up_front, ["hack"]);
+        // epaint with that provider: a character the floor lacks lays out (as a box) without a panic.
+        let mut fonts = egui::epaint::text::Fonts::new(Default::default(), embedded().0)
+            .with_font_providers(vec![Arc::new(Guarded::new(Junk(calls.clone())))]);
+        let galley = fonts.with_pixels_per_point(1.0).layout_no_wrap(
+            "日".into(),
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
+        assert!(galley.size().x > 0.0);
     }
 
     /// Start-time budget (Note JM1): fonts installed and one pass laid out, in a fresh process. Run in release, five times.
