@@ -98,8 +98,8 @@ fn system_definitions() -> (egui::FontDefinitions, FontChoice) {
     .clone()
 }
 
-/// Whether `SDC_FONT`'s value forces the embedded floor: only exactly `embedded` does. A test seam; release builds
-/// never read the variable.
+/// Whether `SDC_FONT`'s value forces the embedded floor: only exactly `embedded` does. A test seam; builds without
+/// `test-hooks` never read the variable.
 #[cfg(feature = "test-hooks")]
 pub fn floor_forced(value: Option<&std::ffi::OsStr>) -> bool {
     value.is_some_and(|v| v == "embedded")
@@ -554,7 +554,8 @@ pub fn embedded() -> (egui::FontDefinitions, FontChoice) {
     resolve(&mut NoFonts, &none)
 }
 
-/// Every non-ASCII character in `crates/gui/src` outside this file, CJK aside (`ui_symbols_cover_the_source`).
+/// Every non-ASCII character in `crates/gui/src`, CJK aside; in this file only the code before its test module, without
+/// this literal (`ui_symbols_cover_the_source`).
 #[cfg(test)]
 pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥≈≡✓ⓘẞ°±Δ²α↔üïÄ✎●←‹›äÖΩω≠π▼◀▶▸✖“”🔗é⏵";
 
@@ -715,23 +716,48 @@ mod tests {
         }
     }
 
+    /// Each `UI_SYMBOLS` character with the key of the configured font that draws it in `family`, `None` when no
+    /// configured font has it (the system provider is not asked).
+    #[cfg(windows)]
+    fn symbol_owners(
+        defs: egui::FontDefinitions,
+        family: &egui::FontFamily,
+    ) -> Vec<(char, Option<String>)> {
+        let mut f = egui::epaint::text::Fonts::new(Default::default(), defs);
+        let mut v = f.with_pixels_per_point(1.0);
+        let map = v.characters(family).clone();
+        UI_SYMBOLS
+            .chars()
+            .map(|c| (c, map.get(&c).and_then(|n| n.first().cloned())))
+            .collect()
+    }
+
     #[cfg(windows)]
     #[test]
     fn ui_symbols_resolve_to_the_same_fonts_as_before() {
         for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
-            let owner = |defs: egui::FontDefinitions| {
-                let mut f = egui::epaint::text::Fonts::new(Default::default(), defs);
-                let mut v = f.with_pixels_per_point(1.0);
-                let map = v.characters(&family).clone();
-                UI_SYMBOLS
-                    .chars()
-                    .map(|c| (c, map.get(&c).and_then(|n| n.first().cloned())))
-                    .collect::<Vec<_>>()
-            };
             assert_eq!(
-                owner(system_definitions().0),
-                owner(legacy_definitions()),
+                symbol_owners(system_definitions().0, &family),
+                symbol_owners(legacy_definitions(), &family),
                 "{family:?}"
+            );
+        }
+    }
+
+    /// Note JM3: on Windows no UI string reaches the system provider, because every UI symbol has a configured font
+    /// in both families. A new UI character none of them draws fails here, not silently through the provider.
+    #[cfg(windows)]
+    #[test]
+    fn every_ui_symbol_has_a_configured_font_on_windows() {
+        for family in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
+            let missing: String = symbol_owners(system_definitions().0, &family)
+                .into_iter()
+                .filter(|(_, owner)| owner.is_none())
+                .map(|(c, _)| c)
+                .collect();
+            assert!(
+                missing.is_empty(),
+                "{family:?}: no configured font draws {missing}"
             );
         }
     }
@@ -888,9 +914,8 @@ mod tests {
     }
 
     /// Every non-ASCII character in the GUI source (this file's tests, its `UI_SYMBOLS` literal and CJK aside) is in
-    /// `UI_SYMBOLS`, so the
-    /// floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in the source. On a
-    /// failure add or remove the reported characters and rerun the pins.
+    /// `UI_SYMBOLS`, so the floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in the
+    /// source. On a failure add or remove the reported characters and rerun the pins.
     #[test]
     fn ui_symbols_cover_the_source() {
         fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
@@ -915,9 +940,16 @@ mod tests {
             // This file: only the code before `mod tests` (its user-facing `FLOOR_*` messages), without the
             // `UI_SYMBOLS` literal, which would satisfy the stale check by itself.
             let text = if f.ends_with("fonts.rs") {
-                let code = text.split("mod tests {").next().unwrap();
-                code.lines()
+                // Cut at the line pair that opens the test module, so a comment naming it cannot end the scan early.
+                let lines: Vec<&str> = text.lines().collect();
+                let end = lines
+                    .windows(2)
+                    .position(|w| w[0].starts_with("#[cfg(test)]") && w[1].starts_with("mod tests"))
+                    .expect("fonts.rs has a test module");
+                lines[..end]
+                    .iter()
                     .filter(|l| !l.contains("const UI_SYMBOLS"))
+                    .copied()
                     .collect::<Vec<_>>()
                     .join("\n")
             } else {
