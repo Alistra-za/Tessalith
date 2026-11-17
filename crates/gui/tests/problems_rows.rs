@@ -241,9 +241,10 @@ fn info_rows_never_count_against_ready() {
         "an info line",
         NifTab::Extra,
     )]));
+    // The fixture's PACK-DEFAULTED notes are Info rows too (review E2): count the NIF one.
     let rows: Vec<_> = problems(&m)
         .iter()
-        .filter(|p| p.level == Level::Info)
+        .filter(|p| p.level == Level::Info && matches!(p.at, bottom::At::Nif(_)))
         .cloned()
         .collect();
     assert_eq!(rows.len(), 1, "{rows:?}");

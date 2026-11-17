@@ -1,8 +1,11 @@
 //! The bottom panel's state (layout v2 A1, A9; R7, R8): which tab shows, and whether the panel is open.
+use super::code_text::{note_sentence, row_class, RowClass};
 use super::cs_pbr::{set_key, statics_text, Kind, StaticsStatus, NO_TXST_USES};
 use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
-use super::{checks, code_text, counts_toward_badge, pbr_export, sets, AppModel, ItemStatus};
+use super::{
+    checks, code_text, counts_toward_badge, makes_a_row, pbr_export, sets, AppModel, ItemStatus,
+};
 use crate::pgp::settings::Feature;
 use engine::codes::Code;
 use nif::fields::Field;
@@ -527,7 +530,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         .iter()
         .filter(|i| i.status != ItemStatus::NeedsDecision && m.item_in_run(i))
     {
-        for w in i.warnings.iter().filter(|w| counts_toward_badge(w)) {
+        for w in i.warnings.iter().filter(|w| makes_a_row(w)) {
             let at = At::Texture(i.key.clone());
             // FC7 (CN3): a `_curves`/cavity map no recipe reads is Also export's input, not a mistake: an Info row
             // with no button (the generic PACK-UNUSED-INPUT sentence says to remove it).
@@ -535,6 +538,12 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             if w.code == Code::PackUnusedInput && w.message.contains(engine::pack::ALSO_ONLY) {
                 let text = "Read only by Also export; not written on its own".to_string();
                 out.push(row(Level::Info, at, text, None));
+                continue;
+            }
+            // Review E2: a Note-class warning is an Info row that says why the output is fine; its code stays, so
+            // Kinds can still hide it.
+            if row_class(w.code) == RowClass::Note {
+                out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
                 continue;
             }
             // Note DP: a short normal's row rebuilds Z in place.
@@ -546,8 +555,13 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         }
     }
     for v in views.iter() {
-        for w in v.set_warnings.iter().filter(|w| counts_toward_badge(w)) {
+        for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
+            // Review E2: SHADER-EXTRA-MAP arrives here.
+            if row_class(w.code) == RowClass::Note {
+                out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
+                continue;
+            }
             out.push(row(Level::Warning, at, w.message.clone(), Some(w.code)));
         }
     }
@@ -666,8 +680,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out.extend(nif_rows(NifLevel::Warning, Level::Warning));
     // Artist checks (DECISIONS Note CL): listed, never "ready"-changing. CHK-GREEN-GUESS, the one Info result, is a
     // row too, since it has an action (Note FC3, CL5).
-    let check_row =
-        |w: &engine::codes::Warning| counts_toward_badge(w) || w.code == Code::ChkGreenGuess;
+    let check_row = |w: &engine::codes::Warning| makes_a_row(w) || w.code == Code::ChkGreenGuess;
     for i in m
         .items
         .iter()
@@ -686,7 +699,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         for w in m
             .set_check_warnings(&v.key)
             .iter()
-            .filter(|w| counts_toward_badge(w))
+            .filter(|w| makes_a_row(w))
         {
             let at = set_at(&v.key, &v.id);
             out.push(row(Level::Check, at, w.message.clone(), Some(w.code)));
@@ -700,7 +713,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         // Note FC3 (CN67): the DERIVE result the user acts on is a Warning row that opens the report; the other
         // Info results stay on the row's hover (P11).
         let file_row =
-            |w: &engine::codes::Warning| counts_toward_badge(w) || w.code == Code::DeriveNifSuggest;
+            |w: &engine::codes::Warning| makes_a_row(w) || w.code == Code::DeriveNifSuggest;
         // Note DP4: the live item row is the current truth and carries the fix, so a same-code copy of it from
         // the last export is dropped. Only when the job maps to exactly one item (None = several share a job_key).
         // Built once, and only when some export row has a listed warning (no per-row scan of all items).
@@ -737,6 +750,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     _ => None,
                 };
                 let at = At::File(r.job_key.clone());
+                // Review E2: a Note-class code from the last export gets the same note row as a live one.
+                if row_class(w.code) == RowClass::Note {
+                    out.push(row(Level::Info, at, note_sentence(w), Some(w.code)));
+                    continue;
+                }
                 // The suggested NIF values are the engine message; the row shows the sentence, the hover the values.
                 let detail = (w.code == Code::DeriveNifSuggest).then(|| w.message.clone());
                 out.push(Problem {

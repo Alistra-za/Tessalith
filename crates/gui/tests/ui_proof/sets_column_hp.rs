@@ -25,7 +25,8 @@ journey!(
     "demo",
     [
         r#"{"op":"click","at":{"starts":"Not ready"}}"#,
-        r#"{"op":"expect","fact":"/counts/visible_sets","equals":3}"#,
+        // stonewall and fern; armor/steel's SHADER-EXTRA-MAP is a note (review E2).
+        r#"{"op":"expect","fact":"/counts/visible_sets","equals":2}"#,
         r#"{"op":"check","name":"sets_pills_match_their_counts"}"#,
         r#"{"op":"check","name":"sets_not_ready_shows_exactly_problem_sets"}"#
     ]

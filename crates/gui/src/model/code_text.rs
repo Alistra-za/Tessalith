@@ -44,14 +44,14 @@ pub fn code_sentence(code: Code) -> &'static str {
         CfgInvalid => "A setting has a value that isn't allowed — fix it in the settings",
         CfgPresetSkipped => "A preset file could not be loaded and was skipped — fix or remove the file",
         CfgGreenConflict => "The green-channel setting contradicts the normal-map convention — pick one of them",
-        DimNpot => "This texture has no mips, so it keeps a size that isn't a power of two",
+        DimNpot => "Keeps a size that isn't a power of two. That's fine: it has no mips.",
         DimSmall => "This texture is too small for its format — use a bigger image",
-        DimFlowSmall => "This flow map is small — use a bigger image or acknowledge",
+        DimFlowSmall => "This flow map is small — use a bigger image, or mark it as intended",
         DimTooLarge => "This texture is larger than the format allows — resize it",
         SetCompanionDds => "A companion file of this set is a DDS and can't be combined — use its original image",
         SetBakeRatio => "The maps of this set differ a lot in size — use matching sizes",
         SugLowConfidence => "Tessalith isn't sure what this alpha means — choose what it means",
-        SugContradiction => "The file name and its contents disagree on the type — check the sub-type",
+        SugContradiction => "The file name and the contents point to different types. Set the right one.",
         ValAlphaGuarantee => "The written alpha doesn't keep its guarantee — check the alpha settings",
         ValCoverage => "Cutout coverage drifted across the mips — adjust the threshold or the coverage setting",
         ValMComplexMargin => "The smallest mip's alpha is too low for complex material — change the alpha settings",
@@ -61,7 +61,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         ValBc6hPeak => "Bright peaks lose accuracy in BC6H — check the highlights",
         ValHeader => "The written DDS header isn't valid — export again",
         ValMipError => "A mip level strays from its source — check the filter or the source",
-        EncWeightsIgnored => "The BC7 weighting is ignored here — clear it or change the encoder",
+        EncWeightsIgnored => "The BC7 weighting has no effect with this format, so it is ignored. The file is fine.",
         InDuplicate => "Two files claim the same slot — remove or rename one",
         InPackingInput => "A packing input is missing or unusable — check the files of this set",
         InDecode => "This image could not be read — replace the file",
@@ -84,7 +84,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         GrassDetectSource => "This looks like grass from its source — confirm the grass setting",
         ValGrassDetect => "The grass check failed on the output — check the grass settings",
         PbrGrassDetect => "Community Shaders would read this grass albedo as complex grass — change its alpha or name",
-        ChkZSign => "This normal map's blue channel points the wrong way — flip it",
+        ChkZSign => "This normal map's blue channel points the wrong way — use Rebuild Z",
         ChkParallax => "The parallax height looks wrong for this map — check the height map",
         ChkParallaxScale => "The parallax scale looks too strong or too weak for this set — adjust it",
         ChkLowDetail => "This texture has little detail for its size — consider Resize: Half",
@@ -100,6 +100,126 @@ pub fn code_sentence(code: Code) -> &'static str {
         // The other Info results: no row, no sentence.
         _ => "",
     }
+}
+
+/// Review E2: what a row of a code is. A Note means the engine applied a documented default or made a documented
+/// choice and the output is valid; a Problem means the output may be wrong or a file is not written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowClass {
+    Problem,
+    Note,
+}
+
+/// Review E2: the class of `code`. No `_` arm, so a new engine code fails to build until it is classed. The
+/// Blocking and Error codes keep their own rows and are `Problem` here.
+pub fn row_class(code: Code) -> RowClass {
+    use Code::*;
+    use RowClass::{Note, Problem};
+    match code {
+        // The Info codes, but the two the user acts on (CHK-GREEN-GUESS, DERIVE-NIF-SUGGEST).
+        FmtHdrSource | CfgFileUnmatched | CfgFilterIgnored | DimResized | ResizeNoReference
+        | SetMissingCompanion | SetEditStale | InDdsSkipped | InGreenUnstated | InAliasStale
+        | OutKeptOlderEncode | OutKeptLowerTarget | PackSourceResized | ShaderAuto
+        | DeriveNotConverted | GenReplaced | GenAo => Note,
+        // The Warning codes whose output is valid as it is.
+        DimNpot | EncWeightsIgnored | PackDefaulted | PackUnusedInput | ShaderExtraMap => Note,
+        ChkGreenGuess | DeriveNifSuggest => Problem,
+        LossClampHdr
+        | LossReencode
+        | ChanNotGray
+        | ChanNormalLength
+        | SkinWetGrey
+        | AlphaParallaxNoAlpha
+        | AlphaBc1OneBit
+        | TagContentMismatch
+        | CfgPresetSkipped
+        | CfgGreenConflict
+        | DimFlowSmall
+        | SetCompanionDds
+        | SetBakeRatio
+        | SugContradiction
+        | ValCoverage
+        | ValMComplexMargin
+        | ValMGrayscale
+        | ValMHeightClip
+        | ValPgpatcher50
+        | ValBc6hPeak
+        | ValMipError
+        | InPackingInput
+        | InNonfinite
+        | InUnreadable
+        | InAliasInvalid
+        | OutUnknownExisting
+        | PackConflict
+        | PackRecipeConflict
+        | PackRecipeUnbuildable
+        | ShaderUnavailable
+        | ShaderMissingMap
+        | GrassTopOpaque
+        | GrassNormals
+        | GrassDetectSource
+        | PbrGrassDetect
+        | ChkZSign
+        | ChkParallax
+        | ChkParallaxScale
+        | ChkLowDetail
+        | DeriveDdsSource
+        | DeriveNoAlbedo
+        | CubeNoMips => Problem,
+        // Blocking and Error: they stay Blocks, Decide or "Failed: …" rows.
+        LossAlphaData | FmtBc5Normal | FmtLandscapeBc1 | FmtCsSkinLoader | FmtBc1Alpha
+        | FmtRgb8Alpha | FmtPerceptualData | AlphaExactOffM | TagSrgbVanilla | TagSrgbNonpbr
+        | TagUnormPbr | TagSrgbLod | CfgUnavailable | CfgInvalid | DimSmall | DimTooLarge
+        | SugLowConfidence | ValAlphaGuarantee | ValHeader | InDuplicate | InDecode
+        | PackSizeMismatch | GrassShape | ValGrassDetect | DerivePathConflict | AlsoPhaseFailed
+        | CubeFaces => Problem,
+    }
+}
+
+/// Review E2: the sentence of a Note-class warning's row, which says why the output is fine; the engine message
+/// for any other code, and for a Note whose message or `data` does not give what the sentence needs.
+pub fn note_sentence(w: &engine::codes::Warning) -> String {
+    let built = match w.code {
+        Code::PackDefaulted => pack_defaulted_note(&w.data),
+        // `"{name}: {reason}; not converted"` (`engine/src/pack/plan.rs`).
+        Code::PackUnusedInput => w.message.split_once(": ").and_then(|(name, rest)| {
+            let reason = rest.strip_suffix("; not converted")?;
+            Some(format!(
+                "{name} isn't used: {reason}. Nothing else changes."
+            ))
+        }),
+        Code::ShaderExtraMap => {
+            let s = |k: &str| w.data.get(k).and_then(|v| v.as_str());
+            s("member").zip(s("shader")).map(|(member, shader)| {
+                format!("{member} isn't read by the {shader} shader. It is still converted, so nothing breaks.")
+            })
+        }
+        Code::DimNpot | Code::EncWeightsIgnored => Some(code_sentence(w.code).to_string()),
+        _ => None,
+    };
+    built.unwrap_or_else(|| w.message.clone())
+}
+
+/// PACK-DEFAULTED's note from its `data` (`engine/src/pack/plan.rs`): the output's file name, the channel, the
+/// slot's default and why it is fine. `None` for missing data or a slot with no sentence.
+fn pack_defaulted_note(data: &serde_json::Value) -> Option<String> {
+    let output = data.get("output")?.as_str()?;
+    let output = output.rsplit('/').next().unwrap_or(output);
+    let channel = data.get("channel")?.as_str()?;
+    // The engine's value is an f32: print it as one, so 1.0 reads "1" and 0.04 reads "0.04", as the message does.
+    let value = data.get("value")?.as_f64()? as f32;
+    let head = format!("{output} {channel}");
+    Some(match data.get("slot")?.as_str()? {
+        "metallic" => format!("{head}: no metallic map, so the default {value} (not metal) is used. Fine unless part of it is metal."),
+        "specular" => format!("{head}: no specular map, so the default {value} is used. Fine for most surfaces that aren't metal."),
+        "ao" => format!("{head}: no AO map, so the default {value} (no extra shading) is used. Fine; creases just get no extra shadow."),
+        "roughness" => format!("{head}: no roughness map, so the default {value} is used everywhere. Fine if the surface is evenly rough."),
+        "glossiness" => format!("{head}: no glossiness map, so the default {value} is used everywhere. Fine if the surface is evenly glossy."),
+        "env_mask" => format!("{head}: no environment mask, so the default {value} (no reflection) is used. Fine unless part of it should reflect."),
+        "height" => format!("{head}: no height map, so the default {value} (flat) is used. Fine unless you want parallax depth."),
+        "fuzz" => format!("{head}: no fuzz map, so the default {value} (no fuzz) is used. Fine unless it is cloth or fur."),
+        _ => return None,
+    })
 }
 
 /// Note GU2: the engine's reason a cube-typed image is no cube source (so the two cannot drift), else a plain line.

@@ -998,7 +998,13 @@ fn hovering_a_pills_warning_badge_lists_the_warnings() {
         .clone();
     let member = m.items.iter_mut().find(|i| i.key == key).unwrap();
     let name = member.name.clone();
-    member.warnings = vec![Warning::new(Code::LossAlphaData, "the alpha would be lost")];
+    // Two more problems keep the badge's count apart from the other cards' "⚠ 1" (the fixture's PACK-DEFAULTED
+    // notes no longer count, review E2).
+    member.warnings = vec![
+        Warning::new(Code::LossAlphaData, "the alpha would be lost"),
+        Warning::new(Code::ChanNotGray, "not grey"),
+        Warning::new(Code::LossReencode, "decoded again"),
+    ];
     m.invalidate_views();
     let total: usize = sdc_gui::model::sets::set_views(&m)
         .into_iter()
@@ -1007,7 +1013,13 @@ fn hovering_a_pills_warning_badge_lists_the_warnings() {
         .members
         .iter()
         .filter_map(|k| m.item(k))
-        .map(|i| i.warnings.len())
+        // The badge counts problems, not the fixture's PACK-DEFAULTED notes (review E2).
+        .map(|i| {
+            i.warnings
+                .iter()
+                .filter(|w| sdc_gui::model::counts_toward_badge(w))
+                .count()
+        })
         .sum();
     let mut h = harness(m);
     instant_tooltips(&h);

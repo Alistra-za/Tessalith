@@ -984,7 +984,13 @@ fn a_dropped_fill_is_an_info_row_with_undo() {
     idle(&mut m);
     m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
     idle(&mut m);
-    let row = |m: &AppModel| problems(m).iter().find(|p| p.level == Level::Info).cloned();
+    // The fixture's PACK-DEFAULTED notes are Info rows too (review E2); the dropped fill's row has no code.
+    let row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.level == Level::Info && p.code.is_none())
+            .cloned()
+    };
     let r = row(&m).expect("the Info row");
     assert_eq!(r.at, At::Texture(RFAOS.into()));
     assert_eq!(

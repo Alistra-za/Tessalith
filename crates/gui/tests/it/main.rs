@@ -221,6 +221,8 @@ mod preview_readout;
 mod problems;
 #[path = "../problems_accept.rs"]
 mod problems_accept;
+#[path = "../problems_notes.rs"]
+mod problems_notes;
 #[path = "../problems_rows.rs"]
 mod problems_rows;
 #[path = "../project.rs"]

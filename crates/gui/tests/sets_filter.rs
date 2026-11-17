@@ -257,6 +257,9 @@ fn no_false_no_match_while_the_first_plan_runs() {
     };
     s.layout.sets_filters = vec!["ready".into()];
     let mut m = AppModel::new(s, None, session());
+    // As `support::opened`: suggestions stay undecided, so no set is ready. Accepted, rock01 is ready, since its
+    // PACK-DEFAULTED rows are notes (review E2).
+    m.accept = engine::policy::AcceptSuggestions::None;
     sdc_gui::layout::restore_model(
         &m.settings.layout.clone(),
         &mut m.filter,

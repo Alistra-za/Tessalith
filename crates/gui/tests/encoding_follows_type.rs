@@ -308,10 +308,14 @@ fn a_cleared_format_is_an_info_row_with_undo() {
     let (mut m, set) = grass_with(d.path(), Some(LINEAR));
     m.set_shader(&set, Some(Shader::Pbr));
     idle(&mut m);
-    // Note FC1's "types set automatically" row is the opening's, not this edit's.
+    // Note FC1's "types set automatically" row is the opening's, not this edit's. The fixture's PACK-DEFAULTED notes
+    // are Info rows too (review E2); the cleared format's row has no code.
+    let edit_rows =
+        |p: &&sdc_gui::model::bottom::Problem| p.level == Level::Info && p.code.is_none();
     let rows: Vec<_> = problems(&m)
         .iter()
-        .filter(|p| p.level == Level::Info && !p.text.contains("set automatically"))
+        .filter(edit_rows)
+        .filter(|p| !p.text.contains("set automatically"))
         .cloned()
         .collect();
     assert_eq!(rows.len(), 1, "{rows:?}");
@@ -327,7 +331,7 @@ fn a_cleared_format_is_an_info_row_with_undo() {
     assert!(!counts_as_ready_problem(&rows[0]));
     m.undo();
     idle(&mut m);
-    assert!(!problems(&m).iter().any(|p| p.level == Level::Info));
+    assert!(!problems(&m).iter().any(|p| edit_rows(&p)));
     assert_eq!(
         file(&m, "format"),
         Some(json!("bc7")),

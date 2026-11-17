@@ -90,14 +90,21 @@ fn sidecar_only_note(written: &std::io::Result<()>) -> String {
 /// How long the "Undid/Redid" note stays in the status line (AG15).
 const UNDO_NOTE_FOR: Duration = Duration::from_secs(5);
 
-/// Whether a warning counts toward the amber ⚠ badge and the "Has warnings" filter. Info lines (a note, not a
-/// problem) stay in the texture's own warnings list only. One predicate for the pill, the tile and the filter.
-pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
+/// Whether a warning makes a Problems row (a problem or a note): Warning, Error or Blocking severity. Info lines
+/// stay in the texture's own warnings list only, but the few `build_problems` names.
+pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
     use engine::codes::Severity;
     matches!(
         w.severity,
         Severity::Warning | Severity::Error | Severity::Blocking
     )
+}
+
+/// Whether a warning counts toward the amber ⚠ badge and the "Has warnings" filter: a row that is a problem, not a
+/// note (review E2). One predicate for the pill, the tile and the filter.
+pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
+    use code_text::{row_class, RowClass};
+    makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
 /// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…".

@@ -163,7 +163,7 @@ fn sorts_by_name_size_and_status_with_the_name_as_tiebreak() {
         job(&mut m, n).source = size(s);
     }
     // 0 ok, 1 warning, 2 undecided, 3 error, 4 failed, 5 ok.
-    m.items[1].warnings = vec![engine::codes::Warning::new(Code::DimNpot, "w")];
+    m.items[1].warnings = vec![engine::codes::Warning::new(Code::ChanNotGray, "w")];
     m.items[2].status = ItemStatus::NeedsDecision;
     m.items[3].status = ItemStatus::Error(vec![Code::DimNpot]);
     m.items[4].status = ItemStatus::Failed("boom".into());
