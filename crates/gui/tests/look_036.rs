@@ -2,7 +2,7 @@
 //! probe that drew the same ui on egui 0.36.2 and 0.37.0 with the app's font and pinned spacing.
 mod support;
 use eframe::egui::{self, accesskit::Role};
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT as _, Queryable};
 use egui_kittest::Harness;
 use sdc_gui::look::Combo036 as _;
 use sdc_gui::model::AppModel;
@@ -129,13 +129,37 @@ fn a_submenu_entry_ends_in_036s_arrow_glyph() {
     );
 }
 
-/// S1 of the egui 0.37 doc shots: the PBR set's Height _p format combo ("BC4 · linear (one channel)") is one line and
-/// wider than `COMBO_W`, so the Format column keeps its 0.36.2 width and place.
-#[test]
-fn the_set_editors_long_format_combo_is_one_line() {
-    // The doc shots' PBR cobble set: diffuse, normal, height and a ready `_rmaos` (no fill rows in the Format column).
-    let d = tempfile::tempdir().unwrap();
-    let t = d.path().join("textures/architecture/stone");
+/// The app drawn at `size` on `m`, fonts in before the first frame as `main.rs` installs them.
+fn app(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    h.run();
+    h
+}
+
+/// A project of `textures` under a new temp dir, opened, with its export folder set.
+fn project(d: &std::path::Path) -> AppModel {
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings {
+            export_folder: Some(d.join("export")),
+            ..Default::default()
+        },
+        None,
+        session(),
+    );
+    m.open_folder(d.join("textures"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// The doc shots' PBR cobble set (diffuse, normal, height and a ready `_rmaos`: no fill rows in the Format column),
+/// open in the set editor at 1600×900, the `pgp-material` shot's state.
+fn cobble_set_editor(d: &std::path::Path) -> Harness<'static, AppModel> {
+    let t = d.join("textures/architecture/stone");
     std::fs::create_dir_all(&t).unwrap();
     let rgb = |n: &str, c: [u8; 3]| {
         image::ImageBuffer::from_fn(64, 64, |x, _| {
@@ -150,16 +174,7 @@ fn the_set_editors_long_format_combo_is_one_line() {
     image::ImageBuffer::from_fn(64, 64, |x, _| image::Luma([x as u8 * 4]))
         .save(t.join("cobble_p.png"))
         .unwrap();
-    let mut m = AppModel::new(
-        sdc_gui::settings::GuiSettings {
-            export_folder: Some(d.path().join("export")),
-            ..Default::default()
-        },
-        None,
-        session(),
-    );
-    m.open_folder(d.path().join("textures"));
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let mut m = project(d);
     m.set_shader(
         "architecture/stone/cobble",
         Some(engine::shader::Shader::Pbr),
@@ -173,13 +188,15 @@ fn the_set_editors_long_format_combo_is_one_line() {
         .key
         .clone();
     m.select_set(&key);
-    let mut h = Harness::builder()
-        .with_context_setup(|ctx| {
-            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-        })
-        .with_size(egui::vec2(1600.0, 900.0))
-        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
-    h.run();
+    app(m, egui::vec2(1600.0, 900.0))
+}
+
+/// S1 of the egui 0.37 doc shots: the PBR set's Height _p format combo ("BC4 · linear (one channel)") is one line and
+/// wider than `COMBO_W`, so the Format column keeps its 0.36.2 width and place.
+#[test]
+fn the_set_editors_long_format_combo_is_one_line() {
+    let d = tempfile::tempdir().unwrap();
+    let h = cobble_set_editor(d.path());
     let values: Vec<(String, egui::Rect)> = h
         .query_all_by_role(Role::ComboBox)
         .filter_map(|n| n.value().map(|v| (v, n.rect())))
@@ -192,5 +209,107 @@ fn the_set_editors_long_format_combo_is_one_line() {
         // 96: `set_editor::COMBO_W`, the combo's minimum width.
         near(bc4.height(), 19.0) && bc4.width() > 96.0,
         "{bc4:?}"
+    );
+}
+
+/// S1 at the app level (the `pgp-material` shot): every slot row's format combo and every Assign… button start at the
+/// Format column's left edge, x 1237.6, where egui 0.36.2 put it in this state (measured on the 0.36.2 base commit
+/// 40589a43 with this fixture). With the long BC4 value wrapped the column started at 1313.
+#[test]
+fn the_set_editors_format_column_starts_where_036_put_it() {
+    let d = tempfile::tempdir().unwrap();
+    let h = cobble_set_editor(d.path());
+    let combos: Vec<(String, egui::Rect)> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.ends_with(" format"))
+        })
+        .map(|n| (n.accesskit_node().label().unwrap_or_default(), n.rect()))
+        .collect();
+    let assign: Vec<egui::Rect> = h
+        .query_all_by_role_and_label(Role::Button, "Assign…")
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(
+        (combos.len(), assign.len()),
+        (4, 3),
+        "{combos:?} {assign:?}"
+    );
+    for (name, r) in &combos {
+        assert!(near(r.min.x, 1237.6), "{name}: {r:?}");
+    }
+    for r in &assign {
+        assert!(near(r.min.x, 1237.6), "Assign…: {r:?}");
+    }
+}
+
+/// S6 at the app level (the `problems-tab` shot): a Problems row with the alpha combo is 19.5 tall as on 0.36.2 (the
+/// combo half a point below the row's top, Confirm at it), so the next row starts 22.5 below; each row's dot is centred
+/// on its text and its button sits at the row's top. Numbers measured on the 0.36.2 base commit 40589a43 with this
+/// fixture. Without the combo's own row the next rows start half a point higher, which the shot showed as 1 px.
+#[test]
+fn problems_rows_sit_as_on_036() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures");
+    std::fs::create_dir_all(t.join("plants")).unwrap();
+    std::fs::create_dir_all(t.join("armor")).unwrap();
+    image::ImageBuffer::from_fn(128, 128, |x, y| {
+        image::Rgba([60u8, 140, 60, if (x + y) % 20 < 10 { 255 } else { 0 }])
+    })
+    .save(t.join("plants/fern.png"))
+    .unwrap();
+    image::ImageBuffer::from_fn(128, 128, |x, y| image::Rgb([90u8, x as u8, y as u8]))
+        .save(t.join("armor/steel.png"))
+        .unwrap();
+    image::ImageBuffer::from_fn(128, 128, |x, y| image::Luma([((x ^ y) % 64) as u8 + 60]))
+        .save(t.join("armor/steel_m.png"))
+        .unwrap();
+    let mut m = project(d.path());
+    m.open_problems(None);
+    let h = app(m, egui::vec2(1400.0, 900.0));
+    let row = |start: &str| {
+        h.query_all_by_role(Role::Unknown)
+            .find(|n| {
+                n.accesskit_node()
+                    .label()
+                    .is_some_and(|l| l.starts_with(start))
+            })
+            .unwrap_or_else(|| panic!("no Problems row {start:?}"))
+            .rect()
+    };
+    let inside = |r: egui::Rect, role: Role, label: &str| {
+        h.query_all_by_role(role)
+            .filter(|n| {
+                n.accesskit_node().label().is_some_and(|l| l == label)
+                    || n.value().is_some_and(|v| v == label)
+            })
+            .map(|n| n.rect())
+            .find(|x| r.contains(x.center()))
+            .unwrap_or_else(|| panic!("no {role:?} {label:?} in {r:?}"))
+    };
+    let alpha = row("plants/fern.png: Alpha");
+    let combo = inside(alpha, Role::ComboBox, "Problems alpha type: Cutout");
+    let confirm = inside(alpha, Role::Button, "Problems confirm alpha");
+    assert!(
+        near(combo.min.y - alpha.min.y, 0.5) && near(confirm.min.y, alpha.min.y),
+        "combo {combo:?} confirm {confirm:?} row {alpha:?}"
+    );
+    let steel = row("armor/steel:");
+    assert!(
+        near(steel.min.y - alpha.min.y, 22.5),
+        "the next row starts 19.5 + 3 below: {steel:?} vs {alpha:?}"
+    );
+    let dot = inside(steel, Role::Label, "warning");
+    let text = inside(
+        steel,
+        Role::Label,
+        "the envmap shader needs _n; none is in the set (nothing is generated)",
+    );
+    let go = inside(steel, Role::Button, "Go to set");
+    assert!(
+        near(dot.center().y, text.center().y) && near(go.min.y, steel.min.y),
+        "dot {dot:?} text {text:?} button {go:?} row {steel:?}"
     );
 }
