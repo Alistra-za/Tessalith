@@ -111,7 +111,7 @@ pub fn draw(
     let all = views(model);
     // Review E10: Go to set's outline, on the slot rows only (the 3D view and a set gone from the plan drop it).
     let rows_drawn = !view.three_d && all.iter().any(|v| v.key == key);
-    let revealing = super::row_reveal::take(ui.ctx(), &mut model.nav, key, rows_drawn);
+    super::row_reveal::take(ui.ctx(), &mut model.nav, key, rows_drawn);
     let Some(v) = all.iter().find(|v| v.key == key) else {
         ui.weak("This set is no longer in the plan.");
         return;
@@ -142,8 +142,9 @@ pub fn draw(
     let mut area = egui::ScrollArea::vertical()
         .id_salt("centre-set")
         .auto_shrink([false, false]);
-    // A reveal's scroll to its row wins over opening at the top.
-    if view.to_top && !revealing {
+    // Go to set's scroll to its row (`row_reveal`) still wins: egui applies this offset as the area begins and a
+    // scroll request as it ends.
+    if view.to_top {
         area = area.vertical_scroll_offset(0.0);
     }
     area.show(ui, |ui| {

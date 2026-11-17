@@ -2410,7 +2410,12 @@ fn extra_map_at_1280(
 
 /// The frame just drawn asked for the next one at once (`requested_repaint_last_pass` reports the frame before).
 fn asks_now(h: &Harness<'static, AppModel>) -> bool {
-    h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay == std::time::Duration::ZERO
+    wake(h) == std::time::Duration::ZERO
+}
+
+/// When the frame just drawn asked to be drawn again.
+fn wake(h: &Harness<'static, AppModel>) -> std::time::Duration {
+    h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay
 }
 
 /// A node labelled `label` lies inside the centre panel (`assert_in_centre`, scoped: the file name is on a Textures
@@ -2443,9 +2448,16 @@ fn go_to_set_shows_and_outlines_the_file_the_row_names() {
     );
     // The Sets column settles its own scroll to the selected card first (see the reduced-motion test).
     h.run_steps(3); // 1.25 s
-                    // To 2.75 s. The fade's frame shows the outline and asks for the next frame at once (reduced motion never does).
-    let mut fading = false;
-    for _ in 0..6 {
+    for _ in 0..3 {
+        // Up to 1.75 s: held at full strength. The only wake asked for is the timed one at the end of the hold.
+        assert_eq!(revealed(&h.ctx).map(|r| r.1), Some(1.0));
+        assert!(!asks_now(&h), "no repaint loop while held");
+        assert!(wake(&h).as_secs_f64() <= sdc_gui::ui::row_reveal::REVEAL_SECS);
+        h.step();
+    }
+    // 2 s to 2.75 s. The fade's frame shows the outline and asks for the next frame at once (reduced motion never does).
+    let mut fading = revealed(&h.ctx).is_some() && asks_now(&h);
+    for _ in 0..3 {
         h.step();
         fading |= revealed(&h.ctx).is_some() && asks_now(&h);
     }
@@ -2570,9 +2582,158 @@ fn a_target_with_no_row_selects_the_set_and_outlines_nothing() {
     h.run();
     assert_eq!(sdc_gui::ui::row_reveal::revealed(&h.ctx), None);
     // Nothing waits on it: a reveal left pending would wake the frame at the end of its hold.
-    let wake = h.output().viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+    let next = wake(&h);
     assert!(
-        wake.as_secs_f64() >= sdc_gui::ui::row_reveal::REVEAL_SECS,
-        "{wake:?}"
+        next.as_secs_f64() >= sdc_gui::ui::row_reveal::REVEAL_SECS,
+        "{next:?}"
     );
+}
+
+/// Review fix 1: a set opened by Go to set opens at its top, also when its target has no row (the centre's set editor
+/// keeps one scroll offset for every set).
+#[test]
+fn go_to_set_with_no_row_opens_the_set_at_its_top() {
+    use sdc_gui::model::nav::SlotTarget;
+    let (_d, mut h, key, name) = extra_map_at_1280(true);
+    let set = rock01(h.state()).key;
+    h.state_mut().select_set(&set);
+    h.run();
+    let c = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    h.event(egui::Event::PointerMoved(c.center()));
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -1500.0),
+        source: egui::MouseWheelSource::Wheel,
+        phase: egui::TouchPhase::Move,
+        modifiers: Default::default(),
+    });
+    h.run_steps(4);
+    assert!(
+        !h.query_all_by_label(&name)
+            .any(|n| c.expand(0.5).contains_rect(n.rect())),
+        "the editor is scrolled past {name}'s row"
+    );
+    // Another view in the centre, then Go to set back: the set editor opens again.
+    h.state_mut().select_item(&key);
+    h.run();
+    h.state_mut()
+        .go_to_set(&set, Some(SlotTarget::Item("no/such/item".into())));
+    h.run();
+    shown_in_centre(&h, &name);
+}
+
+/// Review fix 2: a Go to set the editor has not drawn yet ends with the next selection, so it never fires later.
+/// Pinned on the model: the editor is not drawn while a texture preview fills the centre.
+#[test]
+fn another_selection_drops_a_waiting_go_to_set() {
+    use sdc_gui::model::nav::SlotTarget;
+    use sdc_gui::model::sets::SlotKind;
+    let (_d, mut m) = with_set_warnings(&[]);
+    let set = rock01(&m).key;
+    let (item, _) = normal_member(&m);
+    m.go_to_set(&set, Some(SlotTarget::Slot(SlotKind::Normal)));
+    assert!(m.nav.reveal_slot.is_some());
+    m.select_item(&item);
+    assert!(m.nav.reveal_slot.is_none(), "a texture selected");
+    m.go_to_set(&set, Some(SlotTarget::Slot(SlotKind::Normal)));
+    m.select_set(&set);
+    assert!(m.nav.reveal_slot.is_none(), "a set selected");
+}
+
+/// Review fix 3: a slot target outlines the card that holds it, also when the card shows the other kind of its slot
+/// (3 or 7, `SlotKind::shares_card`).
+#[test]
+fn a_slot_target_outlines_the_card_its_pair_shows() {
+    use sdc_gui::model::nav::SlotTarget;
+    use sdc_gui::model::sets::{slot_row, SlotKind};
+    let (_d, mut m) = with_set_warnings(&[]);
+    // The PBR shader's optional maps give rock01 the emissive (slot 3) and coat (slot 7) cards.
+    m.set_shader(&rock01(&m).id, Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = rock01(&m);
+    let shown = slot_row(v.shader.as_ref(), &v.slots)
+        .into_iter()
+        .map(|c| c.kind)
+        .find(|k| matches!(k.slot_number(), Some(3 | 7)))
+        .expect("rock01's editor draws a slot 3 or 7 card");
+    let other = SlotKind::ALL
+        .into_iter()
+        .find(|k| *k != shown && k.shares_card(shown))
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    h.state_mut()
+        .go_to_set(&v.key, Some(SlotTarget::Slot(other)));
+    h.step();
+    h.step();
+    assert_eq!(
+        sdc_gui::ui::row_reveal::revealed(&h.ctx),
+        Some((SlotTarget::Slot(other), 1.0)),
+        "{other:?} on the {shown:?} card"
+    );
+}
+
+/// Review fix 4: `slot_for_shader_map` inverts `SlotKind::slot_number` for every label `map_slot` knows, so the two
+/// tables cannot drift apart.
+#[test]
+fn slot_for_shader_map_agrees_with_slot_number() {
+    use engine::{config::Target, shader::Shader};
+    use sdc_gui::model::sets::{map_slot, slot_for_shader_map, SlotKind};
+    let mut labels = vec![
+        "_n",
+        "_n/_msn",
+        "_n (model-space)",
+        "_g",
+        "_p",
+        "_rmaos",
+        "skin_rfaos",
+        "_m complex",
+        "_i",
+    ];
+    for s in Shader::ALL {
+        for t in [Target::Cs, Target::Vanilla] {
+            let spec = s.spec_for(t);
+            labels.extend(spec.required.iter().chain(spec.optional).map(|r| r.label));
+        }
+    }
+    for l in labels {
+        let Some(n) = map_slot(l) else { continue };
+        match slot_for_shader_map(l) {
+            None => assert_eq!(n, 7, "{l}: only slot 7 (`_i`) has no card"),
+            Some(k) => assert_eq!(SlotKind::slot_number(k), Some(n), "{l}"),
+        }
+    }
+}
+
+/// Review fix 5, 6: the OS value `install` reads stops egui's own animations and its animated scroll on both themes;
+/// with motion on, the style is left alone.
+#[test]
+fn install_follows_the_os_value_on_both_themes() {
+    use egui::Theme;
+    use sdc_gui::ui::motion::{install_with, reduced};
+    let ctx = egui::Context::default();
+    install_with(&ctx, true);
+    assert!(reduced(&ctx));
+    for t in [Theme::Dark, Theme::Light] {
+        let s = ctx.style_of(t);
+        assert_eq!(s.animation_time, 0.0, "{t:?}");
+        assert_eq!(s.scroll_animation.duration.max, 0.0, "{t:?}");
+    }
+    let ctx = egui::Context::default();
+    let before = (ctx.style_of(Theme::Dark), ctx.style_of(Theme::Light));
+    install_with(&ctx, false);
+    assert!(!reduced(&ctx));
+    assert_eq!(*ctx.style_of(Theme::Dark), *before.0);
+    assert_eq!(*ctx.style_of(Theme::Light), *before.1);
+}
+
+/// Review fix 5: the app reads the OS value at start.
+#[test]
+fn restore_ctx_reads_the_os_motion_setting() {
+    let d = tempfile::tempdir().unwrap();
+    let app = sdc_gui::app::SdcApp::new(opened(d.path()));
+    let ctx = egui::Context::default();
+    assert_eq!(sdc_gui::ui::motion::os_value(&ctx), None);
+    app.restore_ctx(&ctx);
+    assert!(sdc_gui::ui::motion::os_value(&ctx).is_some());
 }

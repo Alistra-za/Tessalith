@@ -47,9 +47,8 @@ pub fn revealed(ctx: &egui::Context) -> Option<(SlotTarget, f32)> {
 }
 
 /// The set editor draws set `key` (`rows`: its slot rows are drawn this frame). Takes a waiting Go to set for this
-/// set and starts it; drops a reveal of another set, or any reveal when the rows are not drawn (the 3D view). True
-/// while the reveal has not scrolled to its row yet, so the editor's open-at-the-top waits.
-pub(super) fn take(ctx: &egui::Context, nav: &mut Nav, key: &str, rows: bool) -> bool {
+/// set and starts it; drops a reveal of another set, or any reveal when the rows are not drawn (the 3D view).
+pub(super) fn take(ctx: &egui::Context, nav: &mut Nav, key: &str, rows: bool) {
     let new = nav.reveal_slot.take().filter(|r| rows && r.set_key == key);
     // Read before `data_mut`: the context is locked inside it.
     let start = ctx.input(|i| i.time);
@@ -68,9 +67,7 @@ pub(super) fn take(ctx: &egui::Context, nav: &mut Nav, key: &str, rows: bool) ->
         {
             d.remove::<Reveal>(state_id());
         }
-        d.get_temp::<Reveal>(state_id())
-            .is_some_and(|r| !r.scrolled)
-    })
+    });
 }
 
 /// A slot row of set `key` at `rect`, showing `slot` and holding `item`: if it is the reveal's, scroll to it once and
@@ -87,7 +84,8 @@ pub(super) fn on_row(
     };
     let hit = r.set_key == key
         && match &r.target {
-            SlotTarget::Slot(k) => *k == slot,
+            // One card holds both kinds of slot 3 or 7, and shows one of them.
+            SlotTarget::Slot(k) => k.shares_card(slot),
             SlotTarget::Item(i) => item == Some(i.as_str()),
         };
     if !hit {

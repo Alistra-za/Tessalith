@@ -9,18 +9,27 @@ fn key() -> egui::Id {
 }
 
 /// True when the OS asks for no animations, or the style has egui's own animations off (`animation_time` 0).
+///
+/// In every egui_kittest harness this is true: kittest sets `animation_time` to 0 after the context setup. A test of
+/// motion that is not reduced sets `animation_time` back first.
 pub fn reduced(ctx: &egui::Context) -> bool {
     ctx.data(|d| d.get_temp::<bool>(key())).unwrap_or(false)
         || ctx.global_style().animation_time == 0.0
 }
 
-/// Reads the OS value once and keeps it in `ctx`. When the OS asks for no animations, egui's own animations stop too
-/// (`animation_time` 0 on both themes).
+/// Reads the OS value once and keeps it in `ctx`. When the OS asks for no animations, egui's own animations and its
+/// animated scrolling stop too, on both themes.
 pub fn install(ctx: &egui::Context) {
-    let os = os_reduced();
+    install_os(ctx, os_reduced());
+}
+
+fn install_os(ctx: &egui::Context, os: bool) {
     ctx.data_mut(|d| d.insert_temp(key(), os));
     if os {
-        ctx.all_styles_mut(|s| s.animation_time = 0.0);
+        ctx.all_styles_mut(|s| {
+            s.animation_time = 0.0;
+            s.scroll_animation = egui::style::ScrollAnimation::none();
+        });
     }
 }
 
@@ -53,4 +62,16 @@ fn os_reduced() -> bool {
 #[cfg(feature = "test-hooks")]
 pub fn force_reduced(ctx: &egui::Context, on: bool) {
     ctx.data_mut(|d| d.insert_temp(key(), on));
+}
+
+/// Test seam: `install` with this OS value.
+#[cfg(feature = "test-hooks")]
+pub fn install_with(ctx: &egui::Context, os_reduced: bool) {
+    install_os(ctx, os_reduced);
+}
+
+/// Test seam: the OS value `install` stored, `None` before it ran.
+#[cfg(feature = "test-hooks")]
+pub fn os_value(ctx: &egui::Context) -> Option<bool> {
+    ctx.data(|d| d.get_temp::<bool>(key()))
 }

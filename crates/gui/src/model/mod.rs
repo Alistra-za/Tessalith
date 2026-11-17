@@ -3201,6 +3201,8 @@ impl AppModel {
         self.bulk = Default::default();
         // Note FB7: also a click on the texture already selected brings it to the front of the centre.
         self.centre_tab = CentreTab::Selection;
+        // Review E10: a Go to set the set editor has not drawn yet ends here, so it never fires later.
+        self.nav.reveal_slot = None;
     }
 
     /// Select one set; any multi-selection ends (F3a D1).
@@ -3210,6 +3212,8 @@ impl AppModel {
         self.bulk = Default::default();
         // Note FB7: also a click on the set already selected brings it to the front of the centre.
         self.centre_tab = CentreTab::Selection;
+        // Review E10: as in `select_item`; `go_to_set` sets its own after this.
+        self.nav.reveal_slot = None;
     }
 
     /// Review E10: a Problems row's Go to set. Selects the set, and leaves `target` for the set editor to scroll to and

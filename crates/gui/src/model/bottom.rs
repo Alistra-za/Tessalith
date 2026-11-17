@@ -804,6 +804,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     .as_str()
                     .and_then(sets::slot_for_shader_map)
                     .map(SlotTarget::Slot),
+                // No producer reaches this today: the engine raises the code only from the Also export planner, and set
+                // rows come only from the main plan's set warnings. Kept so such a row lands on the Diffuse slot.
                 Code::DeriveNoAlbedo => Some(SlotTarget::Slot(sets::SlotKind::Diffuse)),
                 _ => None,
             };
