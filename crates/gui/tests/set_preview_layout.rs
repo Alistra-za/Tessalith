@@ -344,6 +344,42 @@ fn a_saved_window_size_reopens_at_the_same_size() {
     }
 }
 
+/// Note FM31 with an excess: a saved width a few points under what the window's content needs (262.1 here) is drawn
+/// at that width. The excess comes off what is saved, so the same narrow size is saved again and the next start draws
+/// the same rect; an excess past `FIT_MAX_EXTRA` (16 points) is a clamp, and nothing comes off.
+#[test]
+fn a_saved_size_under_the_content_width_takes_the_excess_off() {
+    let open = |saved: [f32; 4]| {
+        let d = tempfile::tempdir().unwrap();
+        let h = harness_at(d.path(), egui::vec2(1400.0, 900.0), |m| {
+            m.settings.set_settings_open = true;
+            m.settings.layout.settings_window = Some(saved);
+        });
+        let drawn = h
+            .ctx
+            .memory(|m| m.area_rect(sdc_gui::ui::set_preview::settings_window_id()))
+            .expect("the settings window is drawn");
+        let r = sdc_gui::layout::settings_window_now(&h.ctx).expect("the size has settled");
+        (drawn, [r.min.x, r.min.y, r.width(), r.height()])
+    };
+    let asked = [200.0, 100.0, 255.0, 500.0];
+    let (drawn, saved) = open(asked);
+    let extra = drawn.width() - asked[2];
+    assert!(
+        extra > 0.0 && extra <= 16.0,
+        "drawn a few points wider than asked: {drawn:?}"
+    );
+    assert_eq!(saved, asked, "the excess comes off what is saved");
+    let (again, saved_again) = open(saved);
+    assert_eq!(again, drawn, "the next start draws the same rect");
+    assert_eq!(saved_again, asked, "and saves the same size");
+
+    // 62 points past a 200-point width: a clamp, saved as drawn.
+    let (wide, saved) = open([200.0, 100.0, 200.0, 500.0]);
+    assert!(wide.width() - 200.0 > 16.0, "{wide:?}");
+    assert_eq!(saved[2], wide.width(), "nothing comes off a clamp");
+}
+
 #[test]
 fn details_is_collapsed_by_default_and_holds_the_tech_lines() {
     use sdc_gui::model::set_preview::{cap_text, JSON_WINS};
