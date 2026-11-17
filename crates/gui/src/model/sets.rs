@@ -2045,6 +2045,56 @@ fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     }
 }
 
+/// Note J?4 (B2-3): the sets a Delete set or a Remove from set leaves with an empty shared slot, listed before the
+/// edit (B2-9).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct LostShares {
+    /// The sets' ids, in display order.
+    pub sets: Vec<String>,
+    /// The file names (`TextureItem::name`) they shared, sorted.
+    pub files: Vec<String>,
+    /// How many (set, slot) pairs go empty.
+    pub slots: usize,
+}
+
+/// What `delete_counted` did (Task 5 adds `handoffs`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Deleted {
+    /// How many textures went to no set.
+    pub moved: usize,
+    pub lost: LostShares,
+}
+
+/// Note J?4: "a", "a and b", "a, b and c", or "a, b, c and 2 more" (at most three names).
+fn list_ids(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [a] => a.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        [a, b, c, rest @ ..] => format!("{a}, {b}, {c} and {} more", rest.len()),
+    }
+}
+
+/// Note J?4 (B2-3): the sentence that names the sets left with an empty shared slot; `None` when `lost.sets` is
+/// empty. `what` is "it" for Remove from set, and `list_ids(&lost.files)` for Delete set.
+fn lost_share_text(lost: &LostShares, what: &str) -> Option<String> {
+    let (who, tail) = match lost.sets.as_slice() {
+        [] => return None,
+        [one] => (one.clone(), ".".to_string()),
+        all => (
+            format!("{} sets", all.len()),
+            format!(": {}.", list_ids(all)),
+        ),
+    };
+    let place = if lost.slots == 1 {
+        "that slot is empty now"
+    } else {
+        "those slots are empty now"
+    };
+    Some(format!("{who} shared {what}; {place}{tail}"))
+}
+
 /// Note DW3: the items in a locked slot of their own set (`BatchRequest::pinned_files`); a borrowing set's lock is
 /// left out, so it never changes the owner's reading.
 pub fn pinned_files(m: &AppModel) -> BTreeSet<String> {
@@ -2364,6 +2414,51 @@ impl AppModel {
             _ => None,
         })?;
         (first == item).then_some((v.id, n))
+    }
+
+    /// Note J?4 (B2-3, B2-9): call it BEFORE the edit that takes `items` out of set `except`. The sets other than
+    /// `except`, in display order, with an explicit share that resolves to one of `items` (a `SlotFill::Borrowed` on
+    /// a slot that is not in `SetView::filled`, so not a record fill; through a chain too), and the slot would be
+    /// empty after the edit: a share is not counted when `except` keeps a member outside `items` whose `slot_of` has
+    /// that slot number (B2-8: the slot stays filled from the lender).
+    pub(crate) fn sets_sharing(&self, items: &[String], except: &str) -> LostShares {
+        let views = views(self);
+        let kept: BTreeSet<u8> = views
+            .iter()
+            .find(|v| same_id(&v.id, except))
+            .map(|v| {
+                v.members
+                    .iter()
+                    .filter(|k| !items.contains(k))
+                    .filter_map(|k| self.item(k))
+                    .filter_map(slot_of)
+                    .filter_map(SlotKind::slot_number)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut lost = LostShares::default();
+        let mut files = BTreeSet::new();
+        for v in views.iter().filter(|v| !same_id(&v.id, except)) {
+            let mut slots = BTreeSet::new();
+            for (k, f) in &v.slots {
+                let (SlotFill::Borrowed { item, .. }, Some(n)) = (f, k.slot_number()) else {
+                    continue;
+                };
+                if v.filled.contains_key(&n) || kept.contains(&n) || !items.contains(item) {
+                    continue;
+                }
+                slots.insert(n);
+                if let Some(i) = self.item(item) {
+                    files.insert(i.name.clone());
+                }
+            }
+            if !slots.is_empty() {
+                lost.sets.push(v.id.clone());
+                lost.slots += slots.len();
+            }
+        }
+        lost.files = files.into_iter().collect();
+        lost
     }
 
     fn is_packed(&self, item: &str) -> bool {
@@ -2946,9 +3041,10 @@ impl AppModel {
     }
 
     /// Note HF1: delete any set. Its textures (not the packed outputs, which follow their raw maps) go to no set and
-    /// the automatic set does not come back; an entry with no files just goes. Returns how many textures went to no
-    /// set, or `None` (nothing done) when there is no such set or the project file takes no edit.
-    fn delete_counted(&mut self, id: &str) -> Option<usize> {
+    /// the automatic set does not come back; an entry with no files just goes. Returns what it did (how many textures
+    /// went to no set, and the sets left with an empty shared slot), or `None` (nothing done) when there is no such
+    /// set or the project file takes no edit.
+    fn delete_counted(&mut self, id: &str) -> Option<Deleted> {
         if !self.sets_editable() {
             return None;
         }
@@ -2959,13 +3055,15 @@ impl AppModel {
             .filter(|k| !self.is_packed(k))
             .cloned()
             .collect();
-        let n = files.len();
+        let moved = files.len();
+        // Note J?4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
+        let lost = self.sets_sharing(&v.members, &v.id);
         let i = id.to_string();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
             s.delete_set(&i, &files)
         });
         self.prune_collapsed();
-        Some(n)
+        Some(Deleted { moved, lost })
     }
 
     /// `delete_counted`, as done or not.
@@ -2974,17 +3072,21 @@ impl AppModel {
     }
 
     /// Note FC5 (supersedes AG13's confirm): the set menu's Delete set: no question, one undo step and a toast
-    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1).
+    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1), followed by the sets left with an empty
+    /// shared slot (Note J?4).
     pub fn delete_set_with_toast(&mut self, id: &str) {
-        let Some(n) = self.delete_counted(id) else {
+        let Some(d) = self.delete_counted(id) else {
             return;
         };
         let step = (self.history.undo.len(), self.history.pushes);
-        let text = match n {
+        let mut text = match d.moved {
             0 => format!("Deleted set {id}"),
             1 => format!("Deleted set {id} (1 texture now in no set)"),
             n => format!("Deleted set {id} ({n} textures now in no set)"),
         };
+        if let Some(s) = lost_share_text(&d.lost, &list_ids(&d.lost.files)) {
+            text = format!("{text}. {s}");
+        }
         self.messages.notify_with(
             super::messages::Severity::Info,
             text,
@@ -3005,7 +3107,8 @@ impl AppModel {
     }
 
     /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
-    /// in, the only member). Refused for a packed map (it follows its raw maps).
+    /// in, the only member). Refused for a packed map (it follows its raw maps). When sets shared the file, a toast
+    /// names them (Note J?4).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
@@ -3021,9 +3124,16 @@ impl AppModel {
         }
         self.leaves_locked(item)?;
         let (i, it) = (v.id.clone(), item.to_string());
+        // Note J?4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
+        let lost = self.sets_sharing(&[item.to_string()], &v.id);
         self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
             s.remove_member(&i, &it)
         });
+        if let Some(sentence) = lost_share_text(&lost, "it") {
+            let name = self.item(item).map_or(item, |t| t.name.as_str());
+            let text = format!("{name} is in no set now. {sentence}");
+            self.messages.notify(super::messages::Severity::Info, text);
+        }
         Ok(())
     }
 

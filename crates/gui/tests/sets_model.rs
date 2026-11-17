@@ -1941,6 +1941,75 @@ fn a_move_duplicate_or_fill_that_replaces_a_lent_file_leaves_the_borrowers_on_th
     );
 }
 
+/// Note J?4: leaf shares rock01's normal with its slot locked, odd shares rock01's packed rmaos. Neither can take
+/// the file when it leaves rock01 (Note J?5: a locked slot, a packed map), so both slots go empty.
+fn lent_to_leaf_and_odd(d: &std::path::Path) -> sdc_gui::model::AppModel {
+    let mut m = pbr_opened(d);
+    idle(&mut m);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_lock("landscape/leaf", 2, true);
+        s.set_borrow("landscape/odd", 6, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    m
+}
+
+/// The newest Messages line that starts with `start`.
+fn message_starting(m: &sdc_gui::model::AppModel, start: &str) -> String {
+    m.messages
+        .entries()
+        .rev()
+        .find(|e| e.text.starts_with(start))
+        .map(|e| e.text.clone())
+        .unwrap_or_else(|| panic!("no message starting {start:?}"))
+}
+
+/// Note J?4 (B2-3): deleting a lender names the sets left with an empty shared slot; their lines stay (HE3).
+#[test]
+fn deleting_a_lender_keeps_the_borrows_and_names_the_sets_that_lost_a_texture() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lent_to_leaf_and_odd(d.path());
+    m.delete_set_with_toast("landscape/rock01");
+    idle(&mut m);
+    assert_eq!(
+        message_starting(&m, "Deleted set"),
+        "Deleted set landscape/rock01 (4 textures now in no set). 2 sets shared rock01_normal.png and \
+         rock01_rmaos; those slots are empty now: landscape/leaf and landscape/odd."
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock01")
+    );
+    assert_eq!(
+        borrow_of(&m, "landscape/odd", 6).as_deref(),
+        Some("landscape/rock01")
+    );
+}
+
+/// Note J?4 (B2-3): removing a lent file says which set lost it; a file no set shares adds nothing.
+#[test]
+fn removing_a_lent_file_names_the_set_that_lost_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lent_to_leaf_and_odd(d.path());
+    let normal = key_of(&m, "rock01_normal.png");
+    m.remove_member("landscape/rock01", &normal).unwrap();
+    idle(&mut m);
+    assert_eq!(
+        message_starting(&m, "rock01_normal.png"),
+        "rock01_normal.png is in no set now. landscape/leaf shared it; that slot is empty now."
+    );
+    let diffuse = key_of(&m, "rock01.png");
+    m.remove_member("landscape/rock01", &diffuse).unwrap();
+    idle(&mut m);
+    assert!(
+        m.messages
+            .entries()
+            .all(|e| !e.text.starts_with("rock01.png")),
+        "a file no set shares says nothing"
+    );
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).
