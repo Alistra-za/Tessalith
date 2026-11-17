@@ -1436,6 +1436,7 @@ impl AppModel {
         spawn_partial(
             self.tx.clone(),
             session.clone(),
+            session.skeleton(),
             req.clone(),
             changed,
             self.edit_seq,

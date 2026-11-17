@@ -324,10 +324,13 @@ pub fn spawn_plan(
 /// Fast re-plan (R2 §5): `Session::replan_sets` for `changed` (the current entry of every `[files]` key changed
 /// since the last landed full plan), sent as `Partial { seq }`. Never cancelled: a newer edit's `seq` drops it.
 /// When `latest` (the newest edit's `seq`, with a partial or not) has moved past `seq` before the work starts, it is
-/// skipped and an `Err` is sent.
+/// skipped and an `Err` is sent. `skeleton` is the session's when the edit was made, read before its full plan starts:
+/// read here, it could be the one that plan stored meanwhile, which already holds the edit.
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_partial(
     tx: Sender<WorkerMsg>,
     session: Arc<Session>,
+    skeleton: Option<Arc<engine::skeleton::Skeleton>>,
     req: BatchRequest,
     changed: Vec<(String, Option<toml::Table>)>,
     seq: u64,
@@ -345,7 +348,13 @@ pub fn spawn_partial(
         // A panic is this partial's failure: the full plan behind it reports for itself.
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             session
-                .replan_sets(&req, &changed, &rep, &CancelToken::default())
+                .replan_sets_on(
+                    skeleton.as_deref(),
+                    &req,
+                    &changed,
+                    &rep,
+                    &CancelToken::default(),
+                )
                 .map(|p| {
                     let view = PlanView::build(&p.plan, &events.take(), &session, &root);
                     (view, p.scope)

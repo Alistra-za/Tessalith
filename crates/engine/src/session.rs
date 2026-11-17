@@ -457,13 +457,27 @@ impl Session {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<PartialPlan, Partial> {
+        self.replan_sets_on(self.skeleton().as_deref(), req, changed, rep, cancel)
+    }
+
+    /// `replan_sets` on `skeleton`, which the caller read from `Self::skeleton` when the edit was made. A partial that
+    /// reads the skeleton only when its thread starts can find the one its own edit's full plan stored meanwhile, and
+    /// then sees no change to plan in full for.
+    pub fn replan_sets_on(
+        &self,
+        skeleton: Option<&Skeleton>,
+        req: &BatchRequest,
+        changed: &[(String, Option<toml::Table>)],
+        rep: &Reporter,
+        cancel: &CancelToken,
+    ) -> Result<PartialPlan, Partial> {
         use crate::skeleton::{CANCELLED, DERIVE, WRITER_CLASH};
         if req.derive.is_some() {
             return Err(Partial::NeedsFull(DERIVE));
         }
         let sig = req.sig_without_files();
-        let (skel, hit) = Skeleton::patch_sig(self.skeleton().as_deref(), sig, changed)
-            .map_err(|e| Partial::NeedsFull(e.0))?;
+        let (skel, hit) =
+            Skeleton::patch_sig(skeleton, sig, changed).map_err(|e| Partial::NeedsFull(e.0))?;
         let scope = skel.scope(&hit);
         if scope.iter().any(|k| skel.clash_sets.contains(k)) {
             return Err(Partial::NeedsFull(WRITER_CLASH));
