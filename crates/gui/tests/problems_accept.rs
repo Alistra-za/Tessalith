@@ -427,7 +427,9 @@ fn choose_preset_opens_the_preset_list_and_a_pick_closes_it() {
     image::ImageBuffer::from_fn(16, 16, |_, _| image::Rgb([128u8, 128, 255]))
         .save(p)
         .unwrap();
-    std::fs::write(root.join("sdc.toml"), "preset = \"ghost\"\n").unwrap();
+    // The `[files]` entry is what must survive the pick, so a blanked document fails the end check.
+    const KEPT: &str = "[files.\"a/rock_n.png\"]\nsubtype = \"normal\"\n";
+    std::fs::write(root.join("sdc.toml"), format!("preset = \"ghost\"\n{KEPT}")).unwrap();
     let mut m = opened_as_the_app(root, d.path().join("export"));
     m.toggle_tab(sdc_gui::model::bottom::BottomTab::Problems);
     let mut h = harness(m);
@@ -453,4 +455,7 @@ fn choose_preset_opens_the_preset_list_and_a_pick_closes_it() {
     assert_eq!(h.state().project_preset(), None, "the default was picked");
     let text = h.state().project.as_ref().unwrap().text();
     assert!(!text.contains("ghost"), "sdc.toml's preset changed: {text}");
+    // The preset key itself is gone, and the rest of the document is as it was.
+    let doc: toml::Table = text.parse().unwrap();
+    assert_eq!(doc, KEPT.parse::<toml::Table>().unwrap(), "{text}");
 }

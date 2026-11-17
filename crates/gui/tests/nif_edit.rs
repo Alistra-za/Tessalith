@@ -2662,7 +2662,8 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
     }
     for verb in ["Undo", "Redo"] {
         let l = header_button(&h, verb).accesskit_node().label().unwrap();
-        assert!(l.starts_with(&format!("{verb} (NIF edit history)")), "{l}");
+        // No NIF edit yet, so no step follows the history's name.
+        assert_eq!(l, format!("{verb} (NIF edit history)"));
     }
     // Meshes UI T3: the footer sits under the tabs, inside the panel, with its blocked reason; Note GD2: its button
     // is Review…, not Export NIF.

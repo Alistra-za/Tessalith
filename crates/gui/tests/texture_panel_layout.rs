@@ -527,10 +527,15 @@ fn a_linked_control_keeps_its_label_under_a_hover() {
             .count(),
         1
     );
-    assert_eq!(
-        h.query_all_by_role_and_label(Role::ComboBox, HOVER).count(),
-        0,
-        "no combo is named by the hover"
+    // Any combo whose name holds the hover's key word, so a reworded hover cannot slip past.
+    let named_by_hover: Vec<String> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| l.contains("anti-shimmer"))
+        .collect();
+    assert!(
+        named_by_hover.is_empty(),
+        "no combo is named by the hover: {named_by_hover:?}"
     );
 }
 
