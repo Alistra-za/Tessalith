@@ -81,6 +81,14 @@ pub(super) fn paint_lock(painter: &egui::Painter, c: egui::Pos2, color: egui::Co
     painter.rect_filled(body, 1.5, color);
 }
 
+/// A `path_picker::cached` key: a plain hash of `v`. Not `Id::unique(v).value()`: in a debug build egui 0.37 keeps the
+/// source of every new `Id` in a map it never clears (`egui-0.37.0\src\id.rs`, `mod id_source`), so a key per typed
+/// prefix would add an entry per keystroke.
+fn cache_key(v: impl std::hash::Hash) -> u64 {
+    use std::hash::{BuildHasher, BuildHasherDefault, DefaultHasher};
+    BuildHasherDefault::<DefaultHasher>::default().hash_one(v)
+}
+
 /// The box's text edit id for set `set_id` (tests read its cursor through `TextEdit::load_state`).
 pub fn edit_id(set_id: &str) -> egui::Id {
     egui::Id::unique(("input-name", set_id)).with("edit")
@@ -752,7 +760,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                 let full = ui.data(|d| d.get_temp::<bool>(full_id)).unwrap_or(false);
                 let cut = if full { 0 } else { segment_start(&text) };
                 let pre = text[..cut].replace('\\', "/");
-                let under_key = (key.0, egui::Id::unique((key.1, salt, &pre)).value());
+                let under_key = (key.0, cache_key((key.1, salt, &pre)));
                 let under = path_picker::cached(ui, "input-name-under", under_key, || {
                     paths
                         .iter()
@@ -781,7 +789,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             } else {
                 let what = if all { "any slot".to_string() } else { format!("slot {slot}") };
                 ui.label(egui::RichText::new(format!("Textures used in {what}")).strong());
-                let list_key = (key.0, egui::Id::unique((key.1, slot, all)).value());
+                let list_key = (key.0, cache_key((key.1, slot, all)));
                 let list = path_picker::cached(ui, "input-name-slot", list_key, || {
                     let mut l = model.known_textures((!all).then_some(slot - 1));
                     // AO8: PGPatcher's own outputs are never a match.
