@@ -4,9 +4,23 @@ For anyone filling a material set's slots, wiring packed channels, or pointing a
 
 ## The set editor
 
-Select a set and the centre column shows its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a set with no PGPatcher JSON) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Advanced skin](PBR-Landscape.md#advanced-skin), [PBR Landscape](PBR-Landscape.md)). **Also export** holds the Vanilla and CM export settings: [Also export tab](#also-export-tab).
+Select a set and the centre column shows whether it is ready ([below](#is-the-set-ready)), its heading row (the input name box, [Bulk editing and renaming](GUI-Bulk-and-Rename.md#input-name-box); the **Match** box on a TruePBR set; **2D | 3D**, see [Previews](Previews.md)), then the slot rows, then two tabs. **Material** (**Set** on a set with no PGPatcher JSON) holds the PGPatcher settings ([PGPatcher settings and the JSON](GUI-PGPatcher-JSON.md#whats-on-the-material-tab)) or a material card ([Advanced skin](PBR-Landscape.md#advanced-skin), [PBR Landscape](PBR-Landscape.md)). **Also export** holds the Vanilla and CM export settings: [Also export tab](#also-export-tab).
 
 ![The set editor.](../img/gui/GUI-Set-Editor/set-editor.png)
+
+## Is the set ready?
+
+The editor's first line answers it, and stays in sight above the slot rows while you scroll. What counts is on [Sets column](GUI-Sets-Column.md#reading-a-set-card). <!-- D:JO7 -->
+
+- "Ready: nothing in this set needs you." with a green dot.
+- "Not ready:" with an amber dot, up to three reasons as buttons, then "+k more in Problems" for the rest.
+- A red dot instead means the set blocks the export, as on its card. <!-- D:JO7 -->
+
+Click a reason to go to its fix:
+
+- **A missing map** reads "no {slot} (Assign…)". The editor switches to 2D if it shows 3D, scrolls to that slot row, outlines it for two seconds and puts the keyboard on its **Assign…**. <!-- D:JO7,JO8 -->
+- **Any other reason** opens Problems on the set's rows, scrolled to that row, with the keyboard on its fix or **Mark as intended**. A hidden kind shows again. <!-- D:JO7 -->
+- **"+k more in Problems"** opens Problems on the set's rows and shows the hidden kinds among them again. <!-- D:JO7 -->
 
 ## Slot rows
 

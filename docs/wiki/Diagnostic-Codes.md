@@ -38,7 +38,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
 | `CHAN-NOT-GRAY` | warning | A grayscale sub-type's or raw map's R, G and B differ by more than 4/255 under the default `r` or `luma`; only the channel `channels.grayscale_source` picks is kept. A `g`, `b` or `a` pick is yours, so it's reported only when that channel holds one value (an `a` pick on a source with no alpha reads 255). The message names the pick and, when the picked channel is flat while another varies, suggests the first varying one. | Pick the channel or the sub-type. |
-| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. |
+| `CHAN-NORMAL-LENGTH` | warning | A normal source is far from unit length, or has no Z. | **Rebuild Z** on its Problems row (sets `channels.reconstruct_z`), or check the sub-type. On a file already exported, the row then waits as a queued note until you export again ([Problems](GUI-Problems.md#rows-and-their-fixes)). |
 
 ## Format and tag
 
@@ -154,7 +154,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `GRASS-SHAPE` | error | A `complex_grass` source isn't a power-of-two 1:2 image. | Supply e.g. 2048x4096. |
 | `GRASS-TOP-OPAQUE` | warning | The top half is fully opaque: no cutout. | Check the alpha. |
 | `GRASS-NORMALS` | warning | Under 99% of the bottom half is unit-length normals. | Check the bottom half is a normal map. |
-| `GRASS-DETECT-SOURCE` | warning | The source's bottom-left texel already fails Community Shaders' detection test. | Fix the corner texel. |
+| `GRASS-DETECT-SOURCE` | warning | A complex-grass source's bottom-left normal isn't unit length, so Community Shaders' detection test fails on the source. Tessalith renormalises the written file, so Community Shaders still reads it as grass, unless `mips.normal_base = keep`: then the file is written as it is and isn't read as grass. | Nothing, unless `mips.normal_base = keep`: then fix the corner texel. The Problems row has no button. <!-- D:JO15 --> |
 | `PBR-GRASS-DETECT` | warning | A PBR grass albedo's bottom-left texel looks like a complex-grass normal, so Community Shaders' grass shadow pass would read it as complex grass and shadows won't match. | Change that texel. |
 
 ## Also export

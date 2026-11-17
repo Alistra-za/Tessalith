@@ -1,10 +1,10 @@
 # Problems
 
-For anyone getting a folder ready to export: the bottom panel's **Problems** tab lists one row per thing that needs you, each with its fix as a button. What a code means is in [Diagnostic codes](Diagnostic-Codes.md).
+For anyone getting a folder ready to export: the bottom panel's **Problems** tab lists one row per thing that needs you, each with its fix as a button, and keeps what Tessalith did on its own under **Notes**. What a code means is in [Diagnostic codes](Diagnostic-Codes.md).
 
 ## Reading a row
 
-Rows come blockers first, then undecided textures, then warnings, then checks and info rows.
+Rows come blockers first, then undecided textures, then warnings, then checks. Notes that have a button come last ([Problems and Notes](#problems-and-notes)). <!-- D:JO3 -->
 
 ![The Problems tab.](../img/gui/GUI-Problems/problems-tab.png)
 
@@ -12,10 +12,21 @@ Rows come blockers first, then undecided textures, then warnings, then checks an
 |---|---|
 | Red | **Blocker**: stops the export. Fix it or remove the texture. |
 | Amber | **Warning** (the export goes ahead) or a decision you owe. |
-| Grey | **Check**, a hint from an artist check ([Texture types](Texture-Types.md#artist-checks)): a map that will probably look wrong in game. It never blocks and never changes "ready". Or an info row. |
+| Grey | **Check**, a hint from an artist check ([Texture types](Texture-Types.md#artist-checks)): a map that will probably look wrong in game. It never blocks and never changes "ready". |
+| Grey, a note | **Info**: something Tessalith did for you, and why the output is fine. **Intended**: a row you marked as intended. |
+| Green, a note | **Queued**: a fix that waits for the next export. <!-- D:JO9 --> |
 | Green, on a tile or card | Nothing to decide. |
 
-A row names where it is (a texture, set or file you can click; "Project" when it belongs to no file) and says the action in words. Hover it for the engine's message and code (`LOSS-ALPHA-DATA`), which is what Troubleshooting uses.
+A row names where it is (a texture, set or file you can click; "Project" when it belongs to no file) and says the action in words. Hover it for the engine's message and code (`LOSS-ALPHA-DATA`), which is what Troubleshooting uses. Its buttons sit right after the sentence: the fix, a second fix if it has one, **Mark as intended**, then **Go to set** on a set row. <!-- D:JO10,JO13 -->
+
+## Problems and Notes
+
+The tab counts the two apart: `Problems (2) · Notes (67)` is 2 rows that need you and 67 that don't. <!-- D:JO3 -->
+
+- **A problem** is a row about an output that may be wrong or a file that isn't written. A set with one isn't ready ([what Ready means](GUI-Sets-Column.md#reading-a-set-card)). Check rows count here too, but never against Ready. <!-- D:JO1,JO5 -->
+- **A note** needs nothing from you: Tessalith used a default and the row says why that's fine (no metallic map, so the surface reads as not metal), you marked the row as intended, or a fix waits for the next export. Notes never count against Ready. <!-- D:JO1,JO2 -->
+- **Where notes show:** the list shows the problems, then the notes that have a button. The **Notes (67)** pill lists every note, or the set's notes while a set filter is on. <!-- D:JO3 -->
+- **Nothing left:** with no row at all the tab reads `Problems`. With only notes it reads `Problems (0) · Notes (67)`, and the list's first line reads "No problems. Notes (67) lists what Tessalith did for you." <!-- D:JO3 -->
 
 ## Rows and their fixes
 
@@ -29,10 +40,15 @@ A row you must act on has its fix as a button.
 | *Undecided: This type isn't available in this mode…* | **Set type…**, or change the mode in **Settings…**. A type with a fallback has **Acknowledge** instead: [Sub-types](Texture-Types.md#sub-types-what-each-file-becomes). <!-- D:JF3 --> |
 | *Undecided: not a cube source (…)* | **Set type…**: the only answer is a different sub-type. |
 | *Alpha: … — confirm* | The **Alpha type** dropdown and **Confirm**: [Deciding](GUI-Texture-Panel.md#deciding). |
-| Warnings on a set | **Go to set**. They never hold back Export or open Review. |
+| Warnings on a set | **Go to set** ([below](#go-to-set)). They never hold back Export or open Review. |
 | A file's export warnings, after an export | Click the file. |
-| Info rows (things Tessalith changed for you) | **Undo this change** while that step is still the last one. <!-- D:FC3 --> |
-| `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. |
+| A note about a change Tessalith made for you | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
+| `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. On a file you already exported the row then reads *Rebuild Z is on for this file: export again to rewrite it*, a queued note with no button, until the next export. <!-- D:JO9 --> |
+| `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
+| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The removed file goes to the first set that shares it, as its own, else to *no set* ([Textures in no set](GUI-Sets-Column.md#textures-in-no-set)). <!-- D:JO15,JN5 --> |
+| `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
+| *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
+| *Parallax is on but the source has no alpha* | **Turn parallax off**, which writes `alpha.parallax = false`. <!-- D:JO15 --> |
 | A PGPatcher feature clash | **Turn off {feature}** for each of the two; neither is the default. <!-- D:FN5 --> |
 | *sdc.toml is read-only* (or `sdc-project.toml`) | **Clear read-only flag**, on that file only. <!-- D:FC10 --> |
 | *Looks like complex grass, but is not tagged as grass* | **Tag as grass**, which writes `subtype = "complex_grass"`. <!-- D:FC10 --> |
@@ -44,7 +60,25 @@ A row you must act on has its fix as a button.
 | *Preset {id} was skipped: it clashes with {other} on aliases* | **Remove aliases from {id}**: [Presets and targets](Presets-and-Targets.md#checking-and-installing). |
 | *{n} saved settings name no file in this mode ({mode})* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
-Info rows count in the tab's number but never against "ready".
+**Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**, **Clear read-only flag** and **Remove aliases from {id}** run on a mouse click only. Enter and Space do nothing on them, so a key press never takes a file out of a set or switches a feature off. <!-- D:JO16 -->
+
+### Mark as intended
+
+A warning you checked and want to keep as it is (a `_flow` map you made small on purpose) needs no fix:
+
+1. Click **Mark as intended** on its row. The row moves to Notes with a grey dot and stops counting against Ready.
+2. To take it back, click the **Notes (n)** pill, then **Undo mark** on the row.
+
+Each click is one undo step. <!-- D:JO4 -->
+
+- **Where it's kept:** `[project] intended` in `sdc-project.toml`, by the row's code, where it is and its sentence. Renaming a set keeps its marks; deleting the set drops them. When the sentence changes (another file name, another number), the row shows again. <!-- D:JO4 -->
+- **Warnings and checks only:** blockers, questions and a file that failed validation in the last export have no mark. Fix those, or export again. <!-- D:JO4 -->
+- **Greyed** with no project open and while `sdc-project.toml` is read-only; the hover says why. <!-- D:JO4 -->
+- **No mark for a whole kind at once:** hide the kind instead ([Hiding kinds of row](#hiding-kinds-of-row)). <!-- D:JO4 -->
+
+### Go to set
+
+**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md). When the row is about one slot or file (a missing map, a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
 
 ### Unmatched [files] entries
 
@@ -76,4 +110,11 @@ When a plan settles, every sub-type taken from a High-confidence suggestion (inc
 
 Click a row's subject to select it in the Textures view. Arriving from a count (**N undecided**, a set's **⚠** badge) opens the list narrowed, with a chip to clear it. The **Checks** pill narrows to check rows.
 
-**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden. A hidden row still counts in the tab's number and in the ready counts.
+## Hiding kinds of row
+
+**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden, and neither can a queued note. Hiding only changes what the list shows: a hidden row still counts for Ready. <!-- D:JO6,HC4 -->
+
+- **The tab** counts hidden problem rows apart: `Problems (12 · 60 hidden)`. A hidden note counts nowhere. <!-- D:JO6 -->
+- **The list's first line** says what is hidden, with the project's numbers: "2 kinds hidden in this project (60 rows). Hidden rows still count for Ready." <!-- D:JO6 -->
+- **Kinds ▾ (n hidden)** counts the rows this list hides, notes included. <!-- D:JO6 -->
+- **Showing them again:** tick the kind again in **Kinds ▾**, or click "+k more in Problems" on a set's status line, which shows the hidden kinds of that set's rows again ([Set editor](GUI-Set-Editor.md#is-the-set-ready)).
