@@ -310,8 +310,12 @@ impl Problem {
         (!all.is_empty()).then(|| all.join(", "))
     }
 
-    /// What the row shows (Note FB8): the code's action sentence, else the engine's text with any code taken out.
+    /// What the row shows (Note FB8): the code's action sentence, else the engine's text with any code taken out. A
+    /// queued row (review E25) says what is queued, not the code's action.
     pub fn shown(&self) -> std::borrow::Cow<'_, str> {
+        if self.level == Level::Queued {
+            return self.text.as_str().into();
+        }
         code_text::shown_for(self.code, &self.text)
     }
 
@@ -1011,12 +1015,22 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     Some(_) => Level::Check,
                     None => Level::Warning,
                 };
+                let at = At::File(r.job_key.clone());
+                // Review E25: with Rebuild Z now on, the file on disk is still short until the next export rewrites
+                // it, so the row is a queued note with no button (the engine never raises it with Rebuild Z on).
+                let rebuilt = live
+                    .and_then(|i| i.job.as_ref())
+                    .is_some_and(|j| j.profile.channels.reconstruct_z);
+                if w.code == Code::ChanNormalLength && rebuilt {
+                    let text =
+                        "Rebuild Z is on for this file: export again to rewrite it".to_string();
+                    out.push(row(Level::Queued, at, text, Some(w.code)));
+                    continue;
+                }
                 let fix = match w.code {
-                    // Note FC3 (DP7d): after Rebuild Z the file on disk is still short; the row keeps the button.
                     Code::ChanNormalLength => live.map(|i| Fix::RebuildZ(i.key.clone())),
                     _ => None,
                 };
-                let at = At::File(r.job_key.clone());
                 // Review E2: a note from the last export gets the same row as a live one.
                 if let Some(p) = note_row(&at, w) {
                     out.push(p);

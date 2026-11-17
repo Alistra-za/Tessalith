@@ -452,25 +452,24 @@ fn an_exported_short_normal_still_shows_one_z_row() {
     h.get_by_label(sdc_gui::ui::problems::REBUILD_Z).click();
     idle(&mut h);
     assert!(!z(h.state()).contains(&At::Texture("landscape/x_n.png".into())));
-    // Note FC3 (supersedes DP7d's "no button"): the file on disk is still short, so the last export's row comes back
-    // and keeps Rebuild Z, off with the reason until the next export rewrites the file.
+    // Review E25: the file on disk is still short, so the last export's row comes back as a queued note with no
+    // button until the next export rewrites the file.
     let row = problems(h.state())
         .iter()
         .find(|p| p.code == Some(Code::ChanNormalLength))
         .cloned()
         .expect("the last export's row");
     assert!(matches!(row.at, At::File(_)), "{:?}", row.at);
+    assert_eq!(row.level, sdc_gui::model::bottom::Level::Queued);
+    assert_eq!(row.fix, None);
     assert_eq!(
-        row.fix,
-        Some(sdc_gui::model::bottom::Fix::RebuildZ(
-            "landscape/x_n.png".into()
-        ))
+        row.text,
+        "Rebuild Z is on for this file: export again to rewrite it"
     );
     h.state_mut().poll();
     h.state_mut().invalidate_views();
     h.run();
-    let b = h.get_by_label(sdc_gui::ui::problems::REBUILD_Z);
-    assert!(b.accesskit_node().is_disabled(), "already on");
+    assert!(h.query_by_label(sdc_gui::ui::problems::REBUILD_Z).is_none());
 }
 
 #[test]

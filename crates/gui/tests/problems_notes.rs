@@ -3523,6 +3523,133 @@ fn the_pills_and_the_card_say_what_ready_means() {
     h.get_by_label(&format!("Only sets that are ready. {READY_MEANS}"));
 }
 
+/// `bottom_panel.rs::short_normal_model`, copied: a mod folder with one short normal (decodes to length 0.3, R != G)
+/// and a model opened on it.
+fn short_normal_model(dir: &std::path::Path, toml: Option<&str>) -> AppModel {
+    let root = mod_folder(dir);
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([153u8, 140, 153]))
+        .save(root.join("landscape/x_n.png"))
+        .unwrap();
+    if let Some(t) = toml {
+        std::fs::write(root.join("sdc.toml"), t).unwrap();
+    }
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(root);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    choose_export(&mut m, dir.join("export"));
+    m.open_problems(None);
+    m
+}
+
+/// `short_normal_model` with every file decided, x_n.png a DirectX normal without Rebuild Z, and exported: its
+/// exported file is short, so the export's row carries CHAN-NORMAL-LENGTH.
+fn exported_short_normal(dir: &std::path::Path) -> AppModel {
+    let mut m = short_normal_model(dir, None);
+    decide_all(&mut m);
+    m.decide(
+        "landscape/x_n.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
+    );
+    m.decide(
+        "landscape/x_n.png",
+        sdc_gui::model::Answer::Green(engine::config::GreenConvention::Directx),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    m
+}
+
+const QUEUED_Z: &str = "Rebuild Z is on for this file: export again to rewrite it";
+
+/// The last export's CHAN-NORMAL-LENGTH row of x_n.png (an `At::File` row).
+fn exported_z_row(m: &AppModel) -> Option<sdc_gui::model::bottom::Problem> {
+    use sdc_gui::model::bottom::{problems, At};
+    problems(m)
+        .iter()
+        .find(|p| {
+            matches!(p.at, At::File(_)) && p.code == Some(engine::codes::Code::ChanNormalLength)
+        })
+        .cloned()
+}
+
+/// Review E25 acceptance: the row text changes after the press.
+#[test]
+fn after_rebuild_z_the_exported_row_is_a_queued_note() {
+    use sdc_gui::model::bottom::{set_reasons, Level, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = exported_short_normal(d.path());
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    // The click lands on the next frame: run, wait for the plan it starts, then draw its result.
+    click_and_settle(&mut h, sdc_gui::ui::problems::REBUILD_Z);
+    let r = exported_z_row(h.state()).expect("the last export's row");
+    assert_eq!(r.level, Level::Queued);
+    assert_eq!(r.text, QUEUED_Z);
+    assert!(r.is_note() && r.fix.is_none() && r.second_fix.is_none() && r.mark.is_none());
+    // The queued note is no reason on the set editor's status line (a File row never is one): x_n.png's set reads
+    // "Not ready: no Diffuse (Assign…)", from its missing diffuse alone.
+    let v = sdc_gui::model::sets::set_views(h.state())
+        .into_iter()
+        .find(|v| v.members.iter().any(|k| k == "landscape/x_n.png"))
+        .expect("x_n.png is in a set");
+    let reasons = set_reasons(h.state(), &v.key);
+    let texts: Vec<&str> = reasons.iter().map(|r| r.text.as_str()).collect();
+    assert_eq!(texts, ["no Diffuse (Assign…)"]);
+    h.state_mut().open_problems(Some(ProblemsFilter::Notes));
+    h.run();
+    h.get_by_label("queued");
+    // Exact: the row's own name ("<file>: <sentence>", Note FB9) also contains the sentence.
+    h.get_by_label(QUEUED_Z);
+    assert!(h.query_by_label(sdc_gui::ui::problems::REBUILD_Z).is_none());
+}
+
+/// Review E25: without Rebuild Z on, the last export's short normal stays a warning with the Rebuild Z fix (the live
+/// item's warning is cleared so the File row is not dropped as its copy, Note DP4).
+#[test]
+fn an_exported_short_normal_without_rebuild_z_stays_a_warning() {
+    use sdc_gui::model::bottom::{Fix, Level};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = exported_short_normal(d.path());
+    m.items
+        .iter_mut()
+        .find(|i| i.key == "landscape/x_n.png")
+        .unwrap()
+        .warnings
+        .clear();
+    m.invalidate_views();
+    let r = exported_z_row(&m).expect("the last export's row");
+    assert_eq!(r.level, Level::Warning);
+    assert_eq!(r.fix, Some(Fix::RebuildZ("landscape/x_n.png".into())));
+}
+
+/// Controller ruling: a queued note is a reminder that goes with the next export, so a hidden kind never hides it
+/// (pins `can_hide`, which lets only Warning and Info rows hide).
+#[test]
+fn a_hidden_kind_never_hides_the_queued_z_note() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{is_hidden, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = exported_short_normal(d.path());
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, sdc_gui::ui::problems::REBUILD_Z);
+    // Kinds lists no CHAN-NORMAL-LENGTH once the only row is queued, so the kind is hidden as an earlier choice would.
+    h.state_mut().set_kind_hidden(Code::ChanNormalLength, true);
+    let r = exported_z_row(h.state()).expect("the last export's row");
+    assert!(!is_hidden(&r, &h.state().hidden_kinds()));
+    h.state_mut().open_problems(Some(ProblemsFilter::Notes));
+    h.run();
+    h.get_by_label(QUEUED_Z);
+}
+
 /// Review fix 5: the app reads the OS value at start.
 #[test]
 fn restore_ctx_reads_the_os_motion_setting() {
