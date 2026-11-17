@@ -123,15 +123,22 @@ fn in_centre(h: &Harness<'static, AppModel>, row: &str) -> egui::Rect {
 /// The pick starts a re-plan, so this draws only the one frame that takes the click: the caller waits for the plan
 /// (`wait_idle`) before it runs to idle. A `run()` here would race the worker, because on egui 0.37 each new widget
 /// the plan's result draws asks for one more frame (`Ui::widget_style`, egui `theme/mod.rs`), and the step count
-/// would depend on when the result lands.
+/// would depend on when the result lands. The pick must land in that one frame: its undo step is written at once,
+/// whatever the worker does.
 fn pick_in(h: &mut Harness<'static, AppModel>, row: &str, pick: &str) {
     in_centre(h, row);
     h.get_by_role_and_label(Role::ComboBox, row).scroll_to_me();
     h.run();
     h.get_by_role_and_label(Role::ComboBox, row).click();
     h.run();
+    let before = h.state().undo_label().map(str::to_owned);
     h.get_by_label(pick).click();
     h.step();
+    let after = h.state().undo_label();
+    assert!(
+        after != before.as_deref() && after.is_some_and(|l| l.starts_with("Change ")),
+        "the {row} pick of {pick} wrote no \"Change …\" undo step in the one frame after its click: {after:?}"
+    );
 }
 
 /// Spec 9.1, Note JI3: each row moved out of the Advanced drawer writes the same `[files]` key the drawer row wrote,
