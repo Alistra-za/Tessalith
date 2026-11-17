@@ -1358,6 +1358,180 @@ fn a_borrowed_packed_rmaos_answers_the_missing_map_warning() {
     assert_eq!(needs_rows(&m, id, "_rmaos"), 0);
 }
 
+/// Note J?1 (B2-2): a borrow whose lender borrows that slot too follows it to the set that owns the file. The fill
+/// names that set, the engine bakes the borrower's own rmaos from its normal, and the slot answers "needs _n" as a
+/// direct borrow does (HH8, B1-5: rock01's normal is a `pbr_normal`).
+#[test]
+fn a_borrow_from_a_lender_that_borrows_the_slot_fills_from_the_source() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock02", 2, Some("landscape/leaf"));
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    let v = view(&views, id);
+    assert!(
+        matches!(
+            v.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
+        ),
+        "{:?} {:?}",
+        v.slots,
+        v.missing
+    );
+    assert!(v.missing.is_empty(), "{:?}", v.missing);
+    let borrowed = borrowed_normal(&m);
+    assert_eq!(
+        borrowed.get(id).map(String::as_str),
+        Some("landscape/rock01"),
+        "{borrowed:?}"
+    );
+    assert_eq!(m.request().unwrap().borrowed_normal, borrowed);
+    assert_eq!(missing_maps(&m, id), Vec::<String>::new());
+    assert_eq!(needs_rows(&m, id, "_n"), 0);
+    let rmaos02 = key_of(&m, "rock02_rmaos.png");
+    let j = m
+        .item(&rmaos02)
+        .and_then(|i| i.job.clone())
+        .expect("rock02_rmaos has a job");
+    let b = j.bake.as_ref().expect("the borrower's own rmaos bakes");
+    assert!(b.normal.ends_with("rock01_normal.png"), "{:?}", b.normal);
+}
+
+/// Note J?1 (B1-5, B1-6 carried over): a chain to a model-space normal fills the slot but keeps pbr's "needs _n"
+/// (a plain `normal` would answer it, B1-6, as `a_borrowed_vanilla_normal_answers_the_pbr_missing_normal` pins).
+#[test]
+fn a_chain_to_a_model_space_normal_keeps_the_missing_normal() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    m.set_shader(id, Some(engine::shader::Shader::Pbr));
+    m.decide("landscape/rock01_normal.png", Answer::Subtype(Subtype::Msn));
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock02", 2, Some("landscape/leaf"));
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    assert!(matches!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, .. }) if from == "landscape/rock01"
+    ));
+    assert!(
+        missing_maps(&m, id).contains(&"_n".to_string()),
+        "a model-space normal does not answer pbr's _n"
+    );
+    assert_eq!(needs_rows(&m, id, "_n"), 1);
+}
+
+/// Notes HH8, J?1 (B1-6 guard, a pin): the "any tangent-space normal" rule is only for a role that takes a tangent-space
+/// normal. `eye`'s `_n (model-space)` takes `msn` only, so a borrowed tangent-space normal keeps "needs" there. Fails
+/// if `borrow_answers` loses its `takes_normal &&`.
+#[test]
+fn a_borrowed_tangent_space_normal_keeps_the_eye_shaders_model_space_warning() {
+    use engine::config::Subtype;
+    use sdc_gui::model::Answer;
+    for st in [Subtype::Normal, Subtype::PbrNormal] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = rock02_opened(d.path(), false, false);
+        let id = "landscape/rock02";
+        m.set_shader(id, Some(engine::shader::Shader::Eye));
+        m.decide("landscape/rock01_normal.png", Answer::Subtype(st));
+        idle(&mut m);
+        let map = "_n (model-space)".to_string();
+        assert!(missing_maps(&m, id).contains(&map), "{st:?}: before");
+        let normal = key_of(&m, "rock01_normal.png");
+        assert_eq!(
+            m.drop_choice(&normal, id, DropChoice::Share),
+            DropOutcome::Joined
+        );
+        idle(&mut m);
+        assert!(matches!(
+            view(&set_views(&m), id).slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ));
+        assert!(
+            missing_maps(&m, id).contains(&map),
+            "{st:?}: a tangent-space normal does not answer eye's model-space _n"
+        );
+        assert_eq!(needs_rows(&m, id, &map), 1, "{st:?}");
+    }
+}
+
+/// Note J?1 (B2-2): a cycle fills nothing and reads "(it has none)"; a set that borrows from itself keeps its own
+/// file and is reported too. Nothing hangs.
+#[test]
+fn a_borrow_cycle_or_a_self_borrow_fills_nothing_and_is_reported() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/odd"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/leaf"));
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    for (id, from) in [
+        ("landscape/leaf", "landscape/odd"),
+        ("landscape/odd", "landscape/leaf"),
+        ("landscape/rock01", "landscape/rock01"),
+    ] {
+        let v = view(&views, id);
+        assert!(
+            v.missing.contains(&Missing::Borrow {
+                slot: 2,
+                from: from.into(),
+                empty: true
+            }),
+            "{id}: {:?}",
+            v.missing
+        );
+    }
+    for id in ["landscape/leaf", "landscape/odd"] {
+        assert!(
+            !view(&views, id).slots.contains_key(&SlotKind::Normal),
+            "{id}"
+        );
+    }
+    assert_eq!(
+        view(&views, "landscape/rock01")
+            .slots
+            .get(&SlotKind::Normal),
+        Some(&SlotFill::Own { item: normal })
+    );
+}
+
+/// Note J?1 (planner's call): a lender holding its own file and a borrow line for the same slot lends its own file,
+/// as a single hop did before the follow. Its own card shows the borrow.
+#[test]
+fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    let n02 = key_of(&m, "rock02_n.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    assert!(matches!(
+        view(&views, "landscape/rock01").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { item, .. }) if *item == n02
+    ));
+    assert!(matches!(
+        view(&views, "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock01" && *item == normal
+    ));
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).

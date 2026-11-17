@@ -920,9 +920,11 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             .find(|(id, _)| same_id(id, from))
             .map(|(_, s)| s.clone())
     };
+    let lender_borrow =
+        |id: &str, n: u8| entry_of(&entries, id).and_then(|e| e.borrow.get(&n).cloned());
     for v in &mut views {
         if let Some(e) = entry_of(&entries, &v.id) {
-            entry_view(m, v, e, own);
+            entry_view(m, v, e, own, lender_borrow);
         }
     }
     fill_from_records(m, &mut views, &entries, &own_slots);
@@ -1109,12 +1111,13 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
 }
 
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
-/// for no such set).
+/// for no such set); `lender_borrow` gives set `id`'s own `borrow.slot<n>` line (Note J?1: a chain is followed).
 fn entry_view(
     m: &AppModel,
     v: &mut SetView,
     e: &SetEntry,
     own: impl Fn(&str) -> Option<BTreeMap<SlotKind, SlotFill>>,
+    lender_borrow: impl Fn(&str, u8) -> Option<String>,
 ) {
     v.created = e.created;
     v.settings = e.settings.clone();
@@ -1138,28 +1141,40 @@ fn entry_view(
         .filter(|k| !v.members.contains(k))
         .collect();
     for (slot, from) in &e.borrow {
-        let borrow = |empty| Missing::Borrow {
-            slot: *slot,
-            from: from.clone(),
-            empty,
+        // Note J?1 (B2-2): follow a lender's own borrow line to the set that owns the file; own-first, so a lender with
+        // its own file and a borrow line lends its own, as one hop did.
+        let mut seen = vec![fold_id(&v.id)];
+        let mut cur = from.clone();
+        let hit = loop {
+            let folded = fold_id(&cur);
+            if seen.contains(&folded) {
+                break Err(true);
+            }
+            seen.push(folded);
+            let Some(src) = own(&cur) else {
+                break Err(cur != *from);
+            };
+            let found = src.into_iter().find_map(|(k, f)| match f {
+                SlotFill::Own { item } if k.slot_number() == Some(*slot) => Some((k, item)),
+                _ => None,
+            });
+            if let Some(found) = found {
+                break Ok(found);
+            }
+            match lender_borrow(&cur, *slot) {
+                Some(next) => cur = next,
+                None => break Err(true),
+            }
         };
-        let Some(src) = own(from) else {
-            v.missing.push(borrow(false));
-            continue;
-        };
-        let hit = src
-            .iter()
-            .find(|(k, f)| k.slot_number() == Some(*slot) && matches!(f, SlotFill::Own { .. }));
-        if let Some((kind, SlotFill::Own { item })) = hit {
-            v.slots.insert(
-                *kind,
-                SlotFill::Borrowed {
-                    from: from.clone(),
-                    item: item.clone(),
-                },
-            );
-        } else {
-            v.missing.push(borrow(true));
+        match hit {
+            Ok((kind, item)) => {
+                v.slots.insert(kind, SlotFill::Borrowed { from: cur, item });
+            }
+            Err(empty) => v.missing.push(Missing::Borrow {
+                slot: *slot,
+                from: from.clone(),
+                empty,
+            }),
         }
     }
     // Note HH8: a slot a resolved borrow fills answers the shader's missing-map warning when the borrowed file's type
@@ -1282,15 +1297,27 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         let v = views.iter().find(|v| same_id(&v.id, from))?;
         Some(set_of(&v.key).map_or_else(BTreeMap::new, |s| base_view(m, &root, s).slots))
     };
-    let borrowers: Vec<&str> = entries
-        .iter()
-        .filter(|e| {
-            e.borrow
-                .values()
-                .any(|f| scope_ids.iter().any(|s| same_id(s, f)))
-        })
-        .map(|e| e.id.as_str())
-        .collect();
+    let lender_borrow =
+        |id: &str, n: u8| entry_of(&entries, id).and_then(|e| e.borrow.get(&n).cloned());
+    // Note J?1: a chain's far end reads the scope set's files too, so every hop is rebuilt (pinned by
+    // fast_replan::views_after_a_partial_equal_a_fresh_build).
+    let mut borrowers: Vec<&str> = scope_ids.iter().map(String::as_str).collect();
+    loop {
+        let more: Vec<&str> = entries
+            .iter()
+            .filter(|e| !borrowers.iter().any(|b| same_id(b, &e.id)))
+            .filter(|e| {
+                e.borrow
+                    .values()
+                    .any(|f| borrowers.iter().any(|b| same_id(b, f)))
+            })
+            .map(|e| e.id.as_str())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        borrowers.extend(more);
+    }
     let affected: Vec<usize> = (0..views.len())
         .filter(|&i| {
             let v = &views[i];
@@ -1305,7 +1332,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             None => SetView::new(old.key.clone(), old.id.clone(), vec![]),
         };
         if let Some(e) = entry_of(&entries, &v.id) {
-            entry_view(m, &mut v, e, own);
+            entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
         rebuilt.push(v);
