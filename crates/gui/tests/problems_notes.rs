@@ -523,6 +523,14 @@ fn an_empty_notes_list_says_no_notes_and_its_pill_turns_it_off() {
     assert_eq!(h.state().bottom.filter, None);
 }
 
+/// A `SetsDoc` over `sdc-project.toml` holding `text`.
+fn doc_with(text: &str) -> (tempfile::TempDir, sdc_gui::sets_doc::SetsDoc) {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("sdc-project.toml"), text).unwrap();
+    let doc = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    (d, doc)
+}
+
 fn key(code: &str, subject: &str, sentence: &str) -> sdc_gui::sets_doc::IntendedKey {
     sdc_gui::sets_doc::IntendedKey {
         code: code.into(),
@@ -670,5 +678,120 @@ fn hand_written_and_stale_marks_survive_a_rewrite() {
     assert!(
         at("{ code = \"X\" }") < at("texture:gone.png"),
         "kept in place, stale mark kept"
+    );
+}
+
+/// A mark set as it already is makes no edit: no new revision, the same text.
+#[test]
+fn a_mark_set_as_it_already_is_is_no_edit() {
+    let (_d, mut doc) = doc_with("[project]\n");
+    let k = key("VAL-MIP-ERROR", "texture:a.png", "m");
+    let (rev, text) = (doc.rev(), doc.text());
+    doc.set_intended(&k, false);
+    assert_eq!((doc.rev(), doc.text()), (rev, text), "unmark with no key");
+    doc.set_intended(&k, true);
+    let (rev, text) = (doc.rev(), doc.text());
+    doc.set_intended(&k, true);
+    assert_eq!((doc.rev(), doc.text()), (rev, text), "mark twice");
+}
+
+#[test]
+fn a_read_only_document_takes_no_mark() {
+    let (_d, mut doc) = doc_with("[[sets]\nbroken");
+    assert!(doc.read_only());
+    assert!(!doc.intended_editable());
+    let text = doc.text();
+    doc.set_intended(&key("VAL-MIP-ERROR", "texture:a.png", "m"), true);
+    assert_eq!(doc.text(), text);
+    assert!(doc.intended().is_empty());
+}
+
+/// Review E2 fix round 1: an `intended` that is not an array is left as written, and `intended_editable` says so
+/// (Task 4 disables its button on it).
+#[test]
+fn an_intended_that_is_not_an_array_is_not_editable() {
+    let (_d, mut doc) = doc_with("[project]\nintended = \"x\"\n");
+    assert!(!doc.intended_editable());
+    let text = doc.text();
+    doc.set_intended(&key("VAL-MIP-ERROR", "texture:a.png", "m"), true);
+    assert_eq!(doc.text(), text);
+    assert!(doc_with("[project]\n").1.intended_editable(), "no key");
+    assert!(
+        doc_with("[project]\nintended = []\n").1.intended_editable(),
+        "an array"
+    );
+}
+
+const A: &str = "set:landscape/rock01";
+const B: &str = "set:landscape/rock02";
+const T: &str = "texture:landscape/rock01.png";
+
+fn three_marks() -> (tempfile::TempDir, sdc_gui::sets_doc::SetsDoc) {
+    let (d, mut doc) = doc_with("[project]\n");
+    for s in [A, B, T] {
+        doc.set_intended(&key("SHADER-MISSING-MAP", s, "s"), true);
+    }
+    (d, doc)
+}
+
+/// Deleting or renaming one set touches its own marks only; the others stay, in place.
+#[test]
+fn delete_and_rename_touch_only_that_sets_marks() {
+    let (_d, mut doc) = three_marks();
+    doc.delete_set("landscape/rock01", &[]);
+    assert_eq!(
+        doc.intended(),
+        vec![
+            key("SHADER-MISSING-MAP", B, "s"),
+            key("SHADER-MISSING-MAP", T, "s")
+        ]
+    );
+    let (_d, mut doc) = three_marks();
+    doc.rename_set("landscape/rock01", "landscape/rock07");
+    assert_eq!(
+        doc.intended(),
+        vec![
+            key("SHADER-MISSING-MAP", "set:landscape/rock07", "s"),
+            key("SHADER-MISSING-MAP", B, "s"),
+            key("SHADER-MISSING-MAP", T, "s")
+        ]
+    );
+}
+
+/// Set ids compare folded (Note BF): a mark stored with another case follows a rename and is found.
+#[test]
+fn a_set_mark_matches_its_id_in_any_case() {
+    let (_d, mut doc) = doc_with(
+        "[project]\nintended = [{ code = \"C\", subject = \"set:Landscape/Rock01\", sentence = \"s\" }]\n",
+    );
+    assert!(doc.intended_keys().contains(&key("C", A, "s")));
+    doc.rename_set("landscape/rock01", "landscape/rock05");
+    assert_eq!(doc.intended(), vec![key("C", "set:landscape/rock05", "s")]);
+}
+
+/// Taking the first mark off a one-line array leaves no space after `[`; a one-per-line array keeps its lines.
+#[test]
+fn removing_the_first_mark_leaves_a_tidy_array() {
+    let (_d, mut doc) = doc_with("[project]\n");
+    let (k1, k2) = (key("C1", T, "a"), key("C2", T, "b"));
+    doc.set_intended(&k1, true);
+    doc.set_intended(&k2, true);
+    doc.set_intended(&k1, false);
+    assert!(
+        doc.text().contains("intended = [{ code = \"C2\""),
+        "{}",
+        doc.text()
+    );
+    let (_d, mut doc) = doc_with(concat!(
+        "[project]\nintended = [\n",
+        "  { code = \"C1\", subject = \"texture:landscape/rock01.png\", sentence = \"a\" },\n",
+        "  { code = \"C2\", subject = \"texture:landscape/rock01.png\", sentence = \"b\" },\n",
+        "]\n",
+    ));
+    doc.set_intended(&k1, false);
+    assert!(
+        doc.text().contains("intended = [\n  { code = \"C2\""),
+        "{}",
+        doc.text()
     );
 }

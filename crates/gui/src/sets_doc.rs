@@ -173,6 +173,21 @@ fn fold_subject(subject: &str) -> String {
     }
 }
 
+/// After a removal: a first item that had followed `, ` on the same line drops that space (`[{ … }]`, not
+/// `[ { … }]`); one on its own line keeps its newline and indent.
+fn tidy_first(arr: &mut Array) {
+    if let Some(v) = arr.get_mut(0) {
+        let own_line = v
+            .decor()
+            .prefix()
+            .and_then(|p| p.as_str())
+            .is_some_and(|p| p.contains('\n'));
+        if !own_line {
+            v.decor_mut().set_prefix("");
+        }
+    }
+}
+
 fn folded(k: &IntendedKey) -> IntendedKey {
     IntendedKey {
         subject: fold_subject(&k.subject),
@@ -903,8 +918,16 @@ impl SetsDoc {
                 arr.push_formatted(v);
             } else if !on && had {
                 arr.retain(|v| !has(v));
+                tidy_first(arr);
             }
         });
+    }
+
+    /// Whether `set_intended` can write: false while read-only, or when `[project] intended` is there but is not an
+    /// array (a hand-written value the app leaves as written).
+    pub fn intended_editable(&self) -> bool {
+        let stored = self.f.doc.get("project").and_then(|p| p.get("intended"));
+        !self.read_only() && stored.is_none_or(|i| i.as_array().is_some())
     }
 
     /// `[project] intended` as stored. `None` when absent or not an array.
@@ -915,19 +938,10 @@ impl SetsDoc {
     /// Edit a clone of `[project] intended` (empty when absent) and write it back; an array left empty removes the
     /// key. A key that is there but not an array is left as written.
     fn edit_intended(&mut self, edit: impl FnOnce(&mut Array)) {
-        if self.read_only() {
+        if !self.intended_editable() {
             return;
         }
-        let present = self
-            .f
-            .doc
-            .get("project")
-            .is_some_and(|p| p.get("intended").is_some());
-        let mut arr = match self.intended_array() {
-            Some(a) => a.clone(),
-            None if present => return,
-            None => Array::new(),
-        };
+        let mut arr = self.intended_array().cloned().unwrap_or_default();
         edit(&mut arr);
         self.set_project("intended", (!arr.is_empty()).then_some(Value::Array(arr)));
     }
@@ -943,7 +957,10 @@ impl SetsDoc {
             return;
         }
         self.edit_intended(|arr| match to {
-            None => arr.retain(|v| !on_from(v)),
+            None => {
+                arr.retain(|v| !on_from(v));
+                tidy_first(arr);
+            }
             Some(to) => {
                 for v in arr.iter_mut().filter(|v| on_from(v)) {
                     if let Some(s) = v.as_inline_table_mut().and_then(|t| t.get_mut("subject")) {
@@ -1148,7 +1165,7 @@ impl SetsDoc {
     }
 
     /// Note HF1: drop set `id`'s entry and remove it from the order list; its `files` go to no set, so an automatic
-    /// set does not come back. An entry with no files just goes, and so do the set's intended marks.
+    /// set does not come back. An entry with no files just goes. The set's intended marks go too.
     pub fn delete_set(&mut self, id: &str, files: &[String]) {
         if self.read_only() {
             return;
