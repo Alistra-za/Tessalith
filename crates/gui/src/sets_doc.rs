@@ -1088,6 +1088,26 @@ impl SetsDoc {
         self.rename_in_groups(from, to);
     }
 
+    /// Note J?2 (B2-1): every entry whose `borrow.slot<slot>` names set `lender` now names `to`, a locked slot too (as
+    /// `rename_refs` rewrites borrows); the entry of `to` itself drops that borrow instead, because it owns the file now
+    /// (never a self-borrow). Other slots and other lenders stay. Returns the ids of the entries it changed, in file
+    /// order.
+    pub fn retarget_slot_borrows(&mut self, lender: &str, slot: u8, to: &str) -> Vec<String> {
+        let mut changed = vec![];
+        if self.read_only() {
+            return changed;
+        }
+        for e in self.parse_entries() {
+            if !e.borrow.get(&slot).is_some_and(|src| same_id(src, lender)) {
+                continue;
+            }
+            let own = same_id(&e.id, to);
+            self.set_borrow(&e.id, slot, (!own).then_some(to));
+            changed.push(e.id);
+        }
+        changed
+    }
+
     /// GUI tweaks G1: the automatic set `from` is now named `to` by the engine (its members were given new input
     /// names). The entry that applies to it follows: a renamed entry (`renamed_from = from`) gets
     /// `renamed_from = to`; an entry under the automatic id itself takes the new id, with the order list and other

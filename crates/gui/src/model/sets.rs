@@ -2346,6 +2346,26 @@ impl AppModel {
         lock_refusal(&v, slot)
     }
 
+    /// Note J?2 (B2-1): the slot `item` lends, as (its set's id, slot number `n`): a borrow of slot `n` from that set
+    /// resolves to `item`. That is, among the set's own fills (the map `own` gives `entry_view`: `base_view`'s slots,
+    /// before any borrow), `item` is the first `SlotFill::Own`, in `SlotKind` order, whose kind has slot number `n`:
+    /// the same rule as `entry_view`'s hit. `None` for a no-set texture, a second file of a kind, the second kind of
+    /// slot 3 or 7, a helper or packing source with no slot, or a slot with no number (Projected noise, Detail normal).
+    pub(crate) fn lent_slot(&self, item: &str) -> Option<(String, u8)> {
+        let v = self.set_of_item(item)?;
+        let s = self.sets.iter().find(|s| s.key == v.key)?;
+        let own = base_view(self, &self.sets_root(), s).slots;
+        let n = own
+            .iter()
+            .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
+            .and_then(|(k, _)| k.slot_number())?;
+        let first = own.into_iter().find_map(|(k, f)| match f {
+            SlotFill::Own { item } if k.slot_number() == Some(n) => Some(item),
+            _ => None,
+        })?;
+        (first == item).then_some((v.id, n))
+    }
+
     fn is_packed(&self, item: &str) -> bool {
         self.item(item).is_some_and(|i| i.kind == ItemKind::Packed)
     }
@@ -2678,9 +2698,15 @@ impl AppModel {
                 } else {
                     "Move into"
                 };
+                let lent = self.lent_slot(item);
                 self.edit_docs(&format!("{label} {id}"), None, true, move |_, s| {
                     clear_slot(s, &id, slot, &existing);
                     s.add_member(&id, &it);
+                    // Note J?2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do
+                    // for a rename).
+                    if let Some((l, n)) = &lent {
+                        s.retarget_slot_borrows(l, *n, &id);
+                    }
                 });
                 Ok(())
             }
@@ -2726,9 +2752,15 @@ impl AppModel {
             n += 1;
         }
         let (i, it) = (id.clone(), item.to_string());
+        let lent = self.lent_slot(item);
         self.edit_docs(&format!("New set {id}"), None, true, move |_, s| {
             s.create_set(&i);
             s.add_member(&i, &it);
+            // Note J?2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do for a
+            // rename).
+            if let Some((l, n)) = &lent {
+                s.retarget_slot_borrows(l, *n, &i);
+            }
         });
         self.note_new_set(&id);
         Ok(id)
@@ -3486,19 +3518,28 @@ impl AppModel {
             return Err(READ_ONLY.into());
         }
         let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
-        let moves: Vec<(String, SlotKind, Option<SlotFill>)> = fill_proposals(self, set)
+        // (item, slot, what fills that slot now, the slot the item lends).
+        let moves: Vec<_> = fill_proposals(self, set)
             .into_iter()
             .filter(|r| r.blocked.is_none() && ticked.contains(&r.item))
-            .map(|r| (r.item, r.slot, v.slots.get(&r.slot).cloned()))
+            .map(|r| {
+                let lent = self.lent_slot(&r.item);
+                (r.item, r.slot, v.slots.get(&r.slot).cloned(), lent)
+            })
             .collect();
         if moves.is_empty() {
             return Err("nothing to fill".into());
         }
         let (id, n) = (v.id.clone(), moves.len());
         self.edit_docs(&format!("Fill {id} from names"), None, true, move |_, s| {
-            for (item, slot, existing) in &moves {
+            for (item, slot, existing, lent) in &moves {
                 clear_slot(s, &id, Some(*slot), existing);
                 s.add_member(&id, item);
+                // Note J?2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do for
+                // a rename).
+                if let Some((l, n)) = lent {
+                    s.retarget_slot_borrows(l, *n, &id);
+                }
             }
         });
         Ok(n)

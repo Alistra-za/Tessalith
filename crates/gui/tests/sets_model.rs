@@ -1532,6 +1532,286 @@ fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
     ));
 }
 
+/// Note J?2: what `sdc-project.toml` says set `id` borrows for slot `n`.
+fn borrow_of(m: &sdc_gui::model::AppModel, id: &str, n: u8) -> Option<String> {
+    m.sets_doc
+        .as_ref()
+        .unwrap()
+        .entries()
+        .iter()
+        .find(|e| e.id == id)
+        .and_then(|e| e.borrow.get(&n).cloned())
+}
+
+/// Note J?2: runs `edit` and waits for the plan; checks that it made exactly one undo step and, for `locked =
+/// Some((id, n))`, that set `id` still locks slot `n` in `sdc-project.toml`. Returns the file's text from before the
+/// edit, for `undo_restores`.
+fn one_step(
+    m: &mut sdc_gui::model::AppModel,
+    locked: Option<(&str, u8)>,
+    edit: impl FnOnce(&mut sdc_gui::model::AppModel),
+) -> String {
+    let before = m.sets_doc.as_ref().unwrap().text();
+    let steps = m.history.undo.len();
+    edit(m);
+    idle(m);
+    assert_eq!(m.history.undo.len(), steps + 1, "one undo step");
+    if let Some((id, n)) = locked {
+        assert!(
+            m.sets_doc
+                .as_ref()
+                .unwrap()
+                .entries()
+                .iter()
+                .any(|e| e.id == id && e.lock.contains(&n)),
+            "{id} keeps its slot{n} lock"
+        );
+    }
+    before
+}
+
+/// Note J?2: one undo puts `sdc-project.toml` back to `before`, every set's line with it.
+fn undo_restores(m: &mut sdc_gui::model::AppModel, before: &str) {
+    m.undo();
+    idle(m);
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().text(),
+        before,
+        "one undo restores every entry"
+    );
+}
+
+/// Note J?2 (B2-1): moving a lent normal to another set rewrites every set sharing it, a locked slot too, in one
+/// undo step.
+#[test]
+fn moving_a_lent_normal_to_another_set_moves_its_borrowers_in_one_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_lock("landscape/leaf", 2, true);
+        s.set_borrow("landscape/odd", 2, Some("landscape/rock01"));
+    });
+    idle(&mut m);
+    let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
+        assert_eq!(
+            m.drop_choice(&normal, "landscape/rock02", DropChoice::Move),
+            DropOutcome::Joined
+        );
+    });
+    let views = set_views(&m);
+    for id in ["landscape/leaf", "landscape/odd"] {
+        assert_eq!(
+            borrow_of(&m, id, 2).as_deref(),
+            Some("landscape/rock02"),
+            "{id}"
+        );
+        assert!(
+            matches!(
+                view(&views, id).slots.get(&SlotKind::Normal),
+                Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock02" && *item == normal
+            ),
+            "{id}"
+        );
+    }
+    assert!(
+        view(&views, "landscape/leaf").locks.contains(&2),
+        "the lock stays"
+    );
+    undo_restores(&mut m, &before);
+}
+
+/// Note J?2 (B2-1): the set a lent file moves into owns it now, so it shares that slot from nobody.
+#[test]
+fn moving_a_lent_normal_into_its_borrower_leaves_no_self_borrow() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"))
+    });
+    assert_eq!(
+        m.drop_choice(&normal, id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice(&normal, id, DropChoice::Move),
+        DropOutcome::AskReplace {
+            existing: normal.clone()
+        }
+    );
+    m.drop_replace(&normal, id, DropChoice::Move).unwrap();
+    idle(&mut m);
+    assert_eq!(borrow_of(&m, id, 2), None);
+    assert_eq!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Normal),
+        Some(&SlotFill::Own {
+            item: normal.clone()
+        })
+    );
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2).as_deref(), Some(id));
+}
+
+/// Note J?2 (B2-1): a new set made from a lent file takes its borrowers, and Fill from names brings them back; each
+/// in one undo step, a locked borrower slot rewritten too.
+#[test]
+fn a_new_set_from_a_lent_file_and_fill_from_names_take_its_borrowers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let n02 = key_of(&m, "rock02_n.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock02"));
+        s.set_lock("landscape/leaf", 2, true);
+    });
+    idle(&mut m);
+    let mut id = String::new();
+    let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
+        id = m.drop_new_set(&n02).unwrap();
+    });
+    // `drop_new_set` names the set `auto_id` + "-2" when the automatic id is taken.
+    assert_eq!(id, "landscape/rock02-2");
+    assert_eq!(borrow_of(&m, "landscape/leaf", 2), Some(id.clone()));
+    undo_restores(&mut m, &before);
+    one_step(&mut m, None, |m| {
+        m.drop_new_set(&n02).unwrap();
+    });
+    let before = one_step(&mut m, Some(("landscape/leaf", 2)), |m| {
+        assert_eq!(
+            m.fill_from_names("landscape/rock02", std::slice::from_ref(&n02)),
+            Ok(1)
+        );
+    });
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/rock02")
+    );
+    assert!(matches!(
+        view(&set_views(&m), "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/rock02" && *item == n02
+    ));
+    undo_restores(&mut m, &before);
+}
+
+/// Notes HF4, HS13: renaming a lender rewrites the sets sharing from it (survey §3's test gap).
+#[test]
+fn renaming_a_lender_rewrites_its_borrowers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    idle(&mut m);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"));
+        s.set_lock("landscape/leaf", 2, true);
+    });
+    idle(&mut m);
+    m.rename_set("landscape/rock01", "landscape/boulder")
+        .unwrap();
+    idle(&mut m);
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 2).as_deref(),
+        Some("landscape/boulder")
+    );
+    assert!(matches!(
+        view(&set_views(&m), "landscape/leaf").slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/boulder" && *item == normal
+    ));
+}
+
+/// Note J?2: the slot-3 fixture (Tasks 2 and 5). rock01 gets `rock01_sk.png` (a skin `_sk`) and, with `lender_g`,
+/// `rock01_g.png` (a PBR emissive); leaf gets `leaf_g.png` (a PBR emissive) with `leaf_g`. All decided; grouped by
+/// name.
+fn slot3_opened(d: &std::path::Path, lender_g: bool, leaf_g: bool) -> sdc_gui::model::AppModel {
+    use engine::config::Subtype;
+    use image::{ImageBuffer, Rgb};
+    use sdc_gui::model::Answer;
+    let r = d.join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    let mut files = vec![("rock01_sk.png", Subtype::SkinSk)];
+    if lender_g {
+        files.push(("rock01_g.png", Subtype::PbrEmissive));
+    }
+    if leaf_g {
+        files.push(("leaf_g.png", Subtype::PbrEmissive));
+    }
+    for (n, _) in &files {
+        ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 30u8]))
+            .save(r.join(n))
+            .unwrap();
+    }
+    let mut m = pbr_opened(d);
+    for (n, st) in &files {
+        m.decide(&format!("landscape/{n}"), Answer::Subtype(*st));
+    }
+    idle(&mut m);
+    for (n, _) in &files {
+        let set = if n.starts_with("leaf") {
+            "landscape/leaf"
+        } else {
+            "landscape/rock01"
+        };
+        assert!(
+            view(&set_views(&m), set)
+                .members
+                .iter()
+                .any(|k| k.ends_with(n)),
+            "{n} is grouped into {set}"
+        );
+    }
+    m
+}
+
+/// The item set `id` resolves its slot-3 share to.
+fn slot3_share(m: &sdc_gui::model::AppModel, id: &str) -> String {
+    view(&set_views(m), id)
+        .slots
+        .iter()
+        .find_map(|(k, f)| match f {
+            SlotFill::Borrowed { item, .. } if k.slot_number() == Some(3) => Some(item.clone()),
+            _ => None,
+        })
+        .expect("shares slot 3")
+}
+
+/// Note J?2 (planner's call, lent by slot number): rock01 holds both kinds of slot 3 and lends one of them. Moving
+/// the other one out leaves leaf on rock01; moving the lent one out takes leaf with it.
+#[test]
+fn moving_the_lent_kind_of_a_two_kind_slot_takes_its_borrowers_and_the_other_does_not() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = slot3_opened(d.path(), true, false);
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 3, Some("landscape/rock01"))
+    });
+    idle(&mut m);
+    let lent = slot3_share(&m, "landscape/leaf");
+    let (g, sk) = (key_of(&m, "rock01_g.png"), key_of(&m, "rock01_sk.png"));
+    let other = if lent == g { sk } else { g };
+    assert_eq!(
+        m.drop_choice(&other, "landscape/odd", DropChoice::Move),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 3).as_deref(),
+        Some("landscape/rock01"),
+        "the file leaf does not read moved: leaf stays"
+    );
+    m.undo();
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice(&lent, "landscape/odd", DropChoice::Move),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert_eq!(
+        borrow_of(&m, "landscape/leaf", 3).as_deref(),
+        Some("landscape/odd"),
+        "the file leaf reads moved: leaf follows it"
+    );
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).

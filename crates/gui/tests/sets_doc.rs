@@ -104,6 +104,33 @@ fn create_rename_delete_and_order() {
     assert!(!b.created);
 }
 
+/// Note J?2 (B2-1): one slot's borrowers of one lender follow it to `to`, a locked slot too; `to` drops its own
+/// borrow of that slot; other slots, other lenders and the lock stay.
+#[test]
+fn retarget_slot_borrows_moves_one_slot_and_never_makes_a_self_borrow() {
+    let (_d, mut s) = doc(Some(
+        "[[sets]]\nid = \"a/one\"\nborrow = { slot2 = \"l/end\", slot6 = \"l/end\" }\nlock = [\"slot2\"]\n\n\
+         [[sets]]\nid = \"b/two\"\nborrow = { slot2 = \"L/End\" }\n\n\
+         [[sets]]\nid = \"c/three\"\nborrow = { slot2 = \"x/other\" }\n",
+    ));
+    let changed = s.retarget_slot_borrows("l/end", 2, "b/two");
+    assert_eq!(changed, ["a/one", "b/two"]);
+    let b = |s: &SetsDoc, id: &str, n: u8| {
+        s.entries()
+            .iter()
+            .find(|e| e.id == id)
+            .and_then(|e| e.borrow.get(&n).cloned())
+    };
+    assert_eq!(b(&s, "a/one", 2).as_deref(), Some("b/two"));
+    assert_eq!(b(&s, "a/one", 6).as_deref(), Some("l/end"));
+    assert_eq!(b(&s, "b/two", 2), None);
+    assert_eq!(b(&s, "c/three", 2).as_deref(), Some("x/other"));
+    assert!(s
+        .entries()
+        .iter()
+        .any(|e| e.id == "a/one" && e.lock.contains(&2)));
+}
+
 #[test]
 fn a_bad_file_is_read_only_and_never_written() {
     let (d, mut s) = doc(Some("[[sets]\nid = "));
