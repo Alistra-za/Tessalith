@@ -110,7 +110,7 @@ fn card_menu(h: &mut egui_kittest::Harness<'static, AppModel>, id: &str) {
     );
 }
 
-// No "Delete generated file ⏵": a submenu entry is named by its text alone (`look::menu_button_036`, Note J?4).
+// No "Delete generated file ⏵": a submenu entry is named by its text alone (`look::menu_button_036`, Note JL4).
 const ENTRIES: [&str; 5] = [
     "Generate from normal map…",
     "Regenerate…",

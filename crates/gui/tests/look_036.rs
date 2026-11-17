@@ -1,4 +1,4 @@
-//! Note J?2: egui 0.36.2's geometry where the doc shots showed a widget moving on egui 0.37. The numbers come from a
+//! Note JL2: egui 0.36.2's geometry where the doc shots showed a widget moving on egui 0.37. The numbers come from a
 //! probe that drew the same ui on egui 0.36.2 and 0.37.0 with the app's font and pinned spacing.
 mod support;
 use eframe::egui::{self, accesskit::Role};
@@ -94,7 +94,7 @@ fn texts(s: &egui::Shape, out: &mut Vec<(String, egui::Rect)>) {
 
 /// S5 of the egui 0.37 doc shots: a submenu entry ends in 0.36.2's "⏵" glyph (13 pt wide, on the label's text row,
 /// `egui-0.36.2 containers/menu.rs:347`), not 0.37's 14 pt painted triangle, which made the set card's menu 1 px
-/// wider and the arrow 2 px higher. Its accessible name stays the entry's text (J?4).
+/// wider and the arrow 2 px higher. Its accessible name stays the entry's text (JL4).
 #[test]
 fn a_submenu_entry_ends_in_036s_arrow_glyph() {
     let mut h = bare(egui::vec2(400.0, 300.0), |ui| {
