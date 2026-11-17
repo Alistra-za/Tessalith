@@ -647,7 +647,7 @@ mod tests {
         let kinds = ["singleline", "multiline"];
         let builders = kinds.map(|k| format!("TextEdit::{k}("));
         let shorthands = kinds.map(|k| format!(".text_edit_{k}("));
-        let (mut bare, mut through) = (vec![], 0);
+        let (mut bare, mut exempt, mut through) = (vec![], vec![], 0);
         for f in &src_rs_files() {
             let text = std::fs::read_to_string(f).unwrap();
             let line =
@@ -662,12 +662,15 @@ mod tests {
                     // A custom `.frame(..)` brings its own inner margin and egui ignores `.margin(..)` then
                     // (`R\egui-0.37.0\src\widgets\text_edit\builder.rs:693-695`; 0.36.2 `:713` alike). The
                     // input-name box is the one such site, so only `ui/input_name.rs` is exempt: a framed
-                    // TextEdit anywhere else must set the margin through its frame and be added here by name.
+                    // TextEdit anywhere else must set the margin through its frame and be added here by name. The
+                    // exemption is counted, so a second framed box there, or the box gone, fails below.
                     let own_frame = f.ends_with("ui/input_name.rs")
                         && calls.iter().any(|(name, _)| name == "frame");
-                    if margin.is_some_and(|(_, arg)| arg.contains("TEXT_EDIT_MARGIN")) || own_frame
-                    {
+                    if margin.is_some_and(|(_, arg)| arg.contains("TEXT_EDIT_MARGIN")) {
                         through += 1;
+                    } else if own_frame {
+                        through += 1;
+                        exempt.push(line(at));
                     } else {
                         bare.push(line(at));
                     }
@@ -677,6 +680,11 @@ mod tests {
         assert!(
             through >= 30,
             "the scan found {through} TextEdits with the margin"
+        );
+        assert_eq!(
+            exempt.len(),
+            1,
+            "the one framed TextEdit in ui/input_name.rs: {exempt:#?}"
         );
         assert!(
             bare.is_empty(),
