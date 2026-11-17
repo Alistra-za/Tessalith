@@ -1122,6 +1122,16 @@ fn entry_view(
             v.missing.push(borrow(true));
         }
     }
+    // Note HH8: a slot a resolved borrow fills answers the shader's missing-map warning, as an HG7 fill does. An
+    // unresolved borrow (a `Missing::Borrow`) fills nothing and keeps it.
+    let mut warnings = std::mem::take(&mut v.set_warnings);
+    warnings.retain(|w| {
+        let n = (w.code == Code::ShaderMissingMap)
+            .then(|| w.data["map"].as_str().and_then(map_slot))
+            .flatten();
+        !n.is_some_and(|n| v.borrows_slot(n))
+    });
+    v.set_warnings = warnings;
 }
 
 /// `derive_match_diffuse` of a texture path (`textures/a/b.dds`, any slashes, `.dds` optional).

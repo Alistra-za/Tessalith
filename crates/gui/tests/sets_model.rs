@@ -1028,6 +1028,194 @@ fn a_shared_normal_bakes_the_borrowers_own_rmaos() {
     );
 }
 
+/// `pbr_opened` with a second PBR set, `landscape/rock02`: its albedo, with its own `rock02_rmaos.png` when `rmaos`,
+/// and its own `rock02_n.png` (a PBR normal, DirectX green) when `normal`.
+fn rock02_opened(dir: &std::path::Path, rmaos: bool, normal: bool) -> sdc_gui::model::AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use image::{ImageBuffer, Rgb, Rgba};
+    use sdc_gui::model::Answer;
+    let r = dir.join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 60u8]))
+        .save(r.join("rock02.png"))
+        .unwrap();
+    if rmaos {
+        ImageBuffer::from_fn(64, 64, |x, _| Rgba([(x * 4) as u8, 0, 200, 255]))
+            .save(r.join("rock02_rmaos.png"))
+            .unwrap();
+    }
+    if normal {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+            .save(r.join("rock02_n.png"))
+            .unwrap();
+    }
+    let mut m = pbr_opened(dir);
+    m.decide("landscape/rock02.png", Answer::Subtype(Subtype::PbrAlbedo));
+    if rmaos {
+        // Asked for once the set has its own normal.
+        m.decide(
+            "landscape/rock02_rmaos.png",
+            Answer::Subtype(Subtype::Rmaos),
+        );
+    }
+    if normal {
+        m.decide(
+            "landscape/rock02_n.png",
+            Answer::Subtype(Subtype::PbrNormal),
+        );
+        m.decide(
+            "landscape/rock02_n.png",
+            Answer::Green(GreenConvention::Directx),
+        );
+    }
+    idle(&mut m);
+    m
+}
+
+/// The Problems rows of set `id` that say the shader needs `map`.
+fn needs_rows(m: &sdc_gui::model::AppModel, id: &str, map: &str) -> usize {
+    use sdc_gui::model::bottom::At;
+    sdc_gui::model::bottom::problems(m)
+        .iter()
+        .filter(|p| {
+            p.code == Some(engine::codes::Code::ShaderMissingMap)
+                && p.text.contains(&format!("needs {map};"))
+                && matches!(&p.at, At::Set { id: i, .. } if i == id)
+        })
+        .count()
+}
+
+/// The set's own part of the card's "⚠ n" (`sets_column`'s `rows` adds the members' warnings, which a shared normal
+/// also changes: the member `_rmaos` loses its `SET-MISSING-COMPANION`).
+fn set_badge(m: &sdc_gui::model::AppModel, id: &str) -> usize {
+    view(&set_views(m), id)
+        .set_warnings
+        .iter()
+        .filter(|w| sdc_gui::model::counts_toward_badge(w))
+        .count()
+}
+
+/// Whether the card of `id` is Ready, with the set's Problems rows for the failure message.
+fn ready(m: &sdc_gui::model::AppModel, id: &str) -> (bool, Vec<String>) {
+    use sdc_gui::model::bottom::{filtered, set_ready, ProblemsFilter};
+    let views = set_views(m);
+    let v = view(&views, id);
+    let rows = filtered(m, Some(&ProblemsFilter::Set(v.key.clone())))
+        .iter()
+        .map(|p| format!("{:?}: {}", p.at, p.text))
+        .collect();
+    (set_ready(m, v), rows)
+}
+
+/// Note HH8: a slot a resolved borrow fills answers the shader's "needs" warning for its map, so the view, the
+/// Problems row, the card's badge and readiness follow; clearing the borrow brings it back.
+#[test]
+fn a_borrowed_normal_answers_the_missing_map_warning() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    assert_eq!(missing_maps(&m, id), ["_n"], "before the borrow");
+    assert_eq!(
+        needs_rows(&m, id, "_n"),
+        1,
+        "a Problems row before the borrow"
+    );
+    assert!(!ready(&m, id).0, "not Ready before the borrow");
+    let badge_before = set_badge(&m, id);
+    let normal = key_of(&m, "rock01_normal.png");
+    assert_eq!(
+        m.drop_choice(&normal, id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(matches!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert_eq!(
+        missing_maps(&m, id),
+        Vec::<String>::new(),
+        "after the borrow"
+    );
+    assert_eq!(
+        needs_rows(&m, id, "_n"),
+        0,
+        "no Problems row after the borrow"
+    );
+    assert_eq!(
+        set_badge(&m, id),
+        badge_before - 1,
+        "the badge drops by one"
+    );
+    let d2 = tempfile::tempdir().unwrap();
+    let twin = rock02_opened(d2.path(), true, true);
+    assert_eq!(missing_maps(&twin, id), Vec::<String>::new(), "the twin");
+    let (twin_ready, twin_rows) = ready(&twin, id);
+    assert!(
+        twin_ready,
+        "the twin with its own normal is Ready: {twin_rows:?}"
+    );
+    let (now, rows) = ready(&m, id);
+    assert!(now, "as ready as with its own normal: {rows:?}");
+    m.set_slot_command(id, 2, SlotCommand::Clear).unwrap();
+    idle(&mut m);
+    assert_eq!(missing_maps(&m, id), ["_n"], "the clear brings it back");
+    assert_eq!(needs_rows(&m, id, "_n"), 1);
+}
+
+/// Note HH8: a borrow whose lender has nothing in that slot fills nothing, so the warning stays.
+#[test]
+fn a_borrow_from_a_set_without_that_slot_keeps_the_missing_map_warning() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), true, false);
+    let id = "landscape/rock02";
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock02", 2, Some("landscape/leaf"))
+    });
+    idle(&mut m);
+    let views = set_views(&m);
+    let v = view(&views, id);
+    assert!(
+        v.missing.iter().any(|x| matches!(
+            x,
+            Missing::Borrow {
+                slot: 2,
+                empty: true,
+                ..
+            }
+        )),
+        "{:?}",
+        v.missing
+    );
+    assert_eq!(missing_maps(&m, id), ["_n"]);
+    assert_eq!(needs_rows(&m, id, "_n"), 1);
+}
+
+/// Note HH8: a borrowed packed map (the lender packs its own `_rmaos`) answers "needs _rmaos" as a normal does.
+#[test]
+fn a_borrowed_packed_rmaos_answers_the_missing_map_warning() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let id = "landscape/rock02";
+    // Under `textures/landscape/` the auto pick is PBR Landscape, which needs no `_rmaos`; plain `pbr` does.
+    m.set_shader(id, Some(engine::shader::Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(missing_maps(&m, id), ["_rmaos"], "before the borrow");
+    assert_eq!(needs_rows(&m, id, "_rmaos"), 1);
+    let rmaos = key_of(&m, "rock01_rmaos");
+    assert_eq!(
+        m.drop_choice(&rmaos, id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(matches!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Rmaos),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert_eq!(missing_maps(&m, id), Vec::<String>::new());
+    assert_eq!(needs_rows(&m, id, "_rmaos"), 0);
+}
+
 /// Final review Minor 1: after a vanilla → cs switch the first cs plan is requested with the old target's (empty)
 /// shared-roughness list. The settle check compares that list too, so the plan on screen is re-planned even when the
 /// output paths did not change (here rock01 has a bad `rename`, so it has no output paths at all).
