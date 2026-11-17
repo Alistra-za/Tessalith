@@ -112,7 +112,8 @@ fn a_click_outside_or_esc_closes_the_input_name_popup() {
 /// Accepted for the owner to overrule (spec 7a, Plan 1 round 1, ruling 6): egui 0.37 moves between a menu's rows with
 /// the arrow keys (`menu.rs:232-288`). The input-name dropdown is a real menu (`path_picker::menu`), and with its
 /// filter box focused every arrow key stays in the box: no key the filter needs is taken, and Down does not move to a
-/// row. A click on the listed path still reaches its row.
+/// row. After the keys, a click on a row still picks: the set's own name is refused with its reason and the menu stays
+/// open (T35), and a free path is written as the input name and closes the menu.
 #[test]
 fn arrow_keys_and_typing_stay_in_the_input_name_filter() {
     use egui::accesskit::Role;
@@ -156,8 +157,7 @@ fn arrow_keys_and_typing_stay_in_the_input_name_filter() {
     rock_focused(&h, "Down, Down, Up");
     h.get_by_label(HEADING);
     // The one listed path is the set's own name. A click on it reaches the row: the pick is refused (T35, a pick of
-    // the set's own name) and the menu stays open to say why, with the filter cleared by the pick. What a pick of
-    // another path writes, and that it closes the menu, is `input_name_edit`'s to test.
+    // the set's own name) and the menu stays open to say why, with the filter cleared by the pick.
     const PATH: &str = "textures/landscape/rock01";
     h.get_by_label("1 of 3 paths");
     h.query_all_by_role(Role::Button)
@@ -170,4 +170,34 @@ fn arrow_keys_and_typing_stay_in_the_input_name_filter() {
     h.get_by_label(HEADING);
     let name = h.get_by_role_and_label(Role::TextInput, "Input name");
     assert_eq!(name.accesskit_node().value().as_deref(), Some(PATH));
+    // The fixture's other two paths name other sets, so they are refused too: a scan adds one no set has. A pick of it
+    // writes the input name and closes the menu.
+    const FREE: &str = "textures/landscape/rock02";
+    h.state_mut()
+        .0
+        .set_known(sdc_gui::model::known_paths::KnownPaths {
+            textures: [(format!("{FREE}.dds"), 1u16)].into_iter().collect(),
+            mesh_dirs: vec![],
+            ..Default::default()
+        });
+    h.run();
+    h.query_all_by_role(Role::Button)
+        .find(|n| n.accesskit_node().label().as_deref() == Some(FREE))
+        .expect("the scanned path is listed")
+        .click();
+    h.run();
+    assert!(
+        h.query_by_label(HEADING).is_none(),
+        "the pick closes the menu"
+    );
+    // The pick renames the set, whose id follows its new input name (as `input_name_edit` reads it).
+    assert!(h
+        .state_mut()
+        .0
+        .wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        h.state().0.input_name_of("landscape/rock02").as_deref(),
+        Some(FREE)
+    );
 }

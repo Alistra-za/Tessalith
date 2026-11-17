@@ -496,6 +496,44 @@ fn alpha_row_shows_the_proposal() {
     );
 }
 
+/// egui 0.37 (`response.rs:799-815`): a hover added after a control is linked to its row label does not name it.
+/// The Normal handling combo of a complex-material set's normal carries the CL40 hover; it stays named by its row.
+#[test]
+fn a_linked_control_keeps_its_label_under_a_hover() {
+    const NORMAL: &str = "landscape/rock01_normal.png";
+    const HOVER: &str =
+        "Renormalise and bake also bakes this set's complex _m gloss (anti-shimmer)";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.decide(KEY, Answer::Subtype(Subtype::Diffuse));
+    m.decide(NORMAL, Answer::Subtype(Subtype::Normal));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    complex_material(&mut m, "landscape/rock01");
+    m.select_item(NORMAL);
+    let mut h = harness(m, 1600.0);
+    let combo = widget(&h, Role::ComboBox, "Normal handling").rect();
+    // The CL40 branch is the one drawn: its hover shows on the combo.
+    h.hover_at(combo.center());
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("anti-shimmer")
+            .next()
+            .is_some()
+            || h.query_all_by_value(HOVER).next().is_some(),
+        "the CL40 hover shows"
+    );
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::ComboBox, "Normal handling")
+            .count(),
+        1
+    );
+    assert_eq!(
+        h.query_all_by_role_and_label(Role::ComboBox, HOVER).count(),
+        0,
+        "no combo is named by the hover"
+    );
+}
+
 /// Note HI14: the proposal is display only.
 #[test]
 fn the_proposal_writes_nothing() {
