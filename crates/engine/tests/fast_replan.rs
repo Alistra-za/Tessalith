@@ -520,6 +520,41 @@ fn a_cancelled_partial_needs_a_full_plan() {
     );
 }
 
+/// The GUI's `needs_full` race: a partial thread that read the stored skeleton after the edit's own full plan had
+/// replaced it patched a skeleton that already holds the edit, so it saw no reencode change and answered Ok. A
+/// partial on the skeleton read when the edit was made gives the edit's verdict whenever the full plan lands.
+#[test]
+fn a_partial_on_the_edit_time_skeleton_needs_a_full_plan_after_the_edit_is_planned() {
+    let (_fx, session, base_req) = planned_session();
+    let (rep, _) = reporter();
+    let cancel = CancelToken::default();
+    session
+        .plan_and_keep(base_req.clone(), &rep, &cancel)
+        .unwrap();
+    let at_edit = session.skeleton().expect("a full plan keeps a skeleton");
+    let edit = vec![(
+        "dir/f.dds".to_string(),
+        Some(toml::from_str("reencode = true").unwrap()),
+    )];
+    let req = edited(&base_req, &edit);
+    // The edit's full plan lands first and stores the skeleton that holds the edit.
+    session.plan_and_keep(req.clone(), &rep, &cancel).unwrap();
+    let after = session.skeleton().unwrap();
+    assert!(
+        !Arc::ptr_eq(&at_edit, &after),
+        "the full plan stores a new skeleton"
+    );
+
+    let got = session.replan_sets_on(Some(&at_edit), &req, &edit, &rep, &cancel);
+    assert!(
+        matches!(got, Err(Partial::NeedsFull(why)) if why == REENCODE_CHANGE),
+        "{got:?}"
+    );
+    // The control: on the stored skeleton (what the partial thread read before the fix) the edit is no change.
+    let stale = session.replan_sets(&req, &edit, &rep, &cancel);
+    assert!(stale.is_ok(), "{stale:?}");
+}
+
 /// Note HE7: a sub-type on one of two raw twins makes it write, so which of them is a duplicate changes.
 #[test]
 fn a_sub_type_edit_on_a_twin_plans_in_full() {
