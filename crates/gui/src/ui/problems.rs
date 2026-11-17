@@ -5,7 +5,7 @@ use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
     cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter,
+    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -71,6 +71,8 @@ struct Listed {
     suggestions: usize,
     /// Rows the hidden kinds take out of this filter's list (Note HC4).
     hidden: usize,
+    /// Review E18: the `hidden` rows that are not notes (the empty text).
+    hidden_problems: usize,
     /// Any row of the project can be hidden, so `Kinds ▾` shows.
     hideable: bool,
     /// Review E2: the listed rows that are not notes (the empty and first-line texts).
@@ -111,6 +113,10 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         _ => None,
     };
     let hidden = out.iter().filter(|p| is_hidden(p, &hidden_kinds)).count();
+    let hidden_problems = out
+        .iter()
+        .filter(|p| !p.is_note() && is_hidden(p, &hidden_kinds))
+        .count();
     let rows: Rows = if hidden == 0 {
         out
     } else {
@@ -132,6 +138,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         rows,
         checks,
         hidden,
+        hidden_problems,
     };
     ui.data_mut(|d| d.insert_temp(id, l.clone()));
     l
@@ -176,6 +183,65 @@ fn kinds_menu(ui: &mut egui::Ui, model: &AppModel, hidden_rows: usize) -> Option
          counts for Ready, and the tab shows how many are hidden.",
     );
     act
+}
+
+/// What the list's first lines read: this list's counts, and whether it is a worklist (the default list or a Set
+/// filter) or a Notes list.
+struct LineCounts {
+    worklist: bool,
+    notes_list: bool,
+    empty: bool,
+    hidden: usize,
+    hidden_problems: usize,
+    problem_rows: usize,
+    notes: usize,
+}
+
+/// The list's first lines: the hidden line and the plain line, either may be absent.
+#[derive(Debug, Default, PartialEq)]
+struct FirstLines {
+    hidden: Option<String>,
+    plain: Option<String>,
+}
+
+/// Review E2 (controller ruling 5): the plain line says what the default list holds; drawn above the notes with a
+/// button, so those never read as problems. Review E18: while this list has hidden rows, the hidden line names the
+/// scope with the project's numbers (the tab's "· N hidden" and the kinds behind them), never a set's, and replaces
+/// "No problems. …". The Notes lists keep their own text.
+fn first_lines(c: &LineCounts, tab: TabCounts) -> FirstLines {
+    let hidden_line = c.worklist && c.hidden > 0 && tab.hidden > 0;
+    let hidden = hidden_line.then(|| {
+        format!(
+            "{} hidden in this project ({}). Hidden rows still count for Ready.",
+            code_text::counted(tab.hidden_kinds, "kind", "kinds"),
+            code_text::counted(tab.hidden, "row", "rows")
+        )
+    });
+    let plain = if c.empty && c.hidden > 0 {
+        // About this list: where it hid no problem row (only notes), "problem" would be false.
+        Some(if c.worklist && c.hidden_problems > 0 {
+            "Every problem here is hidden. Open Kinds ▾ to show them.".to_string()
+        } else {
+            "Every row here is hidden — see Kinds".to_string()
+        })
+    } else if c.worklist && !hidden_line && c.problem_rows == 0 && c.notes > 0 {
+        Some(format!(
+            "No problems. {NOTES_PILL} ({}) lists what Tessalith did for you.",
+            c.notes
+        ))
+    } else if c.empty {
+        Some(
+            if c.notes_list {
+                "No notes"
+            } else {
+                "No problems"
+            }
+            .to_string(),
+        )
+    } else {
+        None
+    };
+    FirstLines { hidden, plain }
 }
 
 /// The row that had keyboard focus and its index: when it leaves the list (its question was answered), focus goes to
@@ -553,14 +619,16 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         checks,
         suggestions,
         hidden,
+        hidden_problems,
         hideable,
         problem_rows,
         set_notes,
         ..
     } = rows(ui, model);
     // Review E2: the set's notes under a set filter, else the tab's own cached count; neither scans a row on a
-    // settled frame.
-    let notes = set_notes.unwrap_or_else(|| cached_tab_counts(model).notes);
+    // settled frame. Read once a frame (review E18): the first lines read it too.
+    let tab_counts = cached_tab_counts(model);
+    let notes = set_notes.unwrap_or(tab_counts.notes);
     let off = model.fix_off();
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
@@ -641,43 +709,27 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         });
     }
-    // Review E2 (controller ruling 5): the first line says what the default list holds; drawn above the notes with a
-    // button, so those never read as problems.
-    let worklist = matches!(model.bottom.filter, None | Some(ProblemsFilter::Set(_)));
-    // Review E18: while this list has hidden rows, its first line names the scope with the project's numbers (the
-    // tab's "· N hidden"), never a set's; it replaces "No problems. …". The Notes lists keep their own text.
-    let project_hidden = cached_tab_counts(model).hidden;
-    let hidden_line = worklist && hidden > 0 && project_hidden > 0;
-    if hidden_line {
-        let text = format!(
-            "{} hidden in this project ({}). Hidden rows still count for Ready.",
-            code_text::counted(model.hidden_kinds().len(), "kind", "kinds"),
-            code_text::counted(project_hidden, "row", "rows")
-        );
+    let lines = first_lines(
+        &LineCounts {
+            worklist: matches!(model.bottom.filter, None | Some(ProblemsFilter::Set(_))),
+            notes_list: matches!(
+                model.bottom.filter,
+                Some(ProblemsFilter::Notes | ProblemsFilter::SetNotes(_))
+            ),
+            empty: list.is_empty(),
+            hidden,
+            hidden_problems,
+            problem_rows,
+            notes,
+        },
+        tab_counts,
+    );
+    if let Some(text) = lines.hidden {
         // Wraps at a narrow window, so the whole sentence stays on screen and in its name (rule 3.4).
         ui.add(egui::Label::new(egui::RichText::new(text).weak()).wrap());
     }
-    if list.is_empty() && hidden > 0 {
-        // Only hidden notes leave the list empty without the line: "problem" would be false there.
-        ui.weak(if hidden_line {
-            "Every problem here is hidden. Open Kinds ▾ to show them."
-        } else {
-            "Every row here is hidden — see Kinds"
-        });
-    } else if worklist && !hidden_line && problem_rows == 0 && notes > 0 {
-        ui.weak(format!(
-            "No problems. {NOTES_PILL} ({notes}) lists what Tessalith did for you."
-        ));
-    } else if list.is_empty() {
-        let notes_list = matches!(
-            model.bottom.filter,
-            Some(ProblemsFilter::Notes | ProblemsFilter::SetNotes(_))
-        );
-        ui.weak(if notes_list {
-            "No notes"
-        } else {
-            "No problems"
-        });
+    if let Some(text) = lines.plain {
+        ui.weak(text);
     }
     let row_h = ui.spacing().interact_size.y + ui.spacing().item_spacing.y;
     let m = &*model;
@@ -956,5 +1008,51 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
             }
         }
         Fix::RemoveUnmatched(keys) => model.remove_unmatched_keys(&keys),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review E18 fix round 1, item 1: a Set filter whose only hidden row is a note with a button, while another set
+    /// hides problem rows. The empty text is about this list, which hid no problem, so it is the plain hidden-rows
+    /// text; the hidden line keeps the project's numbers. Pinned here: no fixture builds a set note with a button
+    /// before Task 7.
+    #[test]
+    fn first_line_empty_text_follows_this_lists_hidden_problems() {
+        let set = LineCounts {
+            worklist: true,
+            notes_list: false,
+            empty: true,
+            hidden: 1,
+            hidden_problems: 0,
+            problem_rows: 0,
+            notes: 0,
+        };
+        let project = TabCounts {
+            problems: 0,
+            hidden: 2,
+            notes: 0,
+            hidden_kinds: 1,
+        };
+        let lines = first_lines(&set, project);
+        assert_eq!(
+            lines.plain.as_deref(),
+            Some("Every row here is hidden — see Kinds"),
+            "this list hid no problem row"
+        );
+        assert_eq!(
+            lines.hidden.as_deref(),
+            Some("1 kind hidden in this project (2 rows). Hidden rows still count for Ready.")
+        );
+        let hid_a_problem = LineCounts {
+            hidden_problems: 1,
+            ..set
+        };
+        assert_eq!(
+            first_lines(&hid_a_problem, project).plain.as_deref(),
+            Some("Every problem here is hidden. Open Kinds ▾ to show them.")
+        );
     }
 }

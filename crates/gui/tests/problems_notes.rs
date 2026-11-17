@@ -129,6 +129,7 @@ fn label(b: sdc_gui::model::bottom::TabCounts, p: usize, h: usize, n: usize) -> 
         problems: b.problems + p,
         hidden: b.hidden + h,
         notes: b.notes + n,
+        hidden_kinds: b.hidden_kinds,
     })
 }
 
@@ -335,6 +336,7 @@ fn the_tab_label_grammar() {
         problems,
         hidden,
         notes,
+        hidden_kinds: 0,
     };
     assert_eq!(tab_label(c(0, 0, 0)), "Problems");
     assert_eq!(tab_label(c(2, 0, 0)), "Problems (2)");
@@ -464,6 +466,7 @@ fn a_new_problems_build_is_counted_again() {
         problems: 1,
         hidden: 0,
         notes: 0,
+        hidden_kinds: 0,
     };
     assert_eq!(cached_tab_counts(&m), one);
     m.items[0]
@@ -698,6 +701,84 @@ fn the_hidden_line_wraps_at_a_narrow_window() {
     assert!(
         line.height() > 1.5 * one_line,
         "the line wraps: {line:?}, one line is {one_line}"
+    );
+}
+
+/// Review E18 fix round 1, item 2: `k` counts the kinds that hide a problem row, so `k` kinds account for the `r`
+/// rows. A hidden kind with no row now is not in it.
+#[test]
+fn a_hidden_kind_with_no_row_is_not_counted_in_the_line() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.set_kind_hidden(Code::ValMipError, true);
+    assert_eq!(
+        m.hidden_kinds().len(),
+        2,
+        "two kinds hidden, one with a row"
+    );
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        h.query_all_by_label(&hidden_line(2, 1)).count(),
+        0,
+        "a kind with no row is not counted"
+    );
+    h.get_by_label(&hidden_line(1, 1));
+}
+
+/// Review E18 fix round 1, item 4: when only a hidden note empties the default list there is no problem row hidden
+/// (`r` = 0), so no hidden line and the plain hidden-rows text.
+#[test]
+fn only_a_hidden_note_draws_no_hidden_line() {
+    use engine::codes::Code;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = many(d.path(), 1);
+    m.unmatched_keys = vec!["gone.png".into()];
+    m.invalidate_views();
+    m.set_kind_hidden(Code::CfgFileUnmatched, true);
+    assert_eq!(
+        sdc_gui::model::bottom::cached_tab_counts(&m).hidden,
+        0,
+        "a note is no hidden problem row"
+    );
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Every row here is hidden — see Kinds");
+    assert_eq!(
+        h.query_all_by_label_contains("hidden in this project")
+            .count(),
+        0
+    );
+    assert_eq!(h.query_all_by_label(ALL_HIDDEN).count(), 0);
+}
+
+/// Review E18 fix round 1, item 4: under a Set filter, a set with nothing of its own hidden keeps its true line while
+/// a row elsewhere in the project is hidden.
+#[test]
+fn a_set_with_nothing_hidden_keeps_no_problems_and_its_notes() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{cached_tab_counts, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::DimNpot, "npot")]);
+    let set = rock01(&m);
+    m.export.rows = vec![export_row(
+        "derived/x",
+        vec![Warning::new(Code::ChanNotGray, "not grey")],
+    )];
+    m.invalidate_views();
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    assert!(cached_tab_counts(&m).hidden > 0, "the project hides a row");
+    m.open_problems(Some(ProblemsFilter::Set(set.key)));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("No problems. Notes (1) lists what Tessalith did for you.");
+    assert_eq!(
+        h.query_all_by_label_contains("hidden in this project")
+            .count(),
+        0,
+        "nothing of the set's is hidden"
     );
 }
 

@@ -320,6 +320,8 @@ pub struct TabCounts {
     pub problems: usize,
     pub hidden: usize,
     pub notes: usize,
+    /// Review E18: the hidden kinds that hide at least one of the `hidden` problem rows.
+    pub hidden_kinds: usize,
 }
 
 /// Note HC4: a row that one of the `hidden` kinds takes out of the list; the tab counts and the list share it.
@@ -330,14 +332,22 @@ pub fn is_hidden(p: &Problem, hidden: &[Code]) -> bool {
 /// The tab counts of `all` with the kinds in `hidden` hidden (`is_hidden`, as the list).
 pub fn tab_counts(all: &[Problem], hidden: &[Code]) -> TabCounts {
     let mut c = TabCounts::default();
+    // The few hidden kinds seen on a problem row, in the same pass.
+    let mut kinds: Vec<Code> = vec![];
     for p in all {
         match (p.is_note(), is_hidden(p, hidden)) {
             (true, true) => {}
             (true, false) => c.notes += 1,
-            (false, true) => c.hidden += 1,
+            (false, true) => {
+                c.hidden += 1;
+                if let Some(k) = p.code.filter(|k| !kinds.contains(k)) {
+                    kinds.push(k);
+                }
+            }
             (false, false) => c.problems += 1,
         }
     }
+    c.hidden_kinds = kinds.len();
     c
 }
 
