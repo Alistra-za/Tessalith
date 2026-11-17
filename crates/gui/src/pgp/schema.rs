@@ -97,7 +97,7 @@ pub enum Group {
 }
 
 /// How a number key drags and reads (Task 14b, DECISIONS AG121): `speed` per pixel, `decimals` shown, and `log` when
-/// the useful values span orders of magnitude. egui 0.36's `DragValue` has no logarithmic mode, so a log key scales
+/// the useful values span orders of magnitude. egui's `DragValue` has no logarithmic mode, so a log key scales
 /// its speed with the value instead (`speed_at`). Only the feel and the display change: the range clamps and the
 /// stored values are the key's own.
 #[derive(Debug, Clone, Copy, PartialEq)]

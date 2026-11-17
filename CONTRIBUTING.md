@@ -26,7 +26,7 @@ Most people should use the [release zip](docs/wiki/Installation.md). Build from 
 |---|---|
 | Operating system | Windows, x86-64. The build target is fixed to `x86_64-pc-windows-msvc`. Other platforms are not supported. |
 | Rust | Installed through `rustup`. The repository's `rust-toolchain.toml` selects the stable channel, the MSVC target, and the `clippy` and `rustfmt` components. |
-| Minimum Rust version | 1.88 for the workspace. The GUI crate needs 1.95 or later because of its `eframe` 0.36.2 dependency. A current stable toolchain covers both. |
+| Minimum Rust version | 1.88 for the workspace. The GUI crate needs 1.95 or later because of its `eframe` 0.37.0 dependency. A current stable toolchain covers both. |
 | C++ compiler | Microsoft Visual C++ Build Tools (MSVC) with C++17 support. The `encoders-sys` crate compiles the rgbcx encoder, the ISPC Texture Compressor host code and a small C++ shim. |
 | ISPC | Not needed for a normal build. See [ISPC objects](#ispc-objects). |
 

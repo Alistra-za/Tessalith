@@ -128,7 +128,7 @@ pub fn demo(dir: &Path) -> PathBuf {
     t
 }
 
-/// kittest's adapter order (egui_kittest 0.36.2 `wgpu.rs`), CPU first, except that an adapter without BC textures
+/// kittest's adapter order (egui_kittest 0.37.0 `wgpu.rs`), CPU first, except that an adapter without BC textures
 /// (which the 2D preview uploads) goes last.
 fn cpu_first() -> egui_wgpu::NativeAdapterSelectorMethod {
     Arc::new(|adapters, _surface| {
