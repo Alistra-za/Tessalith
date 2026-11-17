@@ -1,9 +1,11 @@
-//! Windows system fonts, loaded at run time, and the per-OS resolver with its embedded floor (Ubuntu Light, Hack,
-//! egui-icons) that Tasks 2 and 3 of the fonts plan wire in (Note JM).
+//! Windows system fonts, loaded at run time, the shared system font provider for characters they lack, and the per-OS
+//! resolver with its embedded floor (Ubuntu Light, Hack, egui-icons) that Task 3 of the fonts plan wires in (Note JM).
 use eframe::egui;
 use std::collections::HashMap;
+use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 
 fn fonts_dir() -> PathBuf {
     std::env::var_os("WINDIR")
@@ -12,7 +14,7 @@ fn fonts_dir() -> PathBuf {
 }
 
 /// The font definitions built from `dir`: Segoe UI (proportional) and Consolas (monospace) with
-/// Segoe UI Symbol, Segoe UI Emoji and the CJK system fonts as fallbacks. A missing optional font is skipped; a missing
+/// Segoe UI Symbol and Segoe UI Emoji as fallbacks. A missing optional font is skipped; a missing
 /// `segoeui.ttf` is an error naming its path.
 fn definitions_from(dir: &Path) -> Result<egui::FontDefinitions, String> {
     let primary = dir.join("segoeui.ttf");
@@ -28,10 +30,6 @@ fn definitions_from(dir: &Path) -> Result<egui::FontDefinitions, String> {
     for (name, file, proportional_fallback, monospace_use) in [
         ("seguisym", "seguisym.ttf", true, true),
         ("seguiemj", "seguiemj.ttf", true, false),
-        // #50: CJK fallbacks (Chinese, Japanese, Korean); each adds 13-20 MB of font data.
-        ("msyh", "msyh.ttc", true, true),
-        ("yugothm", "YuGothM.ttc", true, true),
-        ("malgun", "malgun.ttf", true, true),
         ("consola", "consola.ttf", false, true),
     ] {
         let Ok(bytes) = std::fs::read(dir.join(file)) else {
@@ -61,12 +59,67 @@ fn definitions_from(dir: &Path) -> Result<egui::FontDefinitions, String> {
     Ok(defs)
 }
 
-/// Installs Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas from `%WINDIR%\Fonts`, and pins egui 0.36.2's
-/// look in both themes (`look`).
+/// Installs Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas from `%WINDIR%\Fonts`, then the one system font
+/// provider for characters they lack (CJK, Arabic, …), and pins egui 0.36.2's look in both themes (`look`). The
+/// providers are replaced, not added to, so eframe's own or a second call's never stacks (Note JM).
 pub fn install_system_fonts(ctx: &egui::Context) -> Result<(), String> {
     ctx.set_fonts(definitions_from(&fonts_dir())?);
+    ctx.set_font_providers(vec![system_provider()]);
     ctx.all_styles_mut(crate::look::pin_036_style);
     Ok(())
+}
+
+/// The process-wide system font provider: every context (the app's, each test harness's) shares one, so the system
+/// fonts are enumerated once, on one background thread, and memory-mapped only when a character needs them.
+pub fn system_provider() -> Arc<dyn egui::FontProvider> {
+    static PROVIDER: OnceLock<Arc<dyn egui::FontProvider>> = OnceLock::new();
+    PROVIDER
+        .get_or_init(|| {
+            Arc::new(Guarded::new(
+                egui_system_font_provider::SystemFontProvider::new(),
+            ))
+        })
+        .clone()
+}
+
+/// A font provider that answers `None` when its inner provider panics, and from then on: a failed enumeration thread
+/// makes `SystemFontProvider` panic at every later lookup, and a missing glyph is better than a crash.
+pub struct Guarded<P: egui::FontProvider> {
+    inner: P,
+    failed: AtomicBool,
+}
+
+impl<P: egui::FontProvider> Guarded<P> {
+    pub fn new(inner: P) -> Self {
+        Guarded {
+            inner,
+            failed: AtomicBool::new(false),
+        }
+    }
+
+    /// `ask`'s answer, or `None` if it panics now or the inner provider panicked before.
+    fn guard<T>(&self, ask: impl FnOnce(&P) -> T) -> Option<T> {
+        if self.failed.load(Ordering::Relaxed) {
+            return None;
+        }
+        // shortcut: the panic is swallowed, not logged; Task 3 switches this to `crash_log::catch_expected`.
+        let answer = std::panic::catch_unwind(AssertUnwindSafe(|| ask(&self.inner)));
+        if answer.is_err() {
+            self.failed.store(true, Ordering::Relaxed);
+        }
+        answer.ok()
+    }
+}
+
+impl<P: egui::FontProvider> egui::FontProvider for Guarded<P> {
+    fn fonts_for_family(&self, family: &egui::FontFamily) -> Vec<egui::FontInsert> {
+        self.guard(|p| p.fonts_for_family(family))
+            .unwrap_or_default()
+    }
+
+    fn font_for(&self, request: &egui::FallbackRequest<'_>) -> Option<egui::FontInsert> {
+        self.guard(|p| p.font_for(request)).flatten()
+    }
 }
 
 /// One font family the OS may have, and the key its data gets in [`egui::FontDefinitions`].
@@ -443,6 +496,8 @@ pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥�
 #[cfg(test)]
 mod tests {
     use super::*;
+    use eframe::egui::FontProvider as _;
+    use std::sync::atomic::AtomicUsize;
 
     /// Installed families by name; a named hit is Hack's bytes so `Fonts::new` can parse the result, a name in `broken`
     /// answers bytes that do not parse. The generic answers carry their own bytes (Ubuntu-Light = a proportional Latin
@@ -884,26 +939,127 @@ mod tests {
         assert!(!defs.families[&egui::FontFamily::Monospace].is_empty());
     }
 
-    /// Trace-debug 2026-10-16 #50: CJK names get a proportional fallback (Chinese, Japanese, Korean system fonts).
+    /// Spec 5.4 / Review Focus 5: CJK comes from the system in the same call that asks for it, with no eager CJK font.
     #[test]
-    fn cjk_names_have_a_proportional_fallback() {
+    fn cjk_comes_from_the_system_without_eager_loads() {
         let dir = fonts_dir();
         let defs = definitions_from(&dir).unwrap();
-        let family = &defs.families[&egui::FontFamily::Proportional];
-        for (name, file) in [
-            ("msyh", "msyh.ttc"),
-            ("yugothm", "YuGothM.ttc"),
-            ("malgun", "malgun.ttf"),
-        ] {
-            if dir.join(file).exists() {
-                assert!(family.iter().any(|f| f == name), "{name}: {family:?}");
+        for key in ["msyh", "yugothm", "malgun"] {
+            assert!(
+                !defs.font_data.contains_key(key),
+                "{key} is still loaded at start"
+            );
+        }
+        if ["msyh.ttc", "YuGothM.ttc", "malgun.ttf"]
+            .iter()
+            .any(|f| dir.join(f).exists())
+        {
+            let mut fonts = egui::epaint::text::Fonts::new(Default::default(), defs)
+                .with_font_providers(vec![system_provider()]);
+            assert!(fonts.has_glyphs(&egui::FontId::proportional(14.0), "中文 日本語 한국어"));
+            let found = fonts.discovered_fonts();
+            assert!(
+                !found.is_empty() && found.iter().all(|f| f.name.starts_with("system:")),
+                "{:?}",
+                found.iter().map(|f| &f.name).collect::<Vec<_>>()
+            );
+            eprintln!(
+                "CJK fonts: {:?}",
+                found.iter().map(|f| &f.name).collect::<Vec<_>>()
+            );
+        }
+    }
+
+    #[test]
+    fn one_provider_serves_every_context() {
+        assert!(Arc::ptr_eq(&system_provider(), &system_provider()));
+    }
+
+    /// Review Focus 1: install replaces the providers, so eframe's stub or another provider is never asked.
+    /// U+10FFFD is mapped by none of today's configured fonts on this machine (segoeui, seguisym, seguiemj, consola,
+    /// msyh, YuGothM, malgun: checked 2026-11-16), so before the fix the counting provider is asked and the test is
+    /// RED; a common Han character would not do (msyh has it) and nor would U+E000 (seguisym has it). The
+    /// precondition is asserted, not assumed.
+    #[test]
+    fn install_replaces_other_providers() {
+        const NOWHERE: char = '\u{10FFFD}';
+        let asked = Arc::new(AtomicUsize::new(0));
+        let ctx = egui::Context::default();
+        let a = asked.clone();
+        ctx.add_font_provider(Arc::new(
+            move |_: &egui::FallbackRequest<'_>| -> Option<egui::FontInsert> {
+                a.fetch_add(1, Ordering::Relaxed);
+                None
+            },
+        ));
+        install_system_fonts(&ctx).expect("system fonts");
+        install_system_fonts(&ctx).expect("system fonts");
+        // A dropped `FullOutput` with unapplied texture deltas panics in a debug build (mistakes/gui.md).
+        ctx.run_ui(Default::default(), |_| {})
+            .textures_delta
+            .clear();
+        let configured = ctx.fonts(|f| f.definitions().clone());
+        let mut plain = egui::epaint::text::Fonts::new(Default::default(), configured);
+        assert!(
+            !plain.has_glyph(&egui::FontId::proportional(14.0), NOWHERE),
+            "precondition: pick a character no configured font maps"
+        );
+        ctx.fonts_mut(|f| f.has_glyph(&egui::FontId::proportional(14.0), NOWHERE));
+        assert_eq!(
+            asked.load(Ordering::Relaxed),
+            0,
+            "a provider added before install was asked"
+        );
+    }
+
+    /// Review Focus 2.
+    #[test]
+    fn a_provider_that_panics_answers_none_from_then_on() {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let c = calls.clone();
+        let g = Guarded::new(
+            move |_: &egui::FallbackRequest<'_>| -> Option<egui::FontInsert> {
+                c.fetch_add(1, Ordering::Relaxed);
+                panic!("enumeration thread gone")
+            },
+        );
+        let req = egui::FallbackRequest {
+            cluster: "日",
+            family: &egui::FontFamily::Proportional,
+        };
+        assert!(g.font_for(&req).is_none());
+        assert!(g.font_for(&req).is_none());
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+    }
+
+    /// `Guarded` passes on an inner provider's up-front fonts until the provider panics.
+    #[test]
+    fn a_guarded_provider_keeps_its_up_front_fonts_until_it_panics() {
+        struct UpFront;
+        impl egui::FontProvider for UpFront {
+            fn fonts_for_family(&self, family: &egui::FontFamily) -> Vec<egui::FontInsert> {
+                vec![egui::FontInsert::new(
+                    "hack",
+                    egui::FontData::from_static(HACK),
+                    vec![egui::InsertFontFamily {
+                        family: family.clone(),
+                        priority: egui::FontPriority::Lowest,
+                    }],
+                )]
+            }
+            fn font_for(&self, _: &egui::FallbackRequest<'_>) -> Option<egui::FontInsert> {
+                panic!("enumeration thread gone")
             }
         }
-        if dir.join("msyh.ttc").exists() {
-            let mut fonts = egui::epaint::text::Fonts::new(Default::default(), defs);
-            let id = egui::FontId::proportional(14.0);
-            assert!(fonts.has_glyphs(&id, "中文 日本語 한국어"));
-        }
+        let g = Guarded::new(UpFront);
+        let family = egui::FontFamily::Proportional;
+        assert_eq!(g.fonts_for_family(&family).len(), 1);
+        let req = egui::FallbackRequest {
+            cluster: "日",
+            family: &family,
+        };
+        assert!(g.font_for(&req).is_none());
+        assert!(g.fonts_for_family(&family).is_empty());
     }
 
     /// Start-time budget (Note JM1): fonts installed and one pass laid out, in a fresh process. Run in release, five times.

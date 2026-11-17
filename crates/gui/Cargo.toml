@@ -76,6 +76,8 @@ eframe = { version = "=0.37.0", default-features = false, features = ["accesskit
 epaint_default_fonts = "=0.37.0"
 # fonts.rs checks that a system font parses with the same call epaint makes, so a broken file is skipped instead of panicking. Already in the tree through epaint.
 skrifa = "=0.44.0"
+# Characters the chosen fonts lack (CJK, Arabic, …) come from the system on demand (fonts.rs). Turns on epaint's color_fonts.
+egui_system_font_provider = "=0.37.0"
 rfd = "=0.17.2"
 toml_edit = "0.25"
 sha2.workspace = true

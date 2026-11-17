@@ -66,6 +66,8 @@ fn main() -> eframe::Result {
         // BC texture compression and the adapter's own limits, for the preview textures.
         wgpu_options: render::wgpu_configuration(),
         viewport,
+        // fonts::install_system_fonts installs the one system font provider (Note JM); eframe must not add its own.
+        system_font_fallback: false,
         ..Default::default()
     };
     eframe::run_native(
