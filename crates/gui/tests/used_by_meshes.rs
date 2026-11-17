@@ -183,6 +183,11 @@ fn no_scan_database_hides_the_list_and_a_database_reads_it_off_the_ui_thread() {
     h.get_by_label_contains("Trees · priority 7");
     // Note GC test 6: the link asks the app for the Meshes view, cut to this texture's users.
     // The link's node carries a label and an empty value, which `get_by_label` skips on a Label role.
+    // With the system fonts (since the egui 0.37 upgrade; before it this harness drew no glyphs, so the panel was
+    // 110+ points shorter) the link sits at y 880-897, under the panel's clip at 860: scroll to it as a user would.
+    h.get_by(|n| n.label().as_deref() == Some("Show in Meshes"))
+        .scroll_to_me();
+    h.run();
     h.get_by(|n| n.label().as_deref() == Some("Show in Meshes"))
         .click();
     h.run();
