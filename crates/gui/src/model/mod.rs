@@ -3305,6 +3305,33 @@ impl AppModel {
         }
     }
 
+    /// Review E2: mark the row named `row` as intended (`on`) or take its mark off, as one undo step named for the
+    /// row. No plan: a mark changes no output.
+    pub fn mark_intended(&mut self, key: crate::sets_doc::IntendedKey, on: bool, row: &str) {
+        if self.mark_off_reason().is_some() {
+            return;
+        }
+        let label = if on {
+            format!("Mark as intended: {row}")
+        } else {
+            format!("Undo mark: {row}")
+        };
+        self.edit_docs(&label, None, false, |_, s| s.set_intended(&key, on));
+    }
+
+    /// Review E2: why **Mark as intended** and **Undo mark** are off, when they are.
+    pub fn mark_off_reason(&self) -> Option<String> {
+        let Some(doc) = self.sets_doc.as_ref() else {
+            return Some("Open a project folder first".into());
+        };
+        self.sets_read_only_reason().or_else(|| {
+            (!doc.intended_editable()).then(|| {
+                "sdc-project.toml's intended entry isn't a list: fix or delete it in the file first"
+                    .into()
+            })
+        })
+    }
+
     /// The BC7 weighting row's two fields for pick `w` over `profile` (`fields::weighting_writes`), as one step.
     fn write_weighting(
         &mut self,

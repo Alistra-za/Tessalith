@@ -1,7 +1,7 @@
 //! Review E: Problems and Notes. Every code is a Problem or a Note once; a Note row says why it is fine.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Warning;
 use sdc_gui::model::AppModel;
@@ -100,6 +100,36 @@ fn rock01(m: &AppModel) -> sdc_gui::model::sets::SetView {
         .into_iter()
         .find(|v| v.id == "landscape/rock01")
         .unwrap()
+}
+
+/// The node whose label contains `label` on the row that shows `sentence` (centre y within 4 px).
+fn on_row<'a>(
+    h: &'a Harness<'static, AppModel>,
+    sentence: &str,
+    label: &'a str,
+) -> egui_kittest::Node<'a> {
+    let y = h.get_by_label(sentence).rect().center().y;
+    h.query_all_by_label_contains(label)
+        .find(|n| (n.rect().center().y - y).abs() <= 4.0)
+        .unwrap_or_else(|| panic!("no {label:?} on the row of {sentence:?}"))
+}
+
+/// The fixture's own rows (see the plan-specific rules): its tab counts and rock01's readiness with no warning.
+fn baseline() -> (sdc_gui::model::bottom::TabCounts, bool) {
+    let (_d, m) = with_warnings(&[]);
+    (
+        sdc_gui::model::bottom::cached_tab_counts(&m),
+        sdc_gui::model::bottom::set_ready(&m, &rock01(&m)),
+    )
+}
+
+fn label(b: sdc_gui::model::bottom::TabCounts, p: usize, h: usize, n: usize) -> String {
+    use sdc_gui::model::bottom::{tab_label, TabCounts};
+    tab_label(TabCounts {
+        problems: b.problems + p,
+        hidden: b.hidden + h,
+        notes: b.notes + n,
+    })
 }
 
 #[test]
@@ -794,4 +824,420 @@ fn removing_the_first_mark_leaves_a_tidy_array() {
         "{}",
         doc.text()
     );
+}
+
+/// Review E2 acceptance: every counted row has a button that removes it from the count.
+#[test]
+fn every_problem_row_has_a_fix_or_mark_as_intended_and_marks_reach_zero() {
+    use engine::codes::{Code, Warning};
+    let ws = [
+        Warning::new(Code::SugContradiction, "name vs content"),
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::DimNpot, "npot"),
+    ];
+    let (_d, mut m) = with_warnings(&ws);
+    let (b, ready) = baseline();
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&label(b, 2, 0, 1));
+    for code in [Code::SugContradiction, Code::ValMipError] {
+        let sentence = sdc_gui::model::code_text::code_sentence(code);
+        on_row(&h, sentence, "Mark as intended: ").click();
+        h.run();
+    }
+    h.get_by_label(&label(b, 0, 0, 3));
+    assert_eq!(
+        sdc_gui::model::bottom::set_ready(h.state(), &rock01(h.state())),
+        ready,
+        "back to the fixture's own readiness"
+    );
+    h.state_mut().undo();
+    // `undo` plans again, and a plan replaces injected warnings: wait for it, then inject them again.
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    inject(h.state_mut(), &ws);
+    h.run();
+    h.get_by_label(&label(b, 1, 0, 2));
+    h.get_by_label(&format!("Notes ({})", b.notes + 2)).click();
+    h.run();
+    h.query_all_by_label_contains("Undo mark: ")
+        .next()
+        .unwrap()
+        .click();
+    h.run();
+    h.get_by_label(&label(b, 2, 0, 1));
+}
+
+/// Controller ruling 5: a marked row leaves the default list even when it has a fix.
+#[test]
+fn a_marked_row_with_a_fix_leaves_the_default_list() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{filtered, problems};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
+    let p = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ChanNormalLength))
+        .cloned()
+        .unwrap();
+    assert!(p.fix.is_some(), "Rebuild Z");
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    assert!(!filtered(&m, None)
+        .iter()
+        .any(|r| r.code == Some(Code::ChanNormalLength)));
+    let notes = filtered(&m, Some(&sdc_gui::model::bottom::ProblemsFilter::Notes));
+    assert!(notes
+        .iter()
+        .any(|r| r.code == Some(Code::ChanNormalLength) && r.intended));
+}
+
+#[test]
+fn two_rows_of_one_code_are_marked_one_at_a_time() {
+    use engine::codes::{Code, Warning};
+    use serde_json::json;
+    let (_d, mut m) = with_set_warnings(&[
+        Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(json!({"map": "_n", "shader": "pbr"})),
+        Warning::new(Code::ShaderMissingMap, "no _rmaos")
+            .with_data(json!({"map": "_rmaos", "shader": "pbr"})),
+    ]);
+    let rows = |m: &AppModel| {
+        sdc_gui::model::bottom::problems(m)
+            .iter()
+            .filter(|p| p.code == Some(Code::ShaderMissingMap))
+            .map(|p| p.intended)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(rows(&m), [false, false]);
+    let p = sdc_gui::model::bottom::problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderMissingMap))
+        .cloned()
+        .unwrap();
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    let mut now = rows(&m);
+    now.sort();
+    assert_eq!(now, [false, true], "the other sentence is still a problem");
+}
+
+#[test]
+fn mark_as_intended_is_off_on_a_read_only_project() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNotGray, "not grey")]);
+    // The reload reads `sdc.toml` again too: saved, rock01's members stay decided and keep their warning rows.
+    assert!(m.save().is_ok());
+    let file = m.root.clone().unwrap().join("sdc-project.toml");
+    // An unreadable file makes SetsDoc read-only (`sets_doc.rs:375`, P8).
+    std::fs::write(&file, "[project\n").unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject(&mut m, &[Warning::new(Code::ChanNotGray, "not grey")]);
+    assert!(m.sets_read_only_reason().is_some());
+    let before = std::fs::read(&file).unwrap();
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let b = h
+        .query_all_by_label_contains("Mark as intended: ")
+        .next()
+        .unwrap();
+    assert!(b.accesskit_node().is_disabled());
+    b.click();
+    h.run();
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+}
+
+/// Controller resolution for Task 4: an `intended` that is not an array turns Mark off with its own reason, and a
+/// click changes nothing (`SetsDoc::intended_editable`).
+#[test]
+fn mark_as_intended_is_off_when_intended_is_not_a_list() {
+    use engine::codes::{Code, Warning};
+    const WHY: &str =
+        "sdc-project.toml's intended entry isn't a list: fix or delete it in the file first";
+    let ws = [Warning::new(Code::ChanNotGray, "not grey")];
+    let (_d, mut m) = with_warnings(&ws);
+    // As above: saved, so the reload keeps rock01's members decided.
+    assert!(m.save().is_ok());
+    let file = m.root.clone().unwrap().join("sdc-project.toml");
+    std::fs::write(&file, "[project]\nintended = \"x\"\n").unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject(&mut m, &ws);
+    assert_eq!(m.sets_read_only_reason(), None, "the file reads");
+    assert_eq!(m.mark_off_reason().as_deref(), Some(WHY));
+    let before = std::fs::read(&file).unwrap();
+    let text = m.sets_doc.as_ref().unwrap().text();
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNotGray);
+    let b = on_row(&h, sentence, "Mark as intended: ");
+    assert!(b.accesskit_node().is_disabled());
+    assert_eq!(h.query_all_by_label(WHY).count(), 0, "no hover yet");
+    b.hover();
+    h.run();
+    assert!(h.query_all_by_label(WHY).count() > 0, "the disabled hover");
+    on_row(&h, sentence, "Mark as intended: ").click();
+    h.run();
+    assert_eq!(std::fs::read(&file).unwrap(), before);
+    assert_eq!(h.state().sets_doc.as_ref().unwrap().text(), text);
+    assert!(!h.state().can_undo(), "no undo step");
+}
+
+/// Controller ruling 7: Mark is for warnings only. An Error-severity code on a last-export File row is at
+/// `Level::Warning` today and still gets no Mark.
+#[test]
+fn an_error_row_cannot_be_marked() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{markable, Level};
+    assert!(!markable(Level::Warning, Some(Code::ValHeader)));
+    assert!(!markable(Level::Warning, Some(Code::ValAlphaGuarantee)));
+    assert!(markable(Level::Warning, Some(Code::ValMipError)));
+    assert!(markable(Level::Warning, None));
+    assert!(markable(Level::Check, Some(Code::ChkLowDetail)));
+    assert!(!markable(Level::Blocks, None));
+    assert!(!markable(Level::Info, Some(Code::DimNpot)));
+}
+
+/// Ruling 1 (spec 7a, Controller rulings for Plan 3a): a mark follows a rename. Run on the real planned warning: rock01 as plain
+/// `pbr` with its normal taken out raises SHADER-MISSING-MAP, whose engine text names the shader, not the set.
+#[test]
+fn a_mark_survives_a_rename() {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{problems, At};
+    use sdc_gui::model::sets::{set_views, slot_of, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    let n = rock01(&m)
+        .members
+        .iter()
+        .find(|k| m.item(k).and_then(slot_of) == Some(SlotKind::Normal))
+        .cloned()
+        .unwrap();
+    m.remove_member("landscape/rock01", &n).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let missing = |m: &AppModel, id: &str| {
+        problems(m)
+            .iter()
+            .find(|p| {
+                p.code == Some(Code::ShaderMissingMap)
+                    && matches!(&p.at, At::Set { id: i, .. } if i == id)
+            })
+            .cloned()
+    };
+    let p = missing(&m, "landscape/rock01")
+        .expect("precondition: plain pbr with no normal raises SHADER-MISSING-MAP");
+    assert!(
+        !p.shown().contains("landscape/rock01"),
+        "precondition: the engine text does not name the set id"
+    );
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    m.rename_set("landscape/rock01", "landscape/rock02")
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(set_views(&m).iter().any(|v| v.id == "landscape/rock02"));
+    let row = missing(&m, "landscape/rock02").expect("the planned row is back after the rename");
+    assert_eq!(row.shown(), p.shown(), "same sentence");
+    assert!(
+        row.intended && row.is_note(),
+        "the mark followed the rename"
+    );
+}
+
+/// Ruling 1 for a row whose text starts with its set id: a PGPatcher pitfall, `"{set id}: {pitfall}"`
+/// (`model/pbr_export.rs:606`). The fixture raises it for real, as `json_errors.rs:27-35` does for the leaf:
+/// `alphaprop_delete` with `alphaprop_thresh` gives "Delete wins; …" (`pgp/prefix.rs:440-446`). No injection.
+#[test]
+fn a_marked_pgpatcher_pitfall_survives_a_rename() {
+    use sdc_gui::model::bottom::{problems, At};
+    use sdc_gui::model::sets::set_views;
+    const PITFALL: &str = "Delete wins; the other alpha keys of this entry do nothing";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_json_value(
+        "landscape/rock01",
+        "alphaprop_delete",
+        Some(serde_json::json!(true)),
+    );
+    m.set_json_value(
+        "landscape/rock01",
+        "alphaprop_thresh",
+        Some(serde_json::json!(10)),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let pitfall = |m: &AppModel, id: &str| {
+        problems(m)
+            .iter()
+            .find(|p| {
+                p.code.is_none()
+                    && p.text.ends_with(PITFALL)
+                    && matches!(&p.at, At::Set { id: i, .. } if i == id)
+            })
+            .cloned()
+    };
+    let p = pitfall(&m, "landscape/rock01")
+        .expect("precondition: rock01's JSON entry raises the Delete-wins pitfall");
+    assert_eq!(
+        p.shown(),
+        format!("landscape/rock01: {PITFALL}"),
+        "precondition: the row text starts with the set id"
+    );
+    assert_eq!(
+        p.mark.as_ref().unwrap().sentence,
+        PITFALL,
+        "the key leaves the set id out"
+    );
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    m.rename_set("landscape/rock01", "landscape/rock02")
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(set_views(&m).iter().any(|v| v.id == "landscape/rock02"));
+    let row =
+        pitfall(&m, "landscape/rock02").expect("the JSON entry and its pitfall follow the rename");
+    assert_eq!(
+        row.shown(),
+        format!("landscape/rock02: {PITFALL}"),
+        "the shown text names the new id"
+    );
+    assert!(
+        row.intended && row.is_note(),
+        "the mark followed the rename"
+    );
+}
+
+/// A row whose sentence really changes shows again (spec 7a.3).
+#[test]
+fn a_changed_sentence_shows_again() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::problems;
+    let missing = |map: &str| {
+        Warning::new(
+            Code::ShaderMissingMap,
+            format!("the pbr shader needs {map}; none is in the set (nothing is generated)"),
+        )
+        .with_data(serde_json::json!({"map": map, "shader": "pbr"}))
+    };
+    let (_d, mut m) = with_set_warnings(&[missing("_n")]);
+    let p = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderMissingMap))
+        .cloned()
+        .unwrap();
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    inject_set(&mut m, &[missing("_rmaos")]);
+    let row = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderMissingMap))
+        .cloned()
+        .unwrap();
+    assert!(
+        !row.intended && !row.is_note(),
+        "a changed sentence shows again"
+    );
+}
+
+/// Controller ruling 3 and review B: DERIVE-NIF-SUGGEST (Info severity) still makes its last-export File row, at
+/// Warning level, with Mark.
+#[test]
+fn a_nif_suggestion_row_is_a_problem_with_mark() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, At, Level};
+    let (_d, mut m) = with_warnings(&[]);
+    m.export.rows = vec![sdc_gui::model::export::Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: sdc_gui::model::export::RowState::Done { passed: true },
+        warnings: vec![Warning::new(
+            Code::DeriveNifSuggest,
+            "NiAlphaProperty flags 4845",
+        )],
+    }];
+    m.invalidate_views();
+    let r = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::DeriveNifSuggest))
+        .cloned()
+        .expect("the row exists");
+    assert!(matches!(r.at, At::File(_)));
+    assert_eq!(r.level, Level::Warning);
+    assert!(r.mark.is_some());
+}
+
+/// Review round 2: with no project open, Mark is off and says why.
+#[test]
+fn mark_is_off_with_no_project_open() {
+    let m = AppModel::new(sdc_gui::settings::GuiSettings::default(), None, session());
+    assert_eq!(
+        m.mark_off_reason().as_deref(),
+        Some("Open a project folder first")
+    );
+}
+
+/// Controller ruling 12: one mark costs one tab-count scan.
+#[test]
+fn a_mark_costs_one_tab_count_scan() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, tab_count_scans};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let before = tab_count_scans(h.state());
+    let p = problems(h.state())
+        .iter()
+        .find(|p| p.code == Some(Code::ValMipError))
+        .cloned()
+        .unwrap();
+    h.state_mut()
+        .mark_intended(p.mark.clone().unwrap(), true, "row");
+    for _ in 0..5 {
+        h.step();
+    }
+    assert_eq!(tab_count_scans(h.state()), before + 1);
+}
+
+/// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
+/// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
+#[test]
+fn counts_for_drops_a_marked_warning_and_every_check() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{counts_for, problems, At};
+    let w = Warning::new(Code::ValMipError, "mip 3");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    let at = At::Texture(k.clone());
+    assert!(counts_for(&m, &at, &w));
+    assert!(!counts_for(
+        &m,
+        &At::Texture(k),
+        &Warning::new(Code::ChkLowDetail, "x")
+    ));
+    let p = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ValMipError))
+        .cloned()
+        .unwrap();
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+    assert!(!counts_for(&m, &at, &w), "marked");
+    assert!(
+        counts_for(&m, &at, &Warning::new(Code::ChanNotGray, "not grey")),
+        "another sentence still counts"
+    );
+}
+
+/// Set ids compare folded (Note BF): a row whose set id differs only in case finds the set's mark.
+#[test]
+fn a_set_mark_is_found_under_its_id_in_any_case() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{counts_for, intended_key, At};
+    let w = Warning::new(Code::ValMipError, "mip 3");
+    let (_d, mut m) = with_warnings(&[]);
+    let at = |id: &str| At::Set {
+        key: "k".into(),
+        id: id.into(),
+    };
+    let shown = sdc_gui::model::code_text::shown_for(Some(w.code), &w.message);
+    let k = intended_key(&at("landscape/rock01"), w.code.as_str(), &shown);
+    m.mark_intended(k, true, "row");
+    assert!(!counts_for(&m, &at("landscape/rock01"), &w));
+    assert!(!counts_for(&m, &at("Landscape/Rock01"), &w), "folded");
 }

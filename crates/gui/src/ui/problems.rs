@@ -14,6 +14,7 @@ use crate::model::sets::Missing;
 use crate::model::shell::ShellRequest;
 use crate::model::{Answer, AppModel};
 use crate::pgp::settings::feature_key;
+use crate::sets_doc::IntendedKey;
 use eframe::egui;
 use engine::codes::Code;
 use serde_json::json;
@@ -195,6 +196,8 @@ enum Act {
     Filter(Option<ProblemsFilter>),
     AcceptAll,
     HideKind(Code, bool),
+    /// Review E2: mark a row as intended or take the mark off: its key, on or off, and its name for the undo step.
+    Mark(IntendedKey, bool, String),
 }
 
 /// The pill's state and where a click takes the filter: on with a set keeps the set (review M2).
@@ -233,6 +236,31 @@ fn button(ui: &mut egui::Ui, text: &str, tip: &str, off: Option<&str>) -> bool {
         None => b.on_hover_text(tip),
     }
     .clicked()
+}
+
+/// Review E2: **Mark as intended** on a problem row, **Undo mark** on an intended one, named for the row (rule 8.4)
+/// and off with `off` as its hover. `Some` when clicked.
+fn mark_button(ui: &mut egui::Ui, p: &Problem, off: Option<&str>) -> Option<Act> {
+    let key = p.mark.as_ref()?;
+    let (text, tip) = match (p.intended, p.is_note()) {
+        (true, _) => ("Undo mark", "Move this row back to Problems."),
+        (false, false) => (
+            "Mark as intended",
+            "Keep it as it is. The row moves to Notes and stops counting against Ready. Undo brings it back.",
+        ),
+        (false, true) => return None,
+    };
+    let b = ui.add_enabled(off.is_none(), egui::Button::new(text));
+    b.widget_info(|| {
+        let name = format!("{text}: {}", row_name(p));
+        egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), name)
+    });
+    let b = match off {
+        Some(why) => b.on_disabled_hover_text(why),
+        None => b.on_hover_text(tip),
+    };
+    b.clicked()
+        .then(|| Act::Mark(key.clone(), !p.intended, row_name(p)))
 }
 
 /// A button that writes to disk: a pointer click only, never Enter or Space on focus (FC5, Note FC10).
@@ -535,6 +563,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let notes = set_notes.unwrap_or_else(|| cached_tab_counts(model).notes);
     let off = model.fix_off();
     let sets_off = model.sets_read_only_reason();
+    let mark_off = model.mark_off_reason();
     let mut act = None;
     let label = |k: &String| {
         crate::model::sets::views(model)
@@ -767,19 +796,26 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         } else {
                             off.clone()
                         };
+                        // Review E2: left to right the fix, Mark as intended, then Go to set (fix round 1: beside
+                        // the fix), so Go to set is drawn first.
+                        let mut a = None;
+                        if let At::Set { key, .. } = &p.at {
+                            if ui.button("Go to set").clicked() {
+                                a = Some(Act::Set(key.clone()));
+                            }
+                        }
+                        if let Some(mark) = mark_button(ui, p, mark_off.as_deref()) {
+                            a = Some(mark);
+                        }
                         if let Some(f) = fix_button(ui, m, p, off.as_deref(), sets_off.as_deref()) {
-                            return Some(Act::Apply(f, p.at.clone()));
+                            a = Some(Act::Apply(f, p.at.clone()));
                         }
-                        match &p.at {
-                            At::Texture(k) if p.level == Level::Decide => {
-                                fix_buttons(ui, m, k, off.as_deref()).map(Act::Pick)
+                        if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
+                            if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {
+                                a = Some(Act::Pick(pick));
                             }
-                            // Fix round 1: a set row keeps Go to set beside its fix.
-                            At::Set { key, .. } if ui.button("Go to set").clicked() => {
-                                Some(Act::Set(key.clone()))
-                            }
-                            _ => None,
                         }
+                        a
                     },
                 );
                 if let Some(a) = l.or(r) {
@@ -837,6 +873,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         Some(Act::Filter(f)) => model.bottom.filter = f,
         Some(Act::AcceptAll) => model.accept_all_suggestions(),
         Some(Act::HideKind(code, hide)) => model.set_kind_hidden(code, hide),
+        Some(Act::Mark(key, on, row)) => model.mark_intended(key, on, &row),
         None => {}
     }
 }

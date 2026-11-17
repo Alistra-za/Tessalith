@@ -7,6 +7,7 @@ use super::{
     checks, code_text, counts_toward_badge, makes_a_row, pbr_export, sets, AppModel, ItemStatus,
 };
 use crate::pgp::settings::Feature;
+use crate::sets_doc::{normalise_sentence, IntendedKey};
 use engine::codes::Code;
 use nif::fields::Field;
 use std::collections::{HashMap, HashSet};
@@ -30,7 +31,7 @@ pub struct BottomPanel {
 }
 
 /// Note HC4: a row its kind can hide. A block or a question never hides, and hiding never touches the Review gate,
-/// which reads `problems` whole.
+/// which reads `export_blocks`, never `problems`.
 pub fn can_hide(p: &Problem) -> bool {
     p.code.is_some() && matches!(p.level, Level::Warning | Level::Info)
 }
@@ -145,6 +146,58 @@ pub fn counts_as_ready_problem(p: &Problem) -> bool {
     !matches!(p.level, Level::Check | Level::Info | Level::Queued) && !p.intended
 }
 
+/// Review E2: the mark of a row at `at` of code (or kind) `kind` that shows `shown`. The subject names where the row
+/// is; the sentence is `normalise_sentence`'s, so a set row's own id in front is left out.
+pub fn intended_key(at: &At, kind: &str, shown: &str) -> IntendedKey {
+    let subject = match at {
+        At::Texture(k) => format!("texture:{k}"),
+        At::Set { id, .. } => format!("set:{id}"),
+        At::File(k) => format!("file:{k}"),
+        At::Project => "project".into(),
+        At::Nif(p) => format!("nif:{p}"),
+    };
+    IntendedKey {
+        code: kind.into(),
+        sentence: normalise_sentence(&subject, shown),
+        subject,
+    }
+}
+
+/// Review E2 (controller ruling 7): a row that gets **Mark as intended**: a warning or check row whose code, if any,
+/// is a warning or an Info result. A file that fails validation (Error, Blocking) is exported again, not marked.
+pub fn markable(level: Level, code: Option<Code>) -> bool {
+    use engine::codes::Severity;
+    matches!(level, Level::Warning | Level::Check)
+        && code.is_none_or(|c| matches!(c.severity(), Severity::Warning | Severity::Info))
+}
+
+/// Whether `keys` (`SetsDoc::intended_keys`, `set:` ids folded) holds `k`.
+fn is_marked(keys: &std::collections::BTreeSet<IntendedKey>, k: &IntendedKey) -> bool {
+    match k.subject.strip_prefix("set:") {
+        Some(id) => keys.contains(&IntendedKey {
+            subject: format!("set:{}", engine::sets::fold_id(id)),
+            ..k.clone()
+        }),
+        None => keys.contains(k),
+    }
+}
+
+/// Review E2: whether warning `w` at `at` takes "ready" away: it counts toward the badge, is no artist check (they
+/// count in the tab only, Note CL), and has no mark on the sentence its row shows, so a tile and its row agree.
+pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
+    if !counts_toward_badge(w) || checks::check_of(w.code).is_some() {
+        return false;
+    }
+    let Some(keys) = m.sets_doc.as_ref().map(|s| s.intended_keys()) else {
+        return true;
+    };
+    // Only a project with marks builds a key per warning.
+    keys.is_empty() || {
+        let shown = code_text::shown_for(Some(w.code), &w.message);
+        !is_marked(&keys, &intended_key(at, w.code.as_str(), &shown))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum At {
     /// An item key.
@@ -223,6 +276,8 @@ pub struct Problem {
     pub carried: bool,
     /// Review E2: the user marked this row as intended, so it is a note.
     pub intended: bool,
+    /// Review E2: the key **Mark as intended** and **Undo mark** write; `Some` exactly on a `markable` row.
+    pub mark: Option<IntendedKey>,
 }
 
 impl Problem {
@@ -485,6 +540,12 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         detail: None,
         carried: false,
         intended: false,
+        mark: None,
+    };
+    // Review E2: a row with no code is marked by its kind, named where it is built.
+    let kinded = |p: Problem, kind: &str| Problem {
+        mark: Some(intended_key(&p.at, kind, &p.shown())),
+        ..p
     };
     // Review E2: the Info row of a warning that is a note, for the item, set and File loops alike; `None` for a
     // problem. FC7 (CN3), controller ruling 4: a `_curves`/cavity map no recipe reads is Also export's input, not a
@@ -548,9 +609,12 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         m.nif_problems
             .iter()
             .filter(move |n| n.level == want)
-            .map(move |n| Problem {
-                fix: Some(Fix::ShowNifTab(n.path.clone(), n.tab, n.field)),
-                ..row(level, At::Nif(n.path.clone()), n.text.clone(), None)
+            .map(move |n| {
+                let p = Problem {
+                    fix: Some(Fix::ShowNifTab(n.path.clone(), n.tab, n.field)),
+                    ..row(level, At::Nif(n.path.clone()), n.text.clone(), None)
+                };
+                kinded(p, "NIF-WARNING")
             })
     };
     out.extend(nif_rows(NifLevel::Blocks, Level::Blocks));
@@ -622,10 +686,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         } else {
             set_at(&a.set_key, &a.set_id)
         };
-        out.push(Problem {
+        let p = Problem {
             carried: true,
             ..row(Level::Warning, at, a.text, None)
-        });
+        };
+        out.push(kinded(p, "PGP-PITFALL"));
     }
     for i in m
         .items
@@ -664,10 +729,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 sets::Missing::NoFilesLeft => "No texture of this set is left in the folder".into(),
                 _ => format!("No file matches {}", miss.text()),
             };
-            out.push(Problem {
+            let p = Problem {
                 fix: Some(Fix::RemoveMissing(miss.clone())),
                 ..row(Level::Warning, set_at(&v.key, &v.id), text, None)
-            });
+            };
+            out.push(kinded(p, "SET-MISSING-ENTRY"));
         }
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
@@ -676,7 +742,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             continue;
         };
         if m.record_of(map).is_some_and(|r| r.slots != map.slots) {
-            out.push(Problem {
+            let p = Problem {
                 fix: Some(Fix::UseRecordPaths(v.id.clone())),
                 ..row(
                     Level::Warning,
@@ -684,12 +750,13 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     format!("Record {} changed", map.edid),
                     None,
                 )
-            });
+            };
+            out.push(kinded(p, "RECORD-CHANGED"));
         }
     }
     // Note GI (X4): an XPMF pbr profile's exact EDID with no PBRMaterialObjects JSON from this project.
     for (key, id, edid) in super::xpmf_json::skipped_edids(m) {
-        out.push(Problem {
+        let p = Problem {
             detail: Some(super::xpmf_json::SKIP_HOVER.into()),
             ..row(
                 Level::Warning,
@@ -697,7 +764,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 format!("XPMF skips {edid}: no PBRMaterialObjects JSON from this project"),
                 None,
             )
-        });
+        };
+        out.push(kinded(p, "XPMF-SKIP"));
     }
     // Advanced skin: a set that writes no `.csskin.json`, or leaves a texture out of it.
     for (id, key, why) in super::cs_skin_json::skin_json_plan(m).1 {
@@ -716,7 +784,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 "The {slot} texture borrowed from {host} is not exported by {host}; it is left out of the .csskin.json."
             ),
         };
-        out.push(row(Level::Warning, set_at(&key, &id), text, None));
+        out.push(kinded(
+            row(Level::Warning, set_at(&key, &id), text, None),
+            "SKIN-SKIP",
+        ));
     }
     // Note FC3 (Y4): an entry of the folder the plan could not read, with its folder to open.
     for w in &m.unreadable {
@@ -728,7 +799,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note FC10 (item 27): a project file with the read-only flag, which a save cannot replace.
     for p in &m.read_only_flags {
         let name = p.file_name().unwrap_or_default().to_string_lossy();
-        out.push(Problem {
+        let flag = Problem {
             fix: Some(Fix::ClearReadOnly(p.clone())),
             ..row(
                 Level::Warning,
@@ -736,14 +807,17 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 format!("{name} is read-only: changes cannot be saved"),
                 None,
             )
-        });
+        };
+        out.push(kinded(flag, "READ-ONLY-FLAG"));
     }
     // Note FC10 (T8): a user preset skipped because another preset already declares its suffix aliases. Note FC14:
     // the skipped one is whichever loads second, the original or its copy, so the row names both. Ruling FR-b: any
     // other skipped file gets a row with its reason and Open folder.
     for (file, reason) in &m.skipped_user_presets {
+        // Review E2 (planner's table): marked under the engine code these rows stand for.
+        let skipped = Code::CfgPresetSkipped.as_str();
         if let Some((id, other)) = alias_clash(reason) {
-            out.push(Problem {
+            let p = Problem {
                 fix: Some(Fix::RemoveAliases(PathBuf::from(file), id.to_string())),
                 detail: Some(format!("{file}: {reason}")),
                 ..row(
@@ -752,13 +826,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     format!("Preset {id} was skipped: it clashes with {other} on aliases"),
                     None,
                 )
-            });
+            };
+            out.push(kinded(p, skipped));
             continue;
         }
         let path = Path::new(file);
         let name = path.file_name().unwrap_or_default().to_string_lossy();
         let why = skipped_reason(file, reason);
-        out.push(Problem {
+        let p = Problem {
             fix: path.parent().map(|p| Fix::OpenFolder(p.to_path_buf())),
             detail: Some(format!("{file}: {why}")),
             ..row(
@@ -767,7 +842,8 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 format!("Preset file {name} was skipped: {}", first_line(why)),
                 None,
             )
-        });
+        };
+        out.push(kinded(p, skipped));
     }
     out.extend(nif_rows(NifLevel::Warning, Level::Warning));
     // Artist checks (DECISIONS Note CL): listed, never "ready"-changing. CHK-GREEN-GUESS, the one Info result, is a
@@ -1013,6 +1089,22 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         }
     }
     out.extend(nif_rows(NifLevel::Info, Level::Info));
+    // Review E2 (controller ruling 7): each markable row's mark, by code or by the kind named above, and whether the
+    // project holds it. A row that is not markable keeps none, so a stale mark never takes it out of Ready.
+    let keys = m.sets_doc.as_ref().map(|s| s.intended_keys());
+    for p in &mut out {
+        if !markable(p.level, p.code) {
+            p.mark = None;
+            continue;
+        }
+        if let (None, Some(c)) = (&p.mark, p.code) {
+            p.mark = Some(intended_key(&p.at, c.as_str(), &p.shown()));
+        }
+        p.intended = match (&keys, &p.mark) {
+            (Some(keys), Some(k)) => is_marked(keys, k),
+            _ => false,
+        };
+    }
     out
 }
 
@@ -1178,6 +1270,7 @@ mod tests {
             detail: None,
             carried: false,
             intended: false,
+            mark: None,
         };
         let all = [
             row(Level::Info, "note", Some(Fix::UndoLast)),
