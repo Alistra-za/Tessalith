@@ -106,7 +106,13 @@ pub fn texture_checks(
     let st = job.profile.subtype;
     let mut out = vec![];
     if on.green && st.category() == Category::Normal {
-        if st != Subtype::Msn && !s.two_channel && s.texels > 0 && a.channels[2].mean < 0.5 {
+        // Review E10: Rebuild Z (`reconstruct_z`) writes a blue that points out of the surface, so the check is done.
+        if st != Subtype::Msn
+            && !s.two_channel
+            && s.texels > 0
+            && a.channels[2].mean < 0.5
+            && !job.profile.channels.reconstruct_z
+        {
             out.push(Warning::new(
                 Code::ChkZSign,
                 format!(

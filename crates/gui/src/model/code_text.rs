@@ -81,7 +81,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         GrassShape => "This grass texture has the wrong layout — use a grass atlas shape",
         GrassTopOpaque => "The tips of this grass texture are fully opaque — check its alpha",
         GrassNormals => "This grass texture's normals look wrong — check or regenerate them",
-        GrassDetectSource => "This looks like grass from its source — confirm the grass setting",
+        GrassDetectSource => "This grass source's corner normal isn't unit length — the written file is renormalised, so Community Shaders still reads it as grass",
         ValGrassDetect => "The grass check failed on the output — check the grass settings",
         PbrGrassDetect => "Community Shaders would read this grass albedo as complex grass — change its alpha or name",
         ChkZSign => "This normal map's blue channel points the wrong way — use Rebuild Z",

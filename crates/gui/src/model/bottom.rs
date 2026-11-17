@@ -751,7 +751,6 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             let fix = match w.code {
                 Code::ChanNormalLength => Some(Fix::RebuildZ(k())),
                 Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
-                Code::GrassDetectSource => Some(Fix::TagAsGrass(k())),
                 Code::SugContradiction => Some(Fix::SetType(k())),
                 _ => None,
             };

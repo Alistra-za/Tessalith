@@ -364,7 +364,7 @@ fn fix_button(
     sets_off: Option<&str>,
 ) -> Option<Act> {
     match fix {
-        Fix::ChangeShader(id) => return shader_menu(ui, m, id, off.or(sets_off)),
+        Fix::ChangeShader(id) => return shader_menu(ui, m, p, id, off.or(sets_off)),
         // Review E10: the undecided rows' own picker, with no default (the warning names no type).
         Fix::SetType(k) => {
             return ui
@@ -380,21 +380,35 @@ fn fix_button(
 }
 
 /// Review E10: **Change shader…** for the set `id`, a menu of the target's shaders by the names the sets column's
-/// shader combo shows. Off with `off` as its hover (`set_shader` writes nothing on a read-only project).
-fn shader_menu(ui: &mut egui::Ui, m: &AppModel, id: &str, off: Option<&str>) -> Option<Act> {
+/// shader combo shows, the set's own shader selected (picking it again is no edit). Off with `off` as its hover
+/// (`set_shader` writes nothing on a read-only project). Scoped by the row `p`, so an open menu stays on its row when
+/// the list changes under it.
+fn shader_menu(
+    ui: &mut egui::Ui,
+    m: &AppModel,
+    p: &Problem,
+    id: &str,
+    off: Option<&str>,
+) -> Option<Act> {
     let r = ui.add_enabled_ui(off.is_none(), |ui| {
-        crate::look::menu_button_036(ui, "Change shader…", |ui| {
-            let mut pick = None;
-            for s in shader_options(m.target) {
-                if ui.selectable_label(false, s.label()).clicked() {
-                    pick = Some(s);
+        ui.push_id(row_id(p), |ui| {
+            crate::look::menu_button_036(ui, "Change shader…", |ui| {
+                let current = crate::model::sets::views(m)
+                    .iter()
+                    .find(|v| v.id == id)
+                    .and_then(|v| v.shader_choice);
+                let mut pick = None;
+                for s in shader_options(m.target) {
+                    let on = current == Some(s);
+                    if ui.selectable_label(on, s.label()).clicked() {
+                        ui.close();
+                        pick = (!on).then_some(s);
+                    }
                 }
-            }
-            if pick.is_some() {
-                ui.close();
-            }
-            pick
+                pick
+            })
         })
+        .inner
     });
     let menu = r.inner;
     let name = format!("Change shader for {id}");
@@ -575,7 +589,9 @@ fn fix_click(
         }
         Fix::RemoveMember { set_id, item } => {
             let file = m.item(item).map_or(item.as_str(), |i| i.name.as_str());
-            let why = off
+            // Off for `remove_member`'s own refusals only, the sets document's full reason first (as the other set
+            // fixes); a read-only `sdc.toml` does not stop it.
+            let why = sets_off
                 .map(str::to_string)
                 .or_else(|| m.remove_member_refusal(set_id, item));
             let b = ui.add_enabled(why.is_none(), egui::Button::new("Remove from set"));

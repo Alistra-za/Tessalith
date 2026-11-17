@@ -2043,10 +2043,12 @@ fn a_type_contradiction_row_offers_set_type_and_the_right_type_clears_it() {
 fn a_parallax_row_offers_turn_parallax_off() {
     use engine::codes::{Code, Warning};
     let (_d, mut m) = with_warnings(&[Warning::new(Code::AlphaParallaxNoAlpha, "p")]);
+    let file = m.item(&rock01(&m).members[0]).unwrap().name.clone();
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    h.get_by_label_contains("Turn parallax off for ").click();
+    h.get_by_label(&format!("Turn parallax off for {file}"))
+        .click();
     h.run();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
@@ -2084,6 +2086,41 @@ fn a_missing_map_row_offers_change_shader() {
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
     assert_eq!(rock01(h.state()).shader_choice, Some(first));
+    // Fix round 1: the menu marks the set's shader, as the sets column's combo does, and picking it again is no edit.
+    // The pick planned again, which replaced the injected warning.
+    inject_set(
+        h.state_mut(),
+        &[Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
+    );
+    h.run();
+    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let at = opener.rect();
+    opener.click();
+    h.run();
+    let toggled = |h: &Harness<'static, AppModel>, s: engine::shader::Shader| {
+        nearest(h, s.label(), at).accesskit_node().toggled()
+    };
+    assert_eq!(
+        toggled(&h, first),
+        Some(egui::accesskit::Toggled::True),
+        "the current shader"
+    );
+    let other = sdc_gui::model::sets::shader_options(target)
+        .into_iter()
+        .find(|s| *s != first)
+        .expect("precondition: a second shader");
+    assert_eq!(toggled(&h, other), Some(egui::accesskit::Toggled::False));
+    let pushes = h.state().history.pushes;
+    nearest(&h, first.label(), at).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        h.state().history.pushes,
+        pushes,
+        "the shader it has: no undo step"
+    );
 }
 
 /// Review E10: each code's row carries the fix the table gives it, and SHADER-EXTRA-MAP's member is matched by the
@@ -2110,9 +2147,13 @@ fn each_row_carries_the_tables_fix() {
         fixes(&m, Code::AlphaParallaxNoAlpha),
         (Some(Fix::ParallaxOff(k.clone())), None)
     );
+    // Fix round 1: the engine raises it only on a texture already tagged grass, so Tag as grass would change nothing;
+    // the row keeps only Mark, and its sentence says what the code means.
+    assert_eq!(fixes(&m, Code::GrassDetectSource), (None, None));
     assert_eq!(
-        fixes(&m, Code::GrassDetectSource),
-        (Some(Fix::TagAsGrass(k.clone())), None)
+        sdc_gui::model::code_text::code_sentence(Code::GrassDetectSource),
+        "This grass source's corner normal isn't unit length — the written file is renormalised, so Community \
+         Shaders still reads it as grass"
     );
     assert_eq!(
         fixes(&m, Code::SugContradiction),
@@ -2151,21 +2192,75 @@ fn each_row_carries_the_tables_fix() {
     assert_eq!(fixes(&m, Code::ShaderExtraMap), (shader(), None));
 }
 
-/// Review E10: a CHK-Z-SIGN check row offers Rebuild Z (`give_a_check` plans one on rock01's normal).
+/// Review E10: a CHK-Z-SIGN check row offers Rebuild Z (`give_a_check` plans one on rock01's normal), and the click
+/// clears the row: the check reads `channels.reconstruct_z`, as CHK-GREEN-GUESS reads `flip_green` (fix round 1).
 #[test]
-fn a_z_sign_check_offers_rebuild_z() {
+fn a_z_sign_check_offers_rebuild_z_and_it_clears_the_row() {
     use engine::codes::Code;
     use sdc_gui::model::bottom::{problems, Fix};
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
     give_a_check(&mut m, d.path());
     let (nk, _) = normal_member(&m);
-    let rows = problems(&m);
-    let r = rows
-        .iter()
-        .find(|p| p.code == Some(Code::ChkZSign))
-        .expect("precondition: the check ran");
-    assert_eq!(r.fix, Some(Fix::RebuildZ(nk)));
+    let has = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::ChkZSign))
+            .map(|p| p.fix.clone())
+    };
+    assert_eq!(
+        has(&m),
+        Some(Some(Fix::RebuildZ(nk))),
+        "precondition: the check ran"
+    );
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    // The sentence names "Rebuild Z" too, so the button is found by its role on the row.
+    let y = h
+        .get_by_label(sdc_gui::model::code_text::code_sentence(Code::ChkZSign))
+        .rect()
+        .center()
+        .y;
+    h.query_all_by_role_and_label(egui::accesskit::Role::Button, "Rebuild Z")
+        .find(|n| (n.rect().center().y - y).abs() <= 4.0)
+        .expect("Rebuild Z on the row")
+        .click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(has(h.state()), None, "Rebuild Z is on: the row is gone");
+}
+
+/// Fix round 1: Remove from set is off for `remove_member`'s own refusal, here a locked Normal slot, with that
+/// refusal as its hover.
+#[test]
+fn remove_from_set_is_off_with_the_refusal_for_a_locked_slot() {
+    use sdc_gui::model::sets::SlotKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let (k, member) = normal_member(&m);
+    let n = SlotKind::Normal.slot_number().unwrap();
+    m.set_slot_lock("landscape/rock01", n, true).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject_set(&mut m, &[extra_map(&member)]);
+    let why = m
+        .remove_member_refusal("landscape/rock01", &k)
+        .expect("precondition: a locked slot is refused");
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    let remove = format!("Remove {member} from landscape/rock01");
+    let b = on_row(&h, &extra_note(&member), &remove);
+    assert!(b.accesskit_node().is_disabled(), "refused: off");
+    b.hover();
+    h.run();
+    h.run();
+    h.get_by_label(&why);
 }
 
 /// Review E18 (Task 6 review, made live by Task 7): under a Set filter whose only hidden row is a note with a button
