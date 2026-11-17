@@ -131,6 +131,55 @@ pub struct SetEntry {
     pub settings: Settings,
 }
 
+/// Review E2: one "intended" mark (`[project] intended`): a row the user marked as meant, by its code, its subject
+/// (`texture:{item key}`, `set:{set id}`, `file:{job key}`, `nif:{path}` or `project`) and its shown sentence after
+/// `normalise_sentence`.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct IntendedKey {
+    pub code: String,
+    pub subject: String,
+    pub sentence: String,
+}
+
+/// Review E2, ruling 1: a row's sentence as a mark stores it: trimmed, each run of whitespace one space, and on a
+/// `set:{id}` subject a leading `"{id}: "` naming that same set dropped (the subject carries the id and follows a
+/// rename). The shown text does not change.
+pub fn normalise_sentence(subject: &str, s: &str) -> String {
+    let s = s.split_whitespace().collect::<Vec<_>>().join(" ");
+    if let (Some(id), Some((p, rest))) = (subject.strip_prefix("set:"), s.split_once(": ")) {
+        if same_id(p, id) {
+            return rest.to_string();
+        }
+    }
+    s
+}
+
+/// A stored mark: an inline table with string `code`, `subject` and `sentence`; anything else is not one.
+fn intended_of(v: &Value) -> Option<IntendedKey> {
+    let t = v.as_inline_table()?;
+    let s = |k: &str| t.get(k)?.as_str().map(str::to_string);
+    Some(IntendedKey {
+        code: s("code")?,
+        subject: s("subject")?,
+        sentence: s("sentence")?,
+    })
+}
+
+/// `subject` with a `set:` id folded: two subjects naming one set compare equal (Note BF).
+fn fold_subject(subject: &str) -> String {
+    match subject.strip_prefix("set:") {
+        Some(id) => format!("set:{}", fold_id(id)),
+        None => subject.to_string(),
+    }
+}
+
+fn folded(k: &IntendedKey) -> IntendedKey {
+    IntendedKey {
+        subject: fold_subject(&k.subject),
+        ..k.clone()
+    }
+}
+
 /// Source of `SetsDoc::rev`: one counter for every document, so a replaced document never reuses a revision (DECISIONS Note Y7).
 static NEXT_REV: AtomicU64 = AtomicU64::new(1);
 pub(crate) fn next_rev() -> u64 {
@@ -142,6 +191,8 @@ pub struct SetsDoc {
     entries_cache: RefCell<Option<(u64, Arc<Vec<SetEntry>>)>>,
     /// `no_set_keys`, by revision.
     no_set_cache: RefCell<Option<(u64, Arc<BTreeSet<String>>)>>,
+    /// `intended_keys`, by revision.
+    intended_cache: RefCell<Option<(u64, Arc<BTreeSet<IntendedKey>>)>>,
     /// Note FC11: `<project root>/_sdc/generated.json` as last read or written: the records kept outside the undo
     /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
     /// holds even when the document is never saved; a table it holds wins over the document's.
@@ -294,6 +345,7 @@ impl SetsDoc {
             f: TomlFile::open(root.join(FILE_NAME)),
             entries_cache: RefCell::default(),
             no_set_cache: RefCell::default(),
+            intended_cache: RefCell::default(),
             side: Default::default(),
         };
         d.load_sidecar();
@@ -804,6 +856,106 @@ impl SetsDoc {
         self.set_project("no_set", (!keys.is_empty()).then_some(Value::Array(arr)));
     }
 
+    /// Review E2: the readable marks of `[project] intended`, in the order they were made.
+    pub fn intended(&self) -> Vec<IntendedKey> {
+        self.intended_array()
+            .map(|a| a.iter().filter_map(intended_of).collect())
+            .unwrap_or_default()
+    }
+    /// `intended`, parsed once per revision, with a `set:` subject's id folded (`fold_id`).
+    pub fn intended_keys(&self) -> Arc<BTreeSet<IntendedKey>> {
+        let rev = self.f.rev;
+        if let Some((r, k)) = &*self.intended_cache.borrow() {
+            if *r == rev {
+                return k.clone();
+            }
+        }
+        let k: Arc<BTreeSet<IntendedKey>> = Arc::new(self.intended().iter().map(folded).collect());
+        *self.intended_cache.borrow_mut() = Some((rev, k.clone()));
+        k
+    }
+    /// Mark `key` as intended (`on`) or take the mark off; no edit when it already is as asked. Controller ruling 9:
+    /// the stored array is edited in place, so other entries (unreadable ones too) stay where and as they were.
+    pub fn set_intended(&mut self, key: &IntendedKey, on: bool) {
+        let want = folded(key);
+        let has = |v: &Value| intended_of(v).is_some_and(|k| folded(&k) == want);
+        self.edit_intended(|arr| {
+            let had = arr.iter().any(has);
+            if on && !had {
+                let mut t = toml_edit::InlineTable::new();
+                t.insert("code", key.code.as_str().into());
+                t.insert("subject", key.subject.as_str().into());
+                t.insert("sentence", key.sentence.as_str().into());
+                // In a one-entry-per-line array the new entry takes its own line, indented as the last one; else
+                // it follows `, ` as `Array::push` would put it.
+                let line = arr
+                    .iter()
+                    .last()
+                    .and_then(|v| v.decor().prefix()?.as_str())
+                    .filter(|p| p.contains('\n'))
+                    .map(str::to_string);
+                let mut v = Value::InlineTable(t);
+                if let Some(p) = line {
+                    v.decor_mut().set_prefix(p);
+                } else if !arr.is_empty() {
+                    v.decor_mut().set_prefix(" ");
+                }
+                arr.push_formatted(v);
+            } else if !on && had {
+                arr.retain(|v| !has(v));
+            }
+        });
+    }
+
+    /// `[project] intended` as stored. `None` when absent or not an array.
+    fn intended_array(&self) -> Option<&Array> {
+        self.f.doc.get("project")?.get("intended")?.as_array()
+    }
+
+    /// Edit a clone of `[project] intended` (empty when absent) and write it back; an array left empty removes the
+    /// key. A key that is there but not an array is left as written.
+    fn edit_intended(&mut self, edit: impl FnOnce(&mut Array)) {
+        if self.read_only() {
+            return;
+        }
+        let present = self
+            .f
+            .doc
+            .get("project")
+            .is_some_and(|p| p.get("intended").is_some());
+        let mut arr = match self.intended_array() {
+            Some(a) => a.clone(),
+            None if present => return,
+            None => Array::new(),
+        };
+        edit(&mut arr);
+        self.set_project("intended", (!arr.is_empty()).then_some(Value::Array(arr)));
+    }
+
+    /// Review E2: the marks on set `from` move to `to` (`rename_refs`), or go with it (`to = None`, `delete_set`).
+    fn move_intended(&mut self, from: &str, to: Option<&str>) {
+        let on_from = |v: &Value| {
+            intended_of(v)
+                .and_then(|k| k.subject.strip_prefix("set:").map(|id| same_id(id, from)))
+                .unwrap_or(false)
+        };
+        if !self.intended_array().is_some_and(|a| a.iter().any(on_from)) {
+            return;
+        }
+        self.edit_intended(|arr| match to {
+            None => arr.retain(|v| !on_from(v)),
+            Some(to) => {
+                for v in arr.iter_mut().filter(|v| on_from(v)) {
+                    if let Some(s) = v.as_inline_table_mut().and_then(|t| t.get_mut("subject")) {
+                        let decor = s.decor().clone();
+                        *s = Value::from(format!("set:{to}"));
+                        *s.decor_mut() = decor;
+                    }
+                }
+            }
+        });
+    }
+
     /// Files whose sub-type was switched to its PBR counterpart because their set's diffuse became `pbr_albedo`
     /// (so a revert finds them). GUI bookkeeping in `[project]`: `sdc.toml` rejects unknown keys.
     pub fn auto_pbr(&self) -> Vec<String> {
@@ -996,7 +1148,7 @@ impl SetsDoc {
     }
 
     /// Note HF1: drop set `id`'s entry and remove it from the order list; its `files` go to no set, so an automatic
-    /// set does not come back. An entry with no files just goes.
+    /// set does not come back. An entry with no files just goes, and so do the set's intended marks.
     pub fn delete_set(&mut self, id: &str, files: &[String]) {
         if self.read_only() {
             return;
@@ -1032,6 +1184,7 @@ impl SetsDoc {
         }
         // Note HF4: the set leaves its group in the same step; a group left with no sets goes.
         self.move_to_group(&[id.to_string()], &GroupTarget::None);
+        self.move_intended(id, None);
     }
 
     /// Rename set `from` to `to`. A created set just changes its id; an automatic set records `renamed_from`. Other
@@ -1065,7 +1218,7 @@ impl SetsDoc {
     }
 
     /// Note HS13: every reference to set `from` becomes `to`: the order list (one place for `to`, the first), other
-    /// entries' borrows and group membership.
+    /// entries' borrows, group membership and its intended marks.
     fn rename_refs(&mut self, from: &str, to: &str) {
         let before = self.order();
         let mut order: Vec<String> = vec![];
@@ -1086,6 +1239,7 @@ impl SetsDoc {
             }
         }
         self.rename_in_groups(from, to);
+        self.move_intended(from, Some(to));
     }
 
     /// GUI tweaks G1: the automatic set `from` is now named `to` by the engine (its members were given new input

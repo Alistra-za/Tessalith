@@ -522,3 +522,153 @@ fn an_empty_notes_list_says_no_notes_and_its_pill_turns_it_off() {
     h.run();
     assert_eq!(h.state().bottom.filter, None);
 }
+
+fn key(code: &str, subject: &str, sentence: &str) -> sdc_gui::sets_doc::IntendedKey {
+    sdc_gui::sets_doc::IntendedKey {
+        code: code.into(),
+        subject: subject.into(),
+        sentence: sentence.into(),
+    }
+}
+
+#[test]
+fn a_mark_is_written_as_an_inline_table_in_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let doc = m.sets_doc.as_mut().unwrap();
+    let k = key("SHADER-MISSING-MAP", "set:landscape/rock01", "no _n");
+    doc.set_intended(&k, true);
+    let text = doc.text();
+    assert!(
+        text.contains(r#"intended = [{ code = "SHADER-MISSING-MAP", subject = "set:landscape/rock01", sentence = "no _n" }]"#),
+        "{text}"
+    );
+    assert!(doc.intended_keys().contains(&k));
+    doc.set_intended(&k, false);
+    assert!(!doc.text().contains("intended"));
+    assert_eq!(
+        sdc_gui::sets_doc::normalise_sentence("texture:x.png", "  a \t b\n c "),
+        "a b c"
+    );
+}
+
+/// Ruling 1 (spec 7a, Controller rulings for Plan 3a): a set row's own id in front of its sentence is left out of
+/// the key, so the mark follows a rename. The PGPatcher pitfall rows are written `"{set id}: {pitfall}"`
+/// (`model/pbr_export.rs:606`).
+#[test]
+fn a_set_rows_own_id_prefix_is_left_out_of_the_key() {
+    use sdc_gui::sets_doc::normalise_sentence as n;
+    let s = "landscape/rock01: Delete wins; the other alpha keys of this entry do nothing";
+    assert_eq!(
+        n("set:landscape/rock01", s),
+        "Delete wins; the other alpha keys of this entry do nothing"
+    );
+    assert_eq!(
+        n("set:Landscape/Rock01", s),
+        "Delete wins; the other alpha keys of this entry do nothing",
+        "ids compare as `same_id`"
+    );
+    assert_eq!(n("set:landscape/rock02", s), s, "another set's id stays");
+    assert_eq!(
+        n("texture:landscape/rock01.png", s),
+        s,
+        "only a set subject drops a prefix"
+    );
+    assert_eq!(
+        n(
+            "set:landscape/rock01",
+            "alphaprop_flags: only changes shapes"
+        ),
+        "alphaprop_flags: only changes shapes",
+        "a sentence that starts with another word is untouched"
+    );
+    assert_eq!(
+        n("set:landscape/rock01", "landscape/rock01 is ready"),
+        "landscape/rock01 is ready",
+        "the id without \": \" stays"
+    );
+}
+
+#[test]
+fn a_mark_follows_a_renamed_set_and_leaves_with_a_deleted_one() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let doc = m.sets_doc.as_mut().unwrap();
+    doc.set_intended(
+        &key(
+            "SET-COMPANION-DDS",
+            "set:landscape/rock01",
+            "a companion is a DDS",
+        ),
+        true,
+    );
+    doc.rename_set("landscape/rock01", "landscape/rock02");
+    assert!(doc.intended_keys().contains(&key(
+        "SET-COMPANION-DDS",
+        "set:landscape/rock02",
+        "a companion is a DDS"
+    )));
+    doc.delete_set("landscape/rock02", &[]);
+    assert!(doc.intended().is_empty());
+}
+
+/// The engine's automatic retarget moves a mark too. `SetsDoc::retarget_auto(from, to)`: its two branches that
+/// change the id go through `rename_set` or `rename_refs`. This call takes the third branch: `opened` writes no
+/// `[[sets]]` entry (`support/mod.rs` `opened` only plans the folder and chooses the export folder), so there is no
+/// entry for the first branch (needs `renamed_from`) or the second (needs an entry with id `from`), and none created
+/// or renamed at `from`, so it calls `rename_refs("landscape/rock01", "landscape/rock09")`.
+#[test]
+fn a_mark_follows_an_automatic_retarget() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let doc = m.sets_doc.as_mut().unwrap();
+    doc.set_intended(
+        &key("SHADER-MISSING-MAP", "set:landscape/rock01", "s"),
+        true,
+    );
+    doc.retarget_auto("landscape/rock01", "landscape/rock09");
+    assert_eq!(
+        doc.intended(),
+        vec![key("SHADER-MISSING-MAP", "set:landscape/rock09", "s")]
+    );
+}
+
+/// Controller ruling 9: a rewrite keeps entries the app can't read, in place, and never drops a stale mark.
+#[test]
+fn hand_written_and_stale_marks_survive_a_rewrite() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        concat!(
+            "[project]\nintended = [\n",
+            "  42,\n",
+            "  { code = \"X\" },\n",
+            "  { code = \"VAL-MIP-ERROR\", subject = \"texture:gone.png\", sentence = \"s\" },\n",
+            "]\n",
+        ),
+    )
+    .unwrap();
+    let mut doc = sdc_gui::sets_doc::SetsDoc::open(d.path());
+    assert!(!doc.read_only());
+    assert_eq!(
+        doc.intended(),
+        vec![key("VAL-MIP-ERROR", "texture:gone.png", "s")],
+        "unreadable entries are skipped on read"
+    );
+    let k = key("CHAN-NOT-GRAY", "texture:landscape/rock01.png", "t");
+    doc.set_intended(&k, true);
+    assert!(
+        doc.text()
+            .contains("sentence = \"s\" },\n  { code = \"CHAN-NOT-GRAY\""),
+        "a new mark takes its own line in a one-per-line array:\n{}",
+        doc.text()
+    );
+    doc.set_intended(&k, false);
+    let t = doc.text();
+    let at = |s: &str| t.find(s).unwrap_or_else(|| panic!("{s} lost:\n{t}"));
+    assert!(at("42") < at("{ code = \"X\" }"));
+    assert!(
+        at("{ code = \"X\" }") < at("texture:gone.png"),
+        "kept in place, stale mark kept"
+    );
+}
