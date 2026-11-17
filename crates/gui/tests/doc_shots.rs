@@ -247,22 +247,14 @@ fn crop(img: RgbaImage, rect: Option<eframe::egui::Rect>) -> RgbaImage {
     image::imageops::crop_imm(&img, x0, y0, x1.saturating_sub(x0), y1.saturating_sub(y0)).to_image()
 }
 
-/// sha256 of each font file the app loads (`fonts.rs`) that `%WINDIR%\Fonts` has.
+/// sha256 of each font file the app loads at start (fonts.rs WINDOWS table) that %WINDIR%\Fonts has.
 fn font_hashes() -> std::collections::BTreeMap<String, String> {
     use sha2::{Digest, Sha256};
     let dir = std::path::PathBuf::from(
         std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into()),
     )
     .join("Fonts");
-    let files = [
-        "segoeui.ttf",
-        "seguisym.ttf",
-        "seguiemj.ttf",
-        "msyh.ttc",
-        "YuGothM.ttc",
-        "malgun.ttf",
-        "consola.ttf",
-    ];
+    let files = ["segoeui.ttf", "seguisym.ttf", "seguiemj.ttf", "consola.ttf"];
     files
         .iter()
         .filter_map(|f| {

@@ -30,7 +30,7 @@ Click a tab to open the panel on it. Click the tab that is showing, or the **▼
 
 ### Messages
 
-Every status-line note and every toast (*Saved*, *Export finished*, *Scan finished*, the *Undid / Redid* note) is also logged in the **Messages** tab, newest first. <!-- D:CD5 --> **Clear** empties it, and it is gone when you close the window. **Ctrl+M** opens the tab, or collapses the panel when it already shows Messages.
+Every status-line note and every toast (*Saved*, *Export finished*, *Scan finished*, the *Undid / Redid* note) is also logged in the **Messages** tab, newest first. <!-- D:CD5 --> **Clear** empties it, and it is gone when you close the window. **Ctrl+M** opens the tab, or collapses the panel when it already shows Messages. At start it also says when Tessalith had to use its built-in fonts ([fonts](Installation.md#what-you-need)).
 
 Anything that needs a decision is a [dialog](#dialogs), not a toast.
 

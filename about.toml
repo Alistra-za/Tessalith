@@ -1,5 +1,5 @@
 # cargo-about config for THIRD_PARTY_LICENSES.md (regenerate command: see THIRD_PARTY_NOTICES.md).
-# Accepted = the licences actually present in the shipped dependency tree, all compatible with GPL-3.0-or-later.
+# Accepted = the licences actually present in the shipped dependency tree, all compatible with GPL-3.0-or-later, plus the licences of the embedded fonts (Note JM).
 # Order matters: for a crate offering a choice (SPDX OR) cargo-about picks the first accepted licence in this
 # list, so MIT is preferred, then Apache-2.0, then the rest. Consequences in the current tree:
 #   MIT OR Apache-2.0 (and variants with Zlib / BSD / Unlicense / 0BSD)  -> MIT

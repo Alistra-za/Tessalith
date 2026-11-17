@@ -12,9 +12,9 @@ The exes aren't code-signed, so SmartScreen warns on the first run. Click **More
 
 ## What you need
 
-- **Windows 10 or 11, x64.** Linux and macOS don't work: the only build target is `x86_64-pc-windows-msvc`, and the 3D preview uses Direct3D 11 and Windows fonts.
+- **Windows 10 or 11, x64.** Linux and macOS don't work: the only build target is `x86_64-pc-windows-msvc`, and the 3D preview uses Direct3D 11.
 - **A GPU for the previews.** Without one the 2D and 3D previews are off and everything else works. The CLI needs none.
-- **Segoe UI.** `tessalith.exe` won't start without it, and says so. Segoe UI Symbol, Segoe UI Emoji and Consolas are used when present and skipped when not. All four ship with Windows; Tessalith ships no fonts.
+- **Fonts.** Tessalith uses Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas, which ship with Windows. Letters they don't have, such as Chinese, Japanese or Korean in file names, come from the other fonts installed on Windows. If Segoe UI is missing or damaged, Tessalith uses Arial; if that is missing too, its own built-in fonts, and the Messages tab says so. A missing font never stops it from starting.
 
 ## Where Tessalith keeps its files
 

@@ -36,7 +36,7 @@ The Helpers row says "not used" with the reason, with the reason (`PACK-UNUSED-I
 
 ### The GUI won't start
 
-It needs the Windows font Segoe UI and says so when it's missing ([what you need](Installation.md#what-you-need)). The previews need a GPU; without one they're off and everything else works.
+The previews need a GPU; without one they're off and everything else works.
 
 ### The 3D preview shows plain textures, or PBR grass looks different
 
