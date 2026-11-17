@@ -26,7 +26,7 @@ Raw maps are packed only under the target that reads them. Under `vanilla` only 
 
 ### My opacity map isn't used
 
-The Helpers row says "not used" with the reason, with the reason (`PACK-UNUSED-INPUT`). Each reason and its fix: [Which data wins](Texture-Packing.md#which-data-wins).
+The Helpers row says "not used" with the reason (`PACK-UNUSED-INPUT`). Each reason and its fix: [Which data wins](Texture-Packing.md#which-data-wins).
 
 ## The GUI
 
