@@ -593,10 +593,10 @@ fn preset_combo(ui: &mut egui::Ui, model: &mut AppModel) {
         .show_ui_036(ui, |ui| body(ui))
         .response;
     let combo = super::name_input(combo, "Preset").on_hover_ui(|ui| {
-            ui.label(format!(
-                "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Settings…"
-            ));
-        });
+        ui.label(format!(
+            "The preset the folder converts with. Saved in sdc.toml as preset. Mode: {mode}; the list shows this mode's presets. Change the mode in Settings…"
+        ));
+    });
     // Note FC1 (AM14): a Problems row's `Choose preset…` opens the same menu under the combo, as a popup the header
     // owns (egui 0.37, as 0.36, has no public way to open a combo: `ComboBox::widget_to_popup_id` is private). A
     // request is taken by the next pass that draws this combo and honoured only within two passes of the click: one

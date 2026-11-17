@@ -273,7 +273,8 @@ pub(crate) fn commit_click(
 
 /// E28: names an input widget for AccessKit (screen readers, kittest finders) when nothing visible beside it does.
 /// The name says what the field is for; a combo's choice and a box's text stay its value. It wins over the hover
-/// sentence egui 0.37 copies into an empty name, whichever is set first.
+/// sentence egui 0.37 copies into an empty name in either order: the hover fills only an empty name
+/// (`R\egui-0.37.0\src\response.rs:797-813`), and this sets the name outright (`:1087-1093`).
 pub(crate) fn name_input(r: egui::Response, name: &str) -> egui::Response {
     r.accessible_name(name)
 }

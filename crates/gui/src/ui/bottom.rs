@@ -107,8 +107,7 @@ pub fn draw(
         .is_some_and(|r| r.dragged() || r.drag_stopped());
     if cap.is_some() && resized {
         // Resized in the Meshes view, to the cap or below it: that is the user's height now.
-        ui.ctx()
-            .data_mut(|d| d.remove::<f32>(egui::Id::unique(id).with("uncapped")));
+        ui.ctx().data_mut(|d| d.remove::<f32>(uncapped_key(id)));
     }
     let (pass, top) = (ui.ctx().cumulative_pass_nr(), panel.response.rect.top());
     ui.ctx()
@@ -119,11 +118,16 @@ pub fn draw(
 /// spacing around it down to the bottom panel, measured at 1536x864 (Note FI18, ruling R3).
 const NIF_ROOM: f32 = 160.0 + 211.0;
 
+/// Where the user's height of panel `salt` is kept aside while the Meshes cap holds it lower.
+fn uncapped_key(salt: &str) -> egui::Id {
+    egui::Id::unique(salt).with("uncapped")
+}
+
 /// Note FI18: the cap is the view's limit, not the user's height. A taller height is kept aside while capped and
 /// given back once the cap no longer applies (the panel itself stores the clamped height).
 fn keep_users_height(ctx: &egui::Context, salt: &str, cap: Option<f32>) {
     use egui::containers::panel::PanelState;
-    let key = egui::Id::unique(salt).with("uncapped");
+    let key = uncapped_key(salt);
     let Some(id) = super::panel_ids::panel_id(ctx, salt) else {
         return;
     };

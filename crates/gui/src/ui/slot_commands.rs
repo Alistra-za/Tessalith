@@ -127,10 +127,9 @@ pub fn draw(ctx: &egui::Context, model: &mut AppModel, st: &mut SlotCmdState) {
                     ui.vertical(|ui| {
                         if choice == 1 {
                             ui.add_enabled_ui(editable, |ui| {
-                                let r = super::name_input(
-                                    ui.add(egui::TextEdit::singleline(&mut st.text[i]).margin(crate::look::TEXT_EDIT_MARGIN)),
-                                    &format!("Slot {n} path"),
-                                );
+                                let edit = egui::TextEdit::singleline(&mut st.text[i])
+                                    .margin(crate::look::TEXT_EDIT_MARGIN);
+                                let r = super::name_input(ui.add(edit), &format!("Slot {n} path"));
                                 let enter =
                                     r.lost_focus() && ui.input(|k| k.key_pressed(egui::Key::Enter));
                                 if ui.small_button("Apply").clicked() || enter {
