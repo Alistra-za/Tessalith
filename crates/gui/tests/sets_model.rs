@@ -1229,29 +1229,27 @@ fn a_borrow_from_a_set_without_that_slot_keeps_the_missing_map_warning() {
     assert_eq!(needs_rows(&m, id, "_n"), 1);
 }
 
-/// Note HH8 (B1-5): a borrowed map answers the warning only when its type fits the role the shader needs. Plain
-/// `pbr` needs a `pbr_normal`; a lender's normal decided as a plain `normal` fills the slot but not the role.
-#[test]
-fn a_borrowed_normal_of_another_type_keeps_the_missing_map_warning() {
-    use engine::config::Subtype;
-    use sdc_gui::model::Answer;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = rock02_opened(d.path(), true, false);
+/// The rock02 set on plain `pbr` (PBR Landscape, the auto pick under `textures/landscape/`, takes any normal), with
+/// rock01's normal decided as `st`, then shared into rock02's Normal slot. Returns the model after the borrow.
+fn borrow_rock01_normal_as(
+    dir: &std::path::Path,
+    st: engine::config::Subtype,
+) -> sdc_gui::model::AppModel {
+    let mut m = rock02_opened(dir, true, false);
     let id = "landscape/rock02";
-    // PBR Landscape (the auto pick under `textures/landscape/`) takes a plain normal too; plain `pbr` does not.
     m.set_shader(id, Some(engine::shader::Shader::Pbr));
     m.decide(
         "landscape/rock01_normal.png",
-        Answer::Subtype(Subtype::Normal),
+        sdc_gui::model::Answer::Subtype(st),
     );
     idle(&mut m);
-    assert!(missing_maps(&m, id).contains(&"_n".to_string()));
+    assert!(missing_maps(&m, id).contains(&"_n".to_string()), "before");
     let normal = key_of(&m, "rock01_normal.png");
     assert_eq!(
         m.item(&normal)
             .and_then(|i| i.job.as_ref())
             .map(|j| j.profile.subtype),
-        Some(Subtype::Normal)
+        Some(st)
     );
     assert_eq!(
         m.drop_choice(&normal, id, DropChoice::Share),
@@ -1262,11 +1260,77 @@ fn a_borrowed_normal_of_another_type_keeps_the_missing_map_warning() {
         view(&set_views(&m), id).slots.get(&SlotKind::Normal),
         Some(SlotFill::Borrowed { .. })
     ));
+    m
+}
+
+/// Note HH8 (B1-6): any tangent-space normal answers a shader that needs one. A plain `normal` borrowed into a `pbr`
+/// set (whose role asks for `pbr_normal`) answers "needs _n": the borrower names the lender's exported file.
+#[test]
+fn a_borrowed_vanilla_normal_answers_the_pbr_missing_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let m = borrow_rock01_normal_as(d.path(), engine::config::Subtype::Normal);
+    let id = "landscape/rock02";
     assert!(
-        missing_maps(&m, id).contains(&"_n".to_string()),
-        "a plain normal does not answer pbr's _n"
+        !missing_maps(&m, id).contains(&"_n".to_string()),
+        "a tangent-space normal answers pbr's _n"
     );
+    assert_eq!(needs_rows(&m, id, "_n"), 0);
+}
+
+/// Note HH8 (B1-6): a model-space normal is not a tangent-space one, so borrowed into a `pbr` set it keeps "needs _n".
+#[test]
+fn a_borrowed_model_space_normal_keeps_the_missing_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let m = borrow_rock01_normal_as(d.path(), engine::config::Subtype::Msn);
+    let id = "landscape/rock02";
+    assert!(missing_maps(&m, id).contains(&"_n".to_string()));
     assert_eq!(needs_rows(&m, id, "_n"), 1);
+}
+
+/// Note HH8 (B1-5): outside the normal slot the engine's check decides. A skin `_rfaos` borrowed into a `pbr` set's
+/// RMAOS slot does not answer "needs _rmaos".
+#[test]
+fn a_borrowed_rfaos_keeps_the_missing_rmaos() {
+    use engine::config::Subtype;
+    use image::{ImageBuffer, Rgba};
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Rgba([(x * 4) as u8, 0, 200, 255]))
+        .save(r.join("skin01_rfaos.png"))
+        .unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let id = "landscape/rock02";
+    m.set_shader(id, Some(engine::shader::Shader::Pbr));
+    m.decide(
+        "landscape/skin01_rfaos.png",
+        Answer::Subtype(Subtype::SkinRfaos),
+    );
+    idle(&mut m);
+    assert_eq!(missing_maps(&m, id), ["_rmaos"], "before the borrow");
+    let rfaos = key_of(&m, "skin01_rfaos.png");
+    assert_eq!(
+        m.item(&rfaos)
+            .and_then(|i| i.job.as_ref())
+            .map(|j| j.profile.subtype),
+        Some(Subtype::SkinRfaos)
+    );
+    assert_eq!(
+        m.drop_choice(&rfaos, id, DropChoice::Share),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    assert!(matches!(
+        view(&set_views(&m), id).slots.get(&SlotKind::Rmaos),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert_eq!(
+        missing_maps(&m, id),
+        ["_rmaos"],
+        "an _rfaos is not an _rmaos"
+    );
+    assert_eq!(needs_rows(&m, id, "_rmaos"), 1);
 }
 
 /// Note HH8: a borrowed packed map (the lender packs its own `_rmaos`) answers "needs _rmaos" as a normal does.
