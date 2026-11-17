@@ -327,8 +327,8 @@ pub struct FontChoice {
     pub lookup_failed: bool,
 }
 
-pub const FLOOR_NO_FONT: &str = "Tessalith found none of its usual fonts, so it uses its built-in Ubuntu Light and Hack; install Noto Sans or DejaVu Sans (on Windows, Segoe UI) for your system's look.";
-pub const FLOOR_TEXT_ONLY: &str = "Tessalith found none of its usual interface fonts, so text uses its built-in Ubuntu Light while fixed-width text keeps a system font; install Noto Sans or DejaVu Sans (on Windows, Segoe UI) for your system's look.";
+pub const FLOOR_NO_FONT: &str = "Tessalith found none of its usual fonts, so it uses its built-in Ubuntu Light and Hack; install Segoe UI or Arial (on Linux, Noto Sans or DejaVu Sans) for your system's look.";
+pub const FLOOR_TEXT_ONLY: &str = "Tessalith found none of its usual interface fonts, so text uses its built-in Ubuntu Light while fixed-width text keeps a system font; install Segoe UI or Arial (on Linux, Noto Sans or DejaVu Sans) for your system's look.";
 pub const FLOOR_LOOKUP_FAILED: &str = "Tessalith couldn't read the system's font list, so it uses its built-in Ubuntu Light and Hack; the error is in the newest crash log in %LOCALAPPDATA%\\sdc\\logs.";
 
 impl FontChoice {
