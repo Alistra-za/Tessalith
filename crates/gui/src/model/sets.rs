@@ -263,7 +263,8 @@ pub enum SlotFill {
     Own {
         item: String,
     },
-    /// A finished output of set `from`, used here through a slot command.
+    /// A finished output of set `from`, used here through a slot command. `from` is the set that owns the file, also
+    /// when the share passes through sets that share the slot in turn (Note JN1).
     Borrowed {
         from: String,
         item: String,
@@ -292,8 +293,15 @@ pub enum Missing {
     NoFilesLeft,
     /// An `add` or `remove` path that names no file.
     File(String),
-    /// `borrow.slot<slot>` from set `from`, which is gone or (`empty`) has nothing in that slot.
-    Borrow { slot: u8, from: String, empty: bool },
+    /// The entry's own `borrow.slot<slot>` line, from set `from`, which fills nothing (Note JN1): set `from` is gone
+    /// (`!empty`), or (`empty`) neither it nor a set it shares that slot from in turn has a file there, or the shares
+    /// loop back. `itself`: the line names the set itself, which keeps its own file.
+    Borrow {
+        slot: u8,
+        from: String,
+        empty: bool,
+        itself: bool,
+    },
 }
 
 impl Missing {
@@ -301,8 +309,17 @@ impl Missing {
         match self {
             Missing::NoFilesLeft => NO_FILES_LEFT.into(),
             Missing::File(f) => f.clone(),
-            Missing::Borrow { slot, from, empty } => {
-                let none = if *empty { " (it has none)" } else { "" };
+            Missing::Borrow {
+                slot,
+                from,
+                empty,
+                itself,
+            } => {
+                let none = match (itself, empty) {
+                    (true, _) => " (this set itself)",
+                    (false, true) => " (it has none)",
+                    (false, false) => "",
+                };
                 // The skin slots past the game's have no `slotN` a user knows: name them.
                 let name = SlotKind::ALL
                     .iter()
@@ -950,9 +967,11 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
             .find(|(id, _)| same_id(id, from))
             .map(|(_, s)| s.clone())
     };
+    let lender_borrow =
+        |id: &str, n: u8| entry_of(&entries, id).and_then(|e| e.borrow.get(&n).cloned());
     for v in &mut views {
         if let Some(e) = entry_of(&entries, &v.id) {
-            entry_view(m, v, e, own);
+            entry_view(m, v, e, own, lender_borrow);
         }
     }
     fill_from_records(m, &mut views, &entries, &own_slots);
@@ -1139,12 +1158,13 @@ fn drop_supplied_missing_maps(m: &AppModel, v: &mut SetView) {
 }
 
 /// Entry data: created flag, settings, missing members, borrowed slots. `own` gives a set's own slots by id (`None`
-/// for no such set).
+/// for no such set); `lender_borrow` gives set `id`'s own `borrow.slot<n>` line (Note JN1: a chain is followed).
 fn entry_view(
     m: &AppModel,
     v: &mut SetView,
     e: &SetEntry,
     own: impl Fn(&str) -> Option<BTreeMap<SlotKind, SlotFill>>,
+    lender_borrow: impl Fn(&str, u8) -> Option<String>,
 ) {
     v.created = e.created;
     v.settings = e.settings.clone();
@@ -1168,28 +1188,46 @@ fn entry_view(
         .filter(|k| !v.members.contains(k))
         .collect();
     for (slot, from) in &e.borrow {
-        let borrow = |empty| Missing::Borrow {
-            slot: *slot,
-            from: from.clone(),
-            empty,
+        // Note JN1 (B2-2): follow a lender's own borrow line to the set that owns the file; own-first, so a lender with
+        // its own file and a borrow line lends its own, as one hop did.
+        let mut seen = vec![fold_id(&v.id)];
+        let mut cur = from.clone();
+        let mut hops = 0;
+        let hit = loop {
+            let folded = fold_id(&cur);
+            if seen.contains(&folded) {
+                break Err(true);
+            }
+            seen.push(folded);
+            // A gone set on the first hop is the line's own `from` (not `empty`); further on, the chain ends empty.
+            let Some(src) = own(&cur) else {
+                break Err(hops > 0);
+            };
+            let found = src.into_iter().find_map(|(k, f)| match f {
+                SlotFill::Own { item } if k.slot_number() == Some(*slot) => Some((k, item)),
+                _ => None,
+            });
+            if let Some(found) = found {
+                break Ok(found);
+            }
+            match lender_borrow(&cur, *slot) {
+                Some(next) => {
+                    cur = next;
+                    hops += 1;
+                }
+                None => break Err(true),
+            }
         };
-        let Some(src) = own(from) else {
-            v.missing.push(borrow(false));
-            continue;
-        };
-        let hit = src
-            .iter()
-            .find(|(k, f)| k.slot_number() == Some(*slot) && matches!(f, SlotFill::Own { .. }));
-        if let Some((kind, SlotFill::Own { item })) = hit {
-            v.slots.insert(
-                *kind,
-                SlotFill::Borrowed {
-                    from: from.clone(),
-                    item: item.clone(),
-                },
-            );
-        } else {
-            v.missing.push(borrow(true));
+        match hit {
+            Ok((kind, item)) => {
+                v.slots.insert(kind, SlotFill::Borrowed { from: cur, item });
+            }
+            Err(empty) => v.missing.push(Missing::Borrow {
+                slot: *slot,
+                from: from.clone(),
+                empty,
+                itself: same_id(from, &v.id),
+            }),
         }
     }
     // Note HH8: a slot a resolved borrow fills answers the shader's missing-map warning when the borrowed file's type
@@ -1312,15 +1350,27 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         let v = views.iter().find(|v| same_id(&v.id, from))?;
         Some(set_of(&v.key).map_or_else(BTreeMap::new, |s| base_view(m, &root, s).slots))
     };
-    let borrowers: Vec<&str> = entries
-        .iter()
-        .filter(|e| {
-            e.borrow
-                .values()
-                .any(|f| scope_ids.iter().any(|s| same_id(s, f)))
-        })
-        .map(|e| e.id.as_str())
-        .collect();
+    let lender_borrow =
+        |id: &str, n: u8| entry_of(&entries, id).and_then(|e| e.borrow.get(&n).cloned());
+    // Note JN1: a chain's far end reads the scope set's files too, so every hop is rebuilt (pinned by
+    // fast_replan::views_after_a_partial_equal_a_fresh_build).
+    let mut borrowers: Vec<&str> = scope_ids.iter().map(String::as_str).collect();
+    loop {
+        let more: Vec<&str> = entries
+            .iter()
+            .filter(|e| !borrowers.iter().any(|b| same_id(b, &e.id)))
+            .filter(|e| {
+                e.borrow
+                    .values()
+                    .any(|f| borrowers.iter().any(|b| same_id(b, f)))
+            })
+            .map(|e| e.id.as_str())
+            .collect();
+        if more.is_empty() {
+            break;
+        }
+        borrowers.extend(more);
+    }
     let affected: Vec<usize> = (0..views.len())
         .filter(|&i| {
             let v = &views[i];
@@ -1335,7 +1385,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             None => SetView::new(old.key.clone(), old.id.clone(), vec![]),
         };
         if let Some(e) = entry_of(&entries, &v.id) {
-            entry_view(m, &mut v, e, own);
+            entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
         rebuilt.push(v);
@@ -2048,6 +2098,92 @@ fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     }
 }
 
+/// Note JN4 (B2-3): the sets a Delete set or a Remove from set leaves with an empty shared slot, listed before the
+/// edit (B2-9).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct LostShares {
+    /// The sets' ids, in display order.
+    pub sets: Vec<String>,
+    /// The file names (`TextureItem::name`) they shared, sorted.
+    pub files: Vec<String>,
+    /// The same files' item keys, sorted.
+    pub keys: Vec<String>,
+    /// How many (set, slot) pairs go empty.
+    pub slots: usize,
+}
+
+/// Note JN5 (B2-6, B2-7): a shared file that leaves its set for the first set sharing it that can take it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Handoff {
+    /// The file's item key.
+    pub file: String,
+    /// Its file name, for the toast.
+    pub name: String,
+    /// The set it leaves, and its slot number there.
+    pub lender: String,
+    pub slot: u8,
+    /// The set that takes it.
+    pub heir: String,
+    /// How many other sets share it from the heir afterwards: every other entry in `sdc-project.toml` whose line
+    /// named the lender for slot `n`, the skipped ones included. Counted from the entries, NOT the views: a set
+    /// whose files are all in no set has no view (`all_no_set`, `card_hidden`) yet its line is rewritten too.
+    pub others: usize,
+}
+
+/// What `delete_counted` did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Deleted {
+    /// How many textures went to no set.
+    pub moved: usize,
+    pub lost: LostShares,
+    /// The files handed to a sharing set, in slot order (Note JN5).
+    pub handoffs: Vec<Handoff>,
+}
+
+/// Note JN5: the toast sentence for one hand-over.
+fn handoff_text(h: &Handoff) -> String {
+    let (name, heir) = (&h.name, &h.heir);
+    match h.others {
+        0 => format!("{name} went to {heir}, which shared it."),
+        1 => {
+            format!("{name} went to {heir}, which shared it; 1 other set now shares it from there.")
+        }
+        k => format!(
+            "{name} went to {heir}, which shared it; {k} other sets now share it from there."
+        ),
+    }
+}
+
+/// Note JN4: "a", "a and b", "a, b and c", or "a, b, c and 2 more" (at most three names).
+fn list_ids(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [a] => a.clone(),
+        [a, b] => format!("{a} and {b}"),
+        [a, b, c] => format!("{a}, {b} and {c}"),
+        [a, b, c, rest @ ..] => format!("{a}, {b}, {c} and {} more", rest.len()),
+    }
+}
+
+/// Note JN4 (B2-3): the sentence that names the sets left with an empty shared slot; `None` when `lost.sets` is
+/// empty. `what` is "it" for Remove from set, and `list_ids(&lost.files)` for Delete set.
+fn lost_share_text(lost: &LostShares, what: &str) -> Option<String> {
+    let (who, tail) = match lost.sets.as_slice() {
+        [] => return None,
+        [one] => (one.clone(), ".".to_string()),
+        all => (
+            format!("{} sets", all.len()),
+            format!(": {}.", list_ids(all)),
+        ),
+    };
+    let place = if lost.slots == 1 {
+        "that slot is empty now"
+    } else {
+        "those slots are empty now"
+    };
+    Some(format!("{who} shared {what}; {place}{tail}"))
+}
+
 /// Note DW3: the items in a locked slot of their own set (`BatchRequest::pinned_files`); a borrowing set's lock is
 /// left out, so it never changes the owner's reading.
 pub fn pinned_files(m: &AppModel) -> BTreeSet<String> {
@@ -2163,6 +2299,27 @@ fn clear_slot(s: &mut SetsDoc, id: &str, slot: Option<SlotKind>, existing: &Opti
         }
         _ => {}
     }
+}
+
+/// A set that may take files (a drop, a hand-over: Note JN5): it still has files, or the user created it.
+fn takes_files(v: &SetView) -> bool {
+    !v.key.is_empty() || v.created
+}
+
+/// Note JN5: hand-over `h` in the document. The heir takes the file; the lender's own line for that slot, when it
+/// names the lender itself, goes (the lender would share back the file it gave away: t5 Minor 5); the sets sharing
+/// the slot from the lender share it from the heir.
+fn hand_over(s: &mut SetsDoc, h: &Handoff) {
+    s.add_member(&h.heir, &h.file);
+    // Fresh: a `SetsDoc` mutator that changes the entries bumps the revision (`delete_set` does). On Delete set the
+    // lender's entry is gone already, so nothing is written for it (`set_borrow` would make the entry again).
+    let self_line = s.entries().iter().any(|e| {
+        same_id(&e.id, &h.lender) && e.borrow.get(&h.slot).is_some_and(|f| same_id(f, &h.lender))
+    });
+    if self_line {
+        s.set_borrow(&h.lender, h.slot, None);
+    }
+    s.retarget_slot_borrows(&h.lender, h.slot, &h.heir);
 }
 
 impl AppModel {
@@ -2285,6 +2442,7 @@ impl AppModel {
         }
         // Note HG: a record fill is turned off; there is no borrow line to drop.
         let fill = v.filled.contains_key(&n);
+        let to = if fill { None } else { self.passed_on(&v, n) };
         let id = v.id;
         self.edit_docs(
             &format!("Clear slot {n} of {id}"),
@@ -2295,6 +2453,10 @@ impl AppModel {
                     s.set_no_fill(&id, n, true);
                 } else {
                     s.set_borrow(&id, n, None);
+                    // Note JN4 (B2-12): a line that passed a chain on passes its sharing sets on, in this step.
+                    if let Some(x) = &to {
+                        s.retarget_slot_borrows(&id, n, x);
+                    }
                 }
             },
         );
@@ -2349,6 +2511,215 @@ impl AppModel {
         lock_refusal(&v, slot)
     }
 
+    /// Note JN2 (B2-1): the slot `item` lends, as (its set's id, slot number `n`): a borrow of slot `n` from that set
+    /// resolves to `item`. That is, among the set's own fills (the map `own` gives `entry_view`: `base_view`'s slots,
+    /// before any borrow), `item` is the first `SlotFill::Own`, in `SlotKind` order, whose kind has slot number `n`:
+    /// the same rule as `entry_view`'s hit. `None` for a no-set texture, a second file of a kind, the second kind of
+    /// slot 3 or 7, a helper or packing source with no slot, or a slot with no number (Projected noise, Detail normal).
+    // shortcut: a share follows its file only through the GUI edits that call this (Move, New set, Fill from names,
+    // Share, Delete set, Remove from set: Notes JN2-JN5). These leave it stale with no toast (JN6):
+    // - a type change that moves the file to another slot number, or makes it a helper;
+    // - a packed output whose raw maps move to another set (the pack follows them; its sharing sets stay put);
+    // - files renamed on disk outside the GUI;
+    // - a lent file deleted on disk.
+    // Upgrade when a user loses a share that way: re-point the sharing sets when the plan sees the file move.
+    pub(crate) fn lent_slot(&self, item: &str) -> Option<(String, u8)> {
+        let v = self.set_of_item(item)?;
+        let own = self.own_fills(&v.key);
+        let n = own
+            .iter()
+            .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
+            .and_then(|(k, _)| k.slot_number())?;
+        let first = own.into_iter().find_map(|(k, f)| match f {
+            SlotFill::Own { item } if k.slot_number() == Some(n) => Some(item),
+            _ => None,
+        })?;
+        (first == item).then_some((v.id, n))
+    }
+
+    /// Note JN4 (B2-3, B2-9): call it BEFORE the edit that takes the files `leaving` out of set `except`. The sets
+    /// other than `except`, in display order, with an explicit share that resolves to one of `items` (a
+    /// `SlotFill::Borrowed` on a slot that is not in `SetView::filled`, so not a record fill; through a chain too), and
+    /// the slot would be empty after the edit. A share is not counted when `except` keeps a member (one not in
+    /// `leaving`) whose `slot_of` has that slot number (B2-8: the slot stays filled from the lender), nor when the
+    /// sharing set has a file of its own in that slot number (it fills the slot again). A set with no card is never
+    /// counted (it is out of the run).
+    pub(crate) fn sets_sharing(
+        &self,
+        items: &[String],
+        leaving: &[String],
+        except: &str,
+    ) -> LostShares {
+        let views = views(self);
+        let kept: BTreeSet<u8> = views
+            .iter()
+            .find(|v| same_id(&v.id, except))
+            .map(|v| {
+                v.members
+                    .iter()
+                    .filter(|k| !leaving.contains(k))
+                    .filter_map(|k| self.item(k))
+                    .filter_map(slot_of)
+                    .filter_map(SlotKind::slot_number)
+                    .collect()
+            })
+            .unwrap_or_default();
+        let mut lost = LostShares::default();
+        let mut files = BTreeSet::new();
+        for v in views.iter().filter(|v| !same_id(&v.id, except)) {
+            let mut slots = BTreeSet::new();
+            let mut own: Option<BTreeSet<u8>> = None;
+            for (k, f) in &v.slots {
+                let (SlotFill::Borrowed { item, .. }, Some(n)) = (f, k.slot_number()) else {
+                    continue;
+                };
+                if v.filled.contains_key(&n) || kept.contains(&n) || !items.contains(item) {
+                    continue;
+                }
+                // Final review Important 2: the set's own file fills the slot once the shared one is gone.
+                if own
+                    .get_or_insert_with(|| self.own_slot_numbers(v))
+                    .contains(&n)
+                {
+                    continue;
+                }
+                slots.insert(n);
+                files.insert(item.clone());
+            }
+            if !slots.is_empty() {
+                lost.sets.push(v.id.clone());
+                lost.slots += slots.len();
+            }
+        }
+        // By key, so two files of one name in different folders both print.
+        lost.files = files
+            .iter()
+            .filter_map(|k| self.item(k).map(|i| i.name.clone()))
+            .collect();
+        lost.files.sort();
+        lost.keys = files.into_iter().collect();
+        lost
+    }
+
+    /// Note JN4: `pack` is a packed output that `item` is a raw map of, and every other raw map of it is in no set
+    /// already, so taking `item` out takes the pack out of its set's slots. Conservative: a raw map with no item, or
+    /// one in another set, counts as staying, so the pack is not counted then (t4-r1).
+    fn last_raw_map_of(&self, item: &str, pack: &str) -> bool {
+        let Some(input) = self.item(item).map(|i| &i.input) else {
+            return false;
+        };
+        let Some(pk) = self
+            .item(pack)
+            .filter(|p| p.kind == ItemKind::Packed)
+            .and_then(|p| p.job.as_ref()?.pack.as_ref())
+        else {
+            return false;
+        };
+        pk.sources.iter().any(|s| s.path == *input)
+            && pk.sources.iter().all(|s| {
+                s.path == *input
+                    || self
+                        .items
+                        .iter()
+                        .any(|i| i.input == s.path && self.is_no_set(&i.key))
+            })
+    }
+
+    /// Note JN5 (B2-6, B2-7, B2-8): where `item` goes instead of no set when it leaves its set together with the
+    /// files `leaving` (`[item]` for Remove from set, every member for Delete set); `None` when it stays a no-set
+    /// file. Call it before the edit (B2-9).
+    pub(crate) fn handoff(&self, item: &str, leaving: &[String]) -> Option<Handoff> {
+        if self.is_packed(item) {
+            return None;
+        }
+        let (lender, n) = self.lent_slot(item)?;
+        let t = self.item(item)?;
+        let kind = slot_of(t)?;
+        let views = views(self);
+        let kinds_of = |v: &SetView, skip: &[String]| -> Vec<SlotKind> {
+            v.members
+                .iter()
+                .filter(|k| !skip.contains(k))
+                .filter_map(|k| self.item(k))
+                .filter_map(slot_of)
+                .collect()
+        };
+        // B2-8: the lender keeps a file in slot number `n`, so the slot stays filled from it.
+        let lv = views.iter().find(|v| same_id(&v.id, &lender))?;
+        if kinds_of(lv, leaving)
+            .iter()
+            .any(|k| k.slot_number() == Some(n))
+        {
+            return None;
+        }
+        let entries = self.sets_doc.as_ref()?.entries();
+        let sharing: Vec<&str> = entries
+            .iter()
+            .filter(|e| !same_id(&e.id, &lender))
+            .filter(|e| e.borrow.get(&n).is_some_and(|f| same_id(f, &lender)))
+            .map(|e| e.id.as_str())
+            .collect();
+        // B2-7: the first in display order that can take it.
+        let heir = views.iter().find(|v| {
+            if !sharing.iter().any(|s| same_id(s, &v.id)) {
+                return false;
+            }
+            if v.locks.contains(&n) || !takes_files(v) {
+                return false;
+            }
+            let own = kinds_of(v, &[]);
+            if own.iter().any(|k| k.slot_number() == Some(n)) {
+                return false;
+            }
+            // B2-7; the slot-number check above already covers it for one handed file.
+            slot_conflict(&own, kind).is_none()
+        })?;
+        Some(Handoff {
+            file: item.to_string(),
+            name: t.name.clone(),
+            lender,
+            slot: n,
+            heir: heir.id.clone(),
+            others: sharing.len() - 1,
+        })
+    }
+
+    /// Note JN2: the set with engine key `key`'s own fills, before any share: the map `own` gives `entry_view`
+    /// (`base_view`'s slots). Empty for no such set.
+    fn own_fills(&self, key: &str) -> BTreeMap<SlotKind, SlotFill> {
+        self.sets
+            .iter()
+            .find(|s| s.key == key)
+            .map(|s| base_view(self, &self.sets_root(), s).slots)
+            .unwrap_or_default()
+    }
+
+    /// Note JN5: the slot numbers set `v` fills with a file of its own (`own_fills`, before any share).
+    fn own_slot_numbers(&self, v: &SetView) -> BTreeSet<u8> {
+        self.own_fills(&v.key)
+            .into_iter()
+            .filter(|(_, f)| matches!(f, SlotFill::Own { .. }))
+            .filter_map(|(k, _)| k.slot_number())
+            .collect()
+    }
+
+    /// Note JN4 (B2-12): the set that set `v`'s share line for slot `n` names, when `v` has no file of its own in
+    /// slot number `n`: the sets sharing that slot from `v` read the file through that line, so dropping it passes
+    /// them on there. `None` when `v` owns a file in that slot number or has no such line.
+    fn passed_on(&self, v: &SetView, n: u8) -> Option<String> {
+        if self.own_slot_numbers(v).contains(&n) {
+            return None;
+        }
+        self.sets_doc
+            .as_ref()?
+            .entries()
+            .iter()
+            .find(|e| same_id(&e.id, &v.id))?
+            .borrow
+            .get(&n)
+            .cloned()
+    }
+
     fn is_packed(&self, item: &str) -> bool {
         self.item(item).is_some_and(|i| i.kind == ItemKind::Packed)
     }
@@ -2373,7 +2744,7 @@ impl AppModel {
     /// The set a texture may be dropped on: it exists and still has files (or is a set the user created).
     fn drop_target(&self, set: &str) -> Result<SetView, String> {
         let target = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
-        if target.key.is_empty() && !target.created {
+        if !takes_files(&target) {
             return Err(format!("{}: {NO_FILES_LEFT}", target.id));
         }
         Ok(target)
@@ -2681,9 +3052,15 @@ impl AppModel {
                 } else {
                     "Move into"
                 };
+                let lent = self.lent_slot(item);
                 self.edit_docs(&format!("{label} {id}"), None, true, move |_, s| {
                     clear_slot(s, &id, slot, &existing);
                     s.add_member(&id, &it);
+                    // Note JN2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do
+                    // for a rename).
+                    if let Some((l, n)) = &lent {
+                        s.retarget_slot_borrows(l, *n, &id);
+                    }
                 });
                 Ok(())
             }
@@ -2702,6 +3079,9 @@ impl AppModel {
                 self.edit_docs(&format!("Share into {id}"), None, true, move |_, s| {
                     clear_slot(s, &id, slot, &existing);
                     s.set_borrow(&id, n, Some(&fid));
+                    // Note JN3 (B2-1b): the slot's sharing sets follow the slot to the new source, so no chain is
+                    // written; a set that is the new source owns the file and shares nothing.
+                    s.retarget_slot_borrows(&id, n, &fid);
                 });
                 Ok(())
             }
@@ -2729,9 +3109,15 @@ impl AppModel {
             n += 1;
         }
         let (i, it) = (id.clone(), item.to_string());
+        let lent = self.lent_slot(item);
         self.edit_docs(&format!("New set {id}"), None, true, move |_, s| {
             s.create_set(&i);
             s.add_member(&i, &it);
+            // Note JN2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do for a
+            // rename).
+            if let Some((l, n)) = &lent {
+                s.retarget_slot_borrows(l, *n, &i);
+            }
         });
         self.note_new_set(&id);
         Ok(id)
@@ -2914,9 +3300,11 @@ impl AppModel {
     }
 
     /// Note HF1: delete any set. Its textures (not the packed outputs, which follow their raw maps) go to no set and
-    /// the automatic set does not come back; an entry with no files just goes. Returns how many textures went to no
-    /// set, or `None` (nothing done) when there is no such set or the project file takes no edit.
-    fn delete_counted(&mut self, id: &str) -> Option<usize> {
+    /// the automatic set does not come back; an entry with no files just goes. A file other sets share goes to the
+    /// first of them that can take it instead (Note JN5). Returns what it did (how many textures went to no set, the
+    /// files handed to a sharing set, and the sets left with an empty shared slot), or `None` (nothing done) when
+    /// there is no such set or the project file takes no edit.
+    fn delete_counted(&mut self, id: &str) -> Option<Deleted> {
         if !self.sets_editable() {
             return None;
         }
@@ -2927,13 +3315,56 @@ impl AppModel {
             .filter(|k| !self.is_packed(k))
             .cloned()
             .collect();
-        let n = files.len();
+        // Note JN5 (B2-6, owner: "Option 1, hand it over"; B2-7, B2-8): a file other sets share goes to the first of
+        // them that can take it, in this step; amends HF1.
+        let mut handoffs: Vec<Handoff> = files
+            .iter()
+            .filter_map(|f| self.handoff(f, &v.members))
+            .collect();
+        handoffs.sort_by_key(|h| h.slot);
+        let rest: Vec<String> = v
+            .members
+            .iter()
+            .filter(|k| !handoffs.iter().any(|h| h.file == **k))
+            .cloned()
+            .collect();
+        // Note JN4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
+        let lost = self.sets_sharing(&rest, &v.members, &v.id);
+        let own = self.own_slot_numbers(&v);
         let i = id.to_string();
+        let moved = files.len() - handoffs.len();
+        let handed = handoffs.clone();
         self.edit_docs(&format!("Delete {id}"), None, true, move |_, s| {
-            s.delete_set(&i, &files)
+            // Note JN4 (B2-11): a share that passed through this set is passed on to the set it shared from, before
+            // the entry goes. Only for a slot number this set has no file of its own in: where it has one, the sharing
+            // sets used that file, and the hand-over below (or the lost sentence) covers them. A hand-over is always
+            // a slot number with an own file (`lent_slot`), so the two rewrites never touch the same slot number.
+            let through: Vec<(u8, String)> = s
+                .entries()
+                .iter()
+                .find(|e| same_id(&e.id, &i))
+                .map(|e| {
+                    e.borrow
+                        .iter()
+                        .filter(|(n, _)| !own.contains(n))
+                        .map(|(n, x)| (*n, x.clone()))
+                        .collect()
+                })
+                .unwrap_or_default();
+            for (n, x) in &through {
+                s.retarget_slot_borrows(&i, *n, x);
+            }
+            s.delete_set(&i, &files);
+            for h in &handed {
+                hand_over(s, h);
+            }
         });
         self.prune_collapsed();
-        Some(n)
+        Some(Deleted {
+            moved,
+            lost,
+            handoffs,
+        })
     }
 
     /// `delete_counted`, as done or not.
@@ -2942,17 +3373,23 @@ impl AppModel {
     }
 
     /// Note FC5 (supersedes AG13's confirm): the set menu's Delete set: no question, one undo step and a toast
-    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1).
+    /// `Deleted set {id} ({n} textures now in no set)` with Undo (Note HF1), followed by where each shared file went
+    /// (Note JN5) and the sets left with an empty shared slot (Note JN4).
     pub fn delete_set_with_toast(&mut self, id: &str) {
-        let Some(n) = self.delete_counted(id) else {
+        let Some(d) = self.delete_counted(id) else {
             return;
         };
         let step = (self.history.undo.len(), self.history.pushes);
-        let text = match n {
+        let mut text = match d.moved {
             0 => format!("Deleted set {id}"),
             1 => format!("Deleted set {id} (1 texture now in no set)"),
             n => format!("Deleted set {id} ({n} textures now in no set)"),
         };
+        let mut sentences: Vec<String> = d.handoffs.iter().map(handoff_text).collect();
+        sentences.extend(lost_share_text(&d.lost, &list_ids(&d.lost.files)));
+        if !sentences.is_empty() {
+            text = format!("{text}. {}", sentences.join(" "));
+        }
         self.messages.notify_with(
             super::messages::Severity::Info,
             text,
@@ -2973,13 +3410,59 @@ impl AppModel {
     }
 
     /// Note HF1 (supersedes DU5): take `item` out of set `id` into no set, whichever way it was in (automatic, moved
-    /// in, the only member). Refused for a packed map (it follows its raw maps).
+    /// in, the only member). Refused for a packed map (it follows its raw maps). A file other sets share goes to the
+    /// first of them that can take it, and a toast says where (Note JN5); else, when sets shared the file, a toast
+    /// names them (Note JN4).
     pub fn remove_member(&mut self, id: &str, item: &str) -> Result<(), String> {
-        let i = self.remove_member_check(id, item)?;
-        let it = item.to_string();
+        let v = self.remove_member_check(id, item)?;
+        let (i, it) = (v.id.clone(), item.to_string());
+        // A packed output of the set leaves it with the last of its raw maps (Note HF1).
+        let mut gone = vec![item.to_string()];
+        gone.extend(
+            v.members
+                .iter()
+                .filter(|p| self.last_raw_map_of(item, p))
+                .cloned(),
+        );
+        // Note JN5 (B2-6, owner: "Option 1, hand it over"; B2-7, B2-8): a file other sets share goes to the first of
+        // them that can take it, in this step; amends HF1.
+        let h = self.handoff(item, &[item.to_string()]);
+        // Note JN4 (B2-3, B2-9): the sets whose share this edit empties, listed before it; the shares stay (HE3).
+        // A handed file is never a pack's last raw map: `handoff` needs a `slot_of`, and a pack's raw map is a
+        // `PackedInto` item (`items.rs`), whose own job the engine drops (`pack::plan`), so `gone` is `[item]` then.
+        // The assert catches an engine change that breaks this (t5 Minor 2).
+        debug_assert!(
+            h.is_none() || gone.len() == 1,
+            "a handed file is a pack's last raw map"
+        );
+        let lost = if h.is_some() {
+            LostShares::default()
+        } else {
+            self.sets_sharing(&gone, &gone, &v.id)
+        };
+        let handed = h.clone();
         self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
-            s.remove_member(&i, &it)
+            s.remove_member(&i, &it);
+            if let Some(h) = &handed {
+                hand_over(s, h);
+            }
         });
+        if let Some(h) = h {
+            self.messages
+                .notify(super::messages::Severity::Info, handoff_text(&h));
+            return Ok(());
+        }
+        let name = self.item(item).map_or(item, |t| t.name.as_str());
+        // By key (t4-r1): another file of the same name is not "it".
+        let what = if lost.keys == [item] {
+            "it".to_string()
+        } else {
+            list_ids(&lost.files)
+        };
+        if let Some(sentence) = lost_share_text(&lost, &what) {
+            let text = format!("{name} is in no set now. {sentence}");
+            self.messages.notify(super::messages::Severity::Info, text);
+        }
         Ok(())
     }
 
@@ -2988,8 +3471,8 @@ impl AppModel {
         self.remove_member_check(id, item).err()
     }
 
-    /// `remove_member`'s refusals, in its order; the set's id when it may go ahead.
-    fn remove_member_check(&self, id: &str, item: &str) -> Result<String, String> {
+    /// `remove_member`'s refusals, in its order; the set's view when it may go ahead.
+    fn remove_member_check(&self, id: &str, item: &str) -> Result<SetView, String> {
         if !self.sets_editable() {
             return Err(READ_ONLY.into());
         }
@@ -3003,7 +3486,7 @@ impl AppModel {
             return Err(format!("{item} is not in {}", v.id));
         }
         self.leaves_locked(item)?;
-        Ok(v.id)
+        Ok(v)
     }
 
     /// Note HE2: a set line (`add` or `remove`) naming a file that is gone from disk clears itself, with an Info line
@@ -3088,6 +3571,8 @@ impl AppModel {
             Missing::Borrow { slot, .. } if self.slot_locked(&id, slot) => {
                 return Err(SLOT_LOCKED.into());
             }
+            // Note JN6: unlike clearing a share that fills its slot (B2-12, `passed_on`), this passes nothing on: the
+            // line filled nothing, so the sets sharing through it showed nothing before and still show nothing.
             Missing::Borrow { slot, .. } => {
                 self.edit_docs("Remove from set", None, true, move |_, s| {
                     s.set_borrow(&id, slot, None)
@@ -3390,6 +3875,7 @@ impl AppModel {
                 );
                 return Ok(());
             }
+            let to = self.passed_on(&v, slot);
             let id = v.id;
             self.edit_docs(
                 &format!("Clear slot {slot} of {id}"),
@@ -3398,6 +3884,10 @@ impl AppModel {
                 move |_, d| {
                     d.set_borrow(&id, slot, None);
                     d.set_value(&id, &key, None);
+                    // Note JN4 (B2-12): a line that passed a chain on passes its sharing sets on, in this step.
+                    if let Some(x) = &to {
+                        d.retarget_slot_borrows(&id, slot, x);
+                    }
                 },
             );
             return Ok(());
@@ -3500,19 +3990,28 @@ impl AppModel {
             return Err(READ_ONLY.into());
         }
         let v = self.view_of(set).ok_or_else(|| format!("no set {set}"))?;
-        let moves: Vec<(String, SlotKind, Option<SlotFill>)> = fill_proposals(self, set)
+        // (item, slot, what fills that slot now, the slot the item lends).
+        let moves: Vec<_> = fill_proposals(self, set)
             .into_iter()
             .filter(|r| r.blocked.is_none() && ticked.contains(&r.item))
-            .map(|r| (r.item, r.slot, v.slots.get(&r.slot).cloned()))
+            .map(|r| {
+                let lent = self.lent_slot(&r.item);
+                (r.item, r.slot, v.slots.get(&r.slot).cloned(), lent)
+            })
             .collect();
         if moves.is_empty() {
             return Err("nothing to fill".into());
         }
         let (id, n) = (v.id.clone(), moves.len());
         self.edit_docs(&format!("Fill {id} from names"), None, true, move |_, s| {
-            for (item, slot, existing) in &moves {
+            for (item, slot, existing, lent) in &moves {
                 clear_slot(s, &id, Some(*slot), existing);
                 s.add_member(&id, item);
+                // Note JN2 (B2-1): the sets sharing the moved file's slot follow it, in this step (as HF4/HS13 do for
+                // a rename).
+                if let Some((l, n)) = lent {
+                    s.retarget_slot_borrows(l, *n, &id);
+                }
             }
         });
         Ok(n)
@@ -3776,5 +4275,37 @@ mod badge_tests {
         assert_eq!(badge_text(&m, &v), "PBR set (no JSON on this target)");
         m.target = Target::Cs;
         assert_eq!(kind_text(&m, &v), "PBR → JSON");
+    }
+}
+
+#[cfg(test)]
+mod lost_share_tests {
+    use super::*;
+
+    fn lost(sets: &[&str], files: &[&str], slots: usize) -> LostShares {
+        let own = |v: &[&str]| v.iter().map(|s| (*s).to_string()).collect();
+        LostShares {
+            sets: own(sets),
+            files: own(files),
+            keys: vec![],
+            slots,
+        }
+    }
+
+    /// Note JN4: one set that lost several slots says "those slots" with its id; more than three sets are cut to
+    /// three names and "N more".
+    #[test]
+    fn the_lost_share_sentence_follows_the_counts() {
+        let one = lost(&["a/one"], &["x.png", "y"], 2);
+        assert_eq!(
+            lost_share_text(&one, &list_ids(&one.files)).as_deref(),
+            Some("a/one shared x.png and y; those slots are empty now.")
+        );
+        let five = lost(&["s/1", "s/2", "s/3", "s/4", "s/5"], &["x.png"], 5);
+        assert_eq!(
+            lost_share_text(&five, "it").as_deref(),
+            Some("5 sets shared it; those slots are empty now: s/1, s/2, s/3 and 2 more.")
+        );
+        assert_eq!(lost_share_text(&lost(&[], &[], 0), "it"), None);
     }
 }

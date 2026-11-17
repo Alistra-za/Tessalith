@@ -4,7 +4,7 @@
 mod support;
 use engine::config::{AlphaPolicy, Subtype};
 use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
-use sdc_gui::model::sets::{view_builds, views, SetView, SlotFill, SlotKind};
+use sdc_gui::model::sets::{view_builds, views, Missing, SetView, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::WorkerMsg;
@@ -548,6 +548,142 @@ fn views_after_a_partial_equal_a_fresh_build() {
     assert!(
         !leaf.slots.contains_key(&SlotKind::Normal) && !leaf.missing.is_empty(),
         "the borrower follows its source: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+
+    // Note JN1 (B2-2): a chain. The leaf borrows the odd set's normal slot, and the odd set borrows the wall's: the
+    // leaf fills from the wall, and must follow it after a partial. A pin: the engine's partial groups put every
+    // normal borrower in the owner's group, so this partial's scope already holds the leaf, the odd set and the wall
+    // (the slot-3 case below is the one a direct borrowers list fails).
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    m.hold_plan_results = false;
+    m.edit_docs("chain", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/odd"));
+        s.set_borrow("landscape/odd", 2, Some("landscape/wall"));
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        matches!(
+            leaf.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { from, item }) if from == "landscape/wall" && *item == WALL_N
+        ),
+        "the leaf fills from the wall through the odd set: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.decide(WALL_N, Answer::Subtype(Subtype::SkinSk));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(&partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "a partial"
+    );
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        !leaf.slots.contains_key(&SlotKind::Normal)
+            && leaf.missing.contains(&Missing::Borrow {
+                slot: 2,
+                from: "landscape/odd".into(),
+                empty: true,
+                itself: false,
+            }),
+        "the far end of the chain follows its source: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+
+    // Note JN1 (B2-2): the same chain on slot 3. The engine's partial groups hold a normal's borrowers (so the chain
+    // above is re-planned whole), not a glow's: a partial of the wall alone must still rebuild the leaf, two hops away.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    decided(&mut m, WALL, Subtype::Glow);
+    m.hold_plan_results = false;
+    m.edit_docs("chain", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 3, Some("landscape/odd"));
+        s.set_borrow("landscape/odd", 3, Some("landscape/wall"));
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        matches!(
+            leaf.slots.get(&SlotKind::Emissive),
+            Some(SlotFill::Borrowed { from, item }) if from == "landscape/wall" && *item == WALL
+        ),
+        "the leaf's glow fills from the wall through the odd set: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.decide(WALL, Answer::Subtype(Subtype::Diffuse));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(&partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "a partial"
+    );
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        !leaf.slots.contains_key(&SlotKind::Emissive)
+            && leaf.missing.contains(&Missing::Borrow {
+                slot: 3,
+                from: "landscape/odd".into(),
+                empty: true,
+                itself: false,
+            }),
+        "the far end of a glow chain follows its source: {:?} {:?}",
+        leaf.slots,
+        leaf.missing
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+
+    // Note JN1 (t1): a loop of shares through the splice path. The leaf shares slot 3 from the odd set, which shares
+    // it from the wall, whose own line names the odd set again. The wall lends its own glow (own-first) until it is
+    // a diffuse; then the walk from the leaf meets the odd set twice and stops. The splice ends and equals a full
+    // build.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    decided(&mut m, WALL, Subtype::Glow);
+    m.hold_plan_results = false;
+    m.edit_docs("loop", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 3, Some("landscape/odd"));
+        s.set_borrow("landscape/odd", 3, Some("landscape/wall"));
+        s.set_borrow("landscape/wall", 3, Some("landscape/odd"));
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.hold_plan_results = true;
+    assert!(matches!(
+        view_of(&m, "landscape/leaf").slots.get(&SlotKind::Emissive),
+        Some(SlotFill::Borrowed { from, item }) if from == "landscape/wall" && *item == WALL
+    ));
+    m.decide(WALL, Answer::Subtype(Subtype::Diffuse));
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(&partials[0], WorkerMsg::Partial { result: Ok(_), .. }),
+        "a partial"
+    );
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    let leaf = view_of(&m, "landscape/leaf");
+    assert!(
+        !leaf.slots.contains_key(&SlotKind::Emissive)
+            && leaf.missing.contains(&Missing::Borrow {
+                slot: 3,
+                from: "landscape/odd".into(),
+                empty: true,
+                itself: false,
+            }),
+        "the loop fills nothing after the partial: {:?} {:?}",
         leaf.slots,
         leaf.missing
     );
