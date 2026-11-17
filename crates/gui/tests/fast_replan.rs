@@ -57,7 +57,14 @@ fn collect(m: &mut AppModel, partials: usize, planned: usize) -> (Vec<WorkerMsg>
     let mut got = vec![];
     loop {
         m.poll();
-        got.extend(m.take_held());
+        // A partial of an edit from before results were held (`decide_all`'s, under load) can land late; the model drops
+        // it (its seq is not past `applied_seq`), so it is not one of the partials asked for.
+        let floor = m.applied_seq;
+        got.extend(
+            m.take_held()
+                .into_iter()
+                .filter(|x| !is_partial(x) || seq_of(x) > floor),
+        );
         let p = got.iter().filter(|x| is_partial(x)).count();
         if p >= partials && got.len() - p >= planned {
             let (mut p, f): (Vec<_>, Vec<_>) = got.into_iter().partition(is_partial);
