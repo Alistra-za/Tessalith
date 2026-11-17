@@ -98,12 +98,28 @@ fn system_definitions() -> (egui::FontDefinitions, FontChoice) {
     .clone()
 }
 
+/// Whether `SDC_FONT`'s value forces the embedded floor: only exactly `embedded` does. A test seam; release builds
+/// never read the variable.
+#[cfg(feature = "test-hooks")]
+pub fn floor_forced(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|v| v == "embedded")
+}
+
 /// Installs this OS's interface fonts (or the embedded floor), then the one system font provider for characters they
 /// lack (CJK, Arabic, …), and pins egui 0.36.2's look in both themes (`look`). The providers are replaced, not added
 /// to, so eframe's own or a second call's never stacks (Note JM). Never fails: the `Result` keeps every
 /// `with_context_setup` call's `.expect("system fonts")` compiling. The choice says whether a floor font is used.
 pub fn install_system_fonts(ctx: &egui::Context) -> Result<FontChoice, std::convert::Infallible> {
-    let (defs, choice) = system_definitions();
+    // The only read of `SDC_FONT`: compiled out of a build without `test-hooks`.
+    #[cfg(feature = "test-hooks")]
+    let forced = floor_forced(std::env::var_os("SDC_FONT").as_deref());
+    #[cfg(not(feature = "test-hooks"))]
+    let forced = false;
+    let (defs, choice) = if forced {
+        embedded()
+    } else {
+        system_definitions()
+    };
     ctx.set_fonts(defs);
     ctx.set_font_providers(vec![system_provider()]);
     ctx.all_styles_mut(crate::look::pin_036_style);
@@ -859,7 +875,20 @@ mod tests {
         }
     }
 
-    /// Every non-ASCII character in the GUI source (this file and the CJK test string aside) is in `UI_SYMBOLS`, so the
+    // `test-hooks` is on for this target (the self dev-dependency in Cargo.toml), but the cfg keeps the test honest.
+    #[cfg(feature = "test-hooks")]
+    #[test]
+    fn only_sdc_font_embedded_forces_the_floor() {
+        use std::ffi::OsStr;
+        assert!(floor_forced(Some(OsStr::new("embedded"))));
+        for v in ["", "Embedded", "system", "embedded "] {
+            assert!(!floor_forced(Some(OsStr::new(v))), "{v:?}");
+        }
+        assert!(!floor_forced(None));
+    }
+
+    /// Every non-ASCII character in the GUI source (this file's tests, its `UI_SYMBOLS` literal and CJK aside) is in
+    /// `UI_SYMBOLS`, so the
     /// floor-gap and owner pins cover new UI text, and every `UI_SYMBOLS` character is still in the source. On a
     /// failure add or remove the reported characters and rerun the pins.
     #[test]
@@ -881,8 +910,19 @@ mod tests {
             &mut files,
         );
         let mut used = std::collections::BTreeSet::new();
-        for f in files.iter().filter(|f| !f.ends_with("fonts.rs")) {
+        for f in &files {
             let text = std::fs::read_to_string(f).unwrap();
+            // This file: only the code before `mod tests` (its user-facing `FLOOR_*` messages), without the
+            // `UI_SYMBOLS` literal, which would satisfy the stale check by itself.
+            let text = if f.ends_with("fonts.rs") {
+                let code = text.split("mod tests {").next().unwrap();
+                code.lines()
+                    .filter(|l| !l.contains("const UI_SYMBOLS"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            } else {
+                text
+            };
             used.extend(text.chars().filter(|c| !c.is_ascii() && !cjk(*c)));
         }
         let missing: String = used.iter().filter(|c| !UI_SYMBOLS.contains(**c)).collect();

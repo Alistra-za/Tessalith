@@ -63,6 +63,11 @@ path = "tests/fonts_crash_hook.rs"
 name = "device_lost"
 path = "tests/device_lost.rs"
 
+# Sets SDC_FONT.
+[[test]]
+name = "fonts_env"
+path = "tests/fonts_env.rs"
+
 [[test]]
 name = "ui_drive"
 path = "tests/ui_drive/main.rs"
