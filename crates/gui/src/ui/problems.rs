@@ -52,12 +52,35 @@ pub fn row_id(p: &Problem) -> egui::Id {
 
 /// A row's accessible name: where, then what (Note FB9).
 fn row_name(p: &Problem) -> String {
-    let at = match &p.at {
+    format!("{}: {}", row_subject(p), p.shown())
+}
+
+/// Note FM35: the alpha type a texture row that asks only its alpha confirms on Enter. With a sub-type question too,
+/// Enter must not answer just one of the two, so there is none there.
+fn row_alpha(m: &AppModel, p: &Problem) -> Option<engine::config::AlphaPolicy> {
+    match &p.at {
+        At::Texture(k) => m.item(k).filter(|i| {
+            !i.decisions
+                .iter()
+                .any(|d| matches!(d, Decision::Subtype { .. }))
+        }),
+        _ => None,
+    }
+    .and_then(alpha_asked)
+}
+
+/// Whether Enter or Space on the focused row `p` writes a decision (its suggestion, or its alpha), when nothing is off.
+fn row_decides(m: &AppModel, p: &Problem) -> bool {
+    matches!(p.at, At::Texture(_)) && (p.suggested.is_some() || row_alpha(m, p).is_some())
+}
+
+/// What a row is about, as its name starts: the texture, file or NIF key, the set id, or "Project".
+pub(crate) fn row_subject(p: &Problem) -> &str {
+    match &p.at {
         At::Texture(k) | At::File(k) | At::Nif(k) => k.as_str(),
         At::Set { id, .. } => id.as_str(),
         At::Project => "Project",
-    };
-    format!("{at}: {}", p.shown())
+    }
 }
 
 type Rows = Arc<Vec<Problem>>;
@@ -253,9 +276,10 @@ const ROW_FOCUS: &str = "problems-row-focus";
 /// Review E4: a row the set editor's status line asked for (`focus_row`); the tab's next draw takes it.
 const FOCUS_FIX: &str = "problems-row-focus-fix";
 
-/// Review E4: the next draw of the row `id` (`row_id`) scrolls to it and moves focus to the first of its fix, its
-/// second fix and its **Mark as intended** that it draws enabled (never its link or Go to set). A row with none of
-/// them, or not in the list, takes no focus.
+/// Review E4: the next draw of the row `id` (`row_id`) scrolls to it and moves focus to the first control the row
+/// reads among its fix, its second fix and its **Mark as intended** (never its link or Go to set), when that control
+/// is enabled. When it is off, or the row has none, the row itself takes focus if Enter and Space on it write nothing
+/// (it has no suggestion to accept and asks no alpha); else nothing does. A row not in the list takes no focus.
 pub fn focus_row(ctx: &egui::Context, id: egui::Id) {
     ctx.data_mut(|d| d.insert_temp(egui::Id::unique(FOCUS_FIX), id));
 }
@@ -266,22 +290,27 @@ fn widgets_so_far(ui: &egui::Ui) -> usize {
         .viewport(|v| v.this_pass.widgets.get_layer(ui.layer_id()).count())
 }
 
-/// The last enabled widget that can take focus that `ui`'s layer took after its first `from`.
-fn last_focusable_since(ui: &egui::Ui, from: usize) -> Option<egui::Id> {
+/// The last widget that can take focus that `ui`'s layer took after its first `from`, enabled or not (a disabled
+/// widget keeps its sense), and whether it is enabled.
+fn last_focusable_since(ui: &egui::Ui, from: usize) -> Option<(egui::Id, bool)> {
     ui.ctx().viewport(|v| {
         v.this_pass
             .widgets
             .get_layer(ui.layer_id())
             .skip(from)
-            .filter(|w| w.enabled && w.sense.is_focusable())
+            .filter(|w| w.sense.is_focusable())
             .last()
-            .map(|w| w.id)
+            .map(|w| (w.id, w.enabled))
     })
 }
 
-/// The Problems tab is not drawn: forget the focused row, so coming back never moves focus into the list.
+/// The Problems tab is not drawn: forget the focused row and a waiting `focus_row`, so coming back never moves focus
+/// into the list.
 pub fn forget_focus(ctx: &egui::Context) {
-    ctx.data_mut(|d| d.remove::<(egui::Id, usize)>(egui::Id::unique(ROW_FOCUS)));
+    ctx.data_mut(|d| {
+        d.remove::<(egui::Id, usize)>(egui::Id::unique(ROW_FOCUS));
+        d.remove::<egui::Id>(egui::Id::unique(FOCUS_FIX));
+    });
 }
 
 enum Act {
@@ -481,9 +510,11 @@ fn fix_click(
         for g in [b, f] {
             let name = feature_key(*g).trim_end_matches("_on");
             let text = format!("Turn off {name}");
-            if button(
+            // FC5: switching off runs on a pointer click only.
+            if click_only_button(
                 ui,
-                &text,
+                egui::Button::new(&text),
+                None,
                 "Turn this feature off for the set",
                 off.or(sets_off),
             ) {
@@ -508,15 +539,14 @@ fn fix_click(
                     format!("Remove {} from {id}", miss.text()),
                 ),
             };
-            let b = ui.add_enabled(sets_off.is_none(), egui::Button::new(label));
-            b.widget_info(|| {
-                egui::WidgetInfo::labeled(egui::Role::Button, sets_off.is_none(), &name)
-            });
-            match sets_off {
-                Some(why) => b.on_disabled_hover_text(why),
-                None => b.on_hover_text("Remove this line from sdc-project.toml"),
-            }
-            .clicked()
+            // FC5: a removal runs on a pointer click only (a reason click focuses it).
+            click_only_button(
+                ui,
+                egui::Button::new(label),
+                Some(&name),
+                "Remove this line from sdc-project.toml",
+                sets_off,
+            )
         }
         Fix::RebuildZ(k) => {
             let on = m
@@ -591,9 +621,10 @@ fn fix_click(
             "Read this EXR's colour as stored (alpha.exr_straight = true in sdc.toml)",
             off,
         ),
-        Fix::RemoveMatch(_, n) => button(
+        Fix::RemoveMatch(_, n) => click_only_button(
             ui,
-            "Remove match",
+            egui::Button::new("Remove match"),
+            None,
             &format!("Remove match{n} from the set's PGPatcher settings"),
             sets_off,
         ),
@@ -625,14 +656,15 @@ fn fix_click(
             let why = sets_off
                 .map(str::to_string)
                 .or_else(|| m.remove_member_refusal(set_id, item));
-            let b = ui.add_enabled(why.is_none(), egui::Button::new("Remove from set"));
             let name = format!("Remove {file} from {set_id}");
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, why.is_none(), &name));
-            match why {
-                Some(why) => b.on_disabled_hover_text(why),
-                None => b.on_hover_text(format!("Take {file} out of this set. It goes to No set.")),
-            }
-            .clicked()
+            // FC5: a removal runs on a pointer click only.
+            click_only_button(
+                ui,
+                egui::Button::new("Remove from set"),
+                Some(&name),
+                &format!("Take {file} out of this set. It goes to No set."),
+                why.as_deref(),
+            )
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
@@ -912,20 +944,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 let stroke = ui.visuals().selection.stroke;
                 ui.painter()
                     .rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-                // Note FM35: a row that asks only its alpha confirms the type it shows. With a sub-type question
-                // too, Enter must not answer just one of the two, so it does nothing there.
-                let alpha = match &p.at {
-                    At::Texture(k) => m.item(k).filter(|i| {
-                        !i.decisions
-                            .iter()
-                            .any(|d| matches!(d, Decision::Subtype { .. }))
-                    }),
-                    _ => None,
-                }
-                .and_then(alpha_asked);
+                let alpha = row_alpha(m, p);
                 // Consumed only when the row acts, so the Grid's Enter (open the preview) never sees it too.
-                let acting = matches!((first, &off, &p.at), (true, None, At::Texture(_)))
-                    && (p.suggested.is_some() || alpha.is_some());
+                let acting = first && off.is_none() && row_decides(m, p);
                 let pressed = acting
                     && ui.input_mut(|k| {
                         k.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
@@ -1030,8 +1051,16 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                             a = Some(f);
                         }
                     }
-                    if let Some(id) = from.and_then(|from| last_focusable_since(ui, from)) {
-                        ui.memory_mut(|mem| mem.request_focus(id));
+                    // The leftmost takes focus only when enabled: focus never passes to Mark because a fix is off. With
+                    // none to take it, the row does, unless a key on it would decide.
+                    if let Some(from) = from {
+                        let to = match last_focusable_since(ui, from) {
+                            Some((id, true)) => Some(id),
+                            _ => (!row_decides(m, p)).then_some(rid),
+                        };
+                        if let Some(id) = to {
+                            ui.memory_mut(|mem| mem.request_focus(id));
+                        }
                     }
                     if let (At::Texture(k), Level::Decide) = (&p.at, p.level) {
                         if let Some(pick) = fix_buttons(ui, m, k, off.as_deref()) {

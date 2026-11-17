@@ -706,6 +706,18 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
         .collect()
 }
 
+/// The slot rows the set editor draws for `v`, in order: its `slot_row` cards (a shared set's own kinds only), less the
+/// skin `_wet` and `_detail_n` cards outside an Advanced skin set. Review E4's status line sends a missing map to its
+/// row's **Assign…** only when the row is here.
+pub fn editor_cells(v: &SetView) -> Vec<SlotCell> {
+    shared_cells(v, slot_row(v.shader.as_ref(), &v.slots))
+        .into_iter()
+        .filter(|c| {
+            v.skin || v.shared || !matches!(c.kind, SlotKind::SkinWet | SlotKind::SkinDetail)
+        })
+        .collect()
+}
+
 /// A shared skin set: marked Advanced skin, with members, and every one of them a map a shared set may hold. That
 /// is the engine's rule (`group::mark_shared_skin`: `_n`, `_sk`, `_wet`, `_detail_n`), so a set the engine
 /// unmarked after a hand edit (a `_p`, a diffuse, an `_rfaos`) is not shared here either. A lone `_rfaos` is not shared.

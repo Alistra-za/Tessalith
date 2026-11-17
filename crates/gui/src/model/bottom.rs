@@ -1375,21 +1375,28 @@ pub enum ReasonGo {
 }
 
 /// Review E4: the rows of the set (an engine set key) and of its members that take "ready" away (the rows
-/// `set_ready` reads), hidden kinds included, in list order. A missing map with a known slot goes to that slot's
-/// **Assign…**; every other row goes to itself in Problems.
+/// `set_ready` reads), hidden kinds included, in list order. A missing map whose slot the set editor draws a row for
+/// goes to that slot's **Assign…**; every other row goes to itself in Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
     let views = sets::views(m);
     let Some(v) = views.iter().find(|v| v.key == key) else {
         return vec![];
     };
+    // A ready set (the cached answer the cards read) has no reason: no scan of the rows.
+    if set_ready_in(&flagged(m), v) {
+        return vec![];
+    }
     let members: HashSet<String> = v.members.iter().cloned().collect();
+    let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
     problems(m)
         .iter()
         .filter(|p| counts_as_ready_problem(p) && in_set(p, key, &members))
         .map(|p| match (p.code, &p.target) {
             // The DERIVE-NO-ALBEDO arm has no producer today: the engine raises it only from the Also export planner,
             // whose rows are not set rows.
-            (Some(Code::ShaderMissingMap | Code::DeriveNoAlbedo), Some(SlotTarget::Slot(kind))) => {
+            (Some(Code::ShaderMissingMap | Code::DeriveNoAlbedo), Some(SlotTarget::Slot(kind)))
+                if drawn.contains(kind) =>
+            {
                 Reason {
                     text: format!("no {} (Assign…)", v.slot_label(*kind, "")),
                     go: ReasonGo::Slot(*kind),

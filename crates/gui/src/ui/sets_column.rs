@@ -977,24 +977,25 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
     let c = model.set_counts();
     ui.horizontal_wrapped(|ui| {
         let f = &mut model.sets_filter;
+        // The hover is (lead, what ready means), joined only when it shows.
         for (on, text, n, hover) in [
             (
                 &mut f.attention,
                 format!("Not ready {}", c.attention),
                 c.attention,
-                format!("Only sets that are not ready. {NOT_READY_MEANS}"),
+                ("Only sets that are not ready.", Some(NOT_READY_MEANS)),
             ),
             (
                 &mut f.ready,
                 format!("Ready {}", c.ready),
                 c.ready,
-                format!("Only sets that are ready. {READY_MEANS}"),
+                ("Only sets that are ready.", Some(READY_MEANS)),
             ),
             (
                 &mut f.no_json,
                 format!("No JSON {}", c.no_json),
                 c.no_json,
-                "Only sets that write no JSON".to_string(),
+                ("Only sets that write no JSON", None),
             ),
         ] {
             // Note HP SC5: a pill that would show nothing is weak, and stays clickable.
@@ -1009,7 +1010,12 @@ fn filter_rows(ui: &mut egui::Ui, model: &mut AppModel) {
                         .corner_radius(10)
                         .frame_when_inactive(true),
                 )
-                .on_hover_text(hover)
+                .on_hover_ui(|ui| {
+                    match hover {
+                        (lead, Some(means)) => ui.label(format!("{lead} {means}")),
+                        (lead, None) => ui.label(lead),
+                    };
+                })
                 .clicked()
             {
                 *on = !*on;

@@ -2867,7 +2867,23 @@ fn a_missing_map_reason_focuses_the_slot_assign_button() {
     let mut h = harness(m);
     h.run();
     click_and_settle(&mut h, &format!("{text} — go to the fix"));
-    // The reason button's own label contains "Assign…" too; leave it out so a focus that stayed on it fails.
+    assign_on_normal_row(&h);
+}
+
+/// Fix round 1 item 13: the focused Assign… is the Normal row's, so another empty slot's (Height's, one row down)
+/// fails. The row's cells are top-aligned with its thumbnail (the slot title is centred, 19 px lower).
+fn assign_on_normal_row<S>(h: &Harness<'_, S>) {
+    let assign = focused_assign(h);
+    let normal = h.get_by_label("Normal _n thumbnail").rect();
+    assert!(
+        (assign.top() - normal.top()).abs() < 4.0,
+        "the Normal row's Assign… has focus: {assign:?} vs {normal:?}"
+    );
+}
+
+/// The one focused **Assign…** button's rect. The reason button's own label contains "Assign…" too; it is left out, so
+/// a focus that stayed on it fails.
+fn focused_assign<S>(h: &Harness<'_, S>) -> egui::Rect {
     let focused: Vec<_> = h
         .query_all_by_label_contains("Assign")
         .filter(|n| {
@@ -2876,12 +2892,472 @@ fn a_missing_map_reason_focuses_the_slot_assign_button() {
                 .is_some_and(|l| l.contains("go to the fix"))
         })
         .filter(|n| n.accesskit_node().is_focused())
+        .map(|n| n.rect())
         .collect();
-    assert_eq!(
-        focused.len(),
-        1,
-        "the empty Normal slot's Assign… has focus"
+    assert_eq!(focused.len(), 1, "one Assign… has focus");
+    focused[0]
+}
+
+/// The labels of the focused nodes.
+fn focused_labels<S>(h: &Harness<'_, S>) -> Vec<String> {
+    h.query_all_by_label_contains("")
+        .filter(|n| n.accesskit_node().is_focused())
+        .filter_map(|n| n.accesskit_node().label().map(|l| l.to_string()))
+        .collect()
+}
+
+/// rock01 with its Normal member gone and the SHADER-MISSING-MAP row for it (`a_missing_map_reason_…`), and the
+/// reason's button name.
+fn missing_normal() -> (tempfile::TempDir, AppModel, String) {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::sets::SlotKind;
+    let missing = || {
+        Warning::new(Code::ShaderMissingMap, "no _n")
+            .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))
+    };
+    let (d, mut m) = with_set_warnings(&[missing()]);
+    let (n, _) = normal_member(&m);
+    m.remove_member(&rock01(&m).id, &n).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject_set(&mut m, &[missing()]);
+    let v = rock01(&m);
+    let name = format!(
+        "no {} (Assign…) — go to the fix",
+        v.slot_label(SlotKind::Normal, "")
     );
+    (d, m, name)
+}
+
+/// Fix round 1: the set editor alone, `width` wide (no GPU: `View::three_d` is read from the settings, as
+/// `ui::draw` reads it when the 3D panel can show), and the column it was given.
+struct Editor {
+    m: AppModel,
+    key: String,
+    thumbs: sdc_gui::ui::thumbs::ThumbCache,
+    cmds: sdc_gui::ui::slot_commands::SlotCmdState,
+    drops: sdc_gui::ui::sets_column::DropState,
+    column: egui::Rect,
+}
+
+fn editor_harness(m: AppModel, key: String, width: f32) -> Harness<'static, Editor> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(width + 40.0, 900.0))
+        .build_ui_state(
+            move |ui, e: &mut Editor| {
+                let view = sdc_gui::ui::set_editor::View {
+                    three_d: e.m.settings.set_view_3d,
+                    ..Default::default()
+                };
+                let r = ui.allocate_ui(egui::vec2(width, ui.available_height()), |ui| {
+                    ui.set_width(width);
+                    sdc_gui::ui::set_editor::draw(
+                        ui,
+                        &mut e.m,
+                        &e.key,
+                        &mut e.thumbs,
+                        &mut e.cmds,
+                        &mut e.drops,
+                        view,
+                    );
+                });
+                e.column = r.response.rect;
+            },
+            Editor {
+                m,
+                key,
+                thumbs: Default::default(),
+                cmds: Default::default(),
+                drops: Default::default(),
+                column: egui::Rect::NOTHING,
+            },
+        )
+}
+
+/// Fix round 1 item 1: in 3D a slot reason switches the editor to 2D, outlines the slot and focuses its Assign….
+#[test]
+fn a_slot_reason_clicked_in_3d_shows_the_slot_in_2d() {
+    use sdc_gui::model::nav::SlotTarget;
+    use sdc_gui::model::sets::SlotKind;
+    let (_d, mut m, name) = missing_normal();
+    m.settings.set_view_3d = true;
+    let key = rock01(&m).key;
+    let mut h = editor_harness(m, key, 1200.0);
+    h.run();
+    assert!(
+        h.query_by_label("Normal _n").is_none(),
+        "precondition: 3D draws no slot rows"
+    );
+    h.get_by_label(&name).click();
+    h.run();
+    assert!(!h.state().m.settings.set_view_3d, "the editor is in 2D");
+    h.run();
+    assert_eq!(
+        sdc_gui::ui::row_reveal::revealed(&h.ctx).map(|r| r.0),
+        Some(SlotTarget::Slot(SlotKind::Normal))
+    );
+    assign_on_normal_row(&h);
+}
+
+/// Fix round 1 item 2: rock01 is PBR Landscape (CS), which draws no slot 3 card, so a missing `_g` (Emissive, slot
+/// 3) has no Assign… to go to: its reason opens the Problems row instead.
+#[test]
+fn a_slot_reason_with_no_slot_row_opens_its_problems_row() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    use sdc_gui::model::sets::{shared_cells, slot_row, SlotKind};
+    assert!(
+        baseline().1,
+        "precondition: rock01 is ready with no injected warning"
+    );
+    let (_d, mut m) = with_set_warnings(&[Warning::new(Code::ShaderMissingMap, "no _g")
+        .with_data(serde_json::json!({"map": "_g", "shader": "pbr"}))]);
+    let v = rock01(&m);
+    assert!(
+        !shared_cells(&v, slot_row(v.shader.as_ref(), &v.slots))
+            .iter()
+            .any(|c| c.kind.shares_card(SlotKind::Emissive) || c.kind == SlotKind::Emissive),
+        "precondition: the editor draws no slot 3 row"
+    );
+    let r = set_reasons(&m, &v.key);
+    assert_eq!(r.len(), 1, "{r:?}");
+    let ReasonGo::Row(p) = &r[0].go else {
+        panic!("a slot the editor does not draw is a Row reason: {r:?}");
+    };
+    let shown = p.shown().to_string();
+    let name = format!("{} — go to the fix", r[0].text);
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &name);
+    assert_eq!(
+        h.state().bottom.filter,
+        Some(sdc_gui::model::bottom::ProblemsFilter::Set(v.key.clone()))
+    );
+    assert!(
+        h.query_all_by_label_contains(&shown).count() >= 1,
+        "the row is listed"
+    );
+}
+
+/// Fix round 1 item 3: two members with the same coded row: two buttons, each named for its file, each to its row.
+#[test]
+fn two_reasons_with_one_text_are_named_for_their_files() {
+    use engine::codes::{Code, Warning};
+    let w = Warning::new(Code::ValMipError, "mip 3");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let v = rock01(&m);
+    let (a, b) = (v.members[0].clone(), v.members[1].clone());
+    m.items.iter_mut().find(|i| i.key == b).unwrap().warnings = vec![w];
+    m.invalidate_views();
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    h.run();
+    let text = MIP_REASON.trim_end_matches(" — go to the fix");
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ValMipError);
+    for k in [&a, &b] {
+        let name = format!("{text} ({k}) — go to the fix");
+        h.get_by_label(&name);
+        click_and_settle(&mut h, &name);
+        let mark = format!("Mark as intended: {k}: {sentence}");
+        assert!(
+            h.get_by_label(&mark).accesskit_node().is_focused(),
+            "{k}'s row has focus"
+        );
+    }
+    assert!(h.query_by_label(MIP_REASON).is_none());
+}
+
+/// Fix round 1 item 4: a set the export blocks on has the red dot on its first line, as on its card.
+#[test]
+fn a_blocked_sets_status_line_has_the_red_dot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_json_value(
+        "landscape/rock01",
+        "slot3",
+        Some(serde_json::json!(r"..\g.dds")),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let blocks = sdc_gui::model::pbr_export::export_blocks(&m);
+    assert!(
+        blocks.iter().any(|i| i.set_id == "landscape/rock01"),
+        "precondition: {blocks:?}"
+    );
+    let key = rock01(&m).key;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let line = h.get_by_label("Not ready:").rect();
+    let dots: Vec<egui::Rect> = h
+        .query_all_by_label("blocks export")
+        .map(|n| n.rect())
+        .collect();
+    assert!(
+        dots.iter()
+            .any(|r| (r.center().y - line.center().y).abs() < 4.0 && r.right() <= line.left()),
+        "the status line's dot: {dots:?} beside {line:?}"
+    );
+    assert!(
+        dots.iter().any(|r| in_sets_column(&h, *r)),
+        "the card's dot: {dots:?}"
+    );
+}
+
+/// Fix round 1 item 5: a removal takes focus from its reason but never runs on Enter or Space; a click still runs it.
+#[test]
+fn a_removal_focused_by_a_reason_ignores_enter_and_space() {
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    const GONE: &str = "landscape/notes.txt";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    std::fs::write(m.root.clone().unwrap().join(GONE), "notes").unwrap();
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member("landscape/rock01", GONE)
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let key = rock01(&m).key;
+    let r = set_reasons(&m, &key);
+    let reason = r
+        .iter()
+        .find(|r| matches!(&r.go, ReasonGo::Row(p) if format!("{:?}", p.fix).contains("RemoveMissing")))
+        .unwrap_or_else(|| panic!("a missing-entry reason: {r:?}"));
+    let name = format!("{} — go to the fix", reason.text);
+    let listed = |m: &AppModel| m.sets_doc.as_ref().unwrap().text().contains("notes.txt");
+    assert!(listed(&m));
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &name);
+    let remove = "Remove landscape/notes.txt from landscape/rock01";
+    assert!(
+        h.get_by_label(remove).accesskit_node().is_focused(),
+        "focus shows where the fix is"
+    );
+    for k in [egui::Key::Enter, egui::Key::Space] {
+        h.key_press(k);
+        h.run();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+        assert!(listed(h.state()), "{k:?} removed nothing");
+    }
+    click_and_settle(&mut h, remove);
+    assert!(!listed(h.state()), "a click removes the entry");
+}
+
+/// Fix round 1 items 6 and 7: Rebuild Z is off (already on), so neither it nor Mark as intended takes focus; the row
+/// does (Enter and Space on it write nothing: it has no suggestion and asks no alpha).
+#[test]
+fn a_disabled_fix_takes_no_focus_and_gives_none_to_mark() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    let w = Warning::new(Code::ChanNormalLength, "short");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    m.set_field(&k, "channels.reconstruct_z", serde_json::json!(true));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject(&mut m, &[w]);
+    let key = rock01(&m).key;
+    let ReasonGo::Row(p) = set_reasons(&m, &key).remove(0).go else {
+        panic!("a Row reason");
+    };
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let what = sdc_gui::model::code_text::code_line(Code::ChanNormalLength)
+        .split(" — ")
+        .next()
+        .unwrap()
+        .to_string();
+    click_and_settle(&mut h, &format!("{what} — go to the fix"));
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
+    let y = h.get_by_label(sentence).rect().center().y;
+    let fix = h
+        .query_all_by_label(sdc_gui::ui::problems::REBUILD_Z)
+        .find(|n| (n.rect().center().y - y).abs() <= 4.0)
+        .expect("Rebuild Z on the row");
+    assert!(fix.accesskit_node().is_disabled(), "precondition");
+    assert!(!fix.accesskit_node().is_focused());
+    assert!(!on_row(&h, sentence, "Mark as intended: ")
+        .accesskit_node()
+        .is_focused());
+    assert_eq!(
+        focused_labels(&h),
+        vec![format!("{k}: {}", p.shown())],
+        "the row has focus"
+    );
+}
+
+/// Fix round 1 items 6 and 7: on a read-only project Mark as intended is off, the row's only control: it takes no
+/// focus and the row does.
+#[test]
+fn a_reason_whose_only_control_is_off_focuses_the_row() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    let w = Warning::new(Code::ChanNotGray, "not grey");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    assert!(m.save().is_ok());
+    let file = m.root.clone().unwrap().join("sdc-project.toml");
+    std::fs::write(&file, "[project\n").unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    inject(&mut m, &[w]);
+    let key = rock01(&m).key;
+    let k = rock01(&m).members[0].clone();
+    let ReasonGo::Row(p) = set_reasons(&m, &key).remove(0).go else {
+        panic!("a Row reason");
+    };
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let what = sdc_gui::model::code_text::code_line(Code::ChanNotGray)
+        .split(" — ")
+        .next()
+        .unwrap()
+        .to_string();
+    click_and_settle(&mut h, &format!("{what} — go to the fix"));
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNotGray);
+    let mark = on_row(&h, sentence, "Mark as intended: ");
+    assert!(mark.accesskit_node().is_disabled(), "precondition");
+    assert_eq!(
+        focused_labels(&h),
+        vec![format!("{k}: {}", p.shown())],
+        "the row has focus"
+    );
+}
+
+/// Fix round 1 item 7: an Undecided row (the `opened` fixture's rock01) has no fix and no Mark, and Enter or Space on
+/// it accepts its suggested sub-type (a decision): nothing on the row takes focus.
+#[test]
+fn an_undecided_reason_gives_its_row_no_focus() {
+    use sdc_gui::model::bottom::ReasonGo;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "landscape/rock01")
+        .unwrap();
+    let r = sdc_gui::model::bottom::set_reasons(&m, &v.key);
+    let ReasonGo::Row(p) = &r[0].go else {
+        panic!("a Row reason: {r:?}");
+    };
+    assert!(
+        p.suggested.is_some() && p.fix.is_none() && p.mark.is_none(),
+        "precondition: {p:?}"
+    );
+    let sdc_gui::model::bottom::At::Texture(k) = &p.at else {
+        panic!("a texture row");
+    };
+    // Two members are undecided, so each reason names its file (item 3).
+    let name = format!("{} ({k}) — go to the fix", r[0].text);
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, &name);
+    let row = format!("{k}: {}", p.shown());
+    let y = h.get_by_label(&row).rect().center().y;
+    let on_it: Vec<String> = h
+        .query_all_by_label_contains("")
+        .filter(|n| n.accesskit_node().is_focused() && (n.rect().center().y - y).abs() <= 4.0)
+        .filter_map(|n| n.accesskit_node().label().map(|l| l.to_string()))
+        .collect();
+    assert!(on_it.is_empty(), "nothing on the row has focus: {on_it:?}");
+}
+
+/// Fix round 1 item 8: a row focus asked for while Problems is not drawn is forgotten with the row focus.
+#[test]
+fn a_waiting_fix_focus_is_forgotten_while_problems_is_hidden() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ProblemsFilter, ReasonGo};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let key = rock01(&m).key;
+    let ReasonGo::Row(p) = set_reasons(&m, &key).remove(0).go else {
+        panic!("a Row reason");
+    };
+    m.bottom.open = false;
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    sdc_gui::ui::problems::focus_row(&h.ctx, sdc_gui::ui::problems::row_id(&p));
+    h.run();
+    h.state_mut().open_problems(Some(ProblemsFilter::Set(key)));
+    h.run();
+    let mark = on_row(
+        &h,
+        sdc_gui::model::code_text::code_sentence(Code::ValMipError),
+        "Mark as intended: ",
+    );
+    assert!(!mark.accesskit_node().is_focused());
+}
+
+/// Fix round 1 item 11: "+k more in Problems" shows the hidden kinds of the rows it counts.
+#[test]
+fn more_in_problems_shows_the_hidden_rows_it_counts() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage"),
+        Warning::new(Code::LossReencode, "again"),
+        Warning::new(Code::ChanNotGray, "colour"),
+    ]);
+    let key = rock01(&m).key;
+    let r = set_reasons(&m, &key);
+    let ReasonGo::Row(p) = &r.last().unwrap().go else {
+        panic!("a Row reason: {r:?}");
+    };
+    let code = p.code.unwrap();
+    let shown = p.shown().to_string();
+    m.set_kind_hidden(code, true);
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let more = format!("+{} more in Problems", r.len() - 3);
+    click_and_settle(&mut h, &more);
+    assert!(h.state().hidden_kinds().is_empty());
+    assert!(
+        h.query_all_by_label_contains(&shown).count() >= 1,
+        "the row is listed"
+    );
+}
+
+/// Fix round 1 item 12: at the centre's floor width, long reasons stay inside the column, none taller than two lines.
+#[test]
+fn the_status_line_fits_the_centres_floor_width() {
+    use engine::codes::{Code, Warning};
+    let (_d, m) = with_warnings(&[
+        Warning::new(Code::LossReencode, "again"),
+        Warning::new(Code::TagContentMismatch, "tag"),
+        Warning::new(Code::InNonfinite, "nan"),
+    ]);
+    let key = rock01(&m).key;
+    let reasons = sdc_gui::model::bottom::set_reasons(&m, &key);
+    assert!(reasons.len() >= 3, "{reasons:?}");
+    assert!(
+        reasons.iter().take(3).all(|r| r.text.chars().count() >= 40),
+        "{reasons:?}"
+    );
+    let mut h = editor_harness(m, key, sdc_gui::ui::set_preview::CENTRE_MIN);
+    h.run();
+    let column = h.state().column;
+    let line = h.get_by_label("Not ready:").rect().height();
+    let buttons: Vec<egui::Rect> = h
+        .query_all_by_label_contains(" — go to the fix")
+        .map(|n| n.rect())
+        .collect();
+    assert_eq!(buttons.len(), 3);
+    for b in &buttons {
+        assert!(
+            b.left() >= column.left() - 0.5 && b.right() <= column.right() + 0.5,
+            "{b:?} inside {column:?}"
+        );
+        assert!(
+            b.height() <= 2.0 * line + 8.0,
+            "{b:?} at most two lines of {line}"
+        );
+    }
 }
 
 /// The DERIVE-NO-ALBEDO slot case: no production row reaches it today (the engine raises the code only from the Also

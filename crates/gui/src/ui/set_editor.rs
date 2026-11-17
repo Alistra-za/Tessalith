@@ -17,9 +17,10 @@ use crate::model::items::{self, ItemKind, ItemStatus, TextureItem};
 use crate::model::nav::SlotTarget;
 use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
+use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    card_title, is_json_set, shared_cells, shows_json_panel, slot_clash_text, slot_of, slot_row,
-    views, SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
+    card_title, editor_cells, is_json_set, shows_json_panel, slot_clash_text, slot_of, views,
+    SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
 use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
@@ -108,22 +109,52 @@ fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
 /// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
 fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
     let reasons = set_reasons(model, &v.key);
+    // A set the export blocks on has the card's red dot (`sets_column`), whatever its words say.
+    let blocked = export_blocks(model).iter().any(|i| i.set_id == v.id);
     let mut act = None;
     ui.horizontal_wrapped(|ui| {
         if reasons.is_empty() {
-            dot(ui, Status::Ready);
+            dot(
+                ui,
+                if blocked {
+                    Status::Blocks
+                } else {
+                    Status::Ready
+                },
+            );
             ui.label("Ready: nothing in this set needs you.");
             return;
         }
-        dot(ui, Status::Warning);
+        dot(
+            ui,
+            if blocked {
+                Status::Blocks
+            } else {
+                Status::Warning
+            },
+        );
         ui.label("Not ready:");
         let hidden = model.hidden_kinds();
-        for (i, r) in reasons.iter().take(STATUS_REASONS).enumerate() {
+        let shown = &reasons[..reasons.len().min(STATUS_REASONS)];
+        for (i, r) in shown.iter().enumerate() {
             if i > 0 {
                 ui.weak("·");
             }
-            let b = ui.button(&r.text);
-            let name = format!("{} — go to the fix", r.text);
+            // Two shown reasons with one text are told apart by their row's subject, in the words, the name and the
+            // hover; a unique text keeps its plain name. A Slot reason has no row: its twin (the same set's same slot)
+            // is the same place.
+            let subject = match &r.go {
+                ReasonGo::Row(p) if shown.iter().filter(|o| o.text == r.text).count() > 1 => {
+                    Some(super::problems::row_subject(p))
+                }
+                _ => None,
+            };
+            let text = match subject {
+                Some(s) => format!("{} ({s})", r.text),
+                None => r.text.clone(),
+            };
+            let b = ui.button(&text);
+            let name = format!("{text} — go to the fix");
             b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
             // Hiding never changes readiness, so a hidden kind's row is still a reason.
             let tip = match &r.go {
@@ -132,7 +163,13 @@ fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> 
                 }
                 _ => "Go to the control that fixes this.",
             };
-            if b.on_hover_text(tip).clicked() {
+            let b = b.on_hover_ui(|ui| {
+                if let Some(s) = subject {
+                    ui.label(s);
+                }
+                ui.label(tip);
+            });
+            if b.clicked() {
                 act = Some(Act::Reason(r.go.clone()));
             }
         }
@@ -144,10 +181,16 @@ fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> 
     act
 }
 
-/// Review E4: what a status line click asks for, applied after drawing.
-fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act) {
+/// Review E4: what a status line click asks for, applied after drawing. `three_d`: the editor shows the 3D view.
+fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_d: bool) {
     match act {
         Act::Reason(ReasonGo::Slot(kind)) => {
+            // The slot rows are 2D only: switch back as the 2D | 3D switch does; the next frame draws the rows, the
+            // reveal and the Assign… focus.
+            if three_d && model.settings.set_view_3d {
+                model.settings.set_view_3d = false;
+                model.save_settings();
+            }
             model.go_to_set(&v.key, Some(SlotTarget::Slot(kind)));
             let id = slot_row_id(&v.id, kind).with("assign");
             ui.data_mut(|d| d.insert_temp(egui::Id::unique(ASSIGN_FOCUS), id));
@@ -160,7 +203,21 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act) {
             model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
-        Act::Problems => model.open_problems(Some(ProblemsFilter::Set(v.key.clone()))),
+        Act::Problems => {
+            // The list shows at least the rows the link counts: their hidden kinds show again, as a reason's does.
+            let hidden = model.hidden_kinds();
+            let codes: Vec<_> = set_reasons(model, &v.key)
+                .iter()
+                .filter_map(|r| match &r.go {
+                    ReasonGo::Row(p) if is_hidden(p, &hidden) => p.code,
+                    _ => None,
+                })
+                .collect();
+            for code in codes {
+                model.set_kind_hidden(code, false);
+            }
+            model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));
+        }
         // `status_line` makes no other act.
         _ => {}
     }
@@ -208,7 +265,7 @@ pub fn draw(
         // No slot rows here: a waiting Assign… focus is dropped.
         ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
         if let Some(a) = status {
-            status_act(ui, model, v, a);
+            status_act(ui, model, v, a, true);
         }
         return;
     }
@@ -297,7 +354,7 @@ pub fn draw(
                     });
                 }
             }
-            a @ (Act::Reason(_) | Act::Problems) => status_act(ui, model, v, a),
+            a @ (Act::Reason(_) | Act::Problems) => status_act(ui, model, v, a, false),
         }
     }
     select_or_expand(ui, model, &v.id, select, expand);
@@ -548,14 +605,8 @@ fn rows(
         .show(ui, |ui| {
             // The row takes the right-click; its labels are not selectable, so they do not take it.
             ui.style_mut().interaction.selectable_labels = false;
-            for cell in shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)) {
-                // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only.
-                if !v.skin
-                    && !v.shared
-                    && matches!(cell.kind, SlotKind::SkinWet | SlotKind::SkinDetail)
-                {
-                    continue;
-                }
+            // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only (`editor_cells`).
+            for cell in editor_cells(v) {
                 let size = cell.fill.item().and_then(|i| sizes.get(i));
                 let w = row(ui, model, v, &cell, thumbs, acts, drop_at, size, file_w);
                 for (a, b) in widths.iter_mut().zip(w) {

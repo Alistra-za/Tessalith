@@ -1346,6 +1346,12 @@ fn a_double_click_on_a_set_member_expands_it() {
     // The member name is in its slot row; the same name is also a tile in the Textures column to the left.
     let label = h
         .query_all_by_label_contains("rock01_normal.png")
+        // Review E4: the status line's reason for this member names it too.
+        .filter(|n| {
+            !n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("go to the fix"))
+        })
         .map(|n| n.rect())
         .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
         .expect("the member in the set view");
@@ -1401,6 +1407,12 @@ fn a_single_click_on_a_set_member_selects_it_after_the_double_click_delay() {
     h.run();
     let label = h
         .query_all_by_label_contains("rock01_normal.png")
+        // Review E4: the status line's reason for this member names it too.
+        .filter(|n| {
+            !n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("go to the fix"))
+        })
         .map(|n| n.rect())
         .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
         .expect("the member in the set view");
@@ -1458,6 +1470,12 @@ fn a_stale_pending_member_click_does_not_replace_a_set_opened_later() {
     h.run();
     let label = h
         .query_all_by_label_contains("rock01_normal.png")
+        // Review E4: the status line's reason for this member names it too.
+        .filter(|n| {
+            !n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("go to the fix"))
+        })
         .map(|n| n.rect())
         .max_by(|a, b| a.min.x.total_cmp(&b.min.x))
         .expect("the member in the set view");
