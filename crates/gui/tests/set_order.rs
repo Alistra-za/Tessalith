@@ -598,20 +598,24 @@ fn the_wheel_scrolls_the_sets_during_a_drag() {
     let y = pos_rect(&h, 2, 60).unwrap().top();
     wheel(&mut h);
     h.run_steps(3);
+    // A move, so this also does the old "with no drag the wheel scrolls" control's job: the wheel reaches the column.
     assert!(
         pos_rect(&h, 2, 60).is_none_or(|r| r.top() < y - 1.0),
         "the wheel scrolls during a drag"
     );
     // Wait until the cards stand still: `contains_pointer` reads the previous frame's rects.
     let mut last = Vec::new();
+    let mut still = false;
     for _ in 0..12 {
         let now = positions(&h);
         if now == last {
+            still = true;
             break;
         }
         last = now;
         h.step();
     }
+    assert!(still, "the cards still move after 12 steps: {last:?}");
     // A release on the lowest card the wheel brought up (whole in the column) moves the set to that card's position.
     let (n, to) = (3..=60)
         .rev()

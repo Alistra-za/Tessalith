@@ -753,8 +753,8 @@ fn the_set_menu_has_move_to_group() {
     h.run();
     right_click_card(&mut h, "g/c");
     h.run();
-    // egui 0.37 paints a submenu's ⏵ as a shape, so the entry's name is its text alone (0.36.2: "Move to group ⏵");
-    // the role and exact name keep it apart from the "Move to group {name}" entries.
+    // `look::menu_button_036` paints 0.36.2's ⏵ glyph but names the entry by its text alone (0.36.2 read
+    // "Move to group ⏵"; Note J?4); the role and exact name keep it apart from the "Move to group {name}" entries.
     widget(&h, Role::Button, "Move to group").click();
     h.run();
     h.get_by_role_and_label(Role::Button, "Armor");

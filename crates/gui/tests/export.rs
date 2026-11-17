@@ -601,8 +601,8 @@ fn the_reencode_box_reencodes_recorded_outputs_only() {
     .click();
     h.run();
     assert!(h.state().reencode_all);
-    // The menu (CloseOnClickOutside) stays open after the tick, and the item reads ticked: egui 0.37 closes a popup
-    // only on a click outside that started while it was open.
+    // The menu (CloseOnClickOutside) stays open after the tick, and the item reads ticked: the tick is a click inside
+    // the menu, which CloseOnClickOutside never closed, on egui 0.36.2 or 0.37.
     assert_eq!(
         item(&h),
         Some(eframe::egui::accesskit::Toggled::True),

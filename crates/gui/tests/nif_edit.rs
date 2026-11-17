@@ -2661,7 +2661,10 @@ fn the_edit_panel_fits_beside_the_3d_view_with_the_header_and_bottom_panel() {
         assert!(h.query_by_label(l).is_none(), "{l} is back in the panel");
     }
     for verb in ["Undo", "Redo"] {
-        let l = header_button(&h, verb).accesskit_node().label().unwrap();
+        let l = support::header_undo(&h, verb)
+            .accesskit_node()
+            .label()
+            .unwrap();
         // No NIF edit yet, so no step follows the history's name.
         assert_eq!(l, format!("{verb} (NIF edit history)"));
     }
@@ -4476,10 +4479,12 @@ fn ctrl_z_undoes_a_nif_edit_with_an_empty_textures_history() {
     let model = support::opened(&t.path().join("mod"));
     assert!(!model.can_undo());
     let (_d, mut h) = in_the_meshes_view(model, 2);
-    assert!(!header_button(&h, "Undo").accesskit_node().is_disabled());
+    assert!(!support::header_undo(&h, "Undo")
+        .accesskit_node()
+        .is_disabled());
     press(&mut h, egui::Modifiers::COMMAND, egui::Key::Z);
     assert_eq!(nif(&h), (1, true));
-    header_button(&h, "Undo").click();
+    support::header_undo(&h, "Undo").click();
     h.run_steps(4);
     assert_eq!(nif(&h), (0, true));
     assert!(!h.state().model.can_undo() && !h.state().model.can_redo());
@@ -4497,11 +4502,6 @@ fn textures(h: &AppH) -> (bool, bool, Option<String>) {
     (m.can_undo(), m.can_redo(), m.undo_label().map(String::from))
 }
 
-/// The header's Undo or Redo, for either history (Note FC12, E28).
-fn header_button<'a>(h: &'a AppH, name: &str) -> egui_kittest::Node<'a> {
-    support::header_undo(h, name)
-}
-
 fn press(h: &mut AppH, mods: egui::Modifiers, key: egui::Key) {
     h.key_press_modifiers(mods, key);
     h.run_steps(4);
@@ -4517,16 +4517,16 @@ fn close(h: &mut AppH) {
 fn header_undo_follows_the_nif_history_while_editing() {
     let (_t, _d, mut h) = both_histories(1);
     let tex = textures(&h);
-    header_button(&h, "Undo").click();
+    support::header_undo(&h, "Undo").click();
     h.run_steps(4);
     assert_eq!(nif(&h), (0, true), "the NIF op is undone");
     assert_eq!(textures(&h), tex, "the Textures history is untouched");
-    header_button(&h, "Redo").click();
+    support::header_undo(&h, "Redo").click();
     h.run_steps(4);
     assert_eq!(nif(&h), (1, false));
     assert_eq!(textures(&h), tex);
     close(&mut h);
-    header_button(&h, "Undo").click();
+    support::header_undo(&h, "Undo").click();
     h.run_steps(4);
     assert!(
         h.state().model.can_redo(),
@@ -4589,24 +4589,30 @@ fn the_palette_undo_follows_the_nif_history_while_editing() {
 fn header_undo_enabled_state_and_hover_follow_the_nif_history() {
     let (_t, _d, mut h) = both_histories(0);
     assert!(
-        header_button(&h, "Undo").accesskit_node().is_disabled(),
+        support::header_undo(&h, "Undo")
+            .accesskit_node()
+            .is_disabled(),
         "no NIF step to undo, though the Textures history has one"
     );
-    header_button(&h, "Undo").hover();
+    support::header_undo(&h, "Undo").hover();
     h.run_steps(30);
     // Note FC12: the hover and the button name the NIF history.
     h.get_by_label("Nothing to undo in the NIF edit history");
     tick(&mut h.state_mut().meshes, 40.5);
     h.state_mut().meshes.edit.as_mut().unwrap().flush();
     h.run_steps(4);
-    assert!(!header_button(&h, "Undo").accesskit_node().is_disabled());
-    assert!(header_button(&h, "Redo").accesskit_node().is_disabled());
-    header_button(&h, "Undo").hover();
+    assert!(!support::header_undo(&h, "Undo")
+        .accesskit_node()
+        .is_disabled());
+    assert!(support::header_undo(&h, "Redo")
+        .accesskit_node()
+        .is_disabled());
+    support::header_undo(&h, "Undo").hover();
     h.run_steps(30);
     h.get_by_label_contains("(Ctrl+Z). Acts on the NIF edit history");
-    header_button(&h, "Undo").click();
+    support::header_undo(&h, "Undo").click();
     h.run_steps(4);
-    header_button(&h, "Redo").hover();
+    support::header_undo(&h, "Redo").hover();
     h.run_steps(30);
     h.get_by_label_contains("Shift+Z). Acts on the NIF edit history");
 }
@@ -4617,7 +4623,7 @@ fn the_textures_view_undoes_textures_with_a_nif_edit_open() {
     let (_t, _d, mut h) = both_histories(1);
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
-    header_button(&h, "Undo").click();
+    support::header_undo(&h, "Undo").click();
     h.run_steps(4);
     assert!(h.state().model.can_redo(), "the header undid Textures");
     assert_eq!(nif(&h), (1, false), "the NIF history is untouched");
@@ -4650,7 +4656,7 @@ fn ctrl_z_does_nothing_in_a_text_field_a_popup_or_a_dialog() {
     h.key_press(Key::Escape);
     h.run_steps(4);
     // An open popup (the header's Open menu).
-    header_button(&h, "Open").click();
+    support::header_undo(&h, "Open").click();
     h.run_steps(4);
     assert!(egui::Popup::is_any_open(&h.ctx), "the menu is open");
     press(&mut h, Modifiers::COMMAND, Key::Z);
@@ -6556,7 +6562,7 @@ fn key_table_colour_picker_sets_the_key_colour() {
 }
 
 /// Whether `n` is one of the open colour picker's channel boxes: egui 0.37 names a DragValue by its prefix, and the
-/// picker's are "R ", "G " and "B " (the key table's own boxes say "… key 2 G").
+/// picker's are "R", "G" and "B" (the key table's own boxes say "… key 2 G").
 fn picker_channel(n: &egui_kittest::kittest::AccessKitNode<'_>) -> bool {
     matches!(n.label().as_deref(), Some("R" | "G" | "B"))
 }
@@ -6633,7 +6639,7 @@ fn shader_colour_picker_is_disabled_outside_0_1() {
         assert!(sw.accesskit_node().is_disabled(), "{v:?}");
         let c = sw.rect().center();
         h.hover_at(c);
-        h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
+        h.run_steps(TOOLTIP_STEPS);
         h.get_by_label("Values outside 0-1: edit R, G and B directly.");
     }
 }
@@ -10948,14 +10954,15 @@ fn meshes_only_waits_for_a_foreign_answer() {
 
 const EXPORT_THIS_NIF: &str = "Export this NIF";
 
-/// Right-click the Meshes view's 3D image (the click lands on the image centre) and let the menu open.
 /// Steps from `hover_at` until a hover text is in the AccessKit tree, with kittest's 0.25 s step and egui's 0.5 s
 /// tooltip delay. The delay ends on step 3, where the tooltip's area runs its first frame as an invisible sizing
 /// pass (`egui-0.37.0\src\containers\area.rs:691-692`, as in 0.36.2); it is painted on step 4 in both versions.
 /// egui 0.36.2 put that invisible frame's text in the tree on step 3; 0.37 leaves an invisible widget out of it
-/// (`egui-0.37.0\src\context.rs:655` through `is_accesskit_visible`, `:4957`). Measured: 3 steps fail, 4 pass.
+/// (`egui-0.37.0\src\context.rs:655` through `is_accesskit_visible`, `:4957`). Measured: 3 steps fail, 4 pass
+/// (0.36.2's tests used 3).
 const TOOLTIP_STEPS: usize = 4;
 
+/// Right-click the Meshes view's 3D image (the click lands on the image centre) and let the menu open.
 fn right_click_3d<S>(h: &mut Harness<'static, S>) {
     h.get_by_label(sdc_gui::model::viewport3d::FRAME_LABEL)
         .click_secondary();
@@ -11104,7 +11111,7 @@ fn quick_export_hover_says_a_foreign_file_opens_review() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
+    h.run_steps(TOOLTIP_STEPS);
     h.get_by_label(
         "The file on disk was not written by Tessalith: opens Review to answer Keep or Overwrite",
     );
@@ -11131,7 +11138,7 @@ fn quick_export_is_off_without_a_folder_and_offers_the_picker() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
+    h.run_steps(TOOLTIP_STEPS);
     assert!(
         h.query_all_by_label("No export folder chosen").count() >= 1,
         "the hover says why"
@@ -11163,7 +11170,7 @@ fn quick_export_is_off_while_an_export_runs() {
         .rect()
         .center();
     h.hover_at(c);
-    h.run_steps(TOOLTIP_STEPS); // was 3: egui 0.37 context.rs:655 (see TOOLTIP_STEPS)
+    h.run_steps(TOOLTIP_STEPS);
     h.get_by_label("An export is running");
     h.get_by_role_and_label(AkRole::Button, EXPORT_THIS_NIF)
         .click();
@@ -11230,7 +11237,9 @@ fn the_edit_panel_has_no_undo_redo_of_its_own() {
         })
         .count();
     assert_eq!(in_panel, 0, "an Undo or Redo button inside the edit panel");
-    assert!(!header_button(&h, "Undo").accesskit_node().is_disabled());
+    assert!(!support::header_undo(&h, "Undo")
+        .accesskit_node()
+        .is_disabled());
     // The header's own text names the step.
     let hdr = sdc_gui::ui::header::undo_button(
         sdc_gui::ui::meshes::undo_target(&h.ctx).as_ref(),
@@ -11248,7 +11257,6 @@ fn the_edit_panel_has_no_undo_redo_of_its_own() {
 /// least.
 #[test]
 fn the_preview_keeps_160_px_with_review_open() {
-    use egui::containers::panel::PanelState;
     let (w, hgt) = (1536.0, 864.0);
     app_data();
     let t = tempfile::tempdir().unwrap();
@@ -11274,14 +11282,7 @@ fn the_preview_keeps_160_px_with_review_open() {
     h.run_steps(8);
     let mut tops = vec![];
     for review_h in [345.0, 380.0, 400.0, 440.0, 480.0] {
-        let r = egui::Rect::from_min_size(
-            egui::pos2(8.0, hgt - review_h),
-            egui::vec2(w - 16.0, review_h),
-        );
-        let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
-            .expect("the Review panel was built");
-        h.ctx
-            .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+        let r = set_review_rect(&h, (w, hgt), review_h);
         h.run_steps(8);
         let frame = h
             .get_by_label(sdc_gui::model::viewport3d::FRAME_LABEL)
@@ -11365,7 +11366,6 @@ fn the_meshes_side_gets_a_new_output_path_on_the_next_frame() {
 /// keeps 160 px, fully above the panel; in the Textures view (NIF still selected) it stays 600.
 #[test]
 fn the_bottom_panel_is_capped_only_in_the_meshes_view_with_a_nif() {
-    use egui::containers::panel::PanelState;
     let (w, hgt) = (1536.0, 864.0);
     app_data();
     let t = tempfile::tempdir().unwrap();
@@ -11379,12 +11379,7 @@ fn the_bottom_panel_is_capped_only_in_the_meshes_view_with_a_nif() {
         .rect();
     assert!(frame.height() >= 159.5, "40 % Review: preview {frame:?}");
     let tall = |h: &mut AppH| {
-        let r =
-            egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-        let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
-            .expect("the Review panel was built");
-        h.ctx
-            .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+        set_review_rect(h, (w, hgt), 600.0);
         h.run_steps(8);
     };
     tall(&mut h);
@@ -11411,7 +11406,6 @@ fn the_bottom_panel_is_capped_only_in_the_meshes_view_with_a_nif() {
 /// the 3D frame its 160 px, fully above the panel.
 #[test]
 fn the_meshes_cap_keeps_160_px_at_1280x720() {
-    use egui::containers::panel::PanelState;
     let (w, hgt) = (1280.0, 720.0);
     app_data();
     let t = tempfile::tempdir().unwrap();
@@ -11419,11 +11413,7 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
     let (_d, mut h) = in_the_meshes_view_sized(model, 1, egui::vec2(w, hgt));
     h.state_mut().model.open_review();
     h.run_steps(8);
-    let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
-        .expect("the Review panel was built");
-    h.ctx
-        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+    set_review_rect(&h, (w, hgt), 600.0);
     h.run_steps(8);
     let capped = review_height(&h);
     assert!(capped < 600.0, "Review {capped}");
@@ -11436,6 +11426,21 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
 
 fn review_height(h: &AppH) -> f32 {
     support::panel(&h.ctx, "bottom-review").height()
+}
+
+/// Writes Review's panel rect, `review_h` px tall at the foot of a `w` x `hgt` window, as a drag of its edge would;
+/// returns that rect.
+fn set_review_rect(h: &AppH, (w, hgt): (f32, f32), review_h: f32) -> egui::Rect {
+    use egui::containers::panel::PanelState;
+    let r = egui::Rect::from_min_size(
+        egui::pos2(8.0, hgt - review_h),
+        egui::vec2(w - 16.0, review_h),
+    );
+    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
+        .expect("the Review panel was built");
+    h.ctx
+        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+    r
 }
 
 /// Note FI18 (2): Review's 40 % default obeys the cap too. At 1536x600 the default (240) is over it.
@@ -11456,7 +11461,6 @@ fn reviews_default_height_obeys_the_meshes_cap() {
 /// panel state is written once, as a drag would, and not re-injected).
 #[test]
 fn the_meshes_cap_keeps_the_users_review_height() {
-    use egui::containers::panel::PanelState;
     let (w, hgt) = (1536.0, 864.0);
     app_data();
     let t = tempfile::tempdir().unwrap();
@@ -11465,11 +11469,7 @@ fn the_meshes_cap_keeps_the_users_review_height() {
     h.state_mut().model.open_review();
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
-    let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
-        .expect("the Review panel was built");
-    h.ctx
-        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+    set_review_rect(&h, (w, hgt), 600.0);
     h.run_steps(4);
     assert_eq!(review_height(&h), 600.0, "Textures view: Review");
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
@@ -11484,7 +11484,6 @@ fn the_meshes_cap_keeps_the_users_review_height() {
 /// too; the Textures view keeps it and does not restore the older 600 px.
 #[test]
 fn a_drag_to_the_cap_is_the_users_height() {
-    use egui::containers::panel::PanelState;
     let (w, hgt) = (1536.0, 864.0);
     app_data();
     let t = tempfile::tempdir().unwrap();
@@ -11493,11 +11492,7 @@ fn a_drag_to_the_cap_is_the_users_height() {
     h.state_mut().model.open_review();
     sdc_gui::ui::header::set_meshes_view(&h.ctx, false);
     h.run_steps(4);
-    let r = egui::Rect::from_min_size(egui::pos2(8.0, hgt - 600.0), egui::vec2(w - 16.0, 600.0));
-    let review_id = sdc_gui::ui::panel_ids::panel_id(&h.ctx, "bottom-review")
-        .expect("the Review panel was built");
-    h.ctx
-        .data_mut(|d| d.insert_persisted(review_id, PanelState { outer_rect: r }));
+    set_review_rect(&h, (w, hgt), 600.0);
     h.run_steps(4);
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);

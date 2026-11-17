@@ -246,8 +246,8 @@ fn the_set_editors_format_column_starts_where_036_put_it() {
 }
 
 /// S6 at the app level (the `problems-tab` shot): a Problems row with the alpha combo is 19.5 tall as on 0.36.2 (the
-/// combo half a point below the row's top, Confirm at it), so the next row starts 22.5 below; each row's dot is centred
-/// on its text and its button sits at the row's top. Numbers measured on the 0.36.2 base commit 40589a43 with this
+/// combo half a point below the row's top, Confirm at it), so the next row starts 22.5 below; that next (steel) row's
+/// dot is centred on its text and its button sits at the row's top. Numbers measured on the 0.36.2 base commit 40589a43 with this
 /// fixture. Without the combo's own row the next rows start half a point higher, which the shot showed as 1 px.
 #[test]
 fn problems_rows_sit_as_on_036() {

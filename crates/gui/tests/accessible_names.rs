@@ -181,7 +181,8 @@ fn a_busy_3d_view_names_its_spinner() {
     }));
     v.request_frame(64, 64);
     assert!(v.busy());
-    // Busy since well past the spinner's delay.
+    // `show_spinner`'s first call records the busy start (and says no), so the toolbar's own call below is well past
+    // the spinner's delay.
     let long_ago = std::time::Instant::now() - 2 * v3::SPINNER_DELAY;
     assert!(!v.show_spinner(long_ago));
     let mut h = Harness::builder()
@@ -369,6 +370,21 @@ fn a_running_scan_names_its_spinner() {
     // The spinner never goes idle: steps, not `run()`.
     h.run_steps(3);
     h.get_by_role_and_label(Role::ProgressIndicator, "Scanning mods");
+    assert!(
+        unnamed_progress(&h).is_empty(),
+        "{:?}",
+        unnamed_progress(&h)
+    );
+    // Once the scan reports progress, its bar draws beside the spinner, named by its text (as a poll would set it).
+    h.state_mut().progress = Some(("Reading", 3, 10));
+    h.run_steps(2);
+    assert!(
+        h.query_all_by_role(Role::ProgressIndicator).any(|n| n
+            .accesskit_node()
+            .label()
+            .is_some_and(|l| l.starts_with("Reading 3/10"))),
+        "the scan's bar is drawn"
+    );
     assert!(
         unnamed_progress(&h).is_empty(),
         "{:?}",

@@ -113,6 +113,8 @@ fn the_wheel_passes_to_the_outer_list_at_the_inner_lists_end() {
     let mut handed_off = false;
     for turn in 0..40 {
         let (y, before) = (outer_y(&h), inner(&h));
+        // The last row has a node only once it is laid out: the list is a `show_rows`, which builds only the rows
+        // in view. A list that laid out every row would make this true from the start.
         let at_end = row(&h, SETS - 1).is_some();
         wheel(&mut h, -10.0);
         let after = inner(&h);

@@ -126,11 +126,13 @@ fn wide_panel(both: bool) -> WidePanel {
 /// screen, and the parent's cursor stops at its left edge (`:869-883`): the centre is left room that the panel's
 /// content draws over. `run()` settles. In a `ScrollArea::both` the panel stays 300 px at the screen edge.
 #[test]
-fn a_vertical_scroll_area_never_widens_its_panel_past_the_range() {
+fn a_vertical_scroll_area_keeps_the_panels_width_but_pushes_it_off_screen() {
     // `ScrollArea::vertical`: the reported rect keeps the range's width but is pushed off the screen's right edge,
     // and what is left for the centre ends at its left edge, past where the panel's content starts.
     let v = wide_panel(false);
     assert!(near(v.card.width(), 390.0), "the card is 390 wide");
+    // egui sets this width itself (the cut at `panel.rs:863-866`), so it cannot fail while that line stands: it pins
+    // that the width is not the symptom, and the next assertion holds the breakage.
     assert!(v.panel.width() <= 300.5, "vertical: panel {:?}", v.panel);
     assert!(
         v.panel.right() > v.screen.right() + 50.0,
@@ -268,8 +270,8 @@ fn open_menu(h: &mut Harness<'static, Combos>) {
 }
 
 /// Pins egui (see the file comment). G22: two `ComboBox`es in a `MenuButton` that closes on a click outside. Held as
-/// the skill states it: egui keeps one open popup per viewport (`memory/mod.rs:1126-1129`, `open_popup` replaces the
-/// one entry), so a click that opens either combo closes the menu, the combo's list never shows and nothing can be
+/// the skill states it: egui keeps one open popup per viewport (`memory/mod.rs:1115-1129`, `open_popup` replaces the
+/// one entry; the menu's close test is `popup.rs:659-676`), so a click that opens either combo closes the menu, the combo's list never shows and nothing can be
 /// picked. A click outside and Esc still close the menu. Tessalith's own `combo_menu` is the way round it.
 #[test]
 fn two_combos_in_a_menu_open_and_close_in_order() {
@@ -388,13 +390,15 @@ fn arrow_keys_stay_in_a_menus_filter_box() {
     key(&mut h, egui::Key::ArrowLeft);
     typed(&mut h, "x");
     in_box(&h, "noxr", "nor, Left, x");
+    // The caret sits before "r": Right moves it past, so "y" lands at the end.
+    key(&mut h, egui::Key::ArrowRight);
+    typed(&mut h, "y");
+    in_box(&h, "noxry", "Right, y");
     key(&mut h, egui::Key::Home);
     typed(&mut h, "H");
     key(&mut h, egui::Key::End);
     key(&mut h, egui::Key::Backspace);
-    in_box(&h, "Hnox", "Home, H, End, Backspace");
-    key(&mut h, egui::Key::ArrowRight);
-    in_box(&h, "Hnox", "Right");
+    in_box(&h, "Hnoxr", "Home, H, End, Backspace");
     for k in [
         egui::Key::ArrowDown,
         egui::Key::ArrowDown,
@@ -402,7 +406,7 @@ fn arrow_keys_stay_in_a_menus_filter_box() {
     ] {
         key(&mut h, k);
     }
-    in_box(&h, "Hnox", "Down, Down, Up");
+    in_box(&h, "Hnoxr", "Down, Down, Up");
     h.get_by_label("Row 1").click();
     h.run();
     assert_eq!(h.state().picked, Some(1), "the click picked row 1");
@@ -461,7 +465,8 @@ struct Scopes {
 /// Pins egui (see the file comment). The skill's examples key a panel's `PanelState` by `Id::new(salt)`. On 0.37 a
 /// panel's id is `parent_ui.scope_id().with_salt(salt)` (`panel.rs:971-976`), so one salt shown in two parents is two
 /// states and none is under `Id::new(salt)`, which is `Id::unique(salt)` (`id.rs:102-104`, deprecated).
-/// `ui::panel_ids` records the id egui uses.
+/// The first parent builds its panel through `ui::panel_ids::left` (the second with a bare `egui::Panel::left`), so the
+/// last assertion is a `panel_ids` check: it records the id egui uses.
 #[test]
 fn a_panel_is_stored_under_its_parents_scope() {
     let mut h = harness(
@@ -510,7 +515,7 @@ struct Heights {
 
 /// Pins egui (see the file comment). Spec section 4 item 7: a singleline TextEdit is 21.28 pt tall with the pinned
 /// 0.36.2 margin (`look::TEXT_EDIT_MARGIN`) and 19.28 with 0.37's own, 2 pt short (`text_edit/builder.rs:143`
-/// `margin: None` keeps the frame's theme margin, which `look.rs` reads as `button_padding`). Neither changes when the
+/// `margin: None` keeps the theme frame's margin, `button_padding`: `theme/default_style.rs:155`). Neither changes when the
 /// box takes focus: a set margin leaves room for the focus stroke (`text_edit/builder.rs:696-701`). Segoe UI 14 pt
 /// from `install_system_fonts`.
 #[test]

@@ -226,19 +226,22 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .expect("the header Export button")
 }
 
-/// Panel `name`'s outer rect as egui stored it last frame (`ui::panel_ids`); panics when the panel was never built.
+/// Panel `name`'s outer rect from the last frame that built the panel (`ui::panel_ids`); panics when the panel was
+/// never built.
 pub fn panel(ctx: &eframe::egui::Context, name: &str) -> eframe::egui::Rect {
     sdc_gui::ui::panel_ids::panel_rect(ctx, name)
         .unwrap_or_else(|| panic!("panel {name} was never built"))
 }
 
 /// Whether panel `name` was never built in `ctx`. A test that checks a panel is absent pairs it with a panel the same
-/// frame does build, so a renamed or unrecorded panel cannot make the check pass.
+/// frame does build, so an unrecorded registry (no panel recorded at all) cannot make the check pass. A renamed salt
+/// still passes it vacuously: the control does not catch that.
 pub fn panel_never_built(ctx: &eframe::egui::Context, name: &str) -> bool {
     sdc_gui::ui::panel_ids::panel_id(ctx, name).is_none()
 }
 
-/// E28: the header's Undo or Redo (`verb`), found by role and exact name. Its name is `{verb}` or `{verb}: {step}` for
+/// E28: the header's Undo or Redo (`verb`), found by role and name: the bare forms exactly, the `{step}` forms by
+/// their prefix. Its name is `{verb}` or `{verb}: {step}` for
 /// the Textures history, `{verb} (NIF edit history)` or `{verb} (NIF edit history): {step}` for the NIF one. On the
 /// main screen no other button carries one of these names: the toast's and the Problems row's Undo say more.
 /// It uses no rect on purpose: while the command palette is open, its Undo / Redo rows match as well, and the finder
@@ -263,12 +266,16 @@ pub fn header_undo<'h, S>(
     match hits.len() {
         1 => hits.pop().unwrap(),
         0 => {
+            // Every Undo / Redo name on screen, whatever its role, with the role.
             let all: Vec<String> = h
-                .query_all_by_role(Role::Button)
-                .filter_map(|n| n.accesskit_node().label())
-                .filter(|l| l.starts_with("Undo") || l.starts_with("Redo"))
+                .query_all_by_label_contains("Undo")
+                .chain(h.query_all_by_label_contains("Redo"))
+                .filter_map(|n| {
+                    let node = n.accesskit_node();
+                    node.label().map(|l| format!("{:?} {l:?}", node.role()))
+                })
                 .collect();
-            panic!("no header {verb} button; Undo / Redo buttons on screen: {all:?}")
+            panic!("no header {verb} button; Undo / Redo names on screen: {all:?}")
         }
         _ => {
             let labels: Vec<_> = hits

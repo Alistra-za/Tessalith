@@ -636,7 +636,7 @@ fn centred(letter: &'static str) -> impl FnOnce(&egui::Painter, egui::Rect) {
 }
 
 #[test]
-fn names_flags_an_unnamed_button() {
+fn names_flags_an_unnamed_clickable_widget() {
     let empty = Shared::new(std::cell::Cell::new(egui::Rect::NOTHING));
     let e2 = empty.clone();
     let f = found(400.0, 200.0, move |ui| {
