@@ -120,6 +120,10 @@ fn in_centre(h: &Harness<'static, AppModel>, row: &str) -> egui::Rect {
 }
 
 /// Opens the centre combo named `row` (scrolled into view first, as a user would) and picks `pick` in its list.
+/// The pick starts a re-plan, so this draws only the one frame that takes the click: the caller waits for the plan
+/// (`wait_idle`) before it runs to idle. A `run()` here would race the worker, because on egui 0.37 each new widget
+/// the plan's result draws asks for one more frame (`Ui::widget_style`, egui `theme/mod.rs`), and the step count
+/// would depend on when the result lands.
 fn pick_in(h: &mut Harness<'static, AppModel>, row: &str, pick: &str) {
     in_centre(h, row);
     h.get_by_role_and_label(Role::ComboBox, row).scroll_to_me();
@@ -127,7 +131,7 @@ fn pick_in(h: &mut Harness<'static, AppModel>, row: &str, pick: &str) {
     h.get_by_role_and_label(Role::ComboBox, row).click();
     h.run();
     h.get_by_label(pick).click();
-    h.run();
+    h.step();
 }
 
 /// Spec 9.1, Note JI3: each row moved out of the Advanced drawer writes the same `[files]` key the drawer row wrote,
