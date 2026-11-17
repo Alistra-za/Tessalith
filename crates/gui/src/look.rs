@@ -433,9 +433,11 @@ mod tests {
         );
     }
 
-    /// A 200 pt tall `thin_scroll()` area over "row 0".."row 39": row 0's painted top at rest, then while the content
-    /// is dragged 200 pt down from the top and held for 2 passes.
-    fn first_row_top_while_dragging_past_top() -> (f32, Vec<f32>) {
+    /// A 200 pt tall area over "row 0".."row 39", its scroll style set by `scroll` from the pinned app style: row 0's
+    /// painted top at rest, then while the content is dragged 200 pt down from the top and held for 2 passes.
+    fn first_row_top_while_dragging_past_top(
+        scroll: fn(&mut egui::style::ScrollStyle),
+    ) -> (f32, Vec<f32>) {
         let ctx = context(crate::fonts::install_system_fonts);
         let mut time = 0.0;
         let mut pass = |events: Vec<egui::Event>| {
@@ -446,10 +448,12 @@ mod tests {
             input.events = events;
             run(&ctx, input, |ui| {
                 ui.allocate_ui(egui::vec2(300.0, 200.0), |ui| {
-                    ui.spacing_mut().scroll = thin_scroll();
+                    scroll(&mut ui.spacing_mut().scroll);
                     egui::ScrollArea::vertical()
                         .id_salt("look-scroll")
                         .max_height(200.0)
+                        // 300 pt wide, so the press at x = 30 lands on a row, not on the bar of a shrunk area.
+                        .auto_shrink(false)
                         .show(ui, |ui| {
                             for n in 0..40 {
                                 let r = ui.label(format!("row {n}"));
@@ -496,10 +500,30 @@ mod tests {
     #[test]
     fn a_drag_past_the_end_of_a_thin_scroll_list_stops_at_the_edge() {
         // Review Focus 5. Reads the painted row, not ScrollArea State: `clamped_offset()` hides any overscroll.
-        let (rest, held) = first_row_top_while_dragging_past_top();
+        let (rest, held) = first_row_top_while_dragging_past_top(|s| *s = thin_scroll());
         assert!(
             held.iter().all(|&t| near(t, rest)),
             "rest {rest}, held {held:?}"
+        );
+        // Control: the same drag with the rubber band on pulls the row below `rest`, so the drag did scroll.
+        let (rest, held) = first_row_top_while_dragging_past_top(|s| {
+            *s = thin_scroll();
+            s.kinetic.rubber_band = true;
+        });
+        assert!(
+            held.iter().all(|&t| t > rest + 5.0),
+            "rubber band on: rest {rest}, held {held:?}"
+        );
+        // The app's own style (pin_036_style) on a default ScrollArea, and its control.
+        let (rest, held) = first_row_top_while_dragging_past_top(|_| {});
+        assert!(
+            held.iter().all(|&t| near(t, rest)),
+            "pinned default style: rest {rest}, held {held:?}"
+        );
+        let (rest, held) = first_row_top_while_dragging_past_top(|s| s.kinetic.rubber_band = true);
+        assert!(
+            held.iter().all(|&t| t > rest + 5.0),
+            "pinned default style, rubber band on: rest {rest}, held {held:?}"
         );
         assert!(!thin_scroll().kinetic.rubber_band);
         assert_eq!(
