@@ -87,6 +87,8 @@ mod dialog_keys;
 mod edges;
 #[path = "../effort_search.rs"]
 mod effort_search;
+#[path = "../egui_gotchas.rs"]
+mod egui_gotchas;
 #[path = "../encoding_follows_type.rs"]
 mod encoding_follows_type;
 #[path = "../export.rs"]
