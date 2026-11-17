@@ -1,5 +1,7 @@
-//! Windows system fonts, loaded at run time (nothing font-related is redistributed).
+//! Windows system fonts, loaded at run time, and the per-OS resolver with its embedded floor (Ubuntu Light, Hack,
+//! egui-icons) that Tasks 2 and 3 of the fonts plan wire in (Note JM).
 use eframe::egui;
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -67,9 +69,810 @@ pub fn install_system_fonts(ctx: &egui::Context) -> Result<(), String> {
     Ok(())
 }
 
+/// One font family the OS may have, and the key its data gets in [`egui::FontDefinitions`].
+#[derive(Clone, Copy, Debug)]
+pub struct Candidate {
+    pub family: &'static str,
+    pub key: &'static str,
+}
+
+/// A candidate whose key is its family name (Linux, macOS).
+const fn named(family: &'static str) -> Candidate {
+    Candidate {
+        family,
+        key: family,
+    }
+}
+
+/// One OS's font candidates, in the order `resolve` asks for them.
+pub struct OsFonts {
+    /// Ask the OS's own `sans-serif` / `monospace` answer before the named lists (Linux: the desktop's choice).
+    pub generic_first: bool,
+    pub proportional: &'static [Candidate],
+    /// Fallbacks after the proportional primary, every one that is found.
+    pub proportional_extra: &'static [Candidate],
+    pub monospace: &'static [Candidate],
+    /// Fallbacks after the monospace primary, every one that is found.
+    pub monospace_extra: &'static [Candidate],
+}
+
+pub const WINDOWS: OsFonts = OsFonts {
+    generic_first: false,
+    proportional: &[Candidate {
+        family: "Segoe UI",
+        key: "segoeui",
+    }],
+    proportional_extra: &[
+        Candidate {
+            family: "Segoe UI Symbol",
+            key: "seguisym",
+        },
+        Candidate {
+            family: "Segoe UI Emoji",
+            key: "seguiemj",
+        },
+    ],
+    monospace: &[Candidate {
+        family: "Consolas",
+        key: "consola",
+    }],
+    monospace_extra: &[Candidate {
+        family: "Segoe UI Symbol",
+        key: "seguisym",
+    }],
+};
+
+pub const LINUX: OsFonts = OsFonts {
+    generic_first: true,
+    proportional: &[
+        named("Noto Sans"),
+        named("DejaVu Sans"),
+        named("Liberation Sans"),
+        named("Cantarell"),
+        named("Ubuntu Sans"),
+        named("Ubuntu"),
+        named("Adwaita Sans"),
+        named("Inter"),
+        named("FreeSans"),
+    ],
+    proportional_extra: &[],
+    monospace: &[
+        named("DejaVu Sans Mono"),
+        named("Liberation Mono"),
+        named("Noto Sans Mono"),
+        named("Ubuntu Mono"),
+    ],
+    monospace_extra: &[],
+};
+
+pub const MACOS: OsFonts = OsFonts {
+    generic_first: false,
+    proportional: &[named("SF Pro Text"), named("Helvetica Neue")],
+    proportional_extra: &[],
+    monospace: &[named("Menlo")],
+    monospace_extra: &[],
+};
+
+/// The candidate table of the OS this build runs on.
+pub fn os_fonts() -> &'static OsFonts {
+    #[cfg(windows)]
+    {
+        &WINDOWS
+    }
+    #[cfg(target_os = "macos")]
+    {
+        &MACOS
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        &LINUX
+    }
+}
+
+/// The OS's generic families: what it answers for `sans-serif` and `monospace`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Generic {
+    SansSerif,
+    Monospace,
+}
+
+/// A face the OS found: the family name it reported and the face's data.
+#[derive(Clone, Debug)]
+pub struct Found {
+    pub family: String,
+    pub data: egui::FontData,
+}
+
+/// How `resolve` asks the OS for fonts (the system lookup in the app, a fixed set in tests).
+pub trait FontLookup {
+    fn family(&mut self, name: &str) -> Option<Found>;
+    fn generic(&mut self, generic: Generic) -> Option<Found>;
+}
+
+/// Where a family's primary font came from.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum FontSource {
+    /// A system font, with the family name the OS reported.
+    System(String),
+    /// The built-in floor (Ubuntu Light, Hack).
+    Embedded,
+}
+
+/// What `resolve` chose for the two families.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FontChoice {
+    pub proportional: FontSource,
+    pub monospace: FontSource,
+    /// The system lookup panicked and the floor was used (set by the caller that catches it).
+    pub lookup_failed: bool,
+}
+
+pub const FLOOR_NO_FONT: &str = "Tessalith found none of its usual fonts, so it uses its built-in Ubuntu Light and Hack; install Noto Sans or DejaVu Sans (on Windows, Segoe UI) for your system's look.";
+pub const FLOOR_TEXT_ONLY: &str = "Tessalith found none of its usual interface fonts, so text uses its built-in Ubuntu Light while fixed-width text keeps a system font; install Noto Sans or DejaVu Sans (on Windows, Segoe UI) for your system's look.";
+pub const FLOOR_LOOKUP_FAILED: &str = "Tessalith couldn't read the system's font list, so it uses its built-in Ubuntu Light and Hack; the error is in the newest crash log in %LOCALAPPDATA%\\sdc\\logs.";
+
+impl FontChoice {
+    /// The one sentence to show when a floor font is in use, `None` when both families are system fonts.
+    /// Proportional `System` with monospace `Embedded` cannot happen (`resolve`, rule 3): the monospace family falls
+    /// to the proportional system font before the floor (`every_choice_has_the_right_message` pins it).
+    pub fn message(&self) -> Option<&'static str> {
+        if self.lookup_failed {
+            return Some(FLOOR_LOOKUP_FAILED);
+        }
+        match (&self.proportional, &self.monospace) {
+            (FontSource::Embedded, FontSource::Embedded) => Some(FLOOR_NO_FONT),
+            (FontSource::Embedded, FontSource::System(_)) => Some(FLOOR_TEXT_ONLY),
+            (FontSource::System(_), _) => None,
+        }
+    }
+}
+
+/// True when epaint can load the face: `skrifa::FontRef::from_index` is the only fallible step of epaint's
+/// `FontFace::new`, and a face that fails it makes `Family::new` panic.
+pub(crate) fn parses(data: &egui::FontData) -> bool {
+    skrifa::FontRef::from_index(data.bytes(), data.index).is_ok()
+}
+
+/// The guard on the OS's generic answer: the face draws `AZaz09`, and its `i` and `W` have different advances for a
+/// proportional font, equal ones for a monospace font. A serif face is not detected. `data` must parse.
+pub(crate) fn fit_for_ui(data: &egui::FontData, monospace: bool) -> bool {
+    let mut defs = egui::FontDefinitions::empty();
+    defs.font_data
+        .insert("probe".to_owned(), Arc::new(data.clone()));
+    defs.families
+        .insert(egui::FontFamily::Proportional, vec!["probe".to_owned()]);
+    let mut fonts = egui::epaint::text::Fonts::new(Default::default(), defs);
+    let id = egui::FontId::proportional(14.0);
+    if !fonts.has_glyphs(&id, "AZaz09") {
+        return false;
+    }
+    let mut view = fonts.with_pixels_per_point(1.0);
+    let same_pitch = (view.glyph_width(&id, 'i') - view.glyph_width(&id, 'W')).abs() < 0.01;
+    same_pitch == monospace
+}
+
+// The floor's keys, egui's own names for these fonts.
+const KEY_UBUNTU_LIGHT: &str = "Ubuntu-Light";
+const KEY_HACK: &str = "Hack";
+const KEY_EGUI_ICONS: &str = "egui-icons";
+
+/// Asks a lookup at most once per family name and per generic family, and keeps only faces that parse (rule 0).
+struct Asker<'a> {
+    lookup: &'a mut dyn FontLookup,
+    named: HashMap<&'static str, Option<Found>>,
+    generic: HashMap<Generic, Option<Found>>,
+}
+
+impl Asker<'_> {
+    fn family(&mut self, name: &'static str) -> Option<Found> {
+        if let Some(hit) = self.named.get(name) {
+            return hit.clone();
+        }
+        let hit = self.lookup.family(name).filter(|f| parses(&f.data));
+        self.named.insert(name, hit.clone());
+        hit
+    }
+
+    /// The first candidate found, with its key.
+    fn first(&mut self, list: &[Candidate]) -> Option<(String, Found)> {
+        list.iter()
+            .find_map(|c| self.family(c.family).map(|f| (c.key.to_owned(), f)))
+    }
+
+    /// The OS's answer for `generic` under its generic key, if it parses and passes the guard.
+    fn generic(&mut self, generic: Generic) -> Option<(String, Found)> {
+        let monospace = generic == Generic::Monospace;
+        let hit = match self.generic.get(&generic) {
+            Some(hit) => hit.clone(),
+            None => {
+                let hit = self
+                    .lookup
+                    .generic(generic)
+                    .filter(|f| parses(&f.data) && fit_for_ui(&f.data, monospace));
+                self.generic.insert(generic, hit.clone());
+                hit
+            }
+        };
+        let key = if monospace { "monospace" } else { "sans-serif" };
+        hit.map(|f| (key.to_owned(), f))
+    }
+}
+
+/// Builds the font definitions from what `lookup` finds for `os`'s candidates, with the embedded floor (Ubuntu Light,
+/// Hack, egui-icons) where nothing is found. The rules are in the plan's Task 1 (Note JM).
+pub fn resolve(lookup: &mut dyn FontLookup, os: &OsFonts) -> (egui::FontDefinitions, FontChoice) {
+    let mut ask = Asker {
+        lookup,
+        named: HashMap::new(),
+        generic: HashMap::new(),
+    };
+    let mut defs = egui::FontDefinitions::empty();
+
+    // Rule 1: the proportional primary.
+    let proportional = if os.generic_first {
+        ask.generic(Generic::SansSerif)
+            .or_else(|| ask.first(os.proportional))
+    } else {
+        ask.first(os.proportional)
+            .or_else(|| ask.generic(Generic::SansSerif))
+    };
+    // Rule 3: the monospace primary; the proportional system font comes before the floor.
+    let monospace = if os.generic_first {
+        ask.generic(Generic::Monospace)
+            .or_else(|| ask.first(os.monospace))
+            .or_else(|| proportional.clone())
+    } else {
+        ask.first(os.monospace)
+            .or_else(|| proportional.clone())
+            .or_else(|| ask.generic(Generic::Monospace))
+    };
+
+    let (proportional_keys, proportional_source) = chain(
+        &proportional,
+        os.proportional_extra,
+        KEY_UBUNTU_LIGHT,
+        [KEY_HACK, KEY_EGUI_ICONS],
+        &mut ask,
+        &mut defs,
+    );
+    let (monospace_keys, monospace_source) = chain(
+        &monospace,
+        os.monospace_extra,
+        KEY_HACK,
+        [KEY_UBUNTU_LIGHT, KEY_EGUI_ICONS],
+        &mut ask,
+        &mut defs,
+    );
+
+    // Rules 4 and 6: the floor's data is there whenever a chain names it.
+    if proportional_source == FontSource::Embedded || monospace_source == FontSource::Embedded {
+        use epaint_default_fonts::{EGUI_ICONS, HACK_REGULAR, UBUNTU_LIGHT};
+        let floor = [
+            (KEY_UBUNTU_LIGHT, egui::FontData::from_static(UBUNTU_LIGHT)),
+            (KEY_HACK, egui::FontData::from_static(HACK_REGULAR)),
+            (
+                KEY_EGUI_ICONS,
+                egui::FontData::from_static(EGUI_ICONS).tweak(egui::FontTweak {
+                    scale: 0.90,
+                    ..Default::default()
+                }),
+            ),
+        ];
+        for (key, data) in floor {
+            defs.font_data.insert(key.to_owned(), Arc::new(data));
+        }
+    }
+    defs.families
+        .insert(egui::FontFamily::Proportional, proportional_keys);
+    defs.families
+        .insert(egui::FontFamily::Monospace, monospace_keys);
+    let choice = FontChoice {
+        proportional: proportional_source,
+        monospace: monospace_source,
+        lookup_failed: false,
+    };
+    (defs, choice)
+}
+
+/// One family's chain: its primary (or the floor's `floor_first`), every extra that is found in table order (rule 2),
+/// then `floor_rest` after a floor primary. Inserts the data of every system font it names.
+fn chain(
+    primary: &Option<(String, Found)>,
+    extras: &[Candidate],
+    floor_first: &str,
+    floor_rest: [&str; 2],
+    ask: &mut Asker<'_>,
+    defs: &mut egui::FontDefinitions,
+) -> (Vec<String>, FontSource) {
+    let mut add = |key: &str, found: &Found| {
+        defs.font_data
+            .entry(key.to_owned())
+            .or_insert_with(|| Arc::new(found.data.clone()));
+        key.to_owned()
+    };
+    let mut keys = Vec::new();
+    let source = match primary {
+        Some((key, found)) => {
+            keys.push(add(key, found));
+            FontSource::System(found.family.clone())
+        }
+        None => {
+            keys.push(floor_first.to_owned());
+            FontSource::Embedded
+        }
+    };
+    for c in extras {
+        if let Some(found) = ask.family(c.family) {
+            keys.push(add(c.key, &found));
+        }
+    }
+    if source == FontSource::Embedded {
+        keys.extend(floor_rest.map(str::to_owned));
+    }
+    (keys, source)
+}
+
+/// A lookup that finds nothing.
+struct NoFonts;
+
+impl FontLookup for NoFonts {
+    fn family(&mut self, _: &str) -> Option<Found> {
+        None
+    }
+    fn generic(&mut self, _: Generic) -> Option<Found> {
+        None
+    }
+}
+
+/// The embedded floor alone: Ubuntu Light for text, Hack for fixed-width text, egui-icons after both.
+pub fn embedded() -> (egui::FontDefinitions, FontChoice) {
+    let none = OsFonts {
+        generic_first: false,
+        proportional: &[],
+        proportional_extra: &[],
+        monospace: &[],
+        monospace_extra: &[],
+    };
+    resolve(&mut NoFonts, &none)
+}
+
+/// Every non-ASCII character in `crates/gui/src` except the CJK test string (`ui_symbols_cover_the_source`).
+#[cfg(test)]
+pub(crate) const UI_SYMBOLS: &str = "§…—→·▾×–↺✕ß−⚠🔒≥≈≡✓ⓘẞ°±Δ²α↔üïÄ✎●←‹›äÖΩω≠π▼◀▶▸✖“”🔗é⏵";
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Installed families by name; a named hit is Hack's bytes so `Fonts::new` can parse the result, a name in `broken`
+    /// answers bytes that do not parse. The generic answers carry their own bytes (Ubuntu-Light = a proportional Latin
+    /// font, Hack = monospace, egui-icons = no Latin, `JUNK` = not a font).
+    struct Fake {
+        have: Vec<&'static str>,
+        broken: Vec<&'static str>,
+        sans: Option<(&'static str, &'static [u8])>,
+        mono: Option<(&'static str, &'static [u8])>,
+        asked: Vec<String>,
+    }
+
+    impl Fake {
+        fn with(names: &[&'static str]) -> Self {
+            Fake {
+                have: names.to_vec(),
+                broken: Vec::new(),
+                sans: None,
+                mono: None,
+                asked: Vec::new(),
+            }
+        }
+    }
+
+    impl FontLookup for Fake {
+        fn family(&mut self, name: &str) -> Option<Found> {
+            self.asked.push(name.to_owned());
+            let bytes = if self.broken.contains(&name) {
+                JUNK
+            } else if self.have.contains(&name) {
+                HACK
+            } else {
+                return None;
+            };
+            Some(Found {
+                family: name.to_owned(),
+                data: egui::FontData::from_static(bytes),
+            })
+        }
+
+        fn generic(&mut self, generic: Generic) -> Option<Found> {
+            let (tag, answer) = match generic {
+                Generic::SansSerif => ("<sans-serif>", self.sans),
+                Generic::Monospace => ("<monospace>", self.mono),
+            };
+            self.asked.push(tag.to_owned());
+            answer.map(|(family, bytes)| Found {
+                family: family.to_owned(),
+                data: egui::FontData::from_static(bytes),
+            })
+        }
+    }
+
+    use epaint_default_fonts::{EGUI_ICONS, HACK_REGULAR as HACK, UBUNTU_LIGHT as UBUNTU};
+    const JUNK: &[u8] = b"this is not a font file";
+
+    #[test]
+    fn the_generic_guard_wants_latin_and_the_right_pitch() {
+        let d = |b: &'static [u8]| egui::FontData::from_static(b);
+        assert!(fit_for_ui(&d(UBUNTU), false));
+        assert!(
+            !fit_for_ui(&d(HACK), false),
+            "a monospace font is not a proportional UI font"
+        );
+        assert!(fit_for_ui(&d(HACK), true));
+        assert!(
+            !fit_for_ui(&d(UBUNTU), true),
+            "a proportional font is not a monospace font"
+        );
+        assert!(!fit_for_ui(&d(EGUI_ICONS), false), "no Latin letters");
+        assert!(parses(&d(UBUNTU)) && parses(&d(HACK)) && !parses(&d(JUNK)));
+    }
+
+    /// Review round 1, ruling 1: a broken file is skipped per candidate; the next candidate is used, not the floor.
+    #[test]
+    fn a_broken_font_file_is_skipped() {
+        // Linux: the generic answer and the first named family are broken.
+        let mut f = Fake {
+            broken: vec!["Noto Sans"],
+            sans: Some(("Broken", JUNK)),
+            mono: Some(("Broken Mono", JUNK)),
+            ..Fake::with(&["DejaVu Sans", "DejaVu Sans Mono"])
+        };
+        let (defs, choice) = resolve(&mut f, &LINUX);
+        assert_eq!(
+            choice.proportional,
+            FontSource::System("DejaVu Sans".into())
+        );
+        assert_eq!(
+            choice.monospace,
+            FontSource::System("DejaVu Sans Mono".into())
+        );
+        assert!(
+            !defs.font_data.contains_key("sans-serif") && !defs.font_data.contains_key("Noto Sans")
+        );
+        // Windows: a broken Segoe UI file falls to the generic family (Arial), the broken Consolas to Segoe UI's
+        // stand-in.
+        let mut w = Fake {
+            broken: vec!["Segoe UI", "Consolas"],
+            sans: Some(("Arial", UBUNTU)),
+            ..Fake::with(&["Segoe UI Symbol"])
+        };
+        let (wdefs, wchoice) = resolve(&mut w, &WINDOWS);
+        assert_eq!(wchoice.proportional, FontSource::System("Arial".into()));
+        assert_eq!(
+            wdefs.families[&egui::FontFamily::Monospace][0],
+            "sans-serif"
+        );
+        // Whatever was chosen, epaint accepts it (it panics on a face it cannot parse, family.rs:44-50).
+        for d in [defs, wdefs] {
+            let mut fonts = egui::epaint::text::Fonts::new(Default::default(), d);
+            assert!(
+                fonts.has_glyph(&egui::FontId::proportional(14.0), 'a')
+                    && fonts.has_glyph(&egui::FontId::monospace(14.0), 'a')
+            );
+        }
+    }
+
+    #[test]
+    fn every_choice_has_the_right_message() {
+        let sys = || FontSource::System("X".into());
+        let c = |p, m, f| FontChoice {
+            proportional: p,
+            monospace: m,
+            lookup_failed: f,
+        };
+        assert_eq!(c(sys(), sys(), false).message(), None);
+        assert_eq!(
+            c(FontSource::Embedded, FontSource::Embedded, false).message(),
+            Some(FLOOR_NO_FONT)
+        );
+        assert_eq!(
+            c(FontSource::Embedded, sys(), false).message(),
+            Some(FLOOR_TEXT_ONLY)
+        );
+        assert_eq!(
+            c(FontSource::Embedded, FontSource::Embedded, true).message(),
+            Some(FLOOR_LOOKUP_FAILED)
+        );
+        // Consolas only: the interface font fell back, fixed-width text did not.
+        let (_, only_mono) = resolve(&mut Fake::with(&["Consolas"]), &WINDOWS);
+        assert_eq!(only_mono.message(), Some(FLOOR_TEXT_ONLY));
+        // Rule 3: a proportional system font and no monospace of any kind never gives an embedded monospace.
+        for (os, family) in [
+            (&WINDOWS, "Segoe UI"),
+            (&LINUX, "Noto Sans"),
+            (&MACOS, "Helvetica Neue"),
+        ] {
+            let (_, choice) = resolve(&mut Fake::with(&[family]), os);
+            assert_eq!(
+                choice.monospace,
+                FontSource::System(family.into()),
+                "{family}"
+            );
+            assert_eq!(choice.message(), None);
+        }
+    }
+
+    /// Every non-ASCII character in the GUI source, except the CJK test string, is in `UI_SYMBOLS`, so the floor-gap
+    /// and owner pins cover new UI text. On a failure add the reported characters to `UI_SYMBOLS` and rerun the pins.
+    #[test]
+    fn ui_symbols_cover_the_source() {
+        fn rs_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+            for e in std::fs::read_dir(dir).unwrap().map(Result::unwrap) {
+                let p = e.path();
+                if p.is_dir() {
+                    rs_files(&p, out)
+                } else if p.extension().is_some_and(|x| x == "rs") {
+                    out.push(p)
+                }
+            }
+        }
+        let cjk = |c: char| matches!(c as u32, 0x3000..=0x9FFF | 0xAC00..=0xD7AF);
+        let mut files = Vec::new();
+        rs_files(
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/src")),
+            &mut files,
+        );
+        let mut missing = std::collections::BTreeSet::new();
+        for f in files {
+            let text = std::fs::read_to_string(&f).unwrap();
+            missing.extend(
+                text.chars()
+                    .filter(|c| !c.is_ascii() && !cjk(*c) && !UI_SYMBOLS.contains(*c)),
+            );
+        }
+        assert!(
+            missing.is_empty(),
+            "add to UI_SYMBOLS: {}",
+            missing.iter().collect::<String>()
+        );
+    }
+
+    #[test]
+    fn the_windows_table_keeps_todays_chain() {
+        let mut f = Fake::with(&["Segoe UI", "Segoe UI Symbol", "Segoe UI Emoji", "Consolas"]);
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional],
+            ["segoeui", "seguisym", "seguiemj"]
+        );
+        assert_eq!(
+            defs.families[&egui::FontFamily::Monospace],
+            ["consola", "seguisym"]
+        );
+        assert_eq!(
+            choice,
+            FontChoice {
+                proportional: FontSource::System("Segoe UI".into()),
+                monospace: FontSource::System("Consolas".into()),
+                lookup_failed: false
+            }
+        );
+        assert_eq!(choice.message(), None);
+        assert!(
+            !f.asked.iter().any(|n| n.starts_with('<')),
+            "Windows asks the generic family only after Segoe UI: {:?}",
+            f.asked
+        );
+        assert_eq!(
+            f.asked.iter().filter(|n| *n == "Segoe UI Symbol").count(),
+            1,
+            "rule 6: {:?}",
+            f.asked
+        );
+    }
+
+    #[test]
+    fn the_linux_lists_are_pinned() {
+        let names = |c: &[Candidate]| c.iter().map(|c| c.family).collect::<Vec<_>>();
+        assert_eq!(
+            [
+                LINUX.generic_first,
+                WINDOWS.generic_first,
+                MACOS.generic_first
+            ],
+            [true, false, false]
+        );
+        assert_eq!(
+            names(LINUX.proportional),
+            [
+                "Noto Sans",
+                "DejaVu Sans",
+                "Liberation Sans",
+                "Cantarell",
+                "Ubuntu Sans",
+                "Ubuntu",
+                "Adwaita Sans",
+                "Inter",
+                "FreeSans"
+            ]
+        );
+        assert_eq!(
+            names(LINUX.monospace),
+            [
+                "DejaVu Sans Mono",
+                "Liberation Mono",
+                "Noto Sans Mono",
+                "Ubuntu Mono"
+            ]
+        );
+        assert_eq!(names(MACOS.proportional), ["SF Pro Text", "Helvetica Neue"]);
+        assert_eq!(names(MACOS.monospace), ["Menlo"]);
+    }
+
+    #[test]
+    fn linux_asks_the_desktops_generic_family_first() {
+        let mut f = Fake {
+            sans: Some(("Desktop Sans", UBUNTU)),
+            mono: Some(("Desktop Mono", HACK)),
+            ..Fake::with(&["Noto Sans", "DejaVu Sans Mono"])
+        };
+        let (defs, choice) = resolve(&mut f, &LINUX);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional],
+            ["sans-serif"]
+        );
+        assert_eq!(defs.families[&egui::FontFamily::Monospace], ["monospace"]);
+        assert_eq!(
+            choice,
+            FontChoice {
+                proportional: FontSource::System("Desktop Sans".into()),
+                monospace: FontSource::System("Desktop Mono".into()),
+                lookup_failed: false
+            }
+        );
+        assert!(
+            !f.asked
+                .iter()
+                .any(|n| n == "Noto Sans" || n == "DejaVu Sans Mono"),
+            "named list not needed: {:?}",
+            f.asked
+        );
+    }
+
+    #[test]
+    fn an_unfit_generic_answer_falls_to_the_named_list() {
+        for bad_sans in [HACK, EGUI_ICONS] {
+            let mut f = Fake {
+                sans: Some(("Odd", bad_sans)),
+                mono: Some(("Odd Mono", UBUNTU)),
+                ..Fake::with(&["Liberation Sans", "DejaVu Sans", "Liberation Mono"])
+            };
+            let (defs, choice) = resolve(&mut f, &LINUX);
+            assert_eq!(
+                defs.families[&egui::FontFamily::Proportional][0],
+                "DejaVu Sans"
+            );
+            assert_eq!(
+                defs.families[&egui::FontFamily::Monospace][0],
+                "Liberation Mono"
+            );
+            assert_eq!(&f.asked[..3], ["<sans-serif>", "Noto Sans", "DejaVu Sans"]);
+            assert!(
+                !f.asked.iter().any(|n| n == "Liberation Sans"),
+                "stops at the first hit: {:?}",
+                f.asked
+            );
+            assert_eq!(choice.message(), None);
+        }
+    }
+
+    #[test]
+    fn windows_without_segoe_ui_takes_the_generic_family() {
+        let mut f = Fake {
+            sans: Some(("Arial", UBUNTU)),
+            ..Fake::with(&["Consolas"])
+        };
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional][0],
+            "sans-serif"
+        );
+        assert_eq!(choice.proportional, FontSource::System("Arial".into()));
+        assert_eq!(f.asked[0], "Segoe UI");
+    }
+
+    #[test]
+    fn no_font_at_all_uses_the_floor_and_says_so() {
+        let (defs, choice) = resolve(&mut Fake::with(&[]), &LINUX);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Proportional],
+            ["Ubuntu-Light", "Hack", "egui-icons"]
+        );
+        assert_eq!(
+            defs.families[&egui::FontFamily::Monospace],
+            ["Hack", "Ubuntu-Light", "egui-icons"]
+        );
+        assert_eq!(
+            choice,
+            FontChoice {
+                proportional: FontSource::Embedded,
+                monospace: FontSource::Embedded,
+                lookup_failed: false
+            }
+        );
+        assert_eq!(choice.message(), Some(FLOOR_NO_FONT));
+        // Rule 4: egui's floor fonts under egui's names, egui-icons at egui's own scale.
+        assert_eq!(defs.font_data["Ubuntu-Light"].bytes(), UBUNTU);
+        assert_eq!(defs.font_data["Hack"].bytes(), HACK);
+        assert_eq!(defs.font_data["egui-icons"].bytes(), EGUI_ICONS);
+        assert_eq!(defs.font_data["egui-icons"].tweak.scale, 0.90);
+        assert_eq!(embedded().1, choice);
+    }
+
+    /// Review Focus 4 and ruling 3: Windows without Consolas keeps today's order (Segoe UI), even though the system
+    /// has a generic monospace answer; the generic answer is not asked before Segoe UI.
+    #[test]
+    fn monospace_without_a_mono_family_uses_the_proportional_one() {
+        let mut f = Fake {
+            mono: Some(("Courier New", HACK)),
+            ..Fake::with(&["Segoe UI", "Segoe UI Symbol"])
+        };
+        let (defs, choice) = resolve(&mut f, &WINDOWS);
+        assert_eq!(
+            defs.families[&egui::FontFamily::Monospace],
+            ["segoeui", "seguisym"]
+        );
+        assert_eq!(choice.monospace, FontSource::System("Segoe UI".into()));
+        assert_eq!(choice.message(), None);
+        assert!(!f.asked.iter().any(|n| n == "<monospace>"), "{:?}", f.asked);
+        // With the floor as the interface font, the generic monospace answer is used before the floor's Hack.
+        let mut g = Fake {
+            mono: Some(("Courier New", HACK)),
+            ..Fake::with(&[])
+        };
+        let (gdefs, gchoice) = resolve(&mut g, &WINDOWS);
+        assert_eq!(gdefs.families[&egui::FontFamily::Monospace][0], "monospace");
+        assert_eq!(gchoice.monospace, FontSource::System("Courier New".into()));
+    }
+
+    /// Review Focus 3: the floor parses, draws a box (no panic) for what it lacks, and lacks exactly these.
+    #[test]
+    fn the_floor_parses_and_lacks_only_these_ui_symbols() {
+        let mut fonts = egui::epaint::text::Fonts::new(Default::default(), embedded().0);
+        let id = egui::FontId::proportional(14.0);
+        let mut got: Vec<char> = UI_SYMBOLS
+            .chars()
+            .filter(|c| !fonts.has_glyph(&id, *c))
+            .collect();
+        let mut want: Vec<char> = "ẞⓘ⚠✎✓✕✖🔒🔗⏵".chars().collect();
+        want.sort();
+        got.sort();
+        assert_eq!(got, want, "floor gaps changed");
+        let g = fonts.with_pixels_per_point(1.0).layout_no_wrap(
+            "⚠ ✓ 🔒".into(),
+            id,
+            egui::Color32::WHITE,
+        );
+        assert!(g.size().x > 0.0);
+    }
+
+    #[test]
+    fn every_table_resolves_to_definitions_epaint_accepts() {
+        for os in [&WINDOWS, &LINUX, &MACOS] {
+            let all: Vec<&'static str> = [
+                os.proportional,
+                os.proportional_extra,
+                os.monospace,
+                os.monospace_extra,
+            ]
+            .concat()
+            .iter()
+            .map(|c| c.family)
+            .collect();
+            let (defs, _) = resolve(&mut Fake::with(&all), os);
+            let mut fonts = egui::epaint::text::Fonts::new(Default::default(), defs);
+            assert!(fonts.has_glyph(&egui::FontId::monospace(14.0), 'a'));
+        }
+    }
 
     #[test]
     fn system_fonts_install_and_fill_the_proportional_family() {
@@ -101,6 +904,19 @@ mod tests {
             let id = egui::FontId::proportional(14.0);
             assert!(fonts.has_glyphs(&id, "中文 日本語 한국어"));
         }
+    }
+
+    /// Start-time budget (Note JM1): fonts installed and one pass laid out, in a fresh process. Run in release, five times.
+    #[test]
+    #[ignore = "timing; run with --release -- --ignored --nocapture"]
+    fn prints_the_font_start_time() {
+        let t = std::time::Instant::now();
+        let ctx = egui::Context::default();
+        install_system_fonts(&ctx).expect("system fonts");
+        let _ = ctx.run_ui(Default::default(), |ui| {
+            ui.label("Cutout + Blend · Coat normal ↺ ▾ ⚠ 🔒 — ×");
+        });
+        eprintln!("font start: {} ms", t.elapsed().as_millis());
     }
 
     #[test]

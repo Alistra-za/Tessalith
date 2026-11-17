@@ -4,7 +4,7 @@ Tessalith (`tessalith.exe`, the GUI, and `sdc.exe`, the command line) is GPL-3.0
 
 The licences of the Rust crates compiled into the two executables, with their texts, are in `THIRD_PARTY_LICENSES.md` (generated). Regenerate with
 `cargo about generate --frozen --workspace -c about.toml about.hbs -o THIRD_PARTY_LICENSES.md` (needs `cargo install cargo-about --locked --features cli`).
-Where a crate offers a choice of licences, `about.toml` records the choice: MIT where offered; Apache-2.0 for `self_cell`, `moxcms` and `pxfm`. `self_cell`'s other option, GPL-2.0-only, is not compatible with GPL-3.0-or-later and is not used. No other licence in the tree is incompatible with GPL-3.0-or-later.
+Where a crate offers a choice of licences, `about.toml` records the choice: MIT where offered; Apache-2.0 for `self_cell`, `moxcms` and `pxfm`. `self_cell`'s other option, GPL-2.0-only, is not compatible with GPL-3.0-or-later and is not used. The embedded fonts' licences (Ubuntu Font Licence 1.0; the crate also names SIL OFL 1.1, for a font not compiled in) are font licences; the owner ruled on shipping them in Note JM.
 
 ## Shipped in the executables (non-crate components)
 
@@ -36,7 +36,7 @@ Where a crate offers a choice of licences, `about.toml` records the choice: MIT 
   > THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 - The icons (`tessalith.ico`, `tessalith-256.png`, `sdc.ico`), the emblem (`docs/assets/tessalith-emblem.png`) and the shader `preview.wgsl` are Tessalith's own; the icon and emblem art was made by the project author.
 
-Tessalith uses the Windows system fonts (Segoe UI, Segoe UI Symbol, Segoe UI Emoji, Consolas) at run time and ships no fonts (egui's bundled default fonts are disabled).
+Tessalith uses the system fonts at run time (on Windows: Segoe UI, Segoe UI Symbol, Segoe UI Emoji and Consolas, and whatever font Windows picks for characters they lack). When no usual font is found it uses fonts built into tessalith.exe from egui: Ubuntu Light (Ubuntu Font Licence 1.0, LICENSES/Ubuntu-Font-Licence-1.0.txt), Hack (MIT and the Bitstream Vera licence, LICENSES/Hack-Regular-LICENSE.txt) and egui-icons (MIT, LICENSES/egui-icons-emoji-icon-font-MIT.txt).
 
 ## Repository only (not in the executables)
 
