@@ -1,7 +1,14 @@
 //! render3d must build without the engine and without the encoders (Note HX6): other programs use it.
 use std::collections::{BTreeMap, BTreeSet};
 
+/// The one target the workspace builds for (`.cargo/config.toml`).
+const BUILD_TARGET: &str = "x86_64-pc-windows-msvc";
+
 /// Names of every package in render3d's normal and build dependency closure (dev dependencies not followed).
+///
+/// `--filter-platform` keeps the question to the build's own target. Without it `cargo metadata` wants every
+/// package in the lock, other platforms' included, and `--offline` then fails on a machine that has only built
+/// for Windows (the CI runner: "failed to download `accesskit_atspi_common`", a Linux-only crate).
 fn normal_closure(root: &str) -> BTreeSet<String> {
     let out = std::process::Command::new(env!("CARGO"))
         .args([
@@ -9,6 +16,8 @@ fn normal_closure(root: &str) -> BTreeSet<String> {
             "--format-version",
             "1",
             "--offline",
+            "--filter-platform",
+            BUILD_TARGET,
             "--manifest-path",
         ])
         .arg(concat!(env!("CARGO_MANIFEST_DIR"), "/../../Cargo.toml"))
