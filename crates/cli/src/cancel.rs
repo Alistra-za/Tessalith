@@ -48,9 +48,6 @@ pub fn on_interrupt(
 ///
 /// The "cancelling" note is printed by a helper thread the handler wakes through a channel, so a blocked
 /// stderr can stall only that thread. The second Ctrl-C calls `std::process::exit(3)` without writing anything.
-// The second Ctrl-C must end the process at once: a running native encode call cannot be interrupted, and
-// `write_atomic` leaves no partial output behind (module docs).
-#[allow(clippy::exit)]
 pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
     let (tx, rx) = mpsc::channel::<()>();
     // Without the helper thread the note is simply not printed; cancelling still works.
@@ -63,6 +60,10 @@ pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
             }
         });
     let seen = Arc::new(AtomicU32::new(0));
+    // The second Ctrl-C must end the process at once: a running native encode call cannot be interrupted, and
+    // `write_atomic` leaves no partial final DDS output (temporary files can remain, as the module docs say).
+    #[allow(clippy::exit)]
+    let abort = |c| std::process::exit(c);
     ctrlc::set_handler(move || {
         on_interrupt(
             &seen,
@@ -71,7 +72,7 @@ pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
                 // Never blocks (unbounded channel); an error only means the helper thread is gone.
                 let _ = tx.send(());
             },
-            |c| std::process::exit(c),
+            abort,
         )
     })
 }
