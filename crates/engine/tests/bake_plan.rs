@@ -22,6 +22,17 @@ fn normal(dir: &Path, rel: &str, w: u32, h: u32) {
     .unwrap();
 }
 
+/// An RGBA `_n` like `normal` (same tilts), with `a` (a specular) in its alpha: the case `normal` cannot make.
+fn normal_with_alpha(dir: &Path, rel: &str, w: u32, h: u32, a: u8) {
+    let p = dir.join("in").join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(w, h, |x, _| {
+        Rgba([if x % 2 == 0 { 204u8 } else { 51 }, 128, 230, a])
+    })
+    .save(p)
+    .unwrap();
+}
+
 fn rough(dir: &Path, rel: &str, w: u32, h: u32) {
     let p = dir.join("in").join(rel);
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -796,4 +807,61 @@ fn a_member_with_no_mips_does_not_bake() {
     assert!(job(&p, "iron_rmaos.png").bake.is_none());
     assert!(job(&p, "iron_rfaos.png").bake.is_none());
     assert!(!bake_flag(&ev, "textures/pbr/iron"));
+}
+
+/// B3-4 pin (Note JP1): an own plain `normal` in a PBR set plans as today. It keeps its alpha and its `_n.dds` name,
+/// it does not bake the set's `_rmaos`, and the `_rmaos` says why.
+#[test]
+fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal_with_alpha(d.path(), "textures/pbr/iron_n.png", 64, 64, 40);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let (p, ev) = plan(req(d.path(), &["file:**/iron_n.png.subtype=normal"]));
+    let n = job(&p, "iron_n.png");
+    assert_eq!(n.profile.subtype, Subtype::Normal);
+    assert_eq!(n.profile.alpha.policy, AlphaPolicy::Data);
+    assert!(n.output.ends_with("iron_n.dds"), "{}", n.output.display());
+    let r = job(&p, "iron_rmaos.png");
+    assert!(r.bake.is_none(), "a plain normal never bakes");
+    assert_eq!(set_codes(r), vec![Code::SetMissingCompanion]);
+    assert!(
+        r.warnings
+            .iter()
+            .any(|w| w.code == Code::SetMissingCompanion
+                && w.message.contains("was given another sub-type")),
+        "{:?}",
+        r.warnings
+    );
+    assert!(!bake_flag(&ev, "textures/pbr/iron"));
+}
+
+/// B3-4 pin (Note JP1): the written `iron_n.dds` keeps the source's alpha.
+#[test]
+fn an_own_plain_normal_in_a_pbr_set_is_written_with_its_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    normal_with_alpha(d.path(), "textures/pbr/iron_n.png", 64, 64, 40);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let e = Engine::new().unwrap();
+    let p = e
+        .plan(
+            req(d.path(), &["file:**/iron_n.png.subtype=normal"]),
+            &rep,
+            &CancelToken::default(),
+        )
+        .unwrap();
+    e.run(p, &rep, &CancelToken::default()).unwrap();
+    let b = std::fs::read(d.path().join("out/textures/pbr/iron_n.dds")).unwrap();
+    let f = engine::dds::read_dds(&b).unwrap();
+    let (w, h, r) = f.levels[0].clone();
+    let engine::decode::Decoded::Ldr(px) =
+        engine::decode::decode_level(f.format, w, h, &f.data[r]).unwrap()
+    else {
+        panic!("LDR expected")
+    };
+    assert!(
+        px.iter().all(|t| t[3].abs_diff(40) <= 2),
+        "the alpha is kept"
+    );
 }

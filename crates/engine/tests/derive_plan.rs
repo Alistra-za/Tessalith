@@ -1692,3 +1692,30 @@ fn a_failed_rmaos_recipe_leaves_a_pbr_set_out_of_also() {
         assert!(drop.contains(&arm.join(f)), "{f}: {drop:?}");
     }
 }
+
+/// `cs_then`'s tweak: `steel_n.png` typed plain `normal` in both plans.
+fn plain_steel_n(r: &mut BatchRequest, _: Option<&mut DeriveRequest>) {
+    r.overrides = vec![parse_set("file:**/steel_n.png.subtype=normal").unwrap()];
+}
+
+/// B3-4 pin (Note JP1): an own plain `normal` in a PBR set gets no Also `legacy_n`; the derived diffuse lists it.
+#[test]
+fn an_own_plain_normal_feeds_no_also_legacy_n() {
+    let d = tempfile::tempdir().unwrap();
+    let inputs = d.path().join("in");
+    steel(&inputs, "textures/pbr/arm", Some([128, 0, 255, 255]), false);
+    let (p, _) = cs_then(DeriveMode::Vanilla, &inputs, d.path(), plain_steel_n);
+    assert!(!kinds(&p).contains(&DeriveKind::LegacyN), "{:?}", kinds(&p));
+    let diffuse = out_job(&p, "textures/arm/steel.dds").expect("the derived diffuse");
+    assert!(
+        diffuse
+            .warnings
+            .iter()
+            .any(|w| w.code == Code::DeriveNotConverted
+                && w.data["member"]
+                    .as_str()
+                    .is_some_and(|m| m.ends_with("steel_n.png"))),
+        "{:?}",
+        diffuse.warnings
+    );
+}
