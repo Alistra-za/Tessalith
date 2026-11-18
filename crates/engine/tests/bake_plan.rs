@@ -874,3 +874,67 @@ fn an_own_plain_normal_in_a_pbr_set_is_written_with_its_alpha() {
         "the alpha is kept"
     );
 }
+
+/// N-10 pin (Note JS7): a `[files]` `alpha.policy = "data"` beats the Analysis layer's `remove` on an RGB `pbr_normal`
+/// (policy.rs `layered_profile_with`: the Analysis remove at l.736-750, `[files]` from l.834), and the set still bakes.
+#[test]
+fn a_files_data_beats_the_analysis_remove_on_a_pbr_normal() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.\"textures/pbr/iron_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    let (p, _) = plan(req(d.path(), &[]));
+    let n = job(&p, "iron_n.png");
+    assert_eq!(n.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(n.profile.alpha.policy, AlphaPolicy::Data);
+    assert_eq!(
+        n.provenance.get("alpha.policy"),
+        Some(&engine::presets::Provenance::ProjectFile)
+    );
+    assert!(job(&p, "iron_rmaos.png").bake.is_some());
+}
+
+/// An `_n` like `normal`, with a specular that changes per texel.
+fn normal_with_varying_alpha(dir: &Path, rel: &str) {
+    let p = dir.join("in").join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgba([
+            if x % 2 == 0 { 204u8 } else { 51 },
+            128,
+            230,
+            (x * 3 + y) as u8,
+        ])
+    })
+    .save(p)
+    .unwrap();
+}
+
+/// N-17 pin (DECISIONS P25, policy.rs:1983-2002): a `pbr_normal`'s varying alpha is dropped with no LOSS-ALPHA-DATA,
+/// planned and run.
+#[test]
+fn a_pbr_normals_varying_alpha_is_dropped_without_a_message() {
+    let d = tempfile::tempdir().unwrap();
+    normal_with_varying_alpha(d.path(), "textures/pbr/iron_n.png");
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let e = Engine::new().unwrap();
+    let p = e
+        .plan(req(d.path(), &[]), &rep, &CancelToken::default())
+        .unwrap();
+    let n = job(&p, "iron_n.png");
+    assert_eq!(n.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(n.profile.alpha.policy, AlphaPolicy::Remove);
+    assert!(!codes(n).contains(&Code::LossAlphaData), "{:?}", n.warnings);
+    e.run(p, &rep, &CancelToken::default()).unwrap();
+    let ev = format!("{:?}", sink.take());
+    assert!(
+        !ev.contains("LossAlphaData"),
+        "no LOSS-ALPHA-DATA in the run's events"
+    );
+}
