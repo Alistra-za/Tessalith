@@ -32,7 +32,8 @@ fn unnamed_progress<S>(h: &Harness<'_, S>) -> Vec<String> {
 }
 
 /// Input nodes on screen as (role, name, hover-only): visible, editable, named. An input linked with `labelled_by`
-/// lands here under its row label's name (egui 0.37 copies the label's text into the node).
+/// lands here under its row label's name: egui 0.37's `labelled_by` clears the node's own label, and AccessKit
+/// resolves the name through the link.
 fn named_inputs<S>(h: &Harness<'_, S>) -> Vec<(Role, String, bool)> {
     h.root()
         .children_recursive()
@@ -50,8 +51,18 @@ fn named_inputs<S>(h: &Harness<'_, S>) -> Vec<(Role, String, bool)> {
         .collect()
 }
 
+/// True when the inputs with these roles sharing one name are a fault. Two exceptions: a Slider and its own value box
+/// (egui gives the box the slider's name), and splitters alone (egui gives every panel splitter the same fixed name,
+/// which the app cannot set).
+fn shared_name_is_a_fault(roles: &[Role]) -> bool {
+    let slider_and_box =
+        roles.len() == 2 && roles.contains(&Role::Slider) && roles.contains(&Role::SpinButton);
+    let splitters = roles.iter().all(|r| *r == Role::Splitter);
+    roles.len() > 1 && !slider_and_box && !splitters
+}
+
 /// The two name faults on a screen: the names of inputs named only by their hover text, and the names shared by two or
-/// more inputs (with their roles). A Slider and its own value box may share a name (egui gives the box the slider's).
+/// more inputs (with their roles), less the two exceptions of `shared_name_is_a_fault`.
 fn name_faults<S>(h: &Harness<'_, S>) -> (Vec<String>, Vec<(String, Vec<Role>)>) {
     let inputs = named_inputs(h);
     let mut hover: Vec<String> = Vec::new();
@@ -70,20 +81,37 @@ fn name_faults<S>(h: &Harness<'_, S>) -> (Vec<String>, Vec<(String, Vec<Role>)>)
             .filter(|(_, n, _)| n == name)
             .map(|(r, _, _)| *r)
             .collect();
-        let slider_and_box =
-            roles.len() == 2 && roles.contains(&Role::Slider) && roles.contains(&Role::SpinButton);
-        if roles.len() > 1 && !slider_and_box {
+        if shared_name_is_a_fault(&roles) {
             dup.push((name.clone(), roles));
         }
     }
     (hover, dup)
 }
 
-/// Rules 8.6 and 8.4 over everything on `screen` (a checkpoint's name), with today's hits allowed: no input is named
-/// only by its hover text, and no two inputs share a name. Each allowlist below holds one entry per (screen, name)
-/// with the reason; a shared-name entry also pins the roles of the inputs sharing the name, so an input added, gone
-/// or changed fails here, and so does an entry whose hit is gone (delete it).
+/// The screens `audit_names` is called on. An allowlist entry names one of them, so an entry for a screen that is
+/// not audited (a typo, a removed checkpoint) fails the self-test instead of passing unseen.
+const SCREENS: &[&str] = &[
+    "textures view with filters",
+    "set editor",
+    "json editor",
+    "presets",
+    "rename dialog",
+    "meshes view",
+    "meshes mod filter open",
+    "meshes skin browse popup",
+    "meshes edit browse popup",
+];
+
+/// Rules 8.8 and 8.4 over everything on `screen` (a checkpoint's name, one of `SCREENS`), with today's hits allowed:
+/// no input is named only by its hover text, and no two inputs share a name. Each allowlist below holds one entry per
+/// (screen, name) with the reason; a shared-name entry also pins the roles of the inputs sharing the name, so an input
+/// added, gone or changed fails here, and so does an entry whose hit is gone (delete it).
+#[track_caller]
 fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
+    assert!(
+        SCREENS.contains(&screen),
+        "{screen:?} is not in SCREENS in crates/gui/tests/accessible_names.rs; add it there"
+    );
     let (hover, dup) = name_faults(h);
     let mut bad: Vec<String> = Vec::new();
     for name in &hover {
@@ -92,7 +120,7 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
             .any(|(s, n, _)| *s == screen && n == name)
         {
             bad.push(format!(
-                "{screen}: an input is named only by its hover text {name:?}; give it a short name with `ui::name_input` (rule 8.8)"
+                "{screen}: an input is named only by its hover text {name:?}; give it a short name with `ui::name_input` (rule 8.8). HOVER_ONLY_ALLOWED in crates/gui/tests/accessible_names.rs lists the allowed ones"
             ));
         }
     }
@@ -107,23 +135,28 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
                 "{screen}: {} inputs share the name {name:?} ({measured:?}); give each its own name (rule 8.4)",
                 roles.len()
             )),
-            Some((_, _, stored, _)) if stored[..] != measured[..] => bad.push(format!(
-                "{screen}: the inputs sharing the name {name:?} changed: allowlist has {stored:?}, measured {measured:?}; name the new input apart (rule 8.4), or update the entry's roles with its reason"
-            )),
-            Some(_) => {}
+            Some((_, _, stored, _)) => {
+                let mut stored = stored.to_vec();
+                stored.sort();
+                if stored[..] != measured[..] {
+                    bad.push(format!(
+                        "{screen}: the inputs sharing the name {name:?} changed: SHARED_NAME_ALLOWED in crates/gui/tests/accessible_names.rs has {stored:?}, measured {measured:?}; name the new input apart (rule 8.4), or update the entry's roles with its reason"
+                    ));
+                }
+            }
         }
     }
     for (s, n, _) in HOVER_ONLY_ALLOWED {
         if *s == screen && !hover.iter().any(|h| h == n) {
             bad.push(format!(
-                "{screen}: the allowlisted hover-only name {n:?} is gone; delete its entry"
+                "{screen}: the hover-only name {n:?} allowed in HOVER_ONLY_ALLOWED in crates/gui/tests/accessible_names.rs is gone; delete its entry"
             ));
         }
     }
     for (s, n, _, _) in SHARED_NAME_ALLOWED {
         if *s == screen && !dup.iter().any(|(d, _)| d == n) {
             bad.push(format!(
-                "{screen}: the allowlisted shared name {n:?} is gone; delete its entry"
+                "{screen}: the shared name {n:?} allowed in SHARED_NAME_ALLOWED in crates/gui/tests/accessible_names.rs is gone; delete its entry"
             ));
         }
     }
@@ -135,7 +168,6 @@ const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
 
 const COLLAPSE: &str =
     "column-collapse small_button: the glyph is the name, the hover names the column";
-const SPLITTER: &str = "egui's own fixed name for a panel splitter";
 const CHIP: &str =
     "a member chip with no docked helper is named by its slot letter alone (chip_name)";
 const GROUP_ROW: &str =
@@ -150,12 +182,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "◀",
         &["Button", "Button"],
         COLLAPSE,
-    ),
-    (
-        "textures view with filters",
-        "Resize panel",
-        &["Splitter", "Splitter"],
-        SPLITTER,
     ),
     (
         "textures view with filters",
@@ -176,12 +202,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         GROUP_ROW,
     ),
     ("set editor", "◀", &["Button", "Button"], COLLAPSE),
-    (
-        "set editor",
-        "Resize panel",
-        &["Splitter", "Splitter"],
-        SPLITTER,
-    ),
     ("set editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "set editor",
@@ -208,12 +228,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "CS PBR's texture-set tick and PGPatcher's number box, one key label",
     ),
     ("json editor", "◀", &["Button", "Button"], COLLAPSE),
-    (
-        "json editor",
-        "Resize panel",
-        &["Splitter", "Splitter"],
-        SPLITTER,
-    ),
     ("json editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "json editor",
@@ -289,15 +303,9 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
     ("rename dialog", "◀", &["Button", "Button"], COLLAPSE),
     (
         "rename dialog",
-        "Resize panel",
-        &["Splitter", "Splitter"],
-        SPLITTER,
-    ),
-    (
-        "rename dialog",
         "⚠ 2",
         &["Button", "Button"],
-        "two buttons named by their text (not traced)",
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
     ),
     ("rename dialog", "D", &["Button", "Button", "Button"], CHIP),
     (
@@ -316,13 +324,7 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
         "meshes skin browse popup",
         "textures/white.dds",
         &["Link", "Link"],
-        "two links to one path (not traced)",
-    ),
-    (
-        "meshes edit browse popup",
-        "Resize panel",
-        &["Splitter", "Splitter"],
-        SPLITTER,
+        "each shape card names a texture slot by its path (`meshes.rs` shape), and the test's skin shape is a copy of the fixture's shape 0, so both show its textures/white.dds",
     ),
 ];
 
@@ -350,6 +352,34 @@ fn the_name_checks_see_a_hover_only_name_and_a_shared_name() {
     assert_eq!(hover, vec!["Close the window".to_string()]);
     assert_eq!(dup.len(), 1, "{dup:?}");
     assert_eq!(dup[0].0, "Same");
+}
+
+/// The two exceptions are exact: splitters alone and a Slider with its value box pass; a splitter or a slider that
+/// shares its name with another input still fails.
+#[test]
+fn a_shared_name_is_a_fault_unless_splitters_alone_or_a_slider_and_its_box() {
+    use Role::*;
+    assert!(!shared_name_is_a_fault(&[Splitter, Splitter]));
+    assert!(!shared_name_is_a_fault(&[Splitter, Splitter, Splitter]));
+    assert!(!shared_name_is_a_fault(&[Slider, SpinButton]));
+    assert!(!shared_name_is_a_fault(&[Button]));
+    assert!(shared_name_is_a_fault(&[Splitter, Button]));
+    assert!(shared_name_is_a_fault(&[Slider, SpinButton, SpinButton]));
+    assert!(shared_name_is_a_fault(&[Button, Button]));
+}
+
+/// Every allowlist entry names an audited screen, so an entry for a screen no test audits fails here.
+#[test]
+fn every_allowlist_entry_names_an_audited_screen() {
+    let screens = HOVER_ONLY_ALLOWED
+        .iter()
+        .map(|(s, _, _)| *s)
+        .chain(SHARED_NAME_ALLOWED.iter().map(|(s, _, _, _)| *s));
+    let unknown: Vec<&str> = screens.filter(|s| !SCREENS.contains(s)).collect();
+    assert!(
+        unknown.is_empty(),
+        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo, or a screen no longer audited; fix or delete the entry): {unknown:?}"
+    );
 }
 
 /// Opens the Textures column's Filter ▾ popup.
