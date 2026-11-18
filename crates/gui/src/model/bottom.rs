@@ -1637,8 +1637,10 @@ impl Scope {
 
 /// The view `s` names: the set with that key, else the key-less set with that id, else the set whose id matches it by
 /// fold (Note BF: a keyed set's id is folded, a key-less one keeps its typed case), so a filter opened on a key-less
-/// set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
-fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
+/// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
+/// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
+/// and has no key (follow-up F7). The key wins. `None` for the empty string.
+fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
     if s.is_empty() {
         return None;
     }
@@ -1647,12 +1649,17 @@ fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView>
         .find(|v| v.key == s)
         .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
         .or_else(|| views.iter().find(|v| engine::sets::same_id(&v.id, s)))
+        .or_else(|| {
+            views
+                .iter()
+                .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+        })
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
 fn scope(m: &AppModel, s: &str) -> Scope {
     let views = sets::views(m);
-    match view_of(&views, s) {
+    match view_of(&views, &m.sets_root(), s) {
         Some(v) => Scope::of(v),
         None => Scope {
             key: s.to_string(),
@@ -1748,7 +1755,7 @@ fn with_counted_rows<T>(
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
     let views = sets::views(m);
-    let v = view_of(&views, key)?;
+    let v = view_of(&views, &m.sets_root(), key)?;
     if set_ready_in(&flagged(m), v) {
         return None;
     }

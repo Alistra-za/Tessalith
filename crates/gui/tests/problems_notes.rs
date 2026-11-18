@@ -5231,6 +5231,63 @@ fn a_key_less_sets_filter_follows_a_mixed_case_id() {
     assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
 }
 
+/// Follow-up F7 (Note JR11): a filter opened by a keyed set's key follows the set once it loses every file and has no
+/// key: it lists the key-less set's rows, the same rows as a filter by its id.
+#[test]
+fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
+    use sdc_gui::model::bottom::{filtered, scope_key, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    // A text file no plan item matches: the entry stays and shows as "No file matches" once the image is gone.
+    std::fs::write(root.join("landscape/one.txt"), "notes").unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("landscape/big");
+        s.add_member("landscape/big", "landscape/one.png");
+        s.add_member("landscape/big", "landscape/one.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let find = |m: &sdc_gui::model::AppModel| {
+        sdc_gui::model::sets::set_views(m)
+            .into_iter()
+            .find(|v| v.id == "landscape/big")
+            .expect("the set has a card")
+    };
+    let v = find(&m);
+    assert!(!v.key.is_empty(), "precondition: the set has a key: {v:?}");
+    let f = ProblemsFilter::Set(v.key.clone());
+    m.open_problems(Some(f.clone()));
+    // The set's only real file goes; the other files of the folder stay, so the plan still has items.
+    std::fs::remove_file(root.join("landscape/one.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = find(&m);
+    assert!(
+        v.key.is_empty(),
+        "precondition: every entry is missing, so no key: {v:?}"
+    );
+    assert_eq!(
+        m.bottom.filter,
+        Some(f.clone()),
+        "nothing resets the filter"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_id = filtered(&m, Some(&ProblemsFilter::Set(scope_key(&v).to_string())));
+    assert!(
+        rows.iter().any(|p| p.text.contains("one.txt")),
+        "the missing entry's row: {texts:?}"
+    );
+    assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+}
+
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
 /// has a key: it lists the keyed set's rows (the same rows as a filter by its key), never another set's, and its chip
 /// names the set.
