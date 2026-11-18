@@ -1086,7 +1086,7 @@ pub fn plan_packing(
                         } else if cancelled.contains(&fm.path) {
                             format!("{n}, the set's _f, was cancelled")
                         } else if dead(fm) {
-                            format!("{n}, the set's _f, is not converted")
+                            format!("{n}, the set's _f, is skipped")
                         } else {
                             match crate::policy::subtype_override(ctx, fm) {
                                 Some(st) if st != Subtype::PbrFuzz && fm.kind != InputKind::Dds => {

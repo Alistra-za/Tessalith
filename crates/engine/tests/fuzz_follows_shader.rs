@@ -1617,10 +1617,10 @@ fn the_f_that_writes_the_pbr_fuzz_texture_is_named_before_one_typed_away() {
     );
 }
 
-/// F15 (Note JQ53): an `_f` pair that collides (IN-DUPLICATE) has no job; the reason says it is not converted. (Both
+/// F15 (Note JQ53): an `_f` pair that collides (IN-DUPLICATE) has no job; the reason says it is skipped. (Both
 /// members of such a pair are skipped, so the rule above is only reachable through a kept DDS.)
 #[test]
-fn an_f_that_is_a_duplicate_is_named_as_not_converted() {
+fn an_f_that_is_a_duplicate_is_named_as_skipped() {
     let d = fixture(
         &[
             "iron.png",
@@ -1634,7 +1634,7 @@ fn an_f_that_is_a_duplicate_is_named_as_not_converted() {
     let p = plan(&d);
     assert_eq!(
         unused_reason(&p, "iron_fuzz.png"),
-        "iron_fuzz.png: iron_f.png, the set's _f, is not converted; not converted"
+        "iron_fuzz.png: iron_f.png, the set's _f, is skipped; not converted"
     );
 }
 
