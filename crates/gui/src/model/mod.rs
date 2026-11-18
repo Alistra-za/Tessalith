@@ -1185,10 +1185,20 @@ impl AppModel {
 
     /// Saved in `sdc-project.toml` at once, or with the next Save when it holds unsaved edits (those are the user's to
     /// save, Note BD2), as `set_export_folder` does. Not an undo step: it is a preference.
+    /// While the folder's open can still be cancelled it changes nothing: Cancel goes back to the previous folder
+    /// without a question (AG92, FC12), so a tick taken now could vanish unasked (ruling 3c-13).
     pub fn set_export_without_review(&mut self, on: bool) {
+        if self.can_cancel_open() {
+            self.status_line =
+                "Export without review can be set once the folder has finished opening.".into();
+            return;
+        }
         let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
             return;
         };
+        if d.export_without_review() == on {
+            return;
+        }
         let was_dirty = d.is_dirty();
         d.set_export_without_review(on);
         if was_dirty {
