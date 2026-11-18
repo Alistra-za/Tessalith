@@ -405,6 +405,9 @@ pub enum Fix {
     SetType(String),
     /// Note JP3 (SHADER-NORMAL-SPECULAR): write subtype = "pbr_normal" for this item.
     UsePbrNormal(String),
+    /// Owner A1 (PACK-RECIPE-CONFLICT, PACK-RECIPE-UNBUILDABLE, SHADER-EXTRA-MAP on a packed output): remove
+    /// `packing.recipe` from both packed keys of the set; the planned packed key names it.
+    ClearRecipe(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -925,6 +928,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::ChanNormalLength => Some(Fix::RebuildZ(k())),
                 Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
                 Code::SugContradiction => Some(Fix::SetType(k())),
+                // Owner A1-4: both rows sit on the planned packed key.
+                Code::PackRecipeConflict | Code::PackRecipeUnbuildable => {
+                    Some(Fix::ClearRecipe(k()))
+                }
                 _ => None,
             };
             // A job-dependent sentence (A3) keeps the engine's message on the hover.
@@ -949,18 +956,31 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
                 let (fix, second_fix, target, text) = match w.code {
-                    Code::ShaderExtraMap => match extra_member(m, v, w) {
-                        Some(item) => (
-                            Some(Fix::RemoveMember {
-                                set_id: v.id.clone(),
-                                item: item.clone(),
-                            }),
-                            shader(),
-                            Some(SlotTarget::Item(item)),
-                            None,
-                        ),
-                        None => (shader(), None, None, None),
-                    },
+                    Code::ShaderExtraMap => {
+                        let member = w.data.get("member").and_then(|x| x.as_str()).unwrap_or("");
+                        // Owner A1-7: a packed output with a written recipe offers Clear recipe, then Change shader….
+                        if let Some(k) = extra_map_recipe_key(m, v, member) {
+                            (
+                                Some(Fix::ClearRecipe(k.clone())),
+                                shader(),
+                                Some(SlotTarget::Item(k)),
+                                None,
+                            )
+                        } else {
+                            match extra_member(m, v, w) {
+                                Some(item) => (
+                                    Some(Fix::RemoveMember {
+                                        set_id: v.id.clone(),
+                                        item: item.clone(),
+                                    }),
+                                    shader(),
+                                    Some(SlotTarget::Item(item)),
+                                    None,
+                                ),
+                                None => (shader(), None, None, None),
+                            }
+                        }
+                    }
                     // Note JP3 (B3-11): a kept DDS's type cannot drop its alpha, so it gets no button and its own
                     // sentence; a DDS encoded again (`reencode = true`) gets the button like any source image.
                     Code::ShaderNormalSpecular => match extra_member(m, v, w) {
@@ -1443,6 +1463,36 @@ fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> 
             })
         })
         .cloned()
+}
+
+/// Owner A1-7: the key of `v`'s packed output (the Rmaos slot's own item) whose output file name is `member`, with
+/// no condition on the recipe.
+fn packed_output_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let Some(sets::SlotFill::Own { item: k }) = v.slots.get(&sets::SlotKind::Rmaos) else {
+        return None;
+    };
+    let named = m
+        .item(k)?
+        .job
+        .as_ref()?
+        .output
+        .file_name()
+        .is_some_and(|f| f == member);
+    named.then(|| k.clone())
+}
+
+/// Owner A1-7: [`packed_output_key`] when `packing.recipe` is written on either packed key of that set.
+fn extra_map_recipe_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    let k = packed_output_key(m, v, member)?;
+    let (base, _) = super::pack_fills::split_packed_key(&k)?;
+    let p = m.project.as_ref()?;
+    ["rmaos", "rfaos"]
+        .iter()
+        .any(|s| {
+            p.file_value(&format!("{base}_{s}"), "packing.recipe")
+                .is_some()
+        })
+        .then_some(k)
 }
 
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.

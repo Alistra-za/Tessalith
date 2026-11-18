@@ -29,7 +29,7 @@ use crate::model::sets::{
 use crate::model::AppModel;
 use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
 use eframe::egui;
-use engine::config::{AlphaPolicy, ColorTag, Format, PackRecipe, RawMap, Target};
+use engine::config::{AlphaPolicy, ColorTag, Format, RawMap, Target};
 use engine::events::RecipeReport;
 use engine::pack::RecipeKind;
 use engine::shader::Shader;
@@ -52,7 +52,12 @@ pub const ROWS_MIN: f32 = 724.0;
 pub const ALPHA_W: f32 = 114.0;
 
 const THUMB: f32 = 56.0;
-/// The format and recipe combos (A5).
+/// Owner A1-5 (Note DQ2): the hover of the packed row's title on an Advanced Skin set that keeps `_rmaos` because
+/// it has no map `_rfaos` could be built from.
+pub const KEEPS_RMAOS: &str =
+    "RMAOS, not RFAOS: RFAOS needs a roughness, glossiness or AO map, and this set has none.";
+
+/// The format combo (A5).
 pub(super) const COMBO_W: f32 = 96.0;
 /// The File cell is the stretchy one (it truncates); a Grid column sizes itself from its content, so it gets what the
 /// row's other cells leave of the column, and at least this.
@@ -73,7 +78,6 @@ enum Act {
     Parallax(String, bool),
     /// Clear the `_m`'s own `alpha.parallax` (the reset next to a locked box).
     ParallaxReset(String),
-    Recipe(String, PackRecipe),
     Fill(String, RawMap, Option<u8>),
     /// Note DY18: a packed channel's source (packed key, channel, helper item key; `None` = a value).
     ChannelHelper(String, u8, Option<String>),
@@ -349,9 +353,6 @@ pub fn draw(
             Act::ClearAlpha(k) => model.clear_alpha(&k),
             Act::Parallax(k, on) => model.set_field(&k, "alpha.parallax", serde_json::json!(on)),
             Act::ParallaxReset(k) => model.clear_field(&k, "alpha.parallax"),
-            Act::Recipe(k, r) => {
-                model.set_packing_recipe(&k, r);
-            }
             Act::Fill(k, role, v) => model.set_pack_fill(&k, role, v),
             Act::ChannelHelper(k, c, h) => model.set_channel_helper(&k, c, h.as_deref()),
             Act::Json(set, k, v) => model.set_json_value(&set, &k, v),
@@ -831,6 +832,25 @@ fn row(
         .is_some_and(|p| matches!(p.shader, Shader::Landscape | Shader::PbrLandscape));
     if slot == SlotKind::DetailNormal && landscape {
         t.clone().on_hover_text(DETAIL_NORMAL_HOVER);
+    }
+    // Owner A1-5 (Note DQ2): an Advanced Skin set with no RFAOS source keeps RMAOS; the title says why (the disabled
+    // RFAOS option's hover is gone with the combo), in its AccessKit description too (rule 8).
+    if slot == SlotKind::Rmaos
+        && model.target == Target::Cs
+        && v.shader
+            .as_ref()
+            .is_some_and(|p| p.shader == Shader::AdvancedSkin)
+        && item
+            .and_then(|i| i.job.as_ref())
+            .and_then(|j| j.pack.as_ref())
+            .is_some_and(|pk| pk.kind == RecipeKind::Rmaos)
+        && item_key
+            .as_deref()
+            .is_some_and(|k| model.rfaos_unbuildable(k).is_some())
+    {
+        t.clone().on_hover_text(KEEPS_RMAOS);
+        ui.ctx()
+            .accesskit_node_builder(t.id, |b| b.set_description(KEEPS_RMAOS));
     }
     if let (false, Some(p)) = (cell.usable, &v.shader) {
         let what = slot
@@ -1416,8 +1436,9 @@ fn role_label(role: RawMap) -> String {
     }
 }
 
-/// A packed output's recipe choice (cs `_rmaos`/`_rfaos`) and its fill rows. Both write `sdc.toml`, so both are
-/// disabled, with the reason on hover, while it is read-only.
+/// A packed output's fill rows. They write `sdc.toml`, so they are disabled, with the reason on hover, while it is
+/// read-only. The recipe has no control of its own (owner A1-1): the shader and the maps decide it, and a written
+/// `packing.recipe` is cleared by its Problems row.
 fn packed_controls(
     ui: &mut egui::Ui,
     model: &AppModel,
@@ -1425,56 +1446,7 @@ fn packed_controls(
     why: Option<&str>,
     acts: &mut Vec<Act>,
 ) {
-    let Some(pk) = item.job.as_ref().and_then(|j| j.pack.as_ref()) else {
-        return;
-    };
     ui.add_enabled_ui(why.is_none(), |ui| {
-        if model.target == Target::Cs && matches!(pk.kind, RecipeKind::Rmaos | RecipeKind::Rfaos) {
-            let label = |k: RecipeKind| match k {
-                RecipeKind::Rfaos => "RFAOS (skin)",
-                _ => "RMAOS",
-            };
-            let explicit = model.explicit_recipe(&item.key);
-            let auto = explicit == PackRecipe::Auto;
-            let recipe = |k: RecipeKind| {
-                if k == RecipeKind::Rfaos {
-                    PackRecipe::Rfaos
-                } else {
-                    PackRecipe::Rmaos
-                }
-            };
-            let unbuildable = model.rfaos_unbuildable(&item.key);
-            let r = egui::ComboBox::from_id_salt(("pack-recipe", &item.key))
-                .selected_text(format!(
-                    "{}{}",
-                    label(pk.kind),
-                    if auto { " (auto)" } else { "" }
-                ))
-                .width(COMBO_W)
-                .show_ui_036(ui, |ui| {
-                    for k in [RecipeKind::Rmaos, RecipeKind::Rfaos] {
-                        // Final review I2: RFAOS is offered only where the set can build it.
-                        let why = unbuildable.filter(|_| k == RecipeKind::Rfaos);
-                        let r = ui
-                            .add_enabled(
-                                why.is_none(),
-                                egui::Button::selectable(pk.kind == k, label(k)),
-                            )
-                            .on_disabled_hover_text(why.unwrap_or_default());
-                        // Picking the built recipe again still writes it when an explicit value differs: a stale
-                        // hand-written `rfaos` the engine could not follow is cleared by picking RMAOS. An `auto`
-                        // choice is never pinned by a re-click.
-                        if r.clicked()
-                            && (k != pk.kind
-                                || (explicit != PackRecipe::Auto && explicit != recipe(k)))
-                        {
-                            acts.push(Act::Recipe(item.key.clone(), recipe(k)));
-                        }
-                    }
-                })
-                .response;
-            super::name_input(r, "Packed texture recipe");
-        }
         fill_controls(ui, model, &item.key, acts);
     })
     .response

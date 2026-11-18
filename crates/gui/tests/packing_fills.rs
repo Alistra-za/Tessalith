@@ -3,11 +3,14 @@
 mod support;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
+use engine::codes::Code;
 use engine::config::{PackRecipe, RawMap, Subtype};
+use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb};
+use sdc_gui::model::bottom::{problems, At, Fix};
 use sdc_gui::model::pack_fills::{fill_rows, FillRow};
 use sdc_gui::model::pbr_export::{export_blocks, json_entries};
-use sdc_gui::model::sets::{set_views, SlotFill, SlotKind};
+use sdc_gui::model::sets::{set_views, views, SlotFill, SlotKind};
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
@@ -109,6 +112,26 @@ fn editor(mut m: AppModel) -> Harness<'static, AppModel> {
         .with_size(eframe::egui::vec2(1400.0, 900.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h
+}
+
+/// The whole app in a 1400x900 window.
+fn app(m: AppModel) -> Harness<'static, AppModel> {
+    Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
+}
+
+/// The id of the rock01 set.
+fn set_id(m: &AppModel) -> String {
+    views(m)
+        .iter()
+        .find(|v| v.key.ends_with("m/rock01"))
+        .expect("the rock01 set")
+        .id
+        .clone()
 }
 
 fn settle(h: &mut Harness<'static, AppModel>) {
@@ -383,7 +406,7 @@ fn a_read_only_project_file_does_not_stop_the_recipe() {
 }
 
 #[test]
-fn a_read_only_sdc_toml_disables_the_recipe_and_the_fills_and_says_why() {
+fn a_read_only_sdc_toml_disables_the_fills_and_says_why() {
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     let bad = d.path().join("bad");
@@ -393,7 +416,6 @@ fn a_read_only_sdc_toml_disables_the_recipe_and_the_fills_and_says_why() {
     assert!(m.project.as_ref().unwrap().read_only());
     // The model refuses too.
     m.set_pack_fill(RMAOS, RawMap::Ao, Some(1));
-    m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
     assert_eq!(
         m.project.as_ref().unwrap().file_value(RMAOS, "packing"),
         None
@@ -401,15 +423,11 @@ fn a_read_only_sdc_toml_disables_the_recipe_and_the_fills_and_says_why() {
     let mut h = editor(m);
     h.run();
     h.run();
-    let combo = h
-        .query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| {
-            n.accesskit_node()
-                .value()
-                .is_some_and(|t| t.starts_with("RMAOS"))
-        })
-        .expect("the recipe selector");
-    assert!(combo.accesskit_node().is_disabled());
+    let picker = h.get_by_role_and_label(
+        eframe::egui::accesskit::Role::ComboBox,
+        "roughness channel source",
+    );
+    assert!(picker.accesskit_node().is_disabled());
     // The value box on each named fill row is disabled; the controls are found by their row's label.
     for name in ["metallic", "AO", "specular"] {
         let y = h.get_by_label(name).accesskit_node().raw_bounds().unwrap();
@@ -425,20 +443,30 @@ fn a_read_only_sdc_toml_disables_the_recipe_and_the_fills_and_says_why() {
     }
 }
 
+/// A1-6 (was `the_recipe_selector_shows_the_chosen_recipe_with_auto`): the slot title is the recipe's one display
+/// (HE1); no combo shows it.
 #[test]
-fn the_recipe_selector_shows_the_chosen_recipe_with_auto() {
+fn the_packed_slot_title_follows_the_planned_recipe() {
     let d = tempfile::tempdir().unwrap();
     let mut h = editor(fixture(d.path()));
-    h.run();
-    let shows = |h: &Harness<'static, AppModel>, text: &str| {
-        h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-            .any(|n| n.value().as_deref() == Some(text))
+    settle(&mut h);
+    let title = |h: &Harness<'static, AppModel>, t: &str| {
+        h.query_all_by_label(t)
+            .any(|n| !support::in_sets_column(h, n.rect()))
     };
-    assert!(shows(&h, "RMAOS (auto)"));
+    let combo_reads = |h: &Harness<'static, AppModel>| {
+        h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
+            .any(|n| {
+                n.value()
+                    .is_some_and(|v| v.starts_with("RMAOS") || v.starts_with("RFAOS"))
+            })
+    };
+    assert!(title(&h, "RMAOS"), "auto: the slot title reads RMAOS");
+    assert!(!combo_reads(&h), "no recipe combo");
     h.state_mut().set_packing_recipe(RMAOS, PackRecipe::Rfaos);
     settle(&mut h);
-    h.run();
-    assert!(shows(&h, "RFAOS (skin)"), "explicit: no (auto)");
+    assert!(title(&h, "RFAOS"), "a written rfaos: the title follows");
+    assert!(!combo_reads(&h));
 }
 
 #[test]
@@ -799,91 +827,318 @@ fn rfaos_on_a_metallic_only_set_is_refused_with_the_reason() {
     assert_eq!(m.rfaos_unbuildable(RMAOS), None);
 }
 
-/// Final review I2: the card offers RFAOS disabled on a metallic-only set.
+/// A1-5, A1-6 (was `the_rfaos_option_is_disabled_on_a_metallic_only_set`): Note DQ2's case says why on the title.
 #[test]
-fn the_rfaos_option_is_disabled_on_a_metallic_only_set() {
+fn a_metallic_only_skin_set_says_why_it_keeps_rmaos() {
+    use sdc_gui::ui::set_editor::KEEPS_RMAOS;
     let d = tempfile::tempdir().unwrap();
-    let mut h = editor(metallic_only(d.path()));
-    h.run();
-    h.run();
-    h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("RMAOS (auto)"))
-        .expect("the recipe selector")
-        .click();
-    h.run();
-    h.run();
-    let rfaos = h.get_by_label("RFAOS (skin)");
-    assert!(rfaos.accesskit_node().is_disabled());
-    rfaos.hover();
-    h.run();
-    h.run();
-    h.get_by_label(RFAOS_WHY);
-    // The RMAOS option in the open list (the slot card is labelled "RMAOS" too, but is no button).
-    let rmaos = h
+    let mut m = metallic_only(d.path());
+    let id = set_id(&m);
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert!(m.item(RMAOS).is_some(), "DQ2: still _rmaos");
+    let mut h = editor(m);
+    settle(&mut h);
+    let title = h
         .query_all_by_label("RMAOS")
-        .find(|n| n.accesskit_node().role() == eframe::egui::accesskit::Role::Button)
-        .expect("the RMAOS option");
-    assert!(!rmaos.accesskit_node().is_disabled());
+        .find(|n| !support::in_sets_column(&h, n.rect()))
+        .expect("the packed row's slot title");
+    assert_eq!(
+        title.accesskit_node().description().as_deref(),
+        Some(KEEPS_RMAOS)
+    );
+    title.hover();
+    h.run();
+    h.run();
+    h.get_by_label(KEEPS_RMAOS);
+    // A set that can build RFAOS: Advanced Skin packs it; its slot title reads RFAOS and does not say the sentence.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    let id = set_id(&m);
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    let mut h = editor(m);
+    settle(&mut h);
+    let title = h
+        .query_all_by_label("RFAOS")
+        .find(|n| !support::in_sets_column(&h, n.rect()))
+        .expect("the packed row's slot title reads RFAOS");
+    assert_ne!(
+        title.accesskit_node().description().as_deref(),
+        Some(KEEPS_RMAOS)
+    );
+    assert!(h.query_by_label(KEEPS_RMAOS).is_none());
 }
 
-/// Final review I2: a hand-written `rfaos` the engine could not follow leaves the card on RMAOS; picking RMAOS
-/// still writes it, which clears the stale value.
+/// A1-4, A1-6 (was `picking_rmaos_clears_a_stale_rfaos`): a hand-written `rfaos` the set cannot build is cleared by
+/// the row's fix.
 #[test]
-fn picking_rmaos_clears_a_stale_rfaos() {
+fn an_unbuildable_recipe_row_clears_the_recipe() {
     let d = tempfile::tempdir().unwrap();
     let m = metallic_only_with(
         d.path(),
         "\n[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
     );
     assert!(m.item(RMAOS).is_some(), "unbuildable: still _rmaos");
-    assert_eq!(m.explicit_recipe(RMAOS), PackRecipe::Rfaos);
-    let mut h = editor(m);
+    let row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::PackRecipeUnbuildable))
+            .cloned()
+    };
+    let r = row(&m).expect("the UNBUILDABLE row");
+    assert_eq!(r.at, At::Texture(RMAOS.into()));
+    assert_eq!(r.fix, Some(Fix::ClearRecipe(RMAOS.into())));
+    let mut m = m;
+    m.open_problems(None);
+    let mut h = app(m);
     h.run();
-    h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("RMAOS"))
-        .expect("the recipe selector, no (auto)")
+    h.get_by_label("Clear the packing recipe of rock01_rmaos.dds")
         .click();
     h.run();
+    idle(h.state_mut());
     h.run();
-    // K11: the Sets column's "RMAOS" chip is a button too.
-    h.query_all_by_label("RMAOS")
-        .find(|n| {
-            n.accesskit_node().role() == eframe::egui::accesskit::Role::Button
-                && !support::in_sets_column(&h, n.rect())
-        })
-        .expect("the RMAOS option")
-        .click();
-    settle(&mut h);
-    let p = h.state().project.as_ref().unwrap();
-    assert_eq!(p.file_value(RMAOS, "packing.recipe"), Some(json!("rmaos")));
+    let m = h.state();
+    let p = m.project.as_ref().unwrap();
     assert_eq!(p.file_value(RFAOS, "packing.recipe"), None);
+    assert_eq!(p.file_value(RMAOS, "packing.recipe"), None);
+    assert_eq!(
+        p.file_value(RMAOS, "packing.fill.ao"),
+        Some(json!(99)),
+        "the fill stays"
+    );
+    assert!(row(m).is_none());
+    assert!(m.item(RMAOS).is_some());
 }
 
-/// Final review I2: re-picking the recipe an `auto` card already built writes nothing (the set keeps following
-/// `auto`).
+/// A1-4: the two packed entries disagree; the fix on the CONFLICT row clears both and the maps decide (`_rmaos`:
+/// roughness and metallic, no fuzz).
 #[test]
-fn re_picking_the_auto_recipe_writes_nothing() {
+fn a_recipe_conflict_row_clears_both_entries() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("m")).unwrap();
+    grey(&d.path().join("m"), "rock01_metallic.png", 30);
+    let mut m = fixture_with(
+        d.path(),
+        "[files.\"m/rock01_rmaos\".packing]\nrecipe = \"rmaos\"\n\n[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+        false,
+    );
+    assert!(m.item(RFAOS).is_some(), "the _rfaos entry wins");
+    let r = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::PackRecipeConflict))
+        .cloned()
+        .expect("the CONFLICT row");
+    assert_eq!(r.fix, Some(Fix::ClearRecipe(RFAOS.into())));
+    m.open_problems(None);
+    let mut h = app(m);
+    h.run();
+    h.get_by_label("Clear the packing recipe of rock01_rfaos.dds")
+        .click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    let m = h.state();
+    assert_eq!(m.explicit_recipe(RMAOS), PackRecipe::Auto);
+    assert!(m.item(RMAOS).is_some() && m.item(RFAOS).is_none());
+    assert!(!problems(m)
+        .iter()
+        .any(|p| p.code == Some(Code::PackRecipeConflict)));
+    // A1-8: the emptied `packing` tables and `[files."…"]` entries are pruned, not left empty.
+    let text = m.project.as_ref().unwrap().text();
+    assert!(
+        !text.contains("rock01_rfaos") && !text.contains("rock01_rmaos"),
+        "{text}"
+    );
+    assert!(
+        !problems(m).iter().any(|p| p
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.contains("rock01_rfaos"))),
+        "no CFG-FILE-UNMATCHED row for an empty entry"
+    );
+}
+
+/// A1-8: fills stay. A fill on the losing `_rfaos` entry outlives Clear recipe, and the entry, now without a file,
+/// keeps its own CFG-FILE-UNMATCHED row.
+#[test]
+fn clear_recipe_keeps_the_fills_with_their_unmatched_row() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("m")).unwrap();
+    grey(&d.path().join("m"), "rock01_metallic.png", 30);
+    let mut m = fixture_with(
+        d.path(),
+        "[files.\"m/rock01_rmaos\".packing]\nrecipe = \"rmaos\"\n\n[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\nfill.ao = 99\n",
+        false,
+    );
+    m.clear_packing_recipe(RFAOS);
+    idle(&mut m);
+    let p = m.project.as_ref().unwrap();
+    assert_eq!(p.file_value(RFAOS, "packing.recipe"), None);
+    assert_eq!(
+        p.file_value(RFAOS, "packing.fill.ao"),
+        Some(json!(99)),
+        "the fill stays"
+    );
+    assert!(m.item(RMAOS).is_some() && m.item(RFAOS).is_none());
+    // `problems` returns `Arc<Vec<Problem>>`: find by reference, then clone.
+    let row = problems(&m)
+        .iter()
+        .find(|r| r.code == Some(Code::CfgFileUnmatched))
+        .cloned()
+        .expect("the CFG-FILE-UNMATCHED row");
+    assert!(
+        row.detail
+            .as_deref()
+            .is_some_and(|d| d.split('\n').any(|k| k == RFAOS)),
+        "{:?}",
+        row.detail
+    );
+}
+
+/// A1-8, A1-9: on a read-only `sdc.toml` Clear recipe is disabled and its hover gives the read-only reason, as the
+/// fills'. Every assert here can fail: the button's state and its hover.
+#[test]
+fn a_read_only_sdc_toml_disables_clear_recipe_and_says_why() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = metallic_only_with(
+        d.path(),
+        "\n[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+    );
+    // The read-only swap `a_read_only_sdc_toml_disables_the_fills_and_says_why` uses: a project doc opened on an
+    // unparsable sdc.toml (`ProjectDoc::read_only` is "it failed to parse", `project.rs` l.91-93).
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc.toml"), "this is = = not toml\n").unwrap();
+    m.project = Some(sdc_gui::project::ProjectDoc::open(&bad));
+    let reason = m.toml_read_only_reason().expect("read-only");
+    m.open_problems(None);
+    let mut h = app(m);
+    // As `problems_rows::no_tooltip_delay`: a disabled button's tooltip waits on egui's delay otherwise.
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    let button = h.get_by_label("Clear the packing recipe of rock01_rmaos.dds");
+    assert!(button.accesskit_node().is_disabled());
+    h.hover_at(button.rect().center());
+    h.run_steps(4);
+    h.get_by_label(&reason);
+}
+
+/// A1-4: the sentences no longer send the user to a control that is gone.
+#[test]
+fn the_recipe_rows_name_the_clear_fix() {
+    use sdc_gui::model::code_text::code_sentence;
+    assert_eq!(
+        code_sentence(Code::PackRecipeConflict),
+        "The two packed entries name different recipes — clear the recipe"
+    );
+    assert_eq!(
+        code_sentence(Code::PackRecipeUnbuildable),
+        "The written recipe can't be built from this set's maps — clear the recipe"
+    );
+}
+
+/// A1-6 (was `re_picking_the_auto_recipe_writes_nothing`): an `auto` set drawn for a while writes nothing.
+#[test]
+fn drawing_an_auto_set_writes_no_recipe() {
     let d = tempfile::tempdir().unwrap();
     let m = fixture(d.path());
     let before = texts(&m);
     let mut h = editor(m);
-    h.run();
-    h.query_all_by_role(eframe::egui::accesskit::Role::ComboBox)
-        .find(|n| n.value().as_deref() == Some("RMAOS (auto)"))
-        .expect("the recipe selector")
-        .click();
-    h.run();
-    h.run();
-    // K11: the Sets column's "RMAOS" chip is a button too.
-    h.query_all_by_label("RMAOS")
-        .find(|n| {
-            n.accesskit_node().role() == eframe::egui::accesskit::Role::Button
-                && !support::in_sets_column(&h, n.rect())
-        })
-        .expect("the RMAOS option")
-        .click();
     settle(&mut h);
+    h.run();
     assert_eq!(texts(h.state()), before);
+    assert_eq!(h.state().explicit_recipe(RMAOS), PackRecipe::Auto);
+}
+
+/// A1-7: the SHADER-EXTRA-MAP row that names the packed output `out` (`At::Set`, its sentence starts with `out`)
+/// offers Clear recipe first and Change shader… second; pressing Clear recipe removes the recipe from both packed
+/// keys, the set packs `after`, and the row goes.
+fn extra_row_clears(mut m: AppModel, id: &str, packed: &str, out: &str, after: &str) {
+    let row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::ShaderExtraMap) && p.text.starts_with(out))
+            .cloned()
+    };
+    let r = row(&m).unwrap_or_else(|| panic!("the SHADER-EXTRA-MAP row for {out}"));
+    assert!(
+        matches!(&r.at, At::Set { id: i, .. } if i == id),
+        "{:?}",
+        r.at
+    ); // `At::Set` is `{ key, id }`
+    assert_eq!(
+        r.fix,
+        Some(Fix::ClearRecipe(packed.into())),
+        "Clear recipe is the first fix"
+    );
+    assert_eq!(
+        r.second_fix,
+        Some(Fix::ChangeShader(id.into())),
+        "Change shader… moves to second"
+    );
+    m.open_problems(None);
+    let mut h = app(m);
+    h.run();
+    h.get_by_label(&format!("Clear the packing recipe of {out}"))
+        .click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    let m = h.state();
+    let p = m.project.as_ref().unwrap();
+    assert_eq!(p.file_value(RMAOS, "packing.recipe"), None);
+    assert_eq!(p.file_value(RFAOS, "packing.recipe"), None);
+    assert!(m.item(after).is_some(), "the shader decides: {after}");
+    assert!(m.item(packed).is_none());
+    assert!(row(m).is_none(), "the row goes");
+}
+
+/// A1-7 (probe P1c): a written `rfaos` under an explicit PBR shader, and the mirror, a written `rmaos` under an
+/// explicit Advanced Skin (DV3). Each keeps its written recipe and gets Clear recipe on the SHADER-EXTRA-MAP row.
+#[test]
+fn the_extra_packed_map_row_offers_clear_recipe_first() {
+    // P1c: roughness only, `rfaos` written, then PBR picked.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = fixture(d.path());
+    m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
+    idle(&mut m);
+    let id = set_id(&m);
+    m.set_shader(&id, Some(Shader::Pbr));
+    idle(&mut m);
+    assert!(
+        m.item(RFAOS).is_some(),
+        "P1c: the written rfaos keeps _rfaos under PBR"
+    );
+    extra_row_clears(m, &id, RFAOS, "rock01_rfaos.dds", RMAOS);
+    // The mirror, written to disk before opening: picking Advanced Skin in the app would rewrite `rmaos` to `rfaos`
+    // (DU6 → DQ1), so the shader and the recipe are both on disk first.
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        "[[sets]]\nid = \"m/rock01\"\nshader = \"advanced_skin\"\n",
+    )
+    .unwrap();
+    let m = fixture_with(
+        d.path(),
+        "[files.\"m/rock01_rmaos\".packing]\nrecipe = \"rmaos\"\n",
+        false,
+    );
+    let id = set_id(&m);
+    let v = views(&m).iter().find(|v| v.id == id).cloned().unwrap(); // `views` returns `Arc<Vec<SetView>>`
+    assert_eq!(
+        v.shader.as_ref().map(|p| p.shader),
+        Some(Shader::AdvancedSkin),
+        "fixture: the shader is read"
+    );
+    assert!(
+        m.item(RMAOS).is_some(),
+        "DV3: the written rmaos keeps _rmaos under Advanced Skin"
+    );
+    extra_row_clears(m, &id, RMAOS, "rock01_rmaos.dds", RFAOS);
 }
 
 #[test]
@@ -974,7 +1229,7 @@ fn a_skin_f_is_the_rfaos_cards_fuzz_file() {
 #[test]
 fn a_dropped_fill_is_an_info_row_with_undo() {
     use egui_kittest::kittest::Queryable;
-    use sdc_gui::model::bottom::{counts_as_ready_problem, problems, At, Fix, Level};
+    use sdc_gui::model::bottom::{counts_as_ready_problem, Level};
     let d = tempfile::tempdir().unwrap();
     let mut m = fixture(d.path());
     m.set_pack_fill(RMAOS, RawMap::Metallic, Some(9));
@@ -997,12 +1252,7 @@ fn a_dropped_fill_is_an_info_row_with_undo() {
     assert_eq!(r.fix, Some(Fix::UndoLast));
     assert!(!counts_as_ready_problem(&r));
     m.open_problems(None);
-    let mut h = Harness::builder()
-        .with_context_setup(|ctx| {
-            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-        })
-        .with_size(eframe::egui::vec2(1400.0, 900.0))
-        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    let mut h = app(m);
     h.run();
     h.get_by_label(sdc_gui::ui::problems::UNDO_ROW).click();
     h.run();

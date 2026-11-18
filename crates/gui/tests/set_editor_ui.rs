@@ -116,7 +116,7 @@ fn the_set_editor_shows_slot_rows_alpha_and_slot_commands() {
         .key
         .clone();
     m.select_set(&key);
-    // Tall enough for the packed card's recipe choice and fill rows, which push the commands button down.
+    // Tall enough for the packed card's fill rows, which push the commands button down.
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

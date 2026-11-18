@@ -43,7 +43,7 @@ fn fill_field(role: RawMap) -> String {
 }
 
 /// `(<folder>/<base>, the recipe the key names)` of a cs packed key.
-fn split_packed_key(key: &str) -> Option<(&str, RecipeKind)> {
+pub(super) fn split_packed_key(key: &str) -> Option<(&str, RecipeKind)> {
     if let Some(base) = key.strip_suffix("_rmaos") {
         Some((base, RecipeKind::Rmaos))
     } else {
@@ -123,6 +123,26 @@ impl AppModel {
             .iter()
             .any(|r| r.kind == RecipeKind::Rfaos);
         (!built).then_some(RFAOS_UNBUILDABLE)
+    }
+
+    /// Owner A1-4, A1-8: take `packing.recipe` off both packed keys of the set that owns `packed_key` (`_rmaos` and
+    /// `_rfaos`), as one undo step; the shader and the maps decide the recipe again. `clear_file_value` prunes an
+    /// emptied `packing` table and an emptied `[files."…"]` entry. Fills stay where they are. Does nothing for a
+    /// non-packed key, off the cs target or on a read-only `sdc.toml`.
+    pub fn clear_packing_recipe(&mut self, packed_key: &str) {
+        let Some((base, _)) = split_packed_key(packed_key) else {
+            return;
+        };
+        if self.target != Target::Cs || self.project.as_ref().is_none_or(ProjectDoc::read_only) {
+            return;
+        }
+        let keys = [format!("{base}_rmaos"), format!("{base}_rfaos")];
+        self.edit_docs("Packing recipe", None, true, move |p, _| {
+            for k in &keys {
+                p.clear_file_value(k, "packing.recipe");
+            }
+        });
+        self.dropped_fills.clear();
     }
 
     /// Choose `_rmaos` or `_rfaos` for the set that owns the packed output `packed_key`, as one undo step.

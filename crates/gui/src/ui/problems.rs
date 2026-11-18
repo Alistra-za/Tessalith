@@ -707,6 +707,20 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
+        // Owner A1-8: it writes sdc.toml, so a read-only one disables it with its reason; a pointer click only (FC5).
+        Fix::ClearRecipe(k) => {
+            let out = format!("{}.dds", k.rsplit('/').next().unwrap_or(k));
+            let name = format!("Clear the packing recipe of {out}");
+            let toml = m.toml_read_only_reason();
+            let off = toml.as_deref().or(off);
+            click_only_button(
+                ui,
+                egui::Button::new("Clear recipe"),
+                Some(&name),
+                "Remove packing.recipe from this set's packed entries in sdc.toml. The shader and the maps then pick RMAOS or RFAOS.",
+                off,
+            )
+        }
         // Note JP3 (B3-27): it switches a type, as Tag as grass does, so it keeps Enter and Space (`RebuildZ`'s shape,
         // not `click_only_button`). The refusal is read at draw time: the problems cache key does not follow locks.
         Fix::UsePbrNormal(k) => {
@@ -1321,6 +1335,7 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
+        Fix::ClearRecipe(k) => model.clear_packing_recipe(&k),
         Fix::UsePbrNormal(k) => {
             if let Err(why) = model.use_pbr_normal(&k) {
                 model.status_line = why;

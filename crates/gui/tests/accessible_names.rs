@@ -76,7 +76,11 @@ fn every_input_has_a_name_in_the_set_editor_and_json_editor() {
     );
     let mut h = harness(m);
     h.run();
-    h.get_by_role_and_label(Role::ComboBox, "Packed texture recipe");
+    assert!(
+        h.query_by_label("Packed texture recipe").is_none(),
+        "A1-1: the recipe combo is gone"
+    );
+    h.get_by_role_and_label(Role::ComboBox, "roughness channel source");
     h.get_by_role_and_label(Role::TextInput, "EDID to add");
     // Rule 8.4: a number box beside a named tick is "{label} value", never the tick's own name.
     h.get_by_role_and_label(Role::SpinButton, "Specular level value");
