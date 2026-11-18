@@ -1,6 +1,8 @@
 //! Packing fills Task 2: per-output fills, the RMAOS/RFAOS choice on the packed card, the Advanced skin follow, the
 //! dropdown groups and the retired global fill panel.
 mod support;
+use eframe::egui;
+use eframe::egui::accesskit::Role;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Code;
@@ -16,7 +18,7 @@ use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
-use support::session;
+use support::{painted_cut, painted_in, session};
 
 const DIFFUSE: &str = "m/rock01.png";
 const SK: &str = "m/rock01_sk.png";
@@ -96,7 +98,12 @@ fn roles(m: &AppModel, key: &str) -> Vec<RawMap> {
         .collect()
 }
 
-fn editor(mut m: AppModel) -> Harness<'static, AppModel> {
+fn editor(m: AppModel) -> Harness<'static, AppModel> {
+    editor_at(m, 1400.0, 900.0)
+}
+
+/// `editor` in a `w` x `h` window.
+fn editor_at(mut m: AppModel, w: f32, height: f32) -> Harness<'static, AppModel> {
     let key = m
         .sets
         .iter()
@@ -109,7 +116,7 @@ fn editor(mut m: AppModel) -> Harness<'static, AppModel> {
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .with_size(eframe::egui::vec2(w, height))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h
 }
@@ -1480,4 +1487,274 @@ fn a_held_fill_value_does_not_follow_to_another_set() {
     h.run_steps(3);
     assert!(h.state().edit_busy(), "still out after the switch");
     assert_eq!(ao(&h).accesskit_node().numeric_value(), Some(255.0));
+}
+
+#[test]
+fn slot_row_values_read_in_full_under_a_heading() {
+    // Task 5a removed the recipe combo; the source pickers have their own test below.
+    for w in [1024.0, 1280.0, 1536.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = editor_at(fixture(d.path()), w, 900.0);
+        settle(&mut h);
+        // the slot-row format combos (Material-tab combos are not this task's)
+        let combos = |h: &Harness<'static, AppModel>| -> Vec<(String, egui::Rect)> {
+            h.query_all_by_role(Role::ComboBox)
+                .filter_map(|n| {
+                    n.accesskit_node()
+                        .label()
+                        .map(|l| (l.to_string(), n.rect()))
+                })
+                .filter(|(l, _)| l.ends_with(" format"))
+                .collect()
+        };
+        let first = combos(&h);
+        assert!(!first.is_empty(), "{w}: a format combo");
+        h.step(); // one frame: `run()` may step twice and hide a period-2 flicker (as Task 7)
+        assert_eq!(first, combos(&h), "{w}: same widths on consecutive frames");
+        let right = sdc_gui::ui::centre_rect(&h.ctx)
+            .unwrap()
+            .intersect(h.ctx.content_rect())
+            .right();
+        for (name, r) in &first {
+            assert!(
+                r.right() <= right + 0.5,
+                "{w}: {name} ends inside the visible centre"
+            );
+        }
+        if w >= 1280.0 {
+            for (name, r) in &first {
+                assert!(!painted_cut(&h, *r), "{w}: {name} reads in full");
+            }
+            // the heading names the Format column: above the first format combo, overlapping it across
+            let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+            let head = h
+                .query_all_by_label("Format")
+                .find(|n| centre.contains_rect(n.rect()))
+                .expect("the heading line")
+                .rect();
+            let fmt = first[0].1;
+            assert!(
+                head.max.y <= fmt.min.y && head.min.x < fmt.max.x && head.max.x > fmt.min.x,
+                "{w}: the heading sits over the Format column"
+            );
+        }
+    }
+}
+
+/// A greyscale `m/rock01_<suffix>.png` per suffix beside the RGB `m/rock01.png` (probe P2's `open_with`).
+fn suffix_set(
+    dir: &Path,
+    suffixes: &[&str],
+    accept: engine::policy::AcceptSuggestions,
+) -> AppModel {
+    let r = dir.join("m");
+    std::fs::create_dir_all(&r).unwrap();
+    if !r.join("rock01.png").exists() {
+        ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+            .save(r.join("rock01.png"))
+            .unwrap();
+    }
+    for (i, s) in suffixes.iter().enumerate() {
+        grey(&r, &format!("rock01_{s}.png"), 60 + 30 * i as u8);
+    }
+    let settings = GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..GuiSettings::default()
+    };
+    let mut m = AppModel::new(settings, None, session());
+    m.accept = accept;
+    m.open_folder(dir.to_path_buf());
+    idle(&mut m);
+    m
+}
+
+/// Rulings A2-1…A2-4 (probe P2d): every channel picker of an output has one x and the width `SOURCE_W`, paints one
+/// text that egui did not elide, ending in the file's whole `_suffix.png` (the whole name, or "…" and its end), or
+/// "value"; and no control ends past the visible centre.
+fn pickers_line_up(tag: &str, h: &Harness<'static, AppModel>) {
+    let vis = sdc_gui::ui::centre_rect(&h.ctx)
+        .unwrap()
+        .intersect(h.ctx.content_rect());
+    let pickers: Vec<(String, String, egui::Rect)> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter_map(|n| {
+            let l = n.accesskit_node().label()?.to_string();
+            l.ends_with(" channel source")
+                .then(|| (l, n.value().unwrap_or_default().to_string(), n.rect()))
+        })
+        .collect();
+    assert!(!pickers.is_empty(), "{tag}: pickers");
+    let x0 = pickers[0].2.min.x;
+    for (name, value, r) in &pickers {
+        assert!(
+            (r.min.x - x0).abs() < 0.5,
+            "{tag}: {name} at x {}, the first at {x0}",
+            r.min.x
+        );
+        assert!(
+            (r.width() - 130.0).abs() < 0.5,
+            "{tag}: {name} is {} wide",
+            r.width()
+        );
+        assert!(
+            r.max.x <= vis.max.x + 0.5,
+            "{tag}: {name} ends past the centre"
+        );
+        let file = value
+            .strip_prefix("Source: ")
+            .expect("value is Source: {file}");
+        let shown = painted_in(h, *r);
+        assert!(
+            !painted_cut(h, *r) || shown.starts_with('…'),
+            "{tag}: {name}: egui cut {shown:?}"
+        );
+        if file == "value" {
+            assert_eq!(shown, "value", "{tag}: {name}");
+        } else {
+            let suffix = &file[file.rfind('_').unwrap()..];
+            assert!(
+                shown.ends_with(suffix),
+                "{tag}: {name} shows {shown:?}, not the whole {suffix}"
+            );
+            assert!(
+                shown == file
+                    || shown
+                        .strip_prefix('…')
+                        .is_some_and(|end| file.ends_with(end)),
+                "{tag}: {name} shows {shown:?} for {file:?}"
+            );
+        }
+    }
+    let over: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .chain(h.query_all_by_role(Role::SpinButton))
+        .chain(h.query_all_by_role(Role::Button))
+        .filter(|n| {
+            n.rect().min.x > vis.min.x
+                && n.rect().min.y < vis.max.y
+                && n.rect().max.x > vis.max.x + 0.5
+        })
+        .map(|n| n.accesskit_node().label().map(|s| s.to_string()))
+        .collect();
+    assert!(over.is_empty(), "{tag}: past the edge {over:?}");
+}
+
+#[test]
+fn source_pickers_line_up_and_show_the_suffix() {
+    use engine::policy::AcceptSuggestions::{High, None as Never};
+    for (w, hgt) in [(1024.0, 800.0), (1400.0, 900.0)] {
+        for sfx in [
+            &["roughness", "metallic", "ao", "specular"][..],
+            &["glossiness", "fuzz"][..],
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let skin = sfx.contains(&"fuzz");
+            if skin {
+                // After the fuzz plan a `_fuzz` map alone makes the set PBR (Fuzz-1); an explicit Advanced Skin keeps
+                // it the `_rfaos` G mask (Fuzz-2), so ruling A2-3's `rock01_fuzz.png` picker is still drawn.
+                std::fs::write(
+                    d.path().join("sdc-project.toml"),
+                    "[[sets]]\nid = \"m/rock01\"\nshader = \"advanced_skin\"\n",
+                )
+                .unwrap();
+            }
+            let mut h = editor_at(suffix_set(d.path(), sfx, Never), w, hgt);
+            settle(&mut h);
+            if skin {
+                assert!(
+                    h.state().item(RFAOS).is_some(),
+                    "{w}: the explicit Advanced Skin set packs _rfaos"
+                );
+                h.get_by_role_and_label(Role::ComboBox, "fuzz channel source");
+            }
+            pickers_line_up(&format!("{w} {sfx:?}"), &h);
+        }
+        // The worst line: Confirm shows (an RGBA diffuse) and three Value lines with Reset (probe P2a: the centre's
+        // right edge at 1025.3, 1.3 px past the 1024 window, before this task).
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(d.path().join("m")).unwrap();
+        ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgba([(x * 4) as u8, (y * 4) as u8, 90u8, (x * 4) as u8])
+        })
+        .save(d.path().join("m/rock01.png"))
+        .unwrap();
+        let mut m = suffix_set(d.path(), &["roughness"], Never);
+        m.decide(DIFFUSE, sdc_gui::model::Answer::Subtype(Subtype::PbrAlbedo));
+        idle(&mut m);
+        for role in [RawMap::Metallic, RawMap::Ao, RawMap::Specular] {
+            m.set_pack_fill(RMAOS, role, Some(200));
+            idle(&mut m);
+        }
+        let mut h = editor_at(m, w, hgt);
+        settle(&mut h);
+        h.get_by_label("Slot confirm alpha");
+        pickers_line_up(&format!("{w} Confirm + 3 Reset"), &h);
+        // The lines read last frame's Flags width: one more frame moves nothing (Review Focus 5).
+        let rects = |h: &Harness<'static, AppModel>| -> Vec<egui::Rect> {
+            h.query_all_by_role(Role::ComboBox)
+                .filter(|n| {
+                    n.accesskit_node()
+                        .label()
+                        .is_some_and(|l| l.ends_with(" channel source"))
+                })
+                .map(|n| n.rect())
+                .collect()
+        };
+        let before = rects(&h);
+        h.step(); // one frame, as above
+        assert_eq!(
+            before,
+            rects(&h),
+            "{w}: same picker rects on the next frame"
+        );
+        // A Value line's picker says what the box does (ruling A2-1: every picker has a hover).
+        h.get_by_role_and_label(Role::ComboBox, "metallic channel source")
+            .hover();
+        h.run();
+        h.run();
+        h.get_by_label("No file: the box sets this channel (0 to 255).");
+        // The vanilla complex `_m` lines share `fill_controls` and `source_picker` (ruling A2-4).
+        let d = tempfile::tempdir().unwrap();
+        let mut m = suffix_set(d.path(), &["glossiness", "metallic", "height"], High);
+        m.set_target(engine::config::Target::Vanilla);
+        idle(&mut m);
+        support::complex_material(&mut m, "m/rock01");
+        let mut h = editor_at(m, w, hgt);
+        settle(&mut h);
+        pickers_line_up(&format!("{w} vanilla complex _m"), &h);
+    }
+}
+
+/// Ruling A2-6: on a read-only `sdc.toml` a disabled picker's hover holds the full name, then the reason, so a name
+/// cut at the front stays readable with the mouse.
+#[test]
+fn a_read_only_picker_hover_holds_the_name_and_the_reason() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = suffix_set(
+        d.path(),
+        &["roughness"],
+        engine::policy::AcceptSuggestions::None,
+    );
+    // The read-only swap of `a_read_only_sdc_toml_disables_the_recipe_and_the_fills_and_says_why`.
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc.toml"), "this is = = not toml\n").unwrap();
+    m.project = Some(sdc_gui::project::ProjectDoc::open(&bad));
+    let reason = m.toml_read_only_reason().expect("read-only");
+    let mut h = editor_at(m, 1024.0, 800.0);
+    settle(&mut h);
+    let picker = h.get_by_role_and_label(Role::ComboBox, "roughness channel source");
+    assert!(picker.accesskit_node().is_disabled());
+    let r = picker.rect();
+    assert!(
+        painted_in(&h, r).starts_with('…'),
+        "at 1024 the name is cut: the hover is what shows it whole"
+    );
+    picker.hover();
+    h.run();
+    h.run();
+    let want = format!("rock01_roughness.png\n{reason}");
+    // The disabled hover is the name, then the reason. A tooltip Label's text is its AccessKit value; kittest's label
+    // query reads it (one tooltip per layer: the picker's, so the outer reason-only tooltip is not drawn).
+    h.get_by_label(&want);
 }

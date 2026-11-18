@@ -547,3 +547,43 @@ pub fn dds_pbr_sets(dir: &Path, sets: &[&str]) -> PathBuf {
     }
     dir.join("textures")
 }
+
+/// The painted text galleys of the last frame whose rect lies inside `r.expand(1.0)`, each with whether egui elided
+/// it or it ends in `…`. Shapes are flattened as `ui_proof/sets_column_pins.rs` `texts` does.
+fn painted_galleys<S>(
+    h: &egui_kittest::Harness<'_, S>,
+    r: eframe::egui::Rect,
+) -> Vec<(String, bool)> {
+    use eframe::egui::Shape;
+    fn flat(s: &Shape, r: eframe::egui::Rect, out: &mut Vec<(String, bool)>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|s| flat(s, r, out)),
+            Shape::Text(t) if r.contains_rect(t.visual_bounding_rect()) => {
+                let text = t.galley.job.text.clone();
+                // `job.text` is the whole text even when egui elided its end: read the elided flag too.
+                let cut = t.galley.elided || text.ends_with('…');
+                out.push((text, cut));
+            }
+            _ => {}
+        }
+    }
+    let r = r.expand(1.0);
+    let mut out = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, r, &mut out);
+    }
+    out
+}
+
+/// The painted texts inside `r.expand(1.0)`, joined (Tasks 6, 7 and 9).
+pub fn painted_in<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> String {
+    painted_galleys(h, r)
+        .into_iter()
+        .map(|(t, _)| t)
+        .collect::<String>()
+}
+
+/// Whether any text painted inside `r.expand(1.0)` is elided by egui or ends in `…`.
+pub fn painted_cut<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
+    painted_galleys(h, r).into_iter().any(|(_, cut)| cut)
+}

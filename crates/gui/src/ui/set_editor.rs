@@ -723,7 +723,18 @@ fn rows(
     let file_w = others.map_or(FILE_MIN, |w| {
         (ui.available_width() - w.iter().sum::<f32>() - 5.0 * SPACING - bar).max(FILE_MIN)
     });
+    // The format cells' base widths (the combo at `COMBO_W`) of last frame: what a combo may widen into never reads
+    // the widths a widened combo made, so a frame's widths do not feed back into themselves.
+    let base_id = egui::Id::unique(("slot-rows-base", &v.id));
+    let base = ui.data(|d| d.get_temp::<[f32; 5]>(base_id));
+    let free = base.map_or(0.0, |b| {
+        (ui.available_width() - b.iter().sum::<f32>() - 5.0 * SPACING - bar - FILE_MIN).max(0.0)
+    });
+    let format_base = base.map_or(0.0, |b| b[2]);
     let mut widths = [0.0f32; 5];
+    let mut base_widths = [0.0f32; 5];
+    // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only (`editor_cells`).
+    let cells = editor_cells(v);
     egui::Grid::new(("slot-rows", &v.id))
         .num_columns(6)
         .striped(true)
@@ -732,16 +743,83 @@ fn rows(
         .show(ui, |ui| {
             // The row takes the right-click; its labels are not selectable, so they do not take it.
             ui.style_mut().interaction.selectable_labels = false;
-            // The skin `_wet` and `_detail_n` cards belong to an Advanced skin set only (`editor_cells`).
-            for cell in editor_cells(v) {
+            // E17: the labels of the columns, in one line above the rows. No row with a format combo, no heading.
+            let has_job = |c: &SlotCell| own_item(model, v, c).is_some_and(|i| i.job.is_some());
+            if cells.iter().any(has_job) {
+                let head = |ui: &mut egui::Ui, text: &str| {
+                    ui.label(egui::RichText::new(text).small().weak());
+                };
+                head(ui, "Slot");
+                head(ui, "");
+                head(ui, "File");
+                head(ui, "Format");
+                // The Flags cell's alpha combo is the Diffuse row's (`row`).
+                let alpha = cells
+                    .iter()
+                    .any(|c| c.kind == SlotKind::Diffuse && has_job(c));
+                head(ui, if alpha { "Alpha" } else { "" });
+                head(ui, "");
+                ui.end_row();
+            }
+            for cell in &cells {
                 let size = cell.fill.item().and_then(|i| sizes.get(i));
-                let w = row(ui, model, v, &cell, thumbs, acts, drop_at, size, file_w);
-                for (a, b) in widths.iter_mut().zip(w) {
+                let w = row(
+                    ui,
+                    model,
+                    v,
+                    cell,
+                    thumbs,
+                    acts,
+                    drop_at,
+                    size,
+                    RowRoom {
+                        file_w,
+                        free,
+                        format_base,
+                    },
+                );
+                for (a, b) in widths.iter_mut().zip(w.widths) {
+                    *a = a.max(b);
+                }
+                for (a, b) in base_widths.iter_mut().zip(w.base_widths) {
                     *a = a.max(b);
                 }
             }
         });
-    ui.data_mut(|d| d.insert_temp(others_id, widths));
+    ui.data_mut(|d| {
+        d.insert_temp(others_id, widths);
+        d.insert_temp(base_id, base_widths);
+    });
+}
+
+/// What a slot row has to size its cells by, from last frame (`rows`).
+#[derive(Clone, Copy)]
+struct RowRoom {
+    /// The File cell's width.
+    file_w: f32,
+    /// What the row's cells can still take beyond their base widths before the File cell goes under `FILE_MIN`.
+    free: f32,
+    /// The Format column's base width.
+    format_base: f32,
+}
+
+/// The widths a row drew: its cells' (`widths`, the Format cell with its combo as drawn) and the same with every
+/// format combo at `COMBO_W` (`base_widths`).
+struct RowWidths {
+    widths: [f32; 5],
+    base_widths: [f32; 5],
+}
+
+/// The slot's own item when its row draws that item's controls: not a link, not a borrowed file (the one rule for the
+/// heading, the format combo and the alpha combo).
+fn own_item<'a>(model: &'a AppModel, v: &SetView, cell: &SlotCell) -> Option<&'a TextureItem> {
+    if matches!(slot_shown(v, cell.kind), SlotShown::Linked(_)) {
+        return None;
+    }
+    match &cell.fill {
+        SlotFill::Own { item } => model.item(item),
+        _ => None,
+    }
 }
 
 /// A Flags icon toggle: its accessible name is the full `label`, which also leads its hover. True when clicked.
@@ -773,8 +851,9 @@ fn row(
     acts: &mut Vec<Act>,
     drop_at: Option<egui::Pos2>,
     size: Option<&SizeEst>,
-    file_w: f32,
-) -> [f32; 5] {
+    room: RowRoom,
+) -> RowWidths {
+    let file_w = room.file_w;
     let slot = cell.kind;
     let fill = &cell.fill;
     // K1: a Grid cell cannot hold the whole row, so last frame's row rect takes the right-click (F3a Task 8) and the
@@ -963,8 +1042,11 @@ fn row(
 
     // Format, or Assign… on an empty slot (R13: the slot's own menu); a packed output's recipe and fills under it.
     let toml_read_only = model.toml_read_only_reason();
-    let own = item.filter(|_| borrowed.is_none());
+    let own = own_item(model, v, cell);
     let own_job = own.and_then(|i| i.job.as_ref().map(|j| (i, j)));
+    // The widest thing in the Format cell that is not the format combo (`RowRoom::format_base`).
+    let mut other_w = 0.0f32;
+    let mut combo_drawn = false;
     let format_w = ui
         .vertical(|ui| {
             if let (SlotShown::Linked(_), Some(n)) = (&shown, slot.game_slot()) {
@@ -975,6 +1057,7 @@ fn row(
                     .add_enabled(off.is_none(), egui::Button::new("Unlink"))
                     .on_hover_text("Remove the link. The slot goes back to what this set gives.")
                     .on_disabled_hover_text(off.as_deref().unwrap_or_default());
+                other_w = other_w.max(r.rect.width());
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::Role::Button,
@@ -1000,6 +1083,7 @@ fn row(
                         })
                     })
                     .inner;
+                other_w = other_w.max(menu.response.rect.width());
                 let focus_key = egui::Id::unique(ASSIGN_FOCUS);
                 if ui.data(|d| d.get_temp::<egui::Id>(focus_key)) == Some(assign_id) {
                     ui.data_mut(|d| d.remove::<egui::Id>(focus_key));
@@ -1016,16 +1100,30 @@ fn row(
                 .clone()
                 .or(field_lock(model.target, &job.profile, "format").map(str::to_string));
             let mut choice = (cur_f, cur_t);
+            // E17: a value reads in full where the row has room: the combo takes what its cell and the File cell
+            // leave, up to the painted value. The values are short fixed strings; `truncate` is the floor's answer.
+            let value = format_label(cur_f, cur_t);
+            let want = combo_want(ui, &value);
+            // Its cell's slack: the column is `format_base` wide whatever this combo does.
+            let slack = (room.format_base - COMBO_W).max(0.0);
+            let w = combo_w(room.free + slack, want, COMBO_W);
+            combo_drawn = true;
             ui.add_enabled_ui(lock.is_none(), |ui| {
-                let r = egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
-                    .selected_text(format_label(cur_f, cur_t))
-                    .width(COMBO_W)
-                    .show_ui_036(ui, |ui| {
-                        for (e, label) in encoding_options(model.target, &job.profile) {
-                            ui.selectable_value(&mut choice, e, label);
-                        }
+                let h = ui.spacing().interact_size.y;
+                let r = ui
+                    .allocate_ui(egui::vec2(w, h), |ui| {
+                        egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
+                            .selected_text(value)
+                            .width(w)
+                            .truncate()
+                            .show_ui_036(ui, |ui| {
+                                for (e, label) in encoding_options(model.target, &job.profile) {
+                                    ui.selectable_value(&mut choice, e, label);
+                                }
+                            })
+                            .response
                     })
-                    .response;
+                    .inner;
                 super::name_input(r, &format!("{} format", slot.label()));
             })
             .response
@@ -1034,12 +1132,23 @@ fn row(
                 acts.push(Act::Format(i.key.clone(), choice.0, choice.1));
             }
             if i.kind == ItemKind::Packed {
-                packed_controls(ui, model, i, toml_read_only.as_deref(), acts);
+                // Last frame's Flags column: the lines run on across it (ruling A2-7: `rows` stores it).
+                let flags_w = ui
+                    .data(|d| d.get_temp::<[f32; 5]>(egui::Id::unique(("slot-rows-others", &v.id))))
+                    .map_or(0.0, |w| w[3]);
+                let used = packed_controls(ui, model, i, toml_read_only.as_deref(), flags_w, acts);
+                other_w = other_w.max(used);
             }
         })
         .response
         .rect
         .width();
+    // The same cell with the combo at `COMBO_W` (a row with no combo has none to widen).
+    let format_base_w = if combo_drawn {
+        other_w.max(COMBO_W)
+    } else {
+        format_w
+    };
 
     // Flags: Match on this (slots 1/2 of a JSON set), an icon toggle that keeps its full label as its accessible
     // name and leads its hover with it, and the diffuse's alpha type (Note JI5), on one line.
@@ -1167,7 +1276,10 @@ fn row(
         );
     }
     super::row_reveal::on_row(ui, &v.key, slot, item_key.as_deref(), rect);
-    [slot_w, THUMB, format_w, flags_w, status_w]
+    RowWidths {
+        widths: [slot_w, THUMB, format_w, flags_w, status_w],
+        base_widths: [slot_w, THUMB, format_base_w, flags_w, status_w],
+    }
 }
 
 /// Review E1: the File cell of a slot the set's JSON entry fills with a path (`slotN`): the file, then the set it comes
@@ -1429,6 +1541,54 @@ fn select_or_expand(
     }
 }
 
+/// `text` when `fits(text)`, else "…" and the longest end of `text` for which `fits` holds with the "…" (at least one
+/// character, fitting or not): a file name keeps its suffix (ruling A2-1). `header::elide_middle` is the other cut.
+pub fn front_cut(text: &str, fits: impl Fn(&str) -> bool) -> String {
+    if fits(text) {
+        return text.to_string();
+    }
+    let mut cut = String::new();
+    // Every end, longest first; the last one is a single character.
+    for (at, _) in text.char_indices().skip(1) {
+        cut.clear();
+        cut.push('…');
+        cut.push_str(&text[at..]);
+        if fits(&cut) {
+            return cut;
+        }
+    }
+    let last = text.chars().last().map(String::from).unwrap_or_default();
+    format!("…{last}")
+}
+
+/// A format combo's width: its minimum `min`, plus the free room up to what the painted value `want`s.
+pub(super) fn combo_w(free: f32, want: f32, min: f32) -> f32 {
+    min + free.max(0.0).min((want - min).max(0.0))
+}
+
+/// What a `ComboBox` button spends beside its text: the arrow and the padding (probe P2b: 26.0).
+fn combo_chrome(ui: &egui::Ui) -> f32 {
+    let s = ui.spacing();
+    s.icon_width + s.icon_spacing + 2.0 * s.button_padding.x
+}
+
+/// `text`'s width in the `Button` font.
+fn button_text_w(ui: &egui::Ui, text: &str) -> f32 {
+    ui.painter()
+        .layout_no_wrap(
+            text.to_string(),
+            egui::TextStyle::Button.resolve(ui.style()),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x
+}
+
+/// The width a combo wants to paint `text` in full: the text and the chrome.
+fn combo_want(ui: &egui::Ui, text: &str) -> f32 {
+    button_text_w(ui, text) + combo_chrome(ui)
+}
+
 fn role_label(role: RawMap) -> String {
     match role {
         RawMap::Ao => "AO".into(),
@@ -1439,24 +1599,43 @@ fn role_label(role: RawMap) -> String {
 /// A packed output's fill rows. They write `sdc.toml`, so they are disabled, with the reason on hover, while it is
 /// read-only. The recipe has no control of its own (owner A1-1): the shader and the maps decide it, and a written
 /// `packing.recipe` is cleared by its Problems row.
+///
+/// Ruling A2-3 (probe P2d): the channel lines are drawn in a child that is not bounded by the Format column, and the
+/// cell takes only what the lines need beyond the Flags cell that follows (`flags_w`, last frame's Flags column,
+/// which a packed row leaves empty): the lines run on across it, so the pickers keep their width at the floor. The
+/// first frame has no `flags_w` (0.0): the cell takes the whole width for one frame. Returns the cell's width.
 fn packed_controls(
     ui: &mut egui::Ui,
     model: &AppModel,
     item: &TextureItem,
     why: Option<&str>,
+    flags_w: f32,
     acts: &mut Vec<Act>,
-) {
+) -> f32 {
+    let mut cell_w = 0.0;
     ui.add_enabled_ui(why.is_none(), |ui| {
-        fill_controls(ui, model, &item.key, acts);
+        let top = ui.cursor().min;
+        // Any rect larger than the window: the child's `min_rect` is what counts.
+        let mut lines = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(egui::Rect::from_min_size(top, egui::vec2(2000.0, 2000.0)))
+                .layout(egui::Layout::top_down(egui::Align::Min)),
+        );
+        fill_controls(&mut lines, model, &item.key, why, acts);
+        let used = lines.min_rect();
+        cell_w = (used.width() - SPACING - flags_w).max(0.0);
+        ui.allocate_space(egui::vec2(cell_w, used.height()));
     })
     .response
     .on_disabled_hover_text(why.unwrap_or_default());
+    cell_w
 }
 
-/// Note DY18: the width of a fill row's source picker (egui-ui-rules 3.5: `ComboBox::width` is only a minimum).
-/// The format combo's width, so the rows fit the centre column at 1024 px (`set_editor_width.rs`; truncated, full name
-/// on hover).
-const SOURCE_W: f32 = COMBO_W;
+/// Ruling A2-4 (DY18 superseded; probe P2b): the width of a fill row's source picker, one for every channel line
+/// (egui-ui-rules 3.5: `ComboBox::width` is only a minimum). `…_roughness.png` is 100.1 px of Button-font text, so
+/// 126.1 px of combo (26.0 of arrow and padding); a pixel of fit margin and a few of rule 3.7's make 130. A longer
+/// name is cut at the front (`front_cut`), full on hover.
+const SOURCE_W: f32 = 130.0;
 
 /// `channel_helpers` of `packed`, cached by the items' revision (review M1: an open popup draws every frame).
 fn cached_helpers(
@@ -1489,20 +1668,30 @@ fn source_picker(
     packed: &str,
     role: RawMap,
     current: Option<(&str, &str)>,
+    why: Option<&str>,
     acts: &mut Vec<Act>,
 ) -> egui::Response {
     let channel = model
         .item(packed)
         .and_then(|i| i.job.as_ref()?.pack.as_ref())
         .and_then(|p| channel_roles(p.kind).iter().position(|r| *r == Some(role)));
-    let shown = format!("Source: {}", current.map_or("value", |(_, f)| f));
+    let file = current.map_or("value", |(_, f)| f);
+    // The AccessKit value keeps the whole name (A2-2); the painted text is the file alone, cut at the front so the
+    // suffix shows when it does not fit (A2-1).
+    let shown = format!("Source: {file}");
+    let room = SOURCE_W - combo_chrome(ui) - 1.0;
+    let painted = if current.is_some() && button_text_w(ui, file) > room {
+        front_cut(file, |s| button_text_w(ui, s) <= room)
+    } else {
+        file.to_string()
+    };
     let h = ui.spacing().interact_size.y;
     let r = ui
         .allocate_ui(egui::vec2(SOURCE_W, h), |ui| {
             egui::ComboBox::from_id_salt(("fill-source", packed, role.id()))
                 .width(SOURCE_W)
                 .truncate()
-                .selected_text(&shown)
+                .selected_text(painted)
                 .show_ui_036(ui, |ui| {
                     let now = current.map(|(k, _)| k);
                     let helpers = cached_helpers(ui.ctx(), model, packed);
@@ -1544,13 +1733,57 @@ fn source_picker(
         &format!("{} channel source", role_label(role)),
         Some(&shown),
     );
-    r
+    // Every picker has the whole name on hover; a disabled one says the name, then why it is off (A2-6).
+    let name = if current.is_some() {
+        file
+    } else {
+        "No file: the box sets this channel (0 to 255)."
+    };
+    let r = r.on_hover_text(name);
+    match why {
+        Some(why) => r.on_disabled_hover_text(format!("{name}\n{why}")),
+        None => r,
+    }
 }
 
 /// One row per channel that a fill can stand in for: its role, the source picker (Note DY18), and while the channel
 /// has no source a value box with a reset.
-fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<Act>) {
-    for row in fill_rows(model, key) {
+fn fill_controls(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    key: &str,
+    why: Option<&str>,
+    acts: &mut Vec<Act>,
+) {
+    let rows = fill_rows(model, key);
+    // Ruling A2-3: every line starts with a role label of the width of the output's widest, so its pickers share an x.
+    let small = egui::TextStyle::Small.resolve(ui.style());
+    let lab_w = rows
+        .iter()
+        .map(|r| match r {
+            FillRow::FromFile { role, .. } | FillRow::Value { role, .. } => {
+                ui.painter()
+                    .layout_no_wrap(role_label(*role), small.clone(), egui::Color32::PLACEHOLDER)
+                    .size()
+                    .x
+            }
+        })
+        .fold(0.0f32, f32::max)
+        .ceil();
+    // The label is drawn in a child of its own rect (a `scope_builder` advanced the cursor again, probe P2d).
+    let role_cell = |ui: &mut egui::Ui, role: RawMap| {
+        let (r, _) = ui.allocate_exact_size(
+            egui::vec2(lab_w, ui.spacing().interact_size.y),
+            egui::Sense::hover(),
+        );
+        let mut cell = ui.new_child(
+            egui::UiBuilder::new()
+                .max_rect(r)
+                .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        );
+        cell.label(egui::RichText::new(role_label(role)).small());
+    };
+    for row in rows {
         match row {
             FillRow::FromFile {
                 role,
@@ -1558,13 +1791,10 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                 key: src,
                 ..
             } => {
-                let r = ui
-                    .horizontal(|ui| {
-                        ui.label(egui::RichText::new(role_label(role)).small());
-                        source_picker(ui, model, key, role, Some((&src, &file)), acts)
-                    })
-                    .inner;
-                r.on_hover_text(file);
+                ui.horizontal(|ui| {
+                    role_cell(ui, role);
+                    source_picker(ui, model, key, role, Some((&src, &file)), why, acts);
+                });
             }
             FillRow::Value {
                 role,
@@ -1572,8 +1802,8 @@ fn fill_controls(ui: &mut egui::Ui, model: &AppModel, key: &str, acts: &mut Vec<
                 own_key,
             } => {
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new(role_label(role)).small());
-                    source_picker(ui, model, key, role, None, acts);
+                    role_cell(ui, role);
+                    source_picker(ui, model, key, role, None, why, acts);
                     let mut v = shown;
                     let name = format!("{} fill", role_label(role));
                     if super::number_input::settled_drag(
@@ -1648,7 +1878,7 @@ fn unslotted_packed(ui: &mut egui::Ui, model: &AppModel, v: &SetView, acts: &mut
                 });
             }
             if fills {
-                fill_controls(ui, model, &item.key, acts)
+                fill_controls(ui, model, &item.key, why.as_deref(), acts)
             }
         })
         .response
@@ -1783,6 +2013,41 @@ mod tests {
     use eframe::egui;
     use std::sync::Arc;
     use std::time::Duration;
+
+    use super::{combo_w, front_cut};
+
+    #[test]
+    fn combo_w_takes_free_room_up_to_its_want() {
+        assert_eq!(combo_w(0.0, 200.0, 96.0), 96.0);
+        assert_eq!(combo_w(-5.0, 200.0, 96.0), 96.0, "no room: the minimum");
+        assert_eq!(combo_w(50.0, 200.0, 96.0), 146.0, "part of the room");
+        assert_eq!(combo_w(500.0, 200.0, 96.0), 200.0, "no wider than it wants");
+        assert_eq!(combo_w(500.0, 80.0, 96.0), 96.0, "never under the minimum");
+    }
+
+    #[test]
+    fn front_cut_keeps_the_end() {
+        let at_most = |n: usize| move |s: &str| s.chars().count() <= n;
+        assert_eq!(
+            front_cut("rock01_roughness.png", at_most(40)),
+            "rock01_roughness.png"
+        );
+        assert_eq!(
+            front_cut("rock01_roughness.png", at_most(15)),
+            "…_roughness.png"
+        );
+        assert_eq!(
+            front_cut("rock01_roughness.png", at_most(16)),
+            "…1_roughness.png",
+            "the longest end that fits"
+        );
+        assert_eq!(front_cut("rock01_ao.png", at_most(13)), "rock01_ao.png");
+        assert_eq!(
+            front_cut("rock01_ao.png", at_most(1)),
+            "…g",
+            "at least one character"
+        );
+    }
 
     /// Trace fix 10: a set-editor frame (`set_editor_shown`, `set_editor::draw`, the input-name picker) reads the cached
     /// views and deep-clones none of them.
