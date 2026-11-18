@@ -217,6 +217,24 @@ fn a_recorded_normal_follows_its_set_into_pbr() {
     );
 }
 
+/// An Undo of the follow step stays undone: the next settled plan does not retype the normal again (`normal-follow`
+/// marker in `History::auto_written`).
+#[test]
+fn an_undone_follow_stays_undone() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    add_rmaos(&t, &mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
+    m.undo();
+    settle(&mut m);
+    m.replan();
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    assert!(m.can_redo(), "the undone step is still offered again");
+}
+
 /// A `normal` the user typed is never retyped (the owner's "data treatment" by type), a pin.
 #[test]
 fn a_typed_normal_stays_when_its_set_turns_pbr() {
