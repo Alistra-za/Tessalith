@@ -230,11 +230,13 @@ pub fn draw_with_scan(
     slot_commands::draw(ui.ctx(), model, &mut state.slot_cmds);
     dialogs::draw(ui.ctx(), model);
     centre_tabs::popped(ui.ctx(), model);
-    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab).
+    // AG132: only while the centre shows the 3D view (not over an expanded preview, the bulk panel or a tab). The front
+    // tab is read again here, after `centre()` ran, not taken from the hoisted value: a strip click this frame must
+    // show or hide the window this frame.
     set_preview::settings_window(
         ui.ctx(),
         model,
-        three_d && selection_in_front && set_editor_shown(model, three_d),
+        three_d && model.centre_front() == CentreTab::Selection && set_editor_shown(model, three_d),
     );
     // T7 K10: last, so it is over everything and survives a virtualised source.
     columns::drag_ghost(ui.ctx(), model, &mut state.thumbs);
@@ -292,9 +294,10 @@ pub(crate) fn blur_on_press(ui: &egui::Ui, rect: egui::Rect) {
 
 /// The narrowest the centre gets: `CENTRE_MIN`, and while a texture is expanded enough for `PREVIEW_MIN` beside the
 /// collapsed settings strip (K8), or beside the open settings in a window where they start open (Note FC8). The 16 is
-/// `Frame::central_panel`'s 8 px margin a side.
+/// `Frame::central_panel`'s 8 px margin a side. Review E24: the preview's part holds only while the Selection tab is in
+/// front, as the set editor's floor does; behind a centre tab the floor is `CENTRE_MIN`. The only caller sizes the columns.
 pub(crate) fn centre_floor(ctx: &egui::Context, model: &AppModel) -> f32 {
-    if model.expanded.is_some() {
+    if model.expanded.is_some() && model.centre_front() == CentreTab::Selection {
         let settings = if ctx.content_rect().width() >= preview::WIDE_WINDOW {
             preview::SETTINGS_WIDTH
         } else {

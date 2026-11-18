@@ -5,7 +5,7 @@ mod support;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, CentreTab};
 use sdc_gui::ui::State;
 use support::*;
 
@@ -198,6 +198,11 @@ fn a_centre_tab_in_front_does_not_take_the_editors_floor() {
                 m.clear_selection();
             }
             open(&mut m);
+            assert_ne!(
+                m.centre_front(),
+                CentreTab::Selection,
+                "premise: a tab is in front"
+            );
             let mut h = harness(m, 1057.0);
             h.run();
             sdc_gui::ui::centre_rect(&h.ctx).unwrap().min.x
@@ -207,6 +212,46 @@ fn a_centre_tab_in_front_does_not_take_the_editors_floor() {
             (with - without).abs() < 0.5,
             "the side columns keep their widths behind a centre tab: {with} against {without}"
         );
+    }
+}
+
+/// Review E24, the preview's floor (K8, Note FC8): a texture expanded behind a centre tab does not take the preview's
+/// floor either. The floor is 776 px from 1280 px up, 520 below.
+#[test]
+fn a_centre_tab_in_front_does_not_take_the_previews_floor() {
+    for w in [1057.0, 1280.0] {
+        for open in [
+            AppModel::open_presets,
+            AppModel::open_settings_tab,
+            AppModel::open_json_editor,
+        ] {
+            let left = |expand: bool| {
+                let d = tempfile::tempdir().unwrap();
+                let (mut m, _) = rock_set(d.path());
+                m.clear_selection();
+                if expand {
+                    m.expand("landscape/leaf.png");
+                    assert!(m.expanded.is_some(), "premise: a texture is expanded");
+                }
+                open(&mut m);
+                if expand {
+                    assert!(m.expanded.is_some(), "premise: the tab keeps it expanded");
+                }
+                assert_ne!(
+                    m.centre_front(),
+                    CentreTab::Selection,
+                    "premise: a tab is in front"
+                );
+                let mut h = harness(m, w);
+                h.run_steps(4);
+                sdc_gui::ui::centre_rect(&h.ctx).unwrap().min.x
+            };
+            let (with, without) = (left(true), left(false));
+            assert!(
+                (with - without).abs() < 0.5,
+                "{w} px: the side columns keep their widths behind a centre tab: {with} against {without}"
+            );
+        }
     }
 }
 
