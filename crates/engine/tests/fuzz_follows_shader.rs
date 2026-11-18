@@ -1379,3 +1379,112 @@ fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
         patched_equals_fresh(&request(&d), "x.png");
     }
 }
+
+/// A request that exports into its own source folder (`in/` both ways), with `on_existing`.
+fn in_place(d: &TempDir, on_existing: OnExisting) -> BatchRequest {
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("in"), Target::Cs);
+    r.recursive = true;
+    r.on_existing = on_existing;
+    r
+}
+
+/// A plan of `req`, then a run of it: the run's summary and events.
+fn plan_and_run(req: &BatchRequest) -> (BatchSummary, Vec<EngineEvent>) {
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let e = Engine::new().unwrap();
+    let p = e.plan(req.clone(), &rep, &CancelToken::default()).unwrap();
+    let s = e.run(p, &rep, &CancelToken::default()).unwrap();
+    (s, sink.take())
+}
+
+fn unknown_existing(ev: &[EngineEvent]) -> usize {
+    ev.iter()
+        .filter(|e| matches!(&e.kind, EventKind::Warning(w) if w.code == Code::OutUnknownExisting))
+        .count()
+}
+
+/// Final review A I3 (JQ53): a project that exports into its source folder plans again with its own earlier `x_f.dds`
+/// beside the fuzz map. That kept DDS is the fuzz map's output path, not the set's `_f`, so the map stays `pbr_fuzz`
+/// writing `x_f.dds` and is not listed unused; a fast re-plan gives the same.
+#[test]
+fn an_in_place_second_plan_keeps_converting_the_fuzz_map() {
+    let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+    let r = in_place(&d, OnExisting::IfChanged);
+    plan_and_run(&r);
+    assert!(d.path().join("in/x_f.dds").exists());
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r.clone(),
+            &Reporter::new(Arc::new(VecSink::default()), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let j = job(&p, "x_fuzz.png");
+    assert_eq!(j.profile.subtype, Subtype::PbrFuzz, "{:?}", codes_of(j));
+    assert_eq!(out_name(j), "x_f.dds");
+    assert!(
+        !codes_of(j).contains(&Code::PackUnusedInput),
+        "{:?}",
+        codes_of(j)
+    );
+    assert_eq!(job(&p, "x.png").profile.subtype, Subtype::PbrAlbedo);
+    patched_equals_fresh(&r, "x_fuzz.png");
+}
+
+/// Final review A I3: the in-place second run keeps Tessalith's own `x_f.dds` (its manifest record is there) up to
+/// date, and re-encodes it when the fuzz map changed.
+#[test]
+fn an_in_place_run_keeps_its_own_f_up_to_date() {
+    let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+    let r = in_place(&d, OnExisting::IfChanged);
+    let (first_run, _) = plan_and_run(&r);
+    let f = d.path().join("in/x_f.dds");
+    let first = std::fs::read(&f).unwrap();
+    let (s, ev) = plan_and_run(&r);
+    assert_eq!(
+        (s.converted, s.up_to_date),
+        (0, first_run.converted),
+        "{s:#?}"
+    );
+    assert_eq!(unknown_existing(&ev), 0);
+    assert_eq!(std::fs::read(&f).unwrap(), first);
+    ImageBuffer::from_fn(64, 64, |_, y| Luma([(y * 2) as u8]))
+        .save(d.path().join("in/x_fuzz.png"))
+        .unwrap();
+    let (s, ev) = plan_and_run(&r);
+    assert_eq!(
+        (s.converted, s.up_to_date),
+        (1, first_run.converted - 1),
+        "{s:#?}"
+    );
+    assert_eq!(unknown_existing(&ev), 0);
+    assert_ne!(std::fs::read(&f).unwrap(), first);
+}
+
+/// Final review A I3: a hand-made `x_f.dds` at exactly the fuzz map's output path, with no manifest record. The map
+/// plans to write it, and the run's existing-output check keeps the file under the default and re-encode modes
+/// (OUT-UNKNOWN-EXISTING); only `--on-existing overwrite` replaces it. (Not at that path it is the set's `_f`:
+/// `a_kept_f_dds_beside_a_fuzz_map_wins_under_pbr`.)
+#[test]
+fn a_hand_made_f_at_the_fuzz_output_is_never_overwritten_unasked() {
+    let hand = b"DDS made by hand".to_vec();
+    for mode in [
+        OnExisting::IfChanged,
+        OnExisting::Reencode,
+        OnExisting::Overwrite,
+    ] {
+        let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+        let f = d.path().join("in/x_f.dds");
+        std::fs::write(&f, &hand).unwrap();
+        let (s, ev) = plan_and_run(&in_place(&d, mode));
+        if mode == OnExisting::Overwrite {
+            assert_ne!(std::fs::read(&f).unwrap(), hand, "{mode:?}: {s:#?}");
+            assert_eq!(unknown_existing(&ev), 0, "{mode:?}");
+        } else {
+            assert_eq!(std::fs::read(&f).unwrap(), hand, "{mode:?}: {s:#?}");
+            assert_eq!(unknown_existing(&ev), 1, "{mode:?}");
+        }
+    }
+}

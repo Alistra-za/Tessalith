@@ -2343,9 +2343,11 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
                 && crate::pack::plan::fuzz_reading(ctx, f.set, f.input)
                     == crate::pack::plan::FuzzReading::Pbr;
             // Fuzz-4: a PBR set's own `_f` wins; the fuzz map stays a waiting input that `plan_packing` lists unused.
-            // `set.suffixes` holds `f` here only from a real `_f` member (an image or a kept DDS): api.rs resolves a
-            // fuzz-stem member against the real set, never against the clone that gains `f`, and the real set never
-            // gains it (only `set_resolved` reads a copy with it). `pbr_f_name` asks the same set.
+            // `set.suffixes` holds `f` here only from the set's own `_f` member (an image or a kept DDS): api.rs
+            // resolves a fuzz-stem member against the real set, never against the clone that gains `f`, and the real
+            // set never gains it (only `set_resolved` reads a copy with it). A kept DDS at the fuzz map's own
+            // `<base>_f.dds` is no `_f` of the set (`group::is_fuzz_own_f`, Note JQ53): `api::member_set` hands the
+            // fuzz map a copy without that `f`. `pack::plan::pbr_f_name` asks the same.
             if !pbr || f.set.suffixes.contains("f") {
                 return packing_input_job(ctx, f, term, *role, false);
             }
@@ -2385,7 +2387,8 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
 
 /// Fuzz-10: a `_fuzz`/`_sheen` map resolved as `pbr_fuzz` on cs is the PBR fuzz texture, written `<base>_f.dds`. Not
 /// when its output is an explicit path (not the Discover default `<stem>.dds`), nor beside an `_f` member: there the
-/// fuzz map keeps its own name, so the two never clash. A hand role never gets here (`resolve_file_with`).
+/// fuzz map keeps its own name, so the two never clash. A kept DDS at the `<base>_f.dds` path is the map's own earlier
+/// output, not an `_f` member (Note JQ53, see the Fuzz-4 test). A hand role never gets here (`resolve_file_with`).
 fn fuzz_f_output(ctx: &ResolveCtx, f: &FileFacts, job: &ResolvedJob) -> Option<PathBuf> {
     let stem = f.input.rel.file_stem()?.to_string_lossy();
     let default = f
@@ -2393,8 +2396,8 @@ fn fuzz_f_output(ctx: &ResolveCtx, f: &FileFacts, job: &ResolvedJob) -> Option<P
         .output
         .file_name()
         .is_some_and(|n| n.to_string_lossy() == format!("{stem}.dds"));
-    // The stem is parsed once: its vocabulary role is the fuzz map test (`group::is_fuzz_stem`), its base the name.
-    let (base, term) = crate::group::split_vocab(&stem)?;
+    // Its vocabulary role is the fuzz map test (`group::is_fuzz_stem`); `group::fuzz_f_path` names the output.
+    let (_, term) = crate::group::split_vocab(&stem)?;
     if ctx.target != Target::Cs
         || f.alias.is_some()
         || term.role != crate::group::VocabRole::PackingInput(RawMap::Fuzz)
@@ -2404,7 +2407,7 @@ fn fuzz_f_output(ctx: &ResolveCtx, f: &FileFacts, job: &ResolvedJob) -> Option<P
     {
         return None;
     }
-    Some(f.input.output.with_file_name(format!("{base}_f.dds")))
+    crate::group::fuzz_f_path(f.input)
 }
 
 /// Design §5: the auto-tag, only over a suggestion (a `--set`, rule, `[files]` entry or set shader has decided already).

@@ -882,9 +882,15 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
     }
 }
 
-/// Fuzz-4: the file name of the set's first member with suffix `f`, by path (an image or a kept DDS: both count in
-/// `set.suffixes`, which `policy::resolve_file_with` tests); `None` when the set has no `f`.
-fn pbr_f_name(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> Option<String> {
+/// Fuzz-4: the file name of the set's own `_f`, its first member with suffix `f` by path (an image or a kept DDS);
+/// `None` when the set has none. A kept DDS that is the fuzz map's own earlier output is not the set's `_f`
+/// (`group::is_fuzz_own_f`, Note JQ53). `api::pbr_read_fuzz` and policy's Fuzz-4 test (through `api::member_set`)
+/// ask the same.
+pub(crate) fn pbr_f_name(
+    ctx: &ResolveCtx,
+    set: &TextureSet,
+    files: &[InputFile],
+) -> Option<String> {
     if !set.suffixes.contains("f") {
         return None;
     }
@@ -900,6 +906,7 @@ fn pbr_f_name(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> Option
             .suffix
             .as_deref()
                 == Some("f")
+                && !crate::group::is_fuzz_own_f(set, files, f)
         })
         .collect();
     f_members.sort_by(|a, b| a.path.cmp(&b.path));

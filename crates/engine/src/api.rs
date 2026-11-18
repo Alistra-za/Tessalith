@@ -1307,7 +1307,7 @@ pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
 // `f`; read `set.shares` too when the shared fuzz map follow-up (F10) lands.
 pub(crate) fn pbr_read_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> bool {
     ctx.target == Target::Cs
-        && !set.suffixes.contains("f")
+        && pack::plan::pbr_f_name(ctx, set, files).is_none()
         && set
             .members
             .iter()
@@ -1333,13 +1333,22 @@ fn with_f(set: &TextureSet) -> TextureSet {
 /// is read as the PBR fuzz texture, `pbr_read_fuzz`) the other members read [`with_f`]; the fuzz map itself reads the
 /// real set, whose rename guard (JQ37) and `_f` arm read the set's own `f`. 6c, the fill step and the shader map check
 /// (`map_members`) all ask here, so a member is typed and checked against one set. The set itself never gains `f`.
+/// Note JQ53: a set of `f_sets` whose suffixes hold `f` has no `_f` of its own (`pack::plan::pbr_f_name`): its `f` is a
+/// kept DDS, the fuzz map's earlier output. The fuzz map reads a copy without it, so policy's Fuzz-4 test and
+/// `fuzz_f_output`'s guard see no `_f` and the map still writes `<base>_f.dds`.
 fn member_set<'a>(
     set: &'a TextureSet,
     f: &InputFile,
     f_sets: &BTreeSet<String>,
 ) -> std::borrow::Cow<'a, TextureSet> {
-    if f_sets.contains(&set.key) && !crate::group::is_fuzz_map_image(f) {
+    if !f_sets.contains(&set.key) {
+        std::borrow::Cow::Borrowed(set)
+    } else if !crate::group::is_fuzz_map_image(f) {
         std::borrow::Cow::Owned(with_f(set))
+    } else if set.suffixes.contains("f") {
+        let mut c = set.clone();
+        c.suffixes.remove("f");
+        std::borrow::Cow::Owned(c)
     } else {
         std::borrow::Cow::Borrowed(set)
     }
