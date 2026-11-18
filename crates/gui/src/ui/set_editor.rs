@@ -716,7 +716,7 @@ fn row(
         title.to_string()
     };
     let text = egui::RichText::new(text);
-    let t = ui.label(if item.is_some() || matches!(shown, SlotShown::Linked(_)) {
+    let t = ui.label(if shown.is_filled() {
         text.strong()
     } else {
         text.weak()
@@ -1067,7 +1067,9 @@ fn linked_cell(
     let hover = |ui: &mut egui::Ui| {
         ui.label(format!("PGPatcher reads {} for this slot.", link.path));
     };
-    // The set link keeps its size on the right; the file name truncates on the left and keeps its text on hover.
+    // The set link keeps its size on the right, but takes at most half of the cell and truncates (its full text on
+    // hover); the file name truncates on the left in what is left and keeps its text on hover.
+    let half = ((ui.available_width() - ui.spacing().item_spacing.x) / 2.0).floor();
     egui::Sides::new().shrink_left().truncate().show(
         ui,
         |ui| match (&link.from, &link.from_short) {
@@ -1085,23 +1087,29 @@ fn linked_cell(
         },
         |ui| {
             if let (Some(from), Some(short)) = (&link.from, &link.from_short) {
-                ui.label(egui::RichText::new(" · ").small().weak());
-                let r = ui
-                    .add(egui::Link::new(
+                ui.set_max_width(half);
+                ui.horizontal(|ui| {
+                    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+                    ui.label(egui::RichText::new(" · ").small().weak());
+                    let r = ui.add(egui::Link::new(
                         egui::RichText::new(format!("from set {short}")).small(),
-                    ))
-                    .on_hover_text("Open the set this file comes from.");
-                // Two slots linked from one set name the slot, so their names differ (egui-ui-rules 8.4).
-                r.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::Role::Link,
-                        true,
-                        format!("Open set {short} ({})", v.slot_label(kind, "")),
-                    )
+                    ));
+                    let r = r.on_hover_ui(|ui| {
+                        ui.label(format!("from set {short}"));
+                        ui.label("Open the set this file comes from.");
+                    });
+                    // Two slots linked from one set name the slot, so their names differ (egui-ui-rules 8.4).
+                    r.widget_info(|| {
+                        egui::WidgetInfo::labeled(
+                            egui::Role::Link,
+                            true,
+                            format!("Open set {short} ({})", v.slot_label(kind, "")),
+                        )
+                    });
+                    if r.clicked() {
+                        acts.push(Act::OpenSet(from.clone()));
+                    }
                 });
-                if r.clicked() {
-                    acts.push(Act::OpenSet(from.clone()));
-                }
             }
         },
     );

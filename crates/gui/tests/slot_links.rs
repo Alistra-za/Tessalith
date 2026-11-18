@@ -475,6 +475,7 @@ fn a_path_to_another_kind_on_slot_1_is_the_diffuse_rows_link() {
 /// Fix round 1 (I2): the "from set" link stays inside the File cell beside a long file name, left of Unlink.
 #[test]
 fn a_long_linked_file_name_keeps_the_set_link_inside_its_cell() {
+    use egui_kittest::kittest::NodeT;
     let long = "lacquer_with_a_very_long_name_that_cannot_fit_in_the_file_cell_beside_the_link_to_its_set_and_the_unlink_button_cnr.png";
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair_with(d.path(), &[(long, [128, 128, 255], Subtype::CoatNormal)]);
@@ -485,23 +486,90 @@ fn a_long_linked_file_name_keeps_the_set_link_inside_its_cell() {
     });
     select_set(&mut m, LEAF);
     const WIDTH: f32 = 1280.0;
-    let h = harness_at(m, WIDTH);
+    let mut h = harness_at(m, WIDTH);
     let unlink = h.get_by_label("Unlink Coat normal / Fuzz (slot 7)").rect();
+    let link_name = "Open set arch/lacquer";
     let link = h
-        .query_all_by_label_contains("Open set")
+        .query_all_by_label_contains(link_name)
         .next()
-        .expect("the set link")
-        .rect();
-    assert!(
-        link.max.x <= unlink.min.x,
-        "the set link {link:?} ends left of Unlink {unlink:?}"
-    );
-    // The truncating file name gives way: the link ends inside the centre column, not past its edge.
+        .expect("the set link");
+    let link_rect = link.rect();
+    let on_row = |r: &egui::Rect| (r.center().y - unlink.center().y).abs() < ROW_REACH;
+    let file = h
+        .query_all_by_label_contains(long.trim_end_matches(".png"))
+        .map(|n| n.rect())
+        .find(on_row)
+        .expect("the file label on the linked row");
+    // The restored window assert: nothing on the row reaches past the centre's right edge, Unlink and the Status dot
+    // included.
     let full = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
-    let edge = full.intersect(h.ctx.content_rect()).right();
+    let margin = egui::Frame::central_panel(&h.ctx.global_style())
+        .inner_margin
+        .right as f32;
+    let edge = full.intersect(h.ctx.content_rect()).right() - margin;
     assert!(
-        link.max.x <= edge,
-        "the set link {link:?} ends past the centre's edge {edge}"
+        unlink.max.x <= edge,
+        "Unlink {unlink:?} passes the centre's edge {edge}"
+    );
+    let mut row_nodes = vec![];
+    for role in [
+        egui::accesskit::Role::Button,
+        egui::accesskit::Role::Link,
+        egui::accesskit::Role::Label,
+        egui::accesskit::Role::Image,
+        egui::accesskit::Role::GenericContainer,
+    ] {
+        row_nodes.extend(
+            h.query_all_by_role(role)
+                .filter(|n| n.accesskit_node().raw_bounds().is_some())
+                .map(|n| n.rect())
+                .filter(|r| {
+                    on_row(r) && r.min.x >= full.min.x && r.min.x < edge && r.width() > 0.0
+                }),
+        );
+    }
+    assert!(
+        row_nodes.len() > 4,
+        "found the row's controls {row_nodes:?}"
+    );
+    for r in &row_nodes {
+        assert!(
+            r.max.x <= edge,
+            "row control {r:?} passes the centre's edge {edge}: Unlink {unlink:?}"
+        );
+    }
+    // Both sides stay in the File cell, which ends where the Format cell (Unlink) starts: the file label, then the
+    // link, and the link takes at most half of the cell.
+    let cell_w = unlink.min.x - file.min.x;
+    assert!(
+        file.max.x <= link_rect.min.x + 0.5 && link_rect.max.x <= unlink.min.x,
+        "file {file:?} then link {link_rect:?} inside the File cell ending at Unlink {unlink:?}"
+    );
+    assert!(
+        link_rect.width() <= cell_w / 2.0 + 0.5 && file.width() >= link_rect.width(),
+        "the link {link_rect:?} takes at most half of the {cell_w} px cell, the file {file:?} the rest"
+    );
+    // The accessible name keeps the full set name; the full visible text is on hover.
+    let name = h
+        .get_by_label_contains(link_name)
+        .accesskit_node()
+        .label()
+        .expect("the link's name");
+    let short = name
+        .strip_prefix("Open set ")
+        .and_then(|s| s.strip_suffix(" (Coat normal / Fuzz (slot 7))"))
+        .unwrap_or_else(|| panic!("the name keeps the full set name and the slot: {name}"));
+    assert!(short.len() > 60, "premise: a long set name, {short}");
+    let full_text = format!("from set {short}");
+    assert!(
+        h.query_by_label(&full_text).is_none(),
+        "premise: no tooltip yet"
+    );
+    h.get_by_label_contains(link_name).hover();
+    h.run();
+    assert!(
+        h.query_all_by_label(&full_text).next().is_some(),
+        "hovering the truncated link shows its full text"
     );
 }
 
