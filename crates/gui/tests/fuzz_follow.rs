@@ -994,17 +994,142 @@ fn other_skin_evidence_keeps_the_recorded_skin_albedo() {
     ] {
         for fuzz in ["rock01_fuzz.png", "rock01_sheen.png"] {
             let d = tempfile::tempdir().unwrap();
-            let m = old_high(
+            let mut m = old_high(
                 d.path(),
                 &["rock01_roughness.png", fuzz],
                 extra,
                 AcceptSuggestions::None,
             );
             assert!(!m.fuzz_recorded_skin(DIFFUSE), "{fuzz} {extra}");
+            // The user's value: an explicit PBR pick leaves it.
+            m.set_shader("m/rock01", Some(Shader::Pbr));
+            idle(&mut m);
+            assert_eq!(
+                subtype(&m, DIFFUSE),
+                Some(json!("skin_albedo")),
+                "{fuzz} {extra}"
+            );
         }
     }
-    // An explicit Advanced Skin pick. DU6 records nothing here: the diffuse already resolves `SkinAlbedo`, so
-    // `skin_follow` returns `None`. The predicate is false through "shader origin not `Set`".
+    // An explicit Advanced Skin pick keeps the value, in both accept modes. DU6 records nothing here: the diffuse
+    // already resolves `SkinAlbedo`, so `skin_follow` returns `None`. The predicate is then false through "shader
+    // origin not `Set`".
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = old_high(
+            d.path(),
+            &["rock01_roughness.png", "rock01_fuzz.png"],
+            "",
+            accept,
+        );
+        m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+        idle(&mut m);
+        assert_eq!(
+            subtype(&m, DIFFUSE),
+            Some(json!("skin_albedo")),
+            "{accept:?}"
+        );
+        assert!(!m.fuzz_recorded_skin(DIFFUSE), "{accept:?}");
+        // Review t7 probe: a presets save re-types no untouched value here.
+        m.presets_saved();
+        idle(&mut m);
+        assert_eq!(
+            subtype(&m, DIFFUSE),
+            Some(json!("skin_albedo")),
+            "{accept:?}"
+        );
+    }
+}
+
+/// Fuzz-5 with Fuzz-22: a hand-set `helper.role = "fuzz"` is skin evidence, on a member or on a file shared in.
+#[test]
+fn a_hand_set_fuzz_role_keeps_the_recorded_skin_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let m = old_high(
+        d.path(),
+        &[
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+            "rock01_sheen.png",
+        ],
+        "[files.\"m/rock01_sheen.png\".helper]\nrole = \"fuzz\"\n",
+        AcceptSuggestions::None,
+    );
+    assert!(!m.fuzz_recorded_skin(DIFFUSE));
+    // Shared in (Note HH) from another set.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_high(
+        d.path(),
+        &[
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+            "aaa01.png",
+            "aaa01_mask.png",
+        ],
+        "[files.\"m/aaa01_mask.png\".helper]\nrole = \"fuzz\"\n",
+        AcceptSuggestions::None,
+    );
+    assert!(m.fuzz_recorded_skin(DIFFUSE), "before the share");
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let out = m.drop_choice("m/aaa01_mask.png", "m/rock01", DropChoice::Share);
+    if matches!(out, DropOutcome::AskReplace { .. }) {
+        m.drop_replace("m/aaa01_mask.png", "m/rock01", DropChoice::Share)
+            .unwrap();
+    }
+    idle(&mut m);
+    assert!(
+        set_view(&m)
+            .shared_helpers
+            .iter()
+            .any(|k| k == "m/aaa01_mask.png"),
+        "{:?}",
+        set_view(&m)
+    );
+    assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
+
+/// Fuzz-5 (review t7 M1): a written `rfaos` recipe is read from the set's base, not through the Rmaos slot: a real
+/// `rock01_rmaos.png` fills that slot.
+#[test]
+fn a_written_rfaos_recipe_beside_a_real_rmaos_keeps_the_recorded_skin_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let m = old_high(
+        d.path(),
+        &["rock01_rmaos.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+        AcceptSuggestions::None,
+    );
+    assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
+
+/// Fuzz-5 (review t7 M1): in a sub-folder the recipe key is `<folder>/<base>_rfaos`; without one the value is
+/// untouched there too.
+#[test]
+fn the_recipe_key_is_read_in_the_diffuses_folder() {
+    for (extra, recorded) in [
+        ("", true),
+        (
+            "[files.\"m/sub/stone_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+            false,
+        ),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let sub = d.path().join("m/sub");
+        let toml = format!("[files.\"m/sub/stone.png\"]\nsubtype = \"skin_albedo\"\n{extra}");
+        let m = open_with_hook(d.path(), &[], &toml, AcceptSuggestions::None, |_| {
+            std::fs::create_dir_all(&sub).unwrap();
+            rgb(&sub, "stone.png");
+            grey(&sub, "stone_roughness.png", 60);
+            grey(&sub, "stone_fuzz.png", 60);
+        });
+        assert_eq!(m.fuzz_recorded_skin("m/sub/stone.png"), recorded, "{extra}");
+    }
+}
+
+/// Fuzz-5 (review t7 M2): a locked Diffuse slot, a real `_rfaos` file and a vanilla target each keep the value the
+/// user's.
+#[test]
+fn a_lock_a_real_rfaos_or_vanilla_keeps_the_recorded_skin_albedo() {
     let d = tempfile::tempdir().unwrap();
     let mut m = old_high(
         d.path(),
@@ -1012,8 +1137,45 @@ fn other_skin_evidence_keeps_the_recorded_skin_albedo() {
         "",
         AcceptSuggestions::None,
     );
-    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    assert!(m.fuzz_recorded_skin(DIFFUSE));
+    m.set_slot_lock("m/rock01", 1, true).unwrap();
     idle(&mut m);
+    assert!(!m.fuzz_recorded_skin(DIFFUSE), "locked");
+    let d = tempfile::tempdir().unwrap();
+    let m = old_high(
+        d.path(),
+        &["rock01_rfaos.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    assert!(!m.fuzz_recorded_skin(DIFFUSE), "a real _rfaos");
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_high(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert_eq!(m.target, engine::config::Target::Vanilla);
+    assert!(!m.fuzz_recorded_skin(DIFFUSE), "vanilla");
+}
+
+/// Fuzz-5 (review t7 M6): the fuzz map is an image, as the engine's `untyped_fuzz_map` requires; a kept
+/// `rock01_fuzz.dds` alone is no fuzz map here.
+#[test]
+fn a_kept_dds_fuzz_map_alone_is_not_a_fuzz_recorded_skin() {
+    let d = tempfile::tempdir().unwrap();
+    const KEPT: &str = "m/rock01_fuzz.dds";
+    let m = open_with_hook(
+        d.path(),
+        &["rock01_roughness.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        AcceptSuggestions::None,
+        |_| bc1_dds(&d.path().join(KEPT)),
+    );
+    assert!(set_view(&m).members.iter().any(|k| k == KEPT));
     assert!(!m.fuzz_recorded_skin(DIFFUSE));
 }
 

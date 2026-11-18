@@ -88,10 +88,10 @@ impl AppModel {
 
     /// Fuzz-5: `key`'s `[files]` `skin_albedo` is one an older Tessalith recorded only because its set holds a fuzz
     /// map, so it is untouched: on cs, in the set whose own Diffuse slot holds `key` (Fuzz-30: a borrower's view never
-    /// decides the lender's file), with an automatic shader, an untyped fuzz map with no hand role, `key` neither
-    /// made skin by a pick (`auto_skin`) nor locked, no recipe written on the packed output, and no other skin
-    /// evidence (a skin-typed member, a real `_rfaos` file, a shared skin set). The cheap `[files]` check runs first,
-    /// as `presets_saved` asks this of every item.
+    /// decides the lender's file), with an automatic shader, an untyped fuzz map image with no hand role, `key`
+    /// neither made skin by a pick (`auto_skin`) nor locked, no recipe written on the set's packed key, and no other
+    /// skin evidence (a skin-typed member, a hand-set fuzz role on a member or a shared file, a real `_rfaos` file, a
+    /// shared skin set). The cheap `[files]` check runs first, as `presets_saved` asks this of every item.
     pub fn fuzz_recorded_skin(&self, key: &str) -> bool {
         let Some(p) = self.project.as_ref() else {
             return false;
@@ -124,12 +124,6 @@ impl AppModel {
         {
             return false;
         }
-        // The recipe of the set's packed output (`explicit_recipe` reads both the `_rmaos` and `_rfaos` keys).
-        if let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Rmaos) {
-            if self.explicit_recipe(item) != PackRecipe::Auto {
-                return false;
-            }
-        }
         let stem = |k: &str| {
             Path::new(k)
                 .file_stem()
@@ -137,14 +131,35 @@ impl AppModel {
                 .to_string_lossy()
                 .into_owned()
         };
+        // A recipe written on the set's packed key, `<folder>/<base>_rfaos` (or `_rmaos`), built from `key` as the
+        // engine's `set_is_advanced_skin` builds it from the file it resolves; `explicit_recipe` reads both keys.
+        let base = split_suffix_with(&stem(key), &self.suffix_aliases).base;
+        let packed = match key.rsplit_once('/') {
+            Some((dir, _)) => format!("{dir}/{base}_rfaos"),
+            None => format!("{base}_rfaos"),
+        };
+        if self.explicit_recipe(&packed) != PackRecipe::Auto {
+            return false;
+        }
+        // Fuzz-22: a hand-set fuzz role is skin evidence, on a member or on a file shared in (Note HH).
+        let hand_fuzz =
+            |k: &str| p.file_value(k, engine::helper::ROLE_FIELD) == Some(json!("fuzz"));
+        if v.shared_helpers.iter().any(|k| hand_fuzz(k)) {
+            return false;
+        }
         let mut fuzz = false;
         for k in &v.members {
             // Packed outputs are not files: the set's own `_rfaos` output is no evidence.
             if self.item(k).is_none_or(|i| i.kind == ItemKind::Packed) {
                 continue;
             }
+            if hand_fuzz(k) {
+                return false;
+            }
             let s = stem(k);
+            // An image, as the engine's `untyped_fuzz_map`: a kept DDS is no fuzz map here.
             if is_fuzz_stem(&s)
+                && !k.to_ascii_lowercase().ends_with(".dds")
                 && typed(k).is_none()
                 && p.file_value(k, engine::helper::ROLE_FIELD).is_none()
             {
