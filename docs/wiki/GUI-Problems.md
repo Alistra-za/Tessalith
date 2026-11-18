@@ -47,7 +47,7 @@ A row you must act on has its fix as a button.
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
 | `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). <!-- D:JO15 --> |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
-| *{file} is a vanilla normal…* (a PBR set's own normal) | **Use PBR normal**, which writes `subtype = "pbr_normal"`. Off on a locked slot or a read-only `sdc.toml`; none on a kept DDS. <!-- D:JP3 --> |
+| `SHADER-NORMAL-SPECULAR`, a note: *{file} is a vanilla normal…* (a PBR set's own normal) | **Use PBR normal**, which writes `subtype = "pbr_normal"`: the alpha is dropped and any `_rmaos` in the set bakes from it. Off on a locked slot or a read-only `sdc.toml`. A DDS kept as it is gets no button and reads *{file} is a kept DDS…*: it is not converted again, so its type can't drop the alpha. A DDS set to be encoded again (`reencode = true`) gets the button. <!-- D:JP3 --> |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
 | *Parallax is on but the source has no alpha* | **Turn parallax off**, which writes `alpha.parallax = false`. <!-- D:JO15 --> |
 | A PGPatcher feature clash | **Turn off {feature}** for each of the two; neither is the default. <!-- D:FN5 --> |
