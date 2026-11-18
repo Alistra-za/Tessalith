@@ -13,6 +13,15 @@ use std::time::{Duration, Instant};
 /// sleeping past it.
 pub const REVIEW_JSON_TTL: Duration = Duration::from_secs(1);
 
+/// E3 (ruling 3c-19): the whole project's expensive terms of the write-now rule, held while a scope is set.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct WholeTerms {
+    files: usize,
+    gate_ok: bool,
+    undecided: usize,
+    problem_rows: bool,
+}
+
 /// Note FB1: the gate's reason, and the Blockers row's text, while no export folder is chosen.
 pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
@@ -99,6 +108,7 @@ impl AppModel {
     #[cfg(feature = "test-hooks")]
     pub fn expire_review_json(&self) {
         self.review_json_cache.take();
+        self.whole_json.take();
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
@@ -429,45 +439,111 @@ impl AppModel {
     /// eyes, so Export writes at once. `unanswered_overwrites` is left out: its NIF half needs a written NIF row
     /// (`nif_rows_written`) and its JSON half an edited PGPatcher JSON, both refused here.
     pub fn writes_without_review(&self) -> bool {
+        self.writes_rule(
+            || self.export_files(),
+            || self.review_gate().is_ok(),
+            || self.undecided(),
+            // Not `pgp_json_edited()`: it hashes the file on every call; `review_json` is cached for 1 s.
+            || {
+                self.review_json()
+                    .iter()
+                    .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
+            },
+            || self.has_problem_rows(),
+        )
+    }
+
+    /// The one rule's terms, in its order, each read only when the ones before it allow the write. The caller says
+    /// where the expensive terms come from (live under the scope, or held for the whole project under one); the
+    /// cheap, volatile ones (opt-out, pending plan, NIF rows, Also tick) are always read here, live.
+    fn writes_rule(
+        &self,
+        files: impl FnOnce() -> usize,
+        gate_ok: impl FnOnce() -> bool,
+        undecided: impl FnOnce() -> usize,
+        json_edited: impl FnOnce() -> bool,
+        problem_rows: impl FnOnce() -> bool,
+    ) -> bool {
         self.export_without_review()
             && !self.full_plan_pending()
-            && self.export_files() > 0
-            && self.review_gate().is_ok()
-            && self.undecided() == 0
+            && files() > 0
+            && gate_ok()
+            && undecided() == 0
             && !self.nif_rows_written()
-            // Not `pgp_json_edited()`: it hashes the file on every call; `review_json` is cached for 1 s.
-            && !self
-                .review_json()
-                .iter()
-                .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
+            && !json_edited()
             && !self.also_runs()
-            && !self.has_problem_rows()
+            && !problem_rows()
     }
 
     /// E3 (ruling 3c-18): `writes_without_review` for a write about to start: the JSON state is read fresh (the 1 s
     /// cache is for the per-frame label). Once per dispatch, never per frame.
     pub(super) fn writes_without_review_fresh(&self) -> bool {
         self.review_json_cache.take();
+        self.whole_json.take();
         self.writes_without_review()
     }
 
+    /// E3 (ruling 3c-19): the whole project's expensive terms while a scope is set: file count, gate, undecided and
+    /// problem rows, read through `with_whole_view` once per change of what they read (the view key and the problems
+    /// key), so the per-frame cost is one key compare. Nothing volatile is held here (see `whole_pair`).
+    fn whole_terms(&self) -> WholeTerms {
+        let key = (self.view_key(), super::bottom::problems_inner(self));
+        if let Some((v, p, t)) = &*self.whole_cache.borrow() {
+            if (v, p) == (&key.0, &key.1) {
+                return *t;
+            }
+        }
+        let t = self.with_whole_view(|| WholeTerms {
+            files: self.export_files(),
+            gate_ok: self.review_gate().is_ok(),
+            undecided: self.undecided(),
+            problem_rows: self.has_problem_rows(),
+        });
+        *self.whole_cache.borrow_mut() = Some((key.0, key.1, t));
+        t
+    }
+
+    /// E3: the PGPatcher JSON of the whole project is edited, re-read once per `REVIEW_JSON_TTL` (one file read) and
+    /// whenever the view key moves, like `review_json`'s own cache, which a scope's lines occupy.
+    fn whole_json_edited(&self) -> bool {
+        let key = self.view_key();
+        if let Some((k, at, edited)) = &*self.whole_json.borrow() {
+            if *k == key && at.elapsed() < REVIEW_JSON_TTL {
+                return *edited;
+            }
+        }
+        let edited = self.with_whole_view(|| self.pgp_json_edited());
+        *self.whole_json.borrow_mut() = Some((key, Instant::now(), edited));
+        edited
+    }
+
     /// E3 (ruling 3c-14): `(writes_without_review, export_files)` of the whole project, whatever scope an open Review
-    /// was made for (a header click clears the scope first). With no scope it is the live pair; with one it is read
-    /// through `with_whole_view`, once per change of what it reads (the view key and the problems key), so the
-    /// per-frame cost is one key compare. The JSON recheck (1 s) does not move the key: the click itself re-decides.
+    /// was made for (a header click clears the scope first). With no scope it is the live pair. With one, the
+    /// expensive terms are the held `whole_terms` and the JSON term has its own 1 s cache; everything volatile
+    /// (opt-out, pending plan or read, NIF rows, Also tick) is read live by `writes_rule`, so no held answer can
+    /// outlive what it read.
     fn whole_pair(&self) -> (bool, usize) {
         if self.export_scope().is_none() {
             return (self.writes_without_review(), self.export_files());
         }
-        let key = (self.view_key(), super::bottom::problems_inner(self));
-        if let Some((v, p, pair)) = &*self.whole_cache.borrow() {
-            if (v, p) == (&key.0, &key.1) {
-                return *pair;
-            }
+        let t = self.whole_terms();
+        let writes = self.writes_rule(
+            || t.files,
+            || t.gate_ok,
+            || t.undecided,
+            || self.whole_json_edited(),
+            || t.problem_rows,
+        );
+        (writes, t.files)
+    }
+
+    /// The gate as the header reads it: the whole project's (ruling 3c-21), as the label's answer is.
+    fn whole_gate_ok(&self) -> bool {
+        if self.export_scope().is_none() {
+            self.review_gate().is_ok()
+        } else {
+            self.whole_terms().gate_ok
         }
-        let pair = self.with_whole_view(|| (self.writes_without_review(), self.export_files()));
-        *self.whole_cache.borrow_mut() = Some((key.0, key.1, pair));
-        pair
     }
 
     /// `whole_pair().0`, without counting files when there is no scope.
@@ -516,7 +592,7 @@ impl AppModel {
 
     /// [`Self::header_accent`] for a `now` the caller already has (the header asks once per frame).
     pub fn accent_for(&self, now: bool) -> bool {
-        (now || self.review_gate().is_ok()) && self.header_files(now) + self.nif_rows.len() > 0
+        (now || self.whole_gate_ok()) && self.header_files(now) + self.nif_rows.len() > 0
     }
 
     /// E3: the header's Export button: `Review {n} files…`, or `Export {n} files now` when a click writes.

@@ -375,7 +375,9 @@ pub(crate) struct ViewKey {
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
 /// E3: the whole-project header answer `(writes_without_review, export_files)` and the keys it was read under.
-type WholeAnswer = (ViewKey, ProblemsKey, (bool, usize));
+type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
+/// E3: whether the whole project's PGPatcher JSON is edited, the view key and the time it was read.
+type WholeJson = (ViewKey, Instant, bool);
 
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
@@ -677,6 +679,8 @@ pub struct AppModel {
     whole_view: std::cell::Cell<bool>,
     /// E3: the whole-project `(writes_without_review, export_files)` while a scope is set, by the inputs it reads.
     whole_cache: std::cell::RefCell<Option<WholeAnswer>>,
+    /// E3: the whole project's PGPatcher JSON state while a scope is set, re-read once per `REVIEW_JSON_TTL`.
+    whole_json: std::cell::RefCell<Option<WholeJson>>,
     /// Review's Export was clicked while a plan or scan read was in flight: the export continues when it lands.
     continue_after_plan: Option<Continue>,
     /// The user chose to cancel the running export and then close or open: done when the export has ended.
@@ -947,6 +951,7 @@ impl AppModel {
             landing: 0,
             whole_view: std::cell::Cell::new(false),
             whole_cache: std::cell::RefCell::new(None),
+            whole_json: std::cell::RefCell::new(None),
             continue_after_plan: None,
             after_export: None,
             pending_json: None,

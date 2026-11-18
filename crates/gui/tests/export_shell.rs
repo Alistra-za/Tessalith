@@ -597,6 +597,100 @@ fn the_header_is_the_whole_projects_while_a_scoped_review_is_open() {
     }
 }
 
+/// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
+fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
+    let k = key_of(m, id);
+    m.export_sets([k].into(), format!("Export set {id}"));
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "guard: a scoped Review is open"
+    );
+    m.set_export_without_review(true);
+}
+
+// Ruling 3c-19: the whole-project answer under a scope keeps its volatile terms live (the JSON recheck, the NIF
+// rows, the pending plan), so none of them can leave a stale "now" or a stale Review behind.
+#[test]
+fn a_scoped_review_header_follows_the_json_going_edited() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/pbr/arm");
+    support::colour(&t.join("steel.png"), 200);
+    support::flat(&t.join("steel_n.png"));
+    support::colour(&t.join("steel_rmaos.png"), 30);
+    let mut m = support::opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_without_review(true);
+    m.header_export_clicked();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let json = support::pgp_json_path(&m);
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    m.set_export_without_review(false);
+    let id = sdc_gui::model::sets::set_views(&m)[0].id.clone();
+    scoped_review_with_the_opt_out(&mut m, &id);
+    assert!(
+        m.header_export_text().ends_with(" now"),
+        "guard: {}",
+        m.header_export_text()
+    );
+    std::fs::write(&json, "{ \"edited\": true }\n").unwrap();
+    m.expire_review_json(); // the 1 s recheck passing
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "{}",
+        m.header_export_text()
+    );
+}
+
+#[test]
+fn a_scoped_review_header_is_not_stuck_on_an_answer_made_while_votes_were_pending() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    m.scan_db = Some(db);
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    // The held answer starts as "Review" (a NIF edit waits when the plan starts), so the label reads the live
+    // whole-project answer while the plan's post-plan read is pending.
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
+    // Another database: the post-plan read cannot be the kept evidence, it goes to the worker.
+    let db2 = dbdir.path().join("scan2.db");
+    drop(modscan::store::Store::open(&db2).unwrap());
+    m.scan_db = Some(db2);
+    m.replan();
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    while !m.votes_pending() {
+        assert!(std::time::Instant::now() < end, "the plan never landed");
+        m.poll();
+    }
+    assert!(
+        m.full_plan_pending(),
+        "guard: the post-plan read is pending"
+    );
+    // The header is drawn while it is pending: the whole-project answer is computed now (a pending plan and a NIF
+    // edit both answer false).
+    let _ = m.header_export_text();
+    m.set_nif_review_rows(vec![]); // moves neither the view key nor the problems key
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.export_scope().is_some(), "guard: still scoped");
+    assert_eq!(m.header_export_text(), "Export 4 files now");
+}
+#[test]
+fn a_scoped_review_header_follows_a_nif_row_that_will_be_written() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "{}",
+        m.header_export_text()
+    );
+}
+
 // Ruling 3c-17: the accent shows only when a click has something to write or review.
 #[test]
 fn the_header_has_no_accent_with_nothing_to_write() {
