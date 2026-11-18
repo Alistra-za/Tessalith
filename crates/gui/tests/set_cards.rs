@@ -4,7 +4,9 @@ mod support;
 use eframe::egui;
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::sets::{set_views, slot_row, SlotFill, SlotKind};
+use engine::config::Subtype;
+use sdc_gui::model::bulk::MenuAction;
+use sdc_gui::model::sets::{set_views, slot_row, view_row, views, SlotCommand, SlotFill, SlotKind};
 use sdc_gui::model::AppModel;
 use std::time::Duration;
 use support::*;
@@ -897,4 +899,118 @@ fn a_far_jump_does_not_shift_the_scroll() {
         ys.windows(2).all(|w| (w[0] - w[1]).abs() < 1.5),
         "card 200 moved between frames: {ys:?}"
     );
+}
+
+/// The AccessKit name `member_chip` gives the own `leaf_f.png` chip on base (read off the premise run).
+const FUZZ_CHIP: &str = "F";
+
+#[test]
+fn a_linked_chip_is_filled_and_named_for_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 1,
+        item: "arch/wall.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        on_card_of(&h, "arch/leaf", "D, from set arch/wall").len(),
+        1
+    );
+    assert!(on_card_of(&h, "arch/leaf", "D, empty").is_empty());
+    h.state_mut().undo();
+    h.run();
+    assert_eq!(on_card_of(&h, "arch/leaf", "D, empty").len(), 1);
+}
+
+#[test]
+fn a_coat_link_fills_one_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal)],
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    let linked = h
+        .query_all_by_label_contains(", from set arch/lacq")
+        .count();
+    assert_eq!(
+        linked, 1,
+        "one slot-7 link is one chip, not a Coat and a Fuzz chip"
+    );
+}
+
+#[test]
+fn a_coat_link_over_an_own_fuzz_shows_only_the_link() {
+    let d = tempfile::tempdir().unwrap();
+    let m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        on_card_of(&h, "arch/leaf", FUZZ_CHIP).len(),
+        1,
+        "premise: the own _f's chip is on the card"
+    );
+    h.state_mut().run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    h.run();
+    let drawn = h
+        .query_all_by_label_contains(", from set arch/lacq")
+        .count()
+        + on_card_of(&h, "arch/leaf", FUZZ_CHIP).len();
+    let v = views(h.state())
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .clone();
+    let counted = view_row(&v)
+        .iter()
+        .filter(|c| c.kind.game_slot() == Some(7))
+        .count();
+    assert_eq!(
+        (drawn, counted),
+        (1, 1),
+        "slot 7: one chip drawn (the link's), one counted"
+    );
+    assert!(
+        on_card_of(&h, "arch/leaf", FUZZ_CHIP).is_empty(),
+        "the own _f is not written, so its chip goes"
+    );
+    // chip_row's trailing loop names an un-chipped member "{file}, {slot text} (its slot is taken)": not for a
+    // Replaced file
+    assert!(
+        h.query_all_by_label_contains("leaf_f.png, ").all(|n| !n
+            .accesskit_node()
+            .label()
+            .is_some_and(|l| l.contains("(its slot is taken)"))),
+        "no thumbnail for the own _f"
+    );
+}
+
+#[test]
+fn a_cleared_slot_has_a_cleared_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(on_card_of(&h, "arch/wall", "N, cleared").len(), 1);
 }

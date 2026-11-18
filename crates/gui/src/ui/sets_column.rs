@@ -16,8 +16,9 @@ use crate::model::pbr_export::export_blocks;
 use crate::model::picker::{PickerPurpose, PickerSpec};
 use crate::model::set_groups::GroupTarget;
 use crate::model::sets::{
-    badge_text, fill_proposals, kind_text, member_tail, shader_options, shared_cells, slot_row,
-    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind,
+    badge_text, fill_proposals, kind_text, member_tail, shader_options, slot_shown, view_row,
+    DropChoice, DropOutcome, FillProposal, Missing, SetView, SlotFill, SlotKind, SlotLink,
+    SlotShown,
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
@@ -162,9 +163,7 @@ const CARD_EST: f32 = 110.0;
 // shortcut: a helper docked on a chip still counts as an extra member here, so an unmeasured card may be estimated
 // a row too tall (drawing corrects it, FM32); subtract the docked helpers if a scroll jump shows.
 fn chip_rows(v: &SetView, width: f32, frame_x: f32) -> usize {
-    let chips = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots)).len()
-        + v.missing.len()
-        + v.members.len().saturating_sub(v.slots.len());
+    let chips = view_row(v).len() + v.missing.len() + v.members.len().saturating_sub(v.slots.len());
     chips.div_ceil(chips_per_row(width, frame_x))
 }
 
@@ -266,18 +265,30 @@ fn chip_letter(v: &SetView, k: SlotKind) -> String {
 }
 
 /// An empty slot (or a missing entry, outlined): a dim box with the letter. K11: named by the letter.
-fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -> egui::Response {
+/// `filled` (a linked slot with no thumbnail to show): the box in the filled colours, named `name`.
+fn letter_box(
+    ui: &mut egui::Ui,
+    letter: &str,
+    outline: Option<egui::Color32>,
+    filled: Option<&str>,
+) -> egui::Response {
     let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(CHIP), egui::Sense::hover());
     let vis = ui.visuals();
     let stroke = match outline {
         Some(c) => egui::Stroke::new(2.0, c),
+        None if filled.is_some() => vis.widgets.inactive.bg_stroke,
         None => vis.widgets.noninteractive.bg_stroke,
     };
+    let bg = if filled.is_some() {
+        vis.widgets.inactive.bg_fill
+    } else {
+        vis.extreme_bg_color
+    };
     let p = ui.painter();
-    p.rect_filled(rect, 2.0, vis.extreme_bg_color);
+    p.rect_filled(rect, 2.0, bg);
     p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
     if outline.is_none() {
-        paint_letter(ui, rect, letter, true, f32::INFINITY);
+        paint_letter(ui, rect, letter, filled.is_none(), f32::INFINITY);
     } else {
         // The missing entry's "?" stays centred.
         ui.painter().text(
@@ -289,13 +300,34 @@ fn letter_box(ui: &mut egui::Ui, letter: &str, outline: Option<egui::Color32>) -
         );
     }
     // an empty chip's name is "<letter>, empty"; a missing entry's outlined "?" keeps its own
-    let name = if outline.is_none() {
-        format!("{letter}, empty")
-    } else {
-        letter.to_string()
+    let name = match (outline, filled) {
+        (_, Some(f)) => f.to_string(),
+        (None, None) => format!("{letter}, empty"),
+        (Some(_), None) => letter.to_string(),
     };
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
     r
+}
+
+/// Review E1: the mark of a linked slot, two overlapping rings (a chain) in `r`. No glyph: no emoji font is loaded.
+pub(crate) fn link_mark(p: &egui::Painter, r: egui::Rect, c: egui::Color32) {
+    let radius = r.height() * 0.28;
+    let dx = r.width() * 0.2;
+    let stroke = egui::Stroke::new(1.5, c);
+    for sign in [-1.0, 1.0] {
+        p.circle_stroke(r.center() + egui::vec2(sign * dx, 0.0), radius, stroke);
+    }
+}
+
+/// A linked slot's chip name: "{letter}, from set {short}", or "{letter}, path {file}" for a typed path.
+fn linked_chip_name(letter: &str, l: &SlotLink) -> String {
+    match &l.from_short {
+        Some(s) => format!("{letter}, from set {s}"),
+        None => {
+            let file = l.path.rsplit(['\\', '/']).next().unwrap_or(&l.path);
+            format!("{letter}, path {file}")
+        }
+    }
 }
 
 /// Note HP: the dimmed letter's colour on an empty chip (read at 4.5:1 on `extreme_bg_color` in both themes).
@@ -2527,6 +2559,63 @@ fn pill(
     }
 }
 
+/// Review E1: the chip of a slot that holds a link: the linked item's thumbnail, or a filled letter box when no item
+/// is known (a typed path); `link_mark` sits at its bottom-right corner. `cell` is the slot's kind, letter and link.
+/// Returns the chip's rect.
+#[allow(clippy::too_many_arguments)]
+fn linked_chip<'a>(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    thumbs: &mut ThumbCache,
+    v: &SetView,
+    cell: (SlotKind, &str, &'a SlotLink),
+    sel_items: &HashSet<String>,
+    acts: &mut Vec<Act>,
+    member_menu: &mut bool,
+    chipped: &mut HashSet<&'a str>,
+) -> egui::Rect {
+    let (k, letter, l) = cell;
+    let name = linked_chip_name(letter, l);
+    let hover = format!("{} linked to {}", v.slot_text(k), l.path);
+    let thumb = l.item.as_deref().and_then(|mk| {
+        chipped.insert(mk);
+        // K13: the item belongs to another set: no drag payload from here.
+        member_chip(
+            ui,
+            model,
+            thumbs,
+            v,
+            mk,
+            Some(k),
+            false,
+            Some(&hover),
+            sel_items,
+            acts,
+            member_menu,
+        )
+    });
+    let rect = match thumb {
+        Some(r) => {
+            paint_letter(ui, r.rect, letter, false, f32::INFINITY);
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+            r.rect
+        }
+        None => {
+            letter_box(ui, letter, None, Some(&name))
+                .on_hover_text(&hover)
+                .rect
+        }
+    };
+    let at = egui::Rect::from_min_size(
+        rect.right_bottom() - egui::Vec2::splat(BADGE),
+        egui::Vec2::splat(BADGE),
+    );
+    // the panel's fill backs the mark so the strong text colour reads over any thumbnail in both themes
+    ui.painter().rect_filled(at, 2.0, ui.visuals().panel_fill);
+    link_mark(ui.painter(), at, ui.visuals().strong_text_color());
+    rect
+}
+
 /// Note HP: the chip row of a card: one chip per slot (an empty one is a letter box), the missing entries, then the
 /// members that fill no chip. Returns each filled chip's dock plan and every rect a badge's hit must keep clear of
 /// (`fixed` comes in holding the combo's).
@@ -2543,18 +2632,45 @@ fn chip_row<'a>(
     member_menu: &mut bool,
     mut fixed: Vec<egui::Rect>,
 ) -> (Vec<DockPlan<'a>>, Vec<egui::Rect>) {
-    let row = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    let row = view_row(v);
     let mut chipped: HashSet<&str> = HashSet::new();
     let mut badged: HashSet<&str> = HashSet::new();
     let mut plans: Vec<DockPlan> = vec![];
     for cell in &row {
         let k = cell.kind;
         let letter = chip_letter(v, k);
+        match slot_shown(v, k) {
+            SlotShown::Linked(l) => {
+                let rect = linked_chip(
+                    ui,
+                    model,
+                    thumbs,
+                    v,
+                    (k, &letter, l),
+                    sel_items,
+                    acts,
+                    member_menu,
+                    &mut chipped,
+                );
+                fixed.push(rect);
+                continue;
+            }
+            // the JSON leaves the slot empty: dim like an empty chip, named for what it is
+            SlotShown::Cleared { .. } => {
+                let r = letter_box(ui, &letter, None, None)
+                    .on_hover_text(format!("{} (cleared)", v.slot_text(k)));
+                let name = format!("{letter}, cleared");
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+                fixed.push(r.rect);
+                continue;
+            }
+            _ => {}
+        }
         let (mk, from) = match &cell.fill {
             SlotFill::Own { item } => (item, None),
             SlotFill::Borrowed { from, item } => (item, Some(from)),
             SlotFill::Empty => {
-                let r = letter_box(ui, &letter, None)
+                let r = letter_box(ui, &letter, None, None)
                     .on_hover_text(format!("{} (empty)", v.slot_text(k)));
                 fixed.push(r.rect);
                 continue;
@@ -2576,7 +2692,7 @@ fn chip_row<'a>(
             acts,
             member_menu,
         ) else {
-            fixed.push(letter_box(ui, &letter, None).rect);
+            fixed.push(letter_box(ui, &letter, None, None).rect);
             continue;
         };
         let own = fixed.len();
@@ -2605,7 +2721,7 @@ fn chip_row<'a>(
     // K12: an add/remove entry that matches no file.
     // Note DU1: its menu removes the entry (an entry with no files left: Delete set).
     for m in &v.missing {
-        let r = letter_box(ui, "?", Some(RED)).interact(egui::Sense::click());
+        let r = letter_box(ui, "?", Some(RED), None).interact(egui::Sense::click());
         fixed.push(r.rect);
         let text = m.text();
         r.widget_info(|| {
@@ -2637,6 +2753,10 @@ fn chip_row<'a>(
         // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
         let owns = |f: &SlotFill| matches!(f, SlotFill::Own { item } if item == mk);
         let kind = v.slots.iter().find(|(_, f)| owns(f)).map(|(k, _)| *k);
+        // A file whose game slot holds a link for another kind is not written: it draws no chip (review E1).
+        if kind.is_some_and(|k| matches!(slot_shown(v, k), SlotShown::Replaced { .. })) {
+            continue;
+        }
         let Some(item) = model.item(mk) else {
             continue;
         };
