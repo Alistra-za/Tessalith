@@ -31,8 +31,8 @@ fn unnamed_progress<S>(h: &Harness<'_, S>) -> Vec<String> {
         .collect()
 }
 
-/// Input nodes on screen as (role, name): visible, editable, named. An input with a `labelled_by` link has no name of
-/// its own in 0.37, so it never lands here.
+/// Input nodes on screen as (role, name, hover-only): visible, editable, named. An input linked with `labelled_by`
+/// lands here under its row label's name (egui 0.37 copies the label's text into the node).
 fn named_inputs<S>(h: &Harness<'_, S>) -> Vec<(Role, String, bool)> {
     h.root()
         .children_recursive()
@@ -81,7 +81,8 @@ fn name_faults<S>(h: &Harness<'_, S>) -> (Vec<String>, Vec<(String, Vec<Role>)>)
 
 /// Rules 8.6 and 8.4 over everything on `screen` (a checkpoint's name), with today's hits allowed: no input is named
 /// only by its hover text, and no two inputs share a name. Each allowlist below holds one entry per (screen, name)
-/// with the reason. A new hit fails here, and so does an entry whose hit is gone (delete it).
+/// with the reason; a shared-name entry also pins the roles of the inputs sharing the name, so an input added, gone
+/// or changed fails here, and so does an entry whose hit is gone (delete it).
 fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
     let (hover, dup) = name_faults(h);
     let mut bad: Vec<String> = Vec::new();
@@ -96,14 +97,20 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
         }
     }
     for (name, roles) in &dup {
-        if !SHARED_NAME_ALLOWED
+        let mut measured: Vec<String> = roles.iter().map(|r| format!("{r:?}")).collect();
+        measured.sort();
+        match SHARED_NAME_ALLOWED
             .iter()
-            .any(|(s, n, _)| *s == screen && n == name)
+            .find(|(s, n, _, _)| *s == screen && n == name)
         {
-            bad.push(format!(
-                "{screen}: {} inputs share the name {name:?} ({roles:?}); give each its own name (rule 8.4)",
+            None => bad.push(format!(
+                "{screen}: {} inputs share the name {name:?} ({measured:?}); give each its own name (rule 8.4)",
                 roles.len()
-            ));
+            )),
+            Some((_, _, stored, _)) if stored[..] != measured[..] => bad.push(format!(
+                "{screen}: the inputs sharing the name {name:?} changed: allowlist has {stored:?}, measured {measured:?}; name the new input apart (rule 8.4), or update the entry's roles with its reason"
+            )),
+            Some(_) => {}
         }
     }
     for (s, n, _) in HOVER_ONLY_ALLOWED {
@@ -113,7 +120,7 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
             ));
         }
     }
-    for (s, n, _) in SHARED_NAME_ALLOWED {
+    for (s, n, _, _) in SHARED_NAME_ALLOWED {
         if *s == screen && !dup.iter().any(|(d, _)| d == n) {
             bad.push(format!(
                 "{screen}: the allowlisted shared name {n:?} is gone; delete its entry"
@@ -126,96 +133,196 @@ fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
 /// Inputs named only by their hover text today: none.
 const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
 
-/// Names two or more inputs share today, one entry per (screen, name). R5: allowed until the names are fixed (the sets
-/// branch is changing the set editor's names). Every entry is two controls a screen reader cannot tell apart.
-const SHARED_NAME_ALLOWED: &[(&str, &str, &str)] = &[
-    // The same app-wide chrome shows on every full-window screen.
+const COLLAPSE: &str =
+    "column-collapse small_button: the glyph is the name, the hover names the column";
+const SPLITTER: &str = "egui's own fixed name for a panel splitter";
+const CHIP: &str =
+    "a member chip with no docked helper is named by its slot letter alone (chip_name)";
+const GROUP_ROW: &str =
+    "a group header named after its main row, whose control carries the same name";
+const SUBTYPE_ROWS: &str = "two open sub-type rows draw the same tree with fixed labels";
+
+/// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
+/// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
+const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
     (
         "textures view with filters",
         "◀",
-        "two collapse arrows (side panels)",
+        &["Button", "Button"],
+        COLLAPSE,
     ),
     (
         "textures view with filters",
         "Resize panel",
-        "one splitter per panel edge",
+        &["Splitter", "Splitter"],
+        SPLITTER,
     ),
     (
         "textures view with filters",
         "D",
-        "three same-lettered chips",
+        &["Button", "Button", "Button"],
+        CHIP,
     ),
     (
         "textures view with filters",
         "Alpha",
-        "disclosure triangle and the alpha combo",
+        &["ComboBox", "DisclosureTriangle"],
+        GROUP_ROW,
     ),
     (
         "textures view with filters",
         "Mipmaps",
-        "disclosure triangle and the mipmaps tick",
+        &["CheckBox", "DisclosureTriangle"],
+        GROUP_ROW,
     ),
-    ("set editor", "◀", "two collapse arrows (side panels)"),
-    ("set editor", "Resize panel", "one splitter per panel edge"),
-    ("set editor", "D", "three same-lettered chips"),
-    ("set editor", "Match on this", "two Match buttons"),
-    ("set editor", "Assign…", "three Assign buttons"),
+    ("set editor", "◀", &["Button", "Button"], COLLAPSE),
+    (
+        "set editor",
+        "Resize panel",
+        &["Splitter", "Splitter"],
+        SPLITTER,
+    ),
+    ("set editor", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "set editor",
+        "Match on this",
+        &["Button", "Button"],
+        "one fixed-name flag per filled slot row",
+    ),
+    (
+        "set editor",
+        "Assign…",
+        &["Button", "Button", "Button"],
+        "one fixed-name menu button per empty slot row",
+    ),
     (
         "set editor",
         "Roughness scale",
-        "a tick and a second box named like it",
+        &["CheckBox", "SpinButton"],
+        "CS PBR's texture-set tick and PGPatcher's number box, one key label",
     ),
     (
         "set editor",
         "Specular level",
-        "a tick and a second box named like it",
+        &["CheckBox", "SpinButton"],
+        "CS PBR's texture-set tick and PGPatcher's number box, one key label",
     ),
-    ("json editor", "◀", "two collapse arrows (side panels)"),
-    ("json editor", "Resize panel", "one splitter per panel edge"),
-    ("json editor", "D", "three same-lettered chips"),
-    ("json editor", "×", "two close buttons"),
-    ("presets", "Suffixes", "two disclosure triangles"),
-    ("presets", "New alias _", "two alias boxes"),
-    ("presets", "Add alias", "two Add buttons"),
-    ("presets", "Compression", "two disclosure triangles"),
-    ("presets", "Format", "two combos"),
-    ("presets", "Effort", "two combos"),
-    ("presets", "Perceptual", "two ticks"),
-    ("presets", "Resize & mips", "two disclosure triangles"),
-    ("presets", "Resize", "two combos"),
-    ("presets", "Relative to", "two combos"),
-    ("presets", "Size floor", "two combos"),
-    ("presets", "Mip levels", "two combos"),
-    ("presets", "Mip filter", "two combos"),
-    ("presets", "Policy", "two combos"),
-    ("presets", "Alpha", "two disclosure triangles"),
-    ("rename dialog", "◀", "two collapse arrows (side panels)"),
+    ("json editor", "◀", &["Button", "Button"], COLLAPSE),
+    (
+        "json editor",
+        "Resize panel",
+        &["Splitter", "Splitter"],
+        SPLITTER,
+    ),
+    ("json editor", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "json editor",
+        "×",
+        &["Button", "Button"],
+        "remove_button: the glyph is the name, the hover says which key",
+    ),
+    (
+        "presets",
+        "Suffixes",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "New alias _",
+        &["TextInput", "TextInput"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Add alias", &["Button", "Button"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Compression",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Format", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    ("presets", "Effort", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Perceptual",
+        &["CheckBox", "CheckBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Resize & mips",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Resize", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Relative to",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Size floor",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Mip levels",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Mip filter",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Policy", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Alpha",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("rename dialog", "◀", &["Button", "Button"], COLLAPSE),
     (
         "rename dialog",
         "Resize panel",
-        "one splitter per panel edge",
+        &["Splitter", "Splitter"],
+        SPLITTER,
     ),
-    ("rename dialog", "⚠ 2", "two warning buttons"),
-    ("rename dialog", "D", "three same-lettered chips"),
+    (
+        "rename dialog",
+        "⚠ 2",
+        &["Button", "Button"],
+        "two buttons named by their text (not traced)",
+    ),
+    ("rename dialog", "D", &["Button", "Button", "Button"], CHIP),
     (
         "rename dialog",
         "Alpha",
-        "disclosure triangle and the alpha combo",
+        &["ComboBox", "DisclosureTriangle"],
+        GROUP_ROW,
     ),
     (
         "rename dialog",
         "Mipmaps",
-        "disclosure triangle and the mipmaps tick",
+        &["CheckBox", "DisclosureTriangle"],
+        GROUP_ROW,
     ),
     (
         "meshes skin browse popup",
         "textures/white.dds",
-        "two links to one path",
+        &["Link", "Link"],
+        "two links to one path (not traced)",
     ),
     (
         "meshes edit browse popup",
         "Resize panel",
-        "one splitter per panel edge",
+        &["Splitter", "Splitter"],
+        SPLITTER,
     ),
 ];
 
