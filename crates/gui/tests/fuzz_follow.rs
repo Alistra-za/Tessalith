@@ -8,10 +8,10 @@ use engine::pack::ChannelSource;
 use engine::policy::AcceptSuggestions;
 use engine::shader::{Shader, ShaderOrigin, ShaderPick};
 use image::{ImageBuffer, Luma, Rgb};
-use sdc_gui::model::bottom::Level;
+use sdc_gui::model::bottom::{problems, Fix, Level};
 use sdc_gui::model::code_text::RowClass;
 use sdc_gui::model::{bottom, code_text};
-use sdc_gui::model::{Answer, AppModel};
+use sdc_gui::model::{Answer, AppModel, FUZZ_SWITCH_HOVER};
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::collections::BTreeSet;
@@ -47,6 +47,19 @@ fn open_with_hook(
     accept: AcceptSuggestions,
     hook: impl FnOnce(&mut AppModel),
 ) -> AppModel {
+    let mut m = open_unsettled(dir, files, toml, accept, hook);
+    idle(&mut m);
+    m
+}
+
+/// `open_with_hook` without waiting for the plan: the open's first plan is still in flight.
+fn open_unsettled(
+    dir: &Path,
+    files: &[&str],
+    toml: &str,
+    accept: AcceptSuggestions,
+    hook: impl FnOnce(&mut AppModel),
+) -> AppModel {
     let r = dir.join("m");
     std::fs::create_dir_all(&r).unwrap();
     rgb(&r, "rock01.png");
@@ -70,7 +83,6 @@ fn open_with_hook(
     m.accept = accept;
     hook(&mut m);
     m.open_folder(dir.to_path_buf());
-    idle(&mut m);
     m
 }
 
@@ -950,10 +962,11 @@ fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
 }
 
 /// The old High project of Fuzz-8: `files` (greys) beside rock01.png, whose `skin_albedo` an older Tessalith recorded
-/// because the set had a fuzz map, then `extra`.
+/// because the set had a fuzz map, then `extra`. The switch on open (Fuzz-8) is off, so these tests read the
+/// predicate alone.
 fn old_high(dir: &Path, files: &[&str], extra: &str, accept: AcceptSuggestions) -> AppModel {
     let toml = format!("[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n{extra}");
-    open_with_hook(dir, files, &toml, accept, |_| {})
+    open_with_hook(dir, files, &toml, accept, |m| m.switch_fuzz_on_open = false)
 }
 
 /// Fuzz-5: the recorded `skin_albedo` of an old fuzz-only skin set is untouched, in both accept modes; an explicit
@@ -1116,7 +1129,9 @@ fn the_recipe_key_is_read_in_the_diffuses_folder() {
         let d = tempfile::tempdir().unwrap();
         let sub = d.path().join("m/sub");
         let toml = format!("[files.\"m/sub/stone.png\"]\nsubtype = \"skin_albedo\"\n{extra}");
-        let m = open_with_hook(d.path(), &[], &toml, AcceptSuggestions::None, |_| {
+        // The switch on open (Fuzz-8) is off, as in `old_high`.
+        let m = open_with_hook(d.path(), &[], &toml, AcceptSuggestions::None, |m| {
+            m.switch_fuzz_on_open = false;
             std::fs::create_dir_all(&sub).unwrap();
             rgb(&sub, "stone.png");
             grey(&sub, "stone_roughness.png", 60);
@@ -1205,4 +1220,403 @@ fn a_borrowers_view_does_not_decide_the_lenders_file() {
         Some(SlotFill::Borrowed { .. })
     ));
     assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
+
+/// Clears a test file's read-only flag on drop, so a failed assert does not leave it set (as `by_hand_rows.rs`).
+struct ReadOnly(std::path::PathBuf);
+
+impl Drop for ReadOnly {
+    fn drop(&mut self) {
+        if let Ok(m) = std::fs::metadata(&self.0) {
+            let mut p = m.permissions();
+            #[allow(clippy::permissions_set_readonly_false)]
+            p.set_readonly(false);
+            let _ = std::fs::set_permissions(&self.0, p);
+        }
+    }
+}
+
+/// `open_with_hook` under accept off, whose hook marks `sdc.toml` read-only; the guard clears the flag again.
+fn open_with_read_only(dir: &Path, files: &[&str], toml: &str) -> (AppModel, ReadOnly) {
+    let file = dir.join("sdc.toml");
+    let guard = ReadOnly(file.clone());
+    let m = open_with_hook(dir, files, toml, AcceptSuggestions::None, |_| {
+        let mut p = std::fs::metadata(&file).unwrap().permissions();
+        p.set_readonly(true);
+        std::fs::set_permissions(&file, p).unwrap();
+    });
+    (m, guard)
+}
+
+/// The file names of every file under `root`, recursively.
+fn exported_names(root: &Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut dirs = vec![root.to_path_buf()];
+    while let Some(d) = dirs.pop() {
+        let Ok(rd) = std::fs::read_dir(&d) else {
+            continue;
+        };
+        for e in rd.flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                dirs.push(p);
+            } else {
+                out.push(e.file_name().to_string_lossy().into_owned());
+            }
+        }
+    }
+    out
+}
+
+/// Fuzz-8: an old High fuzz-only project opens with the set switched off Advanced Skin, one undoable step, with a
+/// row that names every changed file; Undo restores the file; the switch does not fire again until reopened.
+/// Fuzz-18: nothing is recorded on the fuzz map.
+#[test]
+fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
+    let d = tempfile::tempdir().unwrap();
+    let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n";
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        before,
+        AcceptSuggestions::High,
+    );
+    idle(&mut m);
+    let v = set_view(&m);
+    assert!(v.pbr && !v.skin, "switched to PBR");
+    assert_eq!(
+        subtype(&m, DIFFUSE),
+        Some(json!("pbr_albedo")),
+        "High records the new pick in the same step"
+    );
+    assert_eq!(
+        subtype(&m, FUZZ),
+        None,
+        "Fuzz-18: the fuzz map is never recorded"
+    );
+    let (text, lines) = m.fuzz_note_for_test().expect("the switch row");
+    assert_eq!(
+        text,
+        "1 set left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
+    );
+    assert!(
+        lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+        "{lines:?}"
+    );
+    assert!(
+        !lines.iter().any(|l| l.starts_with("rock01_fuzz.png: ")),
+        "{lines:?}"
+    );
+    // The High recording that joined the step lists its line too.
+    assert!(
+        lines.contains(&"rock01.png: pbr albedo".to_string()),
+        "{lines:?}"
+    );
+    assert_eq!(lines.last().map(String::as_str), Some(FUZZ_SWITCH_HOVER));
+    let rows = sdc_gui::model::bottom::problems(&m);
+    // The row of its own: its text, and the Undo fix while the step is on top.
+    assert!(
+        rows.iter()
+            .any(|r| r.text == text && r.fix == Some(Fix::UndoLast)),
+        "{rows:?}"
+    );
+    m.undo();
+    idle(&mut m);
+    assert_eq!(
+        m.project.as_ref().unwrap().text(),
+        before,
+        "one step: Undo restores the file"
+    );
+    assert!(set_view(&m).skin, "skin again after Undo");
+    assert!(
+        m.fuzz_note_for_test().is_none(),
+        "the undone step's row goes"
+    );
+    idle(&mut m);
+    assert!(set_view(&m).skin, "the switch does not fire again");
+}
+
+/// Fuzz-8, the next open: a kept and saved switch leaves nothing to switch; an undone switch saved as skin switches
+/// again on the next open (the switch runs once per open).
+#[test]
+fn the_next_open_switches_an_undone_save_again_and_not_a_kept_one() {
+    let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n";
+    for undo in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(
+            d.path(),
+            &["rock01_roughness.png", "rock01_fuzz.png"],
+            before,
+            AcceptSuggestions::None,
+        );
+        assert!(m.fuzz_note_for_test().is_some(), "undo {undo}");
+        if undo {
+            m.undo();
+            idle(&mut m);
+            assert!(set_view(&m).skin, "undo {undo}");
+        }
+        m.save().unwrap();
+        m.open_folder(d.path().to_path_buf());
+        idle(&mut m);
+        assert_eq!(
+            m.fuzz_note_for_test().is_some(),
+            undo,
+            "undo {undo}: the next open switches only the undone save"
+        );
+        assert!(!set_view(&m).skin, "undo {undo}");
+        assert_eq!(subtype(&m, DIFFUSE), None, "undo {undo}");
+    }
+}
+
+/// Fuzz-8 with two sets: one step clears both, and one Undo restores both (the plural strings too).
+#[test]
+fn two_switched_sets_are_one_step_and_one_undo() {
+    let d = tempfile::tempdir().unwrap();
+    let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n\n[files.\"m/stone01.png\"]\nsubtype = \"skin_albedo\"\n";
+    let mut m = open_with(
+        d.path(),
+        &[
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+            "stone01.png",
+            "stone01_roughness.png",
+            "stone01_sheen.png",
+        ],
+        before,
+        AcceptSuggestions::High,
+    );
+    let skin = |m: &AppModel, id: &str| {
+        sdc_gui::model::sets::set_views(m)
+            .into_iter()
+            .find(|v| v.id == id)
+            .unwrap()
+            .skin
+    };
+    assert!(!skin(&m, "m/rock01") && !skin(&m, "m/stone01"));
+    let (text, lines) = m.fuzz_note_for_test().expect("the switch row");
+    assert_eq!(
+        text,
+        "2 sets left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
+    );
+    for l in [
+        "rock01.png: skin albedo → pbr albedo",
+        "stone01.png: skin albedo → pbr albedo",
+    ] {
+        assert!(lines.contains(&l.to_string()), "{lines:?}");
+    }
+    m.undo();
+    idle(&mut m);
+    assert_eq!(m.project.as_ref().unwrap().text(), before);
+    assert!(skin(&m, "m/rock01") && skin(&m, "m/stone01"));
+}
+
+/// Fuzz-8 under accept off, both terms: the same switch; nothing is recorded, the row still lists the diffuse.
+#[test]
+fn the_switch_runs_with_accept_off() {
+    for fuzz in ["rock01_fuzz.png", "rock01_sheen.png"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(
+            d.path(),
+            &["rock01_roughness.png", fuzz],
+            "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+            AcceptSuggestions::None,
+        );
+        idle(&mut m);
+        assert_eq!(subtype(&m, DIFFUSE), None, "{fuzz}");
+        assert_eq!(subtype(&m, &format!("m/{fuzz}")), None, "{fuzz}");
+        assert!(!set_view(&m).skin, "{fuzz}");
+        let (_, lines) = m.fuzz_note_for_test().unwrap();
+        assert!(
+            lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+            "{fuzz}: {lines:?}"
+        );
+    }
+}
+
+/// Fuzz-8: sets with other skin evidence stay skin; nothing is written. Both terms.
+#[test]
+fn sets_with_other_skin_evidence_are_not_switched() {
+    for fuzz in ["rock01_fuzz.png", "rock01_sheen.png"] {
+        for extra in [
+            "[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+            "[files.\"m/rock01_roughness.png\"]\nsubtype = \"skin_rfaos\"\n",
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let text = format!("[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n{extra}");
+            let mut m = open_with(
+                d.path(),
+                &["rock01_roughness.png", fuzz],
+                &text,
+                AcceptSuggestions::None,
+            );
+            idle(&mut m);
+            assert!(set_view(&m).skin, "{fuzz} {extra}");
+            assert_eq!(m.project.as_ref().unwrap().text(), text, "{fuzz} {extra}");
+        }
+    }
+    // A set the user made Advanced Skin: its shader is in sdc-project.toml, at the folder root beside sdc.toml.
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("m")).unwrap();
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        "[[sets]]\nid = \"m/rock01\"\nshader = \"advanced_skin\"\n",
+    )
+    .unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        AcceptSuggestions::None,
+    );
+    idle(&mut m);
+    assert!(set_view(&m).skin);
+}
+
+/// Review Focus 3: a read-only `sdc.toml` switches nothing and shows no switch row.
+#[test]
+fn a_read_only_project_switches_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let text = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n";
+    let (mut m, _flag) =
+        open_with_read_only(d.path(), &["rock01_roughness.png", "rock01_fuzz.png"], text);
+    idle(&mut m);
+    assert!(set_view(&m).skin);
+    assert!(m.fuzz_note_for_test().is_none());
+    assert_eq!(
+        std::fs::read_to_string(d.path().join("sdc.toml")).unwrap(),
+        text
+    );
+}
+
+/// Review Focus 4: a switched set lands on whatever the other maps pick (Glow here); the row says "left Advanced
+/// Skin", and the fuzz map is unused (Fuzz-3).
+#[test]
+fn a_switched_set_can_land_on_another_shader() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        AcceptSuggestions::None,
+    );
+    idle(&mut m);
+    assert_eq!(set_view(&m).shader.as_ref().unwrap().shader, Shader::Glow);
+    let (_, lines) = m.fuzz_note_for_test().unwrap();
+    assert!(
+        lines.contains(&"rock01.png: skin albedo → diffuse".to_string()),
+        "{lines:?}"
+    );
+    let it = m.item(FUZZ).unwrap();
+    let warned = it
+        .warnings
+        .iter()
+        .chain(it.job.iter().flat_map(|j| j.warnings.iter()))
+        .any(|w| w.message.contains("the glow shader reads no fuzz map"));
+    assert!(warned, "{:?}", it.warnings);
+}
+
+/// Review r2 I4: an export queued behind the first plan after open waits for the switch and runs on the post-switch
+/// plan: the export writes `rock01_f.dds` and `_rmaos`, never the skin plan's `_rfaos`. High, so the open records
+/// the diffuse's new type in the switch's step and no texture is left undecided.
+#[test]
+fn an_export_queued_at_open_runs_on_the_switched_plan() {
+    let d = tempfile::tempdir().unwrap();
+    // FB1: the export folder is the project's own `[project] export_folder`, not `GuiSettings`'. A TOML literal
+    // string, because of Windows backslashes.
+    let out = d.path().join("export");
+    std::fs::write(
+        d.path().join("sdc-project.toml"),
+        format!("[project]\nexport_folder = '{}'\n", out.display()),
+    )
+    .unwrap();
+    let mut m = open_unsettled(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        AcceptSuggestions::High,
+        |_| {},
+    );
+    m.export_clicked(); // a plan is in flight: `export_go` sets `export_after_plan`
+    idle(&mut m);
+    if m.review.is_some() {
+        // support's `export_through` pattern; Review exports the decided files and skips undecided ones.
+        m.export_from_review();
+        idle(&mut m);
+    }
+    assert!(m.fuzz_note_for_test().is_some(), "the switch ran");
+    assert_eq!(m.export_root(), out);
+    let names = exported_names(&out);
+    assert!(
+        names.contains(&"rock01_f.dds".to_string()),
+        "exported after the switch: {names:?}"
+    );
+    assert!(names.contains(&"rock01_rmaos.dds".to_string()), "{names:?}");
+    assert!(
+        !names.contains(&"rock01_rfaos.dds".to_string()),
+        "never the pre-switch skin plan: {names:?}"
+    );
+}
+
+/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and B3 offers
+/// **Use PBR normal** on it.
+#[test]
+fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n[files.\"m/rock01_n.png\"]\nsubtype = \"normal\"\n";
+    let mut m = open_with(
+        d.path(),
+        &["rock01_n.png", "rock01_roughness.png", "rock01_fuzz.png"],
+        before,
+        AcceptSuggestions::None,
+    );
+    idle(&mut m);
+    assert!(!set_view(&m).skin && set_view(&m).pbr, "switched");
+    assert_eq!(subtype(&m, NORMAL), Some(json!("normal")), "not rewritten");
+    let (_, lines) = m.fuzz_note_for_test().expect("the switch row");
+    assert!(
+        !lines.iter().any(|l| l.starts_with("rock01_n.png: ")),
+        "{lines:?}"
+    );
+    let rows = problems(&m);
+    assert!(
+        rows.iter()
+            .any(|r| r.code == Some(Code::ShaderNormalSpecular)
+                && r.fix == Some(Fix::UsePbrNormal(NORMAL.into()))),
+        "{rows:?}"
+    );
+}
+
+/// Fuzz-29, a pin: the switch row is in the rows built on the first frame (`poll`, then `problems`) after the poll
+/// that built it, with no other change between. It does not fail if `finish_fuzz_switch`'s `invalidate_views()` is
+/// removed: even with a scan database (the open's first read goes to a worker), the reads after the switch's plans
+/// have the inputs of the last landed read (only the diffuse has a colour mesh key, and it does not move), so Note
+/// FL6 lands them at once and the row is built in the poll whose `apply_plan` already invalidated the views.
+#[test]
+fn the_switch_row_shows_on_the_frame_after_it_is_built() {
+    let d = tempfile::tempdir().unwrap();
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    assert!(db.is_file());
+    let mut m = open_unsettled(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        AcceptSuggestions::None,
+        |m| m.scan_db = Some(db.clone()),
+    );
+    let start = std::time::Instant::now();
+    loop {
+        m.poll();
+        let rows = problems(&m);
+        if let Some((text, _)) = m.fuzz_note_for_test() {
+            assert!(rows.iter().any(|r| r.text == text), "{rows:?}");
+            break;
+        }
+        assert!(
+            start.elapsed() < Duration::from_secs(60),
+            "no switch row in 60 s"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }

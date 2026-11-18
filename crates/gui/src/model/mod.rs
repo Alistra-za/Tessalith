@@ -154,6 +154,7 @@ pub enum Selection {
     Set(String),
 }
 
+pub use auto_record::FUZZ_SWITCH_HOVER;
 pub use texture_view::Filter;
 
 /// (sdc.toml rev, dirty, only automatic types unsaved), (sdc-project.toml rev, dirty, read-only).
@@ -645,6 +646,15 @@ pub struct AppModel {
     /// Note FC1: the last automatic recording: its row text, its lines (the row's hover) and the `history.pushes`
     /// it left.
     pub(crate) auto_note: Option<auto_record::AutoNote>,
+    /// Fuzz-8: the settled plan after an open clears a `skin_albedo` recorded only because of a fuzz map. On by
+    /// default; tests of `fuzz_recorded_skin` alone turn it off.
+    pub switch_fuzz_on_open: bool,
+    /// Fuzz-8: the switch's step while the recording that joins it is still to come.
+    fuzz_switch: Option<auto_record::FuzzSwitch>,
+    /// Fuzz-8: the switch was tried in this open (it runs once per open).
+    fuzz_switch_checked: bool,
+    /// Fuzz-8: the switch's Problems row, with Undo while its step is on top.
+    pub(crate) fuzz_note: Option<auto_record::AutoNote>,
     /// Note FC1 (AM14): `preset` names no installed preset; computed once per plan request.
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
@@ -952,6 +962,10 @@ impl AppModel {
             nif_tab_request: None,
             choose_preset: None,
             auto_note: None,
+            switch_fuzz_on_open: true,
+            fuzz_switch: None,
+            fuzz_switch_checked: false,
+            fuzz_note: None,
             missing_preset_id: None,
             last_inputs: None,
             auto_replans: 0,
@@ -1047,6 +1061,9 @@ impl AppModel {
         // `pushes` never goes back (FC3's rows compare it).
         self.history.pushes = kept.0.pushes;
         self.auto_note = None;
+        self.fuzz_switch_checked = false;
+        self.fuzz_switch = None;
+        self.fuzz_note = None;
         self.refresh_banner();
         let recent = self.settings.recent.clone();
         self.settings.push_recent(root.clone());
@@ -2932,10 +2949,12 @@ impl AppModel {
             return;
         }
         // Note FC1: the settled plan's own decisions go into the project; its re-plan finds nothing new to record. A
-        // queued export waits for that plan (the flags below are taken then).
-        if self.record_auto_decisions() {
+        // queued export waits for that plan (the flags below are taken then). Fuzz-8: the switch on open writes
+        // first; its re-plan records and joins its step (FI3).
+        if self.switch_fuzz_sets() || self.record_auto_decisions() {
             return;
         }
+        self.finish_fuzz_switch();
         // Both flags are taken together so a leftover one cannot fire on a later, unrelated plan; the export the
         // user clicked wins.
         let (clicked, continued) = (
@@ -2980,6 +2999,14 @@ impl AppModel {
     #[cfg(feature = "test-hooks")]
     pub fn votes_pending(&self) -> bool {
         self.votes_pending.is_some()
+    }
+
+    /// Tests (Fuzz-8): the switch row's text and hover lines.
+    #[cfg(feature = "test-hooks")]
+    pub fn fuzz_note_for_test(&self) -> Option<(String, Vec<String>)> {
+        self.fuzz_note
+            .as_ref()
+            .map(|n| (n.text.clone(), n.lines.clone()))
     }
 
     /// The plan generation, bumped once per `replan` (tests: one plan per bulk apply).
@@ -3436,6 +3463,9 @@ impl AppModel {
         self.dropped_fills.clear();
         // Note FC1: the row's Undo is for its own step; `pushes` does not move on an undo.
         self.auto_note = None;
+        // Fuzz-8: likewise the switch's row, and a switch step still waiting for its recording no longer applies.
+        self.fuzz_note = None;
+        self.fuzz_switch = None;
         // Note FB3: the bulk result line describes the edit that is now taken back (or redone).
         self.bulk.report = None;
         // Task 9 (Z11): restoring a state as it was is no sub-type change to clean up after.

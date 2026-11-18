@@ -50,6 +50,22 @@ fn file_name(key: &str) -> &str {
 /// Ends the row's hover when a sub-type was set (Note FI11, A17).
 const HIGH_CONFIDENCE: &str = "High confidence: the file name and the pixels agree on the type.";
 
+/// Fuzz-8: ends the switch row's hover.
+pub const FUZZ_SWITCH_HOVER: &str = "A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.";
+
+/// Fuzz-8: the switch on open while its step is still being completed (the recording that joins it).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FuzzSwitch {
+    /// The step's history merge key; the recording joins it through `reencode_follow` (Note FI3).
+    merge: String,
+    /// The joined recording's lines.
+    lines: Vec<String>,
+    /// The Diffuse-slot keys whose `skin_albedo` the switch cleared.
+    keys: Vec<String>,
+    /// Note FI4: nothing prompted to be saved just before the switch.
+    clean_before: bool,
+}
+
 impl AppModel {
     /// What auto-accept picks for `key` from the plan: its top name-based suggestion when High (a `[files]` sub-type
     /// leaves `job.suggestions` as they would be without it), re-typed by `shader` as the engine does (S-shader-4).
@@ -186,6 +202,89 @@ impl AppModel {
         fuzz
     }
 
+    /// Fuzz-8: once per open, the settled plan clears each Diffuse-slot `skin_albedo` an older Tessalith recorded only
+    /// because of a fuzz map (`fuzz_recorded_skin`), in one undo step the next recording joins. True when it wrote
+    /// (a re-plan follows). Fuzz-26: nothing else is cleared; Fuzz-18: nothing is recorded on the fuzz map.
+    pub(super) fn switch_fuzz_sets(&mut self) -> bool {
+        if self.fuzz_switch_checked {
+            return false;
+        }
+        // As the recording (Note FB5): a plan under a running export or the crash restore leaves the switch for the
+        // next settled plan.
+        if self.export.running.is_some() || self.crash_restore_on_top() {
+            return false;
+        }
+        self.fuzz_switch_checked = true;
+        // A read-only `sdc.toml` (unloadable, or flagged read-only so the change cannot be saved) is not switched.
+        if !self.switch_fuzz_on_open || self.sdc_toml_writable().is_err() {
+            return false;
+        }
+        let keys: Vec<String> = self
+            .items
+            .iter()
+            .map(|i| i.key.clone())
+            .filter(|k| self.fuzz_recorded_skin(k))
+            .collect();
+        if keys.is_empty() {
+            return false;
+        }
+        let clean_before = !self.prompts_unsaved();
+        let merge = format!("fuzz-switch-{}", self.history.pushes);
+        let n = keys.len();
+        let s = if n == 1 { "" } else { "s" };
+        let label = format!("Switch {n} fuzz-map set{s} off Advanced Skin");
+        let cleared = keys.clone();
+        self.edit_docs(&label, Some(merge.clone()), true, move |p, _| {
+            for k in &cleared {
+                p.clear_file_value(k, "subtype");
+            }
+        });
+        self.reencode_follow = Some(merge.clone());
+        self.fuzz_switch = Some(FuzzSwitch {
+            merge,
+            lines: vec![],
+            keys,
+            clean_before,
+        });
+        true
+    }
+
+    /// Fuzz-8: once the switch's step is complete (the plan settled with nothing more to record), its Problems row:
+    /// each cleared file with the type it now plans, the joined recording's lines, then `FUZZ_SWITCH_HOVER`.
+    pub(super) fn finish_fuzz_switch(&mut self) {
+        let Some(switch) = self.fuzz_switch.take() else {
+            return;
+        };
+        let n = switch.keys.len();
+        let s = if n == 1 { "" } else { "s" };
+        let was = super::labels::subtype_name(Subtype::SkinAlbedo);
+        let lines = switch
+            .keys
+            .iter()
+            .map(|k| {
+                let now = self
+                    .item(k)
+                    .and_then(|i| i.job.as_ref())
+                    .map_or_else(String::new, |j| {
+                        super::labels::subtype_name(j.profile.subtype)
+                    });
+                format!("{}: {was} → {now}", file_name(k))
+            })
+            .chain(switch.lines)
+            .chain([FUZZ_SWITCH_HOVER.to_string()])
+            .collect();
+        self.fuzz_note = Some(AutoNote {
+            text: format!(
+                "{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
+            ),
+            lines,
+            step: self.history.pushes,
+            clean_before: switch.clean_before,
+        });
+        // Fuzz-29: as after `auto_note`, so the cached rows show it on the next frame.
+        self.invalidate_views();
+    }
+
     /// Each set member's current shader (chosen or automatic).
     fn shaders_by_member(&self) -> std::collections::HashMap<String, Shader> {
         let mut out = std::collections::HashMap::new();
@@ -305,7 +404,11 @@ impl AppModel {
             self.history.auto_written.insert((k.clone(), f));
         }
         if let Some(k) = join {
-            // One step with the re-encode (its label stays), so no row of its own offers a separate Undo.
+            // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
+            // switch's row lists what it joined.
+            if let Some(sw) = self.fuzz_switch.as_mut().filter(|sw| sw.merge == k) {
+                sw.lines.extend(lines);
+            }
             let pushes = self.history.pushes;
             self.edit_docs(&label, Some(k), true, |p, _| {
                 for (k, f, v) in &writes {

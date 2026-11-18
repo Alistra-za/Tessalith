@@ -1262,6 +1262,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             ..row(Level::Info, At::Project, a.text.clone(), None)
         });
     }
+    // Fuzz-8: the sets the open switched off Advanced Skin, one row with each file on hover; its step is a real undo
+    // step, so the row keeps Undo while the step is on top.
+    if let Some(a) = &m.fuzz_note {
+        out.push(Problem {
+            fix: undo(a.step),
+            detail: Some(a.lines.join("\n")),
+            ..row(Level::Info, At::Project, a.text.clone(), None)
+        });
+    }
     // Note JI6: the `[files]` entries that name no file, checked by the last full plan in its mode (`m.target`); one
     // row with every entry on hover.
     if !m.unmatched_keys.is_empty() {
