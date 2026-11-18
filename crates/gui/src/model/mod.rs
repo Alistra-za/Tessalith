@@ -2138,8 +2138,11 @@ impl AppModel {
         if self.root.is_none() {
             return;
         }
+        // Ruling 3c-25: what the click is is decided here, never inferred from the scope when a plan lands. Only a
+        // whole-project click may wait for a write; a scoped one opens its scoped Review instead.
+        let whole = self.export_scope().is_none();
         if self.full_plan_pending() {
-            if self.settled_writes_now {
+            if whole && self.settled_writes_now {
                 self.write_now_after_plan = true;
             } else {
                 self.open_review();
@@ -2150,8 +2153,12 @@ impl AppModel {
         // Fresh JSON read (ruling 3c-18): a write never rides on the label's cached answer.
         let writes = self.writes_without_review_fresh();
         if writes && self.check_sources() > 0 && self.session.is_some() {
-            self.write_now_after_plan = true;
-            self.replan();
+            if whole {
+                self.write_now_after_plan = true;
+                self.replan();
+            } else {
+                self.open_review();
+            }
             return;
         }
         if writes {

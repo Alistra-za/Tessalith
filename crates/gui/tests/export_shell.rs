@@ -601,6 +601,83 @@ fn the_header_is_the_whole_projects_while_a_scoped_review_is_open() {
     }
 }
 
+/// Round 2: wait until the held plan result has arrived (the plan stays pending until the test delivers it).
+fn held_plan(m: &mut AppModel) -> Vec<sdc_gui::worker::WorkerMsg> {
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    let mut got = vec![];
+    loop {
+        m.poll();
+        got.extend(m.take_held());
+        if got
+            .iter()
+            .any(|x| matches!(x, sdc_gui::worker::WorkerMsg::Planned { .. }))
+        {
+            return got;
+        }
+        assert!(std::time::Instant::now() < end, "the plan never arrived");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// Deliver the held plan messages, let every later message through and settle.
+fn land_plan(m: &mut AppModel, msgs: Vec<sdc_gui::worker::WorkerMsg>) {
+    for x in msgs {
+        m.handle_held(x);
+    }
+    m.hold_plan_results = false;
+    assert!(m.wait_idle(Duration::from_secs(120)));
+}
+
+fn nothing_written(d: &std::path::Path) -> bool {
+    !d.join("export/textures/g/a.dds").exists() && !d.join("export/textures/g/u.dds").exists()
+}
+
+/// Round 2, ruling 3c-25 (finding 5, B5): a scoped click never arms a write. With Review open and a plan pending, a
+/// click on Export set opens its scoped Review at once; pressing Close before the plan lands must not leave a
+/// whole-project write behind.
+#[test]
+fn a_scoped_click_during_a_plan_never_leaves_a_write_armed_for_close() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.open_review();
+    m.hold_plan_results = true;
+    m.replan();
+    assert!(m.full_plan_pending(), "guard: a plan is pending");
+    let k = key_of(&m, "g/u");
+    m.export_sets([k].into(), "Export set g/u".into());
+    assert!(
+        m.export_scope().is_some(),
+        "guard: the scoped Review is open"
+    );
+    assert!(!m.export_queued(), "a scoped click queues nothing");
+    m.close_review();
+    let msgs = held_plan(&mut m);
+    land_plan(&mut m, msgs);
+    assert!(
+        nothing_written(d.path()) && m.export.running.is_none() && m.export.summary.is_none(),
+        "the landed plan wrote the whole project"
+    );
+}
+
+/// Round 2, ruling 3c-25: a scoped click whose sources changed opens its scoped Review instead of queueing a write
+/// and planning again.
+#[test]
+fn a_scoped_click_on_a_changed_source_opens_its_review() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    support::colour(&d.path().join("textures/g/a.png"), 91);
+    let k = key_of(&m, "g/u");
+    m.export_sets([k].into(), "Export set g/u".into());
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "the scoped Review opens"
+    );
+    assert!(!m.export_queued(), "nothing is queued");
+    assert!(m.export.running.is_none() && nothing_written(d.path()));
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);

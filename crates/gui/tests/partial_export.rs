@@ -704,16 +704,20 @@ fn closing_review_ends_the_scope() {
     assert!(m.export_scope().is_none());
 }
 
-/// Note HF10: a queued scoped export that is dropped (a dialog open when the plan lands) takes its scope with it.
+/// Note HF10: a queued scoped export that is dropped (a dialog open when the plan lands) leaves its scope to the Review that queued it.
 #[test]
 fn a_dropped_queued_export_ends_the_scope() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
-    // E3: only a write-now click queues (the project's opt-out); without it a scoped click opens Review at once.
-    m.set_export_without_review(true);
+    // Round 2 (3c-25): a scoped click never queues a write; Review's own Export is what waits for the plan.
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "Review opens at once"
+    );
+    m.export_from_review();
     assert!(m.export_queued(), "waits for the plan");
     assert!(m.export_scope().is_some());
     m.dialog = Some(sdc_gui::model::Dialog::Error("x".into()));
@@ -727,7 +731,10 @@ fn a_dropped_queued_export_ends_the_scope() {
     assert!(m.export_scope().is_some(), "kept while the dialog is open");
     m.dialog = None;
     idle(&mut m);
-    assert!(m.export_scope().is_none(), "the dropped export ends it");
+    // The Review that queued the export is still open, so it keeps its scope until it closes.
+    assert!(m.export_scope().is_some(), "Review keeps its scope");
+    m.close_review();
+    assert!(m.export_scope().is_none(), "closing ends it");
     assert_eq!(m.write_only(), None, "the next export is whole");
 }
 
@@ -742,7 +749,10 @@ fn a_queued_scoped_export_writes_only_its_set() {
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.export_queued(), "waits for the plan");
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "3c-25: the scoped Review opens at once, nothing queues"
+    );
     idle(&mut m);
     // E3 (3c-20): the landed plan opens the scoped Review and writes nothing; Review's Export then writes only the
     // scope.
@@ -781,8 +791,8 @@ fn a_queued_scoped_export_that_covers_the_whole_project_still_opens_its_review()
             m.export_sets(k, "Export set g/a".into());
         }
         assert!(
-            m.export_queued(),
-            "via_group={via_group}: waits for the plan"
+            m.review.is_some() && !m.export_queued(),
+            "via_group={via_group}: the scoped Review opens at once (3c-25)"
         );
         idle(&mut m);
         assert!(
