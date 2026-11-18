@@ -629,6 +629,11 @@ pub struct MeshesModel {
 }
 
 impl MeshesModel {
+    /// Completed scans so far: it changes whenever the mods and rows can have (the key of the view's width cache).
+    pub fn scan_rev(&self) -> u64 {
+        self.scan_rev
+    }
+
     /// No store, no source, nothing detected: for tests and before the view is first opened.
     pub fn empty() -> MeshesModel {
         let mut m = MeshesModel::new(None, MeshesSettings::default());

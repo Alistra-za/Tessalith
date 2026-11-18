@@ -406,6 +406,55 @@ fn nif_label(ui: &egui::Ui, path: &str) -> egui::text::LayoutJob {
     job
 }
 
+/// The laid-out width of `text` on one line.
+fn text_width(ui: &egui::Ui, text: &str, font: &egui::FontId) -> f32 {
+    ui.painter()
+        .layout_no_wrap(text.to_string(), font.clone(), egui::Color32::WHITE)
+        .size()
+        .x
+}
+
+/// `text` as it is when it fits `width`, else cut in the middle (`elide_middle`) to the longest that fits: a binary
+/// search on the character count, one layout per probe (review E23). The width is not strictly monotonic in the
+/// count at `elide_middle`'s fallback edge, so the best fit probed is kept; `…` when not even one character fits.
+pub(super) fn fit_middle(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
+    if text_width(ui, text, font) <= width {
+        return text.to_string();
+    }
+    let (mut lo, mut hi) = (1, text.chars().count());
+    let mut best: Option<String> = None;
+    while lo <= hi {
+        let mid = lo + (hi - lo) / 2;
+        let cut = crate::ui::header::elide_middle(text, mid);
+        if text_width(ui, &cut, font) <= width {
+            best = Some(cut);
+            lo = mid + 1;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    best.unwrap_or_else(|| "…".to_string())
+}
+
+/// The width the Mod column needs for the longest mod name, cached by scan and font size (the names change only with
+/// a scan).
+fn widest_mod(ui: &egui::Ui, m: &MeshesModel, font: &egui::FontId) -> f32 {
+    let key = ui.scope_id().with("meshes-mod-w");
+    let stamp = (m.scan_rev(), font.size.to_bits());
+    if let Some((s, w)) = ui.data_mut(|d| d.get_temp::<((u64, u32), f32)>(key)) {
+        if s == stamp {
+            return w;
+        }
+    }
+    let w = m
+        .mods
+        .iter()
+        .map(|r| text_width(ui, &r.name, font))
+        .fold(0.0, f32::max);
+    ui.data_mut(|d| d.insert_temp(key, (stamp, w)));
+    w
+}
+
 /// One cell of a list row: `width` wide, its text cut to fit (rule 3.6), drawn left to right.
 fn cell<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let h = ui.spacing().interact_size.y;
@@ -553,8 +602,13 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
     // Rule 3.7: a few pixels short of the column, so a full row never flips the scroll bar.
     let gap = ui.spacing().item_spacing.x;
     let w = ui.available_width() - 8.0 - 2.0 * gap;
-    let (mod_w, chips_w) = ((0.25 * w).min(180.0), (0.25 * w).min(200.0));
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    // Review E23: the Mod column takes what its longest name needs, up to the old cap; the Path takes the rest.
+    let pad = 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x;
+    let mod_w = (0.25 * w).min(180.0).min(widest_mod(ui, m, &font) + pad);
+    let chips_w = (0.25 * w).min(200.0);
     let path_w = (w - mod_w - chips_w).max(0.0);
+    let text_w = (path_w - 2.0 * ui.spacing().button_padding.x).max(0.0);
     // Note GH3: with the pill on, a project row names the project mod, and the path's winner on hover when another
     // mod wins it (read off the row: the shown copy may be the project mod's losing one).
     let project_mod = project
@@ -569,13 +623,16 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 let (n, origin) = m.nif_at(i);
                 ui.horizontal(|ui| {
                     let r = cell(ui, path_w, |ui| {
-                        let b = egui::Button::selectable(
-                            m.selected_nif == Some(n.copy_id),
-                            nif_label(ui, &n.path),
-                        )
-                        .truncate()
-                        .min_size(egui::vec2(path_w, 0.0));
-                        ui.add(b)
+                        let shown = fit_middle(ui, &n.path, &font, text_w);
+                        let on = m.selected_nif == Some(n.copy_id);
+                        let b = egui::Button::selectable(on, nif_label(ui, &shown))
+                            .min_size(egui::vec2(path_w, 0.0));
+                        let r = ui.add(b);
+                        // The name stays the full path when the shown text is cut (rule 3.4, 8.1).
+                        r.widget_info(|| {
+                            egui::WidgetInfo::selected(egui::Role::Button, true, on, &n.path)
+                        });
+                        r
                     });
                     // Rules 3.4, 9.3: the whole path on hover, built only while hovered.
                     if r.on_hover_ui(|ui| {

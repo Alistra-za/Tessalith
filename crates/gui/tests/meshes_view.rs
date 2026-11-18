@@ -1118,6 +1118,12 @@ fn at_1100_px_a_long_row_truncates_and_stays_in_its_columns() {
     assert_eq!(rect(&h), panel, "the long row widened the column");
     // The full path stays the AccessKit name (rule 3.4).
     let path = h.get_by_label(&long).rect();
+    // E23: the cut is in the middle, so the file name stays.
+    let shown = painted_text_in(&h, path);
+    assert!(
+        shown.contains('…') && shown.ends_with("rock.nif"),
+        "{shown:?}"
+    );
     let origin = h.get_by_role_and_label(Role::Label, name).rect();
     let le = h.get_by_role_and_label(Role::Label, "LE").rect();
     assert!(
@@ -1140,6 +1146,73 @@ fn at_1100_px_a_long_row_truncates_and_stays_in_its_columns() {
         past.is_empty(),
         "past the column edge {}: {past:?}",
         panel.max.x
+    );
+}
+
+/// The text painted inside `cell`: the galleys of every `Shape::Text` whose rect lies in it, in paint order.
+fn painted_text_in(h: &Harness<'static, MeshesModel>, cell: eframe::egui::Rect) -> String {
+    h.output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            eframe::egui::Shape::Text(t) if cell.contains_rect(t.visual_bounding_rect()) => {
+                Some(t.galley.rows.iter().map(|r| r.text()).collect::<String>())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A harness at 1100 x 800 over one mod per name in `mods` and one row, `path`, won by the first.
+fn one_row_at_1100(mods: &[&str], path: &str) -> Harness<'static, MeshesModel> {
+    use eframe::egui;
+    let mut m = MeshesModel::empty();
+    m.mods = mods
+        .iter()
+        .enumerate()
+        .map(|(i, n)| mod_row(i as i64 + 1, n, modscan::store::KIND_BSA, false))
+        .collect();
+    m.winners = Arc::new(vec![(nif(1, path), mods[0].to_string())]);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1100.0, 800.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        );
+    h.run();
+    h
+}
+
+/// Review E23: a path too long for the list keeps its file name and its full name (the elision is in the middle).
+#[test]
+fn a_long_nif_path_keeps_its_file_name_and_full_name() {
+    let full = "meshes/armor/a very long folder name that keeps going/another very long folder name that keeps going/and a third long folder name for good measure/boots_of_the_long_name_1.nif";
+    let h = one_row_at_1100(&["A"], full);
+    let node = h.get_by_label(full);
+    let shown = painted_text_in(&h, node.rect());
+    assert!(shown.contains('…'), "not elided: {shown:?}");
+    assert!(
+        shown.ends_with("boots_of_the_long_name_1.nif"),
+        "the file name is cut: {shown:?}"
+    );
+}
+
+/// Review E23: short mod names leave the width to the path.
+#[test]
+fn short_mod_names_give_the_width_to_the_path() {
+    let full = "meshes/armor/a very long folder name that keeps going/another very long folder name that keeps going/and a third long folder name for good measure/boots_of_the_long_name_1.nif";
+    let h = one_row_at_1100(&["A", "B"], full);
+    let path = h.get_by_label(full).rect();
+    let list =
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "meshes-tree").expect("the panel was built");
+    assert!(
+        path.width() >= 0.6 * list.width(),
+        "path cell {} of a list {}",
+        path.width(),
+        list.width()
     );
 }
 
