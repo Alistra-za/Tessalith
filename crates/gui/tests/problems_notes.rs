@@ -5286,6 +5286,13 @@ fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
         "the missing entry's row: {texts:?}"
     );
     assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+    // The chip resolves the key as the list does: it names the set, not the old output-root path.
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("Set: landscape/big").count() > 0,
+        "the chip names the set by its id"
+    );
 }
 
 /// A set filter's rows after the output root changes to `to` (an export folder), for a filter opened on `landscape/leaf`

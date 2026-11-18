@@ -1639,7 +1639,7 @@ impl Scope {
 /// fold (Note BF: a keyed set's id is folded, a key-less one keeps its typed case), so a filter opened on a key-less
 /// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
 /// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
-/// and has no key (follow-up F7). The key wins. `None` for the empty string.
+/// and has no key. The key wins. `None` for the empty string.
 fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
     if s.is_empty() {
         return None;
@@ -1654,6 +1654,13 @@ fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a s
                 .iter()
                 .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
         })
+}
+
+/// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip;
+/// `s` itself when no set matches.
+pub fn scope_label(m: &AppModel, s: &str) -> String {
+    let views = sets::views(m);
+    view_of(&views, &m.sets_root(), s).map_or_else(|| s.to_string(), |v| v.id.clone())
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
