@@ -2499,7 +2499,7 @@ impl AppModel {
     }
 
     /// Why `item` cannot leave its set: it fills a locked slot there (F3a Task 8).
-    fn leaves_locked(&self, item: &str) -> Result<(), String> {
+    pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
         let Some(v) = self.set_of_item(item) else {
             return Ok(());
         };

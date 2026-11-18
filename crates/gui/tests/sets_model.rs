@@ -1277,6 +1277,30 @@ fn a_borrowed_vanilla_normal_answers_the_pbr_missing_normal() {
     assert_eq!(needs_rows(&m, id, "_n"), 0);
 }
 
+/// B3-3 (Note JP4): a borrowed vanilla normal raises no SHADER-NORMAL-SPECULAR on the borrower (the engine sees own
+/// members only), and HH8's borrow still answers "needs _n".
+#[test]
+fn a_borrowed_vanilla_normal_raises_no_specular_note() {
+    use sdc_gui::model::bottom::{problems, At};
+    let d = tempfile::tempdir().unwrap();
+    let m = borrow_rock01_normal_as(d.path(), engine::config::Subtype::Normal);
+    let id = "landscape/rock02";
+    // Review r1 I1: bind the views first; `view(&set_views(&m), id)` borrows a temporary (E0716).
+    let views = set_views(&m);
+    let v = view(&views, id);
+    assert!(
+        !v.set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
+        "{:?}",
+        v.set_warnings
+    );
+    assert!(!problems(&m).iter().any(|p| p.code
+        == Some(engine::codes::Code::ShaderNormalSpecular)
+        && matches!(&p.at, At::Set { id: i, .. } if i == id)));
+    assert_eq!(needs_rows(&m, id, "_n"), 0);
+}
+
 /// Note HH8 (B1-6): a model-space normal is not a tangent-space one, so borrowed into a `pbr` set it keeps "needs _n".
 #[test]
 fn a_borrowed_model_space_normal_keeps_the_missing_normal() {
