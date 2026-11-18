@@ -3331,7 +3331,7 @@ fn focused_labels<S>(h: &Harness<'_, S>) -> Vec<String> {
 
 /// rock01 with its Normal member gone and the SHADER-MISSING-MAP row for it (`a_missing_map_reason_…`), and the
 /// reason's button name. Final fix wave B10: no set in this fixture shares rock01's normal, so removing the member
-/// leaves the slot empty; a fixture with such a set would fill it from the shared member and lose the reason.
+/// goes to no set and no hand-over (Note JN5) takes part.
 fn missing_normal() -> (tempfile::TempDir, AppModel, String) {
     use engine::codes::{Code, Warning};
     use sdc_gui::model::sets::SlotKind;
