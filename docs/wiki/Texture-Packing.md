@@ -19,7 +19,7 @@ For modders whose sources come as separate maps (Substance or Blender exports): 
 | B | AO | 1 |
 | A | specular | 1 |
 
-`_rfaos` replaces it in an Advanced skin set: you picked **Advanced Skin** as the set's shader, or its other maps or types make it skin ([which sets are skin](Texture-Types.md#suffixes)). A `_fuzz` or `_sheen` map then fills G. In a PBR set the same map is written as the PBR fuzz texture (`<base>_f.dds`), and the set keeps `_rmaos`. <!-- D:JQ1,JQ2 --> The recipe key is [`packing.recipe`](Project-Config.md#packing).
+`_rfaos` replaces it when you picked **Advanced Skin** as the set's shader, or when a skin fuzz mask fills G: a `_fuzz` or `_sheen` map in a set its other maps or types make skin ([which sets are skin](Texture-Types.md#suffixes)). Under a picked **Advanced Skin** the fuzz map fills G too. In a PBR set the same map is written as the PBR fuzz texture (`<base>_f.dds`), and the set keeps `_rmaos`. <!-- D:JQ1,JQ2 --> The recipe key is [`packing.recipe`](Project-Config.md#packing).
 
 The channels are the same as above, except G is the fuzzmask (default 0).
 
