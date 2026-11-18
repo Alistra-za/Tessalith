@@ -182,6 +182,13 @@ pub fn is_fuzz_stem(stem: &str) -> bool {
     vocab_of(stem).is_some_and(|v| v.role == VocabRole::PackingInput(RawMap::Fuzz))
 }
 
+/// Whether `f` is a fuzz map image (`is_fuzz_stem`), the file the fuzz reading decides. A kept DDS of that name is not
+/// one: it is never planned.
+pub fn is_fuzz_map_image(f: &InputFile) -> bool {
+    f.kind == InputKind::Image
+        && is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+}
+
 /// Whether `term` (lower-case, no '_') is a vocabulary term; preset aliases may not be one (spec §3.7).
 pub fn is_vocabulary(term: &str) -> bool {
     VOCABULARY.iter().any(|v| v.term == term)

@@ -1078,7 +1078,8 @@ fn vanilla_fuzz_sets_are_unchanged() {
 }
 
 /// Fuzz-1a with a Note DY alpha fill: a `fuzzweight` helper fills the fuzz map's alpha, and the filled map still
-/// writes `<base>_f.dds` (the fill step resolves it again, before the set gains `f`). The set reports `pbr`.
+/// writes `<base>_f.dds`: the fill step resolves it again against the real set, which never holds `f` (only the other
+/// members and `set_resolved` read the set with `f`). The set reports `pbr`.
 #[test]
 fn a_filled_fuzz_map_keeps_base_f() {
     let d = fixture(
@@ -1091,11 +1092,12 @@ fn a_filled_fuzz_map_keeps_base_f() {
     let p = Engine::new()
         .unwrap()
         .plan(
-            r,
+            r.clone(),
             &Reporter::new(sink.clone(), "t"),
             &CancelToken::default(),
         )
         .unwrap();
+    patched_equals_fresh(&r, "x.png");
     let j = job(&p, "x_fuzz.png");
     assert!(
         j.fill
@@ -1123,4 +1125,170 @@ fn a_filled_fuzz_map_keeps_base_f() {
         })
         .collect();
     assert_eq!(pbr, vec![true]);
+}
+
+/// `in/<rel>` as a grey (`Luma`) gradient, for a helper whose name has no raw-map term.
+fn grey(dir: &Path, rel: &str) {
+    let p = dir.join("in").join(rel);
+    std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+        .save(p)
+        .unwrap();
+}
+
+/// `req` with its `[files]` table inline (read from `in/sdc.toml`), as the GUI sends it to a fast re-plan.
+fn inline(req: &BatchRequest) -> BatchRequest {
+    let mut r = req.clone();
+    let text = std::fs::read_to_string(r.inputs[0].join("sdc.toml")).unwrap_or_default();
+    r.project_config_inline = Some(engine::presets::ConfigFile::parse(&text, "t").unwrap());
+    r
+}
+
+/// The jobs (sorted by input) and `SetResolved` events of the sets in `scope`, in a comparable form.
+fn in_scope(
+    p: &Plan,
+    events: &[EngineEvent],
+    scope: &std::collections::BTreeSet<String>,
+) -> (Vec<serde_json::Value>, Vec<String>) {
+    let mut jobs: Vec<_> = p
+        .jobs
+        .iter()
+        .filter(|j| scope.contains(&j.set_key))
+        .collect();
+    jobs.sort_by(|a, b| a.input.cmp(&b.input));
+    let mut resolved: Vec<String> = events
+        .iter()
+        .filter(|e| e.set.as_ref().is_some_and(|k| scope.contains(k)))
+        .filter(|e| matches!(e.kind, EventKind::SetResolved { .. }))
+        .map(|e| serde_json::to_string(&e.kind).unwrap())
+        .collect();
+    resolved.sort();
+    (
+        jobs.iter()
+            .map(|j| serde_json::to_value(j).unwrap())
+            .collect(),
+        resolved,
+    )
+}
+
+/// R2 §6 for a fuzz fixture: after a full plan of `req`, a `[files]` edit on `key` that any sub-type takes
+/// (`mips.levels = 1`) re-planned fast (`Session::replan_sets`) gives the jobs and `SetResolved` events (shader map
+/// warnings included) of a fresh full plan of the edited request.
+fn patched_equals_fresh(req: &BatchRequest, key: &str) {
+    let base = inline(req);
+    let session = engine::session::Session::new().unwrap();
+    let cancel = CancelToken::default();
+    let rep = || {
+        let sink = Arc::new(VecSink::default());
+        (Reporter::new(sink.clone(), "t"), sink)
+    };
+    session
+        .plan_and_keep(base.clone(), &rep().0, &cancel)
+        .unwrap();
+    let edit: toml::Table = toml::from_str("mips.levels = 1").unwrap();
+    let mut edited = base;
+    edited
+        .project_config_inline
+        .as_mut()
+        .unwrap()
+        .files
+        .insert(key.into(), serde_json::to_value(&edit).unwrap());
+    let (prep, psink) = rep();
+    let partial = session
+        .replan_sets(&edited, &[(key.to_string(), Some(edit))], &prep, &cancel)
+        .unwrap_or_else(|e| panic!("{key}: {e:?}"));
+    let (frep, fsink) = rep();
+    let fresh = session
+        .engine()
+        .plan_cached(edited, &frep, &cancel, session.cache())
+        .unwrap();
+    assert_eq!(
+        in_scope(&partial.plan, &psink.take(), &partial.scope),
+        in_scope(&fresh, &fsink.take(), &partial.scope),
+        "{key}: the fast re-plan differs from a fresh plan"
+    );
+}
+
+/// A plan of `d` (cs, accept off) and the warnings of the `SetResolved` of the set that holds `file`.
+fn set_warnings(d: &TempDir, file: &str) -> (Plan, Vec<engine::codes::Warning>) {
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    let sink = Arc::new(VecSink::default());
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(sink.clone(), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let key = job(&p, file).set_key.clone();
+    let warnings = sink
+        .take()
+        .into_iter()
+        .filter(|e| e.set.as_deref() == Some(key.as_str()))
+        .filter_map(|e| match e.kind {
+            EventKind::SetResolved { warnings, .. } => Some(warnings),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    (p, warnings)
+}
+
+fn request(d: &TempDir) -> BatchRequest {
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    r
+}
+
+/// Final review A I1: a filled member of a Fuzz-1a set is typed against the set read with `f`, as 6c types it. A
+/// `_opacity` helper fills the diffuse's alpha (Ruling 5), and the filled diffuse stays `pbr_albedo`.
+#[test]
+fn a_filled_diffuse_in_a_fuzz_only_set_stays_pbr_albedo() {
+    let d = fixture(&["rock01.png", "rock01_n.png", "rock01_fuzz.png"], "");
+    grey(d.path(), "rock01_opacity.png");
+    let p = plan(&d);
+    let j = job(&p, "rock01.png");
+    assert!(
+        j.fill
+            .as_ref()
+            .is_some_and(|f| f.source.path.ends_with("rock01_opacity.png")),
+        "the helper fills the diffuse: {:?}",
+        j.fill
+    );
+    assert_eq!(j.profile.subtype, Subtype::PbrAlbedo);
+    assert_eq!(shader(&p), Shader::Pbr);
+    patched_equals_fresh(&request(&d), "rock01.png");
+}
+
+/// Final review A I2: the shader map check reads a kept DDS member against the set read with `f`. In a Fuzz-1a set a
+/// kept `x.dds` fills `albedo` (no SHADER-EXTRA-MAP for it, no SHADER-MISSING-MAP `albedo`), and a kept `x_n.dds`
+/// fills `_n` with no SHADER-NORMAL-SPECULAR. The control row, a real `_f` in place of the fuzz map, passes either way.
+#[test]
+fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
+    for fuzz in ["x_fuzz.png", "x_f.png"] {
+        let d = fixture(&["x_n.png", fuzz], "");
+        std::fs::write(d.path().join("in/x.dds"), b"DDS not a real texture").unwrap();
+        let (_, w) = set_warnings(&d, "x_n.png");
+        assert!(
+            !w.iter()
+                .any(|w| w.code == Code::ShaderExtraMap && w.data["member"] == "x.dds"),
+            "{fuzz}: {w:?}"
+        );
+        assert!(
+            !w.iter()
+                .any(|w| w.code == Code::ShaderMissingMap && w.data["map"] == "albedo"),
+            "{fuzz}: {w:?}"
+        );
+        patched_equals_fresh(&request(&d), "x_n.png");
+        let d = fixture(&["x.png", fuzz], "");
+        std::fs::write(d.path().join("in/x_n.dds"), b"DDS not a real texture").unwrap();
+        let (_, w) = set_warnings(&d, "x.png");
+        assert!(
+            !w.iter().any(|w| w.code == Code::ShaderNormalSpecular),
+            "{fuzz}: {w:?}"
+        );
+        patched_equals_fresh(&request(&d), "x.png");
+    }
 }
