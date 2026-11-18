@@ -1113,7 +1113,7 @@ fn row(
                 let r = ui
                     .allocate_ui(egui::vec2(w, h), |ui| {
                         egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
-                            .selected_text(value)
+                            .selected_text(value.as_str())
                             .width(w)
                             .truncate()
                             .show_ui_036(ui, |ui| {
@@ -1124,7 +1124,21 @@ fn row(
                             .response
                     })
                     .inner;
-                super::name_input(r, &format!("{} format", slot.label()));
+                let r = super::name_input(r, &format!("{} format", slot.label()));
+                // A value the row has no room for is cut: its full text is on hover (rule 3.4), and on a disabled
+                // combo it leads the reason's line (as the pickers' hover does).
+                if w + 0.01 < want {
+                    let why = lock.as_deref();
+                    r.on_hover_ui(|ui| {
+                        ui.label(&value);
+                    })
+                    .on_disabled_hover_ui(|ui| {
+                        ui.label(match why {
+                            Some(why) => format!("{value}\n{why}"),
+                            None => value.clone(),
+                        });
+                    });
+                }
             })
             .response
             .on_disabled_hover_text(lock.unwrap_or_default());
@@ -1806,21 +1820,31 @@ fn fill_controls(
                     source_picker(ui, model, key, role, None, why, acts);
                     let mut v = shown;
                     let name = format!("{} fill", role_label(role));
-                    if super::number_input::settled_drag(
-                        ui,
-                        &mut v,
-                        1.0,
-                        0..=255,
-                        &name,
-                        model.edit_busy(),
-                        key,
-                    ) {
+                    // The lines run past the scope that `packed_controls` disables them under, so the box and Reset
+                    // each answer for themselves with the reason (a scope's response covers the box, as a DragValue's
+                    // `settled_drag` does not hand its own back).
+                    let drag = ui.scope(|ui| {
+                        super::number_input::settled_drag(
+                            ui,
+                            &mut v,
+                            1.0,
+                            0..=255,
+                            &name,
+                            model.edit_busy(),
+                            key,
+                        )
+                    });
+                    if let Some(why) = why {
+                        drag.response.on_disabled_hover_text(why);
+                    }
+                    if drag.inner {
                         acts.push(Act::Fill(key.to_string(), role, Some(v)));
                     }
                     if own_key
                         && ui
                             .small_button("Reset")
                             .on_hover_text("Remove this fill")
+                            .on_disabled_hover_text(why.unwrap_or_default())
                             .clicked()
                     {
                         acts.push(Act::Fill(key.to_string(), role, None));

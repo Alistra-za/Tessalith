@@ -421,6 +421,7 @@ fn a_read_only_sdc_toml_disables_the_fills_and_says_why() {
     std::fs::write(bad.join("sdc.toml"), "this is = = not toml\n").unwrap();
     m.project = Some(sdc_gui::project::ProjectDoc::open(&bad));
     assert!(m.project.as_ref().unwrap().read_only());
+    let reason = m.toml_read_only_reason().expect("read-only");
     // The model refuses too.
     m.set_pack_fill(RMAOS, RawMap::Ao, Some(1));
     // A note from an earlier switch: a refused call must leave it (the guard returns before `dropped_fills.clear()`;
@@ -454,6 +455,19 @@ fn a_read_only_sdc_toml_disables_the_fills_and_says_why() {
         assert_eq!(row.len(), 1, "one value box on the {name} row");
         assert!(row[0].accesskit_node().is_disabled(), "{name}");
     }
+    // "Says why": the value box answers for itself with the reason. The lines run past the scope the fills are
+    // disabled under, so a hover on the box is not that scope's (review F2).
+    let metallic = h.get_by_role_and_label(Role::SpinButton, "metallic fill");
+    metallic.scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::SpinButton, "metallic fill")
+        .hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_all_by_label(&reason).count() >= 1,
+        "the metallic box's hover says why"
+    );
 }
 
 /// A1-6 (was `the_recipe_selector_shows_the_chosen_recipe_with_auto`): the slot title is the recipe's one display
@@ -1757,4 +1771,95 @@ fn a_read_only_picker_hover_holds_the_name_and_the_reason() {
     // The disabled hover is the name, then the reason. A tooltip Label's text is its AccessKit value; kittest's label
     // query reads it (one tooltip per layer: the picker's, so the outer reason-only tooltip is not drawn).
     h.get_by_label(&want);
+}
+
+/// A PBR rock01 with a height map: its `_p` row's format combo reads "BC4 · linear (one channel)", longer than the
+/// 96 px combo.
+fn bc4_set(dir: &Path) -> AppModel {
+    let mut m = suffix_set(dir, &["p"], engine::policy::AcceptSuggestions::None);
+    let key = m
+        .sets
+        .iter()
+        .find(|s| s.key.ends_with("m/rock01"))
+        .expect("the rock01 set")
+        .key
+        .clone();
+    m.set_shader(&key, Some(Shader::Pbr));
+    idle(&mut m);
+    m
+}
+
+const BC4_VALUE: &str = "BC4 · linear (one channel)";
+
+/// The BC4 format combos' value and rect.
+fn bc4_combos(h: &Harness<'static, AppModel>) -> Vec<(String, egui::Rect)> {
+    h.query_all_by_role(Role::ComboBox)
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.ends_with(" format"))
+        })
+        .filter_map(|n| n.value().map(|v| (v.to_string(), n.rect())))
+        .filter(|(v, _)| v.starts_with("BC4"))
+        .collect()
+}
+
+/// Review F3 (controller ruling 1: at 1280 every format value reads in full): the long BC4 value is whole at 1280 and
+/// 1536, where the row has the room, and painted as the AccessKit value says.
+#[test]
+fn a_long_format_value_reads_in_full_at_1280_and_1536() {
+    for w in [1280.0, 1536.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = editor_at(bc4_set(d.path()), w, 900.0);
+        settle(&mut h);
+        let combos = bc4_combos(&h);
+        assert!(!combos.is_empty(), "{w}: a BC4 format combo");
+        for (value, r) in combos {
+            assert_eq!(value, BC4_VALUE, "{w}");
+            assert!(r.width() > 96.0, "{w}: the combo widened ({r:?})");
+            assert!(!painted_cut(&h, r), "{w}: {value} reads in full ({r:?})");
+            assert_eq!(painted_in(&h, r), value, "{w}: painted as it is valued");
+        }
+    }
+}
+
+/// Review F1: a value the row has no room for is cut, and the hover holds it whole (rule 3.4). At the 724 px floor the
+/// long BC4 value still fits (the File cell only needs `FILE_MIN`), so the cut is made with a larger Button font: the
+/// combo wants more than the row can give.
+#[test]
+fn a_cut_format_value_has_its_full_text_on_hover() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor_at(bc4_set(d.path()), 1024.0, 800.0);
+    h.ctx.global_style_mut(|s| {
+        s.text_styles
+            .insert(egui::TextStyle::Button, egui::FontId::proportional(60.0));
+    });
+    settle(&mut h);
+    let (_, r) = bc4_combos(&h).into_iter().next().expect("a BC4 combo");
+    // The text is taller than the combo then, so `painted_cut` would see no galley in it: compare the widths instead.
+    let text_w = h.ctx.fonts_mut(|f| {
+        f.layout_no_wrap(
+            BC4_VALUE.to_string(),
+            egui::FontId::proportional(60.0),
+            egui::Color32::WHITE,
+        )
+        .size()
+        .x
+    });
+    assert!(
+        text_w > r.width(),
+        "the value ({text_w} px) is cut by its combo ({r:?})"
+    );
+    h.get_by_role_and_label(Role::ComboBox, "Height _p format")
+        .scroll_to_me();
+    h.run();
+    h.get_by_role_and_label(Role::ComboBox, "Height _p format")
+        .hover();
+    h.run();
+    h.run();
+    assert!(
+        h.query_all_by_label(BC4_VALUE)
+            .any(|n| n.accesskit_node().role() == Role::Label),
+        "the hover shows {BC4_VALUE}"
+    );
 }
