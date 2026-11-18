@@ -140,7 +140,7 @@
           ]
         },
         "normal": {
-          "description": "The set's `pbr_normal` source.",
+          "description": "The set's tangent-space `_n` source (Note JS2: `pbr_normal`, else under a PBR-set shader `normal` or `landscape_normal`).",
           "type": "string"
         },
         "normal_profile": {
