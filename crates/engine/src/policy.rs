@@ -2342,7 +2342,9 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
             let pbr = *role == RawMap::Fuzz
                 && crate::pack::plan::fuzz_reading(ctx, f.set, f.input)
                     == crate::pack::plan::FuzzReading::Pbr;
-            if !pbr {
+            // Fuzz-4: a PBR set's own `_f` wins; the fuzz map stays a waiting input that `plan_packing` lists unused.
+            // `set.suffixes` holds `f` only for a real `_f` member here (api.rs keeps it off the fuzz map's clone).
+            if !pbr || f.set.suffixes.contains("f") {
                 return packing_input_job(ctx, f, term, *role, false);
             }
             let mut suggestions = vec![Suggestion {

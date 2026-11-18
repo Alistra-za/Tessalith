@@ -873,6 +873,32 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
     }
 }
 
+/// Fuzz-4: the file name of the set's first image with suffix `f` (its own or shared in), by path; `None` when the
+/// set has no `f`.
+fn pbr_f_name(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> Option<String> {
+    if !set.suffixes.contains("f") {
+        return None;
+    }
+    let mut own: Vec<&InputFile> = set
+        .members
+        .iter()
+        .chain(&set.shares)
+        .map(|&i| &files[i])
+        .filter(|f| {
+            f.kind == InputKind::Image
+                && split_suffix_with(
+                    &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                    ctx.registry.alias_table(),
+                )
+                .suffix
+                .as_deref()
+                    == Some("f")
+        })
+        .collect();
+    own.sort_by(|a, b| a.path.cmp(&b.path));
+    own.first().map(|f| name(&f.path))
+}
+
 /// Note DR: whether `f` is a `_f` that a set already Advanced skin packs into the `_rfaos` G channel (a `_f` whose
 /// sub-type was requested is converted alone). `policy::resolve_file_with` applies the same test to a planned file.
 pub fn is_skin_f(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bool {
@@ -970,6 +996,8 @@ pub fn plan_packing(
     // set, why its mask has no shared fuzz source; and every file some set takes as a raw input.
     let mut unread: BTreeMap<PathBuf, Vec<(String, FuzzReading)>> = BTreeMap::new();
     let mut lent: BTreeMap<String, String> = BTreeMap::new();
+    // Fuzz-4: a fuzz map a PBR set's own `_f` beats, with that `_f`'s file name.
+    let mut f_wins: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut in_raw: BTreeSet<PathBuf> = BTreeSet::new();
     for (set, stand_in) in sets.iter().zip(&stand_ins) {
         // Raw members still waiting for a recipe: a planned packing input, or one that failed to load or was
@@ -1017,6 +1045,13 @@ pub fn plan_packing(
                 && crate::policy::helper_requested(ctx, f).role.is_none()
             {
                 let reading = fuzz_reading(ctx, set, f);
+                // Fuzz-4: under PBR the set's own `_f` wins; the fuzz map is listed unused after the loop.
+                if reading == FuzzReading::Pbr && waiting.contains_key(&f.path) {
+                    if let Some(f_name) = pbr_f_name(ctx, set, files) {
+                        f_wins.entry(f.path.clone()).or_insert(f_name);
+                        continue;
+                    }
+                }
                 if reading != FuzzReading::Skin {
                     // Listed unused after the loop, with every set that does not read it (Note HH1: one may lend it).
                     if waiting.contains_key(&f.path) {
@@ -1442,6 +1477,20 @@ pub fn plan_packing(
             Code::PackUnusedInput,
             format!("{}: {reason}; not converted", name(&p)),
         );
+    }
+    // Fuzz-4: a fuzz map beside the set's own `_f` under PBR is listed unused, unless another set takes it as a source.
+    for (p, f_name) in f_wins {
+        if !in_raw.contains(&p) {
+            retag(
+                jobs,
+                &p,
+                Code::PackUnusedInput,
+                format!(
+                    "{}: {f_name} is the set's PBR fuzz texture (_f); not converted",
+                    name(&p)
+                ),
+            );
+        }
     }
     // Note DY: a helper an alpha fill uses is consumed too, whatever packing did with it.
     consumed.extend(fills.used.iter().cloned());

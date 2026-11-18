@@ -172,6 +172,36 @@ fn a_typed_fuzz_map_beside_an_f_keeps_its_own_name() {
     );
 }
 
+/// Fuzz-4: a PBR set holding both an `_f` and a fuzz map keeps the `_f`; the fuzz map is listed unused.
+#[test]
+fn an_f_beside_a_fuzz_map_wins_under_pbr() {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_ao.png",
+            "iron_fuzz.png",
+            "iron_f.png",
+        ],
+        "",
+    );
+    let p = plan(&d);
+    assert!(
+        packed(&p, "iron_rmaos.dds").is_some(),
+        "{:?}",
+        out_names(&p)
+    );
+    assert_eq!(job(&p, "iron_f.png").profile.subtype, Subtype::PbrFuzz);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png is the set's PBR fuzz texture (_f); not converted"
+    );
+    assert_eq!(
+        out_names(&p).iter().filter(|n| *n == "iron_f.dds").count(),
+        1
+    );
+}
+
 /// Fuzz-1, Fuzz-2, Fuzz-18: with other PBR evidence (a raw roughness map) the fuzz map is `pbr_fuzz` decided by the
 /// set (never a suggestion), `<base>_f.dds`, and the set packs `_rmaos`; the diffuse is `pbr_albedo`. Both terms,
 /// both accept modes.
