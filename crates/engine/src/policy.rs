@@ -2393,16 +2393,17 @@ fn fuzz_f_output(ctx: &ResolveCtx, f: &FileFacts, job: &ResolvedJob) -> Option<P
         .output
         .file_name()
         .is_some_and(|n| n.to_string_lossy() == format!("{stem}.dds"));
+    // The stem is parsed once: its vocabulary role is the fuzz map test (`group::is_fuzz_stem`), its base the name.
+    let (base, term) = crate::group::split_vocab(&stem)?;
     if ctx.target != Target::Cs
         || f.alias.is_some()
-        || !crate::group::is_fuzz_stem(&stem)
+        || term.role != crate::group::VocabRole::PackingInput(RawMap::Fuzz)
         || job.profile.subtype != Subtype::PbrFuzz
         || !default
         || f.set.suffixes.contains("f")
     {
         return None;
     }
-    let (base, _) = crate::group::split_vocab(&stem)?;
     Some(f.input.output.with_file_name(format!("{base}_f.dds")))
 }
 

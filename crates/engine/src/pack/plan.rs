@@ -12,9 +12,7 @@ use crate::codes::{Code, Warning};
 use crate::config::{GraySource, PackPrefer, PackRecipe, Profile, RawMap, Target};
 use crate::discover::{InputFile, InputKind};
 use crate::events::{RecipeReport, RecipeStatus};
-use crate::group::{
-    is_fuzz_stem, member_split, split_suffix_with, split_vocab, TextureSet, VocabRole,
-};
+use crate::group::{member_split, split_suffix_with, split_vocab, TextureSet, VocabRole};
 use crate::image::{Rgba32F, SourceInfo};
 use crate::policy::{
     layered_profile_placeholder, resolve_decided, FileFacts, JobStatus, ResolveCtx, ResolvedJob,
@@ -332,6 +330,16 @@ fn retag(jobs: &mut [ResolvedJob], path: &Path, code: Code, message: String) {
             .unwrap_or_default();
         j.warnings = vec![Warning::new(code, message).with_data(data)];
     }
+}
+
+/// [`retag`] as PACK-UNUSED-INPUT, `<file>: <reason>; not converted`.
+fn retag_unused(jobs: &mut [ResolvedJob], path: &Path, reason: &str) {
+    retag(
+        jobs,
+        path,
+        Code::PackUnusedInput,
+        format!("{}: {reason}; not converted", name(path)),
+    );
 }
 
 /// A planned non-raw member that already provides `kind`'s output (spec §6.4 "Pre-packed conflict", DECISIONS
@@ -740,13 +748,8 @@ pub fn chosen_skin(ctx: &ResolveCtx, set: &TextureSet) -> bool {
 /// Fuzz-9: the set's explicit shader (`ShaderOrigin::Set`) is in the PBR family (`Pbr`, `PbrGrass`, `PbrLandscape`).
 pub fn chosen_pbr(ctx: &ResolveCtx, set: &TextureSet) -> bool {
     ctx.shaders.get(&set.key).is_some_and(|p| {
-        p.provenance == crate::shader::ShaderOrigin::Set && is_pbr_family(p.shader)
+        p.provenance == crate::shader::ShaderOrigin::Set && p.shader.is_pbr_family()
     })
-}
-
-fn is_pbr_family(s: crate::shader::Shader) -> bool {
-    use crate::shader::Shader;
-    matches!(s, Shader::Pbr | Shader::PbrGrass | Shader::PbrLandscape)
 }
 
 /// Whether the set is Advanced skin (DECISIONS Note R-skin-1): shared skin (Note HG2); a fuzz map with other skin
@@ -756,9 +759,10 @@ fn is_pbr_family(s: crate::shader::Shader) -> bool {
 /// before Pass 1, from the raw roles the set's suffixes name; `this` is any member of the set (it supplies the folder
 /// and base the packed output's `[files]` key is read from).
 ///
-/// `set.suffixes` also holds the suffixes `auto` predicts from the raw roles (DECISIONS Note M7), so an `rfaos` in
-/// it counts as a real `_rfaos` member only when `auto` does not predict it from the roles other than a fuzz map's
-/// (final review I1; a fuzz map's prediction follows this answer, `api::predict_suffixes`).
+/// `set.suffixes` also holds the suffixes `auto` predicts from the raw roles (DECISIONS Note M7). Without a fuzz map
+/// `auto` never builds `_rfaos` (Fuzz-1), and `api::predict_suffixes` predicts an `rfaos` from a fuzz map only when the
+/// set already reads it as the skin mask (this answer, on the set before prediction), so an `rfaos` in the suffixes is
+/// either a real `_rfaos` member or the prediction of a set that is already skin.
 pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> bool {
     if ctx.target != Target::Cs {
         return false;
@@ -767,23 +771,27 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
         return true;
     }
     // The packed output's key is built from a raw map's name, so give it one: `this` may be `x_sk`, `x_wet` or `x`.
-    let stem = this
-        .rel
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let base = member_split(&stem, set, ctx.registry.alias_table()).base;
-    let ext = this
-        .rel
-        .extension()
-        .map_or_else(|| "png".to_string(), |e| e.to_string_lossy().into_owned());
-    let mut this = this.clone();
-    this.rel = this.rel.with_file_name(format!("{base}_ao.{ext}"));
+    // Built only where a recipe is read (this runs per file from `suggest`).
+    let renamed = || {
+        let stem = this
+            .rel
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let base = member_split(&stem, set, ctx.registry.alias_table()).base;
+        let ext = this
+            .rel
+            .extension()
+            .map_or_else(|| "png".to_string(), |e| e.to_string_lossy().into_owned());
+        let mut this = this.clone();
+        this.rel = this.rel.with_file_name(format!("{base}_ao.{ext}"));
+        this
+    };
     // Fuzz-5: the evidence that keeps a fuzz map the skin mask. Only in a set with a fuzz map, so no other set's
     // reading changes (a metallic-only set with a written `rfaos` stays `_rmaos`, DQ2).
     if has_fuzz_map(set) {
-        let (on_rfaos, on_rmaos) = written_recipes(ctx, set, &this);
+        let (on_rfaos, on_rmaos) = written_recipes(ctx, set, &renamed());
         if on_rfaos == PackRecipe::Rfaos || on_rmaos == PackRecipe::Rfaos {
             return true;
         }
@@ -800,18 +808,18 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     {
         return true;
     }
-    // Fuzz-1: a fuzz map takes no part in either test below. `predict_suffixes` predicts an `rfaos` from a name-read
-    // fuzz map only when the set already reads it as the skin mask, so the prediction check needs no fuzz role, and a
-    // real `_rfaos` beside a fuzz map stays evidence; in the recipe test `auto` with a fuzz map alone builds `_rmaos`.
+    // A real `_rfaos` member, with or without a fuzz map (JQ48); see the doc comment for a predicted one.
+    // shortcut: an in-place skin project's own earlier `<base>_rfaos.dds` (a kept DDS) counts here too, so such a set
+    // stays Advanced Skin until the file is deleted; upgrade when the planner can tell an output the manifest records
+    // as Tessalith's from a hand-made file (follow-up F14), and leave that one out.
+    if set.suffixes.contains("rfaos") {
+        return true;
+    }
+    // Fuzz-1: a fuzz map takes no part in the recipe test: `auto` with a fuzz map alone builds `_rmaos`.
     let roles: BTreeSet<RawMap> = RawMap::INPUTS
         .into_iter()
         .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(&r.id()))
         .collect();
-    if set.suffixes.contains("rfaos")
-        && !super::predicted_suffixes(ctx.target, false, &roles).contains(&"rfaos")
-    {
-        return true;
-    }
     let raw: Vec<RawInput> = roles
         .iter()
         .map(|&role| RawInput {
@@ -822,6 +830,7 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     if raw.is_empty() {
         return false;
     }
+    let this = renamed();
     let (choice, _) = chosen_recipe(ctx, set, &|_| this.clone(), &raw, &BTreeMap::new());
     recipes_for_with(ctx.target, &raw, choice, false)
         .0
@@ -866,7 +875,7 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
         return FuzzReading::Skin;
     }
     match pick.filter(|p| p.provenance != ShaderOrigin::Set) {
-        Some(p) if is_pbr_family(p.shader) => FuzzReading::Pbr,
+        Some(p) if p.shader.is_pbr_family() => FuzzReading::Pbr,
         Some(p) if p.shader == Shader::AdvancedSkin => FuzzReading::Skin,
         Some(p) => FuzzReading::Unused(p.shader),
         None => FuzzReading::Pbr,
@@ -1039,7 +1048,7 @@ pub fn plan_packing(
             // A hand-set role is outside this (spec §3a).
             if role == RawMap::Fuzz
                 && ctx.target == Target::Cs
-                && is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+                && crate::group::is_fuzz_map_image(f)
                 && crate::policy::helper_requested(ctx, f).role.is_none()
             {
                 let reading = fuzz_reading(ctx, set, f);
@@ -1062,7 +1071,10 @@ pub fn plan_packing(
                 }
                 // shortcut: a file has one job (a packed source has no job of its own: the run's terminal events,
                 // `api.rs`), so a shared fuzz map its own set converts is no source of this set's mask; its G
-                // PACK-DEFAULTED says why. Upgrade when a packed source may also keep its own job.
+                // PACK-DEFAULTED says why. The mirror is silent: a lender that packs it into its own `_rfaos` leaves
+                // a PBR borrower no `<base>_f.dds` and no row (the file's job is consumed, so nothing carries one).
+                // A set whose only fuzz map is shared in gets no Fuzz-1a pick (`api::pbr_read_fuzz`). Upgrade all
+                // three when a packed source may also keep its own job (follow-up F10).
                 let own_job = !waiting.contains_key(&f.path)
                     && !failed.contains(&f.path)
                     && !cancelled.contains(&f.path);
@@ -1421,12 +1433,7 @@ pub fn plan_packing(
             }
             let reason = fills.not_used.get(&p).cloned().unwrap_or(reason);
             if !failed.contains(&p) {
-                retag(
-                    jobs,
-                    &p,
-                    Code::PackUnusedInput,
-                    format!("{}: {reason}; not converted", name(&p)),
-                );
+                retag_unused(jobs, &p, &reason);
             }
         }
         out.reports.insert(set.key.clone(), reports);
@@ -1469,24 +1476,17 @@ pub fn plan_packing(
                 .collect::<Vec<_>>()
                 .join(", and ")
         };
-        retag(
-            jobs,
-            &p,
-            Code::PackUnusedInput,
-            format!("{}: {reason}; not converted", name(&p)),
-        );
+        retag_unused(jobs, &p, &reason);
     }
     // Fuzz-4: a fuzz map beside the set's own `_f` under PBR is listed unused, unless another set takes it as a source.
+    // Last on purpose: when a shared fuzz map is also in `unread`, its own set's `_f` is the reason that holds for the
+    // file's own job, so this retag replaces the one above.
     for (p, f_name) in f_wins {
         if !in_raw.contains(&p) {
-            retag(
+            retag_unused(
                 jobs,
                 &p,
-                Code::PackUnusedInput,
-                format!(
-                    "{}: {f_name} is the set's PBR fuzz texture (_f); not converted",
-                    name(&p)
-                ),
+                &format!("{f_name} is the set's PBR fuzz texture (_f)"),
             );
         }
     }

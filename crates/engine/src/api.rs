@@ -1241,6 +1241,9 @@ pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
 /// new state, so an edit that moves any file in or out is seen.
 /// shortcut: a file a `[[rules]]` entry types is invisible here (rules need the analysis); the BV2 writer dedupe
 /// catches two of those, so none writes twice. Revisit if a rule needs the pre-pass to see it.
+/// shortcut: a fuzz map the set reads as the PBR fuzz texture (Fuzz-1a) counts here by its raw name, although it
+/// writes `<base>_f.dds`; two that would both write it are left to the BV2 writer dedupe (JQ40). Revisit if the
+/// pre-pass must see the reading.
 pub(crate) fn waiting_images(
     ctx: &ResolveCtx,
     target: Target,
@@ -1285,11 +1288,13 @@ pub(crate) fn hand_role(ctx: &ResolveCtx, f: &InputFile) -> Option<crate::helper
         .flatten()
 }
 
-/// Fuzz-1a: `f` is a fuzz map (`group::is_fuzz_stem`) image with no requested sub-type and no hand role, so its
+/// Fuzz-1a: `f` is a fuzz map image (`group::is_fuzz_map_image`) with no requested sub-type and no hand role, so its
 /// reading is the set's to decide.
+// shortcut: a sub-type a `[[rules]]` entry names is not seen (rules need the analysis, as `is_typed` says), so a fuzz
+// map a preset rule types `pbr_fuzz` counts as untyped: with a `_g` the set picks Glow, yet the map converts to
+// `<base>_f.dds` and nothing lists it unused. Revisit if a rule needs the pre-pass to see it.
 pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
-    f.kind == InputKind::Image
-        && crate::group::is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+    crate::group::is_fuzz_map_image(f)
         && hand_role(ctx, f).is_none()
         && !crate::policy::subtype_requested(ctx, f)
 }
@@ -1309,10 +1314,7 @@ pub(crate) fn pbr_read_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFi
             .map(|&i| &files[i])
             .find(|f| {
                 untyped_fuzz_map(ctx, f)
-                    || (f.kind == InputKind::Image
-                        && crate::group::is_fuzz_stem(
-                            &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                        )
+                    || (crate::group::is_fuzz_map_image(f)
                         && crate::policy::subtype_override(ctx, f) == Some(Subtype::PbrFuzz))
             })
             .is_some_and(|fm| {
@@ -1754,7 +1756,9 @@ impl Engine {
         };
         file_scopes.index(&files);
         // Fuzz-5, Fuzz-22: the skin evidence a set with a fuzz map reads (`set_is_advanced_skin`), from a ctx of its
-        // own that is dropped before the sets are stored.
+        // own that is dropped before the sets are stored. Each image's hand-set role is read here once (it reads
+        // neither field).
+        let hand: Vec<Option<crate::helper::HelperRole>>;
         {
             let ctx = base_ctx(
                 req,
@@ -1765,27 +1769,17 @@ impl Engine {
                 project_config.as_ref(),
                 &file_scopes,
             );
-            let skin_typed: BTreeSet<usize> = (0..files.len())
+            hand = files.iter().map(|f| hand_role(&ctx, f)).collect();
+            // shortcut: a sub-type a `[[rules]]` entry names is not seen (rules need the analysis), as in `is_typed`;
+            // revisit if a rule names a skin sub-type.
+            file_scopes.skin_typed = (0..files.len())
                 .filter(|&i| {
-                    matches!(
-                        crate::policy::subtype_override(&ctx, &files[i]),
-                        Some(
-                            Subtype::SkinAlbedo
-                                | Subtype::SkinRfaos
-                                | Subtype::SkinSk
-                                | Subtype::SkinWet
-                                | Subtype::SkinDetail
-                        )
-                    )
+                    crate::policy::subtype_override(&ctx, &files[i]).is_some_and(Subtype::is_skin)
                 })
                 .collect();
-            let hand_fuzz: BTreeSet<usize> = (0..files.len())
-                .filter(|&i| {
-                    hand_role(&ctx, &files[i]) == Some(crate::helper::HelperRole::Raw(RawMap::Fuzz))
-                })
+            file_scopes.hand_fuzz = (0..files.len())
+                .filter(|&i| hand[i] == Some(crate::helper::HelperRole::Raw(RawMap::Fuzz)))
                 .collect();
-            file_scopes.skin_typed = skin_typed;
-            file_scopes.hand_fuzz = hand_fuzz;
         }
         let ctx = base_ctx(
             req,
@@ -1796,8 +1790,6 @@ impl Engine {
             project_config.as_ref(),
             &file_scopes,
         );
-        let hand: Vec<Option<crate::helper::HelperRole>> =
-            files.iter().map(|f| hand_role(&ctx, f)).collect();
         let typed: BTreeSet<usize> = (0..files.len())
             .filter(|&i| is_typed(&ctx, &files[i], hand[i]))
             .collect();
@@ -2366,7 +2358,8 @@ impl Engine {
             .filter(|s| pbr_read_fuzz(&ctx, s, files))
             .map(|s| s.key.clone())
             .collect();
-        // 6c. Re-resolve the members of a set whose shader changes member defaults.
+        // 6c. Re-resolve the members of a set whose shader changes member defaults, of a chosen-skin set (DV1) and of a
+        // set read with `f` (Fuzz-1a), and every cs fuzz map (its reading follows the pick).
         let mut jobs = vec![];
         for (mut old, (wi, a, info)) in pass1_jobs.into_iter().zip(pass1) {
             // PBR grass design §4.4: the albedo's corner texel against CS's grass shadow-pass detector, judged on the

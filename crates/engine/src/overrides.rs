@@ -135,9 +135,13 @@ pub struct FileScopes {
     /// set's diffuse member (no suffix, or `_d`): their set gets no Advanced Skin reading from its chosen shader.
     pub(crate) skin_pinned: BTreeSet<usize>,
     /// Fuzz-5: indices (as `skin_pinned`) of the files whose `[files]` or `--set` sub-type is a skin type
-    /// (`skin_albedo`, `skin_rfaos`, `skin_sk`, `skin_wet`, `skin_detail`): skin evidence for a set with a fuzz map.
+    /// (`Subtype::is_skin`): skin evidence for a set with a fuzz map. Built once in `prepare`; `set_entry` does not
+    /// refresh it, which is safe only because a sub-type edit in a set with a fuzz map plans in full
+    /// (`skeleton::FUZZ_SUBTYPE`).
     pub(crate) skin_typed: BTreeSet<usize>,
-    /// Fuzz-22: indices (as `skin_pinned`) of the images whose hand-set `helper.role` is `fuzz`: skin evidence.
+    /// Fuzz-22: indices (as `skin_pinned`) of the images whose hand-set `helper.role` is `fuzz`: skin evidence. Built
+    /// once in `prepare`, like `skin_typed`; safe because a `helper.role` edit plans in full
+    /// (`skeleton::HELPER_ROLE_CHANGE`).
     pub(crate) hand_fuzz: BTreeSet<usize>,
     /// `overrides` and `allow` by lower-cased key (`index`); `None` until built. Valid only while `overrides` and
     /// `allow` change through `index` or `set_entry`: staleness is detected by their lengths only, so any other

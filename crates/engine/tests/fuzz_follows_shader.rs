@@ -538,6 +538,24 @@ fn a_written_recipe_wins_over_an_explicit_shader() {
             .to_string_lossy(),
         "rock01_f.dds"
     );
+    // rfaos + explicit Glow, with a fuzz map (JQ42): the pick decides the reading, so the fuzz map is unused under
+    // Glow, and the written recipe still picks the packed file, `_rfaos` with G at its default.
+    let d = fixture(
+        &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+    );
+    let p = plan_with(
+        &d,
+        AcceptSuggestions::None,
+        &[("rock01", Shader::Glow)],
+        &[],
+    );
+    let j = packed(&p, "rock01_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
+    assert_eq!(*g(j), ChannelSource::Default { value: 0.0 });
+    assert_eq!(
+        unused_reason(&p, "rock01_fuzz.png"),
+        "rock01_fuzz.png: the glow shader reads no fuzz map; not converted"
+    );
     // rfaos + explicit PBR, no fuzz map (Plan 3b P1c: roughness and sk).
     let d = fixture(
         &["rock01.png", "rock01_roughness.png", "rock01_sk.png"],
@@ -611,10 +629,11 @@ fn other_shaders_leave_the_fuzz_map_unused() {
     );
 }
 
-/// Spec §3b: under the Unused reading an RGBA fuzz map is not read at all: no CHAN-NOT-GRAY anywhere.
+/// Spec §3b: under the Unused reading an RGBA fuzz map is not read at all: no CHAN-NOT-GRAY anywhere. The roughness
+/// map gives a recipe the fuzz map could feed, so a regression that packs it raises CHAN-NOT-GRAY.
 #[test]
 fn an_rgba_fuzz_map_under_another_shader_is_not_read() {
-    let d = fixture(&["rock01.png", "rock01_n.png"], "");
+    let d = fixture(&["rock01.png", "rock01_n.png", "rock01_roughness.png"], "");
     rgba(d.path(), "rock01_fuzz.png");
     let p = plan_with(
         &d,
@@ -1240,6 +1259,74 @@ fn request(d: &TempDir) -> BatchRequest {
     let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
     r.recursive = true;
     r
+}
+
+/// A `[files]` `pbr_fuzz` on the fuzz map and no other PBR evidence: the typed map is not the untyped fuzz map the pick
+/// leaves out (`api::untyped_fuzz_map`), so it picks PBR itself, also beside a `_g`; the set is read with `f`
+/// (`api::pbr_read_fuzz`'s typed arm), so the diffuse is `pbr_albedo`; the map writes `<base>_f.dds`.
+#[test]
+fn a_typed_pbr_fuzz_alone_makes_the_set_pbr() {
+    for extra in ["x_n.png", "x_g.png"] {
+        let d = fixture(
+            &["x.png", extra, "x_fuzz.png"],
+            "[files.\"x_fuzz.png\"]\nsubtype = \"pbr_fuzz\"\n",
+        );
+        let p = plan(&d);
+        assert_eq!(
+            p.shaders[&job(&p, "x.png").set_key].shader,
+            Shader::Pbr,
+            "{extra}"
+        );
+        assert_eq!(
+            job(&p, "x.png").profile.subtype,
+            Subtype::PbrAlbedo,
+            "{extra}"
+        );
+        assert_eq!(out_name(job(&p, "x_fuzz.png")), "x_f.dds", "{extra}");
+    }
+}
+
+/// Fuzz-10's guards (JQ37), t1 Minor 1: a typed `pbr_fuzz` keeps `<base>_fuzz.dds` on the vanilla target, and under an
+/// explicit output path it keeps that path. (`helper.role = "none"`: `a_hand_set_none_role_is_an_ordinary_file_…`.)
+#[test]
+fn the_f_rename_keeps_vanilla_and_explicit_outputs() {
+    let toml = "[files.\"rock01_fuzz.png\"]\nsubtype = \"pbr_fuzz\"\n";
+    let files = ["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"];
+    let d = fixture(&files, toml);
+    let mut r = request(&d);
+    r.target = Some(Target::Vanilla);
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(Arc::new(VecSink::default()), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let j = job(&p, "rock01_fuzz.png");
+    assert_eq!(j.profile.subtype, Subtype::PbrFuzz);
+    assert_eq!(out_name(j), "rock01_fuzz.dds");
+    let d = fixture(&files, toml);
+    let mut r = request(&d);
+    r.output_paths.insert(
+        engine::sets::OutputKey::File("rock01_fuzz.png".into()),
+        "fuzz/rock01_fuzz_own.dds".into(),
+    );
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(Arc::new(VecSink::default()), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let j = job(&p, "rock01_fuzz.png");
+    assert_eq!(j.profile.subtype, Subtype::PbrFuzz);
+    assert!(
+        j.output.ends_with("fuzz/rock01_fuzz_own.dds"),
+        "{:?}",
+        j.output
+    );
 }
 
 /// Final review A I1: a filled member of a Fuzz-1a set is typed against the set read with `f`, as 6c types it. A
