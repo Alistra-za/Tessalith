@@ -92,6 +92,90 @@ fn a_slot_7_link_serves_only_the_link() {
     );
 }
 
+fn no_shared_kind(slots: &[MemberSlot]) {
+    let mut kinds: Vec<_> = slots.iter().map(|s| s.kind).collect();
+    kinds.sort();
+    let n = kinds.len();
+    kinds.dedup();
+    assert_eq!(kinds.len(), n, "two members share a kind: {slots:?}");
+}
+
+#[test]
+fn a_link_to_another_slots_kind_leaves_the_own_file_of_that_kind_served() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let own = leaf_slots(&m)
+        .into_iter()
+        .find(|s| s.item == "arch/leaf_n.png")
+        .expect("premise: the own _n is served");
+    let game = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let still = slots.iter().find(|s| s.item == "arch/leaf_n.png");
+    assert_eq!(
+        still.map(|s| s.paths.clone()),
+        Some(own.paths.clone()),
+        "the own _n keeps its path"
+    );
+    let linked = slots.iter().find(|s| s.item == "arch/wall_n.png");
+    assert_eq!(
+        linked.map(|s| s.paths.clone()),
+        Some(vec![canon(&game)]),
+        "the link is served at its path"
+    );
+    no_shared_kind(&slots);
+}
+
+#[test]
+fn a_link_on_the_own_files_slot_replaces_it_in_the_preview() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 2,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let normals: Vec<_> = slots
+        .iter()
+        .filter(|s| s.kind == SlotKind::Normal)
+        .collect();
+    assert_eq!(normals.len(), 1, "{slots:?}");
+    assert_eq!(normals[0].item, "arch/wall_n.png");
+    assert_eq!(normals[0].paths, vec![canon(&game)]);
+    assert!(slots.iter().all(|s| s.item != "arch/leaf_n.png"));
+    no_shared_kind(&slots);
+}
+
+#[test]
+fn syncing_an_unchanged_linked_set_twice_resets_no_member() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 2,
+        item: "arch/wall_n.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let mut enc = Encoder::new(DEFAULT_CAP);
+    enc.sync(&m, slots.clone(), Instant::now(), true);
+    settle(&mut enc, &m);
+    let first = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    enc.sync(&m, slots.clone(), Instant::now(), false);
+    enc.sync(&m, slots, Instant::now(), false);
+    assert!(
+        enc.settled(),
+        "an unchanged sync leaves every member settled"
+    );
+    let st = &enc.members[&SlotKind::Normal].state;
+    assert!(matches!(st, EncState::Fresh(e) if e.id == first), "{st:?}");
+}
+
 fn settle(e: &mut Encoder, m: &AppModel) {
     let t = Instant::now();
     while !e.settled() && t.elapsed() < Duration::from_secs(60) {

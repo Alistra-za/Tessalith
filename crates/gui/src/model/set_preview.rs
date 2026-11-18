@@ -165,12 +165,42 @@ pub struct MemberSlot {
 /// The set's filled slots (02 §1.1). With the PGPatcher entry (CS and a PBR set): the slot's path in
 /// `entry.slots[slotN]` when sdc names it there (a borrowed slot, or a file another set owns, `pbr_export::slots_of`),
 /// and for the set's own texture `<prefix>_<suffix>.dds`. The preview shows what the JSON carries (review E1): a
-/// linked slot (`v.linked` with an item) serves the linked file at the link's path, and the own file under it keeps
-/// only its prefix path; an own or borrowed file whose slot holds a link for another kind (`SlotShown::Replaced`)
-/// is not served. A typed path naming no file is not served either, so the view reads the game data there. Without
-/// the entry (D3): [`plain_path`]. Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one
-/// wins in [`Encoder::memory_sources`].
+/// linked slot (`v.linked` with an item and a row) serves the linked file at the link's path, keyed by the row the
+/// link fills (`Encoder.members` is keyed by kind, so no two slots leave here with one kind); the row's own file is
+/// not served then, and neither is an own or borrowed file whose slot holds a link for another kind
+/// (`SlotShown::Replaced`). A typed path naming no file pushes nothing: the own file under it keeps only its prefix
+/// path and the view reads the game data for the rest. Without the entry (D3): [`plain_path`], no links.
+/// Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one wins in
+/// [`Encoder::memory_sources`].
 pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Vec<MemberSlot> {
+    // The links' files first: each takes its row, and the row's own fill is then left out.
+    let mut linked_out: Vec<MemberSlot> = vec![];
+    if entry.is_some() {
+        for link in v.linked.values() {
+            let Some(key) = &link.item else {
+                continue;
+            };
+            // shortcut: a link on game slot 5 with no kind of the set on it has no row to key its member by, so it is
+            // not served and the view reads the game data; upgrade when `Encoder.members` is keyed by more than `SlotKind`.
+            let Some(row) = link.row else {
+                continue;
+            };
+            if linked_out.iter().any(|s| s.kind == row) {
+                continue;
+            }
+            let Some(item) = m.item(key) else {
+                continue;
+            };
+            linked_out.push(MemberSlot {
+                kind: row,
+                item: key.clone(),
+                job_key: item.job_key.clone(),
+                status: format!("{:?}", item.status),
+                sig: signature(item),
+                paths: vec![canon(&link.path)],
+            });
+        }
+    }
     let mut out = vec![];
     for (kind, fill) in &v.slots {
         let (key, own) = match fill {
@@ -182,10 +212,10 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
             continue;
         };
         let shown = slot_shown(v, *kind);
-        if matches!(shown, SlotShown::Replaced { .. }) {
+        if matches!(shown, SlotShown::Replaced { .. }) || linked_out.iter().any(|s| s.kind == *kind)
+        {
             continue;
         }
-        let linked = matches!(shown, SlotShown::Linked(_));
         let mut paths = vec![];
         match entry {
             None => paths.push(plain_path(*kind)),
@@ -198,7 +228,7 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
                         .is_some_and(|x| x.is_string())
                 });
                 let entry_path = n.and_then(|n| e.slots.get(&n));
-                if let Some(p) = entry_path.filter(|p| !user && !linked && !p.is_empty()) {
+                if let Some(p) = entry_path.filter(|p| !user && !p.is_empty()) {
                     paths.push(canon(p));
                 }
                 if let (true, Some(pre)) = (own, &v.prefix) {
@@ -218,25 +248,7 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
             paths,
         });
     }
-    // A linked slot's file, under the link's own path (only with the entry: without it there is no JSON).
-    if entry.is_some() {
-        for link in v.linked.values() {
-            let (Some(key), Some(kind)) = (&link.item, link.kind) else {
-                continue;
-            };
-            let Some(item) = m.item(key) else {
-                continue;
-            };
-            out.push(MemberSlot {
-                kind,
-                item: key.clone(),
-                job_key: item.job_key.clone(),
-                status: format!("{:?}", item.status),
-                sig: signature(item),
-                paths: vec![canon(&link.path)],
-            });
-        }
-    }
+    out.extend(linked_out);
     out
 }
 
