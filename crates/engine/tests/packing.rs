@@ -261,6 +261,33 @@ fn a_metallic_fill_replaces_the_default() {
     assert_channel(px, 0, 2, |_, _| 128);
 }
 
+/// Fuzz-5: with skin evidence (a written `rfaos`) the fuzz map's pixels are the written `_rfaos` G channel, and
+/// metallic beside it is unused.
+#[test]
+fn a_skin_fuzz_set_writes_the_fuzz_into_rfaos_g() {
+    let d = tempfile::tempdir().unwrap();
+    put(d.path(), "iron_roughness.png", r);
+    put(d.path(), "iron_fuzz.png", ao);
+    put(d.path(), "iron_metallic.png", m);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.\"textures/a/iron_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+    )
+    .unwrap();
+    let o = convert(d.path(), Target::Cs, &[]);
+    assert!(
+        out_path(d.path(), "iron_rfaos.dds").exists(),
+        "{:?}",
+        warnings(&o)
+    );
+    assert!(!out_path(d.path(), "iron_rmaos.dds").exists());
+    assert_eq!(
+        skip_code(&o, "iron_metallic.png"),
+        Some(Code::PackUnusedInput)
+    );
+    assert_channel(&levels(&dds(d.path(), "iron_rfaos.dds"))[0], 1, 4, ao);
+}
+
 /// Fuzz-1: a fuzz map with no skin evidence is the PBR fuzz texture: the set packs `_rmaos` (metallic in G) and the
 /// fuzz map writes `iron_f.dds`.
 #[test]

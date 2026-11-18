@@ -779,7 +779,7 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     this.rel = this.rel.with_file_name(format!("{base}_ao.{ext}"));
     // Fuzz-5: the evidence that keeps a fuzz map the skin mask. Only in a set with a fuzz map, so no other set's
     // reading changes (a metallic-only set with a written `rfaos` stays `_rmaos`, DQ2).
-    if set.suffixes.contains(&RawMap::Fuzz.id()) {
+    if has_fuzz_map(set) {
         let (on_rfaos, on_rmaos) = written_recipes(ctx, set, &this);
         if on_rfaos == PackRecipe::Rfaos || on_rmaos == PackRecipe::Rfaos {
             return true;
@@ -890,8 +890,14 @@ pub fn skin_f_candidate(ctx: &ResolveCtx, set: &TextureSet, f: &InputFile) -> bo
             .suffix
             .as_deref()
             == Some("f")
-        && !set.suffixes.contains(&RawMap::Fuzz.id())
+        && !has_fuzz_map(set)
         && set_is_advanced_skin(ctx, set, f)
+}
+
+/// The set lists a fuzz map, its own or one shared in (Note HH1): the gate of `set_is_advanced_skin`'s Fuzz-5
+/// evidence, and of the fast re-plan's `FUZZ_SUBTYPE` check (`skeleton.rs`), so the two never disagree.
+pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
+    set.suffixes.contains(&RawMap::Fuzz.id())
 }
 
 /// Pass 1 over every set. `jobs` holds every resolved job of the batch and is changed in place: consumed raw jobs

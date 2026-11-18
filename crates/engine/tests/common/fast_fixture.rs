@@ -43,6 +43,9 @@ recipe = "rfaos"
 
 [files."dir/q_rough"]
 subtype = "diffuse"
+
+[files."dir/r.png"]
+subtype = "skin_albedo"
 "#;
 
 /// A temp project and the request that plans it.
@@ -94,7 +97,9 @@ fn put_normal(dir: &Path, name: &str) {
 /// - a second six-face cube `s_px` .. `s_nz` beside `s.png`, whose output the merged cube's clashes with;
 /// - `z.png`, a corrupt source (a load failure);
 /// - shared roughness on sets `e` and `q`;
-/// - `u` (`u`, `u_g`) with a fuzz map `u_fuzz` (Fuzz-19).
+/// - `u` (`u`, `u_g`) with a fuzz map `u_fuzz` (Fuzz-19);
+/// - `v` (`v`, `v_n`) and `r` (`r` typed `skin_albedo`, `r_n`), each with `u_fuzz` shared in (Note HH1) as its only
+///   fuzz map.
 pub fn fast_fixture() -> FastFixture {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("in/dir");
@@ -154,6 +159,10 @@ pub fn fast_fixture() -> FastFixture {
     put_rgb(&d, "u.png", 140);
     put_rgb(&d, "u_g.png", 141);
     put_grey(&d, "u_fuzz.png", 142);
+    put_rgb(&d, "v.png", 150);
+    put_normal(&d, "v_n.png");
+    put_rgb(&d, "r.png", 151);
+    put_normal(&d, "r_n.png");
 
     let mut req = BatchRequest::new(
         vec![dir.path().join("in")],
@@ -173,6 +182,14 @@ pub fn fast_fixture() -> FastFixture {
         engine::sets::SetEdit::Move {
             file: "dir/n_rough.png".into(),
             to: "dir/o".into(),
+        },
+        engine::sets::SetEdit::Share {
+            file: "dir/u_fuzz.png".into(),
+            to: "dir/v".into(),
+        },
+        engine::sets::SetEdit::Share {
+            file: "dir/u_fuzz.png".into(),
+            to: "dir/r".into(),
         },
     ];
     req.shared_roughness = ["dir/e", "dir/q"].map(String::from).into();

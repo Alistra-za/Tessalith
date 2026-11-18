@@ -61,7 +61,8 @@ pub struct Skeleton {
     pub(crate) key_sets: HashMap<String, Vec<u32>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
     pub(crate) pbr_sets: BTreeSet<u32>,
-    /// Sets with a member image whose stem is a fuzz map's (`group::is_fuzz_stem`, Fuzz-19).
+    /// Sets with a fuzz map (Fuzz-19): a member image whose stem is a fuzz map's (`group::is_fuzz_stem`), or a set
+    /// that lists one, also shared in (`pack::plan::has_fuzz_map`, the gate the Advanced Skin evidence reads).
     pub(crate) fuzz_sets: BTreeSet<u32>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
@@ -94,6 +95,9 @@ impl Skeleton {
             .map(|(i, s)| (s.key.as_str(), i as u32))
             .collect();
         for (si, set) in prepared.sets.iter().enumerate() {
+            if crate::pack::plan::has_fuzz_map(set) {
+                fuzz_sets.insert(si as u32);
+            }
             for &m in &set.members {
                 set_of[m] = si as u32;
                 let file = &prepared.files[m];

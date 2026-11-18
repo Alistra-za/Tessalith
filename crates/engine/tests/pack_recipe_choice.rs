@@ -52,6 +52,25 @@ fn g(j: &ResolvedJob) -> &ChannelSource {
     &j.pack.as_ref().unwrap().channels[1]
 }
 
+/// The `PACK-UNUSED-INPUT` message of the raw map `file`, wherever the plan keeps it.
+fn unused_reason(p: &Plan, file: &str) -> String {
+    let has = |path: &Path| {
+        path.file_name()
+            .is_some_and(|n| n.to_string_lossy() == file)
+    };
+    for j in p.jobs.iter().filter(|j| has(&j.input)) {
+        if let Some(w) = j.warnings.iter().find(|w| w.code == Code::PackUnusedInput) {
+            return w.message.clone();
+        }
+    }
+    for s in p.skipped.iter().filter(|s| has(&s.path)) {
+        if s.code == Some(Code::PackUnusedInput) {
+            return s.reason.clone();
+        }
+    }
+    panic!("{file} is not reported unused");
+}
+
 const RFAOS: &str = "[files.\"iron_rfaos\".packing]\nrecipe = \"rfaos\"\n";
 
 #[test]
@@ -116,6 +135,24 @@ fn a_written_rmaos_with_a_fuzz_map_packs_rmaos() {
     let f = own_job(&p, "iron_fuzz.png");
     assert_eq!(f.profile.subtype, engine::config::Subtype::PbrFuzz);
     assert_eq!(out_name(f), "iron_f.dds");
+}
+
+/// Fuzz-5 with a written `rmaos`: a skin-typed member keeps the fuzz map the skin mask, the written recipe still
+/// packs `_rmaos`, and the fuzz map is reported unused because of it.
+#[test]
+fn a_written_rmaos_leaves_a_skin_fuzz_map_unused() {
+    let d = fixture(
+        &["iron.png", "iron_roughness.png", "iron_fuzz.png", "iron_ao.png"],
+        "[files.\"iron_rmaos\".packing]\nrecipe = \"rmaos\"\n[files.\"iron.png\"]\nsubtype = \"skin_albedo\"\n",
+    );
+    let p = plan(&d);
+    assert!(packed(&p, "iron_rmaos.dds").is_some());
+    assert!(packed(&p, "iron_rfaos.dds").is_none());
+    let why = unused_reason(&p, "iron_fuzz.png");
+    assert!(
+        why.contains("the set is set to _rmaos (packing.recipe)"),
+        "{why}"
+    );
 }
 
 /// Fuzz-1: `auto` packs `_rmaos` beside a fuzz map with no skin evidence; the fuzz map writes `<base>_f.dds`.

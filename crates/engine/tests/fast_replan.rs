@@ -118,6 +118,18 @@ fn rows() -> Vec<Row> {
             &[],
         ),
         row(
+            "skin_albedo added in v (shared fuzz map)",
+            &[("dir/v.png", Some("subtype = \"skin_albedo\""))],
+            NeedsFull(FUZZ_SUBTYPE),
+            &[],
+        ),
+        row(
+            "skin_albedo removed in r (shared fuzz map)",
+            &[("dir/r.png", None)],
+            NeedsFull(FUZZ_SUBTYPE),
+            &[],
+        ),
+        row(
             "one cube face",
             &[(
                 "dir/c_px",
