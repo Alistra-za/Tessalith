@@ -1261,7 +1261,13 @@ fn a_plain_normal_in_a_pbr_set_is_silent_in_convert_and_inspect() {
     assert_eq!(code(&o), 0, "{}", text(&o.stderr));
     let out = text(&o.stdout);
     assert!(!out.contains("SHADER-EXTRA-MAP"), "{out}");
-    assert!(!out.contains("SHADER-NORMAL-SPECULAR"), "{out}");
+    // No shader code names the plain _n: the only SHADER line is the _rmaos one.
+    assert!(
+        out.lines()
+            .filter(|l| l.contains("SHADER-"))
+            .all(|l| l.contains("SHADER-MISSING-MAP")),
+        "{out}"
+    );
     assert!(!out.contains("needs _n"), "{out}");
 
     let o = sdc()
@@ -1283,4 +1289,12 @@ fn a_plain_normal_in_a_pbr_set_is_silent_in_convert_and_inspect() {
         "the _rmaos one: {codes:?}"
     );
     assert!(!codes.iter().any(|c| c == "SHADER-EXTRA-MAP"), "{codes:?}");
+    // Any other SHADER code on the set (an info about the plain _n) would fail here too.
+    assert!(
+        codes
+            .iter()
+            .filter(|c| c.starts_with("SHADER-"))
+            .all(|c| c == "SHADER-MISSING-MAP"),
+        "{codes:?}"
+    );
 }

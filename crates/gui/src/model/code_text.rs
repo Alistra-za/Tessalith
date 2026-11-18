@@ -78,8 +78,6 @@ pub fn code_sentence(code: Code) -> &'static str {
         ShaderUnavailable => "The chosen shader isn't available — pick another shader",
         ShaderExtraMap => "This set has a map its shader doesn't read — remove it or change the shader",
         ShaderMissingMap => "This set lacks a map its shader needs — add it or change the shader",
-        // Note JP3: an Info with a row, since the user acts on it.
-        ShaderNormalSpecular => "A PBR set uses a vanilla normal, whose alpha the shader doesn't read — switch it to PBR normal",
         GrassShape => "This grass texture has the wrong layout — use a grass atlas shape",
         GrassTopOpaque => "The tips of this grass texture are fully opaque — check its alpha",
         GrassNormals => "This grass texture's normals look wrong — check or regenerate them",
@@ -119,11 +117,10 @@ pub fn row_class(code: Code) -> RowClass {
     use RowClass::{Note, Problem};
     match code {
         // The Info codes, but the two the user acts on (CHK-GREEN-GUESS, DERIVE-NIF-SUGGEST).
-        // SHADER-NORMAL-SPECULAR is a note with a button (Note JP3).
         FmtHdrSource | CfgFileUnmatched | CfgFilterIgnored | DimResized | ResizeNoReference
         | SetMissingCompanion | SetEditStale | InDdsSkipped | InGreenUnstated | InAliasStale
         | OutKeptOlderEncode | OutKeptLowerTarget | PackSourceResized | ShaderAuto
-        | ShaderNormalSpecular | DeriveNotConverted | GenReplaced | GenAo => Note,
+        | DeriveNotConverted | GenReplaced | GenAo => Note,
         // The Warning codes whose output is valid as it is.
         DimNpot | EncWeightsIgnored | PackDefaulted | PackUnusedInput | ShaderExtraMap => Note,
         ChkGreenGuess | DeriveNifSuggest => Problem,
@@ -195,24 +192,10 @@ pub fn note_sentence(w: &engine::codes::Warning) -> String {
         Code::ShaderExtraMap => member_and_shader(w).map(|(member, shader)| {
             format!("{member} isn't read by the {shader} shader. It is still converted, so nothing breaks.")
         }),
-        // Note JP3: `data.member` and `data.shader`, as SHADER-EXTRA-MAP's.
-        Code::ShaderNormalSpecular => member_and_shader(w).map(|(member, shader)| {
-            format!("{member} is a vanilla normal: the {shader} shader ignores the specular in its alpha. Use PBR normal to drop the alpha and bake any _rmaos in this set from it.")
-        }),
         Code::DimNpot | Code::EncWeightsIgnored => Some(code_sentence(w.code).to_string()),
         _ => None,
     };
     built.unwrap_or_else(|| w.message.clone())
-}
-
-/// Note JP3 (B3-11): SHADER-NORMAL-SPECULAR's sentence when the normal is a kept DDS, whose type cannot drop its
-/// alpha; the engine message on missing data.
-pub fn kept_normal_sentence(w: &engine::codes::Warning) -> String {
-    member_and_shader(w)
-        .map(|(member, shader)| {
-            format!("{member} is a kept DDS: the {shader} shader reads it as its normal and ignores the specular in its alpha.")
-        })
-        .unwrap_or_else(|| w.message.clone())
 }
 
 /// A shader warning's `data.member` and `data.shader`.
@@ -377,7 +360,6 @@ fn names_its_map(code: Code) -> bool {
             | Code::PackUnusedInput
             | Code::ShaderExtraMap
             | Code::ShaderMissingMap
-            | Code::ShaderNormalSpecular
     )
 }
 

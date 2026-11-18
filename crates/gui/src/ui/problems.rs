@@ -5,7 +5,7 @@ use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
     cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts, USE_PBR_NORMAL,
+    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -707,25 +707,6 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
-        // Note JP3 (B3-27): it switches a type, as Tag as grass does, so it keeps Enter and Space (`RebuildZ`'s shape,
-        // not `click_only_button`). The refusal is read at draw time: the problems cache key does not follow locks.
-        Fix::UsePbrNormal(k) => {
-            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
-            let why = off
-                .map(str::to_string)
-                .or_else(|| m.use_pbr_normal_refusal(k));
-            let name = format!("{USE_PBR_NORMAL} for {file}");
-            let b = ui.add_enabled(why.is_none(), egui::Button::new(USE_PBR_NORMAL));
-            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, why.is_none(), &name));
-            match why {
-                Some(why) => b.on_disabled_hover_text(why),
-                None => b.on_hover_text(
-                    "Set its sub-type to PBR normal (subtype = \"pbr_normal\" in sdc.toml): its alpha is dropped, \
-                     and any _rmaos in this set bakes from it, so distant surfaces shine less.",
-                ),
-            }
-            .clicked()
-        }
         // Note FC14: the hover names the file it rewrites, since the skipped one may be the original.
         Fix::RemoveAliases(file, id) => click_only_button(
             ui,
@@ -1321,11 +1302,6 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
-        Fix::UsePbrNormal(k) => {
-            if let Err(why) = model.use_pbr_normal(&k) {
-                model.status_line = why;
-            }
-        }
     }
 }
 

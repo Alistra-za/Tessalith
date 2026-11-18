@@ -3904,8 +3904,7 @@ impl AppModel {
                     return Some((k.clone(), None, false));
                 }
                 // Fuzz-9, Fuzz-27: `member_subtype` maps no `diffuse`, `normal` or `glow` under a PBR-family shader,
-                // so the untouched members take their PBR counterpart here (an untouched `normal` bypasses B3's
-                // Use PBR normal: the pick is the user's act, and leaving it reverts the type).
+                // so the untouched members take their PBR counterpart here (the pick is the user's act, and leaving it reverts the type).
                 if pbr_pick && !locked.contains_key(k) {
                     if let Some(st) =
                         held_type(k).and_then(|st| pbr_member_type(st, diffuse_slot(k)))

@@ -6,7 +6,6 @@
 //! The switched members are recorded in `sdc-project.toml` (`[project] auto_pbr`), because `sdc.toml`'s
 //! `[files]` entries reject unknown keys. While `sdc-project.toml` is read-only (DECISIONS P8) the diffuse still
 //! changes but nothing propagates: there would be no way to find the members again to revert them.
-use super::bottom::USE_PBR_NORMAL;
 use super::items::Decision;
 use super::sets::{is_pbr_diffuse, locked_items, set_views, SlotFill, SlotKind};
 use super::AppModel;
@@ -43,35 +42,6 @@ impl AppModel {
     /// Note FC10 (X10, X3): `Tag as grass` writes `subtype = "complex_grass"`, an explicit user value (one undo step).
     pub fn tag_as_grass(&mut self, key: &str) {
         self.edit_subtype("Tag as grass", key, Some(Subtype::ComplexGrass));
-    }
-
-    /// Note JP3: `Use PBR normal` writes `subtype = "pbr_normal"` for `key`, an explicit user value (one undo step).
-    /// Refused with `fix_off`'s reason or [`Self::use_pbr_normal_refusal`]'s, writing nothing: `edit_subtype` checks no
-    /// lock and returns silently on a read-only project, so the model guards itself.
-    pub fn use_pbr_normal(&mut self, key: &str) -> Result<(), String> {
-        if let Some(why) = self.fix_off().or_else(|| self.use_pbr_normal_refusal(key)) {
-            return Err(why);
-        }
-        self.edit_subtype(USE_PBR_NORMAL, key, Some(Subtype::PbrNormal));
-        Ok(())
-    }
-
-    /// Note JP3 (B3-11): why `Use PBR normal` cannot switch `key`, or `None`. Runs per drawn row per frame, so it looks
-    /// up only the item's own set (`leaves_locked`), never every set.
-    // shortcut: a set that borrows this normal into its own locked slot is not checked: the type change rebuilds the
-    // lender's set, and the borrower's lock guards its slot, not the lender's file. Check borrowers too if a lock
-    // comes to mean "this file's output never changes".
-    pub fn use_pbr_normal_refusal(&self, key: &str) -> Option<String> {
-        let Some(i) = self.item(key) else {
-            return Some(format!("{key} is not in this project"));
-        };
-        if i.kept_dds() {
-            return Some(format!(
-                "{} is kept as it is (a DDS is not converted again), so its type can't change its alpha",
-                i.name
-            ));
-        }
-        self.leaves_locked(key).err()
     }
 
     /// Change (`Some`) or reset (`None`) `key`'s sub-type, with the PBR follow-on for its set, as one step.

@@ -403,8 +403,6 @@ pub enum Fix {
     ChangeShader(String),
     /// Review E10 (SUG-CONTRADICTION): the undecided rows' type picker, for this item.
     SetType(String),
-    /// Note JP3 (SHADER-NORMAL-SPECULAR): write subtype = "pbr_normal" for this item.
-    UsePbrNormal(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -937,18 +935,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
-    // Note JP3: SHADER-NORMAL-SPECULAR, an Info result, is a note row too: the user acts on it (Use PBR normal).
-    let set_row =
-        |w: &engine::codes::Warning| makes_a_row(w) || w.code == Code::ShaderNormalSpecular;
     for v in views.iter() {
-        for w in v.set_warnings.iter().filter(|w| set_row(w)) {
+        for w in v.set_warnings.iter().filter(|w| makes_a_row(w)) {
             let at = set_at(&v.key, &v.id);
             let shader = || Some(Fix::ChangeShader(v.id.clone()));
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.
             if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
-                let (fix, second_fix, target, text) = match w.code {
+                let (fix, second_fix, target) = match w.code {
                     Code::ShaderExtraMap => match extra_member(m, v, w) {
                         Some(item) => (
                             Some(Fix::RemoveMember {
@@ -957,34 +952,15 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                             }),
                             shader(),
                             Some(SlotTarget::Item(item)),
-                            None,
                         ),
-                        None => (shader(), None, None, None),
+                        None => (shader(), None, None),
                     },
-                    // Note JP3 (B3-11): a kept DDS's type cannot drop its alpha, so it gets no button and its own
-                    // sentence; a DDS encoded again (`reencode = true`) gets the button like any source image.
-                    Code::ShaderNormalSpecular => match extra_member(m, v, w) {
-                        Some(item) if m.item(&item).is_some_and(|i| i.kept_dds()) => (
-                            None,
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            Some(code_text::kept_normal_sentence(w)),
-                        ),
-                        Some(item) => (
-                            Some(Fix::UsePbrNormal(item.clone())),
-                            None,
-                            Some(SlotTarget::Item(item)),
-                            None,
-                        ),
-                        None => (None, None, None, None),
-                    },
-                    _ => (None, None, None, None),
+                    _ => (None, None, None),
                 };
                 out.push(Problem {
                     fix,
                     second_fix,
                     target,
-                    text: text.unwrap_or(p.text),
                     ..p
                 });
                 continue;
@@ -1428,7 +1404,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     out
 }
 
-/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's or SHADER-NORMAL-SPECULAR's `data.member` names.
+/// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's `data.member` names.
 /// The engine writes the member's output file name (`engine::api` `shader_members`); a source file name is matched too.
 fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
     let name = w.data.get("member")?.as_str()?;
@@ -1447,8 +1423,6 @@ fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> 
 
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.
 pub const NO_ALBEDO_KEEPS: &str = "No albedo in this set; the mesh keeps {path}. A vanilla diffuse isn't sRGB, so it can look washed out";
-/// Note JP3: the button of a SHADER-NORMAL-SPECULAR row, and its undo step's label.
-pub const USE_PBR_NORMAL: &str = "Use PBR normal";
 /// Note HL6: an output the target mod already ships (it wins or loses by load order).
 pub const REPLACES_TARGET: &str = "Replaces {file} of the target mod in the load order";
 
