@@ -1,7 +1,7 @@
 //! The bottom panel's state (layout v2 A1, A9; R7, R8): which tab shows, and whether the panel is open.
 use super::code_text::{note_sentence, row_class, RowClass};
 use super::cs_pbr::{set_key, statics_text, Kind, StaticsStatus, NO_TXST_USES};
-use super::items::{self, Decision, ItemKind};
+use super::items::{self, Decision};
 use super::meshes::{NifLevel, NifTab};
 use super::nav::SlotTarget;
 use super::{
@@ -962,19 +962,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                         None => (shader(), None, None, None),
                     },
                     // Note JP3 (B3-11): a kept DDS's type cannot drop its alpha, so it gets no button and its own
-                    // sentence.
+                    // sentence; a DDS encoded again (`reencode = true`) gets the button like any source image.
                     Code::ShaderNormalSpecular => match extra_member(m, v, w) {
-                        Some(item)
-                            if m.item(&item)
-                                .is_some_and(|i| matches!(i.kind, ItemKind::Dds)) =>
-                        {
-                            (
-                                None,
-                                None,
-                                Some(SlotTarget::Item(item)),
-                                Some(code_text::kept_normal_sentence(w)),
-                            )
-                        }
+                        Some(item) if m.item(&item).is_some_and(|i| i.kept_dds()) => (
+                            None,
+                            None,
+                            Some(SlotTarget::Item(item)),
+                            Some(code_text::kept_normal_sentence(w)),
+                        ),
                         Some(item) => (
                             Some(Fix::UsePbrNormal(item.clone())),
                             None,
@@ -1576,7 +1571,8 @@ impl Scope {
     }
 }
 
-/// The view `s` names: the set with that key, else the key-less set with that id. `None` for the empty string.
+/// The view `s` names: the set with that key, else the key-less set with that id, else the set with that id, so a
+/// filter opened on a key-less set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
 fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
     if s.is_empty() {
         return None;
@@ -1585,6 +1581,7 @@ fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView>
         .iter()
         .find(|v| v.key == s)
         .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
+        .or_else(|| views.iter().find(|v| v.id == s))
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.

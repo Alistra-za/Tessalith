@@ -97,6 +97,14 @@ pub struct TextureItem {
     pub waiting: bool,
 }
 
+impl TextureItem {
+    /// A DDS input kept as it is: no job, so it is copied and never encoded again (Note FI3). A DDS with
+    /// `reencode = true` has a job and is encoded like any source image.
+    pub fn kept_dds(&self) -> bool {
+        self.kind == ItemKind::Dds && self.job.is_none()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct SetItem {
     pub key: String,

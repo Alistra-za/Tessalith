@@ -7,7 +7,7 @@
 //! `[files]` entries reject unknown keys. While `sdc-project.toml` is read-only (DECISIONS P8) the diffuse still
 //! changes but nothing propagates: there would be no way to find the members again to revert them.
 use super::bottom::USE_PBR_NORMAL;
-use super::items::{Decision, ItemKind};
+use super::items::Decision;
 use super::sets::{is_pbr_diffuse, locked_items, set_views, SlotFill, SlotKind};
 use super::AppModel;
 use engine::config::{PackRecipe, Subtype};
@@ -65,7 +65,7 @@ impl AppModel {
         let Some(i) = self.item(key) else {
             return Some(format!("{key} is not in this project"));
         };
-        if matches!(i.kind, ItemKind::Dds) {
+        if i.kept_dds() {
             return Some(format!(
                 "{} is kept as it is (a DDS is not converted again), so its type can't change its alpha",
                 i.name

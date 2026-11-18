@@ -392,6 +392,94 @@ fn a_kept_dds_normal_gets_the_note_without_a_button() {
     assert!(m.use_pbr_normal_refusal(&key).is_some());
 }
 
+/// The kept `_n.dds` of `kept_dds_normal_wall`.
+const WALL_N: &str = "test/wall_n.dds";
+
+/// `textures/test/wall.png` decided `pbr_albedo` beside a kept `wall_n.dds` (no job: typed by its `_n` suffix as a
+/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`: the engine itself raises
+/// SHADER-NORMAL-SPECULAR on it (`engine/tests/shaders.rs` `a_kept_dds_normal_in_a_pbr_set_is_the_same_info`).
+fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
+    let r = dir.join("textures/test");
+    std::fs::create_dir_all(&r).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([120u8, 90, 60]))
+        .save(r.join("wall.png"))
+        .unwrap();
+    bc1_dds(&r.join("wall_n.dds"));
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    let id = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("wall"))
+        .expect("the set")
+        .id
+        .clone();
+    m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+    m.decide(
+        "test/wall.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::PbrAlbedo),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// Final review I1 (Note JP3): a DDS with `reencode = true` has a job and is encoded again, so its type drops the
+/// alpha like any source image's: its note has the plain sentence and **Use PBR normal**, nothing refuses it, and the
+/// click writes `subtype = "pbr_normal"`. (A kept DDS: `a_kept_dds_normal_gets_the_note_without_a_button`.)
+#[test]
+fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
+    use sdc_gui::model::bottom::{Fix, USE_PBR_NORMAL};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = kept_dds_normal_wall(d.path());
+    m.set_reencode(&[WALL_N.to_string()], true);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let i = m.item(WALL_N).expect("the _n");
+    assert!(
+        i.input.extension().is_some_and(|x| x == "dds"),
+        "precondition: a DDS input"
+    );
+    assert_eq!(
+        i.job.as_ref().map(|j| j.profile.subtype),
+        Some(engine::config::Subtype::Normal),
+        "precondition: re-encoded, as a vanilla normal"
+    );
+    let rows = specular_rows(&m);
+    assert_eq!(rows.len(), 1, "one note");
+    assert!(rows[0].is_note());
+    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(WALL_N.into())));
+    let sentence = rows[0].shown().into_owned();
+    // Final review M1: the words hold for a set with no _rmaos, as this one is.
+    assert!(
+        sentence.starts_with("wall_n.dds is a vanilla normal:")
+            && sentence.ends_with(
+                "Use PBR normal to drop the alpha and bake any _rmaos in this set from it."
+            ),
+        "{sentence}"
+    );
+    assert_eq!(m.use_pbr_normal_refusal(WALL_N), None);
+    m.open_problems(None);
+    let mut h = harness(m);
+    tooltips_now(&h);
+    h.run();
+    let button = format!("{USE_PBR_NORMAL} for wall_n.dds");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
+        .hover();
+    h.run();
+    h.run();
+    h.get_by_label_contains("its alpha is dropped, and any _rmaos in this set bakes from it");
+    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
+        .click();
+    h.step();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        h.state()
+            .project
+            .as_ref()
+            .unwrap()
+            .file_value(WALL_N, "subtype"),
+        Some(serde_json::json!("pbr_normal"))
+    );
+}
+
 #[test]
 fn a_defaulted_channel_reads_as_a_note_that_says_it_is_fine() {
     use engine::codes::{Code, Warning};
@@ -4946,6 +5034,120 @@ fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
         reasons[0].contains(mine) && !reasons[0].contains(theirs),
         "{reasons:?}"
     );
+}
+
+/// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
+/// has a key: it lists the keyed set's rows (the same rows as a filter by its key), never another set's, and its chip
+/// names the set.
+#[test]
+fn a_key_less_sets_filter_follows_the_set_once_it_has_a_key() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    let f = ProblemsFilter::Set("landscape/empty".into());
+    m.open_problems(Some(f.clone()));
+    // The fix a modder makes for "No file matches landscape/one.txt": put the texture in place and add it to the set.
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member("landscape/empty", "landscape/one.png")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "landscape/empty")
+        .expect("the created set has a card");
+    assert!(
+        !v.key.is_empty() && v.key != v.id,
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert!(
+        v.members.iter().any(|k| k == "landscape/one.png"),
+        "precondition: {v:?}"
+    );
+    assert_eq!(
+        m.bottom.filter,
+        Some(f.clone()),
+        "nothing resets the filter"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_key = filtered(&m, Some(&ProblemsFilter::Set(v.key.clone())));
+    assert_eq!(
+        rows.len(),
+        by_key.len(),
+        "the rows of a filter by its key: {texts:?}"
+    );
+    assert_eq!(*rows, *by_key);
+    assert!(!rows.is_empty(), "the set's rows: {texts:?}");
+    assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
+    assert!(
+        !rows.iter().any(|p| p.text.contains("two.txt")),
+        "{texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { key, .. } => *key == v.key,
+            At::Texture(t) => v.members.contains(t),
+            _ => false,
+        }),
+        "{texts:?}"
+    );
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("Set: landscape/empty")
+            .count()
+            > 0,
+        "the chip names the set"
+    );
+    assert!(
+        h.query_all_by_label_contains("one.txt").count() > 0,
+        "the row is listed"
+    );
+}
+
+/// t0 Minor 2 (Note JP5): a key-less set's reason on the editor's status line opens a Problems filter that lists that
+/// set's row and no other key-less set's (`status_act` names the set by `scope_key`, not by its empty key).
+#[test]
+fn a_key_less_sets_reason_opens_its_own_rows() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    // The editor opens the first key-less set for the empty key (selection by key, B3-20).
+    let first = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.key.is_empty())
+        .unwrap()
+        .id;
+    let (mine, theirs) = if first == "landscape/empty" {
+        ("one.txt", "two.txt")
+    } else {
+        ("two.txt", "one.txt")
+    };
+    m.go_to_set("", None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains("— go to the fix").click();
+    h.step();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    let f = h.state().bottom.filter.clone();
+    assert_eq!(f, Some(ProblemsFilter::Set(first.clone())));
+    let rows = filtered(h.state(), f.as_ref());
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert_eq!(rows.len(), 1, "{texts:?}");
+    assert!(
+        rows[0].text.contains(mine) && !rows[0].text.contains(theirs),
+        "{texts:?}"
+    );
+    assert!(matches!(&rows[0].at, At::Set { key, id } if key.is_empty() && *id == first));
 }
 
 /// B3-17 (Note JP5): a key-less set with a counted row is not ready like any set: its card's hover says what Ready

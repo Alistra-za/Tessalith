@@ -197,7 +197,7 @@ pub fn note_sentence(w: &engine::codes::Warning) -> String {
         }),
         // Note JP3: `data.member` and `data.shader`, as SHADER-EXTRA-MAP's.
         Code::ShaderNormalSpecular => member_and_shader(w).map(|(member, shader)| {
-            format!("{member} is a vanilla normal: the {shader} shader ignores the specular in its alpha. Use PBR normal to drop the alpha and bake this set's _rmaos from it.")
+            format!("{member} is a vanilla normal: the {shader} shader ignores the specular in its alpha. Use PBR normal to drop the alpha and bake any _rmaos in this set from it.")
         }),
         Code::DimNpot | Code::EncWeightsIgnored => Some(code_sentence(w.code).to_string()),
         _ => None,

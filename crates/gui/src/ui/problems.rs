@@ -720,8 +720,8 @@ fn fix_click(
             match why {
                 Some(why) => b.on_disabled_hover_text(why),
                 None => b.on_hover_text(
-                    "Set its sub-type to PBR normal (subtype = \"pbr_normal\" in sdc.toml): its alpha is dropped \
-                     and this set's _rmaos bakes from it, so distant surfaces shine less.",
+                    "Set its sub-type to PBR normal (subtype = \"pbr_normal\" in sdc.toml): its alpha is dropped, \
+                     and any _rmaos in this set bakes from it, so distant surfaces shine less.",
                 ),
             }
             .clicked()

@@ -84,7 +84,7 @@ impl AppModel {
         let writers = self.writers();
         let (mut ok, mut blocked) = (vec![], vec![]);
         for i in keys.iter().filter_map(|k| self.item(k)) {
-            if i.kind != super::items::ItemKind::Dds || i.job.is_some() {
+            if !i.kept_dds() {
                 continue;
             }
             match blocker(&writers, i) {
