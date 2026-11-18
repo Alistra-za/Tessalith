@@ -1710,6 +1710,34 @@ fn edit_toggle_opens_the_panel_with_four_tabs() {
 }
 
 #[test]
+fn the_edit_button_has_a_frame_when_closed() {
+    let (_d, m) = session(false);
+    let mut h = view(m);
+    h.run_steps(4);
+    assert_eq!(
+        h.get_by_label("Edit").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::False)
+    );
+    let r = h.get_by_label("Edit").rect();
+    // a fill the size of the button itself, not the header or panel background behind it
+    let framed = h.output().shapes.iter().any(|c| {
+        matches!(&c.shape,
+        egui::epaint::Shape::Rect(s) if s.rect.expand(2.0).contains_rect(r)
+            && r.expand(2.0).contains_rect(s.rect) && s.fill.a() > 0)
+    });
+    assert!(
+        framed,
+        "Edit must be drawn as a button while the panel is closed"
+    );
+    h.get_by_label("Edit").click();
+    h.run_steps(4);
+    assert_eq!(
+        h.get_by_label("Edit").accesskit_node().toggled(),
+        Some(egui::accesskit::Toggled::True)
+    );
+}
+
+#[test]
 fn clicking_a_card_selects_the_shape_and_root_card_is_first() {
     let (_d, mut m) = session(false);
     m.open_edit();

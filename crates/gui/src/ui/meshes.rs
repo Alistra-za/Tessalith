@@ -818,7 +818,7 @@ fn detail_head(ui: &mut egui::Ui, m: &mut MeshesModel, row: Option<&NifRow>) {
             },
             |ui| {
                 toggle = ui
-                    .add(egui::Button::selectable(editing, "Edit"))
+                    .add(egui::Button::new("Edit").selected(editing))
                     .on_hover_text(if editing {
                         "Close the NIF edit panel"
                     } else {
