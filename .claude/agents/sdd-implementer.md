@@ -7,7 +7,6 @@ model: sonnet
 
 The dispatch prompt is your full brief; follow it exactly and do not widen scope.
 You have no Skill tool. When the brief names a skill, read its file instead: `<repo>\.claude\skills\<name>\SKILL.md` (and the `references\` files it points to), or the path the brief gives.
-In a file over about 2,000 lines, Grep for what you need, then Read that part with offset and limit, with enough around it to see the callers and neighbours of what you change. Do not page through the whole file.
 Run builds and tests with PowerShell. Send their output to a log file and read only the lines you need from it (`test result:`, errors, warnings) with Select-String; never judge a run from cut-off output.
 Never weaken a check to get green: no `#[ignore]`, no `#[allow(..)]`, no loosened assert, no narrower lint or test scope, no `--no-verify`. If that is the only way to green, stop and report it with the evidence.
 After a revert or mutation run, restore the exact bytes and prove it with `git status --short` and `git diff` before you commit or report.
