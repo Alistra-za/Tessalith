@@ -114,7 +114,7 @@
   - Each group is a `[[groups]]` table in `sdc-project.toml` with a `name`, the `sets` in it and `excluded`. See docs/wiki/GUI-Sets-Column.md#groups.
 - **Export set**, **Export n sets** and **Export group** export only those sets, plus any set they borrow a slot from; the rest of the export folder, its per-set JSON and its PGPatcher JSON entries stay as they are. **Exclude from export** on a group header leaves its sets out of every whole-project export, Also export's Vanilla and CM folders included, until **Include in export**. Also export runs only on a whole-project export. `sdc convert` exports everything as before. See docs/wiki/GUI-Review-and-Export.md#exporting-part-of-the-project.
 - **Delete set** works on every set: its textures go to *no set* and the automatic set doesn't come back, even after a new plan. **Remove member** puts the texture in no set too, also the only one in a set and one you moved in. A texture in no set is on no card, isn't written, shows **No set** in the Textures column, counts for no warning, question or Undecided total, and doesn't make its same-named twin `IN-DUPLICATE`. Drag it onto a card, or use **Back to its automatic set**. The list is `no_set` under `[project]` in `sdc-project.toml`. See docs/wiki/GUI-Sets-Column.md#textures-in-no-set.
-- **Rename outputs** appears only on PGPatcher PBR sets on Community Shaders; with no such set selected it leaves the menus and the dialog, F2 opens Inputs, and a vanilla set renames through Map to target. A set that already has an `output_name` keeps writing under it, and the set editor can clear it.
+- **Rename outputs** appears only on PGPatcher PBR sets on Community Shaders; with no such set selected it leaves the menus and the dialog's mode switch, F2 opens Inputs, and a vanilla set renames through Map to target. A set that already has an `output_name` keeps writing under it, and the set editor can clear it.
 - **Rename outputs** can move a PGPatcher PBR set's outputs to another folder (*Whole path*, or a path such as `armor\steel\plate` in **Rename**); Outputs rows show game paths.
 - The texture panel's rows line up in one label and one control column. The Colour group is gone: **Input content** (was Content) and **DDS tag** are in Compression, after Format.
 - In the texture panel, **Helper** is a tick under Sub-type; unticking a helper writes `helper.role = "none"`, as **Not a helper** did.
@@ -216,21 +216,25 @@
   - `resize = "pot-down"` and `drop_top_mip` (the Advanced **Half size** tick and the **Resize to a power of two** button) are removed, and a config, preset or `--set` naming either is an error that says so.
   - `resize` gains `quarter` and `eighth`, and each halving stops at `resize_floor` (512, the GUI's **Size floor**); height maps under `half` go down to 256, so under `cs-compact` and `vanilla-compact` a 512 height map with no diffuse in its set shrinks to 256 (one beside a diffuse is measured from it, see `resize_relative_to`).
 - BC3 alpha, BC4 and BC5 use a better block search (cutout alpha about +3 dB); existing BC3, BC4 and BC5 outputs re-encode once. BC4 and BC5 take about 1.7 to 1.9 times as long and BC3 under 10 % longer, the `fast` presets included.
-- The BC3 alpha guard uses each texture's alpha-test value (`alpha.threshold` and `alpha.compare`, or its meshes') instead of a fixed 128.
-- New output format `rgb8` (24-bit B8G8R8 with a legacy header, as vanilla tint masks); it refuses kept alpha (`FMT-RGB8-ALPHA`), `_SRGB` and `header = "dx10"`.
+- The BC3 alpha guard uses each texture's alpha-test value (`alpha.threshold` and `alpha.compare`, or its meshes') instead of a fixed 128; at the default threshold the output is unchanged.
+- New output format `rgb8` (24-bit B8G8R8 with a legacy header, as vanilla tint masks); it refuses kept alpha (`FMT-RGB8-ALPHA`), `_SRGB` and `header = "dx10"`. Existing outputs do not change.
 - DDS inputs also read 24-bit R8G8B8, A8L8 and L16 (from the high byte), and the 3D view loads them as body textures; A8L8 and L16 are never written.
 - BC1 and RGB8 are accepted on a type with `data` alpha when that alpha is empty (none, or 255 everywhere); a `complex_material` stays refused for BC1.
-- Alpha counts as opaque when only stray texels are below 251 (under 0.1 % of the image, no connected group over 16). Such a texture no longer asks about its alpha or raises `LOSS-ALPHA-DATA`, and one blocked or asked only because of them converts with its alpha removed (a complex `_m` becomes an env mask with parallax off). Cached image analysis is recomputed once, and `sdc validate` reads a stored DDS the same way.
-- `channels.grayscale_source` also takes `g`, `b` and `a` (it had `r` and `luma`); the default stays `r`, and `CHAN-NOT-GRAY` names the pick.
+- Alpha counts as opaque when only stray texels are below 251 (under 0.1 % of the image, no connected group over 16). Such a texture no longer asks about its alpha or raises `LOSS-ALPHA-DATA`, and one blocked or asked only because of them converts with its alpha removed (a complex `_m` becomes an env mask with parallax off). Bytes for files that were not affected do not change, cached image analysis is recomputed once, and `sdc validate` reads a stored DDS the same way.
+- `channels.grayscale_source` also takes `g`, `b` and `a` (it had `r` and `luma`); the default stays `r` and no existing output changes. `CHAN-NOT-GRAY` names the pick.
 - New sub-type `gray` in the type picker's Grayscale maps group: a plain grey map written as BC4 (the default) or R8, that you pick on the file.
 - Krita and OpenRaster files (`.kra`, `.ora`) are not read: they are reported as `IN-DECODE`. Export the image as PNG from the editor.
 - Mip filter: Tent is allowed on `cutout`, `blend` and `cutout_blend` colour and weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge. Box stays the default; a texture that set `mips.filter = "tent"` on such colour used box in 1.x and now writes the tent.
-- Packed, derived and alpha-fill sources of one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`); another aspect ratio fails (`PACK-SIZE-MISMATCH`).
+- Packed, derived and alpha-fill sources of different sizes but one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`) instead of refused; another ratio still fails (`PACK-SIZE-MISMATCH`). No existing output changes.
 - `vanilla-quality` (and `vanilla-compact`, which inherits it) encodes `diffuse` and `glow` perceptually in BC1, BC3 and BC7, so those outputs re-encode once; `cs-quality`, `cs-compact` and `fast-preview` are unchanged. `VAL-MIP-ERROR` scores a perceptual texture by Rec.709 luma PSNR, and `sdc presets show` and the preset editor show a BC6H texture's effective effort.
 
 ### GUI
 - Meshes view: one flat list of NIF files titled **Meshes**, with a search over path or mod, an **Any mod** picker and chips (Wins, All, Overridden, Conflicted, Problems). Mod chips sit on the rows. **Show in Meshes** from a texture's Used by meshes adds a "Uses <texture>" chip.
   - Upgrading from 1.1: the scan database is emptied once; scan again in the Meshes view.
+- Review only holds what blocks or needs an answer: blockers, undecided textures and the Keep or Overwrite questions.
+  - Its Warnings column (the ticks and **Acknowledge all**), the half-size question and the **Stale outputs** list with **Delete** are gone. Tessalith no longer offers to delete old outputs; they stay in the export folder.
+  - Export pitfalls are ordinary Warning rows in Problems and never hold back Export.
+  - Review opens at 40 % of the window height, waits for overwrite answers and offers hand remedies as row buttons. Enter never saves, deletes or exports; Esc only closes.
 - Removed from the Meshes view and the 3D preview:
   - **Plugin file references…** (the Missing and Unused window) and the set editor's **Used by plugins**;
   - **Show inert**: **Plugin overrides** lists every winning record that uses the mesh;
@@ -245,10 +249,6 @@
   - an **Advanced Skin preview** card on Face Tint and Skin Tint shapes picks the RFAOS and wetness maps and a **Wet amount** from 0 to 1, for the preview only.
 - NIF edits in the worklist: NIF warnings are worklist rows, **Export NIF** is a Review row with **Diff…**, and NIF edits need an export folder you chose. An empty RMAOS slot is an amber row, clip timing is editable, and cancelling Review writes no NIF edits.
   - Upgrading from 1.1: NIF edits made without an export folder are in `mods\sdc NIF Edits`. Choose that folder in **Export to ▾** to reopen them.
-- Review only holds what blocks or needs an answer: blockers, undecided textures and the Keep or Overwrite questions.
-  - Its Warnings column (the ticks and **Acknowledge all**), the half-size question and the **Stale outputs** list with **Delete** are gone. Tessalith no longer offers to delete old outputs; they stay in the export folder.
-  - Export pitfalls are ordinary Warning rows in Problems and never hold back Export.
-  - Review opens at 40 % of the window height, waits for overwrite answers and offers hand remedies as row buttons. Enter never saves, deletes or exports; Esc only closes.
 - Header and editor:
   - **Export** stays neutral until the project is clean, and there is no inherited export folder;
   - **Mode** moved to the **Presets** tab (This project), **Export to** reads "not chosen" until a folder is chosen (**More ▾** only with no project open);
@@ -290,6 +290,11 @@
   - Up and Down move through the helper rows under the tiles, and a re-plan of unchanged files no longer reloads each target an alpha helper fills.
 
 ### Common
+- XPMF profiles: a Landscape or PBR Landscape set can write `SKSE\Plugins\XPMF\tessalith_<set>.json` on Export, from an **XPMF profile** card in the set editor. Landscape sets get two optional maps, **Projected noise** (`_noise`, written as BC4) and **Detail normal**, that the profile points at, and the 3D preview's Material object layer shows the profile's textures and coverage. An Also export with Vanilla ticked writes those two maps and a `pbr = false` copy of the profile into the Vanilla folder too. See docs/wiki/XPMF-Profiles.md.
+  - Upgrading from 1.1: in a landscape set, `_detail` and `_detailnorm` are the set's detail normal and no longer blend into `_n`; a landscape set's `_noise` is written as BC4 with no action by you. A set that had a `_detail` or `_noise` file now writes those outputs, and its `_n` changes (the detail blend is gone). A `_detail_mask` file stays an RNM layer and reports `RNM-MASK-ORPHAN`.
+  - Upgrading from 1.1: `noise` is a file suffix, so every `*_noise.png` joins the set of its base name (`perlin_noise.png` joins set `perlin`; a `[sets."../perlin_noise"]` entry no longer matches). A user preset suffix alias named `noise` is refused on load (`CFG-PRESET-SKIPPED`; `--preset-file` exits 2).
+- BC1 can keep 1-bit alpha: turn on `encoder.bc1_alpha` (GUI: **1-bit alpha** in the Alpha group, BC1 only) for a `cutout`, `blend` or `cutout_blend` texture. Texels below the alpha-test cutoff become transparent black, and a new warning, `ALPHA-BC1-ONE-BIT`, flags sources with soft alpha. See docs/wiki/Texture-Types.md#alpha-policies.
+  - Upgrading from 1.1: `encoder.bc1_transparent_black` is removed; a config or preset that still has the line, even `= false`, is an error that names `encoder.bc1_alpha`. Delete the line.
 - NVTT removed: `encoder.backend = "nvtt"` and `--nvtt` now fail (as does an allow list naming `ENC-NVTT-MISSING`, `ENC-NVTT-VERSION` or `ENC-NVTT-FAILED`); re-encode with the built-in encoders. The GUI loses the NVTT section in Advanced, the Encoder row in the texture panel and the Textures column's Encoder filter, and `sdc encoders` stops looking for NVTT. `VAL-BC6H-PEAK` advice is now only `encoder.effort = "slowest"`.
 - The format alone picks the encoder: `encoder.backend` and `encoder.rgbcx_level` are removed (BC1 and BC3 colour always use rgbcx level 18, the value every built-in preset set), and a config, preset or `--set` that names either is an error that says so. The GUI loses the rgbcx level row in Advanced. Output bytes do not change.
 - Diagnostic codes removed; an allow list naming one is an error that says so:
@@ -313,11 +318,6 @@
   - The GUI loses the Review checkbox **Also write a zip of each folder** and the Problems row **Reset also.json**.
   - An Also export keeps no `_sdc/also.json`; one a 1.x export left is never read, rewritten or deleted. Files an earlier export left in the three folders are still listed in the export notes as "not written by this export".
   - After an Also export the command line prints those files, and the PBR sets left out of Vanilla and CM, as plain lines on stderr.
-- XPMF profiles: a Landscape or PBR Landscape set can write `SKSE\Plugins\XPMF\tessalith_<set>.json` on Export, from an **XPMF profile** card in the set editor. Landscape sets get two optional maps, **Projected noise** (`_noise`, written as BC4) and **Detail normal**, that the profile points at, and the 3D preview's Material object layer shows the profile's textures and coverage. An Also export with Vanilla ticked writes those two maps and a `pbr = false` copy of the profile into the Vanilla folder too. See docs/wiki/XPMF-Profiles.md.
-  - Upgrading from 1.1: in a landscape set, `_detail` and `_detailnorm` are the set's detail normal and no longer blend into `_n`; a landscape set's `_noise` is written as BC4 with no action by you. A set that had a `_detail` or `_noise` file now writes those outputs, and its `_n` changes (the detail blend is gone). A `_detail_mask` file stays an RNM layer and reports `RNM-MASK-ORPHAN`.
-  - Upgrading from 1.1: `noise` is a file suffix, so every `*_noise.png` joins the set of its base name (`perlin_noise.png` joins set `perlin`; a `[sets."../perlin_noise"]` entry no longer matches). A user preset suffix alias named `noise` is refused on load (`CFG-PRESET-SKIPPED`; `--preset-file` exits 2).
-- BC1 can keep 1-bit alpha: turn on `encoder.bc1_alpha` (GUI: **1-bit alpha** in the Alpha group, BC1 only) for a `cutout`, `blend` or `cutout_blend` texture. Texels below the alpha-test cutoff become transparent black, and a new warning, `ALPHA-BC1-ONE-BIT`, flags sources with soft alpha. See docs/wiki/Texture-Types.md#alpha-policies.
-  - Upgrading from 1.1: `encoder.bc1_transparent_black` is removed; a config or preset that still has the line, even `= false`, is an error that names `encoder.bc1_alpha`. Delete the line.
 - `encoder.perceptual` also applies to BC1 and BC3 colour, weighting R, G and B by 54/183/19 (Rec.709 luma). It stays off by default and `FMT-PERCEPTUAL-DATA` still refuses it on data maps. The GUI shows a **Perceptual** tick in Compression for BC1 and BC3, and the preset editor one for BC1, BC3 and BC7. The vanilla presets turn it on for `diffuse` and `glow`, so those outputs change; the other presets keep their bytes.
 - New setting `resize_relative_to` (GUI: **Relative to**, next to Resize): `slot1` to `slot8` measure `resize` from the source size of the set's map in that texture-set slot instead of the texture's own size, and never enlarge. `cs-compact` and `vanilla-compact` use `slot1` for every map but the diffuse, so a normal or mask already exported smaller than its diffuse is no longer halved again. A map whose set has none or several maps in that slot is resized from its own size and gets the info code `RESIZE-NO-REFERENCE`.
 - Automatic decisions (the ones Tessalith makes without asking) are recorded in `sdc.toml`, so the GUI and CLI agree on them.
@@ -357,8 +357,6 @@
 - **Existing projects: some outputs change on the next export.** A set with a helper that 1.0.0 ignored, beside a target whose alpha is empty (none, fully opaque or flat), now fills that alpha: a colour texture beside an `_opacity` file, and a non-PBR `_n` beside a `_specular` file. That output gains an alpha and may change format (a BC1 diffuse moves to an alpha format). A target with a real alpha keeps it. `--on-existing if-changed` re-exports only those outputs (the helper is now recorded as a source of the output); nothing else re-encodes. To keep the old output, set `helper.role = "none"` on the helper (it is then converted on its own) or `helper.fills = []` (it is then not used).
 
 ## 1.0.0
-
-First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was never released).
 
 ### Main
 - Edit NIF files on the Meshes page: shader and material fields, extra data, alpha properties, animation keys and clips, written with **Export NIF**.
@@ -404,7 +402,7 @@ First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was neve
   - Ctrl+Shift+Z with nothing to redo no longer undoes, and Shift+Tab in the input-name box no longer takes the ghost suggestion;
   - a disabled shortcut yields to an enabled one on the same keys;
   - the presets' Delete confirmation is per preset, and the RNM strength and AO-power sliders keep the value you set until the plan updates;
-  - Encode pressed during an export runs when the export ends;
+  - Encode now pressed during an export runs when the export ends;
   - a non-Unicode path is left out of `gui.toml` instead of failing the settings save;
   - an edit that changes no text leaves the project clean, and a `[files]` lookup also finds a key without an extension;
   - the bulk Encoder row keeps its lock when NVTT is not found.
@@ -413,6 +411,7 @@ First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was neve
 - `patch-header --dry-run` prints "would patch: ..." instead of the real patched code.
 
 ### Common
+- First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was never released).
 - **Also export as Vanilla / Complex Material**: from a PBR set, write a vanilla or Complex Material version beside the PBR one. `_curves`, `_curvature` and `_cavity` files join their set as packing inputs instead of making their own set, and write nothing by themselves.
 - **BC7 weighting** dropdown replaces the Perceptual check box: Linear (default), Perceptual, Alpha ×2, ×8 or ×16, for the built-in BC7 encoder only; other formats and encoders warn that it is ignored. The `encoder.bc7_weights` setting is also available from `--set`, `[files]` and rules. Output with the default setting is unchanged.
 - A quoted dotted `[files]` key is a config error that names the field, where the value was silently dropped.
@@ -424,7 +423,7 @@ First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was neve
 - New bc7e quality level `encoder.effort = "max"`, off by default.
 
 ### Engine
-- New bc7e quality level `encoder.effort = "max"` (sdc patch 0002, a wider search on top of `veryslow`), off by default; a build without the patch refuses it with `CFG-INVALID`.
+- New bc7e quality level `encoder.effort = "max"` (sdc patch 0002, a wider search on top of `veryslow`), off by default, so the default output is unchanged; a build without the patch refuses it with `CFG-INVALID`.
 
 ### GUI
 - GUI layout v2. The header is rebuilt, and dialogs share one frame with a fixed button order. The export Review tab is split out, the Sets column has a filter, and the Presets window and the 3D settings window have moved. See docs/gui.md.
@@ -444,8 +443,6 @@ First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was neve
 
 ## 0.8.0-alpha.1 (first public alpha)
 
-Tessalith converts a folder of source images to DDS for Skyrim SE/AE. The GUI (`tessalith.exe`) and the CLI (`sdc.exe`) share one engine and one per-project `sdc.toml`. This is an alpha: back up your mod folders first.
-
 ### Main
 - Works out what each file is, packs loose maps into Skyrim's layouts, builds the mips and checks every output against Skyrim's rules.
 - Upgrading from 0.7: the `cpm` target is gone, and some defaults change.
@@ -462,6 +459,7 @@ Tessalith converts a folder of source images to DDS for Skyrim SE/AE. The GUI (`
 - GUI with encoded-mip preview, pixel readout, pin and compare, and a 3D preview.
 
 ### Common
+- Tessalith converts a folder of source images to DDS for Skyrim SE/AE. The GUI (`tessalith.exe`) and the CLI (`sdc.exe`) share one engine and one per-project `sdc.toml`. This is an alpha: back up your mod folders first.
 - Every output is decoded and checked against Skyrim's rules; `sdc validate` checks DDS files from other tools.
 
 ### Changes that matter when upgrading from 0.7
