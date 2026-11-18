@@ -114,7 +114,7 @@ A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.
 
 - **The row** reads *{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)*. Hover it for one line per file, `{file}: skin albedo → {type}`, then the types recorded with it, then *A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.* <!-- D:JQ19 -->
 - **Undo this change** sits on the row while the switch is the last step. The switch and the types recorded with it are one undo step. <!-- D:JQ17,JQ56 -->
-- **An undone switch runs again** the next time `sdc.toml` is read. Only a shader you pick in the [set editor](GUI-Set-Editor.md#slot-rows) holds a set on **Advanced Skin**. <!-- D:JQ56 -->
+- **An undone switch runs again** the next time `sdc.toml` is read. The row's hover says how to keep a set skin. <!-- D:JQ56 -->
 - **Not switched:** a set whose shader you picked, a set that other skin maps or types keep skin, and every set while `sdc.toml` is read-only. <!-- D:JQ8,JQ20 -->
 
 ## Narrowing the list

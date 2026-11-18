@@ -83,7 +83,7 @@ A `_fuzz` or `_sheen` map that no set reads is not converted. [Problems](GUI-Pro
 | `<f file> is the set's PBR fuzz texture (_f)` | Remove one of the two fuzz files: both would be `<base>_f.dds`. The `_f` can be an image or a kept `_f.dds`. <!-- D:JQ4,JQ53 --> |
 | `the <shader> shader of set <id> reads no fuzz map, and set <id> (<shader> shader) would read it as its fuzz texture, which only the file's own set can convert` | The map is shared between sets. Pick **Advanced Skin** or a PBR shader for the set that holds the file. <!-- D:JQ51 --> |
 
-A shared fuzz map does the job its own set gives it. An Advanced skin set that borrows a map its own PBR set converts gets the default G, and its `_rfaos` row reads *{output} g: the shared {file} is converted by its own set {id} ({shader} shader) and is not read here, so the default 0 (no fuzz) is used.* A PBR set that borrows a skin set's fuzz map gets no `<base>_f.dds` and no row. <!-- D:JQ51 -->
+A shared fuzz map does the job its own set gives it. An Advanced skin set that borrows a map its own PBR set converts gets the default G, and its `_rfaos` row reads *{output} G: the shared {file} is converted by its own set {id} ({shader} shader) and is not read here, so the default 0 (no fuzz) is used.* A PBR set that borrows a skin set's fuzz map gets no `<base>_f.dds` and no row. <!-- D:JQ51 -->
 
 ### Alpha targets and sizes
 
