@@ -1284,16 +1284,65 @@ fn title_probe(h: &Harness<'static, AppModel>, id: &str) -> (String, usize, egui
     (text, rows, r)
 }
 
-/// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, under the
-/// position and handle) instead of wrapping mid-word beside the pill.
+/// The status pill's kind label of the card whose title is `title`: of every painted copy of the set's kind text,
+/// the one nearest the title vertically (the pill sits on the title's row or the row under it).
+fn pill_of(h: &Harness<'static, AppModel>, id: &str, title: egui::Rect) -> egui::Rect {
+    let v = set_views(h.state())
+        .into_iter()
+        .find(|v| v.id == id)
+        .expect("the set's view");
+    let kind = sdc_gui::model::sets::kind_text(h.state(), &v);
+    fn flat(s: &egui::Shape, kind: &str, out: &mut Vec<egui::Rect>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, kind, out)),
+            egui::Shape::Text(t) if t.galley.job.text == kind => out.push(t.visual_bounding_rect()),
+            _ => {}
+        }
+    }
+    let mut all = vec![];
+    for c in &h.output().shapes {
+        flat(&c.shape, kind, &mut all);
+    }
+    all.into_iter()
+        .min_by(|a, b| {
+            (a.center().y - title.center().y)
+                .abs()
+                .total_cmp(&(b.center().y - title.center().y).abs())
+        })
+        .unwrap_or_else(|| panic!("the pill's {kind:?} label is painted"))
+}
+
+/// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, the pill
+/// wholly below it) instead of wrapping mid-word beside the pill; with a set open, at 1055x770.
 #[test]
 fn a_title_too_wide_beside_the_pill_takes_its_own_line() {
-    const IDS: [&str; 2] = [
-        "architecture/whiterun/wrwoodbeamlong01",
-        "architecture/windhelm/wrwoodbeamlong01",
-    ];
+    // Sets at its default 266 px at 1055x770 (nothing open): the one-row layout is chosen, and a 25-character
+    // tail does not fit beside the pill. This is the state that is RED without the fix.
+    own_line_case(
+        [
+            "architecture/whiterun/wrwoodbeamlong01",
+            "architecture/windhelm/wrwoodbeamlong01",
+        ],
+        false,
+    );
+}
+
+/// A pin of the narrower state: with a set open the Sets column is 172 px at 1055x770 and the narrow layout was
+/// already chosen before the fix, so this passes on the old code too.
+#[test]
+fn a_title_in_the_narrowest_column_with_a_set_open_stays_on_one_line_above_the_pill() {
+    own_line_case(
+        [
+            "architecture/whiterun/wrbeam01",
+            "architecture/windhelm/wrbeam01",
+        ],
+        true,
+    );
+}
+
+fn own_line_case(ids: [&str; 2], open: bool) {
     let d = tempfile::tempdir().unwrap();
-    for (id, rgb) in IDS.iter().zip([[90u8; 3], [60u8; 3]]) {
+    for (id, rgb) in ids.iter().zip([[90u8; 3], [60u8; 3]]) {
         let p = d.path().join("textures").join(format!("{id}.png"));
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb(rgb))
@@ -1301,15 +1350,32 @@ fn a_title_too_wide_beside_the_pill_takes_its_own_line() {
             .unwrap();
     }
     let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let key = set_views(&m)
+        .into_iter()
+        .find(|v| v.id == ids[0])
+        .unwrap()
+        .key;
     let mut h = harness(m);
     h.set_size(egui::vec2(1055.0, 770.0));
+    if open {
+        h.state_mut().select_set(&key);
+    }
     h.run();
     h.run();
     let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
-    for id in IDS {
+    println!(
+        "MEASURED Sets column width at 1055x770, set open {open}: {}",
+        panel.width()
+    );
+    for id in ids {
         // the narrow layout: the title beside the position and handle at the card's full width, the pill below
         let (text, rows, r) = title_probe(&h, id);
         assert_eq!(rows, 1, "{id}: one line, shown {text:?} in {r:?}");
+        let pill = pill_of(&h, id, r);
+        assert!(
+            pill.min.y >= r.max.y - 1.0,
+            "{id}: the pill {pill:?} lies below the title {r:?}"
+        );
         assert!(
             r.height() < 1.5 * h.ctx.global_style().text_styles[&egui::TextStyle::Body].size + 6.0
                 && panel.contains_rect(r),
@@ -1358,6 +1424,12 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
         assert!(
             rows == 1 || last_resort,
             "{id}: {rows} lines for {text:?} in {r:?}"
+        );
+        // on its own row: the pill lies wholly below the title, never beside it
+        let pill = pill_of(&h, id, r);
+        assert!(
+            pill.min.y >= r.max.y - 1.0,
+            "{id}: the pill {pill:?} lies below the title {r:?}"
         );
     }
     assert!(
