@@ -1141,6 +1141,57 @@ fn the_extra_packed_map_row_offers_clear_recipe_first() {
     extra_row_clears(m, &id, RMAOS, "rock01_rmaos.dds", RFAOS);
 }
 
+/// Controller ruling (2026-11-18): with no recipe written, the SHADER-EXTRA-MAP row that names the set's packed
+/// output (DQ2's metallic-only Advanced Skin set: `_rmaos`, nothing written) has exactly one fix, Change shader….
+/// Remove from set is not offered: a packed output cannot leave its set, so that button could never work. Go to set
+/// still outlines the packed row. A non-packed extra member keeps 3a's two fixes
+/// (`problems_notes::each_row_carries_the_tables_fix`).
+#[test]
+fn the_extra_packed_map_row_without_a_recipe_offers_change_shader_alone() {
+    use sdc_gui::model::nav::SlotTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = metallic_only(d.path());
+    let id = set_id(&m);
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(RMAOS, "packing.recipe"),
+        None,
+        "fixture: nothing written"
+    );
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(RFAOS, "packing.recipe"),
+        None,
+        "fixture: nothing written"
+    );
+    let r = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderExtraMap) && p.text.starts_with("rock01_rmaos.dds"))
+        .cloned()
+        .expect("DQ2's SHADER-EXTRA-MAP row");
+    assert_eq!(
+        r.text,
+        "rock01_rmaos.dds isn't read by the advanced_skin shader. It is still converted, so nothing breaks."
+    );
+    assert_eq!(
+        r.fix,
+        Some(Fix::ChangeShader(id.clone())),
+        "Change shader… is the one fix"
+    );
+    assert_eq!(r.second_fix, None, "no Remove from set for a packed output");
+    assert_eq!(
+        r.target,
+        Some(SlotTarget::Item(RMAOS.into())),
+        "Go to set still outlines the packed row"
+    );
+}
+
 #[test]
 fn dragging_a_fill_box_and_releasing_stores_the_final_dragged_value() {
     let d = tempfile::tempdir().unwrap();

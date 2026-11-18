@@ -977,7 +977,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                                     Some(SlotTarget::Item(item)),
                                     None,
                                 ),
-                                None => (shader(), None, None, None),
+                                // A packed output is skipped by `extra_member`: Change shader… alone, and Go to
+                                // set still outlines its row.
+                                None => (
+                                    shader(),
+                                    None,
+                                    packed_output_key(m, v, member).map(SlotTarget::Item),
+                                    None,
+                                ),
                             }
                         }
                     }
@@ -1450,16 +1457,18 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
 
 /// Review E10: the key of `v`'s member that a SHADER-EXTRA-MAP's or SHADER-NORMAL-SPECULAR's `data.member` names.
 /// The engine writes the member's output file name (`engine::api` `shader_members`); a source file name is matched too.
+/// A packed output is skipped: it cannot leave its set (controller ruling, 2026-11-18).
 fn extra_member(m: &AppModel, v: &sets::SetView, w: &engine::codes::Warning) -> Option<String> {
     let name = w.data.get("member")?.as_str()?;
     v.members
         .iter()
         .find(|k| {
             m.item(k).is_some_and(|i| {
-                i.name == name
-                    || i.job
-                        .as_ref()
-                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name))
+                i.kind != items::ItemKind::Packed
+                    && (i.name == name
+                        || i.job
+                            .as_ref()
+                            .is_some_and(|j| j.output.file_name().is_some_and(|f| f == name)))
             })
         })
         .cloned()
