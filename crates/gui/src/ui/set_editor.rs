@@ -822,18 +822,25 @@ fn own_item<'a>(model: &'a AppModel, v: &SetView, cell: &SlotCell) -> Option<&'a
     }
 }
 
-/// A Flags icon toggle: its accessible name is the full `label`, which also leads its hover. True when clicked.
-fn flag(
-    ui: &mut egui::Ui,
-    enabled: bool,
-    on: bool,
-    icon: &str,
-    label: &str,
-    hover: &str,
-    why: &str,
-) -> bool {
-    let r = ui
-        .add_enabled(enabled, egui::Button::selectable(on, icon))
+/// The link mark's square: the toggle is as wide as the glyph button it replaces (`look_036`'s pin on the Format column).
+const MARK_W: f32 = 13.0;
+
+/// A Flags toggle painted as the link mark (two rings, no emoji glyph): its accessible name is the full `label`, which
+/// also leads its hover. True when clicked.
+fn flag(ui: &mut egui::Ui, enabled: bool, on: bool, label: &str, hover: &str, why: &str) -> bool {
+    let mark = egui::IdSalt::new("flag-mark");
+    let mut button = None;
+    ui.add_enabled_ui(enabled, |ui| {
+        let a = egui::Button::selectable(on, egui::Atom::custom(mark, egui::Vec2::splat(MARK_W)))
+            .atom_ui(ui);
+        if let Some(rect) = a.rect(mark) {
+            let c = ui.style().interact_selectable(&a.response, on).text_color();
+            super::sets_column::link_mark(ui.painter(), rect, c);
+        }
+        button = Some(a.response);
+    });
+    let r = button
+        .expect("the toggle is drawn")
         .on_hover_text(format!("{label}. {hover}"))
         .on_disabled_hover_text(why);
     ui.ctx()
@@ -1189,7 +1196,6 @@ fn row(
                     ui,
                     refused.is_none(),
                     on,
-                    "🔗",
                     "Match on this",
                     "PGPatcher applies the entry to meshes with this exact texture in this slot",
                     refused.as_deref().unwrap_or_default(),

@@ -15,11 +15,15 @@ const ROCK: &str = "landscape/rock01.png";
 const LEAF: &str = "landscape/leaf.png";
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
+    harness_at(m, 1400.0)
+}
+
+fn harness_at(m: AppModel, w: f32) -> Harness<'static, AppModel> {
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(egui::vec2(1400.0, 1200.0))
+        .with_size(egui::vec2(w, 1200.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h
 }
@@ -297,5 +301,91 @@ fn the_slot_alpha_sits_on_the_formats_line() {
             (alpha.center().y - format.center().y).abs() <= 2.0,
             "asks {asks}: alpha {alpha:?} vs format {format:?}"
         );
+    }
+}
+
+/// Guard (passes today and must keep passing): at the floor the alpha value reads in full, under its heading.
+#[test]
+fn the_alpha_value_reads_in_full_at_1280() {
+    let d = tempfile::tempdir().unwrap();
+    let m = leaf(d.path()); // a set that asks: Confirm shows, the tightest row
+    let want = alpha_label(sdc_gui::model::items::alpha_asked(m.item(LEAF).unwrap()).unwrap());
+    let mut h = harness_at(m, 1280.0);
+    h.run_steps(4);
+    let combo = slot_combo(&h);
+    assert!(
+        combo
+            .accesskit_node()
+            .label()
+            .unwrap()
+            .starts_with("Slot alpha type: "),
+        "AccessKit keeps the full name"
+    );
+    assert_eq!(
+        painted_in(&h, combo.rect()),
+        want,
+        "the value is painted in full"
+    );
+    assert!(
+        !painted_cut(&h, combo.rect()),
+        "painted {:?}",
+        painted_in(&h, combo.rect())
+    );
+    // the heading over this combo: the nearest "Alpha" label above it that overlaps it across
+    // (the PGPatcher panel's alpha group has a title of its own elsewhere)
+    let c = combo.rect();
+    let head = h
+        .query_all_by_role(Role::Label)
+        .filter(|n| {
+            let a = n.accesskit_node();
+            a.label().as_deref() == Some("Alpha") || a.value().as_deref() == Some("Alpha")
+        })
+        .map(|n| n.rect())
+        .filter(|r| r.max.y <= c.min.y && r.min.x < c.max.x && r.max.x > c.min.x)
+        .min_by(|a, b| (c.min.y - a.max.y).total_cmp(&(c.min.y - b.max.y)));
+    assert!(head.is_some(), "an Alpha heading above the alpha combo");
+}
+
+/// The link mark's rings (two 1.5 px circles) painted inside `r`.
+fn rings(h: &Harness<'static, AppModel>, r: egui::Rect) -> usize {
+    fn count(s: &egui::Shape, r: egui::Rect) -> usize {
+        match s {
+            egui::Shape::Vec(v) => v.iter().map(|s| count(s, r)).sum(),
+            egui::Shape::Circle(c) if c.stroke.width == 1.5 && r.contains(c.center) => 1,
+            _ => 0,
+        }
+    }
+    h.output().shapes.iter().map(|c| count(&c.shape, r)).sum()
+}
+
+const MATCH_HOVER: &str =
+    "Match on this. PGPatcher applies the entry to meshes with this exact texture in this slot";
+
+/// E17: the Match toggle is the painted link mark alone, at the floor and at a wide window: no text and no emoji
+/// glyph in it, its name and its hover in full.
+#[test]
+fn the_match_toggle_is_the_painted_mark() {
+    for w in [1280.0f32, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let mut h = harness_at(rock(d.path()), w); // a PBR JSON set: Match on slots 1 and 2
+        h.ctx.global_style_mut(|s| {
+            s.interaction.tooltip_delay = 0.0;
+            s.interaction.show_tooltips_only_when_still = false;
+        });
+        h.run_steps(4);
+        let n = h
+            .query_all_by_label("Match on this")
+            .next()
+            .unwrap_or_else(|| panic!("{w}: Match on this"));
+        let r = n.rect();
+        let shown = painted_in(&h, r);
+        assert!(
+            !shown.contains("Match") && !shown.contains('\u{1F517}') && shown.trim().is_empty(),
+            "{w}: no text, no glyph: {shown:?}"
+        );
+        assert_eq!(rings(&h, r), 2, "{w}: the mark's two rings are painted");
+        h.hover_at(r.center());
+        h.run();
+        h.get_by_label(MATCH_HOVER);
     }
 }
