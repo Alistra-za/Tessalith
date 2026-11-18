@@ -166,7 +166,7 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
 }
 
 #[test]
-fn the_output_files_group_is_drawn_in_the_3d_view_too() {
+fn the_output_files_group_is_not_drawn_in_the_3d_view() {
     use sdc_gui::ui::set_editor::{draw, View};
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair(d.path());
@@ -201,7 +201,8 @@ fn the_output_files_group_is_drawn_in_the_3d_view_too() {
             },
             (m, key),
         );
-    assert!(h.query_by_label_contains("Output files").is_some());
+    // The viewport's share of the centre is pinned (`set_preview_layout`), so the header stays out of the 3D view.
+    assert!(h.query_by_label_contains("Output files").is_none());
     assert!(
         h.query_by_label("Slot commands…").is_none(),
         "premise: the 3D path draws no slot rows"

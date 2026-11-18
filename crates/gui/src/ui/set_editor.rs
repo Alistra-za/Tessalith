@@ -285,8 +285,8 @@ pub fn draw(
         // 3D (AG132): the set's 3D view takes the rest of this pane (`ui::centre`); the TruePBR settings and the skin
         // card are in the TruePBR settings… window, as are the CS PBR section and the complex material card, so an edit
         // still shows live in 3D.
+        // No Output files group here either: the viewport's share of the centre is pinned (`set_preview_layout`).
         head(ui, model, v, view);
-        outputs(ui, model, v);
         // No slot rows here: a waiting Assign… focus is dropped.
         ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
         if let Some(a) = status {
