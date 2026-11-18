@@ -14,11 +14,15 @@ pub fn format_panic(
     format!("{time} panic in thread '{thread}' at {location}: {message}\nbacktrace: {bt}\n")
 }
 
-/// `yyyymmdd-hhmmss` (UTC; std has no local time) for a count of seconds since the Unix epoch.
-pub fn stamp(secs: u64) -> String {
-    let (days, rem) = (secs / 86400, secs % 86400);
-    // Civil date from days since 1970-01-01 (H. Hinnant's algorithm).
-    let z = days as i64 + 719_468;
+/// `YYYY-MM-DD` (UTC) for a count of seconds since the Unix epoch.
+pub fn date(secs: u64) -> String {
+    let (y, m, d) = civil((secs / 86400) as i64);
+    format!("{y:04}-{m:02}-{d:02}")
+}
+
+/// Civil date `(year, month, day)` from days since 1970-01-01 (H. Hinnant's algorithm).
+fn civil(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
     let era = z / 146_097;
     let doe = z - era * 146_097;
     let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
@@ -26,7 +30,13 @@ pub fn stamp(secs: u64) -> String {
     let mp = (5 * doy + 2) / 153;
     let d = doy - (153 * mp + 2) / 5 + 1;
     let m = if mp < 10 { mp + 3 } else { mp - 9 };
-    let y = yoe + era * 400 + i64::from(m <= 2);
+    (yoe + era * 400 + i64::from(m <= 2), m, d)
+}
+
+/// `yyyymmdd-hhmmss` (UTC; std has no local time) for a count of seconds since the Unix epoch.
+pub fn stamp(secs: u64) -> String {
+    let rem = secs % 86400;
+    let (y, m, d) = civil((secs / 86400) as i64);
     format!(
         "{y:04}{m:02}{d:02}-{:02}{:02}{:02}",
         rem / 3600,
@@ -390,6 +400,13 @@ mod tests {
             l,
             "T panic in thread 'main' at a.rs:1:2: boom\nbacktrace: 0: f\\n1: g\n"
         );
+    }
+
+    #[test]
+    fn date_is_iso() {
+        assert_eq!(date(1_762_776_000), "2025-11-10");
+        assert_eq!(date(0), "1970-01-01");
+        assert_eq!(stamp(1_762_776_000), "20251110-120000");
     }
 
     #[test]

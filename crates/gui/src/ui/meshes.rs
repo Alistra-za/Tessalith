@@ -527,6 +527,13 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
             }
         }
     });
+    // Review E16: the list names the scan it comes from; truncate() keeps the full line on hover and as the name.
+    if let Some(s) = m.scan_source() {
+        let line = crate::model::meshes::source_line(s);
+        if !line.is_empty() {
+            ui.add(egui::Label::new(egui::RichText::new(line).weak()).truncate());
+        }
+    }
     if m.selected_mod.is_none() && m.rows_loading() {
         ui.weak("Reading the scan…");
         return;

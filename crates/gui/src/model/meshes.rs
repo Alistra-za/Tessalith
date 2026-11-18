@@ -407,11 +407,69 @@ pub fn overridden_text(n: u32) -> String {
     }
 }
 
+/// Where the list on screen comes from (review E16): the folder the scan read and when `scan.db` was last written.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScanSource {
+    pub root: Option<String>,
+    pub written: Option<String>,
+}
+
+/// The line over the list: "From the scan of {root}. Scan data last written {written}."
+/// With no root only the second sentence; with no time only the first; with neither, no line.
+pub fn source_line(s: &ScanSource) -> String {
+    let from = s.root.as_ref().map(|r| format!("From the scan of {r}."));
+    let at = s
+        .written
+        .as_ref()
+        .map(|w| format!("Scan data last written {w}."));
+    [from, at]
+        .into_iter()
+        .flatten()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// `scan.db`'s own modified time as `YYYY-MM-DD` (UTC); `-wal` is not looked at (controller ruling 6).
+pub fn scan_written(db: &Path) -> Option<String> {
+    let t = std::fs::metadata(db).and_then(|m| m.modified()).ok()?;
+    let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
+    Some(crate::crash_log::date(secs))
+}
+
+/// The folder the scan in `store` read: the parent of the Overwrite origin's root (an MO2 scan always adds one,
+/// `modscan/src/mo2.rs`), else the root of the only mod origin (a folder scan), else `None`.
+// shortcut: an MO2 `overwrite_directory` outside the instance names the wrong folder, and the file time moves on any
+// later write (a WAL checkpoint, a migration, a later NIF-team table); upgrade when modscan records the instance and
+// the scan time.
+fn scan_root(store: &Store) -> Option<String> {
+    let mut st = store
+        .conn()
+        .prepare("SELECT kind, root FROM origin WHERE kind IN (1, 2)")
+        .ok()?;
+    let rows: Vec<(i32, String)> = st
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .ok()?
+        .filter_map(Result::ok)
+        .collect();
+    if let Some((_, root)) = rows
+        .iter()
+        .find(|(k, _)| *k == modscan::store::KIND_OVERWRITE)
+    {
+        return Path::new(root).parent().map(|p| p.display().to_string());
+    }
+    match rows.as_slice() {
+        [(_, root)] => Some(root.clone()),
+        _ => None,
+    }
+}
+
 pub struct MeshesModel {
     pub picker: super::picker::Picker,
     pub store_path: Option<PathBuf>,
     pub target: Option<ScanTarget>,
     pub mods: Vec<ModRow>,
+    /// What the list names as its scan; filled by `reload`, `None` while `mods` is empty.
+    scan_source: Option<ScanSource>,
     /// The mod picker (Note GC): `None` is "Any mod" (the winners); `Some` lists that mod's copies (`nifs`).
     pub selected_mod: Option<i64>,
     /// The picked mod's NIF copies, winning or not.
@@ -578,6 +636,7 @@ impl MeshesModel {
             store_path,
             target: None,
             mods: vec![],
+            scan_source: None,
             selected_mod: None,
             nifs: Arc::default(),
             filter: NifFilter::All,
@@ -787,6 +846,11 @@ impl MeshesModel {
 
     pub fn take_request(&mut self) -> bool {
         std::mem::take(&mut self.request)
+    }
+
+    /// The scan the list comes from; `None` while there is no scan.
+    pub fn scan_source(&self) -> Option<&ScanSource> {
+        self.scan_source.as_ref()
     }
 
     pub fn scanning(&self) -> bool {
@@ -1025,6 +1089,10 @@ impl MeshesModel {
                 return;
             }
         }
+        self.scan_source = (!self.mods.is_empty()).then(|| ScanSource {
+            root: scan_root(store),
+            written: self.store_path.as_deref().and_then(scan_written),
+        });
         self.refresh_doc_badges();
         self.refresh_placement();
         self.scan_ctrls.clear(); // the files may have changed too (T8)

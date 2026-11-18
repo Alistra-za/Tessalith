@@ -1474,6 +1474,112 @@ fn the_list_says_it_is_reading_until_the_rows_land() {
     h.get_by_label("meshes/rock.nif");
 }
 
+/// Review E16: the date comes from the file's own modified time (a plain file, so nothing rewrites it).
+#[test]
+fn scan_written_reads_the_file_time() {
+    let d = tempfile::tempdir().unwrap();
+    let p = d.path().join("scan.db");
+    let f = std::fs::File::create(&p).unwrap();
+    f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(1_762_776_000))
+        .unwrap();
+    drop(f);
+    assert_eq!(
+        sdc_gui::model::meshes::scan_written(&p).as_deref(),
+        Some("2025-11-10")
+    );
+    assert_eq!(
+        sdc_gui::model::meshes::scan_written(&d.path().join("none.db")),
+        None
+    );
+}
+
+/// Review E16: the list names the instance its scan read (the parent of `overwrite`) and the scan data's date.
+#[test]
+fn the_list_names_the_instance_of_its_scan() {
+    let (d, mut m) = scan_files("+A\n", &[("mods/A/meshes/x.nif", None)]);
+    m.reload();
+    let mut h = harness(m);
+    h.run();
+    let want = format!("From the scan of {}.", d.path().display());
+    let line = h.get_by_label_contains(&want);
+    // A `Role::Label` node keeps its text in `value`, not `label`.
+    assert!(line
+        .accesskit_node()
+        .value()
+        .unwrap()
+        .contains("Scan data last written 20"));
+}
+
+/// Review E16: a folder scan names the folder.
+#[test]
+fn a_folder_scan_names_the_folder() {
+    let (f, _db, m) = folder_scan("x");
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains(&format!(
+        "From the scan of {}.",
+        f.path().join("x").display()
+    ));
+}
+
+/// A model that scanned `sub` of a temp folder as a single mod.
+fn folder_scan(sub: &str) -> (tempfile::TempDir, tempfile::TempDir, MeshesModel) {
+    let f = tempfile::tempdir().unwrap();
+    let folder = f.path().join(sub);
+    put(&folder, "meshes/x.nif", None);
+    let db = tempfile::tempdir().unwrap();
+    let mut m = scan_model(db.path().join("scan.db"));
+    m.activate_with(None);
+    m.use_folder(folder);
+    start_scan(&mut m);
+    wait(&mut m);
+    assert_eq!(m.error, None);
+    (f, db, m)
+}
+
+/// Review E16: with no source chosen any more, the list still names the scan it shows.
+#[test]
+fn with_no_source_chosen_the_list_still_names_the_old_scan() {
+    let (d, mut m) = scan_files("+A\n", &[("mods/A/meshes/x.nif", None)]);
+    m.target = None;
+    m.reload();
+    wait(&mut m);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label_contains(&format!("From the scan of {}.", d.path().display()));
+    h.get_by_label("meshes/x.nif");
+}
+
+/// Review E16: at 1100 px the line is cut in its column and keeps its full text as its name.
+#[test]
+fn at_1100_px_the_source_line_is_cut_and_keeps_its_full_name() {
+    use eframe::egui;
+    let (f, _db, m) = folder_scan(&"a_very_long_folder_name".repeat(4));
+    let root = f.path().join("a_very_long_folder_name".repeat(4));
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1100.0, 800.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        );
+    h.run();
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "meshes-tree").expect("the panel");
+    let line = h.get_by_label_contains("From the scan of");
+    let full = line.accesskit_node().value().unwrap().to_string();
+    assert!(full.contains(&format!("From the scan of {}.", root.display())));
+    let band = line.rect().y_range();
+    let past = h.ctx.viewport(|v| {
+        (v.this_pass.widgets.layers().flat_map(|(_, ws)| ws))
+            .filter(|w| band.contains(w.rect.center().y) && w.rect.max.x > panel.max.x)
+            .map(|w| w.rect)
+            .collect::<Vec<_>>()
+    });
+    assert!(past.is_empty(), "past the column edge: {past:?}");
+}
+
 fn stats(
     n: usize,
     cached: usize,
