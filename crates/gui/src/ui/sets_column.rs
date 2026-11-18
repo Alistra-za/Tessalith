@@ -2656,9 +2656,10 @@ fn chip_row<'a>(
                 continue;
             }
             // the JSON leaves the slot empty: dim like an empty chip, named for what it is
-            SlotShown::Cleared { .. } => {
+            SlotShown::Cleared { item } => {
+                let file = model.item(item).map_or(item, |i| i.name.as_str());
                 let r = letter_box(ui, &letter, None, None)
-                    .on_hover_text(format!("{} (cleared)", v.slot_text(k)));
+                    .on_hover_text(format!("{} (cleared): {file}", v.slot_text(k)));
                 let name = format!("{letter}, cleared");
                 r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
                 fixed.push(r.rect);
@@ -2753,8 +2754,14 @@ fn chip_row<'a>(
         // F3a Task 8: the slot the member fills in this set, if any, has a slot menu.
         let owns = |f: &SlotFill| matches!(f, SlotFill::Own { item } if item == mk);
         let kind = v.slots.iter().find(|(_, f)| owns(f)).map(|(k, _)| *k);
-        // A file whose game slot holds a link for another kind is not written: it draws no chip (review E1).
-        if kind.is_some_and(|k| matches!(slot_shown(v, k), SlotShown::Replaced { .. })) {
+        // A file the JSON does not write (its slot holds a link, or is cleared) draws no thumbnail: the slot's own
+        // chip speaks for it (review E1). `chip_rows` does not count it either: it fills a slot.
+        if kind.is_some_and(|k| {
+            matches!(
+                slot_shown(v, k),
+                SlotShown::Replaced { .. } | SlotShown::Linked(_) | SlotShown::Cleared { .. }
+            )
+        }) {
             continue;
         }
         let Some(item) = model.item(mk) else {

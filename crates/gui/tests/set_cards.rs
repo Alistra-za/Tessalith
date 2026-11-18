@@ -1014,3 +1014,81 @@ fn a_cleared_slot_has_a_cleared_chip() {
     h.run();
     assert_eq!(on_card_of(&h, "arch/wall", "N, cleared").len(), 1);
 }
+
+/// Nodes named "<file>, ... (its slot is taken)": the trailing loop's thumbnails for a file with no slot of its own.
+fn taken_thumbs(h: &Harness<'static, AppModel>, file: &str) -> usize {
+    h.query_all_by_label_contains(&format!("{file}, "))
+        .filter(|n| {
+            n.accesskit_node()
+                .label()
+                .is_some_and(|l| l.contains("(its slot is taken)"))
+        })
+        .count()
+}
+
+/// The cells of `id`'s slot row on game slot `n`: what `chip_rows` counts for it.
+fn counted_on_slot(m: &AppModel, id: &str, n: u8) -> usize {
+    let v = views(m).iter().find(|v| v.id == id).unwrap().clone();
+    view_row(&v)
+        .iter()
+        .filter(|c| c.kind.game_slot() == Some(n))
+        .count()
+}
+
+#[test]
+fn a_cleared_slot_over_an_own_file_draws_one_chip_that_names_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    let cleared = on_card_of(&h, "arch/wall", "N, cleared").len();
+    let drawn = cleared + taken_thumbs(&h, "wall_n.png");
+    assert_eq!(cleared, 1);
+    assert_eq!(
+        (drawn, counted_on_slot(h.state(), "arch/wall", 2)),
+        (1, 1),
+        "slot 2: one chip drawn, one counted"
+    );
+    assert_eq!(
+        taken_thumbs(&h, "wall_n.png"),
+        0,
+        "no thumbnail for the file"
+    );
+    on_card_of(&h, "arch/wall", "N, cleared")[0].hover();
+    h.run();
+    h.run();
+    h.get_by_label_contains("(cleared): wall_n.png");
+}
+
+#[test]
+fn a_link_over_an_own_file_of_its_kind_draws_one_chip() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("other.png", [10, 200, 10], Subtype::PbrAlbedo)],
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/wall".into(),
+        n: 1,
+        item: "arch/other.png".into(),
+    });
+    let mut h = harness(m);
+    h.run();
+    let linked = h
+        .query_all_by_label_contains(", from set arch/other")
+        .count();
+    assert_eq!(linked, 1, "the linked chip");
+    let drawn = linked + taken_thumbs(&h, "wall.png");
+    assert_eq!(
+        (drawn, counted_on_slot(h.state(), "arch/wall", 1)),
+        (1, 1),
+        "slot 1: one chip drawn (the link's), one counted"
+    );
+    assert_eq!(
+        taken_thumbs(&h, "wall.png"),
+        0,
+        "no thumbnail for the own file"
+    );
+}
