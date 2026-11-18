@@ -6,7 +6,7 @@ use engine::config::{PackRecipe, Subtype};
 use engine::group::{split_vocab, VocabRole};
 use engine::pack::ChannelSource;
 use engine::policy::AcceptSuggestions;
-use engine::shader::Shader;
+use engine::shader::{Shader, ShaderOrigin, ShaderPick};
 use image::{ImageBuffer, Luma, Rgb};
 use sdc_gui::model::bottom::Level;
 use sdc_gui::model::code_text::RowClass;
@@ -14,6 +14,7 @@ use sdc_gui::model::{bottom, code_text};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use serde_json::json;
+use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
@@ -22,6 +23,7 @@ const FUZZ: &str = "m/rock01_fuzz.png";
 const DIFFUSE: &str = "m/rock01.png";
 const RMAOS: &str = "m/rock01_rmaos";
 const RFAOS: &str = "m/rock01_rfaos";
+const NORMAL: &str = "m/rock01_n.png";
 
 fn grey(dir: &Path, name: &str, v: u8) {
     ImageBuffer::from_fn(64, 64, |x, _| Luma([v.wrapping_add(x as u8)]))
@@ -113,6 +115,32 @@ fn set_view(m: &AppModel) -> sdc_gui::model::sets::SetView {
         .into_iter()
         .find(|v| v.id == "m/rock01")
         .expect("the rock01 set")
+}
+
+/// The saved `sdc.toml` text planned by the engine as `sdc convert` would (no set shaders), as `auto_accept.rs`'s.
+fn cli_plan(root: &Path, toml: &str) -> engine::api::Plan {
+    use engine::api::*;
+    use engine::config::Target;
+    use engine::events::{new_batch_id, NullSink, Reporter};
+    use engine::presets::ConfigFile;
+    let mut req = BatchRequest::new(vec![root.to_path_buf()], root.join("../cli"), Target::Cs);
+    req.recursive = true;
+    req.project_config_inline = Some(ConfigFile::parse(toml, "sdc.toml").unwrap());
+    let rep = Reporter::new(std::sync::Arc::new(NullSink), new_batch_id());
+    Engine::new()
+        .unwrap()
+        .plan(req, &rep, &CancelToken::default())
+        .unwrap()
+}
+
+/// The keys `sdc-project.toml` lists as Tessalith's own PBR writes (`[project] auto_pbr`).
+fn auto_pbr(m: &AppModel) -> BTreeSet<String> {
+    m.sets_doc
+        .as_ref()
+        .unwrap()
+        .auto_pbr()
+        .into_iter()
+        .collect()
 }
 
 /// Fuzz-10, probe P1g: the typed fuzz map writes `rock01_f.dds` with accept off and under High alike.
@@ -339,4 +367,292 @@ fn an_unused_fuzz_map_is_a_note_under_notes() {
         .find(|w| w.code == Code::PackUnusedInput)
         .expect("the item's PACK-UNUSED-INPUT warning");
     assert!(!bottom::counts_for(&m, &p.at, w));
+}
+
+/// Fuzz-9 (as JE2 for Advanced Skin): after an explicit PBR pick the saved text plans the same in `sdc convert`.
+#[test]
+fn an_explicit_pbr_pick_writes_pbr_fuzz_and_the_cli_matches() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    assert_eq!(
+        set_view(&m).shader.as_ref().unwrap().shader,
+        Shader::Glow,
+        "the _g picks Glow (Fuzz-1a)"
+    );
+    assert_eq!(
+        subtype(&m, DIFFUSE),
+        Some(json!("diffuse")),
+        "High recorded the Glow set's types"
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_eq!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    assert_eq!(job_out(&m, FUZZ), "rock01_f.dds");
+    m.save().unwrap();
+    let text = m.project.as_ref().unwrap().text();
+    let p = cli_plan(d.path(), &text);
+    let cli = |file: &str| {
+        p.jobs
+            .iter()
+            .find(|j| j.pack.is_none() && j.input.ends_with(file))
+            .unwrap()
+    };
+    assert_eq!(cli("rock01_fuzz.png").profile.subtype, Subtype::PbrFuzz);
+    assert_eq!(
+        cli("rock01_fuzz.png")
+            .output
+            .file_name()
+            .unwrap()
+            .to_string_lossy(),
+        "rock01_f.dds"
+    );
+    assert_eq!(cli("rock01.png").profile.subtype, Subtype::PbrAlbedo);
+    assert_eq!(cli("rock01_g.png").profile.subtype, Subtype::PbrEmissive);
+    // Back to Auto: the step's own values go; the _g picks Glow again and the fuzz map is unused.
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+}
+
+/// Fuzz-9 under accept off: only the fuzz map is written; the CLI still plans the members as PBR.
+#[test]
+fn an_explicit_pbr_pick_with_accept_off_matches_the_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+    assert_eq!(subtype(&m, DIFFUSE), None);
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    let diffuse = p
+        .jobs
+        .iter()
+        .find(|j| j.pack.is_none() && j.input.ends_with("rock01.png"))
+        .unwrap();
+    assert_eq!(diffuse.profile.subtype, Subtype::PbrAlbedo);
+}
+
+/// Review Focus 2: beside an `_f`, the explicit PBR pick writes nothing on the fuzz map (Fuzz-4 lists it unused).
+#[test]
+fn an_explicit_pbr_pick_writes_no_pbr_fuzz_beside_an_f() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png", "rock01_f.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert_eq!(job_out(&m, "m/rock01_f.png"), "rock01_f.dds");
+}
+
+/// Fuzz-9: a fuzz map with a hand-set helper role (Fuzz-22's skin evidence) takes no `pbr_fuzz` from the pick.
+#[test]
+fn an_explicit_pbr_pick_writes_no_pbr_fuzz_on_a_hand_role() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01_fuzz.png\"]\nhelper.role = \"fuzz\"\n",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert!(!auto_pbr(&m).contains(FUZZ));
+}
+
+/// Fuzz-9: leaving PBR clears only a value still equal to the step's write. One changed in `sdc.toml` by hand (the
+/// key is still in `auto_pbr`, as no GUI edit dropped it) stays.
+#[test]
+fn leaving_pbr_keeps_a_fuzz_type_changed_outside_the_gui() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    m.save().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[files.\"m/rock01_fuzz.png\"]\nsubtype = \"generic_data\"\n",
+    )
+    .unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    assert!(auto_pbr(&m).contains(FUZZ));
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("generic_data")));
+}
+
+/// Fuzz-9 with DU6-DU7: from an explicit PBR pick to Advanced Skin, the diffuse the step typed `pbr_albedo` is
+/// cleared by the step, so Advanced Skin remembers no `pbr_albedo` to write back; back on Auto the Glow set's
+/// diffuse is `diffuse` again.
+#[test]
+fn pbr_then_advanced_skin_then_auto_leaves_no_pbr_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("skin_albedo")));
+    assert_eq!(subtype(&m, FUZZ), None);
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("diffuse")));
+}
+
+/// A sub-type the user picked for the fuzz map is theirs: leaving PBR keeps it. The user path is the type picker
+/// (`set_field(key, "subtype", v)` → `edit_subtype` → `edit_subtype_alone`, which drops the key from `auto_pbr`).
+/// Two real writes, so the second is not a same-value no-op.
+#[test]
+fn a_hand_picked_pbr_fuzz_survives_leaving_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert!(
+        auto_pbr(&m).contains(FUZZ),
+        "the pick's own write is recorded"
+    );
+    m.set_field(FUZZ, "subtype", json!("generic_data"));
+    idle(&mut m);
+    m.set_field(FUZZ, "subtype", json!("pbr_fuzz"));
+    idle(&mut m);
+    assert!(
+        !auto_pbr(&m).contains(FUZZ),
+        "the user's edit made it theirs"
+    );
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+}
+
+/// Known limit (Fuzz-24), pinned so it shows: an explicit Advanced Skin on a set whose diffuse holds a user-written
+/// type DU6 leaves alone writes nothing. The GUI plans the set skin (`chosen_skin`); `sdc convert` on the saved text
+/// sees no skin evidence and plans it PBR with `rock01_f.dds`. Upgrade with Fuzz-11 (an explicit pick in `sdc.toml`).
+#[test]
+fn an_explicit_advanced_skin_that_writes_nothing_splits_gui_and_cli() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"m/rock01.png\"]\nsubtype = \"pbr_albedo\"\n",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert_eq!(
+        subtype(&m, DIFFUSE),
+        Some(json!("pbr_albedo")),
+        "DU6 leaves a user-written type alone"
+    );
+    assert!(m.item(RFAOS).is_some(), "the GUI plans the set skin");
+    assert_ne!(job_out_or_none(&m, FUZZ).as_deref(), Some("rock01_f.dds"));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    let fuzz = p
+        .jobs
+        .iter()
+        .find(|j| j.pack.is_none() && j.input.ends_with("rock01_fuzz.png"))
+        .unwrap();
+    assert_eq!(
+        fuzz.output.file_name().unwrap().to_string_lossy(),
+        "rock01_f.dds"
+    );
+    assert!(p
+        .jobs
+        .iter()
+        .any(|j| j.pack.is_some() && j.output.ends_with("rock01_rmaos.dds")));
+}
+
+/// Fuzz-27: in a set not read as PBR (Glow), an explicit PBR pick retypes the untouched recorded `normal` to
+/// `pbr_normal`, so B3's SHADER-NORMAL-SPECULAR note does not show; leaving PBR reverts it.
+#[test]
+fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_n.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    let normal_note = |m: &AppModel| {
+        bottom::problems(m)
+            .iter()
+            .any(|r| r.code == Some(Code::ShaderNormalSpecular))
+    };
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
+    assert!(!normal_note(&m));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert!(auto_pbr(&m).contains(NORMAL));
+    assert!(!normal_note(&m), "{:?}", bottom::problems(&m));
+    m.set_shader("m/rock01", Some(Shader::Default));
+    idle(&mut m);
+    assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert!(!auto_pbr(&m).contains(NORMAL));
+}
+
+/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes, as B3-11's
+/// `use_pbr_normal_refusal` says), and its key never joins `auto_pbr`.
+#[test]
+fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
+    let d = tempfile::tempdir().unwrap();
+    const KEPT: &str = "m/rock01_fuzz.dds";
+    let mut m = open_with_hook(
+        d.path(),
+        &["rock01_g.png"],
+        "",
+        AcceptSuggestions::None,
+        |_| bc1_dds(&d.path().join(KEPT)),
+    );
+    assert!(m.item(KEPT).unwrap().kept_dds());
+    assert!(set_view(&m).members.iter().any(|k| k == KEPT));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, KEPT), None);
+    assert!(!auto_pbr(&m).contains(KEPT));
+    assert!(matches!(
+        set_view(&m).shader,
+        Some(ShaderPick {
+            shader: Shader::Pbr,
+            provenance: ShaderOrigin::Set,
+            ..
+        })
+    ));
 }
