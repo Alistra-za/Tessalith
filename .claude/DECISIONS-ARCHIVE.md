@@ -767,6 +767,18 @@ ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
 ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
 - The set editor's warnings block is one line "N problems in this set - Show in Problems"; a Textures-column "{n} undecided" count and a set's warning badge open Problems narrowed. [CA18]
 
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- `packing.recipe` = `auto`, `rmaos` or `rfaos`; `rfaos` without fuzz uses the fuzz fill. [R-fills-1]
+
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- A skin `_f` fills the RFAOS fuzz mask in a set already Advanced skin by other evidence; `_f` never makes a set Advanced skin by itself; a real `_fuzz`/`_sheen` wins G. [DR1, DR2, DR3, DR7]
+
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- The packed suffix joins the set's suffixes before members resolve, predicted from the raw roles present. [M7]
+
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- Skin detection uses the recipe actually chosen (a forced `rmaos` with fuzz is not skin). RFAOS is offered only where buildable (roughness, glossiness or AO source); `PACK-RECIPE-UNBUILDABLE` is attached only when `auto` would not build `_rfaos`. [I1, I2, BQ13]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
@@ -1028,3 +1040,8 @@ ARCHIVED (wording before the edit; superseded in part by Note JP, 2026-11-17)
 
 ARCHIVED (wording before the edit; superseded in part by Note JP, 2026-11-17)
   - GRASS-DETECT-SOURCE has no button (the engine raises it only on a texture already tagged complex grass; overrules the plan table's **Tag as grass**, ledger) and stays a Problem, so **Mark as intended** clears it (final fix wave). Its sentence follows the job (`bottom::warning_text`, final fix wave A3): with the job's `mips.normal_base` renormalising, the row reads "This grass source's corner normal isn't unit length — the written file is renormalised, so Community Shaders still reads it as grass"; with `mips.normal_base = keep` the file is written as it is and the row reads "This grass source's corner normal isn't unit length, and its normal base level is kept as authored — Community Shaders won't read the written file as grass" (`code_text::GRASS_SOURCE_KEPT`). The row, its mark and the tile's count read the same sentence.
+
+## Note JE — Advanced Skin re-types untouched recorded members (owner, 2026-11-15)
+
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- **JE2 An untouched recorded `pbr_fuzz` is cleared.** In the same step `untouched_for_shader` clears it, so the `_f` packs into the `_rfaos` G channel as the skin fuzz mask (DR1, DR2) and is not exported alone; `sdc convert` on the saved text plans the same. Leaving Advanced Skin: the next settled plan records `pbr_fuzz` again (FC1). A pinned diffuse keeps the set from turning skin (DW1), so then nothing is cleared. shortcut: a set with a `_fuzz` or `_sheen` map keeps its `_f` as `pbr_fuzz` (DR7), so there the clear is followed by a recording step of its own; check the set's raw maps in `untouched_for_shader` if that shows up. Test `auto_accept::advanced_skin_packs_an_untouched_recorded_fuzz_into_rfaos`.
