@@ -842,6 +842,18 @@ fn pbr_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
     }
 }
 
+/// Final review B-I2: the inverse of `pbr_member_type`, the vanilla type an explicit pick outside the PBR family gives
+/// an untouched recorded member holding `st`: `pbr_albedo` on the Diffuse-slot member becomes `diffuse`, `pbr_normal`
+/// `normal`, `pbr_emissive` `glow`; anything else stays (`None`).
+fn vanilla_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
+    match st {
+        Subtype::PbrAlbedo if diffuse_slot => Some(Subtype::Diffuse),
+        Subtype::PbrNormal => Some(Subtype::Normal),
+        Subtype::PbrEmissive => Some(Subtype::Glow),
+        _ => None,
+    }
+}
+
 /// Fuzz-9: member `key` is a fuzz map by its file name (`_fuzz`, `_sheen`).
 fn is_fuzz_member(key: &str) -> bool {
     engine::group::is_fuzz_stem(
@@ -3787,6 +3799,15 @@ impl AppModel {
                 == Some("f")
         });
         let pbr_pick = has_fuzz && shader.is_some_and(Shader::is_pbr_family);
+        // Final review B-I2: an explicit pick outside the PBR family, from a set read PBR (by Auto or a pick).
+        // Advanced Skin keeps its own diffuse step (`skin_follow`, DU6-DU7).
+        let vanilla = |s: Shader| !s.is_pbr_family() && s != Shader::AdvancedSkin;
+        let vanilla_pick =
+            has_fuzz && now.is_some_and(Shader::is_pbr_family) && shader.is_some_and(vanilla);
+        // Its way back: Auto after a chosen vanilla shader clears the untouched vanilla types `vanilla_pick` (or the
+        // recorder under that shader) wrote, so the next settled plan records what Auto reads (FC1 R5's Auto rule);
+        // the generic arm below keeps a value equal to the vanilla plan's pick.
+        let vanilla_back = has_fuzz && chosen && shader.is_none() && now.is_some_and(vanilla);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -3872,6 +3893,23 @@ impl AppModel {
                     {
                         return Some((k.clone(), Some(serde_json::json!(st)), true));
                     }
+                }
+                // Final review B-I2: the mirror for an explicit pick outside the PBR family. `member_subtype` keeps a
+                // PBR type under a vanilla shader (JQ16), so an untouched PBR type FC1 recorded while the set was
+                // read PBR takes its vanilla counterpart here. Not listed in `auto_pbr`: the value is what the new
+                // shader's recorder writes (DU8), and a later PBR pick maps it back through the arm above.
+                if vanilla_pick && !locked.contains_key(k) {
+                    if let Some(st) =
+                        held_type(k).and_then(|st| vanilla_member_type(st, diffuse_slot(k)))
+                    {
+                        return Some((k.clone(), Some(serde_json::json!(st)), false));
+                    }
+                }
+                if vanilla_back
+                    && !locked.contains_key(k)
+                    && held_type(k).is_some_and(|st| pbr_member_type(st, diffuse_slot(k)).is_some())
+                {
+                    return Some((k.clone(), None, false));
                 }
                 let new = self.auto_pick(k, shader).map(|st| serde_json::json!(st));
                 (new.is_some() && new != held(k))

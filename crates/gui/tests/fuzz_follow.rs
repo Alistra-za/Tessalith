@@ -728,6 +728,67 @@ fn leaving_pbr_reverts_a_pick_that_wrote_only_emissive() {
     }
 }
 
+/// Final review B-I2: Auto reads the set PBR (Fuzz-1a) and High records `pbr_albedo`/`pbr_normal` (FC1, not the
+/// step's own, so not in `auto_pbr`); an explicit PBR pick, then Glow: the recorded PBR types do not stay written
+/// under Glow, and the saved text plans no PBR member. Glow then Auto plans the set PBR again.
+#[test]
+fn high_auto_pbr_then_pbr_then_glow_drops_the_recorded_pbr_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_n.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Pbr));
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::Diffuse));
+    assert_eq!(gui_subtype(&m, NORMAL), Some(Subtype::Normal));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::Diffuse));
+    assert_eq!(cli_subtype(&p, "rock01_n.png"), Some(Subtype::Normal));
+    // Glow, then Auto: the set is read PBR again and High records its types.
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Pbr));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::PbrAlbedo));
+    assert_eq!(gui_subtype(&m, NORMAL), Some(Subtype::PbrNormal));
+}
+
+/// Review t6 M6 (line 36): a Glow set (its `_g`) under High, an explicit PBR pick, then an explicit Glow: the `_g`
+/// is `glow` and the diffuse `diffuse` again; then Auto keeps the `_g` a glow map.
+#[test]
+fn pbr_then_explicit_glow_gives_back_the_glow_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_eq!(gui_subtype(&m, "m/rock01_g.png"), Some(Subtype::Glow));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::Diffuse));
+    assert_ne!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
+    assert_eq!(gui_subtype(&m, "m/rock01_g.png"), Some(Subtype::Glow));
+}
+
 /// Review t6 V1 (measured): an explicit Advanced Skin on a set with a `_g`, a fuzz map and no raw maps, directly or
 /// after PBR, and with no fuzz map. The GUI and the saved text agree: shader Advanced Skin (the GUI by the pick, the
 /// CLI by the written `skin_albedo`), diffuse `skin_albedo`, no packed output, and the fuzz map a waiting packing
