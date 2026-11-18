@@ -160,9 +160,12 @@ impl AppModel {
         if self.explicit_recipe(&packed) != PackRecipe::Auto {
             return false;
         }
-        // Fuzz-22: a hand-set fuzz role is skin evidence, on a member or on a file shared in (Note HH).
-        let hand_fuzz =
-            |k: &str| p.file_value(k, engine::helper::ROLE_FIELD) == Some(json!("fuzz"));
+        // Fuzz-22: a hand-set fuzz role is skin evidence, on a member or on a file shared in (Note HH). On an image
+        // only, as the engine's `hand_role` reads it: a kept DDS takes no role.
+        let hand_fuzz = |k: &str| {
+            !k.to_ascii_lowercase().ends_with(".dds")
+                && p.file_value(k, engine::helper::ROLE_FIELD) == Some(json!("fuzz"))
+        };
         if v.shared_helpers.iter().any(|k| hand_fuzz(k)) {
             return false;
         }
@@ -184,16 +187,7 @@ impl AppModel {
             {
                 fuzz = true;
             }
-            let skin_typed = matches!(
-                typed(k),
-                Some(
-                    Subtype::SkinAlbedo
-                        | Subtype::SkinRfaos
-                        | Subtype::SkinSk
-                        | Subtype::SkinWet
-                        | Subtype::SkinDetail
-                )
-            );
+            let skin_typed = typed(k).is_some_and(Subtype::is_skin);
             let rfaos = split_suffix_with(&s, &self.suffix_aliases)
                 .suffix
                 .as_deref()
@@ -366,6 +360,8 @@ impl AppModel {
         let retype = std::mem::take(&mut self.history.retype_untouched);
         let mut writes: Vec<(String, &'static str, serde_json::Value)> = vec![];
         let mut lines = vec![];
+        // The key each line names, so a switch's row can drop the lines of the files its own lines already name.
+        let mut line_keys: Vec<String> = vec![];
         let mut only_types = true;
         if !retype.is_empty() {
             let shaders = self.shaders_by_member();
@@ -382,6 +378,7 @@ impl AppModel {
                         show_type(&old),
                         show_type(&new)
                     ));
+                    line_keys.push(k.clone());
                     writes.push((k, "subtype", new));
                 }
             }
@@ -416,6 +413,7 @@ impl AppModel {
                         show(&v)
                     };
                     lines.push(format!("{}: {v}", file_name(&i.key)));
+                    line_keys.push(i.key.clone());
                 }
                 writes.push((i.key.clone(), f, v));
             }
@@ -446,7 +444,15 @@ impl AppModel {
                 }
             });
             if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
-                sw.lines.extend(lines);
+                // Final review B I1: a switched file is listed once, by the switch's own line (it names the type the
+                // file now plans); the recording's lines for other files stay.
+                let own: Vec<String> = lines
+                    .into_iter()
+                    .zip(&line_keys)
+                    .filter(|(_, k)| !sw.keys.contains(k))
+                    .map(|(l, _)| l)
+                    .collect();
+                sw.lines.extend(own);
                 // The joined step is still the switch's (I2).
                 sw.step = self.history.pushes;
             }

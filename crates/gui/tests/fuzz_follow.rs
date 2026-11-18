@@ -320,25 +320,48 @@ fn high_auto_pbr_then_skin_evidence_makes_the_fuzz_map_the_mask() {
 
 /// Fuzz-2's known limit with Note HH1 (`pack::plan::plan_packing`'s `shortcut:`): the borrower's G PACK-DEFAULTED is a
 /// Note that says why the shared fuzz map is not its source (the engine's `data.why`).
+/// Two sets in `m/`: `m/rock01` (rock01.png, `_roughness`, `_fuzz`) and `m/aaa01` (aaa01.png, `_roughness`), with
+/// `sdc.toml` = `toml` and `sdc-project.toml` = `project` (where a Note HH `share` line is written), opened under
+/// `accept`.
+fn open_shared(dir: &Path, toml: &str, project: &str, accept: AcceptSuggestions) -> AppModel {
+    let project = project.to_string();
+    open_with_hook(
+        dir,
+        &[
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+            "aaa01.png",
+            "aaa01_roughness.png",
+        ],
+        toml,
+        accept,
+        |_| std::fs::write(dir.join("sdc-project.toml"), project).unwrap(),
+    )
+}
+
+/// Final review line 14: driven from a real two-set plan (the lender `m/rock01` on Auto reads PBR and converts its
+/// fuzz map; the borrower `m/aaa01`, explicit Advanced Skin, shares it by a `share` line) through `bottom::problems`.
 #[test]
 fn a_borrowers_fuzz_default_says_why_the_shared_map_is_not_read() {
-    let why = "the shared rock_fuzz.png is converted by its own set textures/a/rock (pbr shader) and is not read \
-               here";
-    let w = engine::codes::Warning::new(
-        Code::PackDefaulted,
-        format!("stone_rfaos.dds G: no fuzz source; neutral default 0; {why}"),
-    )
-    .with_data(json!({
-        "output": "textures/b/stone_rfaos.dds",
-        "channel": "G",
-        "slot": "fuzz",
-        "value": 0.0,
-        "why": why,
-    }));
+    let d = tempfile::tempdir().unwrap();
+    let m = open_shared(
+        d.path(),
+        "",
+        "[[sets]]\nid = \"m/aaa01\"\nshader = \"advanced_skin\"\nshare = [\"m/rock01_fuzz.png\"]\n",
+        AcceptSuggestions::None,
+    );
+    assert_eq!(job_out(&m, FUZZ), "rock01_f.dds", "the lender converts it");
     assert_eq!(code_text::row_class(Code::PackDefaulted), RowClass::Note);
+    let why = "the shared rock01_fuzz.png is converted by its own set m/rock01 (pbr shader) and is not read here";
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|r| r.code == Some(Code::PackDefaulted) && r.text.contains(" G: "))
+        .unwrap_or_else(|| panic!("{rows:?}"));
+    assert!(row.is_note(), "{row:?}");
     assert_eq!(
-        code_text::note_sentence(&w),
-        format!("stone_rfaos.dds G: {why}, so the default 0 (no fuzz) is used.")
+        row.text,
+        format!("aaa01_rfaos.dds G: {why}, so the default 0 (no fuzz) is used.")
     );
 }
 
@@ -372,6 +395,18 @@ fn an_unused_fuzz_map_is_a_note_under_notes() {
     assert!(p.fix.is_none());
     assert!(!p.in_worklist());
     assert!(!bottom::markable(p.level, p.code));
+    // Listed under Notes: dropping the row lowers the Notes count by one and leaves the problem count alone.
+    let without: Vec<_> = problems
+        .iter()
+        .filter(|r| r.code != Some(Code::PackUnusedInput))
+        .cloned()
+        .collect();
+    let (all, rest) = (
+        bottom::tab_counts(&problems, &[]),
+        bottom::tab_counts(&without, &[]),
+    );
+    assert_eq!(all.notes, rest.notes + 1);
+    assert_eq!(all.problems, rest.problems);
     let it = m.item(FUZZ).unwrap();
     let w = it
         .warnings
@@ -728,6 +763,195 @@ fn leaving_pbr_reverts_a_pick_that_wrote_only_emissive() {
     }
 }
 
+/// Final review B-I2: Auto reads the set PBR (Fuzz-1a) and High records `pbr_albedo`/`pbr_normal` (FC1, not the
+/// step's own, so not in `auto_pbr`); an explicit PBR pick, then Glow: the recorded PBR types do not stay written
+/// under Glow, and the saved text plans no PBR member. Glow then Auto plans the set PBR again.
+#[test]
+fn high_auto_pbr_then_pbr_then_glow_drops_the_recorded_pbr_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_n.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Pbr));
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::Diffuse));
+    assert_eq!(gui_subtype(&m, NORMAL), Some(Subtype::Normal));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::Diffuse));
+    assert_eq!(cli_subtype(&p, "rock01_n.png"), Some(Subtype::Normal));
+    // Glow, then Auto: the set is read PBR again and High records its types.
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Pbr));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::PbrAlbedo));
+    assert_eq!(gui_subtype(&m, NORMAL), Some(Subtype::PbrNormal));
+}
+
+/// Review t6 (line 45), two rows: (a) a set that never held a fuzz map keeps `pbr_follow`'s keys through an
+/// explicit PBR pick then Auto (left to `pbr_follow`); (b) Advanced Skin then PBR under High with nothing written
+/// before the skin pick (`was` empty): the diffuse is cleared and the engine infers `pbr_albedo` from the written
+/// `pbr_fuzz`, in the GUI and in `sdc convert`.
+#[test]
+fn explicit_pbr_rows_with_no_fuzz_map_and_with_an_empty_was() {
+    use sdc_gui::model::Answer;
+    // (a)
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(d.path(), &["rock01_n.png"], "", AcceptSuggestions::None);
+    m.decide(DIFFUSE, Answer::Subtype(Subtype::PbrAlbedo));
+    idle(&mut m);
+    assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert!(auto_pbr(&m).contains(NORMAL));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert!(auto_pbr(&m).contains(NORMAL));
+    // (b)
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.accept = AcceptSuggestions::High;
+    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("skin_albedo")));
+    assert_eq!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .auto_skin()
+            .get(DIFFUSE)
+            .map(String::as_str),
+        Some(""),
+        "nothing was written before the skin pick"
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("skin_albedo")));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::PbrAlbedo));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::PbrAlbedo));
+}
+
+/// Final review B-M1 (ruling R1 on the leave arm): a member the PBR pick wrote and whose slot is pinned afterwards
+/// keeps its type on leaving PBR, and its key stays in `auto_pbr`.
+#[test]
+fn leaving_pbr_keeps_a_value_whose_slot_was_pinned_after_the_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert!(auto_pbr(&m).contains(DIFFUSE));
+    m.set_slot_lock("m/rock01", 1, true).unwrap();
+    idle(&mut m);
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert!(auto_pbr(&m).contains(DIFFUSE));
+}
+
+/// Final review B-M1, the fuzz arm's lock filter (ruling R1): an Auto-PBR set's fuzz map fills the Fuzz slot (7);
+/// with that slot pinned, an explicit PBR pick writes no `pbr_fuzz` on it and lists no key.
+#[test]
+fn an_explicit_pbr_pick_writes_no_pbr_fuzz_in_a_pinned_fuzz_slot() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    assert_eq!(
+        set_view(&m).slots.get(&SlotKind::Fuzz),
+        Some(&SlotFill::Own { item: FUZZ.into() })
+    );
+    m.set_slot_lock("m/rock01", 7, true).unwrap();
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert!(!auto_pbr(&m).contains(FUZZ));
+}
+
+/// Final review B-M7: taking the fuzz map out of its set, after an explicit PBR pick typed it `pbr_fuzz`, clears that
+/// value and its `auto_pbr` key in the same step; one Undo puts all three back.
+#[test]
+fn removing_the_fuzz_map_clears_the_picks_pbr_fuzz() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+    assert!(auto_pbr(&m).contains(FUZZ));
+    m.remove_member("m/rock01", FUZZ).unwrap();
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert!(!auto_pbr(&m).contains(FUZZ));
+    // The file in no set is a set of its own holding only a fuzz map, which Fuzz-1a reads PBR with nothing written:
+    // it still writes `rock01_f.dds` (measured; the review's "no stray `_f.dds`" does not hold, see the fix report).
+    assert_eq!(job_out(&m, FUZZ), "rock01_f.dds");
+    // One step: Undo puts the member, its type and its key back together.
+    m.undo();
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+    assert!(auto_pbr(&m).contains(FUZZ));
+}
+
+/// Review t6 M6 (line 36): a Glow set (its `_g`) under High, an explicit PBR pick, then an explicit Glow: the `_g`
+/// is `glow` and the diffuse `diffuse` again; then Auto keeps the `_g` a glow map.
+#[test]
+fn pbr_then_explicit_glow_gives_back_the_glow_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_eq!(gui_subtype(&m, "m/rock01_g.png"), Some(Subtype::Glow));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::Diffuse));
+    assert_ne!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
+    assert_eq!(gui_subtype(&m, "m/rock01_g.png"), Some(Subtype::Glow));
+}
+
 /// Review t6 V1 (measured): an explicit Advanced Skin on a set with a `_g`, a fuzz map and no raw maps, directly or
 /// after PBR, and with no fuzz map. The GUI and the saved text agree: shader Advanced Skin (the GUI by the pick, the
 /// CLI by the written `skin_albedo`), diffuse `skin_albedo`, no packed output, and the fuzz map a waiting packing
@@ -884,7 +1108,13 @@ fn an_explicit_advanced_skin_that_writes_nothing_splits_gui_and_cli() {
         "DU6 leaves a user-written type alone"
     );
     assert!(m.item(RFAOS).is_some(), "the GUI plans the set skin");
-    assert_ne!(job_out_or_none(&m, FUZZ).as_deref(), Some("rock01_f.dds"));
+    // The fuzz map is packed into the `_rfaos` G (not merely "no `_f.dds`", which no job at all would pass).
+    assert!(
+        matches!(&m.item(FUZZ).unwrap().status,
+            sdc_gui::model::items::ItemStatus::PackedInto(k) if k.ends_with("rock01_rfaos.dds")),
+        "{:?}",
+        m.item(FUZZ).unwrap().status
+    );
     m.save().unwrap();
     let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
     let fuzz = p
@@ -986,12 +1216,37 @@ fn a_fuzz_recorded_skin_albedo_is_untouched() {
                 "{fuzz} {accept:?}"
             );
             assert!(!set_view(&m).skin, "{fuzz} {accept:?}");
+            // The clear is the pick's R5 step, not the PBR step's own write.
+            assert!(!auto_pbr(&m).contains(DIFFUSE), "{fuzz} {accept:?}");
             // The GUI and `sdc convert` on the saved text plan the diffuse alike.
             m.save().unwrap();
             let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
             assert_eq!(
                 gui_subtype(&m, DIFFUSE),
                 cli_subtype(&p, "rock01.png"),
+                "{fuzz} {accept:?}"
+            );
+            // The pick is one step: its Undo gives back the shader and the recorded `skin_albedo` together. Under High
+            // the recording of the new plan is a step of its own on top (as for a user edit), undone first.
+            let undos = if accept == AcceptSuggestions::High {
+                2
+            } else {
+                1
+            };
+            for _ in 0..undos {
+                m.undo();
+                idle(&mut m);
+            }
+            assert_eq!(
+                subtype(&m, DIFFUSE),
+                Some(json!("skin_albedo")),
+                "{fuzz} {accept:?}"
+            );
+            assert!(
+                !matches!(
+                    set_view(&m).shader.map(|p| p.provenance),
+                    Some(ShaderOrigin::Set)
+                ),
                 "{fuzz} {accept:?}"
             );
         }
@@ -1099,6 +1354,32 @@ fn a_hand_set_fuzz_role_keeps_the_recorded_skin_albedo() {
         set_view(&m)
     );
     assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
+
+/// Final review line 46: a hand fuzz role on a kept DDS member is no skin evidence (the engine's `hand_role` reads
+/// images only), so the recorded `skin_albedo` is still the fuzz map's.
+#[test]
+fn a_hand_fuzz_role_on_a_kept_dds_is_no_skin_evidence() {
+    let d = tempfile::tempdir().unwrap();
+    const KEPT: &str = "m/rock01_n.dds";
+    let toml = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n\
+                [files.\"m/rock01_n.dds\".helper]\nrole = \"fuzz\"\n";
+    let m = open_with_hook(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        toml,
+        AcceptSuggestions::None,
+        |m| {
+            m.switch_fuzz_on_open = false;
+            bc1_dds(&d.path().join(KEPT));
+        },
+    );
+    assert!(
+        set_view(&m).members.iter().any(|k| k == KEPT),
+        "{:?}",
+        set_view(&m)
+    );
+    assert!(m.fuzz_recorded_skin(DIFFUSE));
 }
 
 /// Fuzz-5 (review t7 M1): a written `rfaos` recipe is read from the set's base, not through the Rmaos slot: a real
@@ -1307,9 +1588,14 @@ fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
         !lines.iter().any(|l| l.starts_with("rock01_fuzz.png: ")),
         "{lines:?}"
     );
-    // The High recording that joined the step lists its line too.
-    assert!(
-        lines.contains(&"rock01.png: pbr albedo".to_string()),
+    // Final review B I1: the High recording that joined the step wrote the diffuse too, but the switched file is listed
+    // once, by the switch's own line.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.starts_with("rock01.png: "))
+            .count(),
+        1,
         "{lines:?}"
     );
     assert_eq!(lines.last().map(String::as_str), Some(FUZZ_SWITCH_HOVER));
@@ -1334,6 +1620,34 @@ fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
     );
     idle(&mut m);
     assert!(set_view(&m).skin, "the switch does not fire again");
+}
+
+/// Final review B-I1, the other half: under High the joined recording's lines for files the switch does not name stay
+/// in the row (a second set's diffuse, `stone01.png`, recorded in the same plan).
+#[test]
+fn the_switch_row_keeps_the_recordings_lines_for_other_files() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png", "stone01.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    idle(&mut m);
+    assert!(subtype(&m, "m/stone01.png").is_some(), "recorded");
+    let (_, lines) = m.fuzz_note_for_test().expect("the switch row");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.starts_with("rock01.png: "))
+            .count(),
+        1,
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("stone01.png: ")),
+        "{lines:?}"
+    );
 }
 
 /// Fuzz-8, the next open: a kept and saved switch leaves nothing to switch; an undone switch saved as skin switches
@@ -1470,6 +1784,37 @@ fn sets_with_other_skin_evidence_are_not_switched() {
     );
     idle(&mut m);
     assert!(set_view(&m).skin);
+}
+
+/// Final review B-M6 (code left, F10): an old borrower whose only fuzz map is shared in from another set keeps its
+/// recorded `skin_albedo` on open, and the switch row names it nowhere.
+#[test]
+fn an_old_borrower_of_a_shared_fuzz_map_is_not_switched() {
+    let d = tempfile::tempdir().unwrap();
+    // The borrower is `m/aaa01`: its diffuse has the old recorded `skin_albedo`, and its only fuzz map is
+    // `m/rock01_fuzz.png`, shared in by a `share` line.
+    let text = "[files.\"m/aaa01.png\"]\nsubtype = \"skin_albedo\"\n";
+    let m = open_shared(
+        d.path(),
+        text,
+        "[[sets]]\nid = \"m/aaa01\"\nshare = [\"m/rock01_fuzz.png\"]\n",
+        AcceptSuggestions::None,
+    );
+    let views = sdc_gui::model::sets::views(&m);
+    let borrower = views.iter().find(|v| v.id == "m/aaa01").unwrap();
+    assert!(
+        borrower.shared_helpers.iter().any(|k| k == FUZZ),
+        "{borrower:?}"
+    );
+    assert!(borrower.skin, "{borrower:?}");
+    assert_eq!(subtype(&m, "m/aaa01.png"), Some(json!("skin_albedo")));
+    assert!(
+        m.fuzz_note_for_test()
+            .is_none_or(|(_, lines)| !lines.iter().any(|l| l.starts_with("aaa01.png: "))),
+        "{:?}",
+        m.fuzz_note_for_test()
+    );
+    assert_eq!(m.project.as_ref().unwrap().text(), text);
 }
 
 /// Review Focus 3: a read-only `sdc.toml` switches nothing and shows no switch row.
@@ -1940,5 +2285,147 @@ fn a_switched_file_gone_before_the_row_gets_a_line_without_an_arrow() {
         lines.first().map(String::as_str),
         Some("rock01.png: skin albedo"),
         "{lines:?}"
+    );
+}
+
+/// Review t7 (line 47): a `_d` diffuse. The predicate's packed key is built from the diffuse's base (`stone`, not
+/// `stone_d`), so a recipe written on `m/stone_rfaos` is read as skin evidence.
+#[test]
+fn a_d_diffuse_reads_its_sets_packed_key() {
+    let files = ["stone_d.png", "stone_roughness.png", "stone_fuzz.png"];
+    let typed = "[files.\"m/stone_d.png\"]\nsubtype = \"skin_albedo\"\n";
+    for (recipe, recorded) in [
+        ("", true),
+        (
+            "[files.\"m/stone_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+            false,
+        ),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let m = open_with_hook(
+            d.path(),
+            &files,
+            &format!("{typed}{recipe}"),
+            AcceptSuggestions::None,
+            |m| m.switch_fuzz_on_open = false,
+        );
+        assert_eq!(m.fuzz_recorded_skin("m/stone_d.png"), recorded, "{recipe}");
+    }
+}
+
+/// Review t8 M4 (line 50): a crash restore on top defers the switch without using it up: the open's plans leave
+/// the set skin, and once the restore is undone the next settled plan switches it.
+#[test]
+fn a_crash_restore_on_top_defers_the_switch() {
+    let d = tempfile::tempdir().unwrap();
+    let file = d.path().join("sdc.toml");
+    let mut m = open_with_hook(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+        |_| {
+            std::fs::File::options()
+                .write(true)
+                .open(&file)
+                .unwrap()
+                .set_modified(std::time::SystemTime::UNIX_EPOCH + Duration::from_secs(86_400))
+                .unwrap();
+            std::fs::write(
+                sdc_gui::crash_log::recovery_path(&file),
+                format!("# crash edit\n{OLD_SKIN}"),
+            )
+            .unwrap();
+        },
+    );
+    assert_eq!(m.undo_label(), Some("Restore crash edits"));
+    assert!(set_view(&m).skin, "deferred under the restore");
+    assert!(m.fuzz_note_for_test().is_none());
+    m.undo_crash_restore();
+    idle(&mut m);
+    assert!(!set_view(&m).skin, "switched once the restore is gone");
+    assert!(m.fuzz_note_for_test().is_some());
+}
+
+/// Review t8 N1 (line 52): taking the file's own text on an external change (`resolve_external_change(SdcToml,
+/// false)`) is a fresh read, so the reloaded text is switched again.
+#[test]
+fn reloading_on_an_external_change_switches_again() {
+    use sdc_gui::model::DocKind;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+    );
+    assert!(!set_view(&m).skin);
+    // The file on disk is still the old text (the switch is unsaved); take it.
+    m.resolve_external_change(DocKind::SdcToml, false);
+    idle(&mut m);
+    assert!(!set_view(&m).skin, "the reloaded text is switched again");
+    assert!(m.fuzz_note_for_test().is_some());
+}
+
+/// Final review A I1, the GUI side: under High a filled diffuse in a Fuzz-1a set (no `_g`, a fuzz map, an
+/// `_opacity` helper) is planned and recorded `pbr_albedo`.
+#[test]
+fn a_filled_diffuse_in_a_fuzz_only_set_records_pbr_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let m = open_with_hook(
+        d.path(),
+        &["rock01_n.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+        |_| grey(&d.path().join("m"), "rock01_opacity.png", 200),
+    );
+    let j = m.item(DIFFUSE).unwrap().job.as_ref().unwrap();
+    assert!(
+        j.fill
+            .as_ref()
+            .is_some_and(|f| f.source.path.ends_with("rock01_opacity.png")),
+        "{:?}",
+        j.fill
+    );
+    assert_eq!(j.profile.subtype, Subtype::PbrAlbedo);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+}
+
+/// Final review line 18 (F10, the mirror case): the lender's explicit Advanced Skin packs the shared fuzz map into its
+/// own `_rfaos`, and the borrower, read PBR, gets no fuzz texture: its Fuzz slot is not shown filled.
+#[test]
+fn a_mirror_borrowers_fuzz_slot_is_not_shown_filled() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let m = open_shared(
+        d.path(),
+        "",
+        "[[sets]]\nid = \"m/rock01\"\nshader = \"advanced_skin\"\n\n\
+         [[sets]]\nid = \"m/aaa01\"\nshare = [\"m/rock01_fuzz.png\"]\n",
+        AcceptSuggestions::None,
+    );
+    assert!(
+        set_view(&m).skin,
+        "the lender is Advanced Skin: {:?}",
+        set_view(&m)
+    );
+    assert!(
+        matches!(&m.item(FUZZ).unwrap().status,
+            sdc_gui::model::items::ItemStatus::PackedInto(k) if k.ends_with("rock01_rfaos.dds")),
+        "the lender packs it"
+    );
+    let views = sdc_gui::model::sets::views(&m);
+    let borrower = views.iter().find(|v| v.id == "m/aaa01").unwrap();
+    assert!(
+        borrower.shared_helpers.iter().any(|k| k == FUZZ),
+        "{borrower:?}"
+    );
+    assert!(borrower.pbr && !borrower.skin, "{borrower:?}");
+    assert!(
+        !matches!(
+            borrower.slots.get(&SlotKind::Fuzz),
+            Some(SlotFill::Borrowed { .. } | SlotFill::Own { .. })
+        ),
+        "{borrower:?}"
     );
 }

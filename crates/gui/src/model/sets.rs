@@ -1001,11 +1001,25 @@ fn auto_id(item_key: &str) -> String {
 /// Fuzz-9: the PBR type an explicit PBR-family pick gives an untouched member holding `st`: `diffuse` on the
 /// Diffuse-slot member (`diffuse_slot`) becomes `pbr_albedo` (an `_i` elsewhere stays `diffuse`), `normal` becomes
 /// `pbr_normal`, `glow` becomes `pbr_emissive`; anything else stays (`None`).
+// shortcut: no `_s` arm, so an untouched `subsurface_tint` in a fuzz-map set stays under the PBR pick (JQ58); upgrade:
+// add the arm with `engine::suggest`'s rule for `_s` (follow-up F13).
 fn pbr_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
     match st {
         Subtype::Diffuse if diffuse_slot => Some(Subtype::PbrAlbedo),
         Subtype::Normal => Some(Subtype::PbrNormal),
         Subtype::Glow => Some(Subtype::PbrEmissive),
+        _ => None,
+    }
+}
+
+/// Final review B-I2: the inverse of `pbr_member_type`, the vanilla type an explicit pick outside the PBR family gives
+/// an untouched recorded member holding `st`: `pbr_albedo` on the Diffuse-slot member becomes `diffuse`, `pbr_normal`
+/// `normal`, `pbr_emissive` `glow`; anything else stays (`None`).
+fn vanilla_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
+    match st {
+        Subtype::PbrAlbedo if diffuse_slot => Some(Subtype::Diffuse),
+        Subtype::PbrNormal => Some(Subtype::Normal),
+        Subtype::PbrEmissive => Some(Subtype::Glow),
         _ => None,
     }
 }
@@ -3714,7 +3728,18 @@ impl AppModel {
             self.sets_sharing(&gone, &gone, &v.id)
         };
         let handed = h.clone();
-        self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
+        // Final review B-M7: the `pbr_fuzz` an explicit PBR pick wrote on the fuzz map, and its `auto_pbr` key, go
+        // with it in this step: the pick was this set's (a value changed since is the user's and stays).
+        let fuzz_step = is_fuzz_member(item);
+        self.edit_docs(&format!("Remove from {i}"), None, true, move |p, s| {
+            let mut auto = s.auto_pbr();
+            if fuzz_step && auto.contains(&it) {
+                if p.file_value(&it, "subtype") == Some(serde_json::json!(Subtype::PbrFuzz)) {
+                    p.clear_file_value(&it, "subtype");
+                }
+                auto.retain(|a| a != &it);
+                s.set_auto_pbr(&auto);
+            }
             s.remove_member(&i, &it);
             if let Some(h) = &handed {
                 hand_over(s, h);
@@ -3922,8 +3947,9 @@ impl AppModel {
         };
         // The sub-type written before (DQ3 takes the packed output back to `_rmaos`); none was written: the explicit
         // `diffuse` moves the recipe back, then goes, so the sub-type is inferred again. Fuzz-9 (review t6 I1): under
-        // an explicit PBR-family pick in a set holding a fuzz map, a `diffuse` (written or none) is the step's
-        // `pbr_albedo` instead, listed in `auto_pbr` so leaving PBR reverts it.
+        // an explicit PBR-family pick in a set holding a fuzz map, a `was` Tessalith recorded (`recorded` below) is
+        // mapped by `pbr_member_type` (`diffuse` to `pbr_albedo`) as the step's own, listed in `auto_pbr` so leaving
+        // PBR reverts it; a hand-written `was` is restored as it is.
         let back: Subtype =
             serde_json::from_value(serde_json::json!(was)).unwrap_or(Subtype::Diffuse);
         let pbr_step = !on
@@ -4034,6 +4060,15 @@ impl AppModel {
                 == Some("f")
         });
         let pbr_pick = has_fuzz && shader.is_some_and(Shader::is_pbr_family);
+        // Final review B-I2: an explicit pick outside the PBR family, from a set read PBR (by Auto or a pick).
+        // Advanced Skin keeps its own diffuse step (`skin_follow`, DU6-DU7).
+        let vanilla = |s: Shader| !s.is_pbr_family() && s != Shader::AdvancedSkin;
+        let vanilla_pick =
+            has_fuzz && now.is_some_and(Shader::is_pbr_family) && shader.is_some_and(vanilla);
+        // Its way back: Auto after a chosen vanilla shader clears the untouched vanilla types `vanilla_pick` (or the
+        // recorder under that shader) wrote, so the next settled plan records what Auto reads (FC1 R5's Auto rule);
+        // the generic arm below keeps a value equal to the vanilla plan's pick.
+        let vanilla_back = has_fuzz && chosen && shader.is_none() && now.is_some_and(vanilla);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -4082,8 +4117,9 @@ impl AppModel {
                     return Some((k.clone(), Some(pbr_fuzz.clone()), true));
                 }
                 // Leaving the pick: what the step wrote and nobody changed since (an edit drops the key from
-                // `auto_pbr`, DU8's rule) goes, whatever the new shader.
-                if leaves_pbr && auto_pbr.contains(k) {
+                // `auto_pbr`, DU8's rule) goes, under Auto or a shader outside the PBR family. A member in a locked
+                // slot keeps it (ruling R1; final review B-M1), and its key stays listed.
+                if leaves_pbr && auto_pbr.contains(k) && !locked.contains_key(k) {
                     let wrote = held_type(k).is_some_and(|st| {
                         (st == Subtype::PbrFuzz && fuzz_map(k))
                             || [Subtype::Diffuse, Subtype::Normal, Subtype::Glow]
@@ -4119,6 +4155,23 @@ impl AppModel {
                     {
                         return Some((k.clone(), Some(serde_json::json!(st)), true));
                     }
+                }
+                // Final review B-I2: the mirror for an explicit pick outside the PBR family. `member_subtype` keeps a
+                // PBR type under a vanilla shader (JQ16), so an untouched PBR type FC1 recorded while the set was
+                // read PBR takes its vanilla counterpart here. Not listed in `auto_pbr`: the value is what the new
+                // shader's recorder writes (DU8), and a later PBR pick maps it back through the arm above.
+                if vanilla_pick && !locked.contains_key(k) {
+                    if let Some(st) =
+                        held_type(k).and_then(|st| vanilla_member_type(st, diffuse_slot(k)))
+                    {
+                        return Some((k.clone(), Some(serde_json::json!(st)), false));
+                    }
+                }
+                if vanilla_back
+                    && !locked.contains_key(k)
+                    && held_type(k).is_some_and(|st| pbr_member_type(st, diffuse_slot(k)).is_some())
+                {
+                    return Some((k.clone(), None, false));
                 }
                 let new = self.auto_pick(k, shader).map(|st| serde_json::json!(st));
                 (new.is_some() && new != held(k))

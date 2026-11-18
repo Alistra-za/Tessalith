@@ -287,6 +287,10 @@ fn a_packed_rfaos_fits_to_its_canvas() {
         .find(|j| j.pack.is_some())
         .expect("a packed rfaos");
     assert_eq!(
+        b.output.file_name().unwrap().to_string_lossy(),
+        "b_rfaos.dds"
+    );
+    assert_eq!(
         b.bake.as_ref().unwrap().fit,
         Some((64, 64)),
         "{:?}",

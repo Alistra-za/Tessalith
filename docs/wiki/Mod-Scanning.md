@@ -7,7 +7,7 @@ This page is for modders who want Tessalith to read their Mod Organizer 2 load o
 | Use | Where you see it |
 |---|---|
 | Alpha meaning of colour maps | The Alpha row reads "from the meshes that use this texture" ([how](GUI-Texture-Panel.md#alpha-from-the-meshes)). |
-| Set shader | When no map in the set decides it (PBR, Advanced skin, complex grass, complex `_m`, `_p`), the shader most scanned meshes use for the diffuse picks the set's shader. |
+| Set shader | When no map in the set decides it (PBR, Advanced skin, complex grass, complex `_m`, `_p`), the shader most scanned meshes use for the diffuse picks the set's shader, with the exceptions in [How the shader is picked](Set-Shaders.md#how-the-shader-is-picked). |
 | Complex grass | After a scan that included plugins, the diffuse of a grass (GRAS) record's mesh gets a `complex_grass` suggestion ([the shape tests](PBR-Landscape.md#complex-grass)). |
 | Path pickers | The input name ▾ list and the match pickers in the PGPatcher JSON editor list the texture paths and mesh folders the scan found. |
 | Rename warnings | Renaming an output that scanned meshes still use under its old name (as slot 0) is flagged amber. PBR sets under `cs` are not flagged. |

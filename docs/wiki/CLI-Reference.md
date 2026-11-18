@@ -532,7 +532,7 @@ Partly. **Copy CLI command** (Files tab, [Review and Export](GUI-Review-and-Expo
 
 | Stays in the GUI | Why it differs on the CLI |
 |---|---|
-| `sdc-project.toml`: moved files, created sets, borrows, set renames, output names, set shaders, texture set record mappings and fills | The CLI doesn't read it, so those sets come out differently: an `_rfaos` bakes without the shared normal, and a shared set's maps type as `normal` and `backlight_tint`. The `[project] target_mod` it holds isn't read either. |
+| `sdc-project.toml`: moved files, created sets, borrows, set renames, output names, set shaders, texture set record mappings and fills | The CLI doesn't read it, so those sets come out differently: an `_rfaos` bakes without the shared normal, and a shared set's maps type as `normal` and `backlight_tint`. A `_fuzz` or `_sheen` map in a set whose picked shader reads no fuzz map, such as **Glow**, is listed unused in the GUI but converted as `<base>_f.dds` by `sdc convert`. <!-- D:JQ13 --> The `[project] target_mod` it holds isn't read either. |
 | The mod scan: mesh and grass evidence | The CLI doesn't read the scan database. A mesh **Remove** and the `_m` that Also export derives from meshes stay GUI-only. |
 | The PGPatcher JSON | Only the GUI writes it, after a complete export. `sdc` never does, so a set exported with `sdc` has no entry in it. |
 

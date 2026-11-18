@@ -440,6 +440,19 @@ impl Subtype {
         )
     }
 
+    /// An Advanced Skin member's sub-type: a set with a fuzz map and a member of one of these is skin (Fuzz-5). The
+    /// engine's `FileScopes::skin_typed` and the GUI's switch predicate (`fuzz_recorded_skin`) read it.
+    pub fn is_skin(self) -> bool {
+        matches!(
+            self,
+            Subtype::SkinAlbedo
+                | Subtype::SkinRfaos
+                | Subtype::SkinSk
+                | Subtype::SkinWet
+                | Subtype::SkinDetail
+        )
+    }
+
     /// Alpha meaning depends on the mesh (NiAlphaProperty), so it is never a high-confidence guess [SC §1].
     pub fn alpha_from_mesh(self) -> bool {
         matches!(

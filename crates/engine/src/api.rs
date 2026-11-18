@@ -1241,6 +1241,9 @@ pub(crate) fn reencodes(ctx: &ResolveCtx, f: &InputFile) -> bool {
 /// new state, so an edit that moves any file in or out is seen.
 /// shortcut: a file a `[[rules]]` entry types is invisible here (rules need the analysis); the BV2 writer dedupe
 /// catches two of those, so none writes twice. Revisit if a rule needs the pre-pass to see it.
+/// shortcut: a fuzz map the set reads as the PBR fuzz texture (Fuzz-1a) counts here by its raw name, although it
+/// writes `<base>_f.dds`; two that would both write it are left to the BV2 writer dedupe (JQ40). Revisit if the
+/// pre-pass must see the reading.
 pub(crate) fn waiting_images(
     ctx: &ResolveCtx,
     target: Target,
@@ -1285,11 +1288,13 @@ pub(crate) fn hand_role(ctx: &ResolveCtx, f: &InputFile) -> Option<crate::helper
         .flatten()
 }
 
-/// Fuzz-1a: `f` is a fuzz map (`group::is_fuzz_stem`) image with no requested sub-type and no hand role, so its
+/// Fuzz-1a: `f` is a fuzz map image (`group::is_fuzz_map_image`) with no requested sub-type and no hand role, so its
 /// reading is the set's to decide.
+// shortcut: a sub-type a `[[rules]]` entry names is not seen (rules need the analysis, as `is_typed` says), so a fuzz
+// map a preset rule types `pbr_fuzz` counts as untyped: with a `_g` the set picks Glow, yet the map converts to
+// `<base>_f.dds` and nothing lists it unused. Revisit if a rule needs the pre-pass to see it.
 pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
-    f.kind == InputKind::Image
-        && crate::group::is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+    crate::group::is_fuzz_map_image(f)
         && hand_role(ctx, f).is_none()
         && !crate::policy::subtype_requested(ctx, f)
 }
@@ -1302,22 +1307,51 @@ pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
 // `f`; read `set.shares` too when the shared fuzz map follow-up (F10) lands.
 pub(crate) fn pbr_read_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> bool {
     ctx.target == Target::Cs
-        && !set.suffixes.contains("f")
+        && pack::plan::pbr_f_name(ctx, set, files).is_none()
         && set
             .members
             .iter()
             .map(|&i| &files[i])
             .find(|f| {
                 untyped_fuzz_map(ctx, f)
-                    || (f.kind == InputKind::Image
-                        && crate::group::is_fuzz_stem(
-                            &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                        )
+                    || (crate::group::is_fuzz_map_image(f)
                         && crate::policy::subtype_override(ctx, f) == Some(Subtype::PbrFuzz))
             })
             .is_some_and(|fm| {
                 pack::plan::fuzz_reading(ctx, set, fm) == pack::plan::FuzzReading::Pbr
             })
+}
+
+/// Fuzz-1a: a copy of `set` whose suffixes hold the `f` its PBR-read fuzz map writes, as M7 adds a predicted `_rmaos`.
+fn with_f(set: &TextureSet) -> TextureSet {
+    let mut c = set.clone();
+    c.suffixes.insert("f".into());
+    c
+}
+
+/// Fuzz-1a (Note JQ52): the set member `f` of `set` is typed and checked against. In a set of `f_sets` (its fuzz map
+/// is read as the PBR fuzz texture, `pbr_read_fuzz`) the other members read [`with_f`]; the fuzz map itself reads the
+/// real set, whose rename guard (JQ37) and `_f` arm read the set's own `f`. 6c, the fill step and the shader map check
+/// (`map_members`) all ask here, so a member is typed and checked against one set. The set itself never gains `f`.
+/// Note JQ53: a set of `f_sets` whose suffixes hold `f` has no `_f` of its own (`pack::plan::pbr_f_name`): its `f` is a
+/// kept DDS, the fuzz map's earlier output. The fuzz map reads a copy without it, so policy's Fuzz-4 test and
+/// `fuzz_f_output`'s guard see no `_f` and the map still writes `<base>_f.dds`.
+fn member_set<'a>(
+    set: &'a TextureSet,
+    f: &InputFile,
+    f_sets: &BTreeSet<String>,
+) -> std::borrow::Cow<'a, TextureSet> {
+    if !f_sets.contains(&set.key) {
+        std::borrow::Cow::Borrowed(set)
+    } else if !crate::group::is_fuzz_map_image(f) {
+        std::borrow::Cow::Owned(with_f(set))
+    } else if set.suffixes.contains("f") {
+        let mut c = set.clone();
+        c.suffixes.remove("f");
+        std::borrow::Cow::Owned(c)
+    } else {
+        std::borrow::Cow::Borrowed(set)
+    }
 }
 
 /// Trace-debug 2026-10-16 #4: a raw map whose sub-type was requested is an ordinary file (spec §4.4), as
@@ -1731,7 +1765,9 @@ impl Engine {
         };
         file_scopes.index(&files);
         // Fuzz-5, Fuzz-22: the skin evidence a set with a fuzz map reads (`set_is_advanced_skin`), from a ctx of its
-        // own that is dropped before the sets are stored.
+        // own that is dropped before the sets are stored. Each image's hand-set role is read here once (it reads
+        // neither field).
+        let hand: Vec<Option<crate::helper::HelperRole>>;
         {
             let ctx = base_ctx(
                 req,
@@ -1742,27 +1778,17 @@ impl Engine {
                 project_config.as_ref(),
                 &file_scopes,
             );
-            let skin_typed: BTreeSet<usize> = (0..files.len())
+            hand = files.iter().map(|f| hand_role(&ctx, f)).collect();
+            // shortcut: a sub-type a `[[rules]]` entry names is not seen (rules need the analysis), as in `is_typed`;
+            // revisit if a rule names a skin sub-type.
+            file_scopes.skin_typed = (0..files.len())
                 .filter(|&i| {
-                    matches!(
-                        crate::policy::subtype_override(&ctx, &files[i]),
-                        Some(
-                            Subtype::SkinAlbedo
-                                | Subtype::SkinRfaos
-                                | Subtype::SkinSk
-                                | Subtype::SkinWet
-                                | Subtype::SkinDetail
-                        )
-                    )
+                    crate::policy::subtype_override(&ctx, &files[i]).is_some_and(Subtype::is_skin)
                 })
                 .collect();
-            let hand_fuzz: BTreeSet<usize> = (0..files.len())
-                .filter(|&i| {
-                    hand_role(&ctx, &files[i]) == Some(crate::helper::HelperRole::Raw(RawMap::Fuzz))
-                })
+            file_scopes.hand_fuzz = (0..files.len())
+                .filter(|&i| hand[i] == Some(crate::helper::HelperRole::Raw(RawMap::Fuzz)))
                 .collect();
-            file_scopes.skin_typed = skin_typed;
-            file_scopes.hand_fuzz = hand_fuzz;
         }
         let ctx = base_ctx(
             req,
@@ -1773,8 +1799,6 @@ impl Engine {
             project_config.as_ref(),
             &file_scopes,
         );
-        let hand: Vec<Option<crate::helper::HelperRole>> =
-            files.iter().map(|f| hand_role(&ctx, f)).collect();
         let typed: BTreeSet<usize> = (0..files.len())
             .filter(|&i| is_typed(&ctx, &files[i], hand[i]))
             .collect();
@@ -2336,23 +2360,15 @@ impl Engine {
             .map(|(wi, a, _)| (work[*wi].1.path.clone(), a.dds_dxgi))
             .collect();
         // Fuzz-1a: a set that reads its fuzz map as the PBR fuzz texture writes an `_f`, so its other members are
-        // resolved below against a clone whose suffixes hold `f`, as M7 adds a predicted `_rmaos`; `set_resolved`
-        // reads a copy with `f`, so it says `pbr`. The set itself never gains it (see `set_resolved` below).
+        // resolved below (and in the fill step, and checked in `map_members`) against a copy whose suffixes hold `f`
+        // (`member_set`); `set_resolved` reads a copy with `f`, so it says `pbr`. The set itself never gains it.
         let f_sets: BTreeSet<String> = sets
             .iter()
             .filter(|s| pbr_read_fuzz(&ctx, s, files))
             .map(|s| s.key.clone())
             .collect();
-        let f_clones: BTreeMap<String, TextureSet> = sets
-            .iter()
-            .filter(|s| f_sets.contains(&s.key))
-            .map(|s| {
-                let mut c = s.clone();
-                c.suffixes.insert("f".into());
-                (s.key.clone(), c)
-            })
-            .collect();
-        // 6c. Re-resolve the members of a set whose shader changes member defaults.
+        // 6c. Re-resolve the members of a set whose shader changes member defaults, of a chosen-skin set (DV1) and of a
+        // set read with `f` (Fuzz-1a), and every cs fuzz map (its reading follows the pick).
         let mut jobs = vec![];
         for (mut old, (wi, a, info)) in pass1_jobs.into_iter().zip(pass1) {
             // PBR grass design §4.4: the albedo's corner texel against CS's grass shadow-pass detector, judged on the
@@ -2382,13 +2398,10 @@ impl Engine {
                     .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
             // Fuzz-2, Fuzz-3: a fuzz map is read again with the pick (`fuzz_reading`). A typed or hand-set one needs no
             // test of its own here: `resolve_file_with` asks `fuzz_reading` for neither.
-            let fuzz_map = ctx.target == Target::Cs
-                && f.kind == InputKind::Image
-                && crate::group::is_fuzz_stem(
-                    &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                );
-            // Fuzz-1a: never the fuzz map itself, whose rename guard and `_f` arm read the real set's `f`.
-            let f_clone = f_clones.get(&set.key).filter(|_| !fuzz_map);
+            let fuzz_map = ctx.target == Target::Cs && crate::group::is_fuzz_map_image(f);
+            // Fuzz-1a: the other members of a set read with `f` are resolved against the copy.
+            let read = member_set(set, f, &f_sets);
+            let with_f = matches!(read, std::borrow::Cow::Owned(_));
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
@@ -2397,13 +2410,13 @@ impl Engine {
                     || (p.shader == crate::shader::Shader::PbrLandscape && landscape_retype)
             }) && !pack::plan::chosen_skin(&ctx, set)
                 && !fuzz_map
-                && f_clone.is_none()
+                && !with_f
             {
                 old.warnings.extend(grass_note(&old));
                 jobs.push(old);
                 continue;
             }
-            let set = f_clone.unwrap_or(set);
+            let set: &TextureSet = &read;
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let split = split_for((set, f));
                 let facts = FileFacts {
@@ -2663,6 +2676,9 @@ impl Engine {
             |(_, ji, ..)| jobs[*ji].output.as_path(),
             |&(c, ji, set, f), admitted, stage| {
                 let old = &jobs[ji];
+                // Fuzz-1a: against the set 6c resolved this member with.
+                let read = member_set(set, f, &f_sets);
+                let set: &TextureSet = &read;
                 let split = split_for((set, f));
                 let gras_diffuse = gras.contains(&crate::shader::gras_key(&f.game_path, &f.output));
                 // Review 4 I2: the resolved profile may change `alpha.exr_straight` (a rule on the filled alpha), so the
@@ -3089,15 +3105,14 @@ impl Engine {
         let index = crate::shader::JobIndex::new(&jobs);
         let mut pbr_sets = BTreeSet::new();
         for set in &sets {
-            // Fuzz-1a: the `_f` the fuzz map writes counts here only, on a copy. `sets` never gains it: the fill step
-            // and pass 2 resolve with the set again, and its `f` would take the fuzz map's `<base>_f.dds` (the rename
-            // guard) or make it a packing input (the `_f` arm).
-            let with_f;
+            // Fuzz-1a: the `_f` the fuzz map writes counts here, on a copy (`with_f`), as it does for the other
+            // members (`member_set`). `sets` never gains it: the fill step and pass 2 resolve the fuzz map with the
+            // set again, and its `f` would take the fuzz map's `<base>_f.dds` (the rename guard) or make it a packing
+            // input (the `_f` arm).
+            let copy;
             let read = if f_sets.contains(&set.key) {
-                let mut c = set.clone();
-                c.suffixes.insert("f".into());
-                with_f = c;
-                &with_f
+                copy = with_f(set);
+                &copy
             } else {
                 set
             };
@@ -3117,6 +3132,7 @@ impl Engine {
                     let maps = map_members(
                         &ctx,
                         set,
+                        &f_sets,
                         files,
                         &index,
                         &skipped,
@@ -3899,10 +3915,13 @@ pub(crate) fn pre_edit_shaders(
 /// input with the sub-type its suffix suggests, not the set's own earlier output), then each packed output of the
 /// set. Raw maps are left out by role, because
 /// `plan_packing` re-tags an unused one; duplicates and failed files are left out. A raw-named image set to
-/// `helper.role = "none"` (Note DY) is an ordinary member.
+/// `helper.role = "none"` (Note DY) is an ordinary member. A member's suffix and a kept DDS's sub-type are read
+/// against the set it was typed with (`member_set`, Fuzz-1a's `f` from `f_sets`).
+#[allow(clippy::too_many_arguments)]
 fn map_members(
     ctx: &ResolveCtx,
     set: &TextureSet,
+    f_sets: &BTreeSet<String>,
     files: &[InputFile],
     jobs: &crate::shader::JobIndex,
     skipped: &[SkippedFile],
@@ -3917,7 +3936,7 @@ fn map_members(
     };
     let suffix = |f: &InputFile| {
         let stem = f.rel.file_stem().unwrap_or_default().to_string_lossy();
-        member_split(&stem, set, aliases).suffix
+        member_split(&stem, &member_set(set, f, f_sets), aliases).suffix
     };
     let mut out = vec![];
     for &i in &set.members {
@@ -3955,7 +3974,7 @@ fn map_members(
                 target,
                 suffix: sfx.as_deref(),
                 game_path: &f.game_path,
-                set_suffixes: &set.suffixes,
+                set_suffixes: &member_set(set, f, f_sets).suffixes,
                 alpha: AlphaContent::None,
                 is_float: false,
                 advanced_skin: false,

@@ -61,7 +61,7 @@ pub struct Skeleton {
     pub(crate) key_sets: HashMap<String, Vec<u32>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
     pub(crate) pbr_sets: BTreeSet<u32>,
-    /// Sets with a fuzz map (Fuzz-19): a member image whose stem is a fuzz map's (`group::is_fuzz_stem`), or a set
+    /// Sets with a fuzz map (Fuzz-19): a member fuzz map image (`group::is_fuzz_map_image`), or a set
     /// that lists one, also shared in (`pack::plan::has_fuzz_map`, the gate the Advanced Skin evidence reads).
     pub(crate) fuzz_sets: BTreeSet<u32>,
     /// Sets whose `set_resolved` read them with `f` in the full plan, from a fuzz map read as the PBR fuzz texture
@@ -110,11 +110,7 @@ impl Skeleton {
             for &m in &set.members {
                 set_of[m] = si as u32;
                 let file = &prepared.files[m];
-                if file.kind == InputKind::Image
-                    && crate::group::is_fuzz_stem(
-                        &file.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                    )
-                {
+                if crate::group::is_fuzz_map_image(file) {
                     fuzz_sets.insert(si as u32);
                 }
                 if let Some(f) = prepared.file_scopes.forms_of(file) {

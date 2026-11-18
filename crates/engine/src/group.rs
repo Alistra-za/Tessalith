@@ -182,6 +182,48 @@ pub fn is_fuzz_stem(stem: &str) -> bool {
     vocab_of(stem).is_some_and(|v| v.role == VocabRole::PackingInput(RawMap::Fuzz))
 }
 
+/// Whether `f` is a fuzz map image (`is_fuzz_stem`), the file the fuzz reading decides. A kept DDS of that name is not
+/// one: it is never planned.
+pub fn is_fuzz_map_image(f: &InputFile) -> bool {
+    f.kind == InputKind::Image
+        && is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+}
+
+/// Fuzz-1a: the `<base>_f.dds` beside its Discover output that a PBR-read fuzz map `m` writes (`policy`'s
+/// `fuzz_f_output` renames to it); `None` when `m` is no fuzz map image.
+pub fn fuzz_f_path(m: &InputFile) -> Option<std::path::PathBuf> {
+    if !is_fuzz_map_image(m) {
+        return None;
+    }
+    let (base, _) = split_vocab(&m.rel.file_stem()?.to_string_lossy())?;
+    Some(m.output.with_file_name(format!("{base}_f.dds")))
+}
+
+/// Note JQ53 (final review A I3): `f` is a kept DDS at the path a fuzz map of `set` really writes, so it is that map's
+/// earlier output (a project exported into its source folder), not the set's `_f`. That path is the map's own output
+/// when it is not the Discover default `<stem>.dds` (an `output_paths` name, which `policy`'s `fuzz_f_output` keeps),
+/// else its `<base>_f.dds`. Path only, as CO102 (`generated_losers`) tells a generated output from a rival. The run's
+/// existing-output check then guards the file: one with no manifest record is never replaced unless the run overwrites.
+pub fn is_fuzz_own_f(set: &TextureSet, files: &[InputFile], f: &InputFile) -> bool {
+    let written = |m: &InputFile| {
+        let stem = m.rel.file_stem()?.to_string_lossy();
+        let named = m
+            .output
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy() != format!("{stem}.dds"));
+        if named && is_fuzz_map_image(m) {
+            Some(m.output.clone())
+        } else {
+            fuzz_f_path(m)
+        }
+    };
+    f.kind == InputKind::Dds
+        && set
+            .members
+            .iter()
+            .any(|&i| written(&files[i]).is_some_and(|p| crate::dds::same_file(&f.path, &p)))
+}
+
 /// Whether `term` (lower-case, no '_') is a vocabulary term; preset aliases may not be one (spec §3.7).
 pub fn is_vocabulary(term: &str) -> bool {
     VOCABULARY.iter().any(|v| v.term == term)

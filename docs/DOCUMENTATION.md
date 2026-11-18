@@ -92,9 +92,37 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
   A shot that no test renders any more is deleted along with every reference to it.
 
 ## 6. The changelog
-- CHANGELOG.md has one section per version, newest first, with one line per user-visible change.
+- CHANGELOG.md has one section per version, newest first, with one entry per user-visible change.
 - **The changelog is where history goes.** When a doc page loses an "earlier versions…" sentence, check that the change is in the changelog, and add it if it's missing.
-- Unreleased changes collect under `## Unreleased` until a release commit names the version.
+- Unreleased changes collect under `## Unreleased` until a release commit names the version. There an entry is one bullet, as long as the change needs, in the order the work merged. Nothing is shortened or sorted at a merge or a push.
+- **The release commit puts the version's section into release shape (owner, 2026-11-18).** A reader of a release looks for their area and scans it. In one pass over that section:
+  1. **Three headings, in this order, an empty one left out:** `### Engine`, `### GUI`, `### Common`.
+     - Engine is what changes the files Tessalith writes or how fast it writes them. Its entries are ordered by part: encoders, texture types and alpha, mips, packing, bake, outputs and the manifest, presets.
+     - GUI is what only `tessalith.exe` shows.
+     - Common is a change that touches both, or belongs to neither: an `sdc.toml` key with its GUI control, an `sdc convert` flag, the crates, the licences and the build.
+  2. **A minor entry is one line:** one sentence of at most about 160 characters that says what the user now sees. Its measurements, reasons and edge cases are cut.
+  3. **What a user who upgrades must know or do is never cut:** a renamed option or output, a file to delete, and the `sdc convert … --ev` command of the next rule stay in full, whatever the length.
+  4. **Headline news keeps its lines.** A change that is a reason to update by itself, such as BC1 to BC5 encoding four times as fast, keeps several sentences or sub-bullets and comes first under its heading. A release has a few of these, not one per plan.
+  5. **Similar bug fixes share one entry:** three or more fixes in one part of the program become one bullet, such as "Fixed in menus and lists:", with a short sub-bullet each. A lone fix is a one-line entry after the features under its heading.
+  6. **Released sections stay as released.** The pass touches only the version being released. The long entries remain in git history (`git log -p CHANGELOG.md`).
+
+  The shape:
+  ```
+  ## <version>
+
+  ### Engine
+  - BC1, BC3, BC4 and BC5 textures encode more than four times as fast. (Headline: its measurements and what changes for the user follow here, in a few sentences.)
+  - BC7 and BC6H encode about 1.5 times as fast on CPUs with AVX-512; there their bytes differ from an AVX2 CPU's.
+
+  ### GUI
+  - New **Re-encode every output** item in **Export to ▾**: the next export encodes every recorded output again.
+  - Fixed in menus and lists:
+    - a list opened with a click stays open after that click;
+    - once a list inside a panel reaches its end, the wheel scrolls the panel.
+
+  ### Common
+  - New `sdc convert` flags `--ev` and `--property` encode the outputs of an older encode version again.
+  ```
 - **A change to a texture type's output names the command that picks it up (Note JA10).** `if-changed` keeps outputs written by an older encode version unless the run has `--ev`, so the entry is how users learn to re-encode them. An entry for a change that moves an `encode_version` arm, `BC1_ENCODE_ID` or an encoder tag ends with the `sdc convert` command, scoped with `--property` to what the change touched, and says those outputs are otherwise kept. Two examples:
   - a fix to alpha mipmaps: `sdc convert … --on-existing if-changed --ev --property cutout,mips`;
   - a BC1 encoder change: `sdc convert … --on-existing if-changed --ev --property bc1 --property bc3`.

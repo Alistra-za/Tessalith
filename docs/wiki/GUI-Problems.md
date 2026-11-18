@@ -110,12 +110,12 @@ When a plan settles, every sub-type taken from a High-confidence suggestion (inc
 
 ### Sets that left Advanced Skin
 
-A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.md#suffixes)). When you open a project, or `sdc.toml` is read again, Tessalith clears a recorded `skin_albedo` on a set's diffuse when only such a map made the set skin. The set then takes the shader its other maps give. <!-- D:JQ8,JQ56 -->
+A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.md#suffixes)). When you open a project, or `sdc.toml` is read again, Tessalith clears a recorded `skin_albedo` on a set's diffuse when only such a map made the set skin. The set then takes the shader its other maps give. When that shader is PBR and the set has no roughness or metallic map, it warns that the PBR shader needs an `_rmaos`, like any PBR set without one. <!-- D:JQ8,JQ56 -->
 
-- **The row** reads *{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)*. Hover it for one line per file, `{file}: skin albedo → {type}`, then the types recorded with it, then *A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.* <!-- D:JQ19 -->
+- **The row** reads *{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)*. Hover it for one line per file, `{file}: skin albedo → {type}`, then the types recorded with it on other files, then *A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.* <!-- D:JQ19 -->
 - **Undo this change** sits on the row while the switch is the last step. The switch and the types recorded with it are one undo step. <!-- D:JQ17,JQ56 -->
-- **An undone switch runs again** the next time `sdc.toml` is read. The row's hover says how to keep a set skin. <!-- D:JQ56 -->
-- **Not switched:** a set whose shader you picked, a set that other skin maps or types keep skin, and every set while `sdc.toml` is read-only. <!-- D:JQ8,JQ20 -->
+- **An undone switch runs again** the next time `sdc.toml` is read. To keep a set skin, choose **Advanced Skin** as its shader in the set editor. <!-- D:JQ56 -->
+- **Not switched:** a set whose shader you picked, a set whose diffuse is pinned, a set with a written `packing.recipe`, a set that other skin maps or types keep skin ([which](Texture-Types.md#suffixes)), a set whose only fuzz map is shared in from another set, and every set while `sdc.toml` is read-only. <!-- D:JQ8,JQ20,JQ55 -->
 
 ## Narrowing the list
 
