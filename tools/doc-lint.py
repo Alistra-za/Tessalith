@@ -35,7 +35,7 @@ MIN_BYTES = 2 * KB
 HISTORY = [
     (re.compile(r"\bused to\b", re.I), "used to"),
     (re.compile(r"\bpreviously\b", re.I), "previously"),
-    (re.compile(r"\bsince 1\.\d+(?:\.\d+)?\b", re.I), "since 1.x"),
+    (re.compile(r"\bsince v?\d+\.(?:x|\d+)(?:\.\d+)?\b", re.I), "since <version>"),
     (re.compile(r"\bin earlier versions\b", re.I), "in earlier versions"),
     (re.compile(r"\(new\)", re.I), "(new)"),
 ]
