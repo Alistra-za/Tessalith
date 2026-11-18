@@ -9,7 +9,7 @@ use super::{
 use crate::analyse::{analyse, Analysis};
 use crate::api::SkippedFile;
 use crate::codes::{Code, Warning};
-use crate::config::{GraySource, PackPrefer, PackRecipe, Profile, RawMap, Target};
+use crate::config::{GraySource, PackPrefer, PackRecipe, Profile, RawMap, Subtype, Target};
 use crate::discover::{InputFile, InputKind};
 use crate::events::{RecipeReport, RecipeStatus};
 use crate::group::{member_split, split_suffix_with, split_vocab, TextureSet, VocabRole};
@@ -882,20 +882,26 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
     }
 }
 
-/// Fuzz-4: the file name of the set's own `_f`, its first member with suffix `f` by path (an image or a kept DDS);
-/// `None` when the set has none. A kept DDS that is the fuzz map's own earlier output is not the set's `_f`
-/// (`group::is_fuzz_own_f`, Note JQ53). `api::pbr_read_fuzz` and policy's Fuzz-4 test (through `api::member_set`)
-/// ask the same.
-pub(crate) fn pbr_f_name(
+/// Fuzz-4 (Note JQ53, F15): the set's own `_f`, a member with suffix `f` by path (an image or a kept DDS), not the fuzz
+/// map's own earlier output (`group::is_fuzz_own_f`). `dead(f)` marks a member that writes nothing (no job). A member
+/// that writes the PBR fuzz texture comes first, then by path; `None` when the set has none. Policy's Fuzz-4 gate and
+/// `fuzz_f_output`'s guard count every such member through the set's suffixes, so this is `Some` exactly when they
+/// see an `_f`: only the name it gives differs.
+pub(crate) fn pbr_f_member<'f>(
     ctx: &ResolveCtx,
     set: &TextureSet,
-    files: &[InputFile],
-) -> Option<String> {
+    files: &'f [InputFile],
+    dead: impl Fn(&InputFile) -> bool,
+) -> Option<&'f InputFile> {
     if !set.suffixes.contains("f") {
         return None;
     }
-    let mut f_members: Vec<&InputFile> = set
-        .members
+    let writes_f = |f: &InputFile| {
+        !dead(f)
+            && (f.kind == InputKind::Dds
+                || crate::policy::subtype_override(ctx, f).is_none_or(|s| s == Subtype::PbrFuzz))
+    };
+    set.members
         .iter()
         .map(|&i| &files[i])
         .filter(|f| {
@@ -908,9 +914,16 @@ pub(crate) fn pbr_f_name(
                 == Some("f")
                 && !crate::group::is_fuzz_own_f(set, files, f)
         })
-        .collect();
-    f_members.sort_by(|a, b| a.path.cmp(&b.path));
-    f_members.first().map(|f| name(&f.path))
+        .min_by(|a, b| (!writes_f(a), &a.path).cmp(&(!writes_f(b), &b.path)))
+}
+
+/// `pbr_f_member`'s file name before load (no member is dead yet); `api::pbr_read_fuzz` asks it.
+pub(crate) fn pbr_f_name(
+    ctx: &ResolveCtx,
+    set: &TextureSet,
+    files: &[InputFile],
+) -> Option<String> {
+    pbr_f_member(ctx, set, files, |_| false).map(|f| name(&f.path))
 }
 
 /// Note DR: whether `f` is a `_f` that a set already Advanced skin packs into the `_rfaos` G channel (a `_f` whose
@@ -987,6 +1000,8 @@ pub fn plan_packing(
             _ => None,
         })
         .collect();
+    // F15: a member with no job writes nothing (failed, cancelled, or skipped as a duplicate).
+    let planned: BTreeSet<PathBuf> = jobs.iter().map(|j| j.input.clone()).collect();
     let renamed: BTreeMap<PathBuf, InputFile> = sets
         .iter()
         .flat_map(|set| joined_helper_names(ctx, set, files))
@@ -1010,7 +1025,7 @@ pub fn plan_packing(
     // set, why its mask has no shared fuzz source; and every file some set takes as a raw input.
     let mut unread: BTreeMap<PathBuf, Vec<(String, FuzzReading)>> = BTreeMap::new();
     let mut lent: BTreeMap<String, String> = BTreeMap::new();
-    // Fuzz-4: a fuzz map a PBR set's own `_f` beats, with that `_f`'s file name.
+    // Fuzz-4: a fuzz map a PBR set's own `_f` keeps out, with the reason (F15).
     let mut f_wins: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut in_raw: BTreeSet<PathBuf> = BTreeSet::new();
     for (set, stand_in) in sets.iter().zip(&stand_ins) {
@@ -1061,8 +1076,29 @@ pub fn plan_packing(
                 let reading = fuzz_reading(ctx, set, f);
                 // Fuzz-4: under PBR the set's own `_f` wins; the fuzz map is listed unused after the loop.
                 if reading == FuzzReading::Pbr && waiting.contains_key(&f.path) {
-                    if let Some(f_name) = pbr_f_name(ctx, set, files) {
-                        f_wins.entry(f.path.clone()).or_insert(f_name);
+                    let dead =
+                        |m: &InputFile| m.kind == InputKind::Image && !planned.contains(&m.path);
+                    if let Some(fm) = pbr_f_member(ctx, set, files, dead) {
+                        let n = name(&fm.path);
+                        // F15 (Note JQ53): the reason says what the `_f` member is (proposed strings).
+                        let reason = if failed.contains(&fm.path) {
+                            format!("{n}, the set's _f, failed to load")
+                        } else if cancelled.contains(&fm.path) {
+                            format!("{n}, the set's _f, was cancelled")
+                        } else if dead(fm) {
+                            format!("{n}, the set's _f, is not converted")
+                        } else {
+                            match crate::policy::subtype_override(ctx, fm) {
+                                Some(st) if st != Subtype::PbrFuzz && fm.kind != InputKind::Dds => {
+                                    format!(
+                                        "{n} ({}) is written at the set's _f path",
+                                        json!(st).as_str().unwrap_or_default()
+                                    )
+                                }
+                                _ => format!("{n} is the set's PBR fuzz texture (_f)"),
+                            }
+                        };
+                        f_wins.entry(f.path.clone()).or_insert(reason);
                         continue;
                     }
                 }
@@ -1488,13 +1524,9 @@ pub fn plan_packing(
     // Fuzz-4: a fuzz map beside the set's own `_f` under PBR is listed unused, unless another set takes it as a source.
     // Last on purpose: when a shared fuzz map is also in `unread`, its own set's `_f` is the reason that holds for the
     // file's own job, so this retag replaces the one above.
-    for (p, f_name) in f_wins {
+    for (p, reason) in f_wins {
         if !in_raw.contains(&p) {
-            retag_unused(
-                jobs,
-                &p,
-                &format!("{f_name} is the set's PBR fuzz texture (_f)"),
-            );
+            retag_unused(jobs, &p, &reason);
         }
     }
     // Note DY: a helper an alpha fill uses is consumed too, whatever packing did with it.

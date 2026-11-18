@@ -1562,3 +1562,36 @@ fn a_named_fuzz_output_leaves_a_hand_made_f_the_sets_f_in_place() {
     );
     patched_equals_fresh(&r, "x_fuzz.png");
 }
+
+/// F15 (Note JQ53): an `_f` typed away from `pbr_fuzz` still holds the set's `_f` path, so the fuzz map stays out (it
+/// would clash), and the reason says what that `_f` is instead of calling it the PBR fuzz texture.
+#[test]
+fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.png",
+        ],
+        "[files.\"iron_f.png\"]\nsubtype = \"height\"\n",
+    );
+    let p = plan(&d);
+    assert_eq!(job(&p, "iron_f.png").profile.subtype, Subtype::Height);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png (height) is written at the set's _f path; not converted"
+    );
+}
+
+/// F15 (Note JQ53): an `_f` that fails to load writes nothing; the reason says so.
+#[test]
+fn an_f_that_fails_to_load_is_named_as_failed() {
+    let d = fixture(&["iron.png", "iron_roughness.png", "iron_fuzz.png"], "");
+    std::fs::write(d.path().join("in/iron_f.png"), b"not a png").unwrap();
+    let p = plan(&d);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png, the set's _f, failed to load; not converted"
+    );
+}
