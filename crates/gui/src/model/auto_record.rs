@@ -62,6 +62,9 @@ pub(crate) struct FuzzSwitch {
     lines: Vec<String>,
     /// The Diffuse-slot keys whose `skin_albedo` the switch cleared.
     keys: Vec<String>,
+    /// The `history.pushes` the switch's step left (moved by the joined recording): the row offers Undo, and the
+    /// switch counts as automatic (FI4), only while it is the top step.
+    step: u64,
     /// Note FI4: nothing prompted to be saved just before the switch.
     clean_before: bool,
 }
@@ -244,9 +247,35 @@ impl AppModel {
             merge,
             lines: vec![],
             keys,
+            step: self.history.pushes,
             clean_before,
         });
         true
+    }
+
+    /// Fuzz-8: a fresh read of the documents (an open or a reload) drops the previous switch, its row and a step
+    /// still waiting for its recording, and lets the next settled plan switch the text it read.
+    pub(super) fn reset_fuzz_switch(&mut self) {
+        self.fuzz_note = None;
+        if let Some(sw) = self.fuzz_switch.take() {
+            if self.reencode_follow.as_ref() == Some(&sw.merge) {
+                self.reencode_follow = None;
+            }
+        }
+        self.fuzz_switch_checked = false;
+    }
+
+    /// FI4: the switch, with what joined it, is the only unsaved change since a document that asked nothing: its row
+    /// (or, before the row is built, its step) is the top step.
+    pub(super) fn only_switch_unsaved(&self) -> bool {
+        let top = |clean: bool, step: u64| clean && step == self.history.pushes;
+        self.fuzz_note
+            .as_ref()
+            .is_some_and(|n| top(n.clean_before, n.step))
+            || self
+                .fuzz_switch
+                .as_ref()
+                .is_some_and(|s| top(s.clean_before, s.step))
     }
 
     /// Fuzz-8: once the switch's step is complete (the plan settled with nothing more to record), its Problems row:
@@ -262,13 +291,15 @@ impl AppModel {
             .keys
             .iter()
             .map(|k| {
-                let now = self
-                    .item(k)
-                    .and_then(|i| i.job.as_ref())
-                    .map_or_else(String::new, |j| {
+                // A file with no job by now (deleted, unreadable) has no type to name.
+                match self.item(k).and_then(|i| i.job.as_ref()) {
+                    Some(j) => format!(
+                        "{}: {was} → {}",
+                        file_name(k),
                         super::labels::subtype_name(j.profile.subtype)
-                    });
-                format!("{}: {was} → {now}", file_name(k))
+                    ),
+                    None => format!("{}: {was}", file_name(k)),
+                }
             })
             .chain(switch.lines)
             .chain([FUZZ_SWITCH_HOVER.to_string()])
@@ -278,7 +309,8 @@ impl AppModel {
                 "{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
             ),
             lines,
-            step: self.history.pushes,
+            // The switch's own step (I2): a user edit since then is the top step, and the row offers no Undo.
+            step: switch.step,
             clean_before: switch.clean_before,
         });
         // Fuzz-29: as after `auto_note`, so the cached rows show it on the next frame.
@@ -406,15 +438,18 @@ impl AppModel {
         if let Some(k) = join {
             // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
             // switch's row lists what it joined.
-            if let Some(sw) = self.fuzz_switch.as_mut().filter(|sw| sw.merge == k) {
-                sw.lines.extend(lines);
-            }
+            let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
             let pushes = self.history.pushes;
             self.edit_docs(&label, Some(k), true, |p, _| {
                 for (k, f, v) in &writes {
                     p.set_file_value(k, f, v);
                 }
             });
+            if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
+                sw.lines.extend(lines);
+                // The joined step is still the switch's (I2).
+                sw.step = self.history.pushes;
+            }
             return self.history.pushes != pushes;
         }
         let clean_before = !self.prompts_unsaved();

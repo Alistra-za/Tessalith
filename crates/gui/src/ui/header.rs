@@ -156,7 +156,7 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
     );
     let r = if model.only_automatic_unsaved() {
         r.on_hover_text(
-            "Save the texture types Tessalith set automatically, so sdc.exe plans the same",
+            "Save the texture types Tessalith changed automatically, so sdc.exe plans the same",
         )
     } else {
         r

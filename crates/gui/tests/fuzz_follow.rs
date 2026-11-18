@@ -1620,3 +1620,325 @@ fn the_switch_row_shows_on_the_frame_after_it_is_built() {
         std::thread::sleep(Duration::from_millis(5));
     }
 }
+
+const OLD_SKIN: &str = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n";
+
+/// An old fuzz-only skin project, opened and not yet settled.
+fn old_unsettled(dir: &Path, accept: AcceptSuggestions) -> AppModel {
+    open_unsettled(
+        dir,
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        accept,
+        |_| {},
+    )
+}
+
+/// Poll until the switch's step is pushed and its row is not built yet (the window between the two).
+fn until_switch_pending(m: &mut AppModel) {
+    let start = std::time::Instant::now();
+    loop {
+        m.poll();
+        assert!(
+            m.fuzz_note_for_test().is_none(),
+            "the row was built before the window was seen"
+        );
+        if m.can_undo() {
+            return;
+        }
+        assert!(start.elapsed() < Duration::from_secs(60), "no switch");
+    }
+}
+
+/// A user edit: the diffuse's alpha policy.
+fn user_edit(m: &mut AppModel) {
+    m.set_field(
+        DIFFUSE,
+        "alpha.policy",
+        json!(engine::config::AlphaPolicy::Remove),
+    );
+}
+
+/// The dialogs the close, open and reload requests raise now (each from the same state).
+fn asks(m: &mut AppModel, root: &Path) -> [bool; 3] {
+    let close = !m.request_close();
+    m.dialog = None;
+    let opened = m.request_open(root.to_path_buf());
+    let open = !opened;
+    m.dialog = None;
+    if opened {
+        idle(m);
+    }
+    // The open above may have re-read the documents; reload last.
+    m.request_reload();
+    let reload = m.dialog.is_some();
+    m.dialog = None;
+    idle(m);
+    [close, open, reload]
+}
+
+/// Fix round 1, I1 (FI4): the switch alone, with its joined recording, is an automatic change: no title mark, no
+/// close, open or reload question, no crash-recovery copy; Save says what it writes.
+#[test]
+fn the_switch_alone_asks_nothing() {
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(
+            d.path(),
+            &["rock01_roughness.png", "rock01_fuzz.png"],
+            OLD_SKIN,
+            accept,
+        );
+        assert!(m.fuzz_note_for_test().is_some(), "{accept:?}");
+        assert!(m.is_dirty(), "{accept:?}");
+        assert!(!m.prompts_unsaved(), "{accept:?}");
+        assert!(m.only_automatic_unsaved(), "{accept:?}");
+        assert!(
+            !sdc_gui::ui::header::window_title(&m).ends_with('●'),
+            "{accept:?}"
+        );
+        assert!(m.recovery_snapshot().is_empty(), "{accept:?}");
+        assert_eq!(asks(&mut m, d.path()), [false; 3], "{accept:?}");
+    }
+}
+
+/// Fix round 1, I1: a user edit after the switch asks, in all three places.
+#[test]
+fn a_user_edit_after_the_switch_asks() {
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(
+            d.path(),
+            &["rock01_roughness.png", "rock01_fuzz.png"],
+            OLD_SKIN,
+            accept,
+        );
+        user_edit(&mut m);
+        idle(&mut m);
+        assert!(m.prompts_unsaved(), "{accept:?}");
+        assert!(!m.request_close(), "{accept:?}");
+        m.dialog = None;
+        assert!(!m.request_open(d.path().to_path_buf()), "{accept:?}");
+        m.dialog = None;
+        m.request_reload();
+        assert!(m.dialog.is_some(), "{accept:?}");
+    }
+}
+
+/// Fix round 1, I1: a later automatic recording in its own step, after a clean switch, still asks nothing.
+#[test]
+fn a_later_recording_after_the_switch_asks_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    let pushes = m.history.pushes;
+    rgb(&d.path().join("m"), "stone01.png");
+    m.replan();
+    idle(&mut m);
+    assert!(subtype(&m, "m/stone01.png").is_some(), "recorded");
+    assert!(m.history.pushes > pushes, "a step of its own");
+    assert!(!m.prompts_unsaved());
+}
+
+/// Fix round 1, I1: Undo of an unsaved switch leaves the saved text, so nothing is unsaved; Undo of a saved switch
+/// leaves a change the user made, so it asks.
+#[test]
+fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+    );
+    m.undo();
+    idle(&mut m);
+    assert!(!m.is_dirty() && !m.prompts_unsaved());
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+    );
+    m.save().unwrap();
+    m.undo();
+    idle(&mut m);
+    assert!(m.prompts_unsaved());
+}
+
+/// Fix round 1, I1: between the switch and its row, the switch alone asks nothing.
+#[test]
+fn the_window_before_the_switch_row_asks_nothing() {
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = old_unsettled(d.path(), accept);
+        until_switch_pending(&mut m);
+        assert!(m.is_dirty(), "{accept:?}");
+        assert!(!m.prompts_unsaved(), "{accept:?}");
+        assert!(m.request_close(), "{accept:?}");
+        idle(&mut m);
+    }
+}
+
+/// Fix round 1, I2: a user edit made before the switch's row is built: the row never offers Undo (it would take back
+/// the user's edit, or only the recording), and the user's edit asks.
+#[test]
+fn a_user_edit_before_the_switch_row_takes_no_undo_from_it() {
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = old_unsettled(d.path(), accept);
+        until_switch_pending(&mut m);
+        user_edit(&mut m);
+        idle(&mut m);
+        let (text, _) = m.fuzz_note_for_test().expect("the switch row");
+        let rows = problems(&m);
+        let row = rows
+            .iter()
+            .find(|r| r.text == text)
+            .expect("the switch row is listed");
+        assert_eq!(row.fix, None, "{accept:?}: {rows:?}");
+        assert!(m.prompts_unsaved(), "{accept:?}");
+        // The normal Undo takes back the user's edit only (under High the recording's own step is on top of it).
+        let undos = if accept == AcceptSuggestions::High {
+            2
+        } else {
+            1
+        };
+        for _ in 0..undos {
+            m.undo();
+            idle(&mut m);
+        }
+        assert_eq!(
+            m.project
+                .as_ref()
+                .unwrap()
+                .file_value(DIFFUSE, "alpha.policy"),
+            None,
+            "{accept:?}"
+        );
+        assert!(!set_view(&m).skin, "{accept:?}: still switched");
+    }
+}
+
+/// Fix round 1, I3 (a): a reload is an open: the old row goes and the reloaded text is switched again, with a fresh
+/// row whose Undo works.
+#[test]
+fn a_reload_switches_the_reloaded_text_again() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+    );
+    let first = m.history.pushes;
+    m.request_reload();
+    assert_eq!(m.dialog, None);
+    idle(&mut m);
+    assert!(!set_view(&m).skin, "switched again");
+    assert!(m.history.pushes > first, "a fresh step");
+    let (text, lines) = m.fuzz_note_for_test().expect("a fresh row");
+    assert!(
+        lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+        "{lines:?}"
+    );
+    assert!(problems(&m)
+        .iter()
+        .any(|r| r.text == text && r.fix == Some(Fix::UndoLast)));
+    m.undo();
+    idle(&mut m);
+    assert!(set_view(&m).skin);
+    assert_eq!(m.project.as_ref().unwrap().text(), OLD_SKIN);
+}
+
+/// Fix round 1, I3 (b): a reload while the switch's step waits for its row: no stale line, one correct row.
+#[test]
+fn a_reload_while_the_switch_is_pending_builds_one_correct_row() {
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = old_unsettled(d.path(), accept);
+        until_switch_pending(&mut m);
+        m.reload_documents();
+        idle(&mut m);
+        let (text, lines) = m.fuzz_note_for_test().expect("the row");
+        assert!(
+            !lines
+                .iter()
+                .any(|l| l.contains("skin albedo → skin albedo")),
+            "{accept:?}: {lines:?}"
+        );
+        assert!(
+            lines.contains(&"rock01.png: skin albedo → pbr albedo".to_string()),
+            "{accept:?}: {lines:?}"
+        );
+        assert_eq!(
+            problems(&m).iter().filter(|r| r.text == text).count(),
+            1,
+            "{accept:?}"
+        );
+        assert!(!set_view(&m).skin, "{accept:?}");
+    }
+}
+
+/// Fix round 1, I3 (c): a hand edit of `sdc.toml` while only the switch is unsaved is taken once, the set is switched
+/// again with one row, and a second check reloads nothing.
+#[test]
+fn a_hand_edit_under_an_unsaved_switch_is_taken_once() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::None,
+    );
+    let edited = format!("{OLD_SKIN}\n[files.\"m/rock01.png\".alpha]\npolicy = \"remove\"\n");
+    std::fs::write(d.path().join("sdc.toml"), &edited).unwrap();
+    m.check_sources();
+    idle(&mut m);
+    let doc = m.project.as_ref().unwrap();
+    assert!(
+        doc.file_value(DIFFUSE, "alpha.policy").is_some(),
+        "the hand edit is taken: {}",
+        doc.text()
+    );
+    assert_eq!(subtype(&m, DIFFUSE), None, "switched again");
+    let (text, _) = m.fuzz_note_for_test().expect("the row");
+    assert_eq!(problems(&m).iter().filter(|r| r.text == text).count(), 1);
+    let generation = m.generation();
+    m.check_sources();
+    idle(&mut m);
+    assert_eq!(m.generation(), generation, "no second reload");
+    assert_eq!(subtype(&m, DIFFUSE), None);
+}
+
+/// Fix round 1, M2: a switched file that has no job when the row is built (deleted meanwhile) gets a line with no
+/// arrow.
+#[test]
+fn a_switched_file_gone_before_the_row_gets_a_line_without_an_arrow() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_unsettled(d.path(), AcceptSuggestions::None);
+    until_switch_pending(&mut m);
+    // The switch's plan is in flight: park its result, then plan again without the diffuse.
+    m.hold_plan_results = true;
+    let start = std::time::Instant::now();
+    while m.take_held().is_empty() {
+        m.poll();
+        assert!(start.elapsed() < Duration::from_secs(60), "no plan result");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    m.hold_plan_results = false;
+    std::fs::remove_file(d.path().join("m/rock01.png")).unwrap();
+    m.replan();
+    idle(&mut m);
+    let (_, lines) = m.fuzz_note_for_test().expect("the row");
+    assert_eq!(
+        lines.first().map(String::as_str),
+        Some("rock01.png: skin albedo"),
+        "{lines:?}"
+    );
+}

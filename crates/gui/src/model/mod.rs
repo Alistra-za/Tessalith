@@ -1061,9 +1061,7 @@ impl AppModel {
         // `pushes` never goes back (FC3's rows compare it).
         self.history.pushes = kept.0.pushes;
         self.auto_note = None;
-        self.fuzz_switch_checked = false;
-        self.fuzz_switch = None;
-        self.fuzz_note = None;
+        self.reset_fuzz_switch();
         self.refresh_banner();
         let recent = self.settings.recent.clone();
         self.settings.push_recent(root.clone());
@@ -2336,6 +2334,8 @@ impl AppModel {
             }
             self.drop_undo_note();
             self.history.clear();
+            // Fuzz-8: a reload is a fresh read, as an open; the text read is switched again.
+            self.reset_fuzz_switch();
             self.ignored_by_plan = false;
             self.refresh_banner();
             self.replan();
@@ -4016,14 +4016,17 @@ impl AppModel {
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
     }
 
-    /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, still the top step. It neither
-    /// asks on close, open or reload nor marks the title; Save stays live and writes it.
+    /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, or the Fuzz-8 switch on open with
+    /// the recording that joined it, still the top step. It neither asks on close, open or reload nor marks the title;
+    /// Save stays live and writes it.
     /// shortcut: a user edit followed by its Undo leaves `pushes` advanced, so that state prompts although the text
     /// equals the automatic state; compare the document with the recording's snapshot if users report it.
     pub fn only_automatic_unsaved(&self) -> bool {
-        self.auto_note
+        (self
+            .auto_note
             .as_ref()
             .is_some_and(|a| a.clean_before && a.step == self.history.pushes)
+            || self.only_switch_unsaved())
             && !self
                 .sets_doc
                 .as_ref()
@@ -4259,6 +4262,8 @@ impl AppModel {
         self.ignored_by_plan = false;
         self.drop_undo_note();
         self.history.clear();
+        // Fuzz-8: a reload is a fresh read, as an open; the text read is switched again.
+        self.reset_fuzz_switch();
         self.apply_recovery();
         self.refresh_banner();
         self.replan();
@@ -4329,6 +4334,8 @@ impl AppModel {
                     p.reload();
                     self.drop_undo_note();
                     self.history.clear();
+                    // Fuzz-8: a reload is a fresh read, as an open; the text read is switched again.
+                    self.reset_fuzz_switch();
                     self.ignored_by_plan = false;
                     self.refresh_banner();
                     self.replan();
