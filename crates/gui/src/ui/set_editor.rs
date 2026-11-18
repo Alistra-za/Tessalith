@@ -8,7 +8,7 @@ use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
 use crate::model::bottom::{
-    hidden_reason_kinds, is_hidden, set_reasons, tile_ready, ProblemsFilter, ReasonGo,
+    cached_set_reasons, hidden_reason_kinds, is_hidden, tile_ready, ProblemsFilter, ReasonGo,
 };
 use crate::model::bulk::MenuAction;
 use crate::model::fields::{
@@ -110,11 +110,24 @@ fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
 
 /// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
 fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
-    let reasons = set_reasons(model, &v.key);
+    let reasons = cached_set_reasons(model, &v.key);
     // A set the export blocks on has the card's red dot (`sets_column`), whatever its words say.
     let blocked = export_blocks(model).iter().any(|i| i.set_id == v.id);
     let mut act = None;
     ui.horizontal_wrapped(|ui| {
+        // Final review Minor 2: a created set with no files yet has no engine key and no rows; amber, as its card.
+        if v.key.is_empty() {
+            dot(
+                ui,
+                if blocked {
+                    Status::Blocks
+                } else {
+                    Status::Warning
+                },
+            );
+            ui.label(super::sets_column::NO_FILES_YET);
+            return;
+        }
         if reasons.is_empty() {
             dot(
                 ui,
@@ -151,12 +164,16 @@ fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> 
                 }
                 _ => None,
             };
-            let text = match subject {
-                Some(s) => format!("{} ({s})", r.text),
-                None => r.text.clone(),
+            let with_subject = |t: &str| match subject {
+                Some(s) => format!("{t} ({s})"),
+                None => t.to_string(),
             };
-            let b = ui.button(&text);
-            let name = format!("{text} — go to the fix");
+            let b = ui.button(with_subject(&r.text));
+            // Rule 3.4: a cut text is named by the whole one.
+            let name = format!(
+                "{} — go to the fix",
+                with_subject(r.full.as_deref().unwrap_or(&r.text))
+            );
             b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
             // Hiding never changes readiness, so a hidden kind's row is still a reason.
             let tip = match &r.go {
@@ -166,6 +183,9 @@ fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> 
                 _ => "Go to the control that fixes this.",
             };
             let b = b.on_hover_ui(|ui| {
+                if let Some(full) = &r.full {
+                    ui.label(full);
+                }
                 if let Some(s) = subject {
                     ui.label(s);
                 }

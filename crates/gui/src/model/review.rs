@@ -1,5 +1,6 @@
 //! Review (layout v2 B2, C2, C5; rulings R1–R4): the pre-export gate as a bottom-panel tab, not a modal. It holds
 //! only what the user answered; blockers and undecided textures are read live from the model.
+use super::code_text::counted;
 use super::history::{record_key, records_at, sha256_of};
 use super::{
     bottom::BottomTab, cm_json, cs_pbr_export, cs_skin_json, pbr_export, xpmf_json, AppModel,
@@ -80,16 +81,8 @@ pub fn disk_state(path: &Path, recorded: Option<&str>) -> DiskState {
     }
 }
 
-pub(super) fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
-}
-
 fn nif_edits(n: usize) -> String {
-    format!("{n} NIF edit{}", plural(n))
+    counted(n, "NIF edit", "NIF edits")
 }
 
 impl AppModel {
@@ -317,7 +310,7 @@ impl AppModel {
         }
         let n = pbr_export::export_blocks(self).len();
         if n > 0 {
-            return Err(format!("Fix {n} blocker{} first", plural(n)));
+            return Err(format!("Fix {} first", counted(n, "blocker", "blockers")));
         }
         // Note CN: the Also rows, after the blocks and before the overwrite questions (A9); nothing writes (7.1, 7.2).
         if self.also_runs() {
@@ -399,7 +392,7 @@ impl AppModel {
             Ok(0) => return,
             Ok(n) => (
                 super::messages::Severity::Info,
-                format!("NIF edits written: {n} file{}", plural(n)),
+                format!("NIF edits written: {}", counted(n, "file", "files")),
             ),
             Err(why) => (
                 super::messages::Severity::Warning,
@@ -443,9 +436,9 @@ impl AppModel {
         let rows = self.nif_rows.len();
         let blocked = self.nif_rows.iter().filter(|r| r.blocked.is_some()).count();
         let mut t = format!(
-            "{} {n} file{}",
+            "{} {}",
             if clean { "Export" } else { "Review" },
-            plural(n)
+            counted(n, "file", "files")
         );
         // Note FI7: `Review` writes nothing, so it counts every pending NIF edit; `Export` names only what it writes.
         if !clean && rows > 0 {
@@ -460,7 +453,7 @@ impl AppModel {
     /// folder's and the other folders are named without one, "20 DDS files in the PBR folder, plus the Vanilla folder".
     pub fn written_text(&self) -> String {
         let n = self.export_files();
-        let dds = format!("{n} DDS file{}", plural(n));
+        let dds = counted(n, "DDS file", "DDS files");
         if self.also_runs() {
             format!(
                 "{dds} in the PBR folder, plus the {}",
@@ -476,14 +469,14 @@ impl AppModel {
         // Note GH8: no project, no texture run: the button writes the NIF edits alone.
         if self.root.is_none() {
             let n = self.nif_rows.iter().filter(|r| r.blocked.is_none()).count();
-            return format!("Export {n} NIF edit{}", plural(n));
+            return format!("Export {}", nif_edits(n));
         }
         let files = self.export_files();
         let skipped = self.undecided();
         // Note HF9: a scoped export's button says what Review is for (`Export group Armor`).
         let mut t = match self.export_scope() {
             Some(s) => s.label.clone(),
-            None => format!("Export {files} file{}", plural(files)),
+            None => format!("Export {}", counted(files, "file", "files")),
         };
         // Note JF1: the count is the PBR folder's; the folders copied or derived from it are named, not counted.
         if self.also_runs() {

@@ -355,9 +355,17 @@ fn names_its_map(code: Code) -> bool {
     )
 }
 
+/// GRASS-DETECT-SOURCE's sentence when the job keeps the normal base as authored (`mips.normal_base = keep`, the
+/// setting's label "Normal base level", its value "Keep as authored"): the written file is not renormalised, so
+/// `code_sentence`'s "still reads it as grass" is false there. `bottom::warning_text` gives it as the warning's text.
+pub const GRASS_SOURCE_KEPT: &str = "This grass source's corner normal isn't unit length, and its normal base level is kept as authored — Community Shaders won't read the written file as grass";
+
 /// What a row or line shows for `code` and its engine `text` (Notes FB8, HC2): the code's sentence, else the engine's
-/// text without its code.
+/// text without its code. A text that is already the code's job-dependent sentence (`GRASS_SOURCE_KEPT`) shows as it is.
 pub fn shown_for(code: Option<Code>, text: &str) -> std::borrow::Cow<'_, str> {
+    if code == Some(Code::GrassDetectSource) && text == GRASS_SOURCE_KEPT {
+        return text.into();
+    }
     match code.filter(|c| !names_its_map(*c)).map(code_sentence) {
         Some(s) if !s.is_empty() => s.into(),
         _ => without_codes(text).into(),

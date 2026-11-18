@@ -455,6 +455,27 @@ fn export_and_wait(m: &mut sdc_gui::model::AppModel) {
     );
 }
 
+/// Final fix wave A7: the PGPatcher JSON's note counts its entries, one in the singular.
+#[test]
+fn the_written_note_counts_the_entries() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    export_and_wait(&mut m);
+    let p = pgp_json_path(&m);
+    let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
+    let n = v["entries"].as_array().unwrap().len();
+    let want = format!(
+        "PGPatcher JSON written: {} ({n} {})",
+        p.display(),
+        if n == 1 { "entry" } else { "entries" }
+    );
+    assert!(
+        m.export.notes.contains(&want),
+        "{want:?} in {:?}",
+        m.export.notes
+    );
+}
+
 #[test]
 fn export_writes_a_valid_json_and_records_its_hash() {
     let d = tempfile::tempdir().unwrap();

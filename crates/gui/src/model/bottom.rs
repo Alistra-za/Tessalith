@@ -181,8 +181,56 @@ pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     !marked(m, at, w)
 }
 
+/// The text a row of the item warning `w` is built from, `job` being the item's: the engine's message, but for
+/// GRASS-DETECT-SOURCE under `mips.normal_base = keep` its own sentence (`code_text::GRASS_SOURCE_KEPT`; the written
+/// file is not renormalised then). The row, its mark and `marked` read it, so a tile and its row agree.
+pub fn warning_text<'a>(
+    job: Option<&engine::policy::ResolvedJob>,
+    w: &'a engine::codes::Warning,
+) -> std::borrow::Cow<'a, str> {
+    let kept = job.is_some_and(|j| j.profile.mips.normal_base == engine::config::NormalBase::Keep);
+    if w.code == Code::GrassDetectSource && kept {
+        code_text::GRASS_SOURCE_KEPT.into()
+    } else {
+        w.message.as_str().into()
+    }
+}
+
+/// The job of the item a row at `at` is about: a texture's, or a last-export file's when exactly one item maps to it
+/// (as the File rows' `live`, Note DP4).
+fn job_at<'m>(m: &'m AppModel, at: &At) -> Option<&'m engine::policy::ResolvedJob> {
+    match at {
+        At::Texture(k) => m.item(k)?.job.as_ref(),
+        At::File(jk) => {
+            let mut of = m.items.iter().filter(|i| i.job_key == *jk);
+            let one = of.next()?;
+            of.next().is_none().then_some(one)?.job.as_ref()
+        }
+        _ => None,
+    }
+}
+
+/// Final fix wave A6: the line a hover puts before the warnings and check results marked as intended, which it lists
+/// after the others (the tile, the Files row and the card's ⓘ).
+pub const MARKED_LINE: &str = "Marked as intended:";
+
+/// A hover's lines: `open`, then `MARKED_LINE` and `marked` when there are any.
+pub fn with_marked(mut open: Vec<String>, marked: Vec<String>) -> Vec<String> {
+    if !marked.is_empty() {
+        open.push(MARKED_LINE.to_string());
+        open.extend(marked);
+    }
+    open
+}
+
 /// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
-fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
+/// Final fix wave A6: only a code that can be marked (Warning or Info, as `markable`) reads one; a hand-written mark on
+/// an Error code is not one.
+pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
+    use engine::codes::Severity;
+    if !matches!(w.code.severity(), Severity::Warning | Severity::Info) {
+        return false;
+    }
     let Some(doc) = m.sets_doc.as_ref() else {
         return false;
     };
@@ -193,9 +241,26 @@ fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
         .iter()
         .any(|k| k.code == w.code.as_str())
         && {
-            let shown = code_text::shown_for(Some(w.code), &w.message);
+            let text = warning_text(job_at(m, at), w);
+            let shown = code_text::shown_for(Some(w.code), &text);
             doc.is_intended(&intended_key(at, w.code.as_str(), &shown))
         }
+}
+
+/// Final fix wave A6: whether the last export's warning `w` on the file `job_key` is marked, read where its row is: on
+/// the texture's row when the one live item of that file has a warning of the same code (the File loop of
+/// `build_problems` leaves the warning to it), else on the File row.
+pub fn export_warning_marked(m: &AppModel, job_key: &str, w: &engine::codes::Warning) -> bool {
+    let mut of = m.items.iter().filter(|i| i.job_key == job_key);
+    let first = of.next();
+    let live = first.filter(|_| of.next().is_none());
+    let on_texture = live
+        .filter(|i| i.status != ItemStatus::NeedsDecision)
+        .and_then(|i| i.warnings.iter().find(|x| x.code == w.code).map(|x| (i, x)));
+    match on_texture {
+        Some((i, x)) => marked(m, &At::Texture(i.key.clone()), x),
+        None => marked(m, &At::File(job_key.to_string()), w),
+    }
 }
 
 /// Review E4: a row the Checks pill counts and its filter lists: a check row not marked as intended (a marked one is
@@ -566,6 +631,12 @@ pub fn tab_count_scans(m: &AppModel) -> u64 {
     m.tab_count_scans.get()
 }
 
+/// Every `set_reasons` scan `cached_set_reasons` ran (final fix wave R2), not its cached answers.
+#[cfg(feature = "test-hooks")]
+pub fn reason_scans(m: &AppModel) -> u64 {
+    m.reason_scans.get()
+}
+
 /// `AppModel::export_files` counts that were not served from the cache.
 #[cfg(feature = "test-hooks")]
 pub fn export_files_builds(m: &AppModel) -> u64 {
@@ -762,9 +833,13 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::SugContradiction => Some(Fix::SetType(k())),
                 _ => None,
             };
+            // A job-dependent sentence (A3) keeps the engine's message on the hover.
+            let text = warning_text(i.job.as_ref(), w);
+            let detail = (text != w.message).then(|| w.message.clone());
             out.push(Problem {
                 fix,
-                ..row(Level::Warning, at, w.message.clone(), Some(w.code))
+                detail,
+                ..row(Level::Warning, at, text.into_owned(), Some(w.code))
             });
         }
     }
@@ -1037,11 +1112,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     continue;
                 }
                 // The suggested NIF values are the engine message; the row shows the sentence, the hover the values.
-                let detail = (w.code == Code::DeriveNifSuggest).then(|| w.message.clone());
+                // A job-dependent sentence (A3) keeps the engine's message on the hover too.
+                let text = warning_text(live.and_then(|i| i.job.as_ref()), w);
+                let detail = (w.code == Code::DeriveNifSuggest || text != w.message)
+                    .then(|| w.message.clone());
                 out.push(Problem {
                     fix,
                     detail,
-                    ..row(level, at, w.message.clone(), Some(w.code))
+                    ..row(level, at, text.into_owned(), Some(w.code))
                 });
             }
         }
@@ -1366,9 +1444,10 @@ fn set_members(m: &AppModel, key: &str) -> HashSet<String> {
         .unwrap_or_default()
 }
 
+/// The empty key is every key-less set's: it names no one set, so it matches no set row.
 fn in_set(p: &Problem, key: &str, members: &HashSet<String>) -> bool {
     match &p.at {
-        At::Set { key: k, .. } => k == key,
+        At::Set { key: k, .. } => !key.is_empty() && k == key,
         At::Texture(t) => members.contains(t),
         _ => false,
     }
@@ -1378,6 +1457,8 @@ fn in_set(p: &Problem, key: &str, members: &HashSet<String>) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Reason {
     pub text: String,
+    /// The whole sentence when `text` is cut (rule 3.4: the button's name and hover hold it).
+    pub full: Option<String>,
     pub go: ReasonGo,
 }
 
@@ -1399,6 +1480,32 @@ pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
     .unwrap_or_default()
 }
 
+/// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
+/// per `problems()` build, set key and hidden kinds, as `cached_tab_counts`. The set views it reads live in the same
+/// cache cell, which is emptied when they change. The empty key has no reasons (`with_counted_rows`).
+pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
+    if key.is_empty() {
+        return Arc::default();
+    }
+    // Both before the borrow: `problems` writes the same cell.
+    let all = problems(m);
+    let hidden = m.hidden_kinds();
+    if let Some((.., r)) = m
+        .views
+        .borrow()
+        .set_reasons
+        .as_ref()
+        .filter(|(p, k, h, _)| Arc::ptr_eq(p, &all) && k == key && *h == hidden)
+    {
+        return r.clone();
+    }
+    #[cfg(feature = "test-hooks")]
+    m.reason_scans.set(m.reason_scans.get() + 1);
+    let r = Arc::new(set_reasons(m, key));
+    m.views.borrow_mut().set_reasons = Some((all, key.to_string(), hidden, r.clone()));
+    r
+}
+
 /// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key`, slot reasons' rows included
 /// (what "+k more in Problems" shows again).
 pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
@@ -1414,11 +1521,16 @@ pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
 
 /// `f` on the set `key`'s view and the rows that take its "ready" away, in list order; `None` for a set gone from
 /// the plan or ready (the cached answer the cards read, so a ready set never scans the rows).
+/// `None` for the empty key too: a created set with no files yet, which `set_ready_in` calls not ready. Every such set
+/// shares that key, so it names no one set's rows; its status line says it has no files (final review Minor 2).
 fn with_counted_rows<T>(
     m: &AppModel,
     key: &str,
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
+    if key.is_empty() {
+        return None;
+    }
     let views = sets::views(m);
     let v = views.iter().find(|v| v.key == key)?;
     if set_ready_in(&flagged(m), v) {
@@ -1442,31 +1554,49 @@ fn reason(v: &sets::SetView, p: &Problem, drawn: &[sets::SlotKind]) -> Reason {
             if drawn.contains(kind) =>
         {
             Reason {
-                text: format!("no {} (Assign…)", v.slot_label(*kind, "")),
+                text: format!("no {} (Assign…)", unnested(v.slot_label(*kind, ""))),
+                full: None,
                 go: ReasonGo::Slot(*kind),
             }
         }
-        _ => Reason {
-            text: reason_text(p),
-            go: ReasonGo::Row(Box::new(p.clone())),
-        },
+        _ => {
+            let (text, full) = reason_text(p);
+            Reason {
+                text,
+                full,
+                go: ReasonGo::Row(Box::new(p.clone())),
+            }
+        }
     }
 }
 
-/// A row reason's words: its code's sentence up to " — ", or a code-less row's text cut at 60 characters.
-fn reason_text(p: &Problem) -> String {
+/// A slot label without its own closing parentheses, so the reason's "(Assign…)" is not nested: "Emissive / Skin
+/// (slot 3)" reads "Emissive / Skin, slot 3" (final fix wave A11).
+fn unnested(label: &str) -> std::borrow::Cow<'_, str> {
+    match label.strip_suffix(')').and_then(|l| l.rsplit_once(" (")) {
+        Some((name, inner)) => format!("{name}, {inner}").into(),
+        None => label.into(),
+    }
+}
+
+/// A row reason's words: its code's sentence up to " — ", or a code-less row's text cut at 60 characters with "…";
+/// then the whole text when it was cut.
+fn reason_text(p: &Problem) -> (String, Option<String>) {
     const MAX: usize = 60;
     match p.code {
-        Some(c) => code_text::code_line(c)
-            .split(" — ")
-            .next()
-            .unwrap_or_default()
-            .to_string(),
+        Some(c) => (
+            code_text::code_line(c)
+                .split(" — ")
+                .next()
+                .unwrap_or_default()
+                .to_string(),
+            None,
+        ),
         None if p.text.chars().count() > MAX => {
             let cut: String = p.text.chars().take(MAX).collect();
-            format!("{cut}…")
+            (format!("{cut}…"), Some(p.text.clone()))
         }
-        None => p.text.clone(),
+        None => (p.text.clone(), None),
     }
 }
 
@@ -1506,7 +1636,7 @@ mod tests {
     }
 
     /// Review E4: a reason names a code's row by its sentence up to " — ", and a code-less row by its text, cut at 60
-    /// characters with "…".
+    /// characters with "…"; a cut text keeps the whole one beside it (final review Important 1).
     #[test]
     fn a_reason_is_the_sentence_before_its_dash_or_the_text_cut_at_60() {
         let row = |text: &str, code| Problem {
@@ -1526,15 +1656,15 @@ mod tests {
         };
         assert_eq!(
             reason_text(&row("mip 3", Some(Code::ValMipError))),
-            "A mip level strays from its source"
+            ("A mip level strays from its source".to_string(), None)
         );
         let long = "é".repeat(61);
         assert_eq!(
             reason_text(&row(&long, None)),
-            format!("{}…", "é".repeat(60))
+            (format!("{}…", "é".repeat(60)), Some(long.clone()))
         );
         let sixty = "a".repeat(60);
-        assert_eq!(reason_text(&row(&sixty, None)), sixty);
+        assert_eq!(reason_text(&row(&sixty, None)), (sixty, None));
     }
 
     /// Pins the engine's IN-UNREADABLE message shape (`skipped: <path>: <error>`) that `unreadable_folder` parses.

@@ -90,7 +90,11 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, to_top: bool) {
         }
     }
     let keys = &view.keys;
-    ui.heading(format!("{} textures selected", keys.len()));
+    // A kind chip of two sets can hold one texture (final fix wave A7).
+    ui.heading(format!(
+        "{} selected",
+        crate::model::code_text::counted(keys.len(), "texture", "textures")
+    ));
     if let Some(r) = &model.bulk.report {
         ui.weak(r);
     }

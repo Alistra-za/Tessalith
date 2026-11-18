@@ -216,7 +216,8 @@ pub fn finish(
     }
     if written > 0 {
         notes.push(format!(
-            "CS PBR JSON written: {written} files under {}",
+            "CS PBR JSON written: {} under {}",
+            super::code_text::counted(written, "file", "files"),
             p.root.display()
         ));
     }

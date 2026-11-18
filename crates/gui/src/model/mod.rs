@@ -108,12 +108,14 @@ pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
 }
 
-/// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…".
+/// Item 13: the plan bar's text, "Analysing 1,234 / 5,000 files…"; "Analysing 0 / 1 file…" for one (final fix wave
+/// A7; not `counted`, which has no thousands separator).
 pub fn plan_bar_text(done: usize, total: usize) -> String {
     format!(
-        "Analysing {} / {} files…",
+        "Analysing {} / {} {}…",
         thousands(done),
-        thousands(total)
+        thousands(total),
+        if total == 1 { "file" } else { "files" }
     )
 }
 
@@ -266,6 +268,14 @@ fn read_only_banner(error: &str) -> String {
 /// `(evidence_rev, export.revision, export running, history.pushes, scan_stamp)`.
 type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
 
+/// `ViewCache::set_reasons`: (the `problems` build, the set key, the hidden kinds, the reasons).
+pub(crate) type CachedReasons = (
+    Arc<Vec<bottom::Problem>>,
+    String,
+    Vec<engine::codes::Code>,
+    Arc<Vec<bottom::Reason>>,
+);
+
 /// The cached set views, export blocks and delete-section hits, valid for `key` only.
 #[derive(Default)]
 pub(crate) struct ViewCache {
@@ -286,6 +296,9 @@ pub(crate) struct ViewCache {
         Vec<engine::codes::Code>,
         bottom::TabCounts,
     )>,
+    /// Final fix wave R2: `bottom::cached_set_reasons`, keyed on the `problems` build it read (held), the set key and
+    /// the hidden kinds.
+    pub set_reasons: Option<CachedReasons>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -551,6 +564,9 @@ pub struct AppModel {
     /// Review E2: the row scans `bottom::cached_tab_counts` ran (see `bottom::tab_count_scans`).
     #[cfg(feature = "test-hooks")]
     pub(crate) tab_count_scans: std::cell::Cell<u64>,
+    /// Final fix wave R2: the reason scans `bottom::cached_set_reasons` ran (see `bottom::reason_scans`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) reason_scans: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
@@ -865,6 +881,8 @@ impl AppModel {
             problem_lookups: Default::default(),
             #[cfg(feature = "test-hooks")]
             tab_count_scans: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            reason_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
@@ -3218,8 +3236,12 @@ impl AppModel {
 
     /// Review E10: a Problems row's Go to set. Selects the set, and leaves `target` for the set editor to scroll to and
     /// outline when it next draws the set (`ui::set_editor`); with no target, the same as `select_set`. The switch to
-    /// the Textures view is the caller's: the model has no egui context.
+    /// the Textures view is the caller's: the model has no egui context. An expanded texture preview closes first: it
+    /// fills the centre, so the set editor would not draw (final fix wave A2).
     pub fn go_to_set(&mut self, key: &str, target: Option<nav::SlotTarget>) {
+        if self.expanded.is_some() {
+            self.collapse();
+        }
         self.select_set(key);
         self.nav.reveal_slot = target.map(|target| nav::RevealSlot {
             set_key: key.to_string(),
@@ -3481,9 +3503,9 @@ impl AppModel {
     fn counts_line(&self) -> String {
         let (t, s) = (self.items.len(), sets::carded_sets(self));
         format!(
-            "{t} texture{}, {s} set{}",
-            review::plural(t),
-            review::plural(s)
+            "{}, {}",
+            code_text::counted(t, "texture", "textures"),
+            code_text::counted(s, "set", "sets")
         )
     }
 

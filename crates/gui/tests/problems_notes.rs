@@ -1028,6 +1028,29 @@ fn a_set_mark_matches_its_id_in_any_case() {
     assert_eq!(doc.intended(), vec![key("C", "set:landscape/rock05", "s")]);
 }
 
+/// Final review Minor 3: a `texture:` or `file:` subject folds its key as `[files]` keys fold (Note BF), so a mark made
+/// on `Rock_N.png` still matches once the file's key differs only in case; the stored text stays as written.
+#[test]
+fn a_file_mark_matches_its_key_in_any_case() {
+    let (_d, mut doc) = doc_with("[project]\n");
+    for (made, now) in [
+        (
+            "texture:Landscape/Rock_N.png",
+            "texture:landscape/rock_n.png",
+        ),
+        ("file:Landscape/Rock_N", "file:landscape/rock_n"),
+    ] {
+        doc.set_intended(&key("CHAN-NOT-GRAY", made, "s"), true);
+        assert!(doc.text().contains(made), "stored as written");
+        assert!(
+            doc.is_intended(&key("CHAN-NOT-GRAY", now, "s")),
+            "{made} matches {now}"
+        );
+        doc.set_intended(&key("CHAN-NOT-GRAY", now, "s"), false);
+        assert!(doc.intended().is_empty(), "{now} takes {made}'s mark off");
+    }
+}
+
 /// Taking the first mark off a one-line array leaves no space after `[`; a one-per-line array keeps its lines.
 #[test]
 fn removing_the_first_mark_leaves_a_tidy_array() {
@@ -1053,6 +1076,18 @@ fn removing_the_first_mark_leaves_a_tidy_array() {
         "{}",
         doc.text()
     );
+}
+
+/// Final fix wave A5: only a removed first entry tidies the new first one. A hand-written first entry keeps its
+/// leading space when a later mark goes.
+#[test]
+fn removing_a_later_mark_keeps_the_first_entry_as_written() {
+    let (_d, mut doc) = doc_with(concat!(
+        "[project]\nintended = [ 42, ",
+        "{ code = \"C1\", subject = \"texture:landscape/rock01.png\", sentence = \"a\" }]\n",
+    ));
+    doc.set_intended(&key("C1", T, "a"), false);
+    assert!(doc.text().contains("intended = [ 42]"), "{}", doc.text());
 }
 
 /// Review E2 acceptance: every counted row has a button that removes it from the count.
@@ -1424,6 +1459,43 @@ fn a_mark_costs_one_tab_count_scan() {
     assert_eq!(tab_count_scans(h.state()), before + 1);
 }
 
+/// Final fix wave R2 (final review Minor 1): the set editor's status line scans its reasons once per change: frames
+/// with no change scan none; a mark, a hidden kind or another set scan once each.
+#[test]
+fn the_status_line_scans_its_reasons_once_per_change() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::reason_scans;
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage 0.4"),
+    ]);
+    let key = rock01(&m).key;
+    let other = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key != key && !v.key.is_empty())
+        .expect("another set")
+        .key
+        .clone();
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    let steps = |h: &mut Harness<'static, AppModel>| {
+        for _ in 0..5 {
+            h.step();
+        }
+        reason_scans(h.state())
+    };
+    let n = steps(&mut h);
+    assert!(n >= 1, "the status line read its reasons");
+    assert_eq!(steps(&mut h), n, "five frames, no change: no scan");
+    mark_first(h.state_mut(), Code::ValMipError);
+    assert_eq!(steps(&mut h), n + 1, "a mark");
+    h.state_mut().set_kind_hidden(Code::ValCoverage, true);
+    assert_eq!(steps(&mut h), n + 2, "a hidden kind");
+    h.state_mut().select_set(&other);
+    assert_eq!(steps(&mut h), n + 3, "another set");
+}
+
 /// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
 /// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
 #[test]
@@ -1739,6 +1811,127 @@ fn a_set_tile_and_badge_agree_once_a_row_is_marked() {
     ));
 }
 
+/// Final fix wave A6: a mark is read only for a code that can be marked (Warning or Info, `markable`). A hand-written
+/// mark on an Error code is not one: the warning still counts.
+#[test]
+fn a_hand_written_mark_on_an_error_code_still_counts() {
+    use engine::codes::{Code, Severity, Warning};
+    use sdc_gui::model::bottom::{counts_for, intended_key, problems};
+    assert_eq!(
+        Code::TagSrgbVanilla.severity(),
+        Severity::Error,
+        "precondition"
+    );
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::TagSrgbVanilla, "vanilla sRGB")]);
+    let p = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::TagSrgbVanilla))
+        .cloned()
+        .expect("the row");
+    assert!(
+        p.mark.is_none(),
+        "precondition: the row has no Mark as intended"
+    );
+    let key = rock01(&m).members[0].clone();
+    let w = m.item(&key).unwrap().warnings[0].clone();
+    assert!(counts_for(&m, &p.at, &w), "precondition: it counts");
+    m.sets_doc.as_mut().unwrap().set_intended(
+        &intended_key(&p.at, Code::TagSrgbVanilla.as_str(), &p.shown()),
+        true,
+    );
+    m.invalidate_views();
+    assert!(
+        counts_for(&m, &p.at, &w),
+        "a mark on an Error code is not read"
+    );
+}
+
+/// Final fix wave A6: the tile hover lists a marked warning under "Marked as intended:", after the unmarked ones; with
+/// none unmarked, only that line and the marked ones.
+#[test]
+fn the_tile_hover_lists_a_marked_warning_under_its_line() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::ui::columns::tile_tooltip;
+    let (_d, mut m) = with_warnings(&[
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage 0.4"),
+    ]);
+    let key = rock01(&m).members[0].clone();
+    let tip = |m: &AppModel| tile_tooltip(m, m.item(&key).unwrap(), false);
+    assert!(tip(&m).ends_with("\nmip 3\ncoverage 0.4"), "{}", tip(&m));
+    mark_first(&mut m, Code::ValMipError);
+    assert!(
+        tip(&m).ends_with("\ncoverage 0.4\nMarked as intended:\nmip 3"),
+        "{}",
+        tip(&m)
+    );
+    mark_first(&mut m, Code::ValCoverage);
+    assert_eq!(
+        tip(&m),
+        format!("{key}\nMarked as intended:\nmip 3\ncoverage 0.4")
+    );
+}
+
+/// Final fix wave A6: a Files row's "n warnings" hover lists a marked warning under "Marked as intended:", after the
+/// unmarked ones.
+#[test]
+fn the_files_rows_warning_hover_lists_a_marked_warning_under_its_line() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::export::warning_line;
+    use sdc_gui::ui::drawer::warnings_hover;
+    let (_d, mut m) = with_warnings(&[]);
+    let (mip, cov) = (
+        Warning::new(Code::ValMipError, "mip 3"),
+        Warning::new(Code::ValCoverage, "coverage 0.4"),
+    );
+    m.export.rows = vec![sdc_gui::model::export::Row {
+        job_key: "derived/x".into(),
+        path: "derived/x".into(),
+        state: sdc_gui::model::export::RowState::Done { passed: true },
+        warnings: vec![mip.clone(), cov.clone()],
+    }];
+    m.invalidate_views();
+    let hover = |m: &AppModel| warnings_hover(m, &m.export.rows[0]);
+    assert_eq!(
+        hover(&m),
+        format!("{}\n{}", warning_line(&mip), warning_line(&cov))
+    );
+    mark_first(&mut m, Code::ValMipError);
+    assert_eq!(
+        hover(&m),
+        format!(
+            "{}\nMarked as intended:\n{}",
+            warning_line(&cov),
+            warning_line(&mip)
+        )
+    );
+}
+
+/// Final fix wave A6: a Files row's warning that its texture also has is listed, and marked, on the texture's row
+/// (the File row is left out); the Files hover reads that mark.
+#[test]
+fn the_files_hover_reads_the_mark_of_the_textures_row() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::export::warning_line;
+    use sdc_gui::ui::drawer::warnings_hover;
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let key = rock01(&m).members[0].clone();
+    let job = m.item(&key).unwrap().job_key.clone();
+    let file = Warning::new(Code::ValMipError, "mip 3 in the file");
+    m.export.rows = vec![sdc_gui::model::export::Row {
+        job_key: job.clone(),
+        path: job,
+        state: sdc_gui::model::export::RowState::Done { passed: true },
+        warnings: vec![file.clone()],
+    }];
+    m.invalidate_views();
+    mark_first(&mut m, Code::ValMipError);
+    assert_eq!(
+        warnings_hover(&m, &m.export.rows[0]),
+        format!("Marked as intended:\n{}", warning_line(&file))
+    );
+}
+
 /// Review E4: the Textures column's "Has warnings" pill, its filter and the Status sort drop a marked warning.
 #[test]
 fn a_marked_warning_leaves_the_warnings_pill_filter_and_status_sort() {
@@ -1968,7 +2161,7 @@ fn nearest<'a>(
 fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened(d.path());
-    let (_k, member) = normal_member(&m);
+    let (k, member) = normal_member(&m);
     inject_set(&mut m, &[extra_map(&member)]);
     m.open_problems(None);
     let mut h = harness(m);
@@ -1985,6 +2178,11 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     .map(|l| on_row(&h, &note, l).rect().center().x)
     .collect();
     assert!(xs[0] < xs[1] && xs[1] < xs[2], "row order: {xs:?}");
+    // Final fix wave A8: the hover says where the file goes (Note JN5).
+    tooltips_now(&h);
+    on_row(&h, &note, &remove).hover();
+    h.run();
+    h.get_by_label(&remove_hover(&member));
     on_row(&h, &note, &remove).click();
     h.run();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
@@ -1993,6 +2191,64 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
         .members
         .iter()
         .any(|k| h.state().item(k).unwrap().name == member));
+    // Final fix wave A8: no set shares it here, so it is in no set, and nothing is toasted.
+    assert!(
+        sdc_gui::model::sets::set_views(h.state())
+            .iter()
+            .all(|v| !v.members.contains(&k)),
+        "in no set"
+    );
+    let texts: Vec<&str> = h
+        .state()
+        .messages
+        .entries()
+        .map(|e| e.text.as_str())
+        .collect();
+    assert!(
+        texts.iter().all(|t| !t.contains("went to")),
+        "no hand-over message: {texts:?}"
+    );
+}
+
+/// The Problems row's Remove from set hover for the file `name` (final fix wave A8, Note JN5).
+fn remove_hover(name: &str) -> String {
+    format!("Take {name} out of this set. It goes to No set, or to the first set that shares it.")
+}
+
+/// Final fix wave A8 (Note JN5): the Problems row's Remove from set on a file another set shares hands it to that set
+/// and raises the hand-over toast, as the set card's removal does.
+#[test]
+fn remove_from_set_on_a_shared_file_hands_it_over_with_a_toast() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/leaf", 2, Some("landscape/rock01"))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let (k, member) = normal_member(&m);
+    inject_set(&mut m, &[extra_map(&member)]);
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let remove = format!("Remove {member} from landscape/rock01");
+    on_row(&h, &extra_note(&member), &remove).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    let views = sdc_gui::model::sets::set_views(h.state());
+    let heir = views
+        .iter()
+        .find(|v| v.members.contains(&k))
+        .unwrap_or_else(|| panic!("{member} is in a set"));
+    assert_eq!(heir.id, "landscape/leaf", "the set that shared it");
+    let toast = format!("{member} went to landscape/leaf, which shared it.");
+    let texts: Vec<&str> = h
+        .state()
+        .messages
+        .entries()
+        .map(|e| e.text.as_str())
+        .collect();
+    assert!(texts.contains(&toast.as_str()), "{texts:?}");
 }
 
 /// Controller ruling: SUG-CONTRADICTION offers the fix its sentence names. A diffuse whose contents are a
@@ -2201,6 +2457,50 @@ fn each_row_carries_the_tables_fix() {
     assert_eq!(fixes(&m, Code::ShaderExtraMap), (shader(), None));
 }
 
+/// Final fix wave A3 (L116): GRASS-DETECT-SOURCE's sentence follows the job. Under the default normal base the
+/// written file is renormalised and Community Shaders reads it as grass; with "Keep as authored" it is not, and the row
+/// says so. A mark on the kept row's sentence takes the warning out of the tile's count too.
+#[test]
+fn the_grass_source_row_says_what_the_normal_base_does() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{counts_for, problems, At};
+    let w = Warning::new(Code::GrassDetectSource, "g");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    let row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::GrassDetectSource))
+            .cloned()
+            .expect("the grass source row")
+    };
+    assert_eq!(
+        row(&m).shown(),
+        "This grass source's corner normal isn't unit length — the written file is renormalised, so Community \
+         Shaders still reads it as grass"
+    );
+    let job = m
+        .items
+        .iter_mut()
+        .find(|i| i.key == k)
+        .and_then(|i| i.job.as_mut())
+        .expect("a job");
+    job.profile.mips.normal_base = engine::config::NormalBase::Keep;
+    m.invalidate_views();
+    let kept = row(&m);
+    assert_eq!(
+        kept.shown(),
+        "This grass source's corner normal isn't unit length, and its normal base level is kept as authored — \
+         Community Shaders won't read the written file as grass"
+    );
+    assert_eq!((kept.fix.clone(), kept.second_fix.clone()), (None, None));
+    let at = At::Texture(k);
+    assert!(counts_for(&m, &at, &w), "precondition: it counts");
+    m.mark_intended(kept.mark.clone().expect("markable"), true, "row");
+    assert!(row(&m).intended, "the row is marked");
+    assert!(!counts_for(&m, &at, &w), "the tile reads the same mark");
+}
+
 /// Review E10: a CHK-Z-SIGN check row offers Rebuild Z (`give_a_check` plans one on rock01's normal), and the click
 /// clears the row: the check reads `channels.reconstruct_z`, as CHK-GREEN-GUESS reads `flip_green` (fix round 1).
 #[test]
@@ -2219,10 +2519,11 @@ fn a_z_sign_check_offers_rebuild_z_and_it_clears_the_row() {
     };
     assert_eq!(
         has(&m),
-        Some(Some(Fix::RebuildZ(nk))),
+        Some(Some(Fix::RebuildZ(nk.clone()))),
         "precondition: the check ran"
     );
     m.open_problems(None);
+    let name = rebuild_z_for(&m.item(&nk).unwrap().name);
     let mut h = harness(m);
     h.run();
     // The sentence names "Rebuild Z" too, so the button is found by its role on the row.
@@ -2231,7 +2532,7 @@ fn a_z_sign_check_offers_rebuild_z_and_it_clears_the_row() {
         .rect()
         .center()
         .y;
-    h.query_all_by_role_and_label(egui::accesskit::Role::Button, "Rebuild Z")
+    h.query_all_by_role_and_label(egui::accesskit::Role::Button, &name)
         .find(|n| (n.rect().center().y - y).abs() <= 4.0)
         .expect("Rebuild Z on the row")
         .click();
@@ -2239,6 +2540,54 @@ fn a_z_sign_check_offers_rebuild_z_and_it_clears_the_row() {
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
     assert_eq!(has(h.state()), None, "Rebuild Z is on: the row is gone");
+}
+
+/// The accessible name of the Rebuild Z button of the file `name` (final review Minor 4, rule 8.4).
+fn rebuild_z_for(name: &str) -> String {
+    format!("{} for {name}", sdc_gui::ui::problems::REBUILD_Z)
+}
+
+/// `rebuild_z_for` the member `inject` (and so `with_warnings`) puts its warnings on.
+fn injected_z(m: &AppModel) -> String {
+    rebuild_z_for(&m.item(&rock01(m).members[0]).unwrap().name)
+}
+
+/// Final review Minor 4: each Rebuild Z button is named for its file, so two on screen are told apart; the visible
+/// text stays "Rebuild Z".
+#[test]
+fn each_rebuild_z_button_is_named_for_its_file() {
+    use engine::codes::{Code, Warning};
+    let w = Warning::new(Code::ChanNormalLength, "short");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let v = rock01(&m);
+    let (a, b) = (v.members[0].clone(), v.members[1].clone());
+    m.items.iter_mut().find(|i| i.key == b).unwrap().warnings = vec![w];
+    m.invalidate_views();
+    m.open_problems(None);
+    let names: Vec<String> = [&a, &b]
+        .iter()
+        .map(|k| m.item(k).unwrap().name.clone())
+        .collect();
+    assert_ne!(names[0], names[1], "precondition");
+    let mut h = harness(m);
+    h.run();
+    for n in &names {
+        assert_eq!(
+            h.query_all_by_role_and_label(egui::accesskit::Role::Button, &rebuild_z_for(n))
+                .count(),
+            1,
+            "{n}'s button"
+        );
+    }
+    assert_eq!(
+        h.query_all_by_role_and_label(
+            egui::accesskit::Role::Button,
+            sdc_gui::ui::problems::REBUILD_Z
+        )
+        .count(),
+        0,
+        "no bare name left"
+    );
 }
 
 /// Fix round 1: Remove from set is off for `remove_member`'s own refusal, here a locked Normal slot, with that
@@ -2631,6 +2980,36 @@ fn go_to_set_with_no_row_opens_the_set_at_its_top() {
     shown_in_centre(&h, &name);
 }
 
+/// Final fix wave A2: Go to set closes an expanded texture preview first, so the set editor draws at once and takes
+/// the reveal.
+#[test]
+fn go_to_set_closes_an_expanded_preview_first() {
+    use sdc_gui::model::nav::SlotTarget;
+    use sdc_gui::model::sets::SlotKind;
+    let (_d, m) = with_set_warnings(&[]);
+    let set = rock01(&m).key;
+    let (item, _) = normal_member(&m);
+    let mut h = harness(m);
+    h.state_mut().expand(&item);
+    h.step();
+    h.step();
+    assert_eq!(
+        h.state().expanded.as_deref(),
+        Some(item.as_str()),
+        "precondition"
+    );
+    h.state_mut()
+        .go_to_set(&set, Some(SlotTarget::Slot(SlotKind::Normal)));
+    h.step();
+    h.step();
+    assert!(h.state().expanded.is_none(), "the preview closed");
+    assert_eq!(
+        sdc_gui::ui::row_reveal::revealed(&h.ctx).map(|r| r.0),
+        Some(SlotTarget::Slot(SlotKind::Normal)),
+        "the set editor took the reveal"
+    );
+}
+
 /// Review fix 2: a Go to set the editor has not drawn yet ends with the next selection, so it never fires later.
 /// Pinned on the model: the editor is not drawn while a texture preview fills the centre.
 #[test]
@@ -2797,6 +3176,7 @@ fn a_reason_with_a_fix_focuses_the_fix() {
     use engine::codes::{Code, Warning};
     let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
     let key = rock01(&m).key;
+    let z = injected_z(&m);
     m.select_set(&key);
     let mut h = harness(m);
     h.run();
@@ -2809,7 +3189,7 @@ fn a_reason_with_a_fix_focuses_the_fix() {
     let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
     let y = h.get_by_label(sentence).rect().center().y;
     let fix = h
-        .query_all_by_role_and_label(Role::Button, sdc_gui::ui::problems::REBUILD_Z)
+        .query_all_by_role_and_label(Role::Button, &z)
         .find(|n| (n.rect().center().y - y).abs() <= 4.0)
         .expect("Rebuild Z on the row");
     assert!(fix.accesskit_node().is_focused(), "Rebuild Z has focus");
@@ -2843,6 +3223,49 @@ fn a_hidden_reason_shows_its_kind_again_and_takes_focus() {
         "Mark as intended: ",
     );
     assert!(mark.accesskit_node().is_focused());
+}
+
+/// Final fix wave A11: a slot whose label has its own parentheses is named without nesting them, in the words, the
+/// name and the hover.
+#[test]
+fn slot_3s_reason_has_no_nested_parentheses() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::set_reasons;
+    use sdc_gui::model::sets::{editor_cells, SlotKind};
+    const SLOT3: &str = "no Emissive / Skin, slot 3 (Assign…)";
+    // A PBR set outside landscape/ draws a slot 3 card (rock01, PBR Landscape, draws none).
+    let d = tempfile::tempdir().unwrap();
+    let mut m = flat_parallax_wall(d.path());
+    let key = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key.ends_with("wall"))
+        .unwrap()
+        .key
+        .clone();
+    m.sets.iter_mut().find(|s| s.key == key).unwrap().warnings =
+        vec![Warning::new(Code::ShaderMissingMap, "no _g")
+            .with_data(serde_json::json!({"map": "_g", "shader": "pbr"}))];
+    m.invalidate_views();
+    let v = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key == key)
+        .cloned()
+        .unwrap();
+    assert!(
+        editor_cells(&v)
+            .iter()
+            .any(|c| c.kind == SlotKind::Emissive),
+        "precondition: the editor draws slot 3"
+    );
+    let texts: Vec<String> = set_reasons(&m, &key).into_iter().map(|r| r.text).collect();
+    assert_eq!(texts, [SLOT3]);
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(
+        egui::accesskit::Role::Button,
+        &format!("{SLOT3} — go to the fix"),
+    );
 }
 
 /// Controller ruling for Task 9: the Normal member leaves, not the diffuse (the set could dissolve); the empty slot's
@@ -3163,6 +3586,7 @@ fn a_disabled_fix_takes_no_focus_and_gives_none_to_mark() {
     let ReasonGo::Row(p) = set_reasons(&m, &key).remove(0).go else {
         panic!("a Row reason");
     };
+    let z = injected_z(&m);
     m.select_set(&key);
     let mut h = harness(m);
     h.run();
@@ -3175,7 +3599,7 @@ fn a_disabled_fix_takes_no_focus_and_gives_none_to_mark() {
     let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
     let y = h.get_by_label(sentence).rect().center().y;
     let fix = h
-        .query_all_by_label(sdc_gui::ui::problems::REBUILD_Z)
+        .query_all_by_label(&z)
         .find(|n| (n.rect().center().y - y).abs() <= 4.0)
         .expect("Rebuild Z on the row");
     assert!(fix.accesskit_node().is_disabled(), "precondition");
@@ -3566,6 +3990,8 @@ fn exported_short_normal(dir: &std::path::Path) -> AppModel {
 }
 
 const QUEUED_Z: &str = "Rebuild Z is on for this file: export again to rewrite it";
+/// x_n.png's Rebuild Z button (`rebuild_z_for`).
+const X_N_Z: &str = "Rebuild Z for x_n.png";
 
 /// The last export's CHAN-NORMAL-LENGTH row of x_n.png (an `At::File` row).
 fn exported_z_row(m: &AppModel) -> Option<sdc_gui::model::bottom::Problem> {
@@ -3588,7 +4014,7 @@ fn after_rebuild_z_the_exported_row_is_a_queued_note() {
     let mut h = harness(m);
     h.run();
     // The click lands on the next frame: run, wait for the plan it starts, then draw its result.
-    click_and_settle(&mut h, sdc_gui::ui::problems::REBUILD_Z);
+    click_and_settle(&mut h, X_N_Z);
     let r = exported_z_row(h.state()).expect("the last export's row");
     assert_eq!(r.level, Level::Queued);
     assert_eq!(r.text, QUEUED_Z);
@@ -3607,7 +4033,7 @@ fn after_rebuild_z_the_exported_row_is_a_queued_note() {
     h.get_by_label("queued");
     // Exact: the row's own name ("<file>: <sentence>", Note FB9) also contains the sentence.
     h.get_by_label(QUEUED_Z);
-    assert!(h.query_by_label(sdc_gui::ui::problems::REBUILD_Z).is_none());
+    assert!(h.query_by_label(X_N_Z).is_none());
 }
 
 /// Review E25: without Rebuild Z on, the last export's short normal stays a warning with the Rebuild Z fix (the live
@@ -3640,7 +4066,7 @@ fn a_hidden_kind_never_hides_the_queued_z_note() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    click_and_settle(&mut h, sdc_gui::ui::problems::REBUILD_Z);
+    click_and_settle(&mut h, X_N_Z);
     // Kinds lists no CHAN-NORMAL-LENGTH once the only row is queued, so the kind is hidden as an earlier choice would.
     h.state_mut().set_kind_hidden(Code::ChanNormalLength, true);
     let r = exported_z_row(h.state()).expect("the last export's row");
@@ -3687,16 +4113,14 @@ fn at_1600_a_row_with_two_controls_keeps_both_after_the_sentence() {
     use engine::codes::{Code, Warning};
     let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
     m.open_problems(None);
+    let z = injected_z(&m);
     let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
     h.run();
     let text = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
     let sentence = h.get_by_label(text).rect();
     // By role: the row's own name contains the sentence, which names Rebuild Z.
     let fix = h
-        .query_all_by_role_and_label(
-            egui::accesskit::Role::Button,
-            sdc_gui::ui::problems::REBUILD_Z,
-        )
+        .query_all_by_role_and_label(egui::accesskit::Role::Button, &z)
         .find(|n| (n.rect().center().y - sentence.center().y).abs() <= 4.0)
         .expect("Rebuild Z on the row")
         .rect();
@@ -3801,6 +4225,195 @@ fn a_row_sized_from_the_last_frame_settles_wide_and_narrow() {
     assert!(
         mark.right() <= panel.right().min(1280.0) && mark.left() >= panel.left(),
         "Mark at {mark:?} is outside the panel {panel:?} or the window"
+    );
+}
+
+/// Final fix wave A1: a row listed for the first time has its buttons at their final x on its first painted frame:
+/// the pass that measures them is discarded, as egui's `Grid` does on its first measure.
+#[test]
+fn a_new_rows_buttons_are_in_place_on_its_first_frame() {
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = only(&[]);
+    m.open_problems(None);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    h.state_mut().items[0].warnings = vec![Warning::new(Code::ChanNotGray, "not grey")];
+    h.state_mut().invalidate_views();
+    h.step();
+    let first = h.get_by_label_contains("Mark as intended: ").rect();
+    h.run();
+    let settled = h.get_by_label_contains("Mark as intended: ").rect();
+    assert!(
+        (first.left() - settled.left()).abs() < 0.5,
+        "first frame {first:?}, settled {settled:?}"
+    );
+}
+
+/// Final fix wave A1 (pin): a reason's `focus_row` hand-off survives the discarded pass that first measures its row.
+/// At 1600 px the row is narrower than the list, so the Problems tab's first draw is discarded.
+#[test]
+fn a_reason_focuses_its_fix_through_a_discarded_first_pass() {
+    use egui::accesskit::Role;
+    use engine::codes::{Code, Warning};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ChanNormalLength, "short")]);
+    let key = rock01(&m).key;
+    let z = injected_z(&m);
+    m.select_set(&key);
+    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
+    h.run();
+    let what = sdc_gui::model::code_text::code_line(Code::ChanNormalLength)
+        .split(" — ")
+        .next()
+        .unwrap()
+        .to_string();
+    h.get_by_label(&format!("{what} — go to the fix")).click();
+    h.step();
+    h.step();
+    let sentence = sdc_gui::model::code_text::code_sentence(Code::ChanNormalLength);
+    let row = h.get_by_label(sentence).rect();
+    let fix = h
+        .query_all_by_role_and_label(Role::Button, &z)
+        .find(|n| (n.rect().center().y - row.center().y).abs() <= 4.0)
+        .expect("Rebuild Z on the row");
+    assert!(fix.accesskit_node().is_focused(), "Rebuild Z has focus");
+    assert!(
+        fix.rect().left() - row.right() < 100.0,
+        "the row is narrow: its fix follows the sentence ({row:?}, {:?})",
+        fix.rect()
+    );
+}
+
+/// Final review Important 1 (rule 3.4): a code-less reason longer than 60 characters is cut on screen, but its
+/// accessible name and the first line of its hover hold the whole sentence.
+#[test]
+fn a_long_code_less_reason_keeps_its_whole_sentence_in_its_name_and_hover() {
+    use sdc_gui::model::bottom::{set_reasons, ReasonGo};
+    const GONE: &str = "landscape/a_notes_file_whose_name_is_long_enough_to_be_cut.txt";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    // As `a_removal_focused_by_a_reason_ignores_enter_and_space`: a file that is no texture matches no entry.
+    std::fs::write(m.root.clone().unwrap().join(GONE), "notes").unwrap();
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member("landscape/rock01", GONE)
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let key = rock01(&m).key;
+    let r = set_reasons(&m, &key);
+    let full = r
+        .iter()
+        .find_map(|r| match &r.go {
+            ReasonGo::Row(p) if p.text.contains("a_notes_file") => Some(p.text.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("a missing-entry reason: {r:?}"));
+    assert!(full.chars().count() > 60, "precondition: {full}");
+    let cut: String = full.chars().take(60).collect();
+    m.select_set(&key);
+    let mut h = harness(m);
+    tooltips_now(&h);
+    h.run();
+    assert!(
+        h.query_by_label(&format!("{cut}… — go to the fix"))
+            .is_none(),
+        "the cut text is not the button's name"
+    );
+    assert!(
+        h.query_by_label(&full).is_none(),
+        "precondition: the whole sentence is not on screen"
+    );
+    h.get_by_label(&format!("{full} — go to the fix")).hover();
+    h.run();
+    h.get_by_label(&full);
+}
+
+/// Final review Minor 2: a created set with no files yet has no engine key, so its card is amber with no problem row;
+/// its hover says why instead of claiming a row.
+#[test]
+fn a_set_with_no_files_yet_says_so_on_its_card() {
+    use sdc_gui::ui::sets_column::{pill_hover, NOT_READY_MEANS, NO_FILES_YET};
+    use sdc_gui::ui::status::Status;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("landscape/empty"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "landscape/empty")
+        .expect("the created set has a card");
+    assert!(
+        v.key.is_empty() && v.members.is_empty(),
+        "precondition: {v:?}"
+    );
+    assert!(!sdc_gui::model::bottom::set_ready(&m, &v), "amber");
+    let hover = pill_hover(&m, &v, Status::Warning);
+    assert!(hover.contains(NO_FILES_YET), "{hover}");
+    assert!(!hover.contains(NOT_READY_MEANS), "{hover}");
+    assert_eq!(NO_FILES_YET, "Not ready: this set has no files yet.");
+    let ready = rock01(&m);
+    assert!(pill_hover(&m, &ready, Status::Warning).contains(NOT_READY_MEANS));
+}
+
+/// Final review Minor 2: a key-less set opens in the editor through its missing entry's Go to set (the row carries
+/// the empty key). Its status line agrees with its card, and no other key-less set's rows are its reasons.
+#[test]
+fn a_set_with_no_files_yet_says_so_on_its_status_line() {
+    use sdc_gui::model::bottom::{problems, set_reasons, At};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    for (id, file) in [
+        ("landscape/empty", "landscape/one.txt"),
+        ("landscape/other", "landscape/two.txt"),
+    ] {
+        std::fs::write(root.join(file), "notes").unwrap();
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.add_member(id, file)
+        });
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let v = views
+        .iter()
+        .find(|v| v.id == "landscape/empty")
+        .expect("the created set has a card");
+    assert!(
+        v.key.is_empty() && !v.missing.is_empty(),
+        "precondition: {v:?}"
+    );
+    let all = problems(&m);
+    let row = all
+        .iter()
+        .find(|p| matches!(&p.at, At::Set { id, .. } if id == "landscape/empty"))
+        .expect("its missing entry's row");
+    let At::Set { key, .. } = &row.at else {
+        unreachable!()
+    };
+    assert!(
+        key.is_empty(),
+        "Go to set on this row selects the empty key"
+    );
+    assert!(
+        set_reasons(&m, "").is_empty(),
+        "no reason, least of all another key-less set's row"
+    );
+    let set = sdc_gui::model::bottom::ProblemsFilter::Set(String::new());
+    assert!(
+        sdc_gui::model::bottom::filtered(&m, Some(&set)).is_empty(),
+        "the empty key names no set's rows"
+    );
+    let key = key.clone();
+    m.go_to_set(&key, None);
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(sdc_gui::ui::sets_column::NO_FILES_YET);
+    assert!(h
+        .query_by_label("Ready: nothing in this set needs you.")
+        .is_none());
+    assert_eq!(
+        h.query_all_by_label_contains("— go to the fix").count(),
+        0,
+        "no reason buttons"
     );
 }
 

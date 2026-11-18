@@ -39,6 +39,8 @@ fn the_bar_text_has_thousands_separators() {
         plan_bar_text(999, 1_234_567),
         "Analysing 999 / 1,234,567 files…"
     );
+    // Final fix wave A7: one file in the singular.
+    assert_eq!(plan_bar_text(0, 1), "Analysing 0 / 1 file…");
 }
 
 #[test]

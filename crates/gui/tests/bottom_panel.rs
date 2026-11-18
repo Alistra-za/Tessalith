@@ -383,6 +383,9 @@ fn z_row_code(m: &AppModel, code: engine::codes::Code) -> bool {
     })
 }
 
+/// x_n.png's Rebuild Z button, named for its file (rule 8.4).
+const X_N_REBUILD_Z: &str = "Rebuild Z for x_n.png";
+
 #[test]
 fn the_z_row_offers_rebuild_z_and_it_clears_the_row() {
     use engine::codes::Code;
@@ -400,7 +403,7 @@ fn the_z_row_offers_rebuild_z_and_it_clears_the_row() {
     assert!(z_row_code(&m, Code::ChanNormalLength));
     let mut h = harness(m);
     h.run();
-    h.get_by_label(sdc_gui::ui::problems::REBUILD_Z).click();
+    h.get_by_label(X_N_REBUILD_Z).click();
     idle(&mut h);
     let v = h
         .state()
@@ -449,7 +452,7 @@ fn an_exported_short_normal_still_shows_one_z_row() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    h.get_by_label(sdc_gui::ui::problems::REBUILD_Z).click();
+    h.get_by_label(X_N_REBUILD_Z).click();
     idle(&mut h);
     assert!(!z(h.state()).contains(&At::Texture("landscape/x_n.png".into())));
     // Review E25: the file on disk is still short, so the last export's row comes back as a queued note with no
@@ -469,7 +472,7 @@ fn an_exported_short_normal_still_shows_one_z_row() {
     h.state_mut().poll();
     h.state_mut().invalidate_views();
     h.run();
-    assert!(h.query_by_label(sdc_gui::ui::problems::REBUILD_Z).is_none());
+    assert!(h.query_by_label(X_N_REBUILD_Z).is_none());
 }
 
 #[test]
@@ -488,7 +491,7 @@ fn rebuild_z_is_disabled_on_a_read_only_sdc_toml() {
     m.invalidate_views();
     let mut h = harness(m);
     h.run();
-    let b = h.get_by_label(sdc_gui::ui::problems::REBUILD_Z);
+    let b = h.get_by_label(X_N_REBUILD_Z);
     assert!(b.accesskit_node().is_disabled());
     h.ctx.global_style_mut(|s| {
         s.interaction.tooltip_delay = 0.0;
@@ -645,10 +648,12 @@ fn at_1280x800_a_long_problems_row_keeps_its_buttons_on_screen() {
     idle(&mut h);
     let panel = outer(&h, "bottom");
     // The list scrolls: a row cut by its bottom edge is clipped there (`show_rows` draws one more), so a button only
-    // has to start above the panel's bottom; the right edge (final review I2) and the top are checked whole.
+    // has to start above the panel's bottom; the right edge (final review I2) and the top are checked whole. The
+    // right edge is the window's too: a too-wide row widens the panel's rect past it (final fix wave A12).
+    let right = panel.right().min(1280.0);
     let inside = |r: egui::Rect| {
         r.left() >= panel.left()
-            && r.right() <= panel.right()
+            && r.right() <= right
             && r.top() >= panel.top()
             && r.top() < panel.bottom()
     };
@@ -663,7 +668,7 @@ fn at_1280x800_a_long_problems_row_keeps_its_buttons_on_screen() {
             seen += 1;
             assert!(
                 inside(n.rect()),
-                "{label} at {:?} is outside the panel {panel:?}",
+                "{label} at {:?} is outside the panel {panel:?} or the window",
                 n.rect()
             );
         }
@@ -673,7 +678,7 @@ fn at_1280x800_a_long_problems_row_keeps_its_buttons_on_screen() {
         seen += 1;
         assert!(
             inside(n.rect()),
-            "{:?} at {:?} is outside the panel {panel:?}",
+            "{:?} at {:?} is outside the panel {panel:?} or the window",
             n.accesskit_node().label(),
             n.rect()
         );

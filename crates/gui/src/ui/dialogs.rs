@@ -254,7 +254,10 @@ fn copy_settings(
 
 /// F3a D4: Reset all asks first; it names how many textures lose their settings.
 fn confirm_reset_all(ctx: &egui::Context, model: &mut AppModel, keys: &[String]) {
-    let title = format!("Reset all settings of {} textures?", keys.len());
+    let title = format!(
+        "Reset all settings of {}?",
+        crate::model::code_text::counted(keys.len(), "texture", "textures")
+    );
     let buttons = [
         ("Reset", Role::Destructive, true),
         ("Cancel", Role::Default, true),

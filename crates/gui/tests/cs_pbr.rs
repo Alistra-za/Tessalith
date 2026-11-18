@@ -402,7 +402,7 @@ fn statics_using_the_diffuse_get_the_entry_with_the_blocks_values() {
     );
     assert_eq!(
         statics_text(&m.statics_status(&v).unwrap()),
-        "Used by 1 meshes: PGPatcher entry written"
+        "Used by 1 mesh: PGPatcher entry written"
     );
     export_and_wait(&mut m);
     let pgp =

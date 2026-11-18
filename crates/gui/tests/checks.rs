@@ -856,6 +856,75 @@ fn checks_summary_counts_warning_level_check_results_only() {
     assert_eq!(checks_summary(&m), None);
 }
 
+/// Marks the first Problems row of `code` as intended, as its **Mark as intended** button does.
+fn mark_first(m: &mut AppModel, code: Code) {
+    let p = bottom::problems(m)
+        .iter()
+        .find(|p| p.code == Some(code))
+        .cloned()
+        .unwrap();
+    m.mark_intended(p.mark.clone().unwrap(), true, "row");
+}
+
+/// Final fix wave A6 (final review Minor 5): the export's line counts the check rows the Checks pill counts
+/// (`counts_as_check`), so a marked result is not counted.
+#[test]
+fn checks_summary_leaves_out_a_marked_result() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_sets(d.path(), &[("a", true), ("b", true)], false);
+    let first = bottom::problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ChkParallax))
+        .cloned()
+        .unwrap();
+    m.mark_intended(first.mark.clone().unwrap(), true, "row");
+    assert_eq!(
+        checks_summary(&m).as_deref(),
+        Some("Checks: 1 warning on 1 texture; see Problems")
+    );
+    let second = bottom::problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ChkParallax) && !p.intended)
+        .cloned()
+        .unwrap();
+    m.mark_intended(second.mark.clone().unwrap(), true, "row");
+    assert_eq!(checks_summary(&m), None, "both marked");
+}
+
+/// Final fix wave A6: the card's ⓘ hover lists a marked result under "Marked as intended:", after the others.
+#[test]
+fn the_cards_check_hover_lists_a_marked_result_under_its_line() {
+    let d = tempfile::tempdir().unwrap();
+    let m = pbr_wall(d.path(), true, true);
+    let mut h = harness(m, 1600.0);
+    h.run();
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    mark_first(h.state_mut(), Code::ChkParallax);
+    h.run();
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Check results: info only")
+        .hover();
+    h.run();
+    // A Label's text is its node's value.
+    let tip = h
+        .query_all_by_label_contains("CHK-GREEN-GUESS")
+        .map(|n| {
+            use egui_kittest::kittest::NodeT;
+            let a = n.accesskit_node();
+            a.label().or(a.value()).unwrap_or_default()
+        })
+        .find(|l| l.starts_with("wall_n.png: CHK-GREEN-GUESS"))
+        .expect("the badge's hover");
+    let at = |s: &str| tip.find(s).unwrap_or_else(|| panic!("{s:?} in {tip:?}"));
+    assert!(
+        at("CHK-GREEN-GUESS") < at("\nMarked as intended:\n")
+            && at("\nMarked as intended:\n") < at("CHK-PARALLAX"),
+        "{tip:?}"
+    );
+}
+
 #[test]
 fn check_warnings_are_not_copied_into_the_export_rows() {
     let d = tempfile::tempdir().unwrap();

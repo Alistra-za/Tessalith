@@ -185,9 +185,9 @@ fn tile_border(ui: &egui::Ui, status: &ItemStatus, no_set: bool) -> egui::Color3
     border_of(ui, status)
 }
 
-/// The hover text of a tile: what the status means, then the warnings. A no-set texture says `No set` in place of
-/// its question and its warnings (Note HF1).
-fn tile_tooltip(item: &TextureItem, no_set: bool) -> String {
+/// The hover text of a tile: what the status means, then the warnings, the marked ones last under `MARKED_LINE`. A
+/// no-set texture says `No set` in place of its question and its warnings (Note HF1).
+pub fn tile_tooltip(model: &AppModel, item: &TextureItem, no_set: bool) -> String {
     let mut lines = vec![item.key.clone()];
     if no_set {
         lines.push("No set".to_string());
@@ -210,8 +210,15 @@ fn tile_tooltip(item: &TextureItem, no_set: bool) -> String {
         ItemStatus::PackedInto(j) => lines.push(format!("Packed into {j}")),
         ItemStatus::Ready => {}
     }
-    if !no_set {
-        lines.extend(item.warnings.iter().map(|w| w.message.clone()));
+    if !no_set && !item.warnings.is_empty() {
+        // Final fix wave A6: a marked warning is listed under its own line, after the others.
+        use crate::model::bottom::{marked, with_marked, At};
+        let at = At::Texture(item.key.clone());
+        let (done, open): (Vec<_>, Vec<_>) =
+            item.warnings.iter().partition(|w| marked(model, &at, w));
+        let text =
+            |ws: Vec<&engine::codes::Warning>| ws.iter().map(|w| w.message.clone()).collect();
+        lines.extend(with_marked(text(open), text(done)));
     }
     lines.join("\n")
 }
@@ -295,7 +302,7 @@ fn tile(
         })
         .response
         .interact(egui::Sense::click_and_drag())
-        .on_hover_text(tile_tooltip(item, no_set));
+        .on_hover_text(tile_tooltip(model, item, no_set));
     ui.set_opacity(opacity);
     // T7: hover and press show instantly; the frame's stroke was chosen before `interact`, so paint over it.
     // Not on the dimmed drag source: a full-opacity stroke would make it look lit (review I1).

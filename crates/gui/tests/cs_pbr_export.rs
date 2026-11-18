@@ -181,6 +181,24 @@ fn export_writes_one_file_per_edid_named_exactly_and_records_hashes() {
     assert_eq!(m.sets_doc.as_ref().unwrap().cs_pbr_shas(), shas);
 }
 
+/// Final fix wave A7: one written file is noted in the singular.
+#[test]
+fn one_written_file_is_noted_in_the_singular() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_plain(d.path());
+    m.add_cs_block(ROCK, Kind::Txst);
+    m.set_cs_edids(ROCK, Kind::Txst, &["LandscapeRock01".into()]);
+    export_and_wait(&mut m);
+    assert!(
+        m.export
+            .notes
+            .iter()
+            .any(|n| n.starts_with("CS PBR JSON written: 1 file under ")),
+        "{:?}",
+        m.export.notes
+    );
+}
+
 /// Review focus: a file sdc did not write last (edited, or never recorded) is never overwritten.
 #[test]
 fn a_hand_edited_or_foreign_file_is_kept_and_reported() {

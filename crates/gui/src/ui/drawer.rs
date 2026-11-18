@@ -182,6 +182,18 @@ pub fn write_report(model: &AppModel, path: &Path) -> std::io::Result<()> {
     std::fs::write(path, report_text(model, path))
 }
 
+/// The hover of a Files row's "n warnings": one `warning_line` per warning, the marked ones last under `MARKED_LINE`
+/// (final fix wave A6).
+pub fn warnings_hover(model: &AppModel, r: &crate::model::export::Row) -> String {
+    use crate::model::bottom::{export_warning_marked, with_marked};
+    let (done, open): (Vec<_>, Vec<_>) = r
+        .warnings
+        .iter()
+        .partition(|w| export_warning_marked(model, &r.job_key, w));
+    let lines = |ws: Vec<&engine::codes::Warning>| ws.into_iter().map(warning_line).collect();
+    with_marked(lines(open), lines(done)).join("\n")
+}
+
 /// The Files tab: only the rows on screen are laid out (`show_rows`), over the cached filtered index.
 fn files(
     ui: &mut egui::Ui,
@@ -214,9 +226,11 @@ fn files(
                     }
                     ui.label(r.state.label());
                     if !r.warnings.is_empty() {
-                        let lines: Vec<String> = r.warnings.iter().map(warning_line).collect();
+                        // A Label's hover never becomes its name (0.37), so it is built only while shown.
                         ui.label(counted(r.warnings.len(), "warning", "warnings"))
-                            .on_hover_text(lines.join("\n"));
+                            .on_hover_ui(|ui| {
+                                ui.label(warnings_hover(model, r));
+                            });
                     }
                     // The written output once it exists, otherwise the source.
                     let now = Instant::now();

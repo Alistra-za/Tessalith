@@ -40,6 +40,53 @@ fn ctrl_click_on_tiles_selects_both_and_the_heading_counts_them() {
     assert_eq!(h.query_all_by_label("2 selected").count(), 1);
 }
 
+/// Final fix wave A7: Reset all for one texture asks in the singular.
+#[test]
+fn reset_all_of_one_texture_asks_in_the_singular() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    m.dialog = Some(Dialog::ConfirmResetAll(vec![ROCK.into()]));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("Reset all settings of 1 texture?");
+}
+
+/// Final fix wave A7: two sets' kind chip that holds one texture heads the bulk panel in the singular.
+#[test]
+fn a_one_texture_chip_heads_the_panel_in_the_singular() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    // The second set without its first member: that member's kind is in one set only.
+    let (id, member) = sdc_gui::model::sets::views(&m)
+        .iter()
+        .filter(|v| !v.key.is_empty())
+        .nth(1)
+        .map(|v| (v.id.clone(), v.members[0].clone()))
+        .expect("two sets");
+    m.remove_member(&id, &member).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let keys: Vec<String> = sdc_gui::model::sets::views(&m)
+        .iter()
+        .filter(|v| !v.key.is_empty())
+        .map(|v| v.key.clone())
+        .collect();
+    m.click_set(&keys[0], false, false);
+    m.click_set(&keys[1], true, false);
+    let view = m.bulk_view();
+    let chip = view
+        .chips
+        .iter()
+        .find(|c| c.members.len() == 1)
+        .unwrap_or_else(|| {
+            let n: Vec<usize> = view.chips.iter().map(|c| c.members.len()).collect();
+            panic!("precondition: a one-texture chip in {n:?}")
+        });
+    m.bulk.kind = chip.kind;
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label("1 texture selected");
+}
+
 #[test]
 fn right_click_on_a_selected_tile_keeps_the_selection_and_opens_the_menu() {
     let d = tempfile::tempdir().unwrap();

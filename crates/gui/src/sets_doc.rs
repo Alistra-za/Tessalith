@@ -165,16 +165,29 @@ fn intended_of(v: &Value) -> Option<IntendedKey> {
     })
 }
 
-/// `subject` with a `set:` id folded: two subjects naming one set compare equal (Note BF).
+/// `subject` with a `set:` id, a `texture:` item key or a `file:` job key folded as set ids and `[files]` keys fold
+/// (Note BF): two subjects naming one set or file compare equal. A `nif:` game path is left as it is.
 fn fold_subject(subject: &str) -> String {
-    match subject.strip_prefix("set:") {
-        Some(id) => format!("set:{}", fold_id(id)),
-        None => subject.to_string(),
+    for kind in ["set:", "texture:", "file:"] {
+        if let Some(key) = subject.strip_prefix(kind) {
+            return format!("{kind}{}", fold_id(key));
+        }
+    }
+    subject.to_string()
+}
+
+/// Removes the entries `gone` matches. Only when the first one goes is the new first one tidied (`tidy_first`): a
+/// first entry that stays keeps its decor as written (final fix wave A5).
+fn remove_entries(arr: &mut Array, gone: impl Fn(&Value) -> bool) {
+    let first_gone = arr.get(0).is_some_and(&gone);
+    arr.retain(|v| !gone(v));
+    if first_gone {
+        tidy_first(arr);
     }
 }
 
-/// After a removal: a first item that had followed `, ` on the same line drops that space (`[{ … }]`, not
-/// `[ { … }]`); one on its own line keeps its newline and indent.
+/// After the first entry's removal: a new first item that had followed `, ` on the same line drops that space
+/// (`[{ … }]`, not `[ { … }]`); one on its own line keeps its newline and indent.
 fn tidy_first(arr: &mut Array) {
     if let Some(v) = arr.get_mut(0) {
         let own_line = v
@@ -877,7 +890,7 @@ impl SetsDoc {
             .map(|a| a.iter().filter_map(intended_of).collect())
             .unwrap_or_default()
     }
-    /// `intended`, parsed once per revision, with a `set:` subject's id folded (`fold_id`).
+    /// `intended`, parsed once per revision, with each subject's key folded (`fold_subject`).
     pub fn intended_keys(&self) -> Arc<BTreeSet<IntendedKey>> {
         let rev = self.f.rev;
         if let Some((r, k)) = &*self.intended_cache.borrow() {
@@ -889,7 +902,7 @@ impl SetsDoc {
         *self.intended_cache.borrow_mut() = Some((rev, k.clone()));
         k
     }
-    /// Whether `key` is marked, its `set:` id compared folded as `set_intended` stores and finds it.
+    /// Whether `key` is marked, its subject's key compared folded as `set_intended` stores and finds it.
     pub fn is_intended(&self, key: &IntendedKey) -> bool {
         self.intended_keys().contains(&folded(key))
     }
@@ -921,8 +934,7 @@ impl SetsDoc {
                 }
                 arr.push_formatted(v);
             } else if !on && had {
-                arr.retain(|v| !has(v));
-                tidy_first(arr);
+                remove_entries(arr, has);
             }
         });
     }
@@ -961,10 +973,7 @@ impl SetsDoc {
             return;
         }
         self.edit_intended(|arr| match to {
-            None => {
-                arr.retain(|v| !on_from(v));
-                tidy_first(arr);
-            }
+            None => remove_entries(arr, on_from),
             Some(to) => {
                 for v in arr.iter_mut().filter(|v| on_from(v)) {
                     if let Some(s) = v.as_inline_table_mut().and_then(|t| t.get_mut("subject")) {

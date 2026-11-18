@@ -1527,7 +1527,7 @@ fn error_codes(codes: &[Code]) -> String {
 
 /// Warnings the decision box does not already show. Note FM35: while the alpha is asked, its line answers
 /// LOSS-ALPHA-DATA, so that warning is not listed a second time.
-fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool) {
+fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool, job: &ResolvedJob) {
     let rest: Vec<&Warning> = warnings
         .iter()
         .filter(|w| {
@@ -1546,7 +1546,9 @@ fn other_warnings(ui: &mut egui::Ui, warnings: &[Warning], alpha_asked: bool) {
     ui.add_space(6.0);
     ui.label(egui::RichText::new("Warnings").strong());
     for w in rest {
-        ui.label(egui::RichText::new(&*shown_for(Some(w.code), &w.message)).small())
+        // As its Problems row reads it (a job-dependent sentence, final fix wave A3).
+        let text = crate::model::bottom::warning_text(Some(job), w);
+        ui.label(egui::RichText::new(&*shown_for(Some(w.code), &text)).small())
             .on_hover_ui(|ui| code_hover(ui, &w.message, w.code.as_str()));
     }
 }
@@ -1822,7 +1824,7 @@ pub fn draw(ui: &mut egui::Ui, model: &mut AppModel, key: &str, compact: bool) {
                         None => model.clear_field(&k, &f),
                     }
                 }
-                other_warnings(ui, &warnings, alpha.is_some());
+                other_warnings(ui, &warnings, alpha.is_some(), job);
             }
         }
     });

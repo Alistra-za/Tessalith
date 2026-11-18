@@ -850,9 +850,9 @@ pub fn finish(
     match engine::dds::write_atomic(&p.path, text.as_bytes()) {
         Ok(()) => {
             notes.push(format!(
-                "PGPatcher JSON written: {} ({} entries)",
+                "PGPatcher JSON written: {} ({})",
                 p.path.display(),
-                kept.len()
+                super::code_text::counted(kept.len(), "entry", "entries")
             ));
             sha256_of(&p.path).map_or(Finish::Nothing, Finish::Written)
         }

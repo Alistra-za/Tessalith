@@ -362,6 +362,8 @@ fn tag_text(helper_fills: Option<&[engine::helper::FillTarget]>, tail: &str) -> 
 pub const READY_MEANS: &str = "Ready: no problem row in the set or its textures. Notes, rows you marked as intended and checks don't count.";
 /// Review E4 (controller ruling 10): what Not ready means, on the Not ready pill and an amber card's status hover.
 pub const NOT_READY_MEANS: &str = "Not ready: a problem row in the set or one of its textures. Notes, rows you marked as intended and checks don't count.";
+/// An amber card's status hover when the set has no files yet (no engine key, so no row; `bottom::set_ready_in`).
+pub const NO_FILES_YET: &str = "Not ready: this set has no files yet.";
 
 /// The pill's hover (R15): the long badge, then what the status `s` means (review E4) or blocked, then one line each
 /// for owns, missing entries and recipes.
@@ -370,6 +372,8 @@ pub fn pill_hover(model: &AppModel, v: &SetView, s: Status) -> String {
     match s {
         Status::Blocks => lines.push("blocked".to_string()),
         Status::Ready => lines.push(READY_MEANS.to_string()),
+        // Final review Minor 2: a created set with no files yet has no engine key and so no row to point at.
+        Status::Warning if v.key.is_empty() => lines.push(NO_FILES_YET.to_string()),
         Status::Warning => lines.push(NOT_READY_MEANS.to_string()),
         _ => {}
     }
@@ -489,7 +493,15 @@ fn warn_text(n: usize) -> String {
     format!("⚠ {n}")
 }
 
-fn check_badge(ui: &mut egui::Ui, v: &SetView, checks: &[(&str, &Warning)], acts: &mut Vec<Act>) {
+/// Shown only while a result is not marked (a marked one leaves the badge, review E4); its hover lists the `marked`
+/// ones last, under `MARKED_LINE` (final fix wave A6).
+fn check_badge(
+    ui: &mut egui::Ui,
+    v: &SetView,
+    checks: &[(&str, &Warning)],
+    marked: &[(&str, &Warning)],
+    acts: &mut Vec<Act>,
+) {
     if checks.is_empty() {
         return;
     }
@@ -510,7 +522,12 @@ fn check_badge(ui: &mut egui::Ui, v: &SetView, checks: &[(&str, &Warning)], acts
         )
     });
     let r = r.on_hover_ui(|ui| {
-        ui.label(warning_tooltip(checks));
+        let done = (!marked.is_empty()).then(|| warning_tooltip(marked));
+        let lines = crate::model::bottom::with_marked(
+            vec![warning_tooltip(checks)],
+            done.into_iter().collect(),
+        );
+        ui.label(lines.join("\n"));
     });
     if r.clicked() {
         acts.push(Act::Problems(v.key.clone()));
@@ -2266,7 +2283,10 @@ fn pill(
                         key: v.key.clone(),
                         id: v.id.clone(),
                     });
-                    let checks: Vec<(&str, &Warning)> = v
+                    // Final fix wave A6: the marked ones stay for the badge's hover, listed last.
+                    let mut checks: Vec<(&str, &Warning)> = vec![];
+                    let mut marked_checks: Vec<(&str, &Warning)> = vec![];
+                    let results = v
                         .members
                         .iter()
                         .filter_map(|k| model.item(k))
@@ -2274,20 +2294,24 @@ fn pill(
                         .flat_map(|i| {
                             let found = model.check_warnings(&i.key);
                             let at = (!found.is_empty()).then(|| At::Texture(i.key.clone()));
-                            found
-                                .iter()
-                                .filter(move |w| {
-                                    at.as_ref().is_some_and(|a| check_listed(model, a, w))
-                                })
-                                .map(move |w| (i.name.as_str(), w))
+                            found.iter().map(move |w| {
+                                let listed = at.as_ref().is_some_and(|a| check_listed(model, a, w));
+                                (listed, (i.name.as_str(), w))
+                            })
                         })
                         .chain(set_check_at.iter().flat_map(|at| {
                             set_checks
                                 .iter()
-                                .filter(|w| check_listed(model, at, w))
-                                .map(|w| (v.id.as_str(), w))
-                        }))
-                        .collect();
+                                .map(|w| (check_listed(model, at, w), (v.id.as_str(), w)))
+                        }));
+                    for (listed, row) in results {
+                        if listed {
+                            &mut checks
+                        } else {
+                            &mut marked_checks
+                        }
+                        .push(row);
+                    }
                     // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
                     // (Notes FI13, HP12).
                     let sp = ui.spacing().item_spacing.x;
@@ -2352,7 +2376,7 @@ fn pill(
                                 egui::Layout::right_to_left(egui::Align::Center),
                                 |ui| {
                                     // Right to left: reads pill, ⚠, ⓘ, as the narrow row does (review M1).
-                                    check_badge(ui, v, &checks, acts);
+                                    check_badge(ui, v, &checks, &marked_checks, acts);
                                     warn_button(ui, v, &rows, acts);
                                     status_pill(ui, model, v, status);
                                     ui.with_layout(
@@ -2380,7 +2404,7 @@ fn pill(
                         ui.horizontal_wrapped(|ui| {
                             status_pill(ui, model, v, status);
                             warn_button(ui, v, &rows, acts);
-                            check_badge(ui, v, &checks, acts);
+                            check_badge(ui, v, &checks, &marked_checks, acts);
                         });
                     }
                     if let Some(map) = &v.txst {

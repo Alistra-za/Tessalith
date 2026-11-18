@@ -365,7 +365,7 @@ pub fn summary_text(n: usize, textures: usize, sets: usize) -> String {
 /// counted; with no rows it covers the whole project. A texture counts once, whether its rows are keyed by item or
 /// by job (CL19).
 pub fn checks_summary(m: &AppModel) -> Option<String> {
-    use super::bottom::{problems, At, Level};
+    use super::bottom::{counts_as_check, problems, At};
     use std::collections::HashSet;
     let exported: HashSet<&str> = m.export.rows.iter().map(|r| r.job_key.as_str()).collect();
     let all = exported.is_empty();
@@ -384,9 +384,10 @@ pub fn checks_summary(m: &AppModel) -> Option<String> {
     let views = super::sets::views(m);
     let (mut textures, mut sets) = (HashSet::new(), HashSet::new());
     let mut n = 0;
-    // The green guess is an engine Info result that FC3 lists as a row for its button; it is not a warning.
+    // The green guess is an engine Info result that FC3 lists as a row for its button; it is not a warning. A marked
+    // result is a note, as the Checks pill counts it (`counts_as_check`, final fix wave A6).
     let warning = |p: &&super::bottom::Problem| {
-        p.level == Level::Check && p.code != Some(engine::codes::Code::ChkGreenGuess)
+        counts_as_check(p) && p.code != Some(engine::codes::Code::ChkGreenGuess)
     };
     for p in problems(m).iter().filter(warning) {
         match &p.at {

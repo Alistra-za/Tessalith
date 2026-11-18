@@ -775,7 +775,10 @@ pub enum StaticsStatus {
 
 pub fn statics_text(s: &StaticsStatus) -> String {
     match s {
-        StaticsStatus::Used(p) => format!("Used by {} meshes: PGPatcher entry written", p.len()),
+        StaticsStatus::Used(p) => format!(
+            "Used by {}: PGPatcher entry written",
+            super::code_text::counted(p.len(), "mesh", "meshes")
+        ),
         StaticsStatus::Unused => {
             "No mesh of the latest scan uses this diffuse yet (LOD meshes do not count); the PGPatcher entry is still written".into()
         }

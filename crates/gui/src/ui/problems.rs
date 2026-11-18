@@ -583,13 +583,20 @@ fn fix_click(
                 == Some(json!(true));
             // DP7d: after Rebuild Z the exported file is still short until the next export.
             let done = on.then_some("Rebuild Z is on for this file: export again to rewrite it");
-            button(
-                ui,
-                REBUILD_Z,
-                "Rebuild the blue (Z) channel from red and green for this file (channels.reconstruct_z). Only for \
-                 normal maps: it replaces the file's blue channel.",
-                off.or(done),
-            )
+            let off = off.or(done);
+            // Rule 8.4: named for its file, as Turn parallax off is (a CHK-Z-SIGN row adds a second button).
+            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
+            let name = format!("{REBUILD_Z} for {file}");
+            let b = ui.add_enabled(off.is_none(), egui::Button::new(REBUILD_Z));
+            b.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
+            match off {
+                Some(why) => b.on_disabled_hover_text(why),
+                None => b.on_hover_text(
+                    "Rebuild the blue (Z) channel from red and green for this file (channels.reconstruct_z). \
+                     Only for normal maps: it replaces the file's blue channel.",
+                ),
+            }
+            .clicked()
         }
         Fix::OpenFolder(path) => button(ui, "Open folder", &path.display().to_string(), None),
         Fix::TreatAsOpenGl(_) => button(
@@ -688,7 +695,10 @@ fn fix_click(
                 ui,
                 egui::Button::new("Remove from set"),
                 Some(&name),
-                &format!("Take {file} out of this set. It goes to No set."),
+                // Note JN5: a file another set shares goes to that set, not to No set.
+                &format!(
+                    "Take {file} out of this set. It goes to No set, or to the first set that shares it."
+                ),
                 why.as_deref(),
             )
         }
@@ -937,13 +947,14 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut focus_now = None;
     // Review E4: a row `focus_row` asked for, taken on this draw: scrolled to the top of the list, so it is drawn.
     let fix_key = egui::Id::unique(FOCUS_FIX);
-    let fix_focus = ui
-        .data_mut(|d| {
-            let id = d.get_temp::<egui::Id>(fix_key);
-            d.remove::<egui::Id>(fix_key);
-            id
-        })
-        .and_then(|id| list.iter().position(|p| row_id(p) == id).map(|i| (id, i)));
+    let taken = ui.data_mut(|d| {
+        let id = d.get_temp::<egui::Id>(fix_key);
+        d.remove::<egui::Id>(fix_key);
+        id
+    });
+    let fix_focus = taken.and_then(|id| list.iter().position(|p| row_id(p) == id).map(|i| (id, i)));
+    // Final fix wave A1: a row measured for the first time that is narrower than the list.
+    let mut sizing = false;
     let mut area = egui::ScrollArea::vertical().auto_shrink([false, false]);
     if let Some((_, i)) = fix_focus {
         area = area.vertical_scroll_offset(i as f32 * row_h);
@@ -1004,8 +1015,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             let w_key = rid.with("buttons-w");
             let stored: Option<f32> = ui.data(|d| d.get_temp(w_key));
             let full = ui.available_width();
+            let gaps = 3.0 * ui.spacing().item_spacing.x;
             let width = stored.map_or(full, |b| {
-                let gaps = 3.0 * ui.spacing().item_spacing.x;
                 (lead_width(ui, p) + gaps + b + ROW_MARGIN).min(full)
             });
             let size = egui::vec2(width, ui.spacing().interact_size.y);
@@ -1118,12 +1129,26 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             if stored.is_none_or(|b| (b - buttons).abs() > 0.5) {
                 ui.data_mut(|d| d.insert_temp(w_key, buttons));
                 ui.ctx().request_repaint();
+                // Final fix wave A1: on its first measure a row that would move was drawn at the full width; that
+                // pass is not shown (below). A row at the full width already, or one whose buttons changed, is.
+                sizing |=
+                    stored.is_none() && lead_width(ui, p) + gaps + buttons + ROW_MARGIN < full;
             }
             if let Some(a) = l.or(r) {
                 act = Some(a);
             }
         }
     });
+    // Final fix wave A1: the pass that measured a new row's buttons is discarded, as egui's `Grid` does on its first
+    // measure, so the row is first shown with its buttons in place. The next pass reads the stored widths and asks
+    // for none (egui allows at most `max_passes`). The `focus_row` this pass took and removed is put back, so the kept
+    // pass reads it too (the focus request and scroll offset this pass made are in egui's memory already).
+    if sizing {
+        ui.ctx().request_discard("Problems row width");
+        if let Some(id) = taken.filter(|_| ui.ctx().will_discard()) {
+            ui.data_mut(|d| d.insert_temp(fix_key, id));
+        }
+    }
     // Kept while a row has focus, and over the frame its row leaves the list (egui drops the focus at that frame's
     // end; the next frame moves it, so ask for that frame).
     let keep = focus_now.or(last.filter(|(rid, _)| focused == Some(*rid)));
