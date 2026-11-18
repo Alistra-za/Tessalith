@@ -1,0 +1,7 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+JE2	JE		back	JQ		partial	2026-11-18		goes: nothing (JQ9's leave step clears a pbr_fuzz an explicit PBR pick wrote on a fuzz map); stays: the whole item
+Digest¶- `packing.recipe` = `auto`	Digest		back	JQ		partial	2026-11-18		goes: nothing (JQ1: a fuzz map makes auto pack _rfaos only where the set reads it as skin); stays: the whole line
+Digest¶- A skin `_f` fills the RFAOS fuzz mask	Digest		back	JQ		partial	2026-11-18		goes: nothing (JQ1: a fuzz map never makes a set Advanced skin by itself); stays: the whole line
+Digest¶- The packed suffix joins the set's suffixes	Digest		back	JQ		partial	2026-11-18		goes: nothing (JQ1: a name-read fuzz map is predicted only where the set reads it as skin); stays: the whole line
+Digest¶- Skin detection uses the recipe actually chosen	Digest		back	JQ		partial	2026-11-18		goes: nothing (JQ1: a fuzz map alone is no skin evidence); stays: the whole line
+Digest¶- `_i` suggests `diffuse`; rule 12 picks `default`	Digest		back	JQ		partial	2026-11-18		goes: nothing (JQ11: on cs a set holding an untyped fuzz map picks the PBR family at rule 12); stays: the whole line

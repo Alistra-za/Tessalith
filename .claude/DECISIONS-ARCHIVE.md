@@ -779,6 +779,9 @@ ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
 ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
 - Skin detection uses the recipe actually chosen (a forced `rmaos` with fuzz is not skin). RFAOS is offered only where buildable (roughness, glossiness or AO source); `PACK-RECIPE-UNBUILDABLE` is attached only when `auto` would not build `_rfaos`. [I1, I2, BQ13]
 
+ARCHIVED (wording before the edit; superseded in part by Note JQ, 2026-11-18)
+- `_i` suggests `diffuse`; rule 12 picks `default`, never `pbr` without a PBR map. [S-shader-6]
+
 ## Note GQ — NIF trace-debug fixes (NIF team, 2026-11-04)
 
 ARCHIVED (superseded by Note GT, 2026-11-06)
