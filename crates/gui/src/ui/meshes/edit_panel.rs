@@ -15,6 +15,9 @@ use nif::fields::Field;
 const TAB_MIN_H: f32 = 200.0;
 /// The head (path, solo, pending list) keeps at least this much height, however little room there is.
 const TOP_MIN_H: f32 = 48.0;
+/// The footer's Diff list is at most this high, and gives way to the editor's floors down to `DIFF_MIN_H`.
+const DIFF_MAX_H: f32 = 160.0;
+const DIFF_MIN_H: f32 = 40.0;
 
 const TABS: [&str; 4] = ["Shader", "Alpha", "Controllers", "Extra data"];
 
@@ -84,16 +87,31 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .map(|(_, l)| l.as_slice());
         // Meshes UI T3, review replay 109: the footer is drawn first (rule 2.1), so neither the head nor a long tab
         // pushes it away; the head and the tab list share what it leaves.
-        crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
-            .resizable(false)
-            .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
-        // Thin bars stay visible without hover, for the head's list and the tab list alike.
-        ui.spacing_mut().scroll = crate::look::thin_scroll();
         // The tab strip, the editing line and the separators are drawn after the head, so their height is last
         // frame's (28 px on the first); the head gives up its room before the tab list falls under TAB_MIN_H.
         let sp = ui.spacing().item_spacing.y;
         let tabs_h_id = ui.scope_id().with("meshes-edit-tabs-h");
         let tabs_h: f32 = ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32));
+        // The open Diff's list gives way before the editor loses its floors (a 48 px head, the tab strip, a 48 px
+        // slot list). What the footer takes besides the list is last frame's (0 before the first, and the Diff's
+        // heading row joins it one frame after the Diff opens).
+        let fixed_id = ui.scope_id().with("meshes-edit-footer-fixed");
+        let fixed: f32 = ui.data_mut(|d| *d.get_temp_mut_or(fixed_id, 0.0f32));
+        let floors = TOP_MIN_H + sp + tabs_h + TOP_MIN_H;
+        // shortcut: below about 300 px of panel height the floors and DIFF_MIN_H do not fit together and the panel
+        // clips (1280x720 with Review open leaves 323); upgrade when a window that small must work.
+        let list_cap = (ui.available_height() - floors - fixed).clamp(DIFF_MIN_H, DIFF_MAX_H);
+        let footer = crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
+            .resizable(false)
+            .show(ui, |ui| {
+                export_block(ui, e, foreign, diff, list_cap, &mut act)
+            });
+        ui.data_mut(|d| {
+            *d.get_temp_mut_or(fixed_id, 0.0f32) =
+                (footer.response.rect.height() - footer.inner).max(0.0);
+        });
+        // Thin bars stay visible without hover, for the head's list and the tab list alike.
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
         // The spacing the head's scroll area leaves below itself is the head's too.
         let top_cap = (ui.available_height() - TAB_MIN_H - tabs_h - sp).max(TOP_MIN_H);
         let head_y = ui.cursor().min.y;
@@ -298,14 +316,16 @@ fn op_row(ui: &mut egui::Ui, e: &NifEdit, i: usize, label: &str, failed: bool, a
 
 /// The export footer (spec §8, Meshes UI T3): a status line (Ready, or Blocked and why), what is written where, then
 /// Review… (Note GD2). A read-only session shows its reason here too. `foreign`: a file Tessalith did not write is at
-/// the export path (Diff… shows it); `diff`: the open Diff view's lines (Note GD18).
+/// the export path (Diff… shows it); `diff`: the open Diff view's lines (Note GD18), whose list is at most `list_cap`
+/// high. Returns the height the Diff list took (0 with no Diff open).
 fn export_block(
     ui: &mut egui::Ui,
     e: &NifEdit,
     foreign: bool,
     diff: Option<&[String]>,
+    list_cap: f32,
     act: &mut Act,
-) {
+) -> f32 {
     ui.add_space(4.0);
     let red = e.doc.has_conflicts();
     egui::Sides::new().shrink_left().truncate().show(
@@ -362,6 +382,7 @@ fn export_block(
             }
         },
     );
+    let mut list_h = 0.0;
     if let Some(lines) = diff {
         ui.horizontal(|ui| {
             ui.strong("The file on disk against the export");
@@ -372,9 +393,10 @@ fn export_block(
             }
         });
         // shortcut: the lines are read at the click and go stale after a later edit; Diff… again reads them anew.
+        let list_y = ui.cursor().min.y;
         egui::ScrollArea::vertical()
             .id_salt("meshes-edit-diff")
-            .max_height(160.0)
+            .max_height(list_cap)
             .show(ui, |ui| {
                 for l in lines {
                     let r = ui.add(egui::Label::new(egui::RichText::new(l).monospace()).truncate());
@@ -387,6 +409,7 @@ fn export_block(
                     });
                 }
             });
+        list_h = ui.cursor().min.y - list_y - ui.spacing().item_spacing.y;
     }
     if !e.edit_mod.as_os_str().is_empty() {
         // The real destination (Note CI29), cut in the middle like the header's Export to; the full path on hover and
@@ -410,6 +433,7 @@ fn export_block(
     if r.clicked() {
         act.review = true;
     }
+    list_h
 }
 
 /// The sentence the Writes line's hover and accessible name carry after the line itself.

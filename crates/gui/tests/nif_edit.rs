@@ -11688,6 +11688,53 @@ fn a_horizontal_bar_stays_above_the_footer_at_1280x720() {
     assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "outer rect {r:?}");
 }
 
+/// Fix round 1, Important 3: an open Diff (a 160 px list) at 1280x720 with Review open would push the tab strip and
+/// the slot list into the footer; its list gives way instead, down to 40 px, and the editor keeps its floors.
+#[test]
+fn an_open_diff_gives_way_before_the_editor_loses_its_floors_at_1280x720() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, mut h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
+    let path = h.state().meshes.edit.as_ref().unwrap().data_path.clone();
+    let lines: Vec<String> = (0..20).map(|i| format!("block {i}: changed")).collect();
+    h.state_mut().meshes.nif_diff_view = Some((path, lines));
+    h.run_steps(8);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    assert!(
+        r.top.max.y <= r.tab_area.min.y + 0.5,
+        "head over the slot list: {r:?}"
+    );
+    assert!(
+        r.tab_area.max.y <= r.footer.min.y + 0.5,
+        "slot list under the footer: {r:?}"
+    );
+    assert!(r.tab_area.height() >= 48.0 - 0.5, "slot list {r:?}");
+    for tab in [
+        "Shader tab",
+        "Alpha tab",
+        "Controllers tab",
+        "Extra data tab",
+    ] {
+        let b = h.get_by_label(tab).rect();
+        assert!(b.max.y <= r.footer.min.y + 0.5, "{tab} {b:?} under {r:?}");
+        assert!(
+            b.min.y >= r.top.max.y - 0.5,
+            "{tab} {b:?} inside the head {r:?}"
+        );
+    }
+    // The Diff list scrolls in its own bar: 40 to 160 px, strictly under its 160 px cap here.
+    let bars: Vec<_> = h
+        .query_all_by_role(AkRole::ScrollBar)
+        .map(|n| n.rect())
+        .filter(|b| b.height() > b.width() && r.footer.contains_rect(b.shrink(0.5)))
+        .collect();
+    assert_eq!(bars.len(), 1, "the Diff list's bar: {bars:?} in {r:?}");
+    let list = bars[0].height();
+    assert!(
+        (40.0 - 0.5..160.0 - 0.5).contains(&list),
+        "Diff list {list} px"
+    );
+}
+
 /// Fix round 1: after one pass of a first frame (the cached tab height still its first-frame 28 px) no part of the
 /// editor reaches below the footer's top, and the head is over the slot list, not on it.
 #[test]
