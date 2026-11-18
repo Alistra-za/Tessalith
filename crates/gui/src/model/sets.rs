@@ -3684,7 +3684,23 @@ impl AppModel {
             && self
                 .view_of(set)
                 .is_some_and(|v| v.members.iter().any(|k| is_fuzz_member(k)));
-        let pbr_back = pbr_member_type(back, true).filter(|_| pbr_step);
+        // Only a value Tessalith recorded is mapped (re-review t6-r1 N1). DU7's `was` counts as recorded when it is
+        // non-empty, the recorder is on (`auto_pick` gives a value), and `was` is what the recorder writes on a colour
+        // member: the current pick itself, or `diffuse`/`pbr_albedo` while the current plan suggests `skin_albedo`
+        // (the suggestion an explicit Advanced Skin puts on the diffuse). A hand-written value equal to the
+        // recorder's is the recorder's (DU8). Under accept off DU7 restores the user's value or clears it, and the
+        // engine infers `pbr_albedo` from the written `pbr_fuzz`.
+        // The `skin_albedo` ↔ `diffuse`/`pbr_albedo` pair is the colour-member arm of the engine's `suggest.rs`
+        // (`Some("d") | None`: skin set, PBR set, else); change it here if that arm changes.
+        // shortcut: under High, a hand-written `diffuse` on a diffuse the recorder would have typed `pbr_albedo`
+        // before the skin pick is treated as recorded and mapped; upgrade when DU6 stores whether the value it
+        // replaced was untouched.
+        let picked = self.auto_pick(&item, None);
+        let recorded = !was.is_empty()
+            && (picked == Some(back)
+                || (picked == Some(Subtype::SkinAlbedo)
+                    && matches!(back, Subtype::Diffuse | Subtype::PbrAlbedo)));
+        let pbr_back = pbr_member_type(back, true).filter(|_| pbr_step && recorded);
         // Note DU6-DU7: the shader and the diffuse's sub-type (with Note DQ's recipe follow) are one step.
         self.batch_edit("Shader", |m| {
             m.edit_docs("Shader", None, true, pick);
@@ -3780,9 +3796,10 @@ impl AppModel {
         let held_type =
             |k: &String| held(k).and_then(|v| serde_json::from_value::<Subtype>(v).ok());
         let pbr_fuzz = serde_json::json!(Subtype::PbrFuzz);
-        // Leaving the pick reverts only in a set this step wrote: a listed member holding a value only it lists (the
-        // fuzz map's `pbr_fuzz`, the Diffuse-slot member's `pbr_albedo`; `pbr_follow` lists neither), so it still
-        // runs after the fuzz map left the set, and never in a set where only `pbr_follow` switched members.
+        // Leaving the pick reverts in a set holding a fuzz map, or one this step wrote: a listed member holding a value
+        // only it lists (the fuzz map's `pbr_fuzz`, the Diffuse-slot member's `pbr_albedo`; `pbr_follow` lists
+        // neither), so it still runs after the fuzz map left the set. A set with neither, where only `pbr_follow`
+        // switched members, is left to `pbr_follow`.
         let step_wrote = v.members.iter().any(|k| {
             auto_pbr.contains(k)
                 && held_type(k).is_some_and(|st| {
@@ -3790,7 +3807,9 @@ impl AppModel {
                         || (st == Subtype::PbrAlbedo && diffuse_slot(k))
                 })
         });
-        let leaves_pbr = step_wrote
+        // `has_fuzz` too (re-review t6-r1 N2): a pick that wrote only `pbr_normal`/`pbr_emissive` (diffuse pinned or
+        // borrowed, fuzz map kept or hand-roled) lists no such value, while the set still holds its fuzz map.
+        let leaves_pbr = (has_fuzz || step_wrote)
             && chosen
             && now.is_some_and(Shader::is_pbr_family)
             && !shader.is_some_and(Shader::is_pbr_family);
