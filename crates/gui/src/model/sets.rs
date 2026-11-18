@@ -842,6 +842,16 @@ fn pbr_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
     }
 }
 
+/// Fuzz-9: member `key` is a fuzz map by its file name (`_fuzz`, `_sheen`).
+fn is_fuzz_member(key: &str) -> bool {
+    engine::group::is_fuzz_stem(
+        &Path::new(key)
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy(),
+    )
+}
+
 /// Note JH1: the path texture `item` is read as: its `[inputs]` alias when the plan applied it (the job's game path
 /// ends with it, as `input_name_plan` checks), else its key. A refused alias (IN-ALIAS-INVALID) leaves the key.
 fn read_name(m: &AppModel, item: &TextureItem) -> String {
@@ -3663,18 +3673,26 @@ impl AppModel {
         } else {
             was
         };
+        // The sub-type written before (DQ3 takes the packed output back to `_rmaos`); none was written: the explicit
+        // `diffuse` moves the recipe back, then goes, so the sub-type is inferred again. Fuzz-9 (review t6 I1): under
+        // an explicit PBR-family pick in a set holding a fuzz map, a `diffuse` (written or none) is the step's
+        // `pbr_albedo` instead, listed in `auto_pbr` so leaving PBR reverts it.
+        let back: Subtype =
+            serde_json::from_value(serde_json::json!(was)).unwrap_or(Subtype::Diffuse);
+        let pbr_step = !on
+            && shader.is_some_and(Shader::is_pbr_family)
+            && self
+                .view_of(set)
+                .is_some_and(|v| v.members.iter().any(|k| is_fuzz_member(k)));
+        let pbr_back = pbr_member_type(back, true).filter(|_| pbr_step);
         // Note DU6-DU7: the shader and the diffuse's sub-type (with Note DQ's recipe follow) are one step.
         self.batch_edit("Shader", |m| {
             m.edit_docs("Shader", None, true, pick);
             if on {
                 m.edit_subtype("Shader", &item, Some(Subtype::SkinAlbedo));
             } else {
-                // The sub-type written before (DQ3 takes the packed output back to `_rmaos`); none was written: the
-                // explicit `diffuse` moves the recipe back, then goes, so the sub-type is inferred again.
-                let back =
-                    serde_json::from_value(serde_json::json!(was)).unwrap_or(Subtype::Diffuse);
-                m.edit_subtype("Shader", &item, Some(back));
-                if was.is_empty() {
+                m.edit_subtype("Shader", &item, Some(pbr_back.unwrap_or(back)));
+                if was.is_empty() && pbr_back.is_none() {
                     m.edit_docs("Shader", None, true, |p, _| {
                         p.clear_file_value(&item, "subtype")
                     });
@@ -3688,6 +3706,12 @@ impl AppModel {
                     skin.remove(&item);
                 }
                 s.set_auto_skin(&skin);
+                // After `edit_subtype_alone` took the key off the list (it reads every edit as the user's).
+                let mut auto = s.auto_pbr();
+                if pbr_back.is_some() && !auto.contains(&item) {
+                    auto.push(item.clone());
+                    s.set_auto_pbr(&auto);
+                }
             });
         });
     }
@@ -3735,7 +3759,7 @@ impl AppModel {
                 .to_string_lossy()
                 .into_owned()
         };
-        let fuzz_map = |k: &String| engine::group::is_fuzz_stem(&stem(k));
+        let fuzz_map = |k: &String| is_fuzz_member(k);
         // Fuzz-9: only a set holding a fuzz map takes the PBR step; one with its own `_f` keeps the fuzz map
         // untyped (Fuzz-4 lists it unused).
         let has_fuzz = v.members.iter().any(fuzz_map);
@@ -3746,10 +3770,6 @@ impl AppModel {
                 == Some("f")
         });
         let pbr_pick = has_fuzz && shader.is_some_and(Shader::is_pbr_family);
-        let leaves_pbr = has_fuzz
-            && chosen
-            && now.is_some_and(Shader::is_pbr_family)
-            && !shader.is_some_and(Shader::is_pbr_family);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -3759,6 +3779,23 @@ impl AppModel {
         let held_type =
             |k: &String| held(k).and_then(|v| serde_json::from_value::<Subtype>(v).ok());
         let pbr_fuzz = serde_json::json!(Subtype::PbrFuzz);
+        // Leaving the pick reverts only in a set this step wrote: a listed member holding a value only it lists (the
+        // fuzz map's `pbr_fuzz`, the Diffuse-slot member's `pbr_albedo`; `pbr_follow` lists neither), so it still
+        // runs after the fuzz map left the set, and never in a set where only `pbr_follow` switched members.
+        let step_wrote = v.members.iter().any(|k| {
+            auto_pbr.contains(k)
+                && held_type(k).is_some_and(|st| {
+                    (st == Subtype::PbrFuzz && fuzz_map(k))
+                        || (st == Subtype::PbrAlbedo && diffuse_slot(k))
+                })
+        });
+        let leaves_pbr = step_wrote
+            && chosen
+            && now.is_some_and(Shader::is_pbr_family)
+            && !shader.is_some_and(Shader::is_pbr_family);
+        // Ruling R1: a member in a locked slot keeps its type (the pin guards its encoding), as in `pbr_follow` and
+        // DW1.
+        let locked = locked_items(self);
         v.members
             .iter()
             .filter_map(|k| {
@@ -3766,6 +3803,7 @@ impl AppModel {
                 // the PBR fuzz texture. Fuzz-28: not a kept DDS, whose bytes a type cannot change.
                 if pbr_pick
                     && !has_f
+                    && !locked.contains_key(k)
                     && fuzz_map(k)
                     && held(k).is_none()
                     && self
@@ -3802,7 +3840,7 @@ impl AppModel {
                 // Fuzz-9, Fuzz-27: `member_subtype` maps no `diffuse`, `normal` or `glow` under a PBR-family shader,
                 // so the untouched members take their PBR counterpart here (an untouched `normal` bypasses B3's
                 // Use PBR normal: the pick is the user's act, and leaving it reverts the type).
-                if pbr_pick {
+                if pbr_pick && !locked.contains_key(k) {
                     if let Some(st) =
                         held_type(k).and_then(|st| pbr_member_type(st, diffuse_slot(k)))
                     {

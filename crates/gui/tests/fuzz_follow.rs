@@ -479,7 +479,8 @@ fn an_explicit_pbr_pick_writes_no_pbr_fuzz_on_a_hand_role() {
 }
 
 /// Fuzz-9: leaving PBR clears only a value still equal to the step's write. One changed in `sdc.toml` by hand (the
-/// key is still in `auto_pbr`, as no GUI edit dropped it) stays.
+/// key is still in `auto_pbr`, as no GUI edit dropped it) stays. Under High, so the diffuse's `pbr_albedo` keeps the
+/// leave step open (fix round 1: it runs only in a set the step wrote).
 #[test]
 fn leaving_pbr_keeps_a_fuzz_type_changed_outside_the_gui() {
     let d = tempfile::tempdir().unwrap();
@@ -487,22 +488,211 @@ fn leaving_pbr_keeps_a_fuzz_type_changed_outside_the_gui() {
         d.path(),
         &["rock01_g.png", "rock01_fuzz.png"],
         "",
-        AcceptSuggestions::None,
+        AcceptSuggestions::High,
     );
     m.set_shader("m/rock01", Some(Shader::Pbr));
     idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
     m.save().unwrap();
-    std::fs::write(
-        d.path().join("sdc.toml"),
-        "[files.\"m/rock01_fuzz.png\"]\nsubtype = \"generic_data\"\n",
-    )
-    .unwrap();
+    let path = d.path().join("sdc.toml");
+    let text = std::fs::read_to_string(&path).unwrap();
+    let edited = text.replacen("\"pbr_fuzz\"", "\"generic_data\"", 1);
+    assert_ne!(edited, text);
+    std::fs::write(&path, edited).unwrap();
     m.reload_documents();
     idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), Some(json!("generic_data")));
     assert!(auto_pbr(&m).contains(FUZZ));
     m.set_shader("m/rock01", None);
     idle(&mut m);
     assert_eq!(subtype(&m, FUZZ), Some(json!("generic_data")));
+    assert_ne!(
+        subtype(&m, DIFFUSE),
+        Some(json!("pbr_albedo")),
+        "the step's own value still goes"
+    );
+}
+
+/// The engine's plan of `key` in the GUI (`None` without a job).
+fn gui_subtype(m: &AppModel, key: &str) -> Option<Subtype> {
+    m.item(key)
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.profile.subtype)
+}
+
+/// The saved-text plan's sub-type for the unpacked job of `file`.
+fn cli_subtype(p: &engine::api::Plan, file: &str) -> Option<Subtype> {
+    p.jobs
+        .iter()
+        .find(|j| j.pack.is_none() && j.input.ends_with(file))
+        .map(|j| j.profile.subtype)
+}
+
+/// Fuzz-9 with DU7 (review t6 I1): Advanced Skin then PBR under High. Leaving Advanced Skin writes back the recorded
+/// `diffuse`; the explicit PBR pick maps it to `pbr_albedo` as the step's own, so the GUI and `sdc convert` plan
+/// an albedo, and back on Auto it goes.
+#[test]
+fn advanced_skin_then_pbr_gives_the_diffuse_pbr_albedo() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("skin_albedo")));
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert!(auto_pbr(&m).contains(DIFFUSE));
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::PbrAlbedo));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::PbrAlbedo));
+    m.set_shader("m/rock01", None);
+    idle(&mut m);
+    assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+    assert!(!auto_pbr(&m).contains(DIFFUSE));
+}
+
+/// Review t6 I2: the step's values are reverted on leaving PBR after the fuzz map left the set (Auto), and an
+/// explicit Glow then plans no PBR from the saved text.
+#[test]
+fn leaving_pbr_after_the_fuzz_map_left_reverts_the_step() {
+    for leave in [None, Some(Shader::Glow)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(
+            d.path(),
+            &["rock01_g.png", "rock01_fuzz.png"],
+            "",
+            AcceptSuggestions::High,
+        );
+        m.set_shader("m/rock01", Some(Shader::Pbr));
+        idle(&mut m);
+        assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+        m.remove_member("m/rock01", FUZZ).unwrap();
+        idle(&mut m);
+        assert!(!set_view(&m).members.iter().any(|k| k == FUZZ));
+        m.set_shader("m/rock01", leave);
+        idle(&mut m);
+        assert_ne!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")), "{leave:?}");
+        assert_ne!(
+            subtype(&m, "m/rock01_g.png"),
+            Some(json!("pbr_emissive")),
+            "{leave:?}"
+        );
+        assert!(!auto_pbr(&m).contains(DIFFUSE), "{leave:?}");
+        if leave.is_some() {
+            m.save().unwrap();
+            let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+            assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::Diffuse));
+            assert_eq!(cli_subtype(&p, "rock01_g.png"), Some(Subtype::Glow));
+        }
+    }
+}
+
+/// Ruling R1 (review t6): a member in a locked slot keeps its type under the explicit PBR pick (as DW1 and
+/// `pbr_follow` leave it); the unpinned members still take theirs.
+#[test]
+fn an_explicit_pbr_pick_leaves_a_pinned_diffuse_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    m.set_slot_lock("m/rock01", 1, true).unwrap();
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("diffuse")));
+    assert!(!auto_pbr(&m).contains(DIFFUSE));
+    assert_eq!(subtype(&m, "m/rock01_g.png"), Some(json!("pbr_emissive")));
+    assert_eq!(subtype(&m, FUZZ), Some(json!("pbr_fuzz")));
+    m.save().unwrap();
+    let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+    // The pinned `diffuse` is the user's choice (as DW1 has it for skin): both sides plan it `diffuse`.
+    assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::Diffuse));
+    assert_eq!(cli_subtype(&p, "rock01.png"), Some(Subtype::Diffuse));
+    assert_eq!(cli_subtype(&p, "rock01_fuzz.png"), Some(Subtype::PbrFuzz));
+}
+
+/// Review t6 V1 (measured): an explicit Advanced Skin on a set with a `_g`, a fuzz map and no raw maps, directly or
+/// after PBR, and with no fuzz map. The GUI and the saved text agree: shader Advanced Skin (the GUI by the pick, the
+/// CLI by the written `skin_albedo`), diffuse `skin_albedo`, no packed output, and the fuzz map a waiting packing
+/// input that is not converted (the GUI shows it skipped: nothing to pack).
+#[test]
+fn an_explicit_advanced_skin_without_raw_maps_plans_the_same_in_gui_and_cli() {
+    use engine::policy::JobStatus;
+    for (files, accept, via_pbr) in [
+        (
+            &["rock01_g.png", "rock01_fuzz.png"][..],
+            AcceptSuggestions::None,
+            false,
+        ),
+        (
+            &["rock01_g.png", "rock01_fuzz.png"][..],
+            AcceptSuggestions::High,
+            true,
+        ),
+        (&["rock01_g.png"][..], AcceptSuggestions::None, false),
+    ] {
+        let row = format!("{files:?} {accept:?} via PBR {via_pbr}");
+        let d = tempfile::tempdir().unwrap();
+        let mut m = open_with(d.path(), files, "", accept);
+        if via_pbr {
+            m.set_shader("m/rock01", Some(Shader::Pbr));
+            idle(&mut m);
+        }
+        m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+        idle(&mut m);
+        m.save().unwrap();
+        let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+        // Shader.
+        assert_eq!(
+            set_view(&m).shader.map(|s| s.shader),
+            Some(Shader::AdvancedSkin),
+            "{row}"
+        );
+        assert!(
+            p.shaders.values().all(|s| s.shader == Shader::AdvancedSkin),
+            "{row}: {:?}",
+            p.shaders
+        );
+        // Diffuse.
+        assert_eq!(gui_subtype(&m, DIFFUSE), Some(Subtype::SkinAlbedo), "{row}");
+        assert_eq!(
+            cli_subtype(&p, "rock01.png"),
+            Some(Subtype::SkinAlbedo),
+            "{row}"
+        );
+        // Packed outputs: none on either side.
+        assert!(m.item(RFAOS).is_none() && m.item(RMAOS).is_none(), "{row}");
+        assert!(p.jobs.iter().all(|j| j.pack.is_none()), "{row}");
+        // The fuzz map: never converted.
+        if files.contains(&"rock01_fuzz.png") {
+            let it = m.item(FUZZ).unwrap();
+            assert!(it.job.is_none(), "{row}");
+            assert!(
+                format!("{:?}", it.status).contains("nothing to pack"),
+                "{row}: {:?}",
+                it.status
+            );
+            let j = p
+                .jobs
+                .iter()
+                .find(|j| j.input.ends_with("rock01_fuzz.png"))
+                .unwrap();
+            assert!(
+                matches!(j.status, JobStatus::PackingInput { .. }),
+                "{row}: {:?}",
+                j.status
+            );
+        }
+    }
 }
 
 /// Fuzz-9 with DU6-DU7: from an explicit PBR pick to Advanced Skin, the diffuse the step typed `pbr_albedo` is
