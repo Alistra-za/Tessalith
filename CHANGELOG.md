@@ -73,7 +73,7 @@
 - Sets gain groups, partial exports, shared helpers, a *no set* state and mapping to texture set records.
 - Advanced skin sets write a `.csskin.json` on every export, and the 3D preview has Community Shaders 1.9.0 built in.
 - Removed: panorama, ball and photo cubemap sources, RNM normal layers, **Generate from normal map** and the GUI's UV checker.
-- The engine is GPL-3.0-or-later, every export has the `textures` folder, and a lone file with no known suffix waits for a type.
+- The engine is GPL-3.0-or-later, every export has the `textures` folder, and a lone file with an underscore and no known suffix waits for a type.
 
 ### Engine
 - Cubemaps are made from six faces, a cross, a strip or a cube DDS. Panorama (`equirect`), `mirror_ball`, `angular` and single-photo (`photo`) sources, `cubemap.ground_fill` and `cubemap.horizon` are removed, with the GUI's Set layout menu and Ground group. A project or preset that names one is refused with "removed in 3.0" and a hint. Convert a panorama, ball or photo to six faces, a cross or a strip first. A square or 2:1 image typed as a cube is Unresolved with "not a cube source"; change its sub-type. A cube's lower half is the source's own pixels.
@@ -90,7 +90,7 @@
 - A set of only `_n`, `_sk` and `_wet` maps with the Advanced Skin shader is a shared skin set: its maps are skin maps and it warns of no missing diffuse or `_rfaos`. Its `_wet` and `_detail_n` join it; for every other set the join still follows the set's maps, not its chosen shader.
 - An explicit `alpha.policy = "remove"` on a colour map whose alpha varies is opaque colour to the preset's rules, as a mesh `remove` is: under cs-compact it is BC1, not BC7.
 - A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Under `if-changed`, every diffuse, PBR albedo, UI/sky and skin albedo output is written again once; only resized cutouts change.
-- A helper shared into another set, or joined under a hand-set role, gives that set's packed output its own card and `[files]` key (`x_rmaos`), no longer `CFG-FILE-UNMATCHED`, and an output name or texture-set record on that set puts it in the set's own folder; settings under the old key are not moved.
+- A helper shared into another set, or joined under a hand-set role, gives that set's packed output its own card and `[files]` key (`x_rmaos`), so fills and recipes set on it reach it and a `[files]` entry on it is no longer `CFG-FILE-UNMATCHED`, and an output name or texture-set record on that set puts it in the set's own folder; settings under the old key are not moved.
 - An `_rmaos`, `_rfaos` or complex `_m` of another shape or a non-power-of-two size than its `_n` gets the variance bake instead of `SET-BAKE-RATIO`; a member with one mip level is not baked.
 - A renamed PGPatcher set can have more than one match or a path contains again: its entry then keeps its matches and names the renamed files in slot commands instead of writing `rename`; a set with one match writes `match_diffuse` + `rename` as before. The "not written" markers are gone.
 - PGPatcher JSON: every PBR set gets its entry, also with no PBR albedo, no mesh or no record; with no albedo the mesh keeps its own diffuse.
@@ -122,8 +122,8 @@
   - the set editor (**Stop sharing**), the helper panel (**Shared with**) and the **Source** picker list shared helpers; one only another set uses reads `used by <set>`;
   - the line is `share` in the set's `sdc-project.toml` entry. See docs/wiki/GUI-Set-Editor.md#shared-helpers.
 - A set can be mapped to a texture set record:
-  - **Map to target…** opens a picker over a read-only target mod's records, mesh paths and texture file bases, with **Change mapping…** and **Remove mapping** once mapped;
-  - the card shows `Record: EDID (0x814, plugin)`, and after a scan a changed record raises a Problems row with **Use new paths**;
+  - **Map to target…** opens a picker over a read-only target mod's records, mesh paths and texture file bases (the scan's winning records when no target mod is set), with **Change mapping…** and **Remove mapping** once mapped;
+  - the card shows `Record: EDID (0x814, plugin)`, a slot the record supplies reads "From record: file", and after a scan a changed record raises a Problems row with **Use new paths**;
   - a mapped set writes each file in a slot the record names to the record's path, the `.csskin.json` follows the diffuse, and other files keep theirs;
   - the mapping is `[sets.txst]` in `sdc-project.toml`;
   - an empty slot borrows from the set that writes the record's path (one `_n` written), or counts as supplied when no set writes it;
@@ -229,7 +229,7 @@
 - New sub-type `gray` in the type picker's Grayscale maps group: a plain grey map written as BC4 (the default) or R8, that you pick on the file.
 - Krita and OpenRaster files (`.kra`, `.ora`) are not read: they are reported as `IN-DECODE`. Export the image as PNG from the editor.
 - Mip filter: Tent is allowed on `cutout`, `blend` and `cutout_blend` colour and weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge; alpha stays the area-exact box. Box is the default and its output does not change; a texture that set `mips.filter = "tent"` on such colour used box in 1.x and now writes the tent.
-- Packed, derived and alpha-fill sources of different sizes but one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`); another ratio still fails (`PACK-SIZE-MISMATCH`). No existing output changes.
+- Packed, derived and alpha-fill sources of different sizes but one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`) instead of refused; another ratio still fails (`PACK-SIZE-MISMATCH`). No existing output changes.
 - `vanilla-quality` (and `vanilla-compact`, which inherits it) encodes `diffuse` and `glow` perceptually in BC1, BC3 and BC7, so those outputs re-encode once; where the alpha is `data` the preset's value drops out instead of raising `FMT-PERCEPTUAL-DATA`. `cs-quality`, `cs-compact` and `fast-preview` are unchanged. `VAL-MIP-ERROR` scores a perceptual BC1, BC3 or BC7 texture by Rec.709 luma PSNR, and `sdc presets show` and the preset editor show a BC6H texture's effective effort.
 
 ### GUI
@@ -327,7 +327,7 @@
   - The GUI loses the Review checkbox **Also write a zip of each folder** and the Problems row **Reset also.json**.
   - An Also export keeps no `_sdc/also.json`; one a 1.x export left is never read, rewritten or deleted. Files an earlier export left in the three folders are still listed in the export notes as "not written by this export".
   - After an Also export the command line prints those files, and the PBR sets left out of Vanilla and CM, as plain lines on stderr.
-- `encoder.perceptual` also applies to BC1 and BC3 colour (Rec.709 luma); it stays off by default, and the GUI shows a **Perceptual** tick for BC1 and BC3.
+- `encoder.perceptual` also applies to BC1 and BC3 colour (Rec.709 luma); it stays off by default and `FMT-PERCEPTUAL-DATA` still refuses it on data maps. The GUI shows a **Perceptual** tick in Compression for BC1 and BC3, and the preset editor one for BC1, BC3 and BC7.
 - New setting `resize_relative_to` (GUI: **Relative to**, next to Resize): `slot1` to `slot8` measure `resize` from the source size of the set's map in that texture-set slot instead of the texture's own size, and never enlarge. `cs-compact` and `vanilla-compact` use `slot1` for every map but the diffuse, so a normal or mask already exported smaller than its diffuse is no longer halved again. A map whose set has none or several maps in that slot is resized from its own size and gets the info code `RESIZE-NO-REFERENCE`.
 - Automatic decisions (the ones Tessalith makes without asking) are recorded in `sdc.toml`, so the GUI and CLI agree on them.
 - The **Value range** and **Plastic look** artist checks are removed (`CHK-RANGE`, `CHK-PLASTIC`), with the preview's **Range** overlay and their two switches in Advanced → Checks. An allow list naming either code is an error that says so, and an old `[checks]` line for either in `gui.toml` is ignored.
