@@ -98,8 +98,9 @@ pub struct TextureItem {
 }
 
 impl TextureItem {
-    /// A DDS input kept as it is: no job, so it is copied and never encoded again (Note FI3). A DDS with
-    /// `reencode = true` has a job and is encoded like any source image.
+    /// A DDS input kept as it is, copied and never encoded again (Note FI3). `ItemKind::Dds` is only built for a
+    /// skipped DDS, which has no job; a DDS encoded again (`reencode = true`) is an `Image` item with a job. The job
+    /// test states the rule and does not change the answer today.
     pub fn kept_dds(&self) -> bool {
         self.kind == ItemKind::Dds && self.job.is_none()
     }

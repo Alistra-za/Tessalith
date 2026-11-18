@@ -1571,8 +1571,9 @@ impl Scope {
     }
 }
 
-/// The view `s` names: the set with that key, else the key-less set with that id, else the set with that id, so a
-/// filter opened on a key-less set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
+/// The view `s` names: the set with that key, else the key-less set with that id, else the set whose id matches it by
+/// fold (Note BF: a keyed set's id is folded, a key-less one keeps its typed case), so a filter opened on a key-less
+/// set follows it once it has a key (Note JP5). The key wins. `None` for the empty string.
 fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
     if s.is_empty() {
         return None;
@@ -1581,7 +1582,7 @@ fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView>
         .iter()
         .find(|v| v.key == s)
         .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
-        .or_else(|| views.iter().find(|v| v.id == s))
+        .or_else(|| views.iter().find(|v| engine::sets::same_id(&v.id, s)))
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.

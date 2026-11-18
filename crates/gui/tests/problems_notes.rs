@@ -5161,6 +5161,67 @@ fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
     );
 }
 
+/// Re-review F1 (Note JP5, BF): a key-less set's id keeps the case it was typed in, while a keyed set's id is folded,
+/// so the filter finds the set by its id compared by fold once a file lands in it and it has a key.
+#[test]
+fn a_key_less_sets_filter_follows_a_mixed_case_id() {
+    use sdc_gui::model::bottom::{filtered, scope_key, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("landscape/one.txt"), "notes").unwrap();
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("Landscape/Big");
+        s.add_member("Landscape/Big", "landscape/one.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let same = |v: &sdc_gui::model::sets::SetView| v.id.eq_ignore_ascii_case("landscape/big");
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(same)
+        .expect("the created set has a card");
+    assert!(
+        v.key.is_empty() && v.id == "Landscape/Big",
+        "precondition: a key-less set with its typed id: {v:?}"
+    );
+    let f = ProblemsFilter::Set(scope_key(&v).to_string());
+    m.open_problems(Some(f.clone()));
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.add_member("Landscape/Big", "landscape/one.png")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(same)
+        .expect("the set still has a card");
+    assert!(
+        !v.key.is_empty(),
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert_eq!(
+        m.bottom.filter,
+        Some(f.clone()),
+        "nothing resets the filter"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_key = filtered(&m, Some(&ProblemsFilter::Set(v.key.clone())));
+    assert_eq!(
+        rows.len(),
+        by_key.len(),
+        "the rows of a filter by its key: {texts:?}"
+    );
+    assert_eq!(*rows, *by_key);
+    assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
+}
+
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
 /// has a key: it lists the keyed set's rows (the same rows as a filter by its key), never another set's, and its chip
 /// names the set.
