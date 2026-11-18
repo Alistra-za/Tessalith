@@ -740,7 +740,8 @@ pub fn chosen_skin(ctx: &ResolveCtx, set: &TextureSet) -> bool {
 /// and base the packed output's `[files]` key is read from).
 ///
 /// `set.suffixes` also holds the suffixes `auto` predicts from the raw roles (DECISIONS Note M7), so an `rfaos` in
-/// it counts as a real `_rfaos` member only when `auto` does not predict it (final review I1).
+/// it counts as a real `_rfaos` member only when `auto` does not predict it from the roles other than a fuzz map's
+/// (final review I1; a fuzz map's prediction follows this answer, `api::predict_suffixes`).
 pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> bool {
     if ctx.target != Target::Cs {
         return false;
@@ -782,19 +783,20 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     {
         return true;
     }
+    // Fuzz-1: a fuzz map takes no part in either test below. `predict_suffixes` predicts an `rfaos` from a name-read
+    // fuzz map only when the set already reads it as the skin mask, so the prediction check needs no fuzz role, and a
+    // real `_rfaos` beside a fuzz map stays evidence; in the recipe test `auto` with a fuzz map alone builds `_rmaos`.
     let roles: BTreeSet<RawMap> = RawMap::INPUTS
         .into_iter()
-        .filter(|r| set.suffixes.contains(&r.id()))
+        .filter(|&r| r != RawMap::Fuzz && set.suffixes.contains(&r.id()))
         .collect();
     if set.suffixes.contains("rfaos")
         && !super::predicted_suffixes(ctx.target, false, &roles).contains(&"rfaos")
     {
         return true;
     }
-    // Fuzz-1: the fuzz map takes no part in the recipe test, so `auto` with it alone builds `_rmaos`.
     let raw: Vec<RawInput> = roles
         .iter()
-        .filter(|&&role| role != RawMap::Fuzz)
         .map(|&role| RawInput {
             path: PathBuf::from(format!("{}.{}", set.key, role.id())),
             role,

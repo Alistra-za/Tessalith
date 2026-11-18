@@ -297,6 +297,95 @@ fn two_fuzz_maps_in_a_pbr_set_clash_once() {
     assert!(dup, "{:?}", p.skipped);
 }
 
+/// Fuzz-1 (fix round 1): a real `_rfaos` image is skin evidence beside a fuzz map, as without one: the set is
+/// Advanced Skin, its diffuse `skin_albedo`, and the fuzz map the skin mask (no `pbr_fuzz`, no `_f.dds`). Which data
+/// wins is unchanged (`pack::plan::plan_packing`, `packing.prefer = prepacked`): the pre-packed `_rfaos` wins over the
+/// raw maps it would be built from, so it carries PACK-CONFLICT, the roughness and fuzz maps PACK-UNUSED-INPUT, and
+/// nothing is packed (no `_rmaos` beside it). Both terms.
+#[test]
+fn a_real_rfaos_beside_a_fuzz_map_keeps_the_set_skin() {
+    for term in ["fuzz", "sheen"] {
+        let fuzz = format!("rock01_{term}.png");
+        let d = fixture(
+            &[
+                "rock01.png",
+                "rock01_rfaos.png",
+                "rock01_roughness.png",
+                &fuzz,
+            ],
+            "",
+        );
+        let p = plan(&d);
+        assert_eq!(shader(&p), Shader::AdvancedSkin, "{term}");
+        assert_eq!(
+            job(&p, "rock01.png").profile.subtype,
+            Subtype::SkinAlbedo,
+            "{term}"
+        );
+        let f = job(&p, &fuzz);
+        assert_ne!(f.profile.subtype, Subtype::PbrFuzz, "{term}");
+        assert!(
+            codes_of(f).contains(&Code::PackUnusedInput),
+            "{term}: {:?}",
+            codes_of(f)
+        );
+        assert!(
+            !out_names(&p).contains(&"rock01_f.dds".to_string()),
+            "{term}: {:?}",
+            out_names(&p)
+        );
+        assert!(
+            p.jobs.iter().all(|j| j.pack.is_none()),
+            "{term}: {:?}",
+            out_names(&p)
+        );
+        assert!(
+            codes_of(job(&p, "rock01_rfaos.png")).contains(&Code::PackConflict),
+            "{term}"
+        );
+        assert!(
+            codes_of(job(&p, "rock01_roughness.png")).contains(&Code::PackUnusedInput),
+            "{term}"
+        );
+    }
+    // The same evidence without a fuzz map (unchanged): skin, with a `skin_albedo` diffuse.
+    let d = fixture(
+        &["rock01.png", "rock01_rfaos.png", "rock01_roughness.png"],
+        "",
+    );
+    let p = plan(&d);
+    assert_eq!(shader(&p), Shader::AdvancedSkin);
+    assert_eq!(job(&p, "rock01.png").profile.subtype, Subtype::SkinAlbedo);
+}
+
+/// The mirror of the above (fix round 1): a real `_rmaos` image is no skin evidence, so beside a fuzz map and a raw
+/// roughness map the set reads PBR, the fuzz map is `pbr_fuzz` written `rock01_f.dds`, and no `_rfaos` is built; the
+/// pre-packed `_rmaos` wins over the roughness map (PACK-CONFLICT, PACK-UNUSED-INPUT).
+#[test]
+fn a_real_rmaos_beside_a_fuzz_map_reads_pbr() {
+    let d = fixture(
+        &[
+            "rock01.png",
+            "rock01_rmaos.png",
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+        ],
+        "",
+    );
+    let p = plan(&d);
+    assert_eq!(shader(&p), Shader::Pbr);
+    let f = job(&p, "rock01_fuzz.png");
+    assert_eq!(f.profile.subtype, Subtype::PbrFuzz);
+    assert_eq!(out_name(f), "rock01_f.dds");
+    assert!(
+        packed(&p, "rock01_rfaos.dds").is_none(),
+        "{:?}",
+        out_names(&p)
+    );
+    assert!(codes_of(job(&p, "rock01_rmaos.png")).contains(&Code::PackConflict));
+    assert!(codes_of(job(&p, "rock01_roughness.png")).contains(&Code::PackUnusedInput));
+}
+
 /// The new evidence is scoped to fuzz-map sets: a metallic-only set with a written `rfaos` still builds `_rmaos`
 /// and is not skin (DQ2, probe P1e).
 #[test]
