@@ -4,7 +4,7 @@
 disallowed-methods = [
     { path = "egui::Context::animate_bool", reason = "linear motion with egui's default time: use `animate_bool_with_time_and_easing` with an explicit duration and an ease-out curve (`emath::easing::*_out`)" },
     { path = "egui::Context::animate_bool_with_time", reason = "linear motion: use `animate_bool_with_time_and_easing` with the explicit duration and an ease-out curve (`emath::easing::*_out`)" },
-    { path = "emath::easing::linear", reason = "linear motion: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out`" },
+    { path = "emath::easing::linear", reason = "linear motion: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out` (this entry also catches `linear` passed as a function value, such as the curve of `animate_bool_with_time_and_easing`)" },
     { path = "emath::easing::quadratic_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::quadratic_out`" },
     { path = "emath::easing::cubic_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out`" },
     { path = "emath::easing::sin_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::sin_out`" },

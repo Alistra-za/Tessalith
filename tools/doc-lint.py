@@ -5,14 +5,16 @@
       found no wiki pages. A warning prints "warning:" and does not change the exit code.
 
 Fail rules:
-  history      README.md, docs/gui.md, docs/wiki/*.md: "used to", "previously", "since 1.x", "in earlier versions",
-               "(new)" (section 1; history goes in CHANGELOG.md). "now" and "no longer" are not checked.
+  history      README.md, docs/gui.md, docs/wiki/*.md: "used to" (not after is, are, be, was or were: "is used to
+               set" is current state), "previously", "since <version>" (since 1.x, since 3.0, since v3.0.0),
+               "in earlier versions", "(new)" (section 1; history goes in CHANGELOG.md). "now" and "no longer" are
+               not checked.
   as-above     docs/wiki/*.md: "as above" and "as below" (a section never leans on the reader's memory).
   changelog    CHANGELOG.md: each released section's ### headings are an ordered subset of Main, Engine, GUI, CLI,
                Common, with Main first (section 6). 0.8.0-alpha.1 is allowlisted by name.
   budget       docs/wiki/*.md: size limits of section 4. Every page not starting with "_" is linked from _Sidebar.md.
-  callout      docs/wiki/*.md: at most two IMPORTANT lines per page; no BOM in the wiki or README.md; no image with
-               empty alt text.
+  callout      docs/wiki/*.md: at most two IMPORTANT lines per page. README.md, docs/gui.md and docs/wiki/*.md: no
+               BOM, no image with empty alt text.
 Warning rule: six or more top-level bullets in a row on a wiki page (_Sidebar.md excluded).
 """
 # shortcut: the scans read text line by line, so a phrase split across two lines is missed and a phrase inside a
@@ -33,7 +35,8 @@ NO_LIMIT_PAGES = {"CLI-Reference.md"}
 MIN_BYTES = 2 * KB
 
 HISTORY = [
-    (re.compile(r"\bused to\b", re.I), "used to"),
+    # "is used to <verb>" says what a thing is for, not what it did.
+    (re.compile(r"(?<!\bis )(?<!\bare )(?<!\bbe )(?<!\bwas )(?<!\bwere )\bused to\b", re.I), "used to"),
     (re.compile(r"\bpreviously\b", re.I), "previously"),
     (re.compile(r"\bsince v?\d+\.(?:x|\d+)(?:\.\d+)?\b", re.I), "since <version>"),
     (re.compile(r"\bin earlier versions\b", re.I), "in earlier versions"),
