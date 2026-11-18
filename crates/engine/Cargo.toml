@@ -39,3 +39,6 @@ test-hooks = ["encoders-sys/test-hooks"]
 [dev-dependencies]
 tempfile.workspace = true
 engine = { path = ".", features = ["test-hooks"] }
+
+[lints]
+workspace = true

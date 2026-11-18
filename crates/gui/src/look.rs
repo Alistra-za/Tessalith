@@ -696,6 +696,88 @@ mod tests {
         );
     }
 
+    /// `path` as `ui/status.rs`, for the scans that name a file by its tail.
+    fn is_file(path: &std::path::Path, tail: &str) -> bool {
+        path.ends_with(tail)
+    }
+
+    #[test]
+    fn status_colours_are_defined_in_ui_status_only() {
+        // Red blocks, amber warns, green is ready: one definition each (layout v2 A12, `ui/status.rs`). The needles
+        // are built here, so this file's own scan text is not a hit.
+        // shortcut: line by line, so a colour written across two lines or built from other numbers is not seen;
+        // upgrade when a second colour table appears.
+        let consts = regex::Regex::new(r"\bconst (RED|AMBER|GREEN)\b").unwrap();
+        let triplets = [(230, 160, 30), (210, 60, 60), (90, 170, 90)]
+            .map(|(r, g, b)| format!("from_rgb({r}, {g}, {b})"));
+        let mut hits = vec![];
+        for f in &src_rs_files() {
+            if is_file(f, "ui/status.rs") {
+                continue;
+            }
+            let text = std::fs::read_to_string(f).unwrap();
+            for (n, l) in text.lines().enumerate() {
+                if consts.is_match(l) || triplets.iter().any(|t| l.contains(t.as_str())) {
+                    hits.push(format!("{}:{}", f.display(), n + 1));
+                }
+            }
+        }
+        assert!(
+            hits.is_empty(),
+            "status colours defined outside ui/status.rs; import RED, AMBER and GREEN from crate::ui::status instead: {hits:#?}"
+        );
+    }
+
+    #[test]
+    fn scroll_bars_use_thin_scroll() {
+        // `look::thin_scroll()` is the one scroll style (Note JJ2): it keeps 0.37's rubber band off. The three
+        // `ScrollStyle` constructors are named only here, and every assignment to a `spacing.scroll` takes it.
+        // shortcut: text scan; a style set through a variable, a re-export or a helper is not seen, upgrade when
+        // one appears.
+        let ctors = ["thin", "solid", "floating"].map(|k| format!("ScrollStyle::{k}("));
+        let targets = ["spacing.scroll", "spacing_mut().scroll"];
+        // The call under any path, ending the statement or a brace-less closure's argument.
+        let thin = regex::Regex::new(
+            r"^\s*(?:(?:crate|super|sdc_gui)::)*look::thin_scroll\(\)\s*(?:$|[),])",
+        )
+        .unwrap();
+        let (mut bad_ctor, mut bad_assign, mut through) = (vec![], vec![], 0);
+        for f in &src_rs_files() {
+            let text = std::fs::read_to_string(f).unwrap();
+            let line =
+                |at: usize| format!("{}:{}", f.display(), text[..at].matches('\n').count() + 1);
+            if !is_file(f, "look.rs") {
+                for c in &ctors {
+                    bad_ctor.extend(text.match_indices(c.as_str()).map(|(at, _)| line(at)));
+                }
+            }
+            for t in targets {
+                for (at, _) in text.match_indices(t) {
+                    let rest = text[at + t.len()..].trim_start();
+                    // `= value;` only: not `.kinetic.. =`, not `==`, not an argument.
+                    let Some(rhs) = rest.strip_prefix('=').filter(|r| !r.starts_with('=')) else {
+                        continue;
+                    };
+                    let rhs = &rhs[..rhs.find(';').unwrap_or(rhs.len())];
+                    if thin.is_match(rhs) {
+                        through += 1;
+                    } else {
+                        bad_assign.push(line(at));
+                    }
+                }
+            }
+        }
+        assert!(through >= 10, "the scan found {through} thin_scroll sites");
+        assert!(
+            bad_ctor.is_empty(),
+            "ScrollStyle built outside look.rs; call look::thin_scroll() instead: {bad_ctor:#?}"
+        );
+        assert!(
+            bad_assign.is_empty(),
+            "{through} assignments read; a spacing.scroll set to something other than look::thin_scroll(); assign look::thin_scroll() instead: {bad_assign:#?}"
+        );
+    }
+
     #[test]
     fn every_menu_button_goes_through_menu_button_036() {
         // `Ui::menu_button` and `SubMenuButton` are the ways to draw a submenu entry (egui 0.37 `ui.rs:2927-2931`;

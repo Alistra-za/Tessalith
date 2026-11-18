@@ -21,7 +21,7 @@ For modders whose sources come as separate maps (Substance or Blender exports): 
 
 `_rfaos` replaces it when you picked **Advanced Skin** as the set's shader, or when a skin fuzz mask fills G: a `_fuzz` or `_sheen` map in a set its other maps or types make skin ([which sets are skin](Texture-Types.md#suffixes)). Under a picked **Advanced Skin** the fuzz map fills G too. In a PBR set the same map is written as the PBR fuzz texture (`<base>_f.dds`), and the set keeps `_rmaos`. <!-- D:JQ1,JQ2 --> The recipe key is [`packing.recipe`](Project-Config.md#packing).
 
-The channels are the same as above, except G is the fuzzmask (default 0).
+The channels are the same as in the `_rmaos` table, except G is the fuzzmask (default 0).
 
 ### Vanilla
 
@@ -59,7 +59,7 @@ A **helper** is a source file that fills one channel of another output in its ow
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
 | Opacity (`opacity`) | the colour texture's alpha (`diffuse.a`) | packed channels |
-| Specular (`specular`) | the `_n` alpha of a non-PBR set (`n.a`), plus its packed channel as above | other packed channels |
+| Specular (`specular`) | the `_n` alpha of a non-PBR set (`n.a`), plus its packed channel in the tables above | other packed channels |
 | Fuzz weight, PBR (`fuzzweight`) | the PBR `_f` alpha (`f.a`) | packed channels |
 | Subsurface weight, PBR (`subsurfaceweight`) | the PBR `_s` alpha (`s.a`) | packed channels |
 | Roughness, glossiness, metallic, AO, height, fuzz mask (skin), `_orm`, curvature, cavity | the packed channels of the tables above | any planned alpha target; the `_cnr` alpha (`cnr.a`, coat roughness) is offered, never suggested |

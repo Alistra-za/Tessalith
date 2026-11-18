@@ -119,8 +119,12 @@ pub fn monitors() -> Vec<Rect> {
     unsafe extern "system" fn each(m: HMONITOR, _: HDC, _: *mut RECT, out: LPARAM) -> i32 {
         // SAFETY: `out` is the `&mut Vec` passed below, alive for the whole enumeration.
         let list = unsafe { &mut *(out as *mut Vec<(bool, Rect)>) };
+        // SAFETY: `MONITORINFO` is a `repr(C)` struct of `u32`s and `RECT`s (four `i32`s), so all-zero bytes are a
+        // valid value.
         let mut info: MONITORINFO = unsafe { std::mem::zeroed() };
         info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+        // SAFETY: `m` is the monitor handle `EnumDisplayMonitors` passes to this callback, valid while it runs; `info`
+        // is a live local whose `cbSize` names `MONITORINFO`, so Windows writes one `MONITORINFO` through the pointer.
         if unsafe { GetMonitorInfoW(m, &mut info) } != 0 {
             let r = info.rcWork;
             list.push((
