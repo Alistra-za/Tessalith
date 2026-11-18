@@ -183,7 +183,7 @@ fn title<'a>(h: &'a H, t: &'a str) -> egui_kittest::Node<'a> {
         .unwrap_or_else(|| panic!("no group {t}"))
 }
 
-/// The value right-aligned in a group's header row ("on"/"off" repeat, so it is found beside its title).
+/// The value right-aligned in a group's header row (the same words can repeat, so it is found beside its title).
 fn header_value(h: &H, t: &str) -> String {
     let r = title(h, t).rect();
     h.query_all_by_role(Role::Label)
@@ -222,7 +222,8 @@ fn the_material_groups_are_framed_in_order_with_values() {
     .collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
     assert!(h.query_all_by_label("Coat").next().is_none());
-    assert!(header_has_no_value(&h, "Subsurface"));
+    // Subsurface has no Features tick: closed at Off, its header says the mode.
+    assert_eq!(header_value(&h, "Subsurface"), "Off");
     assert_eq!(header_value(&h, "Matching"), "1 match");
     assert_eq!(header_value(&h, "NiAlphaProperty"), "off");
     assert_eq!(header_value(&h, "CS PBR records"), "0 records");
@@ -450,8 +451,13 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
     h.get_by_label("Emissive").click();
     h.run();
     let p = centre(&h);
-    // C14: the feature groups (Coat, Subsurface, Emissive settings) have no header value any more.
-    for t in ["NiAlphaProperty", "Matching", "CS PBR records"] {
+    // C14: Coat and Emissive settings have no header value; Subsurface is closed at Off here, so it says its mode.
+    for t in [
+        "Subsurface",
+        "NiAlphaProperty",
+        "Matching",
+        "CS PBR records",
+    ] {
         let r = title(&h, t).rect();
         let v = h
             .query_all_by_role(Role::Label)

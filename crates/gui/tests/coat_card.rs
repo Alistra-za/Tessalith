@@ -94,7 +94,7 @@ fn the_coat_group_keeps_its_values_while_multilayer_is_off() {
     ));
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    // Note FM33: with values stored Coat stays listed, "off", open, with the "kept, not used" line and its rows.
+    // Note FM33: with values stored Coat stays listed, open, with the "kept, not used" line and its rows.
     h.get_by_label("Coat colour");
     widget(&h, Role::SpinButton, "Inner UV scale");
     h.get_by_label("Coat");

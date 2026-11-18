@@ -60,42 +60,50 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Opti
     let off = m.sets_read_only_reason();
     let editable = off.is_none();
     let why = off.unwrap_or_default();
-    // C14: the checkbox inside is the one control showing on or off.
-    super::group::group(ui, ("xpmf", v.id.as_str()), CARD, None, true, |ui| {
-        ui.add_enabled_ui(editable, |ui| {
-            let mut on = block.is_some();
-            if ui
-                .checkbox(&mut on, TOGGLE)
-                .on_hover_text(TOGGLE_HOVER)
-                .changed()
-            {
-                acts.push(Act::On(on));
-            }
-            let Some(b) = &block else {
-                return;
-            };
-            let c = card_values(m, &v.id);
-            if let Some(e) = c.profile.as_ref().err().or(c.refusal.as_ref()) {
-                ui.colored_label(AMBER, e);
-            }
-            if !shows(v) {
-                return;
-            }
-            let cx = Cx { m, v, noise_uv };
-            let none = Map::new();
-            let defaults = c.defaults.as_ref().unwrap_or(&none);
-            // X9: the effective pbr, the block's over the default.
-            let pbr = b.get("pbr").or(defaults.get("pbr")) == Some(&json!(true));
-            for f in FIELDS {
-                if f.key == "specularMult" && pbr {
-                    continue;
+    // C14: the checkbox inside is the one control showing on or off, so the header says it only while the card is closed.
+    let head = egui::RichText::new(if block.is_some() { "on" } else { "off" }).weak();
+    super::group::group_closed_value(
+        ui,
+        ("xpmf", v.id.as_str()),
+        CARD,
+        (None, Some(head)),
+        true,
+        |ui| {
+            ui.add_enabled_ui(editable, |ui| {
+                let mut on = block.is_some();
+                if ui
+                    .checkbox(&mut on, TOGGLE)
+                    .on_hover_text(TOGGLE_HOVER)
+                    .changed()
+                {
+                    acts.push(Act::On(on));
                 }
-                row(ui, &cx, f, b.get(f.key), defaults.get(f.key), &mut acts);
-            }
-        })
-        .response
-        .on_disabled_hover_text(&why);
-    });
+                let Some(b) = &block else {
+                    return;
+                };
+                let c = card_values(m, &v.id);
+                if let Some(e) = c.profile.as_ref().err().or(c.refusal.as_ref()) {
+                    ui.colored_label(AMBER, e);
+                }
+                if !shows(v) {
+                    return;
+                }
+                let cx = Cx { m, v, noise_uv };
+                let none = Map::new();
+                let defaults = c.defaults.as_ref().unwrap_or(&none);
+                // X9: the effective pbr, the block's over the default.
+                let pbr = b.get("pbr").or(defaults.get("pbr")) == Some(&json!(true));
+                for f in FIELDS {
+                    if f.key == "specularMult" && pbr {
+                        continue;
+                    }
+                    row(ui, &cx, f, b.get(f.key), defaults.get(f.key), &mut acts);
+                }
+            })
+            .response
+            .on_disabled_hover_text(&why);
+        },
+    );
     for a in acts {
         match a {
             Act::On(on) => model.set_xpmf_on(&v.id, on),

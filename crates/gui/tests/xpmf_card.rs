@@ -523,3 +523,45 @@ fn a_block_on_a_non_landscape_set_can_be_removed() {
     h.run_steps(2);
     assert!(!has(&h, TOGGLE), "and with it the card");
 }
+
+/// The header values beside the card's title.
+fn card_header(h: &H) -> Vec<String> {
+    let t = h
+        .query_all_by_label("XPMF profile")
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .expect("the card's title")
+        .rect();
+    h.query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x > t.max.x && (n.rect().center().y - t.center().y).abs() < 2.0)
+        .filter_map(|n| n.value().map(|v| v.to_string()))
+        .collect()
+}
+
+/// C14 and Task 5: the checkbox is the one control for on or off, so the header says the state only while the card is
+/// really closed, and not while the checkbox is on screen.
+#[test]
+fn the_card_header_says_its_state_only_while_closed() {
+    for on in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = opened(d.path());
+        if on {
+            set_block(&mut m, json!({}));
+        }
+        let mut h = tall(m);
+        h.run_steps(4);
+        assert!(has(&h, TOGGLE), "open by default");
+        assert!(
+            card_header(&h).is_empty(),
+            "open (on {on}): {:?}",
+            card_header(&h)
+        );
+        h.query_all_by_label("XPMF profile")
+            .find(|n| n.accesskit_node().role() == Role::Label)
+            .unwrap()
+            .click();
+        h.run_steps(4);
+        assert!(!has(&h, TOGGLE), "closed by the user");
+        let word = if on { "on" } else { "off" };
+        assert_eq!(card_header(&h), [word], "closed (on {on})");
+    }
+}

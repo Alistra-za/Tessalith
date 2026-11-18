@@ -225,7 +225,8 @@ fn value(s: impl Into<String>) -> Option<egui::RichText> {
     Some(egui::RichText::new(s).weak())
 }
 
-/// The visual settings to Matching, each a framed group with its value in the header (layout v2 A3).
+/// The visual settings to Matching, each a framed group; a header carries a value only where one shows nowhere else
+/// (layout v2 A3, C14).
 pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
     let c = context(model, set);
     let mut edits: Vec<Edit> = vec![];
@@ -262,27 +263,31 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                 continue;
             }
         }
-        // C14 (Note FB2): a feature's state shows once, in its control (the Features ticks, the Subsurface selector). A
-        // header says only what shows nowhere else: the amber reason a feature on in the JSON is blocked.
-        let head = match g {
+        // C14 (Note FB2): a state shows once. The four feature groups say none: their Features tick is always drawn.
+        // Subsurface has no tick, its selector sits in the body, so its mode shows in the header only while the group is
+        // really closed (`group_closed_value`). The amber reason a feature that is on (in the JSON or by its files) is
+        // blocked shows open or closed (CC10): it is a reason, not a repeat.
+        let (head, closed_head) = match g {
             Group::Subsurface => {
                 let mode = sub_mode(&c.eff);
-                if mode == SubMode::Off {
-                    None
-                } else {
-                    blocked_head(Feature::Subsurface, &c.eff, sub_text(mode))
-                }
+                let blocked = (mode != SubMode::Off)
+                    .then(|| blocked_head(Feature::Subsurface, &c.eff, sub_text(mode)))
+                    .flatten();
+                (blocked, value(sub_text(mode)))
             }
-            _ => group_feature(g)
-                .filter(|f| feature_on(&c.eff, *f))
-                .and_then(|f| blocked_head(f, &c.eff, "on")),
+            _ => (
+                group_feature(g)
+                    .filter(|f| feature_on(&c.eff, *f))
+                    .and_then(|f| blocked_head(f, &c.eff, "on")),
+                None,
+            ),
         };
         // K16: the id carries the state, so a group opens when its feature turns on and closes when it turns off.
-        super::group::group(
+        super::group::group_closed_value(
             ui,
             ("pgp", g as u8, on, kept, &c.set),
             group_title(g),
-            head,
+            (head, closed_head),
             on || kept,
             |ui| {
                 if g == Group::Subsurface {

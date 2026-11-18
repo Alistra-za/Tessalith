@@ -142,8 +142,7 @@ fn the_set_name_is_shown_once() {
     );
 }
 
-/// C14: a feature's state shows once, in its own group's header ("off"); the Features group, whose ticks are the
-/// state, has no count beside its title.
+/// C14: the Features group, whose ticks are the state, has no count beside its title.
 #[test]
 fn the_features_group_has_no_header_value() {
     let d = tempfile::tempdir().unwrap();
@@ -172,7 +171,7 @@ fn beside(h: &H, title: &str) -> Vec<String> {
         .collect()
 }
 
-/// C14: a feature's state shows once, in its control and the Features ticks, never again in the group's header.
+/// C14: a feature's state shows once, in its Features tick and its control, never again in the group's header.
 #[test]
 fn a_feature_group_header_has_no_state_word() {
     for (title, key) in [
@@ -195,23 +194,67 @@ fn a_feature_group_header_has_no_state_word() {
     }
 }
 
-/// C14: the Subsurface selector inside the group shows the mode, so the header does not.
+/// Click a group's title (scrolled into view first, as a user would).
+fn click_title(h: &mut H, title: &str) {
+    let n = h
+        .query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap_or_else(|| panic!("the {title} group"));
+    n.scroll_to_me();
+    h.run();
+    h.query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap()
+        .click();
+    h.run();
+}
+
+/// Is the Subsurface selector (a combo reading `mode`) on screen?
+fn selector_shows(h: &H, mode: &str) -> bool {
+    h.query_all_by_role(Role::ComboBox)
+        .any(|n| n.value().as_deref() == Some(mode))
+}
+
+/// C14 and Task 5: the Subsurface selector is the one control showing the mode, so the header says the mode only while
+/// the group is really closed (the user's click counts, not the default), and never while the selector is on screen.
 #[test]
-fn the_subsurface_header_has_no_mode_word() {
-    for on in [false, true] {
-        let d = tempfile::tempdir().unwrap();
-        let (mut m, id) = rock_set(d.path());
-        if on {
-            m.set_json_value(&id, "subsurface", Some(serde_json::Value::Bool(true)));
-        }
-        let mut h = harness(m, 1400.0);
-        h.run();
-        let words = beside(&h, "Subsurface");
-        assert!(
-            words.is_empty(),
-            "Subsurface header (on {on}) repeats its mode: {words:?}"
-        );
+fn the_subsurface_header_says_the_mode_only_while_closed() {
+    // Off: closed by default.
+    let d = tempfile::tempdir().unwrap();
+    let (m, _) = rock_set(d.path());
+    let mut h = harness(m, 1400.0);
+    h.run();
+    assert_eq!(beside(&h, "Subsurface"), ["Off"], "closed at Off");
+    click_title(&mut h, "Subsurface");
+    assert!(beside(&h, "Subsurface").is_empty(), "opened by the user");
+    assert!(selector_shows(&h, "Off"), "the selector is on screen");
+
+    // On: open by default; the user closes it.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = rock_set(d.path());
+    m.set_json_value(&id, "subsurface", Some(serde_json::Value::Bool(true)));
+    let mut h = harness(m, 1400.0);
+    h.run();
+    assert!(beside(&h, "Subsurface").is_empty(), "open by default");
+    assert!(selector_shows(&h, "Standard"));
+    click_title(&mut h, "Subsurface");
+    assert_eq!(beside(&h, "Subsurface"), ["Standard"], "closed by the user");
+}
+
+/// Task 5 and CC10: a Subsurface that is on but blocked reads its reason in the header, closed or open.
+#[test]
+fn a_blocked_subsurface_header_reads_its_reason_open_or_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = rock_set(d.path());
+    for k in ["subsurface", "multilayer"] {
+        m.set_json_value(&id, k, Some(serde_json::Value::Bool(true)));
     }
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let reason = ["Standard, blocked by multilayer"];
+    assert_eq!(beside(&h, "Subsurface"), reason, "closed");
+    click_title(&mut h, "Subsurface");
+    assert_eq!(beside(&h, "Subsurface"), reason, "opened by the user");
 }
 
 /// C14: the Assign… menu's header is the slot label, once ("Emissive / Skin (slot 3)", not "Slot 3: Emissive / Skin
