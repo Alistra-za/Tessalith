@@ -395,6 +395,8 @@ pub struct SetView {
     pub txst: Option<TxstMap>,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
+    /// The id's last `/`-parts that tell it from every other set (see [`short_names`]). Set by `build_views`.
+    pub short: String,
 }
 
 /// The joined tails a set's member names carry past the base (Note GW1): `_detail_n` in a Landscape, PBR Landscape
@@ -482,6 +484,7 @@ impl SetView {
             locks: BTreeSet::new(),
             txst: None,
             recipes: vec![],
+            short: String::new(),
         }
     }
 
@@ -1001,12 +1004,58 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     for v in &mut views {
         finish_view(m, v);
     }
+    let ids: Vec<&str> = views.iter().map(|v| v.id.as_str()).collect();
+    let shorts = short_names(&ids);
+    for (v, s) in views.iter_mut().zip(shorts) {
+        v.short = s;
+    }
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
         v.owns = owns_of(v, &owners);
     }
     views
+}
+
+/// A short display name per set id, in the order of `ids`: the last `k` `/`-parts, `k` the smallest value from
+/// `min(2, parts)` up for which no other id has the same last `k` parts (compared folded, as `same_id` does, Note
+/// BF). Ids equal after folding keep the whole id.
+pub fn short_names(ids: &[&str]) -> Vec<String> {
+    let parts: Vec<Vec<&str>> = ids.iter().map(|id| id.split('/').collect()).collect();
+    let folded: Vec<Vec<String>> = parts
+        .iter()
+        .map(|p| p.iter().map(|s| fold_id(s)).collect())
+        .collect();
+    let mut k: Vec<usize> = parts.iter().map(|p| p.len().min(2)).collect();
+    let mut done = vec![false; ids.len()];
+    let deepest = parts.iter().map(Vec::len).max().unwrap_or(0);
+    for round in 1..=deepest {
+        if !k.iter().zip(&done).any(|(&ki, &d)| !d && ki == round) {
+            continue;
+        }
+        let mut count: HashMap<&[String], usize> = HashMap::new();
+        for f in &folded {
+            *count
+                .entry(&f[f.len().saturating_sub(round)..])
+                .or_default() += 1;
+        }
+        for i in 0..ids.len() {
+            if done[i] || k[i] != round {
+                continue;
+            }
+            let f = &folded[i];
+            if count[&f[f.len().saturating_sub(round)..]] == 1 || round >= f.len() {
+                done[i] = true;
+            } else {
+                k[i] += 1;
+            }
+        }
+    }
+    parts
+        .iter()
+        .zip(&k)
+        .map(|(p, &k)| p[p.len().saturating_sub(k)..].join("/"))
+        .collect()
 }
 
 /// Note HF1: the set has a member and every one that is not a packed output is in no set (a packed output follows
@@ -1410,6 +1459,7 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
             entry_view(m, &mut v, e, own, lender_borrow);
         }
         finish_view(m, &mut v);
+        v.short = old.short.clone();
         rebuilt.push(v);
     }
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.

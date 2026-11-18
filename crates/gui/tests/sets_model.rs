@@ -4186,3 +4186,34 @@ fn every_required_role_has_a_slot() {
         }
     }
 }
+
+#[test]
+fn short_names_keep_two_parts_and_differ() {
+    use sdc_gui::model::sets::short_names;
+    assert_eq!(
+        short_names(&["textures/arch/eye/eye", "textures/arch/eye/m", "solo"]),
+        vec!["eye/eye", "eye/m", "solo"]
+    );
+    // a shared two-part tail grows until the names differ
+    assert_eq!(
+        short_names(&["a/stone/m", "b/stone/m", "c/wood/m"]),
+        vec!["a/stone/m", "b/stone/m", "wood/m"]
+    );
+    // tails compare folded (Note BF): "Stone/m" and "stone/M" collide at two parts, so both grow to three
+    assert_eq!(
+        short_names(&["X/Stone/m", "y/stone/M"]),
+        vec!["X/Stone/m", "y/stone/M"]
+    );
+    // ids equal after folding never get a unique tail: both keep the whole id
+    assert_eq!(short_names(&["a/B", "A/b"]), vec!["a/B", "A/b"]);
+}
+
+#[test]
+fn every_view_has_its_short_name() {
+    let d = tempfile::tempdir().unwrap();
+    let m = pbr_opened(d.path());
+    let v = views(&m);
+    assert!(v
+        .iter()
+        .all(|v| !v.short.is_empty() && v.id.ends_with(&v.short)));
+}
