@@ -161,11 +161,10 @@ fn plain_normal_in_pbr(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// B3-13 (Note JP3): the set loses one counted problem ("needs _n"); a note never takes Ready away, so the set reads
-/// Ready exactly when the same set with a `pbr_normal` does. Baseline: `pbr_opened_plain` (rock01's normal decided
-/// `pbr_normal`, DirectX green; `support/mod.rs` `pbr_opened`).
+/// N-8, N-9 (Note JS4): rock01 on plain `pbr` with its own normal decided `normal` has no counted row and reads Ready
+/// exactly when the same set with a `pbr_normal` does (baseline `pbr_opened_plain`).
 #[test]
-fn the_set_loses_one_counted_problem_and_can_be_ready() {
+fn a_plain_normal_in_a_pbr_set_counts_nothing_and_the_set_can_be_ready() {
     use sdc_gui::model::bottom::{counts_for, set_ready, At};
     let base_dir = tempfile::tempdir().unwrap();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -192,222 +191,19 @@ fn the_set_loses_one_counted_problem_and_can_be_ready() {
         set_ready(&plain, &rock01(&plain)),
         set_ready(&base, &rock01(&base))
     );
-}
-
-fn specular_rows(m: &AppModel) -> Vec<sdc_gui::model::bottom::Problem> {
-    sdc_gui::model::bottom::problems(m)
-        .iter()
-        .filter(|p| p.code == Some(engine::codes::Code::ShaderNormalSpecular))
-        .cloned()
-        .collect()
-}
-
-/// rock01 still carries the engine's "needs _n".
-fn needs_n(m: &AppModel) -> bool {
-    rock01(m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")
-}
-
-fn subtype_written(m: &AppModel) -> Option<serde_json::Value> {
-    m.project.as_ref().unwrap().file_value(NORMAL, "subtype")
-}
-
-fn specular_note(member: &str, shader: &str) -> Warning {
-    Warning::new(engine::codes::Code::ShaderNormalSpecular, "m")
-        .with_data(serde_json::json!({"member": member, "shader": shader, "map": "_n"}))
-}
-
-/// Only `specular_note(member, shader)`, on the set whose key is `set_key` (for states where no decision can be made).
-fn put_specular_note(m: &mut AppModel, set_key: &str, member: &str, shader: &str) {
-    for s in m.sets.iter_mut() {
-        s.warnings.clear();
-    }
-    m.sets
-        .iter_mut()
-        .find(|s| s.key == set_key)
-        .unwrap()
-        .warnings = vec![specular_note(member, shader)];
-    m.invalidate_views();
-}
-
-/// The button's AccessKit name, which names its file: the note's sentence says "Use PBR normal" too, so the bare label
-/// would find the sentence on the same row.
-fn use_pbr_normal_button(file: &str) -> String {
-    format!("{} for {file}", sdc_gui::model::bottom::USE_PBR_NORMAL)
-}
-
-/// B3-1, B3-2 (Note JP3): the set shows one note in place of "needs _n" and "not used", with **Use PBR normal**.
-/// One click writes `pbr_normal`, the note goes and "needs _n" does not come back; one Undo restores `normal`.
-#[test]
-fn use_pbr_normal_switches_the_type_in_one_click_and_one_undo_restores_it() {
-    use sdc_gui::model::bottom::{Fix, USE_PBR_NORMAL};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(!needs_n(&m), "the Info replaces needs _n");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(NORMAL.into())),
-        "Go to set outlines the normal's row"
-    );
-    let sentence = rows[0].shown().into_owned();
-    assert!(sentence.contains("_rmaos"), "{sentence}");
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    on_row(&h, &sentence, &use_pbr_normal_button("rock01_normal.png")).click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("pbr_normal"))
-    );
-    assert!(specular_rows(h.state()).is_empty(), "the note goes");
-    assert!(!needs_n(h.state()), "needs _n does not come back");
-    assert_eq!(h.state().undo_label(), Some(USE_PBR_NORMAL));
-    h.state_mut().undo();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("normal"))
-    );
-    assert_eq!(specular_rows(h.state()).len(), 1, "the note is back");
-}
-
-/// B3-7 (Note BM): PBR Landscape takes a vanilla normal as its `_n`: no note.
-#[test]
-fn no_specular_note_under_pbr_landscape() {
-    let d = tempfile::tempdir().unwrap();
-    // `pbr_opened` leaves rock01 on its automatic pick, PBR Landscape (`textures/landscape/`).
-    let mut m = pbr_opened(d.path());
-    m.decide(
-        NORMAL,
-        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
-    );
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    assert!(specular_rows(&m).is_empty());
-    assert!(!rock01(&m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular));
-}
-
-/// B3-11 (Note JP3): a locked slot turns the button off with `lock_refusal`'s reason, and the model writes nothing.
-#[test]
-fn use_pbr_normal_is_off_on_a_locked_slot() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    // Slot 2 is Normal (`SlotKind::slot_number`).
-    m.set_slot_lock("landscape/rock01", 2, true).unwrap();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(
-        sdc_gui::model::sets::locked_items(&m).contains_key(NORMAL),
-        "the normal fills rock01's slot 2"
+        !rock01(&plain)
+            .set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderExtraMap
+                || (w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")),
+        "{:?}",
+        rock01(&plain).set_warnings
     );
-    let why = m.use_pbr_normal_refusal(NORMAL).expect("refused");
-    assert!(why.contains("is locked"), "{why}");
-    assert!(m.use_pbr_normal(NORMAL).is_err());
-    assert_eq!(subtype_written(&m), Some(serde_json::json!("normal")));
-    let sentence = specular_rows(&m)[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("is locked");
 }
-
-/// B3-11 (Note JP3): a read-only `sdc.toml` turns the button off with `fix_off`'s reason; the file is not written.
-#[test]
-fn use_pbr_normal_is_off_on_a_read_only_sdc_toml() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    assert!(m.save().is_ok());
-    let file = m.root.clone().unwrap().join("sdc.toml");
-    std::fs::write(&file, "[files\n").unwrap();
-    m.reload_documents();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    // Read-only: the plan no longer reads the decision, so the note is put on the set directly.
-    let key = rock01(&m).key;
-    put_specular_note(&mut m, &key, "rock01_normal.png", "pbr");
-    assert!(m
-        .fix_off()
-        .is_some_and(|w| w.contains("sdc.toml is read-only")));
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "the note's row");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    let before = std::fs::read(&file).unwrap();
-    let sentence = rows[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("sdc.toml is read-only");
-    assert_eq!(std::fs::read(&file).unwrap(), before);
-}
-
-/// B3-11 (Note JP3): a kept DDS gets the note with its own sentence and no button; its type cannot drop the alpha.
-#[test]
-fn a_kept_dds_normal_gets_the_note_without_a_button() {
-    let d = tempfile::tempdir().unwrap();
-    let root = dds_pbr_sets(d.path(), &["iron"]);
-    let mut m = opened_as_the_app(root, d.path().join("export"));
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("iron"))
-        .expect("the set");
-    let key = v
-        .members
-        .iter()
-        .find(|k| k.ends_with("iron_n.dds"))
-        .expect("the kept _n")
-        .clone();
-    assert!(matches!(
-        m.item(&key).unwrap().kind,
-        sdc_gui::model::items::ItemKind::Dds
-    ));
-    put_specular_note(&mut m, &v.key, "iron_n.dds", "pbr");
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().contains("is a kept DDS"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(key.clone()))
-    );
-    assert!(m.use_pbr_normal_refusal(&key).is_some());
-}
-
-/// The kept `_n.dds` of `kept_dds_normal_wall`.
-const WALL_N: &str = "test/wall_n.dds";
 
 /// `textures/test/wall.png` decided `pbr_albedo` beside a kept `wall_n.dds` (no job: typed by its `_n` suffix as a
-/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`: the engine itself raises
-/// SHADER-NORMAL-SPECULAR on it (`engine/tests/shaders.rs` `a_kept_dds_normal_in_a_pbr_set_is_the_same_info`).
+/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`.
 fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
@@ -431,134 +227,18 @@ fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// Final review I1 (Note JP3): a DDS with `reencode = true` has a job and is encoded again, so its type drops the
-/// alpha like any source image's: its note has the plain sentence and **Use PBR normal**, nothing refuses it, and the
-/// click writes `subtype = "pbr_normal"`. (A kept DDS: `a_kept_dds_normal_gets_the_note_without_a_button`.)
+/// N-9 (Note JS4), a pin: a kept DDS normal in a PBR set fills its `_n`: no EXTRA row and no "needs _n" row. (The
+/// set's own "needs _rmaos" is a SHADER-MISSING-MAP row too, so the match names the `_n`.)
 #[test]
-fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = kept_dds_normal_wall(d.path());
-    m.set_reencode(&[WALL_N.to_string()], true);
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(
-        i.input.extension().is_some_and(|x| x == "dds"),
-        "precondition: a DDS input"
-    );
-    assert_eq!(
-        i.job.as_ref().map(|j| j.profile.subtype),
-        Some(engine::config::Subtype::Normal),
-        "precondition: re-encoded, as a vanilla normal"
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(WALL_N.into())));
-    let sentence = rows[0].shown().into_owned();
-    // Final review M1: the words hold for a set with no _rmaos, as this one is.
-    assert!(
-        sentence.starts_with("wall_n.dds is a vanilla normal:")
-            && sentence.ends_with(
-                "Use PBR normal to drop the alpha and bake any _rmaos in this set from it."
-            ),
-        "{sentence}"
-    );
-    assert_eq!(m.use_pbr_normal_refusal(WALL_N), None);
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let button = use_pbr_normal_button("wall_n.dds");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("its alpha is dropped, and any _rmaos in this set bakes from it");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        h.state()
-            .project
-            .as_ref()
-            .unwrap()
-            .file_value(WALL_N, "subtype"),
-        Some(serde_json::json!("pbr_normal"))
-    );
-}
-
-/// B3-27 (Note JP3): **Use PBR normal** keeps Enter and Space. Each key on the focused button writes `pbr_normal`, as
-/// a click does: it switches a type, as Rebuild Z does, so it is not a `click_only_button`.
-#[test]
-fn use_pbr_normal_answers_enter_and_space() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    for key in [egui::Key::Enter, egui::Key::Space] {
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("normal")),
-            "{key:?}: before"
-        );
-        h.get_by_role_and_label(egui::accesskit::Role::Button, &name)
-            .focus();
-        h.run();
-        h.key_press(key);
-        h.step();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("pbr_normal")),
-            "{key:?}"
-        );
-        h.state_mut().undo();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-    }
-}
-
-/// Final review M4 (Note JP3): with no injection, the engine's own SHADER-NORMAL-SPECULAR on a kept DDS joins its
-/// item (`extra_member` matches the engine's member name): the set's row has the kept-DDS sentence and no button.
-#[test]
-fn the_engines_own_note_on_a_kept_dds_has_no_button() {
+fn a_kept_dds_normal_in_a_pbr_set_has_no_shader_row() {
+    use engine::codes::Code;
     let d = tempfile::tempdir().unwrap();
     let m = kept_dds_normal_wall(d.path());
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(i.kept_dds(), "precondition: kept as it is");
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("wall"))
-        .expect("the set");
+    let rows = sdc_gui::model::bottom::problems(&m);
     assert!(
-        v.set_warnings
-            .iter()
-            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
-        "the engine raises it: {:?}",
-        v.set_warnings
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(
-        matches!(&rows[0].at, sdc_gui::model::bottom::At::Set { key, .. } if *key == v.key),
-        "on the set"
-    );
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().starts_with("wall_n.dds is a kept DDS:"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(WALL_N.into()))
+        !rows.iter().any(|p| p.code == Some(Code::ShaderExtraMap)
+            || (p.code == Some(Code::ShaderMissingMap) && p.text.contains("needs _n"))),
+        "{rows:?}"
     );
 }
 

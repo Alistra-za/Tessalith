@@ -1351,7 +1351,7 @@ fn a_filled_diffuse_in_a_fuzz_only_set_stays_pbr_albedo() {
 
 /// Final review A I2: the shader map check reads a kept DDS member against the set read with `f`. In a Fuzz-1a set a
 /// kept `x.dds` fills `albedo` (no SHADER-EXTRA-MAP for it, no SHADER-MISSING-MAP `albedo`), and a kept `x_n.dds`
-/// fills `_n` with no SHADER-NORMAL-SPECULAR. The control row, a real `_f` in place of the fuzz map, passes either way.
+/// fills `_n` (no SHADER-EXTRA-MAP and no SHADER-MISSING-MAP `_n`). The control row, a real `_f` in place of the fuzz map, passes either way.
 #[test]
 fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
     for fuzz in ["x_fuzz.png", "x_f.png"] {
@@ -1373,7 +1373,10 @@ fn a_kept_dds_in_a_fuzz_only_set_fills_its_pbr_slot() {
         std::fs::write(d.path().join("in/x_n.dds"), b"DDS not a real texture").unwrap();
         let (_, w) = set_warnings(&d, "x.png");
         assert!(
-            !w.iter().any(|w| w.code == Code::ShaderNormalSpecular),
+            !w.iter().any(
+                |w| (w.code == Code::ShaderExtraMap && w.data["member"] == "x_n.dds")
+                    || (w.code == Code::ShaderMissingMap && w.data["map"] == "_n")
+            ),
             "{fuzz}: {w:?}"
         );
         patched_equals_fresh(&request(&d), "x.png");

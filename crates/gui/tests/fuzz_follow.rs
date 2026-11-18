@@ -1133,9 +1133,9 @@ fn an_explicit_advanced_skin_that_writes_nothing_splits_gui_and_cli() {
 }
 
 /// Fuzz-27: in a set not read as PBR (Glow), an explicit PBR pick retypes the untouched recorded `normal` to
-/// `pbr_normal`, so B3's SHADER-NORMAL-SPECULAR note does not show; leaving PBR reverts it.
+/// `pbr_normal`; leaving PBR reverts it.
 #[test]
-fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
+fn an_explicit_pbr_pick_retypes_an_untouched_normal() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -1143,27 +1143,19 @@ fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
         "",
         AcceptSuggestions::High,
     );
-    let normal_note = |m: &AppModel| {
-        bottom::problems(m)
-            .iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular))
-    };
     assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
     assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
-    assert!(!normal_note(&m));
     m.set_shader("m/rock01", Some(Shader::Pbr));
     idle(&mut m);
     assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
     assert!(auto_pbr(&m).contains(NORMAL));
-    assert!(!normal_note(&m), "{:?}", bottom::problems(&m));
     m.set_shader("m/rock01", Some(Shader::Default));
     idle(&mut m);
     assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
     assert!(!auto_pbr(&m).contains(NORMAL));
 }
 
-/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes, as B3-11's
-/// `use_pbr_normal_refusal` says), and its key never joins `auto_pbr`.
+/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes), and its key never joins `auto_pbr`.
 #[test]
 fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
     let d = tempfile::tempdir().unwrap();
@@ -1902,10 +1894,10 @@ fn an_export_queued_at_open_runs_on_the_switched_plan() {
     );
 }
 
-/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and B3 offers
-/// **Use PBR normal** on it.
+/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and no SHADER row
+/// names it.
 #[test]
-fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
+fn the_switch_leaves_a_recorded_normal() {
     let d = tempfile::tempdir().unwrap();
     let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n[files.\"m/rock01_n.png\"]\nsubtype = \"normal\"\n";
     let mut m = open_with(
@@ -1924,9 +1916,7 @@ fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
     );
     let rows = problems(&m);
     assert!(
-        rows.iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular)
-                && r.fix == Some(Fix::UsePbrNormal(NORMAL.into()))),
+        !rows.iter().any(|r| r.code == Some(Code::ShaderExtraMap) || r.code == Some(Code::ShaderMissingMap)),
         "{rows:?}"
     );
 }
