@@ -177,6 +177,11 @@ pub fn vocab_of(stem: &str) -> Option<&'static Vocab> {
     split_vocab(stem).map(|(_, v)| v)
 }
 
+/// Whether `stem` is a fuzz map: it ends in `_fuzz` or `_sheen` (role `PackingInput(Fuzz)`), case-insensitive.
+pub fn is_fuzz_stem(stem: &str) -> bool {
+    vocab_of(stem).is_some_and(|v| v.role == VocabRole::PackingInput(RawMap::Fuzz))
+}
+
 /// Whether `term` (lower-case, no '_') is a vocabulary term; preset aliases may not be one (spec §3.7).
 pub fn is_vocabulary(term: &str) -> bool {
     VOCABULARY.iter().any(|v| v.term == term)

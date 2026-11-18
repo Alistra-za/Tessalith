@@ -107,6 +107,8 @@ mod fast_replan;
 mod fields;
 #[path = "../fill_from_names.rs"]
 mod fill_from_names;
+#[path = "../fuzz_follow.rs"]
+mod fuzz_follow;
 #[path = "../generate_removed.rs"]
 mod generate_removed;
 #[path = "../generated_sidecar.rs"]

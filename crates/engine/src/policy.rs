@@ -2352,7 +2352,34 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
     if gras_diffuse {
         suggest_grass(ctx, f, &mut d);
     }
-    resolve_decided(ctx, f, d)
+    let mut job = resolve_decided(ctx, f, d);
+    if let Some(out) = fuzz_f_output(ctx, f, &job) {
+        job.output = out;
+    }
+    job
+}
+
+/// Fuzz-10: a `_fuzz`/`_sheen` map resolved as `pbr_fuzz` on cs is the PBR fuzz texture, written `<base>_f.dds`. Not
+/// when its output is an explicit path (not the Discover default `<stem>.dds`), nor beside an `_f` member: there the
+/// fuzz map keeps its own name, so the two never clash. A hand role never gets here (`resolve_file_with`).
+fn fuzz_f_output(ctx: &ResolveCtx, f: &FileFacts, job: &ResolvedJob) -> Option<PathBuf> {
+    let stem = f.input.rel.file_stem()?.to_string_lossy();
+    let default = f
+        .input
+        .output
+        .file_name()
+        .is_some_and(|n| n.to_string_lossy() == format!("{stem}.dds"));
+    if ctx.target != Target::Cs
+        || f.alias.is_some()
+        || !crate::group::is_fuzz_stem(&stem)
+        || job.profile.subtype != Subtype::PbrFuzz
+        || !default
+        || f.set.suffixes.contains("f")
+    {
+        return None;
+    }
+    let (base, _) = crate::group::split_vocab(&stem)?;
+    Some(f.input.output.with_file_name(format!("{base}_f.dds")))
 }
 
 /// Design §5: the auto-tag, only over a suggestion (a `--set`, rule, `[files]` entry or set shader has decided already).

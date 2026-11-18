@@ -328,7 +328,7 @@
     "subtype": "pbr_albedo",
     "width": 64
   },
-  "textures/h/pbr_fuzz.dds": {
+  "textures/h/pbr_f.dds": {
     "format": "Bc7 { srgb: true }",
     "height": 64,
     "payload_sha256@avx2": "c76d1e152a0f232487d79836756977d54579828f17f76c8cf293f40419b74694",

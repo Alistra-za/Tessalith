@@ -83,7 +83,7 @@
     "sha256": "f9d3cba4ea865646bf325eaa2324c165d7d0257022e7efc7c8117d583aa6eb12",
     "subtype": "pbr_albedo"
   },
-  "textures/h/pbr_fuzz.dds": {
+  "textures/h/pbr_f.dds": {
     "sha256": "04c28ca2c35c8c53188dbf15e217636bc22914ceed58c4552b707b0d5a46ad7b",
     "subtype": "pbr_fuzz"
   },
