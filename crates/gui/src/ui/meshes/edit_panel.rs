@@ -135,8 +135,9 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         ui.separator();
         let tabs_h = ui.cursor().min.y - tabs_start;
         ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32) = tabs_h);
-        // Both ways: a wide row scrolls instead of widening the panel. Its height is what is left, never more
-        // (egui's 64 px minimum would push it under the footer).
+        // Both ways: a wide row scrolls instead of widening the panel. Its OUTER height (a horizontal bar included)
+        // is what is left, never more: egui's 64 px scrolled minimum, or the whole `avail` as a minimum, is applied
+        // to the inner viewport, and the bar is added on top, under the footer.
         let avail = ui.available_height();
         #[cfg(feature = "test-hooks")]
         let tab_y = ui.cursor().min.y;
@@ -144,7 +145,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .id_salt("meshes-edit-scroll")
             .auto_shrink([false, false])
             .max_height(avail)
-            .min_scrolled_height(avail)
+            .min_scrolled_height(0.0)
             .show(ui, |ui| match shown {
                 0 => edit_fields::shader_tab(ui, m, e, &mut act),
                 1 => edit_fields::alpha_tab(ui, e, &mut act),

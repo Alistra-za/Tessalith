@@ -11665,6 +11665,29 @@ fn the_head_keeps_its_own_48_px_floor_at_1280x720() {
     assert!(r.tab_area.height() >= 138.0, "slot list {r:?}");
 }
 
+/// Fix round 1, Important 2: a slot list wide enough for a horizontal bar (the edit panel dragged to 300 px) keeps
+/// its whole OUTER rect, the bar included, above the footer. The inner viewport alone would end 6 px lower.
+#[test]
+fn a_horizontal_bar_stays_above_the_footer_at_1280x720() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, mut h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
+    sdc_gui::ui::panel_ids::restore_size(&h.ctx, "meshes-edit", 300.0);
+    h.run_steps(6);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    let bars: Vec<_> = h
+        .query_all_by_role(AkRole::ScrollBar)
+        .map(|n| n.rect())
+        .filter(|b| b.width() > b.height() && r.tab_area.contains_rect(b.shrink(0.5)))
+        .collect();
+    assert_eq!(bars.len(), 1, "the slot list shows a horizontal bar: {r:?}");
+    assert!(
+        bars[0].max.y <= r.footer.min.y + 0.5,
+        "bar {:?} under {r:?}",
+        bars[0]
+    );
+    assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "outer rect {r:?}");
+}
+
 /// Fix round 1: after one pass of a first frame (the cached tab height still its first-frame 28 px) no part of the
 /// editor reaches below the footer's top, and the head is over the slot list, not on it.
 #[test]
