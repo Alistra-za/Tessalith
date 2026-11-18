@@ -333,9 +333,9 @@ fn auto_after_a_pbr_pick_takes_the_normal_back() {
     assert_ne!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
 }
 
-/// G4 (N-17): an explicit Advanced Skin pick with no skin evidence types the untouched normal `pbr_normal`. The
-/// type alone is a pin (the recorder's follow pass reaches it too); the undo label tells the pick's own step from the
-/// recorder's.
+/// G4 (N-17): an explicit Advanced Skin pick with no skin evidence types the untouched normal `pbr_normal`. A pin: it
+/// passes with or without the pick's own write, because the wall's diffuse triggers the diffuse Switch inside the
+/// same step; `an_advanced_skin_pick_without_a_diffuse_types_the_normal_in_its_own_step` isolates the pick.
 #[test]
 fn an_advanced_skin_pick_types_the_untouched_normal() {
     let d = tempfile::tempdir().unwrap();
@@ -503,7 +503,10 @@ fn the_diffuse_switch_moves_an_untouched_normal_and_takes_it_back() {
         .any(|k| k == WALL_N));
     m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
     settle(&mut m);
-    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("normal")), Some("normal".into()), false)
+    );
 }
 
 /// N-17: an explicit regular pick takes a followed `pbr_normal` back to `normal` and clears the follow's marker, so
@@ -522,4 +525,250 @@ fn a_regular_pick_clears_the_follow_marker() {
     settle(&mut m);
     assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
     assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+}
+
+/// The three facts of a key: the held `[files]` sub-type, its `auto_normal` word, and whether `auto_pbr` lists it.
+fn facts(m: &AppModel, key: &str) -> (Option<serde_json::Value>, Option<String>, bool) {
+    (
+        held(m, key, "subtype"),
+        listed(m, key),
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .auto_pbr()
+            .iter()
+            .any(|k| k == key),
+    )
+}
+
+/// The wall with its `_rmaos` added after the open: the recorder followed, so its normal is `pbr_normal` and listed.
+fn followed_wall(dir: &Path) -> AppModel {
+    let t = wall(dir);
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    add_rmaos(&t, &mut m);
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
+    );
+    m
+}
+
+/// N-17 (N6-c, N6-d): an Eye pick takes a followed `pbr_normal` to `msn` (Eye accepts nothing else) and leaves its
+/// listed word; the way back from `msn` is the normal rule's write, listed, and never in `auto_pbr`.
+#[test]
+fn eye_from_a_followed_normal_is_msn_and_the_way_back_is_listed() {
+    let word = |s: &str| (Some(json!(s)), Some(s.to_string()), false);
+    for (leg, want) in [
+        (Some(Shader::Default), word("normal")),
+        (Some(Shader::Pbr), word("pbr_normal")),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = followed_wall(d.path());
+        m.set_shader("test/wall", Some(Shader::Eye));
+        settle(&mut m);
+        assert_eq!(
+            facts(&m, WALL_N),
+            (Some(json!("msn")), Some("pbr_normal".into()), false),
+            "Eye"
+        );
+        m.set_shader("test/wall", leg);
+        settle(&mut m);
+        assert_eq!(facts(&m, WALL_N), want, "{leg:?}");
+    }
+}
+
+/// N-17 (N6-d): Eye, then Auto: the set is PBR by its `_rmaos`, so Auto reads `pbr_normal` again; the key and its
+/// lists agree.
+#[test]
+fn eye_then_auto_leaves_the_lists_agreeing_with_the_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.set_shader("test/wall", Some(Shader::Eye));
+    settle(&mut m);
+    m.set_shader("test/wall", None);
+    settle(&mut m);
+    let (held, word, in_auto_pbr) = facts(&m, WALL_N);
+    eprintln!("PROBE eye-auto {held:?} {word:?} {in_auto_pbr}");
+    assert!(!in_auto_pbr);
+    assert!(word.is_none() || word.as_deref() == held.as_ref().and_then(|v| v.as_str()));
+}
+
+/// A fuzz-map wall: `wall_g` and `wall_fuzz` beside the normal, so an explicit PBR pick runs R5's fuzz step.
+fn fuzz_wall(dir: &Path) -> std::path::PathBuf {
+    let t = wall(dir);
+    ImageBuffer::from_fn(64, 64, |x, _| Rgb([(x * 4) as u8, 200, 40]))
+        .save(t.join("wall_g.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+        .save(t.join("wall_fuzz.png"))
+        .unwrap();
+    t
+}
+
+/// N-17 (N6-e): the typed-normal guard covers every member, not only the Normal slot's. A set whose second `_n`-like
+/// file the user typed `normal` (no job: the two compete for the slot, so no real plan reaches R5 with it) keeps it:
+/// the pick's resolution drops every R5 entry for it, but a legacy leave clear of a key in `auto_pbr`.
+#[test]
+fn the_typed_normal_guard_covers_every_member() {
+    const SECOND: &str = "test/wall_normal.png";
+    let d = tempfile::tempdir().unwrap();
+    let t = fuzz_wall(d.path());
+    bumpy_n(&t.join("wall_normal.png"));
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.decide(SECOND, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    let r5 = vec![
+        (SECOND.to_string(), Some(json!("pbr_normal")), true),
+        (
+            "test/wall_fuzz.png".to_string(),
+            Some(json!("pbr_fuzz")),
+            true,
+        ),
+        (SECOND.to_string(), None, true),
+    ];
+    let kept = m.normal_plan_probe("test/wall", Some(Shader::Pbr), r5);
+    // The fuzz map's entry stands; the typed member's value entry goes; its clear stands only for a key an older
+    // pick listed in `auto_pbr` (this one is not listed).
+    assert_eq!(
+        kept,
+        vec![(
+            "test/wall_fuzz.png".to_string(),
+            Some(json!("pbr_fuzz")),
+            true
+        )]
+    );
+}
+/// N-28 (N6-e): the Switch reads the stored value. A `_n` typed `glow`, then typed `normal`, then the diffuse decided
+/// before the plan settles: the `_n` stays `normal`, in no list.
+#[test]
+fn the_switch_reads_the_stored_type_of_a_member_the_plan_has_not_seen_yet() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Glow));
+    settle(&mut m);
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), (Some(json!("normal")), None, false));
+}
+
+/// N-17, N-19 (N6-f): an inferred normal whose `alpha.policy` the user wrote is never switched or listed by the
+/// diffuse's Switch.
+#[test]
+fn the_switch_leaves_an_inferred_normal_with_the_users_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"test/wall_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..sdc_gui::settings::GuiSettings::default()
+        },
+        None,
+        session(),
+    );
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.path().join("textures"));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), (None, None, false));
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), (None, None, false));
+}
+
+/// N-17 (N6-c): a saved fuzz-map set under an explicit PBR pick whose `pbr_normal` is in both lists (the two lists
+/// are read independently): Advanced Skin keeps it `pbr_normal` listed in `auto_normal` only; Default types it back
+/// and lists that word; Auto clears it and unlists it.
+#[test]
+fn a_normal_in_both_lists_resolves_to_one_final_value_per_pick() {
+    let word = |s: &str| (Some(json!(s)), Some(s.to_string()), false);
+    for (shader, want) in [
+        (Some(Shader::AdvancedSkin), word("pbr_normal")),
+        (Some(Shader::Default), word("normal")),
+        (None, (None, None, false)),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        fuzz_wall(d.path());
+        let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+        m.set_shader("test/wall", Some(Shader::Pbr));
+        settle(&mut m);
+        m.edit_docs("both lists", None, true, |p, s| {
+            p.set_file_value(WALL_N, "subtype", &json!("pbr_normal"));
+            s.set_auto_pbr(&[WALL_N.to_string()]);
+            s.set_auto_normal(&std::collections::BTreeMap::from([(
+                WALL_N.to_string(),
+                "pbr_normal".to_string(),
+            )]));
+        });
+        settle(&mut m);
+        assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
+        m.set_shader("test/wall", shader);
+        // The pick alone, before the next plan records anything.
+        assert_eq!(facts(&m, WALL_N), want, "{shader:?}");
+    }
+}
+
+/// N-17 (N6-g): the recorder follows, the user undoes it, picks PBR, and undoes the pick: the key is `normal`, the
+/// recorder does not follow again, and Redo is still offered.
+#[test]
+fn undoing_a_pick_after_an_undone_follow_does_not_follow_again() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.undo();
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    m.undo();
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert!(m.can_redo(), "Redo is still offered");
+}
+
+/// N-28 (N6-g): a followed normal on a wall whose diffuse was recorded `diffuse`: Advanced Skin, then PBR. The pick
+/// types the normal `pbr_normal` and the diffuse's Revert leaves it (the explicit pick is a PBR-set shader), in the
+/// pick's one step; a settle adds none.
+#[test]
+fn advanced_skin_then_pbr_keeps_a_followed_normal_in_one_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.set_shader("test/wall", Some(Shader::AdvancedSkin));
+    settle(&mut m);
+    let before = m.history.undo.len();
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    let after_pick = m.history.undo.len();
+    assert_eq!(after_pick, before + 1, "one Shader step");
+    settle(&mut m);
+    assert_eq!(m.history.undo.len(), after_pick, "a settle adds none");
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
+    );
+}
+
+/// G4 (N-17): an explicit Advanced Skin pick on a set with no diffuse types the untouched normal `pbr_normal` in
+/// the pick's own step (no diffuse Switch, no recorder follow), listed in `auto_normal` only.
+#[test]
+fn an_advanced_skin_pick_without_a_diffuse_types_the_normal_in_its_own_step() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/test");
+    std::fs::create_dir_all(&t).unwrap();
+    bumpy_n(&t.join("wall_n.png"));
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("normal")), Some("normal".into()), false)
+    );
+    m.set_shader("test/wall", Some(Shader::AdvancedSkin));
+    assert_eq!(m.undo_label(), Some("Shader"));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false),
+        "the pick itself, before any plan"
+    );
 }

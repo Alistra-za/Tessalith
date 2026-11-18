@@ -1157,6 +1157,7 @@ fn an_explicit_pbr_pick_retypes_an_untouched_normal() {
             .map(String::as_str),
         Some("pbr_normal")
     );
+    assert!(!auto_pbr(&m).contains(NORMAL));
     m.set_shader("m/rock01", Some(Shader::Default));
     idle(&mut m);
     assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));

@@ -1,6 +1,8 @@
 //! Note JS5 (N-17, N-19, N-27): a tangent-space normal the user did not decide is `pbr_normal` in a PBR or Advanced
 //! Skin set, and the engine's own type elsewhere. Untouched = listed in `[project] auto_normal` with the word its
-//! `[files]` sub-type still holds, `alpha_free`, in no locked slot, not a kept DDS.
+//! `[files]` sub-type still holds, `alpha_free`, in no locked slot, not a kept DDS. Any other member storing a
+//! tangent-space type is the user's: neither the recorder, a shader pick nor the diffuse's Switch changes it. A shader
+//! pick resolves each key to one final value before it writes (`normal_plan`).
 // shortcut: list keys are not renamed with `[files]` keys (`retarget_auto`, input renames), so a renamed file reads as
 // the user's and its old entry stays until Tessalith next writes the list; rename list keys there if it matters.
 use super::sets::{locked_items, views, SlotFill, SlotKind};
@@ -17,6 +19,19 @@ pub(crate) fn tangent(st: Subtype) -> bool {
         st,
         Subtype::Normal | Subtype::LandscapeNormal | Subtype::PbrNormal
     )
+}
+
+/// A shader pick's resolved writes (`AppModel::normal_plan`): each key has one final value.
+#[derive(Default)]
+pub(super) struct NormalPlan {
+    /// `untouched_for_shader`'s entries that stand.
+    pub retype: Vec<(String, Option<Value>, bool)>,
+    /// The normal rule's writes: `Some` types and lists the key, `None` clears and unlists it.
+    pub writes: Vec<(String, Option<Subtype>)>,
+    /// Keys the pick takes off `auto_pbr`.
+    pub off_auto_pbr: Vec<String>,
+    /// Keys whose follow marker goes: the pick moves them away from `pbr_normal`.
+    pub marker_off: Vec<String>,
 }
 
 /// The stored word of a sub-type (`pbr_normal`).
@@ -78,6 +93,125 @@ impl AppModel {
             self.tangent_back(key)
         };
         (want != held).then_some(want)
+    }
+
+    /// Note JS6 (N-17, N-19, N-28): resolves a shader pick's writes for the set's tangent-space normals, once, before
+    /// anything is written. `r5` is `untouched_for_shader`'s list (`key`, value or clear, the PBR step's own).
+    /// - The untouched normal of the set's own Normal slot (K) takes the shader's type from this rule alone, in every
+    ///   set: `pbr_normal` under a PBR-set shader, `tangent_back` under any other, cleared on Auto from a chosen PBR-set
+    ///   shader. An untouched key lives in `auto_normal` only: it never stays in `auto_pbr`. R5's entry for K survives
+    ///   only as a non-tangent value (Eye's `msn`); the key then keeps its listed word and this rule writes nothing.
+    /// - A K holding a non-tangent type (R5's `msn`) that R5 takes back to a tangent value gets the final value from
+    ///   this rule, listed; on Auto it is unlisted with R5's clear.
+    /// - Any other member holding a tangent-space type is the user's (or recorded before Note JS, N-20): R5 changes
+    ///   none of them but for the leave step on a key an older pick listed in `auto_pbr`.
+    pub(super) fn normal_plan(
+        &self,
+        set: &str,
+        shader: Option<Shader>,
+        mut r5: Vec<(String, Option<Value>, bool)>,
+    ) -> NormalPlan {
+        let mut plan = NormalPlan::default();
+        let (Some(view), Some(p), Some(s)) = (
+            self.view_of(set),
+            self.project.as_ref(),
+            self.sets_doc.as_ref(),
+        ) else {
+            plan.retype = r5;
+            return plan;
+        };
+        let chosen = view
+            .shader
+            .as_ref()
+            .filter(|p| p.provenance == engine::shader::ShaderOrigin::Set)
+            .map(|p| p.shader);
+        let own_n = match view.slots.get(&SlotKind::Normal) {
+            Some(SlotFill::Own { item }) => Some(item.clone()),
+            _ => None,
+        };
+        let stored = |k: &str| {
+            p.file_value(k, "subtype")
+                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
+        };
+        let new_of = |v: &Option<Value>| {
+            v.clone()
+                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
+        };
+        let auto_pbr = s.auto_pbr();
+        let untouched = own_n
+            .clone()
+            .and_then(|k| self.untouched_normal(&k).map(|st| (k, st)));
+        let untouched_key = untouched.as_ref().map(|(k, _)| k.clone());
+        let r5_of = |k: &str| {
+            r5.iter()
+                .find(|(rk, _, _)| rk == k)
+                .map(|(_, v, _)| v.clone())
+        };
+        let mut drop_r5: Vec<String> = vec![];
+        if let Some((k, held)) = untouched {
+            plan.off_auto_pbr.push(k.clone());
+            let keeps = r5_of(&k).is_some_and(|v| new_of(&v).is_some_and(|st| !tangent(st)));
+            if keeps {
+                if held == Subtype::PbrNormal {
+                    plan.marker_off.push(k.clone());
+                }
+            } else {
+                drop_r5.push(k.clone());
+                let write = match shader {
+                    Some(sh) => self.normal_for(&k, sh).map(Some),
+                    None => (chosen.is_some_and(Shader::is_pbr_or_advanced_skin)
+                        && held == Subtype::PbrNormal)
+                        .then_some(None),
+                };
+                if let Some(w) = write {
+                    if held == Subtype::PbrNormal && w != Some(Subtype::PbrNormal) {
+                        plan.marker_off.push(k.clone());
+                    }
+                    plan.writes.push((k, w));
+                }
+            }
+        } else if let Some(k) = own_n.filter(|k| stored(k).is_some_and(|st| !tangent(st))) {
+            // R5's own `msn`: the way back is this rule's write, listed (Tessalith's own, N-27).
+            let free = alpha_free(p, s, &k)
+                && !locked_items(self).contains_key(&k)
+                && self.item(&k).is_some_and(|i| !i.kept_dds());
+            match (r5_of(&k), shader) {
+                (Some(v), Some(sh)) if free && new_of(&v).is_some_and(tangent) => {
+                    drop_r5.push(k.clone());
+                    plan.off_auto_pbr.push(k.clone());
+                    let want = if sh.is_pbr_or_advanced_skin() {
+                        Subtype::PbrNormal
+                    } else {
+                        self.tangent_back(&k)
+                    };
+                    plan.writes.push((k, Some(want)));
+                }
+                (Some(None), None) if s.auto_normal().contains_key(&k) => {
+                    plan.off_auto_pbr.push(k.clone());
+                    plan.writes.push((k, None));
+                }
+                _ => {}
+            }
+        }
+        r5.retain(|(k, new, step)| {
+            let typed = untouched_key.as_ref() != Some(k)
+                && stored(k).is_some_and(tangent)
+                && view.members.contains(k);
+            !drop_r5.contains(k) && (!typed || (new.is_none() && *step && auto_pbr.contains(k)))
+        });
+        plan.retype = r5;
+        plan
+    }
+
+    /// Tests: the R5 entries `normal_plan` lets stand for a shader pick.
+    #[cfg(feature = "test-hooks")]
+    pub fn normal_plan_probe(
+        &self,
+        set: &str,
+        shader: Option<Shader>,
+        r5: Vec<(String, Option<Value>, bool)>,
+    ) -> Vec<(String, Option<Value>, bool)> {
+        self.normal_plan(set, shader, r5).retype
     }
 
     /// G1: each set's own Normal-slot member that its settled pick (not derived) moves into PBR.

@@ -209,12 +209,17 @@ impl AppModel {
         let locked = locked_items(self);
         let free = |mk: &&String| !locked.contains_key(*mk);
         if leaves {
-            // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`).
+            // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`), unless
+            // the set's explicit pick is a PBR-set shader, which keeps it `pbr_normal` (the pick types it).
+            let explicit_pbr = v.shader.as_ref().is_some_and(|p| {
+                p.provenance == engine::shader::ShaderOrigin::Set
+                    && p.shader.is_pbr_or_advanced_skin()
+            });
             let back = v
                 .members
                 .iter()
                 .filter(free)
-                .filter(|m| self.untouched_normal(m) == Some(Subtype::PbrNormal))
+                .filter(|m| !explicit_pbr && self.untouched_normal(m) == Some(Subtype::PbrNormal))
                 .map(|m| (m.clone(), self.tangent_back(m)))
                 .collect();
             return Follow::Revert(v.members.iter().filter(free).cloned().collect(), back);
@@ -240,15 +245,31 @@ impl AppModel {
                     _ => None,
                 });
                 let from = suggested.unwrap_or(job.profile.subtype);
-                // Note JS6 (N-28): a tangent-space normal switches only when inferred or untouched in `auto_normal`; R5's
-                // "equal to the suggestion" does not make a typed `normal` Tessalith's (owner, 07:10).
-                let listed = self.untouched_normal(m).is_some();
-                let tangent = matches!(from, Subtype::Normal | Subtype::LandscapeNormal);
-                if (tangent && !inferred && !listed) || (!tangent && !inferred && !untouched) {
+                // Note JS6 (N-28): a member storing a tangent-space type is the user's unless it is untouched in
+                // `auto_normal` (R5's "equal to the suggestion" does not make a typed `normal` Tessalith's); the stored
+                // value decides, never the plan's `from`. An inferred normal switches while its alpha is not the user's
+                // (N-17, N-19).
+                let stored = p
+                    .file_value(m, "subtype")
+                    .and_then(|v| serde_json::from_value::<Subtype>(v).ok());
+                if stored.is_some_and(super::normal_follow::tangent) {
+                    let listed =
+                        self.untouched_normal(m).is_some() && stored != Some(Subtype::PbrNormal);
+                    return listed.then(|| (m.clone(), Subtype::PbrNormal, true));
+                }
+                if matches!(from, Subtype::Normal | Subtype::LandscapeNormal) {
+                    let alpha_free = self
+                        .sets_doc
+                        .as_ref()
+                        .is_some_and(|s| super::normal_follow::alpha_free(p, s, m));
+                    return (inferred && alpha_free)
+                        .then(|| (m.clone(), Subtype::PbrNormal, false));
+                }
+                if !inferred && !untouched {
                     return None;
                 }
                 let st = pbr_counterpart(from)?;
-                Some((m.clone(), st, listed))
+                Some((m.clone(), st, false))
             })
             .collect();
         Follow::Switch(switch)

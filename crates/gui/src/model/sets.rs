@@ -3651,70 +3651,29 @@ impl AppModel {
             return;
         }
         let id = set.to_string();
-        let mut retype = self.untouched_for_shader(set, shader);
-        // Note JS6 (N-17, N-19, G2-G4): the untouched normal of the set's own Normal slot takes the chosen shader's
-        // type in this step, in every set (not only fuzz-map sets): `pbr_normal` under a PBR-set shader, the engine's
-        // type (`tangent_back`) under any other; back to Auto from a chosen PBR-set shader it is cleared, so the next
-        // settled plan records what Auto reads (the fuzz plan's `leaves_pbr` rule). `msn` is never one. An untouched
-        // key lives in `auto_normal` only: it leaves `retype` and `auto_pbr`. Any other tangent-space normal there is
-        // the user's (or recorded before Note JS, N-20): no arm retypes it but the leave step on a key an older pick
-        // listed in `auto_pbr`.
-        let view = self.view_of(set);
-        let chosen = view
-            .as_ref()
-            .and_then(|v| v.shader.clone())
-            .filter(|p| p.provenance == engine::shader::ShaderOrigin::Set)
-            .map(|p| p.shader);
-        let own_n = view.and_then(|v| match v.slots.get(&SlotKind::Normal) {
-            Some(SlotFill::Own { item }) => Some(item.clone()),
-            _ => None,
-        });
-        let untouched_n = own_n.clone().filter(|k| self.untouched_normal(k).is_some());
-        let normals: Vec<(String, Option<Subtype>)> = untouched_n
-            .clone()
-            .and_then(|k| match shader {
-                Some(sh) => self.normal_for(&k, sh).map(|st| (k, Some(st))),
-                None => (chosen.is_some_and(Shader::is_pbr_or_advanced_skin)
-                    && self.untouched_normal(&k) == Some(Subtype::PbrNormal))
-                .then_some((k, None)),
-            })
-            .into_iter()
-            .collect();
-        let auto_pbr_now = self
-            .sets_doc
-            .as_ref()
-            .map(|s| s.auto_pbr())
-            .unwrap_or_default();
-        let typed_n = own_n.filter(|k| {
-            untouched_n.as_ref() != Some(k)
-                && self
-                    .project
-                    .as_ref()
-                    .and_then(|p| p.file_value(k, "subtype"))
-                    .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
-                    .is_some_and(super::normal_follow::tangent)
-        });
-        // N6-a: the rule owns tangent-space values only; a re-type of the key to another type (`msn` under Eye) stays
-        // R5's.
-        let tangent_new = |new: &Option<serde_json::Value>| {
-            new.clone()
-                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
-                .is_some_and(super::normal_follow::tangent)
-        };
-        retype.retain(|(k, new, step)| {
-            (untouched_n.as_ref() != Some(k) || !tangent_new(new))
-                && (typed_n.as_ref() != Some(k)
-                    || (new.is_none() && *step && auto_pbr_now.contains(k)))
-        });
+        // Note JS6: the pick's writes for the set's tangent-space normals are resolved once (`normal_plan`), so each key
+        // gets one final value; R5's other entries stand.
+        let super::normal_follow::NormalPlan {
+            retype,
+            writes: normals,
+            off_auto_pbr,
+            marker_off,
+        } = self.normal_plan(set, shader, self.untouched_for_shader(set, shader));
         // Note FC1 R5: a sub-type the plan recorded on its own and nobody changed takes the chosen shader's type in
         // this step (the CLI never reads the set's shader, so `sdc.toml` must name it). Back to Auto it goes, and the
-        // next settled plan records what the plan picks then. The follow's marker goes with it: a normal taken back
-        // here may follow again when the set returns to PBR.
+        // next settled plan records what the plan picks then.
         for (k, _, _) in &retype {
             self.history.auto_written.remove(&(k.clone(), "subtype"));
         }
         for (k, _) in &normals {
             self.history.auto_written.remove(&(k.clone(), "subtype"));
+        }
+        // The follow's marker goes only with a pick that moves the normal away from `pbr_normal`: a normal taken back
+        // here may follow again when the set returns to PBR; a pick that leaves it typed `pbr_normal` keeps the marker,
+        // so an Undo of a follow stays undone.
+        // shortcut: the marker is not in the undo snapshot, so Undo of the pick that took a normal back, then Undo of
+        // the follow, lets the recorder follow again; upgrade with the `subtype` marker, which has the same limit.
+        for k in &marker_off {
             self.history
                 .auto_written
                 .remove(&(k.clone(), "normal-follow"));
@@ -3751,9 +3710,7 @@ impl AppModel {
                     None => p.clear_file_value(k, "subtype"),
                 }
             }
-            if let Some(k) = &untouched_n {
-                auto.retain(|a| a != k);
-            }
+            auto.retain(|a| !off_auto_pbr.contains(a));
             if auto != before {
                 d.set_auto_pbr(&auto);
             }
