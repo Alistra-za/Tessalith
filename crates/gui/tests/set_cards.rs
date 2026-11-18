@@ -1260,6 +1260,63 @@ fn a_link_over_an_own_file_of_its_kind_draws_one_chip() {
     );
 }
 
+/// What a card's title painted: its text, how many lines the galley has, and the title node's rect.
+fn title_probe(h: &Harness<'static, AppModel>, id: &str) -> (String, usize, egui::Rect) {
+    let r = h
+        .query_all_by_label(id)
+        .next()
+        .expect("the card title")
+        .rect();
+    let mut found = None;
+    fn flat(s: &egui::Shape, r: egui::Rect, out: &mut Option<(String, usize)>) {
+        match s {
+            egui::Shape::Vec(v) => v.iter().for_each(|s| flat(s, r, out)),
+            egui::Shape::Text(t) if r.expand(1.0).contains_rect(t.visual_bounding_rect()) => {
+                *out = Some((t.galley.job.text.clone(), t.galley.rows.len()));
+            }
+            _ => {}
+        }
+    }
+    for c in &h.output().shapes {
+        flat(&c.shape, r, &mut found);
+    }
+    let (text, rows) = found.expect("the title's text is painted");
+    (text, rows, r)
+}
+
+/// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, under the
+/// position and handle) instead of wrapping mid-word beside the pill.
+#[test]
+fn a_title_too_wide_beside_the_pill_takes_its_own_line() {
+    const IDS: [&str; 2] = [
+        "architecture/whiterun/wrwoodbeamlong01",
+        "architecture/windhelm/wrwoodbeamlong01",
+    ];
+    let d = tempfile::tempdir().unwrap();
+    for (id, rgb) in IDS.iter().zip([[90u8; 3], [60u8; 3]]) {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb(rgb))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let mut h = harness(m);
+    h.set_size(egui::vec2(1055.0, 770.0));
+    h.run();
+    h.run();
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
+    for id in IDS {
+        // the narrow layout: the title beside the position and handle at the card's full width, the pill below
+        let (text, rows, r) = title_probe(&h, id);
+        assert_eq!(rows, 1, "{id}: one line, shown {text:?} in {r:?}");
+        assert!(
+            r.height() < 1.5 * h.ctx.global_style().text_styles[&egui::TextStyle::Body].size + 6.0
+                && panel.contains_rect(r),
+            "{id}: {r:?} one line high inside the column {panel:?}"
+        );
+    }
+}
 #[test]
 fn two_cards_sharing_a_leaf_never_read_the_same() {
     const IDS: [&str; 2] = [
@@ -1294,6 +1351,15 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
         "premise: both titles are cut: {shown:?}"
     );
     assert_ne!(shown[0], shown[1], "two cards read the same");
+    for id in IDS {
+        let (text, rows, r) = title_probe(&h, id);
+        // these tails are wider than the whole card, so they may wrap, and only as the last resort
+        let last_resort = text == format!("…/{}", id.split_once('/').unwrap().1);
+        assert!(
+            rows == 1 || last_resort,
+            "{id}: {rows} lines for {text:?} in {r:?}"
+        );
+    }
     assert!(
         shown[0].ends_with("whiterun/whiterunstonework/wallblocklarge01")
             && shown[1].ends_with("windhelm/whiterunstonework/wallblocklarge01"),

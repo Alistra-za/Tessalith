@@ -2396,17 +2396,21 @@ fn pill(
                     if !checks.is_empty() {
                         need += small_width(ui, &check_badge_text(&checks).1) + btn;
                     }
-                    let wide = ui.available_width() >= need;
-                    // Note HN F3: elide the middle so the leaf stays; the node's name is the full id.
-                    let shown_for = |ui: &egui::Ui| {
+                    // Note HN F3: elide the middle so the tail stays; the node's name is the full id.
+                    // `fits` is whether the shown title fits `room`; when even `…/<tail>` does not, it wraps.
+                    let shown_in = |ui: &egui::Ui, room: f32| {
                         let font = egui::TextStyle::Body.resolve(ui.style());
-                        let room = ui.available_width();
                         let shown = fit_title(&v.id, &v.short, &model.sets_filter.search, |t| {
                             text_width(ui, t, &font) <= room
                         });
                         let fits = text_width(ui, &shown, &font) <= room;
                         (shown, fits)
                     };
+                    let shown_for = |ui: &egui::Ui| shown_in(ui, ui.available_width());
+                    // One row only when the title that will be shown also fits beside the pill and badges
+                    // (Task 9 review); otherwise it takes its own line at the card's full width.
+                    let wide = ui.available_width() >= need
+                        && shown_in(ui, ui.available_width() - (need - name_min)).1;
                     let name = |ui: &mut egui::Ui| {
                         let (shown, fits) = shown_for(ui);
                         // Extend: the shown text already fits, so egui never end-cuts the tail. When even the
@@ -2453,7 +2457,7 @@ fn pill(
                             );
                             false
                         } else {
-                            // Beside the position and handle the leaf would be cut: give the title its own line.
+                            // Beside the position and handle the tail would not fit: give the title its own line.
                             let own = !shown_for(ui).1;
                             if !own {
                                 name(ui);
