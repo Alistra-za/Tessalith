@@ -46,15 +46,15 @@
 - A slot shared from a set that itself shares it now finds the texture. Deleting that middle set, or clearing its share, keeps the slot filled: the share passes on to the set the middle one shared from. A set that shares a slot from itself is no longer treated as sharing it: it keeps its own file, and its card reads "(this set itself)".
 - If your project already has such a slot (sharing a texture into a slot other sets shared could make one), the next export fills it: its PGPatcher JSON names the texture, a vanilla set gets its copy of it, and on Community Shaders a shared normal feeds its roughness bake. Before, that slot was left empty. If that set is a PBR set listed before the texture's other PBR sets in the Sets column, the texture's own Community Shaders PBR output moves to that set's prefix: the export writes it at the new path, leaves the old file on disk, and points the other sets' JSON lines at the new path.
 - Problems can now reach zero. Rows that only say what a default did (a missing metallic or AO map, a size kept without mips, a map the shader doesn't read) are now Notes and say why that is fine. Notes with a button stay in the list after the problems; the rest are behind a **Notes** pill. The tab reads `Problems (2) · Notes (67)`.
-- Warning and check rows have **Mark as intended**, after any fix. A mark is saved in `sdc-project.toml`, moves the row to Notes and can be undone with **Undo mark**.
+- Warning and check rows have **Mark as intended**, after any fix; a file that failed validation in the last export has none. A mark is saved in `sdc-project.toml`, moves the row to Notes and can be undone with **Undo mark**.
 - A set is Ready when neither it nor its textures has a problem row; notes, rows marked as intended and checks don't count. The set editor's first line says Ready, or Not ready with up to three reasons as buttons that take you to the fix, and it stays in sight while you scroll.
-- **Go to set** now scrolls to the file or empty slot the row is about and outlines it for two seconds. Rows about a map the shader doesn't use offer **Remove from set** and **Change shader…**.
+- **Go to set** now closes an expanded texture preview, then scrolls to the file or empty slot the row is about and outlines it for two seconds. Rows about a map the shader doesn't use offer **Remove from set** and **Change shader…**.
 - More rows have a fix button: **Change shader…** for a missing map or a shader that isn't available, **Set type…** when a file's name and contents point to different types, **Turn parallax off** for a complex `_m` with parallax on and no alpha, and **Rebuild Z** for a normal map whose blue channel points the wrong way.
 - Fixes that remove or switch something off (**Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**) run on a mouse click only: Enter and Space do nothing on them.
 - Hidden kinds show in the tab (`Problems (12 · 60 hidden)`), and the list says what is hidden.
 - After **Rebuild Z** the exported row says it is queued until the next export.
 - A row's buttons sit right after its sentence.
-- Counts of one read '1 problem', '1 warning', '1 note'.
+- Counts of one now read in the singular: "1 file, 1 problem" in the Export button's hover, "1 warning" in the Files tab, "1 note" in the 3D view's Details, "1 texture selected" in the bulk panel, and "Analysing 0 / 1 file…" on the plan bar.
 
 ## 3.0.0
 

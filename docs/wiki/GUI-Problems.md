@@ -45,7 +45,7 @@ A row you must act on has its fix as a button.
 | A note about a change Tessalith made for you | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
 | `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. On a file you already exported the row then reads *Rebuild Z is on for this file: export again to rewrite it*, a queued note with no button, until the next export. <!-- D:JO9 --> |
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
-| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The removed file goes to the first set that shares it, as its own, else to *no set* ([Textures in no set](GUI-Sets-Column.md#textures-in-no-set)). <!-- D:JO15,JN5 --> |
+| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). <!-- D:JO15 --> |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
 | *Parallax is on but the source has no alpha* | **Turn parallax off**, which writes `alpha.parallax = false`. <!-- D:JO15 --> |
@@ -75,10 +75,11 @@ Each click is one undo step. <!-- D:JO4 -->
 - **Warnings and checks only:** blockers, questions and a file that failed validation in the last export have no mark. Fix those, or export again. <!-- D:JO4 -->
 - **Greyed** with no project open and while `sdc-project.toml` is read-only; the hover says why. <!-- D:JO4 -->
 - **No mark for a whole kind at once:** hide the kind instead ([Hiding kinds of row](#hiding-kinds-of-row)). <!-- D:JO4 -->
+- **In hovers:** a tile's hover, a file's warnings in the **Files** tab and a set's check badge list marked rows last, under "Marked as intended:". <!-- D:JO4 -->
 
 ### Go to set
 
-**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md). When the row is about one slot or file (a missing map, a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
+**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md), closing an expanded texture preview first. When the row is about one slot or file (a missing map, a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
 
 ### Unmatched [files] entries
 
@@ -112,7 +113,7 @@ Click a row's subject to select it in the Textures view. Arriving from a count (
 
 ## Hiding kinds of row
 
-**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden, and neither can a queued note. Hiding only changes what the list shows: a hidden row still counts for Ready. <!-- D:JO6,HC4 -->
+**Kinds ▾** hides kinds of warning and info row for this project, such as every missing specular. Blocks and questions can't be hidden, and neither can a queued note. Hiding changes what the list and the tab's count show; a hidden row still counts for Ready. <!-- D:JO6,HC4 -->
 
 - **The tab** counts hidden problem rows apart: `Problems (12 · 60 hidden)`. A hidden note counts nowhere. <!-- D:JO6 -->
 - **The list's first line** says what is hidden, with the project's numbers: "2 kinds hidden in this project (60 rows). Hidden rows still count for Ready." <!-- D:JO6 -->

@@ -68,7 +68,7 @@ Re-runs default to `if-changed`. For each output that already exists, Tessalith 
 
 So editing a source, or changing a setting in `sdc.toml` or a preset, re-encodes exactly the files affected. <!-- D:JA1 --> A record written by Tessalith 1.x is always encoded again. <!-- D:JA4 -->
 
-Two kinds of output are kept and counted instead. Every run says how many: the CLI on its `done` line and, with `--json`, by format ([the log](CLI-Reference.md#reading-the-log)); the GUI in the export's **Notes**.
+Two kinds of output are kept and counted instead. Every run says how many: the CLI on its `done` line and, with `--json`, by format ([the log](CLI-Reference.md#reading-the-log)); the GUI in the bottom panel's **Files** tab, under its **Notes (n)** heading (not the **Notes** pill of the Problems tab).
 
 - **Encoded at a higher quality target.** The settings now ask for a lower `encoder.effort`, `encoder.bc45_search_radius` or `encoder.bc1_search` than the output was encoded at, so the file is already better than asked. A raised target encodes it again. <!-- D:JA5 -->
 - **Written by an older encode version.** A Tessalith release that changes how a texture type is encoded (an encoder change or a fix) leaves the outputs of that type at an older encode version. They are encoded again only with `--ev`, and `--ev --property <words>` limits that to what the release names, for example `--ev --property cutout,mips` for a fix to alpha mipmaps ([the words](CLI-Reference.md#property-words)). The changelog entry of such a release ends with the command to run. <!-- D:JA2,JA8 -->

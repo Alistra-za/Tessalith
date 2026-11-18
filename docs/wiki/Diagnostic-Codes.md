@@ -154,7 +154,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `GRASS-SHAPE` | error | A `complex_grass` source isn't a power-of-two 1:2 image. | Supply e.g. 2048x4096. |
 | `GRASS-TOP-OPAQUE` | warning | The top half is fully opaque: no cutout. | Check the alpha. |
 | `GRASS-NORMALS` | warning | Under 99% of the bottom half is unit-length normals. | Check the bottom half is a normal map. |
-| `GRASS-DETECT-SOURCE` | warning | A complex-grass source's bottom-left normal isn't unit length, so Community Shaders' detection test fails on the source. Tessalith renormalises the written file, so Community Shaders still reads it as grass, unless `mips.normal_base = keep`: then the file is written as it is and isn't read as grass. | Nothing, unless `mips.normal_base = keep`: then fix the corner texel. The Problems row has no button. <!-- D:JO15 --> |
+| `GRASS-DETECT-SOURCE` | warning | A complex-grass source's bottom-left normal isn't unit length, so Community Shaders' detection test fails on the source. Tessalith renormalises the written file, so Community Shaders still reads it as grass, unless `mips.normal_base = keep`: then the file is written as it is and isn't read as grass. | Nothing, unless `mips.normal_base = keep`: then fix the corner texel. The Problems row has no fix button; **Mark as intended** clears it. <!-- D:JO15 --> |
 | `PBR-GRASS-DETECT` | warning | A PBR grass albedo's bottom-left texel looks like a complex-grass normal, so Community Shaders' grass shadow pass would read it as complex grass and shadows won't match. | Change that texel. |
 
 ## Also export

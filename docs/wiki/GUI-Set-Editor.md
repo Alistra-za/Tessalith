@@ -15,10 +15,11 @@ The editor's first line answers it, and stays in sight above the slot rows while
 - "Ready: nothing in this set needs you." with a green dot.
 - "Not ready:" with an amber dot, up to three reasons as buttons, then "+k more in Problems" for the rest.
 - A red dot instead means the set blocks the export, as on its card. <!-- D:JO7 -->
+- "Not ready: this set has no files yet." with an amber dot and no reason buttons, for a set you created that has no file. <!-- D:JO7 -->
 
 Click a reason to go to its fix:
 
-- **A missing map** reads "no {slot} (Assign…)". The editor switches to 2D if it shows 3D, scrolls to that slot row, outlines it for two seconds and puts the keyboard on its **Assign…**. <!-- D:JO7,JO8 -->
+- **A missing map** reads "no {slot} (Assign…)". The editor switches to 2D if it shows 3D, then scrolls to that slot row and outlines it, as [Go to set](GUI-Problems.md#go-to-set) does, and puts the keyboard on its **Assign…**. A slot named with its own brackets reads "no Emissive / Skin, slot 3 (Assign…)". <!-- D:JO7 -->
 - **Any other reason** opens Problems on the set's rows, scrolled to that row, with the keyboard on its fix or **Mark as intended**. A hidden kind shows again. <!-- D:JO7 -->
 - **"+k more in Problems"** opens Problems on the set's rows and shows the hidden kinds among them again. <!-- D:JO7 -->
 

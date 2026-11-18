@@ -4,7 +4,7 @@ For anyone grouping textures into material sets: reading a set card, finding a s
 
 ## Reading a set card
 
-One card per material set. A status pill shows what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set on a target that writes none, "PBR Landscape", "skin"), with a red dot when it blocks export, amber when it isn't ready and green when it is. A set is ready when neither it nor its textures has a problem row; notes, rows you marked as intended and checks don't count ([Problems and Notes](GUI-Problems.md#problems-and-notes)). <!-- D:JO5 --> The hovers of the status pill and of the *Ready* and *Not ready* filter pills say so too. Hover the pill for what the set writes and the state of each packed output. **⚠ n** opens the set's problems, and the shader combo sits on its own row. Click empty card area to open the set.
+One card per material set. A status pill shows what the set is ("vanilla", "PBR → JSON", "PBR, no JSON" for a PBR set on a target that writes none, "PBR Landscape", "skin"), with a red dot when it blocks export, amber when it isn't ready and green when it is. A set is ready when neither it nor its textures has a problem row; notes, rows you marked as intended and checks don't count ([Problems and Notes](GUI-Problems.md#problems-and-notes)). <!-- D:JO5 --> A set you created that has no file yet is amber too, and its hover says so. Hover the pill for what the set writes and the state of each packed output. **⚠ n** opens the set's problems, and the shader combo sits on its own row. Click empty card area to open the set.
 
 Under it is one chip per slot of the shader, lettered by the slot's suffix. On an Advanced skin set the RMAOS chip reads RFAOS, and the letter sits bottom-left on every chip. <!-- D:HE1 --> A small thumbnail on a chip's corner is a [helper](Texture-Packing.md#helper-textures) feeding that slot. An amber outline marks a slot borrowed from another set, and a red **?** a borrow whose set is gone or a file that is gone. A slot shared from a set that shares it in turn reads the set that has the file; a loop of shares fills nothing and shows the **?**. <!-- D:JN1 --> Delete that middle set, or **Clear** its share, and the far set keeps the texture: its share passes on to the set the middle one shared from. <!-- D:JN4 --> Right-click a **?** for **Remove from set** (or **Delete set** when nothing is left); each one is also a Problems row.
 
@@ -16,7 +16,7 @@ The card's right-click menu holds **Export set** ([Exporting part of the project
 
 ## Finding a set
 
-The search box matches a set's id or label, never its key. The pills *Not ready*, *Ready* and *No JSON* and **Filter ▾** (by shader) narrow the list, and they combine. A filter only hides: the selection, the editor and the bulk panel stay. **Go to set** from Problems on a hidden set tells you it is hidden and offers **Clear filter**. The pills and the shader are remembered in `gui.toml`, the search text isn't.
+The search box matches a set's id or label, never its key. The pills *Not ready*, *Ready* and *No JSON* and **Filter ▾** (by shader) narrow the list, and they combine. Hover *Ready* or *Not ready* for what Ready means. A filter only hides: the selection, the editor and the bulk panel stay. **Go to set** from Problems on a hidden set tells you it is hidden and offers **Clear filter**. The pills and the shader are remembered in `gui.toml`, the search text isn't.
 
 ## Groups
 
