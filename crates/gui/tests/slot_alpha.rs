@@ -304,48 +304,99 @@ fn the_slot_alpha_sits_on_the_formats_line() {
     }
 }
 
-/// Guard (passes today and must keep passing): at the floor the alpha value reads in full, under its heading.
-#[test]
-fn the_alpha_value_reads_in_full_at_1280() {
-    let d = tempfile::tempdir().unwrap();
-    let m = leaf(d.path()); // a set that asks: Confirm shows, the tightest row
-    let want = alpha_label(sdc_gui::model::items::alpha_asked(m.item(LEAF).unwrap()).unwrap());
-    let mut h = harness_at(m, 1280.0);
+/// The alpha value reads in full under its heading: `m`'s diffuse row at window width `w` (the heading starts at the
+/// combo's left edge, and over no Match toggle), on two frames.
+fn alpha_reads_in_full(set: &str, m: AppModel, want: &str, w: f32) {
+    let mut h = harness_at(m, w);
     h.run_steps(4);
-    let combo = slot_combo(&h);
-    assert!(
-        combo
-            .accesskit_node()
-            .label()
-            .unwrap()
-            .starts_with("Slot alpha type: "),
-        "AccessKit keeps the full name"
-    );
-    assert_eq!(
-        painted_in(&h, combo.rect()),
-        want,
-        "the value is painted in full"
-    );
-    assert!(
-        !painted_cut(&h, combo.rect()),
-        "painted {:?}",
-        painted_in(&h, combo.rect())
-    );
-    // the heading over this combo: the nearest "Alpha" label above it that overlaps it across
-    // (the PGPatcher panel's alpha group has a title of its own elsewhere)
-    let c = combo.rect();
-    let head = h
-        .query_all_by_role(Role::Label)
-        .filter(|n| {
-            let a = n.accesskit_node();
-            a.label().as_deref() == Some("Alpha") || a.value().as_deref() == Some("Alpha")
-        })
-        .map(|n| n.rect())
-        .filter(|r| r.max.y <= c.min.y && r.min.x < c.max.x && r.max.x > c.min.x)
-        .min_by(|a, b| (c.min.y - a.max.y).total_cmp(&(c.min.y - b.max.y)));
-    assert!(head.is_some(), "an Alpha heading above the alpha combo");
+    for frame in 0..2 {
+        let combo = slot_combo(&h);
+        assert!(
+            combo
+                .accesskit_node()
+                .label()
+                .unwrap()
+                .starts_with("Slot alpha type: "),
+            "AccessKit keeps the full name"
+        );
+        assert_eq!(
+            painted_in(&h, combo.rect()),
+            want,
+            "{set} {w} frame {frame}: the value is painted in full"
+        );
+        assert!(
+            !painted_cut(&h, combo.rect()),
+            "{set} {w}: painted {:?}",
+            painted_in(&h, combo.rect())
+        );
+        // the heading over this combo: the nearest "Alpha" label above it that overlaps it across
+        // (the PGPatcher panel's alpha group has a title of its own elsewhere)
+        let c = combo.rect();
+        // the Flags cell reaches back to the Match toggle on its row (a JSON set)
+        let cell_left = h
+            .query_all_by_label("Match on this")
+            .map(|n| n.rect())
+            .filter(|t| (t.center().y - c.center().y).abs() <= 2.0)
+            .fold(c.min.x, |a, t| a.min(t.min.x));
+        let head = h
+            .query_all_by_role(Role::Label)
+            .filter(|n| {
+                let a = n.accesskit_node();
+                a.label().as_deref() == Some("Alpha") || a.value().as_deref() == Some("Alpha")
+            })
+            .map(|n| n.rect())
+            .filter(|r| r.max.y <= c.min.y && r.min.x < c.max.x && r.max.x > cell_left)
+            .min_by(|a, b| (c.min.y - a.max.y).total_cmp(&(c.min.y - b.max.y)))
+            .unwrap_or_else(|| panic!("{set} {w}: an Alpha heading above the alpha combo"));
+        assert!(
+            (head.min.x - c.min.x).abs() <= 1.0,
+            "{set} {w} frame {frame}: the heading {head:?} starts at the combo {c:?}"
+        );
+        // the Match toggle on this row (a JSON set) is not under the heading
+        for t in h.query_all_by_label("Match on this") {
+            let t = t.rect();
+            if (t.center().y - c.center().y).abs() <= 2.0 {
+                assert!(
+                    t.max.x <= head.min.x + 0.5,
+                    "{set} {w}: the heading {head:?} stands over the Match toggle {t:?}"
+                );
+            }
+        }
+        h.step();
+    }
 }
 
+/// Pin of the alpha value's place: in full, under its heading, on a set that asks (Confirm shows, the tightest row),
+/// at 1280 and at a wide window.
+#[test]
+fn the_alpha_value_reads_in_full_at_1280() {
+    for w in [1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let m = leaf(d.path());
+        let want = alpha_label(sdc_gui::model::items::alpha_asked(m.item(LEAF).unwrap()).unwrap());
+        alpha_reads_in_full("leaf", m, want, w);
+    }
+}
+
+/// The same on a JSON set, whose diffuse row draws the Match toggle before the combo: the heading is over the combo.
+#[test]
+fn the_alpha_value_reads_in_full_on_a_json_set() {
+    for w in [1280.0, 1600.0] {
+        let d = tempfile::tempdir().unwrap();
+        let m = rock(d.path());
+        let want = alpha_label(
+            m.item(ROCK)
+                .unwrap()
+                .job
+                .as_ref()
+                .unwrap()
+                .profile
+                .alpha
+                .policy,
+        );
+        alpha_reads_in_full("rock", m, want, w);
+    }
+}
 /// The link mark's rings (two 1.5 px circles) painted inside `r`.
 fn rings(h: &Harness<'static, AppModel>, r: egui::Rect) -> usize {
     fn count(s: &egui::Shape, r: egui::Rect) -> usize {

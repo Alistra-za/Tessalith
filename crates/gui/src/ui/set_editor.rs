@@ -757,7 +757,17 @@ fn rows(
                 let alpha = cells
                     .iter()
                     .any(|c| c.kind == SlotKind::Diffuse && has_job(c));
-                head(ui, if alpha { "Alpha" } else { "" });
+                if alpha && shows_json_panel(v, model.target) {
+                    // The diffuse row draws the Match toggle before its alpha combo: "Alpha" starts at the combo.
+                    let span = match_toggle_span(ui);
+                    ui.horizontal(|ui| {
+                        ui.spacing_mut().item_spacing.x = 0.0;
+                        ui.add_space(span);
+                        head(ui, "Alpha");
+                    });
+                } else {
+                    head(ui, if alpha { "Alpha" } else { "" });
+                }
                 head(ui, "");
                 ui.end_row();
             }
@@ -824,6 +834,12 @@ fn own_item<'a>(model: &'a AppModel, v: &SetView, cell: &SlotCell) -> Option<&'a
 
 /// The link mark's square: the toggle is as wide as the glyph button it replaces (`look_036`'s pin on the Format column).
 const MARK_W: f32 = 13.0;
+
+/// What the Match toggle takes in the Flags cell before the alpha combo: its button (the mark and the button's
+/// padding) and the spacing after it. The heading row starts "Alpha" this far in, so it stands over the combo.
+fn match_toggle_span(ui: &egui::Ui) -> f32 {
+    MARK_W + 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x
+}
 
 /// A Flags toggle painted as the link mark (two rings, no emoji glyph): its accessible name is the full `label`, which
 /// also leads its hover. True when clicked.
