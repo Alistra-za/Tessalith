@@ -444,14 +444,72 @@ impl AppModel {
             && !self.has_problem_rows()
     }
 
+    /// E3 (ruling 3c-14): `(writes_without_review, export_files)` of the whole project, whatever scope an open Review
+    /// was made for (a header click clears the scope first). With no scope it is the live pair; with one it is read
+    /// through `with_whole_view`, once per change of what it reads (the view key and the problems key), so the
+    /// per-frame cost is one key compare. The JSON recheck (1 s) does not move the key: the click itself re-decides.
+    fn whole_pair(&self) -> (bool, usize) {
+        if self.export_scope().is_none() {
+            return (self.writes_without_review(), self.export_files());
+        }
+        let key = (self.view_key(), super::bottom::problems_inner(self));
+        if let Some((v, p, pair)) = &*self.whole_cache.borrow() {
+            if (v, p) == (&key.0, &key.1) {
+                return *pair;
+            }
+        }
+        let pair = self.with_whole_view(|| (self.writes_without_review(), self.export_files()));
+        *self.whole_cache.borrow_mut() = Some((key.0, key.1, pair));
+        pair
+    }
+
+    /// `whole_pair().0`, without counting files when there is no scope.
+    pub(super) fn whole_writes(&self) -> bool {
+        if self.export_scope().is_none() {
+            self.writes_without_review()
+        } else {
+            self.whole_pair().0
+        }
+    }
+
+    /// `whole_pair().1`.
+    pub(super) fn whole_files(&self) -> usize {
+        if self.export_scope().is_none() {
+            self.export_files()
+        } else {
+            self.whole_pair().1
+        }
+    }
+
     /// E3: the header label's write-now state. While a plan is pending it is the last settled answer, so the
     /// label never flips mid-plan (a partial plan lands without settling); else the live rule, whole project.
     pub fn header_writes_now(&self) -> bool {
         if self.full_plan_pending() {
             self.settled_writes_now
         } else {
-            self.writes_without_review()
+            self.whole_writes()
         }
+    }
+
+    /// The file count the header label shows: the settled one while a write-now label is held, else the live one;
+    /// the whole project's in both.
+    fn header_files(&self, now: bool) -> usize {
+        if now && self.full_plan_pending() {
+            self.settled_export_files
+        } else {
+            self.whole_files()
+        }
+    }
+
+    /// E3 (ruling 3c-17): the header draws the accent only when a click has something to write or review: the
+    /// write-now answer or an open gate, and a count above zero (the label's files plus NIF edits).
+    pub fn header_accent(&self) -> bool {
+        self.accent_for(self.header_writes_now())
+    }
+
+    /// [`Self::header_accent`] for a `now` the caller already has (the header asks once per frame).
+    pub fn accent_for(&self, now: bool) -> bool {
+        (now || self.review_gate().is_ok()) && self.header_files(now) + self.nif_rows.len() > 0
     }
 
     /// E3: the header's Export button: `Review {n} files…`, or `Export {n} files now` when a click writes.
@@ -471,15 +529,16 @@ impl AppModel {
         }
         // Only the held write-now label keeps the settled count; the Review label reads the decisions live.
         if now {
-            let n = if self.full_plan_pending() {
-                self.settled_export_files
-            } else {
-                self.export_files()
-            };
-            return format!("Export {} now", counted(n, "file", "files"));
+            return format!(
+                "Export {} now",
+                counted(self.header_files(true), "file", "files")
+            );
         }
         let rows = self.nif_rows.len();
-        let mut t = format!("Review {}", counted(self.export_files(), "file", "files"));
+        let mut t = format!(
+            "Review {}",
+            counted(self.header_files(false), "file", "files")
+        );
         // Note FI7: `Review` writes nothing, so it counts every pending NIF edit.
         if rows > 0 {
             t.push_str(&format!(" + {}", nif_edits(rows)));

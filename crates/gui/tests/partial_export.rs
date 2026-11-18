@@ -731,7 +731,10 @@ fn a_dropped_queued_export_ends_the_scope() {
     assert_eq!(m.write_only(), None, "the next export is whole");
 }
 
-/// Note HF10 (final review I4): a scoped export that waits for a plan writes only its own set when the plan lands.
+/// Note HF10 (final review I4), ruling 3c-16: a scoped click that waits for a plan under the opt-out lands in its
+/// scoped Review and writes nothing there: the count the click was held on is the whole project's, and a scoped run's
+/// never equals it (a scope is a part of the project), so `settle_queued` opens Review instead of writing what the
+/// user was not shown. Review's Export then writes only the scope.
 #[test]
 fn a_queued_scoped_export_writes_only_its_set() {
     let d = tempfile::tempdir().unwrap();

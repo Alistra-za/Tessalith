@@ -374,6 +374,9 @@ pub(crate) struct ViewKey {
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
+/// E3: the whole-project header answer `(writes_without_review, export_files)` and the keys it was read under.
+type WholeAnswer = (ViewKey, ProblemsKey, (bool, usize));
+
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
 
@@ -669,6 +672,11 @@ pub struct AppModel {
     /// E3: depth of the worker-result handlers that can start the next plan of a chain (a landed plan's tail
     /// re-plans): inside one the pending state is continuous, so the held pair is not taken again.
     landing: u8,
+    /// E3 (ruling 3c-14): set while the whole-project header answer is computed, so `export_scope()` reads `None` and
+    /// every scope-keyed cache takes a slot of its own (`view_key`). Never set across a call that can return.
+    whole_view: std::cell::Cell<bool>,
+    /// E3: the whole-project `(writes_without_review, export_files)` while a scope is set, by the inputs it reads.
+    whole_cache: std::cell::RefCell<Option<WholeAnswer>>,
     /// Review's Export was clicked while a plan or scan read was in flight: the export continues when it lands.
     continue_after_plan: Option<Continue>,
     /// The user chose to cancel the running export and then close or open: done when the export has ended.
@@ -937,6 +945,8 @@ impl AppModel {
             settled_writes_now: false,
             settled_export_files: 0,
             landing: 0,
+            whole_view: std::cell::Cell::new(false),
+            whole_cache: std::cell::RefCell::new(None),
             continue_after_plan: None,
             after_export: None,
             pending_json: None,
@@ -2157,9 +2167,10 @@ impl AppModel {
     fn hold_settled(&mut self) {
         // The count is read only when the label can use it (a write-now answer): the default, opted-in-never project
         // pays nothing per plan.
-        let writes = self.writes_without_review();
+        // Whole-project, whatever scope an open Review has (ruling 3c-14: the header's answer is never a scope's).
+        let writes = self.whole_writes();
         (self.settled_writes_now, self.settled_export_files) =
-            (writes, if writes { self.export_files() } else { 0 });
+            (writes, if writes { self.whole_files() } else { 0 });
     }
 
     /// E3: `hold_settled` at a settled-to-pending transition, never inside a landing worker result (a landed
@@ -3368,7 +3379,12 @@ impl AppModel {
             scan: self.scan_stamp,
             known_rev: self.known_rev,
             target_mod_rev: self.target_mod_rev,
-            scope: self.scope_rev,
+            // E3: the whole-project header answer reads with the scope off, in caches of its own.
+            scope: if self.whole_view.get() {
+                u64::MAX
+            } else {
+                self.scope_rev
+            },
         }
     }
 

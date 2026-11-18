@@ -232,7 +232,7 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     };
     // Once per frame: the text, the accent and the hover all read the same answer.
     let now = model.header_writes_now();
-    let ready = now || model.review_gate().is_ok();
+    let ready = model.accent_for(now);
     let mut export = egui::Button::new(egui::RichText::new(model.export_text(now)).strong())
         .min_size(egui::vec2(size.x, button_h));
     if ready {

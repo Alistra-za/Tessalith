@@ -22,7 +22,19 @@ impl AppModel {
 
     /// The Export set / group / N sets that Review or the running export is for.
     pub fn export_scope(&self) -> Option<&ExportScope> {
+        if self.whole_view.get() {
+            return None;
+        }
         self.export_scope.as_ref()
+    }
+
+    /// E3 (ruling 3c-14): `f` read as if no scope were set, without touching the scope: `export_scope()` answers
+    /// `None` and the view key moves to caches of their own meanwhile.
+    pub(super) fn with_whole_view<T>(&self, f: impl FnOnce() -> T) -> T {
+        self.whole_view.set(true);
+        let out = f();
+        self.whole_view.set(false);
+        out
     }
 
     pub(super) fn set_scope(&mut self, scope: Option<ExportScope>) {

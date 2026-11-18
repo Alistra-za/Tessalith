@@ -395,6 +395,97 @@ fn a_blocked_nif_row_does_not_stop_a_write_now_and_is_not_counted_as_written() {
     assert!(!m.take_nif_export_due(), "no NIF edit was written");
 }
 
+/// The set key of `id` in `m`.
+fn key_of(m: &AppModel, id: &str) -> String {
+    sdc_gui::model::sets::set_views(m)
+        .iter()
+        .find(|v| v.id == id)
+        .unwrap_or_else(|| panic!("no set {id}"))
+        .key
+        .clone()
+}
+
+// Ruling 3c-14: the header is always the whole project's, whatever scope an open Review was made for.
+#[test]
+fn the_header_is_the_whole_projects_while_a_scoped_review_is_open() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let u = key_of(&m, "g/u");
+    m.export_sets([u].into(), "Export set g/u".into());
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "a scoped Review is open"
+    );
+    assert_eq!(m.export_files(), 2, "guard: the scope has 2 of the 4 files");
+    // Default setting: the label names the whole project, and a click opens the whole project's Review.
+    assert_eq!(m.header_export_text(), "Review 4 files…");
+    m.header_export_clicked();
+    assert!(
+        m.review.is_some() && m.export_scope().is_none(),
+        "the open Review is now the whole project's"
+    );
+    assert_eq!(m.review_button_text(), "Export 4 files");
+    assert!(m.export.running.is_none());
+    m.close_review();
+    // With the opt-out: the label and the click are the whole project's too.
+    let u = key_of(&m, "g/u");
+    m.export_sets([u].into(), "Export set g/u".into());
+    m.set_export_without_review(true);
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "guard: a scoped Review is open"
+    );
+    assert_eq!(m.header_export_text(), "Export 4 files now");
+    m.header_export_clicked();
+    assert!(m.export.running.is_some(), "the click writes");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        m.review.is_none(),
+        "an export that starts closes the open Review"
+    );
+    assert!(m.export_scope().is_none());
+    for f in ["a", "a_n", "u", "u_n"] {
+        assert!(
+            d.path()
+                .join(format!("export/textures/g/{f}.dds"))
+                .is_file(),
+            "{f}"
+        );
+    }
+}
+
+// Ruling 3c-17: the accent shows only when a click has something to write or review.
+#[test]
+fn the_header_has_no_accent_with_nothing_to_write() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings::default(),
+        None,
+        support::session(),
+    );
+    m.open_folder(root);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_folder(d.path().join("out"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.header_export_text(), "Review 0 files…");
+    assert!(
+        m.review_gate().is_ok(),
+        "guard: the gate alone would light it"
+    );
+    assert!(!m.header_accent());
+}
+
+#[test]
+fn the_header_has_the_accent_when_there_is_something_to_write() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    assert!(m.header_accent(), "a clean project with files");
+    m.set_export_without_review(true);
+    assert!(m.header_accent(), "under the opt-out");
+}
+
 #[test]
 fn the_hover_says_why_a_click_writes_at_once() {
     let d = tempfile::tempdir().unwrap();
