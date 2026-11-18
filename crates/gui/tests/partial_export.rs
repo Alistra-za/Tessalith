@@ -733,7 +733,8 @@ fn a_dropped_queued_export_ends_the_scope() {
 
 /// Note HF10 (final review I4), ruling 3c-20 (revising 3c-16): a scoped click that waits for a plan under the opt-out
 /// always lands in its scoped Review and writes nothing there, whatever the counts. Review's Export then writes only
-/// the scope.#[test]
+/// the scope.
+#[test]
 fn a_queued_scoped_export_writes_only_its_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
