@@ -2657,7 +2657,8 @@ fn each_row_carries_the_tables_fix() {
         (Some(Fix::ParallaxOff(k.clone())), None)
     );
     // Fix round 1: the engine raises it only on a texture already tagged grass, so Tag as grass would change nothing;
-    // the row keeps only Mark, and its sentence says what the code means.
+    // under the default normal base the row is a note with no button (Note JP6), and its sentence says what the code
+    // means.
     assert_eq!(fixes(&m, Code::GrassDetectSource), (None, None));
     assert_eq!(
         sdc_gui::model::code_text::code_sentence(Code::GrassDetectSource),
@@ -2743,6 +2744,224 @@ fn the_grass_source_row_says_what_the_normal_base_does() {
     m.mark_intended(kept.mark.clone().expect("markable"), true, "row");
     assert!(row(&m).intended, "the row is marked");
     assert!(!counts_for(&m, &at, &w), "the tile reads the same mark");
+}
+
+/// Sets the normal base of item `k`'s job and returns the one it had (as
+/// `the_grass_source_row_says_what_the_normal_base_does` sets it).
+fn set_normal_base(
+    m: &mut AppModel,
+    k: &str,
+    nb: engine::config::NormalBase,
+) -> engine::config::NormalBase {
+    let job = m
+        .items
+        .iter_mut()
+        .find(|i| i.key == k)
+        .and_then(|i| i.job.as_mut())
+        .expect("a job");
+    let old = std::mem::replace(&mut job.profile.mips.normal_base, nb);
+    m.invalidate_views();
+    old
+}
+
+/// B3-18 (Note JP6; F1): with the default normal base the written file is renormalised, so the grass source's row is
+/// a note: no button, no Mark, listed under Notes only. It takes nothing from the tile, the set or the tab's count.
+#[test]
+fn a_grass_source_row_is_a_note_when_the_file_is_renormalised() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{
+        cached_tab_counts, counts_for, filtered, item_warned, problems, set_ready, tab_label,
+        tile_ready, warning_class, At, Level, ProblemsFilter,
+    };
+    use sdc_gui::model::code_text::RowClass;
+    use sdc_gui::model::items::ItemStatus;
+    let (b, ready) = baseline();
+    let w = Warning::new(Code::GrassDetectSource, "g");
+    let (_d, m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    let item = m.item(&k).unwrap();
+    let job = item.job.as_ref().expect("a job");
+    assert_ne!(
+        job.profile.mips.normal_base,
+        engine::config::NormalBase::Keep,
+        "precondition: the default renormalises"
+    );
+    assert_eq!(item.status, ItemStatus::Ready, "precondition");
+    assert_eq!(warning_class(Some(job), &w), RowClass::Note);
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(Code::GrassDetectSource))
+        .expect("the row");
+    assert_eq!(row.level, Level::Info);
+    assert!(row.is_note() && !row.in_worklist());
+    assert_eq!(
+        (row.fix.clone(), row.second_fix.clone(), row.mark.clone()),
+        (None, None, None)
+    );
+    let grass = |rows: &[sdc_gui::model::bottom::Problem]| {
+        rows.iter().any(|p| p.code == Some(Code::GrassDetectSource))
+    };
+    assert!(!grass(&filtered(&m, None)), "not in the main list");
+    assert!(grass(&filtered(&m, Some(&ProblemsFilter::Notes))));
+    assert_eq!(tab_label(cached_tab_counts(&m)), label(b, 0, 0, 1));
+    assert!(!counts_for(&m, &At::Texture(k.clone()), &w));
+    assert!(!item_warned(&m, item));
+    assert!(tile_ready(&m, item));
+    assert_eq!(
+        set_ready(&m, &rock01(&m)),
+        ready,
+        "as ready as with no warning"
+    );
+}
+
+/// B3-18 (Note JP6): under `mips.normal_base = keep` the written file is not read as grass, so the row stays a
+/// Problem with Mark, and it counts on the tile, the set and the tab.
+#[test]
+fn a_grass_source_row_is_a_problem_when_the_normal_base_is_kept() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{
+        cached_tab_counts, counts_for, filtered, item_warned, problems, set_ready, tab_label,
+        tile_ready, At, Level,
+    };
+    let (b, _) = baseline();
+    let w = Warning::new(Code::GrassDetectSource, "g");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    set_normal_base(&mut m, &k, engine::config::NormalBase::Keep);
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(Code::GrassDetectSource))
+        .expect("the row");
+    assert_eq!(row.level, Level::Warning);
+    assert!(row.mark.is_some() && !row.is_note());
+    assert!(filtered(&m, None)
+        .iter()
+        .any(|p| p.code == Some(Code::GrassDetectSource)));
+    assert_eq!(tab_label(cached_tab_counts(&m)), label(b, 1, 0, 0));
+    assert!(counts_for(&m, &At::Texture(k.clone()), &w));
+    let item = m.item(&k).unwrap();
+    assert!(item_warned(&m, item) && !tile_ready(&m, item));
+    assert!(!set_ready(&m, &rock01(&m)));
+}
+
+/// B3-18 (Note JP6): the set card's "⚠ n" and the tile's ⚠ follow the job: none while renormalised, one when kept.
+#[test]
+fn the_grass_source_class_follows_the_job_on_the_card() {
+    use engine::codes::{Code, Warning};
+    let (_d, m) = with_warnings(&[Warning::new(Code::GrassDetectSource, "g")]);
+    let k = rock01(&m).members[0].clone();
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        h.query_all_by_label_contains("⚠").count(),
+        0,
+        "renormalised: no amber badge"
+    );
+    set_normal_base(h.state_mut(), &k, engine::config::NormalBase::Keep);
+    h.run();
+    h.get_by_label("⚠ 1");
+}
+
+/// B3-18 (Note JP6): a last-export File row of the code reads the live item's job, as its sentence does.
+#[test]
+fn a_grass_source_file_row_follows_the_live_job() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{problems, At, Level};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let jk = m.export.rows[0].job_key.clone();
+    let live: Vec<String> = m
+        .items
+        .iter()
+        .filter(|i| i.job_key == jk)
+        .map(|i| i.key.clone())
+        .collect();
+    assert_eq!(live.len(), 1, "precondition: one live item");
+    let nb = m
+        .item(&live[0])
+        .and_then(|i| i.job.as_ref())
+        .expect("a live job");
+    assert_ne!(
+        nb.profile.mips.normal_base,
+        engine::config::NormalBase::Keep,
+        "precondition: the default renormalises"
+    );
+    m.export.rows[0]
+        .warnings
+        .push(Warning::new(Code::GrassDetectSource, "g"));
+    m.invalidate_views();
+    let file_row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::GrassDetectSource))
+            .cloned()
+            .expect("a File row")
+    };
+    let r = file_row(&m);
+    assert!(matches!(r.at, At::File(_)), "{:?}", r.at);
+    assert_eq!(r.level, Level::Info, "renormalised: a note");
+    set_normal_base(&mut m, &live[0], engine::config::NormalBase::Keep);
+    let r = file_row(&m);
+    assert_eq!(r.level, Level::Warning, "kept: a problem");
+    assert_eq!(r.shown(), sdc_gui::model::code_text::GRASS_SOURCE_KEPT);
+}
+
+/// B3-18 (Note JP6): a note reads no mark. A mark stored on the renormalised sentence (Plan 3a let a user store one),
+/// and a mark stored while the job kept the normal base, hold nothing once the job renormalises: the row has no Mark,
+/// the tile's hover lists no marked line, and both keys stay in sdc-project.toml (ruling 9), so going back to `keep`
+/// reads the kept one again.
+#[test]
+fn a_mark_stored_while_the_grass_row_was_a_problem_holds_nothing_once_it_is_a_note() {
+    use engine::codes::{Code, Warning};
+    use engine::config::NormalBase;
+    use sdc_gui::model::bottom::{intended_key, marked, problems, At, Level, MARKED_LINE};
+    let w = Warning::new(Code::GrassDetectSource, "g");
+    let (_d, mut m) = with_warnings(std::slice::from_ref(&w));
+    let k = rock01(&m).members[0].clone();
+    let at = At::Texture(k.clone());
+    let grass = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::GrassDetectSource))
+            .cloned()
+            .expect("the row")
+    };
+    let renormalised = grass(&m).shown().into_owned();
+    m.mark_intended(
+        intended_key(&at, Code::GrassDetectSource.as_str(), &renormalised),
+        true,
+        "row",
+    );
+    assert!(!marked(&m, &at, &w), "a note reads no mark");
+    let before = set_normal_base(&mut m, &k, NormalBase::Keep);
+    mark_first(&mut m, Code::GrassDetectSource);
+    assert!(
+        grass(&m).intended && marked(&m, &at, &w),
+        "precondition: marked as a Problem"
+    );
+    set_normal_base(&mut m, &k, before);
+    let row = grass(&m);
+    assert_eq!(row.level, Level::Info);
+    assert!(!row.intended && row.mark.is_none());
+    assert!(!marked(&m, &at, &w));
+    let tip = sdc_gui::ui::columns::tile_tooltip(&m, m.item(&k).unwrap(), false);
+    assert!(!tip.contains(MARKED_LINE), "{tip}");
+    let stored = m.sets_doc.as_ref().unwrap().intended_keys();
+    assert_eq!(
+        stored
+            .iter()
+            .filter(|s| s.code == "GRASS-DETECT-SOURCE")
+            .count(),
+        2,
+        "both marks stay (ruling 9)"
+    );
+    set_normal_base(&mut m, &k, NormalBase::Keep);
+    assert!(grass(&m).intended, "the kept mark holds again");
 }
 
 /// Review E10: a CHK-Z-SIGN check row offers Rebuild Z (`give_a_check` plans one on rock01's normal), and the click

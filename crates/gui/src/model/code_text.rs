@@ -160,6 +160,7 @@ pub fn row_class(code: Code) -> RowClass {
         | ShaderMissingMap
         | GrassTopOpaque
         | GrassNormals
+        // its worst case: `bottom::warning_class` makes it a Note while the job renormalises (Note JP6)
         | GrassDetectSource
         | PbrGrassDetect
         | ChkZSign

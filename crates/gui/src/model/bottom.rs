@@ -173,9 +173,13 @@ pub fn markable(level: Level, code: Option<Code>) -> bool {
 }
 
 /// Review E2: whether warning `w` at `at` takes "ready" away: it counts toward the badge, is no artist check (they
-/// count in the tab only, Note CL), and has no mark on the sentence its row shows, so a tile and its row agree.
+/// count in the tab only, Note CL), is a Problem for its job (`class_at`, Note JP6), and has no mark on the sentence
+/// its row shows, so a tile and its row agree.
 pub fn counts_for(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
-    if !counts_toward_badge(w) || checks::check_of(w.code).is_some() {
+    if !counts_toward_badge(w)
+        || checks::check_of(w.code).is_some()
+        || class_at(m, at, w) == RowClass::Note
+    {
         return false;
     }
     !marked(m, at, w)
@@ -188,11 +192,44 @@ pub fn warning_text<'a>(
     job: Option<&engine::policy::ResolvedJob>,
     w: &'a engine::codes::Warning,
 ) -> std::borrow::Cow<'a, str> {
-    let kept = job.is_some_and(|j| j.profile.mips.normal_base == engine::config::NormalBase::Keep);
-    if w.code == Code::GrassDetectSource && kept {
+    if follows_job(w.code) && normal_base_kept(job) {
         code_text::GRASS_SOURCE_KEPT.into()
     } else {
         w.message.as_str().into()
+    }
+}
+
+/// The job keeps its normal base as authored (`mips.normal_base = keep`), so the written file is not renormalised.
+fn normal_base_kept(job: Option<&engine::policy::ResolvedJob>) -> bool {
+    job.is_some_and(|j| j.profile.mips.normal_base == engine::config::NormalBase::Keep)
+}
+
+/// Note JP6: the codes whose class (`warning_class`) and text (`warning_text`) follow the item's job.
+fn follows_job(code: Code) -> bool {
+    code == Code::GrassDetectSource
+}
+
+/// Note JP6 (B3-18): whether warning `w` makes a Problem or a Note, given its item's `job`. GRASS-DETECT-SOURCE is a
+/// Problem only when the job keeps the normal base as authored (Community Shaders won't read the written file as
+/// grass); renormalised, or with no job (as `warning_text` reads it), the output is fine, so it is a Note. Every
+/// other code is `row_class`'s.
+pub fn warning_class(
+    job: Option<&engine::policy::ResolvedJob>,
+    w: &engine::codes::Warning,
+) -> RowClass {
+    match w.code {
+        c if follows_job(c) && normal_base_kept(job) => RowClass::Problem,
+        c if follows_job(c) => RowClass::Note,
+        c => row_class(c),
+    }
+}
+
+/// `warning_class` of the warning `w` of a row at `at`; the job is looked up only for a code whose class follows it.
+pub fn class_at(m: &AppModel, at: &At, w: &engine::codes::Warning) -> RowClass {
+    if follows_job(w.code) {
+        warning_class(job_at(m, at), w)
+    } else {
+        row_class(w.code)
     }
 }
 
@@ -254,7 +291,8 @@ pub fn with_marked(mut open: Vec<String>, marked: Vec<String>) -> Vec<String> {
 
 /// Review E4: the project holds the mark of the row warning `w` at `at` makes (`intended_key` of its shown sentence).
 /// Final fix wave A6: only a code that can be marked (Warning or Info, as `markable`) reads one; a hand-written mark on
-/// an Error code is not one.
+/// an Error code is not one. A Note's warning reads no mark (Note JP6): its row has no Mark, so a mark stored while it
+/// was a Problem shows nowhere.
 pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     use engine::codes::Severity;
     if !matches!(w.code.severity(), Severity::Warning | Severity::Info) {
@@ -269,6 +307,7 @@ pub fn marked(m: &AppModel, at: &At, w: &engine::codes::Warning) -> bool {
     doc.intended_keys()
         .iter()
         .any(|k| k.code == w.code.as_str())
+        && class_at(m, at, w) == RowClass::Problem
         && {
             let text = warning_text(job_at(m, at), w);
             let shown = code_text::shown_for(Some(w.code), &text);
@@ -725,16 +764,18 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Review E2: the Info row of a warning that is a note, for the item, set and File loops alike; `None` for a
     // problem. FC7 (CN3), controller ruling 4: a `_curves`/cavity map no recipe reads is Also export's input, not a
     // mistake, so it keeps its own row with no code and no button, ahead of the general note.
+    // The class follows the job (Note JP6): GRASS-DETECT-SOURCE is a note while the written file is renormalised.
     // shortcut: matched on the shared `ALSO_ONLY` text; give the warning a reason flag if a second row needs one.
-    let note_row = |at: &At, w: &engine::codes::Warning| {
-        if w.code == Code::PackUnusedInput && w.message.contains(engine::pack::ALSO_ONLY) {
-            let text = "Read only by Also export; not written on its own".to_string();
-            return Some(row(Level::Info, at.clone(), text, None));
-        }
-        // The code stays, so Kinds can still hide the row.
-        (row_class(w.code) == RowClass::Note)
-            .then(|| row(Level::Info, at.clone(), note_sentence(w), Some(w.code)))
-    };
+    let note_row =
+        |at: &At, job: Option<&engine::policy::ResolvedJob>, w: &engine::codes::Warning| {
+            if w.code == Code::PackUnusedInput && w.message.contains(engine::pack::ALSO_ONLY) {
+                let text = "Read only by Also export; not written on its own".to_string();
+                return Some(row(Level::Info, at.clone(), text, None));
+            }
+            // The code stays, so Kinds can still hide the row.
+            (warning_class(job, w) == RowClass::Note)
+                .then(|| row(Level::Info, at.clone(), note_sentence(w), Some(w.code)))
+        };
     let mut out = vec![];
     // Note FC1 (AM14): the plan runs on the fallback so the window is not empty, but the export waits for a preset.
     if let Some((text, detail)) = m.missing_preset_text() {
@@ -874,7 +915,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     {
         for w in i.warnings.iter().filter(|w| makes_a_row(w)) {
             let at = At::Texture(i.key.clone());
-            if let Some(p) = note_row(&at, w) {
+            if let Some(p) = note_row(&at, i.job.as_ref(), w) {
                 out.push(p);
                 continue;
             }
@@ -905,7 +946,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             let shader = || Some(Fix::ChangeShader(v.id.clone()));
             // Review E2: SHADER-EXTRA-MAP arrives here. Review E10: Remove from set for the member the warning
             // names, then Change shader…; with no such member, Change shader… alone.
-            if let Some(p) = note_row(&at, w) {
+            if let Some(p) = note_row(&at, None, w) {
                 // Go to set outlines the member's row (review E10).
                 let (fix, second_fix, target, text) = match w.code {
                     Code::ShaderExtraMap => match extra_member(m, v, w) {
@@ -1186,7 +1227,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     _ => None,
                 };
                 // Review E2: a note from the last export gets the same row as a live one.
-                if let Some(p) = note_row(&at, w) {
+                if let Some(p) = note_row(&at, live.and_then(|i| i.job.as_ref()), w) {
                     out.push(p);
                     continue;
                 }

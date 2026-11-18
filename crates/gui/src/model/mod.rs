@@ -102,7 +102,8 @@ pub fn makes_a_row(w: &engine::codes::Warning) -> bool {
 }
 
 /// Whether a warning counts toward the amber ⚠ badge and the "Has warnings" filter: a row that is a problem, not a
-/// note (review E2). One predicate for the pill, the tile and the filter.
+/// note (review E2). One predicate for the pill, the tile and the filter. By code: a superset of what counts.
+/// `bottom::counts_for` also asks the warning's class given its job (`class_at`, Note JP6).
 pub fn counts_toward_badge(w: &engine::codes::Warning) -> bool {
     use code_text::{row_class, RowClass};
     makes_a_row(w) && row_class(w.code) == RowClass::Problem
