@@ -3806,6 +3806,10 @@ impl AppModel {
         // Fuzz-9: only a set holding a fuzz map takes the PBR step; one with its own `_f` keeps the fuzz map
         // untyped (Fuzz-4 lists it unused).
         let has_fuzz = v.members.iter().any(fuzz_map);
+        // F16 (Note JQ53): a kept `_f` counts, a kept DDS too, so no `pbr_fuzz` is written. The GUI refuses an export folder
+        // that is or holds the opened folder (HQ3, HQ5) and writes a CS PBR set under `textures\pbr\` (P14), so a kept
+        // `x_f.dds` here is hand-made or an in-place `sdc convert`'s; the map is listed unused, as `sdc convert` into the
+        // same export folder does. Pinned by `fuzz_follow::a_kept_f_beside_the_fuzz_map_is_the_sets_f_in_the_gui_and_the_cli`.
         let has_f = v.members.iter().any(|k| {
             engine::group::split_suffix_with(&stem(k), &self.suffix_aliases)
                 .suffix
