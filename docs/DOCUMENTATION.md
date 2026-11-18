@@ -106,7 +106,8 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
   3. **What a user who upgrades must know or do is never cut:** a renamed option or output, a file to delete, and the `sdc convert … --ev` command of the next rule stay in full, whatever the length.
   4. **Headline news keeps its lines.** A change that is a reason to update by itself, such as BC1 to BC5 encoding four times as fast, keeps several sentences or sub-bullets and comes first under its heading. A release has a few of these, not one per plan.
   5. **Similar bug fixes share one entry:** three or more fixes in one part of the program become one bullet, such as "Fixed in menus and lists:", with a short sub-bullet each. A lone fix is a one-line entry after the features under its heading.
-  6. **The pass touches only the version being released.** Every older section already has this shape. The long entries remain in git history (`git log -p CHANGELOG.md`).
+  6. **The pass touches only the version being released, except for rule 7.** Every older section already has this shape. The long entries remain in git history (`git log -p CHANGELOG.md`).
+  7. **A feature a later version removed keeps only its removal entry (owner, 2026-11-18).** When the section being released removes a feature, key, flag, code, command or control, the release commit takes out of the older sections the entries that added it or changed it, or only the clause about it where an entry also names things that still exist. The removal entry stays whole, with the error a user now gets, what to do instead and the files to delete. Only that exact thing goes: a thing that was renamed or replaced and still exists keeps its entries.
 
   The shape:
   ```
