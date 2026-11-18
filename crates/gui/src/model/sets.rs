@@ -3722,7 +3722,8 @@ impl AppModel {
     /// encoding). Each with the value to write (`None` under Auto, or an untouched `pbr_fuzz` under Advanced Skin,
     /// Note JE2: cleared), and whether it is the PBR step's own (Fuzz-9: it joins `auto_pbr`, or leaves it when
     /// cleared). In a set holding a fuzz map, an explicit PBR-family pick also types the fuzz map `pbr_fuzz` and the
-    /// untouched members their PBR counterpart (`pbr_member_type`), and leaving that pick clears what it wrote.
+    /// untouched members their PBR counterpart (`pbr_member_type`), and leaving that pick clears what it wrote. A
+    /// `skin_albedo` recorded only because of a fuzz map (Fuzz-5) is cleared under any pick but Advanced Skin.
     fn untouched_for_shader(
         &self,
         set: &str,
@@ -3829,6 +3830,12 @@ impl AppModel {
                 }
                 if !self.untouched_subtype(k, now) {
                     return None;
+                }
+                // Fuzz-5: a `skin_albedo` an older Tessalith recorded because of the fuzz map goes under any pick but
+                // Advanced Skin; the engine then infers the new pick's type, and `sdc convert` plans the same from
+                // the cleared text. It runs before the pick stores the shader (origin not yet `Set`).
+                if shader != Some(Shader::AdvancedSkin) && self.fuzz_recorded_skin(k) {
+                    return Some((k.clone(), None, false));
                 }
                 // Note JE2: under Advanced Skin an untouched `pbr_fuzz` is the skin fuzz mask, which packs into the
                 // `_rfaos` G channel only while no sub-type is written (Note DR2): clear it. shortcut: a set with a

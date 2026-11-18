@@ -7,12 +7,15 @@
 //! untouched recorded sub-type, one equal to what auto-accept picks from the plan, as not set, as before FC1. Scan
 //! evidence still never rewrites one.
 use super::items::{ItemKind, ItemStatus};
+use super::sets::{SlotFill, SlotKind};
 use super::{fields, AppModel};
-use engine::config::Subtype;
+use engine::config::{PackRecipe, Subtype, Target};
+use engine::group::{is_fuzz_stem, split_suffix_with};
 use engine::policy::{AcceptSuggestions, Provenance};
-use engine::shader::{member_subtype, Shader};
+use engine::shader::{member_subtype, Shader, ShaderOrigin};
 use engine::suggest::Confidence;
 use serde_json::json;
+use std::path::Path;
 
 /// The last recording, for its Problems row.
 #[derive(Debug, Clone, PartialEq)]
@@ -67,7 +70,8 @@ impl AppModel {
     }
 
     /// R5: `key`'s `[files]` sub-type is untouched: it is what auto-accept picks from the plan, with or without the
-    /// set's current `shader`, so a re-typing user action may replace it. A different value is the user's.
+    /// set's current `shader`, so a re-typing user action may replace it; so is a `skin_albedo` recorded only because
+    /// of a fuzz map (Fuzz-5, `fuzz_recorded_skin`), in every accept mode. A different value is the user's.
     pub(crate) fn untouched_subtype(&self, key: &str, shader: Option<Shader>) -> bool {
         let Some(v) = self
             .project
@@ -79,6 +83,92 @@ impl AppModel {
         };
         self.auto_pick(key, None) == Some(v)
             || (shader.is_some() && self.auto_pick(key, shader) == Some(v))
+            || self.fuzz_recorded_skin(key)
+    }
+
+    /// Fuzz-5: `key`'s `[files]` `skin_albedo` is one an older Tessalith recorded only because its set holds a fuzz
+    /// map, so it is untouched: on cs, in the set whose own Diffuse slot holds `key` (Fuzz-30: a borrower's view never
+    /// decides the lender's file), with an automatic shader, an untyped fuzz map with no hand role, `key` neither
+    /// made skin by a pick (`auto_skin`) nor locked, no recipe written on the packed output, and no other skin
+    /// evidence (a skin-typed member, a real `_rfaos` file, a shared skin set). The cheap `[files]` check runs first,
+    /// as `presets_saved` asks this of every item.
+    pub fn fuzz_recorded_skin(&self, key: &str) -> bool {
+        let Some(p) = self.project.as_ref() else {
+            return false;
+        };
+        let typed = |k: &str| {
+            p.file_value(k, "subtype")
+                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
+        };
+        if typed(key) != Some(Subtype::SkinAlbedo) || self.target != Target::Cs {
+            return false;
+        }
+        let views = super::sets::views(self);
+        let Some(v) = views.iter().find(|v| {
+            matches!(v.slots.get(&SlotKind::Diffuse), Some(SlotFill::Own { item }) if item == key)
+        }) else {
+            return false;
+        };
+        if v.shared
+            || v.shader
+                .as_ref()
+                .is_some_and(|s| s.provenance == ShaderOrigin::Set)
+        {
+            return false;
+        }
+        if self
+            .sets_doc
+            .as_ref()
+            .is_some_and(|s| s.auto_skin().contains_key(key))
+            || super::sets::locked_items(self).contains_key(key)
+        {
+            return false;
+        }
+        // The recipe of the set's packed output (`explicit_recipe` reads both the `_rmaos` and `_rfaos` keys).
+        if let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Rmaos) {
+            if self.explicit_recipe(item) != PackRecipe::Auto {
+                return false;
+            }
+        }
+        let stem = |k: &str| {
+            Path::new(k)
+                .file_stem()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned()
+        };
+        let mut fuzz = false;
+        for k in &v.members {
+            // Packed outputs are not files: the set's own `_rfaos` output is no evidence.
+            if self.item(k).is_none_or(|i| i.kind == ItemKind::Packed) {
+                continue;
+            }
+            let s = stem(k);
+            if is_fuzz_stem(&s)
+                && typed(k).is_none()
+                && p.file_value(k, engine::helper::ROLE_FIELD).is_none()
+            {
+                fuzz = true;
+            }
+            let skin_typed = matches!(
+                typed(k),
+                Some(
+                    Subtype::SkinAlbedo
+                        | Subtype::SkinRfaos
+                        | Subtype::SkinSk
+                        | Subtype::SkinWet
+                        | Subtype::SkinDetail
+                )
+            );
+            let rfaos = split_suffix_with(&s, &self.suffix_aliases)
+                .suffix
+                .as_deref()
+                == Some("rfaos");
+            if (k != key && skin_typed) || rfaos {
+                return false;
+            }
+        }
+        fuzz
     }
 
     /// Each set member's current shader (chosen or automatic).

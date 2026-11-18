@@ -846,3 +846,99 @@ fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
         })
     ));
 }
+
+/// The old High project of Fuzz-8: `files` (greys) beside rock01.png, whose `skin_albedo` an older Tessalith recorded
+/// because the set had a fuzz map, then `extra`.
+fn old_high(dir: &Path, files: &[&str], extra: &str, accept: AcceptSuggestions) -> AppModel {
+    let toml = format!("[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n{extra}");
+    open_with_hook(dir, files, &toml, accept, |_| {})
+}
+
+/// Fuzz-5: the recorded `skin_albedo` of an old fuzz-only skin set is untouched, in both accept modes; an explicit
+/// PBR pick replaces it in the shader's step.
+#[test]
+fn a_fuzz_recorded_skin_albedo_is_untouched() {
+    for fuzz in ["rock01_fuzz.png", "rock01_sheen.png"] {
+        for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+            let d = tempfile::tempdir().unwrap();
+            let mut m = old_high(d.path(), &["rock01_roughness.png", fuzz], "", accept);
+            assert!(m.fuzz_recorded_skin(DIFFUSE), "{fuzz} {accept:?}");
+            m.set_shader("m/rock01", Some(Shader::Pbr));
+            idle(&mut m);
+            assert_ne!(
+                subtype(&m, DIFFUSE),
+                Some(json!("skin_albedo")),
+                "{fuzz} {accept:?}"
+            );
+            assert!(!set_view(&m).skin, "{fuzz} {accept:?}");
+            // The GUI and `sdc convert` on the saved text plan the diffuse alike.
+            m.save().unwrap();
+            let p = cli_plan(d.path(), &m.project.as_ref().unwrap().text());
+            assert_eq!(
+                gui_subtype(&m, DIFFUSE),
+                cli_subtype(&p, "rock01.png"),
+                "{fuzz} {accept:?}"
+            );
+        }
+    }
+}
+
+/// Fuzz-5: other skin evidence keeps it the user's.
+#[test]
+fn other_skin_evidence_keeps_the_recorded_skin_albedo() {
+    for extra in [
+        "[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+        "[files.\"m/rock01_roughness.png\"]\nsubtype = \"skin_rfaos\"\n",
+    ] {
+        for fuzz in ["rock01_fuzz.png", "rock01_sheen.png"] {
+            let d = tempfile::tempdir().unwrap();
+            let m = old_high(
+                d.path(),
+                &["rock01_roughness.png", fuzz],
+                extra,
+                AcceptSuggestions::None,
+            );
+            assert!(!m.fuzz_recorded_skin(DIFFUSE), "{fuzz} {extra}");
+        }
+    }
+    // An explicit Advanced Skin pick. DU6 records nothing here: the diffuse already resolves `SkinAlbedo`, so
+    // `skin_follow` returns `None`. The predicate is false through "shader origin not `Set`".
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_high(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
+
+/// Fuzz-30: a set borrowing the diffuse (JN1 share) never decides the lender's file. The borrower `m/aaa01` holds
+/// only a fuzz map and sorts before the lender, so a find-first match over the views would meet it first.
+#[test]
+fn a_borrowers_view_does_not_decide_the_lenders_file() {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome, SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_high(
+        d.path(),
+        &["rock01_roughness.png", "aaa01_fuzz.png"],
+        "[files.\"m/rock01_roughness.png\"]\nsubtype = \"skin_rfaos\"\n",
+        AcceptSuggestions::None,
+    );
+    let out = m.drop_choice(DIFFUSE, "m/aaa01", DropChoice::Share);
+    if matches!(out, DropOutcome::AskReplace { .. }) {
+        m.drop_replace(DIFFUSE, "m/aaa01", DropChoice::Share)
+            .unwrap();
+    }
+    idle(&mut m);
+    let views = sdc_gui::model::sets::views(&m);
+    let at = |id: &str| views.iter().position(|v| v.id == id).unwrap();
+    assert!(at("m/aaa01") < at("m/rock01"));
+    assert!(matches!(
+        views[at("m/aaa01")].slots.get(&SlotKind::Diffuse),
+        Some(SlotFill::Borrowed { .. })
+    ));
+    assert!(!m.fuzz_recorded_skin(DIFFUSE));
+}
