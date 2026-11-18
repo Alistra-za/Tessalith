@@ -1050,8 +1050,8 @@ pub(super) fn member(
     locked: bool,
     pgp_locked: bool,
     thumbs: &mut ThumbCache,
-    // A line added to the one hover (a set card's "borrowed from …").
-    note: Option<&str>,
+    // A line added to the one hover (a set card's "borrowed from …"), built only when the hover shows.
+    note: Option<&dyn Fn() -> String>,
 ) -> egui::Response {
     let (rect, response) =
         ui.allocate_exact_size(egui::vec2(MEMBER, MEMBER), egui::Sense::click_and_drag());
@@ -1100,18 +1100,21 @@ pub(super) fn member(
             );
         }
     }
-    let mut hover = item.name.clone();
-    if locked {
-        hover.push_str(" (slot pinned)");
-    }
-    if pgp_locked {
-        hover.push_str(" (kept by PGPatcher: the mesh's original texture is used)");
-    }
-    if let Some(n) = note {
-        hover.push('\n');
-        hover.push_str(n);
-    }
-    response.on_hover_text(hover)
+    // built when the tooltip shows, not per frame
+    response.on_hover_ui(|ui| {
+        let mut hover = item.name.clone();
+        if locked {
+            hover.push_str(" (slot pinned)");
+        }
+        if pgp_locked {
+            hover.push_str(" (kept by PGPatcher: the mesh's original texture is used)");
+        }
+        if let Some(n) = note {
+            hover.push('\n');
+            hover.push_str(&n());
+        }
+        ui.label(hover);
+    })
 }
 
 /// The export folder as a prefix of set keys: `<export folder>/`.

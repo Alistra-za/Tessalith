@@ -1015,6 +1015,173 @@ fn a_cleared_slot_has_a_cleared_chip() {
     assert_eq!(on_card_of(&h, "arch/wall", "N, cleared").len(), 1);
 }
 
+/// The painted text shapes of the frame inside `chip`: (text, galley rect in screen space).
+fn texts_in(h: &Harness<'static, AppModel>, chip: egui::Rect) -> Vec<(String, egui::Rect)> {
+    shapes(h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Text(t) => Some((
+                t.galley.text().to_string(),
+                t.galley.rect.translate(t.pos.to_vec2()),
+            )),
+            _ => None,
+        })
+        .filter(|(_, r)| chip.contains_rect(*r))
+        .collect()
+}
+
+/// Whether two rects share area (rects that only touch along an edge do not overlap).
+fn overlaps(a: egui::Rect, b: egui::Rect) -> bool {
+    let i = a.intersect(b);
+    i.width() > 0.0 && i.height() > 0.0
+}
+
+/// Linked Coat (slot 7) and RMAOS (slot 6) chips on `leaf`, each with both locks when `locks`: the chip named
+/// `label` has its link mark (backing square and two rings) at its top centre, inside the chip and touching neither
+/// the slot letter nor a lock.
+fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal)],
+    );
+    for (n, item) in [(6, "arch/wall_rmaos.png"), (7, "arch/lacq_cnr.png")] {
+        m.run_menu(MenuAction::SlotLink {
+            set: "arch/leaf".into(),
+            n,
+            item: item.into(),
+        });
+        if locks {
+            m.set_slot_lock("arch/leaf", n, true).unwrap();
+            m.run_menu(MenuAction::PgpLock {
+                set: "arch/leaf".into(),
+                n,
+                on: true,
+            });
+        }
+    }
+    idle(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let chip = {
+        let card = card_of(&h, "arch/leaf");
+        let found: Vec<_> = h
+            .query_all_by_label_contains(label)
+            .filter(|n| card.contains_rect(n.rect()))
+            .collect();
+        assert_eq!(found.len(), 1, "the {label} chip");
+        found[0].rect()
+    };
+    let texts = texts_in(&h, chip);
+    let lock_rects: Vec<egui::Rect> = texts
+        .iter()
+        .filter(|(t, _)| t == "🔒")
+        .map(|(_, r)| *r)
+        .collect();
+    assert_eq!(lock_rects.len(), if locks { 2 } else { 0 }, "{texts:?}");
+    let letter_rect = texts
+        .iter()
+        .find(|(t, _)| t == letter)
+        .unwrap_or_else(|| panic!("the letter {letter}: {texts:?}"))
+        .1;
+    let circles: Vec<egui::Pos2> = shapes(&h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Circle(c) if c.stroke.width == 1.5 && chip.contains(c.center) => {
+                Some(c.center)
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(circles.len(), 2, "the mark's two rings are inside the chip");
+    let mark = shapes(&h)
+        .iter()
+        .filter_map(|s| match s {
+            egui::Shape::Rect(r)
+                if r.fill != egui::Color32::TRANSPARENT
+                    && chip.contains_rect(r.rect)
+                    && r.rect.width() < chip.width()
+                    && circles.iter().all(|c| r.rect.contains(*c)) =>
+            {
+                Some(r.rect)
+            }
+            _ => None,
+        })
+        .min_by(|a, b| a.area().total_cmp(&b.area()))
+        .expect("the mark's backing square");
+    assert_eq!(
+        mark,
+        egui::Rect::from_min_size(chip.min + egui::vec2(11.0, 2.0), egui::Vec2::splat(10.0)),
+        "the mark is at the chip's top centre in every lock state"
+    );
+    assert!(
+        !overlaps(mark, letter_rect),
+        "the mark {mark:?} covers the letter {letter_rect:?}"
+    );
+    for l in &lock_rects {
+        assert!(!overlaps(mark, *l), "the mark {mark:?} covers a lock {l:?}");
+    }
+}
+
+#[test]
+fn the_link_mark_clears_the_letter_and_both_locks_on_a_coat_chip() {
+    assert_mark_at_top_centre(", from set arch/lacq", "CNR", true);
+}
+
+#[test]
+fn the_link_mark_clears_the_letter_and_both_locks_on_an_rmaos_chip() {
+    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", true);
+}
+
+#[test]
+fn the_link_mark_is_in_the_same_place_without_locks() {
+    assert_mark_at_top_centre(", from set arch/lacq", "CNR", false);
+    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", false);
+}
+
+#[test]
+fn a_typed_path_link_is_a_filled_box_named_for_its_file_with_the_slot_menu() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command(
+        "arch/leaf",
+        1,
+        SlotCommand::Path("textures\\other\\thing_d.dds".into()),
+    )
+    .unwrap();
+    let mut h = harness(m);
+    h.run();
+    let chip = on_card_of(&h, "arch/leaf", "D, path thing_d.dds");
+    assert_eq!(chip.len(), 1, "the typed path's box");
+    chip[0].hover();
+    h.run();
+    h.run();
+    h.get_by_label_contains("Diffuse linked to textures\\other\\thing_d.dds");
+    on_card_of(&h, "arch/leaf", "D, path thing_d.dds")[0].click_secondary();
+    h.run();
+    h.get_by_label("Slot 1: Diffuse");
+}
+
+#[test]
+fn a_cleared_chip_offers_the_slot_menu_that_restores_the_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    let mut h = harness(m);
+    h.run();
+    on_card_of(&h, "arch/wall", "N, cleared")[0].click_secondary();
+    h.run();
+    h.get_by_label_contains("Slot 2:");
+    let from_set = h.get_by_label_contains("From this set");
+    assert!(!from_set.accesskit_node().is_disabled());
+    from_set.click();
+    h.run();
+    idle(h.state_mut());
+    h.run();
+    assert!(on_card_of(&h, "arch/wall", "N, cleared").is_empty());
+}
+
 /// Nodes named "<file>, ... (its slot is taken)": the trailing loop's thumbnails for a file with no slot of its own.
 fn taken_thumbs(h: &Harness<'static, AppModel>, file: &str) -> usize {
     h.query_all_by_label_contains(&format!("{file}, "))
