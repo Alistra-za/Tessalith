@@ -873,30 +873,28 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
     }
 }
 
-/// Fuzz-4: the file name of the set's first image with suffix `f` (its own or shared in), by path; `None` when the
-/// set has no `f`.
+/// Fuzz-4: the file name of the set's first member with suffix `f`, by path (an image or a kept DDS: both count in
+/// `set.suffixes`, which `policy::resolve_file_with` tests); `None` when the set has no `f`.
 fn pbr_f_name(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> Option<String> {
     if !set.suffixes.contains("f") {
         return None;
     }
-    let mut own: Vec<&InputFile> = set
+    let mut f_members: Vec<&InputFile> = set
         .members
         .iter()
-        .chain(&set.shares)
         .map(|&i| &files[i])
         .filter(|f| {
-            f.kind == InputKind::Image
-                && split_suffix_with(
-                    &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                    ctx.registry.alias_table(),
-                )
-                .suffix
-                .as_deref()
-                    == Some("f")
+            split_suffix_with(
+                &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                ctx.registry.alias_table(),
+            )
+            .suffix
+            .as_deref()
+                == Some("f")
         })
         .collect();
-    own.sort_by(|a, b| a.path.cmp(&b.path));
-    own.first().map(|f| name(&f.path))
+    f_members.sort_by(|a, b| a.path.cmp(&b.path));
+    f_members.first().map(|f| name(&f.path))
 }
 
 /// Note DR: whether `f` is a `_f` that a set already Advanced skin packs into the `_rfaos` G channel (a `_f` whose

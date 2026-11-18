@@ -2343,7 +2343,9 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
                 && crate::pack::plan::fuzz_reading(ctx, f.set, f.input)
                     == crate::pack::plan::FuzzReading::Pbr;
             // Fuzz-4: a PBR set's own `_f` wins; the fuzz map stays a waiting input that `plan_packing` lists unused.
-            // `set.suffixes` holds `f` only for a real `_f` member here (api.rs keeps it off the fuzz map's clone).
+            // `set.suffixes` holds `f` here only from a real `_f` member (an image or a kept DDS): api.rs resolves a
+            // fuzz-stem member against the real set, never against the clone that gains `f`, and the real set never
+            // gains it (only `set_resolved` reads a copy with it). `pbr_f_name` asks the same set.
             if !pbr || f.set.suffixes.contains("f") {
                 return packing_input_job(ctx, f, term, *role, false);
             }

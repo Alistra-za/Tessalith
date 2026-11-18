@@ -202,6 +202,25 @@ fn an_f_beside_a_fuzz_map_wins_under_pbr() {
     );
 }
 
+/// Fuzz-4: a kept `_f.dds` (a DDS input the plan skips, never re-encodes) is the set's PBR fuzz texture too; the fuzz
+/// map is listed unused naming the DDS, not left a packing input.
+#[test]
+fn a_kept_f_dds_beside_a_fuzz_map_wins_under_pbr() {
+    let d = fixture(&["iron.png", "iron_roughness.png", "iron_fuzz.png"], "");
+    std::fs::write(d.path().join("in/iron_f.dds"), b"DDS not a real texture").unwrap();
+    let p = plan(&d);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.dds is the set's PBR fuzz texture (_f); not converted"
+    );
+    assert!(
+        !p.jobs.iter().any(|j| out_name(j) == "iron_fuzz.dds"
+            && !j.warnings.iter().any(|w| w.code == Code::PackUnusedInput)),
+        "{:?}",
+        out_names(&p)
+    );
+}
+
 /// Fuzz-1, Fuzz-2, Fuzz-18: with other PBR evidence (a raw roughness map) the fuzz map is `pbr_fuzz` decided by the
 /// set (never a suggestion), `<base>_f.dds`, and the set packs `_rmaos`; the diffuse is `pbr_albedo`. Both terms,
 /// both accept modes.
