@@ -76,7 +76,7 @@ fn every_listed_output_exists_after_export() {
     export_through(&mut m);
     // The export runs on a worker: wait for it, or the files are not there yet.
     assert!(m.wait_idle(std::time::Duration::from_secs(120)));
-    for (_, p) in &listed {
+    for (_, _, p) in &listed {
         assert!(p.is_file(), "{} exists after export", p.display());
     }
     select_set(&mut m, LEAF);
@@ -89,12 +89,123 @@ fn every_listed_output_exists_after_export() {
     );
     h.get_by_label_contains("Output files").click();
     h.run();
-    for (_, p) in &listed {
+    for (_, _, p) in &listed {
         let name = p.file_name().unwrap().to_string_lossy();
         assert!(h
             .query_by_label(&format!("Show {name} in Explorer"))
             .is_some());
     }
+}
+
+/// The arrow exists because a PBR set's files go under the prefix: the listed path of `arch/wall` must be the file the
+/// export wrote there.
+#[test]
+fn every_listed_output_of_the_pbr_set_exists_after_export() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let wall = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/wall")
+        .unwrap()
+        .clone();
+    assert!(wall.pbr, "premise: arch/wall is the PBR set");
+    let listed = set_outputs(&wall).to_vec();
+    assert!(!listed.is_empty());
+    export_through(&mut m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    for (_, _, p) in &listed {
+        assert!(p.is_file(), "{} exists after export", p.display());
+    }
+    select_set(&mut m, "arch/wall");
+    let h = harness(m);
+    assert!(h
+        .query_by_label_contains(&format!("{}, all written", listed.len()))
+        .is_some());
+}
+
+#[test]
+fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_m.png", [10, 20, 30], Subtype::ComplexMaterial)],
+    );
+    let key = "arch/leaf_m.png";
+    let item = m.item(key).expect("the _m file is an item");
+    assert!(slot_of(item).is_none(), "premise: it fills no slot");
+    let out = item
+        .job
+        .as_ref()
+        .expect("premise: it has a job")
+        .output
+        .clone();
+    let leaf = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    assert!(
+        leaf.members.iter().any(|k| k == key),
+        "premise: it is leaf's"
+    );
+    let listed = set_outputs(&leaf).to_vec();
+    let at: Vec<usize> = listed
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, _, p))| *p == out)
+        .map(|(i, _)| i)
+        .collect();
+    assert_eq!(at, vec![listed.len() - 1], "once, after the slot files");
+    assert_eq!(listed.last().unwrap().0, None);
+    assert!(listed[..listed.len() - 1]
+        .iter()
+        .all(|(k, _, _)| k.is_some()));
+    select_set(&mut m, LEAF);
+    let h = harness(m);
+    assert!(
+        h.query_by_label_contains(&format!("{}, not exported yet", listed.len()))
+            .is_some(),
+        "the count includes it"
+    );
+}
+
+#[test]
+fn the_output_files_group_is_drawn_in_the_3d_view_too() {
+    use sdc_gui::ui::set_editor::{draw, View};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, LEAF);
+    let key = m
+        .sets
+        .iter()
+        .find(|s| s.key.ends_with(LEAF))
+        .unwrap()
+        .key
+        .clone();
+    let h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            move |ui, s: &mut (AppModel, String)| {
+                let view = View {
+                    three_d: true,
+                    ..Default::default()
+                };
+                draw(
+                    ui,
+                    &mut s.0,
+                    &s.1,
+                    &mut Default::default(),
+                    &mut Default::default(),
+                    &mut Default::default(),
+                    view,
+                );
+            },
+            (m, key),
+        );
+    assert!(h.query_by_label_contains("Output files").is_some());
+    assert!(
+        h.query_by_label("Slot commands…").is_none(),
+        "premise: the 3D path draws no slot rows"
+    );
 }
 
 #[test]
@@ -106,7 +217,7 @@ fn a_set_with_some_files_written_says_k_of_n() {
     assert!(listed.len() >= 2, "premise: leaf writes two files");
     export_through(&mut m);
     assert!(m.wait_idle(std::time::Duration::from_secs(120)));
-    std::fs::remove_file(&listed[0].1).unwrap();
+    std::fs::remove_file(&listed[0].2).unwrap();
     select_set(&mut m, LEAF);
     let n = listed.len();
     let h = harness(m);

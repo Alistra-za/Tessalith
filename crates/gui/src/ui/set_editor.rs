@@ -282,6 +282,7 @@ pub fn draw(
         // card are in the TruePBR settings… window, as are the CS PBR section and the complex material card, so an edit
         // still shows live in 3D.
         head(ui, model, v, view);
+        outputs(ui, model, v);
         // No slot rows here: a waiting Assign… focus is dropped.
         ui.data_mut(|d| d.remove::<egui::Id>(assign_focus));
         if let Some(a) = status {
@@ -465,7 +466,10 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
 fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     let files = set_outputs(v);
     let n = files.len();
-    let written = files.iter().filter(|(_, p)| model.stat_is_file(p)).count();
+    let written = files
+        .iter()
+        .filter(|(_, _, p)| model.stat_is_file(p))
+        .count();
     let summary = if n == 0 {
         "none".to_string()
     } else if written == n {
@@ -489,7 +493,12 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 return;
             }
             let root = model.export_root();
-            for (kind, abs) in files {
+            for (kind, item, abs) in files {
+                // A slot's own name, or for a member that fills no slot the name its row under the cards uses.
+                let label = match kind {
+                    Some(k) => v.slot_label(*k, ""),
+                    None => model.item(item).map_or("File", |i| i.name.as_str()),
+                };
                 let rel = abs.strip_prefix(&root).unwrap_or(abs);
                 let name = abs
                     .file_name()
@@ -498,11 +507,7 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 egui::Sides::new().shrink_left().truncate().show(
                     ui,
                     |ui| {
-                        let line = format!(
-                            "{}: {}",
-                            v.slot_label(*kind, ""),
-                            rel.to_string_lossy().replace('/', "\\")
-                        );
+                        let line = format!("{label}: {}", rel.to_string_lossy().replace('/', "\\"));
                         let full = abs.display().to_string();
                         let r = ui
                             .add(egui::Label::new(line).truncate())
@@ -512,7 +517,7 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                             egui::WidgetInfo::labeled(
                                 egui::Role::Label,
                                 true,
-                                format!("{}: {full}", v.slot_label(*kind, "")),
+                                format!("{label}: {full}"),
                             )
                         });
                     },

@@ -400,9 +400,11 @@ pub struct SetView {
     /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
     /// that path. Only a set written as a JSON entry has any (`link_slots`); set by `build_views`.
     pub linked: BTreeMap<u8, SlotLink>,
-    /// The files this set's own slots write, in slot order (review E13): each own slot's planned output, once.
-    /// Borrowed and linked slots are other sets' files. Set at the end of `finish_view`, so both view builders give it.
-    pub outputs: Vec<(SlotKind, PathBuf)>,
+    /// The files this set's own members write (review E13): each own slot's planned output in slot order, then each
+    /// member with a job that fills no slot (a complex `_m`, a packed output with no card) in member order, each path
+    /// once. Each entry is the slot (`None` for an unslotted member), the item's key and its output path. Borrowed and
+    /// linked slots are other sets' files. Set at the end of `finish_view`, so both view builders give it.
+    pub outputs: Vec<(Option<SlotKind>, String, PathBuf)>,
 }
 
 /// A `slotN` path of a set's JSON entry, and what it names (review E1).
@@ -1583,14 +1585,26 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         let Some(out) = m.item(item).and_then(|i| i.job.as_ref()).map(|j| &j.output) else {
             continue;
         };
-        if !v.outputs.iter().any(|(_, p)| p == out) {
-            v.outputs.push((*kind, out.clone()));
+        if !v.outputs.iter().any(|(_, _, p)| p == out) {
+            v.outputs.push((Some(*kind), item.clone(), out.clone()));
+        }
+    }
+    // Members that fill no slot but still convert (`unslotted_packed`'s items). `view_reads` covers their `job_key`.
+    for key in &v.members {
+        let Some(i) = m.item(key).filter(|i| slot_of(i).is_none()) else {
+            continue;
+        };
+        let Some(out) = i.job.as_ref().map(|j| &j.output) else {
+            continue;
+        };
+        if !v.outputs.iter().any(|(_, _, p)| p == out) {
+            v.outputs.push((None, key.clone(), out.clone()));
         }
     }
 }
 
 /// The files the set's own slots write (`SetView::outputs`).
-pub fn set_outputs(v: &SetView) -> &[(SlotKind, PathBuf)] {
+pub fn set_outputs(v: &SetView) -> &[(Option<SlotKind>, String, PathBuf)] {
     &v.outputs
 }
 
