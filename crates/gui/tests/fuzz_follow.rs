@@ -873,6 +873,30 @@ fn leaving_pbr_keeps_a_value_whose_slot_was_pinned_after_the_pick() {
     assert!(auto_pbr(&m).contains(DIFFUSE));
 }
 
+/// Final review B-M1, the fuzz arm's lock filter (ruling R1): an Auto-PBR set's fuzz map fills the Fuzz slot (7);
+/// with that slot pinned, an explicit PBR pick writes no `pbr_fuzz` on it and lists no key.
+#[test]
+fn an_explicit_pbr_pick_writes_no_pbr_fuzz_in_a_pinned_fuzz_slot() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    assert_eq!(
+        set_view(&m).slots.get(&SlotKind::Fuzz),
+        Some(&SlotFill::Own { item: FUZZ.into() })
+    );
+    m.set_slot_lock("m/rock01", 7, true).unwrap();
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    idle(&mut m);
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert!(!auto_pbr(&m).contains(FUZZ));
+}
+
 /// Final review B-M7: taking the fuzz map out of its set, after an explicit PBR pick typed it `pbr_fuzz`, clears that
 /// value and its `auto_pbr` key in the same step; one Undo puts all three back.
 #[test]
@@ -1596,6 +1620,34 @@ fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
     );
     idle(&mut m);
     assert!(set_view(&m).skin, "the switch does not fire again");
+}
+
+/// Final review B-I1, the other half: under High the joined recording's lines for files the switch does not name stay
+/// in the row (a second set's diffuse, `stone01.png`, recorded in the same plan).
+#[test]
+fn the_switch_row_keeps_the_recordings_lines_for_other_files() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png", "stone01.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    idle(&mut m);
+    assert!(subtype(&m, "m/stone01.png").is_some(), "recorded");
+    let (_, lines) = m.fuzz_note_for_test().expect("the switch row");
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.starts_with("rock01.png: "))
+            .count(),
+        1,
+        "{lines:?}"
+    );
+    assert!(
+        lines.iter().any(|l| l.starts_with("stone01.png: ")),
+        "{lines:?}"
+    );
 }
 
 /// Fuzz-8, the next open: a kept and saved switch leaves nothing to switch; an undone switch saved as skin switches
@@ -2368,6 +2420,7 @@ fn a_mirror_borrowers_fuzz_slot_is_not_shown_filled() {
         borrower.shared_helpers.iter().any(|k| k == FUZZ),
         "{borrower:?}"
     );
+    assert!(borrower.pbr && !borrower.skin, "{borrower:?}");
     assert!(
         !matches!(
             borrower.slots.get(&SlotKind::Fuzz),
