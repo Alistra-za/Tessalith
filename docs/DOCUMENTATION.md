@@ -96,7 +96,8 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
 - **The changelog is where history goes.** When a doc page loses an "earlier versions…" sentence, check that the change is in the changelog, and add it if it's missing.
 - Unreleased changes collect under `## Unreleased` until a release commit names the version. There an entry is one bullet, as long as the change needs, in the order the work merged. Nothing is shortened or sorted at a merge or a push.
 - **The release commit puts the version's section into release shape (owner, 2026-11-18).** A reader of a release looks for their area and scans it. In one pass over that section:
-  1. **Four headings, in this order, an empty one left out:** `### Engine`, `### GUI`, `### CLI`, `### Common`.
+  1. **Five headings, in this order:** `### Main` always, then `### Engine`, `### GUI`, `### CLI`, `### Common`, an empty one left out.
+     - Main is the update in short: two to four lines that name its main focus, for a reader who reads nothing else. It is written in the release pass, last, from the entries under the other headings, and says nothing they do not.
      - Engine is what changes the files Tessalith writes or how fast it writes them. Its entries are ordered by part: encoders, texture types and alpha, mips, packing, bake, outputs and the manifest, presets.
      - GUI is what only `tessalith.exe` shows.
      - CLI is what only `sdc.exe` shows: a command, a flag, its output text.
@@ -110,6 +111,10 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
   The shape:
   ```
   ## <version>
+
+  ### Main
+  - Faster encoding: BC1 to BC5 more than four times as fast, BC7 and BC6H faster on CPUs with AVX-512.
+  - Outputs written by an older encode version are kept until you ask for them with `--ev`.
 
   ### Engine
   - BC1, BC3, BC4 and BC5 textures encode more than four times as fast. (Headline: its measurements and what changes for the user follow here, in a few sentences.)
