@@ -73,36 +73,37 @@
 - Sets gain groups, partial exports, shared helpers, a *no set* state and mapping to texture set records.
 - Advanced skin sets write a `.csskin.json` on every export, and the 3D preview has Community Shaders 1.9.0 built in.
 - Removed: panorama, ball and photo cubemap sources, RNM normal layers, **Generate from normal map** and the GUI's UV checker.
-- The engine is GPL-3.0-or-later, and every export has the `textures` folder.
+- The engine is GPL-3.0-or-later, every export has the `textures` folder, and a lone file with no known suffix waits for a type.
 
 ### Engine
 - Cubemaps are made from six faces, a cross, a strip or a cube DDS. Panorama (`equirect`), `mirror_ball`, `angular` and single-photo (`photo`) sources, `cubemap.ground_fill` and `cubemap.horizon` are removed, with the GUI's Set layout menu and Ground group. A project or preset that names one is refused with "removed in 3.0" and a hint. Convert a panorama, ball or photo to six faces, a cross or a strip first. A square or 2:1 image typed as a cube is Unresolved with "not a cube source"; change its sub-type. A cube's lower half is the source's own pixels.
 - RNM normal layers are removed: Tessalith no longer blends `_bump`, `_bump2`, `_detailnorm`, `_detailnorm2` and `_bent` files (or their masks, or the `n_` and `cnr_` prefixes) into a normal, so **a set that had layer files exports a different base normal on its next export**. Blend detail into a normal in your image editor before you export.
   - `_bump`, `_bump2`, `_detail2`, `_detailnorm2`, `_bent`, the mask terms and the two prefixes are not recognised: a layer file such as `rock_bump.png` is a set of its own, and alone it waits for a type (`sdc convert` exits 1), so delete it or assign a type.
   - Every `rnm.*` key, the `RNM-*` codes in an `allow` list and a `helper.role` that names a layer are refused with "removed in 3.0" and a hint; delete them. A file called `rnm` still loads.
-  - The GUI loses the RNM section, the blended-normal preview, the teal outline on the normal card and the helper panel's **Blends into** row, and `sdc inspect` prints no `rnm` lines.
+  - The GUI loses the RNM section, the blended-normal preview, the normal card's teal outline and the **Blends into** row; `sdc inspect` prints no `rnm` lines.
 - The export always has the `textures` folder. A project opened at a `textures` folder, or at a folder inside one (`MyMod\textures\armor`), used to write `<export>\armor\x.dds`; it now writes `<export>\textures\armor\x.dds`, the path the game, the PGPatcher JSON and the Community Shaders JSON name. **Such a project writes to new paths on its next export, with its `_sdc` manifest in `<export>\textures\...\_sdc`; the files and the manifest at the old paths stay on disk**: delete them yourself. Set names and your set settings are unchanged. A project opened at the mod folder, or at a folder with no `textures` in its path, writes where it did. See docs/wiki/Validation-and-Output.md#where-the-files-go.
 - Community Shaders Advanced skin material files: every export writes `<diffuse>.csskin.json` for each Advanced skin set, with the values set on the skin card, the paths of the set's `_rfaos`, `_wet` and `_detail_n` (a borrowed slot points at the host set's file) and the diffuse's size and hash. There is no button and no opt-out; the card's **Export JSON** placeholder is gone. An edited file is kept, a stale one is left in place and listed in the export notes. A set with no diffuse or a borrowed diffuse writes no file, and a value outside the Community Shaders range blocks the export. See docs/wiki/GUI-Set-Materials.md#advanced-skin-card.
-- `skin_wet` is always BC7 (a normal with a mask in alpha); the BC4 height form is gone. A grey `_wet` is not written (new warning `SKIN-WET-GREY`) and the rest of the batch still writes. `skin_rfaos`, `skin_wet` and `skin_detail` accept only the formats the Community Shaders loader reads (BC1, BC3, BC7, RGBA8, plus BC5 for `skin_detail`); another format is `FMT-CS-SKIN-LOADER`, which `--allow` cannot lift. Existing `skin_wet` outputs re-encode once.
-- New sub-type `skin_detail` (`_detail_n`) in a `cs` Advanced skin set: BC5 from an opaque source, else BC7. Its `_wet` and `_detail_n` take GUI slots 9 and 10, for borrowing.
+- `skin_wet` is always BC7; the BC4 height form is gone. A grey `_wet` is not written (new warning `SKIN-WET-GREY`) and the rest of the batch still writes. `skin_rfaos`, `skin_wet` and `skin_detail` accept only the formats the Community Shaders loader reads (BC1, BC3, BC7, RGBA8, plus BC5 for `skin_detail`); another format is `FMT-CS-SKIN-LOADER`, which `--allow` cannot lift. Existing `skin_wet` outputs re-encode once.
+- New sub-type `skin_detail`, suffix `_detail_n`, recognised only in an Advanced skin set on `cs`: BC5 when its source is opaque and BC7 otherwise. A set's `_wet` and `_detail_n` have slots 9 and 10 in the GUI, so another Advanced skin set can borrow them; they never reach a PGPatcher JSON or a texture set.
 - The detail normal has three names: `_detail`, `_detailnorm` and `_detail_n`. In a landscape or PBR landscape set each is the `detail_normal` sub-type, in a `cs` Advanced skin set `skin_detail`, and in any other set they stay undecided. 2.x knew `_detail_n` only on a skin set and the other two only on a landscape set. The output keeps your spelling, two of them in one set is `IN-DUPLICATE`, and the GUI refuses an output name that ends in one of them.
 - A file alone in its set with an underscore and no recognised suffix (`rock_bump.png`, or an ordinary `barrel_01.png`) no longer becomes a colour map: it waits for a type. A CLI project that relied on that default now exits 1 for those files, with `unknown suffix: assign a type with --set file:<path>.subtype=<type> or a [files] entry`. A set shader no longer types such a file either: `--set set:<id>.shader=advanced_skin` on a lone `x_y.png` used to export a `skin_albedo` and now exits 1. `--allow SUG-LOW-CONFIDENCE` no longer converts a job that has no suggestion (it used to write it as `generic_data`), waiting or not. In the GUI a waiting file is an Undecided row with no set card until you pick a type; one a scanned mesh uses as its diffuse, or a GRAS model's diffuse, does not wait. See docs/wiki/Texture-Types.md#texture-sets.
-- A set of only `_n`, `_sk` and `_wet` maps with the Advanced Skin shader is a shared skin set: its maps are skin maps and it warns of no missing diffuse or `_rfaos`.
+- A set of only `_n`, `_sk` and `_wet` maps with the Advanced Skin shader is a shared skin set: its maps are skin maps and it warns of no missing diffuse or `_rfaos`. Its `_wet` and `_detail_n` join it; for every other set the join still follows the set's maps, not its chosen shader.
 - An explicit `alpha.policy = "remove"` on a colour map whose alpha varies is opaque colour to the preset's rules, as a mesh `remove` is: under cs-compact it is BC1, not BC7.
 - A cutout texture that is resized (a `resize` mode, or a size that is not a power of two) keeps its source's alpha-test coverage on every mip, the largest included; it used to keep the coverage of its resized largest mip, so thin cutouts could lose texels. Under `if-changed`, every diffuse, PBR albedo, UI/sky and skin albedo output is written again once; only resized cutouts change.
-- A helper shared into another set, or joined into a set under a hand-set role, gives that set's packed output its own card and `[files]` key (`a/slab_rmaos`, `x_rmaos`), so fills and recipes set on it reach it, a `[files]` entry on it is no longer `CFG-FILE-UNMATCHED`, and an output name or texture-set record on that set puts it in the set's own folder. Settings stored under the old key are not moved.
-- An `_rmaos`, `_rfaos` or complex `_m` of another shape or a non-power-of-two size than its `_n` gets the variance bake instead of `SET-BAKE-RATIO`.
-- A renamed PGPatcher set can again have more than one match or a path contains: its entry names the renamed files in slot commands, and the "not written" markers are gone.
+- A helper shared into another set, or joined under a hand-set role, gives that set's packed output its own card and `[files]` key (`x_rmaos`), no longer `CFG-FILE-UNMATCHED`, and an output name or texture-set record on that set puts it in the set's own folder; settings under the old key are not moved.
+- An `_rmaos`, `_rfaos` or complex `_m` of another shape or a non-power-of-two size than its `_n` gets the variance bake instead of `SET-BAKE-RATIO`; a member with one mip level is not baked.
+- A renamed PGPatcher set can have more than one match or a path contains again: its entry then keeps its matches and names the renamed files in slot commands instead of writing `rename`; a set with one match writes `match_diffuse` + `rename` as before. The "not written" markers are gone.
 - PGPatcher JSON: every PBR set gets its entry, also with no PBR albedo, no mesh or no record; with no albedo the mesh keeps its own diffuse.
-- Also export leaves out a PBR set whose recipe failed, or whose raw maps mismatch under `packing.prefer = raw`, with the note "not derived: N map(s) failed in the PBR export".
+- Also export leaves out a PBR set whose recipe failed, with the note "not derived: N map(s) failed in the PBR export". A set with `packing.prefer = raw` and mismatched raw maps is left out too, although its pre-packed `_rmaos` converts.
 - A texture whose alpha a helper fills is checked on the filled image, so its warnings and readouts see the filled alpha.
 - Fixed in packing and the bake:
   - a packed output whose source feeds some channels inverted and others not re-encodes when that source's invert is toggled; under `if-changed` every such output is written again once;
-  - a pre-packed `_rmaos` or `_rfaos` with a flat alpha takes a separate specular into that alpha;
-  - two raw maps of one name (`mouth_ao.psd` and `mouth_ao.png`) are no longer `IN-DUPLICATE`: the first by path feeds the channel and the other is `PACK-UNUSED-INPUT`;
+  - a pre-packed `_rmaos` or `_rfaos` with a flat alpha takes a separate specular into that alpha; an alpha with content, or another loose map beside the image, still keeps the file;
+  - two raw maps of one name (`mouth_ao.psd` and `mouth_ao.png`) are no longer `IN-DUPLICATE`: the first by path feeds the channel and the other is `PACK-UNUSED-INPUT`. Only a raw map, a skin `_f` or a normal layer you set by hand counts; two normal layers found by name stay duplicates;
+  - not fully fixed: a twin removed from its set with **Remove from set** still makes a set of its own, and writes the same output as the first, until the groups work;
   - the variance bake no longer changes mip 0 of an `_rmaos`, `_rfaos` or complex `_m`, which matters when it is smaller than its `_n`. These types re-encode once.
-- Fixed in outputs:
-  - an export folder inside the opened folder no longer moves the output root, where the second export wrote a flat copy without the `textures` folder. A project that already flipped goes back to the `textures` paths on its next export; the flat copy and its `_sdc` manifest stay on disk, so delete them yourself;
+- Fixed in inputs and outputs:
+  - an export folder inside the opened folder no longer moves the output root; before, the second export wrote a flat copy without the `textures` folder. A project that already flipped goes back to the `textures` paths on its next export; the flat copy and its `_sdc` manifest stay on disk, so delete them yourself;
   - a set mapped to a texture set record, or to a target file, with an `_s` backlight map no longer blocks the export with a collision against itself;
   - a file link (symlink) whose target is in the output folder is no longer read as an input, unless the run is in place.
 
@@ -114,13 +115,27 @@
   - Each group is a `[[groups]]` table in `sdc-project.toml` with a `name`, the `sets` in it and `excluded`. See docs/wiki/GUI-Sets-Column.md#groups.
 - **Export set**, **Export n sets** and **Export group** export only those sets, plus any set they borrow a slot from; the rest of the export folder, its per-set JSON and its PGPatcher JSON entries stay as they are. **Exclude from export** on a group header leaves its sets out of every whole-project export, Also export's Vanilla and CM folders included, until **Include in export**. Also export runs only on a whole-project export. `sdc convert` exports everything as before. See docs/wiki/GUI-Review-and-Export.md#exporting-part-of-the-project.
 - **Delete set** works on every set: its textures go to *no set* and the automatic set doesn't come back, even after a new plan. **Remove member** puts the texture in no set too, also the only one in a set and one you moved in. A texture in no set is on no card, isn't written, shows **No set** in the Textures column, counts for no warning, question or Undecided total, and doesn't make its same-named twin `IN-DUPLICATE`. Drag it onto a card, or use **Back to its automatic set**. The list is `no_set` under `[project]` in `sdc-project.toml`. See docs/wiki/GUI-Sets-Column.md#textures-in-no-set.
+- A set can share another set's helper (an AO, a roughness, a mask) with no copy:
+  - the set it is shared with packs or fills from it as if it were its own, writing in that set's folder under that set's name; a share writes no file of its own;
+  - a shared roughness makes a `cs` set PBR, and a helper in no set can be shared too;
+  - in the GUI, drag a helper onto another set's card and pick **Share (use this file here too, no copy)**; a helper in no set is dragged from its row in the Textures column;
+  - the set editor (**Stop sharing**), the helper panel (**Shared with**) and the **Source** picker list shared helpers; one only another set uses reads `used by <set>`;
+  - the line is `share` in the set's `sdc-project.toml` entry. See docs/wiki/GUI-Set-Editor.md#shared-helpers.
+- A set can be mapped to a texture set record:
+  - **Map to target…** opens a picker over a read-only target mod's records, mesh paths and texture file bases, with **Change mapping…** and **Remove mapping** once mapped;
+  - the card shows `Record: EDID (0x814, plugin)`, and after a scan a changed record raises a Problems row with **Use new paths**;
+  - a mapped set writes each file in a slot the record names to the record's path, the `.csskin.json` follows the diffuse, and other files keep theirs;
+  - the mapping is `[sets.txst]` in `sdc-project.toml`;
+  - an empty slot borrows from the set that writes the record's path (one `_n` written), or counts as supplied when no set writes it;
+  - a skin set that takes its normal this way also takes that set's `_wet` and `_detail_n`, and a shared-map set of a skin set becomes Advanced skin itself;
+  - its own file, an explicit borrow and a pin win; **Clear** turns a fill off (`no_fill`) and **From <set>** turns it back on.
 - **Rename outputs** appears only on PGPatcher PBR sets on Community Shaders; with no such set selected it leaves the menus and the dialog's mode switch, F2 opens Inputs, and a vanilla set renames through Map to target. A set that already has an `output_name` keeps writing under it, and the set editor can clear it.
 - **Rename outputs** can move a PGPatcher PBR set's outputs to another folder (*Whole path*, or a path such as `armor\steel\plate` in **Rename**); Outputs rows show game paths.
-- The texture panel's rows line up in one label and one control column. The Colour group is gone: **Input content** (was Content) and **DDS tag** are in Compression, after Format.
+- The texture panel's rows line up in one label and one control column. The Colour group is gone: **Input content** (was Content) and **DDS tag** are in Compression, after Format. Picking another format keeps the DDS tag when that format allows it.
 - In the texture panel, **Helper** is a tick under Sub-type; unticking a helper writes `helper.role = "none"`, as **Not a helper** did.
 - Setting rows of the texture and bulk panels and the Helper tick have a **?** after the label; hovering it or the label says what the row does.
 - The alpha question has a **Confirm** button beside its dropdown, in the texture panel, Problems and Review, that keeps the proposed type.
-- NIF Edit no longer edits clips (add, remove, rename, timing, Convert to clips). Existing clips still play, and a saved edit drops its clip edits when it opens.
+- NIF Edit no longer edits clips (add, remove, rename, timing, Convert to clips). Existing clips still play, and the keys of a clip-driven controller stay editable. A saved edit drops its clip edits when it opens.
 - The skin card edits the 22 parameters of the new Community Shaders contract in six groups. Values saved under the old names (`SkinMainRoughness`, `F0`, `UseSSS`, `sssWidth` and the rest) are not translated: the next edit of the set removes them and the card starts from not set.
 - A shared skin set reads "shared" on its card, shows only its maps, writes no `.csskin.json` and shows no skin warning.
 - Set cards:
@@ -133,11 +148,11 @@
   - opening a set takes its room from Textures before Sets;
   - a search keeps the matched folder in a cut title;
   - status text is readable in both themes, and the texture settings checkboxes have names.
-- A set line (`add` or `remove`) that names a file deleted from disk clears itself, with an Info line in Messages, instead of leaving a red **?** chip.
+- A set line (`add` or `remove`) that names a file deleted from disk clears itself, with an Info line in Messages, instead of leaving a red **?** chip. It is not an undo step. Nothing is cleared while the plan has no files or the project folder is missing, a line is kept when the file's own folder is missing, and borrows keep their chip.
 - A set no longer warns `SHADER-MISSING-MAP` for a map a scanned mesh or a winning texture set record already supplies beside its diffuse (GUI only).
-- Problems: a set no mesh or record uses yet, or with no albedo, shows an info row and is still exported.
+- Problems: a set no mesh or record uses yet, or with no albedo, shows an info row and is still exported; collisions and mismatches stay warnings.
 - Problems has a **Kinds ▾** menu that hides kinds of warning and info row in a project. Review still lists every warning.
-- The analysis cache's limit is 500 MB (was 200 MB) and thumbnails are stored compressed, so it holds about five times as many textures. Set it with **Analysis cache limit** under Advanced → Cache (`analysis_cache_mb` in `gui.toml`); a new limit applies the next time Tessalith starts. Entries an older version wrote still read.
+- The analysis cache's limit is 500 MB (was 200 MB) and thumbnails are stored compressed. Set it with **Analysis cache limit** under Advanced → Cache (`analysis_cache_mb` in `gui.toml`); a new limit applies the next time Tessalith starts. Entries an older version wrote still read.
 - A cube DDS opened as a source previews its whole cross within the preview limit instead of decoding several GB first; one with no small enough mip is not previewed and says so.
 - Fixed in the Sets column:
   - opening a set in a narrow window no longer leaves its card out of view;
@@ -145,55 +160,44 @@
   - long card titles are cut in the middle so the leaf stays;
   - the "Drop here to start a new set" hint is grey instead of amber;
   - dragging a group's first set down onto a card drops the group where the insertion line shows, and dropping it on a set of its own group does nothing;
-  - a set with a PBR map but no PBR albedo (a lone `_f`) showed PBR over a "vanilla" pill; the pill says "PBR → JSON" on Community Shaders and "PBR, no JSON" elsewhere;
+  - a set with a PBR map but no PBR albedo (a lone `_f`) says "PBR → JSON" on Community Shaders and "PBR, no JSON" elsewhere, not PBR over a "vanilla" pill;
   - an Advanced skin set's packed roughness slot says RFAOS, not RMAOS.
 - Fixed in the set editor and renaming:
   - changing a set's input name also renames it in the project order and in other sets' borrows when it has no entry in `sdc-project.toml`;
   - **Rename inputs** and the input name box read a preset's suffix aliases, so a member named by an alias keeps its suffix;
-  - renaming a set to the name of an automatic set the engine still makes is refused with the reason, where the set lost its settings;
+  - renaming a set to the name of an automatic set the engine still makes is refused with the reason; before, the set lost its settings;
   - renaming an Advanced skin set's outputs, or giving it an input name, keeps the `_wet` and `_detail_n` suffixes, and Rename refuses two outputs of one set on one name;
   - the input name box shows `body` for `body_albedo`, so typed names no longer snap back or double the suffix;
   - **Clear** and **From this set** on a borrowed slot drop the borrow.
 - Fixed in the texture and helper panels:
   - changing a texture's sub-type clears a format and DDS tag the new type does not allow, also on the quick re-plan;
   - Copy settings also writes a field another ticked field unlocks on the target, such as the alpha threshold with a cutout policy;
-  - clicking a centre tab commits the text field being edited, where the typed value was lost;
+  - clicking a centre tab commits the text field being edited; before, the typed value was lost;
   - the helper panel's Fills rows line up, one line per target, and a packed target is named by its output (`bake_1001_rmaos R`).
 - Fixed in the previews:
-  - in the set preview, a member that stops being blocked is simulated again, so its "will be skipped" row clears;
+  - in the set preview, a member that stops being blocked is simulated again, so its "will be skipped" row clears and its material is patched;
   - a failed preview shows the error as plain text instead of Rust debug output;
   - CS hair self-shadow no longer leaves hair lit by ambient light only.
 - Fixed in Problems and the path pickers:
   - rows about a packed channel or a shader's map say which map and channel, not "add the missing map";
   - textures named only in a texture set record (TXST) are offered by the path pickers;
   - the path pickers and the missing-map check read a record's slots by lighting slot, so its `_rmaos` no longer shows as slot 3 or its `_sk` as a height.
-- **Export set**, **Export n sets** and **Export group** keep their sets when you choose or change the export folder while their Review is open; before, the export wrote nothing.
+- **Export set**, **Export n sets** and **Export group** keep their sets when you choose or change the export folder while their Review is open or the export waits for a plan; before, the export wrote nothing.
 - **Export set**, **Export n sets** and **Export group** with an Also tick check the PBR folder they write, not the export folder.
-- In NIF Edit, a texture path typed without Enter is kept when you click a tab or another control; a **Fix** on that same slot is dropped.
-- NIF Edit refuses an export folder that holds the mesh it edits, so an export can't overwrite its source.
+- In NIF Edit, a texture path typed without Enter is kept when you click a tab or another control, and the click's own edit is kept too; a **Fix** on that same slot is dropped.
+- NIF Edit no longer takes an export folder that holds the mesh it edits: the NIF's row is blocked with the reason until you choose another folder.
 - The analysis cache's size prune keeps the entries you use: opening a folder refreshes its entry's time when it is over a day old.
 - The line shown when the toast's Undo comes too late says: press Ctrl+Z to undo or Ctrl+Y to redo.
 
 ### CLI
-- New `sdc uv <PATTERN> --s N` (or `--w W --l L`) writes an image of the UV islands of the meshes that use a texture: islands 255, the recommended padding 127, and texels within padding of two islands 191 ("too close"). It reads the GUI's scan database or, with `--meshes`, a mesh folder. It replaces the GUI's UV coverage checker, and it draws thin islands the checker missed. See docs/wiki/CLI-Reference.md#sdc-uv.
+- New `sdc uv <PATTERN>` writes an image of a texture's UV islands, from the GUI's scan database or `--meshes`; it replaces the GUI's UV coverage checker.
 - New `sdc dilate <PATTERN>...` fills the texels outside a `_matid` mask or the `_uvmask` image `sdc uv` writes, keeps the masked texels, and writes to a `dilated` folder.
 - `sdc dilate` never replaces an input of the same run, or the `--mask` file, with or without `--overwrite`; that input writes nothing and the run exits 1.
 - `sdc validate` reads the alpha of all six faces of a cube DDS, so a marker from `sdc cubemap-marker` no longer fails `VAL-ALPHA-GUARANTEE`.
 
 ### Common
-- Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own. The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.
-- A set can share another set's helper (an AO, a roughness, a mask) with no copy:
-  - the set it is shared with packs or fills from it as if it were its own, writing in that set's folder under that set's name; a share writes no file of its own;
-  - a shared roughness makes a `cs` set PBR, and a helper in no set can be shared too;
-  - in the GUI, drag a helper onto another set's card and pick **Share (use this file here too, no copy)**; a helper in no set is dragged from its row in the Textures column;
-  - the set editor lists shared helpers with **Stop sharing**, the helper panel lists them under **Shared with**, a packed channel's **Source** picker offers them, and a helper only another set uses reads `used by <set>`;
-  - the line is `share` in the set's `sdc-project.toml` entry. See docs/wiki/GUI-Set-Editor.md#shared-helpers.
-- A set can be mapped to a texture set record:
-  - **Map to target…** in a set's menu opens a picker over the records, mesh paths and texture file bases of a read-only target mod (the scan's winning records when no target mod is set), each with a "used by" count, and offers **Change mapping…** and **Remove mapping** once mapped;
-  - the card shows `Record: EDID (0x814, plugin)`, a slot the record supplies reads "From record: file", and after a scan a changed record raises a Problems row with **Use new paths**. See docs/wiki/GUI-Sets-Column.md#mapping-to-a-target;
-  - a mapped set writes each file in a slot the record names to the record's path, the `.csskin.json` follows the diffuse, and other files keep their paths. The mapping is stored in `sdc-project.toml` (`[sets.txst]`);
-  - an empty slot borrows from the set that writes the record's path (shown amber, one `_n` written), or counts as supplied when no set writes it. A skin set that takes its normal this way also takes that set's `_wet` and `_detail_n`, and a shared-map set of a skin set becomes Advanced skin itself;
-  - its own file, an explicit borrow and a pin win; **Clear** turns a fill off (`no_fill`) and **From <set>** turns it back on.
+- Tessalith 3.0.0 also carries the 2.1 work, which was never released on its own.
+- The engine (`engine`, `encoders-sys`) is now GPL-3.0-or-later like the rest of Tessalith; it was MPL-2.0. The vendored encoders keep their own licences.
 - **Generate from normal map** is removed: the dialog, **Regenerate…**, **Delete generated file…**, the "generated" marker and the stale-map row (`GEN-STALE`) are gone, with the engine solver behind them. Files named `_generated` are still read as ordinary sources (`GEN-REPLACED`, `GEN-AO`, and `_curves_generated` for Also export), so make a height, AO or curvature map in another tool and name it that way. An `allow` list or `--allow` that names `GEN-STALE` is refused with "removed in 3.0". An old `[generated]` table in `sdc-project.toml` loads without a message and is left as it is.
 - The UV coverage checker is removed from the GUI: the preview's **UV coverage** toggle, **Check all UV coverage** and **Stop checking UV coverage**, the UV switch under Advanced → Checks, and the `CHK-UV-GUTTER` warning. An `allow` list or `--allow` that names `CHK-UV-GUTTER` is refused with "removed in 3.0" and a hint to use `sdc uv`. An old `uv` key under `[checks]` in `gui.toml` is ignored.
 - The GUI records an alpha the scanned meshes drop (`remove` on a colour map whose alpha varies) in `sdc.toml`, so `sdc convert` plans it the same.
@@ -203,7 +207,7 @@
 
 ### Main
 - Every output re-encodes once, and records written by 1.x are stale.
-- NVTT and many keys, codes and commands are removed: a config, preset or allow list that names one is an error that says so.
+- NVTT and many keys, codes and commands are removed; a config, preset or allow list that names a removed key or code is an error that says so.
 - BC6H keeps small bright highlights, BC1 can keep 1-bit alpha, and every output with mips is a power of two.
 - XPMF profiles for Landscape sets, a flat **Meshes** list, and a Review that only holds what blocks or needs an answer.
 
@@ -216,17 +220,17 @@
   - `resize = "pot-down"` and `drop_top_mip` (the Advanced **Half size** tick and the **Resize to a power of two** button) are removed, and a config, preset or `--set` naming either is an error that says so.
   - `resize` gains `quarter` and `eighth`, and each halving stops at `resize_floor` (512, the GUI's **Size floor**); height maps under `half` go down to 256, so under `cs-compact` and `vanilla-compact` a 512 height map with no diffuse in its set shrinks to 256 (one beside a diffuse is measured from it, see `resize_relative_to`).
 - BC3 alpha, BC4 and BC5 use a better block search (cutout alpha about +3 dB); existing BC3, BC4 and BC5 outputs re-encode once. BC4 and BC5 take about 1.7 to 1.9 times as long and BC3 under 10 % longer, the `fast` presets included.
-- The BC3 alpha guard uses each texture's alpha-test value (`alpha.threshold` and `alpha.compare`, or its meshes') instead of a fixed 128; at the default threshold the output is unchanged.
-- New output format `rgb8` (24-bit B8G8R8 with a legacy header, as vanilla tint masks); it refuses kept alpha (`FMT-RGB8-ALPHA`), `_SRGB` and `header = "dx10"`. Existing outputs do not change.
+- The BC3 alpha guard uses each texture's alpha-test value (`alpha.threshold`, `alpha.compare` or its meshes') instead of 128; at the default threshold the output is unchanged.
+- New output format `rgb8` (24-bit B8G8R8 with a legacy header, as vanilla tint masks) refuses kept alpha (`FMT-RGB8-ALPHA`), `_SRGB` and `header = "dx10"`; existing outputs do not change.
 - DDS inputs also read 24-bit R8G8B8, A8L8 and L16 (from the high byte), and the 3D view loads them as body textures; A8L8 and L16 are never written.
-- BC1 and RGB8 are accepted on a type with `data` alpha when that alpha is empty (none, or 255 everywhere); a `complex_material` stays refused for BC1.
-- Alpha counts as opaque when only stray texels are below 251 (under 0.1 % of the image, no connected group over 16). Such a texture no longer asks about its alpha or raises `LOSS-ALPHA-DATA`, and one blocked or asked only because of them converts with its alpha removed (a complex `_m` becomes an env mask with parallax off). Bytes for files that were not affected do not change, cached image analysis is recomputed once, and `sdc validate` reads a stored DDS the same way.
-- `channels.grayscale_source` also takes `g`, `b` and `a` (it had `r` and `luma`); the default stays `r` and no existing output changes. `CHAN-NOT-GRAY` names the pick.
+- BC1 and RGB8 are accepted on a type with `data` alpha when that alpha is empty (none, or 255 everywhere). Any other `data` alpha still raises `FMT-BC1-ALPHA` or `FMT-RGB8-ALPHA`, and a `complex_material` stays refused for BC1.
+- Alpha counts as opaque when only stray texels are below 251 (under 0.1 % of the image, no connected group over 16). Such a texture no longer asks about its alpha or raises `LOSS-ALPHA-DATA`, and one blocked or asked only because of them converts with its alpha removed by default (a complex `_m` becomes an env mask with parallax off); an explicit `alpha.policy` is honoured as before. Bytes for files that were not affected do not change, cached image analysis is recomputed once, and `sdc validate` reads a stored DDS the same way.
+- `channels.grayscale_source` also takes `g`, `b` and `a` (it had `r` and `luma`); the default stays `r` and no existing output changes. `CHAN-NOT-GRAY` names the pick, and for `g`, `b` or `a` fires only when that channel is flat. `helper.read` on a raw map still picks for that map alone.
 - New sub-type `gray` in the type picker's Grayscale maps group: a plain grey map written as BC4 (the default) or R8, that you pick on the file.
 - Krita and OpenRaster files (`.kra`, `.ora`) are not read: they are reported as `IN-DECODE`. Export the image as PNG from the editor.
-- Mip filter: Tent is allowed on `cutout`, `blend` and `cutout_blend` colour and weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge. Box stays the default; a texture that set `mips.filter = "tent"` on such colour used box in 1.x and now writes the tent.
-- Packed, derived and alpha-fill sources of different sizes but one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`) instead of refused; another ratio still fails (`PACK-SIZE-MISMATCH`). No existing output changes.
-- `vanilla-quality` (and `vanilla-compact`, which inherits it) encodes `diffuse` and `glow` perceptually in BC1, BC3 and BC7, so those outputs re-encode once; `cs-quality`, `cs-compact` and `fast-preview` are unchanged. `VAL-MIP-ERROR` scores a perceptual texture by Rec.709 luma PSNR, and `sdc presets show` and the preset editor show a BC6H texture's effective effort.
+- Mip filter: Tent is allowed on `cutout`, `blend` and `cutout_blend` colour and weights each tap by the source alpha, so transparent colour does not bleed into the opaque edge; alpha stays the area-exact box. Box is the default and its output does not change; a texture that set `mips.filter = "tent"` on such colour used box in 1.x and now writes the tent.
+- Packed, derived and alpha-fill sources of different sizes but one aspect ratio are enlarged to the largest (`PACK-SOURCE-RESIZED`); another ratio still fails (`PACK-SIZE-MISMATCH`). No existing output changes.
+- `vanilla-quality` (and `vanilla-compact`, which inherits it) encodes `diffuse` and `glow` perceptually in BC1, BC3 and BC7, so those outputs re-encode once; where the alpha is `data` the preset's value drops out instead of raising `FMT-PERCEPTUAL-DATA`. `cs-quality`, `cs-compact` and `fast-preview` are unchanged. `VAL-MIP-ERROR` scores a perceptual BC1, BC3 or BC7 texture by Rec.709 luma PSNR, and `sdc presets show` and the preset editor show a BC6H texture's effective effort.
 
 ### GUI
 - Meshes view: one flat list of NIF files titled **Meshes**, with a search over path or mod, an **Any mod** picker and chips (Wins, All, Overridden, Conflicted, Problems). Mod chips sit on the rows. **Show in Meshes** from a texture's Used by meshes adds a "Uses <texture>" chip.
@@ -242,12 +246,14 @@
   - **Scan without PGPatcher output**: with PGPatcher running, the banner says to close it and press **Retry**;
   - the mod-level **Generated** chip, and the shape card's Details lines other than which mod each texture comes from;
   - the **UV checker** debug view;
-  - the preview timing log (`SDC_PREVIEW_LOG`), the Details **Timings** section, the 3D frame-time footer line, the "CS settings: N fields unset" line, and the scan's per-step timings and "N ms"; "Scanned in N s" stays;
+  - the 3D frame-time footer line and the "CS settings: N fields unset" line;
+  - the preview timing log (`SDC_PREVIEW_LOG`), the Details **Timings** section and the scan's per-step timings and "N ms"; "Scanned in N s" stays;
   - `set_preview_max` in `gui.toml` (ignored if present).
 - Meshes view, shape cards:
   - a **Texture set** dropdown previews the alternate texture sets that plugin records assign to the shape, in the 3D view only;
   - an **Advanced Skin preview** card on Face Tint and Skin Tint shapes picks the RFAOS and wetness maps and a **Wet amount** from 0 to 1, for the preview only.
-- NIF edits in the worklist: NIF warnings are worklist rows, **Export NIF** is a Review row with **Diff…**, and NIF edits need an export folder you chose. An empty RMAOS slot is an amber row, clip timing is editable, and cancelling Review writes no NIF edits.
+- NIF edits in the worklist: NIF warnings are worklist rows, **Export NIF** is a Review row with **Diff…**, and NIF edits need an export folder you chose.
+  - An empty RMAOS slot is an amber row, clip timing is editable, and cancelling Review writes no NIF edits.
   - Upgrading from 1.1: NIF edits made without an export folder are in `mods\sdc NIF Edits`. Choose that folder in **Export to ▾** to reopen them.
 - Header and editor:
   - **Export** stays neutral until the project is clean, and there is no inherited export folder;
@@ -258,36 +264,43 @@
   - one type picker, Problems rows that accept their suggestion in one click, diagnostic codes on the hover and in Messages, and plainer labels.
 - Renamed: *Pin this slot (always use this file)*, *Keep the original texture* / *Let PGPatcher replace the texture*, the **PGPatcher JSON** editor (was TruePBR JSON) and its **+ Add a delete section**.
 - GUI settings removed (their `gui.toml` keys are ignored and dropped at the next save):
-  - **Worker threads** and **Memory budget** (Advanced → Batch): the GUI runs the engine with its defaults, one thread per core and half of the memory, and the copied CLI command no longer carries `--jobs` (`sdc convert --jobs` and `--mem-budget` stay);
+  - **Worker threads** and **Memory budget** (Advanced → Batch): the GUI runs the engine with its defaults, and the copied CLI command no longer carries `--jobs` (`sdc convert --jobs` and `--mem-budget` stay);
   - **Largest previewed side** and **Allow 16384 previews**: previews go up to 4096 pixels on a side, or the GPU's limit when that is lower;
-  - **Reduce motion**, with all the motion it governed: toasts, the Export accent, progress bars, the folder fade-in, the reorder and slot flashes, the pressed-thumbnail scale and the scroll to a moved set show their end state at once.
+  - **Reduce motion**, with all the motion it governed: toasts, progress bars, fades, flashes and the scroll to a moved set show their end state at once.
 - The **Measure whether full size adds anything** switch in Advanced is gone and Export never asks about half size; **Low detail** warns in Problems. An old `[checks] drop_top_mip` line in `gui.toml` is ignored.
 - Preview: **Pin this result**, the Compare controls, the `P` key and the **Split** layout are removed, with the **Side by side** button and the `preview_layout` setting; the preview shows the source beside the encode. An old `gui.toml` with `preview_layout` loads, and the key drops on the next save.
-- The alpha question is one **Alpha type** dropdown set to the proposed type, with one Problems line; the `Decide…` menu is gone and Enter on the row confirms the type shown.
-- The 3D preview's studio HDRI is Poly Haven's 1k file, and its reflection cube is GGX-prefiltered as Community Shaders does it, so rough surfaces don't show sharp softbox streaks.
+- The alpha question is one **Alpha type** dropdown set to the proposed type, with one Problems line; the `Decide…` menu is gone and Enter on the row confirms the type shown. Choices are written as before.
+- The 3D preview's studio HDRI is Poly Haven's 1k file, and its reflection cube is GGX-prefiltered as Community Shaders does it, so rough surfaces don't show sharp softbox streaks, and every material's studio reflection changes.
 - The 3D **In game** preview simulates PGPatcher 2.3.1: a JSON that would crash the game stops the run, and `disabled` in a complex material JSON is honoured.
 - Unsaved edits survive a crash: the next open restores them, with a toast that can undo it. After a lost graphics device the app restarts.
-- A DDS input can be re-encoded (**Re-encode this file**, or **Re-encode *n* DDS files** in the bulk panel) and shows its stored image on its tile; an all-DDS set is listed as a set.
+- A DDS input can be re-encoded (**Re-encode this file**, or **Re-encode *n* DDS files** in the bulk panel) and shows its stored image; an all-DDS set is a set.
 - The input name box edits the whole path by segment (double-click, Ctrl+Left/Right, Ctrl+Up/Down lists); the path lock rail is gone.
 - The command palette's Enter acts only after you type or move the highlight, and automatic types alone no longer ask on close.
 - In the Meshes view with a NIF selected, the bottom panel leaves room for the 3D preview.
-- The TruePBR editors list a feature's group (Coat, Emissive, Glint, Fuzz) only while the feature is on, and mark values of an off feature "kept, not used".
+- The TruePBR editors list a feature's group (Coat, Emissive, Glint, Fuzz) only while the feature is on, and mark values of an off feature "kept, not used". Nothing in the JSON changes.
 - Generate from normal accepts a normal whose sides are not powers of two: the height is solved at the power-of-two size the normal is written at.
 - A PGPatcher feature clash in Problems offers **Turn off X** and **Turn off Y**, where 1.x offered one button for the later feature.
 - A `DERIVE-NIF-SUGGEST` row in Problems has no **Show in Messages** button: its values are on the row's hover.
 - The GUI's JSON Lines export report leaves out the per-mip progress events.
-- Fixed in the GUI:
+- Fixed in the texture panel and previews:
   - typing a value into a pack fill box is one edit (one undo step), applied when you leave the box;
-  - a greyed-out set control says why it is read-only (the `sdc-project.toml` error);
-  - NIF validate reads non-ASCII texture paths and BSX names as Windows-1252, the same as apply;
   - the 2D and set previews update when a helper's Invert or Read, a bake, a cube face or a derive source changes;
-  - renaming a large selection no longer slows down quadratically;
   - dragging the Alpha threshold slider on a shared alpha property keeps the split;
   - an edit on a large project no longer blocks the texture panel for a whole re-plan: on 10,000 textures it takes the next edit after 0.13 s (was 10.4 s);
-  - the Sets column: Tab and screen readers reach a card scrolled out of view, card heights follow a new width at once, and a far Go to set lands the set at the top;
-  - the 3D settings window keeps its saved size;
+  - the scan-database read after a re-plan no longer greys the panel;
   - the tile of a stored HDR DDS (BC6H, RGBA16F, RGBA32F) is tone-mapped like the preview, and the preview no longer turns a negative value bright;
   - Up and Down move through the helper rows under the tiles, and a re-plan of unchanged files no longer reloads each target an alpha helper fills.
+- Fixed elsewhere in the GUI:
+  - a greyed-out set control says why it is read-only (the `sdc-project.toml` error);
+  - NIF validate reads non-ASCII texture paths and BSX names as Windows-1252, the same as apply;
+  - renaming a large selection no longer slows down quadratically;
+  - the Sets column: Tab and screen readers reach a card scrolled out of view, card heights follow a new width at once, and a far Go to set lands the set at the top;
+  - the Sets column's first card in view stays put while the heights above it are learned;
+  - the 3D settings window keeps its saved size.
+
+### CLI
+- Removed from `sdc`: `presets diff`, `presets export`, `presets validate`, `convert --fill` (use `--set packing.fill.<role>=<value>`) and `encoders` (`sdc --version` prints the encoder versions after the engine version).
+- In `--json` output a `set_resolved` event's pack jobs lose `hand_placed`, and every packed source's `fill` names its channels (`ch:<rgba>`); the event schema version stays 2.
 
 ### Common
 - XPMF profiles: a Landscape or PBR Landscape set can write `SKSE\Plugins\XPMF\tessalith_<set>.json` on Export, from an **XPMF profile** card in the set editor. Landscape sets get two optional maps, **Projected noise** (`_noise`, written as BC4) and **Detail normal**, that the profile points at, and the 3D preview's Material object layer shows the profile's textures and coverage. An Also export with Vanilla ticked writes those two maps and a `pbr = false` copy of the profile into the Vanilla folder too. See docs/wiki/XPMF-Profiles.md.
@@ -304,21 +317,17 @@
 - CLI and GUI extras removed:
   - `.dds.json` sidecars: `sdc convert --sidecar` and the `OUT-SIDECAR-KEPT` code are gone, and Tessalith neither writes nor deletes `.dds.json` files. One left by 1.x stays on disk; delete it by hand.
   - `sdc patch-header`, the `DDS-HEADER-PATCHED` and `DDS-HEADER-UNPATCHABLE` codes, and the GUI's header check, **Tag on patch** and **Patch header…**. Re-encode the file from its source image instead.
-  - `sdc presets diff`, `presets export` and `presets validate`.
-  - `sdc convert --fill`: use `--set packing.fill.<role>=<value>`.
-  - `sdc encoders`: `sdc --version` prints the encoder versions after the engine version.
   - An allow list naming `OUT-SIDECAR-KEPT`, `DDS-HEADER-PATCHED` or `DDS-HEADER-UNPATCHABLE` is an error that says so.
 - `rfaos` is no longer read as a sub-type: use `skin_rfaos`. A key or value that 2.0 removed is an error that names every such key (ten, then a count) and its fix, in `sdc.toml`, presets and `--set`; the GUI opens such a file read-only. A user preset skipped for one is a Problems row with the reason, and a project that names it says it was skipped instead of "not installed".
 - The five `validation.*` thresholds (`min_mip_psnr_db`, `coverage_tolerance_pts`, `complex_m_warn_alpha`, `bc6h_min_peak_ratio`, `pgpatcher_non_white_share`) are fixed at the values every preset used; naming one is an error. `validation.mips` stays. Output bytes do not change.
   - The project-wide `[defaults] packing.fill` is removed the same way and its **Clear** line leaves the Advanced drawer: delete the `[defaults]` fill lines by hand and set fills per set on the packed output.
-  - In `--json` output a `set_resolved` event's pack jobs lose `hand_placed`, and every packed source's `fill` names its channels (`ch:<rgba>`); the event schema version stays 2.
 - A preset or `sdc.toml` that sets `subtype`, `target`, `category` or `resize_reference` in `[defaults]` or `[subtypes.X]` is now a load error that names the table and the key and says it has no effect there. Until now the three profile keys were ignored and `resize_reference` skewed the size checks. Delete the line.
 - The Also export writes no zip, no `SHA256SUMS.txt` and no `conversion-report.md`. Output bytes do not change.
   - `[export] zip` is removed (a config, preset or `--set` that names it is an error that says so), and so are the warning codes `ALSO-ZIP-FAILED`, `ALSO-REPORT-FAILED` and `ALSO-OWNED-UNREADABLE` (an allow list naming one is an error).
   - The GUI loses the Review checkbox **Also write a zip of each folder** and the Problems row **Reset also.json**.
   - An Also export keeps no `_sdc/also.json`; one a 1.x export left is never read, rewritten or deleted. Files an earlier export left in the three folders are still listed in the export notes as "not written by this export".
   - After an Also export the command line prints those files, and the PBR sets left out of Vanilla and CM, as plain lines on stderr.
-- `encoder.perceptual` also applies to BC1 and BC3 colour, weighting R, G and B by 54/183/19 (Rec.709 luma). It stays off by default and `FMT-PERCEPTUAL-DATA` still refuses it on data maps. The GUI shows a **Perceptual** tick in Compression for BC1 and BC3, and the preset editor one for BC1, BC3 and BC7. The vanilla presets turn it on for `diffuse` and `glow`, so those outputs change; the other presets keep their bytes.
+- `encoder.perceptual` also applies to BC1 and BC3 colour (Rec.709 luma); it stays off by default, and the GUI shows a **Perceptual** tick for BC1 and BC3.
 - New setting `resize_relative_to` (GUI: **Relative to**, next to Resize): `slot1` to `slot8` measure `resize` from the source size of the set's map in that texture-set slot instead of the texture's own size, and never enlarge. `cs-compact` and `vanilla-compact` use `slot1` for every map but the diffuse, so a normal or mask already exported smaller than its diffuse is no longer halved again. A map whose set has none or several maps in that slot is resized from its own size and gets the info code `RESIZE-NO-REFERENCE`.
 - Automatic decisions (the ones Tessalith makes without asking) are recorded in `sdc.toml`, so the GUI and CLI agree on them.
 - The **Value range** and **Plastic look** artist checks are removed (`CHK-RANGE`, `CHK-PLASTIC`), with the preview's **Range** overlay and their two switches in Advanced → Checks. An allow list naming either code is an error that says so, and an old `[checks]` line for either in `gui.toml` is ignored.
@@ -342,7 +351,7 @@
 - `--on-existing if-changed` re-encodes only the texture types whose output changed in a new version. Upgrading from 1.0.0 re-encodes nothing.
 
 ### GUI
-- Cubemaps in the GUI: a Cubemap section in the settings panel, a layout question for unclear images, a six-face cross preview, and Export to > Make marker cube...
+- Cubemaps in the GUI: a Cubemap section in the settings panel, a layout question for unclear images, a six-face cross preview, and Export to > Make marker cube... Settings are written to `sdc.toml`, so the GUI and CLI make the same bytes.
 - The GUI keeps its image analyses in `%LOCALAPPDATA%\sdc\analysis-cache` (pruned to 200 MB at start, safe to delete), so reopening a folder reuses the analyses of unchanged files.
 
 ### CLI
@@ -359,9 +368,10 @@
 ## 1.0.0
 
 ### Main
+- First official release: it covers everything since 0.8.0-alpha.2 (0.9.0 was never released).
 - Edit NIF files on the Meshes page: shader and material fields, extra data, alpha properties, animation keys and clips, written with **Export NIF**.
 - New **Generate from normal map**, **Also export as Vanilla / Complex Material**, **Artist checks** and **BC7 weighting**.
-- Every recorded output re-encodes once after you upgrade.
+- Every recorded output re-encodes once on the first `if-changed` run after you upgrade.
 
 ### Engine
 - **Upgrading: one re-encode.** The version change makes every `--on-existing if-changed` run re-encode each recorded output once after you upgrade. The bump itself changes no pixels and no presets.
@@ -387,20 +397,22 @@
 - **Generate from normal map**: make height, AO and curvature maps from a normal map, named `_generated` and used as packing inputs. See docs/gui.md.
 - **Artist checks**: advice for banding, very dark or bright areas, normal-map curl and stepped height or metalness maps, under **Checks**; they never block an export.
 - Fixed in the mod scan and Meshes:
-  - MO2 files (`modlist.txt`, `ModOrganizer.ini`, `plugins.txt`, `Skyrim.ccc`, `Skyrim.ini`) are read line by line, so a byte-order mark or a non-UTF-8 mod name no longer breaks the scan;
+  - MO2 files are read one line at a time, so a byte-order mark or a non-UTF-8 mod name no longer breaks the scan;
   - the loose-file walk skips only the actor facegen folder, so other folders are no longer missed;
   - a scan that is stopped, or one started while a mesh read is in flight, no longer leaves "Used by meshes" and UV coverage empty;
   - the Unused note says LOD textures are left out of the list;
   - the Meshes path filter folds ASCII case only, and the NIF edit source ignores path-separator spelling (`/` or `\`);
   - a new 3D load no longer waits behind a replaced load's queued compiles.
-- Fixed in the GUI:
+- Fixed in renaming and the JSON editor:
   - Rename Inputs refuses two rows that would write the same output, and the JSON rename box refuses device and map-suffix names;
   - Fill from names checks slot clashes inside the batch, and a file dropped from Explorer onto a slot card gets the same slot 3 and 7 check as a drag inside the app;
+  - the JSON editor's pending match pills stay visible, follow a mode change and shift when you remove a row, and Shift+F8 goes to the previous error.
+- Fixed in keyboard shortcuts:
+  - Ctrl+Shift+Z with nothing to redo no longer undoes, and Shift+Tab in the input-name box no longer takes the ghost suggestion;
+  - a disabled shortcut yields to an enabled one on the same keys.
+- Fixed elsewhere in the GUI:
   - moving a file back to its set, or a set that shares an extension-less key, splits and restores correctly;
   - the Also gate with no project open says to open a folder;
-  - the JSON editor's pending match pills stay visible, follow a mode change and shift when you remove a row, and Shift+F8 goes to the previous error;
-  - Ctrl+Shift+Z with nothing to redo no longer undoes, and Shift+Tab in the input-name box no longer takes the ghost suggestion;
-  - a disabled shortcut yields to an enabled one on the same keys;
   - the presets' Delete confirmation is per preset, and the RNM strength and AO-power sliders keep the value you set until the plan updates;
   - Encode now pressed during an export runs when the export ends;
   - a non-Unicode path is left out of `gui.toml` instead of failing the settings save;
@@ -414,7 +426,7 @@
 - First official release. It covers everything since 0.8.0-alpha.2 (0.9.0 was never released).
 - **Also export as Vanilla / Complex Material**: from a PBR set, write a vanilla or Complex Material version beside the PBR one. `_curves`, `_curvature` and `_cavity` files join their set as packing inputs instead of making their own set, and write nothing by themselves.
 - **BC7 weighting** dropdown replaces the Perceptual check box: Linear (default), Perceptual, Alpha ×2, ×8 or ×16, for the built-in BC7 encoder only; other formats and encoders warn that it is ignored. The `encoder.bc7_weights` setting is also available from `--set`, `[files]` and rules. Output with the default setting is unchanged.
-- A quoted dotted `[files]` key is a config error that names the field, where the value was silently dropped.
+- A quoted dotted `[files]` key is a config error that names the field; before, the value was silently dropped.
 
 ## 0.8.0-alpha.2
 
@@ -429,14 +441,8 @@
 - GUI layout v2. The header is rebuilt, and dialogs share one frame with a fixed button order. The export Review tab is split out, the Sets column has a filter, and the Presets window and the 3D settings window have moved. See docs/gui.md.
 - Set cards show their position number. **Move to…** in a set's menu takes a position or a set name; while a filter is on, it is the only way to reorder.
 - The Sets column draws only the cards on screen, so it stays fast with hundreds of sets; Tab and screen readers reach only those, Ctrl+K and Move to… every set.
-- Motion:
-  - Toasts rise and fade, and stay while the pointer is on them.
-  - Export fades to the accent colour when it becomes available.
-  - Progress bars glide.
-  - A dragged texture shows a ghost at the pointer.
-  - Reordered sets and changed slots flash.
-  - The columns fade in when a folder opens.
-  - Ctrl+K, F1 and path autocomplete open at once.
+- Motion: toasts rise and fade, Export fades to the accent colour, progress bars glide, dragged textures show a ghost, and reordered sets and changed slots flash.
+- Toasts stay while the pointer is on them, the columns fade in when a folder opens, and Ctrl+K, F1 and path autocomplete open at once.
 - **Reduce motion** under Advanced → Interface stops movement and shortens fades.
 - Rename dialog: a **Whole path** toggle (Inputs) runs Find, Replace, Prefix and Suffix over the folders too; the clipped *New* column is gone and *Output* shows the result.
 - Fewer per-frame costs in the GUI; background-only reads (output sizes, *used by*, report save) may appear up to 250 ms later.
@@ -446,6 +452,7 @@
 ### Main
 - Works out what each file is, packs loose maps into Skyrim's layouts, builds the mips and checks every output against Skyrim's rules.
 - Upgrading from 0.7: the `cpm` target is gone, and some defaults change.
+- This is an alpha: back up your mod folders first.
 
 ### Engine
 - Works out what each file is from its name and folder, groups files into material sets, packs loose maps into Skyrim's layouts (`_rmaos`, `_rfaos`, complex `_m`), builds the mips and picks the BC format and the `_SRGB`/UNORM tag.
@@ -467,7 +474,7 @@
 Breaking:
 
 - **The `cpm` target is gone.** `cpm` in `--target`, `sdc.toml`, the user config or a preset is an error (exit 2), `--preset cpm-quality` no longer exists, and a user preset with `target = "cpm"` is skipped with `CFG-PRESET-SKIPPED`. Use `vanilla` with the set's shader on complex material instead.
-- **Vanilla gains complex grass and complex material.** Under `vanilla` a set packs the complex `_m` only when its shader is complex material, so existing vanilla output is unchanged.
+- **Vanilla gains complex grass and complex material.** Under `vanilla` a set packs the complex `_m` only when its shader is complex material; every other vanilla set keeps the env-mask `_m`, so existing vanilla output is unchanged.
 - **Plain `_normal`, `_nrm` and `_norm` default to DirectX green.** They no longer block or ask; an info line (`IN-GREEN-UNSTATED`) says DirectX was assumed. `_normalgl` still flips. For an OpenGL map set `channels.green_convention = "opengl"` or use the GUI's *Treat as OpenGL* button. JSON event output no longer has `needs: ["green_convention"]`.
 - **Hair diffuse defaults to cutout + blend** (was cutout), with coverage mips on. Mesh evidence still wins.
 - **A complex `_m` with no source alpha now writes alpha 0** (was 255, which Community Shaders reads as a plain env mask).
