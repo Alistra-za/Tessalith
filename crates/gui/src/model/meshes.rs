@@ -793,6 +793,12 @@ impl MeshesModel {
         self.cancel.is_some()
     }
 
+    /// Tests: show or hide the running-scan state without a scan thread racing the frame.
+    #[cfg(feature = "test-hooks")]
+    pub fn set_scanning_for_test(&mut self, on: bool) {
+        self.cancel = on.then(|| Arc::new(AtomicBool::new(false)));
+    }
+
     /// No scan runs and the store is not unsettled (a cancelled or failed scan left origins disabled): reads that
     /// click-handlers start are meaningful only then (Notes GC14, GC15, GC19, GQ4).
     pub fn store_settled(&self) -> bool {

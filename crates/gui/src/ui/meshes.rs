@@ -155,6 +155,13 @@ fn chip(ui: &mut egui::Ui, color: egui::Color32, text: &str) -> egui::Response {
     ui.label(egui::RichText::new(text).small().color(color))
 }
 
+/// The disabled Scan row's name when no source is chosen.
+pub const SCAN_NEEDS_SOURCE: &str = "Scan: choose an instance first";
+/// The disabled Scan row's name when the instance's profile is empty or not listed.
+pub const SCAN_NEEDS_PROFILE: &str = "Scan: choose a profile first";
+/// The hover of Choose… and Scan a folder… while a scan runs.
+pub const SCAN_RUNNING_HOVER: &str = "A scan is running. Wait for it, or cancel it.";
+
 /// The header's "MO2…" button (Note AM): a popup with the instance and its Choose…, the profiles, Scan a folder…
 /// and Scan or Cancel. A click inside keeps it open; a click outside or Esc closes it.
 pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
@@ -165,6 +172,8 @@ pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
             let r = ui.add_enabled(idle && !busy, egui::Button::new(label));
             (if busy {
                 r.on_disabled_hover_text(picker::BUSY_HOVER)
+            } else if !idle {
+                r.on_disabled_hover_text(SCAN_RUNNING_HOVER)
             } else {
                 r
             })
@@ -212,14 +221,34 @@ pub fn mo2_button(ui: &mut egui::Ui, m: &mut MeshesModel) {
             if ui.button("Cancel").clicked() {
                 m.cancel_scan();
             }
-        } else if ui
-            .add_enabled(
-                m.target.is_some(),
-                egui::Button::new(egui::RichText::new("Scan").strong()),
-            )
-            .clicked()
-        {
-            m.request_scan();
+        } else {
+            // The row's name is its text, so the disabled rows are named for what is missing.
+            let (label, why) = match &m.target {
+                None => (
+                    SCAN_NEEDS_SOURCE,
+                    Some("Choose an MO2 instance, or scan a folder, then scan."),
+                ),
+                Some(ScanTarget::Mo2 { profile, .. })
+                    if profile.is_empty() || !m.profiles().contains(profile) =>
+                {
+                    (
+                        SCAN_NEEDS_PROFILE,
+                        Some("Pick one of the instance's profiles above, then scan."),
+                    )
+                }
+                Some(_) => ("Scan", None),
+            };
+            let r = ui.add_enabled(
+                why.is_none(),
+                egui::Button::new(egui::RichText::new(label).strong()),
+            );
+            let r = match why {
+                Some(why) => r.on_disabled_hover_text(why),
+                None => r,
+            };
+            if r.clicked() {
+                m.request_scan();
+            }
         }
     });
     r.response.on_hover_text(hover);
