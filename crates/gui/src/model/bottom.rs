@@ -929,7 +929,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 Code::AlphaParallaxNoAlpha => Some(Fix::ParallaxOff(k())),
                 Code::SugContradiction => Some(Fix::SetType(k())),
                 // Owner A1-4: both rows sit on the planned packed key.
-                Code::PackRecipeConflict | Code::PackRecipeUnbuildable => {
+                // Only where a recipe is written on the entries: a project or preset value is out of its reach.
+                Code::PackRecipeConflict | Code::PackRecipeUnbuildable
+                    if m.recipe_written(&i.key) =>
+                {
                     Some(Fix::ClearRecipe(k()))
                 }
                 _ => None,
@@ -1490,18 +1493,11 @@ fn packed_output_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<St
     named.then(|| k.clone())
 }
 
-/// Owner A1-7: [`packed_output_key`] when `packing.recipe` is written on either packed key of that set.
+/// Owner A1-7: [`packed_output_key`] when a recipe is written on either packed key of that set
+/// (`AppModel::recipe_written`, which is false off cs, so this is `None` there).
 fn extra_map_recipe_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
     let k = packed_output_key(m, v, member)?;
-    let (base, _) = super::pack_fills::split_packed_key(&k)?;
-    let p = m.project.as_ref()?;
-    ["rmaos", "rfaos"]
-        .iter()
-        .any(|s| {
-            p.file_value(&format!("{base}_{s}"), "packing.recipe")
-                .is_some()
-        })
-        .then_some(k)
+    m.recipe_written(&k).then_some(k)
 }
 
 /// Note HL6: a PBR set with no albedo keeps the mesh's own diffuse at `{path}`.

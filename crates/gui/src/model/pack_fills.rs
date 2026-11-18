@@ -43,7 +43,7 @@ fn fill_field(role: RawMap) -> String {
 }
 
 /// `(<folder>/<base>, the recipe the key names)` of a cs packed key.
-pub(super) fn split_packed_key(key: &str) -> Option<(&str, RecipeKind)> {
+fn split_packed_key(key: &str) -> Option<(&str, RecipeKind)> {
     if let Some(base) = key.strip_suffix("_rmaos") {
         Some((base, RecipeKind::Rmaos))
     } else {
@@ -123,6 +123,23 @@ impl AppModel {
             .iter()
             .any(|r| r.kind == RecipeKind::Rfaos);
         (!built).then_some(RFAOS_UNBUILDABLE)
+    }
+
+    /// Task 5a review F1: a recipe is written on either `[files]` entry of the set that owns the cs packed output
+    /// `packed_key` (`_rmaos`, `_rfaos`), parsed as `explicit_recipe` does: a hand-written `auto` is not written.
+    /// This is what `clear_packing_recipe` can clear, so it decides whether Clear recipe is offered; a recipe from
+    /// the project or a preset is out of its reach.
+    pub fn recipe_written(&self, packed_key: &str) -> bool {
+        let (Some(p), Some((base, _))) = (self.project.as_ref(), split_packed_key(packed_key))
+        else {
+            return false;
+        };
+        self.target == Target::Cs
+            && ["rmaos", "rfaos"].iter().any(|s| {
+                p.file_value(&format!("{base}_{s}"), "packing.recipe")
+                    .and_then(|v| serde_json::from_value::<PackRecipe>(v).ok())
+                    .is_some_and(|r| r != PackRecipe::Auto)
+            })
     }
 
     /// Owner A1-4, A1-8: take `packing.recipe` off both packed keys of the set that owns `packed_key` (`_rmaos` and

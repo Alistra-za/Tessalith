@@ -416,6 +416,12 @@ fn a_read_only_sdc_toml_disables_the_fills_and_says_why() {
     assert!(m.project.as_ref().unwrap().read_only());
     // The model refuses too.
     m.set_pack_fill(RMAOS, RawMap::Ao, Some(1));
+    // A note from an earlier switch: a refused call must leave it (the guard returns before `dropped_fills.clear()`;
+    // the document's own refusal alone would not show in the text).
+    m.dropped_fills
+        .insert(RMAOS.into(), "metallic fill removed".into());
+    m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
+    assert_eq!(m.dropped_fills.len(), 1, "a refused switch touches nothing");
     assert_eq!(
         m.project.as_ref().unwrap().file_value(RMAOS, "packing"),
         None
@@ -1005,12 +1011,16 @@ fn a_read_only_sdc_toml_disables_clear_recipe_and_says_why() {
         d.path(),
         "\n[files.\"m/rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
     );
-    // The read-only swap `a_read_only_sdc_toml_disables_the_fills_and_says_why` uses: a project doc opened on an
-    // unparsable sdc.toml (`ProjectDoc::read_only` is "it failed to parse", `project.rs` l.91-93).
-    let bad = d.path().join("bad");
-    std::fs::create_dir_all(&bad).unwrap();
-    std::fs::write(bad.join("sdc.toml"), "this is = = not toml\n").unwrap();
-    m.project = Some(sdc_gui::project::ProjectDoc::open(&bad));
+    // The row is built while the entry is there (a read-only doc holds none, review F1); the doc then turns
+    // read-only under it, as `problems_rows::a_read_only_project_offers_no_removal` does, and the button's draw
+    // reads the state.
+    assert!(problems(&m)
+        .iter()
+        .any(|p| p.fix == Some(Fix::ClearRecipe(RMAOS.into()))));
+    m.project
+        .as_mut()
+        .unwrap()
+        .set_error("rejected by the engine");
     let reason = m.toml_read_only_reason().expect("read-only");
     m.open_problems(None);
     let mut h = app(m);
@@ -1139,6 +1149,75 @@ fn the_extra_packed_map_row_offers_clear_recipe_first() {
         "DV3: the written rmaos keeps _rmaos under Advanced Skin"
     );
     extra_row_clears(m, &id, RMAOS, "rock01_rmaos.dds", RFAOS);
+}
+
+/// Task 5a review F1: Clear recipe clears only `[files]` entries, so a row offers it only where one holds a recipe.
+/// A recipe that comes from the project level has no button: it would change nothing.
+#[test]
+fn a_recipe_from_the_project_level_gets_no_clear_recipe() {
+    let d = tempfile::tempdir().unwrap();
+    let m = metallic_only_with(d.path(), "");
+    // The project-level `packing.recipe`, set in the document the way a hand edit would.
+    let text = std::fs::read_to_string(d.path().join("sdc.toml")).unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        format!("[defaults.packing]\nrecipe = \"rfaos\"\n\n{text}"),
+    )
+    .unwrap();
+    drop(m);
+    let mut m = AppModel::new(
+        GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..GuiSettings::default()
+        },
+        None,
+        session(),
+    );
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.path().to_path_buf());
+    idle(&mut m);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(RFAOS, "packing.recipe"),
+        None,
+        "fixture: nothing on the entries"
+    );
+    let r = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::PackRecipeUnbuildable))
+        .cloned()
+        .expect("premise: the project-level rfaos makes an UNBUILDABLE row");
+    assert_eq!(r.fix, None, "nothing on the entries to clear");
+}
+
+/// Task 5a review F1 (Minor 3): a hand-written `recipe = "auto"` is not a written recipe, so the SHADER-EXTRA-MAP
+/// row does not offer Clear recipe first.
+#[test]
+fn a_written_auto_recipe_gets_no_clear_recipe() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = metallic_only_with(
+        d.path(),
+        "\n[files.\"m/rock01_rmaos\".packing]\nrecipe = \"auto\"\n",
+    );
+    let id = set_id(&m);
+    m.set_shader(&id, Some(Shader::AdvancedSkin));
+    idle(&mut m);
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(RMAOS, "packing.recipe")
+            .is_some(),
+        "fixture: the auto is on the entry"
+    );
+    let r = problems(&m)
+        .iter()
+        .find(|p| p.code == Some(Code::ShaderExtraMap) && p.text.starts_with("rock01_rmaos.dds"))
+        .cloned()
+        .expect("premise: the extra-map row");
+    assert_eq!(r.fix, Some(Fix::ChangeShader(id)), "Change shader… alone");
 }
 
 /// Controller ruling (2026-11-18): with no recipe written, the SHADER-EXTRA-MAP row that names the set's packed
