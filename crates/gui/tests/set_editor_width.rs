@@ -182,6 +182,34 @@ fn the_assign_menu_header_is_the_slot_label() {
     assert_eq!(h.query_all_by_label("Emissive / Skin (slot 3)").count(), 2);
 }
 
+/// Review E24: a centre tab in front (Presets, Settings, JSON) does not take the set editor's floor, so the side
+/// columns keep the widths they have with nothing selected.
+#[test]
+fn a_centre_tab_in_front_does_not_take_the_editors_floor() {
+    for open in [
+        AppModel::open_presets,
+        AppModel::open_settings_tab,
+        AppModel::open_json_editor,
+    ] {
+        let left = |select: bool| {
+            let d = tempfile::tempdir().unwrap();
+            let (mut m, _) = rock_set(d.path());
+            if !select {
+                m.clear_selection();
+            }
+            open(&mut m);
+            let mut h = harness(m, 1057.0);
+            h.run();
+            sdc_gui::ui::centre_rect(&h.ctx).unwrap().min.x
+        };
+        let (with, without) = (left(true), left(false));
+        assert!(
+            (with - without).abs() < 0.5,
+            "the side columns keep their widths behind a centre tab: {with} against {without}"
+        );
+    }
+}
+
 /// A set whose diffuse row shows Confirm (`asks`: an undecided alpha on a plain diffuse) or the reset (its own alpha),
 /// selected, in a window sized so the centre is exactly `ROWS_MIN` wide.
 fn at_the_floor(asks: bool) -> (H, tempfile::TempDir) {

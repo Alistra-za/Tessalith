@@ -164,13 +164,15 @@ pub fn draw_with_scan(
     ui.data_mut(|d| d.insert_temp(seen_id, seen));
     // The 2D | 3D switch (AB4, AG78): in 3D the set's 3D view takes the centre in place of the set editor's body.
     let three_d = state.set3d.enabled && set_preview::wanted(model);
+    let selection_in_front = model.centre_front() == CentreTab::Selection;
     // A11: no columns until a folder is open. Note JI7: nothing is drawn at the window's right edge in any state.
     if model.root.is_some() {
         let (thumbs, drops, cmds) = (&mut state.thumbs, &mut state.drops, &mut state.slot_cmds);
         // Each column stops at its minimum and leaves the columns after it theirs and the centre its floor.
         let mut floor = centre_floor(ui.ctx(), model);
         // Note FB2: the 2D set editor's one column needs its slot rows' width, so the columns yield it.
-        let editor = !three_d && set_editor_shown(model, false);
+        // Review E24: only while the Selection tab is in front; a centre tab has no slot rows to make room for.
+        let editor = !three_d && selection_in_front && set_editor_shown(model, false);
         if editor {
             floor = floor.max(set_editor::ROWS_MIN);
         }
@@ -215,7 +217,6 @@ pub fn draw_with_scan(
         );
     }
     let c = egui::CentralPanel::default().show(ui, |ui| centre(ui, model, state, three_d));
-    let selection_in_front = model.centre_front() == CentreTab::Selection;
     ui.ctx()
         .data_mut(|d| d.insert_temp(centre_id(), c.response.rect));
     // Folders (or files, which stand for their folder) dropped anywhere but on a slot card open like Open folder
