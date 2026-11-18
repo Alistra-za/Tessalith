@@ -1,0 +1,13 @@
+# Clippy configuration for the GUI crate only (no other crate reads this file).
+# Motion in the GUI has an explicit duration and an ease-out curve: `animate_bool` takes egui's default time with a
+# linear curve, and an ease-in curve starts slow, so the change looks late.
+disallowed-methods = [
+    { path = "egui::Context::animate_bool", reason = "linear motion with egui's default time: use `animate_bool_with_time_and_easing` with an explicit duration and an ease-out curve (`emath::easing::*_out`)" },
+    { path = "emath::easing::quadratic_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::quadratic_out`" },
+    { path = "emath::easing::cubic_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out`" },
+    { path = "emath::easing::sin_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::sin_out`" },
+    { path = "emath::easing::circular_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::circular_out`" },
+    { path = "emath::easing::exponential_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::exponential_out`" },
+    { path = "emath::easing::back_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out`" },
+    { path = "emath::easing::bounce_in", reason = "an ease-in curve starts slow: use an explicit duration with an ease-out curve such as `emath::easing::cubic_out`" },
+]

@@ -137,6 +137,9 @@ pub fn should_relaunch(started_with_flag: bool, uptime: std::time::Duration) -> 
 /// Note FC4 (supersedes DN1's exit): called from the frame after a device loss, before egui-wgpu's paint would
 /// panic. eframe cannot recreate the device, so the app writes the unsaved documents to their recovery files, runs
 /// `on_exit` (the layout save, DN3), starts itself again on the same folder, and exits.
+// Exiting is the point: the device is gone and eframe cannot recreate it, so no frame can be drawn again. Both exits
+// come after the recovery files and `on_exit` are written; one follows the started replacement, the other the message.
+#[allow(clippy::exit)]
 pub fn close_after_device_loss(folder: Option<&Path>, on_exit: impl FnOnce()) -> ! {
     let files = RECOVERY.lock().map(|r| r.clone()).unwrap_or_default();
     write_recovery(&files);

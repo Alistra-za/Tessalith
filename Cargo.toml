@@ -38,6 +38,11 @@ crc32fast = "1.5.2"
 flate2 = "1"
 texcore = { path = "crates/texcore" }
 
+# Only the main team's six crates opt in (`[lints] workspace = true`); the NIF team's crates opt in on their own branch.
+[workspace.lints.clippy]
+exit = "warn"
+undocumented_unsafe_blocks = "warn"
+
 [profile.dev]
 opt-level = 1
 # Line tables keep file:line in panics and backtraces; local-variable debugging needs CARGO_PROFILE_DEV_DEBUG=2 (Note FM2).
