@@ -8,7 +8,7 @@ When the edited NIF has a controller that animates, two rows sit under the 3D vi
 
 ## The Controllers tab
 
-Each shader and alpha property lists its controllers, then **Add controller**. A float, colour or alpha-test controller has:
+Each shader and alpha property lists its controllers (alpha, shader float and colour, texture transform), then **Add controller**. Controllers of other classes are read-only. On a shared alpha you click **Split alpha** first; it also works on an alpha a clip drives, and both alphas keep following the clip. A float, colour or alpha-test controller has:
 - A header with its name, its class, "Managed by a clip" when a clip drives it, and **Remove**. Remove unlinks the controller; the BSX Animated bit stays set. It is off for a controller a clip drives ("Driven by a clip: it cannot be removed.").
 - **Variable**, **Cycle** (Loop, Reverse, Clamp), **Active**, **Play backwards**, **Frequency**, **Phase**, **Start**, **Stop** and the interpolator's value. You can change the Variable of a controller a clip drives: "Its clips follow the new variable."
 - **Interpolation**: Linear or Quadratic. Linear to Quadratic adds tangents that keep the curve's shape; Quadratic to Linear drops them.

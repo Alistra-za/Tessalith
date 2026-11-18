@@ -17,16 +17,16 @@ How to edit a mesh's shader, alpha, controllers and extra data in the Meshes vie
 
 - **Shader** edits the BSLightingShaderProperty of the selected shape: texture slots (counted from 1 like the set editor; a True PBR set uses the set editor's names for slots 3 and 7), shader type, the per-type fields and the SLSF1 and SLSF2 flag lists. A list with a flag warning starts open.
 - **Alpha** edits the NiAlphaProperty. A blend pair the engine mapping does not cover is drawn as stored and marked **Not verified in game**.
-- **Controllers** lists the shape's controllers (alpha, shader float and colour, texture transform) with their start, stop, frequency, phase, cycle and the animated value, and edits their keys ([NIF animation](GUI-NIF-Animation.md#the-controllers-tab)). Controllers of other classes are read-only.
+- **Controllers** lists the shape's controllers and edits their keys: [NIF animation](GUI-NIF-Animation.md#the-controllers-tab).
 - **Extra data** lists the extra data of the root or the selected shape: BSXFlags bits, string, integer, boolean and float values, BSInvMarker. **Add to root**, **Add to shape** and **Remove** change the list. Each row shows its own warnings under it, for example "BSXFlags must be named BSX". A **Known** list above the type and name fills in an entry the game or a plugin reads, with its type, name and a starting value. On a shape: **AnisotropicAlphaMaterial** (Community Shaders see-through look; starts at 3, woven fabric). On the root: **BSX**, **INV**, **HDT Skinned Mesh Physics Object** (type the physics xml path in **Value**; Add stays off until you do) and **Prn (unconfirmed)** (the skeleton node the item attaches to; not checked against a source yet). An entry that goes on the other owner is greyed ("Goes on the root", "Goes on a shape"), and so is one this owner already has ("Already on this root"). **Custom…** keeps free typing for anything else. BODYTRI is not offered: BodySlide and Outfit Studio write it. **Heel height (RaceMenu)** (shapes only; on the root: "The game ignores heel height here. Put it on a shape.") raises the actor so heels stand on the ground. It starts at the shape's stored value, **Calculate** fills it from the lowest point of the shape in bind pose (rounded to 0.1, still editable), and **Set heel height** writes it: the shape's HH_OFFSET is changed in place or added, and an SDTA the shape already has gets the same height in its NPC entry (a new SDTA only when **Also write SDTA** is ticked). It says when an earlier shape's heel height wins, and for `_0`/`_1` files it reminds you to apply the same value to the other weight file. Heel data anywhere but on a shape, and on a shape after the first shape in the scene that has some, warns under its row. A negative height says it lowers the actor. When the shape's HH_OFFSET is not a number the editor can set (another type), Set heel height stays off until that row is removed.
 
 ## Shared blocks
 
 The panel says when a block has more than one user.
-- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. On the Controllers tab you click **Split alpha** first. Split alpha also works on an alpha a clip drives: both alphas keep following the clip.
+- A shared alpha: "Shared by N shapes: editing will split." The first edit splits it, so only this shape changes. The Controllers tab splits it by a button: [NIF animation](GUI-NIF-Animation.md#the-controllers-tab).
 - A shared texture set: "Shared by N shapes: editing makes a copy for this shape."
 - A shared shader: "Shared by N shapes: shader edits change all of them." A texture path edit on a shared shader is refused, because it would change the other shapes.
-- A shared interpolator: a value edit is a conflict ("This interpolator is shared by N controllers"), and the value row is greyed. A key edit copies the interpolator and its keys first, so the other controller's curve does not change.
+- A shared interpolator: a value edit is a conflict ("This interpolator is shared by N controllers"), and the value row is greyed. A key edit copies it first: [NIF animation](GUI-NIF-Animation.md#the-controllers-tab).
 
 ## Warnings
 
@@ -72,13 +72,13 @@ The toggle reads **In game** and **Source** with or without an edit open; while 
 
 ### In game and Source while editing
 
-In game runs Tessalith's PGPatcher simulation on your edited NIF and shows still materials (the clock pauses). It follows PGPatcher 2.3.1: loose JSON only, no modrules priority, read at the last scan. The JSON is read in the background when the edit opens, and a folder scan has no MO2 instance, so In game says no JSON was read. PGPatcher's real output, made from the unedited NIF, is not shown while you edit. For the selected shape a line says what happened:
+In game runs Tessalith's PGPatcher simulation on your edited NIF and shows still materials. It follows PGPatcher 2.3.1: loose JSON only, no modrules priority, read at the last scan. The JSON is read in the background when the edit opens, and a folder scan has no MO2 instance, so In game says no JSON was read. PGPatcher's real output, made from the unedited NIF, is not shown while you edit. For the selected shape a line says what happened:
 
 - No JSON matches it, it is already PBR, or a file is not applied (amber, with the reason; the next file can still match).
 - PGPatcher skips it (`PG_IGNORE`, amber).
 - The shape carries a `PG_STOCK` block (amber): PGPatcher reverts such a shape to its recorded stock state first, and the preview shows it as loaded.
 - **IMPORTANT** A match key such as `match_diffuse` or `nif_filter` that isn't a string, in any JSON the instance loads, crashes PGPatcher 2.3: the run stops, so every shape shows one red line per such file, even shapes PGPatcher would leave alone. The set preview in the Textures view shows the same lines.
-- PGPatcher makes the shape PBR while it has an Env map scale controller (red): that crashes the game.
+- PGPatcher makes the shape PBR while it has an Env map scale controller (red): that crashes the game ([why](GUI-NIF-Animation.md#warnings)).
 
 The simulation leaves out:
 
