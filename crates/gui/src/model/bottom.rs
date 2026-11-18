@@ -499,16 +499,18 @@ pub fn tab_label(c: TabCounts) -> String {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProblemsFilter {
-    /// An engine set key.
+    /// A set's scope key (`scope_key`: its key, or a key-less set's id).
     Set(String),
     Undecided,
     /// Only the artist checks' rows.
     Checks,
-    /// Only the artist checks' rows of one set (an engine set key): "Checks {n}" pressed while `Set` is on.
+    /// Only the artist checks' rows of one set (a set's scope key (`scope_key`: its key, or a key-less set's id)):
+    /// "Checks {n}" pressed while `Set` is on.
     SetChecks(String),
     /// Review E2: every note row.
     Notes,
-    /// Review E2: every note row of one set (an engine set key): the Notes pill pressed while `Set` is on.
+    /// Review E2: every note row of one set (a set's scope key (`scope_key`: its key, or a key-less set's id)): the
+    /// Notes pill pressed while `Set` is on.
     SetNotes(String),
 }
 
@@ -572,6 +574,8 @@ pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
 #[derive(Debug, Default)]
 pub struct Flagged {
     pub sets: HashSet<String>,
+    /// Note JP5: the ids of key-less sets with a counted set row (`sets` holds keys only, so an id never meets a key).
+    pub keyless: HashSet<String>,
     pub textures: HashSet<String>,
     /// Rows passing `counts_as_ready_problem` (the Export dot and its hover, K6).
     pub ready_rows: usize,
@@ -594,6 +598,7 @@ pub fn flagged(m: &AppModel) -> Arc<Flagged> {
         }
         f.ready_rows += 1;
         match &p.at {
+            At::Set { key, id } if key.is_empty() => f.keyless.insert(id.clone()),
             At::Set { key, .. } => f.sets.insert(key.clone()),
             At::Texture(t) => f.textures.insert(t.clone()),
             _ => false,
@@ -609,6 +614,23 @@ pub fn set_ready_in(f: &Flagged, v: &sets::SetView) -> bool {
     !v.key.is_empty()
         && !f.sets.contains(&v.key)
         && !v.members.iter().any(|t| f.textures.contains(t))
+}
+
+/// Note JP5 (B3-16, B3-19): the name a set's Problems filter, its reasons, the card's hover and its badges' clicks use:
+/// its engine key, or for a set with no key (a created set with no file yet, or one whose every entry is missing) its
+/// id.
+pub fn scope_key(v: &sets::SetView) -> &str {
+    if v.key.is_empty() {
+        &v.id
+    } else {
+        &v.key
+    }
+}
+
+/// Note JP5 (B3-17): a set with no key and no counted row of its own, whose status line and card hover say it has no
+/// files yet.
+pub fn no_files_yet(f: &Flagged, v: &sets::SetView) -> bool {
+    v.key.is_empty() && !f.keyless.contains(&v.id)
 }
 
 /// `set_ready_in` with its own `flagged` fetch; a loop over sets fetches once and calls `set_ready_in`.
@@ -1416,9 +1438,9 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         None => worklist(&all, &|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
         Some(ProblemsFilter::SetNotes(k)) => {
-            let members = set_members(m, k);
+            let s = scope(m, k);
             all.iter()
-                .filter(|p| p.is_note() && in_set(p, k, &members))
+                .filter(|p| p.is_note() && in_set(p, &s))
                 .cloned()
                 .collect()
         }
@@ -1431,13 +1453,13 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             all.iter().filter(|p| counts_as_check(p)).cloned().collect()
         }
         Some(ProblemsFilter::Set(k)) => {
-            let members = set_members(m, k);
-            worklist(&all, &|p| in_set(p, k, &members))
+            let s = scope(m, k);
+            worklist(&all, &|p| in_set(p, &s))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
-            let members = set_members(m, k);
+            let s = scope(m, k);
             all.iter()
-                .filter(|p| counts_as_check(p) && in_set(p, k, &members))
+                .filter(|p| counts_as_check(p) && in_set(p, &s))
                 .cloned()
                 .collect()
         }
@@ -1454,28 +1476,67 @@ fn worklist(all: &[Problem], keep: &dyn Fn(&Problem) -> bool) -> Vec<Problem> {
     rows.into_iter().chain(notes).cloned().collect()
 }
 
-/// How many of the set's (an engine set key) own rows and members' rows pass `keep`, without cloning them.
+/// How many of the set's own rows and members' rows pass `keep`, without cloning them. `key` is a set's scope key
+/// (`scope_key`: its key, or a key-less set's id).
 pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) -> usize {
-    let members = set_members(m, key);
+    let s = scope(m, key);
     problems(m)
         .iter()
-        .filter(|p| in_set(p, key, &members) && keep(p))
+        .filter(|p| in_set(p, &s) && keep(p))
         .count()
 }
 
-fn set_members(m: &AppModel, key: &str) -> HashSet<String> {
-    sets::views(m)
-        .iter()
-        .find(|v| v.key == key)
-        .map(|v| v.members.iter().cloned().collect())
-        .unwrap_or_default()
+/// Note JP5 (B3-16): the rows a set filter or reason list names: by key, or for a key-less set by its id; and the
+/// set's member items.
+struct Scope {
+    key: String,
+    id: String,
+    members: HashSet<String>,
 }
 
-/// The empty key is every key-less set's: it names no one set, so it matches no set row.
-fn in_set(p: &Problem, key: &str, members: &HashSet<String>) -> bool {
+impl Scope {
+    fn of(v: &sets::SetView) -> Self {
+        Scope {
+            key: v.key.clone(),
+            id: v.id.clone(),
+            members: v.members.iter().cloned().collect(),
+        }
+    }
+}
+
+/// The view `s` names: the set with that key, else the key-less set with that id. `None` for the empty string.
+fn view_of<'a>(views: &'a [sets::SetView], s: &str) -> Option<&'a sets::SetView> {
+    if s.is_empty() {
+        return None;
+    }
+    views
+        .iter()
+        .find(|v| v.key == s)
+        .or_else(|| views.iter().find(|v| v.key.is_empty() && v.id == s))
+}
+
+/// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
+fn scope(m: &AppModel, s: &str) -> Scope {
+    let views = sets::views(m);
+    match view_of(&views, s) {
+        Some(v) => Scope::of(v),
+        None => Scope {
+            key: s.to_string(),
+            id: String::new(),
+            members: HashSet::new(),
+        },
+    }
+}
+
+/// A row of the scope: a set row by key, or for a key-less set by id (another key-less set's rows never match); a
+/// texture row of a member.
+fn in_set(p: &Problem, s: &Scope) -> bool {
     match &p.at {
-        At::Set { key: k, .. } => !key.is_empty() && k == key,
-        At::Texture(t) => members.contains(t),
+        At::Set { key, id } if s.key.is_empty() => {
+            !s.id.is_empty() && key.is_empty() && *id == s.id
+        }
+        At::Set { key, .. } => *key == s.key,
+        At::Texture(t) => s.members.contains(t),
         _ => false,
     }
 }
@@ -1496,9 +1557,10 @@ pub enum ReasonGo {
     Row(Box<Problem>),
 }
 
-/// Review E4: the rows of the set (an engine set key) and of its members that take "ready" away (the rows
-/// `set_ready` reads), hidden kinds included, in list order. A missing map whose slot the set editor draws a row for
-/// goes to that slot's **Assign…**; every other row goes to itself in Problems.
+/// Review E4: the rows of the set (a set's scope key (`scope_key`: its key, or a key-less set's id)) and of its
+/// members that take "ready" away (the rows `set_ready` reads), hidden kinds included, in list order. A missing map
+/// whose slot the set editor draws a row for goes to that slot's **Assign…**; every other row goes to itself in
+/// Problems.
 pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
     with_counted_rows(m, key, |v, rows| {
         let drawn: Vec<sets::SlotKind> = sets::editor_cells(v).iter().map(|c| c.kind).collect();
@@ -1508,12 +1570,9 @@ pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
 }
 
 /// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
-/// per `problems()` build, set key and hidden kinds, as `cached_tab_counts`. The set views it reads live in the same
-/// cache cell, which is emptied when they change. The empty key has no reasons (`with_counted_rows`).
+/// per `problems()` build, a set's scope key (`scope_key`: its key, or a key-less set's id) and hidden kinds, as
+/// `cached_tab_counts`. The set views it reads live in the same cache cell, which is emptied when they change.
 pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
-    if key.is_empty() {
-        return Arc::default();
-    }
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
     let hidden = m.hidden_kinds();
@@ -1533,8 +1592,9 @@ pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
     r
 }
 
-/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key`, slot reasons' rows included
-/// (what "+k more in Problems" shows again).
+/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key
+/// (`scope_key`: its key, or a key-less set's id)), slot reasons' rows included (what "+k more in Problems" shows
+/// again).
 pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
     let hidden = m.hidden_kinds();
     with_counted_rows(m, key, |_, rows| {
@@ -1547,27 +1607,23 @@ pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
 }
 
 /// `f` on the set `key`'s view and the rows that take its "ready" away, in list order; `None` for a set gone from
-/// the plan or ready (the cached answer the cards read, so a ready set never scans the rows).
-/// `None` for the empty key too: a created set with no files yet, which `set_ready_in` calls not ready. Every such set
-/// shares that key, so it names no one set's rows; its status line says it has no files (final review Minor 2).
+/// the plan or ready (the cached answer the cards read, so a ready set never scans the rows). `key` is a set's scope
+/// key (`scope_key`). `None` for a name no set has (the empty string among them), or a ready set.
 fn with_counted_rows<T>(
     m: &AppModel,
     key: &str,
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
-    if key.is_empty() {
-        return None;
-    }
     let views = sets::views(m);
-    let v = views.iter().find(|v| v.key == key)?;
+    let v = view_of(&views, key)?;
     if set_ready_in(&flagged(m), v) {
         return None;
     }
-    let members: HashSet<String> = v.members.iter().cloned().collect();
+    let s = Scope::of(v);
     let all = problems(m);
     let rows = all
         .iter()
-        .filter(|p| counts_as_ready_problem(p) && in_set(p, key, &members))
+        .filter(|p| counts_as_ready_problem(p) && in_set(p, &s))
         .collect();
     Some(f(v, rows))
 }

@@ -3971,14 +3971,15 @@ fn a_set_with_only_notes_reads_ready() {
 #[test]
 fn the_pills_and_the_card_say_what_ready_means() {
     use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::flagged;
     use sdc_gui::ui::sets_column::{pill_hover, NOT_READY_MEANS, READY_MEANS};
     use sdc_gui::ui::status::Status;
     let (_d, m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
     let v = rock01(&m);
-    assert!(pill_hover(&m, &v, Status::Warning).contains(NOT_READY_MEANS));
-    assert!(pill_hover(&m, &v, Status::Ready).contains(READY_MEANS));
-    assert!(!pill_hover(&m, &v, Status::Blocks).contains(READY_MEANS));
-    assert!(!pill_hover(&m, &v, Status::Blocks).contains(NOT_READY_MEANS));
+    assert!(pill_hover(&m, &flagged(&m), &v, Status::Warning).contains(NOT_READY_MEANS));
+    assert!(pill_hover(&m, &flagged(&m), &v, Status::Ready).contains(READY_MEANS));
+    assert!(!pill_hover(&m, &flagged(&m), &v, Status::Blocks).contains(READY_MEANS));
+    assert!(!pill_hover(&m, &flagged(&m), &v, Status::Blocks).contains(NOT_READY_MEANS));
     let mut h = harness(m);
     tooltips_now(&h);
     h.run();
@@ -4405,6 +4406,7 @@ fn a_long_code_less_reason_keeps_its_whole_sentence_in_its_name_and_hover() {
 /// its hover says why instead of claiming a row.
 #[test]
 fn a_set_with_no_files_yet_says_so_on_its_card() {
+    use sdc_gui::model::bottom::flagged;
     use sdc_gui::ui::sets_column::{pill_hover, NOT_READY_MEANS, NO_FILES_YET};
     use sdc_gui::ui::status::Status;
     let d = tempfile::tempdir().unwrap();
@@ -4420,21 +4422,17 @@ fn a_set_with_no_files_yet_says_so_on_its_card() {
         "precondition: {v:?}"
     );
     assert!(!sdc_gui::model::bottom::set_ready(&m, &v), "amber");
-    let hover = pill_hover(&m, &v, Status::Warning);
+    let hover = pill_hover(&m, &flagged(&m), &v, Status::Warning);
     assert!(hover.contains(NO_FILES_YET), "{hover}");
     assert!(!hover.contains(NOT_READY_MEANS), "{hover}");
     assert_eq!(NO_FILES_YET, "Not ready: this set has no files yet.");
     let ready = rock01(&m);
-    assert!(pill_hover(&m, &ready, Status::Warning).contains(NOT_READY_MEANS));
+    assert!(pill_hover(&m, &flagged(&m), &ready, Status::Warning).contains(NOT_READY_MEANS));
 }
 
-/// Final review Minor 2: a key-less set opens in the editor through its missing entry's Go to set (the row carries
-/// the empty key). Its status line agrees with its card, and no other key-less set's rows are its reasons.
-#[test]
-fn a_set_with_no_files_yet_says_so_on_its_status_line() {
-    use sdc_gui::model::bottom::{problems, set_reasons, At};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened(d.path());
+/// Two sets with no engine key, each with one entry that matches no file (`.txt` is no texture).
+fn key_less_sets(dir: &std::path::Path) -> AppModel {
+    let mut m = pbr_opened(dir);
     let root = m.root.clone().unwrap();
     for (id, file) in [
         ("landscape/empty", "landscape/one.txt"),
@@ -4447,49 +4445,132 @@ fn a_set_with_no_files_yet_says_so_on_its_status_line() {
         });
     }
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    for id in ["landscape/empty", "landscape/other"] {
+        let v = sdc_gui::model::sets::set_views(&m)
+            .into_iter()
+            .find(|v| v.id == id)
+            .expect("the created set has a card");
+        assert!(
+            v.key.is_empty() && !v.missing.is_empty(),
+            "precondition: {v:?}"
+        );
+    }
+    m
+}
+
+/// B3-16, B3-17 (Note JP5; F6 N1): a key-less set is named by its id. Each of two key-less sets lists and reasons
+/// its own missing entry and not the other's, through the model, for both sets; the empty string names no set. The
+/// editor opens the first key-less set for the empty key (selection by key is Plan 3b's, F2): its status line reads
+/// "Not ready:" with its own reason, not "no files yet".
+#[test]
+fn a_key_less_set_lists_and_reasons_its_own_rows_only() {
+    use sdc_gui::model::bottom::{filtered, scope_key, set_reasons, At, ProblemsFilter};
+    use sdc_gui::ui::sets_column::NO_FILES_YET;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    for (id, mine, theirs) in [
+        ("landscape/empty", "one.txt", "two.txt"),
+        ("landscape/other", "two.txt", "one.txt"),
+    ] {
+        let r = set_reasons(&m, id);
+        assert_eq!(r.len(), 1, "{id}: {r:?}");
+        assert!(
+            r[0].text.contains(mine) && !r[0].text.contains(theirs),
+            "{id}: {r:?}"
+        );
+        for f in [
+            ProblemsFilter::Set(id.into()),
+            ProblemsFilter::SetNotes(id.into()),
+        ] {
+            let rows = filtered(&m, Some(&f));
+            let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+            let want = usize::from(matches!(f, ProblemsFilter::Set(_)));
+            assert_eq!(rows.len(), want, "{f:?}: {texts:?}");
+            assert!(
+                rows.iter().all(|p| p.text.contains(mine)),
+                "{f:?}: {texts:?}"
+            );
+            assert!(rows.iter().all(|p| matches!(
+                &p.at,
+                At::Set { key, id: i } if key.is_empty() && i == id
+            )));
+        }
+    }
+    assert!(
+        set_reasons(&m, "").is_empty(),
+        "the empty string names no set"
+    );
+    assert!(filtered(&m, Some(&ProblemsFilter::Set(String::new()))).is_empty());
     let views = sdc_gui::model::sets::set_views(&m);
-    let v = views
-        .iter()
+    for v in views.iter().filter(|v| v.key.is_empty()) {
+        assert_eq!(scope_key(v), v.id, "a key-less set is named by its id");
+    }
+    let first = views.iter().find(|v| v.key.is_empty()).unwrap().id.clone();
+    let (mine, theirs) = if first == "landscape/empty" {
+        ("one.txt", "two.txt")
+    } else {
+        ("two.txt", "one.txt")
+    };
+    m.go_to_set("", None);
+    let mut h = harness(m);
+    h.run();
+    assert!(h.query_by_label(NO_FILES_YET).is_none(), "it has a row");
+    let reasons: Vec<String> = h
+        .query_all_by_label_contains("— go to the fix")
+        .filter_map(|n| n.accesskit_node().label())
+        .collect();
+    assert_eq!(reasons.len(), 1, "{reasons:?}");
+    assert!(
+        reasons[0].contains(mine) && !reasons[0].contains(theirs),
+        "{reasons:?}"
+    );
+}
+
+/// B3-17 (Note JP5): a key-less set with a counted row is not ready like any set: its card's hover says what Ready
+/// means, not "no files yet".
+#[test]
+fn a_key_less_set_with_rows_reads_not_ready_on_its_card() {
+    use sdc_gui::model::bottom::{flagged, no_files_yet, set_ready};
+    use sdc_gui::ui::sets_column::{pill_hover, NOT_READY_MEANS, NO_FILES_YET};
+    use sdc_gui::ui::status::Status;
+    let d = tempfile::tempdir().unwrap();
+    let m = key_less_sets(d.path());
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "landscape/other")
+        .unwrap();
+    assert!(!set_ready(&m, &v), "amber");
+    assert!(!no_files_yet(&flagged(&m), &v));
+    let hover = pill_hover(&m, &flagged(&m), &v, Status::Warning);
+    assert!(hover.contains(NOT_READY_MEANS), "{hover}");
+    assert!(!hover.contains(NO_FILES_YET), "{hover}");
+}
+
+/// B3-17 (Note JP5): a created set with no entry has no row, so its status line still says it has no files yet,
+/// with no reason buttons, as its card does (`a_set_with_no_files_yet_says_so_on_its_card`).
+#[test]
+fn a_set_with_no_entry_says_no_files_yet_on_its_status_line() {
+    use sdc_gui::model::bottom::{flagged, no_files_yet, set_reasons};
+    use sdc_gui::ui::sets_column::NO_FILES_YET;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("landscape/empty"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
         .find(|v| v.id == "landscape/empty")
         .expect("the created set has a card");
     assert!(
-        v.key.is_empty() && !v.missing.is_empty(),
+        v.key.is_empty() && v.members.is_empty() && v.missing.is_empty(),
         "precondition: {v:?}"
     );
-    let all = problems(&m);
-    let row = all
-        .iter()
-        .find(|p| matches!(&p.at, At::Set { id, .. } if id == "landscape/empty"))
-        .expect("its missing entry's row");
-    let At::Set { key, .. } = &row.at else {
-        unreachable!()
-    };
-    assert!(
-        key.is_empty(),
-        "Go to set on this row selects the empty key"
-    );
-    assert!(
-        set_reasons(&m, "").is_empty(),
-        "no reason, least of all another key-less set's row"
-    );
-    let set = sdc_gui::model::bottom::ProblemsFilter::Set(String::new());
-    assert!(
-        sdc_gui::model::bottom::filtered(&m, Some(&set)).is_empty(),
-        "the empty key names no set's rows"
-    );
-    let key = key.clone();
-    m.go_to_set(&key, None);
+    assert!(no_files_yet(&flagged(&m), &v));
+    assert!(set_reasons(&m, "landscape/empty").is_empty());
+    m.go_to_set("", None);
     let mut h = harness(m);
     h.run();
-    h.get_by_label(sdc_gui::ui::sets_column::NO_FILES_YET);
-    assert!(h
-        .query_by_label("Ready: nothing in this set needs you.")
-        .is_none());
-    assert_eq!(
-        h.query_all_by_label_contains("— go to the fix").count(),
-        0,
-        "no reason buttons"
-    );
+    h.get_by_label(NO_FILES_YET);
+    assert_eq!(h.query_all_by_label_contains("— go to the fix").count(), 0);
 }
 
 #[test]

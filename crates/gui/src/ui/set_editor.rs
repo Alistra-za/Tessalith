@@ -8,7 +8,8 @@ use super::status::{dot, Status};
 use super::thumbs::ThumbCache;
 use crate::look::Combo036 as _;
 use crate::model::bottom::{
-    cached_set_reasons, hidden_reason_kinds, is_hidden, tile_ready, ProblemsFilter, ReasonGo,
+    cached_set_reasons, flagged, hidden_reason_kinds, is_hidden, no_files_yet, scope_key,
+    tile_ready, ProblemsFilter, ReasonGo,
 };
 use crate::model::bulk::MenuAction;
 use crate::model::fields::{
@@ -110,13 +111,14 @@ fn slot_row_id(set_id: &str, slot: SlotKind) -> egui::Id {
 
 /// Review E4: the editor's first line, **Ready** or "Not ready:" and up to three reasons, each a button to its fix.
 fn status_line(ui: &mut egui::Ui, model: &AppModel, v: &SetView) -> Option<Act> {
-    let reasons = cached_set_reasons(model, &v.key);
+    let reasons = cached_set_reasons(model, scope_key(v));
     // A set the export blocks on has the card's red dot (`sets_column`), whatever its words say.
     let blocked = export_blocks(model).iter().any(|i| i.set_id == v.id);
     let mut act = None;
     ui.horizontal_wrapped(|ui| {
-        // Final review Minor 2: a created set with no files yet has no engine key and no rows; amber, as its card.
-        if v.key.is_empty() {
+        // Note JP5 (B3-17): a set with no key and no row of its own; amber, as its card. A key-less set with a row
+        // reads its reasons below.
+        if no_files_yet(&flagged(model), v) {
             dot(
                 ui,
                 if blocked {
@@ -222,16 +224,16 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
             if let Some(code) = p.code.filter(|_| is_hidden(&p, &model.hidden_kinds())) {
                 model.set_kind_hidden(code, false);
             }
-            model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));
+            model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
         Act::Problems => {
             // The list shows at least the rows the link counts, a slot reason's row too: their hidden kinds show
             // again, as a reason's does.
-            for code in hidden_reason_kinds(model, &v.key) {
+            for code in hidden_reason_kinds(model, scope_key(v)) {
                 model.set_kind_hidden(code, false);
             }
-            model.open_problems(Some(ProblemsFilter::Set(v.key.clone())));
+            model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));
         }
         // `status_line` makes no other act.
         _ => {}

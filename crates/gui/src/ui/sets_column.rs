@@ -7,7 +7,7 @@ use super::columns::{
 use super::slot_commands::SlotCmdState;
 use super::status::Status;
 use super::thumbs::ThumbCache;
-use crate::model::bottom::{check_listed, counts_for, At};
+use crate::model::bottom::{check_listed, counts_for, no_files_yet, scope_key, At, Flagged};
 use crate::model::bulk::MenuAction;
 use crate::model::helpers::{docked, fill_text, Docked};
 use crate::model::items::{helper_tag_text, helper_target_files};
@@ -362,18 +362,19 @@ fn tag_text(helper_fills: Option<&[engine::helper::FillTarget]>, tail: &str) -> 
 pub const READY_MEANS: &str = "Ready: no problem row in the set or its textures. Notes, rows you marked as intended and checks don't count.";
 /// Review E4 (controller ruling 10): what Not ready means, on the Not ready pill and an amber card's status hover.
 pub const NOT_READY_MEANS: &str = "Not ready: a problem row in the set or one of its textures. Notes, rows you marked as intended and checks don't count.";
-/// An amber card's status hover when the set has no files yet (no engine key, so no row; `bottom::set_ready_in`).
+/// An amber card's status hover and the set editor's status line for a set with no engine key and no counted row
+/// (`bottom::no_files_yet`, Note JP5).
 pub const NO_FILES_YET: &str = "Not ready: this set has no files yet.";
 
 /// The pill's hover (R15): the long badge, then what the status `s` means (review E4) or blocked, then one line each
-/// for owns, missing entries and recipes.
-pub fn pill_hover(model: &AppModel, v: &SetView, s: Status) -> String {
+/// for owns, missing entries and recipes. `flagged` is the frame's one fetch (`status_pill`).
+pub fn pill_hover(model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) -> String {
     let mut lines = vec![badge_text(model, v).to_string()];
     match s {
         Status::Blocks => lines.push("blocked".to_string()),
         Status::Ready => lines.push(READY_MEANS.to_string()),
-        // Final review Minor 2: a created set with no files yet has no engine key and so no row to point at.
-        Status::Warning if v.key.is_empty() => lines.push(NO_FILES_YET.to_string()),
+        // Note JP5 (B3-17): a set with no key and no row of its own has nothing to point at.
+        Status::Warning if no_files_yet(flagged, v) => lines.push(NO_FILES_YET.to_string()),
         Status::Warning => lines.push(NOT_READY_MEANS.to_string()),
         _ => {}
     }
@@ -406,7 +407,7 @@ fn warn_button(ui: &mut egui::Ui, v: &SetView, rows: &[(&str, &Warning)], acts: 
         ))
         .on_hover_text(warning_tooltip(rows));
     if warn.clicked() {
-        acts.push(Act::Problems(v.key.clone()));
+        acts.push(Act::Problems(scope_key(v).to_string()));
     }
 }
 
@@ -530,13 +531,13 @@ fn check_badge(
         ui.label(lines.join("\n"));
     });
     if r.clicked() {
-        acts.push(Act::Problems(v.key.clone()));
+        acts.push(Act::Problems(scope_key(v).to_string()));
     }
 }
 
 /// The status pill: the status dot and the short kind (cut on a narrow card), in a rounded frame, the long text on
-/// hover. The caller works out `s` from one `flagged` fetch per frame (Task 6).
-fn status_pill(ui: &mut egui::Ui, model: &AppModel, v: &SetView, s: Status) {
+/// hover. The caller works out `s` from one `flagged` fetch per frame (Task 6) and passes that `flagged` in.
+fn status_pill(ui: &mut egui::Ui, model: &AppModel, flagged: &Flagged, v: &SetView, s: Status) {
     use super::status::dot;
     egui::Frame::new()
         .corner_radius(8.0)
@@ -559,7 +560,7 @@ fn status_pill(ui: &mut egui::Ui, model: &AppModel, v: &SetView, s: Status) {
             }
         })
         .response
-        .on_hover_text(pill_hover(model, v, s));
+        .on_hover_text(pill_hover(model, flagged, v, s));
 }
 
 /// A member's thumbnail on the card with today's behaviours: click selects, double-click expands, a slot member has
@@ -1718,6 +1719,7 @@ pub fn draw(
                     let out = pill(
                         ui,
                         model,
+                        &flagged,
                         thumbs,
                         v,
                         (index, views.len()),
@@ -2192,6 +2194,7 @@ fn insertion_y(from: usize, to: usize, r: egui::Rect) -> Option<f32> {
 fn pill(
     ui: &mut egui::Ui,
     model: &AppModel,
+    flagged: &Flagged,
     thumbs: &mut ThumbCache,
     v: &SetView,
     (index, total): (usize, usize),
@@ -2378,7 +2381,7 @@ fn pill(
                                     // Right to left: reads pill, ⚠, ⓘ, as the narrow row does (review M1).
                                     check_badge(ui, v, &checks, &marked_checks, acts);
                                     warn_button(ui, v, &rows, acts);
-                                    status_pill(ui, model, v, status);
+                                    status_pill(ui, model, flagged, v, status);
                                     ui.with_layout(
                                         egui::Layout::left_to_right(egui::Align::Center),
                                         name,
@@ -2402,7 +2405,7 @@ fn pill(
                     }
                     if !wide {
                         ui.horizontal_wrapped(|ui| {
-                            status_pill(ui, model, v, status);
+                            status_pill(ui, model, flagged, v, status);
                             warn_button(ui, v, &rows, acts);
                             check_badge(ui, v, &checks, &marked_checks, acts);
                         });

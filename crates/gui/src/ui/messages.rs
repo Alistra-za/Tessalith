@@ -41,8 +41,10 @@ pub fn draw_at(ctx: &egui::Context, model: &mut AppModel, now: Instant) {
     let mut clicked: Option<(u64, ToastAction)> = None;
     if !toasts.is_empty() {
         // shortcut: the anchored Area places itself from last frame's size, so a new toast's first visible frame
-        // draws the stack one toast low; `request_discard` would fix it but can handle a click twice. Upgrade if
-        // egui sizes anchored Areas in the same pass.
+        // draws the stack one toast low. `request_discard` would fix it at the cost of a second pass of the whole UI
+        // on that frame (egui 0.37 hands the input events to the first pass only, so a click is still handled once),
+        // and egui allows one discard a frame (`max_passes` 2), which a Problems row's first measure may already
+        // take (Note JO10). Upgrade if egui sizes anchored Areas in the same pass.
         // Note FC8 (supersedes CA10's anchor): over an open bottom panel they sit above it, off Review's Export.
         let lift =
             super::bottom::open_top(ctx).map_or(0.0, |top| ctx.content_rect().bottom() - top);

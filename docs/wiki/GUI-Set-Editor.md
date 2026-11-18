@@ -15,7 +15,7 @@ The editor's first line answers it, and stays in sight above the slot rows while
 - "Ready: nothing in this set needs you." with a green dot.
 - "Not ready:" with an amber dot, up to three reasons as buttons, then "+k more in Problems" for the rest.
 - A red dot instead means the set blocks the export, as on its card. <!-- D:JO7 -->
-- "Not ready: this set has no files yet." with an amber dot and no reason buttons, for a set you created that has no file. <!-- D:JO7 -->
+- "Not ready: this set has no files yet." with no reason buttons, for a set you created that has nothing in it yet. A set whose entries match no file lists what is wrong instead, such as "No file matches …". <!-- D:JO7 -->
 
 Click a reason to go to its fix:
 

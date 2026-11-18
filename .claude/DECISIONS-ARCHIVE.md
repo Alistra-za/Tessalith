@@ -1020,3 +1020,8 @@ ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
   - **Gates.** Each Remove waits on `fix_off()`, as every Problems row's fix does. Remove all is on when `project.target().is_none_or(|t| t == model.target)`, no full plan is pending and no partial plan is out, and its hover lists what it deletes. One entry is one step "Remove entry"; Remove all is one step "Remove {n} entries". While no entry is left in `[files]` (a read-only `sdc.toml`'s empty document), `Entries ▾` is off too, with Remove all's reason on hover.
   - **Code.** The Kinds ▾ name of the row is "Unmatched [files] entries" (FB8: no raw codes). `ProjectDoc::target()` reads the raw `target` key without a full parse, since the row asks every frame. `target_name` moved to `model/code_text.rs`.
   - It replaces the drawer's last section. Amends nothing: no live ruling described that section (FM16's drawer wording is edited under JI7). Tests in `crates/gui/tests/problems_rows.rs` (`unmatched_entries_show_as_one_info_row` and the tests after it).
+
+## Note JO — Problems and Notes, Mark as intended, readiness (review E, plan 3a; controller for the owner, 2026-11-16)
+
+ARCHIVED (wording before the edit; superseded in part by Note JP, 2026-11-17)
+  - **A set with no files yet** (a created set with an empty key) reads "Not ready: this set has no files yet." with the amber dot and no reason buttons, as its card's hover does (`sets_column::NO_FILES_YET`); no row of another key-less set counts for it (R3).

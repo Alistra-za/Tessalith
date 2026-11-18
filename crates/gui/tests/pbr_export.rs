@@ -464,6 +464,7 @@ fn the_written_note_counts_the_entries() {
     let p = pgp_json_path(&m);
     let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&p).unwrap()).unwrap();
     let n = v["entries"].as_array().unwrap().len();
+    assert_eq!(n, 1, "precondition: the fixture writes one entry");
     let want = format!(
         "PGPatcher JSON written: {} ({n} {})",
         p.display(),
