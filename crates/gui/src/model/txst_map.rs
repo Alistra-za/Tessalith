@@ -317,8 +317,9 @@ pub(super) fn fill_from_records(
 }
 
 /// Review E1: fills `linked` of every set written as a JSON entry (`exports_json`) from its non-empty `slotN` strings:
-/// each path is resolved to the set and file that write it, and the row it fills is that file's kind (a typed path's is
-/// `link_row_kind`). A source is found by the game path a link to it is written with (`game_path_in`, the Path… and
+/// each path is resolved to the set and file that write it, and the row it fills is that file's kind when the kind
+/// belongs to the slot (a typed path's, or another kind's, is `link_row_kind`). A source is found by the game path a
+/// link to it is written with (`game_path_in`, the Path… and
 /// From another set menus' own function), so the opened folder does not matter; the first set in display order that
 /// writes a path keeps it. Then each `SHADER-MISSING-MAP` warning of a slot that holds a link is dropped: the JSON
 /// names a file for it. Runs after `finish_view` and the short names; the arguments are `fill_from_records`'.
@@ -375,7 +376,11 @@ pub(super) fn link_slots(
                         Some((f, s, i, k)) => (Some(f), s, Some(i), k),
                         None => (None, None, None, None),
                     };
-                    let row = kind.or_else(|| link_row_kind(v, n));
+                    // A link shows on the row of the game slot it sits on: a typed path to another kind's output
+                    // is that slot's row, not the source kind's.
+                    let row = kind
+                        .filter(|k| k.game_slot() == Some(n))
+                        .or_else(|| link_row_kind(v, n));
                     Some((
                         n,
                         SlotLink {

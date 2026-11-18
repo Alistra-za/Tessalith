@@ -864,7 +864,10 @@ pub fn view_row(v: &SetView) -> Vec<SlotCell> {
     if v.linked.is_empty() {
         return cells;
     }
-    let usable = v.shader.as_ref().map(|p| usable_slots(p.shader));
+    // The shader's usable kinds are built once, and only when a link replaces a cell.
+    let mut usable: Option<Option<BTreeSet<SlotKind>>> = None;
+    // shortcut: a link on a game slot with no cell (a typed path with no shader pick and no own file there) shows on
+    // no row; only the Slot commands dialog lists it. Upgrade when the editor should draw an extra row for it.
     for c in &mut cells {
         let Some(k) = c
             .kind
@@ -878,7 +881,10 @@ pub fn view_row(v: &SetView) -> Vec<SlotCell> {
         *c = SlotCell {
             kind: k,
             fill: v.slots.get(&k).cloned().unwrap_or(SlotFill::Empty),
-            usable: usable.as_ref().is_none_or(|u| u.contains(&k)),
+            usable: usable
+                .get_or_insert_with(|| v.shader.as_ref().map(|p| usable_slots(p.shader)))
+                .as_ref()
+                .is_none_or(|u| u.contains(&k)),
             clash: None,
         };
     }

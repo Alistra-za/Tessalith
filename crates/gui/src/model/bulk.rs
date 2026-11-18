@@ -1477,6 +1477,21 @@ impl AppModel {
         v
     }
 
+    /// Why `sdc-project.toml` takes no slot edit, when it does not.
+    fn slot_read_only_reason(&self) -> Option<String> {
+        self.sets_doc
+            .as_ref()
+            .and_then(|d| d.error())
+            .map(|e| format!("sdc-project.toml is read-only: {e}"))
+    }
+
+    /// Why a slot command on game slot `n` of `v` would be refused (read-only `sdc-project.toml`, a pinned slot), or
+    /// `None`. The slot menu disables its entries with it, and so do the row's **Unlink** and **Use this file**.
+    pub fn slot_command_off(&self, v: &super::sets::SetView, n: u8) -> Option<String> {
+        self.slot_read_only_reason()
+            .or_else(|| v.locks.contains(&n).then(|| SLOT_LOCKED.to_string()))
+    }
+
     /// F3a Task 8: the menu of slot card `kind` of set `set` (an id): the Slot commands window's commands, From
     /// another set (each other set's member of that kind that writes an output), then Lock or Unlock. A locked slot
     /// offers only Unlock.
@@ -1491,14 +1506,8 @@ impl AppModel {
         };
         let id = v.id.clone();
         let locked = v.locks.contains(&n);
-        let read_only = self
-            .sets_doc
-            .as_ref()
-            .and_then(|d| d.error())
-            .map(|e| format!("sdc-project.toml is read-only: {e}"));
-        let off = read_only
-            .clone()
-            .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
+        let read_only = self.slot_read_only_reason();
+        let off = self.slot_command_off(v, n);
         // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock. An empty
         // one takes a file from the set's folder or borrows another set's (Note JD), a borrowed one offers Clear (no
         // slot command clears it); then the source file and sdc's pin.
@@ -1754,7 +1763,8 @@ impl AppModel {
     }
 
     /// Review E1: the Messages line of a slot picked from another set, written for the menu and the Slot commands
-    /// dialog alike. A pick the view does not resolve to a set (it moved on in the same step) logs nothing.
+    /// dialog alike. Nothing is logged when `link_slots` did not resolve the new link to a set (no source, or no
+    /// view): the line names the set the file comes from.
     fn log_slot_link(&mut self, set: &str, n: u8) {
         let text = super::sets::views(self)
             .iter()

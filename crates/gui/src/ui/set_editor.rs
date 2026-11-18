@@ -716,7 +716,7 @@ fn row(
         title.to_string()
     };
     let text = egui::RichText::new(text);
-    let t = ui.label(if item.is_some() {
+    let t = ui.label(if item.is_some() || matches!(shown, SlotShown::Linked(_)) {
         text.strong()
     } else {
         text.weak()
@@ -816,7 +816,8 @@ fn row(
                     ui.add(egui::Label::new(egui::RichText::new(s).small().weak()).truncate());
                 }
                 if matches!(shown, SlotShown::Cleared { .. }) {
-                    cleared_cell(ui, v, slot, &i.name, acts);
+                    let off = slot.game_slot().and_then(|n| model.slot_command_off(v, n));
+                    cleared_cell(ui, v, slot, &i.name, off.as_deref(), acts);
                 }
             }
             // Note HG: a slot the set's record names that no set in the project writes counts as supplied.
@@ -851,11 +852,19 @@ fn row(
         .vertical(|ui| {
             if let (SlotShown::Linked(_), Some(n)) = (&shown, slot.game_slot()) {
                 // Review E1: the link is what the slot gives; Unlink removes it (`slotN` back to the set's own).
-                let name = format!("Unlink {}", v.slot_label(slot, ""));
+                // Refused like the slot menu's entries: a read-only `sdc-project.toml`, a pinned slot.
+                let off = model.slot_command_off(v, n);
                 let r = ui
-                    .button("Unlink")
-                    .on_hover_text("Remove the link. The slot goes back to what this set gives.");
-                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name.clone()));
+                    .add_enabled(off.is_none(), egui::Button::new("Unlink"))
+                    .on_hover_text("Remove the link. The slot goes back to what this set gives.")
+                    .on_disabled_hover_text(off.as_deref().unwrap_or_default());
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Button,
+                        r.enabled(),
+                        format!("Unlink {}", v.slot_label(slot, "")),
+                    )
+                });
                 if r.clicked() {
                     acts.push(Act::Slot(MenuAction::Slot {
                         set: v.id.clone(),
@@ -1055,30 +1064,47 @@ fn linked_cell(
     acts: &mut Vec<Act>,
 ) {
     let file = link.path.rsplit('\\').next().unwrap_or(&link.path);
-    let hover = format!("PGPatcher reads {} for this slot.", link.path);
-    ui.horizontal(|ui| match (&link.from, &link.from_short) {
-        (Some(from), Some(short)) => {
-            ui.add(egui::Label::new(egui::RichText::new(file).small()).truncate())
-                .on_hover_text(&hover);
-            ui.label(egui::RichText::new(" · ").small().weak());
-            let text = format!("from set {short}");
-            let r = ui
-                .add(egui::Link::new(egui::RichText::new(&text).small()))
-                .on_hover_text("Open the set this file comes from.");
-            let name = format!("Open set {short}");
-            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, name.clone()));
-            if r.clicked() {
-                acts.push(Act::OpenSet(from.clone()));
+    let hover = |ui: &mut egui::Ui| {
+        ui.label(format!("PGPatcher reads {} for this slot.", link.path));
+    };
+    // The set link keeps its size on the right; the file name truncates on the left and keeps its text on hover.
+    egui::Sides::new().shrink_left().truncate().show(
+        ui,
+        |ui| match (&link.from, &link.from_short) {
+            (Some(_), Some(_)) => {
+                ui.add(egui::Label::new(egui::RichText::new(file).small()).truncate())
+                    .on_hover_ui(hover);
             }
-        }
-        _ => {
-            ui.add(
-                egui::Label::new(egui::RichText::new(format!("{file} · set by path")).small())
-                    .truncate(),
-            )
-            .on_hover_text(&hover);
-        }
-    });
+            _ => {
+                ui.add(
+                    egui::Label::new(egui::RichText::new(format!("{file} · set by path")).small())
+                        .truncate(),
+                )
+                .on_hover_ui(hover);
+            }
+        },
+        |ui| {
+            if let (Some(from), Some(short)) = (&link.from, &link.from_short) {
+                ui.label(egui::RichText::new(" · ").small().weak());
+                let r = ui
+                    .add(egui::Link::new(
+                        egui::RichText::new(format!("from set {short}")).small(),
+                    ))
+                    .on_hover_text("Open the set this file comes from.");
+                // Two slots linked from one set name the slot, so their names differ (egui-ui-rules 8.4).
+                r.widget_info(|| {
+                    egui::WidgetInfo::labeled(
+                        egui::Role::Link,
+                        true,
+                        format!("Open set {short} ({})", v.slot_label(kind, "")),
+                    )
+                });
+                if r.clicked() {
+                    acts.push(Act::OpenSet(from.clone()));
+                }
+            }
+        },
+    );
     // An own `_f` under a link to a `_cnr` goes nowhere: the JSON's slot 7 is the link.
     let n = kind.game_slot().unwrap_or_default();
     for other in v
@@ -1099,16 +1125,25 @@ fn linked_cell(
                 )
                 .truncate(),
             )
-            .on_hover_text(format!(
-                "PGPatcher reads the linked file for slot {n}, so this set's {own} goes nowhere. Unlink to use it."
-            ));
+            .on_hover_ui(|ui| {
+                ui.label(format!(
+                    "PGPatcher reads the linked file for slot {n}, so this set's {own} goes nowhere. Unlink to use it."
+                ));
+            });
         }
     }
 }
 
 /// Review E1: under the own file's name, a slot the set cleared (`slotN = ""`): the file is converted but the JSON
-/// leaves it out. **Use this file** gives the slot back (`FromSet`).
-fn cleared_cell(ui: &mut egui::Ui, v: &SetView, kind: SlotKind, name: &str, acts: &mut Vec<Act>) {
+/// leaves it out. **Use this file** gives the slot back (`FromSet`); `off` is the slot menu's reason for refusing it.
+fn cleared_cell(
+    ui: &mut egui::Ui,
+    v: &SetView,
+    kind: SlotKind,
+    name: &str,
+    off: Option<&str>,
+    acts: &mut Vec<Act>,
+) {
     ui.add(
         egui::Label::new(
             egui::RichText::new("Left out of the JSON: you cleared this slot.")
@@ -1118,9 +1153,16 @@ fn cleared_cell(ui: &mut egui::Ui, v: &SetView, kind: SlotKind, name: &str, acts
         .truncate(),
     );
     let Some(n) = kind.game_slot() else { return };
-    let r = ui.small_button("Use this file");
-    let label = format!("Use {name} for {}", v.slot_label(kind, ""));
-    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone()));
+    let r = ui
+        .add_enabled(off.is_none(), egui::Button::new("Use this file").small())
+        .on_disabled_hover_text(off.unwrap_or_default());
+    r.widget_info(|| {
+        egui::WidgetInfo::labeled(
+            egui::Role::Button,
+            r.enabled(),
+            format!("Use {name} for {}", v.slot_label(kind, "")),
+        )
+    });
     if r.clicked() {
         acts.push(Act::Slot(MenuAction::Slot {
             set: v.id.clone(),

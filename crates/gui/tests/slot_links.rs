@@ -17,11 +17,15 @@ const WALL_ALBEDO: &str = "arch/wall.png";
 const ROW_REACH: f32 = 28.0;
 
 fn harness(m: AppModel) -> Harness<'static, AppModel> {
+    harness_at(m, 1400.0)
+}
+
+fn harness_at(m: AppModel, width: f32) -> Harness<'static, AppModel> {
     Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(egui::vec2(1400.0, 1200.0))
+        .with_size(egui::vec2(width, 1200.0))
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m)
 }
 
@@ -263,7 +267,7 @@ fn picking_from_another_set_fills_the_diffuse_row_and_one_undo_empties_it() {
             .any(|n| (n.rect().center().y - diffuse.center().y).abs() < ROW_REACH)
     };
     assert!(on_row(&h, &file), "the Diffuse row's text contains {file}");
-    assert!(h.query_by_label("Open set arch/wall").is_some());
+    assert!(h.query_by_label("Open set arch/wall (Diffuse)").is_some());
     assert!(h.query_by_label("Unlink Diffuse").is_some());
     // Plan 3a's status line drops the Diffuse reason
     assert!(h.query_by_label_contains("no Diffuse").is_none());
@@ -289,7 +293,7 @@ fn the_source_set_opens_from_the_row() {
     });
     select_set(&mut m, LEAF);
     let mut h = harness(m);
-    h.get_by_label("Open set arch/wall").click();
+    h.get_by_label("Open set arch/wall (Diffuse)").click();
     h.run();
     assert!(matches!(&h.state().selection, Selection::Set(k) if k.ends_with("arch/wall")));
 }
@@ -316,6 +320,10 @@ fn a_link_over_an_own_file_shows_the_link_and_unlink_restores_it() {
     };
     assert!(on_row(&h, "x_n.dds · set by path"));
     assert!(
+        h.query_by_label("Normal _n format").is_none(),
+        "a linked row has no format control: the file is the other set's"
+    );
+    assert!(
         !on_row(&h, "wall_n.png"),
         "the own file is not what the JSON carries"
     );
@@ -325,6 +333,10 @@ fn a_link_over_an_own_file_shows_the_link_and_unlink_restores_it() {
     assert!(
         on_row(&h, "wall_n.png"),
         "the own file is back on the Normal row"
+    );
+    assert!(
+        h.query_by_label("Normal _n format").is_some(),
+        "premise: the own file's row has the format control the linked row lacked"
     );
 }
 
@@ -417,6 +429,118 @@ fn a_clear_over_an_own_file_says_so() {
     assert!(h
         .query_by_label("Left out of the JSON: you cleared this slot.")
         .is_none());
+}
+
+/// Fix round 1 (I1 of the review): a link shows on the row of the slot it sits on, whatever kind the typed path's
+/// file is. Unlink then acts on that slot.
+#[test]
+fn a_path_to_another_kind_on_slot_1_is_the_diffuse_rows_link() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let normal = member_game_path(&m, "arch/wall_n.png").unwrap();
+    let file = normal.rsplit('\\').next().unwrap().to_string();
+    m.set_slot_command(LEAF, 1, SlotCommand::Path(normal))
+        .unwrap();
+    select_set(&mut m, LEAF);
+    let mut h = harness(m);
+    let (diffuse, normal_row) = (slot_rect(&h, "Diffuse"), slot_rect(&h, "Normal _n"));
+    let on = |h: &Harness<'static, AppModel>, row: egui::Rect, label: &str| {
+        h.query_all_by_label(label)
+            .any(|n| (n.rect().center().y - row.center().y).abs() < ROW_REACH)
+    };
+    assert!(on(&h, diffuse, &file), "the Diffuse row shows the file");
+    assert!(
+        h.query_by_label("Unlink Diffuse").is_some(),
+        "the Diffuse row offers Unlink"
+    );
+    assert!(
+        h.query_by_label("Unlink Normal _n").is_none(),
+        "the Normal row is not Linked"
+    );
+    assert!(!on(&h, normal_row, &file));
+    h.get_by_label("Unlink Diffuse").click();
+    h.run();
+    let v = views(h.state())
+        .iter()
+        .find(|v| v.id == LEAF)
+        .unwrap()
+        .clone();
+    assert!(
+        !v.linked.contains_key(&1),
+        "Unlink cleared slot 1: {:?}",
+        v.linked
+    );
+}
+
+/// Fix round 1 (I2): the "from set" link stays inside the File cell beside a long file name, left of Unlink.
+#[test]
+fn a_long_linked_file_name_keeps_the_set_link_inside_its_cell() {
+    let long = "lacquer_with_a_very_long_name_that_cannot_fit_in_the_file_cell_beside_the_link_to_its_set_and_the_unlink_button_cnr.png";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &[(long, [128, 128, 255], Subtype::CoatNormal)]);
+    m.run_menu(MenuAction::SlotLink {
+        set: LEAF.into(),
+        n: 7,
+        item: format!("arch/{long}"),
+    });
+    select_set(&mut m, LEAF);
+    const WIDTH: f32 = 1280.0;
+    let h = harness_at(m, WIDTH);
+    let unlink = h.get_by_label("Unlink Coat normal / Fuzz (slot 7)").rect();
+    let link = h
+        .query_all_by_label_contains("Open set")
+        .next()
+        .expect("the set link")
+        .rect();
+    assert!(
+        link.max.x <= unlink.min.x,
+        "the set link {link:?} ends left of Unlink {unlink:?}"
+    );
+    // The truncating file name gives way: the link ends inside the centre column, not past its edge.
+    let full = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    let edge = full.intersect(h.ctx.content_rect()).right();
+    assert!(
+        link.max.x <= edge,
+        "the set link {link:?} ends past the centre's edge {edge}"
+    );
+}
+
+/// Fix round 1 (I3): a pinned slot refuses a slot command, so Unlink and Use this file are disabled, as the menu is.
+#[test]
+fn unlink_and_use_this_file_are_disabled_on_a_pinned_slot() {
+    use egui_kittest::kittest::NodeT;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.run_menu(MenuAction::SlotLink {
+        set: LEAF.into(),
+        n: 1,
+        item: WALL_ALBEDO.into(),
+    });
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    for (set, n) in [(LEAF, 1), ("arch/wall", 2)] {
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLock {
+                set: set.into(),
+                n,
+                on: true
+            }),
+            None
+        );
+    }
+    select_set(&mut m, LEAF);
+    let h = harness(m);
+    assert!(h
+        .get_by_label("Unlink Diffuse")
+        .accesskit_node()
+        .is_disabled());
+    let mut m = h.into_state();
+    select_set(&mut m, "arch/wall");
+    let h = harness(m);
+    assert!(h
+        .get_by_label("Use wall_n.png for Normal _n")
+        .accesskit_node()
+        .is_disabled());
 }
 
 /// Fix round 1 (I1): a link is found by the game path `game_path_in` writes, whatever folder is opened. Opened at
