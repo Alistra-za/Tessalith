@@ -691,6 +691,39 @@ fn a_scoped_review_header_follows_a_nif_row_that_will_be_written() {
     );
 }
 
+/// Fix round 1, Minor 7 (ruling 3c-21): the header's accent reads the whole project's gate, as its label does. A clean
+/// scoped Review with a blocker elsewhere (here a parallax flag no height map backs, in the other set) leaves it
+/// without the accent.
+#[test]
+fn the_header_accent_reads_the_whole_projects_gate_under_a_scope() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_json_value(
+        "landscape/rock01",
+        "parallax",
+        Some(serde_json::json!(true)),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let k = key_of(&m, "landscape/leaf");
+    m.export_sets([k].into(), "Export set landscape/leaf".into());
+    assert!(m.review.is_some() && m.export_scope().is_some(), "guard");
+    assert!(
+        m.review_gate().is_ok(),
+        "guard: the scope alone is clean: {:?}",
+        m.review_gate()
+    );
+    m.close_review();
+    m.header_export_clicked();
+    assert!(
+        m.review_gate().is_err(),
+        "guard: the whole project has a blocker"
+    );
+    m.close_review();
+    let k = key_of(&m, "landscape/leaf");
+    m.export_sets([k].into(), "Export set landscape/leaf".into());
+    assert!(!m.header_accent(), "the whole project's gate is closed");
+}
 // Ruling 3c-17: the accent shows only when a click has something to write or review.
 #[test]
 fn the_header_has_no_accent_with_nothing_to_write() {
