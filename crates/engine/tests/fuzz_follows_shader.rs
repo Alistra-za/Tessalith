@@ -1578,9 +1578,63 @@ fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
     );
     let p = plan(&d);
     assert_eq!(job(&p, "iron_f.png").profile.subtype, Subtype::Height);
+    assert_eq!(out_name(job(&p, "iron_f.png")), "iron_f.dds");
     assert_eq!(
         unused_reason(&p, "iron_fuzz.png"),
         "iron_fuzz.png: iron_f.png (height) is written at the set's _f path; not converted"
+    );
+}
+
+/// F15 (Note JQ53), a pin: of two `_f` members, the one that writes the PBR fuzz texture is named even when the other
+/// comes first by path. The fuzz map's output is named `iron_fuzz_own.dds`, so a kept `iron_f.dds` is the set's `_f`
+/// (JQ53), and `iron_f.bmp`, typed height, sorts before it.
+#[test]
+fn the_f_that_writes_the_pbr_fuzz_texture_is_named_before_one_typed_away() {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.bmp",
+        ],
+        "[files.\"iron_f.bmp\"]\nsubtype = \"height\"\n",
+    );
+    std::fs::write(d.path().join("in/iron_f.dds"), b"DDS made by hand").unwrap();
+    let mut r = in_place(&d, OnExisting::IfChanged);
+    r.output_paths.insert(
+        engine::sets::OutputKey::File("iron_fuzz.png".into()),
+        "iron_fuzz_own.dds".into(),
+    );
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    assert_eq!(job(&p, "iron_f.bmp").profile.subtype, Subtype::Height);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.dds is the set's PBR fuzz texture (_f); not converted"
+    );
+}
+
+/// F15 (Note JQ53): an `_f` pair that collides (IN-DUPLICATE) has no job; the reason says it is not converted. (Both
+/// members of such a pair are skipped, so the rule above is only reachable through a kept DDS.)
+#[test]
+fn an_f_that_is_a_duplicate_is_named_as_not_converted() {
+    let d = fixture(
+        &[
+            "iron.png",
+            "iron_roughness.png",
+            "iron_fuzz.png",
+            "iron_f.png",
+            "iron_f.tga",
+        ],
+        "",
+    );
+    let p = plan(&d);
+    assert_eq!(
+        unused_reason(&p, "iron_fuzz.png"),
+        "iron_fuzz.png: iron_f.png, the set's _f, is not converted; not converted"
     );
 }
 
