@@ -5544,8 +5544,14 @@ fn the_destination_line_shows_the_real_path() {
     let full = writes_line(&d);
     let mut h = view(m);
     h.run_steps(3);
-    h.get_by_label_contains(&full);
+    let name = h.get_by_label_contains(&full).value();
+    assert_eq!(name, Some(format!("{full}\n{WRITES_NOTE}")));
+    assert!(h.query_by_label(WRITES_NOTE).is_none());
 }
+
+/// The sentence the Writes line's accessible name and hover carry after the line.
+const WRITES_NOTE: &str =
+    "The source file is never changed. Change the folder with Export to ▾ in the header.";
 
 /// The text of the `Shape::Text` galleys whose centre lies inside `cell`, as painted last frame (a label's node
 /// rect is a little taller and narrower than its glyph bounds).
@@ -5620,11 +5626,8 @@ fn the_writes_line_fits_and_keeps_the_full_line() {
         "{:?} {panel:?}",
         node.rect()
     );
-    assert!(h
-        .query_by_label(
-            "The source file is never changed. Change the folder with Export to ▾ in the header."
-        )
-        .is_none());
+    assert_eq!(node.value(), Some(format!("{full}\n{WRITES_NOTE}")));
+    assert!(h.query_by_label(WRITES_NOTE).is_none());
 }
 
 #[test]
