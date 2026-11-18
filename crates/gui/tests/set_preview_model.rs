@@ -1,11 +1,13 @@
 //! The set preview's model (P1-A Tasks 13–14): encodes, fingerprint and change classification, query keys,
 //! PGPatcher simulation per shape, and the orchestration without a GPU.
 mod support;
+use engine::config::Subtype;
+use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::items::{ItemKind, ItemStatus};
 use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::preview::DEBOUNCE;
 use sdc_gui::model::set_preview::*;
-use sdc_gui::model::sets::{SetView, SlotKind};
+use sdc_gui::model::sets::{member_game_path, views, SetView, SlotKind};
 use sdc_gui::model::viewport3d::FileSource;
 use sdc_gui::model::AppModel;
 use sdc_gui::pgp::writer::EntryInput;
@@ -17,6 +19,77 @@ fn rock(m: &AppModel) -> (SetView, EntryInput) {
         .into_iter()
         .find(|(v, _)| v.id == "landscape/rock01")
         .expect("the fixture's PBR set")
+}
+
+/// What `member_slots` serves for the set `arch/leaf`, built as the preview builds it.
+fn leaf_slots(m: &AppModel) -> Vec<MemberSlot> {
+    let v = views(m)
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .clone();
+    let e = json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.id == "arch/leaf")
+        .unwrap()
+        .1;
+    member_slots(m, &v, Some(&e))
+}
+
+#[test]
+fn a_linked_slot_serves_the_linked_file_at_its_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, "arch/wall.png").unwrap();
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 1,
+        item: "arch/wall.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    let served = slots
+        .iter()
+        .find(|s| s.item == "arch/wall.png")
+        .expect("the linked file is served");
+    assert_eq!(served.paths, vec![canon(&game)]);
+    m.undo();
+    assert!(leaf_slots(&m).iter().all(|s| s.item != "arch/wall.png"));
+}
+
+#[test]
+fn a_slot_7_link_serves_only_the_link() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    let served = |m: &AppModel| {
+        leaf_slots(m)
+            .into_iter()
+            .map(|s| s.item)
+            .collect::<Vec<_>>()
+    };
+    assert!(
+        served(&m).iter().any(|i| i == "arch/leaf_f.png"),
+        "premise: the own _f is served"
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let s = served(&m);
+    assert!(
+        s.iter().any(|i| i == "arch/lacq_cnr.png"),
+        "the link is served"
+    );
+    assert!(
+        !s.iter().any(|i| i == "arch/leaf_f.png"),
+        "the own _f is not in the JSON, so not served"
+    );
 }
 
 fn settle(e: &mut Encoder, m: &AppModel) {

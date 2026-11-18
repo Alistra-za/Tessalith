@@ -9,7 +9,7 @@ use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
 use crate::model::sets::set_views;
-use crate::model::sets::{SetView, SlotFill, SlotKind};
+use crate::model::sets::{slot_shown, SetView, SlotFill, SlotKind, SlotShown};
 use crate::model::viewport3d::FileSource;
 use crate::model::viewport3d::{read_file, Content, Viewport3d};
 use crate::model::AppModel;
@@ -164,9 +164,12 @@ pub struct MemberSlot {
 
 /// The set's filled slots (02 §1.1). With the PGPatcher entry (CS and a PBR set): the slot's path in
 /// `entry.slots[slotN]` when sdc names it there (a borrowed slot, or a file another set owns, `pbr_export::slots_of`),
-/// and for the set's own texture `<prefix>_<suffix>.dds`. A user's own `slotN` setting points at some other file
-/// and is not served. Without the entry (D3): [`plain_path`]. Coat and fuzz share slot 7: both claim an explicit
-/// slot-7 path, and the later one wins in [`Encoder::memory_sources`].
+/// and for the set's own texture `<prefix>_<suffix>.dds`. The preview shows what the JSON carries (review E1): a
+/// linked slot (`v.linked` with an item) serves the linked file at the link's path, and the own file under it keeps
+/// only its prefix path; an own or borrowed file whose slot holds a link for another kind (`SlotShown::Replaced`)
+/// is not served. A typed path naming no file is not served either, so the view reads the game data there. Without
+/// the entry (D3): [`plain_path`]. Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one
+/// wins in [`Encoder::memory_sources`].
 pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Vec<MemberSlot> {
     let mut out = vec![];
     for (kind, fill) in &v.slots {
@@ -178,6 +181,11 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
         let Some(item) = m.item(key) else {
             continue;
         };
+        let shown = slot_shown(v, *kind);
+        if matches!(shown, SlotShown::Replaced { .. }) {
+            continue;
+        }
+        let linked = matches!(shown, SlotShown::Linked(_));
         let mut paths = vec![];
         match entry {
             None => paths.push(plain_path(*kind)),
@@ -190,7 +198,7 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
                         .is_some_and(|x| x.is_string())
                 });
                 let entry_path = n.and_then(|n| e.slots.get(&n));
-                if let Some(p) = entry_path.filter(|p| !user && !p.is_empty()) {
+                if let Some(p) = entry_path.filter(|p| !user && !linked && !p.is_empty()) {
                     paths.push(canon(p));
                 }
                 if let (true, Some(pre)) = (own, &v.prefix) {
@@ -209,6 +217,25 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
             sig: signature(item),
             paths,
         });
+    }
+    // A linked slot's file, under the link's own path (only with the entry: without it there is no JSON).
+    if entry.is_some() {
+        for link in v.linked.values() {
+            let (Some(key), Some(kind)) = (&link.item, link.kind) else {
+                continue;
+            };
+            let Some(item) = m.item(key) else {
+                continue;
+            };
+            out.push(MemberSlot {
+                kind,
+                item: key.clone(),
+                job_key: item.job_key.clone(),
+                status: format!("{:?}", item.status),
+                sig: signature(item),
+                paths: vec![canon(&link.path)],
+            });
+        }
     }
     out
 }
