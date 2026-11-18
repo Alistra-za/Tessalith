@@ -328,6 +328,10 @@ fn the_header_label_holds_while_a_plan_is_pending() {
     );
 }
 
+/// Two guards hold this outcome: the rule in `settle_queued` and the export guards (`export_stopped`, which opens
+/// Review for an undecided texture). Removing the rule alone does not fail this test (the guards still open Review);
+/// removing the Review fallback does (mutation evidence: `task-2-fix1-mut-*` logs). In that part it pins behaviour
+/// the guards already gave; the count half of the dispatch has its own test below.
 #[test]
 fn a_queued_now_click_opens_review_when_the_plan_brings_a_problem() {
     let d = tempfile::tempdir().unwrap();
