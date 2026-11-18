@@ -72,7 +72,7 @@ pub fn code_sentence(code: Code) -> &'static str {
         PackDefaulted => "A packed channel had no input and got a default — add the missing map",
         PackSizeMismatch => "The packed maps have different aspect ratios — use maps of the same proportions",
         PackConflict => "A packed file collides with another output — remove one of them",
-        PackUnusedInput => "A packing input isn't used by this set — remove it or change the recipe",
+        PackUnusedInput => "A packing input isn't used by this set — remove it, or change the set's shader or the file's type",
         PackRecipeConflict => "The two packed entries name different recipes — clear the recipe",
         PackRecipeUnbuildable => "The written recipe can't be built from this set's maps — clear the recipe",
         ShaderUnavailable => "The chosen shader isn't available — pick another shader",

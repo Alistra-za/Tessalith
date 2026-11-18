@@ -637,6 +637,15 @@ fn an_unused_input_note_names_the_file_and_the_reason() {
     );
 }
 
+/// Controller ruling (2026-11-18): the code sentence no longer sends the user to the recipe combo, which is gone (A1-1).
+#[test]
+fn the_unused_input_sentence_names_the_shader_and_the_type() {
+    assert_eq!(
+        sdc_gui::model::code_text::code_sentence(engine::codes::Code::PackUnusedInput),
+        "A packing input isn't used by this set — remove it, or change the set's shader or the file's type"
+    );
+}
+
 /// A Note-class code on a last-export File row gets the same note row as a live one (the File loop's Note rule).
 #[test]
 fn a_note_from_the_last_export_is_a_note_row() {
