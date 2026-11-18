@@ -13,9 +13,8 @@ docs/research/ is a record of measurements. It may describe old results, but eac
 Documentation describes the build on `main` as it is now. History lives only in the changelog.
 - Delete anything that is no longer true. Don't mark it "old" or "deprecated", and don't strike it through.
 - **Banned in user-facing docs:**
-  - "now", "no longer", "used to", "was renamed", "previously", "since 1.x";
-  - "(new)" badges;
-  - "in earlier versions…".
+  - "now", "no longer", "was renamed";
+  - "used to", "previously", "since `<version>`", "in earlier versions" and "(new)" badges, which `tools/doc-lint.py` fails on.
   
   A feature is described as what it is, not as what changed.
 - **Where an upgrade note goes:** a user who upgrades needs to know what changed, for example "the Resize option was renamed". That goes in the version's CHANGELOG.md entry. A doc page may link to that entry ("Upgrading from 1.1: see CHANGELOG 1.2.0") but doesn't repeat it.
@@ -96,19 +95,26 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
 - **The changelog is where history goes.** When a doc page loses an "earlier versions…" sentence, check that the change is in the changelog, and add it if it's missing.
 - Unreleased changes collect under `## Unreleased` until a release commit names the version. There an entry is one bullet, as long as the change needs, in the order the work merged. Nothing is shortened or sorted at a merge or a push.
 - **The release commit puts the version's section into release shape (owner, 2026-11-18).** A reader of a release looks for their area and scans it. In one pass over that section:
-  1. **Three headings, in this order, an empty one left out:** `### Engine`, `### GUI`, `### Common`.
+  1. **Five headings, in this order:** `### Main` always, then `### Engine`, `### GUI`, `### CLI`, `### Common`, an empty one left out.
+     - Main is the update in short: two to four lines that name its main focus, for a reader who reads nothing else. It is written in the release pass, last, from the entries under the other headings, and says nothing they do not.
      - Engine is what changes the files Tessalith writes or how fast it writes them. Its entries are ordered by part: encoders, texture types and alpha, mips, packing, bake, outputs and the manifest, presets.
      - GUI is what only `tessalith.exe` shows.
-     - Common is a change that touches both, or belongs to neither: an `sdc.toml` key with its GUI control, an `sdc convert` flag, the crates, the licences and the build.
+     - CLI is what only `sdc.exe` shows: a command, a flag, its output text.
+     - Common is a change that touches more than one of them, or belongs to none: an `sdc.toml` key with its GUI control, the crates, the licences and the build.
   2. **A minor entry is one line:** one sentence of at most about 160 characters that says what the user now sees. Its measurements, reasons and edge cases are cut.
   3. **What a user who upgrades must know or do is never cut:** a renamed option or output, a file to delete, and the `sdc convert … --ev` command of the next rule stay in full, whatever the length.
   4. **Headline news keeps its lines.** A change that is a reason to update by itself, such as BC1 to BC5 encoding four times as fast, keeps several sentences or sub-bullets and comes first under its heading. A release has a few of these, not one per plan.
   5. **Similar bug fixes share one entry:** three or more fixes in one part of the program become one bullet, such as "Fixed in menus and lists:", with a short sub-bullet each. A lone fix is a one-line entry after the features under its heading.
-  6. **Released sections stay as released.** The pass touches only the version being released. The long entries remain in git history (`git log -p CHANGELOG.md`).
+  6. **The pass touches only the version being released, except for rule 7.** Every older section already has this shape. The long entries remain in git history (`git log -p CHANGELOG.md`).
+  7. **A feature a later version removed keeps only its removal entry (owner, 2026-11-18).** When the section being released removes a feature, key, flag, code, command or control, the release commit takes out of the older sections the entries that added it or changed it, or only the clause about it where an entry also names things that still exist. The removal entry stays whole, with the error a user now gets, what to do instead and the files to delete. Only that exact thing goes: a thing that was renamed or replaced and still exists keeps its entries.
 
   The shape:
   ```
   ## <version>
+
+  ### Main
+  - Faster encoding: BC1 to BC5 more than four times as fast, BC7 and BC6H faster on CPUs with AVX-512.
+  - Outputs written by an older encode version are kept until you ask for them with `--ev`.
 
   ### Engine
   - BC1, BC3, BC4 and BC5 textures encode more than four times as fast. (Headline: its measurements and what changes for the user follow here, in a few sentences.)
@@ -120,8 +126,11 @@ Every menu, context menu, panel and tab the guide documents has a screenshot on 
     - a list opened with a click stays open after that click;
     - once a list inside a panel reaches its end, the wheel scrolls the panel.
 
-  ### Common
+  ### CLI
   - New `sdc convert` flags `--ev` and `--property` encode the outputs of an older encode version again.
+
+  ### Common
+  - New setting `encoder.bc1_search` (`default` or `fast`), set by the texture panel's **Effort** row on BC1 and BC3.
   ```
 - **A change to a texture type's output names the command that picks it up (Note JA10).** `if-changed` keeps outputs written by an older encode version unless the run has `--ev`, so the entry is how users learn to re-encode them. An entry for a change that moves an `encode_version` arm, `BC1_ENCODE_ID` or an encoder tag ends with the `sdc convert` command, scoped with `--property` to what the change touched, and says those outputs are otherwise kept. Two examples:
   - a fix to alpha mipmaps: `sdc convert … --on-existing if-changed --ev --property cutout,mips`;
@@ -156,6 +165,7 @@ DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only r
 6. If a ruling was reverted, move it to the archive (section 7).
 7. Preview the wiki with `tools\publish-wiki.ps1 -Out <dir>`. Publish only when the owner asks.
 8. Run `tools\doc-markers.ps1` and fix every marker it lists (section 9).
+9. Run `py -3.13 -I tools\doc-lint.py` and fix every failure it lists.
 
 ## 9. Ruling markers
 A statement of Tessalith behaviour that a ruling decided carries a hidden marker at that fact's one home (§2), so the ruling behind it can be found and a stale sentence is caught when the ruling is archived.

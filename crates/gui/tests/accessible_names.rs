@@ -31,6 +31,357 @@ fn unnamed_progress<S>(h: &Harness<'_, S>) -> Vec<String> {
         .collect()
 }
 
+/// Input nodes on screen as (role, name, hover-only): visible, editable, named. An input linked with `labelled_by`
+/// lands here under its row label's name: egui 0.37's `labelled_by` clears the node's own label, and AccessKit
+/// resolves the name through the link.
+fn named_inputs<S>(h: &Harness<'_, S>) -> Vec<(Role, String, bool)> {
+    h.root()
+        .children_recursive()
+        .map(|n| n.accesskit_node())
+        .filter(|n| egui::accessibility::is_input(n.role()) && !n.is_hidden())
+        .filter(|n| !n.data().is_read_only())
+        .filter_map(|n| {
+            let name = n.label().filter(|l| !l.trim().is_empty())?;
+            // The name egui 0.37 copies from `on_hover_text` into a node with none: label equals description (the
+            // predicate of `support::shown_containing`).
+            let hover_only =
+                n.labelled_by().next().is_none() && n.description() == Some(name.clone());
+            Some((n.role(), name.to_string(), hover_only))
+        })
+        .collect()
+}
+
+/// True when the inputs with these roles sharing one name are a fault. Two exceptions: a Slider and its own value box
+/// (egui gives the box the slider's name), and splitters alone (egui gives every panel splitter the same fixed name,
+/// which the app cannot set).
+fn shared_name_is_a_fault(roles: &[Role]) -> bool {
+    let slider_and_box =
+        roles.len() == 2 && roles.contains(&Role::Slider) && roles.contains(&Role::SpinButton);
+    let splitters = roles.iter().all(|r| *r == Role::Splitter);
+    roles.len() > 1 && !slider_and_box && !splitters
+}
+
+/// The two name faults on a screen: the names of inputs named only by their hover text, and the names shared by two or
+/// more inputs (with their roles), less the two exceptions of `shared_name_is_a_fault`.
+fn name_faults<S>(h: &Harness<'_, S>) -> (Vec<String>, Vec<(String, Vec<Role>)>) {
+    let inputs = named_inputs(h);
+    let mut hover: Vec<String> = Vec::new();
+    for (_, name, hover_only) in &inputs {
+        if *hover_only && !hover.contains(name) {
+            hover.push(name.clone());
+        }
+    }
+    let mut dup: Vec<(String, Vec<Role>)> = Vec::new();
+    for (_, name, _) in &inputs {
+        if dup.iter().any(|(n, _)| n == name) {
+            continue;
+        }
+        let roles: Vec<Role> = inputs
+            .iter()
+            .filter(|(_, n, _)| n == name)
+            .map(|(r, _, _)| *r)
+            .collect();
+        if shared_name_is_a_fault(&roles) {
+            dup.push((name.clone(), roles));
+        }
+    }
+    (hover, dup)
+}
+
+/// The screens `audit_names` is called on. An allowlist entry names one of them, so an entry for a screen that is
+/// not audited (a typo, a removed checkpoint) fails the self-test instead of passing unseen.
+const SCREENS: &[&str] = &[
+    "textures view with filters",
+    "set editor",
+    "json editor",
+    "presets",
+    "rename dialog",
+    "meshes view",
+    "meshes mod filter open",
+    "meshes skin browse popup",
+    "meshes edit browse popup",
+];
+
+/// Rules 8.8 and 8.4 over everything on `screen` (a checkpoint's name, one of `SCREENS`), with today's hits allowed:
+/// no input is named only by its hover text, and no two inputs share a name. Each allowlist below holds one entry per
+/// (screen, name) with the reason; a shared-name entry also pins the roles of the inputs sharing the name, so an input
+/// added, gone or changed fails here, and so does an entry whose hit is gone (delete it).
+#[track_caller]
+fn audit_names<S>(h: &Harness<'_, S>, screen: &str) {
+    assert!(
+        SCREENS.contains(&screen),
+        "{screen:?} is not in SCREENS in crates/gui/tests/accessible_names.rs; add it there"
+    );
+    let (hover, dup) = name_faults(h);
+    let mut bad: Vec<String> = Vec::new();
+    for name in &hover {
+        if !HOVER_ONLY_ALLOWED
+            .iter()
+            .any(|(s, n, _)| *s == screen && n == name)
+        {
+            bad.push(format!(
+                "{screen}: an input is named only by its hover text {name:?}; give it a short name with `ui::name_input` (rule 8.8). HOVER_ONLY_ALLOWED in crates/gui/tests/accessible_names.rs lists the allowed ones"
+            ));
+        }
+    }
+    for (name, roles) in &dup {
+        let mut measured: Vec<String> = roles.iter().map(|r| format!("{r:?}")).collect();
+        measured.sort();
+        match SHARED_NAME_ALLOWED
+            .iter()
+            .find(|(s, n, _, _)| *s == screen && n == name)
+        {
+            None => bad.push(format!(
+                "{screen}: {} inputs share the name {name:?} ({measured:?}); give each its own name (rule 8.4)",
+                roles.len()
+            )),
+            Some((_, _, stored, _)) => {
+                let mut stored = stored.to_vec();
+                stored.sort();
+                if stored[..] != measured[..] {
+                    bad.push(format!(
+                        "{screen}: the inputs sharing the name {name:?} changed: SHARED_NAME_ALLOWED in crates/gui/tests/accessible_names.rs has {stored:?}, measured {measured:?}; name the new input apart (rule 8.4), or update the entry's roles with its reason"
+                    ));
+                }
+            }
+        }
+    }
+    for (s, n, _) in HOVER_ONLY_ALLOWED {
+        if *s == screen && !hover.iter().any(|h| h == n) {
+            bad.push(format!(
+                "{screen}: the hover-only name {n:?} allowed in HOVER_ONLY_ALLOWED in crates/gui/tests/accessible_names.rs is gone; delete its entry"
+            ));
+        }
+    }
+    for (s, n, _, _) in SHARED_NAME_ALLOWED {
+        if *s == screen && !dup.iter().any(|(d, _)| d == n) {
+            bad.push(format!(
+                "{screen}: the shared name {n:?} allowed in SHARED_NAME_ALLOWED in crates/gui/tests/accessible_names.rs is gone; delete its entry"
+            ));
+        }
+    }
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
+/// Inputs named only by their hover text today: none.
+const HOVER_ONLY_ALLOWED: &[(&str, &str, &str)] = &[];
+
+const COLLAPSE: &str =
+    "column-collapse small_button: the glyph is the name, the hover names the column";
+const CHIP: &str =
+    "a member chip with no docked helper is named by its slot letter alone (chip_name)";
+const GROUP_ROW: &str =
+    "a group header named after its main row, whose control carries the same name";
+const SUBTYPE_ROWS: &str = "two open sub-type rows draw the same tree with fixed labels";
+
+/// Names two or more inputs share today: one entry per (screen, name), with the Debug names of the roles sharing it
+/// (sorted) and the reason. R5: allowed until the names are fixed (the sets branch is changing the set editor's names).
+const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
+    (
+        "textures view with filters",
+        "◀",
+        &["Button", "Button"],
+        COLLAPSE,
+    ),
+    (
+        "textures view with filters",
+        "D",
+        &["Button", "Button", "Button"],
+        CHIP,
+    ),
+    (
+        "textures view with filters",
+        "Alpha",
+        &["ComboBox", "DisclosureTriangle"],
+        GROUP_ROW,
+    ),
+    (
+        "textures view with filters",
+        "Mipmaps",
+        &["CheckBox", "DisclosureTriangle"],
+        GROUP_ROW,
+    ),
+    ("set editor", "◀", &["Button", "Button"], COLLAPSE),
+    ("set editor", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "set editor",
+        "Match on this",
+        &["Button", "Button"],
+        "one fixed-name flag per filled slot row",
+    ),
+    (
+        "set editor",
+        "Assign…",
+        &["Button", "Button", "Button"],
+        "one fixed-name menu button per empty slot row",
+    ),
+    (
+        "set editor",
+        "Roughness scale",
+        &["CheckBox", "SpinButton"],
+        "CS PBR's texture-set tick and PGPatcher's number box, one key label",
+    ),
+    (
+        "set editor",
+        "Specular level",
+        &["CheckBox", "SpinButton"],
+        "CS PBR's texture-set tick and PGPatcher's number box, one key label",
+    ),
+    ("json editor", "◀", &["Button", "Button"], COLLAPSE),
+    ("json editor", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "json editor",
+        "×",
+        &["Button", "Button"],
+        "remove_button: the glyph is the name, the hover says which key",
+    ),
+    (
+        "presets",
+        "Suffixes",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "New alias _",
+        &["TextInput", "TextInput"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Add alias", &["Button", "Button"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Compression",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Format", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    ("presets", "Effort", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Perceptual",
+        &["CheckBox", "CheckBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Resize & mips",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Resize", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Relative to",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Size floor",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Mip levels",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    (
+        "presets",
+        "Mip filter",
+        &["ComboBox", "ComboBox"],
+        SUBTYPE_ROWS,
+    ),
+    ("presets", "Policy", &["ComboBox", "ComboBox"], SUBTYPE_ROWS),
+    (
+        "presets",
+        "Alpha",
+        &["DisclosureTriangle", "DisclosureTriangle"],
+        SUBTYPE_ROWS,
+    ),
+    ("rename dialog", "◀", &["Button", "Button"], COLLAPSE),
+    (
+        "rename dialog",
+        "⚠ 2",
+        &["Button", "Button"],
+        "each set card's warning-count button is named by its text (`sets_column.rs` warn_button), and two cards have two warnings",
+    ),
+    ("rename dialog", "D", &["Button", "Button", "Button"], CHIP),
+    (
+        "rename dialog",
+        "Alpha",
+        &["ComboBox", "DisclosureTriangle"],
+        GROUP_ROW,
+    ),
+    (
+        "rename dialog",
+        "Mipmaps",
+        &["CheckBox", "DisclosureTriangle"],
+        GROUP_ROW,
+    ),
+    (
+        "meshes skin browse popup",
+        "textures/white.dds",
+        &["Link", "Link"],
+        "each shape card names a texture slot by its path (`meshes.rs` shape), and the test's skin shape is a copy of the fixture's shape 0, so both show its textures/white.dds",
+    ),
+];
+
+/// The two checks see what they stand for: an icon button named only by its hover, two boxes sharing a name, and a
+/// Slider with its own value box (which is allowed).
+#[test]
+fn the_name_checks_see_a_hover_only_name_and_a_shared_name() {
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(600.0, 300.0))
+        .build_ui_state(
+            |ui, st: &mut (String, String, f32)| {
+                ui.add(egui::Button::new(""))
+                    .on_hover_text("Close the window");
+                ui.text_edit_singleline(&mut st.0).accessible_name("Same");
+                ui.text_edit_singleline(&mut st.1).accessible_name("Same");
+                ui.add(egui::Slider::new(&mut st.2, 0.0..=1.0).text("Gain"));
+            },
+            (String::new(), String::new(), 0.5),
+        );
+    h.run();
+    let (hover, dup) = name_faults(&h);
+    assert_eq!(hover, vec!["Close the window".to_string()]);
+    assert_eq!(dup.len(), 1, "{dup:?}");
+    assert_eq!(dup[0].0, "Same");
+}
+
+/// The two exceptions are exact: splitters alone and a Slider with its value box pass; a splitter or a slider that
+/// shares its name with another input still fails.
+#[test]
+fn a_shared_name_is_a_fault_unless_splitters_alone_or_a_slider_and_its_box() {
+    use Role::*;
+    assert!(!shared_name_is_a_fault(&[Splitter, Splitter]));
+    assert!(!shared_name_is_a_fault(&[Splitter, Splitter, Splitter]));
+    assert!(!shared_name_is_a_fault(&[Slider, SpinButton]));
+    assert!(!shared_name_is_a_fault(&[Button]));
+    assert!(shared_name_is_a_fault(&[Splitter, Button]));
+    assert!(shared_name_is_a_fault(&[Slider, SpinButton, SpinButton]));
+    assert!(shared_name_is_a_fault(&[Button, Button]));
+}
+
+/// Every allowlist entry names an audited screen, so an entry for a screen no test audits fails here.
+#[test]
+fn every_allowlist_entry_names_an_audited_screen() {
+    let screens = HOVER_ONLY_ALLOWED
+        .iter()
+        .map(|(s, _, _)| *s)
+        .chain(SHARED_NAME_ALLOWED.iter().map(|(s, _, _, _)| *s));
+    let unknown: Vec<&str> = screens.filter(|s| !SCREENS.contains(s)).collect();
+    assert!(
+        unknown.is_empty(),
+        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo, or a screen no longer audited; fix or delete the entry): {unknown:?}"
+    );
+}
+
 /// Opens the Textures column's Filter ▾ popup.
 fn open_filters(h: &mut Harness<'static, AppModel>) {
     h.query_all_by_label("Filter ▾")
@@ -51,6 +402,7 @@ fn every_input_has_a_name_in_the_textures_view() {
     open_filters(&mut h);
     h.get_by_role_and_label(Role::TextInput, "Search textures");
     h.get_by_role_and_label(Role::ComboBox, "Sort order");
+    audit_names(&h, "textures view with filters");
     assert!(
         unnamed_progress(&h).is_empty(),
         "{:?}",
@@ -84,11 +436,13 @@ fn every_input_has_a_name_in_the_set_editor_and_json_editor() {
     h.get_by_role_and_label(Role::TextInput, "EDID to add");
     // Rule 8.4: a number box beside a named tick is "{label} value", never the tick's own name.
     h.get_by_role_and_label(Role::SpinButton, "Specular level value");
+    audit_names(&h, "set editor");
     // The JSON editor is a centre tab: it takes the set editor's place.
     h.state_mut().open_json_editor();
     h.run();
     h.get_by_label(sdc_gui::ui::json_editor::NAME_LABEL);
     h.get_by_role_and_label(Role::TextInput, "Search sets and paths");
+    audit_names(&h, "json editor");
     assert!(
         unnamed_progress(&h).is_empty(),
         "{:?}",
@@ -123,6 +477,7 @@ fn every_input_has_a_name_in_presets_and_rename() {
     h.get_by_role_and_label(Role::TextInput, "Preset name");
     h.get_by_role_and_label(Role::MultilineTextInput, "TOML preview");
     h.get_by_role_and_label(Role::SpinButton, "AO fill value");
+    audit_names(&h, "presets");
 
     let d = tempfile::tempdir().unwrap();
     let mut m = opened(d.path());
@@ -137,6 +492,7 @@ fn every_input_has_a_name_in_presets_and_rename() {
         h.get_by_role_and_label(Role::TextInput, n);
     }
     h.get_by_role_and_label(Role::ComboBox, "Letter case");
+    audit_names(&h, "rename dialog");
 }
 
 /// The Files tab's bar while an export runs (`drawer.rs`): a `ProgressIndicator`, which kittest's check does not
@@ -324,12 +680,14 @@ fn every_input_has_a_name_in_the_meshes_view() {
     let (_d, m) = scanned_meshes();
     let mut h = meshes_harness(m);
     h.run();
+    audit_names(&h, "meshes view");
     // The mod filter, and the filter box inside its open list.
     h.get_by_role_and_label(Role::ComboBox, "Mod filter")
         .click();
     h.run();
     h.run();
     h.get_by_role_and_label(Role::TextInput, "Filter mods by name");
+    audit_names(&h, "meshes mod filter open");
     h.key_press(egui::Key::Escape);
     h.run();
     // A skin-tint shape for the Advanced Skin card, whose Browse popup has its own filter.
@@ -345,6 +703,7 @@ fn every_input_has_a_name_in_the_meshes_view() {
     h.run();
     open_browse(&mut h, "Browse for the ");
     h.get_by_role_and_label(Role::TextInput, "Filter textures");
+    audit_names(&h, "meshes skin browse popup");
     h.key_press(egui::Key::Escape);
     h.run();
     // Edit swaps the list for the edit model's cards and the edit panel; a slot's Browse has its own filter.
@@ -355,6 +714,7 @@ fn every_input_has_a_name_in_the_meshes_view() {
     h.run();
     open_browse(&mut h, "Browse for ");
     h.get_by_role_and_label(Role::TextInput, "Filter textures");
+    audit_names(&h, "meshes edit browse popup");
 }
 
 #[test]

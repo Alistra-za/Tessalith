@@ -20,3 +20,6 @@ bytemuck = { version = "1", features = ["extern_crate_alloc"], optional = true }
 [features]
 # Image loading, off by default so a consumer that only reads DDS files does not build the `image` crate.
 load = ["dep:image", "dep:bytemuck"]
+
+[lints]
+workspace = true

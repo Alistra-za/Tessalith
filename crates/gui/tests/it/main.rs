@@ -386,3 +386,215 @@ fn every_test_file_is_built() {
          built twice (keep one of the two): {twice:?}"
     );
 }
+
+/// The process-state needles, built here so this file is not a hit. The first four are std's; the last two are the
+/// GUI's own wrappers (`crash_log::install_in` takes and sets the panic hook, `crash_log::watch_device` sets the
+/// device-lost flag), which the std needles cannot see from a test file.
+fn process_state_needles() -> Vec<String> {
+    vec![
+        format!("{}_var(", "set"),
+        format!("{}_var(", "remove"),
+        format!("panic::{}_hook", "set"),
+        format!("{}_hook", "take"),
+        format!("crash_log::{}", "install"),
+        format!("{}_device(", "watch"),
+    ]
+}
+
+/// True when `line` holds a needle that does not continue an identifier: the byte before it is not a letter, a digit
+/// or `_`, so `offset_var(` and `unset_var(` are not `set_var(`.
+fn holds_needle(line: &str, needles: &[String]) -> bool {
+    needles.iter().any(|s| {
+        line.match_indices(s.as_str()).any(|(at, _)| {
+            !line[..at]
+                .bytes()
+                .next_back()
+                .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
+    })
+}
+
+/// Reads `root` and every `mod x;` file under it: a `#[path]` on the line above, else `x/mod.rs` or `x.rs` beside
+/// the declaring file. A declaration it cannot resolve goes to `unresolved` as `file:line`. Files already in `seen`
+/// are skipped.
+// shortcut: line by line, so a `mod` inside a block, a macro or a `cfg_attr(path)` is not followed, and an inline
+// `mod x { .. }` is read as part of its file; upgrade when a test file declares modules that way.
+fn read_modules(
+    root: &std::path::Path,
+    seen: &mut std::collections::HashSet<std::path::PathBuf>,
+    unresolved: &mut Vec<String>,
+) -> Vec<(std::path::PathBuf, String)> {
+    let (mut out, mut todo) = (Vec::new(), vec![root.to_path_buf()]);
+    while let Some(p) = todo.pop() {
+        if !seen.insert(p.clone()) {
+            continue;
+        }
+        let text = std::fs::read_to_string(&p).unwrap();
+        let base = p.parent().unwrap().to_path_buf();
+        let mut prev = "";
+        for (n, l) in text.lines().enumerate() {
+            let t = l.trim();
+            let t = match t.strip_prefix("pub") {
+                Some(r) if r.starts_with(' ') => r.trim_start(),
+                Some(r) if r.starts_with('(') => r[r.find(')').unwrap() + 1..].trim_start(),
+                _ => t,
+            };
+            if let Some(name) = t.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) {
+                let by_attr = prev
+                    .strip_prefix("#[path = \"")
+                    .and_then(|r| r.strip_suffix("\"]"))
+                    .map(|r| base.join(r));
+                let mut found = by_attr.into_iter().chain([
+                    base.join(name).join("mod.rs"),
+                    base.join(format!("{name}.rs")),
+                ]);
+                match found.find(|f| f.is_file()) {
+                    Some(f) => todo.push(f),
+                    None => unresolved.push(format!("{}:{}: mod {name};", p.display(), n + 1)),
+                }
+            }
+            prev = l.trim();
+        }
+        out.push((p, text));
+    }
+    out
+}
+
+/// A module of `it` shares one process with the rest, so it must not change process-wide state.
+#[test]
+fn no_it_module_changes_process_state() {
+    let needles = process_state_needles();
+    let main = include_str!("main.rs").replace('\r', "");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let (mut hits, mut unresolved) = (Vec::new(), Vec::new());
+    let mut seen = std::collections::HashSet::new();
+    for (at, _) in main.match_indices("#[path = \"../") {
+        let rest = &main[at + "#[path = \"../".len()..];
+        let file = &rest[..rest.find('"').unwrap()];
+        for (p, text) in read_modules(&dir.join(file), &mut seen, &mut unresolved) {
+            for (n, l) in text.lines().enumerate() {
+                if holds_needle(l, &needles) {
+                    hits.push(format!("{}:{}", p.display(), n + 1));
+                }
+            }
+        }
+    }
+    let scanned = seen.len();
+    assert!(scanned > 100, "the scan read only {scanned} files");
+    assert!(
+        unresolved.is_empty(),
+        "a `mod` the process-state scan cannot find a file for; point it at the file with #[path] or extend read_modules: {unresolved:#?}"
+    );
+    assert!(
+        hits.is_empty(),
+        "{scanned} files read; a module of the `it` binary changes process-wide state; give the file a [[test]] entry in crates/gui/Cargo.toml instead of a module line in tests/it/main.rs, or, if the hit is in a shared module, move the call into the [[test]] file that needs it: {hits:#?}"
+    );
+}
+
+/// The needle list is pinned against the real corpus: every `[[test]]` kept apart for process-wide state holds at
+/// least one needle, and the list is the manifest's (Note HU2).
+#[test]
+fn process_state_needles_match_the_files_kept_apart() {
+    // Kept apart for process-wide state: the six that redirect %LOCALAPPDATA% / %APPDATA% (directly, or through
+    // `app_harness`), the two that install the panic hook, `device_lost` (the device-lost flag) and `fonts_env`.
+    // `it` is the shared binary and `ui_drive` is a driver with its own `main` (`harness = false`), not kept apart
+    // for state, so neither is on the list.
+    let apart = [
+        "app_no_local_store",
+        "doc_shots",
+        "meshes_header",
+        "nif_edit",
+        "replan_timing",
+        "ui_proof",
+        "crash_recovery",
+        "fonts_crash_hook",
+        "device_lost",
+        "fonts_env",
+    ];
+    let manifest = include_str!("../../Cargo.toml").replace('\r', "");
+    let mut targets: Vec<&str> = manifest
+        .lines()
+        .filter_map(|l| l.strip_prefix("path = \"tests/")?.strip_suffix(".rs\""))
+        .collect();
+    targets.sort();
+    let mut expected: Vec<&str> = apart.to_vec();
+    expected.push("it/main");
+    expected.push("ui_drive/main");
+    expected.sort();
+    assert_eq!(
+        targets, expected,
+        "a [[test]] in crates/gui/Cargo.toml is not on this list (add it if it changes process-wide state, or say \
+         in the comment above `apart` why it is separate), or a listed file lost its entry"
+    );
+    let needles = process_state_needles();
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let (mut bare, mut unresolved) = (Vec::new(), Vec::new());
+    for name in apart {
+        let files = read_modules(
+            &dir.join(format!("{name}.rs")),
+            &mut Default::default(),
+            &mut unresolved,
+        );
+        // A needle in a comment (a doc line naming the wrapper) does not count: the real call must be there.
+        let holds = files.iter().any(|(_, t)| {
+            t.lines()
+                .any(|l| !l.trim_start().starts_with("//") && holds_needle(l, &needles))
+        });
+        if !holds {
+            bare.push(name);
+        }
+    }
+    assert!(unresolved.is_empty(), "unresolved modules: {unresolved:#?}");
+    assert!(
+        bare.is_empty(),
+        "kept apart for process-wide state but holding no needle, so the scan cannot see what it changes; find the state it changes and add a needle for it in process_state_needles: {bare:?}"
+    );
+}
+
+/// kittest's accessibility and glyph checks stay on in every test file and in the GUI's own source.
+#[test]
+fn kittest_checks_are_never_switched_off() {
+    // The needles are built here, so this file is not a hit.
+    // shortcut: line by line over `crates/gui/tests` and `crates/gui/src`, so a call split across lines or reached
+    // through a helper is not seen; upgrade when a harness builder is wrapped.
+    let needles = [
+        format!("with_accessibility_{}(", "check"),
+        format!("allow_missing_{}(", "glyphs"),
+    ];
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for sub in ["tests", "src"] {
+        walk(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(sub),
+            &mut files,
+        );
+    }
+    let mut hits = Vec::new();
+    for f in &files {
+        let text = std::fs::read_to_string(f).unwrap();
+        for (n, l) in text.lines().enumerate() {
+            if needles.iter().any(|s| l.contains(s.as_str())) {
+                hits.push(format!("{}:{}", f.display(), n + 1));
+            }
+        }
+    }
+    assert!(
+        files.len() > 300,
+        "the scan read only {} files",
+        files.len()
+    );
+    assert!(
+        hits.is_empty(),
+        "{} files read; a test or source file switches off a kittest check; remove the call and fix what the check reports instead: {hits:#?}",
+        files.len()
+    );
+}

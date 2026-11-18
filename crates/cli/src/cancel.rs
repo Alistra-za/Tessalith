@@ -60,6 +60,10 @@ pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
             }
         });
     let seen = Arc::new(AtomicU32::new(0));
+    // The second Ctrl-C must end the process at once: a running native encode call cannot be interrupted, and
+    // `write_atomic` leaves no partial final DDS output (temporary files can remain, as the module docs say).
+    #[allow(clippy::exit)]
+    let abort = |c| std::process::exit(c);
     ctrlc::set_handler(move || {
         on_interrupt(
             &seen,
@@ -68,7 +72,7 @@ pub fn install(cancel: CancelToken) -> Result<(), ctrlc::Error> {
                 // Never blocks (unbounded channel); an error only means the helper thread is gone.
                 let _ = tx.send(());
             },
-            |c| std::process::exit(c),
+            abort,
         )
     })
 }
