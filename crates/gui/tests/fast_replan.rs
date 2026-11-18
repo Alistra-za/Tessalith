@@ -765,7 +765,13 @@ fn views_after_a_partial_equal_a_fresh_build_with_a_cleared_slot() {
     m.hold_plan_results = true;
     m.decide("arch/leaf_n.png", Answer::Green(GreenConvention::Opengl)); // a partial over arch/leaf
     let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(partials.as_slice(), [WorkerMsg::Partial { result: Ok(_), .. }]),
+        "premise: the skeleton patched the edit (the partial plan is Ok); a refusal arrives as a partial with an Err result"
+    );
+    let applied = m.applied_seq;
     deliver(&mut m, partials);
+    assert!(m.applied_seq > applied, "premise: the partial landed");
     let spliced = views(&m);
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
