@@ -24,7 +24,7 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 | `landscape` | diffuse, `_n` | | yes |
 | `complex_grass` | the complex-grass texture ([layout](PBR-Landscape.md#complex-grass)) | | yes |
 
-- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 -->
+- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 --> A vanilla normal in a `pbr`/`pbr_grass` set gives one info instead: [SHADER-NORMAL-SPECULAR](Diagnostic-Codes.md).
 
 ## How the shader is picked
 

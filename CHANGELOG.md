@@ -55,6 +55,10 @@
 - After **Rebuild Z** the exported row says it is queued until the next export.
 - A row's buttons sit right after its sentence.
 - Counts of one now read in the singular: "1 file, 1 problem" in the Export button's hover, "1 warning" in the Files tab, "1 note" in the 3D view's Details, "1 texture selected" in the bulk panel, and "Analysing 0 / 1 file…" on the plan bar.
+- A PBR set whose own normal is a vanilla `normal` no longer warns that `_n` is missing and the normal is unused, and may now read Ready. It gets one note, `SHADER-NORMAL-SPECULAR`, and the GUI's **Use PBR normal** switches it in one click.
+- `sdc inspect` shows the note; `sdc convert`'s log, which prints warnings only, no longer prints the two false warnings.
+- GUI: a complex-grass source whose corner normal isn't unit length is now a note while Tessalith renormalises the written file. It no longer keeps the texture or its set from Ready. With the normal base level kept as authored, it is still a problem.
+- GUI: a set whose entries match no file now lists its own problems, such as "No file matches …", in the Problems filter. The set editor lists them too, for the first such set until sets are selected by id. "Not ready: this set has no files yet." now shows only for a set with nothing in it.
 
 ## 3.0.0
 

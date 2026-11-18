@@ -150,11 +150,12 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `SHADER-UNAVAILABLE` | warning | The shader isn't available under the target; it fell back. | Change the shader or target. |
 | `SHADER-EXTRA-MAP` | warning | A member the shader doesn't use; it still converts ([set shaders](Set-Shaders.md)). | |
 | `SHADER-MISSING-MAP` | warning | A map the shader requires is missing. | Add it. |
+| `SHADER-NORMAL-SPECULAR` | info | A `pbr`/`pbr_grass` set's own normal is a vanilla `normal` or `landscape_normal`; the shader ignores its alpha. Shown in place of `SHADER-EXTRA-MAP` and the `_n` `SHADER-MISSING-MAP`. | Set its sub-type to `pbr_normal` (GUI: **Use PBR normal**); a kept DDS: convert its source image instead. <!-- D:JP1 --> |
 | `SKIN-WET-GREY` | warning | A `skin_wet` source is grey. Community Shaders ignores a grey wet map, so that file isn't written; the set's other files are. | Supply a tangent normal with the wet mask in alpha. |
 | `GRASS-SHAPE` | error | A `complex_grass` source isn't a power-of-two 1:2 image. | Supply e.g. 2048x4096. |
 | `GRASS-TOP-OPAQUE` | warning | The top half is fully opaque: no cutout. | Check the alpha. |
 | `GRASS-NORMALS` | warning | Under 99% of the bottom half is unit-length normals. | Check the bottom half is a normal map. |
-| `GRASS-DETECT-SOURCE` | warning | A complex-grass source's bottom-left normal isn't unit length, so Community Shaders' detection test fails on the source. Tessalith renormalises the written file, so Community Shaders still reads it as grass, unless `mips.normal_base = keep`: then the file is written as it is and isn't read as grass. | Nothing, unless `mips.normal_base = keep`: then fix the corner texel. The Problems row has no fix button; **Mark as intended** clears it. <!-- D:JO15 --> |
+| `GRASS-DETECT-SOURCE` | warning | A complex-grass source's bottom-left normal isn't unit length, so Community Shaders' detection test fails on the source. Tessalith renormalises the written file, so Community Shaders still reads it as grass, unless `mips.normal_base = keep`: then the file is written as it is and isn't read as grass. | Nothing, unless `mips.normal_base = keep`: then fix the corner texel. In the GUI it is a note while Tessalith renormalises the written file. With `keep` it is a problem with no fix button; **Mark as intended** clears it. <!-- D:JO15,JP6 --> |
 | `PBR-GRASS-DETECT` | warning | A PBR grass albedo's bottom-left texel looks like a complex-grass normal, so Community Shaders' grass shadow pass would read it as complex grass and shadows won't match. | Change that texel. |
 
 ## Also export

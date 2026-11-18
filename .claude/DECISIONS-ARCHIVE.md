@@ -1025,3 +1025,6 @@ ARCHIVED (wording before the edit; superseded in part by Note JO, 2026-11-17)
 
 ARCHIVED (wording before the edit; superseded in part by Note JP, 2026-11-17)
   - **A set with no files yet** (a created set with an empty key) reads "Not ready: this set has no files yet." with the amber dot and no reason buttons, as its card's hover does (`sets_column::NO_FILES_YET`); no row of another key-less set counts for it (R3).
+
+ARCHIVED (wording before the edit; superseded in part by Note JP, 2026-11-17)
+  - GRASS-DETECT-SOURCE has no button (the engine raises it only on a texture already tagged complex grass; overrules the plan table's **Tag as grass**, ledger) and stays a Problem, so **Mark as intended** clears it (final fix wave). Its sentence follows the job (`bottom::warning_text`, final fix wave A3): with the job's `mips.normal_base` renormalising, the row reads "This grass source's corner normal isn't unit length — the written file is renormalised, so Community Shaders still reads it as grass"; with `mips.normal_base = keep` the file is written as it is and the row reads "This grass source's corner normal isn't unit length, and its normal base level is kept as authored — Community Shaders won't read the written file as grass" (`code_text::GRASS_SOURCE_KEPT`). The row, its mark and the tile's count read the same sentence.
