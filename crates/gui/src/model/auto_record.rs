@@ -433,16 +433,19 @@ impl AppModel {
         for (k, f, _) in &writes {
             self.history.auto_written.insert((k.clone(), f));
         }
+        let sets_clean = !self.sets_user_dirty();
         if let Some(k) = join {
             // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
             // switch's row lists what it joined.
             let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
             let pushes = self.history.pushes;
-            self.edit_docs(&label, Some(k), true, |p, _| {
+            self.edit_docs(&label, Some(k), true, |p, s| {
                 for (k, f, v) in &writes {
                     p.set_file_value(k, f, v);
                 }
+                super::normal_follow::list_normals(p, s, &writes);
             });
+            self.note_listing(sets_clean);
             if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
                 // Final review B I1: a switched file is listed once, by the switch's own line (it names the type the
                 // file now plans); the recording's lines for other files stay.
@@ -464,8 +467,12 @@ impl AppModel {
                 for (k, f, v) in &writes {
                     p.set_file_value(k, f, v);
                 }
-            })
+            });
+            m.edit_docs("Set automatically", None, true, |p, s| {
+                super::normal_follow::list_normals(p, s, &writes)
+            });
         });
+        self.note_listing(sets_clean);
         if wrote {
             let typed = writes.iter().any(|(_, f, _)| *f == "subtype");
             self.auto_note = Some(AutoNote {

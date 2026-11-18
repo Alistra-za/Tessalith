@@ -114,10 +114,11 @@ impl AppModel {
         if shas == recorded {
             return;
         }
+        let user_dirty = self.sets_user_dirty();
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = user_dirty;
         let side = P::record(d, &shas);
         if d.read_only() {
             self.export.notes.push(super::sidecar_only_note(&side));

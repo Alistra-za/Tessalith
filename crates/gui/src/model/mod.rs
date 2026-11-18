@@ -29,6 +29,7 @@ pub mod marker;
 pub mod meshes;
 pub mod messages;
 pub mod nav;
+mod normal_follow;
 pub mod out_size;
 pub mod pack_fills;
 pub mod pbr_export;
@@ -531,6 +532,10 @@ pub struct AppModel {
     pub batch_preset: String,
     /// While set, `edit_docs` changes the documents but neither records a step nor re-plans.
     batch: bool,
+    /// Note JS5 (N-26): the sets document's `(rev, text, saved_text)` right after an automatic step that began with no
+    /// user change in it: while it still holds that state against that saved text, its only unsaved change is
+    /// automatic (the recorder's `auto_normal` listing). Any save, reload or open ends it.
+    listing_only: Option<(u64, String, String)>,
     pub selection: Selection,
     /// F3a D1: the multi-selection; `selection` stays the active entry.
     pub multi: bulk::MultiSelection,
@@ -868,6 +873,7 @@ impl AppModel {
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
+            listing_only: None,
             selection: Selection::None,
             multi: Default::default(),
             bulk: Default::default(),
@@ -1055,6 +1061,7 @@ impl AppModel {
         let project = ProjectDoc::open(&root);
         self.project = Some(project);
         self.sets_doc = Some(crate::sets_doc::SetsDoc::open(&root));
+        self.listing_only = None;
         self.drop_undo_note();
         // Note FC12: the previous folder's history and selection are kept until this open completes (Cancel).
         let kept = (std::mem::take(&mut self.history), self.selection.clone());
@@ -2568,10 +2575,11 @@ impl AppModel {
         if shas == old {
             return;
         }
+        let user_dirty = self.sets_user_dirty();
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = user_dirty;
         let side = d.set_copy_shas(&shas);
         if d.read_only() {
             self.export.notes.push(sidecar_only_note(&side));
@@ -2597,10 +2605,11 @@ impl AppModel {
     /// recorded: the next export then asks before overwriting it.
     fn record_json_sha(&mut self, root: &std::path::Path, key: &str, sha: &str) {
         let root = root.to_path_buf();
+        let user_dirty = self.sets_user_dirty();
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = user_dirty;
         // #43: one record per name; audit 08c-1: keyed by `record_key`, and kept when its file is gone.
         let mut shas = history::records_at(&d.pgp_json_shas(), &root);
         shas.insert(key.to_string(), sha.to_string());
@@ -4018,7 +4027,7 @@ impl AppModel {
 
     /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, or the Fuzz-8 switch on open with
     /// the recording that joined it, still the top step. It neither asks on close, open or reload nor marks the title;
-    /// Save stays live and writes it.
+    /// Save stays live and writes it. Note JS5 (N-26): the recorder's `auto_normal` listing is automatic too.
     /// shortcut: a user edit followed by its Undo leaves `pushes` advanced, so that state prompts although the text
     /// equals the automatic state; compare the document with the recording's snapshot if users report it.
     pub fn only_automatic_unsaved(&self) -> bool {
@@ -4027,16 +4036,47 @@ impl AppModel {
             .as_ref()
             .is_some_and(|a| a.clean_before && a.step == self.history.pushes)
             || self.only_switch_unsaved())
-            && !self
-                .sets_doc
-                .as_ref()
-                .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
+            && !self.sets_user_dirty()
             && self.tentative_edits().is_none()
     }
 
     /// Unsaved changes the close, open and reload dialogs ask about: a user's, not only automatic ones (Note FI4).
     pub fn prompts_unsaved(&self) -> bool {
         self.is_dirty() && !self.only_automatic_unsaved()
+    }
+
+    /// Note JS5 (N-26): the sets document's only unsaved change is the recorder's own `auto_normal` listing. The
+    /// saved text must be the one the snapshot was taken against (review 2 Important 1: after a save, an Undo back to
+    /// that text is the user's change).
+    pub fn sets_listing_only(&self) -> bool {
+        self.sets_doc.as_ref().is_some_and(|s| {
+            s.is_dirty()
+                && self
+                    .listing_only
+                    .as_ref()
+                    .is_some_and(|(rev, text, saved)| {
+                        s.saved_text() == saved && (*rev == s.rev() || *text == s.text())
+                    })
+        })
+    }
+
+    /// The sets document holds an unsaved change other than the recorder's listing (the user's, or another
+    /// automatic one).
+    pub fn sets_user_dirty(&self) -> bool {
+        self.sets_doc
+            .as_ref()
+            .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
+            && !self.sets_listing_only()
+    }
+
+    /// Note JS5 (N-26): after an automatic step, remember the sets document as the step left it when it began with no
+    /// user change in it.
+    pub(super) fn note_listing(&mut self, sets_clean: bool) {
+        self.listing_only = self
+            .sets_doc
+            .as_ref()
+            .filter(|s| sets_clean && s.is_dirty())
+            .map(|s| (s.rev(), s.text(), s.saved_text().to_string()));
     }
 
     /// The unsaved `sdc.toml` edits stashed by a blame that is still tentative (the retry plan has not landed), so
@@ -4053,6 +4093,7 @@ impl AppModel {
         let mut out = vec![];
         // Note FI4: automatic types alone are recorded again on the next plan, so a restore never offers them.
         let only_auto = self.only_automatic_unsaved();
+        let listing = self.sets_listing_only();
         if let Some(p) = self.project.as_ref().filter(|p| p.is_dirty() && !only_auto) {
             out.push((p.path().to_path_buf(), p.text()));
         }
@@ -4062,7 +4103,7 @@ impl AppModel {
         if let Some(s) = self
             .sets_doc
             .as_ref()
-            .filter(|s| s.is_dirty() && !s.read_only())
+            .filter(|s| s.is_dirty() && !s.read_only() && !(only_auto && listing))
         {
             out.push((s.path().to_path_buf(), s.text()));
         }
@@ -4273,6 +4314,7 @@ impl AppModel {
     /// document is not written (audit 2026-10-14 finding 3: writing it would offer "Overwrite" over a hand edit
     /// the GUI never loaded).
     pub fn save(&mut self) -> Result<(), SaveError> {
+        self.listing_only = None; // Note JS5: any save ends the listing snapshot.
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
         if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
