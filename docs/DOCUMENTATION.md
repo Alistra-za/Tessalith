@@ -165,7 +165,7 @@ DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only r
 6. If a ruling was reverted, move it to the archive (section 7).
 7. Preview the wiki with `tools\publish-wiki.ps1 -Out <dir>`. Publish only when the owner asks.
 8. Run `tools\doc-markers.ps1` and fix every marker it lists (section 9).
-9. Run `py -3.13 -I tools\doc-lint.py` and fix every failure it lists: the history words of section 1, "as above", the page budgets and sidebar of section 4, and the release headings of section 6.
+9. Run `py -3.13 -I tools\doc-lint.py` and fix every failure it lists.
 
 ## 9. Ruling markers
 A statement of Tessalith behaviour that a ruling decided carries a hidden marker at that fact's one home (§2), so the ruling behind it can be found and a stale sentence is caught when the ruling is archived.
