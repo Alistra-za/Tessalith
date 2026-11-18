@@ -11532,6 +11532,78 @@ fn the_meshes_cap_keeps_160_px_at_1280x720() {
     assert!(frame.max.y <= hgt - capped + 0.5, "{frame:?} under Review");
 }
 
+/// The app in the Meshes view at `size`, the lit shape selected, five pending edits and the pending list open, and the
+/// bottom panel on `tab` (Review opens at its default height).
+fn slot_list_session(
+    size: egui::Vec2,
+    tab: sdc_gui::model::bottom::BottomTab,
+) -> (tempfile::TempDir, AppH) {
+    use sdc_gui::model::bottom::BottomTab;
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    let model = support::opened(&t.path().join("mod"));
+    let (d, mut h) = in_the_meshes_view_sized(model, 5, size);
+    let (shape, _) = lit_shape(h.state().meshes.edit.as_ref().unwrap());
+    h.state_mut().meshes.select_edit(Selection::Shape(shape));
+    if tab == BottomTab::Review {
+        h.state_mut().model.open_review();
+    } else {
+        h.state_mut().model.show_tab(tab);
+    }
+    h.run_steps(8);
+    h.get_by_label("Pending edits (5)").click();
+    h.run_steps(8);
+    (d, h)
+}
+
+/// Every slot field whose rect reaches below `limit` is clipped away there (its `interact_rect` is empty).
+fn assert_slot_fields_clipped_below(h: &AppH, limit: f32) {
+    let fields: Vec<egui::Rect> = h
+        .query_all_by_label_contains("path (slot ")
+        .filter(|n| n.accesskit_node().role() == AkRole::TextInput)
+        .map(|n| n.rect())
+        .collect();
+    assert!(!fields.is_empty(), "no slot field in the tree");
+    for rect in fields.into_iter().filter(|r| r.max.y > limit) {
+        let clipped = h.ctx.viewport(|v| {
+            v.this_pass
+                .widgets
+                .layers()
+                .flat_map(|(_, ws)| ws)
+                .find(|w| w.rect == rect)
+                .map(|w| w.interact_rect)
+        });
+        let clipped = clipped.unwrap_or_else(|| panic!("no widget at {rect:?}"));
+        // Partly hidden: cut at the area's edge; wholly hidden: an empty (even negative) intersection.
+        assert!(
+            clipped.max.y <= limit + 0.5 || clipped.height() <= 0.0,
+            "a slot field {rect:?} reaches below the footer at {limit} unclipped: {clipped:?}"
+        );
+    }
+}
+
+/// Review replay 109: with Review open at its default height at 1280x720 the slot list scrolls in its own area, which
+/// ends above the footer; it no longer runs under it.
+#[test]
+fn with_review_open_the_slot_list_ends_above_the_footer_at_1280x720() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "{r:?}");
+    assert_slot_fields_clipped_below(&h, r.footer.min.y);
+}
+
+/// Review replay 109: with the Problems panel open at 1536x864 the slot list keeps the 200 px of `TAB_MIN_H`.
+#[test]
+fn with_problems_open_the_slot_list_keeps_200_px_at_1536x864() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, h) = slot_list_session(egui::vec2(1536.0, 864.0), BottomTab::Problems);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    assert!(r.tab_area.height() >= 200.0 - 0.5, "{r:?}");
+    assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "{r:?}");
+    assert_slot_fields_clipped_below(&h, r.footer.min.y);
+}
+
 fn review_height(h: &AppH) -> f32 {
     support::panel(&h.ctx, "bottom-review").height()
 }

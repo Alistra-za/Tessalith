@@ -11,10 +11,38 @@ use eframe::egui;
 use nif::edit::{Op, Outcome};
 use nif::fields::Field;
 
+/// The tab list keeps at least this much height (about four slot rows) while the head above it can still give up room.
+const TAB_MIN_H: f32 = 200.0;
+/// The head (path, solo, pending list) keeps at least this much height, however little room there is.
+const TOP_MIN_H: f32 = 48.0;
+
 const TABS: [&str; 4] = ["Shader", "Alpha", "Controllers", "Extra data"];
 
 /// Note GH5: the footer's line for an edit with no export folder; Review's footer says the same.
 const SKIPPED_NO_FOLDER: &str = "Skipped until an export folder is chosen";
+
+/// Where the edit panel's three vertical parts were laid out in the last frame (tests only).
+#[cfg(feature = "test-hooks")]
+#[derive(Clone, Copy, Debug)]
+pub struct EditPanelRects {
+    pub top: egui::Rect,
+    pub tab_area: egui::Rect,
+    pub footer: egui::Rect,
+}
+
+#[cfg(feature = "test-hooks")]
+const RECTS: &str = "meshes-edit-panel-rects";
+
+#[cfg(feature = "test-hooks")]
+fn store_rects(ctx: &egui::Context, r: EditPanelRects) {
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(RECTS), r));
+}
+
+/// The rects of the last frame's edit panel, `None` while no edit is open.
+#[cfg(feature = "test-hooks")]
+pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
+    ctx.data(|d| d.get_temp(egui::Id::unique(RECTS)))
+}
 
 pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
@@ -30,7 +58,6 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         });
     }
     if let Some(e) = &m.edit {
-        top(ui, e, &mut act);
         // Note GD18: a foreign file at the export path has a Diff…; the rows read the disk only when its stat changed.
         let foreign = m
             .nif_review_rows()
@@ -41,10 +68,30 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .as_ref()
             .filter(|(p, _)| p.eq_ignore_ascii_case(&e.data_path))
             .map(|(_, l)| l.as_slice());
-        // Meshes UI T3: a footer drawn before the tabs (rule 2.1), so a long tab never pushes it away.
-        crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
+        // Meshes UI T3, review replay 109: the footer is drawn first (rule 2.1), so neither the head nor a long tab
+        // pushes it away; the head and the tab list share what it leaves.
+        let footer = crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
             .resizable(false)
-            .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
+            .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act))
+            .response
+            .rect;
+        // Thin bars stay visible without hover, for the head's list and the tab list alike.
+        ui.spacing_mut().scroll = crate::look::thin_scroll();
+        // The tab strip, the editing line and the separator are drawn after the head, so their height is last
+        // frame's (28 px on the first); the head gives up its room before the tab list falls under TAB_MIN_H.
+        let tabs_h_id = ui.scope_id().with("meshes-edit-tabs-h");
+        let tabs_h: f32 = ui.data(|d| d.get_temp(tabs_h_id)).unwrap_or(28.0);
+        // The spacing the head's scroll area leaves below itself is the head's too.
+        let top_cap = (ui.available_height() - TAB_MIN_H - tabs_h - ui.spacing().item_spacing.y)
+            .max(TOP_MIN_H);
+        let top_rect = egui::ScrollArea::vertical()
+            .id_salt("meshes-edit-top")
+            .max_height(top_cap)
+            .auto_shrink([false, true])
+            .show(ui, |ui| top(ui, e, &mut act))
+            .inner_rect;
+        let tabs_start = ui.cursor().min.y;
+        ui.separator();
         let tab_id = egui::Id::unique("meshes-edit-tab");
         let mut tab: usize = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
         // Note HS15: a tab click draws the old tab once more, so a field it ended the typing in commits.
@@ -64,17 +111,34 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         // Meshes UI T6 (Note CZ21): what the tabs act on, always in sight.
         ui.add(egui::Label::new(editing_line(e)).truncate());
         ui.separator();
-        // Both ways: a wide row scrolls instead of widening the panel; thin bars stay visible without hover.
-        ui.spacing_mut().scroll = crate::look::thin_scroll();
-        egui::ScrollArea::both()
+        let tabs_h = ui.cursor().min.y - tabs_start;
+        ui.data_mut(|d| d.insert_temp(tabs_h_id, tabs_h));
+        // Both ways: a wide row scrolls instead of widening the panel. Its height is what is left, never more
+        // (egui's 64 px minimum would push it under the footer).
+        let avail = ui.available_height();
+        let tab_area = egui::ScrollArea::both()
             .id_salt("meshes-edit-scroll")
             .auto_shrink([false, false])
+            .max_height(avail)
+            .min_scrolled_height(avail)
             .show(ui, |ui| match shown {
                 0 => edit_fields::shader_tab(ui, m, e, &mut act),
                 1 => edit_fields::alpha_tab(ui, e, &mut act),
                 2 => edit_ctrl::controllers_tab(ui, m, e, &mut act),
                 _ => edit_extra::extra_tab(ui, e, &mut act),
-            });
+            })
+            .inner_rect;
+        #[cfg(feature = "test-hooks")]
+        store_rects(
+            ui.ctx(),
+            EditPanelRects {
+                top: top_rect,
+                tab_area,
+                footer,
+            },
+        );
+        #[cfg(not(feature = "test-hooks"))]
+        let _ = (top_rect, tab_area, footer);
     }
     apply(m, act);
 }
@@ -149,7 +213,6 @@ fn top(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
                     });
             });
     });
-    ui.separator();
 }
 
 const OPS_MAX_H: f32 = 120.0;
