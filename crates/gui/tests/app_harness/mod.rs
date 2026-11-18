@@ -221,14 +221,16 @@ pub fn plain_harness(m: AppModel) -> H {
     build(SdcApp::new(m), None)
 }
 
-/// Frames with real time between them, so workers (thumbnails, previews, plans) land.
-pub fn settle(h: &mut H, frames: usize) {
+/// Frames with real time between them, so workers (thumbnails, previews, plans) land. True when the model went idle
+/// within 60 s; most callers ignore it.
+pub fn settle(h: &mut H, frames: usize) -> bool {
     for _ in 0..frames {
         h.run_steps(1);
         std::thread::sleep(Duration::from_millis(40));
     }
-    let _ = h.state_mut().model.wait_idle(Duration::from_secs(60));
+    let idle = h.state_mut().model.wait_idle(Duration::from_secs(60));
     h.run_steps(3);
+    idle
 }
 
 /// Frames, with real time between them, until the app stops asking for repaints: every worker `app.rs` polls has

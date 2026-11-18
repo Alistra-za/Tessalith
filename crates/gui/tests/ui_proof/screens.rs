@@ -2,9 +2,13 @@
 //! matching doc-shot scenario (`doc_shots/scenarios.rs`) does, on a temp-dir fixture and without the GPU.
 //!
 //! To add a screen: add a `Screen` to `SCREENS` with the model calls (`open`) or step lines (`steps`) that open it, and
-//! the text only that screen shows (`shows`). `every_entry_opens_its_screen` fails an entry that opens nothing.
+//! a `marker` only that screen can satisfy. The walk fails an entry whose marker is on the window before the entry
+//! opens anything, is on the window before its step lines run, is missing afterwards or after a resize, or is
+//! satisfied by another entry's screen.
 //!
 //! Left out of the list, each named for the doc-shot scenario it mirrors:
+//! - `problems_tab`: `main window with problems` shows the same tab with an item selected, and a marker cannot tell
+//!   the two apart, so they are one entry.
 //! - `cube_panel`: needs six extra face files that neither fixture holds; the walk's screens use the two fixtures.
 //! - `preview_encoded` and `preview_normal`: the 2D preview draws only on the GPU, and `render_*` tests run alone.
 //! - Every doc-shot scenario writes its export folder to a fixed `D:\` path; the walk's fixtures keep it in the
@@ -12,10 +16,10 @@
 //! - A real scan (the Meshes view's winners and mods come from a scan database): the `meshes view` entry sets made-up
 //!   rows on the model, as the doc shot does.
 
-use crate::app_harness::{settle, H};
+use crate::app_harness::{plain_harness, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
-use crate::invariants::SIZES;
+use crate::invariants::Entry;
 use eframe::egui::Vec2;
 use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::rename::RenameMode;
@@ -27,6 +31,51 @@ use std::time::Duration;
 /// The fixture name of a screen that has no project open (the start screen).
 pub const NO_PROJECT: &str = "none";
 
+/// One condition on a frame: a node of `role` (any role when empty) named `text`, or a painted text equal to it, is
+/// there (`present`) or is not.
+pub struct Needle {
+    pub role: &'static str,
+    pub text: &'static str,
+    pub present: bool,
+}
+
+pub const fn has(text: &'static str) -> Needle {
+    Needle {
+        role: "",
+        text,
+        present: true,
+    }
+}
+
+pub const fn has_role(role: &'static str, text: &'static str) -> Needle {
+    Needle {
+        role,
+        text,
+        present: true,
+    }
+}
+
+const fn lacks(text: &'static str) -> Needle {
+    Needle {
+        role: "",
+        text,
+        present: false,
+    }
+}
+
+/// True when every needle of `marker` holds on `s`.
+pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
+    marker.iter().all(|n| {
+        let found = s.nodes.iter().any(|x| {
+            (n.role.is_empty() || x.role == n.role)
+                && (x.label == n.text
+                    || x.value.as_deref() == Some(n.text)
+                    || x.placeholder.as_deref() == Some(n.text))
+        }) || (n.role.is_empty() && s.texts.iter().any(|t| t.text == n.text));
+        found == n.present
+    })
+}
+
 pub struct Screen {
     pub name: &'static str,
     /// A fixture of `ui_drive/fixtures.rs` (`demo`, `helpers`), or `NO_PROJECT`.
@@ -35,9 +84,12 @@ pub struct Screen {
     pub open: fn(&mut H),
     /// Step lines (`ui_drive/steps.rs`) run after `open`, for a menu or popup a click opens.
     pub steps: &'static [&'static str],
-    /// A label or text the screen shows and its fixture's window did not show before `open` (for `NO_PROJECT`, one a
-    /// window with a project open does not show).
-    pub shows: &'static str,
+    /// What only this screen shows. It must not hold before `open` or, with `steps`, before the steps, and no other
+    /// entry's screen may satisfy it.
+    pub marker: &'static [Needle],
+    /// A menu or popup: reopened at each size, because a resize can close it. A stable screen is opened once and
+    /// resized.
+    pub transient: bool,
 }
 
 fn nothing(_: &mut H) {}
@@ -79,7 +131,8 @@ pub const SCREENS: &[Screen] = &[
         fixture: NO_PROJECT,
         open: nothing,
         steps: &[],
-        shows: "Open a folder of source textures to begin.",
+        marker: &[has("Open a folder of source textures to begin.")],
+        transient: false,
     },
     Screen {
         name: "main window with problems",
@@ -89,56 +142,56 @@ pub const SCREENS: &[Screen] = &[
             model(h).toggle_tab(BottomTab::Problems);
         },
         steps: &[],
-        shows: "Kinds ▾",
+        marker: &[has("Kinds ▾"), has("← architecture/stone/stonewall")],
+        transient: false,
     },
     Screen {
         name: "export to menu",
         fixture: "demo",
         open: nothing,
         steps: &[r#"{"op":"click","at":{"starts":"Export to","role":"Button"}}"#],
-        shows: "Also export as Vanilla",
+        marker: &[has("Re-encode every output")],
+        transient: true,
     },
     Screen {
         name: "settings tab",
         fixture: "demo",
         open: |h| model(h).open_settings_tab(),
         steps: &[],
-        shows: "Close Settings",
-    },
-    Screen {
-        name: "problems tab",
-        fixture: "demo",
-        open: |h| model(h).toggle_tab(BottomTab::Problems),
-        steps: &[],
-        shows: "Kinds ▾",
+        marker: CLOSE_SETTINGS,
+        transient: false,
     },
     Screen {
         name: "tile menu",
         fixture: "demo",
         open: |h| model(h).select_item("architecture/stone/stonewall.png"),
         steps: &[r#"{"op":"right_click","at":{"label":"stonewall.png","index":1}}"#],
-        shows: "Reset all settings for 1 selected…",
+        marker: &[has("Copy settings from stonewall.png to 0 selected…")],
+        transient: true,
     },
     Screen {
         name: "texture panel",
         fixture: "demo",
         open: |h| model(h).select_item("plants/fern.png"),
         steps: &[],
-        shows: "Alpha threshold",
+        marker: &[has("← plants/fern"), has("Alpha threshold")],
+        transient: false,
     },
     Screen {
         name: "set card menu",
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/stonewall"),
         steps: &[r#"{"op":"right_click","at":{"label":"architecture/stone/stonewall","index":0}}"#],
-        shows: "Fill from names…",
+        marker: &[has("Fill from names…")],
+        transient: true,
     },
     Screen {
         name: "review tab",
         fixture: "demo",
         open: |h| model(h).open_review(),
         steps: &[],
-        shows: "What will be written",
+        marker: &[has("What will be written")],
+        transient: false,
     },
     Screen {
         name: "presets tab",
@@ -150,14 +203,18 @@ pub const SCREENS: &[Screen] = &[
             m.presets_model().select(&id);
         },
         steps: &[],
-        shows: "Built-in presets are read-only",
+        marker: &[has(
+            "Built-in presets are read-only: Duplicate makes an editable copy.",
+        )],
+        transient: false,
     },
     Screen {
         name: "json editor",
         fixture: "demo",
         open: |h| model(h).open_json_editor(),
         steps: &[],
-        shows: "+ Add a delete section",
+        marker: &[has("+ Add a delete section")],
+        transient: false,
     },
     Screen {
         name: "rename inputs dialog",
@@ -169,28 +226,38 @@ pub const SCREENS: &[Screen] = &[
             m.open_rename(RenameMode::Inputs);
         },
         steps: &[],
-        shows: "Rename 2 inputs",
+        marker: &[has("Rename 2 inputs")],
+        transient: false,
     },
     Screen {
         name: "marker dialog",
         fixture: "demo",
         open: |h| model(h).open_marker_dialog(),
         steps: &[],
-        shows: "F0 = (code/255)^1.6",
+        marker: &[has("F0 = (code/255)^1.6")],
+        transient: false,
     },
     Screen {
         name: "set editor",
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/stonewall"),
         steps: &[],
-        shows: "CS PBR records",
+        marker: &[
+            has("textures/architecture/stone/stonewall"),
+            lacks("Fill from names…"),
+        ],
+        transient: false,
     },
     Screen {
         name: "set editor slot menu",
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/cobble"),
         steps: &[r#"{"op":"right_click","at":{"label":"RMAOS","index":1}}"#],
-        shows: "Pin this slot (always use this file)",
+        marker: &[
+            has("textures/architecture/stone/cobble"),
+            has("Slot 6: RMAOS"),
+        ],
+        transient: true,
     },
     Screen {
         name: "also export tab",
@@ -201,49 +268,63 @@ pub const SCREENS: &[Screen] = &[
             sdc_gui::ui::set_editor::show_also_tab(&h.ctx);
         },
         steps: &[],
-        shows: "Skip vanilla/CM for this set",
+        marker: &[
+            has("textures/architecture/stone/cobble"),
+            has("Skip vanilla/CM for this set"),
+        ],
+        transient: false,
     },
     Screen {
         name: "pgp material tab",
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/cobble"),
         steps: &[],
-        shows: "Match on this",
+        marker: &[
+            has("textures/architecture/stone/cobble"),
+            lacks("Skip vanilla/CM for this set"),
+            lacks("Slot 6: RMAOS"),
+        ],
+        transient: false,
     },
     Screen {
         name: "helper panel",
         fixture: "helpers",
         open: |h| model(h).select_item("props/crate_roughness.png"),
         steps: &[],
-        shows: "crate_roughness.png",
+        marker: &[has("← props/crate"), has_role("ComboBox", "Helper role")],
+        transient: false,
     },
     Screen {
         name: "meshes view",
         fixture: "demo",
         open: meshes_view,
         steps: &[],
-        shows: "5 of 5 NIFs",
+        marker: &[has("5 of 5 NIFs")],
+        transient: false,
     },
     Screen {
         name: "mo2 popup",
         fixture: "demo",
         open: nothing,
         steps: &[r#"{"op":"click","at":{"label":"MO2…"}}"#],
-        shows: "Scan a folder…",
+        marker: &[has("Scan a folder…")],
+        transient: true,
     },
     Screen {
         name: "skin card",
         fixture: "demo",
         open: |h| material_tab(h, "actors/body", engine::shader::Shader::AdvancedSkin),
         steps: &[],
-        shows: "Advanced Skin",
+        marker: &[has("textures/actors/body"), has("RFAOS, empty")],
+        transient: false,
     },
     Screen {
         name: "landscape card",
         fixture: "demo",
         open: |h| material_tab(h, "pbr/metal", engine::shader::Shader::PbrLandscape),
         steps: &[],
-        shows: "Height _p",
+        marker: &[has("textures/pbr/metal"), has("PBR Landscape")],
+        transient: false,
     },
 ];
 
@@ -315,18 +396,22 @@ fn meshes_view(h: &mut H) {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
 }
 
-/// The screen opened on a fresh temp folder, settled at `size`. Panics when `shows` was already on the
-/// window before `open` (it would not tell the screen from the window under it), or is not on it afterwards (the entry
-/// opened nothing). Keep the `TempDir` alive as long as the harness: dropping it deletes the project folder the app
-/// reads.
-pub fn enter(s: &Screen, size: Vec2) -> (tempfile::TempDir, H) {
+fn at_text(size: Vec2) -> String {
+    format!("{}x{}", size.x, size.y)
+}
+
+/// The screen opened on a fresh temp folder and settled at `size`. `Err` (screen and size included by the caller)
+/// when the window or a step does not go idle, when the marker already holds before the entry opens anything or
+/// before its step lines run, or when it does not hold afterwards. Keep the `TempDir` alive as long as the harness:
+/// dropping it deletes the project folder the app reads.
+pub fn enter(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
     crate::app_data();
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = if s.fixture == NO_PROJECT {
         let m = AppModel::new(GuiSettings::default(), None, crate::support::session());
         let picker = Arc::new(fixtures::DriverPicker::default());
         m.picker.set_backend(picker.clone());
-        let mut h = crate::app_harness::plain_harness(m);
+        let mut h = plain_harness(m);
         settle(&mut h, 6);
         let run = fixtures::Run {
             dir: d.path().to_path_buf(),
@@ -334,88 +419,162 @@ pub fn enter(s: &Screen, size: Vec2) -> (tempfile::TempDir, H) {
         };
         (h, run)
     } else {
-        fixtures::start(s.fixture, d.path(), false).unwrap()
+        fixtures::start(s.fixture, d.path(), false)?
     };
     h.set_size(size);
-    settle(&mut h, 2);
-    assert!(
-        s.fixture == NO_PROJECT || !shows(&snapshot(&h), s.shows),
-        "screen {:?}: {:?} is already on the window before the entry opens anything, so it cannot tell the screen from the window under it; choose a text only the screen shows",
-        s.name,
-        s.shows
-    );
+    if !settle(&mut h, 2) {
+        return Err("the window did not go idle after the fixture opened".into());
+    }
+    // the start screen is its own window: another entry's pairwise check covers it
+    if s.fixture != NO_PROJECT && holds(&snapshot(&h), s.marker) {
+        return Err("the marker already holds before the entry opens anything, so it cannot tell the screen from the window under it; choose a marker only the screen satisfies".into());
+    }
     (s.open)(&mut h);
-    settle(&mut h, 4);
-    crate::play(&mut h, &run, s.steps, 0);
-    settle(&mut h, 4);
-    assert!(
-        shows(&snapshot(&h), s.shows),
-        "screen {:?}: its entry opened nothing that shows {:?}; fix the entry's `open` or `steps`, or its `shows`",
-        s.name,
-        s.shows
-    );
-    (d, h)
+    if !settle(&mut h, 4) {
+        return Err("the window did not go idle after `open`".into());
+    }
+    if !s.steps.is_empty() && holds(&snapshot(&h), s.marker) {
+        return Err("the marker already holds before the step lines run, so the steps are not what shows it; choose a marker only the last step satisfies".into());
+    }
+    let entered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        crate::play(&mut h, &run, s.steps, 0)
+    }));
+    if let Err(e) = entered {
+        let why = e
+            .downcast_ref::<String>()
+            .cloned()
+            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+            .unwrap_or_default();
+        return Err(format!("a step line failed: {why}"));
+    }
+    if !settle(&mut h, 4) {
+        return Err("the window did not go idle after the step lines".into());
+    }
+    if !holds(&snapshot(&h), s.marker) {
+        return Err("the entry opened nothing that satisfies its marker; fix the entry's `open` or `steps`, or its `marker`".into());
+    }
+    Ok((d, h))
 }
 
-/// True when a node's name, value or placeholder, or a painted text, holds `needle`.
-pub fn shows(s: &Snapshot, needle: &str) -> bool {
-    s.nodes.iter().any(|n| {
-        n.label.contains(needle)
-            || n.value.as_deref().is_some_and(|v| v.contains(needle))
-            || n.placeholder.as_deref().is_some_and(|p| p.contains(needle))
-    }) || s.texts.iter().any(|t| t.text.contains(needle))
+/// A screen of `SCREENS` as an entry of the walk.
+pub struct ScreenEntry {
+    screen: &'static Screen,
+    open: Option<(tempfile::TempDir, H)>,
 }
 
-/// Every entry opens a screen that shows its text (`enter` asserts it), and the names are distinct.
+impl Entry for ScreenEntry {
+    fn name(&self) -> &str {
+        self.screen.name
+    }
+
+    fn marker(&self) -> &'static [Needle] {
+        self.screen.marker
+    }
+
+    fn at(&mut self, size: Vec2) -> Result<Snapshot, String> {
+        if !self.screen.transient {
+            if let Some((_, h)) = &mut self.open {
+                h.set_size(size);
+                if !settle(h, 2) {
+                    return Err("the window did not go idle after the resize".into());
+                }
+                let snap = snapshot(h);
+                if !holds(&snap, self.screen.marker) {
+                    return Err(format!(
+                        "the screen no longer shows its marker after the resize to {}",
+                        at_text(size)
+                    ));
+                }
+                return Ok(snap);
+            }
+        }
+        // the old window and its folder go before the new ones are built
+        self.open = None;
+        let (d, h) = enter(self.screen, size)?;
+        let snap = snapshot(&h);
+        self.open = Some((d, h));
+        Ok(snap)
+    }
+}
+
+/// Every screen of `SCREENS`, each as one entry.
+pub fn entries() -> Vec<Box<dyn Entry>> {
+    SCREENS
+        .iter()
+        .map(|screen| Box::new(ScreenEntry { screen, open: None }) as Box<dyn Entry>)
+        .collect()
+}
+
 #[test]
-fn every_entry_opens_its_screen() {
+fn every_entry_has_its_own_name_and_a_marker() {
     let mut names: Vec<&str> = SCREENS.iter().map(|s| s.name).collect();
     names.sort();
     names.dedup();
     assert_eq!(names.len(), SCREENS.len(), "two entries share a name");
-    for s in SCREENS {
-        let _ = enter(s, SIZES[1]);
-    }
-}
-
-/// The start screen has no window under it to compare with; its text must not be on a window with a project open.
-#[test]
-fn the_start_screen_text_is_not_on_an_open_project() {
-    let start = SCREENS.iter().find(|s| s.fixture == NO_PROJECT).unwrap();
-    let d = tempfile::tempdir().unwrap();
-    crate::app_data();
-    let (h, _) = fixtures::start("demo", d.path(), false).unwrap();
-    assert!(!shows(&snapshot(&h), start.shows));
+    assert!(SCREENS.iter().all(|s| !s.marker.is_empty()));
+    assert!(SCREENS.iter().all(|s| s.marker.iter().any(|n| n.present)));
 }
 
 /// An entry that opens nothing fails.
 #[test]
-#[should_panic(expected = "its entry opened nothing")]
 fn an_entry_that_opens_nothing_fails() {
-    let _ = enter(
+    let e = enter(
         &Screen {
             name: "test-only empty entry",
             fixture: "demo",
             open: nothing,
             steps: &[],
-            shows: "Close Settings",
+            marker: CLOSE_SETTINGS,
+            transient: false,
         },
-        SIZES[1],
-    );
+        vec2_1280(),
+    )
+    .map(|_| ())
+    .expect_err("an entry that opens nothing is refused");
+    assert!(e.contains("opened nothing"), "{e}");
 }
 
-/// An entry whose text is on the window already fails.
+/// An entry whose marker is on the window already fails.
 #[test]
-#[should_panic(expected = "is already on the window")]
-fn an_entry_whose_text_is_already_on_the_window_fails() {
-    let _ = enter(
+fn an_entry_whose_marker_is_already_on_the_window_fails() {
+    let e = enter(
         &Screen {
             name: "test-only entry on the plain window",
             fixture: "demo",
             open: nothing,
             steps: &[],
-            shows: "Export to",
+            marker: SAVE_BUTTON,
+            transient: false,
         },
-        SIZES[1],
-    );
+        vec2_1280(),
+    )
+    .map(|_| ())
+    .expect_err("a marker on the plain window is refused");
+    assert!(e.contains("already holds before the entry"), "{e}");
+}
+
+/// A multi-step entry whose marker is there before the last step fails.
+#[test]
+fn an_entry_whose_marker_is_there_before_its_last_step_fails() {
+    let e = enter(
+        &Screen {
+            name: "test-only entry whose open already shows it",
+            fixture: "demo",
+            open: |h| model(h).open_settings_tab(),
+            steps: &[r#"{"op":"settle"}"#],
+            marker: CLOSE_SETTINGS,
+            transient: false,
+        },
+        vec2_1280(),
+    )
+    .map(|_| ())
+    .expect_err("a marker present before the last step is refused");
+    assert!(e.contains("before the step lines run"), "{e}");
+}
+
+const CLOSE_SETTINGS: &[Needle] = &[has("Close Settings")];
+const SAVE_BUTTON: &[Needle] = &[has_role("Button", "Save")];
+
+fn vec2_1280() -> Vec2 {
+    eframe::egui::vec2(1280.0, 800.0)
 }

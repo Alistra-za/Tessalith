@@ -208,7 +208,9 @@ pub fn app_step(h: &mut H, run: &Run, step: &Step) -> Result<Option<String>, Str
             }
             run.picker.queue(run.dir.join(p));
         }
-        Step::Settle { frames } => settle(h, *frames),
+        Step::Settle { frames } => {
+            settle(h, *frames);
+        }
         Step::Expect { .. } | Step::Check { .. } => return evaluate(h, step),
         other => {
             ui_step(h, other)?;
