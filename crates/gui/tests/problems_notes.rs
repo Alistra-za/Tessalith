@@ -507,7 +507,14 @@ fn a_set_with_no_notes_shows_no_notes_pill() {
     m.open_problems(Some(ProblemsFilter::Set(key)));
     let mut h = harness(m);
     h.run();
-    assert_eq!(h.query_all_by_label("Notes (1)").count(), 0, "no pill");
+    // Final fix wave B2: no pill of any count; the tab ("Problems · Notes (1)") is the one label that names it.
+    use sdc_gui::ui::problems::NOTES_PILL;
+    let pills: Vec<String> = h
+        .query_all_by_label_contains(&format!("{NOTES_PILL} ("))
+        .filter_map(|n| n.accesskit_node().label())
+        .filter(|l| l.starts_with(NOTES_PILL))
+        .collect();
+    assert!(pills.is_empty(), "no pill: {pills:?}");
     h.get_by_label("No problems");
 }
 
@@ -1600,10 +1607,10 @@ fn every_markable_row_has_its_mark_and_no_other_row_has_one() {
     );
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(
-        problems(&m)
-            .iter()
-            .any(|p| p.carried && p.level == sdc_gui::model::bottom::Level::Warning),
-        "precondition: a pitfall row"
+        problems(&m).iter().any(|p| p.carried
+            && p.level == sdc_gui::model::bottom::Level::Warning
+            && p.text.contains("Delete wins")),
+        "precondition: the Delete-wins pitfall row"
     );
     check(&m, "pbr_opened with a pitfall");
     let (_d, mut m) = with_warnings(&[
@@ -1749,13 +1756,15 @@ fn a_stored_key_never_unblocks_a_row_that_is_not_markable() {
     let doc = m.sets_doc.as_mut().unwrap();
     for p in &rows {
         let kind = match (&p.at, p.code) {
-            (At::Nif(_), _) => "NIF-WARNING",
+            (At::Nif(_), _) => sdc_gui::model::bottom::kind::NIF_WARNING,
             (_, Some(c)) => c.as_str(),
             _ => "",
         };
         doc.set_intended(&intended_key(&p.at, kind, &p.shown()), true);
     }
     assert_eq!(doc.intended().len(), rows.len(), "every key stored");
+    // Final fix wave B4: drop the cached rows, so the checks below read rows built with the stored keys.
+    m.invalidate_views();
     let list = filtered(&m, None);
     for p in pick(&m) {
         assert!(!p.intended && p.mark.is_none(), "{:?}", p.text);
@@ -2351,8 +2360,9 @@ fn a_missing_map_row_offers_change_shader() {
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
     assert_eq!(rock01(h.state()).shader_choice, Some(first));
-    // Fix round 1: the menu marks the set's shader, as the sets column's combo does, and picking it again is no edit.
-    // The pick planned again, which replaced the injected warning.
+    // Fix round 1: the menu marks the set's shader, as the sets column's combo does. The pick planned again, which
+    // replaced the injected warning. Final fix wave B5: no "picking it again is no edit" check, because `edit_docs`
+    // records nothing for an unchanged edit, so it could not fail; the menu's guard is `(!on).then_some(s)`.
     inject_set(
         h.state_mut(),
         &[Warning::new(Code::ShaderMissingMap, "no _n")
@@ -2376,16 +2386,6 @@ fn a_missing_map_row_offers_change_shader() {
         .find(|s| *s != first)
         .expect("precondition: a second shader");
     assert_eq!(toggled(&h, other), Some(egui::accesskit::Toggled::False));
-    let pushes = h.state().history.pushes;
-    nearest(&h, first.label(), at).click();
-    h.run();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        h.state().history.pushes,
-        pushes,
-        "the shader it has: no undo step"
-    );
 }
 
 /// Review E10: each code's row carries the fix the table gives it, and SHADER-EXTRA-MAP's member is matched by the
@@ -3330,7 +3330,8 @@ fn focused_labels<S>(h: &Harness<'_, S>) -> Vec<String> {
 }
 
 /// rock01 with its Normal member gone and the SHADER-MISSING-MAP row for it (`a_missing_map_reason_…`), and the
-/// reason's button name.
+/// reason's button name. Final fix wave B10: no set in this fixture shares rock01's normal, so removing the member
+/// leaves the slot empty; a fixture with such a set would fill it from the shared member and lose the reason.
 fn missing_normal() -> (tempfile::TempDir, AppModel, String) {
     use engine::codes::{Code, Warning};
     use sdc_gui::model::sets::SlotKind;
@@ -3430,7 +3431,7 @@ fn a_slot_reason_clicked_in_3d_shows_the_slot_in_2d() {
 fn a_slot_reason_with_no_slot_row_opens_its_problems_row() {
     use engine::codes::{Code, Warning};
     use sdc_gui::model::bottom::{set_reasons, ReasonGo};
-    use sdc_gui::model::sets::{shared_cells, slot_row, SlotKind};
+    use sdc_gui::model::sets::{editor_cells, SlotKind};
     assert!(
         baseline().1,
         "precondition: rock01 is ready with no injected warning"
@@ -3438,8 +3439,9 @@ fn a_slot_reason_with_no_slot_row_opens_its_problems_row() {
     let (_d, mut m) = with_set_warnings(&[Warning::new(Code::ShaderMissingMap, "no _g")
         .with_data(serde_json::json!({"map": "_g", "shader": "pbr"}))]);
     let v = rock01(&m);
+    // Final fix wave B6: the rows the editor draws, the list `set_reasons` decides by.
     assert!(
-        !shared_cells(&v, slot_row(v.shader.as_ref(), &v.slots))
+        !editor_cells(&v)
             .iter()
             .any(|c| c.kind.shares_card(SlotKind::Emissive) || c.kind == SlotKind::Emissive),
         "precondition: the editor draws no slot 3 row"
@@ -4019,6 +4021,12 @@ fn after_rebuild_z_the_exported_row_is_a_queued_note() {
     assert_eq!(r.level, Level::Queued);
     assert_eq!(r.text, QUEUED_Z);
     assert!(r.is_note() && r.fix.is_none() && r.second_fix.is_none() && r.mark.is_none());
+    // Final fix wave B7: the note takes no "ready" away, and the Export dot's count is the count without the row.
+    assert!(
+        !sdc_gui::model::bottom::counts_as_ready_problem(&r),
+        "{r:?}"
+    );
+    let ready = sdc_gui::model::bottom::flagged(h.state()).ready_rows;
     // The queued note is no reason on the set editor's status line (a File row never is one): x_n.png's set reads
     // "Not ready: no Diffuse (Assign…)", from its missing diffuse alone.
     let v = sdc_gui::model::sets::set_views(h.state())
@@ -4034,6 +4042,19 @@ fn after_rebuild_z_the_exported_row_is_a_queued_note() {
     // Exact: the row's own name ("<file>: <sentence>", Note FB9) also contains the sentence.
     h.get_by_label(QUEUED_Z);
     assert!(h.query_by_label(X_N_Z).is_none());
+    // B7: the same state with the row taken out has the same count.
+    let m = h.state_mut();
+    for row in &mut m.export.rows {
+        row.warnings
+            .retain(|w| w.code != engine::codes::Code::ChanNormalLength);
+    }
+    m.invalidate_views();
+    assert!(exported_z_row(m).is_none(), "precondition: no row");
+    assert_eq!(
+        sdc_gui::model::bottom::flagged(m).ready_rows,
+        ready,
+        "the queued note changes no ready count"
+    );
 }
 
 /// Review E25: without Rebuild Z on, the last export's short normal stays a warning with the Rebuild Z fix (the live
@@ -4068,6 +4089,8 @@ fn a_hidden_kind_never_hides_the_queued_z_note() {
     h.run();
     click_and_settle(&mut h, X_N_Z);
     // Kinds lists no CHAN-NORMAL-LENGTH once the only row is queued, so the kind is hidden as an earlier choice would.
+    // The order does not matter: `is_hidden` reads the row and the hidden kinds as they are now, so hiding before
+    // the press gives the same row.
     h.state_mut().set_kind_hidden(Code::ChanNormalLength, true);
     let r = exported_z_row(h.state()).expect("the last export's row");
     assert!(!is_hidden(&r, &h.state().hidden_kinds()));
@@ -4205,27 +4228,38 @@ fn a_row_whose_button_changes_follows_the_new_width() {
 }
 
 /// Review E29: the row's width comes from the last frame, so the list must settle (`run` panics if it never goes idle),
-/// wide and at 1280×800 with a row longer than the panel, whose button stays inside it.
+/// wide and at 1280×800 with a row longer than the panel, whose button stays inside it. Final fix wave B8: both
+/// halves assert, and once settled a frame is exactly one step of one pass: the row measures itself once, with no
+/// repaint and no discarded pass after that.
 #[test]
 fn a_row_sized_from_the_last_frame_settles_wide_and_narrow() {
     use engine::codes::{Code, Warning};
+    let settles = |m: AppModel, size: egui::Vec2| {
+        let mut h = harness_at(m, size);
+        h.run();
+        let passes = h.ctx.cumulative_pass_nr();
+        assert_eq!(h.run(), 1, "{size:?}: a settled frame asks for no repaint");
+        assert_eq!(
+            h.ctx.cumulative_pass_nr() - passes,
+            1,
+            "{size:?}: a settled frame discards no pass"
+        );
+        // Against the window, not the panel: a row wider than the window would widen the panel's rect with it.
+        let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "bottom").expect("the bottom panel");
+        let mark = h.get_by_label_contains("Mark as intended: ").rect();
+        assert!(
+            mark.right() <= panel.right().min(size.x) && mark.left() >= panel.left(),
+            "{size:?}: Mark at {mark:?} is outside the panel {panel:?} or the window"
+        );
+    };
     let (_d, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
     m.open_problems(None);
-    let mut h = harness_at(m, egui::vec2(1600.0, 900.0));
-    h.run();
+    settles(m, egui::vec2(1600.0, 900.0));
     let (_d2, mut m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
     m.items[0].key = format!("t/{}", "a_very_long_folder_name/".repeat(40));
     m.invalidate_views();
     m.open_problems(None);
-    let mut h = harness_at(m, egui::vec2(1280.0, 800.0));
-    h.run();
-    // Against the window, not the panel: a row wider than the window would widen the panel's rect with it.
-    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "bottom").expect("the bottom panel");
-    let mark = h.get_by_label_contains("Mark as intended: ").rect();
-    assert!(
-        mark.right() <= panel.right().min(1280.0) && mark.left() >= panel.left(),
-        "Mark at {mark:?} is outside the panel {panel:?} or the window"
-    );
+    settles(m, egui::vec2(1280.0, 800.0));
 }
 
 /// Final fix wave A1: a row listed for the first time has its buttons at their final x on its first painted frame:
@@ -4423,12 +4457,52 @@ fn one_problem_reads_singular_in_the_export_hover() {
     let (_d, m) = only(&[Warning::new(Code::ChanNotGray, "not grey")]);
     let t = sdc_gui::ui::header::export_hover(&m);
     assert!(t.ends_with(", 1 problem"), "{t}");
+}
+
+/// Final fix wave B9: the 3D Details footer's notes header counts through `counted`: "1 note", "2 notes".
+#[test]
+fn the_3d_notes_header_reads_singular_and_plural() {
+    use sdc_gui::model::viewport3d::Viewport3d;
+    for (n, header) in [(1, "1 note"), (2, "2 notes")] {
+        let mut v = Viewport3d::new();
+        v.report = Some(render3d::LoadReport {
+            warnings: (0..n).map(|i| format!("note {i}")).collect(),
+            ..Default::default()
+        });
+        let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .with_size(egui::vec2(600.0, 300.0))
+            .build_ui_state(
+                |ui, v: &mut Viewport3d| sdc_gui::ui::viewport3d::details(ui, v),
+                v,
+            );
+        h.run();
+        h.get_by_label(header);
+    }
+}
+
+/// Final fix wave B3: the kinds rows with no code are marked under are stored in users' `sdc-project.toml`, so
+/// each string is pinned; a changed one would orphan every mark stored under it.
+#[test]
+fn the_stored_mark_kinds_never_change() {
+    use sdc_gui::model::bottom::kind;
     assert_eq!(
-        sdc_gui::model::code_text::counted(1, "note", "notes"),
-        "1 note"
+        kind::ALL,
+        [
+            "NIF-WARNING",
+            "PGP-PITFALL",
+            "SET-MISSING-ENTRY",
+            "RECORD-CHANGED",
+            "XPMF-SKIP",
+            "SKIN-SKIP",
+            "READ-ONLY-FLAG",
+            "CFG-PRESET-SKIPPED",
+        ]
     );
     assert_eq!(
-        sdc_gui::model::code_text::counted(0, "message", "messages"),
-        "0 messages"
+        kind::CFG_PRESET_SKIPPED,
+        engine::codes::Code::CfgPresetSkipped.as_str()
     );
 }

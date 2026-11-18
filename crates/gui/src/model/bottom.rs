@@ -210,6 +210,35 @@ fn job_at<'m>(m: &'m AppModel, at: &At) -> Option<&'m engine::policy::ResolvedJo
     }
 }
 
+/// Review E25: the queued note of an exported short normal with Rebuild Z now on, and the Rebuild Z button's hover
+/// once it is on (final fix wave C3: one string for both).
+pub const QUEUED_REBUILD_Z: &str = "Rebuild Z is on for this file: export again to rewrite it";
+
+/// Final fix wave B3: the kinds a row with no code of its own is marked under (`[project] intended`'s `code` in
+/// `sdc-project.toml`). They are stored in users' project files: a changed string orphans their marks.
+pub mod kind {
+    pub const NIF_WARNING: &str = "NIF-WARNING";
+    pub const PGP_PITFALL: &str = "PGP-PITFALL";
+    pub const SET_MISSING_ENTRY: &str = "SET-MISSING-ENTRY";
+    pub const RECORD_CHANGED: &str = "RECORD-CHANGED";
+    pub const XPMF_SKIP: &str = "XPMF-SKIP";
+    pub const SKIN_SKIP: &str = "SKIN-SKIP";
+    pub const READ_ONLY_FLAG: &str = "READ-ONLY-FLAG";
+    /// A skipped user preset's rows; the same string as the engine's `Code::CfgPresetSkipped`.
+    pub const CFG_PRESET_SKIPPED: &str = "CFG-PRESET-SKIPPED";
+    /// Every kind above.
+    pub const ALL: [&str; 8] = [
+        NIF_WARNING,
+        PGP_PITFALL,
+        SET_MISSING_ENTRY,
+        RECORD_CHANGED,
+        XPMF_SKIP,
+        SKIN_SKIP,
+        READ_ONLY_FLAG,
+        CFG_PRESET_SKIPPED,
+    ];
+}
+
 /// Final fix wave A6: the line a hover puts before the warnings and check results marked as intended, which it lists
 /// after the others (the tile, the Files row and the card's ⓘ).
 pub const MARKED_LINE: &str = "Marked as intended:";
@@ -736,7 +765,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     fix: Some(Fix::ShowNifTab(n.path.clone(), n.tab, n.field)),
                     ..row(level, At::Nif(n.path.clone()), n.text.clone(), None)
                 };
-                kinded(p, "NIF-WARNING")
+                kinded(p, kind::NIF_WARNING)
             })
     };
     out.extend(nif_rows(NifLevel::Blocks, Level::Blocks));
@@ -812,7 +841,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             carried: true,
             ..row(Level::Warning, at, a.text, None)
         };
-        out.push(kinded(p, "PGP-PITFALL"));
+        out.push(kinded(p, kind::PGP_PITFALL));
     }
     for i in m
         .items
@@ -906,7 +935,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 fix: Some(Fix::RemoveMissing(miss.clone())),
                 ..row(Level::Warning, set_at(&v.key, &v.id), text, None)
             };
-            out.push(kinded(p, "SET-MISSING-ENTRY"));
+            out.push(kinded(p, kind::SET_MISSING_ENTRY));
         }
     }
     // Note HG: a mapped set whose record's winning copy now names other paths than the stored ones.
@@ -924,7 +953,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     None,
                 )
             };
-            out.push(kinded(p, "RECORD-CHANGED"));
+            out.push(kinded(p, kind::RECORD_CHANGED));
         }
     }
     // Note GI (X4): an XPMF pbr profile's exact EDID with no PBRMaterialObjects JSON from this project.
@@ -938,7 +967,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 None,
             )
         };
-        out.push(kinded(p, "XPMF-SKIP"));
+        out.push(kinded(p, kind::XPMF_SKIP));
     }
     // Advanced skin: a set that writes no `.csskin.json`, or leaves a texture out of it.
     for (id, key, why) in super::cs_skin_json::skin_json_plan(m).1 {
@@ -959,7 +988,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         };
         out.push(kinded(
             row(Level::Warning, set_at(&key, &id), text, None),
-            "SKIN-SKIP",
+            kind::SKIN_SKIP,
         ));
     }
     // Note FC3 (Y4): an entry of the folder the plan could not read, with its folder to open.
@@ -981,14 +1010,14 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                 None,
             )
         };
-        out.push(kinded(flag, "READ-ONLY-FLAG"));
+        out.push(kinded(flag, kind::READ_ONLY_FLAG));
     }
     // Note FC10 (T8): a user preset skipped because another preset already declares its suffix aliases. Note FC14:
     // the skipped one is whichever loads second, the original or its copy, so the row names both. Ruling FR-b: any
     // other skipped file gets a row with its reason and Open folder.
     for (file, reason) in &m.skipped_user_presets {
         // Review E2 (planner's table): marked under the engine code these rows stand for.
-        let skipped = Code::CfgPresetSkipped.as_str();
+        let skipped = kind::CFG_PRESET_SKIPPED;
         if let Some((id, other)) = alias_clash(reason) {
             let p = Problem {
                 fix: Some(Fix::RemoveAliases(PathBuf::from(file), id.to_string())),
@@ -1097,8 +1126,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                     .and_then(|i| i.job.as_ref())
                     .is_some_and(|j| j.profile.channels.reconstruct_z);
                 if w.code == Code::ChanNormalLength && rebuilt {
-                    let text =
-                        "Rebuild Z is on for this file: export again to rewrite it".to_string();
+                    let text = QUEUED_REBUILD_Z.to_string();
                     out.push(row(Level::Queued, at, text, Some(w.code)));
                     continue;
                 }
@@ -1384,9 +1412,8 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
-    let worklist = |keep: &dyn Fn(&Problem) -> bool| worklist(&all, keep);
     Arc::new(match f {
-        None => worklist(&|_| true),
+        None => worklist(&all, &|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
         Some(ProblemsFilter::SetNotes(k)) => {
             let members = set_members(m, k);
@@ -1405,7 +1432,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         }
         Some(ProblemsFilter::Set(k)) => {
             let members = set_members(m, k);
-            worklist(&|p| in_set(p, k, &members))
+            worklist(&all, &|p| in_set(p, k, &members))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
             let members = set_members(m, k);

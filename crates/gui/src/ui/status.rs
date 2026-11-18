@@ -50,10 +50,14 @@ impl Status {
     }
 }
 
-/// An 8 px filled circle in the status colour.
+/// The width and height of `dot` (the Problems row measures its lead with it).
+pub const DOT_SIZE: f32 = 8.0;
+
+/// A `DOT_SIZE` filled circle in the status colour.
 pub fn dot(ui: &mut egui::Ui, s: Status) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(8.0), egui::Sense::hover());
-    ui.painter().circle_filled(rect.center(), 4.0, s.color(ui));
+    let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(DOT_SIZE), egui::Sense::hover());
+    ui.painter()
+        .circle_filled(rect.center(), DOT_SIZE / 2.0, s.color(ui));
     r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, s.label()));
     r
 }

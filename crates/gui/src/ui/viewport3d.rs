@@ -1,5 +1,6 @@
 //! The 3D panel of the Meshes view (plan B Task B8): draws `Viewport3d`, turns drag / scroll / double-click into
 //! orbit changes and uploads a new frame into an egui texture when its id changes (P0 CPU path).
+use crate::model::code_text::counted;
 use crate::model::meshes::LE_WARNING;
 use crate::model::viewport3d::{
     off_line, Clock, Look, V3State, Viewport3d, DEFERRED_LABEL, FEATURES_LABEL, FRAME_LABEL,
@@ -194,17 +195,13 @@ pub fn details(ui: &mut egui::Ui, v: &mut Viewport3d) {
     }
     footer(ui, v);
     if let Some(r) = v.report.as_ref().filter(|r| !r.warnings.is_empty()) {
-        egui::CollapsingHeader::new(crate::model::code_text::counted(
-            r.warnings.len(),
-            "note",
-            "notes",
-        ))
-        .id_salt("viewport3d-warnings")
-        .show(ui, |ui| {
-            for w in r.warnings.iter().take(MAX_LISTED) {
-                ui.weak(w);
-            }
-        });
+        egui::CollapsingHeader::new(counted(r.warnings.len(), "note", "notes"))
+            .id_salt("viewport3d-warnings")
+            .show(ui, |ui| {
+                for w in r.warnings.iter().take(MAX_LISTED) {
+                    ui.weak(w);
+                }
+            });
     }
 }
 

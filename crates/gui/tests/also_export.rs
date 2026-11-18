@@ -358,7 +358,10 @@ fn the_count_is_the_pbr_folders_and_the_other_folders_are_named() {
         );
         let hover = sdc_gui::ui::header::export_hover(&m);
         assert!(
-            hover.starts_with(&format!("{counted} files + {named}, ")),
+            hover.starts_with(&format!(
+                "{} + {named}, ",
+                sdc_gui::model::code_text::counted(counted, "file", "files")
+            )),
             "{hover}"
         );
         m.export_from_review();
@@ -1346,7 +1349,11 @@ fn the_header_export_hover_names_the_folders() {
     assert!(!plain.contains("folders"), "{plain}");
     tick(&mut m, AlsoTarget::Cm);
     let t = sdc_gui::ui::header::export_hover(&m);
-    assert!(t.contains(" files + Vanilla and CM folders, "), "{t}");
+    let files = sdc_gui::model::code_text::counted(m.export_files(), "file", "files");
+    assert!(
+        t.contains(&format!("{files} + Vanilla and CM folders, ")),
+        "{t}"
+    );
 }
 
 // ---- Task 12 fix round 1 ----
