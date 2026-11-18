@@ -22,8 +22,9 @@ use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    card_title, editor_cells, is_json_set, shows_json_panel, slot_clash_text, slot_of, views,
-    SetView, SlotCell, SlotFill, SlotKind, DETAIL_NORMAL_HOVER,
+    card_title, editor_cells, is_json_set, shows_json_panel, slot_clash_text, slot_of, slot_shown,
+    views, SetView, SlotCell, SlotCommand, SlotFill, SlotKind, SlotLink, SlotShown,
+    DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
 use crate::pgp::prefix::{active_matches, lock_key, match_toggle, pgp_locked, slot_match_path};
@@ -82,6 +83,8 @@ enum Act {
     AskOriginal(String, u8),
     /// F3a Task 8: a slot menu pick.
     Slot(MenuAction),
+    /// Review E1: open the set a linked slot's file comes from (set id).
+    OpenSet(String),
     /// Item 17: files from Explorer dropped on this set's slot card.
     FileDrop(String, SlotKind),
     /// Note AO7: take a member out of the set (set id, item), from a clashing slot card.
@@ -352,6 +355,15 @@ pub fn draw(
             Act::Json(set, k, v) => model.set_json_value(&set, &k, v),
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
+            Act::OpenSet(id) => {
+                if let Some(key) = views(model)
+                    .iter()
+                    .find(|s| s.id == id)
+                    .map(|s| s.key.clone())
+                {
+                    model.select_set(&key);
+                }
+            }
             Act::FileDrop(set, slot) => file_drop(model, drops, &set, slot),
             Act::StopSharing(set, item) => {
                 if let Err(why) = model.stop_sharing(&set, &item) {
@@ -686,7 +698,11 @@ fn row(
         }
         _ => v.slot_label(slot, ""),
     };
+    // Review E1: what the exported JSON carries. A linked texture belongs to the other set, so a `Linked` row has no
+    // item: no thumbnail, format, alpha or status of its own, and no row to reveal.
+    let shown = slot_shown(v, slot);
     let (item_key, borrowed) = match fill {
+        _ if matches!(shown, SlotShown::Linked(_)) => (None, None),
         SlotFill::Own { item } => (Some(item.clone()), None),
         SlotFill::Borrowed { from, item } => (Some(item.clone()), Some(from.clone())),
         SlotFill::Empty => (None, None),
@@ -785,8 +801,9 @@ fn row(
     // both members under it.
     ui.vertical(|ui| {
         ui.set_width(file_w);
-        match item {
-            Some(i) => {
+        match (&shown, item) {
+            (SlotShown::Linked(link), _) => linked_cell(ui, model, v, slot, link, acts),
+            (_, Some(i)) => {
                 let size =
                     size.map(|e| format!("{}×{} · {}", e.width, e.height, human(e.file_bytes())));
                 let hover = match &size {
@@ -798,9 +815,12 @@ fn row(
                 if let Some(s) = size {
                     ui.add(egui::Label::new(egui::RichText::new(s).small().weak()).truncate());
                 }
+                if matches!(shown, SlotShown::Cleared { .. }) {
+                    cleared_cell(ui, v, slot, &i.name, acts);
+                }
             }
             // Note HG: a slot the set's record names that no set in the project writes counts as supplied.
-            None => match slot.slot_number().and_then(|n| v.record_supplied.get(&n)) {
+            (_, None) => match slot.slot_number().and_then(|n| v.record_supplied.get(&n)) {
                 Some(path) => {
                     let name = path.rsplit('/').next().unwrap_or(path);
                     ui.add(
@@ -829,7 +849,21 @@ fn row(
     let own_job = own.and_then(|i| i.job.as_ref().map(|j| (i, j)));
     let format_w = ui
         .vertical(|ui| {
-            if item.is_none() {
+            if let (SlotShown::Linked(_), Some(n)) = (&shown, slot.game_slot()) {
+                // Review E1: the link is what the slot gives; Unlink removes it (`slotN` back to the set's own).
+                let name = format!("Unlink {}", v.slot_label(slot, ""));
+                let r = ui
+                    .button("Unlink")
+                    .on_hover_text("Remove the link. The slot goes back to what this set gives.");
+                r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name.clone()));
+                if r.clicked() {
+                    acts.push(Act::Slot(MenuAction::Slot {
+                        set: v.id.clone(),
+                        n,
+                        cmd: SlotCommand::FromSet,
+                    }));
+                }
+            } else if item.is_none() {
                 // Review E4: salted by the row, so a status line reason can ask this button for focus.
                 let assign_id = row_id.with("assign");
                 let menu = ui
@@ -1008,6 +1042,92 @@ fn row(
     }
     super::row_reveal::on_row(ui, &v.key, slot, item_key.as_deref(), rect);
     [slot_w, THUMB, format_w, flags_w, status_w]
+}
+
+/// Review E1: the File cell of a slot the set's JSON entry fills with a path (`slotN`): the file, then the set it comes
+/// from (a button that opens it) or "set by path"; under it, each own file of the same card the link replaces.
+fn linked_cell(
+    ui: &mut egui::Ui,
+    model: &AppModel,
+    v: &SetView,
+    kind: SlotKind,
+    link: &SlotLink,
+    acts: &mut Vec<Act>,
+) {
+    let file = link.path.rsplit('\\').next().unwrap_or(&link.path);
+    let hover = format!("PGPatcher reads {} for this slot.", link.path);
+    ui.horizontal(|ui| match (&link.from, &link.from_short) {
+        (Some(from), Some(short)) => {
+            ui.add(egui::Label::new(egui::RichText::new(file).small()).truncate())
+                .on_hover_text(&hover);
+            ui.label(egui::RichText::new(" · ").small().weak());
+            let text = format!("from set {short}");
+            let r = ui
+                .add(egui::Link::new(egui::RichText::new(&text).small()))
+                .on_hover_text("Open the set this file comes from.");
+            let name = format!("Open set {short}");
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Link, true, name.clone()));
+            if r.clicked() {
+                acts.push(Act::OpenSet(from.clone()));
+            }
+        }
+        _ => {
+            ui.add(
+                egui::Label::new(egui::RichText::new(format!("{file} · set by path")).small())
+                    .truncate(),
+            )
+            .on_hover_text(&hover);
+        }
+    });
+    // An own `_f` under a link to a `_cnr` goes nowhere: the JSON's slot 7 is the link.
+    let n = kind.game_slot().unwrap_or_default();
+    for other in v
+        .slots
+        .keys()
+        .filter(|k| **k != kind && k.shares_card(kind))
+    {
+        if let SlotShown::Replaced { item, .. } = slot_shown(v, *other) {
+            let own = model.item(item).map_or_else(
+                || item.rsplit('/').next().unwrap_or(item).to_string(),
+                |i| i.name.clone(),
+            );
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("{own} is not written: slot {n} is linked."))
+                        .small()
+                        .weak(),
+                )
+                .truncate(),
+            )
+            .on_hover_text(format!(
+                "PGPatcher reads the linked file for slot {n}, so this set's {own} goes nowhere. Unlink to use it."
+            ));
+        }
+    }
+}
+
+/// Review E1: under the own file's name, a slot the set cleared (`slotN = ""`): the file is converted but the JSON
+/// leaves it out. **Use this file** gives the slot back (`FromSet`).
+fn cleared_cell(ui: &mut egui::Ui, v: &SetView, kind: SlotKind, name: &str, acts: &mut Vec<Act>) {
+    ui.add(
+        egui::Label::new(
+            egui::RichText::new("Left out of the JSON: you cleared this slot.")
+                .small()
+                .weak(),
+        )
+        .truncate(),
+    );
+    let Some(n) = kind.game_slot() else { return };
+    let r = ui.small_button("Use this file");
+    let label = format!("Use {name} for {}", v.slot_label(kind, ""));
+    r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, label.clone()));
+    if r.clicked() {
+        acts.push(Act::Slot(MenuAction::Slot {
+            set: v.id.clone(),
+            n,
+            cmd: SlotCommand::FromSet,
+        }));
+    }
 }
 
 /// What the PGPatcher lock reads and is named: the caption under the padlock and its AccessKit name.

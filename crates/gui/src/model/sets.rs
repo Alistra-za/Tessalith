@@ -839,11 +839,40 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
         .collect()
 }
 
-/// The slot rows the set editor draws for `v`, in order: its `slot_row` cards (a shared set's own kinds only), less the
-/// skin `_wet` and `_detail_n` cards outside an Advanced skin set. Review E4's status line sends a missing map to its
-/// row's **Assign…** only when the row is here.
+/// `v`'s slot cards as the exported JSON reads them (review E1): `shared_cells(slot_row(…))`, where a card that holds
+/// a link takes the link's kind. `slot_row` keeps the first kind of a shared card when neither is filled, so a link
+/// to the other kind (a `_f` on slot 7) would read empty.
+pub fn view_row(v: &SetView) -> Vec<SlotCell> {
+    let mut cells = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
+    if v.linked.is_empty() {
+        return cells;
+    }
+    let usable = v.shader.as_ref().map(|p| usable_slots(p.shader));
+    for c in &mut cells {
+        let Some(k) = c
+            .kind
+            .game_slot()
+            .and_then(|n| v.linked.get(&n))
+            .and_then(|l| l.row)
+            .filter(|k| c.kind.shares_card(*k))
+        else {
+            continue;
+        };
+        *c = SlotCell {
+            kind: k,
+            fill: v.slots.get(&k).cloned().unwrap_or(SlotFill::Empty),
+            usable: usable.as_ref().is_none_or(|u| u.contains(&k)),
+            clash: None,
+        };
+    }
+    cells
+}
+
+/// The slot rows the set editor draws for `v`, in order: its [`view_row`] cards, less the skin `_wet` and
+/// `_detail_n` cards outside an Advanced skin set. Review E4's status line sends a missing map to its row's
+/// **Assign…** only when the row is here.
 pub fn editor_cells(v: &SetView) -> Vec<SlotCell> {
-    shared_cells(v, slot_row(v.shader.as_ref(), &v.slots))
+    view_row(v)
         .into_iter()
         .filter(|c| {
             v.skin || v.shared || !matches!(c.kind, SlotKind::SkinWet | SlotKind::SkinDetail)

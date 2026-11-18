@@ -1753,6 +1753,24 @@ impl AppModel {
         menu
     }
 
+    /// Review E1: the Messages line of a slot picked from another set, written for the menu and the Slot commands
+    /// dialog alike. A pick the view does not resolve to a set (it moved on in the same step) logs nothing.
+    fn log_slot_link(&mut self, set: &str, n: u8) {
+        let text = super::sets::views(self)
+            .iter()
+            .find(|v| v.id == set)
+            .and_then(|v| {
+                let l = v.linked.get(&n)?;
+                let from = l.from_short.as_deref()?;
+                let file = l.path.rsplit('\\').next().unwrap_or(&l.path);
+                let label = v.slot_label(l.row?, "");
+                Some(format!("{label} of {}: {file} (from set {from})", v.short))
+            });
+        if let Some(t) = text {
+            self.messages.log(super::messages::Severity::Info, t);
+        }
+    }
+
     /// Run a menu entry; a refused slot command comes back as its reason.
     pub fn run_menu(&mut self, a: MenuAction) -> Option<String> {
         match a {
@@ -1767,7 +1785,13 @@ impl AppModel {
             MenuAction::SlotPath { .. } | MenuAction::FromAnotherSet => {}
             MenuAction::SlotLink { set, n, item } => {
                 return match member_game_path(self, &item) {
-                    Ok(p) => self.set_slot_command(&set, n, SlotCommand::Path(p)).err(),
+                    Ok(p) => {
+                        let err = self.set_slot_command(&set, n, SlotCommand::Path(p)).err();
+                        if err.is_none() {
+                            self.log_slot_link(&set, n);
+                        }
+                        err
+                    }
                     Err(e) => Some(e),
                 };
             }
