@@ -160,9 +160,12 @@ impl AppModel {
         if self.explicit_recipe(&packed) != PackRecipe::Auto {
             return false;
         }
-        // Fuzz-22: a hand-set fuzz role is skin evidence, on a member or on a file shared in (Note HH).
-        let hand_fuzz =
-            |k: &str| p.file_value(k, engine::helper::ROLE_FIELD) == Some(json!("fuzz"));
+        // Fuzz-22: a hand-set fuzz role is skin evidence, on a member or on a file shared in (Note HH). On an image
+        // only, as the engine's `hand_role` reads it: a kept DDS takes no role.
+        let hand_fuzz = |k: &str| {
+            !k.to_ascii_lowercase().ends_with(".dds")
+                && p.file_value(k, engine::helper::ROLE_FIELD) == Some(json!("fuzz"))
+        };
         if v.shared_helpers.iter().any(|k| hand_fuzz(k)) {
             return false;
         }
@@ -184,16 +187,7 @@ impl AppModel {
             {
                 fuzz = true;
             }
-            let skin_typed = matches!(
-                typed(k),
-                Some(
-                    Subtype::SkinAlbedo
-                        | Subtype::SkinRfaos
-                        | Subtype::SkinSk
-                        | Subtype::SkinWet
-                        | Subtype::SkinDetail
-                )
-            );
+            let skin_typed = typed(k).is_some_and(Subtype::is_skin);
             let rfaos = split_suffix_with(&s, &self.suffix_aliases)
                 .suffix
                 .as_deref()

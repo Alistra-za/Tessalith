@@ -3479,7 +3479,18 @@ impl AppModel {
             self.sets_sharing(&gone, &gone, &v.id)
         };
         let handed = h.clone();
-        self.edit_docs(&format!("Remove from {i}"), None, true, move |_, s| {
+        // Final review B-M7: the `pbr_fuzz` an explicit PBR pick wrote on the fuzz map, and its `auto_pbr` key, go
+        // with it in this step: the pick was this set's (a value changed since is the user's and stays).
+        let fuzz_step = is_fuzz_member(item);
+        self.edit_docs(&format!("Remove from {i}"), None, true, move |p, s| {
+            let mut auto = s.auto_pbr();
+            if fuzz_step && auto.contains(&it) {
+                if p.file_value(&it, "subtype") == Some(serde_json::json!(Subtype::PbrFuzz)) {
+                    p.clear_file_value(&it, "subtype");
+                }
+                auto.retain(|a| a != &it);
+                s.set_auto_pbr(&auto);
+            }
             s.remove_member(&i, &it);
             if let Some(h) = &handed {
                 hand_over(s, h);
@@ -3687,8 +3698,9 @@ impl AppModel {
         };
         // The sub-type written before (DQ3 takes the packed output back to `_rmaos`); none was written: the explicit
         // `diffuse` moves the recipe back, then goes, so the sub-type is inferred again. Fuzz-9 (review t6 I1): under
-        // an explicit PBR-family pick in a set holding a fuzz map, a `diffuse` (written or none) is the step's
-        // `pbr_albedo` instead, listed in `auto_pbr` so leaving PBR reverts it.
+        // an explicit PBR-family pick in a set holding a fuzz map, a `was` Tessalith recorded (`recorded` below) is
+        // mapped by `pbr_member_type` (`diffuse` to `pbr_albedo`) as the step's own, listed in `auto_pbr` so leaving
+        // PBR reverts it; a hand-written `was` is restored as it is.
         let back: Subtype =
             serde_json::from_value(serde_json::json!(was)).unwrap_or(Subtype::Diffuse);
         let pbr_step = !on
@@ -3856,8 +3868,9 @@ impl AppModel {
                     return Some((k.clone(), Some(pbr_fuzz.clone()), true));
                 }
                 // Leaving the pick: what the step wrote and nobody changed since (an edit drops the key from
-                // `auto_pbr`, DU8's rule) goes, whatever the new shader.
-                if leaves_pbr && auto_pbr.contains(k) {
+                // `auto_pbr`, DU8's rule) goes, under Auto or a shader outside the PBR family. A member in a locked
+                // slot keeps it (ruling R1; final review B-M1), and its key stays listed.
+                if leaves_pbr && auto_pbr.contains(k) && !locked.contains_key(k) {
                     let wrote = held_type(k).is_some_and(|st| {
                         (st == Subtype::PbrFuzz && fuzz_map(k))
                             || [Subtype::Diffuse, Subtype::Normal, Subtype::Glow]
