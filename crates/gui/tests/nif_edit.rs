@@ -4470,6 +4470,17 @@ fn in_the_meshes_view_sized(
     ops: usize,
     size: egui::Vec2,
 ) -> (tempfile::TempDir, AppH) {
+    let (d, mut h) = in_the_meshes_view_steps(model, ops, size);
+    h.run_steps(4);
+    (d, h)
+}
+
+/// As `in_the_meshes_view_sized`, but no frame has run since the Meshes view was switched on.
+fn in_the_meshes_view_steps(
+    model: sdc_gui::model::AppModel,
+    ops: usize,
+    size: egui::Vec2,
+) -> (tempfile::TempDir, AppH) {
     let d = files(false);
     let mut app = sdc_gui::app::SdcApp::new(model);
     app.meshes.procs = sdc_gui::model::meshes::no_procs;
@@ -4485,7 +4496,7 @@ fn in_the_meshes_view_sized(
         app.meshes.edit.as_mut().unwrap().flush();
     }
     let mut frame = eframe::Frame::_new_kittest();
-    let mut h = Harness::builder()
+    let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
@@ -4495,7 +4506,6 @@ fn in_the_meshes_view_sized(
             app,
         );
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
-    h.run_steps(4);
     (d, h)
 }
 
@@ -11551,29 +11561,59 @@ fn slot_list_session(
         h.state_mut().model.show_tab(tab);
     }
     h.run_steps(8);
-    h.get_by_label("Pending edits (5)").click();
-    h.run_steps(8);
+    // At 1280x720 the head is cut to 48 px, and its clipped header sits under the tab strip: a click there would hit
+    // a tab, so that replay leaves the list closed (the head is taller than its 48 px either way).
+    let pending = h.get_by_label("Pending edits (5)").rect();
+    let head = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap().top;
+    if head.contains_rect(pending) {
+        h.get_by_label("Pending edits (5)").click();
+        h.run_steps(8);
+    }
     (d, h)
 }
 
-/// Every slot field whose rect reaches below `limit` is clipped away there (its `interact_rect` is empty).
-fn assert_slot_fields_clipped_below(h: &AppH, limit: f32) {
-    let fields: Vec<egui::Rect> = h
-        .query_all_by_label_contains("path (slot ")
-        .filter(|n| n.accesskit_node().role() == AkRole::TextInput)
-        .map(|n| n.rect())
-        .collect();
-    assert!(!fields.is_empty(), "no slot field in the tree");
-    for rect in fields.into_iter().filter(|r| r.max.y > limit) {
+/// Every slot field whose rect reaches below `limit` is clipped there (its `interact_rect` ends at `limit`, or is
+/// empty); the replay must really have such a field.
+/// The list is scrolled in 9 px steps until a field straddles the boundary (a field wholly under it has no node).
+fn assert_slot_fields_clipped_below(h: &mut AppH, limit: f32) {
+    let list = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap().tab_area;
+    let crossing_fields = |h: &AppH| -> Vec<_> {
+        h.query_all_by_label_contains("path (slot ")
+            .filter(|n| n.accesskit_node().role() == AkRole::TextInput)
+            .map(|n| (n.accesskit_node().id(), n.rect()))
+            .filter(|(_, r)| r.max.y > limit)
+            .collect()
+    };
+    let mut crossing = crossing_fields(h);
+    h.event(egui::Event::PointerMoved(list.center()));
+    for _ in 0..30 {
+        if !crossing.is_empty() {
+            break;
+        }
+        h.event(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -9.0),
+            source: egui::MouseWheelSource::Wheel,
+            phase: egui::TouchPhase::Move,
+            modifiers: egui::Modifiers::NONE,
+        });
+        h.run_steps(2);
+        crossing = crossing_fields(h);
+    }
+    assert!(
+        !crossing.is_empty(),
+        "no slot field crosses or lies below the footer's top at {limit}"
+    );
+    for (node, rect) in crossing {
         let clipped = h.ctx.viewport(|v| {
             v.this_pass
                 .widgets
                 .layers()
                 .flat_map(|(_, ws)| ws)
-                .find(|w| w.rect == rect)
+                .find(|w| w.id.accesskit_id().0 == (u128::from(node) >> 64) as u64)
                 .map(|w| w.interact_rect)
         });
-        let clipped = clipped.unwrap_or_else(|| panic!("no widget at {rect:?}"));
+        let clipped = clipped.unwrap_or_else(|| panic!("no widget for the field at {rect:?}"));
         // Partly hidden: cut at the area's edge; wholly hidden: an empty (even negative) intersection.
         assert!(
             clipped.max.y <= limit + 0.5 || clipped.height() <= 0.0,
@@ -11587,21 +11627,67 @@ fn assert_slot_fields_clipped_below(h: &AppH, limit: f32) {
 #[test]
 fn with_review_open_the_slot_list_ends_above_the_footer_at_1280x720() {
     use sdc_gui::model::bottom::BottomTab;
-    let (_d, h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
+    let (_d, mut h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
     let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
     assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "{r:?}");
-    assert_slot_fields_clipped_below(&h, r.footer.min.y);
+    assert_slot_fields_clipped_below(&mut h, r.footer.min.y);
 }
 
 /// Review replay 109: with the Problems panel open at 1536x864 the slot list keeps the 200 px of `TAB_MIN_H`.
 #[test]
 fn with_problems_open_the_slot_list_keeps_200_px_at_1536x864() {
     use sdc_gui::model::bottom::BottomTab;
-    let (_d, h) = slot_list_session(egui::vec2(1536.0, 864.0), BottomTab::Problems);
+    let (_d, mut h) = slot_list_session(egui::vec2(1536.0, 864.0), BottomTab::Problems);
     let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
     assert!(r.tab_area.height() >= 200.0 - 0.5, "{r:?}");
     assert!(r.tab_area.max.y <= r.footer.min.y + 0.5, "{r:?}");
-    assert_slot_fields_clipped_below(&h, r.footer.min.y);
+    assert_slot_fields_clipped_below(&mut h, r.footer.min.y);
+}
+
+/// Fix round 1, Important 1: egui applies a scroll area's scrolled minimum (64 by default) after its maximum, so the
+/// head's floor is `TOP_MIN_H` = 48 only when it is set. At 1280x720 with Review open the head is at its floor, and
+/// the slot list gets what the 48 leaves (the default 64 would take 16 px more).
+#[test]
+fn the_head_keeps_its_own_48_px_floor_at_1280x720() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, h) = slot_list_session(egui::vec2(1280.0, 720.0), BottomTab::Review);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    assert!(r.top.height() <= 48.0 + 0.5, "head consumed {r:?}");
+    assert!(r.top.max.y <= r.tab_area.min.y, "head over the tabs: {r:?}");
+    // 254 above the footer's top: the 48 head, its spacing, the strip, separators and editing line (about 60 and 3),
+    // leaves the rest to the slot list.
+    let room = r.footer.min.y - r.top.min.y;
+    let below_head = r.tab_area.height() + (r.tab_area.min.y - r.top.max.y);
+    assert!(
+        (room - r.top.height() - below_head).abs() <= 0.5,
+        "{r:?}: the panel's room {room} is not head + tabs + slot list"
+    );
+    assert!(r.tab_area.height() >= 138.0, "slot list {r:?}");
+}
+
+/// Fix round 1: after one pass of a first frame (the cached tab height still its first-frame 28 px) no part of the
+/// editor reaches below the footer's top, and the head is over the slot list, not on it.
+#[test]
+fn the_first_pass_puts_no_part_of_the_editor_under_the_footer() {
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    let model = support::opened(&t.path().join("mod"));
+    let (_d, mut h) = in_the_meshes_view_steps(model, 5, egui::vec2(1280.0, 720.0));
+    let (shape, _) = lit_shape(h.state().meshes.edit.as_ref().unwrap());
+    h.state_mut().meshes.select_edit(Selection::Shape(shape));
+    h.state_mut().model.open_review();
+    h.step();
+    let r =
+        sdc_gui::ui::meshes::layout_rects(&h.ctx).expect("the edit panel drew in the first pass");
+    assert!(
+        r.top.max.y <= r.tab_area.min.y + 0.5,
+        "head over the slot list: {r:?}"
+    );
+    assert!(
+        r.tab_area.max.y <= r.footer.min.y + 0.5,
+        "slot list under the footer: {r:?}"
+    );
+    assert!(r.tab_area.height() > 0.0, "{r:?}");
 }
 
 fn review_height(h: &AppH) -> f32 {

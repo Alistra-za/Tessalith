@@ -21,7 +21,8 @@ const TABS: [&str; 4] = ["Shader", "Alpha", "Controllers", "Extra data"];
 /// Note GH5: the footer's line for an edit with no export folder; Review's footer says the same.
 const SKIPPED_NO_FOLDER: &str = "Skipped until an export folder is chosen";
 
-/// Where the edit panel's three vertical parts were laid out in the last frame (tests only).
+/// Where the edit panel's three vertical parts were laid out in the last pass (tests only): `top` is the head's
+/// consumed rect, `tab_area` the slot list's OUTER rect (a horizontal bar included), `footer` the export footer.
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Copy, Debug)]
 pub struct EditPanelRects {
@@ -33,15 +34,28 @@ pub struct EditPanelRects {
 #[cfg(feature = "test-hooks")]
 const RECTS: &str = "meshes-edit-panel-rects";
 
+/// (pass, head, tab area) of the pass that drew the panel.
 #[cfg(feature = "test-hooks")]
-fn store_rects(ctx: &egui::Context, r: EditPanelRects) {
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(RECTS), r));
+fn store_rects(ctx: &egui::Context, top: egui::Rect, tab_area: egui::Rect) {
+    let pass = ctx.cumulative_pass_nr();
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(RECTS), (pass, top, tab_area)));
 }
 
-/// The rects of the last frame's edit panel, `None` while no edit is open.
+/// The rects of the last completed pass, `None` when that pass did not draw the edit panel (no edit open).
 #[cfg(feature = "test-hooks")]
 pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
-    ctx.data(|d| d.get_temp(egui::Id::unique(RECTS)))
+    let (pass, top, tab_area): (u64, egui::Rect, egui::Rect) =
+        ctx.data(|d| d.get_temp(egui::Id::unique(RECTS)))?;
+    // The counter moves on when a pass ends: read between passes, the panel's own pass is one behind.
+    if ctx.cumulative_pass_nr().saturating_sub(pass) > 1 {
+        return None;
+    }
+    let footer = crate::ui::panel_ids::panel_rect(ctx, "meshes-edit-export")?;
+    Some(EditPanelRects {
+        top,
+        tab_area,
+        footer,
+    })
 }
 
 pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
@@ -70,27 +84,35 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             .map(|(_, l)| l.as_slice());
         // Meshes UI T3, review replay 109: the footer is drawn first (rule 2.1), so neither the head nor a long tab
         // pushes it away; the head and the tab list share what it leaves.
-        let footer = crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
+        crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
             .resizable(false)
-            .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act))
-            .response
-            .rect;
+            .show(ui, |ui| export_block(ui, e, foreign, diff, &mut act));
         // Thin bars stay visible without hover, for the head's list and the tab list alike.
         ui.spacing_mut().scroll = crate::look::thin_scroll();
-        // The tab strip, the editing line and the separator are drawn after the head, so their height is last
+        // The tab strip, the editing line and the separators are drawn after the head, so their height is last
         // frame's (28 px on the first); the head gives up its room before the tab list falls under TAB_MIN_H.
+        let sp = ui.spacing().item_spacing.y;
         let tabs_h_id = ui.scope_id().with("meshes-edit-tabs-h");
-        let tabs_h: f32 = ui.data(|d| d.get_temp(tabs_h_id)).unwrap_or(28.0);
+        let tabs_h: f32 = ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32));
         // The spacing the head's scroll area leaves below itself is the head's too.
-        let top_cap = (ui.available_height() - TAB_MIN_H - tabs_h - ui.spacing().item_spacing.y)
-            .max(TOP_MIN_H);
-        let top_rect = egui::ScrollArea::vertical()
+        let top_cap = (ui.available_height() - TAB_MIN_H - tabs_h - sp).max(TOP_MIN_H);
+        let head_y = ui.cursor().min.y;
+        // egui applies the scrolled minimum after the maximum (64 by default): set it, so the head's floor is TOP_MIN_H.
+        egui::ScrollArea::vertical()
             .id_salt("meshes-edit-top")
             .max_height(top_cap)
+            .min_scrolled_height(TOP_MIN_H)
             .auto_shrink([false, true])
-            .show(ui, |ui| top(ui, e, &mut act))
-            .inner_rect;
+            .show(ui, |ui| top(ui, e, &mut act));
         let tabs_start = ui.cursor().min.y;
+        // What the head consumed (its prepared rect would be taller when the head is short).
+        #[cfg(feature = "test-hooks")]
+        let top_rect = egui::Rect::from_min_max(
+            egui::pos2(ui.max_rect().min.x, head_y),
+            egui::pos2(ui.max_rect().max.x, tabs_start - sp),
+        );
+        #[cfg(not(feature = "test-hooks"))]
+        let _ = head_y;
         ui.separator();
         let tab_id = egui::Id::unique("meshes-edit-tab");
         let mut tab: usize = ui.data(|d| d.get_temp(tab_id)).unwrap_or(0);
@@ -112,11 +134,13 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         ui.add(egui::Label::new(editing_line(e)).truncate());
         ui.separator();
         let tabs_h = ui.cursor().min.y - tabs_start;
-        ui.data_mut(|d| d.insert_temp(tabs_h_id, tabs_h));
+        ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32) = tabs_h);
         // Both ways: a wide row scrolls instead of widening the panel. Its height is what is left, never more
         // (egui's 64 px minimum would push it under the footer).
         let avail = ui.available_height();
-        let tab_area = egui::ScrollArea::both()
+        #[cfg(feature = "test-hooks")]
+        let tab_y = ui.cursor().min.y;
+        egui::ScrollArea::both()
             .id_salt("meshes-edit-scroll")
             .auto_shrink([false, false])
             .max_height(avail)
@@ -126,19 +150,16 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 1 => edit_fields::alpha_tab(ui, e, &mut act),
                 2 => edit_ctrl::controllers_tab(ui, m, e, &mut act),
                 _ => edit_extra::extra_tab(ui, e, &mut act),
-            })
-            .inner_rect;
+            });
         #[cfg(feature = "test-hooks")]
         store_rects(
             ui.ctx(),
-            EditPanelRects {
-                top: top_rect,
-                tab_area,
-                footer,
-            },
+            top_rect,
+            egui::Rect::from_min_max(
+                egui::pos2(ui.max_rect().min.x, tab_y),
+                egui::pos2(ui.max_rect().max.x, ui.cursor().min.y - sp),
+            ),
         );
-        #[cfg(not(feature = "test-hooks"))]
-        let _ = (top_rect, tab_area, footer);
     }
     apply(m, act);
 }
@@ -217,7 +238,8 @@ fn top(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
 
 const OPS_MAX_H: f32 = 120.0;
 
-/// The footer's Show asks the pending list to open (it is drawn before the footer, so on the next frame).
+/// The footer's Show asks the pending list to open: the footer is drawn first, so the head reads the flag in the
+/// same pass.
 fn show_pending_id() -> egui::Id {
     egui::Id::unique("meshes-edit-show-pending")
 }
