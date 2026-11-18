@@ -154,7 +154,7 @@ impl Outside {
 fn missing_normal(cx: &BakeCtx, set: &TextureSet, outside: &Outside, j: &mut ResolvedJob) {
     if let Some(f) = member_file(cx, set, InputKind::Image, is_normal_suffix) {
         let msg = format!(
-            "the set's _n ({}) has no pbr_normal job (it failed, was cancelled, is a duplicate or was given another sub-type): the roughness is written without the variance bake",
+            "the set's _n ({}) has no normal job that bakes (it failed, was cancelled, is a duplicate, or its type does not bake under this shader): the roughness is written without the variance bake",
             f.path.display()
         );
         note(j, Code::SetMissingCompanion, msg, Some(&f.path));
@@ -187,13 +187,13 @@ pub const NO_NORMAL: &str =
     "no _n in this PBR set: the roughness is written without the variance bake";
 
 /// Why a roughness member whose set borrows the `_n` of set `owner` has nothing to bake from (DECISIONS Note R
-/// M4-final-1): the owner has no usable `pbr_normal` job.
+/// M4-final-1): the owner has no usable normal job.
 fn missing_borrowed_normal(cx: &BakeCtx, owner: &TextureSet, j: &mut ResolvedJob) {
     let file = member_file(cx, owner, InputKind::Image, is_normal_suffix)
         .or_else(|| member_file(cx, owner, InputKind::Dds, is_normal_suffix));
     let msg = match file {
         Some(f) => format!(
-            "the set's borrowed _n ({}) has no usable pbr_normal job: the roughness is written without the variance bake",
+            "the set's borrowed _n ({}) has no usable normal job: the roughness is written without the variance bake",
             f.path.to_string_lossy().replace('\\', "/")
         ),
         None => "the set's _n is borrowed from a set with no usable _n: the roughness is written without the variance bake".into(),
@@ -358,9 +358,24 @@ fn is_dds(j: &ResolvedJob) -> bool {
             .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
 }
 
-/// The set's `_n`: its first `pbr_normal` job by path that did not fail (DECISIONS R9).
-fn own_normal(jobs: &[ResolvedJob], idx: &[usize]) -> Option<usize> {
-    first_of(jobs, idx, Subtype::PbrNormal)
+/// Note JS2 (N-7): the set whose roughness bakes reads any tangent-space normal when its pick
+/// `bakes_any_tangent`. Read from the set's own jobs (api.rs sets `shader` first).
+fn any_tangent(jobs: &[ResolvedJob], idx: &[usize]) -> bool {
+    idx.iter()
+        .find_map(|&i| jobs[i].shader.as_ref())
+        .is_some_and(crate::shader::ShaderPick::bakes_any_tangent)
+}
+
+/// The set's `_n` (DECISIONS R9, Note JS2): its first `pbr_normal` job by path that did not fail; when `any` (the
+/// baking set's [`any_tangent`]), else its first `normal`, else its first `landscape_normal`.
+fn own_normal(jobs: &[ResolvedJob], idx: &[usize], any: bool) -> Option<usize> {
+    first_of(jobs, idx, Subtype::PbrNormal).or_else(|| {
+        any.then(|| {
+            first_of(jobs, idx, Subtype::Normal)
+                .or_else(|| first_of(jobs, idx, Subtype::LandscapeNormal))
+        })
+        .flatten()
+    })
 }
 
 /// The set's first job of sub-type `st` by path that is not a DDS and did not fail.
@@ -406,10 +421,11 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         .borrowed
         .iter()
         .filter(|(b, _)| !roughness_members(jobs, of(b)).is_empty())
-        .filter_map(|(_, o)| own_normal(jobs, of(o)))
+        .filter_map(|(b, o)| own_normal(jobs, of(o), any_tangent(jobs, of(b))))
         .collect();
     for set in cx.sets {
         let idx = of(&set.key);
+        let any = any_tangent(jobs, idx);
         // Spec §10 SET-MISSING-COMPANION, the two triggers that are not about the bake (any target).
         for &i in idx {
             let lacking = match jobs[i].profile.subtype {
@@ -444,8 +460,8 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         // A borrowed Normal slot (GUI) stands in for the set's own `_n` (DECISIONS Note R M4-final-1).
         let owner = cx.borrowed.get(&set.key);
         let normal = match owner {
-            Some(o) => own_normal(jobs, of(o)),
-            None => own_normal(jobs, idx),
+            Some(o) => own_normal(jobs, of(o), any),
+            None => own_normal(jobs, idx, any),
         };
         let members = roughness_members(jobs, idx);
         match (normal, members.is_empty()) {
@@ -480,13 +496,13 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
 }
 
 /// CL40's opt-in test on a set's `_n` job: an explicit (not built-in) `mips.normal = renormalize_bake`. Also read by
-/// the Also export report (TA26, P22).
+/// the Also export report (TA26, P22). Note JS2 (N-12): the bake's own `set` provenance is no opt-in.
 pub(crate) fn gloss_bake_opted(nj: &ResolvedJob) -> bool {
     nj.profile.mips.normal == NormalMips::RenormalizeBake
         && nj
             .provenance
             .get("mips.normal")
-            .is_some_and(|p| *p != Provenance::Builtin)
+            .is_some_and(|p| !matches!(p, Provenance::Builtin | Provenance::Set))
 }
 
 /// Opt-in gloss bake (DECISIONS Note CL40, superseding R6 for this case only), any target: a set whose `normal` has

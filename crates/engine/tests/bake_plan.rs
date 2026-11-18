@@ -660,7 +660,7 @@ fn an_advanced_skin_rfaos_bakes_from_its_n() {
 }
 
 /// The owner's question (Note HC7): an Advanced skin `_rfaos` bakes from a borrowed `_n` like any roughness member, and
-/// that `_n` is the only normal planned. A vanilla `_n` lent to it is no `pbr_normal`, so it does not bake, and says so.
+/// that `_n` is the only normal planned. A plain `_n` lent to it bakes it too (Note JS2).
 #[test]
 fn a_skin_rfaos_bakes_from_a_borrowed_n_with_one_normal_planned() {
     let d = tempfile::tempdir().unwrap();
@@ -689,24 +689,27 @@ fn a_skin_rfaos_bakes_from_a_borrowed_n_with_one_normal_planned() {
     assert!(normals[0].input.ends_with("a_n.png"));
 }
 
+/// N-7 (Note JS2): a plain `normal` lent to an Advanced Skin set bakes its `_rfaos`; the borrower's shader decides.
 #[test]
-fn a_vanilla_n_lent_to_a_skin_rfaos_does_not_bake_and_says_so() {
+fn a_vanilla_n_lent_to_a_skin_rfaos_bakes_it() {
     let d = tempfile::tempdir().unwrap();
     rough(d.path(), "textures/armor/x.png", 64, 64);
     normal(d.path(), "textures/armor/x_n.png", 64, 64);
     rough(d.path(), "textures/actors/skin/b_rfaos.png", 64, 64);
     let mut r = req(d.path(), &[]);
     borrow(&mut r, &[("textures/actors/skin/b", "textures/armor/x")]);
-    let (p, _) = plan(r);
+    let (p, ev) = plan(r);
     assert_eq!(job(&p, "x_n.png").profile.subtype, Subtype::Normal);
     let b = job(&p, "b_rfaos.png");
-    assert!(b.bake.is_none());
-    assert_eq!(set_codes(b), vec![Code::SetMissingCompanion]);
     assert!(
-        b.warnings.last().unwrap().message.contains("no usable"),
+        b.bake
+            .as_ref()
+            .is_some_and(|k| k.normal.ends_with("x_n.png")),
         "{:?}",
         b.warnings
     );
+    assert!(set_codes(b).is_empty(), "{:?}", b.warnings);
+    assert!(bake_flag(&ev, "skin/b"));
 }
 
 /// A borrowed Normal slot whose owner set has no usable `_n` says so, instead of "no _n in this PBR set".
@@ -818,10 +821,10 @@ fn a_member_with_no_mips_does_not_bake() {
     assert!(!bake_flag(&ev, "textures/pbr/iron"));
 }
 
-/// B3-4 pin (Note JP1): an own plain `normal` in a PBR set plans as today. It keeps its alpha and its `_n.dds` name,
-/// it does not bake the set's `_rmaos`, and the `_rmaos` says why.
+/// N-7 (Note JS2): an own plain `normal` in a PBR set keeps its alpha and its `_n.dds` name, and the set's `_rmaos`
+/// bakes from it; the `_n` records the bake with provenance `set`.
 #[test]
-fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_does_not_bake() {
+fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_bakes() {
     let d = tempfile::tempdir().unwrap();
     normal_with_alpha(d.path(), "textures/pbr/iron_n.png", 64, 64, 40);
     rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
@@ -830,18 +833,106 @@ fn an_own_plain_normal_in_a_pbr_set_keeps_its_alpha_and_does_not_bake() {
     assert_eq!(n.profile.subtype, Subtype::Normal);
     assert_eq!(n.profile.alpha.policy, AlphaPolicy::Data);
     assert!(n.output.ends_with("iron_n.dds"), "{}", n.output.display());
+    assert_eq!(n.profile.mips.normal, NormalMips::RenormalizeBake);
+    assert_eq!(
+        n.provenance.get("mips.normal"),
+        Some(&engine::presets::Provenance::Set)
+    );
     let r = job(&p, "iron_rmaos.png");
-    assert!(r.bake.is_none(), "a plain normal never bakes");
-    assert_eq!(set_codes(r), vec![Code::SetMissingCompanion]);
+    assert!(r
+        .bake
+        .as_ref()
+        .is_some_and(|b| b.normal.ends_with("iron_n.png")));
+    assert!(set_codes(r).is_empty(), "{:?}", r.warnings);
+    assert!(bake_flag(&ev, "textures/pbr/iron"));
+}
+
+/// N-7: a `landscape_normal` in an automatic PBR Landscape set bakes its `_rmaos`.
+#[test]
+fn a_landscape_normal_in_a_pbr_landscape_set_bakes() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/landscape/rock_n.png", 64, 64);
+    rough(d.path(), "textures/landscape/rock_rmaos.png", 64, 64);
+    let (p, ev) = plan(req(d.path(), &[]));
+    assert_eq!(
+        job(&p, "rock_n.png").profile.subtype,
+        Subtype::LandscapeNormal
+    );
+    assert!(job(&p, "rock_rmaos.png").bake.is_some());
+    assert!(bake_flag(&ev, "landscape/rock"));
+}
+
+/// N-7, N-15: under an explicit regular shader a plain `normal` does not bake, and the `_rmaos` says why.
+#[test]
+fn a_plain_normal_under_a_regular_shader_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/iron_n.png.subtype=normal"]);
+    r.set_shaders = [(
+        "textures/pbr/iron".to_string(),
+        engine::shader::Shader::Default,
+    )]
+    .into();
+    let (p, _) = plan(r);
+    let r = job(&p, "iron_rmaos.png");
+    assert!(r.bake.is_none());
     assert!(
         r.warnings
             .iter()
             .any(|w| w.code == Code::SetMissingCompanion
-                && w.message.contains("was given another sub-type")),
+                && w.message
+                    .contains("its type does not bake under this shader")),
         "{:?}",
         r.warnings
     );
-    assert!(!bake_flag(&ev, "textures/pbr/iron"));
+}
+
+/// N-7, N-15 (Note JS2): a regular borrower of a PBR owner's plain normal does not bake, and its `_rmaos` says why in
+/// the reworded `missing_borrowed_normal`; the owner bakes from its own plain normal.
+#[test]
+fn a_regular_borrower_of_a_plain_normal_does_not_bake() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
+    rough(d.path(), "textures/armor/steel_rmaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/iron_n.png.subtype=normal"]);
+    borrow(&mut r, &[("textures/armor/steel", "textures/pbr/iron")]);
+    r.set_shaders = [(
+        "textures/armor/steel".to_string(),
+        engine::shader::Shader::Default,
+    )]
+    .into();
+    let (p, _) = plan(r);
+    assert!(job(&p, "iron_rmaos.png").bake.is_some(), "the owner bakes");
+    let s = job(&p, "steel_rmaos.png");
+    assert!(s.bake.is_none());
+    let w = s.warnings.last().unwrap();
+    assert_eq!(w.code, Code::SetMissingCompanion);
+    assert!(
+        w.message.starts_with("the set's borrowed _n (")
+            && w.message.ends_with(
+                "iron_n.png) has no usable normal job: the roughness is written without the variance bake"
+            ),
+        "{}",
+        w.message
+    );
+}
+
+/// N-22 (Note JS2): a plain normal in a PBR set with no roughness member gets the SET-MISSING-COMPANION Info a
+/// `pbr_normal` already gets (an Info: no Problems row).
+#[test]
+fn a_plain_normal_with_no_roughness_in_a_pbr_set_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "textures/pbr/iron_n.png", 64, 64);
+    let (p, _) = plan(req(d.path(), &["file:**/iron_n.png.subtype=normal"]));
+    let n = job(&p, "iron_n.png");
+    assert_eq!(
+        set_codes(n),
+        vec![Code::SetMissingCompanion],
+        "{:?}",
+        n.warnings
+    );
 }
 
 /// B3-4 pin (Note JP1): the written `iron_n.dds` keeps the source's alpha.

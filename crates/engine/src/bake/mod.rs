@@ -179,7 +179,7 @@ impl NormalVariance {
 /// How a roughness member bakes its set's `_n` (`ResolvedJob::bake`, spec §6.2). Set by `plan::plan_bakes`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct BakeJob {
-    /// The set's `pbr_normal` source.
+    /// The set's tangent-space `_n` source (Note JS2: `pbr_normal`, else under a PBR-set shader `normal` or `landscape_normal`).
     pub normal: PathBuf,
     /// That `_n`'s resolved profile: the member decodes the `_n` with it exactly as the `_n`'s own job does
     /// (swizzle, green flip, Z rebuild; DECISIONS R4).

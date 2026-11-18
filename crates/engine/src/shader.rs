@@ -351,6 +351,12 @@ impl Shader {
         matches!(self, Shader::Pbr | Shader::PbrLandscape | Shader::PbrGrass)
     }
 
+    /// Note JS1: a shader whose sets drop a normal's alpha and bake from any tangent-space normal: the PBR family and
+    /// Advanced Skin.
+    pub fn is_pbr_or_advanced_skin(self) -> bool {
+        self.is_pbr_family() || self == Shader::AdvancedSkin
+    }
+
     /// True for the shaders that change their members' default settings.
     pub fn has_member_defaults(self) -> bool {
         matches!(
@@ -584,6 +590,14 @@ pub struct ShaderPick {
     pub provenance: ShaderOrigin,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wanted: Option<Shader>,
+}
+
+impl ShaderPick {
+    /// Note JS2 (N-7): a set under this pick bakes from any tangent-space normal: a PBR-set shader, picked or
+    /// automatic, never derived.
+    pub fn bakes_any_tangent(&self) -> bool {
+        self.provenance != ShaderOrigin::Derived && self.shader.is_pbr_or_advanced_skin()
+    }
 }
 
 pub struct PickInput<'a> {
@@ -1807,6 +1821,27 @@ mod tests {
             .contains(&ShaderNormalSpecular));
         let derived = pick_of(Shader::Pbr, ShaderOrigin::Derived);
         assert!(check_maps(&derived, Target::Cs, &pbr_set(Subtype::Normal)).is_empty());
+    }
+
+    /// N-7 (Note JS2): a plain normal bakes under a PBR-set shader, picked or automatic, never derived (the Vanilla
+    /// derive's kept-landscape pick, api.rs:2286-2293).
+    #[test]
+    fn a_derived_pick_never_bakes_a_plain_normal() {
+        assert!(pick_of(
+            Shader::PbrLandscape,
+            ShaderOrigin::Auto(AutoRule::PbrLandscape)
+        )
+        .bakes_any_tangent());
+        assert!(pick_of(Shader::AdvancedSkin, ShaderOrigin::Set).bakes_any_tangent());
+        assert!(
+            pick_of(Shader::PbrGrass, ShaderOrigin::Auto(AutoRule::PbrGrass)).bakes_any_tangent()
+        );
+        assert!(!pick_of(Shader::PbrLandscape, ShaderOrigin::Derived).bakes_any_tangent());
+        assert!(!pick_of(Shader::Default, ShaderOrigin::Set).bakes_any_tangent());
+        assert!(
+            !pick_of(Shader::Landscape, ShaderOrigin::Auto(AutoRule::Landscape))
+                .bakes_any_tangent()
+        );
     }
 
     #[test]
