@@ -1,13 +1,12 @@
 //! Note HJ1: Rename outputs is for PGPatcher PBR sets on Community Shaders only (an old `output_name` still works, HJ2).
 mod support;
-use engine::config::{GreenConvention, Subtype, Target};
+use engine::config::{Subtype, Target};
 use engine::sets::OutputKey;
-use image::{ImageBuffer, Rgb};
 use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::sets::{engine_inputs, views};
 use sdc_gui::model::{Answer, AppModel, Dialog};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 use support::*;
 
@@ -62,43 +61,10 @@ fn rename_outputs_is_absent_on_a_skin_set() {
     assert!(m.rename_keys(RenameMode::Outputs).is_empty());
 }
 
-fn png(dir: &Path, name: &str, rgb: [u8; 3]) {
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb(rgb))
-        .save(dir.join(name))
-        .unwrap();
-}
-
-/// A PBR set `wall` (albedo + normal), and a PBR-picked set `leaf` with only `_n` and `_rmaos` (Note HL5).
-fn no_albedo(dir: &Path) -> AppModel {
-    let r = dir.join("textures/arch");
-    std::fs::create_dir_all(&r).unwrap();
-    for (n, c) in [
-        ("wall.png", [90, 90, 90]),
-        ("wall_rmaos.png", [200, 20, 255]),
-        ("leaf_rmaos.png", [100, 50, 255]),
-        ("wall_n.png", [128, 128, 255]),
-        ("leaf_n.png", [128, 128, 255]),
-    ] {
-        png(&r, n, c);
-    }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
-    m.decide("arch/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
-    m.decide("arch/wall_n.png", Answer::Subtype(Subtype::PbrNormal));
-    m.decide("arch/wall_n.png", Answer::Green(GreenConvention::Directx));
-    m.decide("arch/leaf_n.png", Answer::Subtype(Subtype::PbrNormal));
-    m.decide("arch/leaf_n.png", Answer::Green(GreenConvention::Directx));
-    idle(&mut m);
-    for id in views(&m).iter().map(|v| v.id.clone()).collect::<Vec<_>>() {
-        m.set_shader(&id, Some(engine::shader::Shader::Pbr));
-        idle(&mut m);
-    }
-    m
-}
-
 #[test]
 fn rename_outputs_is_absent_on_a_no_albedo_json_set() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = no_albedo(d.path());
+    let mut m = no_albedo_pair(d.path());
     let leaf = views(&m)
         .iter()
         .find(|v| v.key.ends_with("leaf"))

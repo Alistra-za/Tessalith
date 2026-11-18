@@ -2,8 +2,9 @@
 //! plan lands behind it and always wins. `hold_plan_results` parks the plan messages so each test delivers them in
 //! the order it wants.
 mod support;
-use engine::config::{AlphaPolicy, Subtype};
+use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
+use sdc_gui::model::bulk::MenuAction;
 use sdc_gui::model::sets::{view_builds, views, Missing, SetView, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
@@ -686,6 +687,61 @@ fn views_after_a_partial_equal_a_fresh_build() {
         "the loop fills nothing after the partial: {:?} {:?}",
         leaf.slots,
         leaf.missing
+    );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+}
+
+/// Plan 3b (E1): a partial plan after a linked-to set's member changes leaves the views a fresh build gives. The
+/// linking set (`landscape/rock01`, a PBR set, so it writes a JSON entry) links slot 2 to the plain `landscape/wall`
+/// set's normal; the edit is on the wall only. `splice_views` alone rebuilds the wall and its borrowers, not rock01,
+/// so rock01's `linked` must not stay stale: a project with a linked slot takes the rebuild-every-view shortcut.
+#[test]
+fn views_after_a_partial_equal_a_fresh_build_with_a_linked_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), wall);
+    // rock01 becomes a PBR set (as `support::pbr_opened` decides it), so `exports_json` holds for it on `cs`.
+    m.hold_plan_results = false;
+    m.decide("landscape/rock01.png", Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(
+        "landscape/rock01_normal.png",
+        Answer::Subtype(Subtype::PbrNormal),
+    );
+    m.decide(
+        "landscape/rock01_normal.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.run_menu(MenuAction::SlotLink {
+        set: "landscape/rock01".into(),
+        n: 2,
+        item: WALL_N.into(),
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let before = view_of(&m, "landscape/rock01").linked[&2].clone();
+    assert_eq!(
+        before.from.as_deref(),
+        Some("landscape/wall"),
+        "premise: the link resolves to the wall"
+    );
+    // A decision on the wall's normal, not a sets-doc edit: a sets-doc edit changes the `ViewKey` and builds every
+    // view anyway (`carry_views`, model/mod.rs l.3080-3102, splices only when the key moved inside `items`).
+    m.hold_plan_results = true;
+    m.decide(WALL_N, Answer::Subtype(Subtype::SkinSk));
+    // Wait for one partial and the full plan, as the neighbouring tests do: the two run on separate threads and
+    // nothing orders their arrival. A partial always arrives (Ok, or Err when the skeleton refuses), so a refusal
+    // fails the premise below at once.
+    let (partials, _full) = collect(&mut m, 1, 1);
+    assert!(
+        matches!(partials.as_slice(), [WorkerMsg::Partial { result: Ok(_), .. }]),
+        "premise: the skeleton patched the edit (the partial plan is Ok); a refusal arrives as a partial with an Err result"
+    );
+    deliver(&mut m, partials);
+    let spliced = views(&m);
+    assert_ne!(
+        view_of(&m, "landscape/rock01").linked[&2],
+        before,
+        "the link follows its source: the wall's normal is no longer a normal"
     );
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));

@@ -297,6 +297,8 @@ mod skin_card;
 mod slot_alpha;
 #[path = "../slot_file_drop.rs"]
 mod slot_file_drop;
+#[path = "../slot_links.rs"]
+mod slot_links;
 #[path = "../slot_lock.rs"]
 mod slot_lock;
 #[path = "../slot_menu.rs"]

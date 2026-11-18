@@ -237,6 +237,13 @@ pub(crate) fn file_name_problem(what: &str, name: &str) -> Option<String> {
     check_file_name(name, what).err().map(|e| e.0)
 }
 
+/// Whether `v` is written as a PGPatcher JSON entry on this target (CS, a JSON set, and a match that applies).
+pub(crate) fn exports_json(m: &AppModel, v: &SetView) -> bool {
+    m.target == Target::Cs
+        && v.json
+        && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
+}
+
 /// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
 pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     if m.target != Target::Cs {
@@ -247,9 +254,7 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     views
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
-        .filter(|v| {
-            v.json && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
-        })
+        .filter(|v| exports_json(m, v))
         .map(|v| {
             let slots = slots_of(v, &views, &paths, m);
             let mut settings = crate::model::auto_flags::resolved_for(

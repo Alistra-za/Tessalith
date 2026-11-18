@@ -3,17 +3,20 @@
 
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
+use super::pbr_export::exports_json;
 use super::sets::{
-    entry_of, missing_map_slot, recipe_suffix, renamed_output, DefaultOutputs, SetView, SlotFill,
-    SlotKind, LAST_GAME_SLOT, READ_ONLY,
+    entry_of, link_row_kind, linked_map_slot, missing_map_slot, recipe_suffix, renamed_output,
+    DefaultOutputs, SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
 use crate::pgp::prefix::check_rel_path;
 use crate::sets_doc::{SetEntry, TxstMap};
+use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::sets::{same_id, OutputKey};
 use engine::shader::Shader;
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
@@ -311,6 +314,101 @@ pub(super) fn fill_from_records(
                 .is_some_and(|n| filled.contains_key(&n) || supplied.contains_key(&n))
         });
     }
+}
+
+/// Review E1: fills `linked` of every set written as a JSON entry (`exports_json`) from its non-empty `slotN` strings:
+/// each path is resolved to the set and file that write it (`written_index`, which needs no record), and the row it
+/// fills is that file's kind (a typed path's is `link_row_kind`). Then each `SHADER-MISSING-MAP` warning of a slot that
+/// holds a link is dropped: the JSON names a file for it. Runs after `finish_view` and the short names; the arguments
+/// are `fill_from_records`'.
+pub(super) fn link_slots(
+    m: &AppModel,
+    views: &mut [SetView],
+    entries: &[SetEntry],
+    own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
+) {
+    if !views.iter().any(has_slot_string) {
+        return;
+    }
+    let written = written_index(m, entries, own_slots.iter().map(|(i, s)| (i.as_str(), s)));
+    // A `slotN` path starts at `textures\`; an output key (`written_index`) starts under the opened folder, so it has
+    // no `textures` part when that folder is the `textures` folder itself.
+    let writer = |path: &str| {
+        let key = game_key(path);
+        written
+            .get(&key)
+            .or_else(|| written.get(key.strip_prefix("textures/")?))
+    };
+    let found: Vec<BTreeMap<u8, SlotLink>> = views
+        .iter()
+        .map(|v| {
+            if !exports_json(m, v) {
+                return BTreeMap::new();
+            }
+            (1..=LAST_GAME_SLOT)
+                .filter_map(|n| {
+                    let Some(Value::String(path)) = v.settings.get(&format!("slot{n}")) else {
+                        return None;
+                    };
+                    if path.is_empty() {
+                        return None;
+                    }
+                    let source = writer(path).map(|(from, item)| {
+                        let kind = own_slots
+                            .iter()
+                            .find(|(id, _)| same_id(id, from))
+                            .and_then(|(_, slots)| {
+                                slots.iter().find(
+                                    |(_, f)| matches!(f, SlotFill::Own { item: i } if i == item),
+                                )
+                            })
+                            .map(|(k, _)| *k);
+                        let short = views
+                            .iter()
+                            .find(|o| same_id(&o.id, from))
+                            .map(|o| o.short.clone());
+                        (from.clone(), short, item.clone(), kind)
+                    });
+                    let (from, from_short, item, kind) = match source {
+                        Some((f, s, i, k)) => (Some(f), s, Some(i), k),
+                        None => (None, None, None, None),
+                    };
+                    let row = kind.or_else(|| link_row_kind(v, n));
+                    Some((
+                        n,
+                        SlotLink {
+                            path: path.clone(),
+                            from,
+                            from_short,
+                            item,
+                            kind,
+                            row,
+                        },
+                    ))
+                })
+                .collect()
+        })
+        .collect();
+    for (v, linked) in views.iter_mut().zip(found) {
+        if linked.is_empty() {
+            continue;
+        }
+        v.set_warnings.retain(|w| {
+            !(w.code == Code::ShaderMissingMap
+                && w.data["map"]
+                    .as_str()
+                    .and_then(linked_map_slot)
+                    .is_some_and(|n| linked.get(&n).is_some_and(|l| l.row.is_some())))
+        });
+        v.linked = linked;
+    }
+}
+
+/// Whether `v` carries a non-empty string `slotN` (the only settings `link_slots` reads).
+fn has_slot_string(v: &SetView) -> bool {
+    (1..=LAST_GAME_SLOT).any(
+        |n| matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty()),
+    )
 }
 
 /// R8: a skin set whose normal came from a shared-map set `H` through its record also takes `H`'s `_wet` and

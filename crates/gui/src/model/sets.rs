@@ -2,7 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::txst_map::{fill_from_records, record_paths, record_shared_sets};
+use super::txst_map::{fill_from_records, link_slots, record_paths, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, is_path_key, output_rel,
@@ -397,6 +397,118 @@ pub struct SetView {
     pub recipes: Vec<engine::events::RecipeReport>,
     /// The id's last `/`-parts that tell it from every other set (see [`short_names`]). Set by `build_views`.
     pub short: String,
+    /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
+    /// that path. Only a set written as a JSON entry has any (`link_slots`); set by `build_views`.
+    pub linked: BTreeMap<u8, SlotLink>,
+}
+
+/// A `slotN` path of a set's JSON entry, and what it names (review E1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SlotLink {
+    /// The `slotN` value as written (backslashes).
+    pub path: String,
+    /// The set whose output this path is (its id), when one writes it.
+    pub from: Option<String>,
+    /// That set's `short` name.
+    pub from_short: Option<String>,
+    /// The item key that writes it.
+    pub item: Option<String>,
+    /// The source item's kind in its set (`Some` exactly when `item` is): Z9's "exact slot kind".
+    pub kind: Option<SlotKind>,
+    /// The row this link fills: `kind`, or for a typed path `link_row_kind(v, n)`. `None` for game slot 5.
+    pub row: Option<SlotKind>,
+}
+
+/// What the exported JSON carries for a kind's row, in the order `slots_of` writes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SlotShown<'a> {
+    Linked(&'a SlotLink),
+    /// An own or borrowed file whose game slot holds a link for another kind (slot 7: a `_f` under a link to a
+    /// `_cnr`): the JSON's `slotN` is the link, so this file is not written there.
+    Replaced {
+        item: &'a str,
+        by: &'a SlotLink,
+    },
+    /// `slotN = ""` over a slot the set fills: the JSON leaves it empty.
+    Cleared {
+        item: &'a str,
+    },
+    Own {
+        item: &'a str,
+    },
+    Borrowed {
+        from: &'a str,
+        item: &'a str,
+    },
+    Record {
+        path: &'a str,
+    },
+    Empty,
+}
+
+impl SlotShown<'_> {
+    /// Whether the row counts as holding a texture.
+    pub fn is_filled(&self) -> bool {
+        matches!(
+            self,
+            SlotShown::Linked(_)
+                | SlotShown::Own { .. }
+                | SlotShown::Borrowed { .. }
+                | SlotShown::Record { .. }
+        )
+    }
+}
+
+/// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
+/// a link first, then an own or borrowed file the link or an empty `slotN` overrides, then the file itself.
+pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
+    if let Some(l) = v.linked.values().find(|l| l.row == Some(kind)) {
+        return SlotShown::Linked(l);
+    }
+    let file = match v.slots.get(&kind) {
+        Some(SlotFill::Own { item }) => Some(SlotShown::Own { item }),
+        Some(SlotFill::Borrowed { from, item }) => Some(SlotShown::Borrowed { from, item }),
+        _ => None,
+    };
+    if let Some(file) = file {
+        let item = match &file {
+            SlotShown::Own { item } | SlotShown::Borrowed { item, .. } => *item,
+            _ => "",
+        };
+        if let Some(n) = kind.game_slot() {
+            if let Some(by) = v.linked.get(&n) {
+                return SlotShown::Replaced { item, by };
+            }
+            if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if s.is_empty())
+            {
+                return SlotShown::Cleared { item };
+            }
+        }
+        return file;
+    }
+    match kind.slot_number().and_then(|n| v.record_supplied.get(&n)) {
+        Some(path) => SlotShown::Record { path },
+        None => SlotShown::Empty,
+    }
+}
+
+/// A typed path's row: the kind the view already has on game slot `n`, else 1 Diffuse, 2 Normal, 3 Emissive,
+/// 4 Height, 6 Rmaos, 7 Coat, 8 Subsurface; `None` for 5.
+pub fn link_row_kind(v: &SetView, n: u8) -> Option<SlotKind> {
+    v.slots
+        .keys()
+        .find(|k| k.game_slot() == Some(n))
+        .copied()
+        .or(match n {
+            1 => Some(SlotKind::Diffuse),
+            2 => Some(SlotKind::Normal),
+            3 => Some(SlotKind::Emissive),
+            4 => Some(SlotKind::Height),
+            6 => Some(SlotKind::Rmaos),
+            7 => Some(SlotKind::Coat),
+            8 => Some(SlotKind::Subsurface),
+            _ => None,
+        })
 }
 
 /// The joined tails a set's member names carry past the base (Note GW1): `_detail_n` in a Landscape, PBR Landscape
@@ -485,6 +597,7 @@ impl SetView {
             txst: None,
             recipes: vec![],
             short: String::new(),
+            linked: BTreeMap::new(),
         }
     }
 
@@ -925,12 +1038,13 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
 pub(crate) fn view_reads(
     i: &TextureItem,
-) -> (Option<SlotKind>, Option<Subtype>, bool, Option<&str>) {
+) -> (Option<SlotKind>, Option<Subtype>, bool, Option<&str>, &str) {
     (
         slot_of(i),
         i.job.as_ref().map(|j| j.profile.subtype),
         i.waiting,
         i.job.as_ref().map(|j| j.game_path.as_str()),
+        i.job_key.as_str(),
     )
 }
 
@@ -1009,6 +1123,8 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     for (v, s) in views.iter_mut().zip(shorts) {
         v.short = s;
     }
+    // Review E1: after `finish_view` (`exports_json` reads `json`) and the short names (a link names its source's).
+    link_slots(m, &mut views, &entries, &own_slots);
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
@@ -1156,6 +1272,18 @@ pub fn map_slot(label: &str) -> Option<u8> {
         "_i" => Some(7),
         _ => None,
     }
+}
+
+/// `map_slot`, and slot 1 for the diffuse-like roles (`albedo`, `diffuse`, `skin_albedo`, `complex_grass`): a link on
+/// slot 1 answers a missing diffuse as a link on slot 2 answers a missing normal.
+pub(crate) fn linked_map_slot(label: &str) -> Option<u8> {
+    map_slot(label).or_else(|| {
+        matches!(
+            label,
+            "albedo" | "diffuse" | "skin_albedo" | "complex_grass"
+        )
+        .then_some(1)
+    })
 }
 
 /// The slot number of the map a `SHADER-MISSING-MAP` names (`map_slot`); `None` for any other warning. A number, not
@@ -1406,8 +1534,15 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         shown == card_hidden(m, &entries, &root, s)
     });
     // shortcut: a mapped project rebuilds every view (a fill reads other sets' paths); index writers by path if a
-    // project with many mapped sets shows it in a profile.
-    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some()) {
+    // project with many mapped sets shows it in a profile. A project with a linked slot (a non-empty string `slotN`)
+    // rebuilds every view too: a link reads another set's output path, and the splice does not know which sets it
+    // reads; upgrade when a splice can name the sets a link reads.
+    let linked = |e: &SetEntry| {
+        (1..=LAST_GAME_SLOT).any(|n| {
+            matches!(e.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty())
+        })
+    };
+    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some() || linked(e)) {
         *views = build_views(m);
         return;
     }

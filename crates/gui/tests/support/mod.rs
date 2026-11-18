@@ -170,6 +170,55 @@ pub fn opened_as_the_app(root: PathBuf, export: PathBuf) -> AppModel {
     m
 }
 
+fn flat_png(dir: &Path, name: &str, rgb: [u8; 3]) {
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb(rgb))
+        .save(dir.join(name))
+        .unwrap();
+}
+
+/// A PBR set `wall` (albedo + normal), and a PBR-picked set `leaf` with only `_n` and `_rmaos` (Note HL5).
+pub fn no_albedo_pair(dir: &Path) -> AppModel {
+    no_albedo_pair_with(dir, &[])
+}
+
+/// `no_albedo_pair` with more PNGs in `textures/arch`: each `(name, colour, sub-type)` is written before the folder
+/// is opened and decided to its sub-type after the first plan.
+pub fn no_albedo_pair_with(dir: &Path, extra: &[(&str, [u8; 3], Subtype)]) -> AppModel {
+    let r = dir.join("textures/arch");
+    std::fs::create_dir_all(&r).unwrap();
+    for (n, c) in [
+        ("wall.png", [90, 90, 90]),
+        ("wall_rmaos.png", [200, 20, 255]),
+        ("leaf_rmaos.png", [100, 50, 255]),
+        ("wall_n.png", [128, 128, 255]),
+        ("leaf_n.png", [128, 128, 255]),
+    ] {
+        flat_png(&r, n, c);
+    }
+    for (n, c, _) in extra {
+        flat_png(&r, n, *c);
+    }
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    for (n, _, st) in extra {
+        m.decide(&format!("arch/{n}"), Answer::Subtype(*st));
+    }
+    m.decide("arch/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide("arch/wall_n.png", Answer::Subtype(Subtype::PbrNormal));
+    m.decide("arch/wall_n.png", Answer::Green(GreenConvention::Directx));
+    m.decide("arch/leaf_n.png", Answer::Subtype(Subtype::PbrNormal));
+    m.decide("arch/leaf_n.png", Answer::Green(GreenConvention::Directx));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    for id in sdc_gui::model::sets::views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect::<Vec<_>>()
+    {
+        m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+    }
+    m
+}
+
 /// Note AZ: give the set whose key ends with `key_end` the complex-material shader (under vanilla it then packs the
 /// complex `_m`, the old cpm target) and wait for the re-plan.
 pub fn complex_material(m: &mut AppModel, key_end: &str) {
