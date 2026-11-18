@@ -217,6 +217,42 @@ fn the_opt_out_never_skips_an_edited_json_on_a_row_free_project() {
     assert!(m.review.is_some() && m.export.running.is_none());
 }
 
+/// Fix round 1, finding 3 (ruling 3c-18): write dispatch reads the JSON state fresh. The label may use the 1 s cache,
+/// the click may not: a JSON edited inside the cache's second still opens Review.
+#[test]
+fn the_click_reads_an_edited_json_fresh_inside_the_cache_second() {
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/pbr/arm");
+    support::colour(&t.join("steel.png"), 200);
+    support::flat(&t.join("steel_n.png"));
+    support::colour(&t.join("steel_rmaos.png"), 30);
+    let mut m = support::opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_without_review(true);
+    m.header_export_clicked();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let json = support::pgp_json_path(&m);
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    m.expire_review_json();
+    // The label warms the cache with the JSON clean...
+    assert!(
+        m.header_export_text().ends_with(" now"),
+        "guard: {}",
+        m.header_export_text()
+    );
+    // ...then the file is edited and the click comes inside the cache's second (no clock advance, no expiry).
+    std::fs::write(&json, "{ \"edited\": true }\n").unwrap();
+    assert!(
+        m.header_export_text().ends_with(" now"),
+        "guard: the label still reads the cache"
+    );
+    m.header_export_clicked();
+    assert!(
+        m.review.is_some() && m.export.running.is_none(),
+        "the click wrote past an edited JSON"
+    );
+}
+
 #[test]
 fn the_opt_out_never_skips_an_also_tick() {
     let d = tempfile::tempdir().unwrap();

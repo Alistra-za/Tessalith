@@ -444,6 +444,13 @@ impl AppModel {
             && !self.has_problem_rows()
     }
 
+    /// E3 (ruling 3c-18): `writes_without_review` for a write about to start: the JSON state is read fresh (the 1 s
+    /// cache is for the per-frame label). Once per dispatch, never per frame.
+    pub(super) fn writes_without_review_fresh(&self) -> bool {
+        self.review_json_cache.take();
+        self.writes_without_review()
+    }
+
     /// E3 (ruling 3c-14): `(writes_without_review, export_files)` of the whole project, whatever scope an open Review
     /// was made for (a header click clears the scope first). With no scope it is the live pair; with one it is read
     /// through `with_whole_view`, once per change of what it reads (the view key and the problems key), so the

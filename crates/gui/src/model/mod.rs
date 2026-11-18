@@ -2142,12 +2142,14 @@ impl AppModel {
             return;
         }
         // The same front half as `export_go`: changed sources plan again first, and the write waits for that plan.
-        if self.writes_without_review() && self.check_sources() > 0 && self.session.is_some() {
+        // Fresh JSON read (ruling 3c-18): a write never rides on the label's cached answer.
+        let writes = self.writes_without_review_fresh();
+        if writes && self.check_sources() > 0 && self.session.is_some() {
             self.write_now_after_plan = true;
             self.replan();
             return;
         }
-        if self.writes_without_review() {
+        if writes {
             self.write_now();
         } else {
             self.open_review();
@@ -2189,7 +2191,7 @@ impl AppModel {
         // read ran plans again first; the click stays queued and the count is compared when that plan lands.
         if self.write_now_after_plan
             && self.dialog.is_none()
-            && self.writes_without_review()
+            && self.writes_without_review_fresh()
             && self.check_sources() > 0
             && self.session.is_some()
         {
@@ -2199,7 +2201,7 @@ impl AppModel {
         if std::mem::take(&mut self.write_now_after_plan) {
             if self.dialog.is_some() {
                 self.queued_export_dropped();
-            } else if self.writes_without_review()
+            } else if self.writes_without_review_fresh()
                 && self.export_files() == self.settled_export_files
             {
                 self.write_now();
