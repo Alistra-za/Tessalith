@@ -1296,7 +1296,10 @@ pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
 
 /// Fuzz-1a: on cs, `set` (with no `_f` of its own) reads its fuzz map as the PBR fuzz texture by the picks in
 /// `ctx.shaders` (`pack::plan::fuzz_reading`); the map is untyped and not hand-set, or typed `pbr_fuzz`. Such a set
-/// writes `<base>_f.dds`, so it gains `f` (6c, and after packing).
+/// writes `<base>_f.dds`, so its other members (6c) and its `set_resolved` read it with `f`.
+// shortcut: member fuzz maps only (here and in `shader::pick_for_set`'s `PickInput::fuzz`), while
+// `pack::plan::has_fuzz_map` counts a share: a set whose only fuzz map is shared in (Note HH1) gets neither Fuzz-1a nor
+// `f`; read `set.shares` too when the shared fuzz map follow-up (F10) lands.
 pub(crate) fn pbr_read_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> bool {
     ctx.target == Target::Cs
         && !set.suffixes.contains("f")
@@ -1590,7 +1593,7 @@ impl Engine {
     }
 
     /// The one composition of a full plan: [`Engine::prepare`] then every set through [`Engine::plan_sets`].
-    /// Also returns the `Prepared`, the PBR set keys and the keys of the sets that gained `f` (Fuzz-1a), which a
+    /// Also returns the `Prepared`, the PBR set keys and the keys of the sets read with `f` (Fuzz-1a), which a
     /// session keeps as its skeleton.
     pub(crate) fn plan_full(
         &self,
@@ -1682,7 +1685,7 @@ impl Engine {
         // 6b. One `ShaderPick` per set (`shader::pick_for_set`) from the pass-1 sub-types; `ctx.shaders` holds them.
         // 6c. Members of a set whose shader has member defaults are resolved again with the picks; then packing.
         //     A set that reads its fuzz map as the PBR fuzz texture (`pbr_read_fuzz`, Fuzz-1a) resolves its other
-        //     members against a clone holding `f`, and gains `f` itself after packing.
+        //     members against a clone holding `f`, and its `set_resolved` reads a copy with `f`.
         let scope_root =
             project_root(req).or_else(|| req.inputs.first().filter(|p| p.is_dir()).cloned());
         let (mut sets, _) = group_sets_with(&files, registry.alias_table());
@@ -1933,7 +1936,7 @@ impl Engine {
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
     /// derive, bakes and the plan's events, the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
-    /// `pbr_sets`), and the keys of the sets that gained `f` from a PBR-read fuzz map (Fuzz-1a; its `f_sets`).
+    /// `pbr_sets`), and the keys of the sets read with `f` from a PBR-read fuzz map (Fuzz-1a; its `f_sets`).
     /// `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
     /// and skips the batch-wide steps: the SET-EDIT-STALE shader warnings, CFG-FILE-UNMATCHED, the BV2 writer dedupe
     /// and the progress counters (the request is the skeleton's). Its skipped entries are the scope files' only.
@@ -2333,8 +2336,8 @@ impl Engine {
             .map(|(wi, a, _)| (work[*wi].1.path.clone(), a.dds_dxgi))
             .collect();
         // Fuzz-1a: a set that reads its fuzz map as the PBR fuzz texture writes an `_f`, so its other members are
-        // resolved below against a clone whose suffixes hold `f`, as M7 adds a predicted `_rmaos`; after packing the
-        // set itself gains it, so `set_resolved` says `pbr`.
+        // resolved below against a clone whose suffixes hold `f`, as M7 adds a predicted `_rmaos`; `set_resolved`
+        // reads a copy with `f`, so it says `pbr`. The set itself never gains it (see `set_resolved` below).
         let f_sets: BTreeSet<String> = sets
             .iter()
             .filter(|s| pbr_read_fuzz(&ctx, s, files))
@@ -2477,10 +2480,6 @@ impl Engine {
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
             s.shares
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
-            // Fuzz-1a: the `_f` the fuzz map writes. No member resolves after this, so no rename guard sees it.
-            if f_sets.contains(&s.key) {
-                s.suffixes.insert("f".into());
-            }
         }
         // Pass 1 may add a recipe job it fails at once (sources of different sizes); like every job it records the
         // target's origin (`BatchRequest::target`, ruling W1).
@@ -3090,7 +3089,19 @@ impl Engine {
         let index = crate::shader::JobIndex::new(&jobs);
         let mut pbr_sets = BTreeSet::new();
         for set in &sets {
-            let Some(pbr) = set_is_pbr(target, set, files) else {
+            // Fuzz-1a: the `_f` the fuzz map writes counts here only, on a copy. `sets` never gains it: the fill step
+            // and pass 2 resolve with the set again, and its `f` would take the fuzz map's `<base>_f.dds` (the rename
+            // guard) or make it a packing input (the `_f` arm).
+            let with_f;
+            let read = if f_sets.contains(&set.key) {
+                let mut c = set.clone();
+                c.suffixes.insert("f".into());
+                with_f = c;
+                &with_f
+            } else {
+                set
+            };
+            let Some(pbr) = set_is_pbr(target, read, files) else {
                 continue;
             };
             if pbr {

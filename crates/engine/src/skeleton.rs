@@ -64,8 +64,8 @@ pub struct Skeleton {
     /// Sets with a fuzz map (Fuzz-19): a member image whose stem is a fuzz map's (`group::is_fuzz_stem`), or a set
     /// that lists one, also shared in (`pack::plan::has_fuzz_map`, the gate the Advanced Skin evidence reads).
     pub(crate) fuzz_sets: BTreeSet<u32>,
-    /// Sets that gained `f` in the full plan from a fuzz map read as the PBR fuzz texture (Fuzz-1a,
-    /// `api::pbr_read_fuzz`): the PBR check's clone gains it too.
+    /// Sets whose `set_resolved` read them with `f` in the full plan, from a fuzz map read as the PBR fuzz texture
+    /// (Fuzz-1a, `api::pbr_read_fuzz`): the PBR check's clone gains it too.
     pub(crate) f_sets: BTreeSet<u32>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
@@ -81,7 +81,7 @@ pub struct Skeleton {
 
 impl Skeleton {
     /// The skeleton of a full plan: `prepared` as `plan` was planned from, `pbr` its PBR set keys and `f` the keys of
-    /// its sets that gained `f` (Fuzz-1a).
+    /// its sets read with `f` (Fuzz-1a).
     pub(crate) fn new(
         prepared: Prepared,
         plan: &Plan,
@@ -422,7 +422,7 @@ impl Skeleton {
             predict_suffixes(
                 &mut set, skin_fuzz, n.target, complex, &n.files, &n.typed, &n.hand,
             );
-            // Fuzz-1a: the `f` the full plan's fuzz map added. Only on this clone: in `n.sets` it would reach the
+            // Fuzz-1a: the `f` the full plan's `set_resolved` read. Only on this clone: in `n.sets` it would reach the
             // partial's pass 1. Edits that change the reading plan in full already (FUZZ_SUBTYPE and the joins).
             if self.f_sets.contains(&s) {
                 set.suffixes.insert("f".into());

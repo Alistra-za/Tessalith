@@ -1057,3 +1057,51 @@ fn vanilla_fuzz_sets_are_unchanged() {
         out_names(&p)
     );
 }
+
+/// Fuzz-1a with a Note DY alpha fill: a `fuzzweight` helper fills the fuzz map's alpha, and the filled map still
+/// writes `<base>_f.dds` (the fill step resolves it again, before the set gains `f`). The set reports `pbr`.
+#[test]
+fn a_filled_fuzz_map_keeps_base_f() {
+    let d = fixture(
+        &["x.png", "x_n.png", "x_fuzz.png", "x_w.png"],
+        "[files.\"x_w.png\"]\nhelper.role = \"fuzzweight\"\n",
+    );
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    let sink = Arc::new(VecSink::default());
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(sink.clone(), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    let j = job(&p, "x_fuzz.png");
+    assert!(
+        j.fill
+            .as_ref()
+            .is_some_and(|f| f.source.path.ends_with("x_w.png")),
+        "the helper fills the fuzz map: {:?}",
+        j.fill
+    );
+    assert!(
+        !matches!(j.status, JobStatus::PackingInput { .. }),
+        "{:?} {}",
+        j.status,
+        out_name(j)
+    );
+    assert_eq!(j.profile.subtype, Subtype::PbrFuzz);
+    assert_eq!(out_name(j), "x_f.dds");
+    let key = j.set_key.clone();
+    let pbr: Vec<bool> = sink
+        .take()
+        .into_iter()
+        .filter(|e| e.set.as_deref() == Some(key.as_str()))
+        .filter_map(|e| match e.kind {
+            EventKind::SetResolved { pbr, .. } => Some(pbr),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(pbr, vec![true]);
+}
