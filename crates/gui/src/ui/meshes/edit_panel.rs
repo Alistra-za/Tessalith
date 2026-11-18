@@ -2,11 +2,10 @@
 //! the export status with Review… (Note GD2: NIF edits export from Review), then the Shader, Alpha, Controllers and
 //! Extra data tabs.
 use super::edit_fields::{self, Act};
-use super::{edit_ctrl, edit_extra};
+use super::{edit_ctrl, edit_extra, fit_middle, text_width};
 use crate::model::meshes::edit_doc::OpStatus;
 use crate::model::meshes::nif_edit::{NifEdit, Selection, NO_EDITS, NO_EXPORT_FOLDER};
 use crate::model::meshes::MeshesModel;
-use crate::ui::header::elide_middle;
 use crate::ui::status::{self, Status, AMBER, GREEN, RED};
 use eframe::egui;
 use nif::edit::{Op, Outcome};
@@ -309,24 +308,13 @@ fn export_block(
         let full = e.export_path.display().to_string().replace('/', "\\");
         let data = e.data_path.replace('/', "\\");
         let font = egui::TextStyle::Body.resolve(ui.style());
-        let glyph = ui.fonts_mut(|f| f.glyph_width(&font, '0'));
-        let chars = ((ui.available_width() / glyph.max(1.0)) as usize)
-            .saturating_sub(data.chars().count() + 14);
-        let line = format!("Writes {data} to {full}");
-        let r = ui.add(
-            egui::Label::new(format!("Writes {data} to {}", elide_middle(&full, chars))).truncate(),
-        );
-        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &line));
-        r.on_hover_text(&line);
-        ui.add(
-            egui::Label::new(
-                egui::RichText::new(
-                    "The source file is never changed. Change the folder with Export to ▾ in the header.",
-                )
-                .weak(),
-            )
-            .wrap(),
-        );
+        let shown = fit_writes_line(ui, &font, &data, &full);
+        let name = format!("Writes {data} to {full}\n{WRITES_NOTE}");
+        let r = ui.add(egui::Label::new(shown).truncate());
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+        r.on_hover_ui(|ui| {
+            ui.label(&name);
+        });
     }
     // Note GD2: NIF edits export from Review, with the textures; its NIF row carries the result, the placement, the
     // Keep / Overwrite answer and the cleanup count. The button only opens Review, so it never writes.
@@ -336,6 +324,38 @@ fn export_block(
     if r.clicked() {
         act.review = true;
     }
+}
+
+/// The sentence the Writes line's hover and accessible name carry after the line itself.
+const WRITES_NOTE: &str =
+    "The source file is never changed. Change the folder with Export to ▾ in the header.";
+
+/// `Writes {data} to {export}` cut in the middle to the footer's width (review E23): the export path first, down to
+/// its first component, `…` and file name; the data path too when the line is still too wide. The text is measured
+/// with `fit_middle`'s layouts (a few per frame; egui's galley cache keeps the unchanged probes between frames).
+fn fit_writes_line(ui: &egui::Ui, font: &egui::FontId, data: &str, export: &str) -> String {
+    let width = ui.available_width();
+    let line = format!("Writes {data} to {export}");
+    if text_width(ui, &line, font) <= width {
+        return line;
+    }
+    let mut parts = export.split('\\');
+    let (first, last) = (parts.next().unwrap_or(export), parts.next_back());
+    let floor = match last {
+        Some(last) => format!("{first}\\…\\{last}"),
+        None => export.to_string(),
+    };
+    let room = width - text_width(ui, &format!("Writes {data} to "), font);
+    let export_shown = fit_middle(ui, export, font, room.max(text_width(ui, &floor, font)));
+    let line = format!("Writes {data} to {export_shown}");
+    if text_width(ui, &line, font) <= width {
+        return line;
+    }
+    let room = width - text_width(ui, "Writes  to ", font) - text_width(ui, &export_shown, font);
+    format!(
+        "Writes {} to {export_shown}",
+        fit_middle(ui, data, font, room)
+    )
 }
 
 fn apply(m: &mut MeshesModel, act: Act) {

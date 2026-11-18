@@ -4095,7 +4095,7 @@ fn the_footer_opens_review_and_writes_nothing() {
     let revert = format!("Revert 1: {}: Glossiness", at.shape.as_deref().unwrap());
     let mut h = view(m);
     h.run_steps(3);
-    h.get_by_label(&writes_line(&d));
+    h.get_by_label_contains(&writes_line(&d));
     h.get_by_label("Ready");
     assert!(h.query(export_nif()).is_none(), "no Export NIF button");
     assert!(
@@ -5544,10 +5544,87 @@ fn the_destination_line_shows_the_real_path() {
     let full = writes_line(&d);
     let mut h = view(m);
     h.run_steps(3);
-    h.get_by_label(&full);
-    h.get_by_label(
-        "The source file is never changed. Change the folder with Export to ▾ in the header.",
+    h.get_by_label_contains(&full);
+}
+
+/// The text of the `Shape::Text` galleys whose centre lies inside `cell`, as painted last frame (a label's node
+/// rect is a little taller and narrower than its glyph bounds).
+fn painted_text_in(h: &Harness<'static, MeshesModel>, cell: egui::Rect) -> String {
+    h.output()
+        .shapes
+        .iter()
+        .filter_map(|c| match &c.shape {
+            egui::Shape::Text(t) if cell.contains(t.visual_bounding_rect().center()) => {
+                Some(t.galley.rows.iter().map(|r| r.text()).collect::<String>())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// Review E23, CZ2: the Writes line is cut in the middle to the footer's width in pixels (the export path first,
+/// then the data path), keeps its file name, and carries the whole line and the source-file sentence in its name.
+#[test]
+fn the_writes_line_fits_and_keeps_the_full_line() {
+    let d = files(false);
+    put(
+        d.path(),
+        "mods/A/meshes/a very long folder/another long folder/x.nif",
+        None,
     );
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let deep = d
+        .path()
+        .join("mods")
+        .join("a deep folder for the export")
+        .join("with several more folders")
+        .join(EDIT_MOD);
+    std::fs::create_dir_all(&deep).unwrap();
+    m.set_nif_export_root(Some(deep));
+    let long = m
+        .nifs
+        .iter()
+        .find(|n| {
+            n.path.ends_with("another long folder\\x.nif")
+                || n.path.ends_with("another long folder/x.nif")
+        })
+        .expect("the long-path nif")
+        .copy_id;
+    m.select_nif(long);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let e = m.edit.as_ref().unwrap();
+    let data = e.data_path.replace('/', "\\");
+    let export = e.export_path.display().to_string().replace('/', "\\");
+    let full = format!("Writes {data} to {export}");
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1536.0, 864.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        );
+    h.run_steps(4);
+    let node = h.get_by_label_contains(&full);
+    let shown = painted_text_in(&h, node.rect());
+    let panel = support::panel(&h.ctx, "meshes-edit");
+    assert!(shown.starts_with("Writes "), "{shown}");
+    assert!(shown.ends_with("x.nif"), "{shown}");
+    assert!(shown.chars().count() < full.chars().count(), "{shown}");
+    assert!(
+        node.rect().width() <= panel.width(),
+        "{:?} {panel:?}",
+        node.rect()
+    );
+    assert!(h
+        .query_by_label(
+            "The source file is never changed. Change the folder with Export to ▾ in the header."
+        )
+        .is_none());
 }
 
 #[test]
