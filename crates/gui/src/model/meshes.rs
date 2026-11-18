@@ -429,22 +429,29 @@ pub fn source_line(s: &ScanSource) -> String {
         .join(" ")
 }
 
-/// `scan.db`'s own modified time as `YYYY-MM-DD` (UTC); `-wal` is not looked at (controller ruling 6).
+/// The store's last write as `YYYY-MM-DD` (UTC): the later modified time of `scan.db` and its `-wal` file (under
+/// WAL a small scan's writes can stay in the `-wal`); `scan.db`'s alone with no `-wal`.
 pub fn scan_written(db: &Path) -> Option<String> {
+    let mut wal = db.as_os_str().to_owned();
+    wal.push("-wal");
     let t = std::fs::metadata(db).and_then(|m| m.modified()).ok()?;
+    let t = match std::fs::metadata(&wal).and_then(|m| m.modified()) {
+        Ok(w) => t.max(w),
+        Err(_) => t,
+    };
     let secs = t.duration_since(std::time::UNIX_EPOCH).ok()?.as_secs();
     Some(crate::crash_log::date(secs))
 }
 
 /// The folder the scan in `store` read: the parent of the Overwrite origin's root (an MO2 scan always adds one,
 /// `modscan/src/mo2.rs`), else the root of the only mod origin (a folder scan), else `None`.
-// shortcut: an MO2 `overwrite_directory` outside the instance names the wrong folder, and the file time moves on any
-// later write (a WAL checkpoint, a migration, a later NIF-team table); upgrade when modscan records the instance and
-// the scan time.
+// shortcut: an MO2 `overwrite_directory` outside the instance names the wrong folder, and the file time is the store's
+// last write (either file), which any later write moves (a migration, a later NIF-team table); upgrade when modscan
+// records the instance and the scan time. Only enabled origins count: earlier scans stay as disabled rows.
 fn scan_root(store: &Store) -> Option<String> {
     let mut st = store
         .conn()
-        .prepare("SELECT kind, root FROM origin WHERE kind IN (1, 2)")
+        .prepare("SELECT kind, root FROM origin WHERE enabled = 1 AND kind IN (1, 2)")
         .ok()?;
     let rows: Vec<(i32, String)> = st
         .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))

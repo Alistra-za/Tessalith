@@ -1493,6 +1493,68 @@ fn scan_written_reads_the_file_time() {
     );
 }
 
+/// Task 3 review: the later of `scan.db`'s and `scan.db-wal`'s times names the last write.
+#[test]
+fn scan_written_takes_the_later_of_the_db_and_its_wal() {
+    let d = tempfile::tempdir().unwrap();
+    let set = |name: &str, secs: u64| {
+        let f = std::fs::File::create(d.path().join(name)).unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_secs(secs))
+            .unwrap();
+    };
+    let db = d.path().join("scan.db");
+    set("scan.db", 1_762_776_000); // 2025-11-10
+    set("scan.db-wal", 1_762_776_000 + 3 * 86_400);
+    assert_eq!(
+        sdc_gui::model::meshes::scan_written(&db).as_deref(),
+        Some("2025-11-13")
+    );
+    set("scan.db-wal", 1_762_776_000 - 3 * 86_400);
+    assert_eq!(
+        sdc_gui::model::meshes::scan_written(&db).as_deref(),
+        Some("2025-11-10")
+    );
+}
+
+/// Task 3 review: origins of earlier scans stay as disabled rows; the line names the latest scan only.
+#[test]
+fn a_folder_scan_after_an_mo2_scan_names_the_folder() {
+    let (d, mut m) = scan_files("+A\n", &[("mods/A/meshes/x.nif", None)]);
+    let folder = d.path().join("loose");
+    put(&folder, "meshes/y.nif", None);
+    m.use_folder(folder.clone());
+    start_scan(&mut m);
+    wait(&mut m);
+    assert_eq!(m.error, None);
+    m.reload();
+    let s = m.scan_source().expect("a scan source");
+    assert_eq!(
+        s.root.as_deref(),
+        Some(folder.display().to_string().as_str())
+    );
+}
+
+/// Task 3 review: two folders in turn into one `scan.db` name the second.
+#[test]
+fn a_second_folder_scan_names_the_second_folder() {
+    let f = tempfile::tempdir().unwrap();
+    let db = tempfile::tempdir().unwrap();
+    let mut m = scan_model(db.path().join("scan.db"));
+    m.activate_with(None);
+    let mut last = PathBuf::new();
+    for name in ["one", "two"] {
+        last = f.path().join(name);
+        put(&last, "meshes/x.nif", None);
+        m.use_folder(last.clone());
+        start_scan(&mut m);
+        wait(&mut m);
+        assert_eq!(m.error, None);
+    }
+    m.reload();
+    let s = m.scan_source().expect("a scan source");
+    assert_eq!(s.root.as_deref(), Some(last.display().to_string().as_str()));
+}
+
 /// Review E16: the list names the instance its scan read (the parent of `overwrite`) and the scan data's date.
 #[test]
 fn the_list_names_the_instance_of_its_scan() {
