@@ -1175,6 +1175,30 @@ impl AppModel {
         }
     }
 
+    /// This project's "Export without review" choice (`[project] export_without_review`); off without a usable project.
+    pub fn export_without_review(&self) -> bool {
+        self.sets_doc
+            .as_ref()
+            .filter(|d| !d.read_only())
+            .is_some_and(|d| d.export_without_review())
+    }
+
+    /// Saved in `sdc-project.toml` at once, or with the next Save when it holds unsaved edits (those are the user's to
+    /// save, Note BD2), as `set_export_folder` does. Not an undo step: it is a preference.
+    pub fn set_export_without_review(&mut self, on: bool) {
+        let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
+            return;
+        };
+        let was_dirty = d.is_dirty();
+        d.set_export_without_review(on);
+        if was_dirty {
+            self.status_line = "Export without review is set; it is saved with your other changes at the next Save."
+                .into();
+        } else if let Err(e) = d.save(false) {
+            self.save_failed(DocKind::Project, &e);
+        }
+    }
+
     /// Where an export would write: the chosen folder, else `<root>/sdc-out` (only a place to name; Review blocks the
     /// export until a folder is chosen, Note FB1).
     pub fn export_root(&self) -> PathBuf {

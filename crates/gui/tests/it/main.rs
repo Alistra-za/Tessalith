@@ -99,6 +99,8 @@ mod export_drawer;
 mod export_folder;
 #[path = "../export_layout.rs"]
 mod export_layout;
+#[path = "../export_shell.rs"]
+mod export_shell;
 #[path = "../export_undecided.rs"]
 mod export_undecided;
 #[path = "../fast_replan.rs"]

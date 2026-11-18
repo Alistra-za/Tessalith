@@ -487,6 +487,7 @@ impl SetsDoc {
         let xpmf = self.doc_shas(XPMF_SHA);
         let skin = self.doc_shas(CS_SKIN_SHA);
         let folder = self.export_folder();
+        let review = self.export_without_review();
         let target = self.target_mod();
         let old = self.text();
         self.restore(text);
@@ -510,6 +511,10 @@ impl SetsDoc {
         if self.export_folder() != folder {
             let v = folder.map(|p| Value::from(p.to_string_lossy().as_ref()));
             self.set_project("export_folder", v);
+        }
+        // Nor is the export-without-review preference.
+        if self.export_without_review() != review {
+            self.set_export_without_review(review);
         }
         // Note HL: nor is the target mod.
         if self.target_mod() != target {
@@ -576,6 +581,19 @@ impl SetsDoc {
             "export_folder",
             Some(Value::from(path.to_string_lossy().as_ref())),
         );
+    }
+
+    /// `[project] export_without_review`, this project's opt-out of Review before an export (GUI-only; absent = off).
+    pub fn export_without_review(&self) -> bool {
+        self.f
+            .doc
+            .get("project")
+            .and_then(|p| p.get("export_without_review"))
+            .and_then(Item::as_bool)
+            .unwrap_or(false)
+    }
+    pub fn set_export_without_review(&mut self, on: bool) {
+        self.set_project("export_without_review", on.then(|| Value::from(true)));
     }
 
     /// Note HL: `[project] target_mod`, the mod folder being worked on (an absolute path; GUI-only state).
