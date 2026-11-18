@@ -131,6 +131,32 @@ pub(super) fn list_normals(
     }
 }
 
+/// A pick's, the Switch's or Revert's own write: `Some` lists the word, `None` (a cleared sub-type) takes the key off;
+/// stale entries are pruned with it.
+pub(super) fn relist(p: &ProjectDoc, s: &mut SetsDoc, changes: &[(String, Option<Subtype>)]) {
+    if s.read_only() || changes.is_empty() {
+        return;
+    }
+    let before = s.auto_normal();
+    let mut l = before.clone();
+    for (k, st) in changes {
+        match st {
+            Some(st) => {
+                l.insert(k.clone(), word(*st));
+            }
+            None => {
+                l.remove(k);
+            }
+        }
+    }
+    l.retain(|k, w| {
+        p.file_value(k, "subtype").as_ref().and_then(Value::as_str) == Some(w.as_str())
+    });
+    if l != before {
+        s.set_auto_normal(&l);
+    }
+}
+
 /// N-27: the user picked the word the list holds, so the key is theirs now (the rare write to `sdc-project.toml`). A
 /// different value needs no write: it already reads as the user's.
 pub(super) fn unlist_same(s: &mut SetsDoc, key: &str, new: Option<Subtype>) {

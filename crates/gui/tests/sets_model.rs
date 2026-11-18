@@ -3835,9 +3835,19 @@ fn move_down_on_last_set_changes_nothing() {
     let last = views.last().unwrap().id.clone();
     let sets_dirty = |m: &sdc_gui::model::AppModel| m.sets_doc.as_ref().unwrap().is_dirty();
     let (undo, dirty) = (m.history.undo.len(), sets_dirty(&m));
+    let text = m.sets_doc.as_ref().unwrap().text();
     assert!(!m.reorder_set(&last, views.len()));
     assert_eq!((m.history.undo.len(), sets_dirty(&m)), (undo, dirty));
-    assert!(!dirty, "sdc-project.toml is untouched");
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().text(),
+        text,
+        "the move changes no text"
+    );
+    assert_eq!(
+        text,
+        m.sets_doc.as_ref().unwrap().saved_text(),
+        "sdc-project.toml is untouched"
+    );
     assert!(m.reorder_set(&last, 0), "a real move still moves");
 }
 

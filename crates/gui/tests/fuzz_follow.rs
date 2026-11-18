@@ -1148,10 +1148,19 @@ fn an_explicit_pbr_pick_retypes_an_untouched_normal() {
     m.set_shader("m/rock01", Some(Shader::Pbr));
     idle(&mut m);
     assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
-    assert!(auto_pbr(&m).contains(NORMAL));
+    assert_eq!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .auto_normal()
+            .get(NORMAL)
+            .map(String::as_str),
+        Some("pbr_normal")
+    );
     m.set_shader("m/rock01", Some(Shader::Default));
     idle(&mut m);
     assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
     assert!(!auto_pbr(&m).contains(NORMAL));
 }
 

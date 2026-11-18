@@ -14,10 +14,11 @@ use engine::presets::Provenance;
 use serde_json::json;
 
 /// The PBR counterpart of an inferred member sub-type; `None` leaves the member alone (`height` stays `height`, and
-/// `msn` stays `msn`: a model-space normal is not a tangent-space one, Note IA3).
+/// `msn` stays `msn`: a model-space normal is not a tangent-space one, Note IA3); `landscape_normal` too (Note JS6,
+/// N-19).
 fn pbr_counterpart(st: Subtype) -> Option<Subtype> {
     match st {
-        Subtype::Normal => Some(Subtype::PbrNormal),
+        Subtype::Normal | Subtype::LandscapeNormal => Some(Subtype::PbrNormal),
         Subtype::Glow => Some(Subtype::PbrEmissive),
         _ => None,
     }
@@ -32,10 +33,12 @@ fn pbr_like(st: Subtype) -> bool {
 /// What a sub-type edit on the Diffuse-slot member does to the rest of its set.
 enum Follow {
     Nothing,
-    /// Members to switch, with their new sub-type.
-    Switch(Vec<(String, Subtype)>),
-    /// The set's members; those listed in `auto_pbr` that still hold their auto value go back to inferred.
-    Revert(Vec<String>),
+    /// Members to switch, with their new sub-type and whether the key is an untouched listed normal (Note JS6, N-28:
+    /// it keeps its `auto_normal` listing, with the new word, and never joins `auto_pbr`).
+    Switch(Vec<(String, Subtype, bool)>),
+    /// The set's members (those listed in `auto_pbr` that still hold their auto value go back to inferred), and the
+    /// untouched listed `pbr_normal`s with the engine type they go back to (Note JS6).
+    Revert(Vec<String>, Vec<(String, Subtype)>),
 }
 
 impl AppModel {
@@ -117,17 +120,20 @@ impl AppModel {
             let before = s.auto_pbr();
             // A sub-type the user just chose is no longer automatic.
             let mut auto: Vec<String> = before.iter().filter(|a| **a != k).cloned().collect();
+            let mut relisted: Vec<(String, Option<Subtype>)> = vec![];
             match follow {
                 Follow::Nothing => {}
                 Follow::Switch(members) => {
-                    for (mk, st) in members {
+                    for (mk, st, listed) in members {
                         p.set_file_value(&mk, "subtype", &json!(st));
-                        if !auto.contains(&mk) {
+                        if listed {
+                            relisted.push((mk, Some(st)));
+                        } else if !auto.contains(&mk) {
                             auto.push(mk);
                         }
                     }
                 }
-                Follow::Revert(members) => {
+                Follow::Revert(members, back) => {
                     for mk in members {
                         let held = p.file_value(&mk, "subtype");
                         let is_auto = held == Some(json!(Subtype::PbrNormal))
@@ -137,6 +143,10 @@ impl AppModel {
                             auto.retain(|a| *a != mk);
                         }
                     }
+                    for (mk, st) in back {
+                        p.set_file_value(&mk, "subtype", &json!(st));
+                        relisted.push((mk, Some(st)));
+                    }
                 }
             }
             // Files that no longer exist drop off the list whenever it is written.
@@ -144,6 +154,7 @@ impl AppModel {
             if auto != before {
                 s.set_auto_pbr(&auto);
             }
+            super::normal_follow::relist(p, s, &relisted);
         });
     }
 
@@ -198,7 +209,15 @@ impl AppModel {
         let locked = locked_items(self);
         let free = |mk: &&String| !locked.contains_key(*mk);
         if leaves {
-            return Follow::Revert(v.members.iter().filter(free).cloned().collect());
+            // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`).
+            let back = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| self.untouched_normal(m) == Some(Subtype::PbrNormal))
+                .map(|m| (m.clone(), self.tangent_back(m)))
+                .collect();
+            return Follow::Revert(v.members.iter().filter(free).cloned().collect(), back);
         }
         let shader = v.shader.as_ref().map(|s| s.shader);
         let switch = v
@@ -216,15 +235,20 @@ impl AppModel {
                 // the user wrote resolves with a provenance other than the engine's own suggestion.
                 let inferred = p.file_value(m, "subtype").is_none()
                     && job.provenance.get("subtype") == Some(&Provenance::Suggestion);
-                if !inferred && !untouched {
-                    return None;
-                }
                 let suggested = it.decisions.iter().find_map(|d| match d {
                     Decision::Subtype { suggested } => *suggested,
                     _ => None,
                 });
-                let st = pbr_counterpart(suggested.unwrap_or(job.profile.subtype))?;
-                Some((m.clone(), st))
+                let from = suggested.unwrap_or(job.profile.subtype);
+                // Note JS6 (N-28): a tangent-space normal switches only when inferred or untouched in `auto_normal`; R5's
+                // "equal to the suggestion" does not make a typed `normal` Tessalith's (owner, 07:10).
+                let listed = self.untouched_normal(m).is_some();
+                let tangent = matches!(from, Subtype::Normal | Subtype::LandscapeNormal);
+                if (tangent && !inferred && !listed) || (!tangent && !inferred && !untouched) {
+                    return None;
+                }
+                let st = pbr_counterpart(from)?;
+                Some((m.clone(), st, listed))
             })
             .collect();
         Follow::Switch(switch)
