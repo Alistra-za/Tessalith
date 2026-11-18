@@ -392,6 +392,80 @@ fn a_queued_now_click_rechecks_the_sources_when_the_read_lands() {
     assert!(d.path().join("export/textures/g/a.dds").is_file());
 }
 
+/// A clean project with the opt-out on and a scan-finished read pending, the header write queued behind it.
+fn queued_behind_a_read(dir: &std::path::Path) -> (AppModel, tempfile::TempDir) {
+    let mut m = support::opened_chosen_decided(dir);
+    m.set_export_without_review(true);
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    m.scan_db = Some(db);
+    m.refresh_mesh_votes(false);
+    assert!(m.votes_pending(), "guard: a scan-finished read is pending");
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.header_export_clicked();
+    assert!(m.review.is_none() && m.export.running.is_none(), "queued");
+    (m, dbdir)
+}
+
+fn assert_cancelled_with_the_note(m: &AppModel) {
+    assert!(
+        m.review.is_none() && m.dialog.is_none() && m.export.running.is_none(),
+        "{:?}",
+        m.dialog
+    );
+    assert!(
+        m.status_line
+            .contains("Export cancelled: the project changed while scan results were loading"),
+        "{}",
+        m.status_line
+    );
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text.starts_with("Export cancelled: the project changed")));
+}
+
+/// Fix round 1, finding 2: the header write the opt-out queues is cancelled by an edit during a scan-finished read,
+/// like the queued Export is (DECISIONS AF4), with the same note. Twin of
+/// `sets_model::an_edit_during_a_scan_finished_read_drops_the_queued_export`.
+#[test]
+fn an_edit_during_a_scan_finished_read_drops_the_queued_header_write() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _db) = queued_behind_a_read(d.path());
+    m.set_field("g/a.png", "header", serde_json::json!("dx10"));
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    assert_cancelled_with_the_note(&m);
+}
+
+/// Fix round 1, finding 2: an undo cancels it the same way (twin of
+/// `sets_model::an_undo_during_a_scan_finished_read_cancels_the_queued_export`).
+#[test]
+fn an_undo_during_a_scan_finished_read_cancels_the_queued_header_write() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_field("g/a.png", "header", serde_json::json!("dx10"));
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    // Re-open the queue on top of the edited project.
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    m.scan_db = Some(db);
+    m.set_export_without_review(true);
+    m.refresh_mesh_votes(false);
+    assert!(m.votes_pending(), "guard: a scan-finished read is pending");
+    assert!(
+        m.header_export_text().ends_with(" now"),
+        "guard: {}",
+        m.header_export_text()
+    );
+    m.header_export_clicked();
+    assert!(m.review.is_none() && m.export.running.is_none(), "queued");
+    m.undo();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    assert_cancelled_with_the_note(&m);
+}
+
 #[test]
 fn a_write_now_click_still_runs_the_export_guards() {
     // `writes_without_review` does not look at the export folder's location; the click's guards (`export_stopped`)

@@ -2375,12 +2375,13 @@ impl AppModel {
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
     fn replan_changed(&mut self, files_edit: bool) {
-        let cancel = self.export_after_plan
+        let cancel = (self.export_after_plan || self.write_now_after_plan)
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
         self.replan_with(files_edit);
         if cancel {
             self.export_after_plan = false;
+            self.write_now_after_plan = false;
             self.status_note = Some(
                 "Export cancelled: the project changed while scan results were loading — click Export again."
                     .into(),
