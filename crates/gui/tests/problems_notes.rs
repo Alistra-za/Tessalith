@@ -182,7 +182,12 @@ fn the_set_loses_one_counted_problem_and_can_be_ready() {
             .filter(|w| counts_for(m, &at, w))
             .count()
     };
+    assert!(
+        set_ready(&base, &rock01(&base)),
+        "precondition: the pbr_normal baseline is Ready"
+    );
     assert_eq!(counted(&plain), counted(&base), "needs _n no longer counts");
+    assert_eq!(counted(&plain), 0, "no counted row is left");
     assert_eq!(
         set_ready(&plain, &rock01(&plain)),
         set_ready(&base, &rock01(&base))
@@ -229,7 +234,9 @@ fn put_specular_note(m: &mut AppModel, set_key: &str, member: &str, shader: &str
 
 /// The button's AccessKit name, which names its file: the note's sentence says "Use PBR normal" too, so the bare label
 /// would find the sentence on the same row.
-const USE_PBR_NORMAL_BUTTON: &str = "Use PBR normal for rock01_normal.png";
+fn use_pbr_normal_button(file: &str) -> String {
+    format!("{} for {file}", sdc_gui::model::bottom::USE_PBR_NORMAL)
+}
 
 /// B3-1, B3-2 (Note JP3): the set shows one note in place of "needs _n" and "not used", with **Use PBR normal**.
 /// One click writes `pbr_normal`, the note goes and "needs _n" does not come back; one Undo restores `normal`.
@@ -253,7 +260,7 @@ fn use_pbr_normal_switches_the_type_in_one_click_and_one_undo_restores_it() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    on_row(&h, &sentence, USE_PBR_NORMAL_BUTTON).click();
+    on_row(&h, &sentence, &use_pbr_normal_button("rock01_normal.png")).click();
     h.step();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
@@ -313,7 +320,8 @@ fn use_pbr_normal_is_off_on_a_locked_slot() {
     let mut h = harness(m);
     tooltips_now(&h);
     h.run();
-    let b = on_row(&h, &sentence, USE_PBR_NORMAL_BUTTON);
+    let name = use_pbr_normal_button("rock01_normal.png");
+    let b = on_row(&h, &sentence, &name);
     assert!(b.accesskit_node().is_disabled());
     b.hover();
     h.run();
@@ -347,7 +355,8 @@ fn use_pbr_normal_is_off_on_a_read_only_sdc_toml() {
     let mut h = harness(m);
     tooltips_now(&h);
     h.run();
-    let b = on_row(&h, &sentence, USE_PBR_NORMAL_BUTTON);
+    let name = use_pbr_normal_button("rock01_normal.png");
+    let b = on_row(&h, &sentence, &name);
     assert!(b.accesskit_node().is_disabled());
     b.hover();
     h.run();
@@ -379,6 +388,7 @@ fn a_kept_dds_normal_gets_the_note_without_a_button() {
     put_specular_note(&mut m, &v.key, "iron_n.dds", "pbr");
     let rows = specular_rows(&m);
     assert_eq!(rows.len(), 1);
+    assert!(rows[0].is_note());
     assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
     assert!(
         rows[0].shown().contains("is a kept DDS"),
@@ -426,7 +436,7 @@ fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
 /// click writes `subtype = "pbr_normal"`. (A kept DDS: `a_kept_dds_normal_gets_the_note_without_a_button`.)
 #[test]
 fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
-    use sdc_gui::model::bottom::{Fix, USE_PBR_NORMAL};
+    use sdc_gui::model::bottom::Fix;
     let d = tempfile::tempdir().unwrap();
     let mut m = kept_dds_normal_wall(d.path());
     m.set_reencode(&[WALL_N.to_string()], true);
@@ -459,7 +469,7 @@ fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
     let mut h = harness(m);
     tooltips_now(&h);
     h.run();
-    let button = format!("{USE_PBR_NORMAL} for wall_n.dds");
+    let button = use_pbr_normal_button("wall_n.dds");
     h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
         .hover();
     h.run();
@@ -477,6 +487,78 @@ fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
             .unwrap()
             .file_value(WALL_N, "subtype"),
         Some(serde_json::json!("pbr_normal"))
+    );
+}
+
+/// B3-27 (Note JP3): **Use PBR normal** keeps Enter and Space. Each key on the focused button writes `pbr_normal`, as
+/// a click does: it switches a type, as Rebuild Z does, so it is not a `click_only_button`.
+#[test]
+fn use_pbr_normal_answers_enter_and_space() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain_normal_in_pbr(d.path());
+    m.open_problems(None);
+    let mut h = harness(m);
+    h.run();
+    let name = use_pbr_normal_button("rock01_normal.png");
+    for key in [egui::Key::Enter, egui::Key::Space] {
+        assert_eq!(
+            subtype_written(h.state()),
+            Some(serde_json::json!("normal")),
+            "{key:?}: before"
+        );
+        h.get_by_role_and_label(egui::accesskit::Role::Button, &name)
+            .focus();
+        h.run();
+        h.key_press(key);
+        h.step();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+        assert_eq!(
+            subtype_written(h.state()),
+            Some(serde_json::json!("pbr_normal")),
+            "{key:?}"
+        );
+        h.state_mut().undo();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+    }
+}
+
+/// Final review M4 (Note JP3): with no injection, the engine's own SHADER-NORMAL-SPECULAR on a kept DDS joins its
+/// item (`extra_member` matches the engine's member name): the set's row has the kept-DDS sentence and no button.
+#[test]
+fn the_engines_own_note_on_a_kept_dds_has_no_button() {
+    let d = tempfile::tempdir().unwrap();
+    let m = kept_dds_normal_wall(d.path());
+    let i = m.item(WALL_N).expect("the _n");
+    assert!(i.kept_dds(), "precondition: kept as it is");
+    let v = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.key.ends_with("wall"))
+        .expect("the set");
+    assert!(
+        v.set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
+        "the engine raises it: {:?}",
+        v.set_warnings
+    );
+    let rows = specular_rows(&m);
+    assert_eq!(rows.len(), 1, "one note");
+    assert!(rows[0].is_note());
+    assert!(
+        matches!(&rows[0].at, sdc_gui::model::bottom::At::Set { key, .. } if *key == v.key),
+        "on the set"
+    );
+    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
+    assert!(
+        rows[0].shown().starts_with("wall_n.dds is a kept DDS:"),
+        "{}",
+        rows[0].shown()
+    );
+    assert_eq!(
+        rows[0].target,
+        Some(sdc_gui::model::nav::SlotTarget::Item(WALL_N.into()))
     );
 }
 
@@ -2812,14 +2894,7 @@ fn the_grass_source_row_says_what_the_normal_base_does() {
         "This grass source's corner normal isn't unit length — the written file is renormalised, so Community \
          Shaders still reads it as grass"
     );
-    let job = m
-        .items
-        .iter_mut()
-        .find(|i| i.key == k)
-        .and_then(|i| i.job.as_mut())
-        .expect("a job");
-    job.profile.mips.normal_base = engine::config::NormalBase::Keep;
-    m.invalidate_views();
+    set_normal_base(&mut m, &k, engine::config::NormalBase::Keep);
     let kept = row(&m);
     assert_eq!(
         kept.shown(),
@@ -2834,8 +2909,7 @@ fn the_grass_source_row_says_what_the_normal_base_does() {
     assert!(!counts_for(&m, &at, &w), "the tile reads the same mark");
 }
 
-/// Sets the normal base of item `k`'s job and returns the one it had (as
-/// `the_grass_source_row_says_what_the_normal_base_does` sets it).
+/// Sets the normal base of item `k`'s job and returns the one it had.
 fn set_normal_base(
     m: &mut AppModel,
     k: &str,
@@ -2997,6 +3071,57 @@ fn a_grass_source_file_row_follows_the_live_job() {
     let r = file_row(&m);
     assert_eq!(r.level, Level::Warning, "kept: a problem");
     assert_eq!(r.shown(), sdc_gui::model::code_text::GRASS_SOURCE_KEPT);
+}
+
+/// B3-25 (Note JP6): a last-export File row whose job key several items share has no job, so its grass row is a Note
+/// and counts nowhere, even when every one of those items keeps its normal base (neither the row nor `class_at` takes
+/// the first item's job).
+#[test]
+fn a_grass_source_file_row_with_a_shared_job_key_is_a_note() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{class_at, counts_for, problems, At, Level};
+    use sdc_gui::model::code_text::RowClass;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = opened(d.path());
+    decide_all(&mut m);
+    m.export_clicked();
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let jk = m.export.rows[0].job_key.clone();
+    let live: Vec<String> = m
+        .items
+        .iter()
+        .filter(|i| i.job_key == jk)
+        .map(|i| i.key.clone())
+        .collect();
+    assert_eq!(live.len(), 1, "precondition: one live item");
+    set_normal_base(&mut m, &live[0], engine::config::NormalBase::Keep);
+    let w = Warning::new(Code::GrassDetectSource, "g");
+    m.export.rows[0].warnings.push(w.clone());
+    m.invalidate_views();
+    let at = At::File(jk.clone());
+    let file_row = |m: &AppModel| {
+        problems(m)
+            .iter()
+            .find(|p| p.code == Some(Code::GrassDetectSource))
+            .cloned()
+            .expect("a File row")
+    };
+    assert_eq!(
+        file_row(&m).level,
+        Level::Warning,
+        "precondition: one item that keeps it, a problem"
+    );
+    // A second item that maps to the same job key and keeps its normal base too.
+    let mut twin = m.item(&live[0]).unwrap().clone();
+    twin.key = format!("{}-twin", twin.key);
+    twin.warnings.clear();
+    m.items.push(twin);
+    m.invalidate_views();
+    let r = file_row(&m);
+    assert!(matches!(r.at, At::File(_)), "{:?}", r.at);
+    assert_eq!(r.level, Level::Info, "no single job: a note");
+    assert_eq!(class_at(&m, &at, &w), RowClass::Note);
+    assert!(!counts_for(&m, &at, &w));
 }
 
 /// B3-18 (Note JP6): a note reads no mark. A mark stored on the renormalised sentence (Plan 3a let a user store one),

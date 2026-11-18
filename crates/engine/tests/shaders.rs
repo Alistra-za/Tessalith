@@ -785,4 +785,10 @@ fn a_kept_dds_normal_in_a_pbr_set_is_the_same_info() {
         !warnings.iter().any(|w| w.code == Code::ShaderExtraMap),
         "{warnings:?}"
     );
+    assert!(
+        !warnings
+            .iter()
+            .any(|w| w.code == Code::ShaderMissingMap && w.data["map"] == "_n"),
+        "{warnings:?}"
+    );
 }

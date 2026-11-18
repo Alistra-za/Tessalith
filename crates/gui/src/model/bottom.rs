@@ -211,8 +211,8 @@ fn follows_job(code: Code) -> bool {
 
 /// Note JP6 (B3-18): whether warning `w` makes a Problem or a Note, given its item's `job`. GRASS-DETECT-SOURCE is a
 /// Problem only when the job keeps the normal base as authored (Community Shaders won't read the written file as
-/// grass); renormalised, or with no job (as `warning_text` reads it), the output is fine, so it is a Note. Every
-/// other code is `row_class`'s.
+/// grass); renormalised, it is a Note; with no job it is a Note too (B3-25), as `warning_text` reads it. Every other
+/// code is `row_class`'s.
 pub fn warning_class(
     job: Option<&engine::policy::ResolvedJob>,
     w: &engine::codes::Warning,
@@ -545,13 +545,13 @@ pub enum ProblemsFilter {
     Undecided,
     /// Only the artist checks' rows.
     Checks,
-    /// Only the artist checks' rows of one set (a set's scope key (`scope_key`: its key, or a key-less set's id)):
-    /// "Checks {n}" pressed while `Set` is on.
+    /// Only the artist checks' rows of one set, named by its scope key as `Set` is: "Checks {n}" pressed while `Set`
+    /// is on.
     SetChecks(String),
     /// Review E2: every note row.
     Notes,
-    /// Review E2: every note row of one set (a set's scope key (`scope_key`: its key, or a key-less set's id)): the
-    /// Notes pill pressed while `Set` is on.
+    /// Review E2: every note row of one set, named by its scope key as `Set` is: the Notes pill pressed while `Set` is
+    /// on.
     SetNotes(String),
 }
 
@@ -1626,7 +1626,7 @@ pub enum ReasonGo {
     Row(Box<Problem>),
 }
 
-/// Review E4: the rows of the set (a set's scope key (`scope_key`: its key, or a key-less set's id)) and of its
+/// Review E4: the rows of the set `key` (a set's scope key, `scope_key`: its key, or a key-less set's id) and of its
 /// members that take "ready" away (the rows `set_ready` reads), hidden kinds included, in list order. A missing map
 /// whose slot the set editor draws a row for goes to that slot's **Assign…**; every other row goes to itself in
 /// Problems.
@@ -1639,8 +1639,8 @@ pub fn set_reasons(m: &AppModel, key: &str) -> Vec<Reason> {
 }
 
 /// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
-/// per `problems()` build, a set's scope key (`scope_key`: its key, or a key-less set's id) and hidden kinds, as
-/// `cached_tab_counts`. The set views it reads live in the same cache cell, which is emptied when they change.
+/// per `problems()` build, scope key `key` (see `scope_key`) and hidden kinds, as `cached_tab_counts`. The set views
+/// it reads live in the same cache cell, which is emptied when they change.
 pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
@@ -1661,9 +1661,8 @@ pub fn cached_set_reasons(m: &AppModel, key: &str) -> Arc<Vec<Reason>> {
     r
 }
 
-/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key
-/// (`scope_key`: its key, or a key-less set's id)), slot reasons' rows included (what "+k more in Problems" shows
-/// again).
+/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key, `scope_key`:
+/// its key, or a key-less set's id), slot reasons' rows included: what "+k more in Problems" shows again.
 pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
     let hidden = m.hidden_kinds();
     with_counted_rows(m, key, |_, rows| {
@@ -1675,9 +1674,9 @@ pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
     .unwrap_or_default()
 }
 
-/// `f` on the set `key`'s view and the rows that take its "ready" away, in list order; `None` for a set gone from
-/// the plan or ready (the cached answer the cards read, so a ready set never scans the rows). `key` is a set's scope
-/// key (`scope_key`). `None` for a name no set has (the empty string among them), or a ready set.
+/// `f` on the view of the set `key` names and the rows that take its "ready" away, in list order. `key` is a set's
+/// scope key: see `scope_key`. `None` for a name no set has, the empty string among them, or for a ready set: the
+/// cached answer the cards read, so a ready set never scans the rows.
 fn with_counted_rows<T>(
     m: &AppModel,
     key: &str,

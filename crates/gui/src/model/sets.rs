@@ -2098,6 +2098,11 @@ fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     }
 }
 
+/// The view whose members list `item` (`AppModel::set_of_item`'s lookup, borrowed).
+fn view_with_member<'a>(views: &'a [SetView], item: &str) -> Option<&'a SetView> {
+    views.iter().find(|v| v.members.iter().any(|k| k == item))
+}
+
 /// Note JN4 (B2-3): the sets a Delete set or a Remove from set leaves with an empty shared slot, listed before the
 /// edit (B2-9).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -2381,10 +2386,7 @@ impl AppModel {
 
     /// The one check from a texture to its set: a no-set texture has none, because its set has no view.
     pub(crate) fn set_of_item(&self, item: &str) -> Option<SetView> {
-        views(self)
-            .iter()
-            .find(|v| v.members.iter().any(|k| k == item))
-            .cloned()
+        view_with_member(&views(self), item).cloned()
     }
 
     /// `set_of_item`'s engine key, for the callers that only open or reveal the set.
@@ -2500,7 +2502,9 @@ impl AppModel {
 
     /// Why `item` cannot leave its set: it fills a locked slot there (F3a Task 8).
     pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
-        let Some(v) = self.set_of_item(item) else {
+        // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JP3).
+        let views = views(self);
+        let Some(v) = view_with_member(&views, item) else {
             return Ok(());
         };
         let slot = v
@@ -2508,7 +2512,7 @@ impl AppModel {
             .iter()
             .find(|(_, f)| matches!(f, SlotFill::Own { item: i } if i == item))
             .map(|(k, _)| *k);
-        lock_refusal(&v, slot)
+        lock_refusal(v, slot)
     }
 
     /// Note JN2 (B2-1): the slot `item` lends, as (its set's id, slot number `n`): a borrow of slot `n` from that set

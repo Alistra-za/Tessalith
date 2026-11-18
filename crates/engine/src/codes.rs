@@ -7,7 +7,7 @@
 //! could not follow, packing-fills Task 1) and
 //! FMT-HDR-SOURCE (why `pbr_emissive` is or is not BC6H, O2) and
 //! DIM-RESIZED (the power of two or `resize` changed the base size, S-mips-7) and CFG-FILTER-IGNORED (an unscoped non-box
-//! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes (M6 Track A) and
+//! `mips.filter` a texture cannot use, which then uses box, S-mips-13) and the four `SHADER-*` codes of M6 Track A and
 //! CFG-PRESET-SKIPPED (a user preset folder file that failed to load, skipped) and CFG-GREEN-CONFLICT (an explicit
 //! `flip_green` that contradicts `green_convention`) (M6 Track D).
 //! and the five `GRASS-*` codes and VAL-GRASS-DETECT (complex grass design 2026-10-12 §3.6, §3.7, §4)
