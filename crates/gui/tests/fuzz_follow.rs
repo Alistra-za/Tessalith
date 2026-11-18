@@ -278,6 +278,30 @@ fn high_auto_pbr_then_skin_evidence_makes_the_fuzz_map_the_mask() {
     assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
 }
 
+/// Fuzz-2's known limit with Note HH1 (`pack::plan::plan_packing`'s `shortcut:`): the borrower's G PACK-DEFAULTED is a
+/// Note that says why the shared fuzz map is not its source (the engine's `data.why`).
+#[test]
+fn a_borrowers_fuzz_default_says_why_the_shared_map_is_not_read() {
+    let why = "the shared rock_fuzz.png is converted by its own set textures/a/rock (pbr shader) and is not read \
+               here";
+    let w = engine::codes::Warning::new(
+        Code::PackDefaulted,
+        format!("stone_rfaos.dds G: no fuzz source; neutral default 0; {why}"),
+    )
+    .with_data(json!({
+        "output": "textures/b/stone_rfaos.dds",
+        "channel": "G",
+        "slot": "fuzz",
+        "value": 0.0,
+        "why": why,
+    }));
+    assert_eq!(code_text::row_class(Code::PackDefaulted), RowClass::Note);
+    assert_eq!(
+        code_text::note_sentence(&w),
+        format!("stone_rfaos.dds G: {why}, so the default 0 (no fuzz) is used.")
+    );
+}
+
 /// Fuzz-25: the unused fuzz map is a Note: an Info row listed under Notes, with no fix and no mark, and it never
 /// counts against Ready.
 #[test]

@@ -679,44 +679,47 @@ fn a_hand_set_none_role_is_an_ordinary_file_under_every_shader() {
     }
 }
 
-/// Note HH1 with the pick: a fuzz map shared from `a/rock` into `b/stone` is read by each set's own pick, and the
-/// file has one job, its own set's. Lender Glow and borrower explicit Advanced Skin: the borrower's `_rfaos` G reads it
-/// and it is consumed (used by one set, so not unused). Lender Glow and borrower Auto (PBR from its roughness): listed
-/// unused under the lender's shader; the borrower packs `_rmaos`. Lender Auto (PBR) and borrower explicit Advanced
-/// Skin: the lender's 6c makes the file its `pbr_fuzz` (`rock_f.dds`), so it is no packing input and the borrower's G
-/// stays at its default. That last row is what the code does at this task, not a ruling (see the Task 3 report).
+/// Note HH1: `a/rock`'s fuzz map shared into `b/stone`; each set has a roughness map, so it reads PBR under Auto.
+/// Planned under `shaders`.
+fn plan_shared(shaders: &[(&str, Shader)]) -> Plan {
+    let d = fixture(
+        &[
+            "textures/a/rock.png",
+            "textures/a/rock_roughness.png",
+            "textures/a/rock_fuzz.png",
+            "textures/b/stone.png",
+            "textures/b/stone_roughness.png",
+        ],
+        "",
+    );
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    r.set_shaders = shaders.iter().map(|(k, s)| (k.to_string(), *s)).collect();
+    r.set_edits = vec![engine::sets::SetEdit::Share {
+        file: "textures/a/rock_fuzz.png".into(),
+        to: "textures/b/stone".into(),
+    }];
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap()
+}
+
+/// The shared fuzz map's own job: (output name, sub-type, codes).
+fn shared_fuzz_job(p: &Plan) -> Option<(String, Subtype, Vec<Code>)> {
+    p.jobs
+        .iter()
+        .find(|j| j.pack.is_none() && j.input.ends_with("rock_fuzz.png"))
+        .map(|j| (out_name(j), j.profile.subtype, codes_of(j)))
+}
+
+/// Fuzz-2, Fuzz-3 with Note HH1: each set reads a shared fuzz map by its own shader. Lender Glow and borrower explicit
+/// Advanced Skin: the borrower's `_rfaos` G reads it and it is consumed (used by one set, so not unused). Lender Glow
+/// and borrower Auto (PBR from its roughness): unused, and the reason names both sets, since the borrower's shader
+/// does read fuzz maps; the borrower packs `_rmaos`.
 #[test]
-fn a_shared_fuzz_map_follows_each_sets_pick() {
-    let plan_shared = |shaders: &[(&str, Shader)]| {
-        let d = fixture(
-            &[
-                "textures/a/rock.png",
-                "textures/a/rock_fuzz.png",
-                "textures/b/stone.png",
-                "textures/b/stone_roughness.png",
-            ],
-            "",
-        );
-        let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
-        r.recursive = true;
-        r.set_shaders = shaders.iter().map(|(k, s)| (k.to_string(), *s)).collect();
-        r.set_edits = vec![engine::sets::SetEdit::Share {
-            file: "textures/a/rock_fuzz.png".into(),
-            to: "textures/b/stone".into(),
-        }];
-        let rep = Reporter::new(Arc::new(VecSink::default()), "t");
-        Engine::new()
-            .unwrap()
-            .plan(r, &rep, &CancelToken::default())
-            .unwrap()
-    };
-    let fuzz_job = |p: &Plan| {
-        p.jobs
-            .iter()
-            .find(|j| j.pack.is_none() && j.input.ends_with("rock_fuzz.png"))
-            .map(|j| (out_name(j), j.profile.subtype, codes_of(j)))
-    };
-    // Lender Glow, borrower explicit Advanced Skin.
+fn a_shared_fuzz_map_is_consumed_by_a_skin_borrower_and_unused_otherwise() {
     let p = plan_shared(&[
         ("textures/a/rock", Shader::Glow),
         ("textures/b/stone", Shader::AdvancedSkin),
@@ -727,26 +730,120 @@ fn a_shared_fuzz_map_follows_each_sets_pick() {
         "{:?}",
         g(j)
     );
-    assert_eq!(fuzz_job(&p), None);
-    // Lender Glow, borrower Auto.
+    assert_eq!(shared_fuzz_job(&p), None);
     let p = plan_shared(&[("textures/a/rock", Shader::Glow)]);
     assert_eq!(
         unused_reason(&p, "rock_fuzz.png"),
-        "rock_fuzz.png: the glow shader reads no fuzz map; not converted"
+        "rock_fuzz.png: the glow shader of set textures/a/rock reads no fuzz map, and set textures/b/stone (pbr \
+         shader) would read it as its fuzz texture, which only the file's own set can convert; not converted"
     );
     assert!(
         packed(&p, "stone_rmaos.dds").is_some(),
         "{:?}",
         out_names(&p)
     );
-    // Lender Auto (PBR), borrower explicit Advanced Skin.
+}
+
+/// Known limit (Fuzz-2 with Note HH1; `pack::plan::plan_packing`'s `shortcut:`): a file has one job, so a shared
+/// fuzz map its own set converts (lender Auto, so PBR: `rock_f.dds`) is no packing source of a borrower's `_rfaos`
+/// (explicit Advanced Skin). The borrower's G takes its default and its PACK-DEFAULTED says why, naming the lender
+/// set and its shader. The mirror (lender explicit Advanced Skin packs it into its own `_rfaos`, borrower Auto reads
+/// PBR): no set writes a fuzz texture, and the borrower packs `_rmaos` without it.
+#[test]
+fn a_shared_fuzz_map_its_own_set_converts_is_no_borrowers_mask_known_limit() {
     let p = plan_shared(&[("textures/b/stone", Shader::AdvancedSkin)]);
     assert_eq!(
-        fuzz_job(&p),
+        shared_fuzz_job(&p),
         Some(("rock_f.dds".to_string(), Subtype::PbrFuzz, vec![]))
     );
     let j = packed(&p, "stone_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
     assert_eq!(*g(j), ChannelSource::Default { value: 0.0 });
+    let w = j
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::PackDefaulted && w.message.contains(" G: "))
+        .expect("the G PACK-DEFAULTED");
+    let why = "the shared rock_fuzz.png is converted by its own set textures/a/rock (pbr shader) and is not read \
+               here";
+    assert_eq!(
+        w.message,
+        format!("stone_rfaos.dds G: no fuzz source; neutral default 0; {why}")
+    );
+    assert_eq!(w.data["why"], why);
+    // The mirror.
+    let p = plan_shared(&[("textures/a/rock", Shader::AdvancedSkin)]);
+    let j = packed(&p, "rock_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
+    assert!(
+        matches!(g(j), ChannelSource::Source { path, .. } if path.ends_with("rock_fuzz.png")),
+        "{:?}",
+        g(j)
+    );
+    assert_eq!(shared_fuzz_job(&p), None);
+    assert!(
+        packed(&p, "stone_rmaos.dds").is_some(),
+        "{:?}",
+        out_names(&p)
+    );
+    assert!(
+        !out_names(&p).iter().any(|n| n.ends_with("_f.dds")),
+        "{:?}",
+        out_names(&p)
+    );
+}
+
+/// Review t3 V1: a set with skin evidence (a recorded `skin_albedo` diffuse) predicts an `_rfaos` before any pick
+/// (`api::predict_suffixes`). Under an explicit `shader` that does not read the fuzz map as the mask, no `_rfaos` is
+/// built, and neither the set's `set_resolved` (recipes, SHADER-* warnings) nor any job's warning names one.
+fn no_rfaos_is_named(shader: Shader) {
+    let d = fixture(
+        &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+    );
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    r.set_shaders = [("rock01".to_string(), shader)].into_iter().collect();
+    let sink = Arc::new(VecSink::default());
+    let rep = Reporter::new(sink.clone(), "t");
+    let p = Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap();
+    assert!(packed(&p, "rock01_rfaos.dds").is_none(), "{shader:?}");
+    let key = job(&p, "rock01.png").set_key.clone();
+    let resolved: Vec<_> = sink
+        .take()
+        .into_iter()
+        .filter(|e| e.set.as_deref() == Some(key.as_str()))
+        .filter_map(|e| match e.kind {
+            EventKind::SetResolved {
+                recipes, warnings, ..
+            } => Some((recipes, warnings)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(resolved.len(), 1, "{shader:?}");
+    let (recipes, warnings) = &resolved[0];
+    assert!(
+        recipes.iter().all(|r| !r.output.contains("rfaos")),
+        "{shader:?}: {recipes:?}"
+    );
+    let named: Vec<&str> = warnings
+        .iter()
+        .chain(p.jobs.iter().flat_map(|j| &j.warnings))
+        .map(|w| w.message.as_str())
+        .filter(|m| m.contains("rfaos"))
+        .collect();
+    assert!(named.is_empty(), "{shader:?}: {named:?}");
+}
+
+#[test]
+fn an_explicit_pbr_on_a_skin_set_names_no_rfaos() {
+    no_rfaos_is_named(Shader::Pbr);
+}
+
+#[test]
+fn another_explicit_shader_on_a_skin_set_names_no_rfaos() {
+    no_rfaos_is_named(Shader::Glow);
 }
 
 /// The `plan_packing` gate also takes a fuzz map that failed to load: its name still gives it role Fuzz there, and it

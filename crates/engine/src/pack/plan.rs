@@ -239,6 +239,9 @@ pub struct Candidate {
     pub notes: Vec<(Code, String)>,
     /// `PACK-SOURCE-RESIZED` when a source is smaller than the largest (Note FM30), read from the headers.
     pub resized: Option<Warning>,
+    /// Why a defaulted fuzz channel has no source although a fuzz map is shared in (`plan_packing`'s `shortcut:`):
+    /// added to its `PACK-DEFAULTED` message and as its `data.why`.
+    pub fuzz_why: Option<String>,
 }
 
 pub struct PackPlan {
@@ -909,7 +912,7 @@ pub(crate) fn has_fuzz_map(set: &TextureSet) -> bool {
 /// holds the raw heights of the landscape sets a Vanilla derive converts (Note CN26, O6): each gets the cs
 /// `Parallax` recipe, which the vanilla target otherwise never plans. It is empty without `derive` (C6).
 /// `flat_b` holds the pass-1 images whose B is empty (`!pack::b_has_content`, Note CO103), `flat_a` those whose alpha
-/// is flat (Note HC1).
+/// is flat (Note HC1). `output_root` turns set keys into the set ids a fuzz-map message names.
 #[allow(clippy::too_many_arguments)]
 pub fn plan_packing(
     ctx: &ResolveCtx,
@@ -924,6 +927,7 @@ pub fn plan_packing(
     flat_b: &BTreeSet<PathBuf>,
     flat_a: &BTreeSet<PathBuf>,
     fills: &crate::helper::plan::FillPlan,
+    output_root: &Path,
 ) -> PackPlan {
     let (pa, pinfo) = placeholder();
     let mut out = PackPlan {
@@ -962,6 +966,11 @@ pub fn plan_packing(
                 .collect()
         })
         .collect();
+    // Fuzz-2, Fuzz-3: per waiting fuzz map, each set that does not read it as the skin mask (set key, reading); per
+    // set, why its mask has no shared fuzz source; and every file some set takes as a raw input.
+    let mut unread: BTreeMap<PathBuf, Vec<(String, FuzzReading)>> = BTreeMap::new();
+    let mut lent: BTreeMap<String, String> = BTreeMap::new();
+    let mut in_raw: BTreeSet<PathBuf> = BTreeSet::new();
     for (set, stand_in) in sets.iter().zip(&stand_ins) {
         // Raw members still waiting for a recipe: a planned packing input, or one that failed to load or was
         // cancelled before its Load. A raw map whose sub-type a rule or `--set` named is an ordinary file
@@ -1009,18 +1018,37 @@ pub fn plan_packing(
             {
                 let reading = fuzz_reading(ctx, set, f);
                 if reading != FuzzReading::Skin {
-                    if let (FuzzReading::Unused(sh), true) =
-                        (reading, waiting.contains_key(&f.path))
-                    {
-                        let reason = format!("the {} shader reads no fuzz map", sh.id());
-                        retag(
-                            jobs,
-                            &f.path,
-                            Code::PackUnusedInput,
-                            format!("{}: {reason}; not converted", name(&f.path)),
-                        );
+                    // Listed unused after the loop, with every set that does not read it (Note HH1: one may lend it).
+                    if waiting.contains_key(&f.path) {
+                        unread
+                            .entry(f.path.clone())
+                            .or_default()
+                            .push((set.key.clone(), reading));
                     }
                     continue;
+                }
+                // shortcut: a file has one job (a packed source has no job of its own: the run's terminal events,
+                // `api.rs`), so a shared fuzz map its own set converts is no source of this set's mask; its G
+                // PACK-DEFAULTED says why. Upgrade when a packed source may also keep its own job.
+                let own_job = !waiting.contains_key(&f.path)
+                    && !failed.contains(&f.path)
+                    && !cancelled.contains(&f.path);
+                if own_job && set.shares.contains(&i) {
+                    if let Some(lender) = sets.iter().find(|s| s.members.contains(&i)) {
+                        let shader = ctx
+                            .shaders
+                            .get(&lender.key)
+                            .map(|p| format!(" ({} shader)", p.shader.id()))
+                            .unwrap_or_default();
+                        lent.insert(
+                            set.key.clone(),
+                            format!(
+                                "the shared {} is converted by its own set {}{shader} and is not read here",
+                                name(&f.path),
+                                crate::sets::set_id(output_root, &lender.key)
+                            ),
+                        );
+                    }
                 }
             }
             if waiting.contains_key(&f.path)
@@ -1031,6 +1059,7 @@ pub fn plan_packing(
                     path: f.path.clone(),
                     role,
                 });
+                in_raw.insert(f.path.clone());
                 let named = stand_in.get(&f.path).or_else(|| renamed.get(&f.path));
                 members.insert(f.path.clone(), named.unwrap_or(f));
                 // Note DY: its hand-set fills, read and invert.
@@ -1349,6 +1378,7 @@ pub fn plan_packing(
                     .filter(|_| matches!(recipe.kind, RecipeKind::Rfaos | RecipeKind::Rmaos))
                     .cloned()
                     .collect(),
+                fuzz_why: lent.get(&set.key).cloned(),
             });
         }
         for (p, reason) in unused {
@@ -1367,6 +1397,51 @@ pub fn plan_packing(
             }
         }
         out.reports.insert(set.key.clone(), reports);
+    }
+    // Fuzz-3: a fuzz map no set takes as a raw input is listed unused when some set's shader reads no fuzz map. A
+    // set that would read it as its PBR fuzz texture is named too (it is shared in: only its own set converts it).
+    for (p, mut readers) in unread {
+        if in_raw.contains(&p)
+            || !readers
+                .iter()
+                .any(|(_, r)| matches!(r, FuzzReading::Unused(_)))
+        {
+            continue;
+        }
+        let own = |key: &str| {
+            sets.iter()
+                .any(|s| s.key == key && s.members.iter().any(|&m| files[m].path == p))
+        };
+        readers.sort_by_key(|(key, _)| !own(key));
+        let reason = if let [(_, FuzzReading::Unused(sh))] = readers.as_slice() {
+            format!("the {} shader reads no fuzz map", sh.id())
+        } else {
+            readers
+                .iter()
+                .map(|(key, r)| {
+                    let id = crate::sets::set_id(output_root, key);
+                    match r {
+                        FuzzReading::Unused(sh) => {
+                            format!("the {} shader of set {id} reads no fuzz map", sh.id())
+                        }
+                        _ => {
+                            let sh = ctx.shaders.get(key).map_or("its", |p| p.shader.id());
+                            format!(
+                                "set {id} ({sh} shader) would read it as its fuzz texture, which only the file's own \
+                                 set can convert"
+                            )
+                        }
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", and ")
+        };
+        retag(
+            jobs,
+            &p,
+            Code::PackUnusedInput,
+            format!("{}: {reason}; not converted", name(&p)),
+        );
     }
     // Note DY: a helper an alpha fill uses is consumed too, whatever packing did with it.
     consumed.extend(fills.used.iter().cloned());
@@ -1413,22 +1488,23 @@ pub fn finish_recipe(
     let out = name(&c.virtual_input.output);
     for &(i, slot) in &c.defaulted {
         if let ChannelSource::Default { value } = &c.job.channels[i] {
-            job.warnings.push(
-                Warning::new(
-                    Code::PackDefaulted,
-                    format!(
-                        "{out} {}: no {} source; neutral default {value}",
-                        CHANNELS[i],
-                        slot.id()
-                    ),
-                )
-                .with_data(json!({
-                    "output": slash(&c.virtual_input.output),
-                    "channel": CHANNELS[i],
-                    "slot": slot,
-                    "value": value,
-                })),
+            let mut message = format!(
+                "{out} {}: no {} source; neutral default {value}",
+                CHANNELS[i],
+                slot.id()
             );
+            let mut data = json!({
+                "output": slash(&c.virtual_input.output),
+                "channel": CHANNELS[i],
+                "slot": slot,
+                "value": value,
+            });
+            if let (Slot::Fuzz, Some(why)) = (slot, &c.fuzz_why) {
+                message = format!("{message}; {why}");
+                data["why"] = json!(why);
+            }
+            job.warnings
+                .push(Warning::new(Code::PackDefaulted, message).with_data(data));
         }
     }
     if let ChannelSource::Source {

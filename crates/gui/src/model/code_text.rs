@@ -238,7 +238,11 @@ fn pack_defaulted_note(data: &serde_json::Value) -> Option<String> {
         "glossiness" => format!("{head}: no glossiness map, so the default {value} is used everywhere. Fine if the surface is evenly glossy."),
         "env_mask" => format!("{head}: no environment mask, so the default {value} (no reflection) is used. Fine unless part of it should reflect."),
         "height" => format!("{head}: no height map, so the default {value} (flat) is used. Fine unless you want parallax depth."),
-        "fuzz" => format!("{head}: no fuzz map, so the default {value} (no fuzz) is used. Fine unless it is cloth or fur."),
+        // A fuzz map shared in that its own set converts (the engine's `data.why`, `pack::plan::Candidate::fuzz_why`).
+        "fuzz" => match data.get("why").and_then(|w| w.as_str()) {
+            Some(why) => format!("{head}: {why}, so the default {value} (no fuzz) is used."),
+            None => format!("{head}: no fuzz map, so the default {value} (no fuzz) is used. Fine unless it is cloth or fur."),
+        },
         _ => return None,
     })
 }

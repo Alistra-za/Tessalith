@@ -2412,6 +2412,7 @@ impl Engine {
             &flat_b,
             &flat_a,
             &fills,
+            &req.output_root,
         );
         // As step 3b drops its losers, so later steps never read a replaced generated AO.
         for s in &mut sets {
