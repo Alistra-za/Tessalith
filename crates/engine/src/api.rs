@@ -1285,6 +1285,38 @@ pub(crate) fn hand_role(ctx: &ResolveCtx, f: &InputFile) -> Option<crate::helper
         .flatten()
 }
 
+/// Fuzz-1a: `f` is a fuzz map (`group::is_fuzz_stem`) image with no requested sub-type and no hand role, so its
+/// reading is the set's to decide.
+pub(crate) fn untyped_fuzz_map(ctx: &ResolveCtx, f: &InputFile) -> bool {
+    f.kind == InputKind::Image
+        && crate::group::is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+        && hand_role(ctx, f).is_none()
+        && !crate::policy::subtype_requested(ctx, f)
+}
+
+/// Fuzz-1a: on cs, `set` (with no `_f` of its own) reads its fuzz map as the PBR fuzz texture by the picks in
+/// `ctx.shaders` (`pack::plan::fuzz_reading`); the map is untyped and not hand-set, or typed `pbr_fuzz`. Such a set
+/// writes `<base>_f.dds`, so it gains `f` (6c, and after packing).
+pub(crate) fn pbr_read_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> bool {
+    ctx.target == Target::Cs
+        && !set.suffixes.contains("f")
+        && set
+            .members
+            .iter()
+            .map(|&i| &files[i])
+            .find(|f| {
+                untyped_fuzz_map(ctx, f)
+                    || (f.kind == InputKind::Image
+                        && crate::group::is_fuzz_stem(
+                            &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                        )
+                        && crate::policy::subtype_override(ctx, f) == Some(Subtype::PbrFuzz))
+            })
+            .is_some_and(|fm| {
+                pack::plan::fuzz_reading(ctx, set, fm) == pack::plan::FuzzReading::Pbr
+            })
+}
+
 /// Trace-debug 2026-10-16 #4: a raw map whose sub-type was requested is an ordinary file (spec §4.4), as
 /// `plan_packing` treats it, so its role leaves the set's suffixes (unless another raw member has it) and Advanced
 /// skin detection and the `auto` prediction follow the recipe actually built. Note DY: a hand role `none` makes a raw
@@ -1558,17 +1590,18 @@ impl Engine {
     }
 
     /// The one composition of a full plan: [`Engine::prepare`] then every set through [`Engine::plan_sets`].
-    /// Also returns the `Prepared` and the PBR set keys, which a session keeps as its skeleton.
+    /// Also returns the `Prepared`, the PBR set keys and the keys of the sets that gained `f` (Fuzz-1a), which a
+    /// session keeps as its skeleton.
     pub(crate) fn plan_full(
         &self,
         req: &BatchRequest,
         rep: &Reporter,
         cancel: &CancelToken,
         cache: &AnalysisCache,
-    ) -> Result<(Plan, Prepared, BTreeSet<String>), EngineError> {
+    ) -> Result<(Plan, Prepared, BTreeSet<String>, BTreeSet<String>), EngineError> {
         let p = self.prepare(req, rep, cancel)?;
-        let (plan, pbr) = self.plan_sets(&p, None, rep, cancel, cache)?;
-        Ok((plan, p, pbr))
+        let (plan, pbr, f) = self.plan_sets(&p, None, rep, cancel, cache)?;
+        Ok((plan, p, pbr, f))
     }
 
     /// The global half of [`Engine::plan_cached`]: setup, discover, grouping, `[files]` scopes, set edits, output
@@ -1648,6 +1681,8 @@ impl Engine {
         // 6a. Explicit shader choices (`explicit_shaders`): `BatchRequest::set_shaders`, then `--set set:<id>.shader`.
         // 6b. One `ShaderPick` per set (`shader::pick_for_set`) from the pass-1 sub-types; `ctx.shaders` holds them.
         // 6c. Members of a set whose shader has member defaults are resolved again with the picks; then packing.
+        //     A set that reads its fuzz map as the PBR fuzz texture (`pbr_read_fuzz`, Fuzz-1a) resolves its other
+        //     members against a clone holding `f`, and gains `f` itself after packing.
         let scope_root =
             project_root(req).or_else(|| req.inputs.first().filter(|p| p.is_dir()).cloned());
         let (mut sets, _) = group_sets_with(&files, registry.alias_table());
@@ -1897,8 +1932,9 @@ impl Engine {
     }
 
     /// The per-set half of [`Engine::plan_cached`] on `p`: Load, Analyse and Resolve, shaders, packing, fills,
-    /// derive, bakes and the plan's events, and the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
-    /// `pbr_sets`). `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
+    /// derive, bakes and the plan's events, the keys of the sets whose `set_resolved` says `pbr` (the skeleton's
+    /// `pbr_sets`), and the keys of the sets that gained `f` from a PBR-read fuzz map (Fuzz-1a; its `f_sets`).
+    /// `Some(scope)` (set keys, closed under [`crate::skeleton::Skeleton::scope`]) plans only those sets
     /// and skips the batch-wide steps: the SET-EDIT-STALE shader warnings, CFG-FILE-UNMATCHED, the BV2 writer dedupe
     /// and the progress counters (the request is the skeleton's). Its skipped entries are the scope files' only.
     pub(crate) fn plan_sets(
@@ -1908,7 +1944,7 @@ impl Engine {
         rep: &Reporter,
         cancel: &CancelToken,
         cache: &AnalysisCache,
-    ) -> Result<(Plan, BTreeSet<String>), EngineError> {
+    ) -> Result<(Plan, BTreeSet<String>, BTreeSet<String>), EngineError> {
         let req = &p.req;
         let registry = &p.registry;
         let (target, target_src, preset_id) = (p.target, &p.target_src, &p.preset_id);
@@ -2296,6 +2332,23 @@ impl Engine {
             .iter()
             .map(|(wi, a, _)| (work[*wi].1.path.clone(), a.dds_dxgi))
             .collect();
+        // Fuzz-1a: a set that reads its fuzz map as the PBR fuzz texture writes an `_f`, so its other members are
+        // resolved below against a clone whose suffixes hold `f`, as M7 adds a predicted `_rmaos`; after packing the
+        // set itself gains it, so `set_resolved` says `pbr`.
+        let f_sets: BTreeSet<String> = sets
+            .iter()
+            .filter(|s| pbr_read_fuzz(&ctx, s, files))
+            .map(|s| s.key.clone())
+            .collect();
+        let f_clones: BTreeMap<String, TextureSet> = sets
+            .iter()
+            .filter(|s| f_sets.contains(&s.key))
+            .map(|s| {
+                let mut c = s.clone();
+                c.suffixes.insert("f".into());
+                (s.key.clone(), c)
+            })
+            .collect();
         // 6c. Re-resolve the members of a set whose shader changes member defaults.
         let mut jobs = vec![];
         for (mut old, (wi, a, info)) in pass1_jobs.into_iter().zip(pass1) {
@@ -2331,6 +2384,8 @@ impl Engine {
                 && crate::group::is_fuzz_stem(
                     &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
                 );
+            // Fuzz-1a: never the fuzz map itself, whose rename guard and `_f` arm read the real set's `f`.
+            let f_clone = f_clones.get(&set.key).filter(|_| !fuzz_map);
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
@@ -2339,11 +2394,13 @@ impl Engine {
                     || (p.shader == crate::shader::Shader::PbrLandscape && landscape_retype)
             }) && !pack::plan::chosen_skin(&ctx, set)
                 && !fuzz_map
+                && f_clone.is_none()
             {
                 old.warnings.extend(grass_note(&old));
                 jobs.push(old);
                 continue;
             }
+            let set = f_clone.unwrap_or(set);
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                 let split = split_for((set, f));
                 let facts = FileFacts {
@@ -2420,6 +2477,10 @@ impl Engine {
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
             s.shares
                 .retain(|&i| !packed.gen_replaced.contains(&files[i].path));
+            // Fuzz-1a: the `_f` the fuzz map writes. No member resolves after this, so no rename guard sees it.
+            if f_sets.contains(&s.key) {
+                s.suffixes.insert("f".into());
+            }
         }
         // Pass 1 may add a recipe job it fails at once (sources of different sizes); like every job it records the
         // target's origin (`BatchRequest::target`, ruling W1).
@@ -3153,7 +3214,7 @@ impl Engine {
             no_set,
             no_set_sets,
         };
-        Ok((plan, pbr_sets))
+        Ok((plan, pbr_sets, f_sets))
     }
 
     /// Report the plan's skipped and failed files, then (unless `dry_run`) convert every ready file and emit

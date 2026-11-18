@@ -99,7 +99,8 @@ fn put_normal(dir: &Path, name: &str) {
 /// - shared roughness on sets `e` and `q`;
 /// - `u` (`u`, `u_g`) with a fuzz map `u_fuzz` (Fuzz-19);
 /// - `v` (`v`, `v_n`) and `r` (`r` typed `skin_albedo`, `r_n`), each with `u_fuzz` shared in (Note HH1) as its only
-///   fuzz map.
+///   fuzz map;
+/// - `x` (`x`, `x_n`) with a fuzz map `x_sheen` and nothing else, so it reads PBR (Fuzz-1a).
 pub fn fast_fixture() -> FastFixture {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("in/dir");
@@ -163,6 +164,9 @@ pub fn fast_fixture() -> FastFixture {
     put_normal(&d, "v_n.png");
     put_rgb(&d, "r.png", 151);
     put_normal(&d, "r_n.png");
+    put_rgb(&d, "x.png", 160);
+    put_normal(&d, "x_n.png");
+    put_grey(&d, "x_sheen.png", 161);
 
     let mut req = BatchRequest::new(
         vec![dir.path().join("in")],

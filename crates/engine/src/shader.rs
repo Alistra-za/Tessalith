@@ -607,6 +607,9 @@ pub struct PickInput<'a> {
     /// S-shader-10: what the scanned meshes report for the set's diffuse, one entry per lighting shape
     /// (`BatchRequest::mesh_shaders`); empty = no evidence.
     pub mesh: &'a [Shader],
+    /// Fuzz-1a: on cs, the set has a member fuzz map (`group::is_fuzz_stem`) with no requested sub-type and no hand
+    /// role. It is no evidence of its own; with nothing else the set is PBR.
+    pub fuzz: bool,
 }
 
 /// S-shader-10: the strict majority of the mesh votes (more than half), else `None` (a tie or no votes: the suffix
@@ -623,7 +626,8 @@ fn mesh_majority(i: &PickInput) -> Option<Shader> {
 /// Spec §4.1-4.3: explicit choice, else the first matching auto rule; a shader the target lacks falls back to
 /// `default_for(target)`. Order (owner answer 2026-10-11, "map wins, assume the user runs PGPatcher"): advanced
 /// skin, PBR (PBR grass, then CS PBR landscape, then plain PBR; Note BM), then the PGPatcher-patchable maps (complex `_m`, `_p`), which beat the mesh, then the mesh majority
-/// (S-shader-10), then envmap `_m`, `_g`, `_i`, `_sk`, `_flow` (Note CL35), hair/eyes/landscape paths and the default.
+/// (S-shader-10), then envmap `_m`, `_g`, `_i`, `_sk`, `_flow` (Note CL35), hair/eyes/landscape paths and the default,
+/// which is the PBR family for a set with an untyped fuzz map (`PickInput::fuzz`, Fuzz-1a).
 pub fn pick(i: &PickInput) -> ShaderPick {
     use Subtype::*;
     let has = |t: &[Subtype]| i.subtypes.iter().any(|s| t.contains(s));
@@ -639,6 +643,16 @@ pub fn pick(i: &PickInput) -> ShaderPick {
             .any(|p| p.to_ascii_lowercase().starts_with("textures/landscape/"))
             || path("landscape")
     };
+    let pbr_family = || {
+        if i.gras {
+            (Shader::PbrGrass, AutoRule::PbrGrass)
+        } else if i.target == Target::Cs && (i.cs_txst || landscape_path()) {
+            // Note BM: CS only, so a vanilla PBR landscape set still falls back with `wanted: pbr` as before.
+            (Shader::PbrLandscape, AutoRule::PbrLandscape)
+        } else {
+            (Shader::Pbr, AutoRule::Pbr)
+        }
+    };
     let (shader, rule) =
         if i.advanced_skin || has(&[SkinAlbedo, SkinRfaos, SkinSk, SkinWet, SkinDetail]) {
             (Shader::AdvancedSkin, AutoRule::AdvancedSkin)
@@ -653,21 +667,15 @@ pub fn pick(i: &PickInput) -> ShaderPick {
                 Rmaos,
             ])
         {
-            if i.gras {
-                (Shader::PbrGrass, AutoRule::PbrGrass)
-            } else if i.target == Target::Cs && (i.cs_txst || landscape_path()) {
-                // Note BM: CS only, so a vanilla PBR landscape set still falls back with `wanted: pbr` as before.
-                (Shader::PbrLandscape, AutoRule::PbrLandscape)
-            } else {
-                (Shader::Pbr, AutoRule::Pbr)
-            }
+            pbr_family()
         } else if has(&[ComplexGrass]) {
             (Shader::ComplexGrass, AutoRule::ComplexGrass)
         } else if has(&[ComplexMaterial]) {
             (Shader::ComplexMaterial, AutoRule::ComplexM)
         } else if sfx("p") {
             (Shader::Parallax, AutoRule::P)
-        } else if let Some(m) = mesh_majority(i) {
+        } else if let Some(m) = mesh_majority(i).filter(|&m| !(i.fuzz && m == Shader::Default)) {
+            // Fuzz-23: on a fuzz-map set a `Default` majority is no evidence; the rules below decide.
             (m, AutoRule::Mesh)
         } else if has(&[Envmask]) || sfx("m") || sfx("em") || sfx("envmask") {
             (Shader::Envmap, AutoRule::EnvM)
@@ -687,6 +695,9 @@ pub fn pick(i: &PickInput) -> ShaderPick {
             (Shader::Eye, AutoRule::EyesPath)
         } else if has(&[LandscapeDiffuse]) || landscape_path() {
             (Shader::Landscape, AutoRule::Landscape)
+        } else if i.fuzz {
+            // Fuzz-1a: a fuzz map and nothing else that gives a shader: the PBR family reads it.
+            pbr_family()
         } else {
             (Shader::Default, AutoRule::Otherwise)
         };
@@ -785,9 +796,19 @@ pub fn pick_for_set(
         })
         .find_map(|k| mesh.get(&k))
         .map_or(&[][..], Vec::as_slice);
+    // Fuzz-1a: the member fuzz maps nothing typed or hand-set; pass 1 resolves them `pbr_fuzz` from evidence alone.
+    let fuzz_maps: Vec<&Path> = set
+        .members
+        .iter()
+        .map(|&i| &files[i])
+        .filter(|f| crate::api::untyped_fuzz_map(ctx, f))
+        .map(|f| f.path.as_path())
+        .collect();
     let subtypes: Vec<Subtype> = jobs
         .in_set(&set.key)
         .filter(|j| !matches!(j.status, crate::policy::JobStatus::PackingInput { .. }))
+        // Fuzz-1a: their pass-1 `pbr_fuzz` is no evidence (it would fire the PBR rule).
+        .filter(|j| !fuzz_maps.contains(&j.input.as_path()))
         .map(|j| j.profile.subtype)
         .collect();
     let game_paths: Vec<&str> = set
@@ -823,6 +844,7 @@ pub fn pick_for_set(
         subtypes: &subtypes,
         game_paths: &game_paths,
         mesh: votes,
+        fuzz: ctx.target == Target::Cs && !fuzz_maps.is_empty(),
     })
 }
 
@@ -1207,6 +1229,7 @@ mod tests {
             subtypes,
             game_paths: paths,
             mesh: &[],
+            fuzz: false,
         }
     }
     fn sx(s: &[&str]) -> BTreeSet<String> {
@@ -1431,6 +1454,61 @@ mod tests {
                 provenance: ShaderOrigin::Fallback,
                 wanted: Some(Shader::Pbr)
             }
+        );
+    }
+
+    /// Fuzz-1a, Fuzz-23: with nothing else a fuzz-map set takes the PBR family member (GRAS, `cs_txst`, plain); a
+    /// `Default` mesh majority is no evidence there, another majority wins; without `fuzz` the default stays.
+    #[test]
+    fn a_fuzz_map_alone_picks_the_pbr_family() {
+        use Subtype::*;
+        let paths = ["textures/a/b.png"];
+        let s = sx(&["n", "fuzz"]);
+        let st = [Diffuse, Normal];
+        let mut i = input(Target::Cs, &s, &st, &paths);
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::Default, ShaderOrigin::Auto(AutoRule::Otherwise))
+        );
+        i.fuzz = true;
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::Pbr, ShaderOrigin::Auto(AutoRule::Pbr))
+        );
+        let def = [Shader::Default, Shader::Default];
+        i.mesh = &def;
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::Pbr, ShaderOrigin::Auto(AutoRule::Pbr))
+        );
+        let hair = [Shader::Hair, Shader::Hair];
+        i.mesh = &hair;
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::Hair, ShaderOrigin::Auto(AutoRule::Mesh))
+        );
+        i.mesh = &[];
+        i.cs_txst = true;
+        assert_eq!(
+            auto(&pick(&i)),
+            (
+                Shader::PbrLandscape,
+                ShaderOrigin::Auto(AutoRule::PbrLandscape)
+            )
+        );
+        i.gras = true;
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::PbrGrass, ShaderOrigin::Auto(AutoRule::PbrGrass))
+        );
+        // A suffix rule still decides first.
+        let s = sx(&["g", "fuzz"]);
+        let st = [Diffuse, Glow];
+        let mut i = input(Target::Cs, &s, &st, &paths);
+        i.fuzz = true;
+        assert_eq!(
+            auto(&pick(&i)),
+            (Shader::Glow, ShaderOrigin::Auto(AutoRule::G))
         );
     }
 

@@ -64,6 +64,9 @@ pub struct Skeleton {
     /// Sets with a fuzz map (Fuzz-19): a member image whose stem is a fuzz map's (`group::is_fuzz_stem`), or a set
     /// that lists one, also shared in (`pack::plan::has_fuzz_map`, the gate the Advanced Skin evidence reads).
     pub(crate) fuzz_sets: BTreeSet<u32>,
+    /// Sets that gained `f` in the full plan from a fuzz map read as the PBR fuzz texture (Fuzz-1a,
+    /// `api::pbr_read_fuzz`): the PBR check's clone gains it too.
+    pub(crate) f_sets: BTreeSet<u32>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
     /// The partner groups [`Skeleton::scope`] closes over (set keys), built once per full plan.
@@ -77,8 +80,14 @@ pub struct Skeleton {
 }
 
 impl Skeleton {
-    /// The skeleton of a full plan: `prepared` as `plan` was planned from, and `pbr` its PBR set keys.
-    pub(crate) fn new(prepared: Prepared, plan: &Plan, pbr: &BTreeSet<String>) -> Skeleton {
+    /// The skeleton of a full plan: `prepared` as `plan` was planned from, `pbr` its PBR set keys and `f` the keys of
+    /// its sets that gained `f` (Fuzz-1a).
+    pub(crate) fn new(
+        prepared: Prepared,
+        plan: &Plan,
+        pbr: &BTreeSet<String>,
+        f: &BTreeSet<String>,
+    ) -> Skeleton {
         let mut set_of = vec![u32::MAX; prepared.files.len()];
         let mut key_sets: HashMap<String, Vec<u32>> = HashMap::new();
         let mut fuzz_sets: BTreeSet<u32> = BTreeSet::new();
@@ -140,10 +149,12 @@ impl Skeleton {
                 }
             }
         }
-        let pbr_sets = pbr
-            .iter()
-            .filter_map(|k| by_key.get(k.as_str()).copied())
-            .collect();
+        let indices = |keys: &BTreeSet<String>| {
+            keys.iter()
+                .filter_map(|k| by_key.get(k.as_str()).copied())
+                .collect()
+        };
+        let (pbr_sets, f_sets) = (indices(pbr), indices(f));
         let root = &prepared.req.output_root;
         let writers: HashMap<String, u32> = plan
             .jobs
@@ -178,6 +189,7 @@ impl Skeleton {
             key_sets,
             pbr_sets,
             fuzz_sets,
+            f_sets,
             patched: false,
             writers: Arc::new(writers),
             clash_sets: Arc::new(clash_sets),
@@ -410,6 +422,11 @@ impl Skeleton {
             predict_suffixes(
                 &mut set, skin_fuzz, n.target, complex, &n.files, &n.typed, &n.hand,
             );
+            // Fuzz-1a: the `f` the full plan's fuzz map added. Only on this clone: in `n.sets` it would reach the
+            // partial's pass 1. Edits that change the reading plan in full already (FUZZ_SUBTYPE and the joins).
+            if self.f_sets.contains(&s) {
+                set.suffixes.insert("f".into());
+            }
             if set_is_pbr(n.target, &set, &n.files).is_some_and(|b| b != self.pbr_sets.contains(&s))
             {
                 return Err(NeedsFull(PBR_CHANGE));
@@ -541,7 +558,7 @@ mod tests {
 
     fn skeleton(req: &BatchRequest) -> Skeleton {
         let rep = Reporter::new(Arc::new(NullSink), "t");
-        let (plan, p, pbr) = Engine::new()
+        let (plan, p, pbr, f) = Engine::new()
             .unwrap()
             .plan_full(
                 req,
@@ -550,7 +567,7 @@ mod tests {
                 &AnalysisCache::default(),
             )
             .unwrap();
-        Skeleton::new(p, &plan, &pbr)
+        Skeleton::new(p, &plan, &pbr, &f)
     }
 
     fn table(s: &str) -> toml::Table {

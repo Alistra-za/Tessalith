@@ -413,8 +413,8 @@ impl Session {
         rep: &Reporter,
         cancel: &CancelToken,
     ) -> Result<Plan, EngineError> {
-        let (plan, prepared, pbr) = self.engine.plan_full(&req, rep, cancel, &self.cache)?;
-        self.keep_skeleton(&plan, prepared, &pbr, cancel);
+        let (plan, prepared, pbr, f) = self.engine.plan_full(&req, rep, cancel, &self.cache)?;
+        self.keep_skeleton(&plan, prepared, &pbr, &f, cancel);
         Ok(plan)
     }
 
@@ -427,12 +427,13 @@ impl Session {
         plan: &Plan,
         prepared: crate::api::Prepared,
         pbr: &std::collections::BTreeSet<String>,
+        f: &std::collections::BTreeSet<String>,
         cancel: &CancelToken,
     ) {
         if !plan.cancelled.is_empty() || cancel.is_cancelled() {
             return;
         }
-        let skeleton = Arc::new(Skeleton::new(prepared, plan, pbr));
+        let skeleton = Arc::new(Skeleton::new(prepared, plan, pbr, f));
         let mut slot = lock(&self.skeleton);
         if !cancel.is_cancelled() {
             self.cache.retain_plan(plan);
@@ -482,7 +483,7 @@ impl Session {
         if scope.iter().any(|k| skel.clash_sets.contains(k)) {
             return Err(Partial::NeedsFull(WRITER_CLASH));
         }
-        let (plan, _) = self
+        let (plan, ..) = self
             .engine
             .plan_sets(&skel.prepared, Some(&scope), rep, cancel, &self.cache)
             .map_err(Partial::Err)?;
@@ -766,13 +767,13 @@ mod tests {
         let first = s.skeleton().expect("a skeleton");
         let late = |cancelled: bool| {
             let cancel = CancelToken::default();
-            let (plan, prepared, pbr) =
+            let (plan, prepared, pbr, f) =
                 s.engine.plan_full(&req(), &rep, &cancel, &s.cache).unwrap();
             assert!(plan.cancelled.is_empty(), "it finished planning");
             if cancelled {
                 cancel.cancel();
             }
-            s.keep_skeleton(&plan, prepared, &pbr, &cancel);
+            s.keep_skeleton(&plan, prepared, &pbr, &f, &cancel);
         };
         late(true);
         assert!(

@@ -130,6 +130,12 @@ fn rows() -> Vec<Row> {
             &[],
         ),
         row(
+            "format on x",
+            &[("dir/x.png", Some("format = \"bc1\""))],
+            Scoped,
+            &["dir/x"],
+        ),
+        row(
             "one cube face",
             &[(
                 "dir/c_px",

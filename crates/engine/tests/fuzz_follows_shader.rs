@@ -533,7 +533,7 @@ fn a_written_recipe_wins_over_an_explicit_shader() {
 }
 
 /// Fuzz-3: an explicit other shader leaves the fuzz map unused, with the shader named. (The automatic row, a `_g`
-/// picking Glow, is Task 4's: until the pick leaves the fuzz map out, the fuzz map makes that pick PBR.)
+/// picking Glow, is `the_fuzz_map_does_not_outvote_other_maps`.)
 #[test]
 fn other_shaders_leave_the_fuzz_map_unused() {
     let d = fixture(&["rock01.png", "rock01_n.png", "rock01_sheen.png"], "");
@@ -897,5 +897,133 @@ fn a_written_rmaos_keeps_the_fuzz_map_pbr() {
             .unwrap()
             .to_string_lossy(),
         "rock01_f.dds"
+    );
+}
+
+/// Fuzz-1a: diffuse + normal + fuzz map, nothing else: PBR; the fuzz map is the PBR fuzz texture; no packed output.
+#[test]
+fn a_fuzz_map_and_nothing_else_picks_pbr() {
+    for term in ["fuzz", "sheen"] {
+        for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+            let name = format!("rock01_{term}.png");
+            let d = fixture(&["rock01.png", "rock01_n.png", &name], "");
+            let p = plan_with(&d, accept, &[], &[]);
+            assert_eq!(shader(&p), Shader::Pbr, "{term} {accept:?}");
+            assert_eq!(
+                job(&p, "rock01.png").profile.subtype,
+                Subtype::PbrAlbedo,
+                "{term} {accept:?}"
+            );
+            assert_eq!(
+                job(&p, "rock01_n.png").profile.subtype,
+                Subtype::PbrNormal,
+                "{term} {accept:?}"
+            );
+            assert_eq!(out_name(job(&p, &name)), "rock01_f.dds");
+            assert!(
+                p.jobs.iter().all(|j| j.pack.is_none()),
+                "{:?}",
+                out_names(&p)
+            );
+        }
+    }
+}
+
+/// Fuzz-1a, Fuzz-3: the fuzz map is the lowest evidence. A `_g` picks Glow with or without it; the `_g` stays
+/// `glow`, and the fuzz map is listed unused with the automatic shader named.
+#[test]
+fn the_fuzz_map_does_not_outvote_other_maps() {
+    let d = fixture(&["rock01.png", "rock01_g.png", "rock01_fuzz.png"], "");
+    let p = plan(&d);
+    assert_eq!(shader(&p), Shader::Glow);
+    assert_eq!(job(&p, "rock01_g.png").profile.subtype, Subtype::Glow);
+    assert_eq!(job(&p, "rock01.png").profile.subtype, Subtype::Diffuse);
+    assert_eq!(
+        unused_reason(&p, "rock01_fuzz.png"),
+        "rock01_fuzz.png: the glow shader reads no fuzz map; not converted"
+    );
+    // The unused map keeps its `PackingInput` job (`rock01_fuzz.dds`, never written), so only converted jobs count.
+    let converted: Vec<String> = p
+        .jobs
+        .iter()
+        .filter(|j| !matches!(j.status, JobStatus::PackingInput { .. }))
+        .map(out_name)
+        .collect();
+    assert!(
+        !converted.iter().any(|n| n.starts_with("rock01_f")),
+        "{converted:?}"
+    );
+}
+
+/// `plan` with mesh votes (`BatchRequest::mesh_shaders`, keyed by `shader::mesh_key`), as `shaders.rs`'s
+/// `plan_with` passes them.
+fn plan_mesh(d: &TempDir, mesh: &[(&str, Vec<Shader>)]) -> Plan {
+    let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+    r.recursive = true;
+    r.mesh_shaders = mesh
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.clone()))
+        .collect();
+    let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+    Engine::new()
+        .unwrap()
+        .plan(r, &rep, &CancelToken::default())
+        .unwrap()
+}
+
+/// Fuzz-23, both cells. A mesh majority of `Default` is no evidence on a fuzz-map set: Fuzz-1a applies and the set
+/// is PBR, as `sdc convert` plans it with no votes. A majority of another shader (Hair) wins as today; the fuzz map
+/// is listed unused with that shader named.
+#[test]
+fn a_default_mesh_vote_keeps_fuzz_1a_and_another_vote_wins() {
+    // Under `textures/`, so the mesh key is the game path (`shaders.rs` uses `textures/a/wall`).
+    let files = [
+        "textures/a/rock01.png",
+        "textures/a/rock01_n.png",
+        "textures/a/rock01_fuzz.png",
+    ];
+    let key = "textures/a/rock01";
+    let d = fixture(&files, "");
+    let p = plan_mesh(&d, &[(key, vec![Shader::Default, Shader::Default])]);
+    assert_eq!(shader(&p), Shader::Pbr);
+    assert_eq!(job(&p, "rock01.png").profile.subtype, Subtype::PbrAlbedo);
+    assert_eq!(out_name(job(&p, "rock01_fuzz.png")), "rock01_f.dds");
+    let d = fixture(&files, "");
+    let p = plan_mesh(&d, &[(key, vec![Shader::Hair, Shader::Hair])]);
+    assert_eq!(shader(&p), Shader::Hair);
+    assert_eq!(
+        unused_reason(&p, "rock01_fuzz.png"),
+        format!(
+            "rock01_fuzz.png: the {} shader reads no fuzz map; not converted",
+            Shader::Hair.id()
+        )
+    );
+}
+
+/// Fuzz-1a is cs only: under vanilla nothing changes (no `_f` output, the pick is not PBR).
+#[test]
+fn vanilla_fuzz_sets_are_unchanged() {
+    let d = fixture(&["rock01.png", "rock01_n.png", "rock01_fuzz.png"], "");
+    let mut r = BatchRequest::new(
+        vec![d.path().join("in")],
+        d.path().join("out"),
+        Target::Vanilla,
+    );
+    r.recursive = true;
+    let p = Engine::new()
+        .unwrap()
+        .plan(
+            r,
+            &Reporter::new(Arc::new(VecSink::default()), "t"),
+            &CancelToken::default(),
+        )
+        .unwrap();
+    assert_ne!(shader(&p), Shader::Pbr);
+    // Not even wanted: a PBR pick would fall back to Default with `wanted: pbr` (SHADER-UNAVAILABLE).
+    assert_eq!(p.shaders[&job(&p, "rock01.png").set_key].wanted, None);
+    assert!(
+        !out_names(&p).iter().any(|n| n == "rock01_f.dds"),
+        "{:?}",
+        out_names(&p)
     );
 }
