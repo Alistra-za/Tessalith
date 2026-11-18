@@ -4,7 +4,7 @@ use super::columns::AMBER;
 use crate::look::Combo036 as _;
 use crate::model::auto_flags::{auto_flags_for, hint, resolved_for};
 use crate::model::sets::{
-    is_pbr_grass, slot_matches, views, SetView, SlotFill, SlotKind, SlotMatch,
+    feature_slots, is_pbr_grass, slot_matches, views, SetView, SlotFill, SlotKind, SlotMatch,
 };
 use crate::model::AppModel;
 use crate::pgp::alpha::{AlphaFlags, BLEND_MODES, DEFAULT_FLAGS, DEFAULT_THRESH, TEST_FUNCS};
@@ -179,18 +179,19 @@ pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
 pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ctx {
     #[cfg(feature = "test-hooks")]
     CONTEXT_BUILDS.set(CONTEXT_BUILDS.get() + 1);
-    let filled = |v: &SetView, s: SlotKind| v.slots.get(&s).is_some_and(SlotFill::is_filled);
+    let filled =
+        |v: &SetView, s: SlotKind| feature_slots(v).get(&s).is_some_and(SlotFill::is_filled);
     let read_only = model.sets_read_only_reason();
     let own: Settings = v.as_ref().map(|v| v.settings.clone()).unwrap_or_default();
     let derived = v.as_ref().and_then(|v| v.derived_match.clone());
     let ss = v.as_ref().map(|v| hint(model, v)).unwrap_or_default();
     let auto = v
         .as_ref()
-        .map(|v| auto_flags_for(v.json, &v.slots, &own, &ss))
+        .map(|v| auto_flags_for(v.json, feature_slots(v), &own, &ss))
         .unwrap_or_default();
     let eff = v
         .as_ref()
-        .map(|v| resolved_for(v.json, &v.slots, &own, &ss))
+        .map(|v| resolved_for(v.json, feature_slots(v), &own, &ss))
         .unwrap_or_else(|| own.clone());
     let (matches, addable) = v.map(slot_matches).unwrap_or_default();
     Ctx {

@@ -5,7 +5,7 @@ mod support;
 use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use sdc_gui::model::bottom::{problems, problems_builds, At, Level};
 use sdc_gui::model::bulk::MenuAction;
-use sdc_gui::model::sets::{view_builds, views, Missing, SetView, SlotFill, SlotKind};
+use sdc_gui::model::sets::{view_builds, views, Missing, SetView, SlotCommand, SlotFill, SlotKind};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
 use sdc_gui::worker::WorkerMsg;
@@ -743,6 +743,30 @@ fn views_after_a_partial_equal_a_fresh_build_with_a_linked_slot() {
         before,
         "the link follows its source: the wall's normal is no longer a normal"
     );
+    m.invalidate_views();
+    assert_eq!(*spliced, *views(&m));
+}
+
+/// Plan 3b (E1, ruling 5): a cleared feature slot keeps its `features` through a partial plan of the same set.
+#[test]
+fn views_after_a_partial_equal_a_fresh_build_with_a_cleared_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_g.png", [255, 200, 0], Subtype::PbrEmissive)],
+    );
+    m.set_slot_command("arch/leaf", 3, SlotCommand::Clear)
+        .unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        view_of(&m, "arch/leaf").features.is_some(),
+        "premise: the clear sets features"
+    );
+    m.hold_plan_results = true;
+    m.decide("arch/leaf_n.png", Answer::Green(GreenConvention::Opengl)); // a partial over arch/leaf
+    let (partials, _full) = collect(&mut m, 1, 1);
+    deliver(&mut m, partials);
+    let spliced = views(&m);
     m.invalidate_views();
     assert_eq!(*spliced, *views(&m));
 }

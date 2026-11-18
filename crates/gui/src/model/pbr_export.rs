@@ -3,8 +3,8 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, item_output_key, item_output_key_in, output_candidates, packed_owners,
-    set_views, SetView, SlotFill, SlotKind,
+    engine_inputs, feature_slots, item_output_key, item_output_key_in, output_candidates,
+    packed_owners, set_views, SetView, SlotFill, SlotKind,
 };
 use super::txst_map::record_entries;
 use super::AppModel;
@@ -259,7 +259,7 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
             let slots = slots_of(v, &views, &paths, m);
             let mut settings = crate::model::auto_flags::resolved_for(
                 v.json,
-                &v.slots,
+                feature_slots(v),
                 &v.settings,
                 &crate::model::auto_flags::hint(m, v),
             );

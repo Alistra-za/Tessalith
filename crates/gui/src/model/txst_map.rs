@@ -5,9 +5,9 @@ use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
 use super::pbr_export::exports_json;
 use super::sets::{
-    engine_inputs_in, entry_of, game_path_in, has_slot_link, link_row_kind, linked_map_slot,
-    missing_map_slot, recipe_suffix, renamed_output, slot_string, DefaultOutputs, SetView,
-    SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
+    engine_inputs_in, entry_of, game_path_in, has_slot_clear, has_slot_link, link_row_kind,
+    linked_map_slot, missing_map_slot, recipe_suffix, renamed_output, slot_string, DefaultOutputs,
+    SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
@@ -329,9 +329,22 @@ pub(super) fn link_slots(
     _entries: &[SetEntry],
     own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
 ) {
-    if !views.iter().any(|v| has_slot_link(&v.settings)) {
+    let any_link = views.iter().any(|v| has_slot_link(&v.settings));
+    if !any_link && !views.iter().any(|v| has_slot_clear(&v.settings)) {
         return;
     }
+    if any_link {
+        set_links(m, views, own_slots);
+    }
+    set_features(m, views);
+}
+
+/// Fills `linked` (see `link_slots`).
+fn set_links(
+    m: &AppModel,
+    views: &mut [SetView],
+    own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
+) {
     let paths = engine_inputs_in(m, views).1;
     let mut written: HashMap<String, (&str, &str)> = HashMap::new();
     for (id, slots) in own_slots {
@@ -408,6 +421,46 @@ pub(super) fn link_slots(
                     .is_some_and(|n| linked.get(&n).is_some_and(|l| l.row.is_some())))
         });
         v.linked = linked;
+    }
+}
+
+/// Task 12: fills `features` of every set written as a JSON entry: a copy of `slots` where each link from another set
+/// (a source set and a kind) replaces the fills of its game slot with `kind → Borrowed`, and a cleared game slot
+/// (`slotN = ""`) drops the fills of that slot. `None` when neither changes anything. A typed path names no kind and
+/// counts for nothing.
+fn set_features(m: &AppModel, views: &mut [SetView]) {
+    for v in views.iter_mut() {
+        if !exports_json(m, v) {
+            continue;
+        }
+        let mut features: Option<BTreeMap<SlotKind, SlotFill>> = None;
+        for (&n, l) in &v.linked {
+            if let (Some(from), Some(item), Some(kind)) = (&l.from, &l.item, l.kind) {
+                let f = features.get_or_insert_with(|| v.slots.clone());
+                f.retain(|k, _| k.game_slot() != Some(n));
+                f.insert(
+                    kind,
+                    SlotFill::Borrowed {
+                        from: from.clone(),
+                        item: item.clone(),
+                    },
+                );
+            }
+        }
+        for n in (1..=LAST_GAME_SLOT).filter(|&n| slot_string(&v.settings, n) == Some("")) {
+            let own_or_borrowed = |k: &SlotKind, f: &SlotFill| {
+                k.game_slot() == Some(n)
+                    && matches!(f, SlotFill::Own { .. } | SlotFill::Borrowed { .. })
+            };
+            let base = features.as_ref().unwrap_or(&v.slots);
+            if !base.iter().any(|(k, f)| own_or_borrowed(k, f)) {
+                continue;
+            }
+            features
+                .get_or_insert_with(|| v.slots.clone())
+                .retain(|k, _| k.game_slot() != Some(n));
+        }
+        v.features = features;
     }
 }
 

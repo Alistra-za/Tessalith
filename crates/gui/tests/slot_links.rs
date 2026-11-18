@@ -6,8 +6,11 @@ use egui_kittest::Harness;
 use engine::codes::Code;
 use engine::config::{GreenConvention, Subtype};
 use sdc_gui::model::bulk::MenuAction;
+use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::sets::*;
 use sdc_gui::model::{Answer, AppModel, Selection};
+use sdc_gui::pgp::writer::document;
+use serde_json::{json, Value};
 use support::*;
 
 const LEAF: &str = "arch/leaf";
@@ -845,5 +848,228 @@ fn a_link_resolves_when_the_opened_folder_is_below_textures() {
     assert!(
         matches!(slot_shown(&v, SlotKind::Fuzz), SlotShown::Replaced { .. }),
         "the coat link is not shown on the Fuzz row"
+    );
+}
+
+fn entry(m: &AppModel, id: &str) -> Value {
+    let e = json_entries(m)
+        .into_iter()
+        .find(|(v, _)| v.id == id)
+        .unwrap_or_else(|| panic!("no entry for {id}"))
+        .1;
+    document(std::slice::from_ref(&e)).to_value()["entries"][0].clone()
+}
+
+fn extra() -> Vec<(&'static str, [u8; 3], Subtype)> {
+    vec![
+        ("glow_g.png", [255, 200, 0], Subtype::PbrEmissive),
+        ("bump_p.png", [128, 128, 128], Subtype::Height),
+        ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ("silk_f.png", [200, 200, 200], Subtype::PbrFuzz),
+        ("skin_s.png", [220, 120, 100], Subtype::PbrSubsurface),
+    ]
+}
+
+fn link(m: &mut AppModel, n: u8, item: &str) {
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: LEAF.into(),
+            n,
+            item: item.into()
+        }),
+        None
+    );
+}
+
+/// The selected set's `control` is greyed, and hovering it says `reason` (the reason shows on hover only).
+fn blocked_with_reason(m: AppModel, control: &str, reason: &str) {
+    use egui_kittest::kittest::NodeT;
+    let mut h = harness(m);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run();
+    h.get_by_label(control).scroll_to_me();
+    h.run();
+    assert!(
+        h.get_by_label(control).accesskit_node().is_disabled(),
+        "{control} is greyed"
+    );
+    assert!(
+        h.query_by_label_contains(reason).is_none(),
+        "premise: on hover only"
+    );
+    h.get_by_label(control).hover();
+    h.run();
+    h.run();
+    assert!(h.query_by_label_contains(reason).is_some(), "{reason}");
+}
+
+/// Whether the selected set's `control` is greyed.
+fn greyed(m: AppModel, control: &str) -> (AppModel, bool) {
+    use egui_kittest::kittest::NodeT;
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(control).scroll_to_me();
+    h.run();
+    let off = h.get_by_label(control).accesskit_node().is_disabled();
+    (h.into_state(), off)
+}
+
+#[test]
+fn a_slot_linked_from_another_set_turns_its_feature_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    assert_eq!(
+        entry(&m, LEAF).get("emissive"),
+        None,
+        "premise: no emissive before"
+    );
+    link(&mut m, 3, "arch/glow_g.png");
+    assert_eq!(entry(&m, LEAF)["emissive"], json!(true));
+    m.undo();
+    assert_eq!(
+        entry(&m, LEAF).get("emissive"),
+        None,
+        "one Undo takes the key away"
+    );
+}
+
+#[test]
+fn a_linked_height_turns_parallax_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    assert_eq!(
+        entry(&m, LEAF).get("parallax"),
+        None,
+        "premise: no parallax before"
+    );
+    link(&mut m, 4, "arch/bump_p.png");
+    assert_eq!(entry(&m, LEAF)["parallax"], json!(true));
+}
+
+#[test]
+fn a_linked_coat_turns_multilayer_on_and_blocks_fuzz() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 7, "arch/lacq_cnr.png");
+    let e = entry(&m, LEAF);
+    assert_eq!(
+        (e["multilayer"].clone(), e["coat_normal"].clone()),
+        (json!(true), json!(true))
+    );
+    // The writer turns `fuzz_on` into the `fuzz` object, so that is the key that shows fuzz on.
+    assert_eq!(e.get("fuzz"), None);
+    select_set(&mut m, LEAF);
+    blocked_with_reason(m, "Fuzz", "off: the set has a coat normal (_cnr)");
+}
+
+#[test]
+fn a_linked_fuzz_turns_fuzz_on_and_blocks_the_coat_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    select_set(&mut m, LEAF);
+    // The coat normal's own row sits in the Multilayer group, which is not drawn while Multilayer is off, so the
+    // block shows as the greyed Multilayer switch.
+    let (mut m, off) = greyed(m, "Multilayer (coat)");
+    assert!(!off, "premise: Multilayer is free before the link");
+    link(&mut m, 7, "arch/silk_f.png");
+    // The writer turns `fuzz_on` into the `fuzz` object, so that is the key that shows fuzz on.
+    assert!(entry(&m, LEAF).get("fuzz").is_some());
+    let (_, off) = greyed(m, "Multilayer (coat)");
+    assert!(off, "a linked fuzz greys Multilayer");
+}
+
+#[test]
+fn a_linked_subsurface_turns_subsurface_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 8, "arch/skin_s.png");
+    assert_eq!(entry(&m, LEAF)["subsurface"], json!(true));
+}
+
+#[test]
+fn a_typed_path_turns_no_feature_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    let before = entry(&m, LEAF);
+    m.set_slot_command(LEAF, 3, SlotCommand::Path(r"textures\other\x_g.dds".into()))
+        .unwrap();
+    let after = entry(&m, LEAF);
+    assert_eq!(after.get("emissive"), None);
+    assert_eq!(
+        after["slot3"],
+        json!(r"textures\other\x_g.dds"),
+        "the path itself is written"
+    );
+    assert_eq!(
+        before
+            .as_object()
+            .unwrap()
+            .keys()
+            .filter(|k| *k != "slot3")
+            .count(),
+        after
+            .as_object()
+            .unwrap()
+            .keys()
+            .filter(|k| *k != "slot3")
+            .count()
+    );
+}
+
+#[test]
+fn a_link_whose_source_set_goes_loses_its_feature_and_undo_brings_it_back() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 3, "arch/glow_g.png");
+    assert_eq!(entry(&m, LEAF)["emissive"], json!(true));
+    assert!(m.delete_set("arch/glow"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(
+        entry(&m, LEAF).get("emissive"),
+        None,
+        "no source set: the link no longer counts"
+    );
+    m.undo();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(
+        entry(&m, LEAF)["emissive"],
+        json!(true),
+        "Undo restores the set and the key"
+    );
+}
+
+#[test]
+fn a_cleared_slot_turns_no_feature_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_g.png", [255, 200, 0], Subtype::PbrEmissive)],
+    );
+    let v = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    assert!(
+        matches!(v.slots.get(&SlotKind::Emissive), Some(SlotFill::Own { .. })),
+        "premise: an own _g"
+    );
+    assert_eq!(
+        entry(&m, LEAF)["emissive"],
+        json!(true),
+        "premise: the own _g turns emissive on"
+    );
+    m.set_slot_command(LEAF, 3, SlotCommand::Clear).unwrap();
+    let e = entry(&m, LEAF);
+    assert_eq!(e["slot3"], json!(""), "the JSON carries the clear command");
+    assert_eq!(
+        e.get("emissive"),
+        None,
+        "a cleared slot turns no feature on"
+    );
+    m.undo();
+    assert_eq!(
+        entry(&m, LEAF)["emissive"],
+        json!(true),
+        "one Undo brings the key back"
     );
 }

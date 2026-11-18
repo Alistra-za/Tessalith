@@ -400,6 +400,11 @@ pub struct SetView {
     /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
     /// that path. Only a set written as a JSON entry has any (`link_slots`); set by `build_views`.
     pub linked: BTreeMap<u8, SlotLink>,
+    /// The fills the exported JSON's feature keys read (`feature_slots`): `slots` with each link from another set in
+    /// place of the own fills of its game slot, and the fills of a cleared game slot (`slotN = ""`) left out. `None`
+    /// when no link counts and no game slot is cleared over an own or borrowed file. Only a set written as a JSON
+    /// entry has any (`link_slots`); set by `build_views` and `splice_views`.
+    pub features: Option<BTreeMap<SlotKind, SlotFill>>,
     /// The files this set's own members write (review E13): each own slot's planned output in slot order, then each
     /// member with a job that fills no slot (a complex `_m`, a packed output with no card) in member order, each path
     /// once. Each entry is the slot (`None` for an unslotted member), the item's key and its output path. Borrowed and
@@ -480,6 +485,17 @@ pub(crate) fn slot_string(s: &Settings, n: u8) -> Option<&str> {
 /// Whether `s` holds a link: a non-empty string `slotN` for some game slot. A clear (`slotN = ""`) names no set.
 pub(crate) fn has_slot_link(s: &Settings) -> bool {
     (1..=LAST_GAME_SLOT).any(|n| slot_string(s, n).is_some_and(|p| !p.is_empty()))
+}
+
+/// Whether `s` clears a game slot (`slotN = ""` for some N).
+pub(crate) fn has_slot_clear(s: &Settings) -> bool {
+    (1..=LAST_GAME_SLOT).any(|n| slot_string(s, n) == Some(""))
+}
+
+/// The fills that decide `v`'s PGPatcher feature keys and their blocks (review E1, Task 12). No allocation, so a
+/// per-frame reader can call it.
+pub fn feature_slots(v: &SetView) -> &BTreeMap<SlotKind, SlotFill> {
+    v.features.as_ref().unwrap_or(&v.slots)
 }
 
 /// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
@@ -620,6 +636,7 @@ impl SetView {
             recipes: vec![],
             short: String::new(),
             linked: BTreeMap::new(),
+            features: None,
             outputs: vec![],
         }
     }
@@ -1701,6 +1718,9 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         v.short = old.short.clone();
         rebuilt.push(v);
     }
+    // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
+    // with one rebuilt every view above), so `own_slots` is not read.
+    link_slots(m, &mut rebuilt, &entries, &[]);
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {
