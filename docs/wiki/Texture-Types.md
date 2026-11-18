@@ -67,8 +67,8 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | `_detail`, `_detailnorm`, `_detail_n` | `detail_normal` or `skin_detail`, by the set: see [Detail names](#detail-names) | High in a skin set; in a landscape set the shader decides |
 | `_e`, or a file under `textures\cubemaps\` | `cubemap`; the face suffixes `_posx` to `_negz` (or `_px` to `_nz`) are cut off first | High |
 
-- **A PBR set** (under `cs`) has a `pbr` folder in its path, or an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or a raw roughness, glossiness, metallic or AO map.
-- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. A pinned Diffuse slot turns it off ([Advanced skin](PBR-Landscape.md#advanced-skin)). In such a set a plain `_f` is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A `_f` never makes a set Advanced skin by itself. This also holds for a set that opened as PBR: the `pbr_albedo` and `pbr_fuzz` types Tessalith recorded on its own switch when you pick Advanced Skin, and come back when you leave it; a type you picked yourself stays. <!-- D:JE1 -->
+- **A PBR set** (under `cs`) has a `pbr` folder in its path, or an `_rmaos`, `_rfaos`, `_cnr` or `_f` member, or a raw roughness, glossiness, metallic or AO map. A set whose own `_fuzz` or `_sheen` map is the only thing that gives it a shader is PBR too ([how the shader is picked](Set-Shaders.md#how-the-shader-is-picked)).
+- **An Advanced skin set** has or builds an `_rfaos`. Setting the set's shader to Advanced Skin builds one (unless `packing.recipe` says otherwise or only a metallic map exists), and its diffuse is `skin_albedo` either way. A pinned Diffuse slot turns it off ([Advanced skin](PBR-Landscape.md#advanced-skin)). In such a set a `_fuzz` or `_sheen` map is the skin fuzz mask: greyscale, packed into the `_rfaos` G channel, not converted on its own. A plain `_f` is the mask too when the set has no `_fuzz` or `_sheen` map; beside one, the `_f` stays the PBR fuzz texture (`pbr_fuzz`). None of them makes a set Advanced skin by itself: to make a set skin, pick **Advanced Skin** as its shader. <!-- D:JQ1,JQ2 --> This also holds for a set that opened as PBR: the `pbr_albedo` and `pbr_fuzz` types Tessalith recorded on its own switch when you pick Advanced Skin, and come back when you leave it; a type you picked yourself stays. <!-- D:JE1 -->
 - **A name that fits none of the above** is read as a colour map when the set has other files (`rock_nm.png` becomes a diffuse); alone, it [waits for a type](#how-files-form-a-set). Rename it, add an `[inputs]` alias, or set `subtype`.
 
 ### Exporter names
@@ -91,7 +91,7 @@ Names that texturing tools commonly export are understood too:
 | `_glossiness`, `_gloss` | Raw glossiness | packed (inverted into roughness) |
 | `_height`, `_displacement`, `_disp` | Raw height | packed |
 | `_opacity` | Raw opacity | the colour texture's alpha ([helper](Texture-Packing.md#helper-textures)) |
-| `_fuzz`, `_sheen` | Raw fuzz | packed |
+| `_fuzz`, `_sheen` | Fuzz: the skin fuzz mask in an Advanced skin set, the PBR fuzz texture in a PBR set, unused under other shaders | packed in a skin set; `<base>_f.dds` in a PBR set <!-- D:JQ2,JQ3,JQ10 --> |
 | `_curves`, `_curvature` | Raw curvature (0.5 is flat) | read only by [Also export](Set-Shaders.md#also-export-as-vanilla-and-cm) |
 | `_cavity` | Raw cavity | read only by Also export |
 

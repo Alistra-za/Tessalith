@@ -19,7 +19,7 @@ For modders whose sources come as separate maps (Substance or Blender exports): 
 | B | AO | 1 |
 | A | specular | 1 |
 
-`_rfaos` replaces it when a fuzz map exists or the set's shader is Advanced Skin
+`_rfaos` replaces it in an Advanced skin set: you picked **Advanced Skin** as the set's shader, or its other maps or types make it skin ([which sets are skin](Texture-Types.md#suffixes)). A `_fuzz` or `_sheen` map then fills G. In a PBR set the same map is written as the PBR fuzz texture (`<base>_f.dds`), and the set keeps `_rmaos`. <!-- D:JQ1,JQ2 --> The recipe key is [`packing.recipe`](Project-Config.md#packing).
 
 The channels are the same as above, except G is the fuzzmask (default 0).
 
@@ -66,12 +66,24 @@ A **helper** is a source file that fills one channel of another output in its ow
 
 Fuzz weight and subsurface weight have no file-name term: a file is one only when you set its role.
 
+A `_fuzz` or `_sheen` map is a helper only in an Advanced skin set. Under any other shader it isn't one ([Texture types](Texture-Types.md#exporter-names)).
+
 ### Which data wins
 
 - A **suggested** helper (role and targets from its name) fills an alpha only when that alpha is empty in the source: none, fully opaque, or one flat value. A colour PNG with a real alpha keeps it, and the helper reads "not used: x.png already has alpha".
 - An **assigned** helper (you set its role or targets) always replaces what the channel holds, a PNG's own alpha included.
 - Two helpers on one channel: an assigned one beats a suggested one; otherwise the first by path wins and the other reads "`<target>` is filled by `<winner>`".
 - A value fill (`packing.fill.*`) applies only when no helper fills the channel.
+
+A `_fuzz` or `_sheen` map that no set reads is not converted. [Problems](GUI-Problems.md#problems-and-notes) lists it under **Notes** as *{file} isn't used: {reason}. Nothing else changes.* <!-- D:JQ28 --> The reasons and their fixes:
+
+| Reason | Fix |
+|---|---|
+| `the <shader> shader reads no fuzz map` | Pick **Advanced Skin** or a PBR shader for the set, or leave the map out: no other shader reads a fuzz map. <!-- D:JQ3 --> |
+| `<f file> is the set's PBR fuzz texture (_f)` | Remove one of the two fuzz files: both would be `<base>_f.dds`. The `_f` can be an image or a kept `_f.dds`. <!-- D:JQ4,JQ53 --> |
+| `the <shader> shader of set <id> reads no fuzz map, and set <id> (<shader> shader) would read it as its fuzz texture, which only the file's own set can convert` | The map is shared between sets. Pick **Advanced Skin** or a PBR shader for the set that holds the file. <!-- D:JQ51 --> |
+
+A shared fuzz map does the job its own set gives it. An Advanced skin set that borrows a map its own PBR set converts gets the default G, and its `_rfaos` row reads *{output} g: the shared {file} is converted by its own set {id} ({shader} shader) and is not read here, so the default 0 (no fuzz) is used.* A PBR set that borrows a skin set's fuzz map gets no `<base>_f.dds` and no row. <!-- D:JQ51 -->
 
 ### Alpha targets and sizes
 

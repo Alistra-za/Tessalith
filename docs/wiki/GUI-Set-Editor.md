@@ -39,6 +39,8 @@ Two controls sit at a row's right end:
 
 Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
+`sdc.exe` doesn't read your shader pick, so picking **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map writes the types it needs, in the same undo step: `subtype = "pbr_fuzz"` on the fuzz map, and the PBR type (`pbr_albedo`, `pbr_normal`, `pbr_emissive`) on members whose type Tessalith chose. The fuzz map gets no type when the set has its own `_f`, when you set its `helper.role`, or when it is a DDS kept as it is. A file in a pinned slot keeps its type. Picking another shader takes back what that pick wrote, unless you changed it since. <!-- D:JQ9,JQ16,JQ31,JQ54 -->
+
 ## Slot menus
 
 Right-click a slot row, or a member chip on a card.

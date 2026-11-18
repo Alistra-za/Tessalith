@@ -103,10 +103,19 @@ An accept is an edit in memory: **Save** writes it to `sdc.toml`.
 When a plan settles, every sub-type taken from a High-confidence suggestion (including one the scanned meshes or a GRAS grass model gave it) and every alpha meaning taken from the meshes (also `remove`, an alpha they never read) is written to `sdc.toml` as a `[files]` entry, as if you had chosen it.
 
 - It is one undo step, `Set {n} types automatically` (`values` when an alpha meaning is among them), and one Info row with **Undo this change**.
-- These types alone don't count as your edits: no title dot, and no unsaved question on close.
+- These types alone, and the [switch off Advanced Skin](#sets-that-left-advanced-skin), don't count as your edits: no title dot, and no unsaved question on close, open or reload. <!-- D:JQ56 -->
 - A file you already decided is never touched, and an Undo stays undone until the folder reopens.
 - It re-types only while the type is still Tessalith's own pick. A type you changed is kept.
 - A file that waits for a type records nothing: [why](Texture-Types.md#how-files-form-a-set).
+
+### Sets that left Advanced Skin
+
+A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.md#suffixes)). When you open a project, or `sdc.toml` is read again, Tessalith clears a recorded `skin_albedo` on a set's diffuse when only such a map made the set skin. The set then takes the shader its other maps give. <!-- D:JQ8,JQ56 -->
+
+- **The row** reads *{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)*. Hover it for one line per file, `{file}: skin albedo → {type}`, then the types recorded with it, then *A _fuzz or _sheen map alone no longer makes a set Advanced Skin. To keep a set skin, choose Advanced Skin as its shader.* <!-- D:JQ19 -->
+- **Undo this change** sits on the row while the switch is the last step. The switch and the types recorded with it are one undo step. <!-- D:JQ17,JQ56 -->
+- **An undone switch runs again** the next time `sdc.toml` is read. Only a shader you pick in the [set editor](GUI-Set-Editor.md#slot-rows) holds a set on **Advanced Skin**. <!-- D:JQ56 -->
+- **Not switched:** a set whose shader you picked, a set that other skin maps or types keep skin, and every set while `sdc.toml` is read-only. <!-- D:JQ8,JQ20 -->
 
 ## Narrowing the list
 

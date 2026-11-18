@@ -35,12 +35,14 @@ Pick it yourself in the [set editor](GUI-Set-Editor.md#the-set-editor). Otherwis
 3. A complex-grass member: `complex_grass`.
 4. A complex `_m`: `complex_material`.
 5. A `_p`: `parallax`.
-6. In the GUI, after a mesh scan: the shader most of the meshes using the diffuse have (a strict majority).
+6. In the GUI, after a mesh scan: the shader most of the meshes using the diffuse have (a strict majority). Under `cs`, a majority of `default` doesn't count for a set with a `_fuzz` or `_sheen` map. <!-- D:JQ26,JQ34 -->
 7. An `_m` env mask: `envmap`.
 8. `_g`: `glow`. `_i`: `multilayer`. `_sk`: `skin`. `_flow`: `hair`, on both targets, unless the path has a `water` or `landscape` folder.
 9. A `hair` folder in the path: `hair`. An `eyes` folder: `eye`.
 10. Landscape textures: `landscape`.
-11. Otherwise `default`.
+11. Otherwise `default`. Under `cs`, a set with a `_fuzz` or `_sheen` map is `pbr` instead (or `pbr_grass` / `pbr_landscape`, as in rule 2). <!-- D:JQ11,JQ34,JQ39 -->
+
+A `_fuzz` or `_sheen` map picks no shader before rule 11: another map, such as a `_g` (rule 8), still decides. The map is then read as that shader reads it: [Texture types](Texture-Types.md#exporter-names). <!-- D:JQ1,JQ2 -->
 
 ## What a shader changes in its members
 
