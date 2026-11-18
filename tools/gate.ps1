@@ -51,5 +51,6 @@ if ($failed) {
     Step render { cargo test --offline --workspace --no-fail-fast -- render_ --test-threads=1 }
 }
 Step doc-dupes { py -3.13 -I "$top/tools/doc-dupes.py" --root $top }
+Step doc-lint { py -3.13 -I "$top/tools/doc-lint.py" --root $top }
 Step doc-markers { pwsh -NoProfile -File "$top/tools/doc-markers.ps1" -Root $top }
 exit $(if ($failed) { 1 } else { 0 })
