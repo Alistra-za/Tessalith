@@ -2194,7 +2194,11 @@ impl AppModel {
     fn settle_queued(&mut self) {
         // The same source recheck as Review's continuation (`continue_review`): a source that changed while the plan or
         // read ran plans again first; the click stays queued and the count is compared when that plan lands.
+        // Ruling 3c-20: only a whole-project click may write when its plan lands; a scoped one (Export set / group)
+        // always opens its scoped Review, whatever the counts: a scope can equal the project's.
+        let whole = self.export_scope().is_none();
         if self.write_now_after_plan
+            && whole
             && self.dialog.is_none()
             && self.writes_without_review_fresh()
             && self.check_sources() > 0
@@ -2206,7 +2210,8 @@ impl AppModel {
         if std::mem::take(&mut self.write_now_after_plan) {
             if self.dialog.is_some() {
                 self.queued_export_dropped();
-            } else if self.writes_without_review_fresh()
+            } else if whole
+                && self.writes_without_review_fresh()
                 && self.export_files() == self.settled_export_files
             {
                 self.write_now();

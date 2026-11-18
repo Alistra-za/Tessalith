@@ -731,11 +731,9 @@ fn a_dropped_queued_export_ends_the_scope() {
     assert_eq!(m.write_only(), None, "the next export is whole");
 }
 
-/// Note HF10 (final review I4), ruling 3c-16: a scoped click that waits for a plan under the opt-out lands in its
-/// scoped Review and writes nothing there: the count the click was held on is the whole project's, and a scoped run's
-/// never equals it (a scope is a part of the project), so `settle_queued` opens Review instead of writing what the
-/// user was not shown. Review's Export then writes only the scope.
-#[test]
+/// Note HF10 (final review I4), ruling 3c-20 (revising 3c-16): a scoped click that waits for a plan under the opt-out
+/// always lands in its scoped Review and writes nothing there, whatever the counts. Review's Export then writes only
+/// the scope.#[test]
 fn a_queued_scoped_export_writes_only_its_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
@@ -745,8 +743,8 @@ fn a_queued_scoped_export_writes_only_its_set() {
     m.export_sets(k, "Export set g/a".into());
     assert!(m.export_queued(), "waits for the plan");
     idle(&mut m);
-    // E3: the label's count (4, the whole project) is not the scope's (2), so the landed plan opens the scoped Review
-    // and writes nothing; Review's Export then writes only the scope.
+    // E3 (3c-20): the landed plan opens the scoped Review and writes nothing; Review's Export then writes only the
+    // scope.
     assert!(m.review.is_some(), "a different count opens Review");
     assert!(!out(&m, "textures/g/a.dds").exists());
     assert_eq!(
@@ -762,6 +760,45 @@ fn a_queued_scoped_export_writes_only_its_set() {
     );
 }
 
+/// Ruling 3c-20: a scope can equal the whole project's count (one set, or a group holding every set); the queued
+/// scoped click still opens its Review and writes nothing.
+#[test]
+fn a_queued_scoped_export_that_covers_the_whole_project_still_opens_its_review() {
+    for via_group in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = plain(d.path(), &["a"], &[]);
+        m.set_export_without_review(true);
+        if via_group {
+            group(&mut m, "All", &["g/a"]);
+        }
+        m.replan();
+        assert!(m.full_plan_pending(), "guard");
+        if via_group {
+            m.export_group("All");
+        } else {
+            let k = keys(&m, &["g/a"]);
+            m.export_sets(k, "Export set g/a".into());
+        }
+        assert!(
+            m.export_queued(),
+            "via_group={via_group}: waits for the plan"
+        );
+        idle(&mut m);
+        assert!(
+            m.writes_without_review(),
+            "guard: the landed plan is clean under the scope, and its count is the project's"
+        );
+        assert!(
+            m.review.is_some(),
+            "via_group={via_group}: the scoped click opens Review"
+        );
+        assert!(
+            m.export.running.is_none() && !out(&m, "textures/g/a.dds").exists(),
+            "via_group={via_group}: nothing was written"
+        );
+        assert!(m.export_scope().is_some(), "via_group={via_group}");
+    }
+}
 /// E3: without the opt-out a scoped click during a plan opens its Review at once (nothing queues) and writes
 /// nothing; Review's own Export then queues behind the plan as usual.
 #[test]
