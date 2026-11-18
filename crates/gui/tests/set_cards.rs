@@ -1259,3 +1259,44 @@ fn a_link_over_an_own_file_of_its_kind_draws_one_chip() {
         "no thumbnail for the own file"
     );
 }
+
+#[test]
+fn two_cards_sharing_a_leaf_never_read_the_same() {
+    const IDS: [&str; 2] = [
+        "architecture/whiterun/whiterunstonework/wallblocklarge01",
+        "architecture/windhelm/whiterunstonework/wallblocklarge01",
+    ];
+    let d = tempfile::tempdir().unwrap();
+    for (id, rgb) in IDS.iter().zip([[90u8; 3], [60u8; 3]]) {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb(rgb))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let mut h = harness(m);
+    h.run();
+    let shown: Vec<String> = IDS
+        .iter()
+        .map(|id| {
+            // the title's AccessKit name is the full id (HN6 `widget_info`)
+            let r = h
+                .query_all_by_label(id)
+                .next()
+                .expect("the card title")
+                .rect();
+            painted_in(&h, r)
+        })
+        .collect();
+    assert!(
+        IDS.iter().zip(&shown).all(|(id, s)| s != id),
+        "premise: both titles are cut: {shown:?}"
+    );
+    assert_ne!(shown[0], shown[1], "two cards read the same");
+    assert!(
+        shown[0].ends_with("whiterun/whiterunstonework/wallblocklarge01")
+            && shown[1].ends_with("windhelm/whiterunstonework/wallblocklarge01"),
+        "each title ends with its unique tail (Task 1's `short`): {shown:?}"
+    );
+}

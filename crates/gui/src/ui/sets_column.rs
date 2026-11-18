@@ -474,12 +474,14 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
     )
 }
 
-/// The longest form of a set id that `fits`: the id, its middle elided, `…/<leaf>`, then the end of the leaf.
-/// Note HP (SC4): when the search lies inside one middle segment, `…/<that segment>/<rest>` is tried right after the id.
-fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
+/// The longest form of a set id that `fits` and keeps `tail` (the view's `short`, the shortest tail no other set
+/// shares): the id, its middle elided, then `…/<tail>`. Note HP (SC4): when the search lies inside one middle
+/// segment, `…/<that segment>/<rest>` is tried right after the id. When nothing fits, `…/<tail>` is returned anyway
+/// (the whole id when the tail is the id) and the title wraps; two cards never read the same (review E24).
+fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
     use super::header::elide_middle;
     let len = id.chars().count();
-    if fits(id) {
+    if fits(id) || tail == id {
         return id.to_string();
     }
     let q = engine::sets::fold_id(query.trim());
@@ -491,35 +493,18 @@ fn fit_title(id: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
             .find(|&i| engine::sets::fold_id(segs[i]).contains(&q))
         {
             let t = format!("…/{}", segs[i..].join("/"));
-            if fits(&t) {
+            if t.ends_with(tail) && fits(&t) {
                 return t;
             }
         }
     }
     for n in (1..len).rev() {
         let t = elide_middle(id, n);
-        if t.contains('/') && fits(&t) {
+        if t.contains('/') && t.ends_with(tail) && fits(&t) {
             return t;
         }
     }
-    let leaf = id.rsplit('/').next().unwrap_or(id);
-    let leaf_len = leaf.chars().count();
-    if leaf != id {
-        let t = format!("…/{leaf}");
-        if fits(&t) {
-            return t;
-        }
-    }
-    for keep in (1..=leaf_len).rev() {
-        let t = format!(
-            "…{}",
-            leaf.chars().skip(leaf_len - keep).collect::<String>()
-        );
-        if fits(&t) {
-            return t;
-        }
-    }
-    "…".to_string()
+    format!("…/{tail}")
 }
 
 /// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
@@ -2416,16 +2401,23 @@ fn pill(
                     let shown_for = |ui: &egui::Ui| {
                         let font = egui::TextStyle::Body.resolve(ui.style());
                         let room = ui.available_width();
-                        fit_title(&v.id, &model.sets_filter.search, |t| {
+                        let shown = fit_title(&v.id, &v.short, &model.sets_filter.search, |t| {
                             text_width(ui, t, &font) <= room
-                        })
+                        });
+                        let fits = text_width(ui, &shown, &font) <= room;
+                        (shown, fits)
                     };
                     let name = |ui: &mut egui::Ui| {
-                        let shown = shown_for(ui);
-                        // Extend: the shown text already fits, so egui never end-cuts the leaf.
+                        let (shown, fits) = shown_for(ui);
+                        // Extend: the shown text already fits, so egui never end-cuts the tail. When even the
+                        // tail does not fit, the title wraps instead of cutting further (E24).
+                        let wrap = if fits {
+                            egui::TextWrapMode::Extend
+                        } else {
+                            egui::TextWrapMode::Wrap
+                        };
                         let r = ui.add(
-                            egui::Label::new(egui::RichText::new(&shown).strong())
-                                .wrap_mode(egui::TextWrapMode::Extend),
+                            egui::Label::new(egui::RichText::new(&shown).strong()).wrap_mode(wrap),
                         );
                         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &v.id));
                         if shown != v.id {
@@ -2462,9 +2454,7 @@ fn pill(
                             false
                         } else {
                             // Beside the position and handle the leaf would be cut: give the title its own line.
-                            let shown = shown_for(ui);
-                            let own = shown != v.id
-                                && !shown.ends_with(v.id.rsplit('/').next().unwrap_or(&v.id));
+                            let own = !shown_for(ui).1;
                             if !own {
                                 name(ui);
                             }
@@ -4105,7 +4095,9 @@ mod tests {
     }
 
     fn fit_at(id: &str, query: &str, n: usize) -> String {
-        fit_title(id, query, |t: &str| t.chars().count() <= n)
+        // the tail is the leaf here: no other set shares it
+        let tail = id.rsplit('/').next().unwrap_or(id);
+        fit_title(id, tail, query, |t: &str| t.chars().count() <= n)
     }
 
     #[test]
@@ -4118,19 +4110,44 @@ mod tests {
     }
 
     #[test]
-    fn fit_title_without_a_middle_match_keeps_hn6() {
+    fn fit_title_without_a_middle_match_keeps_the_tail() {
         let id = "architecture/stone/banner";
-        let hn6 = fit_at(id, "", 15);
+        let plain = fit_at(id, "", 15);
+        assert!(plain.ends_with("banner"), "{plain}");
         for q in ["", "banner", "arch", "stone/ban"] {
-            assert_eq!(fit_at(id, q, 15), hn6, "query {q:?}");
+            assert_eq!(fit_at(id, q, 15), plain, "query {q:?}");
         }
     }
 
     #[test]
-    fn fit_title_with_a_match_that_does_not_fit_falls_through_to_hn6() {
+    fn fit_title_with_a_match_that_does_not_fit_falls_through_to_the_tail() {
         // "…/stone/banner" is 14 characters: at 12 the middle match is skipped
         let id = "architecture/stone/banner";
         assert_eq!(fit_at(id, "stone", 12), fit_at(id, "", 12));
+        assert_eq!(fit_at(id, "stone", 12), "…/banner");
+    }
+
+    #[test]
+    fn fit_title_keeps_the_unique_tail() {
+        let narrow = |s: &str| s.chars().count() <= 8;
+        assert_eq!(
+            fit_title("textures/arch/eye/m", "eye/m", "", narrow),
+            "…/eye/m"
+        );
+        assert_ne!(
+            fit_title("textures/arch/eye/eye", "eye/eye", "", narrow),
+            fit_title("textures/arch/ear/eye", "ear/eye", "", narrow)
+        );
+    }
+
+    #[test]
+    fn fit_title_never_merges_two_ids_under_a_search() {
+        let narrow = |s: &str| s.chars().count() <= 10;
+        // 18 characters each: neither fits whole, so both fall to the tail form, which wraps
+        let a = fit_title("textures/a/stone/m", "a/stone/m", "stone", narrow);
+        let b = fit_title("textures/b/stone/m", "b/stone/m", "stone", narrow);
+        assert_ne!(a, b);
+        assert!(a.ends_with("a/stone/m") && b.ends_with("b/stone/m"));
     }
 
     #[test]
