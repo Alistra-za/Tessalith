@@ -366,6 +366,8 @@ impl AppModel {
         let retype = std::mem::take(&mut self.history.retype_untouched);
         let mut writes: Vec<(String, &'static str, serde_json::Value)> = vec![];
         let mut lines = vec![];
+        // The key each line names, so a switch's row can drop the lines of the files its own lines already name.
+        let mut line_keys: Vec<String> = vec![];
         let mut only_types = true;
         if !retype.is_empty() {
             let shaders = self.shaders_by_member();
@@ -382,6 +384,7 @@ impl AppModel {
                         show_type(&old),
                         show_type(&new)
                     ));
+                    line_keys.push(k.clone());
                     writes.push((k, "subtype", new));
                 }
             }
@@ -416,6 +419,7 @@ impl AppModel {
                         show(&v)
                     };
                     lines.push(format!("{}: {v}", file_name(&i.key)));
+                    line_keys.push(i.key.clone());
                 }
                 writes.push((i.key.clone(), f, v));
             }
@@ -446,7 +450,15 @@ impl AppModel {
                 }
             });
             if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
-                sw.lines.extend(lines);
+                // Final review B I1: a switched file is listed once, by the switch's own line (it names the type the
+                // file now plans); the recording's lines for other files stay.
+                let own: Vec<String> = lines
+                    .into_iter()
+                    .zip(&line_keys)
+                    .filter(|(_, k)| !sw.keys.contains(k))
+                    .map(|(l, _)| l)
+                    .collect();
+                sw.lines.extend(own);
                 // The joined step is still the switch's (I2).
                 sw.step = self.history.pushes;
             }

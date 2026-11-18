@@ -1307,9 +1307,14 @@ fn an_old_fuzz_only_skin_set_switches_on_open_and_undo_restores_it() {
         !lines.iter().any(|l| l.starts_with("rock01_fuzz.png: ")),
         "{lines:?}"
     );
-    // The High recording that joined the step lists its line too.
-    assert!(
-        lines.contains(&"rock01.png: pbr albedo".to_string()),
+    // Final review B I1: the High recording that joined the step wrote the diffuse too, but the switched file is listed
+    // once, by the switch's own line.
+    assert_eq!(
+        lines
+            .iter()
+            .filter(|l| l.starts_with("rock01.png: "))
+            .count(),
+        1,
         "{lines:?}"
     );
     assert_eq!(lines.last().map(String::as_str), Some(FUZZ_SWITCH_HOVER));
