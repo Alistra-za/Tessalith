@@ -1,17 +1,27 @@
 //! A fuzz map follows the set's shader (plan 2026-11-17-fuzz-follows-shader): what the GUI plans, names and exports
 //! for a `_fuzz` or `_sheen` image.
 mod support;
-use engine::config::Subtype;
+use engine::codes::Code;
+use engine::config::{PackRecipe, Subtype};
 use engine::group::{split_vocab, VocabRole};
+use engine::pack::ChannelSource;
 use engine::policy::AcceptSuggestions;
+use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb};
+use sdc_gui::model::bottom::Level;
+use sdc_gui::model::code_text::RowClass;
+use sdc_gui::model::{bottom, code_text};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
+use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
 use support::*;
 
 const FUZZ: &str = "m/rock01_fuzz.png";
+const DIFFUSE: &str = "m/rock01.png";
+const RMAOS: &str = "m/rock01_rmaos";
+const RFAOS: &str = "m/rock01_rfaos";
 
 fn grey(dir: &Path, name: &str, v: u8) {
     ImageBuffer::from_fn(64, 64, |x, _| Luma([v.wrapping_add(x as u8)]))
@@ -84,6 +94,13 @@ fn job_out(m: &AppModel, key: &str) -> String {
         .unwrap()
         .to_string_lossy()
         .into_owned()
+}
+
+/// `job_out` when `key` has a job, else `None`.
+fn job_out_or_none(m: &AppModel, key: &str) -> Option<String> {
+    m.item(key)
+        .and_then(|it| it.job.as_ref())
+        .map(|_| job_out(m, key))
 }
 
 /// The `subtype` value written in `sdc.toml` for `key` (`ProjectDoc::file_value`, as `auto_accept.rs` reads it).
@@ -207,4 +224,95 @@ fn a_typed_fuzz_map_beside_an_f_keeps_its_own_name_in_the_gui() {
             .all(|r| r.code != Some(engine::codes::Code::InDuplicate)),
         "{problems:?}"
     );
+}
+
+/// Fuzz-18: High, Auto reads PBR (nothing recorded on the fuzz map), then an explicit Glow: the fuzz map is unused.
+#[test]
+fn high_auto_pbr_then_an_explicit_glow_leaves_the_fuzz_map_unused() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    assert_eq!(job_out(&m, FUZZ), "rock01_f.dds");
+    assert_eq!(subtype(&m, FUZZ), None);
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_ne!(job_out_or_none(&m, FUZZ).as_deref(), Some("rock01_f.dds"));
+    let it = m.item(FUZZ).unwrap();
+    let warned = it
+        .warnings
+        .iter()
+        .chain(it.job.iter().flat_map(|j| j.warnings.iter()))
+        .any(|w| w.message.contains("the glow shader reads no fuzz map"));
+    assert!(warned, "{:?}", it.warnings);
+}
+
+/// Fuzz-18: High, Auto reads PBR, then skin evidence is added (a written `rfaos`): the fuzz map is the G mask.
+#[test]
+fn high_auto_pbr_then_skin_evidence_makes_the_fuzz_map_the_mask() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::High,
+    );
+    assert!(m.item(RMAOS).is_some());
+    m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
+    idle(&mut m);
+    assert!(m.item(RFAOS).is_some());
+    assert_eq!(subtype(&m, FUZZ), None);
+    assert_ne!(job_out_or_none(&m, FUZZ).as_deref(), Some("rock01_f.dds"));
+    // The point of the test: the fuzz map is the `_rfaos` G mask now.
+    let packed = m.item(RFAOS).unwrap().job.as_ref().unwrap();
+    let g = &packed.pack.as_ref().unwrap().channels[1];
+    assert!(
+        matches!(g, ChannelSource::Source { path, .. } if path.ends_with("rock01_fuzz.png")),
+        "{g:?}"
+    );
+    // High recorded `pbr_albedo` on the diffuse at open; a recorded type stays the user's (`set_packing_recipe`
+    // re-types no member), so `set_view(&m).skin` is false here and is not asserted.
+    assert_eq!(subtype(&m, DIFFUSE), Some(json!("pbr_albedo")));
+}
+
+/// Fuzz-25: the unused fuzz map is a Note: an Info row listed under Notes, with no fix and no mark, and it never
+/// counts against Ready.
+#[test]
+fn an_unused_fuzz_map_is_a_note_under_notes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open_with(
+        d.path(),
+        &["rock01_g.png", "rock01_fuzz.png"],
+        "",
+        AcceptSuggestions::None,
+    );
+    m.set_shader("m/rock01", Some(Shader::Glow));
+    idle(&mut m);
+    assert_eq!(code_text::row_class(Code::PackUnusedInput), RowClass::Note);
+    let problems = bottom::problems(&m);
+    let rows: Vec<_> = problems
+        .iter()
+        .filter(|p| p.code == Some(Code::PackUnusedInput))
+        .collect();
+    assert_eq!(rows.len(), 1, "{problems:?}");
+    let p = rows[0];
+    assert_eq!(
+        p.text,
+        "rock01_fuzz.png isn't used: the glow shader reads no fuzz map. Nothing else changes."
+    );
+    assert_eq!(p.level, Level::Info);
+    assert!(p.is_note());
+    assert!(p.fix.is_none());
+    assert!(!p.in_worklist());
+    assert!(!bottom::markable(p.level, p.code));
+    let it = m.item(FUZZ).unwrap();
+    let w = it
+        .warnings
+        .iter()
+        .find(|w| w.code == Code::PackUnusedInput)
+        .expect("the item's PACK-UNUSED-INPUT warning");
+    assert!(!bottom::counts_for(&m, &p.at, w));
 }

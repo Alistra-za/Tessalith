@@ -2324,6 +2324,13 @@ impl Engine {
                     .suggestions
                     .first()
                     .is_some_and(|s| s.subtype == Subtype::ProjectedNoise);
+            // Fuzz-2, Fuzz-3: a fuzz map is read again with the pick (`fuzz_reading`). A typed or hand-set one needs no
+            // test of its own here: `resolve_file_with` asks `fuzz_reading` for neither.
+            let fuzz_map = ctx.target == Target::Cs
+                && f.kind == InputKind::Image
+                && crate::group::is_fuzz_stem(
+                    &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                );
             // Note DV1: a chosen Advanced Skin makes the set skin (`chosen_recipe`), so its members are typed again
             // (not while its diffuse is pinned, Note DW1).
             if !picks.get(&old.set_key).is_some_and(|p| {
@@ -2331,6 +2338,7 @@ impl Engine {
                     || (p.provenance == crate::shader::ShaderOrigin::Set && is_gras)
                     || (p.shader == crate::shader::Shader::PbrLandscape && landscape_retype)
             }) && !pack::plan::chosen_skin(&ctx, set)
+                && !fuzz_map
             {
                 old.warnings.extend(grass_note(&old));
                 jobs.push(old);

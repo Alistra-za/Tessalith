@@ -7,7 +7,7 @@ use engine::events::*;
 use engine::group::{split_vocab, VocabRole};
 use engine::overrides::parse_set;
 use engine::pack::ChannelSource;
-use engine::policy::{AcceptSuggestions, ResolvedJob};
+use engine::policy::{AcceptSuggestions, JobStatus, ResolvedJob};
 use engine::presets::Provenance;
 use engine::shader::Shader;
 use image::{ImageBuffer, Luma, Rgb, Rgba};
@@ -103,6 +103,25 @@ fn g(j: &ResolvedJob) -> &ChannelSource {
 /// The shader picked for the set of `rock01.png`.
 fn shader(p: &Plan) -> Shader {
     p.shaders[&job(p, "rock01.png").set_key].shader
+}
+
+/// The `PACK-UNUSED-INPUT` message of the raw map `file`, wherever the plan keeps it.
+fn unused_reason(p: &Plan, file: &str) -> String {
+    let has = |path: &Path| {
+        path.file_name()
+            .is_some_and(|n| n.to_string_lossy() == file)
+    };
+    for j in p.jobs.iter().filter(|j| has(&j.input)) {
+        if let Some(w) = j.warnings.iter().find(|w| w.code == Code::PackUnusedInput) {
+            return w.message.clone();
+        }
+    }
+    for s in p.skipped.iter().filter(|s| has(&s.path)) {
+        if s.code == Some(Code::PackUnusedInput) {
+            return s.reason.clone();
+        }
+    }
+    panic!("{file} is not reported unused");
 }
 
 fn codes_of(j: &ResolvedJob) -> Vec<Code> {
@@ -401,6 +420,368 @@ fn a_written_rfaos_on_a_metallic_only_set_is_not_skin() {
         out_names(&p)
     );
     assert_ne!(job(&p, "rock01.png").profile.subtype, Subtype::SkinAlbedo);
+}
+
+/// Fuzz-2, Review Focus 5: an explicit Advanced Skin (GUI pick or `--set set:`) with nothing written reads the
+/// fuzz map as the `_rfaos` G mask.
+#[test]
+fn an_explicit_advanced_skin_reads_the_fuzz_map_as_the_mask() {
+    let files = ["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"];
+    for (shaders, sets) in [
+        (&[("rock01", Shader::AdvancedSkin)][..], &[][..]),
+        (&[][..], &["set:rock01.shader=advanced_skin"][..]),
+    ] {
+        let d = fixture(&files, "");
+        let p = plan_with(&d, AcceptSuggestions::None, shaders, sets);
+        let j = packed(&p, "rock01_rfaos.dds")
+            .unwrap_or_else(|| panic!("{sets:?}: {:?}", out_names(&p)));
+        assert!(
+            matches!(g(j), ChannelSource::Source { path, .. } if path.ends_with("rock01_fuzz.png"))
+        );
+        assert!(!out_names(&p).contains(&"rock01_f.dds".to_string()));
+        assert_eq!(job(&p, "rock01.png").profile.subtype, Subtype::SkinAlbedo);
+    }
+}
+
+/// Fuzz-2, Fuzz-9 (engine half): an explicit PBR-family pick reads the fuzz map as `pbr_fuzz` even when Tessalith
+/// recorded `skin_albedo` before (that value stays; the set packs `_rmaos` from the roughness).
+#[test]
+fn an_explicit_pbr_reads_the_fuzz_map_as_pbr_fuzz() {
+    for sh in [Shader::Pbr, Shader::PbrGrass, Shader::PbrLandscape] {
+        let d = fixture(
+            &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+            "[files.\"rock01.png\"]\nsubtype = \"skin_albedo\"\n",
+        );
+        let p = plan_with(&d, AcceptSuggestions::None, &[("rock01", sh)], &[]);
+        let f = job(&p, "rock01_fuzz.png");
+        assert_eq!(f.profile.subtype, Subtype::PbrFuzz, "{sh:?}");
+        assert_eq!(
+            f.output.file_name().unwrap().to_string_lossy(),
+            "rock01_f.dds",
+            "{sh:?}"
+        );
+        assert!(
+            packed(&p, "rock01_rmaos.dds").is_some(),
+            "{sh:?}: {:?}",
+            out_names(&p)
+        );
+    }
+}
+
+/// Fuzz-20 and A1-7: a written recipe wins over an explicit shader. A written `rfaos` under explicit PBR keeps
+/// `_rfaos` (G at its default when a fuzz map exists, which is `pbr_fuzz`); a written `rmaos` under explicit Advanced
+/// Skin keeps `_rmaos`. With and without a fuzz map.
+#[test]
+fn a_written_recipe_wins_over_an_explicit_shader() {
+    // rfaos + explicit PBR, with a fuzz map.
+    let d = fixture(
+        &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+        "[files.\"rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+    );
+    let p = plan_with(&d, AcceptSuggestions::None, &[("rock01", Shader::Pbr)], &[]);
+    let j = packed(&p, "rock01_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
+    assert_eq!(*g(j), ChannelSource::Default { value: 0.0 });
+    assert_eq!(
+        job(&p, "rock01_fuzz.png")
+            .output
+            .file_name()
+            .unwrap()
+            .to_string_lossy(),
+        "rock01_f.dds"
+    );
+    // rfaos + explicit PBR, no fuzz map (Plan 3b P1c: roughness and sk).
+    let d = fixture(
+        &["rock01.png", "rock01_roughness.png", "rock01_sk.png"],
+        "[files.\"rock01_rfaos\".packing]\nrecipe = \"rfaos\"\n",
+    );
+    let p = plan_with(&d, AcceptSuggestions::None, &[("rock01", Shader::Pbr)], &[]);
+    assert!(
+        packed(&p, "rock01_rfaos.dds").is_some(),
+        "{:?}",
+        out_names(&p)
+    );
+    assert!(
+        packed(&p, "rock01_rmaos.dds").is_none(),
+        "{:?}",
+        out_names(&p)
+    );
+    // rmaos + explicit Advanced Skin, with and without a fuzz map.
+    for extra in [Some("rock01_fuzz.png"), None] {
+        let mut files = vec!["rock01.png", "rock01_roughness.png", "rock01_sk.png"];
+        files.extend(extra);
+        let d = fixture(
+            &files,
+            "[files.\"rock01_rmaos\".packing]\nrecipe = \"rmaos\"\n",
+        );
+        let p = plan_with(
+            &d,
+            AcceptSuggestions::None,
+            &[("rock01", Shader::AdvancedSkin)],
+            &[],
+        );
+        assert!(
+            packed(&p, "rock01_rmaos.dds").is_some(),
+            "{extra:?}: {:?}",
+            out_names(&p)
+        );
+        assert!(packed(&p, "rock01_rfaos.dds").is_none(), "{extra:?}");
+        assert!(
+            !out_names(&p).contains(&"rock01_f.dds".to_string()),
+            "{extra:?}"
+        );
+    }
+}
+
+/// Fuzz-3: an explicit other shader leaves the fuzz map unused, with the shader named. (The automatic row, a `_g`
+/// picking Glow, is Task 4's: until the pick leaves the fuzz map out, the fuzz map makes that pick PBR.)
+#[test]
+fn other_shaders_leave_the_fuzz_map_unused() {
+    let d = fixture(&["rock01.png", "rock01_n.png", "rock01_sheen.png"], "");
+    let p = plan_with(
+        &d,
+        AcceptSuggestions::None,
+        &[("rock01", Shader::Default)],
+        &[],
+    );
+    assert_eq!(
+        unused_reason(&p, "rock01_sheen.png"),
+        "rock01_sheen.png: the default shader reads no fuzz map; not converted"
+    );
+    // An unused raw map keeps its `PackingInput` job (not converted), as every PACK-UNUSED-INPUT map does.
+    let converted: Vec<String> = p
+        .jobs
+        .iter()
+        .filter(|j| !matches!(j.status, JobStatus::PackingInput { .. }))
+        .map(out_name)
+        .collect();
+    assert!(
+        !converted
+            .iter()
+            .any(|n| n.starts_with("rock01_f") || n.starts_with("rock01_sheen")),
+        "{converted:?}"
+    );
+}
+
+/// Spec §3b: under the Unused reading an RGBA fuzz map is not read at all: no CHAN-NOT-GRAY anywhere.
+#[test]
+fn an_rgba_fuzz_map_under_another_shader_is_not_read() {
+    let d = fixture(&["rock01.png", "rock01_n.png"], "");
+    rgba(d.path(), "rock01_fuzz.png");
+    let p = plan_with(
+        &d,
+        AcceptSuggestions::None,
+        &[("rock01", Shader::Default)],
+        &[],
+    );
+    assert_eq!(
+        unused_reason(&p, "rock01_fuzz.png"),
+        "rock01_fuzz.png: the default shader reads no fuzz map; not converted"
+    );
+    let all: Vec<Code> = p
+        .jobs
+        .iter()
+        .flat_map(codes_of)
+        .chain(p.skipped.iter().filter_map(|s| s.code))
+        .collect();
+    assert!(!all.contains(&Code::ChanNotGray), "{all:?}");
+}
+
+/// Spec §3a, Fuzz-22: a hand-set `helper.role = "fuzz"` keeps today's meaning under every shader: the `_rfaos` G
+/// source. It is skin evidence, so under Auto the set stays Advanced Skin with a `skin_albedo` diffuse (DY).
+#[test]
+fn a_hand_set_fuzz_role_stays_the_skin_mask_under_every_shader() {
+    // `helper_roles.rs`'s `files()` form: the key without extension.
+    let toml = "[files.\"rock01_fuzz\"]\nhelper.role = \"fuzz\"\n";
+    for shaders in [
+        &[][..],
+        &[("rock01", Shader::Pbr)][..],
+        &[("rock01", Shader::Glow)][..],
+        &[("rock01", Shader::AdvancedSkin)][..],
+    ] {
+        let d = fixture(
+            &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+            toml,
+        );
+        let p = plan_with(&d, AcceptSuggestions::None, shaders, &[]);
+        let j = packed(&p, "rock01_rfaos.dds")
+            .unwrap_or_else(|| panic!("{shaders:?}: {:?}", out_names(&p)));
+        assert!(
+            matches!(g(j), ChannelSource::Source { path, .. } if path.ends_with("rock01_fuzz.png")),
+            "{shaders:?}"
+        );
+        assert!(
+            !out_names(&p).contains(&"rock01_f.dds".to_string()),
+            "{shaders:?}"
+        );
+        if shaders.is_empty() {
+            // The Auto row (Fuzz-22): the shader and the diffuse type, not only G.
+            assert_eq!(shader(&p), Shader::AdvancedSkin);
+            assert_eq!(job(&p, "rock01.png").profile.subtype, Subtype::SkinAlbedo);
+        }
+    }
+}
+
+/// Fuzz-22 before `auto`'s suffix prediction: the set joins are decided before any `_rfaos` is predicted, so there
+/// the hand-set fuzz role is the only skin evidence. With it the set is Advanced Skin when `x_wet` joins (Final review
+/// I3): `rock01_wet` is the set's skin `_wet` member.
+#[test]
+fn a_hand_set_fuzz_role_joins_the_skin_wet_map() {
+    let d = fixture(
+        &[
+            "rock01.png",
+            "rock01_roughness.png",
+            "rock01_fuzz.png",
+            "rock01_wet.png",
+        ],
+        "[files.\"rock01_fuzz\"]\nhelper.role = \"fuzz\"\n",
+    );
+    let p = plan(&d);
+    assert_eq!(
+        job(&p, "rock01_wet.png").set_key,
+        job(&p, "rock01.png").set_key
+    );
+    assert_eq!(job(&p, "rock01_wet.png").profile.subtype, Subtype::SkinWet);
+}
+
+/// Spec §3a: a hand-set `helper.role = "none"` makes the fuzz map an ordinary file under every shader: converted
+/// alone under its own name, never renamed, never in a packed map, never listed unused. Under Advanced Skin the set
+/// still packs `_rfaos` from its roughness (DV1), with G at its default: the file is not the mask.
+#[test]
+fn a_hand_set_none_role_is_an_ordinary_file_under_every_shader() {
+    let toml = "[files.\"rock01_fuzz\"]\nhelper.role = \"none\"\n";
+    for (shaders, rfaos) in [
+        (&[][..], false),
+        (&[("rock01", Shader::Pbr)][..], false),
+        (&[("rock01", Shader::Glow)][..], false),
+        (&[("rock01", Shader::AdvancedSkin)][..], true),
+    ] {
+        let d = fixture(
+            &["rock01.png", "rock01_roughness.png", "rock01_fuzz.png"],
+            toml,
+        );
+        let p = plan_with(&d, AcceptSuggestions::None, shaders, &[]);
+        assert_eq!(
+            job(&p, "rock01_fuzz.png")
+                .output
+                .file_name()
+                .unwrap()
+                .to_string_lossy(),
+            "rock01_fuzz.dds",
+            "{shaders:?}"
+        );
+        match packed(&p, "rock01_rfaos.dds") {
+            Some(j) => {
+                assert!(rfaos, "{shaders:?}: {:?}", out_names(&p));
+                assert_eq!(*g(j), ChannelSource::Default { value: 0.0 }, "{shaders:?}");
+            }
+            None => assert!(!rfaos, "{shaders:?}: {:?}", out_names(&p)),
+        }
+    }
+}
+
+/// Note HH1 with the pick: a fuzz map shared from `a/rock` into `b/stone` is read by each set's own pick, and the
+/// file has one job, its own set's. Lender Glow and borrower explicit Advanced Skin: the borrower's `_rfaos` G reads it
+/// and it is consumed (used by one set, so not unused). Lender Glow and borrower Auto (PBR from its roughness): listed
+/// unused under the lender's shader; the borrower packs `_rmaos`. Lender Auto (PBR) and borrower explicit Advanced
+/// Skin: the lender's 6c makes the file its `pbr_fuzz` (`rock_f.dds`), so it is no packing input and the borrower's G
+/// stays at its default. That last row is what the code does at this task, not a ruling (see the Task 3 report).
+#[test]
+fn a_shared_fuzz_map_follows_each_sets_pick() {
+    let plan_shared = |shaders: &[(&str, Shader)]| {
+        let d = fixture(
+            &[
+                "textures/a/rock.png",
+                "textures/a/rock_fuzz.png",
+                "textures/b/stone.png",
+                "textures/b/stone_roughness.png",
+            ],
+            "",
+        );
+        let mut r = BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+        r.recursive = true;
+        r.set_shaders = shaders.iter().map(|(k, s)| (k.to_string(), *s)).collect();
+        r.set_edits = vec![engine::sets::SetEdit::Share {
+            file: "textures/a/rock_fuzz.png".into(),
+            to: "textures/b/stone".into(),
+        }];
+        let rep = Reporter::new(Arc::new(VecSink::default()), "t");
+        Engine::new()
+            .unwrap()
+            .plan(r, &rep, &CancelToken::default())
+            .unwrap()
+    };
+    let fuzz_job = |p: &Plan| {
+        p.jobs
+            .iter()
+            .find(|j| j.pack.is_none() && j.input.ends_with("rock_fuzz.png"))
+            .map(|j| (out_name(j), j.profile.subtype, codes_of(j)))
+    };
+    // Lender Glow, borrower explicit Advanced Skin.
+    let p = plan_shared(&[
+        ("textures/a/rock", Shader::Glow),
+        ("textures/b/stone", Shader::AdvancedSkin),
+    ]);
+    let j = packed(&p, "stone_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
+    assert!(
+        matches!(g(j), ChannelSource::Source { path, .. } if path.ends_with("rock_fuzz.png")),
+        "{:?}",
+        g(j)
+    );
+    assert_eq!(fuzz_job(&p), None);
+    // Lender Glow, borrower Auto.
+    let p = plan_shared(&[("textures/a/rock", Shader::Glow)]);
+    assert_eq!(
+        unused_reason(&p, "rock_fuzz.png"),
+        "rock_fuzz.png: the glow shader reads no fuzz map; not converted"
+    );
+    assert!(
+        packed(&p, "stone_rmaos.dds").is_some(),
+        "{:?}",
+        out_names(&p)
+    );
+    // Lender Auto (PBR), borrower explicit Advanced Skin.
+    let p = plan_shared(&[("textures/b/stone", Shader::AdvancedSkin)]);
+    assert_eq!(
+        fuzz_job(&p),
+        Some(("rock_f.dds".to_string(), Subtype::PbrFuzz, vec![]))
+    );
+    let j = packed(&p, "stone_rfaos.dds").unwrap_or_else(|| panic!("{:?}", out_names(&p)));
+    assert_eq!(*g(j), ChannelSource::Default { value: 0.0 });
+}
+
+/// The `plan_packing` gate also takes a fuzz map that failed to load: its name still gives it role Fuzz there, and it
+/// must not make `auto` pack `_rfaos` in a set that does not read it as the skin mask.
+#[test]
+fn a_fuzz_map_that_fails_to_load_packs_no_rfaos() {
+    let d = fixture(&["rock01.png", "rock01_roughness.png"], "");
+    std::fs::write(d.path().join("in/rock01_fuzz.png"), b"not a png").unwrap();
+    let p = plan(&d);
+    assert!(
+        packed(&p, "rock01_rfaos.dds").is_none(),
+        "{:?}",
+        out_names(&p)
+    );
+    assert!(
+        packed(&p, "rock01_rmaos.dds").is_some(),
+        "{:?}",
+        out_names(&p)
+    );
+}
+
+/// Known limit (Fuzz-11, spec §6.1), pinned so it shows: the CLI cannot see an explicit non-PBR shader that is not
+/// written to `sdc.toml`, so with the same files and no shader it plans Fuzz-1a and converts the fuzz map.
+#[test]
+fn without_the_explicit_shader_the_cli_converts_the_fuzz_map() {
+    let d = fixture(&["rock01.png", "rock01_n.png", "rock01_sheen.png"], "");
+    let p = plan(&d);
+    assert_eq!(
+        job(&p, "rock01_sheen.png")
+            .output
+            .file_name()
+            .unwrap()
+            .to_string_lossy(),
+        "rock01_f.dds"
+    );
 }
 
 /// Fuzz-1: a written `rmaos` is not skin evidence either way; the fuzz map is the PBR fuzz texture beside `_rmaos`.

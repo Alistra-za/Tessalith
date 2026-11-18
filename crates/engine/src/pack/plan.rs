@@ -12,7 +12,9 @@ use crate::codes::{Code, Warning};
 use crate::config::{GraySource, PackPrefer, PackRecipe, Profile, RawMap, Target};
 use crate::discover::{InputFile, InputKind};
 use crate::events::{RecipeReport, RecipeStatus};
-use crate::group::{member_split, split_suffix_with, split_vocab, TextureSet, VocabRole};
+use crate::group::{
+    is_fuzz_stem, member_split, split_suffix_with, split_vocab, TextureSet, VocabRole,
+};
 use crate::image::{Rgba32F, SourceInfo};
 use crate::policy::{
     layered_profile_placeholder, resolve_decided, FileFacts, JobStatus, ResolveCtx, ResolvedJob,
@@ -732,6 +734,18 @@ pub fn chosen_skin(ctx: &ResolveCtx, set: &TextureSet) -> bool {
         .any(|i| ctx.files.skin_pinned.contains(i))
 }
 
+/// Fuzz-9: the set's explicit shader (`ShaderOrigin::Set`) is in the PBR family (`Pbr`, `PbrGrass`, `PbrLandscape`).
+pub fn chosen_pbr(ctx: &ResolveCtx, set: &TextureSet) -> bool {
+    ctx.shaders.get(&set.key).is_some_and(|p| {
+        p.provenance == crate::shader::ShaderOrigin::Set && is_pbr_family(p.shader)
+    })
+}
+
+fn is_pbr_family(s: crate::shader::Shader) -> bool {
+    use crate::shader::Shader;
+    matches!(s, Shader::Pbr | Shader::PbrGrass | Shader::PbrLandscape)
+}
+
 /// Whether the set is Advanced skin (DECISIONS Note R-skin-1): shared skin (Note HG2); a fuzz map with other skin
 /// evidence (Fuzz-5: a written `rfaos` on either packed key, or a member typed a skin sub-type); a hand-set
 /// `helper.role = "fuzz"` (Fuzz-22); an `_rfaos` member; or a raw-map recipe other than a fuzz map's that resolves to
@@ -823,15 +837,36 @@ pub enum FuzzReading {
     Unused(crate::shader::Shader),
 }
 
-/// How the set reads its fuzz map `this`: not on cs it is never read; with skin evidence
-/// ([`set_is_advanced_skin`]) it is the skin mask; otherwise the PBR fuzz texture.
+/// How the set reads its fuzz map `this` (Fuzz-2, Fuzz-3): not on cs it is never read. An explicit pick decides
+/// first: the PBR family reads it as the PBR fuzz texture, Advanced Skin ([`chosen_skin`]) as the skin mask, any other
+/// shader not at all. Then skin evidence ([`set_is_advanced_skin`]) makes it the skin mask, ahead of an automatic
+/// pick; an automatic pick reads it as the explicit one would. With no pick (pass 1) it is the PBR fuzz texture.
+/// An explicit Advanced Skin whose diffuse is pinned (Note DW1) has no arm of its own: it reads as if unpicked.
 pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> FuzzReading {
+    use crate::shader::{Shader, ShaderOrigin};
     if ctx.target != Target::Cs {
-        FuzzReading::Unused(crate::shader::Shader::Default)
-    } else if set_is_advanced_skin(ctx, set, this) {
-        FuzzReading::Skin
-    } else {
-        FuzzReading::Pbr
+        return FuzzReading::Unused(Shader::Default);
+    }
+    if chosen_pbr(ctx, set) {
+        return FuzzReading::Pbr;
+    }
+    if chosen_skin(ctx, set) {
+        return FuzzReading::Skin;
+    }
+    let pick = ctx.shaders.get(&set.key);
+    if let Some(p) = pick.filter(|p| p.provenance == ShaderOrigin::Set) {
+        if p.shader != Shader::AdvancedSkin {
+            return FuzzReading::Unused(p.shader);
+        }
+    }
+    if set_is_advanced_skin(ctx, set, this) {
+        return FuzzReading::Skin;
+    }
+    match pick.filter(|p| p.provenance != ShaderOrigin::Set) {
+        Some(p) if is_pbr_family(p.shader) => FuzzReading::Pbr,
+        Some(p) if p.shader == Shader::AdvancedSkin => FuzzReading::Skin,
+        Some(p) => FuzzReading::Unused(p.shader),
+        None => FuzzReading::Pbr,
     }
 }
 
@@ -958,6 +993,30 @@ pub fn plan_packing(
             let Some(role) = role else {
                 continue;
             };
+            // Fuzz-2, Fuzz-3: a fuzz map the set does not read as the skin mask is no packing input, also when it
+            // failed or was cancelled (its role then comes from its name). Under another shader it is listed unused.
+            // A hand-set role is outside this (spec §3a).
+            if role == RawMap::Fuzz
+                && ctx.target == Target::Cs
+                && is_fuzz_stem(&f.rel.file_stem().unwrap_or_default().to_string_lossy())
+                && crate::policy::helper_requested(ctx, f).role.is_none()
+            {
+                let reading = fuzz_reading(ctx, set, f);
+                if reading != FuzzReading::Skin {
+                    if let (FuzzReading::Unused(sh), true) =
+                        (reading, waiting.contains_key(&f.path))
+                    {
+                        let reason = format!("the {} shader reads no fuzz map", sh.id());
+                        retag(
+                            jobs,
+                            &f.path,
+                            Code::PackUnusedInput,
+                            format!("{}: {reason}; not converted", name(&f.path)),
+                        );
+                    }
+                    continue;
+                }
+            }
             if waiting.contains_key(&f.path)
                 || failed.contains(&f.path)
                 || cancelled.contains(&f.path)
