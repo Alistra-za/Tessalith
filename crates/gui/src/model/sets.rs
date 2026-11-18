@@ -833,8 +833,8 @@ fn auto_id(item_key: &str) -> String {
 /// Fuzz-9: the PBR type an explicit PBR-family pick gives an untouched member holding `st`: `diffuse` on the
 /// Diffuse-slot member (`diffuse_slot`) becomes `pbr_albedo` (an `_i` elsewhere stays `diffuse`), `normal` becomes
 /// `pbr_normal`, `glow` becomes `pbr_emissive`; anything else stays (`None`).
-// shortcut: no `_s` arm, so a recorded `subsurface_tint` in a fuzz-map set stays under the PBR pick (JQ58); upgrade:
-// add the arm with `engine::suggest`'s colour-member rule for `_s` (follow-up F13).
+// shortcut: no `_s` arm, so an untouched `subsurface_tint` in a fuzz-map set stays under the PBR pick (JQ58); upgrade:
+// add the arm with `engine::suggest`'s rule for `_s` (follow-up F13).
 fn pbr_member_type(st: Subtype, diffuse_slot: bool) -> Option<Subtype> {
     match st {
         Subtype::Diffuse if diffuse_slot => Some(Subtype::PbrAlbedo),
