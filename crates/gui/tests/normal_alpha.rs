@@ -1,6 +1,6 @@
 //! Note JS (N-17, N-18, N-19, N-10): a normal's alpha follows where it is used.
 mod support;
-use engine::config::Subtype;
+use engine::config::{AlphaPolicy, Subtype};
 use engine::shader::Shader;
 use image::{ImageBuffer, Rgb, Rgba};
 use sdc_gui::model::{Answer, AppModel};
@@ -10,6 +10,29 @@ use std::time::Duration;
 use support::*;
 
 const WALL_N: &str = "test/wall_n.png";
+const ROCK_N: &str = "landscape/rock_n.png";
+
+/// `textures/landscape/rock.png`, `rock_n.png` and `rock_rmaos.png`: an automatic PBR Landscape set.
+fn rock(dir: &Path) {
+    let t = dir.join("textures/landscape");
+    std::fs::create_dir_all(&t).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 60u8]))
+        .save(t.join("rock.png"))
+        .unwrap();
+    bumpy_n(&t.join("rock_n.png"));
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(t.join("rock_rmaos.png"))
+        .unwrap();
+}
+
+fn add_rmaos(t: &Path, m: &mut AppModel) {
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(t.join("wall_rmaos.png"))
+        .unwrap();
+    // A plan reads the folder again (the engine discovers the inputs each plan).
+    m.replan();
+    settle(m);
+}
 
 /// An `_n` like `normal`, with a specular alpha that changes per texel.
 fn bumpy_n(path: &Path) {
@@ -38,6 +61,10 @@ fn wall(dir: &Path) -> std::path::PathBuf {
 
 fn listed(m: &AppModel, key: &str) -> Option<String> {
     m.sets_doc.as_ref().unwrap().auto_normal().remove(key)
+}
+
+fn held(m: &AppModel, key: &str, field: &str) -> Option<serde_json::Value> {
+    m.project.as_ref().unwrap().file_value(key, field)
 }
 
 fn settle(m: &mut AppModel) {
@@ -158,4 +185,95 @@ fn typing_the_listed_word_takes_the_key_off() {
     settle(&mut m);
     assert_eq!(listed(&m, WALL_N), None);
     assert_eq!(m.untouched_normal(WALL_N), None);
+}
+
+/// G1: the recorder wrote `normal` while the set was regular, and listed it; an `_rmaos` arrives and the set is PBR by
+/// evidence, so the listed normal becomes `pbr_normal` and its alpha is dropped silently, in the recorder's own step.
+#[test]
+fn a_recorded_normal_follows_its_set_into_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        held(&m, WALL_N, "subtype"),
+        Some(json!("normal")),
+        "FC1 recorded it"
+    );
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    add_rmaos(&t, &mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+    let j = m.item(WALL_N).and_then(|i| i.job.clone()).expect("job");
+    assert_eq!(j.profile.subtype, Subtype::PbrNormal);
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
+    assert!(!j
+        .warnings
+        .iter()
+        .any(|w| w.code == engine::codes::Code::LossAlphaData));
+    assert!(
+        m.undo_label().is_some_and(|l| l.ends_with("automatically")),
+        "{:?}",
+        m.undo_label()
+    );
+}
+
+/// A `normal` the user typed is never retyped (the owner's "data treatment" by type), a pin.
+#[test]
+fn a_typed_normal_stays_when_its_set_turns_pbr() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    add_rmaos(&t, &mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+}
+
+/// N-19: a never-recorded `_n` in an automatic PBR Landscape set is recorded `pbr_normal` and listed, in the
+/// recording's own step; its alpha is dropped silently.
+#[test]
+fn a_landscape_n_in_a_pbr_landscape_set_is_recorded_pbr_normal() {
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(listed(&m, ROCK_N).as_deref(), Some("pbr_normal"));
+    let j = m.item(ROCK_N).and_then(|i| i.job.clone()).expect("job");
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Remove);
+    assert!(!j
+        .warnings
+        .iter()
+        .any(|w| w.code == engine::codes::Code::LossAlphaData));
+}
+
+/// N-19, a pin: a landscape `_n` whose alpha policy the user wrote is recorded as the engine suggests and stays.
+#[test]
+fn a_landscape_n_with_the_users_alpha_keeps_its_type() {
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"landscape/rock_n.png\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("landscape_normal")));
+    m.replan();
+    settle(&mut m);
+    assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("landscape_normal")));
+}
+
+/// A pin: with `sdc-project.toml` read-only the type could not be listed, so the recorder writes the engine's own
+/// type, as before.
+#[test]
+fn a_read_only_sets_document_gets_no_pbr_normal() {
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    std::fs::write(d.path().join("textures/sdc-project.toml"), "[project\n").unwrap();
+    let m = opened_without_export(d.path());
+    assert!(
+        m.sets_doc.as_ref().unwrap().read_only(),
+        "precondition: unreadable sdc-project.toml"
+    );
+    assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("landscape_normal")));
 }

@@ -383,13 +383,70 @@ impl AppModel {
                 }
             }
         }
+        // Note JS5: a type the list cannot hold is never written: with `sdc-project.toml` read-only the recorder
+        // writes the engine's own types only, as `pbr_follow` skips its propagation then.
+        let sets = self.sets_doc.as_ref().filter(|s| !s.read_only());
+        // Note JS5 (N-17, G1): an untouched normal follows its set's settled pick into PBR, in this step and its row.
+        // The marker keeps an Undo of the step undone, as `auto_written` does below.
+        let mut followed: Vec<String> = vec![];
+        if sets.is_some() {
+            for (k, st) in self.normals_to_follow() {
+                if self
+                    .history
+                    .auto_written
+                    .contains(&(k.clone(), "normal-follow"))
+                {
+                    continue;
+                }
+                let old = doc.file_value(&k, "subtype").unwrap_or(json!(null));
+                let new = json!(st);
+                lines.push(format!(
+                    "{}: {} → {}",
+                    file_name(&k),
+                    show_type(&old),
+                    show_type(&new)
+                ));
+                line_keys.push(k.clone());
+                followed.push(k.clone());
+                writes.push((k, "subtype", new));
+            }
+        }
+        // Note JS5 (N-19): a never-recorded tangent-space `_n` in its set's own Normal slot, under a pick that
+        // `bakes_any_tangent`, is recorded `pbr_normal` straight away (a PBR Landscape set's `landscape_normal`
+        // too), when `alpha_free` holds, it is not locked and it is not a kept DDS.
+        let locked = super::sets::locked_items(self);
+        let into_pbr: std::collections::HashSet<String> = match sets {
+            Some(s) if self.target == Target::Cs => super::sets::views(self)
+                .iter()
+                .filter(|v| v.shader.as_ref().is_some_and(|p| p.bakes_any_tangent()))
+                .filter_map(|v| match v.slots.get(&SlotKind::Normal) {
+                    Some(SlotFill::Own { item }) => Some(item.clone()),
+                    _ => None,
+                })
+                .filter(|k| {
+                    super::normal_follow::alpha_free(doc, s, k)
+                        && !locked.contains_key(k)
+                        && self.item(k).is_some_and(|i| !i.kept_dds())
+                })
+                .collect(),
+            _ => Default::default(),
+        };
         for i in &self.items {
             let own = matches!(i.kind, ItemKind::Image | ItemKind::Dds)
                 && !matches!(i.status, ItemStatus::PackedInto(_) | ItemStatus::Skipped(_));
             let Some(j) = i.job.as_ref().filter(|_| own) else {
                 continue;
             };
-            let st = fields::auto_subtype_reason(j).map(|_| json!(j.profile.subtype));
+            let st = fields::auto_subtype_reason(j).map(|_| {
+                let s = j.profile.subtype;
+                if into_pbr.contains(&i.key)
+                    && matches!(s, Subtype::Normal | Subtype::LandscapeNormal)
+                {
+                    json!(Subtype::PbrNormal)
+                } else {
+                    json!(s)
+                }
+            });
             let mesh = |f: &str| j.provenance.get(f) == Some(&Provenance::MeshAlpha);
             let mesh_policy = mesh("alpha.policy");
             let alpha = mesh_policy.then(|| json!(j.profile.alpha.policy));
@@ -432,6 +489,9 @@ impl AppModel {
         let label = format!("Set {n} {noun}{s} automatically");
         for (k, f, _) in &writes {
             self.history.auto_written.insert((k.clone(), f));
+        }
+        for k in followed {
+            self.history.auto_written.insert((k, "normal-follow"));
         }
         let sets_clean = !self.sets_user_dirty();
         if let Some(k) = join {
