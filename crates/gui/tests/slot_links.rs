@@ -977,8 +977,16 @@ fn a_linked_fuzz_turns_fuzz_on_and_blocks_the_coat_normal() {
     link(&mut m, 7, "arch/silk_f.png");
     // The writer turns `fuzz_on` into the `fuzz` object, so that is the key that shows fuzz on.
     assert!(entry(&m, LEAF).get("fuzz").is_some());
-    let (_, off) = greyed(m, "Multilayer (coat)");
+    let (mut m, off) = greyed(m, "Multilayer (coat)");
     assert!(off, "a linked fuzz greys Multilayer");
+    // Multilayer set by hand shows the Coat normal row, which the linked fuzz blocks with its own reason.
+    m.set_json_value(LEAF, "multilayer", Some(json!(true)));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    blocked_with_reason(
+        m,
+        "Coat normal (_cnr)",
+        "off: the set has a fuzz texture (_f)",
+    );
 }
 
 #[test]
