@@ -51,6 +51,93 @@ fn needs_albedo(m: &AppModel) -> bool {
 }
 
 #[test]
+fn the_title_arrow_shows_only_when_files_go_there() {
+    for (set, arrow) in [(LEAF, false), ("arch/wall", true)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = no_albedo_pair(d.path());
+        select_set(&mut m, set);
+        let h = harness(m);
+        assert_eq!(
+            h.query_by_label_contains("→ textures").is_some(),
+            arrow,
+            "{set}: arrow only where files go"
+        );
+    }
+}
+
+#[test]
+fn every_listed_output_exists_after_export() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let leaf = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    let listed = set_outputs(&leaf).to_vec();
+    assert!(!listed.is_empty());
+    // The harness is built after this, so StatCache's TTL never holds a stale "missing".
+    export_through(&mut m);
+    // The export runs on a worker: wait for it, or the files are not there yet.
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    for (_, p) in &listed {
+        assert!(p.is_file(), "{} exists after export", p.display());
+    }
+    select_set(&mut m, LEAF);
+    let mut h = harness(m);
+    let n = listed.len();
+    assert!(
+        h.query_by_label_contains(&format!("{n}, all written"))
+            .is_some(),
+        "closed header summary"
+    );
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    for (_, p) in &listed {
+        let name = p.file_name().unwrap().to_string_lossy();
+        assert!(h
+            .query_by_label(&format!("Show {name} in Explorer"))
+            .is_some());
+    }
+}
+
+#[test]
+fn a_set_with_some_files_written_says_k_of_n() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let leaf = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    let listed = set_outputs(&leaf).to_vec();
+    assert!(listed.len() >= 2, "premise: leaf writes two files");
+    export_through(&mut m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    std::fs::remove_file(&listed[0].1).unwrap();
+    select_set(&mut m, LEAF);
+    let n = listed.len();
+    let h = harness(m);
+    assert!(h
+        .query_by_label_contains(&format!("{} of {n} written", n - 1))
+        .is_some());
+}
+
+#[test]
+fn show_in_explorer_waits_for_the_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, LEAF);
+    let mut h = harness(m);
+    assert!(
+        h.query_by_label_contains("not exported yet").is_some(),
+        "closed and not silent"
+    );
+    assert!(
+        h.query_by_label_contains(" in Explorer").is_none(),
+        "closed by default"
+    );
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains(" in Explorer").is_none(),
+        "nothing exported yet"
+    );
+}
+
+#[test]
 fn a_linked_slot_is_filled_in_the_view_and_clears_the_albedo_check() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair(d.path());

@@ -406,6 +406,9 @@ fn an_unset_number_shows_the_fixed_default_and_an_edit_is_the_sets_own() {
     h.run();
     assert!(spin_values(&h).contains(&"0.5".to_string()));
     assert_eq!(h.query_all_by_label("reset").count(), 1);
+    // The Output files group above the rows moved the button below the 900 px window: scroll to it first.
+    h.get_by_label("reset").scroll_to_me();
+    h.run();
     h.get_by_label("reset").click();
     h.run();
     assert!(!rock_settings(&h).contains_key("roughness_scale"));

@@ -400,6 +400,9 @@ pub struct SetView {
     /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
     /// that path. Only a set written as a JSON entry has any (`link_slots`); set by `build_views`.
     pub linked: BTreeMap<u8, SlotLink>,
+    /// The files this set's own slots write, in slot order (review E13): each own slot's planned output, once.
+    /// Borrowed and linked slots are other sets' files. Set at the end of `finish_view`, so both view builders give it.
+    pub outputs: Vec<(SlotKind, PathBuf)>,
 }
 
 /// A `slotN` path of a set's JSON entry, and what it names (review E1).
@@ -615,6 +618,7 @@ impl SetView {
             recipes: vec![],
             short: String::new(),
             linked: BTreeMap::new(),
+            outputs: vec![],
         }
     }
 
@@ -1570,6 +1574,24 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
     }
+    // Review E13: the files the set's own slots write (`view_reads` covers `job_key`, so a moved output rebuilds this).
+    v.outputs.clear();
+    for (kind, fill) in &v.slots {
+        let SlotFill::Own { item } = fill else {
+            continue;
+        };
+        let Some(out) = m.item(item).and_then(|i| i.job.as_ref()).map(|j| &j.output) else {
+            continue;
+        };
+        if !v.outputs.iter().any(|(_, p)| p == out) {
+            v.outputs.push((*kind, out.clone()));
+        }
+    }
+}
+
+/// The files the set's own slots write (`SetView::outputs`).
+pub fn set_outputs(v: &SetView) -> &[(SlotKind, PathBuf)] {
+    &v.outputs
 }
 
 /// The slots of `v` whose output it owns while another set also uses it.

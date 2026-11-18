@@ -22,8 +22,8 @@ use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    card_title, editor_cells, is_json_set, shows_json_panel, slot_clash_text, slot_of, slot_shown,
-    views, SetView, SlotCell, SlotCommand, SlotFill, SlotKind, SlotLink, SlotShown,
+    card_title, editor_cells, is_json_set, set_outputs, shows_json_panel, slot_clash_text, slot_of,
+    slot_shown, views, SetView, SlotCell, SlotCommand, SlotFill, SlotKind, SlotLink, SlotShown,
     DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
@@ -315,6 +315,7 @@ pub fn draw(
     }
     area.show(ui, |ui| {
         head(ui, model, v, view);
+        outputs(ui, model, v);
         rows(ui, model, v, thumbs, &mut acts, drop_at, &sizes);
         slot_note(ui, drops, &v.id);
         unslotted_packed(ui, model, v, &mut acts);
@@ -401,12 +402,20 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
         if view.three_d {
             super::set_preview::settings_toggle(ui, model);
         }
-        // The output prefix and its error are PGPatcher JSON facts: only a JSON set shows them.
+        // The prefix error is a PGPatcher JSON fact: any JSON set shows it. The arrow names where files go, so only a
+        // PBR set (whose textures are written under the prefix) draws it (review E13, C14).
         if shows_json_panel(v, model.target) {
             match (&v.prefix, &v.prefix_error) {
-                (Some(p), _) => ui.weak(format!("→ {p}")),
-                (_, Some(e)) => ui.colored_label(RED, e),
-                _ => ui.weak(""),
+                (Some(p), _) if v.pbr => {
+                    ui.weak(format!("→ {p}"));
+                }
+                (Some(_), _) => {}
+                (_, Some(e)) => {
+                    ui.colored_label(RED, e);
+                }
+                _ => {
+                    ui.weak("");
+                }
             };
         }
     });
@@ -448,6 +457,89 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
         });
     }
     ui.separator();
+}
+
+/// Review E13: the files this set's own slots write, in a group closed by default. Its header says how many are on disk
+/// (`stat_is_file` is cached with a TTL, so the closed header costs no stat per frame); an open group lists each file
+/// with a Show in Explorer button once it exists. The lines are built only while the group is open.
+fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
+    let files = set_outputs(v);
+    let n = files.len();
+    let written = files.iter().filter(|(_, p)| model.stat_is_file(p)).count();
+    let summary = if n == 0 {
+        "none".to_string()
+    } else if written == n {
+        format!("{n}, all written")
+    } else if written == 0 {
+        format!("{n}, not exported yet")
+    } else {
+        format!("{written} of {n} written")
+    };
+    let id = ui.scope_id().with(("set-outputs", &v.id));
+    let mut reveal = None;
+    super::group::group(
+        ui,
+        id,
+        "Output files",
+        Some(egui::RichText::new(summary).weak()),
+        false,
+        |ui| {
+            if files.is_empty() {
+                ui.weak("Nothing is written for this set.");
+                return;
+            }
+            let root = model.export_root();
+            for (kind, abs) in files {
+                let rel = abs.strip_prefix(&root).unwrap_or(abs);
+                let name = abs
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                egui::Sides::new().shrink_left().truncate().show(
+                    ui,
+                    |ui| {
+                        let line = format!(
+                            "{}: {}",
+                            v.slot_label(*kind, ""),
+                            rel.to_string_lossy().replace('/', "\\")
+                        );
+                        let full = abs.display().to_string();
+                        let r = ui
+                            .add(egui::Label::new(line).truncate())
+                            .on_hover_text(&full);
+                        // The name keeps the whole path when the line is cut short.
+                        r.widget_info(|| {
+                            egui::WidgetInfo::labeled(
+                                egui::Role::Label,
+                                true,
+                                format!("{}: {full}", v.slot_label(*kind, "")),
+                            )
+                        });
+                    },
+                    |ui| {
+                        if model.stat_is_file(abs) {
+                            let r = ui.small_button("Show in Explorer");
+                            r.widget_info(|| {
+                                egui::WidgetInfo::labeled(
+                                    egui::Role::Button,
+                                    true,
+                                    format!("Show {name} in Explorer"),
+                                )
+                            });
+                            if r.clicked() {
+                                reveal = Some(abs.clone());
+                            }
+                        }
+                    },
+                );
+            }
+        },
+    );
+    if let Some(p) = reveal {
+        if let Err(e) = model.reveal(&p) {
+            model.status_line = e;
+        }
+    }
 }
 
 /// The set editor's tab (Note JI2): kept in egui memory only, never in gui.toml (spec 2.6, review finding 9).
