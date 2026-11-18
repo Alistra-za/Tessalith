@@ -989,6 +989,45 @@ fn a_linked_subsurface_turns_subsurface_on() {
     assert_eq!(entry(&m, LEAF)["subsurface"], json!(true));
 }
 
+/// A link turns on the feature of the slot it fills, so two links to the other's kind keep both features.
+#[test]
+fn links_across_two_slots_keep_each_others_features() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 3, "arch/bump_p.png");
+    link(&mut m, 4, "arch/glow_g.png");
+    let e = entry(&m, LEAF);
+    assert_eq!(e["emissive"], json!(true), "slot 3 is the emissive slot");
+    assert_eq!(e["parallax"], json!(true), "slot 4 is the height slot");
+}
+
+/// A clear on one slot does not take away what a link on another slot gives.
+#[test]
+fn a_clear_on_one_slot_keeps_a_cross_slot_links_feature() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 3, "arch/bump_p.png");
+    m.set_slot_command(LEAF, 4, SlotCommand::Clear).unwrap();
+    let e = entry(&m, LEAF);
+    assert_eq!(e["slot4"], json!(""), "premise: slot 4 is cleared");
+    assert_eq!(e["emissive"], json!(true), "slot 3 still names its file");
+    assert_eq!(e.get("parallax"), None, "slot 4 names none");
+}
+
+/// A link on game slot 5 fills no row, so it turns no feature on.
+#[test]
+fn a_link_on_a_slot_with_no_row_turns_no_feature_on() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    link(&mut m, 5, "arch/glow_g.png");
+    let v = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    assert!(
+        v.linked[&5].item.is_some() && v.linked[&5].row.is_none(),
+        "premise: a link with an item and no row"
+    );
+    assert_eq!(entry(&m, LEAF).get("emissive"), None);
+}
+
 #[test]
 fn a_typed_path_turns_no_feature_on() {
     let d = tempfile::tempdir().unwrap();

@@ -424,22 +424,39 @@ fn set_links(
     }
 }
 
-/// Task 12: fills `features` of every set written as a JSON entry: a copy of `slots` where each link from another set
-/// (a source set and a kind) replaces the fills of its game slot with `kind → Borrowed`, and a cleared game slot
-/// (`slotN = ""`) drops the fills of that slot. `None` when neither changes anything. A typed path names no kind and
-/// counts for nothing.
+/// Fills `features` of every set written as a JSON entry: a copy of `slots` that the exported `slotN` values override.
+/// A game slot holding a link from another set (a source set, an item and a kind; a typed path that names no set output
+/// counts for nothing) loses its own and borrowed fills and gets the file under the row the link fills (`row`), so the
+/// feature is the slot's, whatever the file was called in its source set. A cleared game slot (`slotN = ""`) over an
+/// own or borrowed file loses that fill and gets none. The fills are dropped from `slots` first and the links'
+/// rows inserted after, so a slot's link or clear never touches what another slot's link gives. `None` when nothing
+/// changes.
 fn set_features(m: &AppModel, views: &mut [SetView]) {
     for v in views.iter_mut() {
         if !exports_json(m, v) {
             continue;
         }
-        let mut features: Option<BTreeMap<SlotKind, SlotFill>> = None;
-        for (&n, l) in &v.linked {
-            if let (Some(from), Some(item), Some(kind)) = (&l.from, &l.item, l.kind) {
-                let f = features.get_or_insert_with(|| v.slots.clone());
-                f.retain(|k, _| k.game_slot() != Some(n));
-                f.insert(
-                    kind,
+        let counts = |l: &SlotLink| l.from.is_some() && l.item.is_some() && l.kind.is_some();
+        let cleared = |n: u8| {
+            slot_string(&v.settings, n) == Some("")
+                && v.slots.iter().any(|(k, f)| {
+                    k.game_slot() == Some(n)
+                        && matches!(f, SlotFill::Own { .. } | SlotFill::Borrowed { .. })
+                })
+        };
+        let drops = |n: u8| v.linked.get(&n).is_some_and(counts) || cleared(n);
+        if !(1..=LAST_GAME_SLOT).any(drops) {
+            v.features = None;
+            continue;
+        }
+        let mut features = v.slots.clone();
+        features.retain(|k, _| !k.game_slot().is_some_and(drops));
+        for l in v.linked.values().filter(|l| counts(l)) {
+            // shortcut: a link on game slot 5 with no kind of the set on it has no row, so it turns no feature on;
+            // upgrade when slot 5 has a feature key.
+            if let (Some(row), Some(from), Some(item)) = (l.row, &l.from, &l.item) {
+                features.insert(
+                    row,
                     SlotFill::Borrowed {
                         from: from.clone(),
                         item: item.clone(),
@@ -447,20 +464,7 @@ fn set_features(m: &AppModel, views: &mut [SetView]) {
                 );
             }
         }
-        for n in (1..=LAST_GAME_SLOT).filter(|&n| slot_string(&v.settings, n) == Some("")) {
-            let own_or_borrowed = |k: &SlotKind, f: &SlotFill| {
-                k.game_slot() == Some(n)
-                    && matches!(f, SlotFill::Own { .. } | SlotFill::Borrowed { .. })
-            };
-            let base = features.as_ref().unwrap_or(&v.slots);
-            if !base.iter().any(|(k, f)| own_or_borrowed(k, f)) {
-                continue;
-            }
-            features
-                .get_or_insert_with(|| v.slots.clone())
-                .retain(|k, _| k.game_slot() != Some(n));
-        }
-        v.features = features;
+        v.features = Some(features);
     }
 }
 
