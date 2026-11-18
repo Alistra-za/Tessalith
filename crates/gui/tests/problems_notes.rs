@@ -5288,6 +5288,85 @@ fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
     assert_eq!(*rows, *by_id, "the rows of a filter by its id");
 }
 
+/// A set filter's rows after the output root changes to `to` (an export folder), for a filter opened on `landscape/leaf`
+/// under `<tmp>/out/textures/sub`. `also` creates a key-less set of that name first.
+fn leaf_filter_after_a_root_change(
+    d: &std::path::Path,
+    to: std::path::PathBuf,
+    also: Option<&str>,
+) -> (Vec<String>, Vec<sdc_gui::model::bottom::Problem>) {
+    use sdc_gui::model::bottom::{filtered, ProblemsFilter};
+    let mut m = pbr_opened(d);
+    let root = m.root.clone().unwrap();
+    choose_export(&mut m, d.join("out/textures/sub"));
+    if let Some(id) = also {
+        std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.add_member(id, "landscape/stray.txt")
+        });
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let views = sdc_gui::model::sets::set_views(&m);
+    let leaf = views
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .expect("the leaf set has a card");
+    assert!(!leaf.key.is_empty(), "precondition: {leaf:?}");
+    if let Some(id) = also {
+        let v = views.iter().find(|v| v.id == id).expect("the key-less set");
+        assert!(v.key.is_empty(), "precondition: {v:?}");
+    }
+    let f = ProblemsFilter::Set(leaf.key.clone());
+    m.open_problems(Some(f.clone()));
+    assert!(
+        !filtered(&m, Some(&f)).is_empty(),
+        "precondition: leaf has rows"
+    );
+    choose_export(&mut m, to);
+    assert!(m.bottom.filter.is_some(), "nothing resets the filter");
+    let ids = sdc_gui::model::sets::set_views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect();
+    let f = m.bottom.filter.clone();
+    (ids, filtered(&m, f.as_ref()).to_vec())
+}
+
+/// Review of Task 12a (plan-mandated): a filter opened by a set's key under one output root keeps listing that set's
+/// rows after the root changes to an ancestor, even when a key-less set's id rebuilds the old key under the new root.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_moves_to_an_ancestor() {
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let nested = "sub/textures/landscape/leaf";
+    let (ids, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("out"), Some(nested));
+    assert!(ids.iter().any(|i| i == nested), "{ids:?}");
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+    assert!(
+        !rows.iter().any(|p| p.text.contains("stray.txt")),
+        "another set's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { id, .. } => id == "landscape/leaf",
+            At::Texture(t) => t == "landscape/leaf.png",
+            _ => false,
+        }),
+        "{texts:?}"
+    );
+}
+
+/// The plain case of the same rekey: an ordinary root change leaves the open filter on its set.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("elsewhere"), None);
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+}
+
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it
 /// has a key: it lists the keyed set's rows (the same rows as a filter by its key), never another set's, and its chip
 /// names the set.

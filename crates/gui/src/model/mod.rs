@@ -2747,6 +2747,7 @@ impl AppModel {
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
         self.rekey_scope(old_root.as_deref());
+        self.rekey_filter(old_root.as_deref());
         // Note JI2: a set key holds the output root, so an Also tick or a new export folder dropped the selected set
         // (the Also export tab's own tick closed its editor). Rekey it as the scope is; a key not under the old root
         // (a created set's empty key) is left as it is.

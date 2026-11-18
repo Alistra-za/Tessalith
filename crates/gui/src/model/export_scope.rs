@@ -50,6 +50,26 @@ impl AppModel {
         self.set_scope(Some(ExportScope { keys, label }));
     }
 
+    /// Like `rekey_scope`, for the Problems filter's set key (`Set`, `SetNotes`, `SetChecks`): a key under the old root
+    /// moves to the new root, so it never survives a root change to equal another set's rebuilt key. A value not
+    /// under the old root (a key-less set's id) is left as it is.
+    pub(super) fn rekey_filter(&mut self, old_root: Option<&Path>) {
+        use super::bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
+        let new = self.sets_root();
+        let Some(old) = old_root.filter(|o| *o != new.as_path()) else {
+            return;
+        };
+        let rekey = |k: &str| {
+            let id = set_id(old, k);
+            (id != k).then(|| set_key(&new, &id))
+        };
+        if let Some(Set(k) | SetNotes(k) | SetChecks(k)) = &mut self.bottom.filter {
+            if let Some(n) = rekey(k) {
+                *k = n;
+            }
+        }
+    }
+
     /// Note HF9: this run leaves sets out: a scope, an excluded group, or a texture in no set.
     fn leaves_sets_out(&self) -> bool {
         self.export_scope.is_some()
