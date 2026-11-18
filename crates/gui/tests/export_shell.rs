@@ -359,6 +359,39 @@ fn a_write_now_click_on_a_changed_source_plans_first() {
     assert!(d.path().join("export/textures/g/a.dds").is_file());
 }
 
+/// Fix round 1, finding 1: a header write queued behind a scan-finished read runs the source recheck Review's
+/// continuation runs (`continue_review`) before it writes. A source that changed while the read was pending plans
+/// again first; nothing is written against the old plan.
+#[test]
+fn a_queued_now_click_rechecks_the_sources_when_the_read_lands() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    m.scan_db = Some(db);
+    m.refresh_mesh_votes(false);
+    assert!(m.votes_pending(), "guard: a scan-finished read is pending");
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.header_export_clicked();
+    assert!(m.review.is_none() && m.export.running.is_none(), "queued");
+    support::colour(&d.path().join("textures/g/a.png"), 91);
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    while m.votes_pending() {
+        assert!(std::time::Instant::now() < end, "the read never landed");
+        m.poll();
+    }
+    assert!(
+        m.export.running.is_none() && m.export.summary.is_none(),
+        "the read landed over a changed source: nothing may start on the old plan"
+    );
+    assert!(m.full_plan_pending(), "the changed source plans again");
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    assert!(m.review.is_none(), "{:?}", m.dialog);
+    assert!(d.path().join("export/textures/g/a.dds").is_file());
+}
+
 #[test]
 fn a_write_now_click_still_runs_the_export_guards() {
     // `writes_without_review` does not look at the export folder's location; the click's guards (`export_stopped`)

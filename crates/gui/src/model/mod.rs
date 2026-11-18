@@ -2185,6 +2185,17 @@ impl AppModel {
     /// only while the landed plan is still a clean write of the count the label showed; else Review opens and
     /// nothing is written. Then the settled answer is held again.
     fn settle_queued(&mut self) {
+        // The same source recheck as Review's continuation (`continue_review`): a source that changed while the plan or
+        // read ran plans again first; the click stays queued and the count is compared when that plan lands.
+        if self.write_now_after_plan
+            && self.dialog.is_none()
+            && self.writes_without_review()
+            && self.check_sources() > 0
+            && self.session.is_some()
+        {
+            self.replan();
+            return;
+        }
         if std::mem::take(&mut self.write_now_after_plan) {
             if self.dialog.is_some() {
                 self.queued_export_dropped();
