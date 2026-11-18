@@ -1406,31 +1406,47 @@ fn unknown_existing(ev: &[EngineEvent]) -> usize {
 
 /// Final review A I3 (JQ53): a project that exports into its source folder plans again with its own earlier `x_f.dds`
 /// beside the fuzz map. That kept DDS is the fuzz map's output path, not the set's `_f`, so the map stays `pbr_fuzz`
-/// writing `x_f.dds` and is not listed unused; a fast re-plan gives the same.
+/// writing `x_f.dds` and is not listed unused; a fast re-plan gives the same. Accept off writes only `x_f.dds`; under
+/// High run 1 writes `x.dds` and `x_n.dds` into the source folder too, and they are kept beside it.
 #[test]
 fn an_in_place_second_plan_keeps_converting_the_fuzz_map() {
-    let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
-    let r = in_place(&d, OnExisting::IfChanged);
-    plan_and_run(&r);
-    assert!(d.path().join("in/x_f.dds").exists());
-    let p = Engine::new()
-        .unwrap()
-        .plan(
-            r.clone(),
-            &Reporter::new(Arc::new(VecSink::default()), "t"),
-            &CancelToken::default(),
-        )
-        .unwrap();
-    let j = job(&p, "x_fuzz.png");
-    assert_eq!(j.profile.subtype, Subtype::PbrFuzz, "{:?}", codes_of(j));
-    assert_eq!(out_name(j), "x_f.dds");
-    assert!(
-        !codes_of(j).contains(&Code::PackUnusedInput),
-        "{:?}",
-        codes_of(j)
-    );
-    assert_eq!(job(&p, "x.png").profile.subtype, Subtype::PbrAlbedo);
-    patched_equals_fresh(&r, "x_fuzz.png");
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+        let mut r = in_place(&d, OnExisting::IfChanged);
+        r.accept = accept;
+        plan_and_run(&r);
+        assert!(d.path().join("in/x_f.dds").exists(), "{accept:?}");
+        if accept == AcceptSuggestions::High {
+            for f in ["x.dds", "x_n.dds"] {
+                assert!(d.path().join("in").join(f).exists(), "{f}");
+            }
+        }
+        let p = Engine::new()
+            .unwrap()
+            .plan(
+                r.clone(),
+                &Reporter::new(Arc::new(VecSink::default()), "t"),
+                &CancelToken::default(),
+            )
+            .unwrap();
+        let j = job(&p, "x_fuzz.png");
+        assert_eq!(
+            j.profile.subtype,
+            Subtype::PbrFuzz,
+            "{accept:?} {:?}",
+            codes_of(j)
+        );
+        assert_eq!(out_name(j), "x_f.dds", "{accept:?}");
+        assert!(
+            !codes_of(j).contains(&Code::PackUnusedInput),
+            "{accept:?} {:?}",
+            codes_of(j)
+        );
+        let x = job(&p, "x.png");
+        assert_eq!(x.profile.subtype, Subtype::PbrAlbedo, "{accept:?}");
+        assert_eq!(p.shaders[&x.set_key].shader, Shader::Pbr, "{accept:?}");
+        patched_equals_fresh(&r, "x_fuzz.png");
+    }
 }
 
 /// Final review A I3: the in-place second run keeps Tessalith's own `x_f.dds` (its manifest record is there) up to
@@ -1487,4 +1503,62 @@ fn a_hand_made_f_at_the_fuzz_output_is_never_overwritten_unasked() {
             assert_eq!(unknown_existing(&ev), 1, "{mode:?}");
         }
     }
+}
+
+/// `r` with the fuzz map's output named `x_fuzz_own.dds` (an `output_paths` entry, so no `<base>_f.dds` rename).
+fn fuzz_named_own(mut r: BatchRequest) -> BatchRequest {
+    r.output_paths.insert(
+        engine::sets::OutputKey::File("x_fuzz.png".into()),
+        "x_fuzz_own.dds".into(),
+    );
+    r
+}
+
+/// JQ53: the fuzz map's own output is the path it really writes. With its output named `x_fuzz_own.dds`, a hand-made
+/// `x_f.dds` in the source folder is not its output but the set's `_f`, so it wins as it does when the project exports
+/// to another folder: both plans list the map unused with the same reason. A kept `x_fuzz_own.dds` (the map's earlier
+/// output under that name) does not stop the map converting.
+#[test]
+fn a_named_fuzz_output_leaves_a_hand_made_f_the_sets_f_in_place() {
+    let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+    std::fs::write(d.path().join("in/x_f.dds"), b"DDS made by hand").unwrap();
+    let quiet = || Reporter::new(Arc::new(VecSink::default()), "t");
+    let plan_of = |r: BatchRequest| {
+        Engine::new()
+            .unwrap()
+            .plan(r, &quiet(), &CancelToken::default())
+            .unwrap()
+    };
+    let in_place_req = fuzz_named_own(in_place(&d, OnExisting::IfChanged));
+    let reading = |p: &Plan| {
+        let j = job(p, "x_fuzz.png");
+        (
+            j.profile.subtype,
+            format!("{:?}", j.status),
+            unused_reason(p, "x_fuzz.png"),
+        )
+    };
+    let here = reading(&plan_of(in_place_req.clone()));
+    let there = reading(&plan_of(fuzz_named_own(request(&d))));
+    assert_eq!(
+        here.2,
+        "x_fuzz.png: x_f.dds is the set's PBR fuzz texture (_f); not converted"
+    );
+    assert_eq!(here, there);
+    patched_equals_fresh(&in_place_req, "x.png");
+
+    let d = fixture(&["x.png", "x_n.png", "x_fuzz.png"], "");
+    let r = fuzz_named_own(in_place(&d, OnExisting::IfChanged));
+    plan_and_run(&r);
+    assert!(d.path().join("in/x_fuzz_own.dds").exists());
+    let p = plan_of(r.clone());
+    let j = job(&p, "x_fuzz.png");
+    assert_eq!(j.profile.subtype, Subtype::PbrFuzz, "{:?}", codes_of(j));
+    assert_eq!(out_name(j), "x_fuzz_own.dds");
+    assert!(
+        !codes_of(j).contains(&Code::PackUnusedInput),
+        "{:?}",
+        codes_of(j)
+    );
+    patched_equals_fresh(&r, "x_fuzz.png");
 }

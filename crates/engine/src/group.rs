@@ -199,16 +199,29 @@ pub fn fuzz_f_path(m: &InputFile) -> Option<std::path::PathBuf> {
     Some(m.output.with_file_name(format!("{base}_f.dds")))
 }
 
-/// Note JQ53 (final review A I3): `f` is a kept DDS at the path a fuzz map of `set` writes its `<base>_f.dds` to, so it
-/// is that map's earlier output (a project exported into its source folder), not the set's `_f`. Path only, as CO102
-/// (`generated_losers`) tells a generated output from a rival. The run's existing-output check then guards the file:
-/// one with no manifest record is never replaced unless the run overwrites.
+/// Note JQ53 (final review A I3): `f` is a kept DDS at the path a fuzz map of `set` really writes, so it is that map's
+/// earlier output (a project exported into its source folder), not the set's `_f`. That path is the map's own output
+/// when it is not the Discover default `<stem>.dds` (an `output_paths` name, which `policy`'s `fuzz_f_output` keeps),
+/// else its `<base>_f.dds`. Path only, as CO102 (`generated_losers`) tells a generated output from a rival. The run's
+/// existing-output check then guards the file: one with no manifest record is never replaced unless the run overwrites.
 pub fn is_fuzz_own_f(set: &TextureSet, files: &[InputFile], f: &InputFile) -> bool {
+    let written = |m: &InputFile| {
+        let stem = m.rel.file_stem()?.to_string_lossy();
+        let named = m
+            .output
+            .file_name()
+            .is_some_and(|n| n.to_string_lossy() != format!("{stem}.dds"));
+        if named && is_fuzz_map_image(m) {
+            Some(m.output.clone())
+        } else {
+            fuzz_f_path(m)
+        }
+    };
     f.kind == InputKind::Dds
         && set
             .members
             .iter()
-            .any(|&i| fuzz_f_path(&files[i]).is_some_and(|p| crate::dds::same_file(&f.path, &p)))
+            .any(|&i| written(&files[i]).is_some_and(|p| crate::dds::same_file(&f.path, &p)))
 }
 
 /// Whether `term` (lower-case, no '_') is a vocabulary term; preset aliases may not be one (spec §3.7).
