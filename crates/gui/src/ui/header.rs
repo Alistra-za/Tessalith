@@ -218,8 +218,9 @@ fn push_right(ui: &mut egui::Ui, w: f32) {
 }
 
 /// Export, `size` big. While an export runs its lower half is the progress bar (done/total; the file on hover).
-/// Note FB1: it reads `Review {n} files` in the plain button colour until Review would write without skipping
-/// anything, then `Export {n} files`, accent-filled. A click opens Review either way (CA1); a clean project exports.
+/// E3: it reads `Review {n} files…` and a click opens Review, unless the project opted out of Review and nothing
+/// needs the user's eyes: then it reads `Export {n} files now` and a click writes. A clean project keeps the accent
+/// fill either way (Note FB1).
 fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
     let can_export = model.can_export();
     let running = model.export.running.is_some();
@@ -230,10 +231,11 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
         size.y
     };
     // Once per frame: the text, the accent and the hover all read the same answer.
-    let clean = model.export_is_clean();
-    let mut export = egui::Button::new(egui::RichText::new(model.export_text(clean)).strong())
+    let now = model.header_writes_now();
+    let ready = now || model.review_gate().is_ok();
+    let mut export = egui::Button::new(egui::RichText::new(model.export_text(now)).strong())
         .min_size(egui::vec2(size.x, button_h));
-    if clean {
+    if ready {
         export = export.fill(ui.visuals().selection.bg_fill);
     }
     ui.allocate_ui_with_layout(size, egui::Layout::top_down(egui::Align::Center), |ui| {
@@ -247,15 +249,21 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
             }
             // Note FC5 (supersedes CZ6's hover): NIF edits are Review rows, so the Meshes view's line is gone.
             ui.label(export_hover(model));
-            if !clean {
+            if !now {
                 let nifs = model.nif_review_rows().len();
+                // A clean project that opens Review (the default) has nothing open to name.
                 match model.review_gate() {
-                    Err(why) => ui.label(format!("Review first: {why}")),
-                    Ok(_) if model.undecided() == 0 && nifs > 0 => {
-                        ui.label(format!("Review first: NIF edits ({nifs})"))
+                    Err(why) => {
+                        ui.label(format!("Review first: {why}"));
                     }
-                    Ok(_) => ui.label(format!("Review first: {} undecided", model.undecided())),
-                };
+                    Ok(_) if model.undecided() == 0 && nifs > 0 => {
+                        ui.label(format!("Review first: NIF edits ({nifs})"));
+                    }
+                    Ok(_) if model.undecided() > 0 => {
+                        ui.label(format!("Review first: {} undecided", model.undecided()));
+                    }
+                    Ok(_) => {}
+                }
             }
         };
         let r = ui
@@ -263,7 +271,7 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
             .on_hover_ui(hover)
             .on_disabled_hover_ui(hover);
         // Export saves first: a focused field commits before it runs (Note FC8, supersedes BS14's refusal).
-        super::commit_click(ui, &r, model, AppModel::export_clicked);
+        super::commit_click(ui, &r, model, AppModel::header_export_clicked);
         if running {
             let (done, total) = model.export.progress();
             let frac = if total == 0 {
@@ -296,11 +304,18 @@ pub fn export_hover(model: &AppModel) -> String {
     let n = crate::model::bottom::flagged(model).ready_rows;
     let files = counted(model.export_files(), "file", "files");
     let n = counted(n, "problem", "problems");
-    if model.also_on() {
+    let mut text = if model.also_on() {
         format!("{files} + {}, {n}", model.also_extra_folders())
     } else {
         format!("{files}, {n}")
+    };
+    // E3: the button reads "Export {n} files now": say why a click writes.
+    if model.header_writes_now() {
+        text.push_str(
+            "\nWrites at once: Review is off for this project. Turn it back on in Settings.",
+        );
     }
+    text
 }
 
 /// The "Also export as" ticks: target, text, hover. Export to ▾ and the set editor's Also export tab (Note JI2) show

@@ -88,8 +88,8 @@ impl AppModel {
     }
 
     /// Note HF9: export only sets `keys` (and the sets they borrow from), with Review and its button saying `label`.
-    /// It runs as Export does: at once when clean, else through Review; the scope ends when Review closes or the
-    /// export ends.
+    /// It runs as the header's Export does (E3): through Review, or at once when the project opted out and
+    /// nothing needs the user's eyes under this scope; the scope ends when Review closes or the export ends.
     pub fn export_sets(&mut self, keys: BTreeSet<String>, label: String) {
         // Note HF10: the menus are off while an export runs; changing the scope then would recount its lists.
         if self.export.running.is_some() {
@@ -97,7 +97,7 @@ impl AppModel {
         }
         let keys = self.with_hosts(keys);
         self.set_scope(Some(ExportScope { keys, label }));
-        self.export_go();
+        self.export_decided();
         self.end_idle_scope();
     }
 

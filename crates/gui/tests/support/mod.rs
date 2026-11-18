@@ -40,11 +40,139 @@ pub fn mod_folder(dir: &Path) -> PathBuf {
 /// Rewrites the opened fixture's `rock01_normal.png` with a blue of 0 and plans again, so the folder has one check
 /// result (CHK-Z-SIGN on that normal) once it is a tangent-space normal; the fixture's own flat normal has none.
 pub fn give_a_check(m: &mut AppModel, dir: &Path) {
+    give_a_check_at(m, &dir.join("textures/landscape/rock01_normal.png"));
+}
+
+/// `give_a_check` for the normal map at `normal` (a blue of 0 gives CHK-Z-SIGN once it is a tangent-space normal).
+pub fn give_a_check_at(m: &mut AppModel, normal: &Path) {
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 0]))
-        .save(dir.join("textures/landscape/rock01_normal.png"))
+        .save(normal)
         .unwrap();
     m.replan();
     assert!(m.wait_idle(Duration::from_secs(60)));
+}
+
+/// A colour map under `path`'s folder (created): a gradient with the given blue.
+pub fn colour(path: &Path, tint: u8) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, tint]))
+        .save(path)
+        .unwrap();
+}
+
+/// A flat normal map (128, 128, 255): nothing to decide, no check result.
+pub fn flat(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(path)
+        .unwrap();
+}
+
+/// A colour map whose right half is transparent: its alpha needs a decision.
+pub fn half_alpha(path: &Path) {
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        Rgba([
+            (x * 4) as u8,
+            (y * 4) as u8,
+            90,
+            if x < 32 { 255 } else { 0 },
+        ])
+    })
+    .save(path)
+    .unwrap();
+}
+
+/// `textures/g`: a ready set `g/<n>` per `ready` (a colour map and a flat `_n`), and a set per `warn` whose colour
+/// map has an alpha that needs a decision. Every file is written before the folder is opened as the app opens it,
+/// exports under `<dir>/export`, and the model is idle. It asserts nothing (a warn set leaves a problem row).
+pub fn project_with(dir: &Path, ready: &[&str], warn: &[&str]) -> AppModel {
+    let g = dir.join("textures/g");
+    for n in ready {
+        colour(&g.join(format!("{n}.png")), 90);
+        flat(&g.join(format!("{n}_n.png")));
+    }
+    for n in warn {
+        half_alpha(&g.join(format!("{n}.png")));
+        flat(&g.join(format!("{n}_n.png")));
+    }
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    assert!(
+        m.wait_idle(Duration::from_secs(120)),
+        "the model did not settle"
+    );
+    m
+}
+
+/// `project_with(dir, names, &[])`, asserted clean: no problem row, nothing undecided, `export_is_clean()`. A fixture
+/// drift fails here, not in a later assert. Each name gives `textures/g/{n}.png` and `{n}_n.png`.
+pub fn ready_project(dir: &Path, names: &[&str]) -> AppModel {
+    let m = project_with(dir, names, &[]);
+    assert!(
+        !m.has_problem_rows() && m.undecided() == 0 && m.export_is_clean(),
+        "the fixture is not clean"
+    );
+    m
+}
+
+/// `ready_project` with sets `a` and `u`: four outputs, no problem row.
+pub fn opened_chosen_decided(dir: &Path) -> AppModel {
+    let m = ready_project(dir, &["a", "u"]);
+    assert_eq!(m.export_files(), 4);
+    m
+}
+
+/// Mid-test event: two more clean outputs (`textures/g/{name}.png` and `{name}_n.png`) for the next plan.
+pub fn add_ready_set(dir: &Path, name: &str) {
+    let g = dir.join("textures/g");
+    colour(&g.join(format!("{name}.png")), 90);
+    flat(&g.join(format!("{name}_n.png")));
+}
+
+/// Mid-test event: a set whose colour map has an alpha that needs a decision, so the next plan has an undecided
+/// texture. It starts nothing itself; the test plans (`check_sources`). Never a fixture.
+pub fn add_warn_set(dir: &Path, name: &str) {
+    let g = dir.join("textures/g");
+    half_alpha(&g.join(format!("{name}.png")));
+    flat(&g.join(format!("{name}_n.png")));
+}
+
+/// A NIF review row for `path` that Review's Export would write: not blocked, the given foreign hash, no answer.
+pub fn nif_row(path: &str, foreign: Option<[u8; 32]>) -> sdc_gui::model::meshes::NifReviewRow {
+    sdc_gui::model::meshes::NifReviewRow {
+        path: path.into(),
+        mod_name: "My Mod".into(),
+        blocked: None,
+        foreign,
+        answer: None,
+        compaction: None,
+    }
+}
+
+/// A8: `pbr_ready` with leaf and odd decided (not `decide_all`, which would make rock01 a plain diffuse), exported once
+/// and settled; then the PGPatcher JSON is edited by hand. Returns the model and the JSON's path. (Was
+/// `review.rs::clean_pbr_with_edited_json`.)
+pub fn pbr_with_edited_json(dir: &Path) -> (AppModel, PathBuf) {
+    let mut m = pbr_ready(dir);
+    m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
+    m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
+    assert!(
+        m.wait_idle(Duration::from_secs(120)),
+        "model did not settle"
+    );
+    // C2: clean, so the first export starts without Review.
+    m.export_clicked();
+    assert!(m.review.is_none(), "{:?}", m.review_gate());
+    assert!(
+        m.wait_idle(Duration::from_secs(120)),
+        "model did not settle"
+    );
+    let p = pgp_json_path(&m);
+    assert!(p.is_file(), "{:?}", m.export.notes);
+    std::fs::write(&p, "{ \"edited\": true }\n").unwrap();
+    (m, p)
 }
 
 /// A session of its own per call: a shared one would drop another test's cache entries on every plan (audit 8).
@@ -208,8 +336,9 @@ pub fn pbr_ready(dir: &Path) -> AppModel {
     m
 }
 
-/// Note FB1: the header's Export button reads `Export {n} files` or `Review {n} files`; its label as drawn now (the
-/// Review panel's own `Export {n} files` button is below the header, so the header's rect picks the right one).
+/// E3: the header's Export button reads `Review {n} files…` or, with the project's opt-out, `Export {n} files
+/// now`; its label as drawn now (the Review panel's own `Export {n} files` button is below the header, so the
+/// header's rect picks the right one).
 pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
     use eframe::egui::accesskit::Role;
     use egui_kittest::kittest::{NodeT, Queryable};
@@ -220,8 +349,8 @@ pub fn header_export_label<S>(h: &egui_kittest::Harness<'_, S>) -> String {
         .filter_map(|n| n.accesskit_node().label())
         .find(|l| {
             *l == "Export"
-                || ((l.starts_with("Export ") || l.starts_with("Review "))
-                    && (l.ends_with(" file") || l.ends_with(" files")))
+                || l.starts_with("Review ")
+                || (l.starts_with("Export ") && l.ends_with(" now"))
         })
         .expect("the header Export button")
 }

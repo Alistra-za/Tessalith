@@ -417,35 +417,74 @@ impl AppModel {
             && !self.also_on()
     }
 
-    /// Note FB1: the header's Export button: `Export {n} files` once the project is clean, else `Review {n} files`.
-    pub fn header_export_text(&self) -> String {
-        self.export_text(self.export_is_clean())
+    /// E3: some Problems row counts (Plan 3a's `counts_as_ready_problem`: not a Check, Note, queued or intended
+    /// row). Hidden rows count (hiding is a list filter, E18); only the scope's rows exist (HF10).
+    pub fn has_problem_rows(&self) -> bool {
+        super::bottom::problems(self)
+            .iter()
+            .any(super::bottom::counts_as_ready_problem)
     }
 
-    /// [`Self::header_export_text`] for a `clean` the caller already has (the header asks once per frame).
-    pub fn export_text(&self, clean: bool) -> String {
+    /// E3, the one rule (under the current scope): the project opted out of Review and nothing needs the user's
+    /// eyes, so Export writes at once. `unanswered_overwrites` is left out: its NIF half needs a written NIF row
+    /// (`nif_rows_written`) and its JSON half an edited PGPatcher JSON, both refused here.
+    pub fn writes_without_review(&self) -> bool {
+        self.export_without_review()
+            && !self.full_plan_pending()
+            && self.export_files() > 0
+            && self.review_gate().is_ok()
+            && self.undecided() == 0
+            && !self.nif_rows_written()
+            // Not `pgp_json_edited()`: it hashes the file on every call; `review_json` is cached for 1 s.
+            && !self
+                .review_json()
+                .iter()
+                .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
+            && !self.also_runs()
+            && !self.has_problem_rows()
+    }
+
+    /// E3: the header label's write-now state. While a plan is pending it is the last settled answer, so the
+    /// label never flips mid-plan (a partial plan lands without settling); else the live rule, whole project.
+    pub fn header_writes_now(&self) -> bool {
+        if self.full_plan_pending() {
+            self.settled_writes_now
+        } else {
+            self.writes_without_review()
+        }
+    }
+
+    /// E3: the header's Export button: `Review {n} files…`, or `Export {n} files now` when a click writes.
+    pub fn header_export_text(&self) -> String {
+        self.export_text(self.header_writes_now())
+    }
+
+    /// [`Self::header_export_text`] for a `now` the caller already has (the header asks once per frame).
+    pub fn export_text(&self, now: bool) -> String {
         // Final review M5: with no folder open there is no count to give ("Review 0 files" greeted a new user).
         if self.root.is_none() {
             // Note FI18 (GH handoff item 3): pending NIF edits are counted as in FI7; there are no files to name.
             return match self.nif_rows.len() {
                 0 => "Export".into(),
-                rows => format!("Review {}", nif_edits(rows)),
+                rows => format!("Review {}…", nif_edits(rows)),
             };
         }
-        let n = self.export_files();
-        let rows = self.nif_rows.len();
-        let blocked = self.nif_rows.iter().filter(|r| r.blocked.is_some()).count();
-        let mut t = format!(
-            "{} {}",
-            if clean { "Export" } else { "Review" },
-            counted(n, "file", "files")
-        );
-        // Note FI7: `Review` writes nothing, so it counts every pending NIF edit; `Export` names only what it writes.
-        if !clean && rows > 0 {
-            t.push_str(&format!(" + {}", nif_edits(rows)));
-        } else if clean && blocked > 0 {
-            t.push_str(&format!(" (skip {})", nif_edits(blocked)));
+        // Only the held write-now label keeps the settled count; the Review label reads the decisions live.
+        if now {
+            let n = if self.full_plan_pending() {
+                self.settled_export_files
+            } else {
+                self.export_files()
+            };
+            return format!("Export {} now", counted(n, "file", "files"));
         }
+        let rows = self.nif_rows.len();
+        let mut t = format!("Review {}", counted(self.export_files(), "file", "files"));
+        // Note FI7: `Review` writes nothing, so it counts every pending NIF edit.
+        if rows > 0 {
+            t.push_str(&format!(" + {}", nif_edits(rows)));
+        }
+        t.push('…');
         t
     }
 

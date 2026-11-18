@@ -249,7 +249,7 @@ pub static ACTIONS: &[Action] = &[
         AppModel::is_dirty,
     ),
     when(
-        a("export", "Export", Global, &[], |m, _| m.export_clicked()),
+        a("export", "Export", Global, &[], |m, _| m.header_export_clicked()),
         AppModel::can_export,
     ),
     when(

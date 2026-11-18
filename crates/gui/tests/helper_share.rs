@@ -541,11 +541,14 @@ fn export_set_does_not_pull_in_the_helpers_set() {
     m.export_sets([b.clone()].into(), "Export set b/stone".into());
     let keys = m.export_scope().expect("a scope").keys.clone();
     assert_eq!(keys, [b].into());
+    // E3: a scoped export opens its Review; b asks nothing, so Review's Export is open and writes.
+    assert!(m.review.is_some(), "{:?}", m.dialog);
     assert!(
-        m.review.is_none(),
-        "b asks nothing, so no Review: {:?}",
-        m.dialog
+        m.review_gate().is_ok(),
+        "b asks nothing: {:?}",
+        m.review_gate()
     );
+    m.export_from_review();
     idle(&mut m);
     // A shared AO next to a roughness makes `b` a PBR set, so it writes under `textures/pbr/`.
     let written = files_under(&m.export_root());

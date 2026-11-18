@@ -659,6 +659,16 @@ pub struct AppModel {
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
     export_after_plan: bool,
+    /// E3: the header's Export said "Export {n} files now" while a plan was in flight and was clicked: the
+    /// write starts when the plan settles, only if it is still a clean write of the same count (`settle_queued`).
+    write_now_after_plan: bool,
+    /// E3: `writes_without_review()` as the last settled plan answered it, held while a plan is pending.
+    settled_writes_now: bool,
+    /// E3: `export_files()` as the last settled plan counted it; the held write-now label shows it.
+    settled_export_files: usize,
+    /// E3: depth of the worker-result handlers that can start the next plan of a chain (a landed plan's tail
+    /// re-plans): inside one the pending state is continuous, so the held pair is not taken again.
+    landing: u8,
     /// Review's Export was clicked while a plan or scan read was in flight: the export continues when it lands.
     continue_after_plan: Option<Continue>,
     /// The user chose to cancel the running export and then close or open: done when the export has ended.
@@ -923,6 +933,10 @@ impl AppModel {
             gpu_max_dim: 16384,
             gpu_available: true,
             export_after_plan: false,
+            write_now_after_plan: false,
+            settled_writes_now: false,
+            settled_export_files: 0,
+            landing: 0,
             continue_after_plan: None,
             after_export: None,
             pending_json: None,
@@ -1022,6 +1036,7 @@ impl AppModel {
         self.close_review();
         // An export waiting for a plan of the previous folder no longer applies.
         self.export_after_plan = false;
+        self.write_now_after_plan = false;
         self.continue_after_plan = None;
         self.last_inputs = None;
         self.inputs_rev += 1;
@@ -1091,6 +1106,8 @@ impl AppModel {
         self.refresh_banner(); // a read-only document's held recovery file
         self.refresh_target_mod();
         self.replan();
+        // E3: a new folder has no settled answer; the label reads Review until its plan settles.
+        (self.settled_writes_now, self.settled_export_files) = (false, 0);
     }
 
     pub fn save_settings(&mut self) {
@@ -1276,6 +1293,7 @@ impl AppModel {
             after_plan && self.votes_pending.is_none() && self.votes_read.as_ref() == Some(&inputs);
         self.votes_inputs = Some(inputs);
         let after_plan = after_plan || self.votes_pending.is_some_and(|(_, a)| a);
+        self.hold_on_pending();
         self.votes_gen += 1;
         let generation = self.votes_gen;
         self.votes_pending = Some((generation, after_plan));
@@ -1421,6 +1439,10 @@ impl AppModel {
                 Some(_) => self.continue_review(),
                 None => {}
             }
+            // E3: this branch re-planned nothing and handed nothing over, so the read it ends is the settle.
+            if !self.full_plan_pending() {
+                self.settle_queued();
+            }
         }
     }
 
@@ -1440,6 +1462,7 @@ impl AppModel {
         else {
             return;
         };
+        self.hold_on_pending();
         if let Some(c) = self.planning.take() {
             c.cancel();
         }
@@ -1616,12 +1639,17 @@ impl AppModel {
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
+                self.write_now_after_plan = false;
                 self.continue_after_plan = None;
                 self.close_review();
                 self.refresh_banner();
                 self.status_line.clear();
                 self.open_cancelled = true;
             }
+        }
+        // E3: the previous project's plan state is back; its answer is the settled one.
+        if !self.full_plan_pending() {
+            self.hold_settled();
         }
     }
 
@@ -1787,6 +1815,7 @@ impl AppModel {
                 // The full plan always wins: no partial of its edit or an older one applies after it.
                 self.applied_seq = self.plan_sig.0;
                 self.partial_pending = false;
+                self.landing += 1;
                 match result {
                     Ok(view) => {
                         // Note FC14: the edit planned fine; a later failure is not its fault.
@@ -1796,10 +1825,15 @@ impl AppModel {
                     }
                     Err(f) => self.plan_failed(f),
                 }
+                self.landing -= 1;
             }
             WorkerMsg::Planned { .. } => self.note_stale_drop(StaleKind::Plan),
             WorkerMsg::Partial { seq, result } => self.partial_landed(seq, result),
-            WorkerMsg::MeshVotes { generation, result } => self.votes_landed(generation, result),
+            WorkerMsg::MeshVotes { generation, result } => {
+                self.landing += 1;
+                self.votes_landed(generation, result);
+                self.landing -= 1;
+            }
             WorkerMsg::UsedBy { generation, result } => self.used_by_landed(generation, result),
             WorkerMsg::OriginalTextures {
                 generation,
@@ -1839,6 +1873,7 @@ impl AppModel {
     /// folder again without it. Any other failure (or a config error with `sdc.toml` already ignored) is a dialog.
     fn plan_failed(&mut self, f: PlanFailure) {
         self.export_after_plan = false;
+        self.write_now_after_plan = false;
         self.continue_after_plan = None;
         // An error naming the user config is not the project's fault; ignoring `sdc.toml` would not help.
         let from_user_config = self
@@ -2061,7 +2096,7 @@ impl AppModel {
 
     /// An export waits for a plan to land (Export clicked while planning, or a Continue after a re-plan).
     pub fn export_queued(&self) -> bool {
-        self.export_after_plan || self.continue_after_plan.is_some()
+        self.export_after_plan || self.write_now_after_plan || self.continue_after_plan.is_some()
     }
 
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
@@ -2070,6 +2105,87 @@ impl AppModel {
         // Note HF9: a plain Export is the whole project, whatever Review was opened for.
         self.set_scope(None);
         self.export_go();
+    }
+
+    /// E3: the header's Export (and Ctrl+E): the whole project, then `export_decided`.
+    pub fn header_export_clicked(&mut self) {
+        self.set_scope(None);
+        self.export_decided();
+    }
+
+    /// E3, the one rule: nothing is written that the user was not shown. With the project's opt-out and nothing
+    /// that needs their eyes (`writes_without_review`) the click writes; else it opens Review. While a plan is in
+    /// flight the click follows the label the user saw (`settled_writes_now`): a write waits for the plan
+    /// (`settle_queued` writes only a landed plan that is still clean with the same count), Review opens at once and
+    /// its Export queues as usual. Runs under the scope as it is (Export set / group keeps theirs).
+    pub(super) fn export_decided(&mut self) {
+        self.status_note = None;
+        if self.root.is_none() {
+            return;
+        }
+        if self.full_plan_pending() {
+            if self.settled_writes_now {
+                self.write_now_after_plan = true;
+            } else {
+                self.open_review();
+            }
+            return;
+        }
+        // The same front half as `export_go`: changed sources plan again first, and the write waits for that plan.
+        if self.writes_without_review() && self.check_sources() > 0 && self.session.is_some() {
+            self.write_now_after_plan = true;
+            self.replan();
+            return;
+        }
+        if self.writes_without_review() {
+            self.write_now();
+        } else {
+            self.open_review();
+        }
+    }
+
+    /// E3: the guards that stop any export (an error dialog, blocks listed in Review), then the write.
+    fn write_now(&mut self) {
+        if self.export_stopped() {
+            return;
+        }
+        self.start_export_pass();
+    }
+
+    /// E3: the answer of the last settled plan, kept while a plan is pending so the header label never flips
+    /// under the user's eyes. Written together: the label's count belongs to the answer.
+    fn hold_settled(&mut self) {
+        // The count is read only when the label can use it (a write-now answer): the default, opted-in-never project
+        // pays nothing per plan.
+        let writes = self.writes_without_review();
+        (self.settled_writes_now, self.settled_export_files) =
+            (writes, if writes { self.export_files() } else { 0 });
+    }
+
+    /// E3: `hold_settled` at a settled-to-pending transition, never inside a landing worker result (a landed
+    /// plan's tail starts the next plan of the same chain: the pending state never ended).
+    fn hold_on_pending(&mut self) {
+        if !self.full_plan_pending() && self.landing == 0 {
+            self.hold_settled();
+        }
+    }
+
+    /// E3: a queued header write settles with the plan that really settles: dropped over an open dialog; run
+    /// only while the landed plan is still a clean write of the count the label showed; else Review opens and
+    /// nothing is written. Then the settled answer is held again.
+    fn settle_queued(&mut self) {
+        if std::mem::take(&mut self.write_now_after_plan) {
+            if self.dialog.is_some() {
+                self.queued_export_dropped();
+            } else if self.writes_without_review()
+                && self.export_files() == self.settled_export_files
+            {
+                self.write_now();
+            } else {
+                self.open_review();
+            }
+        }
+        self.hold_settled();
     }
 
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
@@ -3004,6 +3120,10 @@ impl AppModel {
             _ if clicked => self.export_go(),
             Some(how) => self.run_continue(how),
             None => {}
+        }
+        // E3: this is the plan that really settles (every re-plan above returned early).
+        if !self.full_plan_pending() {
+            self.settle_queued();
         }
     }
 
@@ -4285,6 +4405,7 @@ impl AppModel {
         // Review Focus 2: so does a JSON answer; the running export asks instead (the safe side).
         self.pending_json_answer = None;
         self.export_after_plan = false;
+        self.write_now_after_plan = false;
         self.continue_after_plan = None;
         self.reset_type_follow();
         if let Some(p) = self.project.as_mut() {

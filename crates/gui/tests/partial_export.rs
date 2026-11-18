@@ -24,50 +24,9 @@ fn idle(m: &mut AppModel) {
     assert!(m.wait_idle(WAIT), "the model did not settle");
 }
 
-fn colour(path: &Path, tint: u8) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, tint]))
-        .save(path)
-        .unwrap();
-}
-
-fn flat(path: &Path) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
-        .save(path)
-        .unwrap();
-}
-
-/// A colour map whose right half is transparent: its alpha needs a decision.
-fn half_alpha(path: &Path) {
-    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| {
-        Rgba([
-            (x * 4) as u8,
-            (y * 4) as u8,
-            90,
-            if x < 32 { 255 } else { 0 },
-        ])
-    })
-    .save(path)
-    .unwrap();
-}
-
-/// `textures/g`: a ready set `g/<n>` per `ready` (a colour map and a flat `_n`), and a set per `warn` whose colour
-/// map has an alpha that needs a decision. Opened as the app opens a folder, exports under `<dir>/export`.
+/// `support::project_with`: sets `ready` and a set per `warn` with an undecided alpha, opened as the app opens it.
 fn plain(dir: &Path, ready: &[&str], warn: &[&str]) -> AppModel {
-    let g = dir.join("textures/g");
-    for n in ready {
-        colour(&g.join(format!("{n}.png")), 90);
-        flat(&g.join(format!("{n}_n.png")));
-    }
-    for n in warn {
-        half_alpha(&g.join(format!("{n}.png")));
-        flat(&g.join(format!("{n}_n.png")));
-    }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
-    idle(&mut m);
-    m
+    project_with(dir, ready, warn)
 }
 
 /// `textures/pbr/arm`: PBR sets `steel` and `iron` (colour, `_n`, `_rmaos`).
@@ -219,15 +178,46 @@ fn export_n_sets() {
 // ---- When it starts ----
 
 #[test]
-fn a_clean_scoped_export_starts_at_once() {
+fn a_clean_scoped_export_opens_its_review_and_writes_from_there() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.review.is_none(), "no Review for a clean scope");
-    assert!(m.export.running.is_some() || m.export_queued());
+    assert!(m.review.is_some(), "a scoped export opens Review (E3)");
+    assert!(m.export.running.is_none() && !m.export_queued());
+    assert!(!out(&m, "textures/g/a.dds").exists());
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/g/b.dds").exists());
+}
+
+#[test]
+fn export_set_opens_a_scoped_review() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "u"], &[]);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(m.review.is_some() && m.export.running.is_none());
+    assert!(m.review_button_text().contains("Export set g/u"));
+    m.close_review();
+    m.set_export_without_review(true);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(
+        m.review.is_none() && m.export.running.is_some(),
+        "the opt-out covers scoped exports too"
+    );
+}
+
+#[test]
+fn a_scoped_export_ignores_other_sets_problems_and_also_ticks() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "u"], &["w"]); // w: undecided alpha in another set
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.also_on(), "the tick took (cs mode): {}", m.status_line);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_without_review(true);
+    m.export_sets(keys(&m, &["g/u"]), "Export set g/u".into());
+    assert!(m.review.is_none() && m.export.running.is_some());
 }
 
 #[test]
@@ -239,7 +229,13 @@ fn others_problems_do_not_block() {
     m.close_review();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
-    assert!(m.review.is_none(), "w is outside the run");
+    assert!(m.review.is_some(), "Review opens for the scope");
+    assert!(
+        m.review_gate().is_ok(),
+        "w is outside the run, so its question does not gate the scope: {:?}",
+        m.review_gate()
+    );
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
     assert!(!out(&m, "textures/g/w.dds").exists());
@@ -609,7 +605,7 @@ fn also_project(d: &Path) -> AppModel {
 }
 
 #[test]
-fn also_does_not_run_on_a_scoped_export_and_ticks_do_not_open_review_for_it() {
+fn also_does_not_run_on_a_scoped_export() {
     let d = tempfile::tempdir().unwrap();
     let mut m = also_project(d.path());
     m.export_clicked();
@@ -618,10 +614,15 @@ fn also_does_not_run_on_a_scoped_export_and_ticks_do_not_open_review_for_it() {
     let cup = id_ending(&m, "clutter/cup");
     let k = keys(&m, &[&cup]);
     m.export_sets(k, "Export set clutter/cup".into());
+    // E3: a scoped export opens Review too; its gate and button leave the tick out (an Also run is whole).
+    assert!(m.review.is_some(), "a scoped export opens Review");
+    assert!(m.review_gate().is_ok());
     assert!(
-        m.review.is_none(),
-        "the tick does not open Review for a scope"
+        !m.review_button_text().contains("Vanilla"),
+        "the tick is not part of a scoped run: {}",
+        m.review_button_text()
     );
+    m.export_from_review();
     idle(&mut m);
     let [p, v, _] = m.also_folders();
     assert!(
@@ -708,6 +709,8 @@ fn closing_review_ends_the_scope() {
 fn a_dropped_queued_export_ends_the_scope() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
+    // E3: only a write-now click queues (the project's opt-out); without it a scoped click opens Review at once.
+    m.set_export_without_review(true);
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
@@ -733,16 +736,49 @@ fn a_dropped_queued_export_ends_the_scope() {
 fn a_queued_scoped_export_writes_only_its_set() {
     let d = tempfile::tempdir().unwrap();
     let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.set_export_without_review(true);
     m.replan();
     let k = keys(&m, &["g/a"]);
     m.export_sets(k, "Export set g/a".into());
     assert!(m.export_queued(), "waits for the plan");
+    idle(&mut m);
+    // E3: the label's count (4, the whole project) is not the scope's (2), so the landed plan opens the scoped Review
+    // and writes nothing; Review's Export then writes only the scope.
+    assert!(m.review.is_some(), "a different count opens Review");
+    assert!(!out(&m, "textures/g/a.dds").exists());
+    assert_eq!(
+        m.export_scope().map(|s| s.label.as_str()),
+        Some("Export set g/a")
+    );
+    m.export_from_review();
     idle(&mut m);
     assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
     assert!(
         !out(&m, "textures/g/b.dds").exists(),
         "b is outside the scope"
     );
+}
+
+/// E3: without the opt-out a scoped click during a plan opens its Review at once (nothing queues) and writes
+/// nothing; Review's own Export then queues behind the plan as usual.
+#[test]
+fn a_scoped_click_during_a_plan_opens_its_review_at_once() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = plain(d.path(), &["a", "b"], &[]);
+    m.replan();
+    assert!(m.full_plan_pending());
+    let k = keys(&m, &["g/a"]);
+    m.export_sets(k, "Export set g/a".into());
+    assert!(m.review.is_some() && !m.export_queued());
+    assert_eq!(
+        m.export_scope().map(|s| s.label.as_str()),
+        Some("Export set g/a")
+    );
+    m.export_from_review();
+    assert!(m.export_queued(), "Review's Export waits for the plan");
+    idle(&mut m);
+    assert!(out(&m, "textures/g/a.dds").is_file(), "{}", notes(&m));
+    assert!(!out(&m, "textures/g/b.dds").exists());
 }
 
 /// Note HF10 (final review I6): Export set is off, with the reason, on a set with no files.
@@ -1021,6 +1057,9 @@ fn scoped_cup_export(m: &mut AppModel) {
     let cup = id_ending(m, "clutter/cup");
     let k = keys(m, &[&cup]);
     m.export_sets(k, "Export set clutter/cup".into());
+    // E3: a scoped export opens its Review; Review's Export runs the same guards (`export_stopped`).
+    assert!(m.review.is_some(), "a scoped export opens Review");
+    m.export_from_review();
     idle(m);
 }
 

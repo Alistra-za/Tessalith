@@ -114,11 +114,16 @@ fn header_export_reads_review_until_clean() {
     idle(&mut m);
     assert_eq!(m.undecided(), 0);
     let n = m.export_files();
-    assert_eq!(
-        m.header_export_text(),
-        format!("Export {n} file{}", if n == 1 { "" } else { "s" })
-    );
+    let files = format!("{n} file{}", if n == 1 { "" } else { "s" });
+    // E3: a clean project still reads Review; only the project's opt-out turns the label into a write.
+    assert_eq!(m.header_export_text(), format!("Review {files}…"));
     assert!(m.export_is_clean());
+    // This fixture keeps warning rows (a 3 px diffuse, a landscape set with no `_n`), and any problem row keeps the
+    // label on Review even with the project's opt-out (export_shell.rs holds the row-free write-now label).
+    m.set_export_without_review(true);
+    assert!(m.has_problem_rows(), "guard: the fixture has problem rows");
+    assert_eq!(m.header_export_text(), format!("Review {files}…"));
+    m.set_export_without_review(false);
     // Note FC14 (final review, minor): a blocked NIF edit is skipped, never written, so it keeps the project clean;
     // one Review's Export would write does not.
     let nif = |blocked: Option<&str>| sdc_gui::model::meshes::NifReviewRow {
@@ -133,6 +138,11 @@ fn header_export_reads_review_until_clean() {
     assert!(m.export_is_clean());
     m.set_nif_review_rows(vec![nif(None)]);
     assert!(!m.export_is_clean());
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "a NIF edit Review's Export would write keeps the label on Review, opt-out or not: {}",
+        m.header_export_text()
+    );
 }
 
 fn nif_row(blocked: Option<&str>) -> sdc_gui::model::meshes::NifReviewRow {
@@ -169,7 +179,7 @@ fn the_header_counts_pending_nif_edits() {
     let mut m = decided_with_folder(d.path());
     m.set_nif_review_rows(vec![nif_row(None)]);
     let f = files(&m);
-    assert_eq!(m.header_export_text(), format!("Review {f} + 1 NIF edit"));
+    assert_eq!(m.header_export_text(), format!("Review {f} + 1 NIF edit…"));
     assert_eq!(m.review_button_text(), format!("Export {f} + 1 NIF edit"));
 }
 
@@ -183,7 +193,7 @@ fn the_export_button_does_not_count_a_blocked_nif_edit() {
         nif_row(None),
     ]);
     let f = files(&m);
-    assert_eq!(m.header_export_text(), format!("Review {f} + 2 NIF edits"));
+    assert_eq!(m.header_export_text(), format!("Review {f} + 2 NIF edits…"));
     assert_eq!(
         m.review_button_text(),
         format!("Export {f} + 1 NIF edit (skip 1 NIF edit)")
@@ -197,7 +207,9 @@ fn the_export_button_does_not_count_a_blocked_nif_edit() {
     );
 }
 
-/// Note FI7 (4a, round 2): a clean header click writes the files at once, so it names no NIF edit as written.
+/// Note FI7 (4a, round 2), E3: the header label counts every pending NIF edit (it reads Review) and its click
+/// opens Review; the model's `export_clicked` (the CA1 path the Review opt-out takes) writes the files at once and
+/// names no blocked NIF edit as written. The write-now label with a blocked row is in export_shell.rs.
 #[test]
 fn a_clean_header_export_names_no_blocked_nif_edit() {
     let d = tempfile::tempdir().unwrap();
@@ -207,8 +219,12 @@ fn a_clean_header_export_names_no_blocked_nif_edit() {
     let f = files(&m);
     assert_eq!(
         m.header_export_text(),
-        format!("Export {f} (skip 1 NIF edit)")
+        format!("Review {f} + 1 NIF edit…"),
+        "Review counts every pending NIF edit"
     );
+    m.header_export_clicked();
+    assert!(m.review.is_some() && m.export.running.is_none());
+    m.close_review();
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_none(), "{}", m.status_line);
@@ -523,7 +539,7 @@ fn an_empty_project_is_not_clean() {
     idle(&mut m);
     assert_eq!(m.export_files(), 0);
     assert!(!m.export_is_clean());
-    assert_eq!(m.header_export_text(), "Review 0 files");
+    assert_eq!(m.header_export_text(), "Review 0 files…");
 }
 
 /// Final review M5: with no folder open the button is plain "Export", not "Review 0 files".
@@ -541,12 +557,12 @@ fn no_folder_open_counts_pending_nif_edits() {
     m.set_nif_review_rows(vec![]);
     assert_eq!(m.header_export_text(), "Export");
     m.set_nif_review_rows(vec![nif_row(None)]);
-    assert_eq!(m.header_export_text(), "Review 1 NIF edit");
+    assert_eq!(m.header_export_text(), "Review 1 NIF edit…");
     m.set_nif_review_rows(vec![
         nif_row(None),
         nif_row(Some("its NIF changed on disk")),
     ]);
-    assert_eq!(m.header_export_text(), "Review 2 NIF edits");
+    assert_eq!(m.header_export_text(), "Review 2 NIF edits…");
 }
 
 /// UI-D final review Minor 5: with no folder open, the disabled header `Review 1 NIF edit` says on hover where Review
@@ -561,7 +577,7 @@ fn the_disabled_no_project_review_button_says_where_review_opens() {
         s.interaction.show_tooltips_only_when_still = false;
     });
     h.run();
-    h.get_by_role_and_label(Role::Button, "Review 1 NIF edit")
+    h.get_by_role_and_label(Role::Button, "Review 1 NIF edit…")
         .hover();
     h.run();
     h.get_by_label("Open Review from the NIF edit panel (Review…)");
