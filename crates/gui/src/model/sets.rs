@@ -459,6 +459,24 @@ impl SlotShown<'_> {
     }
 }
 
+/// The settings keys of the game slots, so a reader allocates none (`slot_shown` runs per row per frame).
+const SLOT_KEYS: [&str; LAST_GAME_SLOT as usize] = [
+    "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8",
+];
+
+/// The `slotN` value of game slot `n` (1..=8) when it is a string: `Some("")` is an explicit clear.
+pub(crate) fn slot_string(s: &Settings, n: u8) -> Option<&str> {
+    match s.get(*SLOT_KEYS.get(usize::from(n).checked_sub(1)?)?) {
+        Some(Value::String(p)) => Some(p),
+        _ => None,
+    }
+}
+
+/// Whether `s` holds a link: a non-empty string `slotN` for some game slot. A clear (`slotN = ""`) names no set.
+pub(crate) fn has_slot_link(s: &Settings) -> bool {
+    (1..=LAST_GAME_SLOT).any(|n| slot_string(s, n).is_some_and(|p| !p.is_empty()))
+}
+
 /// What `kind`'s row of `v` shows: the one rule is that it reads what the exported JSON carries (`slots_of`):
 /// a link first, then an own or borrowed file the link or an empty `slotN` overrides, then the file itself.
 pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
@@ -479,8 +497,7 @@ pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
             if let Some(by) = v.linked.get(&n) {
                 return SlotShown::Replaced { item, by };
             }
-            if matches!(v.settings.get(&format!("slot{n}")), Some(Value::String(s)) if s.is_empty())
-            {
+            if slot_string(&v.settings, n) == Some("") {
                 return SlotShown::Cleared { item };
             }
         }
@@ -1064,6 +1081,8 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JH1). The keys are
 /// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
 /// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
+/// `link_slots` reads the output path (`job_key`, through `engine_inputs`' mirrored paths and `game_path_in`) to find
+/// the set a `slotN` link names, so a moved output rebuilds the views.
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
 pub(crate) fn view_reads(
     i: &TextureItem,
@@ -1566,12 +1585,12 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
     // project with many mapped sets shows it in a profile. A project with a linked slot (a non-empty string `slotN`)
     // rebuilds every view too: a link reads another set's output path, and the splice does not know which sets it
     // reads; upgrade when a splice can name the sets a link reads.
-    let linked = |e: &SetEntry| {
-        (1..=LAST_GAME_SLOT).any(|n| {
-            matches!(e.settings.get(&format!("slot{n}")), Some(Value::String(s)) if !s.is_empty())
-        })
-    };
-    if card_moves || scope.len() > 32 || entries.iter().any(|e| e.txst.is_some() || linked(e)) {
+    if card_moves
+        || scope.len() > 32
+        || entries
+            .iter()
+            .any(|e| e.txst.is_some() || has_slot_link(&e.settings))
+    {
         *views = build_views(m);
         return;
     }
@@ -1710,6 +1729,15 @@ pub(super) fn recipe_suffix(i: &TextureItem) -> Option<String> {
 
 /// The engine inputs of the current documents and plan (spec §2.1, DECISIONS P1–P2).
 pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    engine_inputs_in(m, &views(m))
+}
+
+/// `engine_inputs` over views already built: `link_slots` runs while the views are being built, so it cannot ask the
+/// cache for them.
+pub(crate) fn engine_inputs_in(
+    m: &AppModel,
+    views: &[SetView],
+) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut edits = vec![];
     for e in entries.iter().filter(|e| e.created) {
@@ -1750,10 +1778,9 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
         }
     }
     let mut paths = BTreeMap::new();
-    let views = views(m);
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
-    let mut named = output_name_paths(m, &views);
-    let record = record_paths(m, &views);
+    let mut named = output_name_paths(m, views);
+    let record = record_paths(m, views);
     if m.target != Target::Cs && record.is_empty() {
         paths.extend(named);
         return (edits, paths);
@@ -1765,7 +1792,7 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(k, _)| k.clone()).collect();
     named.retain(|(k, _)| !rec_keys.contains(k));
     let mut candidates = if cs {
-        output_candidates(m, &views)
+        output_candidates(m, views)
     } else {
         vec![]
     };
@@ -1777,7 +1804,7 @@ pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf
     explicit.extend(named.iter().map(|(c, _)| c));
     explicit.extend(rec_keys.iter());
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
-    let owners = packed_owners(&views);
+    let owners = packed_owners(views);
     let mirrored: BTreeSet<String> = m
         .items
         .iter()

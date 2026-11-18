@@ -184,6 +184,19 @@ pub fn no_albedo_pair(dir: &Path) -> AppModel {
 /// `no_albedo_pair` with more PNGs in `textures/arch`: each `(name, colour, sub-type)` is written before the folder
 /// is opened and decided to its sub-type after the first plan.
 pub fn no_albedo_pair_with(dir: &Path, extra: &[(&str, [u8; 3], Subtype)]) -> AppModel {
+    no_albedo_pair_at(dir, "", extra)
+}
+
+/// `no_albedo_pair_with` opened at `dir/textures/<below>` (`""` is `dir/textures`): the files are the same, so with
+/// `below = "arch"` the set ids are `wall` and `leaf` and the item keys have no `arch/` part.
+pub fn no_albedo_pair_at(dir: &Path, below: &str, extra: &[(&str, [u8; 3], Subtype)]) -> AppModel {
+    let key = |n: &str| {
+        if below.is_empty() {
+            format!("arch/{n}")
+        } else {
+            n.to_string()
+        }
+    };
     let r = dir.join("textures/arch");
     std::fs::create_dir_all(&r).unwrap();
     for (n, c) in [
@@ -198,15 +211,15 @@ pub fn no_albedo_pair_with(dir: &Path, extra: &[(&str, [u8; 3], Subtype)]) -> Ap
     for (n, c, _) in extra {
         flat_png(&r, n, *c);
     }
-    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    let mut m = opened_as_the_app(dir.join("textures").join(below), dir.join("export"));
     for (n, _, st) in extra {
-        m.decide(&format!("arch/{n}"), Answer::Subtype(*st));
+        m.decide(&key(n), Answer::Subtype(*st));
     }
-    m.decide("arch/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
-    m.decide("arch/wall_n.png", Answer::Subtype(Subtype::PbrNormal));
-    m.decide("arch/wall_n.png", Answer::Green(GreenConvention::Directx));
-    m.decide("arch/leaf_n.png", Answer::Subtype(Subtype::PbrNormal));
-    m.decide("arch/leaf_n.png", Answer::Green(GreenConvention::Directx));
+    m.decide(&key("wall.png"), Answer::Subtype(Subtype::PbrAlbedo));
+    m.decide(&key("wall_n.png"), Answer::Subtype(Subtype::PbrNormal));
+    m.decide(&key("wall_n.png"), Answer::Green(GreenConvention::Directx));
+    m.decide(&key("leaf_n.png"), Answer::Subtype(Subtype::PbrNormal));
+    m.decide(&key("leaf_n.png"), Answer::Green(GreenConvention::Directx));
     assert!(m.wait_idle(Duration::from_secs(60)));
     for id in sdc_gui::model::sets::views(&m)
         .iter()

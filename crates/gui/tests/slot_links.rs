@@ -418,3 +418,41 @@ fn a_clear_over_an_own_file_says_so() {
         .query_by_label("Left out of the JSON: you cleared this slot.")
         .is_none());
 }
+
+/// Fix round 1 (I1): a link is found by the game path `game_path_in` writes, whatever folder is opened. Opened at
+/// `textures/arch`, the output key is `pbr/wall.dds` while the link is `textures\pbr\arch\wall.dds`.
+#[test]
+fn a_link_resolves_when_the_opened_folder_is_below_textures() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_at(
+        d.path(),
+        "arch",
+        &[
+            ("leaf_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: "leaf".into(),
+            n: 7,
+            item: "lacq_cnr.png".into()
+        }),
+        None
+    );
+    let v = views(&m).iter().find(|v| v.id == "leaf").unwrap().clone();
+    let l = &v.linked[&7];
+    assert!(
+        l.from.is_some() && l.item.as_deref() == Some("lacq_cnr.png"),
+        "{l:?}"
+    );
+    assert_eq!(l.kind, Some(SlotKind::Coat), "{l:?}");
+    assert!(matches!(
+        slot_shown(&v, SlotKind::Coat),
+        SlotShown::Linked(_)
+    ));
+    assert!(
+        matches!(slot_shown(&v, SlotKind::Fuzz), SlotShown::Replaced { .. }),
+        "the coat link is not shown on the Fuzz row"
+    );
+}
