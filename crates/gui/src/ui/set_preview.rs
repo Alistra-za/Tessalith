@@ -10,6 +10,7 @@ use crate::model::set_preview::{
 };
 use crate::model::sets::SetView;
 use crate::model::AppModel;
+use crate::ui::status::{AMBER, RED};
 use eframe::egui;
 use render3d::ShapeStatus;
 
@@ -19,8 +20,6 @@ const EMISSIVE_APPROX: &str =
     "External emittance: in game the cell or weather can change this glow colour";
 /// SLSF1 bit 29: External Emittance.
 const SLSF1_EMISSIVE: u32 = 1 << 29;
-const AMBER: egui::Color32 = egui::Color32::from_rgb(230, 160, 30);
-const RED: egui::Color32 = egui::Color32::from_rgb(210, 60, 60);
 /// The width the centre pane keeps at the least.
 pub const CENTRE_MIN: f32 = 360.0;
 /// The tallest the shape warnings above the frame get.

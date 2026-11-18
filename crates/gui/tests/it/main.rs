@@ -384,3 +384,108 @@ fn every_test_file_is_built() {
          built twice (keep one of the two): {twice:?}"
     );
 }
+
+/// A module of `it` shares one process with the rest, so it must not change process-wide state.
+#[test]
+fn no_it_module_changes_process_state() {
+    // The needles are built here, so this file is not a hit.
+    let needles = [
+        format!("{}_var(", "set"),
+        format!("{}_var(", "remove"),
+        format!("panic::{}_hook", "set"),
+        format!("{}_hook", "take"),
+    ];
+    let main = include_str!("main.rs").replace('\r', "");
+    let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests");
+    let mut hits = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (at, _) in main.match_indices("#[path = \"../") {
+        let rest = &main[at + "#[path = \"../".len()..];
+        let file = &rest[..rest.find('"').unwrap()];
+        let path = dir.join(file);
+        // The file and each shared module it pulls in with `mod`: a `#[path]` on the line above, else the
+        // `support/mod.rs` style folder or `<name>.rs` beside it.
+        // shortcut: line by line, so a `mod` declared inside a block or a macro is not followed; upgrade then.
+        let mut todo = vec![path];
+        while let Some(p) = todo.pop() {
+            if !seen.insert(p.clone()) {
+                continue;
+            }
+            let text = std::fs::read_to_string(&p).unwrap();
+            for (n, l) in text.lines().enumerate() {
+                if needles.iter().any(|s| l.contains(s.as_str())) {
+                    hits.push(format!("{}:{}", p.display(), n + 1));
+                }
+            }
+            let base = p.parent().unwrap();
+            let mut prev = "";
+            for l in text.lines() {
+                let t = l.trim();
+                if let Some(name) = t.strip_prefix("mod ").and_then(|r| r.strip_suffix(';')) {
+                    let by_attr = prev
+                        .strip_prefix("#[path = \"")
+                        .and_then(|r| r.strip_suffix("\"]"))
+                        .map(|r| base.join(r));
+                    let mut found = by_attr.into_iter().chain([
+                        base.join(name).join("mod.rs"),
+                        base.join(format!("{name}.rs")),
+                    ]);
+                    if let Some(f) = found.find(|f| f.is_file()) {
+                        todo.push(f);
+                    }
+                }
+                prev = t;
+            }
+        }
+    }
+    let scanned = seen.len();
+    assert!(scanned > 100, "the scan read only {scanned} files");
+    assert!(
+        hits.is_empty(),
+        "{scanned} files read; a module of the `it` binary changes process-wide state; give the file a [[test]] entry in crates/gui/Cargo.toml instead of a module line in tests/it/main.rs: {hits:#?}"
+    );
+}
+
+/// kittest's accessibility and glyph checks stay on in every test file.
+#[test]
+fn kittest_checks_are_never_switched_off() {
+    // The needles are built here, so this file is not a hit.
+    let needles = [
+        format!("with_accessibility_{}(", "check"),
+        format!("allow_missing_{}(", "glyphs"),
+    ];
+    fn walk(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {
+        for e in std::fs::read_dir(dir).unwrap() {
+            let p = e.unwrap().path();
+            if p.is_dir() {
+                walk(&p, out);
+            } else if p.extension().is_some_and(|x| x == "rs") {
+                out.push(p);
+            }
+        }
+    }
+    let mut files = Vec::new();
+    walk(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests"),
+        &mut files,
+    );
+    let mut hits = Vec::new();
+    for f in &files {
+        let text = std::fs::read_to_string(f).unwrap();
+        for (n, l) in text.lines().enumerate() {
+            if needles.iter().any(|s| l.contains(s.as_str())) {
+                hits.push(format!("{}:{}", f.display(), n + 1));
+            }
+        }
+    }
+    assert!(
+        files.len() > 100,
+        "the scan read only {} files",
+        files.len()
+    );
+    assert!(
+        hits.is_empty(),
+        "{} files read; a test switches off a kittest check; remove the call and fix what the check reports instead: {hits:#?}",
+        files.len()
+    );
+}
