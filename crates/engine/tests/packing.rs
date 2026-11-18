@@ -261,25 +261,24 @@ fn a_metallic_fill_replaces_the_default() {
     assert_channel(px, 0, 2, |_, _| 128);
 }
 
-/// Exit: fuzz set → `_rfaos`; metallic next to fuzz is unused.
+/// Fuzz-1: a fuzz map with no skin evidence is the PBR fuzz texture: the set packs `_rmaos` (metallic in G) and the
+/// fuzz map writes `iron_f.dds`.
 #[test]
-fn a_fuzz_set_packs_rfaos() {
+fn a_fuzz_set_packs_rmaos_and_writes_the_fuzz_as_f() {
     let d = tempfile::tempdir().unwrap();
     put(d.path(), "iron_roughness.png", r);
     put(d.path(), "iron_fuzz.png", ao);
     put(d.path(), "iron_metallic.png", m);
     let o = convert(d.path(), Target::Cs, &[]);
     assert!(
-        out_path(d.path(), "iron_rfaos.dds").exists(),
+        out_path(d.path(), "iron_rmaos.dds").exists(),
         "{:?}",
         warnings(&o)
     );
-    assert!(!out_path(d.path(), "iron_rmaos.dds").exists());
-    assert_eq!(
-        skip_code(&o, "iron_metallic.png"),
-        Some(Code::PackUnusedInput)
-    );
-    assert_channel(&levels(&dds(d.path(), "iron_rfaos.dds"))[0], 1, 4, ao);
+    assert!(!out_path(d.path(), "iron_rfaos.dds").exists());
+    assert!(out_path(d.path(), "iron_f.dds").exists());
+    assert_eq!(skip_code(&o, "iron_metallic.png"), None);
+    assert_channel(&levels(&dds(d.path(), "iron_rmaos.dds"))[0], 1, 4, m);
 }
 
 /// Exit: height → `_p` BC4 from a 16-bit source.

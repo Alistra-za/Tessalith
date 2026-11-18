@@ -23,6 +23,11 @@ pub struct Suggestion {
     pub reason: String,
 }
 
+/// Fuzz-1, Fuzz-18: the reason on a fuzz map the set decides as `pbr_fuzz` (`policy::resolve_file_with`). The reading
+/// is the set's resolution (provenance `set`), not a suggestion, so no `suggest` arm makes it.
+pub const FUZZ_PBR_REASON: &str =
+    "_fuzz/_sheen outside an Advanced Skin set: the PBR fuzz texture (_f)";
+
 pub struct SuggestContext<'a> {
     pub target: Target,
     pub suffix: Option<&'a str>,

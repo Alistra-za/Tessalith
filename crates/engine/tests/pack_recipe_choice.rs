@@ -52,25 +52,6 @@ fn g(j: &ResolvedJob) -> &ChannelSource {
     &j.pack.as_ref().unwrap().channels[1]
 }
 
-/// The `PACK-UNUSED-INPUT` message of the raw map `file`, wherever the plan keeps it.
-fn unused_reason(p: &Plan, file: &str) -> String {
-    let has = |path: &Path| {
-        path.file_name()
-            .is_some_and(|n| n.to_string_lossy() == file)
-    };
-    for j in p.jobs.iter().filter(|j| has(&j.input)) {
-        if let Some(w) = j.warnings.iter().find(|w| w.code == Code::PackUnusedInput) {
-            return w.message.clone();
-        }
-    }
-    for s in p.skipped.iter().filter(|s| has(&s.path)) {
-        if s.code == Some(Code::PackUnusedInput) {
-            return s.reason.clone();
-        }
-    }
-    panic!("{file} is not reported unused");
-}
-
 const RFAOS: &str = "[files.\"iron_rfaos\".packing]\nrecipe = \"rfaos\"\n";
 
 #[test]
@@ -110,8 +91,21 @@ fn rfaos_without_fuzz_takes_the_fuzz_fill() {
         .any(|w| w.code == Code::PackDefaulted && w.data["channel"] == "G"));
 }
 
+/// The own (non-packed) job of `file`.
+fn own_job<'a>(p: &'a Plan, file: &str) -> &'a ResolvedJob {
+    p.jobs
+        .iter()
+        .find(|j| j.pack.is_none() && j.input.ends_with(file))
+        .unwrap_or_else(|| panic!("no job for {file}"))
+}
+
+fn out_name(j: &ResolvedJob) -> String {
+    j.output.file_name().unwrap().to_string_lossy().into_owned()
+}
+
+/// Fuzz-1: a written `rmaos` is no skin evidence; the fuzz map is the PBR fuzz texture beside the `_rmaos`.
 #[test]
-fn rmaos_overrides_a_fuzz_source() {
+fn a_written_rmaos_with_a_fuzz_map_packs_rmaos() {
     let d = fixture(
         &["iron_roughness.png", "iron_fuzz.png", "iron_ao.png"],
         "[files.\"iron_rmaos\".packing]\nrecipe = \"rmaos\"\n",
@@ -119,20 +113,19 @@ fn rmaos_overrides_a_fuzz_source() {
     let p = plan(&d);
     assert!(packed(&p, "iron_rmaos.dds").is_some());
     assert!(packed(&p, "iron_rfaos.dds").is_none());
-    let why = unused_reason(&p, "iron_fuzz.png");
-    assert!(
-        why.contains("the set is set to _rmaos (packing.recipe)"),
-        "{why}"
-    );
+    let f = own_job(&p, "iron_fuzz.png");
+    assert_eq!(f.profile.subtype, engine::config::Subtype::PbrFuzz);
+    assert_eq!(out_name(f), "iron_f.dds");
 }
 
+/// Fuzz-1: `auto` packs `_rmaos` beside a fuzz map with no skin evidence; the fuzz map writes `<base>_f.dds`.
 #[test]
-fn auto_is_the_fuzz_rule() {
+fn auto_packs_rmaos_beside_a_fuzz_map() {
     for (files, want, other) in [
         (
             &["iron_roughness.png", "iron_fuzz.png"][..],
-            "iron_rfaos.dds",
             "iron_rmaos.dds",
+            "iron_rfaos.dds",
         ),
         (
             &["iron_roughness.png", "iron_metallic.png"][..],
@@ -144,12 +137,15 @@ fn auto_is_the_fuzz_rule() {
         let p = plan(&d);
         assert!(packed(&p, want).is_some(), "{want}");
         assert!(packed(&p, other).is_none(), "{other}");
+        if files.contains(&"iron_fuzz.png") {
+            assert_eq!(out_name(own_job(&p, "iron_fuzz.png")), "iron_f.dds");
+        }
     }
     let d = fixture(
         &["iron_roughness.png", "iron_fuzz.png"],
         "[files.\"iron_rfaos\".packing]\nrecipe = \"auto\"\n",
     );
-    assert!(packed(&plan(&d), "iron_rfaos.dds").is_some());
+    assert!(packed(&plan(&d), "iron_rmaos.dds").is_some());
 }
 
 #[test]
@@ -357,7 +353,7 @@ fn a_fuzz_map_keeps_g_when_a_f_is_beside_it() {
             "iron_fuzz.png",
             "iron_f.png",
         ],
-        "",
+        RFAOS,
     );
     let p = plan(&d);
     let j = packed(&p, "iron_rfaos.dds").expect("an _rfaos output");

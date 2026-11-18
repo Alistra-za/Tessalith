@@ -93,7 +93,8 @@ fn put_normal(dir: &Path, name: &str) {
 ///   sets pack a default `n_rmaos` (Note BV2);
 /// - a second six-face cube `s_px` .. `s_nz` beside `s.png`, whose output the merged cube's clashes with;
 /// - `z.png`, a corrupt source (a load failure);
-/// - shared roughness on sets `e` and `q`.
+/// - shared roughness on sets `e` and `q`;
+/// - `u` (`u`, `u_g`) with a fuzz map `u_fuzz` (Fuzz-19).
 pub fn fast_fixture() -> FastFixture {
     let dir = tempfile::tempdir().unwrap();
     let d = dir.path().join("in/dir");
@@ -150,6 +151,9 @@ pub fn fast_fixture() -> FastFixture {
     }
     put_rgb(&d, "s.png", 130);
     std::fs::write(d.join("z.png"), b"not a png").unwrap();
+    put_rgb(&d, "u.png", 140);
+    put_rgb(&d, "u_g.png", 141);
+    put_grey(&d, "u_fuzz.png", 142);
 
     let mut req = BatchRequest::new(
         vec![dir.path().join("in")],

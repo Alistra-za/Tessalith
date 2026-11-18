@@ -270,12 +270,16 @@ fn a_pair_that_lines_up_stays_on_the_shift_path() {
     assert_eq!((b.shift, b.fit), (2, None));
 }
 
+/// A written `rfaos` on the skin set `b` (a fuzz map alone is no skin evidence, Fuzz-1).
+const B_RFAOS: &str = "[files.\"textures/actors/skin/b_rfaos\".packing]\nrecipe = \"rfaos\"\n";
+
 #[test]
 fn a_packed_rfaos_fits_to_its_canvas() {
     let d = tempfile::tempdir().unwrap();
     normal(d.path(), "textures/actors/skin/b_n.png", 64, 32);
     gray(d.path(), "textures/actors/skin/b_roughness.png", 120);
     gray(d.path(), "textures/actors/skin/b_fuzz.png", 30);
+    std::fs::write(d.path().join("in/sdc.toml"), B_RFAOS).unwrap();
     let (p, _) = plan(req(d.path(), &[]));
     let b = p
         .jobs
@@ -612,7 +616,7 @@ fn only_roughness_members_get_a_bake_job() {
 }
 
 /// Controller ruling: an Advanced skin set's `_rfaos` bakes from its `_n` like an `_rmaos`, pre-packed or packed
-/// from raw maps (`auto` with a fuzz source), outside a `pbr` folder too.
+/// from raw maps (a written `rfaos`), outside a `pbr` folder too.
 #[test]
 fn an_advanced_skin_rfaos_bakes_from_its_n() {
     let d = tempfile::tempdir().unwrap();
@@ -621,6 +625,7 @@ fn an_advanced_skin_rfaos_bakes_from_its_n() {
     normal(d.path(), "textures/actors/skin/b_n.png", 64, 64);
     gray(d.path(), "textures/actors/skin/b_roughness.png", 120);
     gray(d.path(), "textures/actors/skin/b_fuzz.png", 30);
+    std::fs::write(d.path().join("in/sdc.toml"), B_RFAOS).unwrap();
     let (p, ev) = plan(req(d.path(), &[]));
     let a = job(&p, "a_rfaos.png");
     assert_eq!(a.profile.subtype, Subtype::SkinRfaos);

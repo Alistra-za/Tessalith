@@ -423,8 +423,9 @@ pub fn recipes_for_sel(
                     .or_else(|| orm(0, false))
                     .unwrap_or(Missing(Slot::Ao));
                 let spec = src(Specular, false).unwrap_or(Missing(Slot::Specular));
-                // DECISIONS Note R-fills-1: `auto` is `_rfaos` when a fuzz source exists; `rfaos` always is, with
-                // the G channel filled or defaulted when there is none; `rmaos` never is.
+                // DECISIONS Note R-fills-1: `auto` is `_rfaos` when a fuzz source reaches it, which only a fuzz map
+                // the set reads as the skin mask does (Fuzz-1; a PBR-read one is its own `pbr_fuzz` job); `rfaos`
+                // always is, with the G channel filled or defaulted when there is none; `rmaos` never is.
                 let fuzz = match pack_recipe {
                     PackRecipe::Auto => src(Fuzz, false),
                     PackRecipe::Rfaos => Some(src(Fuzz, false).unwrap_or(Missing(Slot::Fuzz))),

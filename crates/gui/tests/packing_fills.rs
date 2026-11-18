@@ -590,29 +590,26 @@ fn complex_m_has_glossiness_metallic_and_height_rows_and_vanilla_m_none() {
     assert!(roles(&m, "m/rock03_m").is_empty());
 }
 
-/// Final review I1: with a fuzz source `auto` builds `_rfaos` (Advanced skin); picking RMAOS builds `_rmaos` and the
-/// inferred members go back to their PBR sub-types, and picking RFAOS again brings the skin ones back.
+/// Fuzz-1: with a fuzz map and no skin evidence `auto` builds `_rmaos` and the fuzz map is `pbr_fuzz`; picking RFAOS
+/// is skin evidence (Fuzz-5), so the inferred members turn skin, and Undo brings the `_rmaos` back.
 #[test]
-fn a_fuzz_source_set_switched_to_rmaos_reverts_the_members() {
+fn a_fuzz_set_packs_rmaos_and_a_written_rfaos_makes_it_skin() {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("m")).unwrap();
     grey(&d.path().join("m"), "rock01_fuzz.png", 60);
     let mut m = fixture(d.path());
-    assert!(m.item(RFAOS).is_some(), "auto builds _rfaos");
-    assert_eq!(resolved(&m, DIFFUSE), Subtype::SkinAlbedo);
-    assert_eq!(resolved(&m, SK), Subtype::SkinSk);
-    m.set_packing_recipe(RFAOS, PackRecipe::Rmaos);
-    idle(&mut m);
-    assert!(m.item(RMAOS).is_some(), "the forced recipe builds _rmaos");
+    assert!(m.item(RMAOS).is_some(), "auto builds _rmaos");
     assert_eq!(resolved(&m, DIFFUSE), Subtype::PbrAlbedo);
     assert_eq!(resolved(&m, SK), Subtype::BacklightTint);
-    assert_eq!(subtype(&m, DIFFUSE), None);
-    assert_eq!(subtype(&m, SK), None);
+    assert_eq!(resolved(&m, "m/rock01_fuzz.png"), Subtype::PbrFuzz);
     m.set_packing_recipe(RMAOS, PackRecipe::Rfaos);
     idle(&mut m);
-    assert!(m.item(RFAOS).is_some());
+    assert!(m.item(RFAOS).is_some(), "the written recipe builds _rfaos");
     assert_eq!(resolved(&m, DIFFUSE), Subtype::SkinAlbedo);
     assert_eq!(resolved(&m, SK), Subtype::SkinSk);
+    m.undo();
+    idle(&mut m);
+    assert!(m.item(RMAOS).is_some(), "Undo builds _rmaos again");
 }
 
 /// A pre-packed Advanced skin set: `rock01.png`, `rock01_rfaos.png`, `rock01_sk.png`.

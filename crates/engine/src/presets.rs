@@ -415,7 +415,8 @@ pub enum Provenance {
     /// The sub-type of a packed output, set by its recipe: `recipe:<kind>`.
     Recipe(String),
     /// Decided by the texture set, not by a layer: the variance bake's `mips.normal = renormalize_bake` on a
-    /// `pbr_normal` (spec §5.2, §6.2, DECISIONS R6). Shown as `set`.
+    /// `pbr_normal` (spec §5.2, §6.2, DECISIONS R6), and the sub-type `pbr_fuzz` of a fuzz map the set does not
+    /// read as the Advanced Skin mask (Fuzz-1). Shown as `set`.
     Set,
 }
 

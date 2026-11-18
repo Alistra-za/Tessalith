@@ -2337,7 +2337,27 @@ pub fn resolve_file_with(ctx: &ResolveCtx, f: &FileFacts, gras_diffuse: bool) ->
             d.provenance,
             Provenance::User | Provenance::Rule(_) | Provenance::ProjectFile
         ) {
-            return packing_input_job(ctx, f, term, *role, false);
+            // Fuzz-1, Fuzz-18: a fuzz map the set does not read as the skin mask is the PBR fuzz texture, decided by
+            // the set (provenance `set`, never a suggestion, so nothing records it). `fuzz_f_output` names it below.
+            let pbr = *role == RawMap::Fuzz
+                && crate::pack::plan::fuzz_reading(ctx, f.set, f.input)
+                    == crate::pack::plan::FuzzReading::Pbr;
+            if !pbr {
+                return packing_input_job(ctx, f, term, *role, false);
+            }
+            let mut suggestions = vec![Suggestion {
+                subtype: Subtype::PbrFuzz,
+                confidence: Confidence::High,
+                reason: crate::suggest::FUZZ_PBR_REASON.into(),
+            }];
+            suggestions.append(&mut d.suggestions);
+            d = SubtypeDecision {
+                subtype: Subtype::PbrFuzz,
+                provenance: Provenance::Set,
+                decided: true,
+                suggestions,
+                waits: false,
+            };
         }
     }
     // Note DR: in a set that is Advanced skin by other evidence, `_f` is the fuzz mask (a metal-like grey map), a

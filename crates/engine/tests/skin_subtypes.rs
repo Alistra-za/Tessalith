@@ -120,24 +120,32 @@ fn an_rfaos_set_suggests_the_skin_sub_types() {
     assert_eq!(top(&p, "x_wet.png"), (Subtype::SkinWet, Confidence::High));
 }
 
-/// (a) A raw-map set whose recipe resolves to `_rfaos` (a fuzz source, or `packing.recipe = rfaos`) is Advanced skin.
+/// (a) A raw-map set whose recipe resolves to `_rfaos` (`packing.recipe = rfaos`) is Advanced skin.
 #[test]
 fn a_set_that_builds_rfaos_is_advanced_skin() {
-    for toml in ["", "[files.\"x_rmaos\".packing]\nrecipe = \"rfaos\"\n"] {
-        let d = tempfile::tempdir().unwrap();
-        set_files(&d, false);
-        put(d.path(), "x_roughness.png", grey(64));
-        put(d.path(), "x_fuzz.png", grey(64));
-        put(d.path(), "x_ao.png", grey(64));
-        std::fs::write(d.path().join("in/sdc.toml"), toml).unwrap();
-        let p = plan(&d, Target::Cs, &[]);
-        assert_eq!(
-            top(&p, "x_sk.png"),
-            (Subtype::SkinSk, Confidence::High),
-            "{toml}"
-        );
-        assert_eq!(top(&p, "x.png").0, Subtype::SkinAlbedo, "{toml}");
-    }
+    let d = tempfile::tempdir().unwrap();
+    set_files(&d, false);
+    put(d.path(), "x_roughness.png", grey(64));
+    put(d.path(), "x_fuzz.png", grey(64));
+    put(d.path(), "x_ao.png", grey(64));
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.\"x_rmaos\".packing]\nrecipe = \"rfaos\"\n",
+    )
+    .unwrap();
+    let p = plan(&d, Target::Cs, &[]);
+    assert_eq!(top(&p, "x_sk.png"), (Subtype::SkinSk, Confidence::High));
+    assert_eq!(top(&p, "x.png").0, Subtype::SkinAlbedo);
+    // Fuzz-1: a fuzz source with no written recipe is no skin evidence: `_rmaos`, not skin.
+    let d = tempfile::tempdir().unwrap();
+    set_files(&d, false);
+    put(d.path(), "x_roughness.png", grey(64));
+    put(d.path(), "x_fuzz.png", grey(64));
+    put(d.path(), "x_ao.png", grey(64));
+    std::fs::write(d.path().join("in/sdc.toml"), "").unwrap();
+    let p = plan(&d, Target::Cs, &[]);
+    assert_eq!(top(&p, "x_sk.png").0, Subtype::BacklightTint);
+    assert_eq!(top(&p, "x.png").0, Subtype::PbrAlbedo);
     // Without a fuzz source and no override the recipe is `_rmaos`: not skin.
     let d = tempfile::tempdir().unwrap();
     set_files(&d, false);

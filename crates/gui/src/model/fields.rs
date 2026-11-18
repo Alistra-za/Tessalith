@@ -688,7 +688,7 @@ pub fn provenance_text(p: &str) -> String {
         "suggestion" => "suggested".into(),
         "analysis" => "from the image analysis".into(),
         "fallback" => "fallback value (sub-type or box filter)".into(),
-        "set" => "decided by the texture set (variance bake)".into(),
+        "set" => "decided by the texture set".into(),
         "mesh:alpha" => "from the meshes that use this texture".into(),
         _ => match p.split_once(':') {
             Some(("preset", id)) => format!("from preset {id}"),

@@ -247,10 +247,7 @@ fn normal_base_level_is_a_normal_map_field() {
         field_lock(Target::Cs, &d, "mips.normal_base"),
         Some("normal maps only")
     );
-    assert_eq!(
-        provenance_text("set"),
-        "decided by the texture set (variance bake)"
-    );
+    assert_eq!(provenance_text("set"), "decided by the texture set");
 }
 
 #[test]

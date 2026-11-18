@@ -7,7 +7,7 @@ use engine::api::{BatchRequest, CancelToken, Plan};
 use engine::events::{EngineEvent, EventKind, Reporter, VecSink};
 use engine::session::{Partial, Session};
 use engine::skeleton::{
-    BAD_ENTRY, CANCELLED, DERIVE, DUPLICATE_CHANGE, HELPER_ROLE_CHANGE, HITS_NOTHING,
+    BAD_ENTRY, CANCELLED, DERIVE, DUPLICATE_CHANGE, FUZZ_SUBTYPE, HELPER_ROLE_CHANGE, HITS_NOTHING,
     MEMBERSHIP_CHANGE, PBR_CHANGE, PBR_SUBTYPE, RECIPE_CHANGE, REENCODE_CHANGE, WRITER_CLASH,
 };
 use fast_fixture::{fast_fixture, with_entry};
@@ -103,6 +103,18 @@ fn rows() -> Vec<Row> {
             "subtype on e_ao",
             &[("dir/e_ao.png", Some("subtype = \"diffuse\""))],
             NeedsFull(PBR_SUBTYPE),
+            &[],
+        ),
+        row(
+            "format on u",
+            &[("dir/u.png", Some("format = \"bc1\""))],
+            Scoped,
+            &["dir/u"],
+        ),
+        row(
+            "subtype on u",
+            &[("dir/u.png", Some("subtype = \"skin_albedo\""))],
+            NeedsFull(FUZZ_SUBTYPE),
             &[],
         ),
         row(

@@ -630,8 +630,6 @@ fn chosen_recipe(
     member: &dyn Fn(&Path) -> InputFile,
     raw: &[RawInput],
     sel: &BTreeMap<PathBuf, crate::helper::HelperSel>,
-    pa: &Analysis,
-    pinfo: &SourceInfo,
 ) -> (PackRecipe, Option<(Code, String)>) {
     // CO109: a pre-packed image keeps its own layout (`_rmaos` or `_rfaos`), whatever `packing.recipe` says.
     if ctx.target != Target::Cs || raw.iter().any(|r| r.role == RawMap::Rmaos) {
@@ -649,18 +647,8 @@ fn chosen_recipe(
     let Some(base) = probes.iter().flatten().next() else {
         return (PackRecipe::Auto, None);
     };
-    let first = &base.sources()[0].0;
-    let read = |kind| {
-        let vin = virtual_input(&member(first), kind);
-        (
-            slash(&vin.rel.with_extension("")),
-            pass1_profile(ctx, set, &vin, kind, pa, pinfo)
-                .packing
-                .recipe,
-        )
-    };
-    let (rfaos_key, on_rfaos) = read(RecipeKind::Rfaos);
-    let (rmaos_key, on_rmaos) = read(RecipeKind::Rmaos);
+    let first = member(&base.sources()[0].0);
+    let (on_rfaos, on_rmaos) = written_recipes(ctx, set, &first);
     // Note DV1: a set whose chosen shader is Advanced Skin packs `_rfaos` unless a recipe is written; the user wrote
     // none, so a set that cannot build it keeps `auto` without a notice. Final review M2: a hand-set `rfaos.*` fill
     // also builds it; the plain test runs first so a hand fill never takes an `_rfaos` away (DV1 unchanged).
@@ -682,6 +670,8 @@ fn chosen_recipe(
     let mut note = None;
     let pick = if on_rfaos != PackRecipe::Auto {
         if on_rmaos != PackRecipe::Auto && on_rmaos != on_rfaos {
+            let key = |kind| slash(&virtual_input(&first, kind).rel.with_extension(""));
+            let (rfaos_key, rmaos_key) = (key(RecipeKind::Rfaos), key(RecipeKind::Rmaos));
             note = Some((Code::PackRecipeConflict, format!(
                 "packing.recipe disagrees: {rfaos_key} says {}, {rmaos_key} says {}; the _rfaos entry wins",
                 on_rfaos.id(),
@@ -713,6 +703,23 @@ fn chosen_recipe(
     (pick, note)
 }
 
+/// The set's written `packing.recipe` at its two packed keys, `(on <base>_rfaos, on <base>_rmaos)`, read from the
+/// pass 1 profile of the packed output named after `first`, a raw member of the set (`chosen_recipe`).
+pub(crate) fn written_recipes(
+    ctx: &ResolveCtx,
+    set: &TextureSet,
+    first: &InputFile,
+) -> (PackRecipe, PackRecipe) {
+    let (pa, pinfo) = placeholder();
+    let read = |kind| {
+        let vin = virtual_input(first, kind);
+        pass1_profile(ctx, set, &vin, kind, &pa, &pinfo)
+            .packing
+            .recipe
+    };
+    (read(RecipeKind::Rfaos), read(RecipeKind::Rmaos))
+}
+
 /// Note DV1: the set's explicit shader (`ShaderOrigin::Set`) is Advanced Skin, so its diffuse reads `skin_albedo`
 /// and it packs `_rfaos`; Note DW1: not while its diffuse member is pinned in the GUI.
 pub fn chosen_skin(ctx: &ResolveCtx, set: &TextureSet) -> bool {
@@ -725,14 +732,15 @@ pub fn chosen_skin(ctx: &ResolveCtx, set: &TextureSet) -> bool {
         .any(|i| ctx.files.skin_pinned.contains(i))
 }
 
-/// Whether the set holds or builds an `_rfaos` (Advanced skin, DECISIONS Note R-skin-1): an `_rfaos` member, or a
-/// raw-map recipe that resolves to `_rfaos` (an explicit `packing.recipe`, or `auto` with a fuzz source). Called at
-/// suggestion time, before Pass 1, from the raw roles the set's suffixes name; `this` is any member of the set (it
-/// supplies the folder and base the packed output's `[files]` key is read from).
+/// Whether the set is Advanced skin (DECISIONS Note R-skin-1): shared skin (Note HG2); a fuzz map with other skin
+/// evidence (Fuzz-5: a written `rfaos` on either packed key, or a member typed a skin sub-type); a hand-set
+/// `helper.role = "fuzz"` (Fuzz-22); an `_rfaos` member; or a raw-map recipe other than a fuzz map's that resolves to
+/// `_rfaos` (Note DV1's chosen Advanced Skin). A fuzz map alone is no evidence (Fuzz-1). Called at suggestion time,
+/// before Pass 1, from the raw roles the set's suffixes name; `this` is any member of the set (it supplies the folder
+/// and base the packed output's `[files]` key is read from).
 ///
 /// `set.suffixes` also holds the suffixes `auto` predicts from the raw roles (DECISIONS Note M7), so an `rfaos` in
-/// it counts as a real `_rfaos` member only when `auto` does not predict it (final review I1). Otherwise the
-/// recipe actually chosen decides: a forced `rmaos` with a fuzz source builds `_rmaos` and is not skin.
+/// it counts as a real `_rfaos` member only when `auto` does not predict it (final review I1).
 pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> bool {
     if ctx.target != Target::Cs {
         return false;
@@ -740,26 +748,6 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
     if set.shared_skin {
         return true;
     }
-    let roles: BTreeSet<RawMap> = RawMap::INPUTS
-        .into_iter()
-        .filter(|r| set.suffixes.contains(&r.id()))
-        .collect();
-    if set.suffixes.contains("rfaos")
-        && !super::predicted_suffixes(ctx.target, false, &roles).contains(&"rfaos")
-    {
-        return true;
-    }
-    let raw: Vec<RawInput> = roles
-        .iter()
-        .map(|&role| RawInput {
-            path: PathBuf::from(format!("{}.{}", set.key, role.id())),
-            role,
-        })
-        .collect();
-    if raw.is_empty() {
-        return false;
-    }
-    let (pa, pinfo) = placeholder();
     // The packed output's key is built from a raw map's name, so give it one: `this` may be `x_sk`, `x_wet` or `x`.
     let stem = this
         .rel
@@ -774,19 +762,75 @@ pub fn set_is_advanced_skin(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile
         .map_or_else(|| "png".to_string(), |e| e.to_string_lossy().into_owned());
     let mut this = this.clone();
     this.rel = this.rel.with_file_name(format!("{base}_ao.{ext}"));
-    let (choice, _) = chosen_recipe(
-        ctx,
-        set,
-        &|_| this.clone(),
-        &raw,
-        &BTreeMap::new(),
-        &pa,
-        &pinfo,
-    );
+    // Fuzz-5: the evidence that keeps a fuzz map the skin mask. Only in a set with a fuzz map, so no other set's
+    // reading changes (a metallic-only set with a written `rfaos` stays `_rmaos`, DQ2).
+    if set.suffixes.contains(&RawMap::Fuzz.id()) {
+        let (on_rfaos, on_rmaos) = written_recipes(ctx, set, &this);
+        if on_rfaos == PackRecipe::Rfaos || on_rmaos == PackRecipe::Rfaos {
+            return true;
+        }
+        if set.members.iter().any(|i| ctx.files.skin_typed.contains(i)) {
+            return true;
+        }
+    }
+    // Fuzz-22: a hand-set fuzz role is skin evidence; its file need not carry the `_fuzz` suffix (Note DY).
+    if set
+        .members
+        .iter()
+        .chain(&set.shares)
+        .any(|i| ctx.files.hand_fuzz.contains(i))
+    {
+        return true;
+    }
+    let roles: BTreeSet<RawMap> = RawMap::INPUTS
+        .into_iter()
+        .filter(|r| set.suffixes.contains(&r.id()))
+        .collect();
+    if set.suffixes.contains("rfaos")
+        && !super::predicted_suffixes(ctx.target, false, &roles).contains(&"rfaos")
+    {
+        return true;
+    }
+    // Fuzz-1: the fuzz map takes no part in the recipe test, so `auto` with it alone builds `_rmaos`.
+    let raw: Vec<RawInput> = roles
+        .iter()
+        .filter(|&&role| role != RawMap::Fuzz)
+        .map(|&role| RawInput {
+            path: PathBuf::from(format!("{}.{}", set.key, role.id())),
+            role,
+        })
+        .collect();
+    if raw.is_empty() {
+        return false;
+    }
+    let (choice, _) = chosen_recipe(ctx, set, &|_| this.clone(), &raw, &BTreeMap::new());
     recipes_for_with(ctx.target, &raw, choice, false)
         .0
         .iter()
         .any(|r| r.kind == RecipeKind::Rfaos)
+}
+
+/// What a set's fuzz map (`_fuzz`/`_sheen`) is (Fuzz-1, Fuzz-2, Fuzz-5).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FuzzReading {
+    /// The Advanced Skin mask: a packing input of the `_rfaos` G channel.
+    Skin,
+    /// The PBR fuzz texture (`pbr_fuzz`), written `<base>_f.dds`.
+    Pbr,
+    /// Nothing reads it under this shader.
+    Unused(crate::shader::Shader),
+}
+
+/// How the set reads its fuzz map `this`: not on cs it is never read; with skin evidence
+/// ([`set_is_advanced_skin`]) it is the skin mask; otherwise the PBR fuzz texture.
+pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> FuzzReading {
+    if ctx.target != Target::Cs {
+        FuzzReading::Unused(crate::shader::Shader::Default)
+    } else if set_is_advanced_skin(ctx, set, this) {
+        FuzzReading::Skin
+    } else {
+        FuzzReading::Pbr
+    }
 }
 
 /// Note DR: whether `f` is a `_f` that a set already Advanced skin packs into the `_rfaos` G channel (a `_f` whose
@@ -946,8 +990,7 @@ pub fn plan_packing(
         if raw.is_empty() {
             continue;
         }
-        let (choice, recipe_note) =
-            chosen_recipe(ctx, set, &|p| members[p].clone(), &raw, &sel, &pa, &pinfo);
+        let (choice, recipe_note) = chosen_recipe(ctx, set, &|p| members[p].clone(), &raw, &sel);
         // Note AZ: a vanilla set whose shader pick is complex material packs the complex `_m`.
         let complex = ctx
             .shaders

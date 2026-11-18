@@ -2,8 +2,8 @@
 //! changed `[files]` keys. A patch either names the sets those keys hit or says why a full plan is needed.
 use crate::api::{
     check_file_overrides, drop_typed_roles, explicit_shaders, hand_role, is_typed, join_members,
-    pre_edit_shaders, predict_suffixes, reencodes, set_is_pbr, waiting_images, Plan, Prepared,
-    BV2_REASON,
+    pre_edit_shaders, predict_suffixes, reencodes, set_is_pbr, skin_fuzz, waiting_images, Plan,
+    Prepared, BV2_REASON,
 };
 use crate::config::Target;
 use crate::cube::plan::face_tag;
@@ -27,6 +27,8 @@ pub const BAD_ENTRY: &str = "invalid [files] entry";
 pub const REENCODE_CHANGE: &str = "reencode change";
 pub const HELPER_ROLE_CHANGE: &str = "helper.role change";
 pub const PBR_SUBTYPE: &str = "subtype on a PBR set member";
+/// Fuzz-19: a sub-type edit in a set with a fuzz map can change how the set reads it (skin evidence, Fuzz-5).
+pub const FUZZ_SUBTYPE: &str = "subtype in a set with a fuzz map";
 pub const MEMBERSHIP_CHANGE: &str = "membership change";
 /// A file moved in or out of the set of images that write nothing while another file folds to its output: which of
 /// them is a duplicate changes (Note HE7).
@@ -59,6 +61,8 @@ pub struct Skeleton {
     pub(crate) key_sets: HashMap<String, Vec<u32>>,
     /// Sets whose `set_resolved` said `pbr` in the full plan.
     pub(crate) pbr_sets: BTreeSet<u32>,
+    /// Sets with a member image whose stem is a fuzz map's (`group::is_fuzz_stem`, Fuzz-19).
+    pub(crate) fuzz_sets: BTreeSet<u32>,
     /// A clone `patch` returned: never patched again.
     pub(crate) patched: bool,
     /// The partner groups [`Skeleton::scope`] closes over (set keys), built once per full plan.
@@ -76,6 +80,7 @@ impl Skeleton {
     pub(crate) fn new(prepared: Prepared, plan: &Plan, pbr: &BTreeSet<String>) -> Skeleton {
         let mut set_of = vec![u32::MAX; prepared.files.len()];
         let mut key_sets: HashMap<String, Vec<u32>> = HashMap::new();
+        let mut fuzz_sets: BTreeSet<u32> = BTreeSet::new();
         let mut add = |form: String, s: u32| {
             let v = key_sets.entry(form).or_default();
             if !v.contains(&s) {
@@ -91,7 +96,15 @@ impl Skeleton {
         for (si, set) in prepared.sets.iter().enumerate() {
             for &m in &set.members {
                 set_of[m] = si as u32;
-                if let Some(f) = prepared.file_scopes.forms_of(&prepared.files[m]) {
+                let file = &prepared.files[m];
+                if file.kind == InputKind::Image
+                    && crate::group::is_fuzz_stem(
+                        &file.rel.file_stem().unwrap_or_default().to_string_lossy(),
+                    )
+                {
+                    fuzz_sets.insert(si as u32);
+                }
+                if let Some(f) = prepared.file_scopes.forms_of(file) {
                     add(f.full.clone(), si as u32);
                     if let Some(s) = &f.stem {
                         add(s.clone(), si as u32);
@@ -160,6 +173,7 @@ impl Skeleton {
             set_of,
             key_sets,
             pbr_sets,
+            fuzz_sets,
             patched: false,
             writers: Arc::new(writers),
             clash_sets: Arc::new(clash_sets),
@@ -200,8 +214,8 @@ impl Skeleton {
     /// A clone with each `(key, entry)` set in its `[files]` layer (`None` removes the key), and the keys of the
     /// sets those keys hit. `NeedsFull` when an edit could change membership, outputs or duplicates (R2 §2).
     /// Checks, first hit wins: a patched skeleton; per key, a key that hits nothing, then a bad entry; per hit file, a
-    /// `reencode` change, then a `helper.role` change; the membership joins; a sub-type edit on a PBR set's member;
-    /// a hit set whose PBR status flips.
+    /// `reencode` change, then a `helper.role` change; the membership joins; a sub-type edit in a set with a fuzz map;
+    /// a sub-type edit on a PBR set's member; a hit set whose PBR status flips.
     pub fn patch(
         &self,
         changed: &[(String, Option<toml::Table>)],
@@ -357,6 +371,10 @@ impl Skeleton {
                 return Err(NeedsFull(MEMBERSHIP_CHANGE));
             }
         }
+        // Fuzz-19: a sub-type is skin evidence for a set with a fuzz map (Fuzz-5), so it can change the set's reading.
+        if p.target == Target::Cs && subtype_sets.iter().any(|s| self.fuzz_sets.contains(s)) {
+            return Err(NeedsFull(FUZZ_SUBTYPE));
+        }
         // DECISIONS P1: a PBR member's sub-type moves the GUI's output paths, which the request carries.
         if p.target == Target::Cs && subtype_sets.iter().any(|s| self.pbr_sets.contains(s)) {
             return Err(NeedsFull(PBR_SUBTYPE));
@@ -379,11 +397,15 @@ impl Skeleton {
             refresh_suffixes(&mut n.sets[s as usize], &n.files, &n.typed);
         }
         // A hit set whose PBR status flips moves output paths too (P1); decided as `set_resolved` decides it.
+        let ctx = n.ctx();
         for &s in &hit_sets {
             let mut set = n.sets[s as usize].clone();
             let (explicit, _) = explicit_shaders(&n.req, std::slice::from_ref(&set));
             let complex = explicit.get(&set.key) == Some(&crate::shader::Shader::ComplexMaterial);
-            predict_suffixes(&mut set, n.target, complex, &n.files, &n.typed, &n.hand);
+            let skin_fuzz = skin_fuzz(&ctx, &set, &n.files);
+            predict_suffixes(
+                &mut set, skin_fuzz, n.target, complex, &n.files, &n.typed, &n.hand,
+            );
             if set_is_pbr(n.target, &set, &n.files).is_some_and(|b| b != self.pbr_sets.contains(&s))
             {
                 return Err(NeedsFull(PBR_CHANGE));

@@ -86,6 +86,11 @@ fn job_out(m: &AppModel, key: &str) -> String {
         .into_owned()
 }
 
+/// The `subtype` value written in `sdc.toml` for `key` (`ProjectDoc::file_value`, as `auto_accept.rs` reads it).
+fn subtype(m: &AppModel, key: &str) -> Option<serde_json::Value> {
+    m.project.as_ref().unwrap().file_value(key, "subtype")
+}
+
 fn set_view(m: &AppModel) -> sdc_gui::model::sets::SetView {
     sdc_gui::model::sets::set_views(m)
         .into_iter()
@@ -143,6 +148,37 @@ fn a_pbr_fuzz_fuzz_map_fills_the_fuzz_slot_and_turns_fuzz_on() {
         .map(|(k, _)| k)
         .collect();
     assert!(keys.contains(&"fuzz_on"), "{keys:?}");
+}
+
+/// Fuzz-18 and spec §3d in the GUI: an untyped fuzz map read as PBR fills the Fuzz slot, turns `fuzz_on` on, writes
+/// `rock01_f.dds`, and High records nothing on it.
+#[test]
+fn an_untyped_fuzz_map_read_as_pbr_fills_the_fuzz_slot_and_is_not_recorded() {
+    use sdc_gui::model::auto_flags::auto_flags;
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    for accept in [AcceptSuggestions::None, AcceptSuggestions::High] {
+        let d = tempfile::tempdir().unwrap();
+        let m = open_with(
+            d.path(),
+            &["rock01_roughness.png", "rock01_fuzz.png"],
+            "",
+            accept,
+        );
+        let v = set_view(&m);
+        assert!(v.pbr && !v.skin, "{accept:?}");
+        assert_eq!(
+            v.slots.get(&SlotKind::Fuzz),
+            Some(&SlotFill::Own { item: FUZZ.into() }),
+            "{accept:?}"
+        );
+        let keys: Vec<_> = auto_flags(v.pbr, &v.slots, &Default::default())
+            .into_iter()
+            .map(|(k, _)| k)
+            .collect();
+        assert!(keys.contains(&"fuzz_on"), "{accept:?}: {keys:?}");
+        assert_eq!(job_out(&m, FUZZ), "rock01_f.dds", "{accept:?}");
+        assert_eq!(subtype(&m, FUZZ), None, "{accept:?}");
+    }
 }
 
 /// Review Focus 1 where the user sees it: the GUI names a PBR set's outputs by slot (`output_candidates`).

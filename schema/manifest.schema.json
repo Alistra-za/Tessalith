@@ -659,7 +659,7 @@
       "type": "string"
     },
     "PackRecipe": {
-      "description": "Which cs recipe a set packs (DECISIONS Note R-fills-1): `auto` = `_rfaos` when a fuzz source exists, else\n`_rmaos`; `rfaos`/`rmaos` force one.",
+      "description": "Which cs recipe a set packs (DECISIONS Note R-fills-1): `auto` = `_rfaos` when the set reads a fuzz source as the\nskin mask, else `_rmaos`; `rfaos`/`rmaos` force one.",
       "enum": [
         "auto",
         "rmaos",

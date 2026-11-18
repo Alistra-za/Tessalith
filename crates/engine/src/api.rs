@@ -1252,7 +1252,8 @@ pub(crate) fn waiting_images(
     let mut waits = BTreeSet::new();
     for set in sets {
         let mut predicted = set.clone();
-        predict_suffixes(&mut predicted, target, false, files, typed, hand);
+        let skin_fuzz = skin_fuzz(ctx, set, files);
+        predict_suffixes(&mut predicted, skin_fuzz, target, false, files, typed, hand);
         for &i in set.members.iter().filter(|i| !typed.contains(i)) {
             let f = &files[i];
             let writes_nothing = match hand[i] {
@@ -1267,6 +1268,14 @@ pub(crate) fn waiting_images(
         }
     }
     waits
+}
+
+/// The `skin_fuzz` argument of [`predict_suffixes`]: whether `set` (not yet predicted) is Advanced skin, read from its
+/// first member; false for a set with no members.
+pub(crate) fn skin_fuzz(ctx: &ResolveCtx, set: &TextureSet, files: &[InputFile]) -> bool {
+    set.members
+        .first()
+        .is_some_and(|&i| pack::plan::set_is_advanced_skin(ctx, set, &files[i]))
 }
 
 /// Note DY: an image's hand-set `helper.role`.
@@ -1369,8 +1378,11 @@ pub(crate) fn detail_host<'a>(
 /// Spec §6.4 "Set membership", DECISIONS Note M7: a recipe's output joins its set before anything resolves.
 /// Note AZ: a set explicitly given complex material predicts the complex `_m` (the auto pick comes later and needs
 /// a member already typed complex_material, so it never adds a suffix of its own).
+/// Fuzz-1: a fuzz map read from its name counts only when `skin_fuzz` (the set reads it as the skin mask,
+/// `pack::plan::set_is_advanced_skin` on the set before prediction); a hand-set fuzz role always counts.
 pub(crate) fn predict_suffixes(
     set: &mut TextureSet,
+    skin_fuzz: bool,
     target: Target,
     complex: bool,
     files: &[InputFile],
@@ -1386,7 +1398,7 @@ pub(crate) fn predict_suffixes(
         .filter_map(|&i| match hand[i] {
             Some(crate::helper::HelperRole::Raw(r)) => Some(r),
             Some(_) => None,
-            None => pack::plan::raw_role(&files[i]),
+            None => pack::plan::raw_role(&files[i]).filter(|&r| skin_fuzz || r != RawMap::Fuzz),
         })
         .collect();
     for s in pack::predicted_suffixes(target, complex, &roles) {
@@ -1680,6 +1692,40 @@ impl Engine {
             ..FileScopes::default()
         };
         file_scopes.index(&files);
+        // Fuzz-5, Fuzz-22: the skin evidence a set with a fuzz map reads (`set_is_advanced_skin`), from a ctx of its
+        // own that is dropped before the sets are stored.
+        {
+            let ctx = base_ctx(
+                req,
+                target,
+                &registry,
+                &preset_id,
+                user_config.as_ref(),
+                project_config.as_ref(),
+                &file_scopes,
+            );
+            let skin_typed: BTreeSet<usize> = (0..files.len())
+                .filter(|&i| {
+                    matches!(
+                        crate::policy::subtype_override(&ctx, &files[i]),
+                        Some(
+                            Subtype::SkinAlbedo
+                                | Subtype::SkinRfaos
+                                | Subtype::SkinSk
+                                | Subtype::SkinWet
+                                | Subtype::SkinDetail
+                        )
+                    )
+                })
+                .collect();
+            let hand_fuzz: BTreeSet<usize> = (0..files.len())
+                .filter(|&i| {
+                    hand_role(&ctx, &files[i]) == Some(crate::helper::HelperRole::Raw(RawMap::Fuzz))
+                })
+                .collect();
+            file_scopes.skin_typed = skin_typed;
+            file_scopes.hand_fuzz = hand_fuzz;
+        }
         let ctx = base_ctx(
             req,
             target,
@@ -1890,7 +1936,8 @@ impl Engine {
         let (explicit, stale_shaders) = explicit_shaders(req, &p.sets);
         for set in &mut sets {
             let complex = explicit.get(&set.key) == Some(&Shader::ComplexMaterial);
-            predict_suffixes(set, target, complex, files, typed, hand);
+            let skin_fuzz = skin_fuzz(&ctx, set, files);
+            predict_suffixes(set, skin_fuzz, target, complex, files, typed, hand);
         }
         let set_of: BTreeMap<usize, &str> = sets
             .iter()

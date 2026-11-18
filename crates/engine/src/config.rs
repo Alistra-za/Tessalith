@@ -240,8 +240,8 @@ impl RawMap {
 
 cfg_enum!(PackPrefer, "lowercase" { Prepacked, Raw });
 
-/// Which cs recipe a set packs (DECISIONS Note R-fills-1): `auto` = `_rfaos` when a fuzz source exists, else
-/// `_rmaos`; `rfaos`/`rmaos` force one.
+/// Which cs recipe a set packs (DECISIONS Note R-fills-1): `auto` = `_rfaos` when the set reads a fuzz source as the
+/// skin mask, else `_rmaos`; `rfaos`/`rmaos` force one.
 #[derive(
     Debug,
     Clone,
