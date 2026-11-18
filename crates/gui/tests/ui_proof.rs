@@ -35,6 +35,10 @@ macro_rules! journey {
     };
 }
 
+#[path = "ui_proof/invariants.rs"]
+mod invariants;
+#[path = "ui_proof/screens.rs"]
+mod screens;
 #[path = "ui_proof/sets_column.rs"]
 mod sets_column;
 #[path = "ui_proof/sets_column_hp.rs"]
