@@ -117,10 +117,11 @@ pub fn row_class(code: Code) -> RowClass {
     use RowClass::{Note, Problem};
     match code {
         // The Info codes, but the two the user acts on (CHK-GREEN-GUESS, DERIVE-NIF-SUGGEST).
+        // SHADER-NORMAL-SPECULAR is a note with a button (Note JP3).
         FmtHdrSource | CfgFileUnmatched | CfgFilterIgnored | DimResized | ResizeNoReference
         | SetMissingCompanion | SetEditStale | InDdsSkipped | InGreenUnstated | InAliasStale
         | OutKeptOlderEncode | OutKeptLowerTarget | PackSourceResized | ShaderAuto
-        | DeriveNotConverted | GenReplaced | GenAo => Note,
+        | ShaderNormalSpecular | DeriveNotConverted | GenReplaced | GenAo => Note,
         // The Warning codes whose output is valid as it is.
         DimNpot | EncWeightsIgnored | PackDefaulted | PackUnusedInput | ShaderExtraMap => Note,
         ChkGreenGuess | DeriveNifSuggest => Problem,

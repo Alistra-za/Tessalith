@@ -731,3 +731,58 @@ fn a_kept_dds_normal_fills_n_and_earlier_outputs_raise_no_map_warnings() {
     let ev = sink.take();
     assert!(map_codes(&ev).is_empty(), "{:?}", map_codes(&ev));
 }
+
+/// B3-1 (Note JP1): end to end on cs, an own plain normal in an explicit `pbr` set raises one Info and no
+/// SHADER-EXTRA-MAP or SHADER-MISSING-MAP; it still converts to `wall_n.dds`.
+#[test]
+fn an_own_plain_normal_in_a_pbr_set_is_one_info() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    put_rgb(d.path(), "textures/a/wall_rmaos.png", [200, 20, 255]);
+    let (p, ev) = plan(
+        d.path(),
+        Target::Cs,
+        &[
+            "set:wall.shader=pbr",
+            "file:**/wall.png.subtype=pbr_albedo",
+            "file:**/wall_n.png.subtype=normal",
+            "file:**/wall_rmaos.png.subtype=rmaos",
+        ],
+        &[],
+    );
+    let EventKind::SetResolved { warnings, .. } = set_event(&ev, "textures/a/wall") else {
+        unreachable!()
+    };
+    let codes: Vec<Code> = warnings.iter().map(|w| w.code).collect();
+    assert_eq!(codes, vec![Code::ShaderNormalSpecular], "{warnings:?}");
+    assert_eq!(warnings[0].data["member"], "wall_n.dds");
+    assert!(p.jobs.iter().any(|j| j.output.ends_with("wall_n.dds")));
+}
+
+/// B3-11, B3-14 (Note JP1): a kept `_n.dds` that its suffix suggests as a vanilla normal answers an explicit `pbr` set's `_n`
+/// with the same Info. `check_maps` cannot tell it is kept; the GUI words that row differently (Note JP3).
+#[test]
+fn a_kept_dds_normal_in_a_pbr_set_is_the_same_info() {
+    let d = tempfile::tempdir().unwrap();
+    put_rgb(d.path(), "textures/a/wall.png", [120, 90, 60]);
+    put_dds(&d.path().join("in"), "textures/a/wall_n.dds");
+    let (_, ev) = plan(
+        d.path(),
+        Target::Cs,
+        &["set:wall.shader=pbr", "file:**/wall.png.subtype=pbr_albedo"],
+        &[],
+    );
+    let EventKind::SetResolved { warnings, .. } = set_event(&ev, "textures/a/wall") else {
+        unreachable!()
+    };
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.code == Code::ShaderNormalSpecular && w.data["member"] == "wall_n.dds"),
+        "{warnings:?}"
+    );
+    assert!(
+        !warnings.iter().any(|w| w.code == Code::ShaderExtraMap),
+        "{warnings:?}"
+    );
+}

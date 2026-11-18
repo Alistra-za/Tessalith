@@ -421,6 +421,7 @@
         "SHADER-UNAVAILABLE",
         "SHADER-EXTRA-MAP",
         "SHADER-MISSING-MAP",
+        "SHADER-NORMAL-SPECULAR",
         "GRASS-SHAPE",
         "GRASS-TOP-OPAQUE",
         "GRASS-NORMALS",
@@ -2208,7 +2209,7 @@
           "description": "M6 (DECISIONS Note S): the set's shader and why it was chosen."
         },
         "warnings": {
-          "description": "SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP for the set.",
+          "description": "SHADER-AUTO / SHADER-UNAVAILABLE, then SHADER-EXTRA-MAP / SHADER-MISSING-MAP / SHADER-NORMAL-SPECULAR for the set.",
           "items": {
             "$ref": "#/$defs/Warning"
           },

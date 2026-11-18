@@ -826,7 +826,8 @@ pub fn pick_for_set(
     })
 }
 
-/// One member of a set as the map check sees it. A skipped DDS member has no sub-type.
+/// One member of a set as the map check sees it. A kept (skipped) DDS member has the sub-type `suggest` gives its
+/// suffix (Audit 08b-2); its `[files]` type is not read.
 pub struct MemberMap {
     pub name: String,
     pub suffix: Option<String>,
@@ -850,7 +851,13 @@ pub fn assign<'s>(spec: &'s ShaderSpec, members: &[MemberMap]) -> Vec<Option<&'s
 }
 
 /// SHADER-EXTRA-MAP per unused member (data `{"member", "shader"}`) and SHADER-MISSING-MAP per required role no
-/// member fills (data `{"map", "shader"}`), members first, then roles in table order.
+/// member fills (data `{"map", "shader"}`), members first, then roles in table order, then at most one
+/// SHADER-NORMAL-SPECULAR (data `{"member", "shader", "map"}`).
+///
+/// Note JP1: on `pbr` and `pbr_grass` the first unused vanilla `normal` / `landscape_normal` answers an unfilled `_n`
+/// with that Info in place of its EXTRA and the `_n` MISSING. The role table is not widened to take it, because a
+/// filled `_n` would add Also outputs and a bake (B3-4, B3-6). The message ends with the kept-DDS clause because
+/// `MemberMap` cannot tell a kept DDS from a converted source (B3-14).
 pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> Vec<Warning> {
     // TA29: a derived set's members were replaced by derived jobs, so its maps are not the shader's.
     if pick.provenance == ShaderOrigin::Derived {
@@ -866,11 +873,21 @@ pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> V
     let id = pick.shader.id();
     let spec = pick.shader.spec_for(target);
     let filled = assign(spec, members);
+    let unfilled = |r: &MapRole| !filled.iter().flatten().any(|f| std::ptr::eq(*f, r));
+    let answers_n = (matches!(pick.shader, Shader::Pbr | Shader::PbrGrass)
+        && spec.required.iter().any(|r| r.label == "_n" && unfilled(r)))
+    .then(|| {
+        members.iter().zip(&filled).position(|(m, r)| {
+            r.is_none() && matches!(m.subtype, Some(Subtype::Normal | Subtype::LandscapeNormal))
+        })
+    })
+    .flatten();
     let extra = members
         .iter()
         .zip(&filled)
-        .filter(|(_, r)| r.is_none())
-        .map(|(m, _)| {
+        .enumerate()
+        .filter(|&(i, (_, r))| r.is_none() && Some(i) != answers_n)
+        .map(|(_, (m, _))| {
             Warning::new(
                 Code::ShaderExtraMap,
                 format!(
@@ -883,7 +900,7 @@ pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> V
     let missing = spec
         .required
         .iter()
-        .filter(|r| !filled.iter().flatten().any(|f| std::ptr::eq(*f, *r)))
+        .filter(|r| unfilled(r) && !(answers_n.is_some() && r.label == "_n"))
         .map(|r| {
             Warning::new(
                 Code::ShaderMissingMap,
@@ -894,7 +911,20 @@ pub fn check_maps(pick: &ShaderPick, target: Target, members: &[MemberMap]) -> V
             )
             .with_data(serde_json::json!({"map": r.label, "shader": id}))
         });
-    extra.chain(missing).collect()
+    let specular = answers_n.map(|i| {
+        let m = &members[i];
+        Warning::new(
+            Code::ShaderNormalSpecular,
+            format!(
+                "{} is a vanilla normal: the {id} shader reads it as _n but ignores any specular in its alpha; set its \
+                 sub-type to pbr_normal to drop the alpha and let a _rmaos in the set be variance-baked from it (a DDS kept \
+                 as it is keeps its alpha)",
+                m.name
+            ),
+        )
+        .with_data(serde_json::json!({"member": m.name, "shader": id, "map": "_n"}))
+    });
+    extra.chain(missing).chain(specular).collect()
 }
 
 /// SHADER-AUTO for an `auto:` pick (data `{"shader", "rule"}`); SHADER-UNAVAILABLE for a fallback (data
@@ -1538,6 +1568,167 @@ mod tests {
         assert_eq!(w[0].data["member"], "lamp_p.dds");
         assert_eq!(w[1].data["map"], "_n");
         assert_eq!(w[2].data["map"], "_g");
+    }
+
+    /// The PBR set `[albedo, x_n.dds as st, rmaos]`.
+    fn pbr_set(st: Subtype) -> [MemberMap; 3] {
+        [
+            m("x.dds", None, Some(Subtype::PbrAlbedo)),
+            m("x_n.dds", Some("n"), Some(st)),
+            m("x_rmaos.dds", Some("rmaos"), Some(Subtype::Rmaos)),
+        ]
+    }
+
+    /// Named `pick_of`, not `pick`: `use super::*` brings the module's own `pick` into the tests.
+    fn pick_of(shader: Shader, provenance: ShaderOrigin) -> ShaderPick {
+        ShaderPick {
+            shader,
+            provenance,
+            wanted: None,
+        }
+    }
+
+    /// B3-1, B3-7 (Note JP1): an own vanilla normal answers pbr's and pbr_grass's `_n` with one Info, in place of
+    /// SHADER-EXTRA-MAP and SHADER-MISSING-MAP, whether the shader was picked or automatic.
+    #[test]
+    fn a_vanilla_normal_answers_pbr_n_with_an_info() {
+        use crate::codes::{Code::*, Severity};
+        for p in [
+            pick_of(Shader::Pbr, ShaderOrigin::Set),
+            pick_of(Shader::Pbr, ShaderOrigin::Auto(AutoRule::Pbr)),
+            pick_of(Shader::PbrGrass, ShaderOrigin::Set),
+            pick_of(Shader::PbrGrass, ShaderOrigin::Auto(AutoRule::PbrGrass)),
+        ] {
+            for st in [Subtype::Normal, Subtype::LandscapeNormal] {
+                let w = check_maps(&p, Target::Cs, &pbr_set(st));
+                assert_eq!(
+                    codes(&w),
+                    vec![ShaderNormalSpecular],
+                    "{:?} {st:?}",
+                    p.shader
+                );
+                assert_eq!(w[0].severity, Severity::Info);
+                assert_eq!(
+                    w[0].data,
+                    serde_json::json!({"member": "x_n.dds", "shader": p.shader.id(), "map": "_n"})
+                );
+                assert!(w[0].message.contains("variance-baked"), "{}", w[0].message);
+                assert!(
+                    w[0].message.contains("set its sub-type to pbr_normal"),
+                    "{}",
+                    w[0].message
+                );
+                assert!(
+                    w[0].message.contains("a DDS kept as it is keeps its alpha"),
+                    "{}",
+                    w[0].message
+                );
+            }
+        }
+    }
+
+    /// B3-7 (Note JP1): `msn`, a detail normal and a coat normal are not a tangent-space `_n`; nothing changes.
+    #[test]
+    fn msn_coat_and_detail_normals_still_miss_pbr_n() {
+        use crate::codes::Code::*;
+        let p = pick_of(Shader::Pbr, ShaderOrigin::Set);
+        for st in [Subtype::Msn, Subtype::DetailNormal] {
+            assert_eq!(
+                codes(&check_maps(&p, Target::Cs, &pbr_set(st))),
+                vec![ShaderExtraMap, ShaderMissingMap],
+                "{st:?}"
+            );
+        }
+        // A coat normal fills pbr's optional `coat _cnr`: `_n` is still missing, and nothing answers it.
+        let ms = [
+            m("x.dds", None, Some(Subtype::PbrAlbedo)),
+            m("x_cnr.dds", Some("cnr"), Some(Subtype::CoatNormal)),
+            m("x_rmaos.dds", Some("rmaos"), Some(Subtype::Rmaos)),
+        ];
+        assert_eq!(
+            codes(&check_maps(&p, Target::Cs, &ms)),
+            vec![ShaderMissingMap]
+        );
+    }
+
+    /// B3-7 (Note JP1): a `pbr_normal` fills `_n`, so a vanilla normal beside it keeps its EXTRA and there is no Info,
+    /// in either member order.
+    #[test]
+    fn a_pbr_normal_beside_a_vanilla_one_keeps_the_extra() {
+        use crate::codes::Code::*;
+        let p = pick_of(Shader::Pbr, ShaderOrigin::Set);
+        // `MemberMap` is not `Clone`: each order builds its own members.
+        let set = |plain_first: bool| {
+            let pbr_n = m("x_n.dds", Some("n"), Some(Subtype::PbrNormal));
+            let plain = m("x_normal.dds", Some("normal"), Some(Subtype::Normal));
+            let (a, b) = if plain_first {
+                (plain, pbr_n)
+            } else {
+                (pbr_n, plain)
+            };
+            [
+                m("x.dds", None, Some(Subtype::PbrAlbedo)),
+                a,
+                b,
+                m("x_rmaos.dds", Some("rmaos"), Some(Subtype::Rmaos)),
+            ]
+        };
+        for plain_first in [false, true] {
+            let w = check_maps(&p, Target::Cs, &set(plain_first));
+            assert_eq!(codes(&w), vec![ShaderExtraMap]);
+            assert_eq!(w[0].data["member"], "x_normal.dds");
+        }
+    }
+
+    /// B3-7 (Note JP1): of two vanilla normals the first in member order answers `_n`; the second keeps its EXTRA.
+    #[test]
+    fn two_vanilla_normals_the_first_answers_n() {
+        use crate::codes::Code::*;
+        let p = pick_of(Shader::PbrGrass, ShaderOrigin::Set);
+        let ms = [
+            m("g.dds", None, Some(Subtype::PbrAlbedo)),
+            m("g_n.dds", Some("n"), Some(Subtype::Normal)),
+            m(
+                "g_normal.dds",
+                Some("normal"),
+                Some(Subtype::LandscapeNormal),
+            ),
+            m("g_rmaos.dds", Some("rmaos"), Some(Subtype::Rmaos)),
+        ];
+        let w = check_maps(&p, Target::Cs, &ms);
+        assert_eq!(codes(&w), vec![ShaderExtraMap, ShaderNormalSpecular]);
+        assert_eq!(w[0].data["member"], "g_normal.dds");
+        assert_eq!(w[1].data["member"], "g_n.dds");
+    }
+
+    /// B3-7 (Note JP1, Note BM): PBR Landscape takes a vanilla normal as its `_n` and says nothing; Default (what a
+    /// `pbr` request falls back to on vanilla) and a derived pick are untouched.
+    #[test]
+    fn pbr_landscape_default_and_derived_raise_no_info() {
+        use crate::codes::Code::*;
+        let land = [
+            m("x.dds", None, Some(Subtype::LandscapeDiffuse)),
+            m("x_n.dds", Some("n"), Some(Subtype::Normal)),
+        ];
+        assert!(check_maps(
+            &pick_of(Shader::PbrLandscape, ShaderOrigin::Set),
+            Target::Cs,
+            &land
+        )
+        .is_empty());
+        let vanilla = [
+            m("x.dds", None, Some(Subtype::Diffuse)),
+            m("x_n.dds", Some("n"), Some(Subtype::Normal)),
+        ];
+        let fallback = ShaderPick {
+            shader: Shader::Default,
+            provenance: ShaderOrigin::Fallback,
+            wanted: Some(Shader::Pbr),
+        };
+        assert!(!codes(&check_maps(&fallback, Target::Vanilla, &vanilla))
+            .contains(&ShaderNormalSpecular));
+        let derived = pick_of(Shader::Pbr, ShaderOrigin::Derived);
+        assert!(check_maps(&derived, Target::Cs, &pbr_set(Subtype::Normal)).is_empty());
     }
 
     #[test]

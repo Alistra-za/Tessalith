@@ -140,11 +140,52 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .iter()
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
-    assert_eq!(engine::codes::Code::ALL.len(), 93);
-    assert_eq!(notes, 22);
+    assert_eq!(engine::codes::Code::ALL.len(), 94);
+    assert_eq!(notes, 23);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),
         RowClass::Problem
+    );
+}
+
+const NORMAL: &str = "landscape/rock01_normal.png";
+
+/// B3: rock01 on plain `pbr` with its own normal decided as vanilla `normal`: the engine's real Info, no injection.
+fn plain_normal_in_pbr(dir: &std::path::Path) -> AppModel {
+    let mut m = pbr_opened_plain(dir);
+    m.decide(
+        NORMAL,
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// B3-13 (Note JP3): the set loses one counted problem ("needs _n"); a note never takes Ready away, so the set reads
+/// Ready exactly when the same set with a `pbr_normal` does. Baseline: `pbr_opened_plain` (rock01's normal decided
+/// `pbr_normal`, DirectX green; `support/mod.rs` `pbr_opened`).
+#[test]
+fn the_set_loses_one_counted_problem_and_can_be_ready() {
+    use sdc_gui::model::bottom::{counts_for, set_ready, At};
+    let base_dir = tempfile::tempdir().unwrap();
+    let plain_dir = tempfile::tempdir().unwrap();
+    let base = pbr_opened_plain(base_dir.path());
+    let plain = plain_normal_in_pbr(plain_dir.path());
+    let counted = |m: &AppModel| {
+        let v = rock01(m);
+        let at = At::Set {
+            key: v.key.clone(),
+            id: v.id.clone(),
+        };
+        v.set_warnings
+            .iter()
+            .filter(|w| counts_for(m, &at, w))
+            .count()
+    };
+    assert_eq!(counted(&plain), counted(&base), "needs _n no longer counts");
+    assert_eq!(
+        set_ready(&plain, &rock01(&plain)),
+        set_ready(&base, &rock01(&base))
     );
 }
 

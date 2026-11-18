@@ -1212,3 +1212,76 @@ fn convert_logs_the_set_shader_warnings() {
     assert_eq!(code(&o), 0, "{err}");
     assert_eq!(err.matches("wall: SHADER-MISSING-MAP").count(), 1, "{err}");
 }
+
+/// B3-8, B3-12 (Note JP2): FX1 as it is. `sdc convert` logs no Info, so the plain normal's two false warnings go and
+/// nothing replaces them in its log; `sdc inspect` and `inspect --json` show SHADER-NORMAL-SPECULAR.
+#[test]
+fn a_plain_normal_in_a_pbr_set_is_an_info_that_inspect_shows_and_convert_does_not() {
+    let d = tempfile::tempdir().unwrap();
+    let a = d.path().join("in/textures/a");
+    std::fs::create_dir_all(&a).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([120u8, 90, 60]))
+        .save(a.join("wall.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(a.join("wall_n.png"))
+        .unwrap();
+    let sets = [
+        "--set",
+        "set:wall.shader=pbr",
+        "--set",
+        "file:**/wall.png.subtype=pbr_albedo",
+        "--set",
+        "file:**/wall_n.png.subtype=normal",
+    ];
+    let o = sdc()
+        .args(["convert", "--accept-suggestions", "high", "--recursive"])
+        .args(["--target", "cs"])
+        .args(sets)
+        .arg("-o")
+        .arg(d.path().join("out"))
+        .arg(d.path().join("in"))
+        .output()
+        .unwrap();
+    let err = text(&o.stderr);
+    assert_eq!(code(&o), 0, "{err}");
+    // The anchor: the set's real warning (it has no _rmaos) is still logged, so this is the log FX1 prints.
+    assert!(
+        err.contains("wall: SHADER-MISSING-MAP the pbr shader needs _rmaos"),
+        "{err}"
+    );
+    assert!(!err.contains("needs _n"), "{err}");
+    assert!(!err.contains("SHADER-EXTRA-MAP"), "{err}");
+    assert!(!err.contains("SHADER-NORMAL-SPECULAR"), "{err}");
+
+    let o = sdc()
+        .args(["inspect", "--recursive", "--target", "cs"])
+        .args(sets)
+        .arg(d.path().join("in"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let out = text(&o.stdout);
+    assert!(out.contains("SHADER-NORMAL-SPECULAR"), "{out}");
+    assert!(!out.contains("needs _n"), "{out}");
+
+    let o = sdc()
+        .args(["inspect", "--json", "--recursive", "--target", "cs"])
+        .args(sets)
+        .arg(d.path().join("in"))
+        .output()
+        .unwrap();
+    assert_eq!(code(&o), 0, "{}", text(&o.stderr));
+    let codes: Vec<String> = text(&o.stdout)
+        .lines()
+        .map(|l| serde_json::from_str::<serde_json::Value>(l).unwrap())
+        .filter(|v| v["kind"] == "set_resolved")
+        .flat_map(|v| v["warnings"].as_array().cloned().unwrap_or_default())
+        .filter_map(|w| w["code"].as_str().map(str::to_string))
+        .collect();
+    assert!(
+        codes.iter().any(|c| c == "SHADER-NORMAL-SPECULAR"),
+        "{codes:?}"
+    );
+    assert!(!codes.iter().any(|c| c == "SHADER-EXTRA-MAP"), "{codes:?}");
+}
