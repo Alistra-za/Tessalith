@@ -20,6 +20,65 @@ fn committed_schemas_match_the_types() {
     }
 }
 
+/// Unit enums already written as `oneOf` in a committed schema: (file, path of the definition). Ruling R4
+/// (skill-checks plan): the committed schema stays as it is, and switching these variants' docs to `//` is
+/// the owner's call.
+const UNIT_ENUMS_AS_ONE_OF: &[(&str, &str)] = &[
+    // `Need`: its variants carry `///` docs, so the schema is `oneOf` instead of an `enum` list.
+    ("event.schema.json", "$defs/Need"),
+    // `RecipeKind`: same.
+    ("event.schema.json", "$defs/RecipeKind"),
+    // `RecipeStatus`: same.
+    ("event.schema.json", "$defs/RecipeStatus"),
+];
+
+/// Collects the path of every `oneOf` whose members are all objects with a string `const`.
+fn unit_enum_one_ofs(node: &serde_json::Value, path: &str, out: &mut Vec<String>) {
+    match node {
+        serde_json::Value::Object(map) => {
+            if let Some(members) = map.get("oneOf").and_then(|m| m.as_array()) {
+                let all_const = !members.is_empty()
+                    && members
+                        .iter()
+                        .all(|m| m.get("const").is_some_and(|c| c.is_string()));
+                if all_const {
+                    out.push(path.to_string());
+                }
+            }
+            for (k, v) in map {
+                unit_enum_one_ofs(v, &format!("{path}/{k}"), out);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for (i, v) in items.iter().enumerate() {
+                unit_enum_one_ofs(v, &format!("{path}/{i}"), out);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// A `///` doc comment on an enum variant turns the enum's schema into `oneOf` (one object per variant with a
+/// string `const`) instead of a plain `enum` list. Data-carrying enums are `oneOf` by nature and do not match.
+#[test]
+fn a_unit_enum_is_never_written_as_one_of_in_a_committed_schema() {
+    for kind in SchemaKind::FILES {
+        let file = kind.file_name();
+        let text = std::fs::read_to_string(schema_dir().join(&file)).expect("committed schema");
+        let v: serde_json::Value = serde_json::from_str(&text).unwrap();
+        let mut hits = Vec::new();
+        unit_enum_one_ofs(&v, "", &mut hits);
+        for hit in hits {
+            let path = hit.trim_start_matches('/');
+            assert!(
+                UNIT_ENUMS_AS_ONE_OF.contains(&(file.as_str(), path)),
+                "schema/{file}: `{path}` is a unit enum written as `oneOf`, because its variants have `///` docs. \
+                 Use `//` on the variants, then regenerate with `sdc presets schema all --out schema`."
+            );
+        }
+    }
+}
+
 #[test]
 fn schema_dir_holds_exactly_the_published_files() {
     let mut found: Vec<String> = std::fs::read_dir(schema_dir())
