@@ -192,6 +192,14 @@ fn header_value(h: &H, t: &str) -> String {
         .unwrap_or_else(|| panic!("no header value beside {t}"))
 }
 
+/// C14: a feature's group repeats neither its state nor its mode in the header.
+fn header_has_no_value(h: &H, t: &str) -> bool {
+    let r = title(h, t).rect();
+    h.query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x > r.max.x && (n.rect().center().y - r.center().y).abs() < 2.0)
+        .all(|n| n.value().is_none())
+}
+
 #[test]
 fn the_material_groups_are_framed_in_order_with_values() {
     let d = tempfile::tempdir().unwrap();
@@ -214,7 +222,7 @@ fn the_material_groups_are_framed_in_order_with_values() {
     .collect();
     assert!(ys.windows(2).all(|w| w[0] < w[1]), "{ys:?}");
     assert!(h.query_all_by_label("Coat").next().is_none());
-    assert_eq!(header_value(&h, "Subsurface"), "Off");
+    assert!(header_has_no_value(&h, "Subsurface"));
     assert_eq!(header_value(&h, "Matching"), "1 match");
     assert_eq!(header_value(&h, "NiAlphaProperty"), "off");
     assert_eq!(header_value(&h, "CS PBR records"), "0 records");
@@ -233,7 +241,7 @@ fn turning_multilayer_on_opens_the_coat_group() {
     h.run();
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    assert_eq!(header_value(&h, "Coat"), "on");
+    assert!(header_has_no_value(&h, "Coat"));
     h.get_by_label("Coat colour");
 }
 
@@ -436,20 +444,14 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
     h.run();
     h.get_by_label("Multilayer (coat)").click();
     h.run();
-    assert_eq!(header_value(&h, "Coat"), "on");
+    assert!(header_has_no_value(&h, "Coat"));
     h.get_by_label("Emissive").scroll_to_me();
     h.run();
     h.get_by_label("Emissive").click();
     h.run();
     let p = centre(&h);
-    for t in [
-        "Coat",
-        "Subsurface",
-        "Emissive settings",
-        "NiAlphaProperty",
-        "Matching",
-        "CS PBR records",
-    ] {
+    // C14: the feature groups (Coat, Subsurface, Emissive settings) have no header value any more.
+    for t in ["NiAlphaProperty", "Matching", "CS PBR records"] {
         let r = title(&h, t).rect();
         let v = h
             .query_all_by_role(Role::Label)

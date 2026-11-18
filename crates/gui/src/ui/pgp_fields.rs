@@ -262,25 +262,20 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                 continue;
             }
         }
-        // C14 (Note FB2): a feature's state shows once, in its own group's header; the Features ticks carry no count.
+        // C14 (Note FB2): a feature's state shows once, in its control (the Features ticks, the Subsurface selector). A
+        // header says only what shows nowhere else: the amber reason a feature on in the JSON is blocked.
         let head = match g {
-            Group::Material | Group::Features => None,
             Group::Subsurface => {
                 let mode = sub_mode(&c.eff);
                 if mode == SubMode::Off {
-                    value(sub_text(mode))
+                    None
                 } else {
                     blocked_head(Feature::Subsurface, &c.eff, sub_text(mode))
-                        .or_else(|| value(sub_text(mode)))
                 }
             }
-            _ => match group_feature(g)
+            _ => group_feature(g)
                 .filter(|f| feature_on(&c.eff, *f))
-                .and_then(|f| blocked_head(f, &c.eff, "on"))
-            {
-                Some(blocked) => Some(blocked),
-                None => value(if on { "on" } else { "off" }),
-            },
+                .and_then(|f| blocked_head(f, &c.eff, "on")),
         };
         // K16: the id carries the state, so a group opens when its feature turns on and closes when it turns off.
         super::group::group(

@@ -60,8 +60,8 @@ pub fn card(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, noise_uv: Opti
     let off = m.sets_read_only_reason();
     let editable = off.is_none();
     let why = off.unwrap_or_default();
-    let head = egui::RichText::new(if block.is_some() { "on" } else { "off" }).weak();
-    super::group::group(ui, ("xpmf", v.id.as_str()), CARD, Some(head), true, |ui| {
+    // C14: the checkbox inside is the one control showing on or off.
+    super::group::group(ui, ("xpmf", v.id.as_str()), CARD, None, true, |ui| {
         ui.add_enabled_ui(editable, |ui| {
             let mut on = block.is_some();
             if ui

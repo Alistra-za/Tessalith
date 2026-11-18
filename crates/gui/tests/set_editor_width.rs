@@ -159,6 +159,61 @@ fn the_features_group_has_no_header_value() {
     assert!(beside.is_empty(), "Features header value {beside:?}");
 }
 
+/// The header values beside a group title: the "beside labels" form of `the_features_group_has_no_header_value`.
+fn beside(h: &H, title: &str) -> Vec<String> {
+    let t = h
+        .query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap_or_else(|| panic!("the {title} group"))
+        .rect();
+    h.query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x > t.max.x && (n.rect().center().y - t.center().y).abs() < 2.0)
+        .filter_map(|n| n.value().map(|v| v.to_string()))
+        .collect()
+}
+
+/// C14: a feature's state shows once, in its control and the Features ticks, never again in the group's header.
+#[test]
+fn a_feature_group_header_has_no_state_word() {
+    for (title, key) in [
+        ("Emissive settings", "emissive"),
+        ("Coat", "multilayer"),
+        ("Glint settings", "glint_on"),
+        ("Fuzz settings", "fuzz_on"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, id) = rock_set(d.path());
+        // One feature on: nothing blocks it.
+        m.set_json_value(&id, key, Some(serde_json::Value::Bool(true)));
+        let mut h = harness(m, 1400.0);
+        h.run();
+        let words = beside(&h, title);
+        assert!(
+            !words.iter().any(|w| w == "on" || w == "off"),
+            "{title} header repeats its state: {words:?}"
+        );
+    }
+}
+
+/// C14: the Subsurface selector inside the group shows the mode, so the header does not.
+#[test]
+fn the_subsurface_header_has_no_mode_word() {
+    for on in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, id) = rock_set(d.path());
+        if on {
+            m.set_json_value(&id, "subsurface", Some(serde_json::Value::Bool(true)));
+        }
+        let mut h = harness(m, 1400.0);
+        h.run();
+        let words = beside(&h, "Subsurface");
+        assert!(
+            words.is_empty(),
+            "Subsurface header (on {on}) repeats its mode: {words:?}"
+        );
+    }
+}
+
 /// C14: the Assign… menu's header is the slot label, once ("Emissive / Skin (slot 3)", not "Slot 3: Emissive / Skin
 /// (slot 3)").
 #[test]
