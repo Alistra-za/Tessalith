@@ -736,6 +736,11 @@ mod tests {
         // one appears.
         let ctors = ["thin", "solid", "floating"].map(|k| format!("ScrollStyle::{k}("));
         let targets = ["spacing.scroll", "spacing_mut().scroll"];
+        // The call under any path, ending the statement or a brace-less closure's argument.
+        let thin = regex::Regex::new(
+            r"^\s*(?:(?:crate|super|sdc_gui)::)*look::thin_scroll\(\)\s*(?:$|[),])",
+        )
+        .unwrap();
         let (mut bad_ctor, mut bad_assign, mut through) = (vec![], vec![], 0);
         for f in &src_rs_files() {
             let text = std::fs::read_to_string(f).unwrap();
@@ -754,9 +759,7 @@ mod tests {
                         continue;
                     };
                     let rhs = &rhs[..rhs.find(';').unwrap_or(rhs.len())];
-                    if rhs.trim() == "look::thin_scroll()"
-                        || rhs.trim() == "crate::look::thin_scroll()"
-                    {
+                    if thin.is_match(rhs) {
                         through += 1;
                     } else {
                         bad_assign.push(line(at));
@@ -767,7 +770,7 @@ mod tests {
         assert!(through >= 10, "the scan found {through} thin_scroll sites");
         assert!(
             bad_ctor.is_empty(),
-            "{through} assignments read; ScrollStyle built outside look.rs; call look::thin_scroll() instead: {bad_ctor:#?}"
+            "ScrollStyle built outside look.rs; call look::thin_scroll() instead: {bad_ctor:#?}"
         );
         assert!(
             bad_assign.is_empty(),

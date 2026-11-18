@@ -70,11 +70,12 @@ fn unit_enum_one_ofs(node: &serde_json::Value, path: &str, out: &mut Vec<String>
     }
 }
 
-/// A `///` doc comment on an enum variant turns the enum's schema into `oneOf` (one object per variant with a
-/// string `const`) instead of a plain `enum` list. Data-carrying enums are `oneOf` by nature and do not match.
+/// A `///` doc comment on an enum variant turns the enum's schema into `oneOf` (string `const` members, alone or
+/// with one `type: string` `enum` member) instead of a plain `enum` list. Data-carrying enums are `oneOf` by nature
+/// and do not match. An allowlist entry whose enum is no longer `oneOf` fails too.
 #[test]
 fn a_unit_enum_is_never_written_as_one_of_in_a_committed_schema() {
-    let mut failures = Vec::new();
+    let (mut failures, mut matched) = (Vec::new(), Vec::new());
     for kind in SchemaKind::FILES {
         let file = kind.file_name();
         let text = std::fs::read_to_string(schema_dir().join(&file)).expect("committed schema");
@@ -83,7 +84,9 @@ fn a_unit_enum_is_never_written_as_one_of_in_a_committed_schema() {
         unit_enum_one_ofs(&v, "", &mut hits);
         for hit in hits {
             let path = hit.trim_start_matches('/');
-            if !UNIT_ENUMS_AS_ONE_OF.contains(&(file.as_str(), path)) {
+            if UNIT_ENUMS_AS_ONE_OF.contains(&(file.as_str(), path)) {
+                matched.push((file.clone(), path.to_string()));
+            } else {
                 failures.push(format!("schema/{file}: `{path}`"));
             }
         }
@@ -94,6 +97,14 @@ fn a_unit_enum_is_never_written_as_one_of_in_a_committed_schema() {
          then regenerate with `sdc presets schema all --out schema`:\n{}",
         failures.join("\n")
     );
+    let stale: Vec<String> = UNIT_ENUMS_AS_ONE_OF
+        .iter()
+        .filter(|(f, p)| !matched.iter().any(|(mf, mp)| mf == f && mp == p))
+        .map(|(f, p)| {
+            format!("the unit enum `{p}` in schema/{f} is no longer `oneOf`; delete its entry in UNIT_ENUMS_AS_ONE_OF")
+        })
+        .collect();
+    assert!(stale.is_empty(), "{}", stale.join("\n"));
 }
 
 /// The matcher: a `oneOf` of one `const` member and one `enum` member (some variants documented) matches; a

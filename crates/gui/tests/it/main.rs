@@ -399,6 +399,19 @@ fn process_state_needles() -> Vec<String> {
     ]
 }
 
+/// True when `line` holds a needle that does not continue an identifier: the byte before it is not a letter, a digit
+/// or `_`, so `offset_var(` and `unset_var(` are not `set_var(`.
+fn holds_needle(line: &str, needles: &[String]) -> bool {
+    needles.iter().any(|s| {
+        line.match_indices(s.as_str()).any(|(at, _)| {
+            !line[..at]
+                .bytes()
+                .next_back()
+                .is_some_and(|b| b.is_ascii_alphanumeric() || b == b'_')
+        })
+    })
+}
+
 /// Reads `root` and every `mod x;` file under it: a `#[path]` on the line above, else `x/mod.rs` or `x.rs` beside
 /// the declaring file. A declaration it cannot resolve goes to `unresolved` as `file:line`. Files already in `seen`
 /// are skipped.
@@ -458,7 +471,7 @@ fn no_it_module_changes_process_state() {
         let file = &rest[..rest.find('"').unwrap()];
         for (p, text) in read_modules(&dir.join(file), &mut seen, &mut unresolved) {
             for (n, l) in text.lines().enumerate() {
-                if needles.iter().any(|s| l.contains(s.as_str())) {
+                if holds_needle(l, &needles) {
                     hits.push(format!("{}:{}", p.display(), n + 1));
                 }
             }
@@ -472,7 +485,7 @@ fn no_it_module_changes_process_state() {
     );
     assert!(
         hits.is_empty(),
-        "{scanned} files read; a module of the `it` binary changes process-wide state; give the file a [[test]] entry in crates/gui/Cargo.toml instead of a module line in tests/it/main.rs: {hits:#?}"
+        "{scanned} files read; a module of the `it` binary changes process-wide state; give the file a [[test]] entry in crates/gui/Cargo.toml instead of a module line in tests/it/main.rs, or, if the hit is in a shared module, move the call into the [[test]] file that needs it: {hits:#?}"
     );
 }
 
@@ -520,9 +533,11 @@ fn process_state_needles_match_the_files_kept_apart() {
             &mut Default::default(),
             &mut unresolved,
         );
-        let holds = files
-            .iter()
-            .any(|(_, t)| needles.iter().any(|s| t.contains(s.as_str())));
+        // A needle in a comment (a doc line naming the wrapper) does not count: the real call must be there.
+        let holds = files.iter().any(|(_, t)| {
+            t.lines()
+                .any(|l| !l.trim_start().starts_with("//") && holds_needle(l, &needles))
+        });
         if !holds {
             bare.push(name);
         }
