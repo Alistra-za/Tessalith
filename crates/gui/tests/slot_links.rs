@@ -2495,8 +2495,8 @@ fn the_click_checks_the_plan_again_without_the_rows_cache() {
 }
 
 /// Rulings 3b-F21 and 3b-F24: with an Also tick on CS (where the output folder is made of the export configuration and
-/// the export folder), a warm menu call with members reads each 4 times: the two views lookups a menu with none listed
-/// makes, the rows' cache key (its views key) and `output_roots`; nothing per listed member or per item. The uncached
+/// the export folder), a warm menu with members reads each twice, for the rows' cache key and `output_roots`.
+/// Warm views add no root read, whatever the number of listed members or items. The uncached
 /// settled check reads the same on a bigger project, and the link index reads them once beside its views. While a plan
 /// is out the list adds no read beyond the views lookups and builds no export inputs.
 #[test]

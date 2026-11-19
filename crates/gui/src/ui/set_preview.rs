@@ -77,6 +77,7 @@ pub fn draw(ui: &mut egui::Ui, m: &mut AppModel, s: &mut SetPreview) {
     }
     let Some((simulated, landscape, grass)) =
         s.fp.as_ref()
+            .filter(|fp| Some(&fp.set_key) == active.target.as_ref())
             .map(|fp| (fp.entry.is_some(), fp.landscape, fp.grass))
     else {
         ui.label(PREPARING);
@@ -511,8 +512,7 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
     let skin = set.is_some_and(|v| v.skin);
     // The CS PBR section (CS target) and the complex material card show here too, as they do in 2D.
     let cs = set.is_some() && m.target == engine::config::Target::Cs;
-    let cm = set.is_some_and(|v| crate::model::cm_json::shows_card(m, v));
-    if item.is_none() && !json && !skin && !cs && !cm {
+    if item.is_none() && !json && !skin && !cs && !set.is_some_and(|v| v.shows_cm_card) {
         m.settings.set_settings_open = false;
         m.save_settings();
         return;
@@ -544,10 +544,7 @@ pub fn settings_window(ctx: &egui::Context, m: &mut AppModel, three_d: bool) {
             if let Some(v) = current.view() {
                 let json = crate::model::sets::shows_json_panel(v, m.target);
                 if item.is_some()
-                    && (json
-                        || v.skin
-                        || m.target == engine::config::Target::Cs
-                        || crate::model::cm_json::shows_card(m, v))
+                    && (json || v.skin || m.target == engine::config::Target::Cs || v.shows_cm_card)
                 {
                     ui.separator();
                     ui.strong(format!("Set {}", v.id));

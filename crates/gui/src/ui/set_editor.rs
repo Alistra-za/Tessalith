@@ -231,7 +231,7 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
             if let Some(code) = p.code.filter(|_| is_hidden(&p, &model.hidden_kinds())) {
                 model.set_kind_hidden(code, false);
             }
-            model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));
+            model.open_set_problems(crate::model::SetTarget::view(v));
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
         Act::Problems => {

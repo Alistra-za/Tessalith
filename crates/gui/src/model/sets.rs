@@ -396,6 +396,7 @@ pub struct SetView {
     pub(crate) output_name: Option<String>,
     pub(crate) cs_txst: Option<Box<super::cs_pbr::CsBlock>>,
     pub(crate) cs_mato: Option<Box<super::cs_pbr::CsBlock>>,
+    pub(crate) shows_cm_card: bool,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
     /// The id's last parts that tell it from every other set (see [`short_names`]). Set by `build_views`; a view
@@ -702,6 +703,7 @@ impl SetView {
             output_name: None,
             cs_txst: None,
             cs_mato: None,
+            shows_cm_card: false,
             recipes: vec![],
             short: String::new(),
             linked: BTreeMap::new(),
@@ -1653,6 +1655,7 @@ fn entry_view(
     v.output_name.clone_from(&e.output_name);
     v.cs_txst = e.cs_txst.clone().map(Box::new);
     v.cs_mato = e.cs_mato.clone().map(Box::new);
+    v.shows_cm_card = e.cm.is_some();
     if v.key.is_empty() && !e.created {
         v.missing.push(Missing::NoFilesLeft);
     }
@@ -1805,9 +1808,11 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         let Some(i) = m.item(key) else {
             continue;
         };
-        let Some(out) = i.job.as_ref().map(|j| &j.output) else {
+        let Some(job) = i.job.as_ref() else {
             continue;
         };
+        v.shows_cm_card |= super::cm_json::is_cm_member(v, job.profile.subtype);
+        let out = &job.output;
         if !v.outputs.iter().any(|(_, _, p)| p == out) {
             v.outputs.push((slot_of(i), key.clone(), out.clone()));
         }

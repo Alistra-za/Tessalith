@@ -1653,14 +1653,6 @@ pub fn draw(
     let reflowed = reflow_heights(st, &views, card_w, frame_x);
     // A new width moves the open card away from the scroll offset: bring it back into view (Note HN).
     let active = model.resolved_selection();
-    let single =
-        matches!(active.selection, Selection::Set(_) | Selection::SetId(_)) && !model.in_bulk();
-    if reflowed && model.nav.reveal_set.is_none() && single {
-        if let Some(k) = &active.target {
-            st.quiet_reveal = Some(k.clone());
-            model.nav.reveal_set = Some(k.clone());
-        }
-    }
     let est = if st.card_h.is_empty() {
         CARD_EST
     } else {
@@ -1680,6 +1672,15 @@ pub fn draw(
         }
     };
     let mut to_top = false;
+    let single = (reflowed || changed)
+        && matches!(active.selection, Selection::Set(_) | Selection::SetId(_))
+        && !model.in_bulk();
+    if reflowed && model.nav.reveal_set.is_none() && single {
+        if let Some(k) = &active.target {
+            st.quiet_reveal = Some(k.clone());
+            model.nav.reveal_set = Some(k.clone());
+        }
+    }
     if changed {
         match &active.target {
             Some(k)

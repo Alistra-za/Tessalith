@@ -58,6 +58,36 @@ fn harness_with(
 }
 
 #[test]
+fn clicking_another_sets_texture_waits_for_its_preview_poll() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(d.path(), false, 1400.0, true);
+    h.get_by_label(FRAME_LABEL);
+    let (m, state) = h.state_mut();
+    state.set3d.poll(m);
+    assert_eq!(state.set3d.fp.as_ref().unwrap().label, "landscape/rock01");
+    h.get_by_label("leaf.png").click();
+    h.run();
+    assert_eq!(
+        h.state().0.resolved_selection().view().unwrap().id,
+        "landscape/leaf"
+    );
+    assert!(
+        h.query_by_label(sdc_gui::ui::set_preview::PREPARING)
+            .is_some(),
+        "the new texture must wait for its own fingerprint"
+    );
+    assert!(h.query_by_label(FRAME_LABEL).is_none());
+    let (m, state) = h.state_mut();
+    state.set3d.poll(m);
+    h.run();
+    assert_eq!(
+        h.state().1.set3d.fp.as_ref().unwrap().label,
+        "landscape/leaf"
+    );
+    h.get_by_label(FRAME_LABEL);
+}
+
+#[test]
 fn texture_follow_reuses_one_resolution_across_frames() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness_on(pbr_opened(d.path()), egui::vec2(1400.0, 900.0), |m| {
@@ -92,6 +122,39 @@ fn texture_follow_reuses_one_resolution_across_frames() {
         h.state().1.set3d.fp.as_ref().unwrap().label,
         "landscape/rock01"
     );
+}
+
+#[test]
+fn vanilla_member_settings_reuse_the_complex_material_card_decision() {
+    use engine::config::Target;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_on(pbr_opened(d.path()), egui::vec2(1400.0, 900.0), |m| {
+        m.set_target(Target::Vanilla);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        m.select_item("landscape/leaf.png");
+        m.settings.set_settings_open = true;
+    });
+    h.get_by_label("leaf.png settings");
+    let (m, _) = h.state();
+    let active = m.resolved_selection();
+    let v = active.view().unwrap();
+    assert_eq!(m.target, Target::Vanilla);
+    assert_eq!(v.id, "landscape/leaf");
+    assert!(!v.skin && !sdc_gui::model::sets::shows_json_panel(v, m.target));
+    let reads = m.doc_block_reads.get();
+    for _ in 0..5 {
+        h.step();
+        let (m, state) = h.state_mut();
+        state.set3d.poll(m);
+    }
+    assert_eq!(
+        h.state().0.doc_block_reads.get(),
+        reads,
+        "settings searched the document on idle frames"
+    );
+    h.state_mut().0.set_cm_export(&v.id, true);
+    h.run();
+    h.get_by_label(sdc_gui::ui::cm_card::SECTION);
 }
 
 #[test]
@@ -232,6 +295,8 @@ fn a_member_keeps_the_3d_view_and_2d_shows_its_normal_view() {
     h.get_by_label("3D");
     if let Some((k, n)) = other {
         h.state_mut().0.selection = Selection::Item(k);
+        let (m, state) = h.state_mut();
+        state.set3d.poll(m);
         h.run_steps(3);
         h.get_by_label(FRAME_LABEL);
         h.get_by_label(&format!("{n} settings"));

@@ -4,8 +4,8 @@
 use super::review::{apply, fix_buttons, RowPick};
 use super::status::{dot, Status};
 use crate::model::bottom::{
-    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered, flagged, is_hidden,
-    kinds, problems, At, Fix, Level, Problem, ProblemsFilter, TabCounts, USE_PBR_NORMAL,
+    cached_tab_counts, can_hide, count_in_set, counts_as_check, filtered_by, flagged, is_hidden,
+    kinds, problems, At, Fix, Level, NameKind, Problem, ProblemsFilter, TabCounts, USE_PBR_NORMAL,
 };
 use crate::model::code_text;
 use crate::model::items::{alpha_asked, Decision};
@@ -80,6 +80,7 @@ fn lead_width(ui: &egui::Ui, p: &Problem) -> f32 {
 fn link_text(p: &Problem) -> &str {
     match &p.at {
         At::Texture(k) | At::File(k) | At::Nif(k) => k.as_str(),
+        At::Set { id, .. } if id.is_empty() => "Unnamed set",
         At::Set { id, .. } => id.as_str(),
         At::Project => "Project",
     }
@@ -120,6 +121,7 @@ type Rows = Arc<Vec<Problem>>;
 struct Listed {
     all: Rows,
     filter: Option<ProblemsFilter>,
+    name_kind: NameKind,
     hidden_kinds: Vec<Code>,
     rows: Rows,
     checks: usize,
@@ -142,18 +144,23 @@ struct Listed {
 fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let all = problems(model);
     let f = model.bottom.filter.clone();
+    let kind = model.bottom.name_kind;
     let hidden_kinds = model.hidden_kinds();
     let id = egui::Id::unique("problems-rows");
     if let Some(l) = ui.data(|d| d.get_temp::<Listed>(id)) {
-        if Arc::ptr_eq(&l.all, &all) && l.filter == f && l.hidden_kinds == hidden_kinds {
+        if Arc::ptr_eq(&l.all, &all)
+            && l.filter == f
+            && l.name_kind == kind
+            && l.hidden_kinds == hidden_kinds
+        {
             return l;
         }
     }
-    let out: Rows = filtered(model, f.as_ref());
+    let out: Rows = filtered_by(model, f.as_ref(), kind);
     // The Checks pill under a set's list or its notes leads to the set's checks, so it counts those.
     let checks = match &f {
         Some(ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k)) => {
-            count_in_set(model, k, counts_as_check)
+            count_in_set(model, k, kind, counts_as_check)
         }
         _ => flagged(model).check_rows,
     };
@@ -162,7 +169,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
     let set_notes = match &f {
         Some(
             ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),
-        ) => Some(count_in_set(model, k, |p| {
+        ) => Some(count_in_set(model, k, kind, |p| {
             p.is_note() && !is_hidden(p, &hidden_kinds)
         })),
         _ => None,
@@ -189,6 +196,7 @@ fn rows(ui: &egui::Ui, model: &AppModel) -> Listed {
         hideable: all.iter().any(can_hide),
         all,
         filter: f,
+        name_kind: kind,
         hidden_kinds: hidden_kinds.clone(),
         rows,
         checks,
@@ -1064,7 +1072,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
     let mut act = None;
-    let label = |k: &String| crate::model::bottom::cached_scope_label(model, k);
+    let label =
+        |k: &String| crate::model::bottom::cached_scope_label(model, k, model.bottom.name_kind);
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
     let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
     if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {

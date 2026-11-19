@@ -29,6 +29,8 @@ pub struct BottomPanel {
     pub open: bool,
     pub tab: BottomTab,
     pub filter: Option<ProblemsFilter>,
+    /// How the open set filter names its card, retained when switching between its checks and notes.
+    pub(crate) name_kind: NameKind,
 }
 
 /// Note HC4: a row its kind can hide. A block or a question never hides, and hiding never touches the Review gate,
@@ -97,6 +99,7 @@ impl AppModel {
             open: true,
             tab,
             filter: None,
+            name_kind: NameKind::Filter,
         };
         self.sync_messages_open();
     }
@@ -110,6 +113,7 @@ impl AppModel {
                 open: true,
                 tab,
                 filter: None,
+                name_kind: NameKind::Filter,
             };
         }
         self.sync_messages_open();
@@ -563,6 +567,15 @@ impl AppModel {
     pub fn open_problems(&mut self, f: Option<ProblemsFilter>) {
         self.show_tab(BottomTab::Problems);
         self.bottom.filter = f;
+    }
+
+    pub(crate) fn open_set_problems(&mut self, target: super::SetTarget) {
+        let (name, kind) = match target {
+            super::SetTarget::Key(k) => (k, NameKind::Key),
+            super::SetTarget::Id(id) => (id, NameKind::Id),
+        };
+        self.open_problems(Some(ProblemsFilter::Set(name)));
+        self.bottom.name_kind = kind;
     }
 
     /// Note FC3: the NIF edit's problems, handed over by `app.rs` each frame. Only a new snapshot rebuilds Problems.
@@ -1583,6 +1596,14 @@ fn unreadable_folder(message: &str) -> Option<PathBuf> {
 /// The list narrowed by `f`: a set keeps its own rows and its members' rows; `Undecided` keeps the Decide rows.
 /// `None` and `Set` list the worklist (`Problem::in_worklist`); `Notes` and `SetNotes` list every note.
 pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
+    filtered_by(m, f, NameKind::Filter)
+}
+
+pub(crate) fn filtered_by(
+    m: &AppModel,
+    f: Option<&ProblemsFilter>,
+    kind: NameKind,
+) -> Arc<Vec<Problem>> {
     #[cfg(feature = "test-hooks")]
     m.filter_builds.set(m.filter_builds.get() + 1);
     let all = problems(m);
@@ -1590,7 +1611,7 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
         None => worklist(&all, &|_| true),
         Some(ProblemsFilter::Notes) => all.iter().filter(|p| p.is_note()).cloned().collect(),
         Some(ProblemsFilter::SetNotes(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| p.is_note() && in_set(p, &s))
                 .cloned()
@@ -1605,11 +1626,11 @@ pub fn filtered(m: &AppModel, f: Option<&ProblemsFilter>) -> Arc<Vec<Problem>> {
             all.iter().filter(|p| counts_as_check(p)).cloned().collect()
         }
         Some(ProblemsFilter::Set(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             worklist(&all, &|p| in_set(p, &s))
         }
         Some(ProblemsFilter::SetChecks(k)) => {
-            let s = scope(m, k);
+            let s = scope(m, k, kind);
             all.iter()
                 .filter(|p| counts_as_check(p) && in_set(p, &s))
                 .cloned()
@@ -1630,8 +1651,13 @@ fn worklist(all: &[Problem], keep: &dyn Fn(&Problem) -> bool) -> Vec<Problem> {
 
 /// How many of the set's own rows and members' rows pass `keep`, without cloning them. `key` is a set's scope key
 /// (`scope_key`: its key, or a key-less set's id).
-pub fn count_in_set(m: &AppModel, key: &str, keep: impl Fn(&Problem) -> bool) -> usize {
-    let s = scope(m, key);
+pub(crate) fn count_in_set(
+    m: &AppModel,
+    key: &str,
+    kind: NameKind,
+    keep: impl Fn(&Problem) -> bool,
+) -> usize {
+    let s = scope(m, key, kind);
     problems(m)
         .iter()
         .filter(|p| in_set(p, &s) && keep(p))
@@ -1661,12 +1687,18 @@ impl Scope {
 /// set follows it once it has a key (Note JP5), and last the key-less set whose key would be `s` (`set_key` of `root`
 /// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
 /// and has no key. The key wins. `None` for the empty string.
-fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
-    view_lookup(views, root, s, NameKind::Filter).map(|(i, _)| &views[i])
+fn view_of<'a>(
+    views: &'a [sets::SetView],
+    root: &Path,
+    s: &str,
+    kind: NameKind,
+) -> Option<&'a sets::SetView> {
+    view_lookup(views, root, s, kind).map(|(i, _)| &views[i])
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum NameKind {
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NameKind {
+    #[default]
     Filter,
     Key,
     Id,
@@ -1730,23 +1762,29 @@ impl AppModel {
         else {
             return false;
         };
-        let views = sets::views(self);
-        view_lookup(&views, &self.sets_root(), k, NameKind::Filter).is_some_and(|(_, by_id)| by_id)
+        match self.bottom.name_kind {
+            NameKind::Id => true,
+            NameKind::Key => false,
+            NameKind::Filter => {
+                view_lookup(&sets::views(self), &self.sets_root(), k, NameKind::Filter)
+                    .is_some_and(|(_, by_id)| by_id)
+            }
+        }
     }
 }
 
 /// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip
 /// (read through `cached_scope_label`); `s` itself when no set matches.
-fn scope_label(m: &AppModel, s: &str) -> String {
+fn scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
     #[cfg(feature = "test-hooks")]
     m.scope_label_lookups.set(m.scope_label_lookups.get() + 1);
     let views = sets::views(m);
-    view_of(&views, &m.sets_root(), s).map_or_else(|| s.to_string(), |v| v.id.clone())
+    view_of(&views, &m.sets_root(), s, kind).map_or_else(|| s.to_string(), |v| v.id.clone())
 }
 
 /// `scope_label` for the Problems chip, which is drawn every frame (final wave Group 7, ledger 253): looked up once
 /// per set views build and stored key `s`. The views live in the same cache cell, which is emptied when they change.
-pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
+pub(crate) fn cached_scope_label(m: &AppModel, s: &str, kind: NameKind) -> String {
     // Before the borrow: `views` writes the same cell.
     let views = sets::views(m);
     if let Some((.., l)) = m
@@ -1754,22 +1792,26 @@ pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
         .borrow()
         .scope_label
         .as_ref()
-        .filter(|(v, k, _)| Arc::ptr_eq(v, &views) && k == s)
+        .filter(|(v, k, n, _)| Arc::ptr_eq(v, &views) && k == s && *n == kind)
     {
         return l.clone();
     }
-    let l = scope_label(m, s);
-    m.views.borrow_mut().scope_label = Some((views, s.to_string(), l.clone()));
+    let l = scope_label(m, s, kind);
+    m.views.borrow_mut().scope_label = Some((views, s.to_string(), kind, l.clone()));
     l
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.
-fn scope(m: &AppModel, s: &str) -> Scope {
+fn scope(m: &AppModel, s: &str, kind: NameKind) -> Scope {
     let views = sets::views(m);
-    match view_of(&views, &m.sets_root(), s) {
+    match view_of(&views, &m.sets_root(), s, kind) {
         Some(v) => Scope::of(v),
         None => Scope {
-            key: s.to_string(),
+            key: if kind == NameKind::Id {
+                String::new()
+            } else {
+                s.to_string()
+            },
             id: None,
             members: HashSet::new(),
         },
@@ -1863,7 +1905,7 @@ fn with_counted_rows<T>(
     f: impl FnOnce(&sets::SetView, Vec<&Problem>) -> T,
 ) -> Option<T> {
     let views = sets::views(m);
-    let v = view_of(&views, &m.sets_root(), key)?;
+    let v = view_of(&views, &m.sets_root(), key, NameKind::Filter)?;
     with_view_rows(m, v, f)
 }
 

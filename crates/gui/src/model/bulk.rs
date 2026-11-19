@@ -85,9 +85,12 @@ impl AppModel {
 
     fn multi_in_effect(&self) -> bool {
         self.multi.keys.len() >= 2
-            && self
-                .active_of(self.multi.sets)
-                .is_some_and(|a| self.multi.keys.iter().any(|k| k == a))
+            && self.active_of(self.multi.sets).is_some_and(|a| {
+                #[cfg(feature = "test-hooks")]
+                self.bulk_membership_scans
+                    .set(self.bulk_membership_scans.get() + 1);
+                self.multi.keys.iter().any(|k| k == a)
+            })
     }
 
     fn selected(&self, sets: bool) -> Vec<String> {
@@ -270,13 +273,10 @@ impl AppModel {
     /// F3a D1: "12 selected", or "12 selected (4 hidden by filter)", for the column of that kind while two or
     /// more are selected there.
     pub fn selection_summary(&self, sets: bool) -> Option<String> {
-        if !self.in_bulk() {
+        if self.multi.sets != sets || !self.in_bulk() {
             return None;
         }
-        let keys = self.selected(sets);
-        if keys.len() < 2 {
-            return None;
-        }
+        let keys = &self.multi.keys;
         let shown: std::collections::HashSet<String> = if sets {
             self.set_order()
         } else {

@@ -116,6 +116,8 @@ use engine::sets::same_id;
 impl AppModel {
     /// Set `set`'s `[sets.cm]` block, as the document holds it.
     pub fn cm_block(&self, set: &str) -> Option<CmBlock> {
+        #[cfg(feature = "test-hooks")]
+        self.doc_block_reads.set(self.doc_block_reads.get() + 1);
         self.sets_doc
             .as_ref()?
             .entries()
@@ -187,25 +189,27 @@ pub fn to_text(values: &Map<String, Json>) -> String {
 /// The set's complex `_m` members, as item keys (design §4): resolved `complex_material`, or `envmask` in a set whose
 /// shader (the choice, else the engine's pick) is Complex Material.
 pub fn cm_members(m: &AppModel, v: &SetView) -> Vec<String> {
-    let shader = v.shader_choice.or(v.shader.as_ref().map(|p| p.shader));
     v.members
         .iter()
         .filter(|k| {
             m.item(k)
                 .and_then(|i| i.job.as_ref())
-                .is_some_and(|j| match j.profile.subtype {
-                    Subtype::ComplexMaterial => true,
-                    Subtype::Envmask => shader == Some(Shader::ComplexMaterial),
-                    _ => false,
-                })
+                .is_some_and(|j| is_cm_member(v, j.profile.subtype))
         })
         .cloned()
         .collect()
 }
 
+pub(super) fn is_cm_member(v: &SetView, subtype: Subtype) -> bool {
+    subtype == Subtype::ComplexMaterial
+        || (subtype == Subtype::Envmask
+            && v.shader_choice.or(v.shader.as_ref().map(|p| p.shader))
+                == Some(Shader::ComplexMaterial))
+}
+
 /// Whether the set editor draws the card: a complex `_m` member, or a stored block (never hide the user's values).
-pub fn shows_card(m: &AppModel, v: &SetView) -> bool {
-    !cm_members(m, v).is_empty() || m.cm_block(&v.id).is_some()
+pub fn shows_card(_: &AppModel, v: &SetView) -> bool {
+    v.shows_cm_card
 }
 
 /// One member's JSON (design §6).

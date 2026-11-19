@@ -477,7 +477,7 @@ pub(crate) struct ViewCache {
     /// the hidden kinds.
     pub set_reasons: Option<CachedReasons>,
     /// Final wave Group 7: `bottom::cached_scope_label`, keyed on the views it read (held) and the filter's stored key.
-    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, String)>,
+    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, bottom::NameKind, String)>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -772,6 +772,10 @@ pub struct AppModel {
     pub(crate) reason_scans: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub selection_builds: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub doc_block_reads: std::cell::Cell<u64>,
+    #[cfg(feature = "test-hooks")]
+    pub bulk_membership_scans: std::cell::Cell<u64>,
     /// Final wave Group 7: the set lookups `bottom::scope_label` ran (see `bottom::scope_label_lookups`).
     #[cfg(feature = "test-hooks")]
     pub(crate) scope_label_lookups: std::cell::Cell<u64>,
@@ -1107,6 +1111,10 @@ impl AppModel {
             reason_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             selection_builds: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            doc_block_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            bulk_membership_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             scope_label_lookups: Default::default(),
             #[cfg(feature = "test-hooks")]

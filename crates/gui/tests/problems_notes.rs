@@ -5272,6 +5272,31 @@ fn the_key_shaped_document_cards_editor_shows_its_own_reason() {
         .accesskit_node()
         .label()
         .is_some_and(|s| s.contains("wall-note.txt"))));
+    // Warm the ordinary key-first list and chip with the same spelling.
+    h.state_mut()
+        .open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Set(
+            id.clone(),
+        )));
+    h.run();
+    h.get_by_label("Set: wall ×");
+    let name = h
+        .query_all_by_label_contains("go to the fix")
+        .filter_map(|n| n.accesskit_node().label())
+        .find(|s| s.contains("wall-note.txt"))
+        .unwrap();
+    click_and_settle(&mut h, &name);
+    let remove = format!("Remove wall-note.txt from {id}");
+    assert!(
+        h.query_by_label(&remove)
+            .is_some_and(|n| n.accesskit_node().is_focused()),
+        "the reason must show and focus the document card's own row"
+    );
+    h.get_by_label(&format!("Set: {id} ×"));
+    h.state_mut()
+        .open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Set(id)));
+    h.run();
+    h.get_by_label("Set: wall ×");
+    assert!(h.query_by_label(&remove).is_none());
 }
 
 #[test]
@@ -5353,6 +5378,14 @@ fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
     assert!(!h
         .query_all_by_label("Ready: nothing in this set needs you.")
         .any(|n| centre.contains(n.rect().center())));
+    click_and_settle(&mut h, &reasons[0]);
+    assert!(
+        h.query_by_label("Remove landscape/empty-id.txt from ")
+            .is_some_and(|n| n.accesskit_node().is_focused()),
+        "the empty-id card must show and focus its own row"
+    );
+    h.get_by_role_and_label(egui::accesskit::Role::Link, "Unnamed set");
+    assert!(filtered(h.state(), Some(&ProblemsFilter::Set(String::new()))).is_empty());
 }
 
 #[test]
@@ -5488,11 +5521,21 @@ fn the_records_header_counts_the_selected_borrowers_blocks() {
     m.add_cs_block(id, Kind::Txst);
     m.add_cs_block(id, Kind::Mato);
     pick_id(&mut m, id);
-    let mut h = harness(m);
+    assert!(!m.resolved_selection().view().unwrap().shared);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
     h.run();
     h.get_by_label("2 records");
+    h.get_by_label(sdc_gui::ui::cs_pbr::SECTION).click();
+    h.run();
+    h.get_by_label("PGPatcher entry for statics:");
+    let reads = h.state().doc_block_reads.get();
     let work = sdc_gui::model::identity_work();
     h.run_steps(5);
+    assert_eq!(
+        h.state().doc_block_reads.get(),
+        reads,
+        "the expanded records panel looked its blocks up again"
+    );
     assert_eq!(
         sdc_gui::model::identity_work(),
         work,
@@ -5501,6 +5544,27 @@ fn the_records_header_counts_the_selected_borrowers_blocks() {
     pick_id(h.state_mut(), "landscape/empty");
     h.run();
     h.get_by_label("0 records");
+}
+
+#[test]
+fn the_landscape_checkbox_uses_the_selected_views_txst() {
+    use sdc_gui::model::cs_pbr::{Kind, PGP_BOX};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let id = "landscape/rock01";
+    m.add_cs_block(id, Kind::Txst);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.select_set(&view_by_id(&m, id).key);
+    let mut h = harness_at(m, egui::vec2(1600.0, 4600.0));
+    h.run();
+    h.get_by_label(PGP_BOX);
+    let reads = h.state().doc_block_reads.get();
+    h.run_steps(5);
+    assert_eq!(
+        h.state().doc_block_reads.get(),
+        reads,
+        "the Landscape checkbox looked its block up again"
+    );
 }
 
 #[test]
@@ -5522,20 +5586,24 @@ fn a_warmed_partial_keeps_the_other_cards_member_storage() {
     let member_ptr = |m: &AppModel| m.resolved_selection().view().unwrap().members[0].as_ptr();
     let before = member_ptr(m);
     let until = std::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
+    let delivered = loop {
         m.poll();
-        if let Some(msg) = m
+        if let Some(msg @ WorkerMsg::Partial { seq, .. }) = m
             .take_held()
             .into_iter()
             .find(|msg| matches!(msg, WorkerMsg::Partial { seq, .. } if *seq > m.applied_seq))
         {
             m.handle_held(msg);
-            break;
+            break seq;
         }
         assert!(std::time::Instant::now() < until);
         std::thread::sleep(std::time::Duration::from_millis(5));
-    }
+    };
     assert!(!m.partial_pending);
+    assert_eq!(
+        m.applied_seq, delivered,
+        "the delivered partial must have applied"
+    );
     assert_eq!(before, member_ptr(m), "the splice cloned an unchanged set");
 }
 
