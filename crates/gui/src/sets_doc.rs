@@ -568,8 +568,13 @@ impl SetsDoc {
 
     /// Owner ruling (Note BV6): `[project] export_folder`, this project's export folder (GUI-only state).
     pub fn export_folder(&self) -> Option<std::path::PathBuf> {
-        self.project_str("export_folder")
-            .map(std::path::PathBuf::from)
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
+        Some(Path::new(
+            self.f.doc.get("project")?.get("export_folder")?.as_str()?,
+        ))
     }
     pub fn set_export_folder(&mut self, path: &std::path::Path) {
         self.set_project(

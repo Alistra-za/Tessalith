@@ -29,6 +29,7 @@ use engine::codes::Warning;
 use engine::sets::fold_id;
 use engine::shader::{Shader, ShaderOrigin};
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 /// Drag payload: a texture, by item key.
 #[derive(Debug, Clone)]
@@ -491,7 +492,12 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 /// segment, `…/<that segment>/<rest>` is tried right after the id. When nothing fits, `…/<tail>` is returned anyway
 /// (the whole id when the tail is the id, or when `…/<tail>` would be no shorter than it: final wave Group 6, ledger
 /// 187) and the title wraps; two cards never read the same (review E24). The bool says whether the title fits.
-fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> (String, bool) {
+fn fit_title(
+    id: &str,
+    tail: &str,
+    query: &str,
+    mut fits: impl FnMut(&str) -> bool,
+) -> (String, bool) {
     use super::header::elide_middle;
     let len = id.chars().count();
     let whole_fits = fits(id);
@@ -512,9 +518,15 @@ fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> 
             }
         }
     }
-    for n in (1..len).rev() {
-        let t = elide_middle(id, n);
-        if t.contains('/') && t.ends_with(tail) && fits(&t) {
+    let mut budget = len.saturating_sub(1);
+    while budget > 0 {
+        let t = elide_middle(id, budget);
+        // Every intermediate budget gives the same component suffix.
+        budget = budget.min(t.chars().count()).saturating_sub(1);
+        if !t.contains('/') {
+            break;
+        }
+        if t.ends_with(tail) && fits(&t) {
             return (t, true);
         }
     }
@@ -527,7 +539,48 @@ fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> 
     }
 }
 
-/// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
+/// The preflight and the label can have different room after egui places the badges.
+struct ShortTitles {
+    forms: Vec<(Arc<egui::RichText>, f32)>,
+    minimum: f32,
+    fallback: Arc<egui::RichText>,
+}
+
+impl ShortTitles {
+    fn new(ui: &egui::Ui, v: &SetView, query: &str, font: &egui::FontId) -> Self {
+        #[cfg(feature = "test-hooks")]
+        super::paint_counts::Work::ShortTitles.built();
+        let mut forms = Vec::<(Arc<egui::RichText>, f32)>::new();
+        // Visit the forms in display order, including the fallback when none fits.
+        let (fallback, _) = fit_title(&v.id, &v.short, query, |text| {
+            if text != v.id && !forms.iter().any(|(form, _)| form.text() == text) {
+                forms.push((
+                    Arc::new(egui::RichText::new(text).strong()),
+                    text_width(ui, text, font),
+                ));
+            }
+            false
+        });
+        let minimum = forms.iter().map(|(_, w)| *w).fold(f32::INFINITY, f32::min);
+        Self {
+            forms,
+            minimum,
+            fallback: Arc::new(egui::RichText::new(fallback).strong()),
+        }
+    }
+
+    fn at(&self, room: f32) -> (Arc<egui::RichText>, bool) {
+        self.forms
+            .iter()
+            .find(|(_, width)| *width <= room)
+            .map_or_else(
+                || (self.fallback.clone(), false),
+                |(form, _)| (form.clone(), true),
+            )
+    }
+}
+
+/// The width of `text` in the small font, as a button or pill would paint it.
 fn small_width(ui: &egui::Ui, text: &str) -> f32 {
     text_width(ui, text, &egui::TextStyle::Small.resolve(ui.style()))
 }
@@ -2393,44 +2446,88 @@ fn pill(
                     }
                     // One row only when the name keeps NAME_MIN px (or its whole width) beside the pill and badges
                     // (Notes FI13, HP12).
-                    let sp = ui.spacing().item_spacing.x;
-                    let btn = 2.0 * ui.spacing().button_padding.x + sp;
                     let body = egui::TextStyle::Body.resolve(ui.style());
-                    // position slot (as wide as the last number), the ≡ handle, and the gaps around them
-                    let lead =
-                        text_width(ui, &total.to_string(), &egui::FontId::monospace(body.size))
-                            + text_width(ui, "≡", &body)
-                            + 2.0 * sp;
-                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke.width;
-                    let pill = small_width(ui, kind_text(model, v))
-                        + 2.0 * PILL_PAD_X
-                        + 2.0 * stroke
-                        + STATUS_DOT
-                        + sp;
-                    // Note HP12: a whole title shorter than NAME_MIN needs only its own width.
-                    let name_min = NAME_MIN.min(text_width(ui, &v.id, &body));
-                    let mut need = lead + name_min + pill + sp;
-                    if !rows.is_empty() {
-                        need += small_width(ui, &warn_text(rows.len())) + btn;
-                    }
-                    if !checks.is_empty() {
-                        need += small_width(ui, &check_badge_text(&checks).1) + btn;
-                    }
-                    // Note HN F3: elide the middle so the tail stays; the node's name is the full id.
-                    // `fits` is whether the shown title fits `room`; when even `…/<tail>` does not, it wraps.
-                    let shown_in = |ui: &egui::Ui, room: f32| {
-                        let font = egui::TextStyle::Body.resolve(ui.style());
-                        fit_title(&v.id, &v.short, &model.sets_filter.search, |t| {
-                            text_width(ui, t, &font) <= room
+                    let query = &model.sets_filter.search;
+                    let title_key = egui::Id::unique((
+                        "card-title",
+                        &v.id,
+                        &v.short,
+                        query,
+                        &body,
+                        ui.pixels_per_point().to_bits(),
+                    ));
+                    let (whole, full_width) = super::paint_cached(ui.ctx(), title_key, || {
+                        #[cfg(feature = "test-hooks")]
+                        super::paint_counts::Work::Title.built();
+                        (
+                            Arc::new(egui::RichText::new(&v.id).strong()),
+                            text_width(ui, &v.id, &body),
+                        )
+                    });
+                    // Only measure shorter forms if the whole title cannot fit.
+                    let shorter = |ui: &egui::Ui| {
+                        super::paint_cached(ui.ctx(), title_key.with("short"), || {
+                            Arc::new(ShortTitles::new(ui, v, query, &body))
                         })
                     };
-                    let shown_for = |ui: &egui::Ui| shown_in(ui, ui.available_width());
+                    let fits =
+                        |ui: &egui::Ui, room| full_width <= room || shorter(ui).minimum <= room;
+                    let name_min = NAME_MIN.min(full_width);
+                    let sp = ui.spacing().item_spacing.x;
+                    let btn = 2.0 * ui.spacing().button_padding.x + sp;
+                    let stroke = ui.visuals().widgets.noninteractive.bg_stroke.width;
+                    let kind = kind_text(model, v);
+                    let count = checks
+                        .iter()
+                        .filter(|(_, w)| super::counts_toward_badge(w))
+                        .count();
+                    let heading_key = title_key.with((
+                        total,
+                        kind,
+                        rows.len(),
+                        checks.is_empty(),
+                        count,
+                        egui::TextStyle::Small.resolve(ui.style()),
+                        sp.to_bits(),
+                        btn.to_bits(),
+                        stroke.to_bits(),
+                    ));
+                    let need = super::paint_cached(ui.ctx(), heading_key, || {
+                        let lead =
+                            text_width(ui, &total.to_string(), &egui::FontId::monospace(body.size))
+                                + text_width(ui, "≡", &body)
+                                + 2.0 * sp;
+                        let pill = small_width(ui, kind)
+                            + 2.0 * PILL_PAD_X
+                            + 2.0 * stroke
+                            + STATUS_DOT
+                            + sp;
+                        let mut need = lead + name_min + pill + sp;
+                        if !rows.is_empty() {
+                            need += small_width(ui, &warn_text(rows.len())) + btn;
+                        }
+                        if !checks.is_empty() {
+                            need += small_width(ui, &check_badge_text(&checks).1) + btn;
+                        }
+                        need
+                    });
+                    // The wrap decision and displayed form use the same measured widths.
                     // One row only when the title that will be shown also fits beside the pill and badges
                     // (Task 9 review); otherwise it takes its own line at the card's full width.
                     let wide = ui.available_width() >= need
-                        && shown_in(ui, ui.available_width() - (need - name_min)).1;
+                        && fits(ui, ui.available_width() - (need - name_min));
                     let name = |ui: &mut egui::Ui| {
-                        let (shown, fits) = shown_for(ui);
+                        let room = ui.available_width();
+                        let (shown, fits) =
+                            super::paint_cached(ui.ctx(), title_key.with(room.to_bits()), || {
+                                #[cfg(feature = "test-hooks")]
+                                super::paint_counts::Work::TitleFit.built();
+                                if full_width <= room {
+                                    (whole.clone(), true)
+                                } else {
+                                    shorter(ui).at(room)
+                                }
+                            });
                         // Extend: the shown text already fits, so egui never end-cuts the tail. When even the
                         // tail does not fit, the title wraps instead of cutting further (E24).
                         let wrap = if fits {
@@ -2438,12 +2535,14 @@ fn pill(
                         } else {
                             egui::TextWrapMode::Wrap
                         };
-                        let r = ui.add(
-                            egui::Label::new(egui::RichText::new(&shown).strong()).wrap_mode(wrap),
-                        );
+                        let r = ui.add(egui::Label::new(shown.clone()).wrap_mode(wrap));
                         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &v.id));
-                        if shown != v.id {
-                            r.on_hover_text(&v.id);
+                        if shown.text() != v.id {
+                            let hover =
+                                super::paint_cached(ui.ctx(), title_key.with("hover"), || {
+                                    Arc::new(egui::RichText::new(&v.id))
+                                });
+                            r.on_hover_text(hover);
                         }
                     };
                     let own_line = ui.horizontal(|ui| {
@@ -2476,7 +2575,7 @@ fn pill(
                             false
                         } else {
                             // Beside the position and handle the tail would not fit: give the title its own line.
-                            let own = !shown_for(ui).1;
+                            let own = !fits(ui, ui.available_width());
                             if !own {
                                 name(ui);
                             }

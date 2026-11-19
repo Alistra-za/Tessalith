@@ -1827,6 +1827,41 @@ fn bc4_set(dir: &Path) -> AppModel {
     m
 }
 
+#[test]
+fn warm_format_fits_follow_the_button_font() {
+    warm_row_fit(sdc_gui::ui::paint_counts::Work::Format);
+}
+
+#[test]
+fn warm_picker_fits_follow_the_button_font() {
+    warm_row_fit(sdc_gui::ui::paint_counts::Work::Picker);
+}
+
+fn warm_row_fit(work: sdc_gui::ui::paint_counts::Work) {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    settle(&mut h);
+    h.run_steps(4);
+    let warm = work.count();
+    assert!(warm > 0);
+    h.run_steps(4);
+    assert_eq!(work.count(), warm, "unchanged rows repeated text fitting");
+    h.ctx.global_style_mut(|s| {
+        s.text_styles
+            .get_mut(&egui::TextStyle::Button)
+            .unwrap()
+            .size += 1.0
+    });
+    h.run_steps(4);
+    let changed = work.count();
+    assert!(
+        changed > warm,
+        "the font change must invalidate measured widths"
+    );
+    h.run_steps(4);
+    assert_eq!(work.count(), changed);
+}
+
 const BC4_VALUE: &str = "BC4 · linear (one channel)";
 
 /// The BC4 format combos' value and rect.

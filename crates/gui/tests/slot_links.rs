@@ -199,6 +199,54 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
 }
 
 #[test]
+fn warm_output_strings_follow_the_disk_count_and_the_displayed_files() {
+    use sdc_gui::ui::paint_counts::Work::{OutputLine, OutputSummary};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, "arch/wall");
+    let v = views(&m);
+    let files = set_outputs(v.iter().find(|v| v.id == "arch/wall").unwrap());
+    let mut h = harness(m);
+    h.run_steps(4);
+    let closed = OutputSummary.count();
+    assert!(closed > 0);
+    assert_eq!(OutputLine.count(), 0, "closed group built its file lines");
+    h.run_steps(4);
+    assert_eq!(
+        OutputSummary.count(),
+        closed,
+        "unchanged count rebuilt its summary"
+    );
+    h.get_by_label_contains("Output files").click();
+    h.run_steps(4);
+    assert_eq!(OutputLine.count(), files.len(), "each open line built once");
+    let path = &files[0].2;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, b"dds").unwrap();
+    h.state().stats.borrow_mut().clear();
+    h.run_steps(4);
+    h.get_by_label(&format!("1 of {} on disk", files.len()));
+    assert_eq!(OutputSummary.count(), closed + 1);
+    assert_eq!(
+        OutputLine.count(),
+        files.len(),
+        "disk count changed the path strings"
+    );
+    let moved = path.with_file_name("renamed-output.dds");
+    let m = h.state_mut();
+    let item = m.items.iter_mut().find(|i| i.key == files[0].1).unwrap();
+    item.job.as_mut().unwrap().output = moved.clone();
+    m.invalidate_views();
+    h.run_steps(4);
+    h.get_by_label_contains(moved.to_str().unwrap());
+    assert_eq!(
+        OutputLine.count(),
+        files.len() + 1,
+        "only the renamed path needs a new line"
+    );
+}
+
+#[test]
 fn a_truncated_output_has_one_hover_with_the_absolute_path() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair(d.path());

@@ -35,6 +35,7 @@ use engine::pack::RecipeKind;
 use engine::shader::Shader;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 /// Note AN: the caption across a PGPatcher-locked slot card.
 /// Review M2: a lock key on a set that writes no JSON.
@@ -468,6 +469,13 @@ pub const MATCH_ON_THIS: &str = "Match on this";
 pub const OUTPUTS_COUNT_NOTE: &str =
     "The count is of the files at these paths now, whichever export wrote them.";
 
+struct OutputLine {
+    visible: Arc<egui::RichText>,
+    full: Arc<egui::RichText>,
+    name: String,
+    reveal: String,
+}
+
 /// Review E13: the files this set's own members write, in a group closed by default. Its header counts the files at
 /// these paths now, whichever export wrote them (`stat_is_file` is cached with a TTL, so the closed header costs no
 /// stat per frame); an open group says so, then lists each file with a Show in Explorer button once it exists. The
@@ -479,22 +487,29 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
         .iter()
         .filter(|(_, _, p)| model.stat_is_file(p))
         .count();
-    let summary = if n == 0 {
-        "none".to_string()
-    } else if on_disk == n {
-        format!("{n}, all on disk")
-    } else if on_disk == 0 {
-        format!("{n}, none on disk")
-    } else {
-        format!("{on_disk} of {n} on disk")
-    };
+    let summary_key = egui::Id::unique(("output-summary", n, on_disk));
+    let summary = super::paint_cached(ui.ctx(), summary_key, || {
+        #[cfg(feature = "test-hooks")]
+        super::paint_counts::Work::OutputSummary.built();
+        let text = if n == 0 {
+            "none".to_string()
+        } else if on_disk == n {
+            format!("{n}, all on disk")
+        } else if on_disk == 0 {
+            format!("{n}, none on disk")
+        } else {
+            format!("{on_disk} of {n} on disk")
+        };
+        Arc::new(egui::RichText::new(text).weak())
+    });
     let id = ui.scope_id().with(("set-outputs", &v.id));
     let mut reveal = None;
-    super::group::group(
+    super::group::group_impl(
         ui,
         id,
         "Output files",
-        Some(egui::RichText::new(summary).weak()),
+        (Some(summary), None),
+        false,
         false,
         |ui| {
             if files.is_empty() {
@@ -502,34 +517,54 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 return;
             }
             ui.weak(OUTPUTS_COUNT_NOTE);
-            let root = model.export_root();
+            let root_key = egui::Id::unique((
+                "output-root",
+                model.root.as_ref().map(|p| p.as_os_str()),
+                model.export_folder_ref().map(|p| p.as_os_str()),
+            ));
+            let root = super::paint_cached(ui.ctx(), root_key, || Arc::new(model.export_root()));
             for (kind, item, abs) in files {
-                // The editor row's title (`row_title`), or for a member that fills no slot the name its row under
-                // the cards uses. A path outside the export folder shows whole.
-                let label = match kind {
-                    Some(k) => v.row_title(*k, Some(item.as_str())),
-                    None => model.item(item).map_or("File", |i| i.name.as_str()),
-                };
-                let rel = abs.strip_prefix(&root).unwrap_or(abs);
+                let member_name = kind
+                    .is_none()
+                    .then(|| model.item(item).map_or("File", |i| i.name.as_str()));
+                let key = root_key.with((
+                    abs.as_os_str(),
+                    kind,
+                    item,
+                    member_name,
+                    v.rfaos,
+                    v.shader.as_ref().map(|s| s.shader),
+                ));
+                let line = super::paint_cached(ui.ctx(), key, || {
+                    #[cfg(feature = "test-hooks")]
+                    super::paint_counts::Work::OutputLine.built();
+                    let label = kind.map_or_else(
+                        || member_name.unwrap_or("File"),
+                        |k| v.row_title(k, Some(item)),
+                    );
+                    let rel = abs.strip_prefix(root.as_path()).unwrap_or(abs);
+                    let full = abs.display().to_string();
+                    let visible = format!("{label}: {}", rel.to_string_lossy().replace('/', "\\"));
+                    Arc::new(OutputLine {
+                        visible: Arc::new(egui::RichText::new(visible)),
+                        name: format!("{label}: {full}"),
+                        reveal: format!("Show {full} in Explorer"),
+                        full: Arc::new(egui::RichText::new(full)),
+                    })
+                });
                 egui::Sides::new().shrink_left().truncate().show(
                     ui,
                     |ui| {
-                        let line = format!("{label}: {}", rel.to_string_lossy().replace('/', "\\"));
-                        let full = abs.display().to_string();
                         let r = ui
                             .add(
-                                egui::Label::new(line)
+                                egui::Label::new(line.visible.clone())
                                     .truncate()
                                     .show_tooltip_when_elided(false),
                             )
-                            .on_hover_text(&full);
+                            .on_hover_text(line.full.clone());
                         // The name keeps the whole path when the line is cut short.
                         r.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::Role::Label,
-                                true,
-                                format!("{label}: {full}"),
-                            )
+                            egui::WidgetInfo::labeled(egui::Role::Label, true, &line.name)
                         });
                     },
                     |ui| {
@@ -543,11 +578,7 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                             let r = ui.small_button("Show in Explorer");
                             // Named by the whole path: two outputs can share a file name (final wave Group 5).
                             r.widget_info(|| {
-                                egui::WidgetInfo::labeled(
-                                    egui::Role::Button,
-                                    true,
-                                    format!("Show {} in Explorer", abs.display()),
-                                )
+                                egui::WidgetInfo::labeled(egui::Role::Button, true, &line.reveal)
                             });
                             if r.clicked() {
                                 reveal = Some(abs.clone());
@@ -1156,8 +1187,14 @@ fn row(
             let mut choice = (cur_f, cur_t);
             // E17: a value reads in full where the row has room: the combo takes what its cell and the File cell
             // leave, up to the painted value. The values are short fixed strings; `truncate` is the floor's answer.
-            let value = format_label(cur_f, cur_t);
-            let want = combo_want(ui, &value);
+            let key = button_fit_key(ui).with(("slot-format", cur_f, cur_t));
+            let (value, want) = super::paint_cached(ui.ctx(), key, || {
+                #[cfg(feature = "test-hooks")]
+                super::paint_counts::Work::Format.built();
+                let text = format_label(cur_f, cur_t);
+                let want = combo_want(ui, &text);
+                (Arc::new(egui::RichText::new(text)), want)
+            });
             // Its cell's slack: the column is `format_base` wide whatever this combo does.
             let slack = (room.format_base - COMBO_W).max(0.0);
             let w = combo_w(room.free + slack, want, COMBO_W);
@@ -1167,7 +1204,7 @@ fn row(
                 let r = ui
                     .allocate_ui(egui::vec2(w, h), |ui| {
                         egui::ComboBox::from_id_salt(("slot-format", &v.id, slot.label()))
-                            .selected_text(value.as_str())
+                            .selected_text(value.clone())
                             .width(w)
                             .truncate()
                             .show_ui_036(ui, |ui| {
@@ -1184,16 +1221,17 @@ fn row(
                 if w + 0.01 < want {
                     // what the hover shows, for a screen reader too (final wave Group 5)
                     ui.ctx()
-                        .accesskit_node_builder(r.id, |b| b.set_description(value.as_str()));
+                        .accesskit_node_builder(r.id, |b| b.set_description(value.text()));
                     let why = lock.as_deref();
                     r.on_hover_ui(|ui| {
-                        ui.label(&value);
+                        ui.label(value.clone());
                     })
                     .on_disabled_hover_ui(|ui| {
-                        ui.label(match why {
-                            Some(why) => format!("{value}\n{why}"),
-                            None => value.clone(),
-                        });
+                        if let Some(why) = why {
+                            ui.label(format!("{}\n{why}", value.text()));
+                        } else {
+                            ui.label(value.clone());
+                        }
                     });
                 }
             })
@@ -1692,11 +1730,43 @@ fn combo_want(ui: &egui::Ui, text: &str) -> f32 {
     button_text_w(ui, text) + combo_chrome(ui)
 }
 
-fn role_label(role: RawMap) -> String {
-    match role {
-        RawMap::Ao => "AO".into(),
-        other => other.id(),
-    }
+fn button_fit_key(ui: &egui::Ui) -> egui::Id {
+    egui::Id::unique((
+        egui::TextStyle::Button.resolve(ui.style()),
+        ui.pixels_per_point().to_bits(),
+        combo_chrome(ui).to_bits(),
+    ))
+}
+
+struct RoleLabel {
+    role: RawMap,
+    id: String,
+    text: Arc<egui::RichText>,
+    width: f32,
+    source: String,
+    fill: String,
+}
+
+fn role_label(ui: &egui::Ui, role: RawMap) -> Arc<RoleLabel> {
+    let small = egui::TextStyle::Small.resolve(ui.style());
+    let key = egui::Id::unique(("fill-role", role, &small, ui.pixels_per_point().to_bits()));
+    super::paint_cached(ui.ctx(), key, || {
+        let id = role.id();
+        let text = if role == RawMap::Ao { "AO" } else { &id };
+        let width = ui
+            .painter()
+            .layout_no_wrap(text.to_owned(), small, egui::Color32::PLACEHOLDER)
+            .size()
+            .x;
+        Arc::new(RoleLabel {
+            role,
+            width,
+            text: Arc::new(egui::RichText::new(text).small()),
+            source: format!("{text} channel source"),
+            fill: format!("{text} fill"),
+            id,
+        })
+    })
 }
 
 /// A packed output's fill rows. They write `sdc.toml`, so they are disabled, with the reason on hover, while it is
@@ -1769,7 +1839,7 @@ fn source_picker(
     ui: &mut egui::Ui,
     model: &AppModel,
     packed: &str,
-    role: RawMap,
+    label: &RoleLabel,
     current: Option<(&str, &str)>,
     why: Option<&str>,
     acts: &mut Vec<Act>,
@@ -1777,21 +1847,33 @@ fn source_picker(
     let channel = model
         .item(packed)
         .and_then(|i| i.job.as_ref()?.pack.as_ref())
-        .and_then(|p| channel_roles(p.kind).iter().position(|r| *r == Some(role)));
+        .and_then(|p| {
+            channel_roles(p.kind)
+                .iter()
+                .position(|r| *r == Some(label.role))
+        });
     let file = current.map_or("value", |(_, f)| f);
     // The AccessKit value keeps the whole name (A2-2); the painted text is the file alone, cut at the front so the
     // suffix shows when it does not fit (A2-1).
-    let shown = format!("Source: {file}");
-    let room = SOURCE_W - combo_chrome(ui) - 1.0;
-    let painted = if current.is_some() && button_text_w(ui, file) > room {
-        front_cut(file, |s| button_text_w(ui, s) <= room)
-    } else {
-        file.to_string()
-    };
+    let key = button_fit_key(ui).with(("fill-picker", file, current.is_some()));
+    let (painted, shown) = super::paint_cached(ui.ctx(), key, || {
+        #[cfg(feature = "test-hooks")]
+        super::paint_counts::Work::Picker.built();
+        let room = SOURCE_W - combo_chrome(ui) - 1.0;
+        let text = if current.is_some() {
+            front_cut(file, |s| button_text_w(ui, s) <= room)
+        } else {
+            file.to_string()
+        };
+        (
+            Arc::new(egui::RichText::new(text)),
+            Arc::new(format!("Source: {file}")),
+        )
+    });
     let h = ui.spacing().interact_size.y;
     let r = ui
         .allocate_ui(egui::vec2(SOURCE_W, h), |ui| {
-            egui::ComboBox::from_id_salt(("fill-source", packed, role.id()))
+            egui::ComboBox::from_id_salt(("fill-source", packed, &label.id))
                 .width(SOURCE_W)
                 .truncate()
                 .selected_text(painted)
@@ -1830,21 +1912,24 @@ fn source_picker(
                 .response
         })
         .inner;
-    super::helper_panel::named(
-        &r,
-        egui::Role::ComboBox,
-        &format!("{} channel source", role_label(role)),
-        Some(&shown),
-    );
+    super::helper_panel::named(&r, egui::Role::ComboBox, &label.source, Some(&shown));
     // Every picker has the whole name on hover; a disabled one says the name, then why it is off (A2-6).
     let name = if current.is_some() {
         file
     } else {
         "No file: the box sets this channel (0 to 255)."
     };
-    let r = r.on_hover_text(name);
+    r.ctx
+        .accesskit_node_builder(r.id, |b| b.set_description(name));
+    let r = r.on_hover_ui(|ui| {
+        ui.set_max_width(ui.spacing().tooltip_width);
+        ui.label(name);
+    });
     match why {
-        Some(why) => r.on_disabled_hover_text(format!("{name}\n{why}")),
+        Some(why) => r.on_disabled_hover_ui(|ui| {
+            ui.set_max_width(ui.spacing().tooltip_width);
+            ui.label(format!("{name}\n{why}"));
+        }),
         None => r,
     }
 }
@@ -1860,21 +1945,17 @@ fn fill_controls(
 ) {
     let rows = fill_rows(model, key);
     // Ruling A2-3: every line starts with a role label of the width of the output's widest, so its pickers share an x.
-    let small = egui::TextStyle::Small.resolve(ui.style());
     let lab_w = rows
         .iter()
         .map(|r| match r {
             FillRow::FromFile { role, .. } | FillRow::Value { role, .. } => {
-                ui.painter()
-                    .layout_no_wrap(role_label(*role), small.clone(), egui::Color32::PLACEHOLDER)
-                    .size()
-                    .x
+                role_label(ui, *role).width
             }
         })
         .fold(0.0f32, f32::max)
         .ceil();
     // The label is drawn in a child of its own rect (a `scope_builder` advanced the cursor again, probe P2d).
-    let role_cell = |ui: &mut egui::Ui, role: RawMap| {
+    let role_cell = |ui: &mut egui::Ui, label: &RoleLabel| {
         let (r, _) = ui.allocate_exact_size(
             egui::vec2(lab_w, ui.spacing().interact_size.y),
             egui::Sense::hover(),
@@ -1884,7 +1965,7 @@ fn fill_controls(
                 .max_rect(r)
                 .layout(egui::Layout::left_to_right(egui::Align::Center)),
         );
-        cell.label(egui::RichText::new(role_label(role)).small());
+        cell.label(label.text.clone());
     };
     for row in rows {
         match row {
@@ -1895,8 +1976,9 @@ fn fill_controls(
                 ..
             } => {
                 ui.horizontal(|ui| {
-                    role_cell(ui, role);
-                    source_picker(ui, model, key, role, Some((&src, &file)), why, acts);
+                    let label = role_label(ui, role);
+                    role_cell(ui, &label);
+                    source_picker(ui, model, key, &label, Some((&src, &file)), why, acts);
                 });
             }
             FillRow::Value {
@@ -1905,10 +1987,10 @@ fn fill_controls(
                 own_key,
             } => {
                 ui.horizontal(|ui| {
-                    role_cell(ui, role);
-                    source_picker(ui, model, key, role, None, why, acts);
+                    let label = role_label(ui, role);
+                    role_cell(ui, &label);
+                    source_picker(ui, model, key, &label, None, why, acts);
                     let mut v = shown;
-                    let name = format!("{} fill", role_label(role));
                     // The lines run past the scope that `packed_controls` disables them under, so the box and Reset
                     // each answer for themselves with the reason (a scope's response covers the box, as a DragValue's
                     // `settled_drag` does not hand its own back).
@@ -1918,7 +2000,7 @@ fn fill_controls(
                             &mut v,
                             1.0,
                             0..=255,
-                            &name,
+                            &label.fill,
                             model.edit_busy(),
                             key,
                         )

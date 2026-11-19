@@ -1396,6 +1396,51 @@ fn pill_of(h: &Harness<'static, AppModel>, id: &str, title: egui::Rect) -> egui:
         .unwrap_or_else(|| panic!("the pill's {kind:?} label is painted in the Sets column"))
 }
 
+#[test]
+fn warm_card_titles_reuse_the_fit_at_the_drawn_width() {
+    use sdc_gui::ui::paint_counts::Work::{Title, TitleFit};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.sets_filter.search = "arch/wall".into();
+    let mut h = harness(m);
+    h.run_steps(4);
+    let warm = Title.count();
+    let fits = TitleFit.count();
+    assert!(warm > 0 && fits > 0);
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm,
+        "unchanged card rebuilt its fitted title"
+    );
+    assert_eq!(TitleFit.count(), fits, "unchanged width repeated the fit");
+    h.state_mut().sets_filter.search = "wall".into();
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm + 1,
+        "one measure for the changed title search"
+    );
+    assert_eq!(
+        TitleFit.count(),
+        fits + 1,
+        "one fit at the drawn width after search changes"
+    );
+    let width_id = sdc_gui::ui::panel_ids::chosen_width_id("sets");
+    h.ctx.data_mut(|d| d.insert_persisted(width_id, 380.0_f32));
+    h.run_steps(4);
+    assert_eq!(
+        Title.count(),
+        warm + 1,
+        "resizing can reuse the measured text"
+    );
+    assert_eq!(
+        TitleFit.count(),
+        fits + 2,
+        "one fit for the new label width"
+    );
+}
+
 /// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, the pill
 /// wholly below it) instead of wrapping mid-word beside the pill; with a set open, at 1055x770.
 #[test]
@@ -1497,6 +1542,18 @@ fn two_cards_sharing_a_leaf_never_read_the_same() {
         "premise: both titles are cut: {shown:?}"
     );
     assert_ne!(shown[0], shown[1], "two cards read the same");
+    let measured = sdc_gui::ui::paint_counts::Work::ShortTitles;
+    assert_eq!(
+        measured.count(),
+        2,
+        "each cut card measured its alternatives once"
+    );
+    h.run_steps(4);
+    assert_eq!(
+        measured.count(),
+        2,
+        "steady frames rebuilt the short title forms"
+    );
     for id in IDS {
         let (text, rows, r) = title_probe(&h, id);
         // these tails are wider than the whole card, so they may wrap, and only as the last resort

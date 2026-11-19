@@ -1223,9 +1223,13 @@ impl AppModel {
     /// inherited. Without one (no folder open, or an `sdc-project.toml` that does not parse) the pick lives in
     /// `gui.toml` (Note BV6), so that is the choice.
     pub fn export_folder_chosen(&self) -> Option<PathBuf> {
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
         match self.sets_doc.as_ref().filter(|d| !d.read_only()) {
-            Some(d) => d.export_folder(),
-            None => self.settings.export_folder.clone(),
+            Some(d) => d.export_folder_ref(),
+            None => self.settings.export_folder.as_deref(),
         }
     }
 
