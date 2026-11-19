@@ -810,6 +810,8 @@ enum Between {
     ExportSetThenClose,
     ExportSetLeftOpen,
     ExportFolderMoved,
+    /// Round 4 (3c-33): the export folder is a junction to A, retargeted to B (outside the target mod): the same path.
+    ExportJunctionRetargeted,
     TargetModSet,
     ReencodeAllTicked,
     ReviewOpenedByHand,
@@ -822,6 +824,17 @@ fn after_a_waiting_click(between: Between) -> Vec<String> {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened_chosen_decided(d.path());
     m.set_export_without_review(true);
+    let (link, a, b) = (
+        d.path().join("export link"),
+        d.path().join("out a"),
+        d.path().join("out b"),
+    );
+    if matches!(between, Between::ExportJunctionRetargeted) {
+        std::fs::create_dir_all(&a).unwrap();
+        std::fs::create_dir_all(&b).unwrap();
+        dir_link(&link, &a);
+        support::choose_export(&mut m, link.clone());
+    }
     m.hold_plan_results = true;
     m.replan();
     assert!(
@@ -847,6 +860,10 @@ fn after_a_waiting_click(between: Between) -> Vec<String> {
         }
         // Another folder, the same four files: only the destination differs.
         Between::ExportFolderMoved => m.set_export_folder(moved.clone()),
+        Between::ExportJunctionRetargeted => {
+            std::fs::remove_dir(&link).unwrap();
+            dir_link(&link, &b);
+        }
         Between::TargetModSet => {
             let t = d.path().join("target mod");
             std::fs::create_dir_all(&t).unwrap();
@@ -862,6 +879,8 @@ fn after_a_waiting_click(between: Between) -> Vec<String> {
     let mut wrong = vec![];
     let wrote = !nothing_written(d.path())
         || moved.join("textures/g/a.dds").exists()
+        || a.join("textures/g/a.dds").exists()
+        || b.join("textures/g/a.dds").exists()
         || m.export.summary.is_some();
     if m.export_queued() {
         wrong.push("a click is still armed".to_string());
@@ -907,6 +926,7 @@ fn a_waiting_click_writes_only_when_nothing_changed_what_it_was_made_for() {
         Between::ExportSetThenClose,
         Between::ExportSetLeftOpen,
         Between::ExportFolderMoved,
+        Between::ExportJunctionRetargeted,
         Between::TargetModSet,
         Between::ReencodeAllTicked,
         Between::ReviewOpenedByHand,

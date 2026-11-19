@@ -386,6 +386,9 @@ struct ArmedWrite {
     scope_rev: u64,
     /// Where the write would go: `output_root()` and the chosen export folder.
     destination: (PathBuf, Option<PathBuf>),
+    /// Ruling 3c-33: where `output_root()` resolves on disk (`std::fs::canonicalize`; `None` while it does not exist).
+    /// The same path through a retargeted junction is another destination. Read once at the click, once at landing.
+    resolved: Option<PathBuf>,
     /// The target mod's revision: its path is what the overlap blocker reads.
     target_mod_rev: u64,
     /// Re-encode all (`reencode_all`, the header's tick): it changes what the write does with existing outputs and
@@ -2268,9 +2271,11 @@ impl AppModel {
 
     /// E3 (ruling 3c-26): what a click made now is made against.
     fn armed_now(&self, replanned: bool) -> ArmedWrite {
+        let output = self.output_root();
         ArmedWrite {
             scope_rev: self.scope_rev,
-            destination: (self.output_root(), self.export_folder_chosen()),
+            resolved: std::fs::canonicalize(&output).ok(),
+            destination: (output, self.export_folder_chosen()),
             target_mod_rev: self.target_mod_rev,
             reencode_all: self.reencode_all,
             replanned,
