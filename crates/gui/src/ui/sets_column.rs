@@ -22,7 +22,7 @@ use crate::model::sets::{
 };
 use crate::model::target_mod::{FileBase, MeshPath};
 use crate::model::txst_map::TargetPick;
-use crate::model::{AppModel, Selection};
+use crate::model::{AppModel, Selection, SetTarget};
 use crate::sets_doc::TxstMap;
 use eframe::egui;
 use engine::codes::Warning;
@@ -199,7 +199,7 @@ fn reflow_heights(st: &mut DropState, views: &[SetView], width: f32, frame_x: f3
 const TIP_LINES: usize = 10;
 
 enum Act {
-    Select(String),
+    Select(SetTarget),
     /// The warning badge: open Problems filtered to this set key.
     Problems(String),
     SelectItem(String),
@@ -222,8 +222,8 @@ enum Act {
     /// The Shader dropdown: `None` is Auto.
     Shader(String, Option<Shader>),
     /// A pill click with its modifiers (F3a D1).
-    Click(String, bool, bool),
-    RightClick(String),
+    Click(SetTarget, bool, bool),
+    RightClick(SetTarget),
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
     Slot(MenuAction),
@@ -1922,12 +1922,14 @@ pub fn draw(
     for a in acts {
         match a {
             // Note FC8 (BN3): a new selection waits a frame for a focused field to commit.
-            Act::Select(k) => super::after_commit(&ctx, model, move |m| m.select_set(&k)),
-            Act::SelectItem(k) => super::after_commit(&ctx, model, move |m| m.select_item(&k)),
-            Act::Click(k, ctrl, shift) => {
-                super::after_commit(&ctx, model, move |m| m.click_set(&k, ctrl, shift))
+            Act::Select(target) => {
+                super::after_commit(&ctx, model, move |m| m.go_to_target(target, None))
             }
-            Act::RightClick(k) => model.right_click_set(&k),
+            Act::SelectItem(k) => super::after_commit(&ctx, model, move |m| m.select_item(&k)),
+            Act::Click(target, ctrl, shift) => {
+                super::after_commit(&ctx, model, move |m| m.click_set(target, ctrl, shift))
+            }
+            Act::RightClick(target) => model.right_click_set(target),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
                 st.pending = Some(Pending::NewGroup {
@@ -2579,9 +2581,9 @@ fn pill(
     if !editing.on {
         resp.clone().on_hover_text(editing.why);
     }
-    if resp.clicked() && !v.key.is_empty() && acts.is_empty() {
+    if resp.clicked() && acts.is_empty() {
         let m = ui.input(|i| i.modifiers);
-        acts.push(Act::Click(v.key.clone(), m.command, m.shift));
+        acts.push(Act::Click(SetTarget::view(v), m.command, m.shift));
     }
     if let Some(p) = dropped {
         if editing.on {
@@ -2596,8 +2598,8 @@ fn pill(
         .map(|p| p.0.clone());
     // F3a D4: a right-click on an unselected pill selects it alone first; among two or more selected sets the pill
     // shows the bulk menu, otherwise its own.
-    if resp.secondary_clicked() && !v.key.is_empty() && !member_menu {
-        acts.push(Act::RightClick(v.key.clone()));
+    if resp.secondary_clicked() && !member_menu {
+        acts.push(Act::RightClick(SetTarget::view(v)));
     }
     let bulk = look.selected && look.bulk;
     if !member_menu {
@@ -3060,8 +3062,8 @@ fn menu(
         }
     });
     tip(rename.response);
-    if tip(ui.button("Edit match…")).clicked() && !v.key.is_empty() {
-        acts.push(Act::Select(v.key.clone()));
+    if tip(ui.button("Edit match…")).clicked() {
+        acts.push(Act::Select(SetTarget::view(v)));
         ui.close();
     }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {
