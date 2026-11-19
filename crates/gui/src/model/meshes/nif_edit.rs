@@ -1651,7 +1651,15 @@ impl NifEdit {
         if !self.touched() || self.draft_path.as_os_str().is_empty() {
             return Ok(());
         }
-        self.durable_in(self.project.is_some(), &self.draft_path, true)
+        // ruling E6-H1: a project session is durable in the project's own files (the draft and the kept autosave of
+        // its id); the plain autosave, shared by every project and by no-project use, never makes it so. Because the
+        // next open there still weighs that file (Note GD11), it must not win with other ops either.
+        let project = self.project.is_some();
+        self.durable_in(project, &self.draft_path, !project)?;
+        match project {
+            true => self.durable_in(true, &self.draft_path, true),
+            false => Ok(()),
+        }
     }
 
     /// Ruling E6-K for a leave: `durable_why`, or, for a project switch to `dest` (Some(the new root)) away from a
@@ -2578,8 +2586,10 @@ impl MeshesModel {
             match e.retarget(p) {
                 Ok(Some(lines)) => {
                     self.messages.extend(lines);
-                    // ruling E6-H: ops the project would load already (`durable`, E6-G) write nothing; the next
-                    // change saves them into it
+                    // ruling E6-H1: ops the project's own files already hold write nothing (a history-only carry);
+                    // other ops are written into its draft now, the plain autosave removed only after that save
+                    // (and only while it holds the adopted bytes, E6-L). A failed save leaves the session unsaved,
+                    // with its reason, and the plain autosave where it is.
                     if e.durable() {
                         e.unsaved = false;
                     } else {
