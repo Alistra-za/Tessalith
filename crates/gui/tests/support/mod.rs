@@ -372,14 +372,16 @@ pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
         .collect()
 }
 
-/// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52), between two `tree_hashes` snapshots taken around one export.
-/// Every file whose bytes or name changed is listed, lies under a listed Also folder, or is credited to one listed entry
-/// by one of four kinds, each with its direction checked:
-/// (a) a removed `<document>.recovery` beside a listed document;
-/// (b) a removed old case spelling of a listed file;
-/// (c) a created `<stem>.<digits>.toml` beside a listed NIF record, holding that record's bytes from before (the record
-///     moved aside, Note GD25);
-/// (d) a removed scan-store autosave `nif-edits\<hash>.toml` of a listed NIF record's data path (Note GD5).
+/// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52, 3c-57), between two `tree_hashes` snapshots taken around one
+/// export. Every file whose bytes or name changed is listed, lies under a listed Also folder, or is credited to the one
+/// listed entry that causes it, by one of four kinds, each bound to its entry, its folder and its direction:
+/// (a) `<document>.recovery` REMOVED, beside a listed document the export saves (`sdc.toml`, `sdc-project.toml`: the
+///     two `AppModel::save` writes and clears a recovery for);
+/// (b) the old case spelling of a listed JSON REMOVED, in that JSON's own folder;
+/// (c) ONE `<stem>.<digits>.toml` CREATED beside a listed NIF record, holding that record's bytes from before (the record
+///     moved aside, Note GD25); the credit is used up, so a second such file fails;
+/// (d) the autosave `nif-edits\<hash>.toml` of a listed NIF record's data path REMOVED, under the session's own scan
+///     store `store` only (Note GD5).
 ///
 /// An entry changed when its own path, a file credited to it or (a folder) a file under it changed; every entry that
 /// did not change must be marked run-dependent. Returns the violations, empty when the rules hold.
@@ -387,9 +389,12 @@ pub fn listing_violations(
     w: &sdc_gui::model::review::ReviewWrites,
     before: &std::collections::BTreeMap<PathBuf, String>,
     after: &std::collections::BTreeMap<PathBuf, String>,
+    store: Option<&Path>,
 ) -> Vec<String> {
     use sdc_gui::model::review::HOVER_ALSO_FOLDER;
     let entries = listed(w);
+    // (c): the records whose one move aside has been seen.
+    let mut moved = vec![false; entries.len()];
     let mut touched = vec![false; entries.len()];
     let mut out = vec![];
     let changed = before
@@ -402,7 +407,7 @@ pub fn listing_violations(
             .iter()
             .position(|e| e.hover == HOVER_ALSO_FOLDER && p.starts_with(&e.path))
             .or_else(|| entries.iter().position(|e| e.path == *p))
-            .or_else(|| credit(p, before, after, &entries));
+            .or_else(|| credit(p, before, after, &entries, store, &mut moved));
         match at {
             Some(i) => touched[i] = true,
             None => out.push(format!(
@@ -423,37 +428,43 @@ pub fn listing_violations(
     out
 }
 
-/// The listed entry a changed file not on the list counts under, by the four kinds of `listing_violations`.
+/// The listed entry a changed file not on the list counts under, by the four kinds of `listing_violations`, each bound
+/// to the entry kind that causes it. `moved`: the records whose move aside (c) is used up.
 fn credit(
     p: &Path,
     before: &std::collections::BTreeMap<PathBuf, String>,
     after: &std::collections::BTreeMap<PathBuf, String>,
     entries: &[Listed],
+    store: Option<&Path>,
+    moved: &mut [bool],
 ) -> Option<usize> {
-    use sdc_gui::model::review::HOVER_NIF_RECORD;
+    use sdc_gui::model::review::{HOVER_NIF_RECORD, HOVER_PROJECT_TOML, HOVER_SDC_TOML};
     let name = p.file_name()?.to_string_lossy().into_owned();
     let removed = before.contains_key(p) && !after.contains_key(p);
     let created = !before.contains_key(p) && after.contains_key(p);
     let find = |f: &dyn Fn(&Listed) -> bool| entries.iter().position(f);
     if removed {
-        // (a)
-        if let Some(doc) = name.strip_suffix(".recovery") {
-            let doc = p.with_file_name(doc);
-            if let Some(i) = find(&|e| e.path == doc) {
-                return Some(i);
-            }
-        }
-        // (b)
-        let lower = p.to_string_lossy().to_lowercase();
-        if let Some(i) = find(&|e| e.path != p && e.path.to_string_lossy().to_lowercase() == lower)
-        {
+        // (a) beside a document `AppModel::save` writes.
+        let saved = |e: &Listed| e.hover == HOVER_SDC_TOML || e.hover == HOVER_PROJECT_TOML;
+        if let Some(i) = find(&|e| saved(e) && sdc_gui::crash_log::recovery_path(&e.path) == p) {
             return Some(i);
         }
-        // (d) the autosave of the record's data path, beside the scan store `p` sits under.
-        let store = p
-            .parent()
-            .filter(|d| d.file_name().is_some_and(|n| n == "nif-edits"))
-            .and_then(Path::parent);
+        // (b) a JSON's other spelling, in its own folder.
+        let json = |e: &Listed| {
+            e.path
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("json"))
+        };
+        let spelling = |e: &Listed| {
+            let other = e.path.file_name().unwrap_or_default().to_string_lossy();
+            e.path.parent() == p.parent()
+                && *other != *name
+                && other.to_lowercase() == name.to_lowercase()
+        };
+        if let Some(i) = find(&|e| json(e) && spelling(e)) {
+            return Some(i);
+        }
+        // (d) the autosave of the record's data path, under the session's scan store.
         if let Some(store) = store {
             let autosave_of = |e: &Listed| {
                 let rec = e.path.to_string_lossy();
@@ -470,18 +481,22 @@ fn credit(
             }
         }
     }
-    // (c)
+    // (c) one move aside per record.
     if created {
-        return find(&|e| {
+        let i = (0..entries.len()).find(|&i| {
+            let e = &entries[i];
             let stem = e.path.file_stem().unwrap_or_default().to_string_lossy();
-            e.hover == HOVER_NIF_RECORD
+            !moved[i]
+                && e.hover == HOVER_NIF_RECORD
                 && e.path.parent() == p.parent()
                 && name
                     .strip_prefix(&format!("{stem}."))
                     .and_then(|r| r.strip_suffix(".toml"))
                     .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
                 && before.get(&e.path) == after.get(p)
-        });
+        })?;
+        moved[i] = true;
+        return Some(i);
     }
     None
 }

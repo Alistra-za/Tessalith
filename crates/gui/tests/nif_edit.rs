@@ -10837,7 +10837,7 @@ fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
     let after = support::tree_hashes(&roots);
     assert!(!autosave(&d).exists(), "the export's save removed it");
     let w = h.state().model.review_writes_at_open();
-    let bad = support::listing_violations(&w, &before, &after);
+    let bad = support::listing_violations(&w, &before, &after, Some(d.path()));
     assert!(bad.is_empty(), "{bad:#?}");
 }
 

@@ -2280,7 +2280,8 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
     let after = support::tree_hashes(&[dir]);
-    let bad = support::listing_violations(&w, &before, &after);
+    // No scan store in these projects: no autosave can be credited.
+    let bad = support::listing_violations(&w, &before, &after, None);
     assert!(bad.is_empty(), "{bad:#?}");
     let changed: BTreeSet<PathBuf> = before
         .keys()
@@ -2681,7 +2682,7 @@ fn a_nif_record_moved_aside_counts_under_the_listed_record() {
     let w = list_of(&[(rec, HOVER_NIF_RECORD, false)]);
     let moved = rec.with_file_name("x.nif.sdc-nifedit.1763500000.toml");
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+        support::listing_violations(&w, &snapshot(b), &snapshot(a), None)
     };
     assert_eq!(
         check(&[(rec, "old")], &[(rec, "new"), (&moved, "old")]),
@@ -2709,6 +2710,83 @@ fn a_nif_record_moved_aside_counts_under_the_listed_record() {
         1,
         "only beside the record"
     );
+    // Ruling 3c-57 (c): one move aside per record; a second file with the old bytes is a change of its own.
+    let second = rec.with_file_name("x.nif.sdc-nifedit.1763500001.toml");
+    let two = check(
+        &[(rec, "old")],
+        &[(rec, "new"), (&moved, "old"), (&second, "old")],
+    );
+    assert_eq!(two.len(), 1, "{two:?}");
+}
+
+/// Ruling 3c-57 (a): a removed `.recovery` counts only beside a listed document the export saves (`sdc.toml`,
+/// `sdc-project.toml`), not beside any listed file.
+#[test]
+fn the_listing_rules_credit_a_recovery_file_only_beside_a_saved_document() {
+    use sdc_gui::model::review::HOVER_PROJECT_TOML;
+    use std::path::Path;
+    let dds = Path::new(r"C:\e\a.dds");
+    let doc = Path::new(r"C:\p\sdc-project.toml");
+    let w = sdc_gui::model::review::ReviewWrites {
+        outputs: vec![sdc_gui::model::review::Output {
+            path: dds.to_path_buf(),
+            marked: false,
+        }],
+        ..list_of(&[(doc, HOVER_PROJECT_TOML, false)])
+    };
+    let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
+        support::listing_violations(&w, &snapshot(b), &snapshot(a), None)
+    };
+    let beside_doc = Path::new(r"C:\p\sdc-project.toml.recovery");
+    assert_eq!(
+        check(
+            &[(dds, "1"), (doc, "1"), (beside_doc, "crash")],
+            &[(dds, "2"), (doc, "2")]
+        ),
+        Vec::<String>::new()
+    );
+    let beside_dds = Path::new(r"C:\e\a.dds.recovery");
+    let bad = check(
+        &[(dds, "1"), (doc, "1"), (beside_dds, "crash")],
+        &[(dds, "2"), (doc, "2")],
+    );
+    assert_eq!(bad.len(), 1, "{bad:?}");
+}
+
+/// Ruling 3c-57 (b): a removed old case spelling counts only for a listed JSON, and only in that JSON's own folder.
+#[test]
+fn the_listing_rules_credit_an_old_spelling_only_of_a_json_in_its_folder() {
+    use std::path::Path;
+    let json = Path::new(r"C:\e\m\iron_m.json");
+    let dds = Path::new(r"C:\e\m\iron.dds");
+    let w = sdc_gui::model::review::ReviewWrites {
+        outputs: [json, dds]
+            .iter()
+            .map(|p| sdc_gui::model::review::Output {
+                path: p.to_path_buf(),
+                marked: false,
+            })
+            .collect(),
+        ..Default::default()
+    };
+    let check = |gone: &Path| {
+        support::listing_violations(
+            &w,
+            &snapshot(&[(json, "1"), (dds, "1"), (gone, "old")]),
+            &snapshot(&[(json, "2"), (dds, "2")]),
+            None,
+        )
+    };
+    assert_eq!(
+        check(Path::new(r"C:\e\m\IRON_M.json")),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check(Path::new(r"C:\e\M\iron_m.json")).len(),
+        1,
+        "another folder's spelling"
+    );
+    assert_eq!(check(Path::new(r"C:\e\m\IRON.dds")).len(), 1, "not a JSON");
 }
 
 /// Ruling 3c-52: a `.recovery` beside a listed document counts under it only when the save removed it; one created or
@@ -2721,7 +2799,7 @@ fn the_listing_rules_credit_a_recovery_file_only_when_it_is_removed() {
     let rec = Path::new(r"C:\p\sdc.toml.recovery");
     let w = list_of(&[(doc, HOVER_SDC_TOML, false)]);
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+        support::listing_violations(&w, &snapshot(b), &snapshot(a), None)
     };
     assert_eq!(
         check(&[(doc, "old"), (rec, "crash")], &[(doc, "new")]),
@@ -2746,7 +2824,7 @@ fn the_listing_rules_credit_a_removed_nif_autosave_to_its_record() {
     let other = autosave_path(store, r"meshes\y.nif").unwrap();
     let w = list_of(&[(rec, HOVER_NIF_RECORD, false)]);
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+        support::listing_violations(&w, &snapshot(b), &snapshot(a), Some(store))
     };
     assert_eq!(
         check(&[(rec, "old"), (&mine, "ops")], &[(rec, "new")]),
@@ -2756,6 +2834,10 @@ fn the_listing_rules_credit_a_removed_nif_autosave_to_its_record() {
     assert_eq!(created.len(), 1, "{created:?}");
     let theirs = check(&[(rec, "old"), (&other, "ops")], &[(rec, "new")]);
     assert_eq!(theirs.len(), 1, "{theirs:?}");
+    // Ruling 3c-57 (d): only under the session's own scan store.
+    let elsewhere = autosave_path(Path::new(r"C:\other\sdc"), r"meshes\x.nif").unwrap();
+    let foreign = check(&[(rec, "old"), (&elsewhere, "ops")], &[(rec, "new")]);
+    assert_eq!(foreign.len(), 1, "{foreign:?}");
 }
 
 /// Ruling 3c-52: no blanket exemption. Of two listed copies, one changes; the other, unchanged, passes only when it is
@@ -2771,6 +2853,7 @@ fn the_listing_rules_need_each_unchanged_entry_marked() {
         &list_of(&[(a, HOVER_COPY, true), (b, HOVER_COPY, false)]),
         &before,
         &after,
+        None,
     );
     assert_eq!(bad.len(), 1, "{bad:?}");
     assert!(bad[0].contains("b_n.dds"), "{bad:?}");
@@ -2778,6 +2861,7 @@ fn the_listing_rules_need_each_unchanged_entry_marked() {
         &list_of(&[(a, HOVER_COPY, false), (b, HOVER_COPY, true)]),
         &before,
         &after,
+        None,
     );
     assert_eq!(ok, Vec::<String>::new());
 }
