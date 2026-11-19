@@ -375,6 +375,14 @@ pub(crate) struct ViewKey {
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
+/// Ruling 3c-38: what an Export button saw when it fired (`AppModel::export_press`). A click the UI defers a frame
+/// (`ui::after_commit`) carries it into the model call, which drops the click when the scope moved meanwhile.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ExportPress {
+    /// `AppModel::scope_rev` at the press.
+    scope_rev: u64,
+}
+
 /// E3: the whole project's keyed header terms and the keys they were read under.
 type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
 
@@ -2191,14 +2199,48 @@ impl AppModel {
         self.export_go();
     }
 
-    /// E3: the header's Export (and Ctrl+E): the whole project, then `export_decided`.
+    /// E3: the header's Export (and the palette's): the whole project, then `export_decided`. A click run at once.
     pub fn header_export_clicked(&mut self) {
-        // Ruling 3c-32: before the scope of an open scoped Review is cleared.
-        if self.dialog_drops_click() {
+        self.header_export_pressed(self.export_press());
+    }
+
+    /// `header_export_clicked` for the press `press` (ruling 3c-38: the header's button can wait a frame).
+    pub fn header_export_pressed(&mut self, press: ExportPress) {
+        // Rulings 3c-32, 3c-37, 3c-38: before the scope of an open scoped Review is cleared.
+        if self.press_refused(press) {
             return;
         }
         self.set_scope(None);
         self.export_decided();
+    }
+
+    /// Ruling 3c-38: what an Export button saw when it fired, read by the UI at the press.
+    pub fn export_press(&self) -> ExportPress {
+        ExportPress {
+            scope_rev: self.scope_rev,
+        }
+    }
+
+    /// Rulings 3c-37 and 3c-38, the entry check of a press: an open dialog drops it (`dialog_drops_click`), and so does
+    /// a scope that moved since the button fired (a click the UI deferred a frame, Note FC8, while a plan landed and
+    /// re-keyed it): a confirmation is for what was on screen at the press. True when it dropped the click.
+    fn press_refused(&mut self, press: ExportPress) -> bool {
+        if self.dialog_drops_click() {
+            return true;
+        }
+        if press.scope_rev != self.scope_rev {
+            self.scope_moved_dropped();
+            return true;
+        }
+        false
+    }
+
+    /// Rulings 3c-35 and 3c-38: an Export confirmed for one scope meets another; nothing starts.
+    fn scope_moved_dropped(&mut self) {
+        let note = "Export not started: what Review exports changed while the plan was running. \
+                    Check Review and press Export again.";
+        self.status_line = note.into();
+        self.messages.notify(messages::Severity::Warning, note);
     }
 
     /// E3 (rulings 3c-27, 3c-32, 3c-37): an Export click that meets an open dialog (a click deferred a frame for a
@@ -2592,10 +2634,7 @@ impl AppModel {
                 }
                 // Ruling 3c-35: confirmed for one scope; the header's Review (or Export set) changed it meanwhile.
                 if scope_rev != self.scope_rev {
-                    let note = "Export not started: what Review exports changed while the plan was running. \
-                                Check Review and press Export again.";
-                    self.status_line = note.into();
-                    self.messages.notify(messages::Severity::Warning, note);
+                    self.scope_moved_dropped();
                     return;
                 }
                 // Note GH8: no project means no texture run (`start_export_pass` needs one): the NIF export is due now,

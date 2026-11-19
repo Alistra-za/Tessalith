@@ -4,7 +4,7 @@ use super::code_text::counted;
 use super::history::{record_key, records_at, sha256_of};
 use super::{
     bottom::BottomTab, cm_json, cs_pbr_export, cs_skin_json, pbr_export, xpmf_json, AppModel,
-    Continue, ItemStatus,
+    Continue, ExportPress, ItemStatus,
 };
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -818,9 +818,15 @@ impl AppModel {
 
     /// Review's Export (R3): `export_clicked`'s front half (a plan in flight → wait; changed sources → plan again and
     /// wait), then `Continue::Review`: the guards and the gate again before the export. Never on a stale plan.
+    /// A click run at once.
     pub fn export_from_review(&mut self) {
-        // Ruling 3c-37: before anything is queued or started.
-        if self.dialog_drops_click() {
+        self.review_export_pressed(self.export_press());
+    }
+
+    /// `export_from_review` for the press `press` (ruling 3c-38: Review's button can wait a frame).
+    pub fn review_export_pressed(&mut self, press: ExportPress) {
+        // Rulings 3c-37, 3c-38: before anything is queued or started.
+        if self.press_refused(press) {
             return;
         }
         // Note GH8: Review's Export also works with no project (it writes the NIF edits alone).
@@ -828,9 +834,9 @@ impl AppModel {
             return;
         }
         self.status_note = None;
-        // Ruling 3c-35: confirmed for the scope Review shows now.
+        // Ruling 3c-35: confirmed for the scope Review showed at the press (`press_refused`: the same as now).
         self.continue_review(Continue::Review {
-            scope_rev: self.scope_rev,
+            scope_rev: press.scope_rev,
         });
     }
 

@@ -937,8 +937,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             model.nif_diff_request = Some(path);
             super::header::set_meshes_view(ui.ctx(), true);
         }
-        // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal).
-        Some(Act::Export) => super::after_commit(ui.ctx(), model, AppModel::export_from_review),
+        // Export saves first: a focused field commits before it runs (Note FC8, supersedes CA14's refusal). Ruling
+        // 3c-38: the click carries what the button saw when it fired, in case it waits a frame.
+        Some(Act::Export) => {
+            let press = model.export_press();
+            super::after_commit(ui.ctx(), model, move |m| m.review_export_pressed(press));
+        }
         Some(Act::Close) => model.close_review(),
         None => {}
     }

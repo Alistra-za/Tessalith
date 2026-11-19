@@ -1953,3 +1953,113 @@ fn an_open_dialog_stops_every_export_entry() {
     }
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// Round 5, ruling 3c-38: the Export buttons the UI can defer a frame for a focused field (`ui::after_commit`).
+/// Export set, Export group, Export N sets and the palette call the model at once.
+#[derive(Debug, Clone, Copy)]
+enum Deferred {
+    ReviewExport,
+    Header,
+}
+
+/// A scoped Review for g/u is open, the input name box has the focus and a plan for another export folder is pending.
+/// `button` is pressed and released in one frame (a tap), so its click waits a frame; the plan lands before that
+/// frame (as `SdcApp`'s poll does) and re-keys the scope; then the frame runs the click. Lists what is wrong.
+fn pressed_then_rekeyed(button: Deferred) -> Vec<String> {
+    use egui_kittest::kittest::{by, Queryable as _};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let u = key_of(&m, "g/u");
+    m.select_set(&u);
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut h = harness(m);
+    h.run();
+    h.get(
+        by().role(egui::accesskit::Role::TextInput)
+            .label(sdc_gui::ui::input_name::HINT),
+    )
+    .click();
+    h.run();
+    let moved = d.path().join("export2");
+    let m = h.state_mut();
+    m.hold_plan_results = true;
+    m.set_export_folder(moved.clone());
+    assert!(m.full_plan_pending(), "{button:?}: guard: pending");
+    let scope = m.export_scope().cloned();
+    let label = match button {
+        Deferred::ReviewExport => m.review_button_text(),
+        Deferred::Header => m.header_export_text(),
+    };
+    let p = h
+        .query_all_by_label(&label)
+        .next()
+        .unwrap_or_else(|| panic!("{button:?}: no button {label}"))
+        .rect()
+        .center();
+    h.input_mut().events.push(egui::Event::PointerMoved(p));
+    h.step();
+    for pressed in [true, false] {
+        h.input_mut().events.push(egui::Event::PointerButton {
+            pos: p,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        });
+    }
+    h.step();
+    let m = h.state_mut();
+    assert_eq!(
+        m.after_commit.len(),
+        1,
+        "{button:?}: guard: the click waits a frame"
+    );
+    // The poll at the next frame's start lands the plan under the new export folder: the scope is re-keyed.
+    let msgs = held_plan(m);
+    for x in msgs {
+        m.handle_held(x);
+    }
+    m.hold_plan_results = false;
+    assert!(
+        m.export_scope().is_some() && m.export_scope().cloned() != scope,
+        "{button:?}: guard: the scope was re-keyed"
+    );
+    h.step();
+    let m = h.state_mut();
+    assert!(
+        m.after_commit.is_empty(),
+        "{button:?}: guard: the click ran"
+    );
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let mut wrong = vec![];
+    if moved.join("textures/g/u.dds").exists()
+        || moved.join("textures/g/a.dds").exists()
+        || !nothing_written(d.path())
+        || m.export.running.is_some()
+        || m.export.summary.is_some()
+    {
+        wrong.push("wrote for a scope the press never saw".to_string());
+    }
+    if m.export_queued() {
+        wrong.push("something is still queued or armed".into());
+    }
+    if !m.status_line.contains("press Export again") {
+        wrong.push(format!("no message: {}", m.status_line));
+    }
+    wrong
+        .into_iter()
+        .map(|w| format!("{button:?}: {w}"))
+        .collect()
+}
+
+/// Round 5, ruling 3c-38 (re-review: Review captures the scope one frame late): a click is judged by what was true
+/// when the button fired. Through the real deferral, a plan that re-keys the scope between the press and the deferred
+/// call drops the click with the 3c-35 message; nothing is written.
+#[test]
+fn a_deferred_export_click_keeps_the_scope_of_its_press() {
+    let wrong: Vec<String> = [Deferred::ReviewExport, Deferred::Header]
+        .into_iter()
+        .flat_map(pressed_then_rekeyed)
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}

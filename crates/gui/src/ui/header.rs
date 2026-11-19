@@ -270,8 +270,10 @@ fn export_button(ui: &mut egui::Ui, model: &mut AppModel, size: egui::Vec2) {
             .add_enabled(can_export, export)
             .on_hover_ui(hover)
             .on_disabled_hover_ui(hover);
-        // Export saves first: a focused field commits before it runs (Note FC8, supersedes BS14's refusal).
-        super::commit_click(ui, &r, model, AppModel::header_export_clicked);
+        // Export saves first: a focused field commits before it runs (Note FC8, supersedes BS14's refusal). Ruling
+        // 3c-38: the click carries what the button saw when it fired, in case it waits a frame.
+        let press = model.export_press();
+        super::commit_click(ui, &r, model, move |m| m.header_export_pressed(press));
         if running {
             let (done, total) = model.export.progress();
             let frac = if total == 0 {
