@@ -599,6 +599,9 @@ pub struct AppModel {
     /// E3 (ruling 3c-28): evaluations of the write-now rule (`writes_rule`); see `review::rule_reads`.
     #[cfg(feature = "test-hooks")]
     pub(crate) rule_reads: std::cell::Cell<u64>,
+    /// E3 (ruling 3c-36): refreshes of the header's whole-project drawing cache; see `review::whole_disk_reads`.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) whole_disk_reads: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
     #[cfg(feature = "test-hooks")]
     pub(crate) stale_drops: std::cell::Cell<[u32; 3]>,
@@ -948,6 +951,8 @@ impl AppModel {
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]
             rule_reads: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            whole_disk_reads: Default::default(),
             #[cfg(feature = "test-hooks")]
             stale_drops: Default::default(),
             #[cfg(feature = "test-hooks")]

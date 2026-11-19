@@ -118,6 +118,12 @@ pub fn rule_reads(m: &AppModel) -> u64 {
     m.rule_reads.get()
 }
 
+/// E3 (ruling 3c-36): how many times the header's whole-project drawing cache was read from disk (`WholeDisk`).
+#[cfg(feature = "test-hooks")]
+pub fn whole_disk_reads(m: &AppModel) -> u64 {
+    m.whole_disk_reads.get()
+}
+
 fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
@@ -591,6 +597,8 @@ impl AppModel {
             .as_ref()
             .is_some_and(|w| w.key == *view && w.at.elapsed() < REVIEW_JSON_TTL);
         if !fresh {
+            #[cfg(feature = "test-hooks")]
+            self.whole_disk_reads.set(self.whole_disk_reads.get() + 1);
             let pgp = self.with_whole_view(|| self.pgp_json_line());
             let toml_unwritable = self.toml_unwritable_now();
             *self.whole_disk.borrow_mut() = Some(WholeDisk {
@@ -605,24 +613,25 @@ impl AppModel {
 
     /// The whole project's gate as the header draws it (rulings 3c-21, 3c-28). With no scope it is `review_gate`.
     /// Under one: the same checks, with the keyed blocker count, and the whole project's Also check (a tick runs on a
-    /// whole-project export) and PGPatcher JSON line from the drawing cache; every other part live.
+    /// whole-project export) and PGPatcher JSON line from the drawing cache; every other part live. The drawing cache
+    /// is read only once the cheap checks before it pass (ruling 3c-36): a missing folder or a known blocker pays no
+    /// whole-project preparation.
     fn whole_gate(&self, whole: Option<&(super::ViewKey, WholeTerms)>) -> Result<(), String> {
         let Some((view, t)) = whole else {
             return self.review_gate().map(|_| ());
         };
-        self.with_whole_disk(view, |w| {
-            self.gate_check(
-                || t.blocks,
-                || {
-                    if self.also_on() {
-                        self.also_gate_with(w.toml_unwritable.as_deref())
-                    } else {
-                        Ok(())
-                    }
-                },
-                || self.unanswered_with(w.pgp.as_ref()),
-            )
-        })
+        self.gate_check(
+            || t.blocks,
+            || {
+                if self.also_on() {
+                    let toml = self.with_whole_disk(view, |w| w.toml_unwritable.clone());
+                    self.also_gate_with(toml.as_deref())
+                } else {
+                    Ok(())
+                }
+            },
+            || self.with_whole_disk(view, |w| self.unanswered_with(w.pgp.as_ref())),
+        )
     }
 
     /// E3 (ruling 3c-14): `writes_without_review` of the whole project, whatever scope an open Review was made for (a

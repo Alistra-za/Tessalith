@@ -1082,6 +1082,43 @@ fn the_click_reads_the_export_blockers_fresh() {
     assert!(m.review.is_some(), "the overlap blocker opens Review");
 }
 
+/// Round 4, ruling 3c-36 (re-review B5): the header's whole-project disk read (the PGPatcher line and the
+/// `sdc.toml` writability, which prepares the whole project's JSON) comes only after the gate's cheap checks pass. A
+/// scoped Review on a project with no export folder chosen fails at that check and reads nothing; a clean one reads
+/// once.
+#[test]
+fn the_header_reads_the_disk_only_after_the_cheap_gate_checks() {
+    use sdc_gui::model::review::whole_disk_reads;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_unchosen(d.path());
+    let k = sdc_gui::model::sets::set_views(&m)[0].key.clone();
+    m.export_sets([k].into(), "Export set".into());
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "guard: scoped Review"
+    );
+    assert!(
+        m.export_folder_chosen().is_none(),
+        "guard: no export folder"
+    );
+    m.expire_review_json();
+    let before = whole_disk_reads(&m);
+    assert!(!m.header_answer().accent, "guard: the gate is closed");
+    assert_eq!(
+        whole_disk_reads(&m),
+        before,
+        "a closed cheap check read the disk"
+    );
+    // Control: a clean scoped project reads it once.
+    let d2 = tempfile::tempdir().unwrap();
+    let mut m2 = support::opened_chosen_decided(d2.path());
+    scoped_review_with_the_opt_out(&mut m2, "g/u");
+    m2.expire_review_json();
+    let before = whole_disk_reads(&m2);
+    assert!(m2.header_answer().now, "guard");
+    assert_eq!(whole_disk_reads(&m2), before + 1);
+}
+
 /// Round 4, ruling 3c-35 (re-review, out-of-scope observation 2): Review's Export, queued behind a plan, was
 /// confirmed for one scope. The header's "Review…" pressed before the plan lands clears the scope (the open Review
 /// becomes the whole project's); the queued export must not run for the whole project: nothing is written, the
