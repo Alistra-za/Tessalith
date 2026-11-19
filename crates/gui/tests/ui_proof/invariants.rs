@@ -234,10 +234,25 @@ fn bar_paint(f: &Frame, bar: &Node, layer: &str) -> Result<(Rect, bool), String>
         (r.min.y - bar.rect.min.y).abs() <= 0.5 && (r.max.y - bar.rect.max.y).abs() <= 0.5
     };
     // the track is the tallest candidate that spans the strip; a handle as long as the track (content that barely
-    // overflows) spans it too and is taken for the handle
+    // overflows) spans it too and is taken for the handle. Equal heights (within 0.5 px) go to the candidate that holds
+    // the other, then to the wider one, whatever order they were painted in.
+    let rank = |a: &Rect, b: &Rect| {
+        let height = if (a.height() - b.height()).abs() <= 0.5 {
+            std::cmp::Ordering::Equal
+        } else {
+            a.height().total_cmp(&b.height())
+        };
+        height
+            .then(
+                a.expand(0.5)
+                    .contains_rect(*b)
+                    .cmp(&b.expand(0.5).contains_rect(*a)),
+            )
+            .then(a.width().total_cmp(&b.width()))
+    };
     let Some(at) = (0..cands.len())
         .filter(|i| spans(&cands[*i].0))
-        .max_by(|a, b| cands[*a].0.height().total_cmp(&cands[*b].0.height()))
+        .max_by(|a, b| rank(&cands[*a].0, &cands[*b].0))
     else {
         return Err(format!(
             "the scroll bar node at {:?} has no filled rect of its own layer spanning its strip in view ({:?}), so which paint is the bar's cannot be told",
@@ -3759,6 +3774,44 @@ fn a_handle_may_be_narrower_than_its_track() {
     let (hits, errors) = observe_bars(&snap);
     assert!(hits.is_empty(), "{hits:?}");
     assert_eq!(errors.len(), 1, "{errors:?}");
+}
+
+/// A handle as tall as its track (content that barely overflows) and narrower, painted after the track, is the handle:
+/// at equal heights the candidate that holds the other is the track, whatever the paint order.
+#[test]
+fn a_full_height_handle_painted_after_its_track_is_the_handle() {
+    let clean = PlantedScreen(Planted::CleanBar).at(SIZES[1]).unwrap();
+    let strip = clean
+        .nodes
+        .iter()
+        .find(|n| n.role == "ScrollBar")
+        .unwrap()
+        .rect
+        .expand(0.5);
+    let mut snap = clean.clone();
+    let mut inside: Vec<usize> = (0..snap.filled.len())
+        .filter(|i| strip.contains_rect(snap.filled[*i].rect))
+        .collect();
+    inside.sort_by(|a, b| {
+        snap.filled[*b]
+            .rect
+            .height()
+            .total_cmp(&snap.filled[*a].rect.height())
+    });
+    let (track, handle) = (inside[0], inside[1]);
+    // a 4 px track and a 2 px handle in its middle, both the strip's whole height
+    let right = snap.filled[track].rect.max.x;
+    snap.filled[track].rect.min.x = right - 4.0;
+    let t = snap.filled[track].rect;
+    let mut h = snap.filled.remove(handle);
+    h.rect = Rect::from_min_max(
+        eframe::egui::pos2(right - 3.0, t.min.y),
+        eframe::egui::pos2(right - 1.0, t.max.y),
+    );
+    h.alpha = 255;
+    snap.filled.push(h);
+    let (hits, errors) = observe_bars(&snap);
+    assert!(hits.is_empty() && errors.is_empty(), "{hits:?} {errors:?}");
 }
 
 /// Paint in a layer egui moves by a transform is in other coordinates than the nodes: a status circle or a bar there is
