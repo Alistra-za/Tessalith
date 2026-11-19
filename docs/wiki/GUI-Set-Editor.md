@@ -27,7 +27,7 @@ Click a reason to go to its fix:
 
 One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
 
-If you borrow the **Normal** slot from a set with two normals, the row can show one file while [your roughness bake uses the other](Texture-Packing.md#variance-and-gloss-bake).
+When you borrow the **Normal** slot, [your roughness bake uses the highest-priority normal](Texture-Packing.md#variance-and-gloss-bake) your shader accepts from the lending set. The slot can show a different file. Even if the lending set shows a borrowed normal, it can lend you its own.
 
 - Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
 - Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
@@ -50,7 +50,9 @@ Picking **Auto** or a shader outside the PBR family takes back what that pick wr
 
 ### Picking a shader for a normal
 
-The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. Tessalith skips an automatic type change if its `[files]` entry would also change another texture. <!-- D:JS5,JS6 -->
+The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type, even if you click **Auto** before the Eye plan finishes. Tessalith can then record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. When a normal follows its set’s shader, Tessalith changes its settings only if the entry controls one input. The same check applies to **Keep alpha**, a shader pick, the diffuse’s **Switch** and **Revert**, and **Reset all**.
+
+If a cube face is read through `wall.png.tga`, recording its type can also mark `wall.png` as a cubemap. A mesh scan can write an alpha setting for `wall.png` that also applies to `wall.png.tga`. If the second file is a shared normal, **Remove** can drop its alpha without a **Keep alpha** row, as before this release. <!-- D:JS5,JS6 -->
 
 ## Slot menus
 
