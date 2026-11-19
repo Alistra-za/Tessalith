@@ -1059,3 +1059,112 @@ fn a_scoped_export_with_a_tick_never_writes_into_the_source_mod() {
     );
     assert!(matches!(m.dialog, Some(Dialog::Error(_))), "{:?}", m.dialog);
 }
+
+// ---- Review E1 (Task 15a): with no link and no clear, Export is what it was ----
+
+/// `textures/arch` with no link and no clear: `wall` a PBR set with a height (Parallax), `lacq` a set with both `_cnr`
+/// and `_f`, a borrow chain (`leaf` slot 4 from `stone`, `stone` slot 4 from `wall`), `iron` with a texture-set block
+/// whose statics are Never, and `stone` with a typed `slot5` no set writes.
+fn guard_project(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    use sdc_gui::model::cs_pbr::{Kind as CsKind, Statics};
+    let mut m = no_albedo_pair_with(
+        dir,
+        &[
+            ("wall_p.png", [128, 128, 128], Subtype::Height),
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+            ("lacq_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("iron.png", [150, 150, 160], Subtype::PbrAlbedo),
+            ("iron_n.png", [128, 128, 255], Subtype::PbrNormal),
+        ],
+    );
+    for n in ["arch/stone_n.png", "arch/iron_n.png"] {
+        m.decide(n, Answer::Green(GreenConvention::Directx));
+    }
+    idle(&mut m);
+    m.edit_docs("chain", None, true, |_, s| {
+        s.set_borrow("arch/leaf", 4, Some("arch/stone"));
+        s.set_borrow("arch/stone", 4, Some("arch/wall"));
+    });
+    idle(&mut m);
+    m.add_cs_block("arch/iron", CsKind::Txst);
+    m.set_cs_statics("arch/iron", Statics::Never);
+    m.set_json_value(
+        "arch/stone",
+        "slot5",
+        Some(json!(r"textures\cubemaps\shiny_e.dds")),
+    );
+    idle(&mut m);
+    m
+}
+
+/// Captured on the task's base (3c919443).
+const GUARD_BLOCKS: &[&str] = &["arch/lacq: _cnr and _f both use slot 7"];
+
+/// Captured on the task's base (3c919443): `iron` (statics Never) has no entry, `lacq` (excluded) none yet.
+const GUARD_JSON: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/hakasapl/PGPatcher/main/schema/pbr.schema.json",
+  "default": {
+    "emissive": false,
+    "parallax": false,
+    "displacement_scale": 1.0,
+    "specular_level": 0.04,
+    "roughness_scale": 1.0,
+    "subsurface": false
+  },
+  "entries": [
+    {
+      "match1": "arch\\leaf.dds",
+      "parallax": true,
+      "slot1": "textures\\arch\\leaf.dds",
+      "slot2": "textures\\arch\\leaf_n.dds",
+      "slot4": "textures\\pbr\\arch\\stone_p.dds",
+      "slot6": "textures\\arch\\leaf_rmaos.dds"
+    },
+    {
+      "match1": "arch\\stone.dds",
+      "parallax": true,
+      "slot4": "textures\\pbr\\arch\\stone_p.dds",
+      "slot5": "textures\\cubemaps\\shiny_e.dds"
+    },
+    {
+      "match1": "arch\\wall.dds",
+      "parallax": true,
+      "slot4": "textures\\pbr\\arch\\stone_p.dds"
+    }
+  ]
+}
+"#;
+
+/// Task 15a's guard, written first and kept unchanged through the task: on a project with no link and no clear, the
+/// export blocks and the written PGPatcher JSON are what the task's base gave (captured there). The `_cnr` + `_f` set
+/// blocks a whole export, so the JSON is taken from a whole export with that set's group excluded.
+#[test]
+fn with_no_link_and_no_clear_export_blocks_and_writes_what_it_did() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = guard_project(d.path());
+    let blocks: Vec<String> = sdc_gui::model::pbr_export::export_blocks(&m)
+        .iter()
+        .map(|i| i.text.clone())
+        .collect();
+    assert_eq!(blocks, GUARD_BLOCKS);
+    group(&mut m, "Clash", &["arch/lacq"]);
+    m.set_group_excluded("Clash", true).unwrap();
+    idle(&mut m);
+    assert!(
+        sdc_gui::model::pbr_export::export_blocks(&m).is_empty(),
+        "{:?}",
+        sdc_gui::model::pbr_export::export_blocks(&m)
+    );
+    whole(&mut m);
+    assert_eq!(pgp_text(&m), GUARD_JSON, "{}", notes(&m));
+    assert_eq!(
+        notes(&m)
+            .lines()
+            .filter(|l| l.starts_with("not in JSON"))
+            .collect::<Vec<_>>(),
+        ["not in JSON: arch/lacq (not exported yet)"]
+    );
+}
