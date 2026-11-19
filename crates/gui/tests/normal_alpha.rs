@@ -3591,6 +3591,96 @@ fn keep_alpha_writes_one_literal_table_and_undo_restores_both_documents() {
 }
 
 #[test]
+fn a_share_leaves_an_aliased_double_extension_inputs_policy_alone() {
+    const OTHER: &str = "pbr/iron_n.png.tga";
+    for (has_full_table, config) in [
+        (true, "[files.'pbr/iron_n.png']\nsubtype = 'pbr_normal'\n"),
+        (
+            false,
+            "[[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n",
+        ),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        open_slot_files(d.path());
+        let root = d.path().join("textures");
+        bumpy_n(&root.join(OTHER));
+        let files = format!(
+            "[inputs.'{OTHER}']\nas = 'pbr/copper.tga'\n{config}\
+             [files.'{OTHER}']\nsubtype = 'pbr_albedo'\n"
+        );
+        let mut m = open_saved_share(d.path(), &files, "");
+        assert_eq!(
+            m.project.as_ref().unwrap().has_file_key(IRON_N),
+            has_full_table
+        );
+        let other_policy = |m: &AppModel| {
+            let item = m.item(OTHER).unwrap();
+            let job = item
+                .job
+                .as_ref()
+                .unwrap_or_else(|| panic!("{:?}", item.status));
+            assert_eq!(job.output.file_name().unwrap(), "copper.dds");
+            job.profile.alpha.policy
+        };
+        let before = other_policy(&m);
+        assert_ne!(before, AlphaPolicy::Data);
+        share(&mut m, IRON_N, "armor/steel");
+        m.save().unwrap();
+        let saved = sdc_gui::project::ProjectDoc::open(&root);
+        for key in saved.file_keys() {
+            if engine::overrides::path_key_matches(&key, OTHER) {
+                assert_eq!(saved.file_value(&key, "alpha.policy"), None, "{key}");
+            }
+        }
+        assert_eq!(saved.has_file_key(IRON_N), has_full_table);
+        assert!(sdc_gui::sets_doc::SetsDoc::open(&root)
+            .auto_data()
+            .is_empty());
+        assert_eq!(other_policy(&m), before);
+        assert_eq!(keep_rows(&m, IRON_N), 1);
+    }
+}
+
+#[test]
+fn ending_a_share_keeps_data_if_a_second_input_now_matches_the_listed_table() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    let root = d.path().join("textures");
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(auto_data(&m), [IRON_N]);
+    m.save().unwrap();
+    drop(m);
+    bumpy_n(&root.join("pbr/iron_n.png.tga"));
+    let path = root.join("sdc.toml");
+    let mut files = std::fs::read_to_string(&path).unwrap();
+    files.push_str(
+        "\n[inputs.'pbr/iron_n.png.tga']\nas = 'pbr/copper.tga'\n\
+         [files.'pbr/iron_n.png.tga']\nsubtype = 'pbr_albedo'\n",
+    );
+    std::fs::write(path, files).unwrap();
+    let mut m = opened_as_the_app(root.clone(), d.path().join("export"));
+    let item = m.item("pbr/iron_n.png.tga").unwrap();
+    let other = item
+        .job
+        .as_ref()
+        .unwrap_or_else(|| panic!("{:?}", item.status));
+    assert_eq!(other.output.file_name().unwrap(), "copper.dds");
+    assert_eq!(other.profile.alpha.policy, AlphaPolicy::Data);
+    assert_eq!(auto_data(&m), [IRON_N]);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    assert_eq!(m.undo_label(), Some("Clear slot 2 of armor/steel"));
+    settle(&mut m);
+    m.save().unwrap();
+    let saved = sdc_gui::project::ProjectDoc::open(&root);
+    assert_eq!(
+        saved.file_value(IRON_N, "alpha.policy"),
+        Some(json!("data"))
+    );
+}
+
+#[test]
 fn keep_alpha_leaves_an_aliased_double_extension_input_alone() {
     let d = tempfile::tempdir().unwrap();
     open_slot_files(d.path());

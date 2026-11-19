@@ -237,7 +237,7 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
         return vec![];
     }
     let tables = Tables::of(p);
-    let inputs = std::cell::LazyCell::new(|| input_key_counts(m));
+    let inputs = std::cell::LazyCell::new(|| input_matches(m));
     shared
         .into_iter()
         .filter_map(|(key, owner)| {
@@ -249,27 +249,36 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
             {
                 return None;
             }
-            let table = tables.keep_table(key).and_then(|table| {
-                if inputs.get(&table.to_lowercase()) != Some(&1) {
-                    return Err(format!(
-                        "The [files] key {table} in sdc.toml also matches another texture."
-                    ));
-                }
-                lock_refusal(owner, Some(SlotKind::Normal))?;
-                Ok(table)
-            });
+            let table = tables
+                .single_input_table(key, &inputs)
+                .and_then(|(table, _)| {
+                    lock_refusal(owner, Some(SlotKind::Normal))?;
+                    Ok(table)
+                });
             Some((key.clone(), table))
         })
         .collect()
 }
 
-/// How many landed inputs each full name or stem governs. Item keys keep the real name after an input alias.
-fn input_key_counts(m: &AppModel) -> HashMap<String, usize> {
-    let mut counts = HashMap::new();
+#[derive(Clone, Copy)]
+enum InputMatch {
+    Full,
+    Stem,
+    Multiple,
+}
+
+/// How each folded table key matches the landed inputs. Item keys keep the real name after an input alias.
+fn input_matches(m: &AppModel) -> HashMap<String, InputMatch> {
+    let mut matches = HashMap::new();
     let mut add = |key: &str| {
         let (full, stem) = forms(key);
-        for form in std::iter::once(full).chain(stem) {
-            *counts.entry(form).or_default() += 1;
+        for (form, kind) in
+            std::iter::once((full, InputMatch::Full)).chain(stem.map(|s| (s, InputMatch::Stem)))
+        {
+            matches
+                .entry(form)
+                .and_modify(|m| *m = InputMatch::Multiple)
+                .or_insert(kind);
         }
     };
     for item in &m.items {
@@ -290,7 +299,7 @@ fn input_key_counts(m: &AppModel) -> HashMap<String, usize> {
             }
         }
     }
-    counts
+    matches
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
@@ -579,21 +588,19 @@ impl Tables {
         })
     }
 
-    /// N8-e: the `[files]` table the share step writes `data` into for file `key`, and so the exact string it lists:
-    /// the table spelled `key`, else the one `find_key` picks among its full-name spellings in another case (the
-    /// first in `[files]` order), else a new `[files."<key>"]` (no table matches, so none is walked for: N8-s). `None`
-    /// when the file's only table is spelled without the extension: the GUI's own edits of the file resolve to that
-    /// table, where a `data` is the user's (no write, N8-a; Task 9's row).
-    fn write_table(&self, key: &str) -> Option<String> {
-        let tables = self.matching(key);
-        if tables.iter().any(|(k, ..)| k == key) {
-            return Some(key.to_string());
+    /// Keep alpha and Share must both resolve the literal table to one landed input.
+    fn single_input_table(
+        &self,
+        key: &str,
+        inputs: &HashMap<String, InputMatch>,
+    ) -> Result<(String, InputMatch), String> {
+        let table = self.keep_table(key)?;
+        match inputs.get(&table.to_lowercase()) {
+            Some(kind @ (InputMatch::Full | InputMatch::Stem)) => Ok((table, *kind)),
+            _ => Err(format!(
+                "The [files] key {table} in sdc.toml also matches another texture."
+            )),
         }
-        let lower = key.to_lowercase();
-        if let Some((k, ..)) = tables.iter().find(|(k, ..)| k.to_lowercase() == lower) {
-            return Some(k.clone());
-        }
-        tables.is_empty().then(|| key.to_string())
     }
 
     /// Use the existing table Reset reads, including its stem fallback. Create a full key only for an unconfigured file.
@@ -675,7 +682,7 @@ fn distinct(list: Vec<String>) -> Vec<String> {
 /// One run, from the documents as the step left them: `data` on each key shared now and not at `b`; every listed key
 /// no regular set shares, still `data`, cleared (N-33); an entry whose own table no longer holds `data` dropped (N8-p).
 fn changes(
-    f: &Facts,
+    m: &AppModel,
     b: &Before,
     p: &ProjectDoc,
     s: &SetsDoc,
@@ -711,8 +718,10 @@ fn changes(
     }
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
     // creates or renames has no view before it, so it is `unsure` instead).
+    let f = facts(m);
+    let inputs = std::cell::LazyCell::new(|| input_matches(m));
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let sh = shared_into_regular(f, s, &gone, &b.targets, touched);
+    let sh = shared_into_regular(&f, s, &gone, &b.targets, touched);
     let (now, unsure) = (&sh.out, &sh.unsure);
     // N8-a, N8-j, N8-o: alpha is read as Task 6 reads it, from every `[files]` table that matches the file, through the
     // step's one index of the document after the edit; each file asks two lookups.
@@ -726,9 +735,9 @@ fn changes(
             && !f.locked.contains(k)
             && tables.alpha(k).is_empty()
             && tables.typed_normal(k);
-        if free && !already_data(f, b.sub.get(k), tables, k) {
-            // N8-e: the entry is the exact table written.
-            if let Some(t) = tables.write_table(k) {
+        if free && !already_data(&f, b.sub.get(k), tables, k) {
+            // N9-m: a safe stem table is for Keep alpha; Share owns only full-name tables.
+            if let Ok((t, InputMatch::Full)) = tables.single_input_table(k, &inputs) {
                 c.write.push(t);
             }
         }
@@ -738,7 +747,16 @@ fn changes(
         // N8-e: only the `data` the share step wrote: the table spelled exactly as the entry (every entry left in
         // `start` holds it); a `data` in any other table is the user's.
         // N8-b: in a `blind` step a borrow may read any of them.
-        if !names(k, &locked) && !names(k, &now_f) && !names(k, &unsure_f) && !sh.blind {
+        // A listed full name can now be another input's stem. An orphaned table can still be cleared.
+        if !names(k, &locked)
+            && !names(k, &now_f)
+            && !names(k, &unsure_f)
+            && !sh.blind
+            && !matches!(
+                inputs.get(&k.to_lowercase()),
+                Some(InputMatch::Multiple | InputMatch::Stem)
+            )
+        {
             c.clear.push(k.clone());
         }
     }
@@ -835,7 +853,7 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
         }
     }
     let data = Some(json!("data"));
-    // N8-s: the index chose each table (`write_table`), so the write takes its spelling as it is, with no lookup.
+    // N8-s: the index chose each table, so the write takes its spelling as it is, with no lookup.
     for k in c.write.iter().filter(|_| !fail) {
         p.set_exact_file_value(k, "alpha.policy", &json!("data"));
     }
@@ -886,12 +904,11 @@ impl AppModel {
     /// Note JS7 (N-10, N-33): the follow-on at the end of a user's step on cs, inside the step, from its starting
     /// point; `post` is the step's index of the project document after the edit (N8-o).
     pub(super) fn follow_shared(&mut self, b: &Before, post: &Tables) {
-        let fx = facts(self);
         let Some(c) = self
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .map(|(p, s)| changes(&fx, b, p, s, &touched(self, b, s), post))
+            .map(|(p, s)| changes(self, b, p, s, &touched(self, b, s), post))
         else {
             return;
         };
