@@ -1231,3 +1231,58 @@ fn every_pick_the_menu_offers_is_a_link_to_its_set() {
         "{l:?}"
     );
 }
+
+/// R4: a CS set whose statics are Never writes no PGPatcher entry, so a stored link or clear on it is no link and no
+/// clear: no feature default, no missing-map row dropped, and an own file under `slotN = ""` shows as itself.
+#[test]
+fn a_set_the_statics_rule_drops_takes_no_link_and_no_clear() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &extra());
+    m.add_cs_block(LEAF, Kind::Txst);
+    m.set_cs_statics(LEAF, Statics::Never);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.pgp_entry_wanted(&leaf(&m)), "premise: no entry");
+    assert!(needs_albedo(&m), "premise");
+    link(&mut m, 1, WALL_ALBEDO);
+    link(&mut m, 4, "arch/bump_p.png");
+    m.set_slot_command(LEAF, 2, SlotCommand::Clear).unwrap();
+    let v = leaf(&m);
+    assert!(v.linked.is_empty(), "{:?}", v.linked);
+    assert!(needs_albedo(&m), "the albedo row stays");
+    assert_eq!(entry(&m, LEAF).get("parallax"), None, "no feature default");
+    assert!(
+        matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Own { .. }),
+        "{:?}",
+        slot_shown(&v, SlotKind::Normal)
+    );
+}
+
+/// R4: on a target with no PGPatcher JSON a stored `slotN = ""` leaves the own file as it is: no dim chip, no "Left
+/// out of the JSON" sentence.
+#[test]
+fn on_a_target_with_no_json_a_stored_clear_leaves_the_own_file_as_it_is() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command(LEAF, 2, SlotCommand::Clear).unwrap();
+    assert!(
+        matches!(
+            slot_shown(&leaf(&m), SlotKind::Normal),
+            SlotShown::Cleared { .. }
+        ),
+        "premise: cleared on cs"
+    );
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(
+        matches!(
+            slot_shown(&leaf(&m), SlotKind::Normal),
+            SlotShown::Own { .. }
+        ),
+        "{:?}",
+        slot_shown(&leaf(&m), SlotKind::Normal)
+    );
+    select_set(&mut m, LEAF);
+    let h = harness(m);
+    assert!(h.query_by_label_contains("Left out of the JSON").is_none());
+}

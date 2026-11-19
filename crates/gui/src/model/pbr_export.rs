@@ -244,6 +244,13 @@ pub(crate) fn exports_json(m: &AppModel, v: &SetView) -> bool {
         && !matches_nothing(&v.settings, v.derived_match.as_deref().unwrap_or(""))
 }
 
+/// Review E1 (Task 15a): whether `v` writes a PGPatcher entry: `exports_json`, and the statics rule keeps the entry
+/// (design §5.1, `pgp_entry_wanted`). The one answer the link display, the feature defaults, the missing-map
+/// suppression and the cleared state read (`txst_map::link_slots`), and the filter of `written_json_entries`.
+pub(crate) fn writes_entry(m: &AppModel, v: &SetView) -> bool {
+    exports_json(m, v) && m.pgp_entry_wanted(v)
+}
+
 /// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
 pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     if m.target != Target::Cs {
@@ -279,7 +286,7 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
 pub fn written_json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     json_entries(m)
         .into_iter()
-        .filter(|(v, _)| m.pgp_entry_wanted(v))
+        .filter(|(v, _)| writes_entry(m, v))
         .collect()
 }
 

@@ -398,13 +398,14 @@ pub struct SetView {
     /// The id's last `/`-parts that tell it from every other set (see [`short_names`]). Set by `build_views`.
     pub short: String,
     /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
-    /// that path. Only a set written as a JSON entry has any (`link_slots`); set by `build_views`.
+    /// that path. Only a set that writes a PGPatcher entry (`pbr_export::writes_entry`) has any (`link_slots`); set by
+    /// `build_views`.
     pub linked: BTreeMap<u8, SlotLink>,
     /// The fills the exported JSON's feature keys read (`feature_slots`): `slots` with the own and borrowed fills of
     /// each game slot that holds a link from another set (a set output, not a typed path) or a clear (`slotN = ""`)
     /// left out, and each such link's file under the row it fills (`SlotLink::row`). `None` when no link counts and no
-    /// game slot is cleared over an own or borrowed file. Only a set written as a JSON entry has any (`link_slots`);
-    /// set by `build_views` and `splice_views`.
+    /// game slot is cleared over an own or borrowed file. Only a set that writes a PGPatcher entry
+    /// (`pbr_export::writes_entry`) has any (`link_slots`); set by `build_views` and `splice_views`.
     pub features: Option<BTreeMap<SlotKind, SlotFill>>,
     /// The files this set's own members write (review E13): each own slot's planned output in slot order, then each
     /// member with a job that fills no slot (a complex `_m`, a packed output with no card) in member order, each path
@@ -520,7 +521,11 @@ pub fn slot_shown(v: &SetView, kind: SlotKind) -> SlotShown<'_> {
             if let Some(by) = v.linked.get(&n) {
                 return SlotShown::Replaced { item, by };
             }
-            if slot_string(&v.settings, n) == Some("") {
+            // A clear counts only on a set that writes an entry, where `link_slots` left the file out of `features`
+            // (Task 15a): elsewhere no JSON carries the `slotN`, and the file shows as itself.
+            if slot_string(&v.settings, n) == Some("")
+                && v.features.as_ref().is_some_and(|f| !f.contains_key(&kind))
+            {
                 return SlotShown::Cleared { item };
             }
         }

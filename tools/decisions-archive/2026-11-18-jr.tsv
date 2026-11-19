@@ -21,3 +21,5 @@ Digest¶- Preview toolbar: three clusters	Digest		back	JR		partial	2026-11-18		g
 Digest¶- A set card uses a one-row heading only when	Digest		back	JR		partial	2026-11-18		goes: nothing (JR5: the shown title must also fit beside the pill); stays: the whole line
 HP6	HP		back	JR		partial	2026-11-18		goes: SETS_W 260, Sets narrowing only by tile rounding at 1055 and the 121/141 px figures (JJ2: 266; Sets yields the rest once Textures is at its minimum, 266 to 172 px, HP12); stays: Textures first, then Sets, the one move left
 HP10	HP		back	JR		partial	2026-11-18		goes: opening a set at 1055 narrows Sets only by 20 px (HP12 (a): 266 to 172 px); stays: the test support
+JR1	JR		back	JR		partial	2026-11-18		goes: shown only on a set that exports a JSON entry (`exports_json`), and a `slotN = ""` read as left out on every set (JR14: a set that writes an entry, `writes_entry`, statics included); stays: the rest
+JR9	JR		back	JR		partial	2026-11-18		goes: `features` computed where `exports_json` holds (JR14: where `writes_entry` holds, statics included); stays: the rest

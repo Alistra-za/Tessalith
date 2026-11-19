@@ -3,7 +3,7 @@
 
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
-use super::pbr_export::exports_json;
+use super::pbr_export::writes_entry;
 use super::sets::{
     engine_inputs_in, entry_of, game_path_in, has_slot_clear, has_slot_link, link_row_kind,
     linked_map_slot, missing_map_slot, recipe_suffix, renamed_output, slot_of, slot_string,
@@ -317,7 +317,8 @@ pub(super) fn fill_from_records(
     }
 }
 
-/// Review E1: fills `linked` of every set written as a JSON entry (`exports_json`) from its non-empty `slotN` strings:
+/// Review E1: fills `linked` of every set that writes a PGPatcher entry (`writes_entry`: a JSON set whose statics keep
+/// the entry, Task 15a) from its non-empty `slotN` strings, and `features` of every such set:
 /// each path is resolved to the set and file that write it, and the row it fills is that file's kind when the kind
 /// belongs to the slot (a typed path's, or another kind's, is `link_row_kind`). A source is found in the index of every
 /// planned output (`written_outputs`), so the opened folder does not matter; the first set in display order that
@@ -392,7 +393,8 @@ fn set_links(m: &AppModel, views: &mut [SetView]) {
     let found: Vec<BTreeMap<u8, SlotLink>> = views
         .iter()
         .map(|v| {
-            if !exports_json(m, v) {
+            // The cheap test first: `writes_entry` reads the set's statics.
+            if !has_slot_link(&v.settings) || !writes_entry(m, v) {
                 return BTreeMap::new();
             }
             (1..=LAST_GAME_SLOT)
@@ -442,7 +444,8 @@ fn set_links(m: &AppModel, views: &mut [SetView]) {
     }
 }
 
-/// Fills `features` of every set written as a JSON entry: a copy of `slots` that the exported `slotN` values override.
+/// Fills `features` of every set that writes an entry (`writes_entry`): a copy of `slots` that the exported `slotN`
+/// values override.
 /// A game slot holding a link from another set (a source set, an item and a kind; a typed path that names no set output
 /// counts for nothing) loses its own and borrowed fills and gets the file under the row the link fills (`row`), so the
 /// feature is the slot's, whatever the file was called in its source set. A cleared game slot (`slotN = ""`) over an
@@ -451,7 +454,8 @@ fn set_links(m: &AppModel, views: &mut [SetView]) {
 /// changes.
 fn set_features(m: &AppModel, views: &mut [SetView]) {
     for v in views.iter_mut() {
-        if !exports_json(m, v) {
+        let s = &v.settings;
+        if !(has_slot_link(s) || has_slot_clear(s)) || !writes_entry(m, v) {
             continue;
         }
         let counts = |l: &SlotLink| l.from.is_some() && l.item.is_some() && l.kind.is_some();
