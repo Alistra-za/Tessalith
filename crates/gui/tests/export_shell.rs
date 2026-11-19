@@ -2680,6 +2680,58 @@ fn vanilla_borrow(d: &std::path::Path) -> (AppModel, std::path::PathBuf, std::pa
     (m, source, want)
 }
 
+#[test]
+fn undoing_a_rename_after_the_first_copy_and_cm_export_is_clean() {
+    let d = tempfile::tempdir().unwrap();
+    let iron = d.path().join("textures/m");
+    std::fs::create_dir_all(&iron).unwrap();
+    image::RgbImage::from_pixel(64, 64, image::Rgb([80, 90, 100]))
+        .save(iron.join("iron.png"))
+        .unwrap();
+    image::RgbaImage::from_fn(64, 64, |x, _| {
+        image::Rgba([80, 90, 100, (40 + x * 2) as u8])
+    })
+    .save(iron.join("iron_m.png"))
+    .unwrap();
+    let (mut m, _, copy) = vanilla_borrow(d.path());
+    m.set_field(
+        "m/iron_m.png",
+        "subtype",
+        serde_json::json!("complex_material"),
+    );
+    m.set_cm_export("m/iron", true);
+    idle(&mut m);
+    m.save().unwrap();
+    let doc = m.sets_doc.as_ref().unwrap();
+    assert!(doc.copy_shas().is_empty() && doc.cm_json_shas().is_empty());
+    let saved = std::fs::read(doc.path()).unwrap();
+    support::export_through(&mut m);
+    assert!(m.export.running.is_some(), "{:?}", m.review_gate());
+    m.rename_set("landscape/rock01", "landscape/renamed")
+        .unwrap();
+    idle(&mut m);
+    let doc = m.sets_doc.as_ref().unwrap();
+    assert!(copy.is_file());
+    let hashes = (doc.copy_shas(), doc.cm_json_shas());
+    assert!(
+        !hashes.0.is_empty() && !hashes.1.is_empty(),
+        "{:?}",
+        m.export.notes
+    );
+    assert!(doc.text().contains("landscape/renamed") && m.unsaved());
+    assert_eq!(std::fs::read(doc.path()).unwrap(), saved);
+    m.undo();
+    let doc = m.sets_doc.as_ref().unwrap();
+    assert!(!doc.text().contains("landscape/renamed"));
+    assert_eq!((doc.copy_shas(), doc.cm_json_shas()), hashes);
+    assert!(doc.text().contains("copy_sha256") && doc.text().contains("cm_json_sha256"));
+    assert!(doc.is_dirty());
+    assert!(
+        m.request_close(),
+        "only the two automatic export hashes remain"
+    );
+}
+
 /// (1) Nothing changed since the last export: everything Review lists is decided by this run (ruling 3c-50): the DDS
 /// outputs (until Task 8), the PGPatcher JSON built from the run's rows, the two record files its hash goes to and the
 /// manifest. Each is marked; the JSON comes out as it was.

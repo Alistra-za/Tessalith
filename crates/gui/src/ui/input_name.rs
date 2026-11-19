@@ -582,7 +582,7 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
             // One tooltip for the frame and the text edit inside it.
             inner.response.clone().union(r.clone()).on_hover_text(hover.join("\n"));
         }
-        if r.has_focus() || r.changed() {
+        if r.has_focus() || r.changed() || !same(&text, &current) {
             ui.data_mut(|d| d.insert_temp(buf, (text.clone(), frame)));
         }
         // AO4: the live list follows the text while the box has focus; FI17: under the folder before the last segment.
@@ -626,20 +626,19 @@ pub fn picker(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, matching: bo
                 }
             }
         }
-        if r.lost_focus() && !refocus {
+        if let Some(accept) = super::drafts::finish(r, !same(&text, &current), r.lost_focus() && !refocus) {
             ui.data_mut(|d| d.remove::<(String, u64)>(buf));
             // A pressed row, else the highlighted row on Enter, else the typed text (AO4). Esc reverts; an invalid or
             // unchanged value reverts; a valid change commits (one commit path, AO1).
-            let cancelled = ui.input(|i| i.key_pressed(Key::Escape));
             // A segment row's label is a folder or texture name, not a path (review fix): it never commits here.
             let row = live.clicked.take().filter(|_| !live.seg_rows).or_else(|| {
                 live.sel
                     .filter(|_| live.open && ui.input(|i| i.key_pressed(Key::Enter)))
                     .and_then(|s| rows.get(s).cloned())
             });
-            if let Some(p) = row {
+            if let Some(p) = row.filter(|_| accept) {
                 commit = (!same(&p, &current)).then_some(p);
-            } else if !cancelled && err.is_none() && !same(&text, &current) {
+            } else if accept && err.is_none() && !same(&text, &current) {
                 commit = Some(text.clone());
             }
             live = Live::default();

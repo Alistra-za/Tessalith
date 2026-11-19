@@ -240,7 +240,7 @@ impl AppModel {
             })
             .collect();
         self.edit_docs(&label, Some(merge.clone()), true, |p, _| {
-            p.touch_auto(&cleared)
+            p.touch_switch(&cleared)
         });
         self.reencode_follow = Some(merge.clone());
         self.fuzz_switch = Some(FuzzSwitch {
@@ -449,7 +449,7 @@ impl AppModel {
             let pushes = self.history.pushes;
             self.record_doc_edit(&label, Some(k), true, |p, _| {
                 if joins_switch {
-                    p.touch_auto(&writes);
+                    p.touch_switch(&writes);
                 } else {
                     for w in &writes {
                         p.set_file_value(&w.key, w.field, &w.value);

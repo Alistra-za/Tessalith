@@ -304,23 +304,38 @@ fn close_unsaved(ctx: &egui::Context, model: &mut AppModel) {
         },
     );
     if clicked == Some(0) {
-        model.dialog = None;
-        // A failed save raises its own dialog (changed on disk, or an error) and the window stays open.
-        if model.save().is_ok() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-        }
+        let window = ctx.clone();
+        super::drafts::answer(
+            ctx,
+            model,
+            true,
+            Box::new(move |model| {
+                model.dialog = None;
+                if model.save().is_ok() {
+                    window.send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            }),
+        );
     } else if clicked == Some(1) {
-        model.dialog = None;
-        // Dropping the edits makes the close request pass `request_close`.
-        if let Some(p) = model.project.as_mut() {
-            p.reload();
-        }
-        if let Some(s) = model.sets_doc.as_mut() {
-            s.reload();
-        }
-        model.history.clear();
-        model.refresh_banner();
-        ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        let window = ctx.clone();
+        super::drafts::answer(
+            ctx,
+            model,
+            false,
+            Box::new(move |model| {
+                model.dialog = None;
+                // Dropping the edits makes the close request pass `request_close`.
+                if let Some(p) = model.project.as_mut() {
+                    p.reload();
+                }
+                if let Some(s) = model.sets_doc.as_mut() {
+                    s.reload();
+                }
+                model.history.clear();
+                model.refresh_banner();
+                window.send_viewport_cmd(egui::ViewportCommand::Close);
+            }),
+        );
     } else if clicked == Some(2) || k.cancel || k.enter {
         model.dialog = None;
     }
@@ -329,6 +344,7 @@ fn close_unsaved(ctx: &egui::Context, model: &mut AppModel) {
 /// Trace-debug #10: Enter and Esc cancel; only the button drops the edits.
 fn reload_unsaved(ctx: &egui::Context, model: &mut AppModel) {
     let buttons = [
+        ("Save and reload", Role::Plain, true),
         ("Discard and reload", Role::Destructive, true),
         ("Cancel", Role::Default, true),
     ];
@@ -344,9 +360,19 @@ fn reload_unsaved(ctx: &egui::Context, model: &mut AppModel) {
             files_hint(ui, model);
         },
     );
-    if clicked == Some(0) {
-        model.reload_documents();
-    } else if clicked == Some(1) || k.cancel || k.enter {
+    if let Some(choice @ (0 | 1)) = clicked {
+        let save = choice == 0;
+        super::drafts::answer(
+            ctx,
+            model,
+            save,
+            Box::new(move |model| {
+                if !save || model.save().is_ok() {
+                    model.reload_documents();
+                }
+            }),
+        );
+    } else if clicked == Some(2) || k.cancel || k.enter {
         model.dialog = None;
     }
 }
@@ -409,10 +435,14 @@ fn open_unsaved(ctx: &egui::Context, model: &mut AppModel, root: std::path::Path
             files_hint(ui, model);
         },
     );
-    if clicked == Some(0) {
-        model.resolve_open_unsaved(root, true);
-    } else if clicked == Some(1) {
-        model.resolve_open_unsaved(root, false);
+    if let Some(choice @ (0 | 1)) = clicked {
+        let save = choice == 0;
+        super::drafts::answer(
+            ctx,
+            model,
+            save,
+            Box::new(move |model| model.resolve_open_unsaved(root, save)),
+        );
     } else if clicked == Some(2) || k.cancel || k.enter {
         model.dialog = None;
     }

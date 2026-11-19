@@ -392,7 +392,7 @@ fn button_width(ui: &egui::Ui, text: &str) -> f32 {
 fn open_menu(ui: &mut egui::Ui, model: &mut AppModel) {
     let mut open = None;
     let mut pick = false;
-    crate::look::menu_button_036(ui, "Open", |ui| {
+    let menu = crate::look::menu_button_036(ui, "Open", |ui| {
         if picker::button(ui, &model.picker, egui::Button::new("Open folder…")) {
             pick = true;
             ui.close();
@@ -408,6 +408,9 @@ fn open_menu(ui: &mut egui::Ui, model: &mut AppModel) {
             }
         }
     });
+    if menu.inner.is_some() || menu.response.is_pointer_button_down_on() || pick || open.is_some() {
+        super::drafts::hold(ui.ctx());
+    }
     if pick {
         model.pick(
             ui.ctx(),
@@ -839,8 +842,14 @@ fn status(ui: &mut egui::Ui, model: &mut AppModel) {
         if let Some(b) = model.banner.clone() {
             ui.horizontal_wrapped(|ui| {
                 ui.colored_label(super::status::AMBER, format!("⚠ {b}"));
-                if model.project.is_some() && ui.button("Reload").clicked() {
-                    model.request_reload();
+                if model.project.is_some() {
+                    let reload = ui.button("Reload");
+                    if reload.is_pointer_button_down_on() || reload.clicked() {
+                        super::drafts::hold(ui.ctx());
+                    }
+                    if reload.clicked() {
+                        model.request_reload();
+                    }
                 }
                 if model.kept_banner.is_some()
                     && ui

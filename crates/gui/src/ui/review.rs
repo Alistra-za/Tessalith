@@ -470,9 +470,9 @@ fn name_field(
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, t.clone()));
     }
-    if r.lost_focus() {
+    if let Some(commit) = super::drafts::text(&r, t != saved) {
         ui.data_mut(|d| d.remove::<String>(id));
-        if t != saved && !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+        if commit && t != saved {
             let v = (!t.is_empty()).then_some(t);
             *act = Some(Act::AlsoSet(Box::new(move |c| match which {
                 0 => c.names.pbr = v,
@@ -583,7 +583,7 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, act: &mut Option<Act>) {
                     let now = cfg.legacy.keep_metal_strength;
                     // One edit (one undo step) per drag, not per frame.
                     let (r, done) =
-                        super::number_input::held_value(ui, "also-keep-strength", now, |ui, s| {
+                        super::number_input::held_value(ui, "also-keep-strength", now, false, |ui, s| {
                             let r = ui.add(egui::Slider::new(s, 0.0..=1.0));
                             let v = *s;
                             r.widget_info(|| {

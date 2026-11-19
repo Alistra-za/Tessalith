@@ -709,8 +709,10 @@ pub struct AppModel {
     /// Note FC8: clicks and keys that waited one frame for a focused text field to commit (`ui::after_commit`); run
     /// first thing next frame, by `ui::actions::keys`.
     pub after_commit: Vec<AfterCommit>,
-    /// A native frame with a focused editor must draw its focus loss before replacing the documents.
-    pub(crate) editing_draft: bool,
+    /// Replacement decisions wait until every viewport has reported this frame's drafts.
+    pub(crate) drawing_editors: bool,
+    pub(crate) pending_draft: bool,
+    pub(crate) draft_answer: Option<(bool, AfterCommit)>,
     pub(crate) after_draft: Option<AfterCommit>,
     /// Note FC8 (CP10): a BC7 weighting pick whose own value may have hidden an inherited one: (item key, pick, the
     /// pick's history merge key). The settled plan checks it and completes the pick in the same step.
@@ -1083,7 +1085,9 @@ impl AppModel {
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
-            editing_draft: false,
+            drawing_editors: false,
+            pending_draft: false,
+            draft_answer: None,
             after_draft: None,
             weighting_follow: Vec::new(),
             reencode_follow: None,
@@ -3793,13 +3797,6 @@ impl AppModel {
             }
             return None;
         }
-        // Typing a saved value again is clean. Reuse the texts already built for history.
-        if let Some(p) = self.project.as_mut() {
-            p.update_user_dirty(&after.sdc_toml);
-        }
-        if let Some(s) = self.sets_doc.as_mut() {
-            s.update_user_dirty(&after.project);
-        }
         self.drop_undo_note();
         let files_edit = before.project == after.project;
         self.history.push(history::Command {
@@ -4463,7 +4460,8 @@ impl AppModel {
 
     /// The user's changes since the last save, including a tentative edit the retry plan still holds.
     pub fn unsaved(&self) -> bool {
-        self.project_user_dirty()
+        self.pending_draft
+            || self.project_user_dirty()
             || self
                 .sets_doc
                 .as_ref()
@@ -4686,7 +4684,7 @@ impl AppModel {
     /// Reload both documents from disk (the banner's Reload), then plan once.
     /// The banner's Reload: at once when nothing is unsaved, else ask first (`Dialog::ReloadUnsaved`).
     pub fn request_reload(&mut self) {
-        if self.editing_draft {
+        if self.drawing_editors {
             self.after_draft = Some(Box::new(Self::request_reload));
             return;
         }
@@ -4823,7 +4821,7 @@ impl AppModel {
 
     /// Open `root`, or ask first when unsaved edits would be lost. True when the folder was opened.
     pub fn request_open(&mut self, root: PathBuf) -> bool {
-        if self.editing_draft {
+        if self.drawing_editors {
             self.after_draft = Some(Box::new(move |m| {
                 m.request_open(root);
             }));

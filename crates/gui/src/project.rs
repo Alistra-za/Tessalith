@@ -47,6 +47,8 @@ pub(crate) struct TomlFile {
     pub(crate) saved_text: String,
     /// The saved text with subsequent automatic decisions applied. Undo compares against it for the title and prompts.
     pub(crate) baseline_text: String,
+    /// The other automatic baseline while the undoable fuzz switch is on the history stack.
+    before_switch: Option<String>,
     pub(crate) user_dirty: bool,
     pub(crate) error: Option<String>,
     /// Changes with every edit, restore and reload, from one counter for every document (DECISIONS Note Y7).
@@ -79,6 +81,7 @@ impl TomlFile {
         }
         self.saved_text = self.doc.to_string();
         self.baseline_text.clone_from(&self.saved_text);
+        self.before_switch = None;
         self.user_dirty = false;
         self.rev = crate::sets_doc::next_rev();
     }
@@ -86,7 +89,7 @@ impl TomlFile {
     /// An unsaved edit, made just before.
     pub(crate) fn touch(&mut self) {
         self.dirty = true;
-        self.user_dirty = true;
+        self.update_user_dirty(&self.text());
         self.rev = crate::sets_doc::next_rev();
     }
 
@@ -107,18 +110,21 @@ impl TomlFile {
         }
         if let Ok(doc) = text.parse::<DocumentMut>() {
             self.doc = doc;
-            self.touch();
+            self.rev = crate::sets_doc::next_rev();
             self.reconcile(&self.text());
         }
     }
 
     pub(crate) fn reconcile(&mut self, text: &str) {
         self.dirty = text != self.saved_text;
-        self.user_dirty = self.dirty && text != self.baseline_text;
+        self.update_user_dirty(text);
     }
 
     pub(crate) fn update_user_dirty(&mut self, text: &str) {
-        self.user_dirty = self.dirty && text != self.baseline_text && text != self.saved_text;
+        self.user_dirty = self.dirty
+            && text != self.baseline_text
+            && text != self.saved_text
+            && self.before_switch.as_deref() != Some(text);
     }
 
     pub(crate) fn changed_on_disk(&self) -> bool {
@@ -144,6 +150,7 @@ impl TomlFile {
         engine::dds::write_atomic(&self.path, text.as_bytes())
             .map_err(|e| write_error(&self.path, e))?;
         self.baseline_text.clone_from(&text);
+        self.before_switch = None;
         self.user_dirty = false;
         self.saved_text = text;
         self.disk = SourceStamp::of(&self.path);
@@ -234,6 +241,7 @@ fn files_append_at_end(text: &str) -> bool {
         || body.ends_with('\n')
         || body.as_bytes().contains(&b'\r')
         || body.as_bytes().contains(&b'\\')
+        || body.contains('{')
         || body.contains("\"\"\"")
         || body.contains("'''")
     {
@@ -478,12 +486,12 @@ impl ProjectDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
-        self.update_user_dirty(&self.text());
+        self.update_user_dirty();
     }
 
-    pub(crate) fn update_user_dirty(&mut self, text: &str) {
+    fn update_user_dirty(&mut self) {
         if !self.blamed() {
-            self.f.update_user_dirty(text);
+            self.f.update_user_dirty(&self.text());
         }
     }
     pub fn user_dirty(&self) -> bool {
@@ -494,22 +502,42 @@ impl ProjectDoc {
         self.f.user_dirty && self.blamed()
     }
 
-    fn apply_writes(&mut self, writes: &[AutoWrite]) {
+    fn apply_writes(&mut self, writes: &[AutoWrite]) -> bool {
+        let mut changed = false;
         for w in writes {
             if self.file_value(&w.key, w.field) == w.only_if {
-                if w.value.is_null() {
-                    self.clear_file_value(&w.key, w.field);
+                changed |= if w.value.is_null() {
+                    self.remove_field(&w.key, w.field)
                 } else {
-                    self.set_file_value(&w.key, w.field, &w.value);
-                }
+                    self.write_field(&w.key, w.field, &w.value)
+                };
             }
         }
+        changed
     }
 
     pub(crate) fn touch_auto(&mut self, writes: &[AutoWrite]) {
-        self.apply_writes(writes);
+        if let Some(before) = &mut self.f.before_switch {
+            *before = apply_auto(before, writes);
+        }
+        self.record_baseline(writes);
+    }
+
+    pub(crate) fn touch_switch(&mut self, writes: &[AutoWrite]) {
+        self.f
+            .before_switch
+            .get_or_insert_with(|| self.f.baseline_text.clone());
+        self.record_baseline(writes);
+    }
+
+    fn record_baseline(&mut self, writes: &[AutoWrite]) {
+        let changed = self.apply_writes(writes);
         self.f.baseline_text = apply_auto(&self.f.baseline_text, writes);
-        self.update_user_dirty(&self.text());
+        if changed {
+            self.touch();
+        } else {
+            self.update_user_dirty();
+        }
     }
 
     pub fn rev(&self) -> u64 {
@@ -685,10 +713,18 @@ impl ProjectDoc {
     }
 
     pub fn set_file_value(&mut self, key: &str, field: &str, value: &Json) {
-        if self.read_only() {
-            return;
+        if self.write_field(key, field, value) {
+            self.touch();
         }
-        let Some(v) = json_to_toml(value) else { return };
+    }
+
+    fn write_field(&mut self, key: &str, field: &str, value: &Json) -> bool {
+        if self.read_only() {
+            return false;
+        }
+        let Some(v) = json_to_toml(value) else {
+            return false;
+        };
         let parts: Vec<&str> = field.split('.').collect();
         let (last, path) = parts.split_last().expect("split yields one part at least");
         let written = (|| {
@@ -699,17 +735,22 @@ impl ProjectDoc {
             set_value(t, last, v);
             Some(())
         })();
-        if written.is_some() {
-            self.touch();
-        } else if self.entry(key).is_some_and(|t| t.is_empty()) {
+        if written.is_none() && self.entry(key).is_some_and(|t| t.is_empty()) {
             // A field path ran into a non-table: do not leave the entry we just created behind.
             self.drop_entry(key);
         }
+        written.is_some()
     }
 
     pub fn clear_file_value(&mut self, key: &str, field: &str) {
+        if self.remove_field(key, field) {
+            self.touch();
+        }
+    }
+
+    fn remove_field(&mut self, key: &str, field: &str) -> bool {
         if self.read_only() || self.entry(key).is_none() {
-            return;
+            return false;
         }
         fn remove(t: &mut dyn TableLike, parts: &[&str]) -> bool {
             if parts.len() == 1 {
@@ -725,15 +766,13 @@ impl ProjectDoc {
             hit
         }
         let parts: Vec<&str> = field.split('.').collect();
-        if self
+        let removed = self
             .entry_mut(key)
-            .is_some_and(|entry| remove(entry, &parts))
-        {
-            self.touch();
-        }
+            .is_some_and(|entry| remove(entry, &parts));
         if self.entry(key).is_some_and(|t| t.is_empty()) {
-            self.remove_file_entry(key);
+            return self.drop_entry(key);
         }
+        removed
     }
 
     /// Every value in `key`'s entry by its dotted field name (`cubemap.yaw`), as `file_value` reads it.

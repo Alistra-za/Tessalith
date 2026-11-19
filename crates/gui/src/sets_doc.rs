@@ -54,7 +54,23 @@ fn put_project(doc: &mut toml_edit::DocumentMut, key: &str, v: Option<Value>) ->
         return false;
     };
     match v {
-        Some(v) => set_value(p, key, v),
+        Some(v) => {
+            let inserting = !p.contains_key(key);
+            set_value(p, key, v);
+            // Export, its baseline and Undo insert new records in the same order. Keep key comments.
+            if let Some(index) = HASH_KEYS
+                .iter()
+                .position(|k| *k == key)
+                .filter(|_| inserting)
+            {
+                for later in &HASH_KEYS[index + 1..] {
+                    if let Some(formatted) = p.key(later).cloned() {
+                        let item = p.remove(later).expect("key present");
+                        p.entry_format(&formatted).or_insert(item);
+                    }
+                }
+            }
+        }
         None => {
             p.remove(key);
         }
@@ -166,6 +182,15 @@ const XPMF_SHA: &str = "xpmf_sha256";
 /// Advanced skin materials: `[project] cs_skin_sha256` (and the sidecar table), path under the export root → hash of
 /// the `.csskin.json` sdc last wrote there.
 const CS_SKIN_SHA: &str = "cs_skin_sha256";
+const HASH_KEYS: [&str; 7] = [
+    COPY_SHA,
+    LAST_SHA,
+    PGP_SHA,
+    CS_SHA,
+    CM_SHA,
+    XPMF_SHA,
+    CS_SKIN_SHA,
+];
 /// Keys of a `[[sets]]` table that are not JSON settings.
 const RESERVED: [&str; 17] = [
     "id",
@@ -567,10 +592,7 @@ impl SetsDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
-        self.update_user_dirty(&self.text());
-    }
-    pub(crate) fn update_user_dirty(&mut self, text: &str) {
-        self.f.update_user_dirty(text);
+        self.f.update_user_dirty(&self.text());
     }
     pub fn read_only(&self) -> bool {
         self.f.read_only()
@@ -617,7 +639,7 @@ impl SetsDoc {
         if self.project_str(LAST_SHA) != sha {
             self.set_project(LAST_SHA, sha.map(Value::from));
         }
-        // In the order an export writes them, so a restore that only puts them back leaves the text as it was.
+        // put_project orders new keys alongside the hashes already in the snapshot.
         for (k, m) in [
             (PGP_SHA, &pgp),
             (CS_SHA, &cs),
@@ -783,7 +805,7 @@ impl SetsDoc {
         if !project_value_same(&baseline, key, &value) && put_project(&mut baseline, key, value) {
             self.f.baseline_text = baseline.to_string();
         }
-        self.update_user_dirty(&self.text());
+        self.f.update_user_dirty(&self.text());
     }
 
     /// E7 (ruling 3c-46): a copy of the records as they are now, for Review to apply the hash records an export would

@@ -285,6 +285,8 @@ mod tests {
             (true, "[files.\"a.png\"]\nformat = 'bc7'\n[files.\"b.png\"]\nformat = 'bc4'\n"),
             (false, "[files.\"other.png\"]\nsubtype = \"diffuse\"\n\n"),
             (false, "# Notes only\n"),
+            (false, "export = { names.pbr = 'P', also = ['vanilla'], names.cm = 'C' }\n"),
+            (false, "targets = [{name = 'plain'}]\n"),
             (false, "[files.\"other.png\"]\nalpha.policy = 'cutout'\nformat = 'bc7'\nalpha.threshold = 128\n"),
             (false, "target = 'cs'\n# trailing comment\n"),
             (false, "files = { 'other.png' = { subtype = 'normal' } }\n"),
@@ -293,13 +295,13 @@ mod tests {
             (false, "[files.\"a.png\"]\nformat = 'bc7'\n[other]\ntest = true\n[files.\"a.png\".alpha]\nthreshold = 128\n"),
         ] {
             let expected = crate::project::apply_auto(text, &writes);
-            assert_eq!(entries.appended(text).as_ref(), fast.then_some(&expected), "{text:?}");
             let snapshot = Snapshot { sdc_toml: text.to_owned(), project: "same".into() };
             let mut history = History::default();
             history.push(Command { label: "edit".into(), before: snapshot.clone(), after: snapshot, merge: None, created_file: None });
             history.apply_auto(&writes);
             assert_eq!(history.undo[0].before.sdc_toml, expected, "before {text:?}");
             assert_eq!(history.undo[0].after.sdc_toml, expected, "after {text:?}");
+            assert_eq!(entries.appended(text).as_ref(), fast.then_some(&expected), "{text:?}");
         }
     }
 

@@ -133,7 +133,9 @@ pub fn popped(ctx: &egui::Context, model: &mut AppModel) {
             .with_title(format!("{title} — {}", crate::PRODUCT_NAME))
             .with_inner_size(size);
         ctx.show_viewport_immediate(id, builder, |ui, class| {
-            if ui.ctx().input(|i| i.viewport().close_requested()) {
+            if class != egui::ViewportClass::EmbeddedWindow
+                && ui.ctx().input(|i| i.viewport().close_requested())
+            {
                 if let Some((open, _)) = flags(model, tab) {
                     *open = false;
                 }

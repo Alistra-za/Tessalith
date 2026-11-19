@@ -355,6 +355,14 @@ fn undoing_a_rename_during_export_leaves_only_the_json_hash_to_write() {
     assert!(doc.is_dirty() && doc.text().contains(&hash));
     assert!(!m.unsaved(), "the export hash alone is pending");
     assert!(m.request_close());
+    let target = tempfile::tempdir().unwrap();
+    m.set_target_mod(Some(target.path().to_owned())).unwrap();
+    assert!(m.unsaved());
+    m.set_target_mod(None).unwrap();
+    assert!(
+        m.request_close(),
+        "clearing the target leaves only the export hash"
+    );
 }
 
 #[test]

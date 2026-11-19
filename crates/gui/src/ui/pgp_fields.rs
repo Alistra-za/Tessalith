@@ -547,10 +547,9 @@ fn matching_body(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
                     }
                     // Committed on Enter or focus loss; an unchanged path (`.dds` and a leading `textures\` aside)
                     // is no edit (F1 Review Focus 4).
-                    if r.lost_focus() {
+                    if let Some(commit) = super::drafts::text(&r, text != m.path) {
                         ui.data_mut(|d| d.remove::<String>(id));
-                        let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                        if !esc && match_value(strip_lead(&text)) != match_value(&m.path) {
+                        if commit && match_value(strip_lead(&text)) != match_value(&m.path) {
                             edits.push((
                                 format!("match{}", m.n),
                                 stored_set_match(m.n, &text, &c.derived),
@@ -767,11 +766,10 @@ pub(crate) fn control(
         }
         KeyKind::Text => {
             let id = egui::Id::unique(("pgp-text", k.key, &c.set));
-            let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
-                value
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default()
-            });
+            let current = value.as_ref().and_then(Value::as_str).unwrap_or_default();
+            let mut text = ui
+                .data(|d| d.get_temp::<String>(id))
+                .unwrap_or_else(|| current.to_owned());
             // A file name stays in the matched folder (V3); a path moves the outputs anywhere under Data (HJ5).
             let hint = if k.key == "rename" {
                 r"new file name or folder\name"
@@ -790,11 +788,11 @@ pub(crate) fn control(
                 ui.data_mut(|d| d.insert_temp(id, text.clone()));
             }
             // Committed on Enter or focus loss; an empty field removes the key.
-            if r.lost_focus() {
+            if let Some(commit) = super::drafts::text(&r, text != current) {
                 ui.data_mut(|d| d.remove::<String>(id));
                 let t = text.trim();
                 // Esc cancels (AG10/AG11, trace-debug #57).
-                if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if commit {
                     edits.push((key, (!t.is_empty()).then(|| json!(t))));
                 }
             }
@@ -1064,13 +1062,12 @@ fn alpha_flag_controls(ui: &mut egui::Ui, c: &Ctx, f: AlphaFlags, edits: &mut Ve
                 egui::StrokeKind::Outside,
             );
         }
-        if r.has_focus() || r.changed() {
+        if r.has_focus() || r.changed() || text != f.raw().to_string() {
             ui.data_mut(|d| d.insert_temp(id, (text.clone(), frame)));
         }
-        if r.lost_focus() {
+        if let Some(commit) = super::drafts::text(&r, ok != Some(f.raw())) {
             ui.data_mut(|d| d.remove::<(String, u64)>(id));
-            let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
-            if let Some(v) = ok.filter(|v| *v != f.raw() && !cancelled) {
+            if let Some(v) = ok.filter(|v| *v != f.raw() && commit) {
                 edits.push(("alphaprop_flags".into(), Some(json!(v))));
             }
         }

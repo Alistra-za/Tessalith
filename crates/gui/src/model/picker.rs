@@ -175,6 +175,10 @@ impl Picker {
         self.lock().open.is_some()
     }
 
+    pub(crate) fn opening_folder(&self) -> bool {
+        self.lock().open == Some(PickerPurpose::OpenFolder)
+    }
+
     /// Open the dialog on a thread; `false` (nothing started) when one is open already. `scope` is the opened
     /// folder for a result that must be dropped if the folder changed. A repaint is requested when it lands.
     pub fn request(

@@ -2074,6 +2074,18 @@ fn cube_faces_join_the_fuzz_switch_without_a_user_edit() {
     assert!(!m.unsaved(), "the joined six-face recording is automatic");
     assert!(m.request_close());
     m.undo();
+    idle(&mut m);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/cubemaps/env_nz.png", "subtype"),
+        Some(json!("cubemap"))
+    );
+    assert!(
+        m.request_close(),
+        "settled Undo holds only automatic face records"
+    );
     m.redo();
     assert!(!m.unsaved(), "all six faces are in the baseline");
 }

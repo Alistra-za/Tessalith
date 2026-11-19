@@ -398,20 +398,20 @@ fn cache(ui: &mut egui::Ui, model: &AppModel) -> Option<u32> {
     ui.horizontal(|ui| {
         // The number box first: in a narrow tab the text is cut, never the box.
         let mut shown = now;
-        let (r, done) = super::number_input::held_value(ui, "settings-cache-mb", now, |ui, x| {
-            let r = ui.add(
-                egui::DragValue::new(x)
-                    .speed(10.0)
-                    // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the box,
-                    // or leaving it, never changes it.
-                    .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
-                    .max_decimals(0)
-                    .suffix(" MB")
-                    .update_while_editing(false),
-            );
-            shown = *x;
-            r
-        });
+        let (r, done) =
+            super::number_input::held_value(ui, "settings-cache-mb", now, true, |ui, x| {
+                let r = ui.add(
+                    egui::DragValue::new(x)
+                        .speed(10.0)
+                        // A limit typed into gui.toml outside the box's range stays allowed, so that looking at the box,
+                        // or leaving it, never changes it.
+                        .range(CACHE_MB.0.min(now)..=CACHE_MB.1.max(now))
+                        .max_decimals(0)
+                        .suffix(" MB"),
+                );
+                shown = *x;
+                r
+            });
         r.widget_info(|| {
             let mut i = egui::WidgetInfo::drag_value(true, shown);
             i.label = Some(NAME.to_string());

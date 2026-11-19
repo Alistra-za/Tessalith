@@ -48,6 +48,8 @@ pub struct SdcApp {
     pub render_state: Option<egui_wgpu::RenderState>,
     uploaded: Uploaded,
     was_focused: bool,
+    /// The NIF editor keeps its own buffer while a shell question owns keyboard focus.
+    paused_mesh_focus: Option<(u64, egui::Id)>,
     /// Waits out 2 s after the layout changed before `gui.toml` is written (AG19).
     layout_save: crate::layout::SaveDebounce,
     /// What the layout looked like last frame; `None` before the first.
@@ -89,6 +91,7 @@ impl SdcApp {
             render_state: None,
             uploaded: Uploaded::default(),
             was_focused: true,
+            paused_mesh_focus: None,
             layout_save: Default::default(),
             layout_probe: None,
             #[cfg(feature = "test-hooks")]
@@ -281,6 +284,37 @@ impl SdcApp {
     fn focus_regained(&mut self) {
         self.model.check_sources();
     }
+
+    fn draw_meshes(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx();
+        let asking = crate::ui::drafts::asking(&self.model);
+        let session = self.meshes.edit.as_ref().map(|e| e.session);
+        if let Some((held_session, field)) = self.paused_mesh_focus {
+            if session == Some(held_session) {
+                if asking || ctx.memory(|m| m.top_modal_layer().is_some()) {
+                    if self.model.dialog.is_none() {
+                        ctx.request_repaint();
+                    }
+                    return;
+                }
+                ctx.memory_mut(|m| m.request_focus(field));
+            }
+            self.paused_mesh_focus = None;
+        }
+        if asking {
+            let field = ctx.memory(|m| m.focused()).filter(|&id| {
+                ctx.read_response(id)
+                    .zip(crate::ui::panel_ids::panel_rect(ctx, "meshes-edit"))
+                    .is_some_and(|(r, panel)| panel.contains(r.rect.center()))
+            });
+            if let Some(held) = session.zip(field) {
+                // Drawing the slot behind a modal delivers lost_focus and starts its autosave.
+                self.paused_mesh_focus = Some(held);
+                return;
+            }
+        }
+        crate::ui::meshes::show(ui, &mut self.meshes);
+    }
 }
 
 impl eframe::App for SdcApp {
@@ -295,12 +329,26 @@ impl eframe::App for SdcApp {
         }
         let ctx = ui.ctx().clone();
         let close = ctx.input(|i| i.viewport().close_requested());
-        let after_draft = self.model.after_draft.take();
-        self.model.editing_draft = crate::ui::actions::text_field_focused(&ctx);
-        if close || after_draft.is_some() {
-            ctx.memory_mut(|m| m.stop_text_input());
-        }
+        use crate::ui::drafts::{self, Mode};
+        let answer = self.model.draft_answer.take();
+        let replacing = close
+            || self.model.picker.opening_folder()
+            || drafts::asking(&self.model)
+            || ctx.input(|i| !i.raw.dropped_files.is_empty());
+        drafts::begin(
+            &ctx,
+            match &answer {
+                Some((true, _)) => Mode::Save,
+                Some((false, _)) => Mode::Discard,
+                None if replacing => Mode::Hold,
+                None => Mode::Editing,
+            },
+        );
+        self.model.drawing_editors = true;
         self.model.poll();
+        if self.model.after_draft.is_some() {
+            drafts::hold(&ctx);
+        }
         let now = std::time::Instant::now();
         self.model.tick(now);
         if let Some(left) = self.model.undo_note_left(now) {
@@ -415,7 +463,7 @@ impl eframe::App for SdcApp {
             crate::ui::record_centre_rect(ui);
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);
-            crate::ui::meshes::show(ui, &mut self.meshes);
+            self.draw_meshes(ui);
             // The Textures model's dialogs (close with unsaved edits, an export error), the shortcut sheet and the palette
             // must show in this view too.
             crate::ui::dialogs::draw(&ctx, &mut self.model);
@@ -427,14 +475,20 @@ impl eframe::App for SdcApp {
                 ctx.request_repaint();
             }
         } else {
+            self.paused_mesh_focus = None;
             crate::ui::draw_with_scan(ui, &mut self.model, &mut self.state, Some(&mut self.meshes));
         }
-        self.model.editing_draft = false;
-        if let Some(request) = after_draft {
-            request(&mut self.model);
+        self.model.drawing_editors = false;
+        let pending = drafts::pending(&ctx);
+        if self.model.pending_draft != pending {
+            self.model.pending_draft = pending;
             ctx.request_repaint();
         }
-        if self.model.after_draft.is_some() {
+        if let Some((_, then)) = answer {
+            then(&mut self.model);
+        }
+        if let Some(request) = self.model.after_draft.take() {
+            request(&mut self.model);
             ctx.request_repaint();
         }
         if close && !self.model.request_close() {
