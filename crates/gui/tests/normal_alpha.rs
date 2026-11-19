@@ -492,6 +492,97 @@ fn a_save_ends_the_listing_snapshot() {
     );
 }
 
+fn failed_listing_save(which: sdc_gui::model::DocKind) {
+    use sdc_gui::model::{Dialog, DocKind};
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_without_export(d.path());
+    assert!(m.only_automatic_unsaved() && m.sets_listing_only());
+    let path = d.path().join("textures").join(which.file());
+    std::fs::write(&path, "# edited outside Tessalith\n").unwrap();
+    assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
+    assert!(matches!(m.dialog, Some(Dialog::ExternalChange(kind)) if kind == which));
+    assert_eq!(
+        m.project.as_ref().unwrap().is_dirty(),
+        which == DocKind::SdcToml
+    );
+    assert!(
+        m.sets_listing_only(),
+        "the failed Save still owns the listing"
+    );
+    assert!(!m.sets_user_dirty() && !m.prompts_unsaved());
+    assert!(m.recovery_snapshot().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "# edited outside Tessalith\n"
+    );
+    m.resolve_external_change(which, true);
+    if which == DocKind::SdcToml {
+        assert!(
+            m.sets_listing_only(),
+            "only the files document has been saved"
+        );
+    }
+    m.save().unwrap();
+    assert!(!m.is_dirty());
+    assert_eq!(
+        sdc_gui::sets_doc::SetsDoc::open(&d.path().join("textures"))
+            .auto_normal()
+            .get(WALL_N)
+            .map(String::as_str),
+        Some("normal")
+    );
+}
+
+#[test]
+fn a_failed_save_keeps_the_listing_when_the_files_document_conflicts() {
+    failed_listing_save(sdc_gui::model::DocKind::SdcToml);
+}
+
+#[test]
+fn a_failed_save_keeps_the_listing_when_the_sets_document_conflicts() {
+    failed_listing_save(sdc_gui::model::DocKind::Project);
+}
+
+#[test]
+fn a_files_only_edit_recovers_the_recorded_type_with_its_listing() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_without_export(d.path());
+    assert!(m.sets_listing_only() && m.recovery_snapshot().is_empty());
+    m.set_field("test/wall.png", "alpha.policy", json!("data"));
+    settle(&mut m);
+    assert!(m.project.as_ref().unwrap().is_dirty() && m.prompts_unsaved());
+    assert!(!m.sets_user_dirty(), "the close dialog names only sdc.toml");
+    let files = m.recovery_snapshot();
+    let p = m.project.as_ref().unwrap();
+    let s = m.sets_doc.as_ref().unwrap();
+    assert_eq!(
+        files,
+        [
+            (p.path().to_owned(), p.text()),
+            (s.path().to_owned(), s.text())
+        ]
+    );
+    assert!(!m.request_close());
+    let dialog = keep_harness(m);
+    assert!(dialog.query_by_label("sdc.toml").is_some());
+    assert!(dialog
+        .query_by_label("sdc.toml, sdc-project.toml")
+        .is_none());
+    for (path, text) in files {
+        std::fs::write(sdc_gui::crash_log::recovery_path(&path), text).unwrap();
+    }
+    let restored = opened_without_export(d.path());
+    assert_eq!(restored.undo_label(), Some("Restore crash edits"));
+    assert_eq!(
+        held(&restored, "test/wall.png", "alpha.policy"),
+        Some(json!("data"))
+    );
+    assert_eq!(restored.untouched_normal(WALL_N), Some(Subtype::Normal));
+}
+
 /// N-27: a user's sub-type edit of a listed normal to another value leaves `sdc-project.toml` as it was (the fast
 /// partial plan is kept); the key no longer counts as untouched.
 #[test]
@@ -943,6 +1034,43 @@ fn eye_then_auto_leaves_the_lists_agreeing_with_the_key() {
         facts(&m, WALL_N),
         (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
     );
+}
+
+#[test]
+fn auto_before_the_eye_plan_lands_clears_msn_and_exports_the_followed_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.set_shader("test/wall", Some(Shader::Eye));
+    assert_plan_pending(&m, "test/wall", Shader::Eye);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("msn")));
+    m.set_shader("test/wall", None);
+    assert_eq!(
+        facts(&m, WALL_N),
+        (None, None, false),
+        "Auto clears the pending Eye type"
+    );
+    settle(&mut m);
+    m.save().unwrap();
+    let root = d.path().join("textures");
+    let saved = sdc_gui::sets_doc::SetsDoc::open(&root);
+    assert!(saved
+        .entries()
+        .iter()
+        .all(|e| e.id != "test/wall" || e.shader.is_none()));
+    assert_eq!(
+        saved.auto_normal().get(WALL_N).map(String::as_str),
+        Some("pbr_normal")
+    );
+    assert_eq!(
+        sdc_gui::project::ProjectDoc::open(&root).file_value(WALL_N, "subtype"),
+        Some(json!("pbr_normal"))
+    );
+    let job = m.item(WALL_N).unwrap().job.as_ref().unwrap();
+    assert_eq!(job.profile.subtype, Subtype::PbrNormal);
+    let out = job.output.clone();
+    export_through(&mut m);
+    settle(&mut m);
+    assert!(out.is_file(), "the followed normal was exported");
 }
 
 /// B1 (N6-i): Eye, then Auto clears the key once: a sub-type the user wrote under the extension-less `[files]` spelling

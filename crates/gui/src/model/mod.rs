@@ -535,7 +535,7 @@ pub struct AppModel {
     batch: bool,
     /// Note JS5 (N-26): the sets document's `(rev, text, saved_text)` right after an automatic step that began with no
     /// user change in it: while it still holds that state against that saved text, its only unsaved change is
-    /// automatic (the recorder's `auto_normal` listing). Any save, reload or open ends it.
+    /// automatic (the recorder's `auto_normal` listing). A successful Save, reload or open ends it.
     listing_only: Option<(u64, String, String)>,
     /// Note JS7 (N-33 as the owner narrowed it, N-37, N8-h): true while a step that is not the user's own alpha edit
     /// writes: the recorder's or the fuzz switch's automatic step, and the crash restore, which reinstates both
@@ -4205,6 +4205,7 @@ impl AppModel {
         if let (Some(p), Some(text)) = (self.project.as_ref(), self.tentative_edits()) {
             out.push((p.path().to_path_buf(), text));
         }
+        // A files-only user edit needs the recorded types and their ownership listing together on restore.
         if let Some(s) = self
             .sets_doc
             .as_ref()
@@ -4405,6 +4406,7 @@ impl AppModel {
         if let Some(s) = self.sets_doc.as_mut() {
             s.reload();
         }
+        self.listing_only = None;
         self.ignored_by_plan = false;
         self.drop_undo_note();
         self.history.clear();
@@ -4419,7 +4421,6 @@ impl AppModel {
     /// document is not written (audit 2026-10-14 finding 3: writing it would offer "Overwrite" over a hand edit
     /// the GUI never loaded).
     pub fn save(&mut self) -> Result<(), SaveError> {
-        self.listing_only = None; // Note JS5: any save ends the listing snapshot.
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
         if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
@@ -4458,6 +4459,7 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
+        self.listing_only = None;
         if wrote {
             self.refresh_banner(); // the save removed the saved documents' recovery files
             self.messages.notify(messages::Severity::Info, "Saved");
@@ -4494,11 +4496,15 @@ impl AppModel {
                 };
                 if overwrite {
                     match s.save(true) {
-                        Ok(()) => crate::crash_log::discard_recovery(s.path()),
+                        Ok(()) => {
+                            crate::crash_log::discard_recovery(s.path());
+                            self.listing_only = None;
+                        }
                         Err(e) => self.save_failed(which, &e),
                     }
                 } else {
                     s.reload();
+                    self.listing_only = None;
                     self.drop_undo_note();
                     self.history.clear();
                     self.refresh_banner();

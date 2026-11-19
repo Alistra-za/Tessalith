@@ -3823,15 +3823,18 @@ impl AppModel {
         let Some(v) = views.iter().find(|v| same_id(&v.id, set)) else {
             return vec![];
         };
-        let now = v.shader.as_ref().map(|p| p.shader);
-        let chosen = v
-            .shader
-            .as_ref()
-            .is_some_and(|p| matches!(p.provenance, engine::shader::ShaderOrigin::Set));
+        let chosen = super::normal_follow::explicit_pick(v);
         // Auto while already on Auto changes nothing.
-        if shader.is_none() && !chosen {
+        if shader.is_none() && chosen.is_none() {
             return vec![];
         }
+        // Between picks the plan can still describe a shader the user has already left.
+        let now = chosen.or_else(|| {
+            v.shader
+                .as_ref()
+                .filter(|p| p.provenance != engine::shader::ShaderOrigin::Set)
+                .map(|p| p.shader)
+        });
         let held = |k: &String| {
             self.project
                 .as_ref()
@@ -3873,7 +3876,7 @@ impl AppModel {
         // Its way back: Auto after a chosen vanilla shader clears the untouched vanilla types `vanilla_pick` (or the
         // recorder under that shader) wrote, so the next settled plan records what Auto reads (FC1 R5's Auto rule);
         // the generic arm below keeps a value equal to the vanilla plan's pick.
-        let vanilla_back = has_fuzz && chosen && shader.is_none() && now.is_some_and(vanilla);
+        let vanilla_back = has_fuzz && shader.is_none() && chosen.is_some_and(vanilla);
         let auto_pbr: HashSet<String> = self
             .sets_doc
             .as_ref()
@@ -3897,8 +3900,7 @@ impl AppModel {
         // `has_fuzz` too (re-review t6-r1 N2): a pick that wrote only `pbr_normal`/`pbr_emissive` (diffuse pinned or
         // borrowed, fuzz map kept or hand-roled) lists no such value, while the set still holds its fuzz map.
         let leaves_pbr = (has_fuzz || step_wrote)
-            && chosen
-            && now.is_some_and(Shader::is_pbr_family)
+            && chosen.is_some_and(Shader::is_pbr_family)
             && !shader.is_some_and(Shader::is_pbr_family);
         // Ruling R1: a member in a locked slot keeps its type (the pin guards its encoding), as in `pbr_follow` and
         // DW1.
