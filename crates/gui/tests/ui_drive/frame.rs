@@ -16,6 +16,8 @@ pub struct Node {
     pub label: String,
     pub value: Option<String>,
     pub placeholder: Option<String>,
+    /// The AccessKit description: what `on_hover_text` copies into a node.
+    pub description: Option<String>,
     pub rect: Rect,
     pub clip: Option<Rect>,
     pub layer: Option<String>,
@@ -30,6 +32,10 @@ pub struct Text {
     pub text: String,
     pub rect: Rect,
     pub clip: Rect,
+    /// The painted galley was cut short by egui (`Galley::elided`); `text` is then the full text of the galley.
+    pub elided: bool,
+    /// The galley's text ends in the ellipsis character (`text` has it trimmed): a back cut, or one the author wrote.
+    pub ends_in_ellipsis: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -80,7 +86,13 @@ fn flatten(s: &Shape, clip: Rect, out: &mut Vec<Text>) {
             let text = t.galley.text().trim_end_matches('…').to_string();
             let rect = t.galley.rect.translate(t.pos.to_vec2());
             if !text.trim().is_empty() && rect.intersects(clip) {
-                out.push(Text { text, rect, clip });
+                out.push(Text {
+                    text,
+                    rect,
+                    clip,
+                    elided: t.galley.elided,
+                    ends_in_ellipsis: t.galley.text().ends_with('…'),
+                });
             }
         }
         _ => {}
@@ -142,6 +154,7 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
             label,
             value,
             placeholder: a.placeholder().map(str::to_owned),
+            description: a.description(),
             rect: r,
             // egui registers a Label in a ScrollArea at its unscrolled place; a clip for another place is not this node's
             clip: joined

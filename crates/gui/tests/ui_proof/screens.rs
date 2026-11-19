@@ -746,6 +746,7 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         label: label.into(),
         value: None,
         placeholder: None,
+        description: None,
         rect: rect(x),
         clip: None,
         layer: None,
@@ -764,6 +765,8 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
             text: pin.into(),
             rect: rect(pin_x),
             clip: rect(pin_x),
+            elided: false,
+            ends_in_ellipsis: false,
         });
     }
     Snapshot {
