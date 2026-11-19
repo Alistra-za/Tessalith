@@ -2074,7 +2074,7 @@ fn height_links(m: &AppModel) -> usize {
 /// Ruling 3b-F21: with an Also tick on CS (where the output folder is made of the export configuration and the export
 /// folder), the From another set list reads both once per menu call (`output_roots`) beside the settled check
 /// (`pick_waits`), and nothing per listed member or per item; the link index reads them once beside its views. While
-/// a plan is out the list reads no folder and builds no export inputs.
+/// a plan is out the list adds no read beyond the views lookups and builds no export inputs.
 #[test]
 fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
     use sdc_gui::model::sets::engine_input_builds;
@@ -2123,7 +2123,7 @@ fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
         "the settled check reads nothing per item"
     );
     assert_eq!(big_menu, menu, "nothing per listed member or item");
-    // A plan out: every row is off and no member path, folder or export input is read.
+    // A plan out: every row is off, and the list reads no member path or folder and builds no export inputs.
     m.hold_plan_results = true;
     m.set_json_value(LEAF, "rename", Some(json!(r"textures\arch\leaf2")));
     assert!(m.full_plan_pending(), "premise: a plan is out");
@@ -2143,7 +2143,10 @@ fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
             .iter()
             .all(|e| e.disabled.as_deref() == Some(PICK_PLANNING)));
     });
-    assert_eq!(pending, none_listed, "no folder read while planning");
+    assert_eq!(
+        pending, none_listed,
+        "while planning the list adds no read beyond the views lookups"
+    );
     assert_eq!(
         engine_input_builds(),
         builds,
