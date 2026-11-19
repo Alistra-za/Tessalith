@@ -871,6 +871,7 @@ pub(super) fn unlist_user_data(without_data: &[String], post: &Tables, s: &mut S
 /// only) makes the file writes fail.
 fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
     let (p0, s0) = (p.text(), s.text());
+    let previous_type_alpha = p.type_alpha_edit;
     let others = |p: &ProjectDoc| -> Vec<Option<String>> {
         c.others
             .iter()
@@ -899,6 +900,7 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
         && others(p) == others0;
     if !took {
         p.restore(&p0);
+        p.type_alpha_edit = previous_type_alpha;
         s.restore(&s0);
     }
 }

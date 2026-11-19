@@ -361,6 +361,8 @@ pub struct SetsDoc {
     /// history (the JSON hash tables), under the same keys as in this document. Written when a record is made, so it
     /// holds even when the document is never saved; a table it holds wins over the document's.
     side: serde_json::Map<String, Json>,
+    /// The clean baseline includes sidecar hashes that the TOML on disk does not yet hold.
+    sidecar_pending_save: bool,
 }
 
 /// Note FC11: the `[project]` key of the current PGPatcher JSON's hash (also a sidecar key).
@@ -516,6 +518,7 @@ impl SetsDoc {
             no_set_cache: RefCell::default(),
             intended_cache: RefCell::default(),
             side: Default::default(),
+            sidecar_pending_save: false,
         };
         d.load_sidecar();
         d
@@ -534,6 +537,7 @@ impl SetsDoc {
     /// Note FC11: read the sidecar (missing or unreadable: nothing, as before it existed) and reconcile the document's
     /// readable copy from it. A value that differs is an unsaved edit; an equal one changes nothing.
     fn load_sidecar(&mut self) {
+        self.sidecar_pending_save = false;
         let was_dirty = self.f.dirty;
         self.side = std::fs::read(self.sidecar_path())
             .ok()
@@ -558,6 +562,7 @@ impl SetsDoc {
         // Note FC14: only a document that was clean before; `TomlFile::open`/`reload` always leave it so today.
         if self.f.dirty && !was_dirty {
             self.f.dirty = false;
+            self.sidecar_pending_save = true;
             self.f.saved_text = self.text();
             self.f.baseline_text.clone_from(&self.f.saved_text);
             self.f.user_dirty = false;
@@ -595,6 +600,10 @@ impl SetsDoc {
     }
     pub fn is_dirty(&self) -> bool {
         self.f.dirty
+    }
+    pub(crate) fn needs_save(&self) -> bool {
+        !self.read_only()
+            && (self.is_dirty() || self.sidecar_pending_save || self.text() != self.saved_text())
     }
     /// A save-if-clean site may persist a pending automatic normal listing. Other pending writes still wait for Save.
     pub(crate) fn defer_record_save(&self) -> bool {
@@ -697,7 +706,9 @@ impl SetsDoc {
     }
 
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
-        self.f.save(force)
+        self.f.save(force)?;
+        self.sidecar_pending_save = false;
+        Ok(())
     }
 
     fn project_str(&self, key: &str) -> Option<String> {

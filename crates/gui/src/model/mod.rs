@@ -2815,6 +2815,7 @@ impl AppModel {
             return true;
         }
         let before = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
+        let previous_type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit);
         let dirty = (
             self.project.as_ref().is_some_and(ProjectDoc::is_dirty),
             self.sets_doc
@@ -2856,7 +2857,8 @@ impl AppModel {
             let post = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
             self.follow_shared(b, &post);
         }
-        let Some(files_edit) = self.record_step(label, None, before, dirty) else {
+        let Some(files_edit) = self.record_step(label, None, before, dirty, previous_type_alpha)
+        else {
             return false;
         };
         self.replan_after_edit(files_edit);
@@ -4009,6 +4011,7 @@ impl AppModel {
             return;
         };
         let before = Self::snapshot_of(Some(p), Some(s));
+        let previous_type_alpha = p.type_alpha_edit;
         let dirty = (p.is_dirty(), s.is_dirty());
         // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
         let held = pre
@@ -4028,7 +4031,8 @@ impl AppModel {
             let t = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
             self.follow_shared(b, &t);
         }
-        if let Some(files_edit) = self.record_step(label, merge, before, dirty) {
+        if let Some(files_edit) = self.record_step(label, merge, before, dirty, previous_type_alpha)
+        {
             if replan {
                 self.replan_after_edit(files_edit);
             }
@@ -4041,6 +4045,7 @@ impl AppModel {
         merge: Option<String>,
         before: history::Snapshot,
         dirty: (bool, bool),
+        previous_type_alpha: Option<u64>,
     ) -> Option<bool> {
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         let changed = before != after;
@@ -4053,12 +4058,13 @@ impl AppModel {
                 s.set_dirty(dirty.1);
             }
         }
-        if let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_ref()) {
-            p.reconcile_ownership(s, &after.sdc_toml);
-        }
         if !changed {
             return None;
         }
+        // The opening fuzz switch writes a subtype automatically. Replaying it is a user's write.
+        let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit)
+            != previous_type_alpha
+            || (self.automatic_step && before.sdc_toml != after.sdc_toml);
         self.drop_undo_note();
         let files_edit = before.project == after.project;
         self.history.push(history::Command {
@@ -4067,6 +4073,7 @@ impl AppModel {
             after,
             merge,
             created_file: None,
+            type_alpha,
             normal_prunes: Default::default(),
         });
         self.auto_replans = 0;
@@ -4191,6 +4198,9 @@ impl AppModel {
         let files_edit = Self::snapshot_of(None, self.sets_doc.as_ref()).project == s.project;
         if let Some(p) = self.project.as_mut() {
             p.restore_snapshot(&s.sdc_toml);
+            if command.type_alpha && !p.read_only() {
+                p.mark_type_alpha_edit();
+            }
         }
         // The JSON hash is not part of a step: export writes it outside history (spec §7.2, final review I2).
         if let Some(d) = self.sets_doc.as_mut() {
@@ -4203,9 +4213,6 @@ impl AppModel {
                 );
             }
             d.restore_keeping_json_sha(&s.project);
-            if let Some(p) = self.project.as_mut() {
-                p.reconcile_ownership(d, &s.sdc_toml);
-            }
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
         self.replan_changed(files_edit);
@@ -4366,6 +4373,9 @@ impl AppModel {
                 if s.text() != old {
                     restored.push(path);
                 }
+            }
+            if !restored.is_empty() && !p.read_only() {
+                p.mark_type_alpha_edit();
             }
         });
         self.automatic_step = false;
@@ -5040,11 +5050,11 @@ impl AppModel {
         self.replan();
     }
 
-    /// Save `sdc.toml`, then `sdc-project.toml`; the first error is returned (and raises its dialog). A clean
-    /// document is not written (audit 2026-10-14 finding 3: writing it would offer "Overwrite" over a hand edit
-    /// the GUI never loaded).
+    /// Save pending edits to `sdc.toml`, then persist any pending sets text, including an automatic listing.
+    /// Return the first write error and show its dialog.
     pub fn save(&mut self) -> Result<(), SaveError> {
         let user_save = self.unsaved();
+        let type_alpha = self.project.as_ref().and_then(|p| p.type_alpha_edit);
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
         if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
@@ -5061,7 +5071,11 @@ impl AppModel {
                 }
             }
         }
-        if let Some(p) = self.project.as_mut().filter(|p| p.is_dirty()) {
+        if let Some(p) = self
+            .project
+            .as_mut()
+            .filter(|p| p.is_dirty() || p.user_dirty())
+        {
             if let Err(e) = p.save(false) {
                 self.save_failed(DocKind::SdcToml, &e);
                 return Err(e);
@@ -5070,13 +5084,11 @@ impl AppModel {
             crate::crash_log::discard_recovery(p.path());
             wrote = true;
         }
-        // A clean sdc-project.toml is not written (no empty file, no spurious conflict); a read-only one never has edits.
-        if let Some(s) = self
-            .sets_doc
-            .as_mut()
-            .filter(|s| s.is_dirty() && !s.read_only())
-        {
+        if let Some(s) = self.sets_doc.as_mut().filter(|s| s.needs_save()) {
             if let Err(e) = s.save(false) {
+                if let Some(p) = self.project.as_mut() {
+                    p.type_alpha_edit = type_alpha;
+                }
                 self.save_failed(DocKind::Project, &e);
                 return Err(e);
             }
@@ -5103,8 +5115,17 @@ impl AppModel {
                     return;
                 };
                 if overwrite {
+                    let pending_claim = p.type_alpha_edit.filter(|_| {
+                        self.sets_doc
+                            .as_ref()
+                            .is_some_and(crate::sets_doc::SetsDoc::needs_save)
+                    });
                     match p.save(true) {
-                        Ok(()) => crate::crash_log::discard_recovery(p.path()),
+                        Ok(()) => {
+                            // This confirmation writes only sdc.toml. Its ownership listing may still need Save.
+                            p.type_alpha_edit = pending_claim;
+                            crate::crash_log::discard_recovery(p.path());
+                        }
                         Err(e) => self.save_failed(which, &e),
                     }
                 } else {

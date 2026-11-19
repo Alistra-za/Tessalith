@@ -17,6 +17,7 @@ fn cmd(label: &str, before: Snapshot, after: Snapshot, merge: Option<&str>) -> C
         after,
         merge: merge.map(str::to_string),
         created_file: None,
+        type_alpha: false,
         normal_prunes: Default::default(),
     }
 }

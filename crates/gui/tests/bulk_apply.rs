@@ -116,6 +116,10 @@ fn a_bulk_sub_type_runs_the_pbr_follow_per_set_and_one_undo_restores_both_files(
         m.sets_doc.as_ref().unwrap().auto_pbr().is_empty(),
         "Review Focus 4"
     );
+    assert!(m.project.as_ref().unwrap().user_dirty());
+    m.reload_documents();
+    idle(&mut m);
+    assert!(!m.unsaved());
 }
 
 /// Perf task 4 pin: a bulk Sub-type apply prunes `auto_pbr` entries whose file is gone and keeps live ones, with the

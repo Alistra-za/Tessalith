@@ -292,6 +292,8 @@ thread_local! {
 
 pub struct ProjectDoc {
     f: TomlFile,
+    /// Last type or alpha edit since Save. A command records whether this changed during its step.
+    pub(crate) type_alpha_edit: Option<u64>,
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
     stash: Option<(DocumentMut, bool)>,
     /// `[export]` as last parsed, by `rev` (Note CN: Review and `view_key` read it every frame).
@@ -428,6 +430,7 @@ impl ProjectDoc {
                 ..Default::default()
             },
             stash: None,
+            type_alpha_edit: None,
             export_cache: Default::default(),
         })
     }
@@ -442,6 +445,7 @@ impl ProjectDoc {
         let mut d = ProjectDoc {
             f: TomlFile::open(root.join("sdc.toml")),
             stash: None,
+            type_alpha_edit: None,
             export_cache: Default::default(),
         };
         d.check();
@@ -451,6 +455,7 @@ impl ProjectDoc {
     /// Re-read the file, dropping unsaved edits.
     pub fn reload(&mut self) {
         self.stash = None;
+        self.type_alpha_edit = None;
         self.f.reload();
         self.check();
     }
@@ -505,7 +510,10 @@ impl ProjectDoc {
     pub fn set_error(&mut self, message: &str) {
         self.f.error = Some(format!("{}: {message}", self.f.path.display()));
         let doc = std::mem::take(&mut self.f.doc);
-        self.stash = Some((doc, std::mem::take(&mut self.f.dirty)));
+        self.stash = Some((
+            doc,
+            std::mem::take(&mut self.f.dirty) || self.type_alpha_edit.is_some(),
+        ));
         self.f.rev = crate::sets_doc::next_rev();
     }
 
@@ -527,66 +535,22 @@ impl ProjectDoc {
         }
     }
     pub fn user_dirty(&self) -> bool {
-        self.f.user_dirty && !self.blamed()
+        (self.f.user_dirty || self.type_alpha_edit.is_some()) && !self.blamed()
     }
 
     pub(crate) fn stashed_user_edit(&self) -> bool {
-        self.f.user_dirty && self.blamed()
+        (self.f.user_dirty || self.type_alpha_edit.is_some()) && self.blamed()
     }
 
-    /// A pending automatic file value is exempt only while its paired listing still owns it.
-    pub(crate) fn reconcile_ownership(&mut self, sets: &crate::sets_doc::SetsDoc, text: &str) {
-        if self.blamed() {
-            return;
-        }
-        self.f.update_user_dirty(text);
-        if !self.f.dirty || text == self.f.saved_text || text != self.baseline() {
-            return;
-        }
-        self.f.user_dirty = self.has_unlisted_value(sets);
+    pub(crate) fn mark_type_alpha_edit(&mut self) {
+        self.type_alpha_edit = Some(crate::sets_doc::next_rev());
     }
 
-    fn has_unlisted_value(&self, sets: &crate::sets_doc::SetsDoc) -> bool {
-        let Some(files) = self.files() else {
-            return false;
-        };
-        let saved = std::cell::LazyCell::new(|| {
-            self.f
-                .saved_text
-                .parse::<DocumentMut>()
-                .expect("serialized files document")
-        });
-        // A listing names an input. Its existing table may use another case or omit the extension.
-        let listed_tables = std::cell::LazyCell::new(|| {
-            sets.auto_normal()
-                .into_iter()
-                .filter_map(|(key, word)| Some((self.file_table_key(&key)?, word)))
-                .collect::<BTreeSet<_>>()
-        });
-        let data = std::cell::LazyCell::new(|| sets.auto_data());
-        files.iter().any(|(key, entry)| {
-            let on_disk = || saved.get("files").and_then(|f| f.get(key));
-            if let Some(word @ ("normal" | "landscape_normal" | "pbr_normal")) =
-                entry.get("subtype").and_then(Item::as_str)
-            {
-                if sets.auto_normal_word(key) != Some(word)
-                    && on_disk()
-                        .and_then(|e| e.get("subtype"))
-                        .and_then(Item::as_str)
-                        != Some(word)
-                    && !listed_tables.contains(&(key.to_owned(), word.to_owned()))
-                {
-                    return true;
-                }
-            }
-            let alpha = |e: &Item| {
-                e.get("alpha")
-                    .and_then(|a| a.get("policy"))
-                    .and_then(Item::as_str)
-                    == Some("data")
-            };
-            alpha(entry) && !on_disk().is_some_and(alpha) && !data.iter().any(|k| k == key)
-        })
+    fn touch_field(&mut self, field: &str) {
+        self.touch();
+        if matches!(field, "subtype" | "alpha.policy") {
+            self.mark_type_alpha_edit();
+        }
     }
 
     fn apply_writes(&mut self, writes: &[AutoWrite]) -> bool {
@@ -788,6 +752,8 @@ impl ProjectDoc {
         let Some(gone) = files.remove(&name) else {
             return false;
         };
+        let removed_type_alpha = gone.get("subtype").is_some()
+            || gone.get("alpha").and_then(|a| a.get("policy")).is_some();
         // Note FC1: the comments `entry_mut` put in front of the only entry go back to the document's trailing text.
         let lead = gone
             .as_table()
@@ -803,6 +769,9 @@ impl ProjectDoc {
                     .to_owned();
                 self.f.doc.set_trailing(lead + &rest);
             }
+        }
+        if removed_type_alpha {
+            self.mark_type_alpha_edit();
         }
         true
     }
@@ -832,7 +801,7 @@ impl ProjectDoc {
 
     fn write_file_value(&mut self, key: &str, field: &str, value: &Json, resolve: bool) {
         if self.write_field(key, field, value, resolve) {
-            self.touch();
+            self.touch_field(field);
         }
     }
 
@@ -872,7 +841,7 @@ impl ProjectDoc {
 
     pub fn clear_file_value(&mut self, key: &str, field: &str) {
         if self.remove_field(key, field) {
-            self.touch();
+            self.touch_field(field);
         }
     }
 
@@ -921,7 +890,7 @@ impl ProjectDoc {
         if empty {
             self.drop_entry(key);
         }
-        self.touch();
+        self.touch_field(field);
         true
     }
 
@@ -1163,7 +1132,9 @@ impl ProjectDoc {
 
     /// Write the document (atomically: a temporary file, then rename).
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
-        self.f.save(force)
+        self.f.save(force)?;
+        self.type_alpha_edit = None;
+        Ok(())
     }
 
     /// Note FP7 (T38): write the unsaved edits a blame stashed (the engine may still reject them: the file then opens
@@ -1173,6 +1144,7 @@ impl ProjectDoc {
             return Ok(false);
         };
         self.f.write_text(doc.to_string(), false)?;
+        self.type_alpha_edit = None;
         *dirty = false;
         Ok(true)
     }

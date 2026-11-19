@@ -98,13 +98,13 @@ fn opening_a_folder_leaves_save_undo_and_the_dot_off() {
 }
 
 #[test]
-fn a_user_edit_then_undo_is_clean_again() {
+fn a_type_edit_then_undo_stays_unsaved() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::auto_project(d.path());
     support::set_type(&mut m, "other_unknown.png", "diffuse");
     assert!(m.unsaved() && m.history.can_undo());
     m.undo();
-    assert!(!m.unsaved() && !m.history.can_undo());
+    assert!(m.unsaved() && !m.history.can_undo());
 }
 
 #[test]
@@ -155,7 +155,7 @@ fn undo_of_an_edit_made_before_the_automatic_values_keeps_them() {
     );
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.undo();
-    assert!(!m.unsaved() && !m.history.can_undo());
+    assert!(m.unsaved() && !m.history.can_undo());
     assert!(
         m.project
             .as_ref()
@@ -178,11 +178,11 @@ fn a_direct_save_moves_the_baseline() {
     m.undo();
     assert!(m.unsaved(), "Undo differs from the newly saved baseline");
     m.redo();
-    assert!(!m.unsaved(), "Redo restores the newly saved baseline");
+    assert!(m.unsaved(), "Redo of the type still prompts");
 }
 
 #[test]
-fn an_undo_across_a_later_automatic_record_is_clean_at_once() {
+fn an_undone_type_edit_across_a_later_automatic_record_still_prompts() {
     // The user step comes first, the automatic record second; the Undo must keep the automatic value, with no
     // wait for a plan: `unsaved()` is read straight after `undo()`.
     let d = tempfile::tempdir().unwrap();
@@ -200,7 +200,7 @@ fn an_undo_across_a_later_automatic_record_is_clean_at_once() {
         .file_value("textures/teeth2_n.png", "subtype")
         .is_some());
     m.undo();
-    assert!(!m.unsaved(), "clean at once, no plan awaited");
+    assert!(m.unsaved(), "type edit marked at once, no plan awaited");
     assert!(
         m.project
             .as_ref()

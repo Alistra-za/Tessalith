@@ -124,7 +124,7 @@ fn auto_accepted_types_are_recorded_as_the_baseline() {
 }
 
 #[test]
-fn undo_after_the_same_normal_type_is_recorded_again_is_clean() {
+fn undo_after_the_same_normal_type_is_recorded_again_still_prompts() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
     rgb(&root, "rock_n.png", [128, 128, 255]);
@@ -137,11 +137,11 @@ fn undo_after_the_same_normal_type_is_recorded_again_is_clean() {
     assert!(m.can_undo());
     m.undo();
     assert!(
-        !m.unsaved(),
-        "Undo to the saved normal type is clean immediately"
+        m.unsaved(),
+        "Undo to the saved normal type keeps the user's edit marked"
     );
     assert!(!m.needs_write());
-    assert!(m.request_close());
+    assert!(!m.request_close());
 }
 
 /// Note FI11 (A17, D15): the row's hover names files and types in words and explains High confidence.

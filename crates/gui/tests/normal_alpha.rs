@@ -410,6 +410,233 @@ fn listed(m: &AppModel, key: &str) -> Option<String> {
     m.sets_doc.as_ref().unwrap().auto_normal().remove(key)
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ClaimStart {
+    Recording,
+    Saved,
+    Pruned,
+    FuzzUndo,
+    Unreadable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Gesture {
+    Pick,
+    Switch,
+    KeepAlpha,
+    Reset,
+}
+
+#[track_caller]
+fn assert_claim_prompt(m: &mut AppModel, files: bool) {
+    let recover_sets = files && m.sets_doc.as_ref().unwrap().is_dirty();
+    check_close(m, (files, false), (files, recover_sets));
+}
+
+fn exercise_claim(start: ClaimStart, gesture: Gesture) {
+    use ClaimStart::*;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    let t = wall(d.path());
+    if gesture == Gesture::KeepAlpha {
+        std::fs::copy(t.join("wall.png"), t.join("steel.png")).unwrap();
+        std::fs::write(
+            root.join("sdc-project.toml"),
+            "[[sets]]\nid = 'test/steel'\nborrow = {slot2 = 'test/wall'}\n",
+        )
+        .unwrap();
+    }
+    let mut sets = sdc_gui::sets_doc::SetsDoc::open(&root);
+    sets.set_export_folder(&d.path().join("export"));
+    sets.save(false).unwrap();
+    if start == Unreadable {
+        std::fs::write(root.join("sdc-project.toml"), "[project\n").unwrap();
+    } else if start == FuzzUndo {
+        std::fs::remove_file(t.join("wall_n.png")).unwrap();
+        std::fs::copy(t.join("wall.png"), t.join("rock01.png")).unwrap();
+        for name in ["rock01_roughness.png", "rock01_fuzz.png"] {
+            ImageBuffer::from_fn(64, 64, |x, _| Luma([60 + x as u8]))
+                .save(t.join(name))
+                .unwrap();
+        }
+        std::fs::write(
+            root.join("sdc.toml"),
+            "[files.'test/rock01.png']\nsubtype = 'skin_albedo'\n",
+        )
+        .unwrap();
+    }
+    let mut m = opened_without_export(d.path());
+    assert_claim_prompt(&mut m, false);
+    if start == FuzzUndo {
+        assert!(m.fuzz_note_for_test().is_some());
+        m.undo();
+        settle(&mut m);
+        assert_claim_prompt(&mut m, true);
+        bumpy_n(&t.join("wall_n.png"));
+        m.replan();
+        settle(&mut m);
+    }
+    let initial = listed(&m, WALL_N);
+    assert_eq!(
+        initial.as_deref(),
+        (start != Unreadable).then_some("normal")
+    );
+    assert_claim_prompt(&mut m, start == FuzzUndo);
+    if gesture == Gesture::KeepAlpha && start != Pruned {
+        add_rmaos(&t, &mut m);
+        assert_claim_prompt(&mut m, start == FuzzUndo);
+    }
+    if matches!(start, Saved | Pruned) {
+        m.save().unwrap();
+        assert_claim_prompt(&mut m, false);
+    }
+    if start == Pruned {
+        let word = if gesture == Gesture::KeepAlpha {
+            Subtype::PbrNormal
+        } else {
+            Subtype::Msn
+        };
+        m.decide(WALL_N, Answer::Subtype(word));
+        settle(&mut m);
+        assert_claim_prompt(&mut m, true);
+        bumpy_n(&t.join("other_n.png"));
+        m.replan();
+        settle(&mut m);
+        assert_eq!(listed(&m, WALL_N), None);
+        assert_eq!(listed(&m, "test/other_n.png").as_deref(), Some("normal"));
+        assert_claim_prompt(&mut m, true);
+    }
+    match gesture {
+        Gesture::Pick => m.decide(WALL_N, Answer::Subtype(Subtype::Normal)),
+        Gesture::Switch => m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo)),
+        Gesture::Reset => {
+            m.reset_all_settings(&[WALL_N.to_owned()]);
+            assert_eq!(held(&m, WALL_N, "subtype"), None);
+        }
+        Gesture::KeepAlpha => {
+            if start == Pruned {
+                add_rmaos(&t, &mut m);
+            }
+            assert_claim_prompt(&mut m, matches!(start, Pruned | FuzzUndo));
+            assert_eq!(
+                keep_rows(&m, WALL_N),
+                1,
+                "{start:?}: Keep alpha must be available"
+            );
+            m.keep_alpha(WALL_N).unwrap();
+        }
+    }
+    settle(&mut m);
+    let sets_claimed = match gesture {
+        Gesture::Pick => start == Saved,
+        Gesture::Switch => !matches!(start, Pruned | Unreadable),
+        // Reset of the pruned MSN gives A back to the recorder, changing its ownership again.
+        Gesture::Reset => start == Pruned,
+        Gesture::KeepAlpha => false,
+    };
+    let recover_sets = m.sets_doc.as_ref().unwrap().is_dirty();
+    assert_eq!(m.sets_user_dirty(), sets_claimed, "{start:?} {gesture:?}");
+    check_close(&mut m, (true, sets_claimed), (true, recover_sets));
+    m.save().unwrap();
+    assert_claim_prompt(&mut m, false);
+    let mut reopened = opened_without_export(d.path());
+    assert_claim_prompt(&mut reopened, false);
+    // A second PBR signal for Keep alpha, whose owner already had the packed map.
+    if gesture == Gesture::KeepAlpha {
+        std::fs::copy(t.join("wall.png"), t.join("wall_roughness.png")).unwrap();
+    }
+    add_rmaos(&t, &mut reopened);
+    let owner = sdc_gui::model::sets::views(&reopened);
+    let shader = owner
+        .iter()
+        .find(|v| v.id == "test/wall")
+        .unwrap()
+        .shader
+        .as_ref()
+        .unwrap();
+    assert!(
+        shader.shader.is_pbr_or_advanced_skin(),
+        "{start:?} {gesture:?}: {shader:?}"
+    );
+    match gesture {
+        Gesture::Pick => {
+            assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!("normal")));
+            assert_eq!(listed(&reopened, WALL_N), None);
+        }
+        Gesture::Switch => {
+            assert_eq!(
+                held(&reopened, "test/wall.png", "subtype"),
+                Some(json!("pbr_albedo"))
+            );
+            let word = match start {
+                Pruned => "msn",
+                Unreadable => "normal",
+                _ => "pbr_normal",
+            };
+            assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!(word)));
+            assert_eq!(
+                listed(&reopened, WALL_N).as_deref(),
+                (!matches!(start, Pruned | Unreadable)).then_some(word)
+            );
+        }
+        Gesture::KeepAlpha => {
+            assert_eq!(held(&reopened, WALL_N, "alpha.policy"), Some(json!("data")));
+            assert!(!auto_data(&reopened).iter().any(|k| k == WALL_N));
+        }
+        // Reset returns control to the recorder. New evidence can change its choice.
+        Gesture::Reset => {
+            let word = if start == Unreadable {
+                "normal"
+            } else {
+                "pbr_normal"
+            };
+            assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!(word)));
+            assert_eq!(
+                listed(&reopened, WALL_N).as_deref(),
+                (start != Unreadable).then_some(word)
+            );
+        }
+    }
+    assert_claim_prompt(&mut reopened, false);
+}
+
+#[test]
+fn pick_switch_and_reset_from_each_claim_start() {
+    use ClaimStart::*;
+    for start in [Recording, Saved, Pruned, FuzzUndo, Unreadable] {
+        for gesture in [Gesture::Pick, Gesture::Switch, Gesture::Reset] {
+            exercise_claim(start, gesture);
+        }
+    }
+}
+
+#[test]
+fn keep_alpha_from_each_readable_claim_start() {
+    use ClaimStart::*;
+    for start in [Recording, Saved, Pruned, FuzzUndo] {
+        exercise_claim(start, Gesture::KeepAlpha);
+    }
+}
+
+#[test]
+fn keep_alpha_with_an_unreadable_sets_document() {
+    let d = tempfile::tempdir().unwrap();
+    let shared = old_share(d.path());
+    assert_eq!(keep_rows(&shared, IRON_N), 1);
+    drop(shared);
+
+    std::fs::write(d.path().join("textures/sdc-project.toml"), "[project\n").unwrap();
+    let mut m = opened_without_export(d.path());
+    let files = m.project.as_ref().unwrap().text();
+    let sets = m.sets_doc.as_ref().unwrap().text();
+    assert_eq!(keep_rows(&m, IRON_N), 0);
+    assert!(m.sets_doc.as_ref().unwrap().read_only());
+    assert!(m.keep_alpha(IRON_N).is_err());
+    assert_eq!(m.project.as_ref().unwrap().text(), files);
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), sets);
+    assert_claim_prompt(&mut m, false);
+}
+
 fn held(m: &AppModel, key: &str, field: &str) -> Option<serde_json::Value> {
     m.project.as_ref().unwrap().file_value(key, field)
 }
@@ -545,6 +772,48 @@ fn a_failed_save_keeps_the_listing_when_the_sets_document_conflicts() {
 }
 
 #[test]
+fn a_failed_second_write_keeps_the_type_claim_until_save_succeeds() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_without_export(d.path());
+    m.save().unwrap();
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    let path = m.sets_doc.as_ref().unwrap().path().to_owned();
+    std::fs::write(&path, "# external edit\n").unwrap();
+    assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), "# external edit\n");
+    check_close(&mut m, (true, true), (true, true));
+    m.resolve_external_change(sdc_gui::model::DocKind::Project, true);
+    m.save().unwrap();
+    check_close(&mut m, (false, false), (false, false));
+}
+
+#[test]
+fn overwriting_a_conflicting_files_document_still_requires_saving_the_pruned_listing() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_without_export(d.path());
+    m.save().unwrap();
+    m.decide(WALL_N, Answer::Subtype(Subtype::Msn));
+    settle(&mut m);
+    bumpy_n(&t.join("other_n.png"));
+    m.replan();
+    settle(&mut m);
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    std::fs::write(m.project.as_ref().unwrap().path(), "# external edit\n").unwrap();
+    assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
+    m.resolve_external_change(sdc_gui::model::DocKind::SdcToml, true);
+    check_close(&mut m, (true, false), (true, true));
+    m.save().unwrap();
+    check_close(&mut m, (false, false), (false, false));
+    let mut reopened = opened_without_export(d.path());
+    add_rmaos(&t, &mut reopened);
+    assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!("normal")));
+}
+
+#[test]
 fn a_files_only_edit_recovers_the_recorded_type_with_its_listing() {
     use egui_kittest::kittest::Queryable;
     let d = tempfile::tempdir().unwrap();
@@ -659,7 +928,7 @@ fn claiming_a_new_recording_prompts_recovers_and_reopens_user_owned() {
     settle(&mut m);
     assert!(!m.can_undo());
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     m.redo();
     settle(&mut m);
     assert!(!m.can_redo());
@@ -672,11 +941,11 @@ fn claiming_a_new_recording_prompts_recovers_and_reopens_user_owned() {
     check_close(&mut restored, (true, false), (true, false));
     restored.undo_crash_restore();
     assert!(!restored.can_undo());
-    check_close(&mut restored, (false, false), (false, false));
+    check_close(&mut restored, (true, false), (true, false));
     assert!(!sdc_gui::crash_log::recovery_path(restored.project.as_ref().unwrap().path()).exists());
     settle(&mut restored);
     assert_eq!(restored.untouched_normal(WALL_N), Some(Subtype::Normal));
-    check_close(&mut restored, (false, false), (false, false));
+    check_close(&mut restored, (true, false), (true, true));
     restored.redo();
     settle(&mut restored);
     assert!(!restored.can_redo());
@@ -830,7 +1099,7 @@ fn undo_lock_and_redo_follow(m: &mut AppModel) {
     settle(m);
     assert!(!m.can_redo());
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(m, (false, true), (true, true));
+    check_close(m, (true, true), (true, true));
 }
 
 #[test]
@@ -861,7 +1130,7 @@ fn an_automatic_prune_allows_the_export_folder_to_save() {
     assert!(!m.can_undo());
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
     assert_eq!(m.untouched_normal(b), Some(Subtype::Normal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     m.redo();
     settle(&mut m);
     assert!(!m.can_redo());
@@ -894,7 +1163,7 @@ fn an_automatic_prune_allows_the_export_folder_to_save() {
     settle(&mut m);
     assert!(!m.can_undo());
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
-    check_close(&mut m, (false, true), (false, true));
+    check_close(&mut m, (true, true), (true, true));
     m.redo();
     settle(&mut m);
     check_close(&mut m, (true, false), (true, false));
@@ -902,7 +1171,70 @@ fn an_automatic_prune_allows_the_export_folder_to_save() {
     settle(&mut m);
     assert!(!m.can_redo());
     assert_eq!(listed(&m, WALL_N), None);
+    check_close(&mut m, (true, false), (true, false));
+}
+
+#[test]
+fn picking_normal_after_a_recording_prunes_the_saved_listing_prompts() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_without_export(d.path());
+    m.save().unwrap();
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Msn));
+    settle(&mut m);
+    check_close(&mut m, (true, false), (true, false));
+    bumpy_n(&t.join("other_n.png"));
+    m.replan();
+    settle(&mut m);
+    assert_eq!(listed(&m, WALL_N), None);
+    assert_eq!(listed(&m, "test/other_n.png").as_deref(), Some("normal"));
+    check_close(&mut m, (true, false), (true, true));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    check_close(&mut m, (true, false), (true, true));
+    m.save().unwrap();
     check_close(&mut m, (false, false), (false, false));
+    let mut reopened = opened_without_export(d.path());
+    assert_eq!(listed(&reopened, WALL_N), None);
+    check_close(&mut reopened, (false, false), (false, false));
+    add_rmaos(&t, &mut reopened);
+    assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!("normal")));
+    check_close(&mut reopened, (false, false), (false, false));
+}
+
+#[test]
+fn saving_a_claim_persists_the_automatically_pruned_listing() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let root = d.path().join("textures");
+    let mut m = opened_without_export(d.path());
+    m.save().unwrap();
+    m.decide(WALL_N, Answer::Subtype(Subtype::Msn));
+    settle(&mut m);
+    bumpy_n(&t.join("other_n.png"));
+    m.replan();
+    settle(&mut m);
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    let disk_listing = || sdc_gui::sets_doc::SetsDoc::open(&root).auto_normal();
+    assert_eq!(
+        disk_listing().get(WALL_N).map(String::as_str),
+        Some("normal")
+    );
+    let sets = m.sets_doc.as_mut().unwrap();
+    assert!(!sets.user_dirty());
+    assert!(!sets.auto_normal().contains_key(WALL_N));
+    // Save must persist a real text difference even when the cached write flag is clear.
+    sets.set_dirty(false);
+    m.save().unwrap();
+    assert_eq!(
+        disk_listing(),
+        [("test/other_n.png".into(), "normal".into())].into()
+    );
+    let mut reopened = opened_without_export(d.path());
+    add_rmaos(&t, &mut reopened);
+    assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!("normal")));
 }
 
 #[test]
@@ -936,7 +1268,7 @@ fn listing_b_keeps_as_ownership_in_the_snapshot_where_a_is_normal() {
     );
     assert_eq!(m.untouched_normal(b), Some(Subtype::Normal));
     assert!(!m.can_undo());
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     m.redo();
     settle(&mut m);
     assert!(!m.can_redo());
@@ -945,10 +1277,10 @@ fn listing_b_keeps_as_ownership_in_the_snapshot_where_a_is_normal() {
     check_close(&mut m, (true, false), (true, true));
     m.undo();
     settle(&mut m);
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     add_rmaos(&t, &mut m);
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
 }
 
 #[test]
@@ -1041,13 +1373,13 @@ fn an_established_follow_discards_an_unrelated_redo() {
     m.undo();
     settle(&mut m);
     assert!(!m.can_undo() && m.can_redo());
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, false));
     record_another_colour(&mut m);
     assert!(m.can_redo(), "an ordinary recording leaves Redo available");
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, false));
     add_rmaos(&t, &mut m);
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     assert!(!m.can_redo(), "the follow replaces the unrelated Redo");
     m.undo();
     settle(&mut m);
@@ -1058,7 +1390,7 @@ fn an_established_follow_discards_an_unrelated_redo() {
     settle(&mut m);
     assert!(!m.can_redo());
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
 }
 
 #[test]
@@ -1071,29 +1403,30 @@ fn a_follow_clears_redo_and_the_user_can_claim_normal_again() {
     m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
     settle(&mut m);
     assert_eq!(listed(&m, WALL_N), None);
-    check_close(&mut m, (false, true), (true, true));
+    check_close(&mut m, (true, true), (true, true));
     m.undo();
     settle(&mut m);
     assert!(!m.can_undo() && m.can_redo());
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, false));
     record_another_colour(&mut m);
     assert!(m.can_redo());
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, false));
     add_rmaos(&t, &mut m);
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    assert!(!m.unsaved());
-    check_close(&mut m, (false, false), (false, false));
+    assert!(m.unsaved());
+    check_close(&mut m, (true, false), (true, true));
     assert!(!m.can_redo(), "the follow clears the pending claim's Redo");
     m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
     settle(&mut m);
     assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
     assert_eq!(m.untouched_normal(WALL_N), None);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
     assert!(m.unsaved());
     check_close(&mut m, (true, false), (true, true));
     m.undo();
     settle(&mut m);
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     m.undo();
     settle(&mut m);
     assert!(!m.can_undo());
@@ -1102,12 +1435,13 @@ fn a_follow_clears_redo_and_the_user_can_claim_normal_again() {
     m.redo();
     settle(&mut m);
     assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
-    check_close(&mut m, (false, false), (false, false));
+    check_close(&mut m, (true, false), (true, true));
     m.redo();
     settle(&mut m);
     assert!(!m.can_redo());
     assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
     assert_eq!(m.untouched_normal(WALL_N), None);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
     check_close(&mut m, (true, false), (true, true));
 }
 
@@ -1164,12 +1498,13 @@ fn a_read_only_sets_document_gets_no_pbr_normal() {
     let d = tempfile::tempdir().unwrap();
     rock(d.path());
     std::fs::write(d.path().join("textures/sdc-project.toml"), "[project\n").unwrap();
-    let m = opened_without_export(d.path());
+    let mut m = opened_without_export(d.path());
     assert!(
         m.sets_doc.as_ref().unwrap().read_only(),
         "precondition: unreadable sdc-project.toml"
     );
     assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("landscape_normal")));
+    check_close(&mut m, (false, false), (false, false));
 }
 
 /// G2, G3 (N-17): an explicit PBR pick types the untouched normal `pbr_normal` in the pick's own step, a regular pick

@@ -25,6 +25,8 @@ pub struct Command {
     /// Consecutive commands with the same `Some` key are one step (a slider drag, typing in one field).
     pub merge: Option<String>,
     pub created_file: Option<CreatedFile>,
+    /// Undo and Redo of this command claim a type or alpha write, even across a Save.
+    pub type_alpha: bool,
     /// Automatic listing removals unique to the before or after snapshot, respectively.
     pub normal_prunes: [BTreeMap<String, String>; 2],
 }
@@ -66,6 +68,7 @@ impl History {
                 && c.created_file.is_none()
             {
                 last.after = c.after;
+                last.type_alpha |= c.type_alpha;
                 for (side, prunes) in c.normal_prunes.into_iter().enumerate() {
                     for (key, word) in prunes {
                         last.record_prune(side, key, word);
@@ -288,6 +291,7 @@ mod tests {
                 after,
                 merge: None,
                 created_file: None,
+                type_alpha: true,
                 normal_prunes: Default::default(),
             });
         }
@@ -344,7 +348,7 @@ mod tests {
             let expected = crate::project::apply_auto(text, &writes);
             let snapshot = Snapshot { sdc_toml: text.to_owned(), project: "same".into() };
             let mut history = History::default();
-            history.push(Command { label: "edit".into(), before: snapshot.clone(), after: snapshot, merge: None, created_file: None, normal_prunes: Default::default() });
+            history.push(Command { label: "edit".into(), before: snapshot.clone(), after: snapshot, merge: None, created_file: None, type_alpha: false, normal_prunes: Default::default() });
             history.apply_auto(&writes);
             assert_eq!(history.undo[0].before.sdc_toml, expected, "before {text:?}");
             assert_eq!(history.undo[0].after.sdc_toml, expected, "after {text:?}");
@@ -390,6 +394,7 @@ mod tests {
                 after: snapshot,
                 merge: None,
                 created_file: None,
+                type_alpha: false,
                 normal_prunes: Default::default(),
             });
             history.apply_auto(std::slice::from_ref(&write));
@@ -430,6 +435,7 @@ mod tests {
                 },
                 merge: None,
                 created_file: None,
+                type_alpha: true,
                 normal_prunes: Default::default(),
             });
         }

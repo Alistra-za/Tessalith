@@ -619,7 +619,6 @@ impl AppModel {
         } else {
             BTreeMap::new()
         };
-        p.reconcile_ownership(sets, &p.text());
         if revs == (p.rev(), sets.rev()) {
             return false;
         }
@@ -693,6 +692,7 @@ impl AppModel {
                 label: format!("Set {n} {noun}{s} automatically"),
                 merge: join.clone(),
                 created_file: None,
+                type_alpha: !joins_user,
                 normal_prunes: [BTreeMap::new(), baseline_pruned],
             });
         }

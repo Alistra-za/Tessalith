@@ -2082,12 +2082,9 @@ fn cube_faces_join_the_fuzz_switch_without_a_user_edit() {
             .file_value("textures/cubemaps/env_nz.png", "subtype"),
         Some(json!("cubemap"))
     );
-    assert!(
-        m.request_close(),
-        "settled Undo holds only automatic face records"
-    );
+    assert!(!m.request_close(), "Undo of the switch wrote a subtype");
     m.redo();
-    assert!(!m.unsaved(), "all six faces are in the baseline");
+    assert!(m.unsaved(), "Redo of the switch wrote a subtype");
 }
 
 /// Fix round 1, I1: a user edit after the switch asks, in all three places.
@@ -2133,6 +2130,50 @@ fn a_later_recording_after_the_switch_asks_nothing() {
 }
 
 #[test]
+fn picking_a_new_normal_after_undoing_the_fuzz_switch_prompts() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    let mut sets = sdc_gui::sets_doc::SetsDoc::open(root);
+    sets.set_export_folder(&root.join("export"));
+    sets.save(false).unwrap();
+    let mut m = open_with(
+        root,
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    assert!(m.fuzz_note_for_test().is_some());
+    check_close(&mut m, (false, false), (false, false));
+    m.undo();
+    idle(&mut m);
+    check_close(&mut m, (true, false), (true, false));
+    let key = "m/stone_n.png";
+    ImageBuffer::from_fn(64, 64, |x, _| {
+        Rgb([if x % 2 == 0 { 204u8 } else { 51 }, 128, 230])
+    })
+    .save(root.join(key))
+    .unwrap();
+    m.replan();
+    idle(&mut m);
+    assert_eq!(m.untouched_normal(key), Some(Subtype::Normal));
+    check_close(&mut m, (true, false), (true, true));
+    m.decide(key, Answer::Subtype(Subtype::Normal));
+    idle(&mut m);
+    check_close(&mut m, (true, false), (true, true));
+    m.save().unwrap();
+    check_close(&mut m, (false, false), (false, false));
+    m.open_folder(root.to_owned());
+    idle(&mut m);
+    check_close(&mut m, (false, false), (false, false));
+    rgb(&root.join("m"), "stone_rmaos.png");
+    m.replan();
+    idle(&mut m);
+    assert_eq!(subtype(&m, key), Some(json!("normal")));
+    assert!(!m.sets_doc.as_ref().unwrap().auto_normal().contains_key(key));
+    check_close(&mut m, (false, false), (false, false));
+}
+
+#[test]
 fn undoing_the_switch_before_save_returns_to_disk() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
@@ -2143,10 +2184,19 @@ fn undoing_the_switch_before_save_returns_to_disk() {
     );
     m.undo();
     idle(&mut m);
-    assert!(!m.unsaved(), "Undo restored exactly the text read on open");
-    assert!(!m.needs_write() && m.recovery_snapshot().is_empty());
-    assert!(m.request_close());
+    assert!(m.unsaved(), "Undo restored the subtype read on open");
+    assert!(!m.needs_write());
+    let doc = m.project.as_ref().unwrap();
+    assert_eq!(
+        m.recovery_snapshot(),
+        [(doc.path().to_owned(), OLD_SKIN.to_owned())]
+    );
+    assert!(!m.request_close());
+    m.dialog = None;
     let other = tempfile::tempdir().unwrap();
+    assert!(!m.request_open(other.path().to_path_buf()));
+    m.dialog = None;
+    m.save().unwrap();
     assert!(m.request_open(other.path().to_path_buf()));
     idle(&mut m);
 }
