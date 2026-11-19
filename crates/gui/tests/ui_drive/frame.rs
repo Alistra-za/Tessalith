@@ -32,10 +32,11 @@ pub struct Text {
     pub text: String,
     pub rect: Rect,
     pub clip: Rect,
-    /// The painted galley was cut short by egui (`Galley::elided`); `text` is then the full text of the galley.
+    /// The painted galley was cut short by egui (`Galley::elided`); `source` is then the full text of the galley.
     pub elided: bool,
-    /// The galley's text ends in the ellipsis character (`text` has it trimmed): a back cut, or one the author wrote.
-    pub ends_in_ellipsis: bool,
+    /// The galley's text exactly as painted, untrimmed (`text` has its trailing ellipses removed): `head……` stays
+    /// `head……`. The cut-text invariant reads this and `elided` only.
+    pub source: String,
 }
 
 #[derive(Clone, Debug)]
@@ -43,6 +44,9 @@ pub struct Snapshot {
     pub size: Vec2,
     pub nodes: Vec<Node>,
     pub texts: Vec<Text>,
+    /// Painted texts that are nothing but ellipses ("…"): `texts` leaves them out (its `text` is empty after the trim),
+    /// so existing readers see no change; the cut-text invariant reads them beside `texts`.
+    pub bare_ellipses: Vec<Text>,
     /// The right edge of the Sets column's panel (`ui::panel_ids::panel_rect`), when the frame built it: the set
     /// editor is the area right of it.
     pub sets_right: Option<f32>,
@@ -79,20 +83,25 @@ pub fn names(a: &egui_kittest::kittest::AccessKitNode<'_>) -> (String, Option<St
     }
 }
 
-fn flatten(s: &Shape, clip: Rect, out: &mut Vec<Text>) {
+fn flatten(s: &Shape, clip: Rect, out: &mut Vec<Text>, bare: &mut Vec<Text>) {
     match s {
-        Shape::Vec(v) => v.iter().for_each(|s| flatten(s, clip, out)),
+        Shape::Vec(v) => v.iter().for_each(|s| flatten(s, clip, out, bare)),
         Shape::Text(t) => {
             let text = t.galley.text().trim_end_matches('…').to_string();
             let rect = t.galley.rect.translate(t.pos.to_vec2());
-            if !text.trim().is_empty() && rect.intersects(clip) {
-                out.push(Text {
+            if rect.intersects(clip) && !t.galley.text().trim().is_empty() {
+                let painted = Text {
                     text,
                     rect,
                     clip,
                     elided: t.galley.elided,
-                    ends_in_ellipsis: t.galley.text().ends_with('…'),
-                });
+                    source: t.galley.text().to_string(),
+                };
+                if painted.text.trim().is_empty() {
+                    bare.push(painted);
+                } else {
+                    out.push(painted);
+                }
             }
         }
         _ => {}
@@ -179,13 +188,15 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
         &mut nodes,
     );
     let mut texts = Vec::new();
+    let mut bare_ellipses = Vec::new();
     for c in &h.output().shapes {
-        flatten(&c.shape, c.clip_rect, &mut texts);
+        flatten(&c.shape, c.clip_rect, &mut texts, &mut bare_ellipses);
     }
     Snapshot {
         size: h.ctx.content_rect().size(),
         nodes,
         texts,
+        bare_ellipses,
         sets_right: sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").map(|r| r.max.x),
     }
 }

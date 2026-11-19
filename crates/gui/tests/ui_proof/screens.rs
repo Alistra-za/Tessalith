@@ -766,13 +766,14 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
             rect: rect(pin_x),
             clip: rect(pin_x),
             elided: false,
-            ends_in_ellipsis: false,
+            source: pin.into(),
         });
     }
     Snapshot {
         size: vec2_1280(),
         nodes,
         texts,
+        bare_ellipses: vec![],
         sets_right: Some(300.0),
     }
 }
