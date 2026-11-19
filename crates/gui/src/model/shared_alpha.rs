@@ -500,10 +500,13 @@ pub(super) fn unlist_user_data(held: &ListedAlpha, p: &ProjectDoc, s: &mut SetsD
     s.set_auto_data(&l);
 }
 
-/// N8-d: a value and its list entry are written together or not at all. The list goes first and is read back: one that
-/// cannot be written (`[project]` is not a table) leaves every value alone. A value that then does not take (its
-/// `[files]` entry is not a table) puts its key's entry back as it was.
-fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc) {
+/// N8-d, N8-i: a value and its list entry are written together or not at all, and a failed attempt changes nothing.
+/// The list goes first and is read back: one that cannot be written (`[project]` is not a table) leaves every value
+/// alone. If a value then does not take (its `[files]` entry is not a table), both documents go back to the text they
+/// had before the attempt: the list's membership as it was, no entry pruned, no file value changed. `fail` (tests
+/// only) makes the file writes fail.
+fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
+    let (p0, s0) = (p.text(), s.text());
     if c.relist {
         s.set_auto_data(&c.list);
         if s.auto_data() != c.list {
@@ -511,19 +514,17 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc) {
         }
     }
     let data = Some(json!("data"));
-    for k in &c.write {
+    for k in c.write.iter().filter(|_| !fail) {
         p.set_file_value(k, "alpha.policy", &json!("data"));
     }
     for k in &c.clear {
         p.clear_file_value(k, "alpha.policy");
     }
-    let mut l = c.list.clone();
-    l.retain(|k| !c.write.contains(k) || exact_alpha(p, k) == data);
-    for k in c.clear.iter().filter(|k| exact_alpha(p, k) == data) {
-        l.push(k.clone());
-    }
-    if l != c.list {
-        s.set_auto_data(&l);
+    let took = c.write.iter().all(|k| exact_alpha(p, k) == data)
+        && c.clear.iter().all(|k| exact_alpha(p, k) != data);
+    if !took {
+        p.restore(&p0);
+        s.restore(&s0);
     }
 }
 
@@ -540,8 +541,12 @@ impl AppModel {
         else {
             return;
         };
+        #[cfg(feature = "test-hooks")]
+        let fail = self.fail_shared_alpha_write;
+        #[cfg(not(feature = "test-hooks"))]
+        let fail = false;
         if let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) {
-            apply(&c, p, s);
+            apply(&c, p, s, fail);
         }
     }
 

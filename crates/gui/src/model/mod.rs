@@ -768,6 +768,10 @@ pub struct AppModel {
     /// them in the order it wants.
     #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    /// Tests (Note JS7, N8-i): the shared-alpha follow-on's file writes fail, as a `[files]` entry that is not a table
+    /// would make them.
+    #[cfg(feature = "test-hooks")]
+    pub fail_shared_alpha_write: bool,
     #[cfg(feature = "test-hooks")]
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
@@ -1002,6 +1006,8 @@ impl AppModel {
             landed_sig: None,
             #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
+            #[cfg(feature = "test-hooks")]
+            fail_shared_alpha_write: false,
             #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,

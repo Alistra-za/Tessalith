@@ -2422,3 +2422,31 @@ fn a_crash_restore_keeps_the_list_it_restores() {
         "ending the share takes it back"
     );
 }
+
+/// N8-i (round 2, B7): the share step's file write fails after the list was written: the list goes back to exactly
+/// what it was, a key already listed after a reset and a stale entry included.
+#[test]
+fn a_failed_write_leaves_the_list_as_it_was() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.clear_alpha(IRON_N);
+    settle(&mut m);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    let start = vec![IRON_N.to_string(), "x/stale.png".to_string()];
+    let l = start.clone();
+    m.edit_docs("seed", None, true, move |_, s| s.set_auto_data(&l));
+    settle(&mut m);
+    assert_eq!(auto_data(&m), start, "precondition");
+    m.fail_shared_alpha_write = true;
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "precondition: the write failed"
+    );
+    assert_eq!(auto_data(&m), start, "the list as it was");
+}
