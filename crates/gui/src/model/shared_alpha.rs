@@ -116,11 +116,15 @@ pub(super) struct Share {
 // back to Auto, a set with no card) makes its pairs `unsure` (spec limit 4): that owner normal is neither written nor
 // cleared in the step, and other keys are unaffected; after the plan, Task 9's row or a leftover `data` shows the result.
 // A `blind` step clears no listed key at all, since the key the borrow reads is not known.
+// N8-f: a lender in `touched` (a set whose files the step's own edit moved, so the views' members are not what the
+// documents say) is not known either: a chain through it is `blind`, and the key it would lend is not named, so
+// nothing is written for it.
 pub(super) fn shared_into_regular(
     f: &Facts,
     s: &SetsDoc,
     gone: &BTreeSet<String>,
     targets: &BTreeSet<String>,
+    touched: &BTreeSet<String>,
 ) -> Share {
     let mut borrows = BTreeMap::new();
     let mut chosen = BTreeMap::new();
@@ -146,6 +150,10 @@ pub(super) fn shared_into_regular(
         let mut seen = BTreeSet::from([b.clone()]);
         let owner = loop {
             if !seen.insert(cur.clone()) {
+                break None;
+            }
+            if touched.contains(&cur) {
+                sh.blind = true;
                 break None;
             }
             if !f.known.contains(&cur) {
@@ -185,12 +193,82 @@ pub(super) fn shared_into_regular(
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
-/// owner's Normal-slot file held, the sets with no file (`empty`) and the slot-2 borrow targets (`targets`, N8-b).
+/// owner's Normal-slot file held, the sets with no file (`empty`), the slot-2 borrow targets (`targets`, N8-b), and
+/// for N8-f: whether the views' members are what the documents say (`fresh`), each entry's membership lines
+/// (`members`) and the `[inputs]` aliases (`aliases`).
 pub(super) struct Before {
     shared: BTreeSet<String>,
     sub: BTreeMap<String, Option<Value>>,
     empty: BTreeSet<String>,
     targets: BTreeSet<String>,
+    fresh: bool,
+    members: BTreeMap<String, Membership>,
+    aliases: BTreeMap<String, String>,
+}
+
+/// What an `[[sets]]` entry says about which files the set holds: `created`, `renamed_from`, `add`, `remove`.
+type Membership = (bool, Option<String>, Vec<String>, Vec<String>);
+
+/// N8-f: every entry's membership lines, by folded id.
+fn membership(s: &SetsDoc) -> BTreeMap<String, Membership> {
+    s.entries()
+        .iter()
+        .map(|e| {
+            let m = (
+                e.created,
+                e.renamed_from.clone(),
+                e.add.clone(),
+                e.remove.clone(),
+            );
+            (fold_id(&e.id), m)
+        })
+        .collect()
+}
+
+/// N8-f: the `[inputs]` aliases (a new input name moves a file to another automatic set at the next plan).
+fn aliases(p: &ProjectDoc) -> BTreeMap<String, String> {
+    p.read_as_all()
+        .into_iter()
+        .map(|(k, a)| (k, a.path))
+        .collect()
+}
+
+/// N8-f: the sets whose files the step's own edit moved: an entry whose membership lines changed (a move, a replace,
+/// Fill from names, a hand-over, a rename, a new or deleted entry), and every set whose view holds a file one of
+/// those lines names (the set the file leaves). The views keep the last plan's members, so for these sets they are
+/// not what the documents say until the plan lands.
+fn touched(m: &AppModel, b: &Before, s: &SetsDoc) -> BTreeSet<String> {
+    let now = membership(s);
+    let mut out = BTreeSet::new();
+    let mut lines = BTreeSet::new();
+    // An entry that is not there says what an entry with no membership lines says (a borrow or a shader pick that
+    // creates the entry moves no file).
+    let none = Membership::default();
+    for id in b.members.keys().chain(now.keys()) {
+        let (x, y) = (
+            b.members.get(id).unwrap_or(&none),
+            now.get(id).unwrap_or(&none),
+        );
+        if x != y {
+            out.insert(id.clone());
+            for (_, _, add, remove) in [x, y] {
+                lines.extend(add.iter().chain(remove).cloned());
+            }
+        }
+    }
+    if !lines.is_empty() {
+        for v in views(m).iter() {
+            let holds = v.members.iter().any(|mk| {
+                lines
+                    .iter()
+                    .any(|l| engine::overrides::path_key_matches(l, mk))
+            });
+            if holds {
+                out.insert(fold_id(&v.id));
+            }
+        }
+    }
+    out
 }
 
 /// The sets the slot-2 borrow lines of `s` name, by folded id.
@@ -213,11 +291,18 @@ pub(super) fn before(m: &AppModel) -> Option<Before> {
         .map(|k| (k.clone(), p.file_value(k, "subtype")))
         .collect();
     let targets = borrow_targets(s);
+    // N8-f: the views' members are what the documents say only when the last landed full plan was asked with the
+    // documents as they are outside `[files]`: the fast re-plan's request signature (`plan_sig`, set by every
+    // re-plan) still equals the landed one's. A set edit or an alias since then (a plan out, or failed) differs.
+    let fresh = m.landed_sig.is_some_and(|l| l == m.plan_sig.1);
     Some(Before {
-        shared: shared_into_regular(&f, s, &f.empty, &targets).out,
+        shared: shared_into_regular(&f, s, &f.empty, &targets, &BTreeSet::new()).out,
         sub,
         empty: f.empty.clone(),
         targets,
+        fresh,
+        members: membership(s),
+        aliases: aliases(p),
     })
 }
 
@@ -279,15 +364,27 @@ struct Changes {
 
 /// One run, from the documents as the step left them: `data` on each key shared now and not at `b`; every listed key
 /// no regular set shares, still `data`, cleared (N-33).
-fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
+fn changes(
+    f: &Facts,
+    b: &Before,
+    p: &ProjectDoc,
+    s: &SetsDoc,
+    touched: &BTreeSet<String>,
+) -> Changes {
     let mut c = Changes::default();
     if p.read_only() || s.read_only() {
+        return c;
+    }
+    // N8-f: views older than the documents (a set edit or an alias whose plan has not landed), or an alias the step
+    // changed (it moves files between automatic sets at the next plan): no set is known, so nothing is written or
+    // cleared.
+    if !b.fresh || aliases(p) != b.aliases {
         return c;
     }
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
     // creates or renames has no view before it, so it is `unsure` instead).
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let sh = shared_into_regular(f, s, &gone, &b.targets);
+    let sh = shared_into_regular(f, s, &gone, &b.targets, touched);
     let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let start = s.auto_data();
@@ -303,7 +400,8 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
                 .is_some_and(tangent)
         })
     };
-    for k in now.difference(&b.shared) {
+    // N8-f: a key any borrower makes unsure is not written either.
+    for k in now.difference(&b.shared).filter(|k| !unsure.contains(*k)) {
         // N-39: a known alpha that does not vary has nothing to keep; an unknown one is kept (the safe side).
         let free = !f.inert.contains(k)
             && !f.flat.contains(k)
@@ -409,7 +507,7 @@ impl AppModel {
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .map(|(p, s)| changes(&fx, b, p, s))
+            .map(|(p, s)| changes(&fx, b, p, s, &touched(self, b, s)))
         else {
             return;
         };

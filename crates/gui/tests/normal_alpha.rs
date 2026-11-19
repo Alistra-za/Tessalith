@@ -2177,3 +2177,107 @@ fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
     );
     assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
 }
+
+/// Drop `item` on set `into` as the Sets column does, without waiting for the plan.
+fn drop_now(m: &mut AppModel, item: &str, into: &str, choice: sdc_gui::model::sets::DropChoice) {
+    use sdc_gui::model::sets::DropOutcome;
+    match m.drop_choice(item, into, choice) {
+        DropOutcome::AskReplace { .. } => m.drop_replace(item, into, choice).expect("dropped"),
+        DropOutcome::Joined => {}
+        other => panic!("{other:?}"),
+    }
+}
+
+/// `two_sets` plus a populated PBR set `pbr/gold` (`gold.png`, `gold_rmaos.png`, and `gold_n.png` when `with_n`);
+/// `iron_n` is shared into `armor/steel` and listed.
+fn shared_with_gold(dir: &Path, with_n: bool) -> AppModel {
+    two_sets_files(dir);
+    let pbr = dir.join("textures/pbr");
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([200u8, 160, 40]))
+        .save(pbr.join("gold.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(pbr.join("gold_rmaos.png"))
+        .unwrap();
+    if with_n {
+        bumpy_n(&pbr.join("gold_n.png"));
+    }
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    m
+}
+
+/// N8-f (round 2, B2): the lent normal moves into another populated PBR set whose Normal slot is empty, and the
+/// regular set's borrow follows it. The last plan does not have the file in that set yet, so the step cannot name
+/// what the borrow reads: the listed `data` stays, and the share holds after the plan.
+#[test]
+fn moving_a_lent_normal_between_pbr_sets_keeps_its_data() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_with_gold(d.path(), false);
+    drop_now(&mut m, IRON_N, "pbr/gold", DropChoice::Move);
+    assert!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|e| e.id == "armor/steel"
+                && e.borrow.get(&2).map(String::as_str) == Some("pbr/gold")),
+        "precondition: the borrow follows the file"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the move's step keeps it"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N8-f (B2): as above with Replace: `pbr/gold` has its own normal, which the move displaces. The listed `data` stays
+/// and the displaced normal gets none.
+#[test]
+fn replacing_a_normal_with_a_lent_one_writes_and_clears_nothing() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_with_gold(d.path(), true);
+    drop_now(&mut m, IRON_N, "pbr/gold", DropChoice::Move);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the replace's step keeps it"
+    );
+    assert_eq!(
+        held(&m, "pbr/gold_n.png", "alpha.policy"),
+        None,
+        "the displaced normal gets no data"
+    );
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(held(&m, "pbr/gold_n.png", "alpha.policy"), None);
+}
+
+/// N8-f (B2): one step makes `iron_n` shared by a known regular set and by a set the step creates (no files yet, so
+/// unsure). A key any borrower makes unsure is neither written nor cleared.
+#[test]
+fn an_unsure_key_is_not_written() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("ghost/new", 2, Some("pbr/iron"));
+        s.set_borrow("armor/steel", 2, Some("pbr/iron"));
+    });
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "an unsure key gets no data"
+    );
+    settle(&mut m);
+}
