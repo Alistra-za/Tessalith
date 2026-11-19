@@ -664,9 +664,12 @@ pub struct AppModel {
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
     export_after_plan: bool,
-    /// E3: the header's Export said "Export {n} files now" while a plan was in flight and was clicked: the
-    /// write starts when the plan settles, only if it is still a clean write of the same count (`settle_queued`).
+    /// E3: a WHOLE-PROJECT click (the header's Export, the "export" action) waits for the plan in flight; it means
+    /// exactly that, and no scoped click ever sets it (ruling 3c-25). `settle_queued` runs it through `write_gate`
+    /// when the plan settles.
     write_now_after_plan: bool,
+    /// E3: the waiting click's own source check already started a plan (write_gate).
+    gate_replanned: bool,
     /// E3: `writes_without_review()` as the last settled plan answered it, held while a plan is pending.
     settled_writes_now: bool,
     /// E3: `export_files()` as the last settled plan counted it; the held write-now label shows it.
@@ -779,6 +782,9 @@ pub struct AppModel {
     /// them in the order it wants.
     #[cfg(feature = "test-hooks")]
     pub hold_plan_results: bool,
+    /// Tests: runs once, right after the write gate's source walk and before its eligibility read (`set_after_walk`).
+    #[cfg(feature = "test-hooks")]
+    after_walk: Option<Box<dyn FnOnce()>>,
     #[cfg(feature = "test-hooks")]
     held: Vec<WorkerMsg>,
     /// Item 13: (done, total) of the plan in flight, from `PlanProgress`; `None` once it lands.
@@ -946,6 +952,7 @@ impl AppModel {
             gpu_available: true,
             export_after_plan: false,
             write_now_after_plan: false,
+            gate_replanned: false,
             settled_writes_now: false,
             settled_export_files: 0,
             landing: 0,
@@ -1019,6 +1026,8 @@ impl AppModel {
             #[cfg(feature = "test-hooks")]
             hold_plan_results: false,
             #[cfg(feature = "test-hooks")]
+            after_walk: None,
+            #[cfg(feature = "test-hooks")]
             held: vec![],
             plan_progress: None,
             opening: None,
@@ -1051,7 +1060,7 @@ impl AppModel {
         self.close_review();
         // An export waiting for a plan of the previous folder no longer applies.
         self.export_after_plan = false;
-        self.write_now_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         self.last_inputs = None;
         self.inputs_rev += 1;
@@ -1602,6 +1611,21 @@ impl AppModel {
         std::mem::take(&mut self.held)
     }
 
+    /// Tests: run `f` once, between the write gate's source walk and its eligibility read (a slow walk during which
+    /// the world changes, made certain).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_after_walk(&mut self, f: impl FnOnce() + 'static) {
+        self.after_walk = Some(Box::new(f));
+    }
+
+    /// The write gate's test seam: see `set_after_walk`.
+    fn walked(&mut self) {
+        #[cfg(feature = "test-hooks")]
+        if let Some(f) = self.after_walk.take() {
+            f();
+        }
+    }
+
     /// Tests: handle one parked message now, without opening the channel (a message arriving meanwhile stays parked).
     #[cfg(feature = "test-hooks")]
     pub fn handle_held(&mut self, msg: WorkerMsg) {
@@ -1654,7 +1678,7 @@ impl AppModel {
                 self.last_inputs = None;
                 // An export queued behind the cancelled plan has no folder to run on (AG129).
                 self.export_after_plan = false;
-                self.write_now_after_plan = false;
+                self.disarm_write();
                 self.continue_after_plan = None;
                 self.close_review();
                 self.refresh_banner();
@@ -1888,7 +1912,7 @@ impl AppModel {
     /// folder again without it. Any other failure (or a config error with `sdc.toml` already ignored) is a dialog.
     fn plan_failed(&mut self, f: PlanFailure) {
         self.export_after_plan = false;
-        self.write_now_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         // An error naming the user config is not the project's fault; ignoring `sdc.toml` would not help.
         let from_user_config = self
@@ -2128,11 +2152,10 @@ impl AppModel {
         self.export_decided();
     }
 
-    /// E3, the one rule: nothing is written that the user was not shown. With the project's opt-out and nothing
-    /// that needs their eyes (`writes_without_review`) the click writes; else it opens Review. While a plan is in
-    /// flight the click follows the label the user saw (`settled_writes_now`): a write waits for the plan
-    /// (`settle_queued` writes only a landed plan that is still clean with the same count), Review opens at once and
-    /// its Export queues as usual. Runs under the scope as it is (Export set / group keeps theirs).
+    /// E3, the one rule: nothing is written that the user was not shown. While a plan is in flight a whole-project
+    /// click that the label showed as "now" (`settled_writes_now`) waits for the plan; every other click opens Review
+    /// at once (a scoped click always, and its Export queues as usual). With no plan in flight the click goes through
+    /// `write_gate`. Runs under the scope as it is (Export set / group keeps theirs).
     pub(super) fn export_decided(&mut self) {
         self.status_note = None;
         if self.root.is_none() {
@@ -2149,23 +2172,58 @@ impl AppModel {
             }
             return;
         }
-        // The same front half as `export_go`: changed sources plan again first, and the write waits for that plan.
-        // Fresh JSON read (ruling 3c-18): a write never rides on the label's cached answer.
-        let writes = self.writes_without_review_fresh();
-        if writes && self.check_sources() > 0 && self.session.is_some() {
-            if whole {
-                self.write_now_after_plan = true;
-                self.replan();
-            } else {
+        self.write_gate(false);
+    }
+
+    /// E3, ruling 3c-23: the one gate to a write that skips Review, for the click that settled at once
+    /// (`export_decided`) and for the click that waited (`settle_queued`, `waited`). Nothing earlier is passed in; the
+    /// order is fixed: an open dialog drops a waiting click; a waiting click that finds a scope set never writes; the
+    /// source walk (a changed source plans again with a whole-project click armed, or opens the scoped Review; a click
+    /// that already waited through its own replan opens Review instead of planning twice); then ONE fresh eligibility
+    /// read (and, for a waiting click, the label's count); then the write or Review.
+    fn write_gate(&mut self, waited: bool) {
+        let replanned = std::mem::take(&mut self.gate_replanned);
+        self.write_now_after_plan = false;
+        if waited {
+            if self.dialog.is_some() {
+                self.queued_export_dropped();
+                return;
+            }
+            if self.export_scope().is_some() {
                 self.open_review();
+                return;
+            }
+        }
+        if !self.export_without_review() {
+            self.open_review();
+            return;
+        }
+        let changed = self.check_sources() > 0 && self.session.is_some();
+        self.walked();
+        if changed {
+            if replanned || self.export_scope().is_some() {
+                self.open_review();
+            } else {
+                self.write_now_after_plan = true;
+                self.gate_replanned = true;
+                self.replan();
             }
             return;
         }
-        if writes {
+        // Ruling 3c-18: the JSON state is read fresh, here and nowhere before.
+        if self.writes_without_review_fresh()
+            && (!waited || self.export_files() == self.settled_export_files)
+        {
             self.write_now();
         } else {
             self.open_review();
         }
+    }
+
+    /// A waiting whole-project write is cancelled (a project change, a failed plan, a closed folder).
+    fn disarm_write(&mut self) {
+        self.write_now_after_plan = false;
+        self.gate_replanned = false;
     }
 
     /// E3: the guards that stop any export (an error dialog, blocks listed in Review), then the write.
@@ -2195,40 +2253,16 @@ impl AppModel {
         }
     }
 
-    /// E3: a queued header write settles with the plan that really settles: dropped over an open dialog; run
-    /// only while the landed plan is still a clean write of the count the label showed; else Review opens and
-    /// nothing is written. Then the settled answer is held again.
+    /// E3: a waiting whole-project click settles with the plan that really settles, through the one gate
+    /// (`write_gate`); then the settled answer is held again, unless the gate started the next plan.
     fn settle_queued(&mut self) {
-        // The same source recheck as Review's continuation (`continue_review`): a source that changed while the plan or
-        // read ran plans again first; the click stays queued and the count is compared when that plan lands.
-        // Ruling 3c-20: only a whole-project click may write when its plan lands; a scoped one (Export set / group)
-        // always opens its scoped Review, whatever the counts: a scope can equal the project's.
-        let whole = self.export_scope().is_none();
-        if self.write_now_after_plan
-            && whole
-            && self.dialog.is_none()
-            && self.writes_without_review_fresh()
-            && self.check_sources() > 0
-            && self.session.is_some()
-        {
-            self.replan();
-            return;
+        if self.write_now_after_plan {
+            self.write_gate(true);
         }
-        if std::mem::take(&mut self.write_now_after_plan) {
-            if self.dialog.is_some() {
-                self.queued_export_dropped();
-            } else if whole
-                && self.writes_without_review_fresh()
-                && self.export_files() == self.settled_export_files
-            {
-                self.write_now();
-            } else {
-                self.open_review();
-            }
+        if !self.full_plan_pending() {
+            self.hold_settled();
         }
-        self.hold_settled();
     }
-
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
     fn export_go(&mut self) {
         self.status_note = None;
@@ -2400,7 +2434,7 @@ impl AppModel {
         self.replan_with(files_edit);
         if cancel {
             self.export_after_plan = false;
-            self.write_now_after_plan = false;
+            self.disarm_write();
             self.status_note = Some(
                 "Export cancelled: the project changed while scan results were loading — click Export again."
                     .into(),
@@ -4452,7 +4486,7 @@ impl AppModel {
         // Review Focus 2: so does a JSON answer; the running export asks instead (the safe side).
         self.pending_json_answer = None;
         self.export_after_plan = false;
-        self.write_now_after_plan = false;
+        self.disarm_write();
         self.continue_after_plan = None;
         self.reset_type_follow();
         if let Some(p) = self.project.as_mut() {

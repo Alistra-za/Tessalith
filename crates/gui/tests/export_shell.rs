@@ -678,6 +678,105 @@ fn a_scoped_click_on_a_changed_source_opens_its_review() {
     assert!(m.export.running.is_none() && nothing_written(d.path()));
 }
 
+/// A row-free PBR project (steel) opted out and exported once, so its PGPatcher JSON is Tessalith's and clean; the
+/// exported DDS files are removed again so a later write shows. Returns the model and the JSON's path.
+fn exported_row_free_pbr(d: &std::path::Path) -> (AppModel, std::path::PathBuf) {
+    let t = d.join("textures/pbr/arm");
+    support::colour(&t.join("steel.png"), 200);
+    support::flat(&t.join("steel_n.png"));
+    support::colour(&t.join("steel_rmaos.png"), 30);
+    let mut m = support::opened_as_the_app(d.join("textures"), d.join("export"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.set_export_without_review(true);
+    m.header_export_clicked();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let json = support::pgp_json_path(&m);
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    for f in ["steel", "steel_n", "steel_rmaos"] {
+        let _ = std::fs::remove_file(d.join(format!("export/textures/pbr/arm/{f}.dds")));
+    }
+    assert!(m.header_export_text().ends_with(" now"), "guard");
+    (m, json)
+}
+
+fn steel_written(d: &std::path::Path) -> bool {
+    d.join("export/textures/pbr/arm/steel.dds").exists()
+}
+
+/// Round 2, ruling 3c-23 (B1): a queued click's gate walks the sources BEFORE it reads eligibility. Here the landed
+/// plan finds a changed source and an edited JSON together: the walk plans again (the click stays queued), nothing is
+/// written on the old plan; with the JSON restored the second plan writes.
+#[test]
+fn a_queued_click_walks_the_sources_before_it_reads_eligibility() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = exported_row_free_pbr(d.path());
+    m.hold_plan_results = true;
+    m.replan();
+    assert!(m.full_plan_pending(), "guard");
+    assert_eq!(m.header_export_text(), "Export 3 files now", "guard");
+    m.header_export_clicked();
+    assert!(m.export_queued(), "guard: queued behind the plan");
+    let original = std::fs::read(&json).unwrap();
+    // The plan has been computed and is parked: what changes now is newer than that plan.
+    let msgs = held_plan(&mut m);
+    support::colour(&d.path().join("textures/pbr/arm/steel.png"), 90);
+    std::fs::write(&json, "{ \"edited\": true }\n").unwrap();
+    for x in msgs {
+        m.handle_held(x);
+    }
+    assert!(
+        m.full_plan_pending() && m.export_queued(),
+        "the landed plan met a changed source: it plans again, the click stays queued"
+    );
+    assert!(m.export.running.is_none() && !steel_written(d.path()));
+    std::fs::write(&json, &original).unwrap();
+    let msgs = held_plan(&mut m);
+    land_plan(&mut m, msgs);
+    assert!(m.review.is_none(), "{:?}", m.dialog);
+    assert!(steel_written(d.path()), "the second plan writes");
+}
+
+/// Round 2, ruling 3c-23 (B3): the eligibility read comes AFTER the source walk. The JSON is edited while the walk
+/// runs (a hook between the walk and the read): Review opens, nothing is written.
+#[test]
+fn the_eligibility_read_comes_after_the_source_walk() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = exported_row_free_pbr(d.path());
+    m.set_after_walk(move || std::fs::write(&json, "{ \"edited\": true }\n").unwrap());
+    m.header_export_clicked();
+    assert!(
+        m.review.is_some() && m.export.running.is_none() && !steel_written(d.path()),
+        "the click wrote on an answer read before the walk"
+    );
+}
+
+/// Round 2, ruling 3c-23 (B1): a click that already waited through its own source replan does not replan again when
+/// a source changes once more: Review opens, nothing is written, no third plan starts.
+#[test]
+fn a_click_that_waited_through_its_own_replan_never_replans_twice() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.hold_plan_results = true;
+    support::colour(&d.path().join("textures/g/a.png"), 91);
+    m.header_export_clicked();
+    assert!(
+        m.full_plan_pending() && m.export_queued(),
+        "guard: the changed source plans first and the click waits"
+    );
+    let msgs = held_plan(&mut m);
+    support::colour(&d.path().join("textures/g/a.png"), 92);
+    for x in msgs {
+        m.handle_held(x);
+    }
+    assert!(!m.full_plan_pending(), "no third plan");
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "the second change opens Review"
+    );
+    assert!(m.export.running.is_none() && nothing_written(d.path()));
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);
