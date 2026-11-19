@@ -183,6 +183,9 @@ pub struct NifEdit {
     /// writes the record, the session is pending whatever its ops are, and that NIF counts as this session's
     /// (`foreign_hash`). In memory only.
     partial: Option<String>,
+    /// Ruling E6-J: the SHA-256 of the source the export record was built from (taken from the record, or set by an
+    /// export); None without a record. A source change forces a re-export only when the source differs from it.
+    record_source: Option<String>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
     pub cleanup_note: Option<String>,
     /// Export is blocked with this reason: the export folder's record did not load (Note GD12), or (`switch_failed`)
@@ -920,6 +923,7 @@ impl NifEdit {
             notice: None,
             export_note: None,
             partial: None,
+            record_source: None,
             cleanup_note: None,
             retarget_error: None,
             retarget_fail: None,
@@ -942,8 +946,8 @@ impl NifEdit {
             match_tests: 0,
             in_game: None,
             pg_supplied: vec![],
-            // a recovered autosave is saved into the folder with the next save or close; an exported session on a
-            // changed source is saved at open (below)
+            // a recovered autosave is saved into the folder with the next save or close; an op re-anchored at open
+            // makes the session unsaved too (below, ruling E6-J), so Export saves the draft first
             unsaved: recovered,
             drag: None,
         };
@@ -951,7 +955,11 @@ impl NifEdit {
             e.take_record(record);
         }
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
+        let read = e.doc.ops.clone();
         e.reapply();
+        if !same_ops(&read, &e.doc.ops) {
+            e.unsaved = true;
+        }
         if changed {
             e.count_changed();
         }
@@ -970,8 +978,10 @@ impl NifEdit {
             self.doc.export = ExportRec::default();
             self.foreign_record = None;
             self.record_fp = None;
+            self.record_source = None;
             return;
         };
+        self.record_source = Some(r.source.sha256.clone());
         let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
         let known = starts(&r.ops, &self.doc.ops);
         self.record_fp = known.then_some(fp);
@@ -1040,8 +1050,11 @@ impl NifEdit {
             .filter(|d| d.status == OpStatus::Conflict)
             .count();
         self.source_changed = Some((self.doc.ops.len() - n, n));
-        // the exported file was built from the old source: force a re-export (write_out sets a real hash again)
-        if self.doc.export.ops_hash.is_some() {
+        // the exported file was built from another source than the current one: force a re-export (write_out sets a
+        // real hash again). Ruling E6-J: the record's source decides, not the draft's.
+        if self.doc.export.ops_hash.is_some()
+            && self.record_source.as_deref() != Some(self.doc.source.sha256.as_str())
+        {
             self.doc.export.ops_hash = Some(String::new());
         }
     }
@@ -1255,6 +1268,7 @@ impl NifEdit {
             }
         };
         self.doc.export = export;
+        self.record_source = Some(self.doc.source.sha256.clone());
         self.partial = None;
         self.up_to_date = true;
         self.foreign_record = None;
@@ -2964,6 +2978,15 @@ impl MeshesModel {
     pub fn quick_export_block(&self) -> Option<String> {
         if self.export_running {
             return Some("An export is running".into());
+        }
+        // ruling E6-J: a failed switch's reason comes before the missing folder (it says the edits are not saved)
+        if let Some(why) = self
+            .edit
+            .as_ref()
+            .filter(|e| e.switch_failed)
+            .and_then(|e| e.retarget_error.clone())
+        {
+            return Some(why);
         }
         if self.nif_export_root.is_none() {
             return Some(NO_EXPORT_FOLDER.into());

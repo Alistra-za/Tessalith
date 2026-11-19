@@ -4344,6 +4344,54 @@ fn a_source_change_after_export_makes_it_pending_again() {
     assert!(!e.pending(), "the export records a real hash again");
 }
 
+/// Review round 2 (B3 display, ruling E6-J): a draft from source S1 opened and exported against S2 is current: the
+/// record names S2, so reopening (the draft still names S1) does not make it pending again.
+#[test]
+fn an_export_on_a_changed_source_is_current_after_a_reopen() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let src = changed_source(&m);
+    m.close_edit();
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.open_edit();
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(!m.edit.as_ref().unwrap().pending(), "premise: exported");
+    m.close_edit();
+    m.open_edit();
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(*e.source, src);
+    assert!(!e.pending(), "the record was exported from this source");
+    assert_ne!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
+}
+
+/// Review round 2 (B3, ruling E6-J): an op that open re-anchors leaves the session unsaved, so Export saves the draft
+/// (with the block it applies to now) before the NIF.
+#[test]
+fn an_op_reanchored_at_open_is_saved_by_the_export() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let mut doc = load(&autosave(&d)).unwrap().unwrap();
+    let Op::SetField { at, .. } = &mut doc.ops[0].op else {
+        panic!("{:?}", doc.ops[0].op)
+    };
+    let right = at.block;
+    at.block = 9999; // the recorded index is gone: the one block of that role is found again
+    save(&autosave(&d), &doc).unwrap();
+    m.open_edit();
+    assert_eq!(op_values(&m)[0].1, 12.5, "premise: the op applies");
+    assert_eq!(export(&mut m), Ok(1));
+    let Op::SetField { at, .. } = &load(&autosave(&d)).unwrap().unwrap().ops[0].op else {
+        unreachable!()
+    };
+    assert_eq!(
+        at.block, right,
+        "the draft holds the block the NIF was written with"
+    );
+}
+
 /// The same when the source changed while the edit was closed.
 #[test]
 fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
@@ -6535,6 +6583,25 @@ fn an_unsaveable_edit_equal_to_its_export_still_says_why() {
     );
     assert_eq!(review_row(&m).blocked.as_deref(), Some(why.as_str()));
     export_fails(&mut m, "while changing the project");
+}
+
+/// Review round 2 (Important 8, ruling E6-J): with no export folder chosen, Export this NIF gives the failed switch's
+/// reason, not the missing folder.
+#[test]
+fn with_no_export_folder_quick_export_gives_the_switch_failure() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_nif_export_root(None);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    std::fs::write(d.path().join("nif-edits"), b"a file").unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    assert!(m.nif_export_root.is_none(), "premise: no folder");
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(why.contains("while changing the project"), "{why}");
+    assert_eq!(m.quick_export_block().as_deref(), Some(why.as_str()));
 }
 
 /// Sets or clears the read-only attribute of `p` (Windows refuses to replace a read-only file).
