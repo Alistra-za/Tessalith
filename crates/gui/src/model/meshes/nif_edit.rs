@@ -182,6 +182,8 @@ pub struct NifEdit {
     partial: Option<String>,
     /// Ruling E6-N: the installed NIF is not the one the record names (`derive_export`, read from disk).
     nif_drift: bool,
+    /// Ruling E6-O: a record that blocked was replaced by one that does not load: why the export may not replace it.
+    record_err: Option<String>,
     /// Ruling E6-J: the SHA-256 of the source the export record was built from (taken from the record, or set by an
     /// export); None without a record. A source change forces a re-export only when the source differs from it.
     record_source: Option<String>,
@@ -952,6 +954,7 @@ impl NifEdit {
             export_note: None,
             partial: None,
             nif_drift: false,
+            record_err: None,
             record_source: None,
             cleanup_note: None,
             retarget_error: None,
@@ -1004,6 +1007,7 @@ impl NifEdit {
     /// export never replaces it. An equal draft id is not ownership.
     fn take_record(&mut self, record: Option<(EditDoc, String)>) {
         self.record_meta = self.record_path.as_deref().and_then(file_meta);
+        self.record_err = None;
         let Some((r, fp)) = record else {
             self.doc.export = ExportRec::default();
             self.foreign_record = None;
@@ -1056,21 +1060,30 @@ impl NifEdit {
     }
 
     /// Ruling E6-F: a block from the record is read again when the record's file changed (moved away, replaced): the
-    /// app's per-frame `set_nif_export_root` calls this, which stats the file only while a block holds.
-    pub(super) fn recheck_record(&mut self) {
-        let Some(p) = self
-            .record_path
-            .clone()
-            .filter(|_| self.foreign_record.is_some())
-        else {
-            return;
-        };
-        if file_meta(&p) == self.record_meta {
+    /// app's per-frame `set_nif_export_root` calls this, which stats the file only while a block holds. Ruling E6-O:
+    /// the metadata seen is kept also when the read fails, so a record that does not load is read once per change and
+    /// blocks with its own reason (`record_err`); `force` (Export) reads it whatever its metadata says. Nothing is
+    /// cloned or read on an idle frame without a block.
+    pub(super) fn recheck_record(&mut self, force: bool) {
+        if self.foreign_record.is_none() && self.record_err.is_none() {
             return;
         }
-        match edit_doc::load_fp(&p) {
+        let Some(p) = self.record_path.as_deref() else {
+            return;
+        };
+        let meta = file_meta(p);
+        if !force && meta == self.record_meta {
+            return;
+        }
+        match edit_doc::load_fp(p) {
             Ok(r) => self.take_record(r),
-            Err(e) => self.error = Some(e),
+            Err(e) => {
+                self.record_meta = meta;
+                self.record_err = Some(format!(
+                    "The export record cannot be read ({e}); an export would replace it. Move that file out of the \
+                     folder, or choose another export folder."
+                ));
+            }
         }
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
         self.refresh_blocked();
@@ -1191,7 +1204,11 @@ impl NifEdit {
         if self.edit_mod.as_os_str().is_empty() {
             return Some(NO_EXPORT_FOLDER.into());
         }
-        if let Some(why) = self.record_block(self.foreign_record.as_deref()) {
+        if let Some(why) = self
+            .record_err
+            .clone()
+            .or_else(|| self.record_block(self.foreign_record.as_deref()))
+        {
             return Some(why);
         }
         if let Some(e) = &self.apply_err {
@@ -1230,6 +1247,7 @@ impl NifEdit {
     pub fn uncovered_block(&self) -> Option<String> {
         self.retarget_error
             .clone()
+            .or_else(|| self.record_err.clone())
             .or_else(|| self.record_block(self.foreign_record.as_deref()))
             .or_else(|| self.apply_err.clone())
             .or_else(|| self.read_err.clone())
@@ -1675,8 +1693,9 @@ impl NifEdit {
     }
 
     /// Ruling E6-G (E6-C1 made exact): the session may end with nothing written, because its current ops are what the
-    /// next open would load: with a project, `pick_draft`'s decision over the draft, the kept autosave of its id and
-    /// the plain autosave as they are now; with none, the plain autosave. No winner and no ops count as equal; a
+    /// next open would load: with a project, `pick_draft`'s decision over the project's own draft and the kept autosave
+    /// of its id (ruling E6-H1; the plain autosave must not win with other ops either); with none, the plain
+    /// autosave. An unreadable candidate the next open could pick is not durable (E6-K). No winner and no ops count as equal; a
     /// winner that does not read or parse does not. Undo and redo history are not ops, so they never hold a session
     /// back, and a draft is never written only for its id (E6-B). An untouched session is equal without a read; a
     /// read-only one (no draft path) has nowhere to save. Reads only.
@@ -3074,17 +3093,19 @@ impl MeshesModel {
         let meta = std::fs::metadata(&e.export_path)
             .ok()
             .map(|m| (m.len(), m.modified().ok()));
+        // ruling E6-O: a hit compares in place; the key is cloned only on a miss
+        if let Some((k, v)) = &*self.foreign_cache.borrow() {
+            if k.0 == e.export_path && k.1 == e.doc.export.sha256 && k.2 == e.partial && k.3 == meta
+            {
+                return v.clone();
+            }
+        }
         let key = (
             e.export_path.clone(),
             e.doc.export.sha256.clone(),
             e.partial.clone(),
             meta,
         );
-        if let Some((k, v)) = &*self.foreign_cache.borrow() {
-            if *k == key {
-                return v.clone();
-            }
-        }
         let v = foreign_hash(
             &e.export_path,
             &e.out,
@@ -3192,7 +3213,7 @@ impl MeshesModel {
     pub fn export_nif_edits(&mut self) -> Result<usize, String> {
         self.foreign_cache.take(); // check again at write time
         if let Some(e) = self.edit.as_mut() {
-            e.recheck_record(); // ruling E6-F: a moved blocking record no longer blocks
+            e.recheck_record(true); // rulings E6-F, E6-O: read again, a moved blocking record no longer blocks
         }
         let rows = self.nif_review_rows();
         self.nif_answers.clear();
@@ -3345,7 +3366,7 @@ impl MeshesModel {
         if self.nif_export_root == root {
             // Ruling E6-F: a record that blocks is read again once its file changed (a stat per frame while it blocks)
             if let Some(e) = self.edit.as_mut() {
-                e.recheck_record();
+                e.recheck_record(false);
             }
             // Note GD12: back to the folder the session never left: its record is current again
             if let Some(e) = self

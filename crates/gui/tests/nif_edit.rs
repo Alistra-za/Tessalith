@@ -6133,6 +6133,66 @@ fn moving_a_blocking_record_away_clears_the_block() {
     assert_eq!(export(&mut m), Ok(1));
 }
 
+/// Review round 3 (B6, ruling E6-O): a blocking record is read once per change of its file, also when it does not
+/// load, and Export reads the record itself (no length-and-time shortcut).
+#[test]
+fn a_changed_record_is_read_once_and_export_reads_it_again() {
+    table(&[
+        (
+            "a record replaced by one that does not load is read once and blocks with that",
+            || {
+                let (d, mut m) = export_session();
+                old_record_in_export_folder(&d, &mut m, false);
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                assert!(review_row(&m).blocked.is_some(), "premise: blocked");
+                std::fs::write(nif_doc(&export_root(&d)), b"not a document [[[").unwrap();
+                let root = m.nif_export_root.clone();
+                let before = load_count();
+                for _ in 0..10 {
+                    m.set_nif_export_root(root.clone()); // idle frames
+                }
+                assert_eq!(load_count() - before, 1, "read once");
+                let why = review_row(&m).blocked.unwrap_or_default();
+                assert!(why.contains("cannot be read"), "{why}");
+            },
+        ),
+        (
+            "a blocker replaced by a prefix of the same length and time does not block Export",
+            || {
+                let (d, mut m) = export_session();
+                old_record_in_export_folder(&d, &mut m, false);
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                assert!(review_row(&m).blocked.is_some(), "premise: blocked");
+                let rec = nif_doc(&export_root(&d));
+                let (old, meta) = (
+                    std::fs::read(&rec).unwrap(),
+                    std::fs::metadata(&rec).unwrap(),
+                );
+                let mut empty = load(&rec).unwrap().unwrap();
+                empty.ops.clear();
+                let mut text = empty.to_text().into_bytes();
+                assert!(text.len() < old.len(), "premise: shorter");
+                text.push(b'#');
+                text.resize(old.len(), b' ');
+                std::fs::write(&rec, &text).unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(&rec)
+                    .unwrap()
+                    .set_modified(meta.modified().unwrap())
+                    .unwrap();
+                assert!(
+                    load(&rec).unwrap().unwrap().ops.is_empty(),
+                    "premise: a valid prefix"
+                );
+                assert_eq!(export(&mut m), Ok(1));
+            },
+        ),
+    ]);
+}
+
 /// Ruling E6-F: the record this session wrote stays its own after a carry-over changed its id, even when its ops no
 /// longer start the session's (an undone export), which the prefix rule alone would refuse.
 #[test]

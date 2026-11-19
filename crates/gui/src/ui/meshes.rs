@@ -1063,7 +1063,11 @@ fn quick_export_menu(ui: &mut egui::Ui, m: &mut MeshesModel) {
         None if m.quick_export_asks() => r.on_hover_text(
             "The file on disk was not written by Tessalith: opens Review to answer Keep or Overwrite",
         ),
-        None => r.on_hover_text("Write this NIF to the export folder now, without Review"),
+        // ruling E6-N: on, and it is the repair of an installed NIF that is not the recorded one
+        None => r.on_hover_text(
+            m.quick_export_note()
+                .unwrap_or("Write this NIF to the export folder now, without Review"),
+        ),
     };
     if r.clicked() {
         m.quick_export();
