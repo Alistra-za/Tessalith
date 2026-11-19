@@ -48,19 +48,23 @@ pub(super) fn explicit_pick(v: &super::sets::SetView) -> Option<Shader> {
     v.shader_choice
 }
 
+/// The spellings among `keys` (`ProjectDoc::file_keys`) of the `[files]` tables that hold `field` for file `key`. The
+/// engine applies every `[files]` key that matches the file (`path_key_matches`: any case, the full path or the
+/// extension-less one), so this is the one reader of "does the file hold a value" (`alpha_free`, `shared_alpha`).
+pub(super) fn holders(p: &ProjectDoc, keys: &[String], key: &str, field: &str) -> Vec<String> {
+    keys.iter()
+        .filter(|k| engine::overrides::path_key_matches(k, key))
+        .filter(|k| p.file_value(k, field).is_some())
+        .cloned()
+        .collect()
+}
+
 /// N-17: the key has no `alpha.policy`, or only the `data` the share step wrote (a listed `auto_data` key still at
 /// `data`). The engine applies every `[files]` table that matches the file, so the extension-less spelling counts
 /// too: `alpha.policy` there is the user's. `untouched_normal`, the recorder and the Switch read this one rule.
 pub(super) fn alpha_free(p: &ProjectDoc, s: &SetsDoc, key: &str) -> bool {
-    // The engine applies every `[files]` key that matches the file (`path_key_matches`: any case, the full path or the
-    // extension-less one). Runs per shader pick, diffuse edit and settled plan, never per frame.
-    let holders = p
-        .file_keys()
-        .into_iter()
-        .filter(|k| engine::overrides::path_key_matches(k, key))
-        .filter(|k| p.file_value(k, "alpha.policy").is_some())
-        .count();
-    match holders {
+    // Runs per shader pick, diffuse edit and settled plan, never per frame.
+    match holders(p, &p.file_keys(), key, "alpha.policy").len() {
         0 => true,
         // The one table `file_value` reads, holding the `data` the share step wrote.
         1 => {

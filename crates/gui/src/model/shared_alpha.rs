@@ -7,6 +7,7 @@
 //! never runs in an automatic step (`AppModel::automatic_step`). A listed key the user moved to another value no
 //! longer counts (the edit stays files-only); a user's Data pick takes the key off (N-34). What a step cannot see (a
 //! set's automatic shader and its Normal-slot member are the last plan's) is Task 9's Note row.
+use super::normal_follow::holders;
 use super::sets::{locked_items, views, SlotFill, SlotKind};
 use super::AppModel;
 use crate::project::ProjectDoc;
@@ -176,6 +177,23 @@ fn already_data(f: &Facts, pre: Option<&Option<Value>>, p: &ProjectDoc, k: &str)
     }
 }
 
+/// N8-a: a `[files]` spelling of file `key`'s full path (any case), as `find_key` matches it before it falls back to
+/// the extension-less spelling.
+fn full_name(spelling: &str, key: &str) -> bool {
+    spelling.to_lowercase() == key.to_lowercase()
+}
+
+/// N8-a: the share step's write lands in a table spelled with the file's full name: there is one, or there is no table
+/// for the file yet (`set_file_value` creates `[files."<key>"]`). A file whose only table is spelled without the
+/// extension is the user's to set: `set_file_value` would write there, and a later run could not tell that `data`
+/// from the user's (no write; Task 9's row shows it).
+fn writes_own_table(keys: &[String], key: &str) -> bool {
+    keys.iter().any(|k| full_name(k, key))
+        || !keys
+            .iter()
+            .any(|k| engine::overrides::path_key_matches(k, key))
+}
+
 /// What one run changes (Note JS7).
 #[derive(Default)]
 struct Changes {
@@ -198,18 +216,27 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
     let (now, unsure) = shared_into_regular(f, s, &gone);
     let data = Some(json!("data"));
     let start = s.auto_data();
+    // N8-a: alpha is read as Task 6 reads it, from every `[files]` table that matches the file (read once per run).
+    let keys = p.file_keys();
+    let alpha = |k: &str| holders(p, &keys, k, "alpha.policy");
     for k in now.difference(&b.shared) {
         // N-39: a known alpha that does not vary has nothing to keep; an unknown one is kept (the safe side).
         let free = !f.inert.contains(k)
             && !f.flat.contains(k)
             && !f.locked.contains(k)
-            && p.file_value(k, "alpha.policy").is_none();
+            && alpha(k).is_empty()
+            && writes_own_table(&keys, k);
         if free && !already_data(f, b.sub.get(k), p, k) {
             c.write.push(k.clone());
         }
     }
     for k in &start {
-        let ours = p.file_value(k, "alpha.policy") == data && !f.locked.contains(k);
+        // N8-a: only the `data` the share step wrote: the one holder, in a table spelled with the file's full name
+        // (the one `file_value` reads); a `data` anywhere else is the user's.
+        let h = alpha(k);
+        let ours = matches!(h.as_slice(), [one] if full_name(one, k))
+            && p.file_value(k, "alpha.policy") == data
+            && !f.locked.contains(k);
         if ours && !now.contains(k) && !unsure.contains(k) {
             c.clear.push(k.clone());
         }

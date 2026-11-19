@@ -1593,3 +1593,86 @@ fn an_automatic_step_never_clears_a_leftover() {
         "the user's next step re-checks every listed key"
     );
 }
+
+fn auto_data(m: &AppModel) -> Vec<String> {
+    m.sets_doc.as_ref().unwrap().auto_data()
+}
+
+/// N8-a (Task 8a round 1, finding 1): the user's `alpha.policy = "remove"` under the extension-less spelling and the
+/// `subtype` under the full name. The engine applies both tables, so the alpha is the user's: the share writes no
+/// `data` in either and lists nothing.
+#[test]
+fn a_share_writes_no_data_over_the_users_alpha_under_another_spelling() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nsubtype = \"pbr_normal\"\n\n[files.\"pbr/iron_n\"]\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        Some(json!("remove")),
+        "precondition: the user's alpha"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "precondition: none in the full name's table"
+    );
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None, "no data written");
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        Some(json!("remove"))
+    );
+    assert!(auto_data(&m).is_empty());
+}
+
+/// N8-a (finding 1): a listed key whose own `[files]` table is gone, with the user's `data` under the extension-less
+/// spelling. `file_value` falls back to that table, but it is not the one the share step writes: ending the share
+/// leaves the user's `data`.
+#[test]
+fn ending_a_share_leaves_the_users_data_under_another_spelling() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("armor/steel", 2, Some("pbr/iron"))
+    });
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table under the full name"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: read through the extension-less spelling"
+    );
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "precondition: listed"
+    );
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        Some(json!("data")),
+        "the user's data stays"
+    );
+}
