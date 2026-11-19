@@ -601,6 +601,8 @@ pub struct MeshesModel {
     pub quick_export_result: Option<Result<usize, String>>,
     /// Note GH9: the 3D menu's `Choose export folder…` was clicked; the app opens the header's picker.
     pub pick_export_folder_request: bool,
+    /// The edit footer's Show in Explorer: the draft to select; the app reveals it (`AppModel::reveal`).
+    pub reveal_request: Option<PathBuf>,
     /// Note GH9: a texture export runs (set by the app each frame); `Export this NIF` waits for it.
     pub export_running: bool,
     /// Note GD18: the edit panel's Diff view, set by `show_nif_diff`: the NIF's data path and `nif_diff`'s lines.
@@ -720,6 +722,7 @@ impl MeshesModel {
             open_review_request: false,
             quick_export_result: None,
             pick_export_folder_request: false,
+            reveal_request: None,
             export_running: false,
             nif_diff_view: None,
             nif_answers: HashMap::new(),

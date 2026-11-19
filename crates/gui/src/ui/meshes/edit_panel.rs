@@ -227,6 +227,16 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             tabs_h,
         );
     }
+    if ui
+        .data_mut(|d| d.remove_temp::<bool>(reveal_draft_id()))
+        .is_some()
+    {
+        m.reveal_request = m
+            .edit
+            .as_ref()
+            .and_then(|e| e.draft_on_disk())
+            .map(std::path::Path::to_path_buf);
+    }
     apply(m, act);
 }
 
@@ -508,15 +518,69 @@ fn export_block(
             ui.label(&name);
         });
     }
-    // Note GD2: NIF edits export from Review, with the textures; its NIF row carries the result, the placement, the
-    // Keep / Overwrite answer and the cleanup count. The button only opens Review, so it never writes.
-    let r = ui
-        .button("Review…")
-        .on_hover_text("NIF edits export from Review, with the textures.");
-    if r.clicked() {
-        act.review = true;
-    }
+    draft_and_review_row(ui, e, act);
     list_h
+}
+
+/// The footer's last row: the draft's line on the left; Review… and Show in Explorer on the right. One row, so the
+/// footer keeps the height the editor's layout floors were measured with (Task 6).
+///
+/// The draft line (review E6) is `Draft saved in {path}` cut in the middle to the room the buttons leave, the full path
+/// on hover and in the accessible name. Before the first save (and while a switch waits on a failed save) it says so
+/// and Show in Explorer is off.
+fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
+    let draft = e.draft_on_disk();
+    egui::Sides::new().shrink_left().truncate().show(
+        ui,
+        |ui| {
+            let Some(path) = draft else {
+                ui.weak("Draft not saved yet");
+                return;
+            };
+            let full = path.display().to_string();
+            let font = egui::TextStyle::Body.resolve(ui.style());
+            let room = ui.available_width() - text_width(ui, "Draft saved in ", &font);
+            let shown = fit_middle(ui, &full, &font, room);
+            let name = format!("Draft saved in {full}");
+            let r = ui.add(egui::Label::new(format!("Draft saved in {shown}")).truncate());
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &name));
+            r.on_hover_ui(|ui| {
+                ui.label(&name);
+            });
+        },
+        |ui| {
+            // Note GD2: NIF edits export from Review, with the textures; its NIF row carries the result, the
+            // placement, the Keep / Overwrite answer and the cleanup count. The button only opens Review, so it never
+            // writes.
+            let r = ui
+                .button("Review…")
+                .on_hover_text("NIF edits export from Review, with the textures.");
+            if r.clicked() {
+                act.review = true;
+            }
+            let r = ui.add_enabled(
+                draft.is_some(),
+                egui::Button::new("Show in Explorer").small(),
+            );
+            r.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::Role::Button,
+                    draft.is_some(),
+                    "Show in Explorer: the draft",
+                )
+            });
+            let r = r.on_disabled_hover_text("The draft is saved with your first edit.");
+            if r.clicked() {
+                ui.data_mut(|d| d.insert_temp(reveal_draft_id(), true));
+            }
+        },
+    );
+}
+
+/// The footer's Show in Explorer asks for the draft to be revealed; `panel` hands the draft's path to the model in
+/// the same pass.
+fn reveal_draft_id() -> egui::Id {
+    egui::Id::unique("meshes-edit-reveal-draft")
 }
 
 /// The sentence the Writes line's hover and accessible name carry after the line itself.

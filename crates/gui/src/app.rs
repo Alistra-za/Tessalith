@@ -358,6 +358,14 @@ impl eframe::App for SdcApp {
         if std::mem::take(&mut self.meshes.pick_export_folder_request) {
             self.model.pick_export_folder(&ctx);
         }
+        // The edit footer's Show in Explorer: queued here, spawned by the shell loop below.
+        if let Some(draft) = self.meshes.reveal_request.take() {
+            if let Err(why) = self.model.reveal(&draft) {
+                self.model
+                    .messages
+                    .log(crate::model::messages::Severity::Warning, why);
+            }
+        }
         let mut written = vec![];
         if self.model.take_nif_export_due() {
             written.push(self.meshes.export_nif_edits());

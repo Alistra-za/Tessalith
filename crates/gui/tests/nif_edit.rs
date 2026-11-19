@@ -15386,3 +15386,89 @@ fn a_pending_texture_row_gives_the_nif_index_on_hover() {
     h.run_steps(30);
     h.get_by_label("NIF texture index 1");
 }
+
+// ---- Review E6: the footer names the draft, with Show in Explorer ----
+
+#[test]
+fn the_footer_names_the_draft_with_show_in_explorer() {
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    // the project is the opened folder's textures folder
+    let p = t.path().join("mod").join("textures");
+    let model = support::opened(&t.path().join("mod"));
+    let (_d, mut h) = in_the_meshes_view(model, 1);
+    h.get_by_label_contains(&format!("Draft saved in {}", draft(&p).display()));
+    h.state_mut().shell_log = Some(vec![]);
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert_eq!(
+        h.state().shell_log,
+        Some(vec![sdc_gui::model::shell::ShellRequest::Reveal(draft(&p))])
+    );
+}
+
+#[test]
+fn with_no_project_the_footer_names_the_autosave() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(autosave(&d).is_file(), "the plain autosave is written");
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains(&format!("Draft saved in {}", autosave(&d).display()));
+    assert!(!h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert_eq!(h.state().reveal_request, Some(autosave(&d)));
+}
+
+#[test]
+fn before_the_first_edit_the_draft_button_is_off() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains("Draft not saved yet");
+    assert!(h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_label("Show in Explorer: the draft").click();
+    h.run_steps(4);
+    assert_eq!(h.state().reveal_request, None);
+}
+
+/// A switch that waits on a failed save: the footer does not name the project the edit has not reached, nor a draft
+/// that may be gone with its folder.
+#[test]
+fn a_failed_switch_does_not_name_a_draft() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(draft(&a).is_file());
+    std::fs::write(
+        d.path().join("nif-edits"),
+        b"a file where the autosave folder goes",
+    )
+    .unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    assert!(
+        m.edit.as_ref().unwrap().export_block().is_some(),
+        "the switch waits"
+    );
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains("Draft not saved yet");
+    assert!(h.query_by_label_contains("Draft saved in").is_none());
+    assert!(h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+}

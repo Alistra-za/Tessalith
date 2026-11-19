@@ -1219,6 +1219,15 @@ impl NifEdit {
         Ok(())
     }
 
+    /// Where the draft is on disk now: the file the session loaded or wrote at `draft_path` (the project's draft, or
+    /// with no project the plain autosave). None before the first save, after a project change until the save into
+    /// the new project, and while a switch waits on a failed save (`switch_failed`): then the old project's draft may
+    /// be gone with its folder and the new project is not reached, so no path is named (review E6).
+    pub fn draft_on_disk(&self) -> Option<&Path> {
+        self.draft_fp.as_ref().filter(|_| !self.switch_failed)?;
+        Some(self.draft_path.as_path()).filter(|p| !p.as_os_str().is_empty())
+    }
+
     /// Why the current state cannot be exported, from memory alone (export steps 2-4): refused ops first (A16 keeps
     /// them as conflicts), then conflicts, new validation errors and bytes that do not read back.
     /// Note GD13: the session holds live work: ops, an undo or redo step, or an export to put back (every edit undone
