@@ -233,11 +233,16 @@ fn cut_text_kept(source: &str, elided: bool, held: &[&str], authored: &[&str]) -
     if !source.contains('…') {
         return true;
     }
+    // A field equal to the painted source as it is (decoration included) is the text naming itself: never the longer
+    // value. A field's own decoration is stripped like the painted text's, so it cannot stand for omitted characters.
     let cut = undecorated(source);
-    held.iter().any(|v| holds_the_longer_text(cut, v)) || authored.contains(&source)
+    held.iter()
+        .any(|v| *v != source && holds_the_longer_text(cut, undecorated(v)))
+        || authored.contains(&source)
 }
 
-/// `value` starts with `first`, ends with `last`, holds `mids` in order between them, and is longer than the pieces.
+/// `value` starts with `first`, ends with `last` and holds `mids` in order between them, with at least one character
+/// in every gap.
 fn pieces_cut_from(value: &str, first: &str, mids: &[&str], last: &str) -> bool {
     let Some(rest) = value.strip_prefix(first) else {
         return false;
@@ -245,19 +250,19 @@ fn pieces_cut_from(value: &str, first: &str, mids: &[&str], last: &str) -> bool 
     let Some(mut rest) = rest.strip_suffix(last) else {
         return false;
     };
+    // each ellipsis stands for at least one character of the value, gap by gap: a piece is looked for after one
+    // character (the earliest place is enough: it leaves the most room for the gaps after it)
     for piece in mids {
-        match rest.find(piece) {
-            Some(at) => rest = &rest[at + piece.len()..],
+        let Some(skip) = rest.chars().next().map(char::len_utf8) else {
+            return false;
+        };
+        match rest[skip..].find(piece) {
+            Some(at) => rest = &rest[skip + at + piece.len()..],
             None => return false,
         }
     }
-    // longer than what is shown: each ellipsis stands for at least one character the value has
-    let shown: usize = [first, last]
-        .iter()
-        .chain(mids)
-        .map(|p| p.chars().count())
-        .sum();
-    value.chars().count() > shown + mids.len()
+    // the last gap, before `last`
+    !rest.is_empty()
 }
 
 /// The node a painted text lies under: the smallest node whose rect holds the text's rect and that has a name, value or
@@ -844,6 +849,7 @@ fn cut_texts_ui(ui: &mut eframe::egui::Ui) {
     // faults
     ui.put(slot(20.0, 200.0), label("some/long/…/name"));
     ui.put(slot(110.0, 200.0), label("report…"));
+    ui.put(slot(230.0, 200.0), label("report… ▾"));
     ui.put(slot(140.0, 200.0), label("/root…file"))
         .accessible_name("rootXYZfile");
     // egui cuts this galley (its source is the whole text, ellipsis included); the name has the text without it
@@ -904,7 +910,7 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
     }
     assert_eq!(calls, want_calls, "the checker ran on every frame");
     assert!(walked.errors.is_empty(), "{:?}", walked.errors);
-    // the fixture is the case in question: egui cut two galleys, and five more painted texts show an ellipsis
+    // the fixture is the case in question: egui cut two galleys, and six more painted texts show an ellipsis
     let snap = CutTexts.at(SIZES[0]).unwrap();
     let mut elided: Vec<&str> = snap
         .texts
@@ -919,32 +925,70 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
             .iter()
             .filter(|t| !t.elided && t.source.contains('…'))
             .count(),
-        5
+        6
     );
+    // each faulty text and the role of the node it lies under
+    let faults = [
+        ("some/long/…/name", "Label"),
+        ("report…", "Label"),
+        ("report… ▾", "Label"),
+        ("/root…file", "Label"),
+        ("abcdefghijkl…", "Button"),
+    ];
     let mut got: Vec<&str> = bad.iter().map(|m| head(m)).collect();
     got.sort();
     let mut want = vec![];
     for size in ["1100x800", "1280x800", "1600x900"] {
-        for (text, px) in [
-            ("some/long/…/name", "0.0"),
-            ("report…", "0.0"),
-            ("/root…file", "0.0"),
-            ("abcdefghijkl…", "0.0"),
-        ] {
+        for (text, _) in faults {
             want.push(format!(
-                "test-only cut-text screen at {size}: cut_text {text:?} #0 ({px} px)"
+                "test-only cut-text screen at {size}: cut_text {text:?} #0 (0.0 px)"
             ));
         }
     }
     want.sort();
     assert_eq!(got, want, "{bad:#?}");
+    for (text, role) in faults {
+        let lines: Vec<&String> = bad
+            .iter()
+            .filter(|m| m.contains(&format!(": cut_text {text:?} #0 ")))
+            .collect();
+        assert_eq!(lines.len(), 3, "{text:?}: {bad:#?}");
+        assert!(
+            lines
+                .iter()
+                .all(|m| m.contains(&format!("under {role} \""))),
+            "{text:?} lies under a {role}: {lines:#?}"
+        );
+    }
     assert!(
         bad.iter().all(|m| m.contains("ALLOWED")
             && m.contains("AUTHORED")
-            && m.contains("under ")
+            && !m.contains("under no named node")
             && m.contains("Label::truncate()")),
         "every failure names the node and says what to do about it: {bad:#?}"
     );
+}
+
+/// Every ellipsis stands for at least one character of the value, gap by gap: one gap cannot pay for another.
+#[test]
+fn every_ellipsis_stands_for_a_character_gap_by_gap() {
+    let none: &[&str] = &[];
+    assert!(!cut_text_kept("a…b…c", false, &["abXXc"], none));
+    assert!(!cut_text_kept("a…b…c", false, &["aXXbc"], none));
+    assert!(cut_text_kept("a…b…c", false, &["aXbXc"], none));
+}
+
+/// A decorated text named only by itself keeps nothing, whatever AUTHORED holds, and a field's own decoration is no
+/// omitted character either.
+#[test]
+fn a_decorated_text_named_by_itself_keeps_nothing() {
+    let kept = cut_text_kept;
+    let none: &[&str] = &[];
+    assert!(!kept("report… ▾", false, &["report… ▾"], none));
+    assert!(!kept("report… ▾", false, &["report… ▾"], AUTHORED));
+    assert!(!kept("report… ▾", false, &["report ▾"], none));
+    assert!(kept("report… ▾", false, &["report-final.dds"], none));
+    assert!(kept("report… ▾", false, &["report-final.dds ▾"], none));
 }
 
 /// What a painted text must keep, through `cut_text_kept`, the function the walk calls for every painted text.
