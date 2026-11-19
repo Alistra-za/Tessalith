@@ -379,6 +379,24 @@ type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
 /// E3: whether the whole project's PGPatcher JSON is edited, the view key and the time it was read.
 type WholeJson = (ViewKey, Instant, Option<review::JsonLine>);
 
+/// E3 (rulings 3c-26, 3c-30): what a waiting whole-project click was made against. When its plan lands, any of these
+/// that moved sends it to Review instead of writing: a safe answer for a change no clear site knows about. An input
+/// that moves none of these starts a plan the click waits for, or is read fresh by the gate.
+#[derive(Debug, Clone, PartialEq)]
+struct ArmedWrite {
+    /// Every change of scope bumps it (`set_scope`), Export set then Close included.
+    scope_rev: u64,
+    /// Where the write would go: `output_root()` and the chosen export folder.
+    destination: (PathBuf, Option<PathBuf>),
+    /// The target mod's revision: its path is what the overlap blocker reads.
+    target_mod_rev: u64,
+    /// Re-encode all (`reencode_all`, the header's tick): it changes what the write does with existing outputs and
+    /// moves nothing else.
+    reencode_all: bool,
+    /// The click already waited through its own source replan (`write_gate`): it never plans again.
+    replanned: bool,
+}
+
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
 
@@ -664,12 +682,10 @@ pub struct AppModel {
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
     export_after_plan: bool,
-    /// E3: a WHOLE-PROJECT click (the header's Export, the "export" action) waits for the plan in flight; it means
-    /// exactly that, and no scoped click ever sets it (ruling 3c-25). `settle_queued` runs it through `write_gate`
-    /// when the plan settles.
-    write_now_after_plan: bool,
-    /// E3: the waiting click's own source check already started a plan (write_gate).
-    gate_replanned: bool,
+    /// E3: a WHOLE-PROJECT click (the header's Export, the "export" action) waits for the plan in flight, with what it
+    /// was made against (ruling 3c-26); no scoped click ever sets it (3c-25). `settle_queued` runs it through
+    /// `write_gate` when the plan settles, which compares it before anything else.
+    armed: Option<ArmedWrite>,
     /// E3: `writes_without_review()` as the last settled plan answered it, held while a plan is pending.
     settled_writes_now: bool,
     /// E3: `export_files()` as the last settled plan counted it; the held write-now label shows it.
@@ -951,8 +967,7 @@ impl AppModel {
             gpu_max_dim: 16384,
             gpu_available: true,
             export_after_plan: false,
-            write_now_after_plan: false,
-            gate_replanned: false,
+            armed: None,
             settled_writes_now: false,
             settled_export_files: 0,
             landing: 0,
@@ -2135,7 +2150,7 @@ impl AppModel {
 
     /// An export waits for a plan to land (Export clicked while planning, or a Continue after a re-plan).
     pub fn export_queued(&self) -> bool {
-        self.export_after_plan || self.write_now_after_plan || self.continue_after_plan.is_some()
+        self.export_after_plan || self.armed.is_some() || self.continue_after_plan.is_some()
     }
 
     /// Export the folder; first the checks that need an answer (M3a spec §2.5). Sources that changed since the plan
@@ -2166,7 +2181,7 @@ impl AppModel {
         let whole = self.export_scope().is_none();
         if self.full_plan_pending() {
             if whole && self.settled_writes_now {
-                self.write_now_after_plan = true;
+                self.arm(false);
             } else {
                 self.open_review();
             }
@@ -2175,25 +2190,31 @@ impl AppModel {
         self.write_gate(false);
     }
 
-    /// E3, ruling 3c-23: the one gate to a write that skips Review, for the click that settled at once
-    /// (`export_decided`) and for the click that waited (`settle_queued`, `waited`). Nothing earlier is passed in; the
-    /// order is fixed: an open dialog drops a waiting click; a waiting click that finds a scope set never writes; the
-    /// source walk (a changed source plans again with a whole-project click armed, or opens the scoped Review; a click
-    /// that already waited through its own replan opens Review instead of planning twice); then ONE fresh eligibility
-    /// read (and, for a waiting click, the label's count); then the write or Review.
+    /// E3, rulings 3c-23 and 3c-26: the one gate to a write that skips Review, for the click that settled at once
+    /// (`export_decided`) and for the click that waited (`settle_queued`, `waited`). Nothing earlier is passed in, and
+    /// the armed click is taken on entry, so every exit leaves nothing armed. The order is fixed: an open dialog drops
+    /// a waiting click; a waiting click compares what it was made against (`ArmedWrite`: the scope, the destination,
+    /// the target mod), and finds no scope set and no Review open, or opens Review; the source walk (a changed source
+    /// plans again with a whole-project click armed, or opens the scoped Review; a click that already waited through
+    /// its own replan opens Review instead of planning twice); then ONE fresh eligibility read (and, for a waiting
+    /// click, the label's count); then the write or Review.
     fn write_gate(&mut self, waited: bool) {
-        let replanned = std::mem::take(&mut self.gate_replanned);
-        self.write_now_after_plan = false;
+        let armed = self.armed.take();
         if waited {
             if self.dialog.is_some() {
                 self.queued_export_dropped();
                 return;
             }
-            if self.export_scope().is_some() {
+            let made_for = armed.as_ref().is_some_and(|a| {
+                let now = self.armed_now(a.replanned);
+                *a == now
+            });
+            if !made_for || self.export_scope().is_some() || self.review.is_some() {
                 self.open_review();
                 return;
             }
         }
+        let replanned = waited && armed.is_some_and(|a| a.replanned);
         if !self.export_without_review() {
             self.open_review();
             return;
@@ -2204,8 +2225,7 @@ impl AppModel {
             if replanned || self.export_scope().is_some() {
                 self.open_review();
             } else {
-                self.write_now_after_plan = true;
-                self.gate_replanned = true;
+                self.arm(true);
                 self.replan();
             }
             return;
@@ -2220,10 +2240,26 @@ impl AppModel {
         }
     }
 
-    /// A waiting whole-project write is cancelled (a project change, a failed plan, a closed folder).
+    /// E3 (ruling 3c-26): what a click made now is made against.
+    fn armed_now(&self, replanned: bool) -> ArmedWrite {
+        ArmedWrite {
+            scope_rev: self.scope_rev,
+            destination: (self.output_root(), self.export_folder_chosen()),
+            target_mod_rev: self.target_mod_rev,
+            reencode_all: self.reencode_all,
+            replanned,
+        }
+    }
+
+    /// E3: a whole-project click waits for the plan in flight (`settle_queued` takes it to `write_gate`).
+    fn arm(&mut self, replanned: bool) {
+        self.armed = Some(self.armed_now(replanned));
+    }
+
+    /// A waiting whole-project write is cancelled where the user is told (a project change, a failed plan, a closed
+    /// folder, AF4). Safety does not rest on these sites: `write_gate` compares the armed click when it lands.
     fn disarm_write(&mut self) {
-        self.write_now_after_plan = false;
-        self.gate_replanned = false;
+        self.armed = None;
     }
 
     /// E3: the guards that stop any export (an error dialog, blocks listed in Review), then the write.
@@ -2256,7 +2292,7 @@ impl AppModel {
     /// E3: a waiting whole-project click settles with the plan that really settles, through the one gate
     /// (`write_gate`); then the settled answer is held again, unless the gate started the next plan.
     fn settle_queued(&mut self) {
-        if self.write_now_after_plan {
+        if self.armed.is_some() {
             self.write_gate(true);
         }
         if !self.full_plan_pending() {
@@ -2428,7 +2464,7 @@ impl AppModel {
     /// `replan` for a change the user made to the project (an edit, an undo or a redo): an Export queued behind a
     /// scan-finished read is cancelled with a note (DECISIONS AF4, AF10, AF11). `files_edit`: see `replan_with`.
     fn replan_changed(&mut self, files_edit: bool) {
-        let cancel = (self.export_after_plan || self.write_now_after_plan)
+        let cancel = (self.export_after_plan || self.armed.is_some())
             && self.planning.is_none()
             && matches!(self.votes_pending, Some((_, false)));
         self.replan_with(files_edit);

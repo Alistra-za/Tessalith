@@ -803,6 +803,121 @@ fn a_click_that_waited_through_its_own_replan_never_replans_twice() {
     assert!(m.export.running.is_none() && nothing_written(d.path()));
 }
 
+/// Ruling 3c-26: what a waiting whole-project click does with ONE thing done between the click and the landing.
+#[derive(Debug, Clone, Copy)]
+enum Between {
+    Nothing,
+    ExportSetThenClose,
+    ExportSetLeftOpen,
+    ExportFolderMoved,
+    TargetModSet,
+    ReencodeAllTicked,
+    ReviewOpenedByHand,
+    DialogOpened,
+}
+
+/// Arm a write-now click on a clean pending plan (its result held), do `between`, deliver the plan, and list what is
+/// wrong with the outcome (empty: right). Nothing but the positive row may write, and nothing may stay armed.
+fn after_a_waiting_click(between: Between) -> Vec<String> {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.hold_plan_results = true;
+    m.replan();
+    assert!(
+        m.full_plan_pending(),
+        "{between:?}: guard: a plan is pending"
+    );
+    assert_eq!(m.header_export_text(), "Export 4 files now", "{between:?}");
+    m.header_export_clicked();
+    assert!(m.export_queued(), "{between:?}: guard: the click is armed");
+    // The click's plan is computed and parked; what happens now is newer than it.
+    let msgs = held_plan(&mut m);
+    let moved = d.path().join("export2");
+    match between {
+        Between::Nothing => {}
+        Between::ExportSetThenClose => {
+            let k = key_of(&m, "g/u");
+            m.export_sets([k].into(), "Export set g/u".into());
+            m.close_review();
+        }
+        Between::ExportSetLeftOpen => {
+            let k = key_of(&m, "g/u");
+            m.export_sets([k].into(), "Export set g/u".into());
+        }
+        // Another folder, the same four files: only the destination differs.
+        Between::ExportFolderMoved => m.set_export_folder(moved.clone()),
+        Between::TargetModSet => {
+            let t = d.path().join("target mod");
+            std::fs::create_dir_all(&t).unwrap();
+            m.set_target_mod(Some(t)).unwrap();
+        }
+        // The header's Re-encode all tick: a plain field, no plan, the same count.
+        Between::ReencodeAllTicked => m.reencode_all = true,
+        Between::ReviewOpenedByHand => m.open_review(),
+        Between::DialogOpened => m.dialog = Some(Dialog::Error("a question".into())),
+    }
+    // The click's plan lands (a plan the action started supersedes it and lands through the channel).
+    land_plan(&mut m, msgs);
+    let mut wrong = vec![];
+    let wrote = !nothing_written(d.path())
+        || moved.join("textures/g/a.dds").exists()
+        || m.export.summary.is_some();
+    if m.export_queued() {
+        wrong.push("a click is still armed".to_string());
+    }
+    match between {
+        Between::Nothing => {
+            if !d.path().join("export/textures/g/a.dds").is_file() || m.review.is_some() {
+                wrong.push(format!("the untouched click did not write: {:?}", m.dialog));
+            }
+        }
+        Between::DialogOpened => {
+            if wrote {
+                wrong.push("wrote under an open dialog".into());
+            }
+            if !m.status_line.contains("answer the open dialog") {
+                wrong.push(format!("no warning: {}", m.status_line));
+            }
+        }
+        _ => {
+            if wrote {
+                wrong.push("wrote what the user was not shown".into());
+            }
+            if m.review.is_none() {
+                wrong.push("no Review is open".into());
+            }
+        }
+    }
+    if matches!(between, Between::ExportSetLeftOpen) && m.export_scope().is_none() {
+        wrong.push("the open scoped Review lost its scope".into());
+    }
+    wrong
+        .into_iter()
+        .map(|w| format!("{between:?}: {w}"))
+        .collect()
+}
+
+/// Round 3, ruling 3c-26: a waiting click is checked when it lands, against what it was made for (the scope, the
+/// destination), and never lands into an open Review or an open dialog. One row per thing done while it waits.
+#[test]
+fn a_waiting_click_writes_only_when_nothing_changed_what_it_was_made_for() {
+    let wrong: Vec<String> = [
+        Between::Nothing,
+        Between::ExportSetThenClose,
+        Between::ExportSetLeftOpen,
+        Between::ExportFolderMoved,
+        Between::TargetModSet,
+        Between::ReencodeAllTicked,
+        Between::ReviewOpenedByHand,
+        Between::DialogOpened,
+    ]
+    .into_iter()
+    .flat_map(after_a_waiting_click)
+    .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);
