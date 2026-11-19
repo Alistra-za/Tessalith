@@ -2571,17 +2571,7 @@ fn renamed_borrow_without_a_game_location_checks_the_path_the_game_reads() {
 #[test]
 fn locked_boolean_slot_checks_the_derived_height_it_writes() {
     let d = tempfile::tempdir().unwrap();
-    let layout = Layout {
-        files: &["arch/rock_p.png", "textures/n/leaf_g.png"],
-        toml: "[[sets]]\nid = \"arch/rock\"\noutput_name = \"stone\"\n\
-               [[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\nlock_parallax = true\nslot4 = false\n\
-               [sets.borrow]\nslot4 = \"arch/rock\"\n",
-        subtypes: &[("arch/rock_p.png", Subtype::Height), ("textures/n/leaf_g.png", Subtype::PbrEmissive)],
-        ..LAYOUTS[0]
-    };
-    let mut m = layout_project(d.path(), &layout);
-    m.set_group_excluded("Consumer", false).unwrap();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let mut m = locked_height_project(d.path());
     let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
     let root = m.export_root();
     assert!(root.join("arch/stone_p.dds").is_file(), "{notes}");
@@ -2600,6 +2590,72 @@ fn locked_boolean_slot_checks_the_derived_height_it_writes() {
     let slot = entry["slot4"].as_str().unwrap();
     assert_eq!(slot, r"arch\stone_p.dds");
     assert!(root.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn staging_textures_above_the_export_folder_is_outside_the_game_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = locked_height_project(&d.path().join("source"));
+    let pack = d.path().join("textures/stage/Pack");
+    m.set_export_folder(pack.clone());
+    let doc = fresh_document(&mut m, "staged");
+    let match1 = r"n\leaf.dds";
+    assert!(pack.join("arch/stone_p.dds").is_file());
+    assert!(
+        doc["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["match1"] != match1),
+        "staging folder admitted a missing game slot: {doc}"
+    );
+    bc1_dds(&pack.join("textures/arch/stone_p.dds"));
+    let doc = fresh_document(&mut m, "installed");
+    let slot = disk_set(&doc, match1)["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"arch\stone_p.dds");
+    assert!(pack.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn excluded_legacy_lender_needs_its_physical_height_as_well_as_the_game_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = locked_height_project(d.path());
+    m.move_to_group(
+        &["arch/rock".into()],
+        sdc_gui::model::set_groups::GroupTarget::New("Lender".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Lender", true).unwrap();
+    let root = m.export_root();
+    bc1_dds(&root.join("textures/arch/stone_p.dds"));
+    let physical = root.join("arch/stone_p.dds");
+    let doc = fresh_document(&mut m, "excluded");
+    assert!(!physical.exists());
+    let match1 = r"n\leaf.dds";
+    assert!(
+        doc["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["match1"] != match1),
+        "unrelated game file admitted the missing lender: {doc}"
+    );
+    bc1_dds(&physical);
+    let doc = fresh_document(&mut m, "restored");
+    let slot = disk_set(&doc, match1)["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"arch\stone_p.dds");
+    assert!(root.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn renamed_albedo_keeps_the_interior_dot_in_its_published_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = LAYOUTS.iter().find(|l| l.out_name == "wall.dds").unwrap();
+    let mut m = layout_project(d.path(), layout);
+    let doc = fresh_document(&mut m, "renamed");
+    let slot = disk_set(&doc, r"k\rock.dds")["slot1"].as_str().unwrap();
+    assert!(m.export_root().join(slot).is_file());
+    assert_eq!(slot, r"textures\stone\.\wall.dds");
 }
 
 #[test]
@@ -2782,6 +2838,21 @@ fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
     )
     .expect("grouped");
     m.set_group_excluded("Consumer", true).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+fn locked_height_project(dir: &std::path::Path) -> AppModel {
+    let layout = Layout {
+        files: &["arch/rock_p.png", "textures/n/leaf_g.png"],
+        toml: "[[sets]]\nid = \"arch/rock\"\noutput_name = \"stone\"\n\
+               [[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\nlock_parallax = true\nslot4 = false\n\
+               [sets.borrow]\nslot4 = \"arch/rock\"\n",
+        subtypes: &[("arch/rock_p.png", Subtype::Height), ("textures/n/leaf_g.png", Subtype::PbrEmissive)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(dir, &layout);
+    m.set_group_excluded("Consumer", false).unwrap();
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m
 }

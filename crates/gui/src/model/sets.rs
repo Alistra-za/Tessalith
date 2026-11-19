@@ -2806,28 +2806,26 @@ pub(crate) fn member_game_path_in(
 /// folder changed and the plan has not landed), and an item that writes no output of its own. The link index folds the
 /// result with ASCII lower case, and the views are rebuilt when the output moves (`view_reads` holds it).
 pub(crate) fn written_game_location(roots: &[PathBuf; 2], it: &TextureItem) -> Option<String> {
-    let (_, rel) = written_output_paths(roots, it)?;
-    game_location_of(rel)
+    game_location_of(written_output_rel(roots, it)?)
 }
 
-/// The settled output and its path below the output or export folder, shared by links and JSON fills.
-pub(crate) fn written_output_paths<'a>(
+/// The settled output relative to the output or export folder, shared by links and JSON fills.
+pub(crate) fn written_output_rel<'a>(
     roots: &[PathBuf; 2],
     it: &'a TextureItem,
-) -> Option<(&'a Path, &'a Path)> {
+) -> Option<&'a Path> {
     let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
     if it.job_key.is_empty() {
         return None;
     }
-    let rel = roots.iter().find_map(|r| job.output.strip_prefix(r).ok())?;
-    Some((&job.output, rel))
+    roots.iter().find_map(|r| job.output.strip_prefix(r).ok())
 }
 
 /// Ruling 3b-F11: the game location of `rel` (a path under the output folder): its filesystem components (`.` and
 /// empty parts are gone, as the writer resolves them) from the first `textures` component (ASCII case-insensitive) on,
 /// joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as text;
 /// `None` under no `textures` folder (never a `textures\` put in front).
-fn game_location_of(rel: &Path) -> Option<String> {
+pub(crate) fn game_location_of(rel: &Path) -> Option<String> {
     let parts: Vec<String> = rel
         .components()
         .filter_map(|c| match c {
