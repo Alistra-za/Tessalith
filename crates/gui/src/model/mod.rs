@@ -2275,7 +2275,7 @@ impl AppModel {
         let whole = self.export_scope().is_none();
         if self.full_plan_pending() {
             if whole && self.settled_writes_now {
-                self.arm(false);
+                self.arm();
             } else {
                 self.open_review();
             }
@@ -2290,7 +2290,8 @@ impl AppModel {
     /// - an open dialog drops the click, waiting or not;
     /// - a waiting click compares what it was made against (`ArmedWrite`), and finds no scope set and no Review open,
     ///   or opens Review;
-    /// - the source walk: a changed source plans again with a whole-project click armed, or opens the scoped Review.
+    /// - the source walk: a changed source plans again with a whole-project click armed (with what it was made
+    ///   against at the click, ruling 3c-39), or opens the scoped Review.
     ///   A click that already waited through its own replan never writes on a second change and the gate requests no
     ///   further plan for it: it opens Review. A plan `check_sources` itself starts because `sdc.toml` changed on disk
     ///   is the reload's own plan, not the gate's;
@@ -2311,18 +2312,28 @@ impl AppModel {
                 return;
             }
         }
-        let replanned = waited && armed.is_some_and(|a| a.replanned);
         if !self.export_without_review() {
             self.open_review();
             return;
         }
+        // Ruling 3c-39: what the click was made against is read once, at the click: the armed value of a click that
+        // waited, or, for one settled at once, now, before the walk. A re-arm keeps it and sets only `replanned`, so
+        // the destination confirmed at the click is the only one a later landing can match.
+        let made_for = match armed {
+            Some(a) if waited => a,
+            _ => self.armed_now(false),
+        };
+        let replanned = made_for.replanned;
         let changed = self.check_sources() > 0 && self.session.is_some();
         self.walked();
         if changed {
             if replanned || self.export_scope().is_some() {
                 self.open_review();
             } else {
-                self.arm(true);
+                self.armed = Some(ArmedWrite {
+                    replanned: true,
+                    ..made_for
+                });
                 self.replan();
             }
             return;
@@ -2351,8 +2362,8 @@ impl AppModel {
     }
 
     /// E3: a whole-project click waits for the plan in flight (`settle_queued` takes it to `write_gate`).
-    fn arm(&mut self, replanned: bool) {
-        self.armed = Some(self.armed_now(replanned));
+    fn arm(&mut self) {
+        self.armed = Some(self.armed_now(false));
     }
 
     /// A waiting whole-project write is cancelled where the user is told (a project change, a failed plan, a closed

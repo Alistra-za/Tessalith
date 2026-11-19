@@ -2063,3 +2063,88 @@ fn a_deferred_export_click_keeps_the_scope_of_its_press() {
         .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+/// The export folder is a junction to `out a`; a source changed, so the gate's walk plans again with the click armed.
+/// While the walk runs (`set_after_walk`) the junction is retargeted to `out b`. `waited`: the click waited for a
+/// pending plan and the walk is its first landing's; else the click met a settled plan and walked at once. Lists what
+/// is wrong (empty: right).
+fn retargeted_during_the_walk(waited: bool) -> Vec<String> {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let (link, a, b) = (
+        d.path().join("export link"),
+        d.path().join("out a"),
+        d.path().join("out b"),
+    );
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    dir_link(&link, &a);
+    support::choose_export(&mut m, link.clone());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    let retarget = {
+        let (link, b) = (link.clone(), b.clone());
+        move || {
+            std::fs::remove_dir(&link).unwrap();
+            dir_link(&link, &b);
+        }
+    };
+    if waited {
+        m.hold_plan_results = true;
+        m.replan();
+        m.header_export_clicked();
+        assert!(m.export_queued(), "waited {waited}: guard: armed");
+        let msgs = held_plan(&mut m);
+        support::colour(&d.path().join("textures/g/a.png"), 91);
+        m.set_after_walk(retarget);
+        for x in msgs {
+            m.handle_held(x);
+        }
+        assert!(
+            m.full_plan_pending() && m.export_queued(),
+            "waited {waited}: guard: the landing walked, planned again and re-armed"
+        );
+        let msgs = held_plan(&mut m);
+        land_plan(&mut m, msgs);
+    } else {
+        support::colour(&d.path().join("textures/g/a.png"), 91);
+        m.set_after_walk(retarget);
+        m.header_export_clicked();
+        assert!(
+            m.full_plan_pending() && m.export_queued(),
+            "waited {waited}: guard: the click walked, planned again and armed"
+        );
+        assert!(m.wait_idle(Duration::from_secs(120)));
+    }
+    let mut wrong = vec![];
+    let wrote = [&a, &b]
+        .iter()
+        .any(|r| r.join("textures/g/a.dds").exists() || r.join("textures/g/u.dds").exists())
+        || m.export.summary.is_some();
+    if wrote {
+        wrong.push("wrote where the click was not confirmed".to_string());
+    }
+    if m.review.is_none() {
+        wrong.push("no Review is open".into());
+    }
+    if m.export_queued() {
+        wrong.push("still armed".into());
+    }
+    wrong
+        .into_iter()
+        .map(|w| format!("waited {waited}: {w}"))
+        .collect()
+}
+
+/// Round 5, ruling 3c-39 (re-review: re-arming can replace destination A with B): an armed value never changes
+/// except its `replanned` bit. The junction retargeted while the walk that re-arms the click runs: the landing of the
+/// plan it starts opens Review and writes nothing, for a click that waited and for one that walked at once.
+#[test]
+fn a_rearmed_click_keeps_the_destination_of_its_click() {
+    let wrong: Vec<String> = [true, false]
+        .into_iter()
+        .flat_map(retargeted_during_the_walk)
+        .collect();
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
