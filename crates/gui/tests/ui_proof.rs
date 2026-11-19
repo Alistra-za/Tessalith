@@ -218,6 +218,49 @@ fn fix_path_from_meshes_focuses_the_main_rename_with_json_popped() {
     );
 }
 
+#[test]
+fn tab_after_fix_path_preserves_an_untouched_literal_rename() {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    m.save().unwrap();
+    let doc = m.sets_doc.as_ref().unwrap();
+    let path = doc.path().to_owned();
+    let id = r#"id = "landscape/other""#;
+    let literal = r"rename = '\custom'";
+    let text = doc.text().replace(id, &format!("{id}\n{literal}"));
+    assert!(text.contains(literal));
+    std::fs::write(&path, &text).unwrap();
+    m.open_folder(m.root.clone().unwrap());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.open_problems(None);
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run_steps(4);
+    h.get_by_label("Fix path").click();
+    h.run_steps(6);
+    let rename = h.get_by_role_and_label(Role::TextInput, "Rename");
+    assert!(rename.accesskit_node().is_focused());
+    assert_eq!(rename.accesskit_node().value().as_deref(), Some(r"\custom"));
+    let steps = h.state().model.history.pushes;
+    h.key_press(Key::Tab);
+    h.run_steps(4);
+    assert!(!h
+        .get_by_role_and_label(Role::TextInput, "Rename")
+        .accesskit_node()
+        .is_focused());
+    assert_eq!(
+        h.state().model.history.pushes,
+        steps,
+        "Tab added an undo step"
+    );
+    h.state_mut().model.save().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), text);
+}
+
 #[derive(Default)]
 struct Tiny {
     clicks: Vec<u32>,

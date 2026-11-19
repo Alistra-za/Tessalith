@@ -88,6 +88,168 @@ fn clicking_another_sets_texture_waits_for_its_preview_poll() {
 }
 
 #[test]
+fn the_new_sets_controls_never_paint_the_previous_frame() {
+    use sdc_gui::model::viewport3d::Frame;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_with(d.path(), false, 1400.0, true, |m| {
+        m.select_item("landscape/leaf.png");
+    });
+    let start = std::time::Instant::now();
+    let (m, state) = h.state_mut();
+    let s = &mut state.set3d;
+    while s.v3.content().is_none() {
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(60),
+            "leaf's scene did not load"
+        );
+        s.shown = true;
+        s.poll(m);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    assert_eq!(s.fp.as_ref().unwrap().label, "landscape/leaf");
+    s.v3.frame = Some(std::sync::Arc::new(Frame {
+        id: 73,
+        width: 1,
+        height: 1,
+        rgba: vec![220, 40, 80, 255],
+    }));
+    s.enc.hold_workers(true);
+    h.step();
+    let (frame_id, texture) = h
+        .ctx
+        .data(|d| {
+            d.get_temp::<(u64, egui::TextureHandle)>(sdc_gui::ui::viewport3d::frame_cache_id(
+                "set_preview",
+            ))
+        })
+        .unwrap();
+    assert_eq!(frame_id, 73);
+    let paints_leaf = |h: &H| {
+        h.output()
+            .shapes
+            .iter()
+            .any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id()))
+    };
+    assert!(paints_leaf(&h));
+    h.get_by_label("rock01.png").click();
+    h.run_steps(3);
+    let (m, state) = h.state_mut();
+    state.set3d.poll(m);
+    assert_eq!(state.set3d.fp.as_ref().unwrap().label, "landscape/rock01");
+    assert!(
+        !state.set3d.enc.settled(),
+        "the new scene is still encoding"
+    );
+    h.step();
+    h.get_by_label(FRAME_LABEL);
+    assert!(
+        !paints_leaf(&h),
+        "the viewport painted leaf's pixels under rock01's controls"
+    );
+}
+
+#[test]
+fn selection_lifetime_reopening_a_scrolled_card_starts_at_the_top() {
+    scroll_after_selection_change(false);
+}
+
+#[test]
+fn selection_lifetime_a_change_in_3d_starts_the_next_2d_editor_at_the_top() {
+    scroll_after_selection_change(true);
+}
+
+fn scroll_after_selection_change(in_3d: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(d.path(), false, 1400.0, false);
+    h.set_size(egui::vec2(1400.0, 480.0));
+    h.run_steps(4);
+    let offset = |h: &H| {
+        h.ctx
+            .data(|d| d.get_temp::<f32>(egui::Id::unique("set-editor-observed-offset")))
+            .unwrap()
+    };
+    h.get_by_label("Advanced TruePBR settings").scroll_to_me();
+    h.run_steps(4);
+    assert!(offset(&h) > 0.0);
+    let id = if in_3d {
+        h.get_by_label("3D").click_accesskit();
+        h.run_steps(4);
+        assert!(h.state().0.settings.set_view_3d);
+        "landscape/leaf"
+    } else {
+        let column = support::panel(&h.ctx, "sets");
+        h.query_all_by_label("landscape/rock01")
+            .find(|n| column.contains(n.rect().center()))
+            .unwrap()
+            .click_modifiers(egui::Modifiers::COMMAND);
+        h.run_steps(4);
+        assert_eq!(h.state().0.selection, sdc_gui::model::Selection::None);
+        "landscape/rock01"
+    };
+    let column = support::panel(&h.ctx, "sets");
+    h.query_all_by_label(id)
+        .find(|n| column.contains(n.rect().center()))
+        .unwrap()
+        .click();
+    h.run_steps(4);
+    assert_eq!(h.state().0.resolved_selection().view().unwrap().id, id);
+    if in_3d {
+        h.get_by_label("2D").click();
+        h.run_steps(4);
+    }
+    assert_eq!(
+        offset(&h),
+        0.0,
+        "the first 2D editor kept the previous offset"
+    );
+}
+
+#[test]
+fn selection_lifetime_a_second_folder_starts_its_borrowers_mesh_at_auto() {
+    use render3d::builtin::Builtin;
+    use sdc_gui::model::set_preview::MeshChoice;
+    use sdc_gui::model::SetTarget;
+    let d = tempfile::tempdir().unwrap();
+    let id = "landscape/other";
+    let project = |name| {
+        let mut m = key_less_json_sets(&d.path().join(name));
+        m.set_shader(id, Some(engine::shader::Shader::Pbr));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        m.save().unwrap();
+        m
+    };
+    let second = project("second").root.unwrap();
+    let mut h = harness_on(project("first"), egui::vec2(1400.0, 900.0), |m| {
+        m.select_target(SetTarget::Id(id.into()));
+    });
+    h.get_by_label("Preview mesh").click();
+    h.run_steps(3);
+    h.get_by_label("Cube").click();
+    h.run_steps(3);
+    assert_eq!(
+        h.state().1.set3d.choice(),
+        MeshChoice::Builtin(Builtin::Cube)
+    );
+    h.state_mut().0.open_folder(second);
+    assert!(h
+        .state_mut()
+        .0
+        .wait_idle(std::time::Duration::from_secs(60)));
+    h.run_steps(3);
+    let column = support::panel(&h.ctx, "sets");
+    h.query_all_by_label(id)
+        .find(|n| column.contains(n.rect().center()))
+        .unwrap()
+        .click();
+    settle(&mut h);
+    assert_eq!(
+        h.state().0.selection,
+        sdc_gui::model::Selection::SetId(id.into())
+    );
+    assert_eq!(h.state().1.set3d.choice(), MeshChoice::Auto);
+}
+
+#[test]
 fn texture_follow_reuses_one_resolution_across_frames() {
     let d = tempfile::tempdir().unwrap();
     let mut h = harness_on(pbr_opened(d.path()), egui::vec2(1400.0, 900.0), |m| {

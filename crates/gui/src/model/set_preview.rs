@@ -1673,6 +1673,8 @@ pub struct SetPreview {
     pub candidates: Candidates,
     /// The mesh per set key, this session only (spec §8).
     pub choice: HashMap<SetTarget, MeshChoice>,
+    /// Document-only mesh choices belong to this project.
+    project: Option<PathBuf>,
     /// Design §7: the landscape plane's tiling, 1.0-3.0 in steps of 0.5; this session only.
     pub tiling: f32,
     pub rows: Vec<ShapeRow>,
@@ -1774,6 +1776,7 @@ impl SetPreview {
             fp: None,
             candidates: Candidates::NotAsked,
             choice: HashMap::new(),
+            project: None,
             tiling: 1.0,
             rows: vec![],
             notices: vec![],
@@ -1900,6 +1903,13 @@ impl SetPreview {
 
     /// `poll` at a given time (tests drive the debounce and the throttle). Call once per frame.
     pub fn poll_at(&mut self, m: &AppModel, now: Instant) {
+        if self.project != m.root {
+            self.project.clone_from(&m.root);
+            self.choice
+                .retain(|target, _| matches!(target, SetTarget::Key(_)));
+            self.fp = None;
+            self.gone = None;
+        }
         self.v3.poll();
         // A finished encode on a scene that is already loaded is swapped in (`sync_textures`); the scene is pushed
         // for a first load and when an encode failed (the game's copy of the texture must come back).
@@ -2019,6 +2029,7 @@ impl SetPreview {
             self.querying = None;
             self.loading = None;
             self.on_screen = None;
+            self.v3.set_content(None, false);
         }
         self.entry = fp.entry.as_ref().map(|e| entry_node(e).to_value());
         self.enc.sync(m, fp.members.clone(), now, d.set);

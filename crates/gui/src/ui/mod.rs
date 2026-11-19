@@ -417,23 +417,32 @@ fn start_screen(ui: &mut egui::Ui, model: &mut AppModel) {
     }
 }
 
-fn switched_to(ctx: &egui::Context, now: Option<&Selection>) -> bool {
+fn track_scroll_target(ctx: &egui::Context, now: Option<&Selection>) {
     ctx.data_mut(|d| {
         let seen = d.get_temp_mut_or_insert_with::<Option<Option<Selection>>>(
             egui::Id::unique("centre-shown"),
             || None,
         );
         if seen.as_ref().is_some_and(|old| old.as_ref() == now) {
-            return false;
+            return;
         }
         *seen = Some(now.cloned());
-        true
+        d.insert_temp(egui::Id::unique("centre-scroll-reset"), true);
+    })
+}
+
+fn take_scroll_reset(ctx: &egui::Context) -> bool {
+    ctx.data_mut(|d| {
+        d.remove_temp::<bool>(egui::Id::unique("centre-scroll-reset"))
+            .unwrap_or(false)
     })
 }
 
 /// The centre: a docked Presets, JSON editor or Settings tab in front (Note FB7, JI1), else the preview of an expanded
 /// texture, else the settings of the selected texture or set, else a hint.
 fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: bool) {
+    let bulk = model.in_bulk();
+    track_scroll_target(ui.ctx(), (!bulk).then_some(&model.selection));
     // Before the start screen: Presets… opens with no folder too (K5).
     centre_tabs::strip(ui, model);
     match model.centre_front() {
@@ -453,8 +462,8 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
     // A texture expanded again starts fitted.
     state.preview = preview::PreviewUi::default();
     // F3a D2/D3: two or more textures or sets.
-    if model.in_bulk() {
-        let top = switched_to(ui.ctx(), None);
+    if bulk {
+        let top = take_scroll_reset(ui.ctx());
         bulk_panel::draw(ui, model, top);
         return;
     }
@@ -479,7 +488,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             let mut area = egui::ScrollArea::vertical()
                 .id_salt("centre-texture")
                 .auto_shrink([false, false]);
-            if switched_to(ui.ctx(), Some(&active.selection)) {
+            if take_scroll_reset(ui.ctx()) {
                 area = area.vertical_scroll_offset(0.0);
             }
             area.show(ui, |ui| settings_panel::draw(ui, model, key, false));
@@ -488,7 +497,6 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
             let view = set_editor::View {
                 switch: state.set3d.enabled,
                 three_d,
-                to_top: switched_to(ui.ctx(), Some(&active.selection)),
                 noise_uv: three_d.then(|| state.set3d.mato_noise_uv_scale()).flatten(),
             };
             set_editor::draw(

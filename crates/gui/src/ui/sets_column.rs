@@ -200,7 +200,6 @@ fn reflow_heights(st: &mut DropState, views: &[SetView], width: f32, frame_x: f3
 const TIP_LINES: usize = 10;
 
 enum Act {
-    Select(SetTarget),
     /// The warning badge: open Problems filtered to this set key.
     Problems(String),
     SelectItem(String),
@@ -223,8 +222,8 @@ enum Act {
     /// The Shader dropdown: `None` is Auto.
     Shader(String, Option<Shader>),
     /// A pill click with its modifiers (F3a D1).
-    Click(SetTarget, bool, bool),
-    RightClick(SetTarget),
+    Click(String, bool, bool),
+    RightClick(String),
     Bulk(MenuAction),
     /// F3a Task 8: a member's slot menu pick.
     Slot(MenuAction),
@@ -1977,14 +1976,11 @@ pub fn draw(
     for a in acts {
         match a {
             // Note FC8 (BN3): a new selection waits a frame for a focused field to commit.
-            Act::Select(target) => {
-                super::after_commit(&ctx, model, move |m| m.go_to_target(target, None))
-            }
             Act::SelectItem(k) => super::after_commit(&ctx, model, move |m| m.select_item(&k)),
-            Act::Click(target, ctrl, shift) => {
-                super::after_commit(&ctx, model, move |m| m.click_set(target, ctrl, shift))
-            }
-            Act::RightClick(target) => model.right_click_set(target),
+            Act::Click(id, ctrl, shift) => after_card_commit(&ctx, model, id, move |m, target| {
+                m.click_set(target, ctrl, shift)
+            }),
+            Act::RightClick(id) => after_card_commit(&ctx, model, id, AppModel::right_click_set),
             // Note HF6: New group… asks for a name first; the other picks go to the model.
             Act::Bulk(MenuAction::ToNewGroup) => {
                 st.pending = Some(Pending::NewGroup {
@@ -2158,6 +2154,23 @@ fn apply_reorder(model: &mut AppModel, id: &str, to: usize) {
             .filter(|k| !k.is_empty())
             .map(crate::model::SetTarget::Key);
     }
+}
+
+/// The plan can land while the old editor commits. Find the clicked card by its document id in that plan.
+fn after_card_commit(
+    ctx: &egui::Context,
+    model: &mut AppModel,
+    id: String,
+    click: impl FnOnce(&mut AppModel, SetTarget) + 'static,
+) {
+    super::after_commit(ctx, model, move |m| {
+        let views = crate::model::sets::views(m);
+        if let Some(v) = views.iter().find(|v| engine::sets::same_id(&v.id, &id)) {
+            click(m, SetTarget::view(v));
+        } else {
+            m.clear_selection();
+        }
+    });
 }
 
 /// CF4: the card's place in the full order, a body-size number in a slot as wide as `total`'s, so names line up.
@@ -2682,7 +2695,7 @@ fn pill(
     }
     if resp.clicked() && acts.is_empty() {
         let m = ui.input(|i| i.modifiers);
-        acts.push(Act::Click(SetTarget::view(v), m.command, m.shift));
+        acts.push(Act::Click(v.id.clone(), m.command, m.shift));
     }
     if let Some(p) = dropped {
         if editing.on {
@@ -2698,7 +2711,7 @@ fn pill(
     // F3a D4: a right-click on an unselected pill selects it alone first; among two or more selected sets the pill
     // shows the bulk menu, otherwise its own.
     if resp.secondary_clicked() && !member_menu {
-        acts.push(Act::RightClick(SetTarget::view(v)));
+        acts.push(Act::RightClick(v.id.clone()));
     }
     let bulk = look.selected && look.bulk;
     if !member_menu {
@@ -3162,7 +3175,7 @@ fn menu(
     });
     tip(rename.response);
     if tip(ui.button("Edit match…")).clicked() {
-        acts.push(Act::Select(SetTarget::view(v)));
+        acts.push(Act::Click(v.id.clone(), false, false));
         ui.close();
     }
     let remove = crate::look::menu_button_036(ui, "Remove member", |ui| {

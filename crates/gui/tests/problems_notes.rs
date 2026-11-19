@@ -4918,6 +4918,69 @@ fn card<'a>(h: &'a Harness<'static, AppModel>, id: &'a str) -> egui_kittest::Nod
 }
 
 #[test]
+fn a_deferred_card_click_uses_the_card_that_survives_the_landing() {
+    use sdc_gui::model::Selection;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(key_less_sets(d.path()));
+    h.run();
+    let id = "landscape/other";
+    let file = "landscape/two.png";
+    let rock = "landscape/rock01";
+    let defer = |h: &mut Harness<'static, AppModel>| {
+        card(h, rock).click();
+        h.run();
+        h.get_by_role_and_label(
+            egui::accesskit::Role::TextInput,
+            sdc_gui::ui::input_name::HINT,
+        )
+        .click();
+        h.run();
+        let pos = card(h, id).rect().center();
+        h.input_mut().events.push(egui::Event::PointerMoved(pos));
+        for pressed in [true, false] {
+            h.input_mut().events.push(egui::Event::PointerButton {
+                pos,
+                pressed,
+                button: egui::PointerButton::Primary,
+                modifiers: egui::Modifiers::NONE,
+            });
+        }
+        h.step();
+        assert_eq!(
+            h.state().after_commit.len(),
+            1,
+            "the card click awaits the field"
+        );
+    };
+    defer(&mut h);
+    give_a_file(h.state_mut(), id, file);
+    let gained = view_by_id(h.state(), id).key;
+    assert!(!gained.is_empty());
+    h.run();
+    assert_eq!(h.state().selection, Selection::Set(gained.clone()));
+    card(&h, rock).click_modifiers(egui::Modifiers::COMMAND);
+    h.run();
+    assert_eq!(
+        h.state().selected_sets(),
+        [gained, view_by_id(h.state(), rock).key]
+    );
+
+    defer(&mut h);
+    std::fs::remove_file(h.state().root.as_ref().unwrap().join(file)).unwrap();
+    h.state_mut().replan();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(h.state(), id).key.is_empty());
+    h.run();
+    assert_eq!(h.state().selection, id_selection(id));
+
+    defer(&mut h);
+    assert!(h.state_mut().delete_set(id));
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(h.state().selection, Selection::None);
+}
+
+#[test]
 fn a_click_on_a_key_less_card_selects_that_set_alone() {
     let d = tempfile::tempdir().unwrap();
     let mut m = key_less_sets(d.path());
@@ -6115,6 +6178,36 @@ fn a_set_filter_keeps_its_set_when_the_root_moves_to_an_ancestor() {
         }),
         "{texts:?}"
     );
+}
+
+#[test]
+fn a_root_move_keeps_the_original_bulk_reset_targets() {
+    use engine::sets::set_key;
+    use sdc_gui::model::{Dialog, Selection};
+    let d = tempfile::tempdir().unwrap();
+    let input = d.path().join("inputs");
+    let root = d.path().join("R");
+    let old = root.join("sub");
+    std::fs::create_dir_all(input.join("sub/sub")).unwrap();
+    for path in ["a.png", "sub/a.png", "sub/sub/a.png"] {
+        image::RgbImage::from_pixel(16, 16, image::Rgb([90, 60, 30]))
+            .save(input.join(path))
+            .unwrap();
+    }
+    let mut m = opened_as_the_app(input, old.clone());
+    m.click_set(&set_key(&old, "a"), false, false);
+    m.click_set(&set_key(&old, "sub/a"), true, false);
+    assert_eq!(
+        m.selected_sets(),
+        [set_key(&old, "a"), set_key(&old, "sub/a")]
+    );
+    choose_export(&mut m, root.clone());
+    assert_eq!(m.selection, Selection::Set(set_key(&root, "sub/a")));
+    m.ask_reset_all();
+    let Some(Dialog::ConfirmResetAll(keys)) = m.dialog else {
+        panic!("the selected sets have reset targets");
+    };
+    assert_eq!(keys, ["a.png", "sub/a.png"]);
 }
 
 /// The plain case of the same rekey: an ordinary root change leaves the open filter on its set.

@@ -255,8 +255,6 @@ pub struct View {
     pub switch: bool,
     /// The 3D panel shows this set: the slot rows are left out, the TruePBR settings stay.
     pub three_d: bool,
-    /// The editor was not what the centre showed last frame: open at the top (Note FI6).
-    pub to_top: bool,
     /// The 3D preview's picked MATO record's `noiseUVScale`, where the XPMF card's Override starts (M8).
     pub noise_uv: Option<f32>,
 }
@@ -319,7 +317,7 @@ pub fn draw(
         .auto_shrink([false, false]);
     // Go to set's scroll to its row (`row_reveal`) still wins: egui applies this offset as the area begins and a
     // scroll request as it ends.
-    if view.to_top {
+    if super::take_scroll_reset(ui.ctx()) {
         area = area.vertical_scroll_offset(0.0);
     }
     let out = area.show(ui, |ui| {

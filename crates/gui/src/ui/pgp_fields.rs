@@ -796,12 +796,11 @@ pub(crate) fn control(
             }
         }
         KeyKind::Text => {
-            let id = egui::Id::unique(("pgp-text", k.key, c.set));
-            let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
-                value
-                    .and_then(|v| v.as_str().map(str::to_string))
-                    .unwrap_or_default()
-            });
+            let id = ui.make_persistent_id(("pgp-text", k.key, c.set));
+            let stored = value.as_ref().and_then(Value::as_str).unwrap_or_default();
+            let mut text = ui
+                .data(|d| d.get_temp::<String>(id))
+                .unwrap_or_else(|| stored.to_owned());
             // A file name stays in the matched folder (V3); a path moves the outputs anywhere under Data (HJ5).
             let hint = if k.key == "rename" {
                 r"new file name or folder\name"
@@ -823,7 +822,7 @@ pub(crate) fn control(
                 ui.data_mut(|d| d.remove::<String>(id));
                 let t = text.trim();
                 // Esc cancels (AG10/AG11, trace-debug #57).
-                if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                if text != stored && !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                     edits.push((key, (!t.is_empty()).then(|| json!(t))));
                 }
             }
