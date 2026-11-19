@@ -87,26 +87,21 @@ fn clicking_another_sets_texture_waits_for_its_preview_poll() {
     h.get_by_label(FRAME_LABEL);
 }
 
-#[test]
-fn the_new_sets_controls_never_paint_the_previous_frame() {
+fn paint_set_frame(h: &mut H, set: &str) -> egui::TextureId {
     use sdc_gui::model::viewport3d::Frame;
-    let d = tempfile::tempdir().unwrap();
-    let mut h = harness_with(d.path(), false, 1400.0, true, |m| {
-        m.select_item("landscape/leaf.png");
-    });
     let start = std::time::Instant::now();
     let (m, state) = h.state_mut();
     let s = &mut state.set3d;
     while s.v3.content().is_none() {
         assert!(
             start.elapsed() < std::time::Duration::from_secs(60),
-            "leaf's scene did not load"
+            "{set}'s scene did not load"
         );
         s.shown = true;
         s.poll(m);
         std::thread::sleep(std::time::Duration::from_millis(5));
     }
-    assert_eq!(s.fp.as_ref().unwrap().label, "landscape/leaf");
+    assert_eq!(s.fp.as_ref().unwrap().label, set);
     s.v3.frame = Some(std::sync::Arc::new(Frame {
         id: 73,
         width: 1,
@@ -124,13 +119,24 @@ fn the_new_sets_controls_never_paint_the_previous_frame() {
         })
         .unwrap();
     assert_eq!(frame_id, 73);
-    let paints_leaf = |h: &H| {
-        h.output()
-            .shapes
-            .iter()
-            .any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture.id()))
-    };
-    assert!(paints_leaf(&h));
+    assert!(paints_frame(h, texture.id()));
+    texture.id()
+}
+
+fn paints_frame(h: &H, texture: egui::TextureId) -> bool {
+    h.output()
+        .shapes
+        .iter()
+        .any(|s| matches!(&s.shape, egui::Shape::Mesh(mesh) if mesh.texture_id == texture))
+}
+
+#[test]
+fn the_new_sets_controls_never_paint_the_previous_frame() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_with(d.path(), false, 1400.0, true, |m| {
+        m.select_item("landscape/leaf.png");
+    });
+    let leaf = paint_set_frame(&mut h, "landscape/leaf");
     h.get_by_label("rock01.png").click();
     h.run_steps(3);
     let (m, state) = h.state_mut();
@@ -143,8 +149,34 @@ fn the_new_sets_controls_never_paint_the_previous_frame() {
     h.step();
     h.get_by_label(FRAME_LABEL);
     assert!(
-        !paints_leaf(&h),
+        !paints_frame(&h, leaf),
         "the viewport painted leaf's pixels under rock01's controls"
+    );
+}
+
+#[test]
+fn changing_the_target_keeps_the_same_sets_frame_while_encoding() {
+    use engine::config::Target;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(d.path(), false, 1400.0, true);
+    let rock = paint_set_frame(&mut h, "landscape/rock01");
+    let (m, state) = h.state_mut();
+    let preview = &mut state.set3d;
+    let before = preview.fp.clone().unwrap();
+    assert!(before.entry.is_some());
+    m.set_target(Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    preview.input = true;
+    preview.poll(m);
+    let after = preview.fp.as_ref().unwrap();
+    assert_eq!(after.set_key, before.set_key);
+    assert!(after.entry.is_none());
+    assert!(!preview.enc.settled());
+    h.step();
+    h.get_by_label(FRAME_LABEL);
+    assert!(
+        paints_frame(&h, rock),
+        "rock01's frame disappeared while its Vanilla preview was encoding"
     );
 }
 

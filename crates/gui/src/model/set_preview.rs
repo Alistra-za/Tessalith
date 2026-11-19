@@ -2029,7 +2029,9 @@ impl SetPreview {
             self.querying = None;
             self.loading = None;
             self.on_screen = None;
-            self.v3.set_content(None, false);
+            if self.fp.as_ref().is_none_or(|old| &old.set_key != key) {
+                self.v3.set_content(None, false);
+            }
         }
         self.entry = fp.entry.as_ref().map(|e| entry_node(e).to_value());
         self.enc.sync(m, fp.members.clone(), now, d.set);
