@@ -4644,7 +4644,8 @@ impl AppModel {
             );
             return Ok(());
         }
-        // `RemoveSlotKey` never reaches the borrow arm above: it plans nothing, as `FromSet` on an unshared slot.
+        // Removing a slot key can uncover a record-derived normal used by the engine.
+        let replan = matches!(cmd, SlotCommand::RemoveSlotKey);
         let v = match cmd {
             SlotCommand::FromSet | SlotCommand::RemoveSlotKey => None,
             SlotCommand::Clear => Some(Value::from("")),
@@ -4658,7 +4659,7 @@ impl AppModel {
             }
         };
         let id = set.to_string();
-        self.edit_docs(&format!("Change {key}"), None, false, move |_, d| {
+        self.edit_docs(&format!("Change {key}"), None, replan, move |_, d| {
             d.set_value(&id, &key, v)
         });
         Ok(())

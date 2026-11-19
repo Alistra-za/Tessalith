@@ -861,13 +861,13 @@ fn chain_borrows(m: &AppModel) -> Vec<Option<String>> {
 
 /// Clicks `button` on moss's editor and checks ruling 3b-W1: the borrow lines are byte-identical to `before`'s, one
 /// Undo step, the row shows the shared file with no link or clear left, and the plan's borrowed normals are the
-/// model's (the action needs no plan).
+/// model's after the edit settles.
 fn click_and_check_the_borrows_stay(mut m: AppModel, before: &str, button: &str) {
     select_set(&mut m, MOSS);
     let mut h = harness(m);
     let steps = h.state().history.undo.len();
     h.get_by_label(button).click();
-    h.run();
+    h.step();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
     let m = h.state();
@@ -2451,6 +2451,161 @@ const LAYOUTS: &[Layout] = &[
 ];
 
 const CONSUMER: &str = "textures/c/con";
+
+fn check_renamed_borrow(layout: &Layout, lender: &str, mod_root: &str, excluded: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), layout);
+    m.edit_docs("Borrow", None, true, |_, s| {
+        s.set_borrow(CONSUMER, layout.slot, Some(lender))
+    });
+    m.set_group_excluded("Consumer", false).unwrap();
+    let root = m.export_root().join(mod_root);
+    let written = layout.real.unwrap();
+    if excluded {
+        m.move_to_group(
+            &[lender.to_string()],
+            sdc_gui::model::set_groups::GroupTarget::New("Lender".into()),
+        )
+        .unwrap();
+        m.set_group_excluded("Lender", true).unwrap();
+        bc1_dds(&root.join(written));
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.export_group("Consumer");
+    if m.review.is_some() {
+        m.export_from_review();
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let path = pgp_json_path(&m);
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{e}: {:?}", m.export.notes));
+    let doc: Value = serde_json::from_slice(&bytes).unwrap();
+    let slot = disk_set(&doc, r"c\con.dds")[format!("slot{}", layout.slot)]
+        .as_str()
+        .unwrap();
+    assert!(root.join(slot).is_file(), "JSON names missing file {slot}");
+    assert_eq!(slot, written);
+    if layout.slot == 7 {
+        let own = disk_set(&doc, r"r\rock.dds")["slot7"].as_str().unwrap();
+        assert!(
+            root.join(own).is_file(),
+            "lender's slot7 names missing file {own}"
+        );
+        assert_eq!(own, written);
+    }
+    if excluded {
+        std::fs::rename(root.join(slot), root.join(layout.invented[0])).unwrap();
+        m.set_json_name("missing");
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let (entry, notes) = exported_entry(&mut m, r"c\con.dds");
+        assert!(entry.is_none(), "{entry:?}");
+        assert!(
+            notes.contains("not in JSON: textures/c/con (not exported yet)"),
+            "{notes}"
+        );
+        assert!(
+            notes.contains("not in JSON: textures/r/rock (not exported yet)"),
+            "{notes}"
+        );
+    }
+}
+
+#[test]
+fn renamed_borrow_writes_the_mapped_fuzz_jobs_filename() {
+    let fuzz = LAYOUTS.iter().find(|l| l.out_name == "rock_f.dds").unwrap();
+    check_renamed_borrow(fuzz, "textures/r/rock", "", false);
+}
+
+#[test]
+fn renamed_borrow_checks_the_excluded_fuzz_jobs_exact_unicode_path() {
+    let fuzz = LAYOUTS.iter().find(|l| l.out_name == "rock_f.dds").unwrap();
+    let layout = Layout {
+        toml: "[[sets]]\nid = \"textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"R\"\n\
+               slot7 = \"textures/İ/rock_fuzz.dds\"\n",
+        real: Some(r"textures\İ\rock_f.dds"),
+        invented: &[r"textures\İ\rock_fuzz.dds"],
+        ..*fuzz
+    };
+    check_renamed_borrow(&layout, "textures/r/rock", "", true);
+}
+
+#[test]
+fn renamed_borrow_writes_the_game_location_of_a_remapped_height() {
+    let layout = Layout {
+        files: &["mod_a/textures/r/rock_height.png"],
+        toml: "[[sets]]\nid = \"mod_a/textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"R\"\n\
+               slot4 = \"textures/z/stone_p.dds\"\n",
+        subtypes: &[("mod_a/textures/r/rock_height.png", Subtype::Height)],
+        slot: 4,
+        real: Some(r"textures\z\stone_p.dds"),
+        ..LAYOUTS[0]
+    };
+    check_renamed_borrow(&layout, "mod_a/textures/r/rock", "mod_a", false);
+}
+
+#[test]
+fn renamed_borrow_without_a_game_location_checks_the_path_the_game_reads() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["arch/rock_p.png", "textures/n/leaf_g.png"],
+        toml: "[[sets]]\nid = \"arch/rock\"\noutput_name = \"stone\"\n\
+               [[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\n[sets.borrow]\nslot4 = \"arch/rock\"\n",
+        subtypes: &[("arch/rock_p.png", Subtype::Height), ("textures/n/leaf_g.png", Subtype::PbrEmissive)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    m.set_group_excluded("Consumer", false).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
+    assert!(
+        m.export_root().join("arch/stone_p.dds").is_file(),
+        "{notes}"
+    );
+    assert!(entry.is_none(), "file outside textures admitted {entry:?}");
+    let textures = m.export_root().join("textures");
+    bc1_dds(&textures.join("arch/stone_p.dds"));
+    let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
+    let entry = entry.expect(&notes);
+    assert!(textures.join(entry["slot4"].as_str().unwrap()).is_file());
+}
+
+#[test]
+fn unlink_replans_the_record_normal_before_export() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["textures/n/leaf_p.png", "textures/r/rock_n.png"],
+        toml: "[[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"L\"\n\
+               slot2 = \"textures/r/rock_n.dds\"\n[[sets]]\nid = \"textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"2\"\nedid = \"R\"\n\
+               slot2 = \"textures/r/rock_n.dds\"\n",
+        subtypes: &[("textures/n/leaf_p.png", Subtype::Height), ("textures/r/rock_n.png", Subtype::Normal)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    m.decide(
+        "textures/r/rock_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    m.set_slot_command(
+        REC_LEAF,
+        2,
+        SlotCommand::Path(r"textures\other\x_n.dds".into()),
+    )
+    .unwrap();
+    m.add_cs_block(REC_LEAF, Kind::Txst);
+    m.set_cs_statics(REC_LEAF, Statics::Always);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(m.inputs_settled() && !borrowed_normal(&m).contains_key(REC_LEAF));
+    select_set(&mut m, REC_LEAF);
+    let mut h = harness(m);
+    h.get_by_label("Unlink Normal _n").click();
+    h.step();
+    let m = h.state_mut();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(borrowed_normal(m)[REC_LEAF], "textures/r/rock");
+    assert!(m.inputs_settled(), "Unlink left the installed plan stale");
+    let (entry, notes) = exported_entry(m, r"n\leaf.dds");
+    assert_eq!(entry.expect(&notes)["slot2"], r"textures\r\rock_n.dds");
+}
 
 /// `layout` opened as the app opens a folder, with a PBR consumer `textures/c/con` (an albedo) in an excluded group,
 /// so it writes an entry but no file and blocks nothing.
