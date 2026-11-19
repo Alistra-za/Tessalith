@@ -385,6 +385,25 @@ pub(crate) struct ViewKey {
     scope: u64,
 }
 
+/// Ruling 3b-F24: everything the From another set rows' settled check (`AppModel::settled_wait`) reads, so a cached
+/// answer is reused only while none of it changed. `ViewKey` alone misses the mesh evidence and `sdc.toml`.
+#[derive(Clone, PartialEq)]
+pub(crate) struct PickKey {
+    /// The views and what they read: the items (a landed plan), `inputs_rev` (the stored last inputs), the
+    /// sets-document revision, the root, the output folder, the target, the scan and the export scope.
+    view: ViewKey,
+    /// The plan generation, bumped by every `replan`.
+    generation: u64,
+    /// `sdc.toml`'s revision (`ProjectDoc::rev`; a new project has another): `[files]` pins and aliases, `[export]`.
+    project: Option<u64>,
+    /// `evidence_rev`: the Tree_Anim and known-path scan evidence.
+    evidence: u64,
+    /// `mesh_rev`: the mesh votes, mesh alpha and grass diffuses the plan request carries.
+    mesh: u64,
+    /// `plan_failed`.
+    plan_failed: bool,
+}
+
 /// A click or key's action that waits a frame for a text field to commit (Note FC8).
 pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 
@@ -459,6 +478,9 @@ pub struct AppModel {
     pub mesh_tree_anim: std::collections::BTreeMap<String, bool>,
     /// Bumped whenever `mesh_tree_anim` or `known` is replaced (DECISIONS AG109); part of `json_key`.
     pub evidence_rev: u64,
+    /// Ruling 3b-F24: bumped when a scan-database read replaces `mesh_votes`, `mesh_alpha`, `gras_diffuses` or
+    /// `gras_all_diffuses` with other values (`put_mesh_evidence`); part of `PickKey`.
+    mesh_rev: u64,
     /// Complex grass design §5: the GRAS diffuses of the scan (`engine::grass::path_key` keys), read with the mesh
     /// evidence; sent as `BatchRequest::gras_diffuses`.
     pub gras_diffuses: std::collections::BTreeSet<String>,
@@ -536,6 +558,8 @@ pub struct AppModel {
     item_index: std::collections::HashMap<String, usize>,
     /// The cached set views and export blocks (DECISIONS Note Y7).
     pub(crate) views: std::cell::RefCell<ViewCache>,
+    /// Ruling 3b-F24: the From another set rows' settled check (`settled_wait`) and the key it was computed under.
+    pick_cache: std::cell::RefCell<Option<(PickKey, Option<&'static str>)>>,
     /// K3: `review_json` for a view key, and when it was read; cleared with `review`.
     review_json_cache: std::cell::RefCell<Option<(ViewKey, Instant, Vec<review::JsonLine>)>>,
     /// The rename dialog's last plan, for drawing only (Note FA).
@@ -840,6 +864,7 @@ impl AppModel {
             mesh_alpha: Default::default(),
             mesh_tree_anim: Default::default(),
             evidence_rev: 0,
+            mesh_rev: 0,
             gras_diffuses: Default::default(),
             gras_all_diffuses: Default::default(),
             known: Default::default(),
@@ -878,6 +903,7 @@ impl AppModel {
             inputs_rev: 0,
             item_index: Default::default(),
             views: Default::default(),
+            pick_cache: Default::default(),
             review_json_cache: Default::default(),
             rename_cache: Default::default(),
             sets: vec![],
@@ -1359,14 +1385,8 @@ impl AppModel {
         let changed = match result {
             Ok(e) => {
                 self.scan_db_error = None;
-                let changed = e.votes != self.mesh_votes
-                    || e.alpha != self.mesh_alpha
-                    || e.gras != self.gras_diffuses
-                    || e.gras_all != self.gras_all_diffuses;
-                (self.mesh_votes, self.mesh_alpha, self.gras_diffuses) = (e.votes, e.alpha, e.gras);
-                self.gras_all_diffuses = e.gras_all;
                 self.set_tree_anim(e.tree_anim);
-                changed
+                self.put_mesh_evidence(e.votes, e.alpha, e.gras, e.gras_all)
             }
             Err(e) => {
                 self.scan_db_warning(format!(
@@ -2137,13 +2157,55 @@ impl AppModel {
     /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
     /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
     /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it.
+    /// Uncached: the click re-checks with it (`member_game_path`); the menu rows read `pick_waits_cached`.
     pub fn pick_waits(&self) -> Option<&'static str> {
-        if self.full_plan_pending() || self.inputs_unsettled() {
+        if self.full_plan_pending() {
+            return Some(sets::PICK_PLANNING);
+        }
+        self.settled_wait()
+    }
+
+    /// `pick_waits` once no plan or scan read is out: the inputs comparison (it builds `EngineInputs`) and the failed
+    /// flag.
+    fn settled_wait(&self) -> Option<&'static str> {
+        #[cfg(feature = "test-hooks")]
+        sets::count_settled_check();
+        if self.inputs_unsettled() {
             Some(sets::PICK_PLANNING)
         } else if self.plan_failed {
             Some(sets::PICK_PLAN_FAILED)
         } else {
             None
+        }
+    }
+
+    /// Ruling 3b-F24: `pick_waits` for the From another set rows, drawn every frame a slot menu is open. A running plan
+    /// or scan read is checked live; the rest (`settled_wait`) is computed once per `PickKey`, so a frame where nothing
+    /// changed builds no `EngineInputs`, scans no set and clones no evidence.
+    pub fn pick_waits_cached(&self) -> Option<&'static str> {
+        if self.full_plan_pending() {
+            return Some(sets::PICK_PLANNING);
+        }
+        let key = self.pick_key();
+        if let Some((k, wait)) = &*self.pick_cache.borrow() {
+            if *k == key {
+                return *wait;
+            }
+        }
+        let wait = self.settled_wait();
+        *self.pick_cache.borrow_mut() = Some((key, wait));
+        wait
+    }
+
+    /// Ruling 3b-F24: the key of `pick_waits_cached` (`PickKey` lists what each field covers).
+    fn pick_key(&self) -> PickKey {
+        PickKey {
+            view: self.view_key(),
+            generation: self.generation,
+            project: self.project.as_ref().map(ProjectDoc::rev),
+            evidence: self.evidence_rev,
+            mesh: self.mesh_rev,
+            plan_failed: self.plan_failed,
         }
     }
 
@@ -3204,6 +3266,41 @@ impl AppModel {
             }
         }
         Some(changed)
+    }
+
+    /// Replace the mesh evidence the plan request carries (the votes, the mesh alpha and the two grass sets); true when
+    /// any of it changed, which bumps `mesh_rev` (ruling 3b-F24: the From another set rows' cache key).
+    fn put_mesh_evidence(
+        &mut self,
+        votes: std::collections::BTreeMap<String, Vec<engine::shader::Shader>>,
+        alpha: std::collections::BTreeMap<String, Vec<engine::shader::MeshAlpha>>,
+        gras: std::collections::BTreeSet<String>,
+        gras_all: std::collections::BTreeSet<String>,
+    ) -> bool {
+        let changed = votes != self.mesh_votes
+            || alpha != self.mesh_alpha
+            || gras != self.gras_diffuses
+            || gras_all != self.gras_all_diffuses;
+        (self.mesh_votes, self.mesh_alpha) = (votes, alpha);
+        (self.gras_diffuses, self.gras_all_diffuses) = (gras, gras_all);
+        if changed {
+            self.mesh_rev += 1;
+        }
+        changed
+    }
+
+    /// Tests: replace the mesh votes as a scan-database read does (`put_mesh_evidence`), the rest kept.
+    #[cfg(feature = "test-hooks")]
+    pub fn put_mesh_votes(
+        &mut self,
+        votes: std::collections::BTreeMap<String, Vec<engine::shader::Shader>>,
+    ) -> bool {
+        let (alpha, gras, all) = (
+            self.mesh_alpha.clone(),
+            self.gras_diffuses.clone(),
+            self.gras_all_diffuses.clone(),
+        );
+        self.put_mesh_evidence(votes, alpha, gras, all)
     }
 
     /// Replace the Tree_Anim scan evidence; the JSON editor's cache sees it (DECISIONS AG109).

@@ -2071,10 +2071,136 @@ fn height_links(m: &AppModel) -> usize {
         .count()
 }
 
-/// Ruling 3b-F21: with an Also tick on CS (where the output folder is made of the export configuration and the export
-/// folder), the From another set list reads both once per menu call (`output_roots`) beside the settled check
-/// (`pick_waits`), and nothing per listed member or per item; the link index reads them once beside its views. While
-/// a plan is out the list adds no read beyond the views lookups and builds no export inputs.
+/// Ruling 3b-F24: a slot menu kept open on a settled plan, with nothing changing, builds the export inputs behind its
+/// settled check once in total, not once per frame (46d55327's menu built them on every frame).
+#[test]
+fn an_open_slot_menu_builds_the_settled_check_once() {
+    use sdc_gui::model::sets::engine_input_builds;
+    let d = tempfile::tempdir().unwrap();
+    let m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("a_p.png", [128, 128, 128], Subtype::Height),
+            ("b_p.png", [128, 128, 128], Subtype::Height),
+            ("c_p.png", [128, 128, 128], Subtype::Height),
+        ],
+    );
+    let _ = views(&m);
+    let before = engine_input_builds();
+    for _ in 0..20 {
+        assert!(height_links(&m) >= 3, "premise: three heights listed");
+    }
+    let builds = engine_input_builds() - before;
+    assert!(
+        builds <= 1,
+        "twenty frames of an open menu built the export inputs {builds} times"
+    );
+}
+
+/// Ruling 3b-F24: the rows' settled check is built again after a change of each field of its key, once, and then
+/// served from the cache: one row per field (`PickKey`). A frame served from the cache builds no export inputs.
+#[test]
+fn the_settled_check_is_built_again_after_each_change_of_its_key() {
+    use sdc_gui::model::sets::{engine_input_builds, settled_check_builds};
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("a_p.png", [128, 128, 128], Subtype::Height),
+            ("b_p.png", [128, 128, 128], Subtype::Height),
+            ("c_p.png", [128, 128, 128], Subtype::Height),
+        ],
+    );
+    // Five frames of an open menu: how many settled checks they built.
+    let frames = |m: &AppModel| {
+        let before = settled_check_builds();
+        for _ in 0..5 {
+            assert!(height_links(m) >= 3, "premise: three heights listed");
+        }
+        settled_check_builds() - before
+    };
+    assert_eq!(frames(&m), 1, "the first open");
+    let inputs = engine_input_builds();
+    assert_eq!(frames(&m), 0, "nothing changed");
+    assert_eq!(
+        engine_input_builds(),
+        inputs,
+        "a cached frame builds no inputs"
+    );
+    // The sets-document revision: a JSON key that plans nothing.
+    m.set_json_value(LEAF, "emissive", Some(json!(true)));
+    assert!(!m.full_plan_pending(), "premise: no plan");
+    assert_eq!(frames(&m), 1, "the sets document");
+    // `evidence_rev`.
+    m.set_tree_anim([("textures/arch/leaf".to_string(), true)].into());
+    assert_eq!(frames(&m), 1, "the scan evidence");
+    // `mesh_rev`: a scan-database read with other mesh votes.
+    assert!(m.put_mesh_votes([("textures/arch/x".to_string(), vec![])].into()));
+    assert_eq!(frames(&m), 1, "the mesh evidence");
+    // The generation and the stored last inputs: a plan runs and lands.
+    m.set_json_value(LEAF, "rename", Some(json!(r"textures\arch\leaf2")));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(frames(&m), 1, "a landed plan");
+    // `plan_failed`: the next plan fails for good.
+    m.hold_plan_results = true;
+    m.set_json_value(LEAF, "rename", Some(json!(r"textures\arch\leaf3")));
+    m.handle_held(WorkerMsg::Planned {
+        generation: m.generation(),
+        result: Err(PlanFailure {
+            message: "the plan failed".into(),
+            config: false,
+        }),
+    });
+    m.dialog = None;
+    assert!(!m.full_plan_pending(), "premise: no plan");
+    assert_eq!(frames(&m), 1, "a failed plan");
+    // `sdc.toml`'s revision.
+    m.blame_sdc_toml_while_retrying("sdc.toml: test");
+    assert_eq!(frames(&m), 1, "sdc.toml");
+}
+
+/// Ruling 3b-F24: the click checks the plan again from scratch, never through the rows' cache. A change the cache key
+/// does not see (the grass evidence written straight into the model, which only a test can do) leaves the rows as
+/// they were, and the click still refuses the pick and stores nothing.
+#[test]
+fn the_click_checks_the_plan_again_without_the_rows_cache() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(d.path(), &[("a_p.png", [128, 128, 128], Subtype::Height)]);
+    let pick = MenuAction::SlotLink {
+        set: LEAF.into(),
+        n: 4,
+        item: "arch/a_p.png".into(),
+    };
+    let row = |m: &AppModel| {
+        m.slot_menu(LEAF, SlotKind::Height)
+            .into_iter()
+            .find(|e| e.action == pick)
+            .expect("the menu lists arch/a_p.png")
+    };
+    assert_eq!(row(&m).disabled, None, "premise: settled");
+    m.gras_diffuses.insert("textures/arch/x.dds".to_string());
+    assert_eq!(
+        row(&m).disabled,
+        None,
+        "premise: the rows' cache does not see a direct write"
+    );
+    assert!(m.run_menu(pick.clone()).is_some(), "the click checks again");
+    assert_eq!(
+        views(&m)
+            .iter()
+            .find(|v| v.id == LEAF)
+            .and_then(|v| v.settings.get("slot4").cloned()),
+        None,
+        "nothing is stored"
+    );
+}
+
+/// Rulings 3b-F21 and 3b-F24: with an Also tick on CS (where the output folder is made of the export configuration and
+/// the export folder), a warm menu call with members reads each 4 times: the two views lookups a menu with none listed
+/// makes, the rows' cache key (its views key) and `output_roots`; nothing per listed member or per item. The uncached
+/// settled check reads the same on a bigger project, and the link index reads them once beside its views. While a plan
+/// is out the list adds no read beyond the views lookups and builds no export inputs.
 #[test]
 fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
     use sdc_gui::model::sets::engine_input_builds;
@@ -2093,14 +2219,17 @@ fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
     let settled = reads_of(|| {
         assert_eq!(m.pick_waits(), None, "premise: settled");
     });
+    // The first frame fills the rows' cache (ruling 3b-F24); the next is the warm call.
+    let _ = height_links(&m);
     let mut listed = 0;
     let menu = reads_of(|| listed = height_links(&m));
     assert!(listed >= 3, "premise: three heights listed");
     assert_eq!(
         menu,
-        (none_listed.0 + settled.0 + 1, none_listed.1 + settled.1 + 1),
-        "a menu with members reads the folders once beside the settled check"
+        (none_listed.0 + 2, none_listed.1 + 2),
+        "a warm menu with members: its cache key and `output_roots` beside the views lookups"
     );
+    assert_eq!(menu, (4, 4), "the measured warm count");
     let views_alone = reads_of(|| {
         let _ = views(&m);
     });
@@ -2112,6 +2241,7 @@ fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
     let d2 = tempfile::tempdir().unwrap();
     let big = ticked_heights(d2.path(), true);
     assert!(big.items.len() > m.items.len() + 4, "premise: more items");
+    let _ = height_links(&big);
     let mut big_listed = 0;
     let big_menu = reads_of(|| big_listed = height_links(&big));
     assert!(big_listed >= 6, "premise: six heights listed");

@@ -1204,6 +1204,24 @@ pub(crate) fn count_root_read(config: bool) {
     });
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Test probe (ruling 3b-F24): how many times the From another set settled check (`settled_wait`) ran.
+    static SETTLED_CHECKS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Count one run of the settled check.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn count_settled_check() {
+    SETTLED_CHECKS.with(|c| c.set(c.get() + 1));
+}
+
+/// Tests: how many times the settled check behind the From another set rows and click ran on this thread.
+#[cfg(feature = "test-hooks")]
+pub fn settled_check_builds() -> u64 {
+    SETTLED_CHECKS.with(std::cell::Cell::get)
+}
+
 /// Tests: (export configuration reads, export folder reads) on this thread so far.
 #[cfg(feature = "test-hooks")]
 pub fn root_reads() -> (u64, u64) {

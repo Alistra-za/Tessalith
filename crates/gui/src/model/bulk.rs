@@ -1710,8 +1710,11 @@ impl AppModel {
             .collect();
         // Ruling 3b-F21: a pick stores the path the settled plan writes. While the plan is not settled
         // (`pick_waits`) every row is off with one reason and no member's path is read; else the folders are read once
-        // per menu (`output_roots`), never once per listed member.
-        let wait = (!members.is_empty()).then(|| self.pick_waits()).flatten();
+        // per menu (`output_roots`), never once per listed member. Ruling 3b-F24: the rows read the cached check, so
+        // an open menu does no project-wide work on a frame where nothing changed; the click checks again uncached.
+        let wait = (!members.is_empty())
+            .then(|| self.pick_waits_cached())
+            .flatten();
         let roots = (!members.is_empty() && wait.is_none()).then(|| output_roots(self));
         let links: Vec<MenuEntry> = members
             .into_iter()
