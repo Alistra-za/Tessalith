@@ -2,18 +2,6 @@
 
 Verified against egui 0.37.0 source with `cargo check`. If `Cargo.toml` pins another version, check these names with `cargo check` before trusting them.
 
-## On egui 0.36.x
-
-Read `Cargo.toml` first. Three names in this file and in the skills that use it do not exist in egui 0.36.2 (checked against its source; `motion.rs` below uses the first and third, fails `cargo check` there on both, and compiles once they are swapped):
-
-| Written for 0.37 | On 0.36.x write | Why |
-|---|---|---|
-| `Id::unique("name")` | `Id::new("name")` | `Id::unique` is new in 0.37. `Id::new` is not deprecated on 0.36. |
-| `ui.scope_id()` | `ui.id()` | Renamed in 0.37. `Ui::id` is not deprecated on 0.36. |
-| `ctx.transform_layer_shapes_after_rounding(layer, xf)` | `ctx.transform_layer_shapes(layer, xf)` | The after-rounding variant is new in 0.37. |
-
-On 0.36.x, `Id::new` and `ui.id()` are correct: never report them as deprecated in a review, audit or plan. Everything else named in this file (`App::ui`, `Panel`, `global_style_mut`, `with_visual_transform`, `set_transform_layer`, `multiply_opacity`, the `animate_*` calls, `has_touch_screen`) exists in both versions.
-
 Contents: API facts · CSS-to-egui translation · Curves · Springs · Helpers (`motion.rs`) · Usage patterns
 
 ## API facts that change how you write motion

@@ -875,3 +875,60 @@ pub fn dds_pbr_sets(dir: &Path, sets: &[&str]) -> PathBuf {
     }
     dir.join("textures")
 }
+
+/// The filled rects of one shape (nested shapes flattened), each with its fill's alpha.
+pub fn fill_rects_of(s: &eframe::egui::Shape, out: &mut Vec<(eframe::egui::Rect, u8)>) {
+    use eframe::egui::Shape;
+    match s {
+        Shape::Vec(v) => v.iter().for_each(|x| fill_rects_of(x, out)),
+        Shape::Rect(r) => out.push((r.rect, r.fill.a())),
+        _ => {}
+    }
+}
+
+/// Every filled rect painted in `shapes`, with its fill's alpha.
+pub fn filled_rects(
+    shapes: &[eframe::egui::epaint::ClippedShape],
+) -> Vec<(eframe::egui::Rect, u8)> {
+    let mut all = vec![];
+    for s in shapes {
+        fill_rects_of(&s.shape, &mut all);
+    }
+    all
+}
+
+/// Of `all` (filled rects, fill alpha), the ones a vertical scroll bar could be at the right edge of `c`: at most 12 px
+/// wide, at least 20 px tall, ending within 20 px of `c`'s right edge.
+pub fn bar_like(
+    all: &[(eframe::egui::Rect, u8)],
+    c: eframe::egui::Rect,
+) -> Vec<(eframe::egui::Rect, u8)> {
+    all.iter()
+        .copied()
+        .filter(|(r, _)| {
+            r.width() <= 12.0
+                && r.height() >= 20.0
+                && r.max.x <= c.max.x + 0.5
+                && r.max.x >= c.max.x - 20.0
+        })
+        .collect()
+}
+
+/// `bar_like` over what `h` painted, at the right edge of `c`, any panel. (rect, fill alpha).
+pub fn bar_rects_in<S>(
+    h: &egui_kittest::Harness<'_, S>,
+    c: eframe::egui::Rect,
+) -> Vec<(eframe::egui::Rect, u8)> {
+    bar_like(&filled_rects(&h.output().shapes), c)
+}
+
+/// The x a control may reach beside a scroll bar whose track is `track`: short of the 10 px the bar takes when hovered
+/// (`bar_width`), or, for a set card (a frame in the Sets column whose own margin is wider than the rest), short of the
+/// track itself at rest. The caller says whether the control is a set card.
+pub fn bar_clearance(is_set_card: bool, track: eframe::egui::Rect, bar_width: f32) -> f32 {
+    if is_set_card {
+        track.min.x
+    } else {
+        track.max.x - bar_width
+    }
+}
