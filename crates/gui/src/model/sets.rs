@@ -1098,15 +1098,24 @@ fn base_view(m: &AppModel, root: &Path, s: &SetItem) -> SetView {
     v.shader = s.shader.clone();
     v.set_warnings = s.warnings.clone();
     v.recipes = s.recipes.clone();
-    for mk in &s.members {
+    v.slots = own_fills(m, &s.members);
+    drop_supplied_missing_maps(m, &mut v);
+    v
+}
+
+/// A set's own slot fills, before any borrow: each slot takes the first member whose resolved sub-type fills it
+/// (`slot_of`). The set resolver lends these (`build_views`' `own_slots`), and the shared-alpha follow-on reads the
+/// same fills (Note JS7, N8-b).
+pub(super) fn own_fills(m: &AppModel, members: &[String]) -> BTreeMap<SlotKind, SlotFill> {
+    let mut slots = BTreeMap::new();
+    for mk in members {
         if let Some(slot) = m.item(mk).and_then(slot_of) {
-            v.slots
+            slots
                 .entry(slot)
                 .or_insert(SlotFill::Own { item: mk.clone() });
         }
     }
-    drop_supplied_missing_maps(m, &mut v);
-    v
+    slots
 }
 
 /// The lighting-shader slot (1-based, as `SlotKind::slot_number`) a required map of `Shader::spec` goes in, from

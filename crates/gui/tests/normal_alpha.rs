@@ -1676,3 +1676,143 @@ fn ending_a_share_leaves_the_users_data_under_another_spelling() {
         "the user's data stays"
     );
 }
+
+/// N8-b (finding 2, JN1 own-first): regular `armor/steel` borrows slot 2 from PBR `pbr/iron`, which owns `iron_n` and
+/// also borrows `pbr/gold`'s. Steel reads iron's own normal, as the set resolver fills it: `iron_n` gets `data` and is
+/// listed, `gold_n` is untouched.
+#[test]
+fn an_own_first_chain_writes_the_file_the_regular_set_reads() {
+    use sdc_gui::model::sets::{SlotFill, SlotKind};
+    const GOLD_N: &str = "pbr/gold_n.png";
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let pbr = d.path().join("textures/pbr");
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([200u8, 160, 40]))
+        .save(pbr.join("gold.png"))
+        .unwrap();
+    bumpy_n(&pbr.join("gold_n.png"));
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(pbr.join("gold_rmaos.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("pbr/iron", 2, Some("pbr/gold"));
+        s.set_borrow("armor/steel", 2, Some("pbr/iron"));
+    });
+    settle(&mut m);
+    let views = sdc_gui::model::sets::set_views(&m);
+    let normal = |id: &str| {
+        views
+            .iter()
+            .find(|v| v.id == id)
+            .and_then(|v| v.slots.get(&SlotKind::Normal).cloned())
+    };
+    assert_eq!(
+        normal("armor/steel"),
+        Some(SlotFill::Borrowed {
+            from: "pbr/iron".into(),
+            item: IRON_N.into()
+        }),
+        "precondition: steel reads iron's own normal"
+    );
+    assert_eq!(
+        normal("pbr/iron"),
+        Some(SlotFill::Borrowed {
+            from: "pbr/gold".into(),
+            item: GOLD_N.into()
+        }),
+        "precondition: iron's own card shows its borrow"
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    assert_eq!(held(&m, GOLD_N, "alpha.policy"), None);
+}
+
+/// N8-b (finding 3): renaming the LENDER retargets the regular set's borrow to an id the running plan does not know
+/// yet, so the step cannot tell which file the borrow reads: it clears nothing. The `data` and its list entry survive
+/// the rename's step and the plan that lands after it.
+#[test]
+fn renaming_the_lender_keeps_the_shared_normals_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    m.rename_set("pbr/iron", "pbr/plate").unwrap();
+    assert!(
+        m.full_plan_pending(),
+        "precondition: the rename's plan is still out"
+    );
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "pbr/plate" && v.members.is_empty()),
+        "precondition: the new id has no files until the plan lands"
+    );
+    assert!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|e| e.id == "armor/steel"
+                && e.borrow.get(&2).map(String::as_str) == Some("pbr/plate")),
+        "precondition: the borrow follows the rename"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the rename's step keeps it"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "and its entry");
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "after the plan lands"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+}
+
+/// N8-b (review Q6): an explicit PBR owner and an explicit PBR borrower. The owner's `pbr_normal` is retyped `height`,
+/// then the borrower is picked Default before the type's plan lands. The last plan still puts the file in the Normal
+/// slot, but the document says it is a height map now: it gets no `data`.
+#[test]
+fn a_normal_retyped_before_its_plan_lands_gets_no_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    m.set_shader("pbr/iron", Some(Shader::Pbr));
+    settle(&mut m);
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "precondition: a share between PBR sets writes nothing"
+    );
+    m.set_field(IRON_N, "subtype", json!("height"));
+    assert_eq!(
+        m.item(IRON_N)
+            .and_then(|i| i.job.as_ref())
+            .map(|j| j.profile.subtype),
+        Some(Subtype::PbrNormal),
+        "precondition: the type's plan has not landed"
+    );
+    assert_eq!(
+        normal_owner(&m, "pbr/iron").as_deref(),
+        Some(IRON_N),
+        "precondition: the last plan still fills the Normal slot with it"
+    );
+    m.set_shader("armor/steel", Some(Shader::Default));
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the retyped file gets no data"
+    );
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+}

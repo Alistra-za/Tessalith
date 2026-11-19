@@ -8,7 +8,8 @@
 //! longer counts (the edit stays files-only); a user's Data pick takes the key off (N-34). What a step cannot see (a
 //! set's automatic shader and its Normal-slot member are the last plan's) is Task 9's Note row.
 use super::normal_follow::holders;
-use super::sets::{locked_items, views, SlotFill, SlotKind};
+use super::normal_follow::tangent;
+use super::sets::{locked_items, own_fills, views, SlotFill, SlotKind};
 use super::AppModel;
 use crate::project::ProjectDoc;
 use crate::sets_doc::SetsDoc;
@@ -19,19 +20,22 @@ use engine::shader::{Shader, ShaderOrigin};
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-/// From the views (rebuilt when the sets document changed) and the last plan, by folded set id: each set's automatic
-/// shader (a chosen one is read from the documents), its own Normal-slot file, the files in locked slots, the files
-/// with no job or a kept DDS (`inert`), the files the last plan planned `data` (review 1 Minor 7), the files whose
-/// analysis is known and whose alpha does not vary (`flat`, N-39), and the sets whose view holds no file (`empty`,
-/// filled only while no plan is out: N-40).
+/// From the views (rebuilt when the sets document changed) and the last plan, by folded set id: the sets shown
+/// (`known`), each set's automatic shader (a chosen one is read from the documents), its own Normal-slot file before
+/// any borrow (`own_n`, the set resolver's own fills, N8-b), the files in locked slots, the files with no job or a kept
+/// DDS (`inert`), the files the last plan planned `data` (review 1 Minor 7), the files whose analysis is known and
+/// whose alpha does not vary (`flat`, N-39), the sets whose view holds no file (`memberless`), and those of them read
+/// while no plan is out (`empty`, N-40).
 #[derive(Default)]
 pub(super) struct Facts {
+    known: BTreeSet<String>,
     auto: BTreeMap<String, Shader>,
     own_n: BTreeMap<String, String>,
     locked: BTreeSet<String>,
     inert: BTreeSet<String>,
     planned_data: BTreeSet<String>,
     flat: BTreeSet<String>,
+    memberless: BTreeSet<String>,
     empty: BTreeSet<String>,
 }
 
@@ -46,6 +50,10 @@ pub(super) fn facts(m: &AppModel) -> Facts {
     let plan_out = m.full_plan_pending();
     for v in views(m).iter() {
         let id = fold_id(&v.id);
+        f.known.insert(id.clone());
+        if v.members.is_empty() {
+            f.memberless.insert(id.clone());
+        }
         if v.members.is_empty() && !plan_out {
             f.empty.insert(id.clone());
         }
@@ -56,7 +64,9 @@ pub(super) fn facts(m: &AppModel) -> Facts {
         {
             f.auto.insert(id.clone(), p.shader);
         }
-        if let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Normal) {
+        // N8-b: the set's own file, as the set resolver lends it (own-first, JN1), not the displayed slot, which shows
+        // a borrow line in place of it.
+        if let Some(SlotFill::Own { item }) = own_fills(m, &v.members).get(&SlotKind::Normal) {
             match m
                 .item(item)
                 .filter(|i| !i.kept_dds())
@@ -80,17 +90,28 @@ pub(super) fn facts(m: &AppModel) -> Facts {
     f
 }
 
+/// `shared_into_regular`'s answer.
+#[derive(Default)]
+pub(super) struct Share {
+    /// The owner normals a regular set shares.
+    pub out: BTreeSet<String>,
+    /// The owner normals of the pairs the step cannot judge (a set with no shader yet, a borrower with no files yet).
+    pub unsure: BTreeSet<String>,
+    /// A borrow reaches a set the step cannot read (no files yet, not gone), so which file it reads is not known: no
+    /// listed key can be cleared in the step (N8-b).
+    pub blind: bool,
+}
+
 /// The owner normals a regular set shares, with the borrows and chosen shaders of `s` as they are now (a chosen shader
 /// wins over `f`'s automatic one), and the owner normals of the pairs where a set has no shader yet (`unsure`, review 4
-/// Important 1). A borrower in `gone` (a set whose files are all gone) reads no texture and shares nothing.
+/// Important 1). A borrower in `gone` (a set whose files are all gone) reads no texture and shares nothing. N8-b: a set
+/// with no files that is not gone (New set, Duplicate into, a rename's new id: the plan has not given it its files) is
+/// not known in the step: as a borrower its pair is `unsure`; on the way to the owner it makes the step `blind`.
 // shortcut: a set with no shader until the next plan (New set, Duplicate into, a rename's `retarget_auto`, a set sent
 // back to Auto, a set with no card) makes its pairs `unsure` (spec limit 4): that owner normal is neither written nor
 // cleared in the step, and other keys are unaffected; after the plan, Task 9's row or a leftover `data` shows the result.
-pub(super) fn shared_into_regular(
-    f: &Facts,
-    s: &SetsDoc,
-    gone: &BTreeSet<String>,
-) -> (BTreeSet<String>, BTreeSet<String>) {
+// A `blind` step clears no listed key at all, since the key the borrow reads is not known.
+pub(super) fn shared_into_regular(f: &Facts, s: &SetsDoc, gone: &BTreeSet<String>) -> Share {
     let mut borrows = BTreeMap::new();
     let mut chosen = BTreeMap::new();
     for e in s.entries().iter() {
@@ -103,38 +124,50 @@ pub(super) fn shared_into_regular(
         }
     }
     let shader = |id: &str| chosen.get(id).copied().or_else(|| f.auto.get(id).copied());
-    let mut out = BTreeSet::new();
-    let mut unsure = BTreeSet::new();
+    let unread = |id: &str| f.memberless.contains(id) && !gone.contains(id);
+    let mut sh = Share::default();
     for (b, first) in &borrows {
         if gone.contains(b) {
             continue;
         }
-        // JN1: follow the chain to the set that owns the file; a lender with its own Normal-slot file lends its own.
+        // JN1, walked as the set resolver walks it (`entry_view`): a lender with its own Normal-slot file lends its
+        // own; a set with no card, or a loop, ends the chain with nothing.
         let mut cur = first.clone();
         let mut seen = BTreeSet::from([b.clone()]);
-        while !f.own_n.contains_key(&cur) {
-            let Some(next) = borrows.get(&cur) else {
-                break;
-            };
-            if !seen.insert(cur.clone()) {
-                break;
+        let owner = loop {
+            if !seen.insert(cur.clone()) || !f.known.contains(&cur) {
+                break None;
             }
+            if unread(&cur) {
+                sh.blind = true;
+                break None;
+            }
+            if let Some(n) = f.own_n.get(&cur) {
+                break Some((cur, n));
+            }
+            let Some(next) = borrows.get(&cur) else {
+                break None;
+            };
             cur = next.clone();
-        }
+        };
         // A chain that reaches no Normal-slot file shares nothing, whatever the shaders: it is read first.
-        let Some(n) = f.own_n.get(&cur) else {
+        let Some((cur, n)) = owner else {
             continue;
         };
         let (Some(bs), Some(os)) = (shader(b), shader(&cur)) else {
-            unsure.insert(n.clone());
+            sh.unsure.insert(n.clone());
             continue;
         };
+        if !f.known.contains(b) || unread(b) {
+            sh.unsure.insert(n.clone());
+            continue;
+        }
         if bs.is_pbr_or_advanced_skin() || !os.is_pbr_or_advanced_skin() {
             continue;
         }
-        out.insert(n.clone());
+        sh.out.insert(n.clone());
     }
-    (out, unsure)
+    sh
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
@@ -157,7 +190,7 @@ pub(super) fn before(m: &AppModel) -> Option<Before> {
         .map(|k| (k.clone(), p.file_value(k, "subtype")))
         .collect();
     Some(Before {
-        shared: shared_into_regular(&f, s, &f.empty).0,
+        shared: shared_into_regular(&f, s, &f.empty).out,
         sub,
         empty: f.empty.clone(),
     })
@@ -213,19 +246,30 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
     // creates or renames has no view before it, so it is `unsure` instead).
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let (now, unsure) = shared_into_regular(f, s, &gone);
+    let sh = shared_into_regular(f, s, &gone);
+    let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let start = s.auto_data();
     // N8-a: alpha is read as Task 6 reads it, from every `[files]` table that matches the file (read once per run).
     let keys = p.file_keys();
     let alpha = |k: &str| holders(p, &keys, k, "alpha.policy");
+    // N8-b: the document wins over the last plan: a file a `[files]` table types as anything but a tangent-space
+    // normal is not an owner normal, whatever slot the last plan put it in.
+    let typed_normal = |k: &str| {
+        holders(p, &keys, k, "subtype").iter().all(|h| {
+            p.file_value(h, "subtype")
+                .and_then(|v| serde_json::from_value::<Subtype>(v).ok())
+                .is_some_and(tangent)
+        })
+    };
     for k in now.difference(&b.shared) {
         // N-39: a known alpha that does not vary has nothing to keep; an unknown one is kept (the safe side).
         let free = !f.inert.contains(k)
             && !f.flat.contains(k)
             && !f.locked.contains(k)
             && alpha(k).is_empty()
-            && writes_own_table(&keys, k);
+            && writes_own_table(&keys, k)
+            && typed_normal(k);
         if free && !already_data(f, b.sub.get(k), p, k) {
             c.write.push(k.clone());
         }
@@ -237,7 +281,8 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
         let ours = matches!(h.as_slice(), [one] if full_name(one, k))
             && p.file_value(k, "alpha.policy") == data
             && !f.locked.contains(k);
-        if ours && !now.contains(k) && !unsure.contains(k) {
+        // N8-b: in a `blind` step a borrow may read any of them.
+        if ours && !now.contains(k) && !unsure.contains(k) && !sh.blind {
             c.clear.push(k.clone());
         }
     }
