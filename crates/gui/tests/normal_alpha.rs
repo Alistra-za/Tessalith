@@ -3236,3 +3236,48 @@ fn a_rejoin_step_drops_a_stale_entry_too() {
         "ending the share leaves the user's data"
     );
 }
+
+/// N8-v (round 5, a pin: it passes on the base): the read-back protects the tables of the intended targets' own file
+/// only. Another file's table that the user changed by hand between runs is not read back, so ending the share still
+/// clears the listed `data` and leaves the other table as the user wrote it.
+#[test]
+fn another_files_table_changed_by_hand_does_not_roll_the_step_back() {
+    use sdc_gui::model::sets::SlotCommand;
+    const OTHER: &str = "armor/other.png";
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n\n[files.'armor/other.png']\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    std::fs::write(t.join("sdc-project.toml"), LISTED_AND_BORROWED).unwrap();
+    let mut m = opened_as_the_app(t.clone(), d.path().join("export"));
+    settle(&mut m);
+    m.save().expect("saved");
+    drop(m);
+    let text = std::fs::read_to_string(t.join("sdc.toml")).unwrap();
+    let edited = text.replace(
+        "[files.'armor/other.png']\nalpha.policy = \"remove\"",
+        "[files.'armor/other.png']\nalpha.policy = \"data\"",
+    );
+    assert_ne!(edited, text, "precondition: the hand edit");
+    std::fs::write(t.join("sdc.toml"), edited).unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "the step's clear takes"
+    );
+    assert!(auto_data(&m).is_empty());
+    assert_eq!(
+        held(&m, OTHER, "alpha.policy"),
+        Some(json!("data")),
+        "the other file's table stays as the user wrote it"
+    );
+}
