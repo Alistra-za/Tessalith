@@ -379,7 +379,7 @@ fn every_allowlist_entry_names_an_audited_screen() {
     let unknown: Vec<&str> = screens.filter(|s| !SCREENS.contains(s)).collect();
     assert!(
         unknown.is_empty(),
-        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo, or a screen no longer audited; fix or delete the entry): {unknown:?}"
+        "allowlist entries in crates/gui/tests/accessible_names.rs name a screen not in SCREENS (a typo; fix the entry's screen or delete the entry): {unknown:?}"
     );
 }
 
