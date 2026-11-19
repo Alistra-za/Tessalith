@@ -577,22 +577,234 @@ fn eye_from_a_followed_normal_is_msn_and_the_way_back_is_listed() {
     }
 }
 
-/// N-17 (N6-d): Eye, then Auto: the set is PBR by its `_rmaos`, so Auto reads `pbr_normal` again; the key and its
-/// lists agree.
+/// N-17 (N6-d): Eye, then Auto: the Eye step leaves `msn` with the parked word; Auto clears once, the set is PBR by
+/// its `_rmaos`, so the recorder then follows and the key ends `pbr_normal`, listed, off `auto_pbr`.
 #[test]
 fn eye_then_auto_leaves_the_lists_agreeing_with_the_key() {
     let d = tempfile::tempdir().unwrap();
     let mut m = followed_wall(d.path());
     m.set_shader("test/wall", Some(Shader::Eye));
     settle(&mut m);
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("msn")), Some("pbr_normal".into()), false)
+    );
     m.set_shader("test/wall", None);
+    assert_eq!(facts(&m, WALL_N), (None, None, false), "Auto clears once");
     settle(&mut m);
-    let (held, word, in_auto_pbr) = facts(&m, WALL_N);
-    eprintln!("PROBE eye-auto {held:?} {word:?} {in_auto_pbr}");
-    assert!(!in_auto_pbr);
-    assert!(word.is_none() || word.as_deref() == held.as_ref().and_then(|v| v.as_str()));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
+    );
 }
 
+/// B1 (N6-i): Eye, then Auto clears the key once: a sub-type the user wrote under the extension-less `[files]` spelling
+/// is still there.
+#[test]
+fn auto_after_eye_keeps_the_users_extensionless_subtype() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.set_shader("test/wall", Some(Shader::Eye));
+    settle(&mut m);
+    m.edit_docs("user glow", None, true, |p, _| {
+        p.set_file_value("test/wall_n", "subtype", &json!("glow"))
+    });
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("msn")));
+    m.set_shader("test/wall", None);
+    assert_eq!(held(&m, "test/wall_n", "subtype"), Some(json!("glow")));
+}
+
+/// The sets document's pick differs from the last plan's: the plan has not seen it yet.
+fn assert_plan_pending(m: &AppModel, id: &str, choice: Shader) {
+    let v = sdc_gui::model::sets::set_views(m)
+        .into_iter()
+        .find(|v| v.id == id)
+        .unwrap();
+    assert_eq!(v.shader_choice, Some(choice), "the live choice");
+    assert!(
+        !v.shader
+            .as_ref()
+            .is_some_and(|p| p.provenance == engine::shader::ShaderOrigin::Set),
+        "the last plan has not seen the pick: {:?}",
+        v.shader
+    );
+}
+
+/// B1 (N6-h): PBR, then Auto before the PBR plan lands: the Auto leg reads the live pick, so the key is cleared and
+/// unlisted, never held and listed `pbr_normal`.
+#[test]
+fn auto_right_after_a_pbr_pick_clears_the_normal() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    assert_plan_pending(&m, "test/wall", Shader::Pbr);
+    m.set_shader("test/wall", None);
+    assert_eq!(facts(&m, WALL_N), (None, None, false));
+}
+
+/// B4 (N6-h): an automatically PBR set with a PBR diffuse and a listed `pbr_normal`: PBR is picked, then the diffuse
+/// is decided `diffuse` before the plan lands. The Revert reads the live pick and keeps the normal.
+#[test]
+fn a_diffuse_revert_before_the_plan_lands_reads_the_live_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = followed_wall(d.path());
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    assert_plan_pending(&m, "test/wall", Shader::Pbr);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+    assert_eq!(
+        facts(&m, WALL_N),
+        (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
+    );
+}
+
+/// N6-l: a key in both lists is the normal rule's alone in a manual Revert: under a settled explicit PBR pick it stays
+/// `pbr_normal`, listed, off `auto_pbr`; without the pick it goes back to `tangent_back`, relisted, off `auto_pbr`.
+#[test]
+fn a_revert_leaves_a_key_in_both_lists_to_the_normal_rule() {
+    for explicit in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = followed_wall(d.path());
+        m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+        settle(&mut m);
+        if explicit {
+            m.set_shader("test/wall", Some(Shader::Pbr));
+            settle(&mut m);
+        }
+        m.edit_docs("both lists", None, true, |_, s| {
+            s.set_auto_pbr(&[WALL_N.to_string()])
+        });
+        m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+        let want = if explicit { "pbr_normal" } else { "normal" };
+        assert_eq!(
+            facts(&m, WALL_N),
+            (Some(json!(want)), Some(want.into()), false),
+            "explicit {explicit}"
+        );
+    }
+}
+
+/// B3 (N6-j): `alpha.policy` under the extension-less spelling `wall_n` and another field under `wall_n.png`: the
+/// engine applies both, so the alpha is the user's. The Switch leaves an inferred normal alone (acceptance off), and a
+/// listed `normal` is not untouched.
+#[test]
+fn an_alpha_under_the_extensionless_spelling_is_the_users() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"test/wall_n\"]\nalpha.policy = \"data\"\n\n[files.\"test/wall_n.png\"]\nformat = \"bc7\"\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(
+        sdc_gui::settings::GuiSettings {
+            export_folder: Some(d.path().join("export")),
+            ..sdc_gui::settings::GuiSettings::default()
+        },
+        None,
+        session(),
+    );
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(d.path().join("textures"));
+    settle(&mut m);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), (None, None, false));
+
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
+    m.edit_docs("alpha", None, true, |p, _| {
+        p.set_file_value("test/wall_n", "alpha.policy", &json!("data"))
+    });
+    assert_eq!(m.untouched_normal(WALL_N), None);
+}
+
+/// B2 (N6-e): a fuzz-map set where `wall_msn.png` sorts before `wall_n.png`: `normal` typed by the user on `_n` is
+/// unchanged by an explicit PBR pick and by a regular pick. A pin of the guard on a real pick. The positive legacy
+/// exception: a `pbr_normal` an older pick listed in `auto_pbr` is cleared when the set leaves PBR.
+#[test]
+fn a_typed_normal_beside_an_msn_survives_picks_and_an_older_listed_one_is_cleared() {
+    let build = |d: &Path| {
+        let t = fuzz_wall(d);
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+            .save(t.join("wall_msn.png"))
+            .unwrap();
+        let mut m = opened_as_the_app(d.join("textures"), d.join("export"));
+        m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+        settle(&mut m);
+        m
+    };
+    let d = tempfile::tempdir().unwrap();
+    let mut m = build(d.path());
+    let typed = facts(&m, WALL_N);
+    assert_eq!(typed, (Some(json!("normal")), None, false));
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), typed, "explicit PBR pick");
+    m.set_shader("test/wall", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(facts(&m, WALL_N), typed, "regular pick");
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = build(d.path());
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    m.edit_docs("older pick", None, true, |p, s| {
+        p.set_file_value(WALL_N, "subtype", &json!("pbr_normal"));
+        s.set_auto_pbr(&[WALL_N.to_string()]);
+    });
+    m.set_shader("test/wall", Some(Shader::Default));
+    assert_eq!(facts(&m, WALL_N), (None, None, false), "the leave step");
+}
+
+/// N6-k: the diffuse's Switch governs every free member that is inferred or untouched-listed, not only the Normal
+/// slot's: in the `_msn`/`_n` set a recorder-listed `normal` on the secondary `_n` switches to `pbr_normal` and stays
+/// in `auto_normal` (never `auto_pbr`); with acceptance off the inferred one switches too. The Revert takes both back.
+#[test]
+fn the_switch_governs_every_free_member_not_only_the_normal_slot() {
+    for accept_on in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let t = wall(d.path());
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+            .save(t.join("wall_msn.png"))
+            .unwrap();
+        let mut m = AppModel::new(
+            sdc_gui::settings::GuiSettings {
+                export_folder: Some(d.path().join("export")),
+                ..sdc_gui::settings::GuiSettings::default()
+            },
+            None,
+            session(),
+        );
+        if !accept_on {
+            m.accept = engine::policy::AcceptSuggestions::None;
+        }
+        m.open_folder(d.path().join("textures"));
+        settle(&mut m);
+        m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+        let (switched, back) = if accept_on {
+            (
+                (
+                    Some(json!("pbr_normal")),
+                    Some("pbr_normal".to_string()),
+                    false,
+                ),
+                (Some(json!("normal")), Some("normal".to_string()), false),
+            )
+        } else {
+            ((Some(json!("pbr_normal")), None, true), (None, None, false))
+        };
+        assert_eq!(facts(&m, WALL_N), switched, "accept on {accept_on}");
+        settle(&mut m);
+        m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+        assert_eq!(facts(&m, WALL_N), back, "accept on {accept_on}");
+    }
+}
 /// A fuzz-map wall: `wall_g` and `wall_fuzz` beside the normal, so an explicit PBR pick runs R5's fuzz step.
 fn fuzz_wall(dir: &Path) -> std::path::PathBuf {
     let t = wall(dir);

@@ -11,6 +11,7 @@ use super::sets::{is_pbr_diffuse, locked_items, set_views, SlotFill, SlotKind};
 use super::AppModel;
 use engine::config::{PackRecipe, Subtype};
 use engine::presets::Provenance;
+use engine::shader::Shader;
 use serde_json::json;
 
 /// The PBR counterpart of an inferred member sub-type; `None` leaves the member alone (`height` stays `height`, and
@@ -37,8 +38,9 @@ enum Follow {
     /// it keeps its `auto_normal` listing, with the new word, and never joins `auto_pbr`).
     Switch(Vec<(String, Subtype, bool)>),
     /// The set's members (those listed in `auto_pbr` that still hold their auto value go back to inferred), and the
-    /// untouched listed `pbr_normal`s with the engine type they go back to (Note JS6).
-    Revert(Vec<String>, Vec<(String, Subtype)>),
+    /// untouched listed `pbr_normal`s with the engine type they go back to (Note JS6), and the keys untouched in
+    /// `auto_normal`, which the normal rule alone decides (`members` leaves them out).
+    Revert(Vec<String>, Vec<(String, Subtype)>, Vec<String>),
 }
 
 impl AppModel {
@@ -133,7 +135,9 @@ impl AppModel {
                         }
                     }
                 }
-                Follow::Revert(members, back) => {
+                Follow::Revert(members, back, owned) => {
+                    // A key untouched in `auto_normal` is `back`'s alone (never the legacy loop's); it leaves `auto_pbr`.
+                    auto.retain(|a| !owned.contains(a));
                     for mk in members {
                         let held = p.file_value(&mk, "subtype");
                         let is_auto = held == Some(json!(Subtype::PbrNormal))
@@ -211,10 +215,8 @@ impl AppModel {
         if leaves {
             // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`), unless
             // the set's explicit pick is a PBR-set shader, which keeps it `pbr_normal` (the pick types it).
-            let explicit_pbr = v.shader.as_ref().is_some_and(|p| {
-                p.provenance == engine::shader::ShaderOrigin::Set
-                    && p.shader.is_pbr_or_advanced_skin()
-            });
+            let explicit_pbr =
+                super::normal_follow::explicit_pick(v).is_some_and(Shader::is_pbr_or_advanced_skin);
             let back = v
                 .members
                 .iter()
@@ -222,7 +224,21 @@ impl AppModel {
                 .filter(|m| !explicit_pbr && self.untouched_normal(m) == Some(Subtype::PbrNormal))
                 .map(|m| (m.clone(), self.tangent_back(m)))
                 .collect();
-            return Follow::Revert(v.members.iter().filter(free).cloned().collect(), back);
+            let owned: Vec<String> = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| self.untouched_normal(m).is_some())
+                .cloned()
+                .collect();
+            let members = v
+                .members
+                .iter()
+                .filter(free)
+                .filter(|m| !owned.contains(m))
+                .cloned()
+                .collect();
+            return Follow::Revert(members, back, owned);
         }
         let shader = v.shader.as_ref().map(|s| s.shader);
         let switch = v

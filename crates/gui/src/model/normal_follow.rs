@@ -3,6 +3,9 @@
 //! `[files]` sub-type still holds, `alpha_free`, in no locked slot, not a kept DDS. Any other member storing a
 //! tangent-space type is the user's: neither the recorder, a shader pick nor the diffuse's Switch changes it. A shader
 //! pick resolves each key to one final value before it writes (`normal_plan`).
+//! Two scopes (N-17, N-28): a shader pick moves the set's own Normal-slot member only; the diffuse's Switch and
+//! Revert (`pbr_follow`) govern every free member that is inferred or untouched-listed. A key untouched in
+//! `auto_normal` is decided by the normal rule alone, in every path: it is never in `auto_pbr` afterwards.
 // shortcut: list keys are not renamed with `[files]` keys (`retarget_auto`, input renames), so a renamed file reads as
 // the user's and its old entry stays until Tessalith next writes the list; rename list keys there if it matters.
 use super::sets::{locked_items, views, SlotFill, SlotKind};
@@ -39,10 +42,37 @@ fn word(st: Subtype) -> String {
     json!(st).as_str().unwrap_or_default().to_string()
 }
 
-/// N-17 (review 2 Minor 2): the key has no `alpha.policy`, or only the `data` the share step wrote (a listed
-/// `auto_data` key still at `data`). `untouched_normal` and the recorder's first `pbr_normal` read this one rule.
+/// The shader the user chose for the set, as the sets document holds it now: the last plan's pick (`view.shader`)
+/// lags a pick until the plan it starts lands. The one read of "which shader did the user choose".
+pub(super) fn explicit_pick(v: &super::sets::SetView) -> Option<Shader> {
+    v.shader_choice
+}
+
+/// N-17: the key has no `alpha.policy`, or only the `data` the share step wrote (a listed `auto_data` key still at
+/// `data`). The engine applies every `[files]` table that matches the file, so the extension-less spelling counts
+/// too: `alpha.policy` there is the user's. `untouched_normal`, the recorder and the Switch read this one rule.
 pub(super) fn alpha_free(p: &ProjectDoc, s: &SetsDoc, key: &str) -> bool {
-    match p.file_value(key, "alpha.policy") {
+    let read = |k: &str| p.file_value(k, "alpha.policy");
+    // The two spellings are looked up directly (no walk over every `[files]` key): a table spelled without the
+    // extension is a separate one only when `key` has a table of its own.
+    let stem = {
+        let (dir, name) = key.rsplit_once('/').map_or(("", key), |(d, n)| (d, n));
+        name.rsplit_once('.')
+            .filter(|(st, _)| !st.is_empty())
+            .map(|(st, _)| {
+                if dir.is_empty() {
+                    st.to_string()
+                } else {
+                    format!("{dir}/{st}")
+                }
+            })
+    };
+    if let Some(st) = stem.filter(|st| p.has_file_key(key) && p.has_file_key(st)) {
+        if read(&st).is_some() {
+            return false;
+        }
+    }
+    match read(key) {
         None => true,
         Some(v) => v == json!("data") && s.auto_data().iter().any(|k| k == key),
     }
@@ -120,11 +150,7 @@ impl AppModel {
             plan.retype = r5;
             return plan;
         };
-        let chosen = view
-            .shader
-            .as_ref()
-            .filter(|p| p.provenance == engine::shader::ShaderOrigin::Set)
-            .map(|p| p.shader);
+        let chosen = explicit_pick(&view);
         let own_n = match view.slots.get(&SlotKind::Normal) {
             Some(SlotFill::Own { item }) => Some(item.clone()),
             _ => None,
@@ -187,6 +213,8 @@ impl AppModel {
                     plan.writes.push((k, Some(want)));
                 }
                 (Some(None), None) if s.auto_normal().contains_key(&k) => {
+                    // The clear is this rule's, once: R5's entry for the key goes.
+                    drop_r5.push(k.clone());
                     plan.off_auto_pbr.push(k.clone());
                     plan.writes.push((k, None));
                 }
@@ -200,6 +228,12 @@ impl AppModel {
             !drop_r5.contains(k) && (!typed || (new.is_none() && *step && auto_pbr.contains(k)))
         });
         plan.retype = r5;
+        debug_assert!(
+            plan.writes
+                .iter()
+                .all(|(k, _)| !plan.retype.iter().any(|(r, _, _)| r == k)),
+            "a key has one final value per pick"
+        );
         plan
     }
 
