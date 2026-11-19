@@ -283,8 +283,25 @@ impl Produced {
     }
 }
 
-/// Ruling 3c-58: one build's successful reads of copy sources, with their hash, by source path.
-type SourceReads = std::collections::HashMap<PathBuf, std::rc::Rc<(Vec<u8>, String)>>;
+/// Rulings 3c-58/61: one fingerprint per owner path for this build.
+type SourceReads = std::collections::HashMap<PathBuf, CopyFingerprint>;
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CopyFingerprint {
+    len: usize,
+    sha: [u8; 32],
+}
+
+impl CopyFingerprint {
+    fn read(path: &Path) -> std::io::Result<Self> {
+        use sha2::{Digest, Sha256};
+        let bytes = std::fs::read(path)?;
+        Ok(Self {
+            len: bytes.len(),
+            sha: Sha256::digest(&bytes).into(),
+        })
+    }
+}
 
 /// Test hook: `AppModel::review_writes_probe` is on while this lives.
 #[cfg(feature = "test-hooks")]
@@ -847,13 +864,8 @@ impl AppModel {
             })
     }
 
-    /// `copy_files` for one copy whose owner is outside this run (ruling 3c-50): the owner's DDS read now, as the
-    /// writer reads it, and `may_replace` on those bytes. `None`: nothing is copied (the source cannot be read, or the
-    /// destination is kept); else the hash it records and whether the copy changes the destination. Ruling 3c-51 (d):
-    /// read at every build (once per `REVIEW_JSON_TTL` at most), never from a memo that could outlive a change of the
-    /// source's bytes under the same stamp. Ruling 3c-58: `sources` holds this build's successful reads, with their hash,
-    /// by source path, so borrowers of one owner share one read; a failed read is not kept, and the map ends with the
-    /// build. Each destination keeps its own `may_replace`.
+    /// Preview `copy_files` for an owner outside this run. Each borrower checks its destination against the owner's
+    /// fingerprint and its own recorded hash. A failed source read is retried by the next borrower.
     fn copy_exact(
         &self,
         src: &Path,
@@ -861,25 +873,25 @@ impl AppModel {
         last: Option<&str>,
         sources: &mut SourceReads,
     ) -> Option<(String, bool)> {
-        use sha2::{Digest, Sha256};
-        let read = match sources.get(src) {
-            Some(r) => r.clone(),
+        let owner = match sources.get(src) {
+            Some(&owner) => owner,
             None => {
                 self.writes_fs_query();
                 #[cfg(feature = "test-hooks")]
                 self.review_writes_src_reads
                     .set(self.review_writes_src_reads.get() + 1);
-                let bytes = std::fs::read(src).ok()?;
-                let sha = hex::encode(Sha256::digest(&bytes));
-                let r = std::rc::Rc::new((bytes, sha));
-                sources.insert(src.to_path_buf(), r.clone());
-                r
+                let owner = CopyFingerprint::read(src).ok()?;
+                sources.insert(src.to_path_buf(), owner);
+                owner
             }
         };
-        let (bytes, sha) = &*read;
-        engine::dds::may_replace(dst, bytes, super::history::recorded(last)).ok()?;
-        let changes = std::fs::read(dst).map_or(true, |b| b != *bytes);
-        Some((sha.clone(), changes))
+        let changes = match CopyFingerprint::read(dst) {
+            Ok(current) if current == owner => false,
+            Ok(current) if last.is_some_and(|sha| hex::encode(current.sha) == sha) => true,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => true,
+            _ => return None,
+        };
+        Some((hex::encode(owner.sha), changes))
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
@@ -1621,5 +1633,41 @@ impl AppModel {
             return;
         }
         self.run_continue(how);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn copy_cache_keeps_only_an_inline_fingerprint_per_owner() {
+        fn check_values<T>(cache: &std::collections::HashMap<PathBuf, T>) {
+            assert_eq!(cache.len(), 2);
+            assert!(!std::mem::needs_drop::<T>(), "cache values own heap data");
+            assert!(size_of::<T>() <= 32 + size_of::<usize>());
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let a = dir.path().join("a.dds");
+        let b = dir.path().join("b.dds");
+        let dst = dir.path().join("copy.dds");
+        std::fs::write(&a, vec![1; 64 * 1024]).unwrap();
+        std::fs::write(&b, vec![2; 64 * 1024]).unwrap();
+        std::fs::copy(&a, &dst).unwrap();
+        let a_sha = sha256_of(&a).unwrap();
+        let b_sha = sha256_of(&b).unwrap();
+        let m = AppModel::placeholder(Default::default());
+        let mut cache = SourceReads::new();
+        assert_eq!(
+            m.copy_exact(&a, &dst, None, &mut cache),
+            Some((a_sha.clone(), false))
+        );
+        assert_eq!(m.copy_exact(&b, &dst, None, &mut cache), None);
+        assert_eq!(
+            m.copy_exact(&b, &dst, Some(&a_sha), &mut cache),
+            Some((b_sha, true))
+        );
+        check_values(&cache);
     }
 }
