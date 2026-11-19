@@ -32,10 +32,20 @@ Fold the sets you've finished into a group, so the column shows only what you're
 ## Moving textures between sets
 
 - Drag a texture from the Textures column onto a card to move it there, or onto empty space to start a new set. A filled slot asks **Replace** or **Cancel**.
-- A texture dragged from another set asks **Move it here**, **Share (borrow its finished output)** or **Duplicate the source for this set**. A shared `_rmaos` is never variance-baked: [Packing PBR maps](Texture-Packing.md#variance-and-gloss-bake). Sharing a PBR set's normal into a regular set writes alpha.policy = "data" on it, so the regular set keeps its specular; Undo of the share takes it back. <!-- D:JS7 -->
+- A texture dragged from another set asks **Move it here**, **Share (borrow its finished output)** or **Duplicate the source for this set**. A shared `_rmaos` is never variance-baked: [Packing PBR maps](Texture-Packing.md#variance-and-gloss-bake). For normal maps, see [Sharing specular alpha](#sharing-specular-alpha).
 - A shared slot follows its texture. Move the texture to another set, start a new set with it, or bring it in with **Fill from names…**, and every set that shared it now shares it from there, in the same undo step. Share another texture into a slot other sets share, and they share the new one from its set. Replacing the texture by a move or a duplicate keeps them on the set, with the new file. <!-- D:JN2,JN3 -->
 - A helper (an AO, a roughness, an opacity map) dragged onto another set asks the same, but **Share (use this file here too, no copy)** writes no file: that set packs or fills from the helper as if it were its own. A pick or setting on the helper (what it fills, read from, invert) applies everywhere it is used. A helper in no set can be shared too: drag its row from the Textures column. It then feeds only the sets that share it, and the question has no Duplicate. A set with no texture of its own can't take a share. The shared rows and **Stop sharing** are on [Set editor](GUI-Set-Editor.md#shared-helpers). <!-- D:HH5 -->
 - **Fill from names…** finds files in the set's folder named like its diffuse plus a suffix the engine knows (`_n`, `_p`, `_rmaos`, exporter tails like `_normal`). A dialog lists each with the slot it fills, all ticked; **Fill** moves the ticked ones in as one undo step.
+
+### Sharing specular alpha
+
+On Community Shaders, a regular set reads specular from its normal’s alpha. When your edit first makes a regular set share a PBR, PBR Grass, PBR Landscape or Advanced Skin set’s normal through the Normal slot, Tessalith can write `alpha.policy = "data"` in the same Undo step. <!-- D:JS7 -->
+
+- The current plan and your edit must identify the owner, borrowers and their shaders. Replacing the borrower’s own normal changes its membership, so that Share leaves alpha alone.
+- The normal must be unlocked and have a conversion job, with varying alpha or analysis still to come. Tessalith skips a kept DDS, a planned **Data** value and any alpha policy you set for the file.
+- Both project files must be writable. Tessalith uses the exact full filename, a single case-insensitive full-name match, or a new full name when no table matches. An extensionless match alone, ambiguous full names or a key that also matches another input prevent the write.
+
+When the plan finds shared specular that would be lost, check [Keep alpha in Problems](GUI-Problems.md#keep-alpha).
 
 ## Reordering and deleting sets
 

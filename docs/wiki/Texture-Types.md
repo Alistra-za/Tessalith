@@ -48,7 +48,7 @@ Matched case-insensitively, longest first, so `_msn` wins over `_n` and `_envmas
 | Suffix | Suggested sub-type | Confidence |
 |---|---|---|
 | none, or `_d` | `diffuse`; `pbr_albedo` in a PBR set; `skin_albedo` in an Advanced skin set; `landscape_diffuse` when a folder in the path is named `landscape`; `ui_sky` under `interface` or `sky` folders; `hdr_sky` for a float source under `sky` | High (`hdr_sky` Medium) |
-| `_n` | `normal`; `pbr_normal` in a PBR set; `landscape_normal` under a `landscape` folder. The GUI types a normal it typed itself `pbr_normal` when the set's shader is PBR, PBR Grass, PBR Landscape or Advanced Skin, and a shader you pick outside those takes it back; a type you chose stays <!-- D:JS5,JS6 --> | High |
+| `_n` | `normal`, `pbr_normal` in a PBR set, or `landscape_normal` under a `landscape` folder. See [Picking a shader for a normal](GUI-Set-Editor.md#picking-a-shader-for-a-normal). | High |
 | `_msn` | `msn` (model-space normal) | High |
 | `_s` | `msn_specular` when the set has `_msn`; `pbr_subsurface` in a PBR set; otherwise `subsurface_tint` | High, High, Low |
 | `_m`, `_em`, `_envmask` | `envmask`; `complex_material` when the alpha minimum is below 251 | High for both |
@@ -119,9 +119,9 @@ One row per sub-type. **vanilla** says whether the sub-type exists under the Van
 | `ui_sky` | Color | BC7 | UNORM | remove | yes | No mips. |
 | `skin_albedo` | Color | BC7 | UNORM | remove | no | Advanced skin. UNORM because the CS skin shader reads it that way. |
 | `cubemap` | Color | BC7 (BC1 for `vanilla_metal` and `room`) | UNORM | remove | yes | See [Cubemaps](Cubemaps.md). BC1, BC3, BC7, RGBA8 or RGB8 only. |
-| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. In a PBR, PBR Grass, PBR Landscape or Advanced Skin set it is the set's _n and bakes its roughness. <!-- D:JS2 --> |
+| `normal` | Normal | BC7 | UNORM | data | yes | Alpha often holds specular. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
 | `landscape_normal` | Normal | BC7 | UNORM | data | yes | |
-| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. Vanilla specular in alpha is dropped, silently; pick Data on the Alpha row to keep it. Shared into a regular set it gets `alpha.policy = "data"` (see [Problems](GUI-Problems.md)). <!-- D:JS7,JS8 --> |
+| `pbr_normal` | Normal | BC7 | UNORM | remove | `normal` | `cs` only. The default drops specular alpha silently. Pick **Data** on the Alpha row to keep it. For shared normals, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS8 --> |
 | `detail_normal` | Normal | BC7 | UNORM | data | yes | A landscape set's detail normal ([Detail names](#detail-names)). |
 | `msn` | Normal | BC7 | UNORM | remove | yes | Model-space normal. Pick the baker with [`channels.msn_source`](Project-Config.md#channels) (*Baked in* in the GUI). |
 | `coat_normal` | Normal | BC7 | UNORM | data | no | `cs` only. Coat roughness in alpha. |

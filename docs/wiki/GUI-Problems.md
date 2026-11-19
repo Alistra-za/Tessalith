@@ -47,7 +47,7 @@ A row you must act on has its fix as a button.
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
 | `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). <!-- D:JO15 --> |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
-| *{file} is shared with a regular set, which reads its alpha as specular; its alpha is not kept* (a note) | **Keep alpha**, which writes `alpha.policy = "data"`. Off on a locked slot or a read-only `sdc.toml`. [Sharing a PBR set's normal into a regular set](GUI-Sets-Column.md#moving-textures-between-sets) writes it for you; this row shows what that step cannot see, such as a type decision that turns a set regular at the next plan. <!-- D:JS7 --> |
+| *{file} is shared with a regular set, which reads its alpha as specular; its alpha is not kept* (a note) | **Keep alpha** writes `alpha.policy = "data"` for this normal. [When the button is available](#keep-alpha). |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
 | *Parallax is on but the source has no alpha* | **Turn parallax off**, which writes `alpha.parallax = false`. <!-- D:JO15 --> |
 | A PGPatcher feature clash | **Turn off {feature}** for each of the two; neither is the default. <!-- D:FN5 --> |
@@ -62,6 +62,12 @@ A row you must act on has its fix as a button.
 | *{n} saved settings name no file in this mode ({mode})* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
 **Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**, **Clear read-only flag** and **Remove aliases from {id}** run on a mouse click only. Enter and Space do nothing on them, so a key press never takes a file out of a set or switches a feature off. <!-- D:JO16 -->
+
+### Keep alpha
+
+On Community Shaders, this Note appears when a regular set’s Normal slot borrows a normal from PBR, PBR Grass, PBR Landscape or Advanced Skin, including through a texture set record. The normal must have a conversion job, varying alpha, a planned policy other than **Data**, and no alpha policy in a matching `[files]` table. A kept DDS gets no Note. Your **Keep alpha** choice survives ending the share. For automatic writes, see [Sharing specular alpha](GUI-Sets-Column.md#sharing-specular-alpha). <!-- D:JS7 -->
+
+Hover over a disabled **Keep alpha** for the reason. The row can stay visible while a plan is pending, the owner’s Normal slot is locked, or `sdc.toml` is read-only. The button also stays off if several full-name tables match without an exact spelling, or the chosen key matches another input. A table without the extension works if it governs this input alone. If the destination changes between display and click, Tessalith refuses the edit. Check Problems again.
 
 ### Mark as intended
 

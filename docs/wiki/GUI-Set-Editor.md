@@ -42,9 +42,13 @@ Drop a file from Explorer on a row to fill it. It must be a texture of the open 
 `sdc.exe` doesn't read your shader pick. So when you pick **PBR**, **PBR grass** or **PBR Landscape** for a set with a `_fuzz` or `_sheen` map, Tessalith writes the types `sdc.exe` needs, in the same undo step:
 
 - `subtype = "pbr_fuzz"` on the fuzz map. It gets none when the set has its own `_f`, when you set its `helper.role`, or when it is a DDS kept as it is.
-- The PBR type (`pbr_albedo`, `pbr_normal`, `pbr_emissive`) on members whose type Tessalith chose. A normal Tessalith typed follows a shader you pick, both ways; one you typed stays. <!-- D:JS6 -->
+- The PBR type (`pbr_albedo`, `pbr_normal`, `pbr_emissive`) on eligible members whose type Tessalith chose.
 
-Picking **Auto** or a shader outside the PBR family takes back what that pick wrote, unless you changed it since. A shader outside the PBR family, other than **Advanced Skin**, also gives a type Tessalith recorded while the set was PBR its plain counterpart (`diffuse`, `normal`, `glow`), so `sdc.exe` types those files the same way (the fuzz map is another matter: [Does the CLI use my GUI edits?](CLI-Reference.md#does-the-cli-use-my-gui-edits)). A file in a pinned slot keeps its type either way. <!-- D:JQ9,JQ16,JQ31,JQ54,JQ59 -->
+Picking **Auto** or a shader outside the PBR family takes back what that pick wrote, unless you changed it since. A shader outside the PBR family, other than **Advanced Skin**, also restores `diffuse` and `glow` on colour and glow maps Tessalith typed while the set was PBR, so `sdc.exe` types those files the same way (the fuzz map is another matter: [Does the CLI use my GUI edits?](CLI-Reference.md#does-the-cli-use-my-gui-edits)). A file in a pinned slot keeps its type either way. <!-- D:JQ9,JQ16,JQ31,JQ54,JQ59 -->
+
+### Picking a shader for a normal
+
+The set’s own, unlocked Normal slot follows your shader pick when Tessalith recorded its type and still owns that choice. **PBR**, **PBR grass**, **PBR Landscape** and **Advanced Skin** use `pbr_normal`. **Eye** can use `msn`. Picking a regular tangent-space shader restores `normal` or `landscape_normal`. Returning to **Auto** from an explicit PBR-family or Eye pick clears the followed type so Tessalith can record the next suggestion. A type or alpha policy you chose stays yours. A kept DDS keeps its type. <!-- D:JS5,JS6 -->
 
 ## Slot menus
 

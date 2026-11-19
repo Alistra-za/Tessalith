@@ -935,7 +935,7 @@ fn a_plain_normal_with_no_roughness_in_a_pbr_set_says_so() {
     );
 }
 
-/// B3-4 pin (Note JS4): the written `iron_n.dds` keeps the source's alpha.
+/// B3-4 pin (Note JS1): the written `iron_n.dds` keeps the source's alpha.
 #[test]
 fn an_own_plain_normal_in_a_pbr_set_is_written_with_its_alpha() {
     let d = tempfile::tempdir().unwrap();
