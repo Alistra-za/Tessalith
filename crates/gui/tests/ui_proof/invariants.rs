@@ -38,7 +38,12 @@ pub trait Entry {
     fn watched(&self) -> Vec<(&'static str, PathBuf)> {
         vec![]
     }
-    /// With nothing focused: presses `key`, lets the app settle and says what it found.
+    /// Clears the keyboard focus and says whether the entry's marker still holds on the frame after: the check right
+    /// before a key. `Ok(false)` means the screen under test is gone (the walk reopens it and asks again).
+    fn arm(&mut self) -> Result<bool, String> {
+        Err("this entry takes no keys".into())
+    }
+    /// Presses `key` on the armed screen (see `strike`) and says what it found.
     fn press(&mut self, _key: Key) -> Result<Pressed, String> {
         Err("this entry takes no keys".into())
     }
@@ -50,14 +55,55 @@ pub trait Entry {
 
 /// What one key did to a screen, besides the files (those are hashed).
 pub struct Pressed {
-    /// An export was already running before the key (never the case on a screen of the walk).
-    pub running_before: bool,
-    /// The export gate's flag, read on the frame after the key.
-    pub running_after_key: bool,
-    /// The same flag after the app settled.
+    /// The export gate's flag, read on the one frame that processed the key going down.
+    pub running_on_key_down: bool,
+    /// The same flag after the key came up and the app settled.
     pub running_after_settle: bool,
+    /// The export's record (rows, events, summary, error, notes) differs from before the key: a second witness that
+    /// does not depend on when the flag is read.
+    pub witness_changed: bool,
     /// The entry's marker still holds: false when the key closed the screen.
     pub shown: bool,
+}
+
+/// Before a key: takes the keyboard focus from whatever holds it (`clear_focus`) and says whether `marker` holds on
+/// the frame after, which is the frame the key lands in.
+pub fn arm<S>(h: &mut Harness<'static, S>, marker: &[Needle]) -> Result<bool, String> {
+    clear_focus(h)?;
+    Ok(holds(&snapshot(h), marker))
+}
+
+/// One key on an armed screen. Needs an idle baseline (no export running; else an error, not a suppressed finding).
+/// Sends the key going down alone, runs the one frame that processes it and reads the running flag at once: an export
+/// that starts on this frame is seen even if the app clears it a frame later. Then the key comes up, `settle` runs (a
+/// timeout is an error and nothing is taken from it) and the flag is read again; `witness` is read before the key and
+/// after settling.
+pub fn strike<S>(
+    h: &mut Harness<'static, S>,
+    key: Key,
+    running: &dyn Fn(&S) -> bool,
+    witness: &dyn Fn(&S) -> String,
+    settle: &mut dyn FnMut(&mut Harness<'static, S>) -> bool,
+    marker: &[Needle],
+) -> Result<Pressed, String> {
+    if running(h.state()) {
+        return Err("an export is already running before the key, so the key's effect cannot be told from it".into());
+    }
+    let witness_before = witness(h.state());
+    h.key_down(key);
+    h.run_steps(1);
+    let running_on_key_down = running(h.state());
+    h.key_up(key);
+    h.run_steps(1);
+    if !settle(h) {
+        return Err("the app did not go idle after the key (the settle timed out), so nothing is taken from this key".into());
+    }
+    Ok(Pressed {
+        running_on_key_down,
+        running_after_settle: running(h.state()),
+        witness_changed: witness(h.state()) != witness_before,
+        shown: holds(&snapshot(h), marker),
+    })
 }
 
 /// Takes the keyboard focus from whatever holds it and proves that nothing holds it on the frame after, which is the
@@ -489,6 +535,8 @@ pub fn walk(
             }
         }
         middle.push(kept);
+        // The key step runs wherever the walk does, so the proof tests that put the real start screen in their list run it
+        // on that screen too (a second or so each); their assertions do not read it.
         if e.takes_keys() {
             press_keys(&mut **e, SIZES[1], &mut walked);
         }
@@ -522,43 +570,66 @@ pub const KEYS: [(Key, &str); 3] = [
 /// changed when its bytes are, not when its modification time is: a save that writes the same bytes is no change.
 pub type Tree = BTreeMap<String, Option<(u64, u64)>>;
 
-fn add_to_tree(name: &str, root: &Path, dir: &Path, tree: &mut Tree) {
+/// How `scan` reads a file; the real one is `std::fs::read`, a test injects a failing one.
+type ReadFile<'a> = &'a dyn Fn(&Path) -> std::io::Result<Vec<u8>>;
+
+fn add_to_tree(
+    name: &str,
+    root: &Path,
+    dir: &Path,
+    read: ReadFile,
+    tree: &mut Tree,
+) -> Result<(), String> {
     use std::hash::Hasher;
-    let Ok(read) = std::fs::read_dir(dir) else {
-        return;
-    };
-    for entry in read.flatten() {
+    let list = std::fs::read_dir(dir)
+        .map_err(|e| format!("cannot list {} in the {name} folder: {e}", dir.display()))?;
+    for entry in list {
+        let entry = entry.map_err(|e| {
+            format!(
+                "cannot read an entry of {} in the {name} folder: {e}",
+                dir.display()
+            )
+        })?;
         let path = entry.path();
+        let is_dir = entry
+            .file_type()
+            .map_err(|e| {
+                format!(
+                    "cannot tell what {} in the {name} folder is: {e}",
+                    path.display()
+                )
+            })?
+            .is_dir();
         let rel = path.strip_prefix(root).unwrap_or(&path);
         let key = format!("{name}/{}", rel.to_string_lossy().replace('\\', "/"));
-        if path.is_dir() {
+        if is_dir {
             tree.insert(key, None);
-            add_to_tree(name, root, &path, tree);
+            add_to_tree(name, root, &path, read, tree)?;
         } else {
+            // an unreadable file is an error, never a stand-in hash: two failed reads must not compare equal
+            let bytes = read(&path)
+                .map_err(|e| format!("cannot read {} in the {name} folder: {e}", path.display()))?;
             let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            // a file that cannot be read hashes its error, so a file that becomes unreadable is a change too
-            let len = match std::fs::read(&path) {
-                Ok(bytes) => {
-                    hasher.write(&bytes);
-                    bytes.len() as u64
-                }
-                Err(e) => {
-                    hasher.write(e.to_string().as_bytes());
-                    u64::MAX
-                }
-            };
-            tree.insert(key, Some((len, hasher.finish())));
+            hasher.write(&bytes);
+            tree.insert(key, Some((bytes.len() as u64, hasher.finish())));
         }
     }
+    Ok(())
 }
 
-/// The tree of every watched folder, each under its name.
-pub fn tree_of(roots: &[(&'static str, PathBuf)]) -> Tree {
+/// The tree of every watched folder, each under its name; `Err` (naming the folder and the path) when anything cannot
+/// be listed or read, because a tree with a hole in it proves nothing.
+pub fn scan(roots: &[(&'static str, PathBuf)], read: ReadFile) -> Result<Tree, String> {
     let mut tree = Tree::new();
     for (name, root) in roots {
-        add_to_tree(name, root, root, &mut tree);
+        add_to_tree(name, root, root, read, &mut tree)?;
     }
-    tree
+    Ok(tree)
+}
+
+/// `scan` with the real file read.
+pub fn tree_of(roots: &[(&'static str, PathBuf)]) -> Result<Tree, String> {
+    scan(roots, &|p| std::fs::read(p))
 }
 
 /// What differs between two trees: a new path, a deleted path, a file whose bytes changed (or a path that was a folder
@@ -588,11 +659,32 @@ pub fn changes(before: &Tree, after: &Tree) -> Vec<(String, &'static str)> {
     out
 }
 
-/// The key step of one screen, at `size`: with nothing focused, presses Enter, Escape and Space one after the other, and
-/// hits every file a key changed and every key that left an export running. The folders are hashed once before the three
-/// keys and once after each; a key that closed the screen is followed by `reopen` (part of this screen's visit) and a
-/// new baseline, so a later key is judged on the screen it was meant for, and a change is reported against the key that
-/// made it, not again against the next.
+/// The hit of one key: what it changed or started.
+fn key_hit(screen: &str, size: Vec2, key: &str, what: String, effect: &str) -> Hit {
+    Hit {
+        screen: screen.to_string(),
+        size,
+        invariant: KEYS_NEVER_WRITE,
+        what,
+        y: 0.0,
+        ordinal: 0,
+        px: 0.0,
+        message: format!(
+            "pressing {key} with nothing focused {effect}; a key with nothing focused never writes a file or starts an export (egui-ui-rules, dialogs: Enter triggers the safe default and never overwrites, deletes or exports)"
+        ),
+    }
+}
+
+/// The key step of one screen, at `size`: presses Enter, Escape and Space one after the other, each with nothing focused
+/// and on the screen under test, and hits every file a key changed and every key that started an export. It passes only
+/// on what it observed: a folder it could not scan, a settle that timed out, an export already running, or a screen that
+/// clearing the focus dismisses is an error of this screen and key.
+///
+/// Per key: `arm` clears the focus and checks the marker on the frame after; a marker that is gone means a replay of the
+/// entry (part of this screen's visit), asked again, and gone again is an error. The folders are hashed right before the
+/// key and right after it, so only a change the key caused counts. A key that closed the screen is followed by a replay
+/// only when another key comes (the next `arm` finds the marker gone). Each key's findings are appended at once, so a
+/// later error cannot drop them.
 fn press_keys(e: &mut dyn Entry, size: Vec2, walked: &mut Walked) {
     let screen = e.name().to_string();
     let mut error = |why: String| {
@@ -603,14 +695,37 @@ fn press_keys(e: &mut dyn Entry, size: Vec2, walked: &mut Walked) {
     if let Err(why) = e.at(size) {
         return error(why);
     }
-    let mut before = tree_of(&e.watched());
-    let mut found: Vec<(&str, String, String)> = vec![];
     for (key, name) in KEYS {
+        let mut replayed = false;
+        loop {
+            match e.arm() {
+                Err(why) => return error(format!("before {name}: {why}")),
+                Ok(true) => break,
+                Ok(false) if replayed => {
+                    return error(format!(
+                        "before {name}: clearing the keyboard focus dismisses this screen, so no key can be pressed on it with nothing focused; the screen's open or marker needs a state that survives an empty focus"
+                    ))
+                }
+                Ok(false) => {
+                    replayed = true;
+                    if let Err(why) = e.reopen(size) {
+                        return error(format!("before {name}: the screen could not be reopened: {why}"));
+                    }
+                }
+            }
+        }
+        let before = match tree_of(&e.watched()) {
+            Ok(tree) => tree,
+            Err(why) => return error(format!("before {name}: {why}")),
+        };
         let pressed = match e.press(key) {
             Ok(p) => p,
             Err(why) => return error(format!("{name}: {why}")),
         };
-        let after = tree_of(&e.watched());
+        let after = match tree_of(&e.watched()) {
+            Ok(tree) => tree,
+            Err(why) => return error(format!("after {name}: {why}")),
+        };
         walked.presses.push(Press {
             screen: screen.clone(),
             key: name,
@@ -618,45 +733,33 @@ fn press_keys(e: &mut dyn Entry, size: Vec2, walked: &mut Walked) {
             shown: pressed.shown,
         });
         for (path, kind) in changes(&before, &after) {
-            found.push((
+            walked.hits.push(key_hit(
+                &screen,
+                size,
                 name,
                 format!("{name}: {path} ({kind})"),
-                format!("changed {path} ({kind})"),
+                &format!("changed {path} ({kind})"),
             ));
         }
-        if !pressed.running_before && (pressed.running_after_key || pressed.running_after_settle) {
-            found.push((
+        if pressed.running_on_key_down || pressed.running_after_settle {
+            walked.hits.push(key_hit(
+                &screen,
+                size,
                 name,
                 format!("{name}: export running"),
-                "left an export running (the model's export.running is set)".to_string(),
+                "started an export (the model's export.running was set)",
+            ));
+        } else if pressed.witness_changed {
+            walked.hits.push(key_hit(
+                &screen,
+                size,
+                name,
+                format!("{name}: export record changed"),
+                "changed the export's record (rows, events, summary, error or notes) without export.running being seen: an export started and ended inside the key's frames",
             ));
         }
-        before = after;
-        if !pressed.shown {
-            if let Err(why) = e.reopen(size) {
-                return error(format!(
-                    "{name} closed the screen and it could not be reopened: {why}"
-                ));
-            }
-            before = tree_of(&e.watched());
-        }
-    }
-    for (key, what, effect) in found {
-        walked.hits.push(Hit {
-            screen: screen.clone(),
-            size,
-            invariant: KEYS_NEVER_WRITE,
-            what,
-            y: 0.0,
-            ordinal: 0,
-            px: 0.0,
-            message: format!(
-                "pressing {key} with nothing focused {effect}; a key with nothing focused never writes a file or starts an export (egui-ui-rules, dialogs: Enter triggers the safe default and never overwrites, deletes or exports)"
-            ),
-        });
     }
 }
-
 /// Numbers the hits of one frame that share an invariant and a name, top to bottom.
 fn number_same_named(hits: &mut [Hit]) {
     let mut order: Vec<usize> = (0..hits.len()).collect();
@@ -1509,26 +1612,74 @@ fn an_authored_text_no_screen_paints_is_stale() {
     assert!(stale[0].contains("\"Gone…\""), "{stale:?}");
 }
 
-/// What `KeyFault` keeps: whether its screen is open, and whether its "export" runs.
+/// What `KeyFault` keeps: whether its screen is open, the export "flag", a counter for the second witness, and what
+/// its faults are.
 struct FaultState {
     dir: PathBuf,
+    cfg: Faults,
     open: bool,
-    running: bool,
+    /// The export gate's flag: set on the frame that processes Space, cleared on the next frame, as an app that
+    /// polls its worker would clear a short export.
+    flag: bool,
+    /// The second witness: counts exports that started and ended inside one frame.
+    counter: u32,
+    text: String,
+    asked_focus: bool,
 }
 
-/// A test-only entry whose keys break the rule: Enter writes a new file (and rewrites another with the same bytes, which
-/// is not a change), Escape rewrites a file with new bytes and closes the screen, Space deletes a file and sets the
-/// running flag. It is not in the shipped list.
+/// What Space does on the fault screen.
+#[derive(Clone, Copy, PartialEq)]
+enum SpaceDoes {
+    Nothing,
+    /// Deletes a file and sets the flag for one frame.
+    DeletesAndFlashesFlag,
+    /// Counts an export that was never visible as running.
+    CountsOnly,
+}
+
+/// The faults one `KeyFault` has.
+#[derive(Clone, Copy)]
+struct Faults {
+    enter_writes: bool,
+    escape_changes_and_closes: bool,
+    space: SpaceDoes,
+    space_closes: bool,
+    /// The screen shows its marker only while a text field has focus, so clearing the focus dismisses it.
+    focus_dismisses: bool,
+    /// The settle of this press (0 is the first) times out.
+    times_out_at: Option<usize>,
+    /// An export is running before any key.
+    running_at_start: bool,
+    /// The watched folder does not exist, so it cannot be listed.
+    unreadable_root: bool,
+}
+
+const NO_FAULTS: Faults = Faults {
+    enter_writes: false,
+    escape_changes_and_closes: false,
+    space: SpaceDoes::Nothing,
+    space_closes: false,
+    focus_dismisses: false,
+    times_out_at: None,
+    running_at_start: false,
+    unreadable_root: false,
+};
+
+/// A test-only entry whose keys break the rule as `Faults` says: Enter writes a new file (and rewrites another with the
+/// same bytes, which is not a change), Escape rewrites a file with new bytes and closes the screen, Space deletes a
+/// file and flashes the export flag for one frame, or only counts an export. It is not in the shipped list.
 struct KeyFault {
     dir: tempfile::TempDir,
     h: Harness<'static, FaultState>,
+    cfg: Faults,
     /// How many times the walk asked for the screen again.
     reopened: std::rc::Rc<std::cell::Cell<usize>>,
+    pressed: usize,
 }
 
 const KEY_FAULT_MARKER: &[Needle] = &[crate::screens::has("Keys fault screen")];
 
-fn key_fault_harness(size: Vec2) -> (tempfile::TempDir, Harness<'static, FaultState>) {
+fn key_fault_harness(size: Vec2, cfg: Faults) -> (tempfile::TempDir, Harness<'static, FaultState>) {
     let dir = tempfile::tempdir().unwrap();
     for (name, text) in [
         ("kept.txt", "kept"),
@@ -1539,8 +1690,12 @@ fn key_fault_harness(size: Vec2) -> (tempfile::TempDir, Harness<'static, FaultSt
     }
     let state = FaultState {
         dir: dir.path().to_path_buf(),
+        cfg,
         open: true,
-        running: false,
+        flag: false,
+        counter: 0,
+        text: String::new(),
+        asked_focus: false,
     };
     let h = Harness::builder()
         .with_context_setup(|ctx| {
@@ -1549,7 +1704,20 @@ fn key_fault_harness(size: Vec2) -> (tempfile::TempDir, Harness<'static, FaultSt
         .with_size(size)
         .build_ui_state(
             |ui, s: &mut FaultState| {
-                if s.open {
+                // the flag lives for the one frame that set it
+                s.flag = false;
+                let mut focused = true;
+                if s.cfg.focus_dismisses {
+                    let edit = ui
+                        .text_edit_singleline(&mut s.text)
+                        .accessible_name("Fault field");
+                    if !s.asked_focus {
+                        edit.request_focus();
+                        s.asked_focus = true;
+                    }
+                    focused = edit.has_focus();
+                }
+                if s.open && focused {
                     ui.label("Keys fault screen");
                 }
                 let (enter, escape, space) = ui.input(|i| {
@@ -1559,17 +1727,26 @@ fn key_fault_harness(size: Vec2) -> (tempfile::TempDir, Harness<'static, FaultSt
                         i.key_pressed(Key::Space),
                     )
                 });
-                if enter {
+                if enter && s.cfg.enter_writes {
                     std::fs::write(s.dir.join("new.txt"), "new").unwrap();
                     std::fs::write(s.dir.join("same.txt"), "same").unwrap();
                 }
-                if escape {
+                if escape && s.cfg.escape_changes_and_closes {
                     std::fs::write(s.dir.join("kept.txt"), "changed").unwrap();
                     s.open = false;
                 }
                 if space {
-                    std::fs::remove_file(s.dir.join("gone.txt")).unwrap();
-                    s.running = true;
+                    match s.cfg.space {
+                        SpaceDoes::Nothing => {}
+                        SpaceDoes::DeletesAndFlashesFlag => {
+                            std::fs::remove_file(s.dir.join("gone.txt")).unwrap();
+                            s.flag = true;
+                        }
+                        SpaceDoes::CountsOnly => s.counter += 1,
+                    }
+                    if s.cfg.space_closes {
+                        s.open = false;
+                    }
                 }
             },
             state,
@@ -1578,9 +1755,15 @@ fn key_fault_harness(size: Vec2) -> (tempfile::TempDir, Harness<'static, FaultSt
 }
 
 impl KeyFault {
-    fn new(reopened: std::rc::Rc<std::cell::Cell<usize>>) -> Self {
-        let (dir, h) = key_fault_harness(SIZES[1]);
-        KeyFault { dir, h, reopened }
+    fn new(cfg: Faults, reopened: std::rc::Rc<std::cell::Cell<usize>>) -> Self {
+        let (dir, h) = key_fault_harness(SIZES[1], cfg);
+        KeyFault {
+            dir,
+            h,
+            cfg,
+            reopened,
+            pressed: 0,
+        }
     }
 }
 
@@ -1604,44 +1787,73 @@ impl Entry for KeyFault {
     }
 
     fn watched(&self) -> Vec<(&'static str, PathBuf)> {
-        vec![("fault folder", self.dir.path().to_path_buf())]
+        let root = self.dir.path().to_path_buf();
+        vec![(
+            "fault folder",
+            if self.cfg.unreadable_root {
+                root.join("missing")
+            } else {
+                root
+            },
+        )]
+    }
+
+    fn arm(&mut self) -> Result<bool, String> {
+        arm(&mut self.h, KEY_FAULT_MARKER)
     }
 
     fn press(&mut self, key: Key) -> Result<Pressed, String> {
-        clear_focus(&mut self.h)?;
-        let running_before = self.h.state().running;
-        self.h.key_press(key);
-        self.h.run_steps(1);
-        let running_after_key = self.h.state().running;
-        self.h.run_steps(3);
-        Ok(Pressed {
-            running_before,
-            running_after_key,
-            running_after_settle: self.h.state().running,
-            shown: holds(&snapshot(&self.h), KEY_FAULT_MARKER),
-        })
+        let n = self.pressed;
+        self.pressed += 1;
+        let times_out = self.cfg.times_out_at == Some(n);
+        let stuck = self.cfg.running_at_start;
+        strike(
+            &mut self.h,
+            key,
+            &|s: &FaultState| s.flag || stuck,
+            &|s: &FaultState| s.counter.to_string(),
+            &mut |h| {
+                h.run_steps(3);
+                !times_out
+            },
+            KEY_FAULT_MARKER,
+        )
     }
 
     fn reopen(&mut self, size: Vec2) -> Result<(), String> {
         self.reopened.set(self.reopened.get() + 1);
-        let (dir, h) = key_fault_harness(size);
+        let (dir, h) = key_fault_harness(size, self.cfg);
         (self.dir, self.h) = (dir, h);
         self.h.run_steps(3);
         Ok(())
     }
 }
 
+/// `KeyFault` alone through `walk`: what it collected and how often the walk reopened the screen.
+fn walk_fault(cfg: Faults) -> (Walked, usize) {
+    let reopened = std::rc::Rc::new(std::cell::Cell::new(0));
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(KeyFault::new(cfg, reopened.clone()))];
+    let walked = walk(&mut list, &mut real_checker);
+    (walked, reopened.get())
+}
+
 /// The key step goes through `walk` and `verdict`, the code the shipped list goes through, beside a clean shipped entry.
 /// The faulty entry's Enter writes a new file, its Escape changes a file (and closes the screen, so the walk reopens it
-/// before Space), its Space deletes a file and starts its "export"; Enter's rewrite of a file with the same bytes is no
-/// change. The final failure list is exactly those four, at the middle size only, and the checker ran on the six frames
-/// of the two entries and nothing else.
+/// before Space), its Space deletes a file and flashes the export flag for the one frame that processes the key; Enter's
+/// rewrite of a file with the same bytes is no change. The final failure list is exactly those four, at the middle size
+/// only, and the checker ran on the six frames of the two entries and nothing else.
 #[test]
 fn a_key_that_writes_a_file_or_starts_an_export_fails_the_walk() {
     let reopened = std::rc::Rc::new(std::cell::Cell::new(0));
+    let cfg = Faults {
+        enter_writes: true,
+        escape_changes_and_closes: true,
+        space: SpaceDoes::DeletesAndFlashesFlag,
+        ..NO_FAULTS
+    };
     let mut list: Vec<Box<dyn Entry>> = vec![
         the_start_screen(),
-        Box::new(KeyFault::new(reopened.clone())),
+        Box::new(KeyFault::new(cfg, reopened.clone())),
     ];
     let mut calls: Vec<(String, (f32, f32))> = vec![];
     let walked = walk(&mut list, &mut |screen, size, snap| {
@@ -1693,6 +1905,144 @@ fn a_key_that_writes_a_file_or_starts_an_export_fails_the_walk() {
     );
 }
 
+/// An export that starts and ends inside one frame is never seen as running; the second witness (the export's record)
+/// sees it. The flag is not what fails here, and the hit says what was seen.
+#[test]
+fn an_export_the_flag_never_shows_is_caught_by_its_record() {
+    let (walked, _) = walk_fault(Faults {
+        space: SpaceDoes::CountsOnly,
+        ..NO_FAULTS
+    });
+    assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    let got: Vec<&str> = walked.hits.iter().map(|h| h.what.as_str()).collect();
+    assert_eq!(got, ["Space: export record changed"]);
+    assert!(walked.hits[0].message.contains("nothing focused"));
+}
+
+/// A key that closes the screen and is the last of the visit is not followed by a replay.
+#[test]
+fn no_replay_follows_the_last_key() {
+    let (walked, reopened) = walk_fault(Faults {
+        space_closes: true,
+        ..NO_FAULTS
+    });
+    assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    assert!(walked.hits.is_empty(), "{:?}", walked.hits);
+    assert_eq!(reopened, 0, "Space was the last key");
+    let shown: Vec<bool> = walked.presses.iter().map(|p| p.shown).collect();
+    assert_eq!(shown, [true, true, false]);
+}
+
+/// A screen that clearing the keyboard focus always dismisses is an error that says so; no key is pressed on the
+/// window underneath.
+#[test]
+fn a_screen_that_clearing_focus_dismisses_is_an_error() {
+    let (walked, reopened) = walk_fault(Faults {
+        enter_writes: true,
+        focus_dismisses: true,
+        ..NO_FAULTS
+    });
+    assert_eq!(reopened, 1, "replayed once, dismissed again");
+    assert_eq!(walked.errors.len(), 1, "{:?}", walked.errors);
+    let e = &walked.errors[0];
+    assert!(
+        e.starts_with("test-only key-fault screen keys at 1280x800: before Enter: clearing the keyboard focus dismisses this screen"),
+        "{e}"
+    );
+    assert!(walked.presses.is_empty() && walked.hits.is_empty());
+}
+
+/// A settle that times out is an error naming the screen and the key, and nothing is taken from it: not the write that
+/// key made, and not the findings of the keys before it are lost.
+#[test]
+fn a_settle_timeout_is_an_error_and_earlier_findings_stay() {
+    let (walked, _) = walk_fault(Faults {
+        enter_writes: true,
+        times_out_at: Some(0),
+        ..NO_FAULTS
+    });
+    assert_eq!(walked.errors.len(), 1, "{:?}", walked.errors);
+    assert!(
+        walked.errors[0].starts_with("test-only key-fault screen keys at 1280x800: Enter: the app did not go idle after the key"),
+        "{:?}",
+        walked.errors
+    );
+    assert!(
+        walked.hits.is_empty() && walked.presses.is_empty(),
+        "nothing from a timed-out key"
+    );
+    // the second key times out: the first key's write is still reported
+    let (walked, _) = walk_fault(Faults {
+        enter_writes: true,
+        times_out_at: Some(1),
+        ..NO_FAULTS
+    });
+    assert_eq!(walked.errors.len(), 1, "{:?}", walked.errors);
+    assert!(walked.errors[0].contains(": Escape: the app did not go idle"));
+    let got: Vec<&str> = walked.hits.iter().map(|h| h.what.as_str()).collect();
+    assert_eq!(got, ["Enter: fault folder/new.txt (new file)"]);
+}
+
+/// No idle baseline is an error, not a suppressed finding.
+#[test]
+fn an_export_running_before_the_key_is_an_error() {
+    let (walked, _) = walk_fault(Faults {
+        running_at_start: true,
+        ..NO_FAULTS
+    });
+    assert_eq!(walked.errors.len(), 1, "{:?}", walked.errors);
+    assert!(
+        walked.errors[0].contains("an export is already running before the key"),
+        "{:?}",
+        walked.errors
+    );
+    assert!(walked.hits.is_empty());
+}
+
+/// A folder that cannot be listed fails the visit with its name and path, and compares nothing.
+#[test]
+fn a_folder_that_cannot_be_listed_is_an_error() {
+    let (walked, _) = walk_fault(Faults {
+        unreadable_root: true,
+        ..NO_FAULTS
+    });
+    assert_eq!(walked.errors.len(), 1, "{:?}", walked.errors);
+    assert!(
+        walked.errors[0].contains("cannot list")
+            && walked.errors[0].contains("missing")
+            && walked.errors[0].contains("fault folder"),
+        "{:?}",
+        walked.errors
+    );
+    assert!(walked.hits.is_empty() && walked.presses.is_empty());
+}
+
+/// A file that cannot be read is an error naming the path (a read failure is injected: the OS gives a temp folder no
+/// unreadable file without admin rights), never a stand-in hash that two failed reads would share.
+#[test]
+fn a_file_that_cannot_be_read_is_an_error() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(d.path().join("a.txt"), "one").unwrap();
+    std::fs::write(d.path().join("b.txt"), "two").unwrap();
+    let roots = [("root", d.path().to_path_buf())];
+    assert!(scan(&roots, &|p| std::fs::read(p)).is_ok());
+    let e = scan(&roots, &|p| {
+        if p.ends_with("b.txt") {
+            Err(std::io::Error::other("sharing violation"))
+        } else {
+            std::fs::read(p)
+        }
+    })
+    .unwrap_err();
+    assert!(
+        e.contains("cannot read")
+            && e.contains("b.txt")
+            && e.contains("root folder")
+            && e.contains("sharing violation"),
+        "{e}"
+    );
+}
+
 /// The hash counts content and paths: a file rewritten with the same bytes (its modification time moves) is no change; a
 /// file with other bytes, a new file, a new folder and a deleted file or folder each are, and each is named by its path.
 #[test]
@@ -1702,7 +2052,7 @@ fn a_tree_differs_by_content_and_paths_not_by_modification_time() {
     std::fs::write(at("a.txt"), "one").unwrap();
     std::fs::write(at("b.txt"), "two").unwrap();
     std::fs::create_dir(at("old")).unwrap();
-    let tree = || tree_of(&[("root", d.path().to_path_buf())]);
+    let tree = || tree_of(&[("root", d.path().to_path_buf())]).unwrap();
     let first = tree();
     assert_eq!(first.len(), 3, "{first:?}");
     std::thread::sleep(std::time::Duration::from_millis(30));

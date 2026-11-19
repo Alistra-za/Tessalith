@@ -19,8 +19,9 @@
 use crate::app_harness::{plain_harness, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
-use crate::invariants::{clear_focus, Entry, Pressed};
+use crate::invariants::{arm, strike, Entry, Pressed};
 use eframe::egui::{Key, Vec2};
+use sdc_gui::app::SdcApp;
 use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::AppModel;
@@ -629,22 +630,39 @@ impl Entry for ScreenEntry {
         roots
     }
 
+    fn arm(&mut self) -> Result<bool, String> {
+        let marker = self.screen.marker;
+        let (_, h) = self.open.as_mut().ok_or("the screen is not open")?;
+        arm(h, marker)
+    }
+
+    /// The export witnesses: the running flag the app's gate uses (read on the key-down frame and after settling) and
+    /// the export's record. The record cannot see an export that starts and ends inside the key's frames without
+    /// changing any of these fields; the model has no counter of finished exports to read instead.
     fn press(&mut self, key: Key) -> Result<Pressed, String> {
         let marker = self.screen.marker;
         let (_, h) = self.open.as_mut().ok_or("the screen is not open")?;
-        clear_focus(h)?;
-        let running = |h: &H| h.state().model.export.running.is_some();
-        let running_before = running(h);
-        h.key_press(key);
-        h.run_steps(2);
-        let running_after_key = running(h);
-        settle(h, 4);
-        Ok(Pressed {
-            running_before,
-            running_after_key,
-            running_after_settle: running(h),
-            shown: holds(&snapshot(h), marker),
-        })
+        strike(
+            h,
+            key,
+            &|app: &SdcApp| app.model.export.running.is_some(),
+            &|app: &SdcApp| {
+                let e = &app.model.export;
+                format!(
+                    "{} {} {} {} {:?} {} {}",
+                    e.revision,
+                    e.rows.len(),
+                    e.events.len(),
+                    e.summary.is_some(),
+                    e.error,
+                    e.notes.len(),
+                    e.outputs.len()
+                )
+            },
+            // a timeout is an error of this screen and key (`strike`)
+            &mut |h| settle(h, 4),
+            marker,
+        )
     }
 
     fn reopen(&mut self, size: Vec2) -> Result<(), String> {
