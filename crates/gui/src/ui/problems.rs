@@ -726,7 +726,7 @@ fn fix_click(
                 ui,
                 egui::Button::new("Clear recipe"),
                 Some(&name),
-                "Remove packing.recipe from this set's packed entries in sdc.toml. The shader and the maps then pick RMAOS or RFAOS.",
+                "Remove packing.recipe from this set's packed entries in sdc.toml. A project or preset recipe can apply next.",
                 off,
             )
         }

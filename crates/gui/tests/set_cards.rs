@@ -1101,7 +1101,7 @@ fn overlaps(a: egui::Rect, b: egui::Rect) -> bool {
 /// Linked Coat (slot 7) and RMAOS (slot 6) chips on `leaf`, each with both locks when `locks`: the chip named
 /// `label` has its link mark (backing square and two rings) at its top centre, inside the chip and touching neither
 /// the slot letter nor a lock.
-fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
+fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool, theme: egui::Theme) {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair_with(
         d.path(),
@@ -1130,7 +1130,11 @@ fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
     }
     idle(&mut m);
     let mut h = harness(m);
+    h.ctx.set_theme(theme);
     h.run();
+    let visuals = &h.ctx.global_style().visuals;
+    assert_eq!(visuals.dark_mode, theme == egui::Theme::Dark);
+    assert_ne!(visuals.strong_text_color(), visuals.panel_fill);
     let chip = {
         let card = card_of(&h, "arch/leaf");
         let found: Vec<_> = h
@@ -1156,6 +1160,11 @@ fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
         .iter()
         .filter_map(|s| match s {
             egui::Shape::Circle(c) if c.stroke.width == 1.5 && chip.contains(c.center) => {
+                assert_eq!(
+                    c.stroke.color,
+                    visuals.strong_text_color(),
+                    "link rings in {theme:?}"
+                );
                 Some(c.center)
             }
             _ => None,
@@ -1166,7 +1175,7 @@ fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
         .iter()
         .filter_map(|s| match s {
             egui::Shape::Rect(r)
-                if r.fill != egui::Color32::TRANSPARENT
+                if r.fill == visuals.panel_fill
                     && chip.contains_rect(r.rect)
                     && r.rect.width() < chip.width()
                     && circles.iter().all(|c| r.rect.contains(*c)) =>
@@ -1193,18 +1202,22 @@ fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
 
 #[test]
 fn the_link_mark_clears_the_letter_and_both_locks_on_a_coat_chip() {
-    assert_mark_at_top_centre(", from set arch/lacq", "CNR", true);
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        assert_mark_at_top_centre(", from set arch/lacq", "CNR", true, theme);
+    }
 }
 
 #[test]
 fn the_link_mark_clears_the_letter_and_both_locks_on_an_rmaos_chip() {
-    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", true);
+    for theme in [egui::Theme::Dark, egui::Theme::Light] {
+        assert_mark_at_top_centre(", from set arch/wall", "RMAOS", true, theme);
+    }
 }
 
 #[test]
 fn the_link_mark_is_in_the_same_place_without_locks() {
-    assert_mark_at_top_centre(", from set arch/lacq", "CNR", false);
-    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", false);
+    assert_mark_at_top_centre(", from set arch/lacq", "CNR", false, egui::Theme::Dark);
+    assert_mark_at_top_centre(", from set arch/wall", "RMAOS", false, egui::Theme::Dark);
 }
 
 #[test]

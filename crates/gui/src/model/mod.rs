@@ -2856,7 +2856,7 @@ impl AppModel {
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
-        // Asked under the old plan's views and root, before they are replaced (`rekey_filter` below).
+        // Resolve the filter under the old plan before moving its key to the new root.
         let filter_names_an_id = self.set_filter_names_an_id();
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
@@ -2870,17 +2870,7 @@ impl AppModel {
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
         self.rekey_scope(old_root.as_deref());
-        self.rekey_filter(old_root.as_deref(), filter_names_an_id);
-        // Note JI2: a set key holds the output root, so an Also tick or a new export folder dropped the selected set
-        // (the Also export tab's own tick closed its editor). Rekey it as the scope is; a key not under the old root
-        // (a created set's empty key) is left as it is.
-        if let (Some(old), Selection::Set(k)) = (old_root.as_deref(), &self.selection) {
-            let new = self.sets_root();
-            let id = engine::sets::set_id(old, k);
-            if old != new.as_path() && id != *k {
-                self.selection = Selection::Set(engine::sets::set_key(&new, &id));
-            }
-        }
+        self.rekey_selected_and_filtered_sets(old_root.as_deref(), filter_names_an_id);
         // Note HQ6: after the output root lands, since the game paths are read under it.
         self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;

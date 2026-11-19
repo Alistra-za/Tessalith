@@ -1702,7 +1702,7 @@ fn view_lookup<'a>(
 impl AppModel {
     /// Whether the open set filter's stored value names its set by id under the plan now in place (a key-less set's
     /// id is typed by the user and may look like a key). Asked before a landing plan replaces the sets and the root,
-    /// so `rekey_filter` leaves such a value alone. `false` with no set filter open.
+    /// so a root change leaves such a value alone. `false` with no set filter open.
     pub(super) fn set_filter_names_an_id(&self) -> bool {
         let Some(
             ProblemsFilter::Set(k) | ProblemsFilter::SetNotes(k) | ProblemsFilter::SetChecks(k),

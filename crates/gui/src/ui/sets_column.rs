@@ -490,12 +490,13 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 /// shares): the id, its middle elided, then `…/<tail>`. Note HP (SC4): when the search lies inside one middle
 /// segment, `…/<that segment>/<rest>` is tried right after the id. When nothing fits, `…/<tail>` is returned anyway
 /// (the whole id when the tail is the id, or when `…/<tail>` would be no shorter than it: final wave Group 6, ledger
-/// 187) and the title wraps; two cards never read the same (review E24).
-fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
+/// 187) and the title wraps; two cards never read the same (review E24). The bool says whether the title fits.
+fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> (String, bool) {
     use super::header::elide_middle;
     let len = id.chars().count();
-    if fits(id) || tail == id {
-        return id.to_string();
+    let whole_fits = fits(id);
+    if whole_fits || tail == id {
+        return (id.to_string(), whole_fits);
     }
     let q = engine::sets::fold_id(query.trim());
     if !q.is_empty() {
@@ -507,21 +508,22 @@ fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> 
         {
             let t = format!("…/{}", segs[i..].join("/"));
             if t.ends_with(tail) && fits(&t) {
-                return t;
+                return (t, true);
             }
         }
     }
     for n in (1..len).rev() {
         let t = elide_middle(id, n);
         if t.contains('/') && t.ends_with(tail) && fits(&t) {
-            return t;
+            return (t, true);
         }
     }
     let last = format!("…/{tail}");
     if last.chars().count() < len {
-        last
+        let last_fits = fits(&last);
+        (last, last_fits)
     } else {
-        id.to_string()
+        (id.to_string(), false)
     }
 }
 
@@ -2418,11 +2420,9 @@ fn pill(
                     // `fits` is whether the shown title fits `room`; when even `…/<tail>` does not, it wraps.
                     let shown_in = |ui: &egui::Ui, room: f32| {
                         let font = egui::TextStyle::Body.resolve(ui.style());
-                        let shown = fit_title(&v.id, &v.short, &model.sets_filter.search, |t| {
+                        fit_title(&v.id, &v.short, &model.sets_filter.search, |t| {
                             text_width(ui, t, &font) <= room
-                        });
-                        let fits = text_width(ui, &shown, &font) <= room;
-                        (shown, fits)
+                        })
                     };
                     let shown_for = |ui: &egui::Ui| shown_in(ui, ui.available_width());
                     // One row only when the title that will be shown also fits beside the pill and badges
@@ -4127,17 +4127,15 @@ mod tests {
     }
 
     fn fit_at(id: &str, query: &str, n: usize) -> String {
-        // the tail is the leaf here: no other set shares it
-        let tail = id.rsplit('/').next().unwrap_or(id);
-        fit_title(id, tail, query, |t: &str| t.chars().count() <= n)
+        let tail = crate::model::sets::short_names(&[id]);
+        fit_title(id, &tail[0], query, |t: &str| t.chars().count() <= n).0
     }
 
     #[test]
     fn fit_title_keeps_a_middle_match() {
-        assert_eq!(
-            fit_at("architecture/stone/banner", "STONE", 15),
-            "…/stone/banner"
-        );
+        let id = "textures/architecture/stone/bricks/banner";
+        assert_eq!(fit_at(id, "STONE", 21), "…/stone/bricks/banner");
+        assert_ne!(fit_at(id, "", 21), fit_at(id, "STONE", 21));
         assert_eq!(fit_at("a/bb/stone/leaf", "ston", 13), "…/stone/leaf");
     }
 
@@ -4145,7 +4143,7 @@ mod tests {
     fn fit_title_without_a_middle_match_keeps_the_tail() {
         let id = "architecture/stone/banner";
         let plain = fit_at(id, "", 15);
-        assert!(plain.ends_with("banner"), "{plain}");
+        assert!(plain.ends_with("stone/banner"), "{plain}");
         for q in ["", "banner", "arch", "stone/ban"] {
             assert_eq!(fit_at(id, q, 15), plain, "query {q:?}");
         }
@@ -4153,10 +4151,9 @@ mod tests {
 
     #[test]
     fn fit_title_with_a_match_that_does_not_fit_falls_through_to_the_tail() {
-        // "…/stone/banner" is 14 characters: at 12 the middle match is skipped
-        let id = "architecture/stone/banner";
+        let id = "architecture/stone/old/banner";
         assert_eq!(fit_at(id, "stone", 12), fit_at(id, "", 12));
-        assert_eq!(fit_at(id, "stone", 12), "…/banner");
+        assert_eq!(fit_at(id, "stone", 12), "…/old/banner");
     }
 
     #[test]
@@ -4164,7 +4161,7 @@ mod tests {
         let narrow = |s: &str| s.chars().count() <= 8;
         assert_eq!(
             fit_title("textures/arch/eye/m", "eye/m", "", narrow),
-            "…/eye/m"
+            ("…/eye/m".into(), true)
         );
         assert_ne!(
             fit_title("textures/arch/eye/eye", "eye/eye", "", narrow),
@@ -4179,7 +4176,8 @@ mod tests {
         let a = fit_title("textures/a/stone/m", "a/stone/m", "stone", narrow);
         let b = fit_title("textures/b/stone/m", "b/stone/m", "stone", narrow);
         assert_ne!(a, b);
-        assert!(a.ends_with("a/stone/m") && b.ends_with("b/stone/m"));
+        assert!(a.0.ends_with("a/stone/m") && b.0.ends_with("b/stone/m"));
+        assert!(!a.1 && !b.1);
     }
 
     #[test]
@@ -4202,17 +4200,26 @@ mod tests {
     fn the_tail_form_is_never_longer_than_the_id() {
         let none = |_: &str| false;
         // "…/stone/m" is 9 characters, as many as the id: the id is shown
-        assert_eq!(fit_title("x/stone/m", "stone/m", "", none), "x/stone/m");
+        assert_eq!(
+            fit_title("x/stone/m", "stone/m", "", none),
+            ("x/stone/m".into(), false)
+        );
         assert_eq!(
             fit_title("textures/arch/eye/m", "eye/m", "", none),
-            "…/eye/m"
+            ("…/eye/m".into(), false)
         );
     }
 
     #[test]
     fn fit_title_shows_the_whole_id_when_it_fits() {
         let id = "architecture/stone/banner";
-        assert_eq!(fit_at(id, "stone", 40), id);
+        let calls = std::cell::Cell::new(0);
+        let result = fit_title(id, "stone/banner", "stone", |text| {
+            calls.set(calls.get() + 1);
+            text.chars().count() <= 40
+        });
+        assert_eq!(result, (id.to_string(), true));
+        assert_eq!(calls.get(), 1, "the fitted title carries its measurement");
     }
 
     #[test]

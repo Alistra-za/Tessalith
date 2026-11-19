@@ -94,6 +94,56 @@ fn finish(m: &mut AppModel, msgs: Vec<WorkerMsg>) {
     assert!(m.wait_idle(Duration::from_secs(60)));
 }
 
+#[test]
+fn a_carried_view_uses_the_exact_output_spelling_of_the_new_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = open(d.path(), |_| {});
+    let displayed = |m: &AppModel| {
+        views(m)
+            .iter()
+            .flat_map(|v| &v.outputs)
+            .find(|(_, key, _)| key == ROCK)
+            .unwrap()
+            .2
+            .clone()
+    };
+    for case_only in [true, false] {
+        let old = displayed(&m);
+        m.replan();
+        let (_, mut full) = collect(&mut m, 0, 1);
+        let WorkerMsg::Planned {
+            result: Ok(view), ..
+        } = &mut full[0]
+        else {
+            panic!("full plan")
+        };
+        let job = view
+            .items
+            .iter_mut()
+            .find(|i| i.key == ROCK)
+            .unwrap()
+            .job
+            .as_mut()
+            .unwrap();
+        let spelled = if case_only {
+            job.output.with_file_name("Rock01.dds")
+        } else {
+            old.parent()
+                .unwrap()
+                .join(".")
+                .join(old.file_name().unwrap())
+        };
+        assert_ne!(old.as_os_str(), spelled.as_os_str(), "different spelling");
+        job.output = spelled.clone();
+        deliver(&mut m, full);
+        assert_eq!(
+            displayed(&m).as_os_str(),
+            spelled.as_os_str(),
+            "the Output files line follows the landed plan"
+        );
+    }
+}
+
 fn policy(m: &AppModel, key: &str) -> Option<AlphaPolicy> {
     m.item(key)?.job.as_ref().map(|j| j.profile.alpha.policy)
 }

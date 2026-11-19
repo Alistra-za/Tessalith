@@ -50,23 +50,32 @@ impl AppModel {
         self.set_scope(Some(ExportScope { keys, label }));
     }
 
-    /// Like `rekey_scope`, for the Problems filter's set key (`Set`, `SetNotes`, `SetChecks`): a key under the old root
+    /// For Selection and the Problems filter (`Set`, `SetNotes`, `SetChecks`), a key under the old root
     /// moves to the new root, so it never survives a root change to equal another set's rebuilt key. A value not
     /// under the old root (a key-less set's id) is left as it is. `names_an_id` is `set_filter_names_an_id`, asked
     /// under the old plan: a value the resolver took for an id is never rekeyed, however it reads.
-    pub(super) fn rekey_filter(&mut self, old_root: Option<&Path>, names_an_id: bool) {
+    pub(super) fn rekey_selected_and_filtered_sets(
+        &mut self,
+        old_root: Option<&Path>,
+        names_an_id: bool,
+    ) {
         use super::bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
         let new = self.sets_root();
-        let Some(old) = old_root.filter(|o| !names_an_id && *o != new.as_path()) else {
+        let Some(old) = old_root.filter(|o| *o != new.as_path()) else {
             return;
         };
-        let rekey = |k: &str| {
+        let rekey = |k: &mut String| {
             let id = set_id(old, k);
-            (id != k).then(|| set_key(&new, &id))
+            if id != *k {
+                *k = set_key(&new, &id);
+            }
         };
-        if let Some(Set(k) | SetNotes(k) | SetChecks(k)) = &mut self.bottom.filter {
-            if let Some(n) = rekey(k) {
-                *k = n;
+        if let super::Selection::Set(k) = &mut self.selection {
+            rekey(k);
+        }
+        if !names_an_id {
+            if let Some(Set(k) | SetNotes(k) | SetChecks(k)) = &mut self.bottom.filter {
+                rekey(k);
             }
         }
     }

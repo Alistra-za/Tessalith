@@ -517,7 +517,11 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                         let line = format!("{label}: {}", rel.to_string_lossy().replace('/', "\\"));
                         let full = abs.display().to_string();
                         let r = ui
-                            .add(egui::Label::new(line).truncate())
+                            .add(
+                                egui::Label::new(line)
+                                    .truncate()
+                                    .show_tooltip_when_elided(false),
+                            )
                             .on_hover_text(&full);
                         // The name keeps the whole path when the line is cut short.
                         r.widget_info(|| {
@@ -530,6 +534,12 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                     },
                     |ui| {
                         if model.stat_is_file(abs) {
+                            let scroll = ui.spacing().scroll;
+                            ui.add_space(
+                                scroll.bar_width
+                                    + scroll.bar_outer_margin
+                                    + ui.spacing().item_spacing.x,
+                            );
                             let r = ui.small_button("Show in Explorer");
                             // Named by the whole path: two outputs can share a file name (final wave Group 5).
                             r.widget_info(|| {
@@ -754,7 +764,11 @@ fn rows(
             let has_job = |c: &SlotCell| own_item(model, v, c).is_some_and(|i| i.job.is_some());
             if cells.iter().any(has_job) {
                 let head = |ui: &mut egui::Ui, text: &str| {
-                    ui.label(egui::RichText::new(text).small().weak());
+                    if text.is_empty() {
+                        ui.allocate_space(egui::Vec2::ZERO);
+                    } else {
+                        ui.label(egui::RichText::new(text).small().weak());
+                    }
                 };
                 head(ui, "Slot");
                 head(ui, "");
@@ -766,7 +780,7 @@ fn rows(
                     .any(|c| c.kind == SlotKind::Diffuse && has_job(c));
                 if alpha && shows_json_panel(v, model.target) {
                     // The diffuse row draws the Match toggle before its alpha combo: "Alpha" starts at the combo.
-                    let span = match_toggle_span(ui);
+                    let span = match_button_width(ui) + ui.spacing().item_spacing.x;
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 0.0;
                         ui.add_space(span);
@@ -793,6 +807,7 @@ fn rows(
                         file_w,
                         free,
                         format_base,
+                        flags_w: others.map_or(0.0, |w| w[3]),
                     },
                 );
                 for (a, b) in widths.iter_mut().zip(w.widths) {
@@ -818,6 +833,7 @@ struct RowRoom {
     free: f32,
     /// The Format column's base width.
     format_base: f32,
+    flags_w: f32,
 }
 
 /// The widths a row drew: its cells' (`widths`, the Format cell with its combo as drawn) and the same with every
@@ -842,10 +858,9 @@ fn own_item<'a>(model: &'a AppModel, v: &SetView, cell: &SlotCell) -> Option<&'a
 /// The link mark's square: the toggle is as wide as the glyph button it replaces (`look_036`'s pin on the Format column).
 const MARK_W: f32 = 13.0;
 
-/// What the Match toggle takes in the Flags cell before the alpha combo: its button (the mark and the button's
-/// padding) and the spacing after it. The heading row starts "Alpha" this far in, so it stands over the combo.
-fn match_toggle_span(ui: &egui::Ui) -> f32 {
-    MARK_W + 2.0 * ui.spacing().button_padding.x + ui.spacing().item_spacing.x
+/// Width reserved for the Match button on its row and before the Alpha heading.
+fn match_button_width(ui: &egui::Ui) -> f32 {
+    MARK_W + 2.0 * ui.spacing().button_padding.x
 }
 
 /// A Flags toggle painted as the link mark (two rings, no emoji glyph): its accessible name is the full `label`, which
@@ -862,6 +877,7 @@ fn flag(
     let mut button = None;
     ui.add_enabled_ui(enabled, |ui| {
         let a = egui::Button::selectable(on, egui::Atom::custom(mark, egui::Vec2::splat(MARK_W)))
+            .min_size(egui::vec2(match_button_width(ui), 0.0))
             .atom_ui(ui);
         if let Some(rect) = a.rect(mark) {
             let c = ui.style().interact_selectable(&a.response, on).text_color();
@@ -1188,10 +1204,8 @@ fn row(
             }
             if i.kind == ItemKind::Packed {
                 // Last frame's Flags column: the lines run on across it (ruling A2-7: `rows` stores it).
-                let flags_w = ui
-                    .data(|d| d.get_temp::<[f32; 5]>(egui::Id::unique(("slot-rows-others", &v.id))))
-                    .map_or(0.0, |w| w[3]);
-                let used = packed_controls(ui, model, i, toml_read_only.as_deref(), flags_w, acts);
+                let used =
+                    packed_controls(ui, model, i, toml_read_only.as_deref(), room.flags_w, acts);
                 other_w = other_w.max(used);
             }
         })
@@ -1444,16 +1458,16 @@ fn linked_cell(
             );
             ui.add(
                 egui::Label::new(
-                    egui::RichText::new(format!("{own} is not written: slot {n} is linked."))
-                        .small()
-                        .weak(),
+                    egui::RichText::new(format!(
+                        "{own} still converts to DDS. The JSON uses the linked file for slot {n}."
+                    ))
+                    .small()
+                    .weak(),
                 )
                 .truncate(),
             )
             .on_hover_ui(|ui| {
-                ui.label(format!(
-                    "PGPatcher reads the linked file for slot {n}, so this set's {own} goes nowhere. Unlink to use it."
-                ));
+                ui.label(format!("Unlink to use {own} in slot {n}."));
             });
         }
     }
@@ -2114,6 +2128,49 @@ mod tests {
     use std::time::Duration;
 
     use super::{combo_w, front_cut};
+
+    #[test]
+    fn a_disabled_fill_reset_shows_its_reason() {
+        use egui_kittest::kittest::{NodeT, Queryable};
+        let d = tempfile::tempdir().unwrap();
+        for name in ["rock.png", "rock_roughness.png"] {
+            image::RgbImage::from_pixel(16, 16, image::Rgb([90, 90, 90]))
+                .save(d.path().join(name))
+                .unwrap();
+        }
+        let session = Arc::new(engine::session::Session::new().unwrap());
+        let mut m = AppModel::new(Default::default(), None, session);
+        m.open_folder(d.path().to_path_buf());
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let key = "rock_rmaos";
+        m.set_pack_fill(key, super::RawMap::Ao, Some(99));
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        // A read-only document drops its own fill keys. Exercise the row with the refusal and a saved fill together.
+        let mut h = egui_kittest::Harness::builder()
+            .with_context_setup(|ctx| {
+                crate::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .build_ui(|ui| {
+                super::packed_controls(
+                    ui,
+                    &m,
+                    m.item(key).unwrap(),
+                    Some("read-only fill"),
+                    super::ALPHA_W,
+                    &mut vec![],
+                );
+            });
+        h.ctx.global_style_mut(|s| {
+            s.interaction.tooltip_delay = 0.0;
+            s.interaction.show_tooltips_only_when_still = false;
+        });
+        h.run();
+        let reset = h.get_by_label("Reset");
+        assert!(reset.accesskit_node().is_disabled());
+        reset.hover();
+        h.run_steps(4);
+        h.get_by_label("read-only fill");
+    }
 
     #[test]
     fn combo_w_takes_free_room_up_to_its_want() {

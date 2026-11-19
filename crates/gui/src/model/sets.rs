@@ -1264,7 +1264,7 @@ pub(crate) type ViewReads<'a> = (
     bool,
     Option<&'a str>,
     &'a str,
-    Option<&'a Path>,
+    Option<&'a std::ffi::OsStr>,
 );
 
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
@@ -1285,7 +1285,7 @@ pub(crate) fn view_reads(i: &TextureItem) -> ViewReads<'_> {
         i.waiting,
         i.job.as_ref().map(|j| j.game_path.as_str()),
         i.job_key.as_str(),
-        i.job.as_ref().map(|j| j.output.as_path()),
+        i.job.as_ref().map(|j| j.output.as_os_str()),
     )
 }
 
@@ -1758,7 +1758,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
     }
-    // Review E13: the files the set's own slots write (`view_reads` covers `job_key`, so a moved output rebuilds this).
+    // Output files shows the plan's exact spelling, which view_reads compares even for equivalent paths.
     v.outputs.clear();
     for (kind, fill) in &v.slots {
         let SlotFill::Own { item } = fill else {
@@ -1772,8 +1772,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         }
     }
     // Then every other member that converts, in member order (final wave Group 2): one that fills no slot
-    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind. `view_reads` covers
-    // their `job_key`.
+    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind.
     for key in &v.members {
         let Some(i) = m.item(key) else {
             continue;

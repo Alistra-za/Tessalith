@@ -5499,6 +5499,8 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         !views.iter().any(|v| v.id == "wall"),
         "precondition: no set wall yet"
     );
+    let selected = "landscape/rock01";
+    m.select_set(&engine::sets::set_key(&m.sets_root(), selected));
     let f = ProblemsFilter::Set(id.clone());
     m.open_problems(Some(f.clone()));
     let before = filtered(&m, Some(&f));
@@ -5534,6 +5536,11 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         "another set's row: {texts:?}"
     );
     assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+    assert_eq!(
+        m.selection,
+        sdc_gui::model::Selection::Set(engine::sets::set_key(&m.sets_root(), selected)),
+        "the selected set moves even when the filter names an explicit id"
+    );
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it

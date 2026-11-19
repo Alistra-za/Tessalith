@@ -186,11 +186,70 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
     // StatCache's TTL would hold the "missing" read above.
     h.state().stats.borrow_mut().clear();
     h.run();
-    assert!(h.query_by_label(&show).is_some(), "{show} once it exists");
+    let button = h.get_by_label(&show).rect();
+    let right = h
+        .get_by_label_contains(&format!("1 of {} on disk", listed.len()))
+        .rect()
+        .right();
+    let scroll = sdc_gui::look::thin_scroll();
+    assert!(
+        button.right() + scroll.bar_width + scroll.bar_outer_margin <= right,
+        "the output button clears the scroll bar: {button:?}, right {right}"
+    );
 }
 
-/// Final wave Group 2: a set none of whose members writes a file has an empty Output files group that says so, and a
-/// header that reads "none".
+#[test]
+fn a_truncated_output_has_one_hover_with_the_absolute_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let path = m.export_root().join(format!(
+        "textures/arch/{}wall.dds",
+        "weathered_stone_".repeat(8)
+    ));
+    m.items
+        .iter_mut()
+        .find(|i| i.key == WALL_ALBEDO)
+        .unwrap()
+        .job
+        .as_mut()
+        .unwrap()
+        .output = path.clone();
+    m.invalidate_views();
+    select_set(&mut m, "arch/wall");
+    let mut h = harness_at(m, 1057.0);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run_steps(4);
+    h.get_by_label_contains("Output files").scroll_to_me();
+    h.run();
+    h.get_by_label_contains("Output files").click();
+    h.run_steps(4);
+    h.get_by_label(OUTPUTS_COUNT_NOTE);
+    let label = format!("Diffuse: {}", path.display());
+    h.get_by_label(&label).scroll_to_me();
+    h.run_steps(4);
+    let line = h.get_by_label(&label);
+    assert!(
+        painted_cut(&h, line.rect()),
+        "premise: the displayed path is elided"
+    );
+    line.hover();
+    h.run_steps(4);
+    h.get_by_label(&path.display().to_string());
+    let relative = path.strip_prefix(h.state().export_root()).unwrap();
+    let repeated = format!(
+        "Diffuse: {}",
+        relative.display().to_string().replace('/', "\\")
+    );
+    assert!(
+        h.query_by_label(&repeated).is_none(),
+        "only the absolute path appears on hover"
+    );
+}
+
+/// The empty Output files group explains the count.
 #[test]
 fn a_set_that_writes_nothing_says_so() {
     let d = tempfile::tempdir().unwrap();
@@ -616,7 +675,7 @@ fn a_link_over_an_own_file_shows_the_link_and_unlink_restores_it() {
 }
 
 #[test]
-fn an_own_file_under_a_link_for_the_other_kind_says_it_is_not_written() {
+fn an_own_file_under_a_link_for_the_other_kind_still_converts() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair_with(
         d.path(),
@@ -633,8 +692,10 @@ fn an_own_file_under_a_link_for_the_other_kind_says_it_is_not_written() {
     select_set(&mut m, LEAF);
     let h = harness(m);
     assert!(
-        h.query_by_label("leaf_f.png is not written: slot 7 is linked.")
-            .is_some(),
+        h.query_by_label(
+            "leaf_f.png still converts to DDS. The JSON uses the linked file for slot 7."
+        )
+        .is_some(),
         "the own file's line"
     );
     assert!(
@@ -1208,6 +1269,17 @@ fn blocked_with_reason(m: AppModel, control: &str, reason: &str) {
     h.run();
     h.run();
     assert!(h.query_by_label_contains(reason).is_some(), "{reason}");
+}
+
+#[test]
+fn a_read_only_sets_document_explains_the_refused_match_toggle() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, "arch/wall");
+    std::fs::write(d.path().join("sdc-project.toml"), "[").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(d.path()));
+    let reason = m.sets_read_only_reason().expect("read-only document");
+    blocked_with_reason(m, "Match on this (Diffuse)", &reason);
 }
 
 /// Whether the selected set's `control` is greyed.
