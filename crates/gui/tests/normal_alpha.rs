@@ -3500,7 +3500,8 @@ fn keep_rows(m: &AppModel, key: &str) -> usize {
     problems(m)
         .iter()
         .filter(|r| {
-            matches!(&r.at, At::Texture(k) if k == key) && matches!(r.fix, Some(Fix::KeepAlpha(_)))
+            matches!(&r.at, At::Texture(k) if k == key)
+                && matches!(r.fix, Some(Fix::KeepAlpha { .. }))
         })
         .count()
 }
@@ -3540,19 +3541,27 @@ fn open_saved_share(dir: &Path, files: &str, sets: &str) -> AppModel {
 }
 
 #[test]
-fn keep_alpha_writes_one_literal_full_table_and_undo_restores_both_documents() {
+fn keep_alpha_writes_one_literal_table_and_undo_restores_both_documents() {
     for (spellings, target) in [
-        (vec!["pbr/iron_n"], IRON_N),
+        (vec![], IRON_N),
+        (vec!["pbr/iron_n"], "pbr/iron_n"),
+        (vec!["PBR/IRON_N"], "PBR/IRON_N"),
         (vec!["PBR/IRON_N.PNG", "pbr/iron_n"], "PBR/IRON_N.PNG"),
         (vec!["PBR/IRON_N.PNG", IRON_N, "Pbr/Iron_N.png"], IRON_N),
     ] {
         let d = tempfile::tempdir().unwrap();
         open_slot_files(d.path());
-        let files: String = spellings
-            .iter()
-            .map(|k| format!("[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n"))
-            .collect();
+        // A rule supplies the type in the table-free case, so the recorder leaves the file unconfigured.
+        let mut files =
+            String::from("[[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n");
+        for k in &spellings {
+            files.push_str(&format!("[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n"));
+        }
         let mut m = open_saved_share(d.path(), &files, LISTED_AND_BORROWED);
+        assert_eq!(
+            m.project.as_ref().unwrap().has_file_key(IRON_N),
+            spellings.contains(&IRON_N)
+        );
         let before = m.project.as_ref().unwrap().text();
         let sets = m.sets_doc.as_ref().unwrap().text();
         assert_eq!(keep_rows(&m, IRON_N), 1);
@@ -3579,6 +3588,112 @@ fn keep_alpha_writes_one_literal_full_table_and_undo_restores_both_documents() {
         assert_eq!(m.project.as_ref().unwrap().text(), before);
         assert_eq!(m.sets_doc.as_ref().unwrap().text(), sets);
     }
+}
+
+#[test]
+fn keep_alpha_leaves_an_aliased_double_extension_input_alone() {
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let root = d.path().join("textures");
+    let other = "pbr/iron_n.png.tga";
+    bumpy_n(&root.join(other));
+    let mut m = open_saved_share(
+        d.path(),
+        "[inputs.'pbr/iron_n.png.tga']\nas = 'pbr/copper.tga'\n\
+         [files.'pbr/iron_n']\nsubtype = 'pbr_normal'\n",
+        STEEL_BORROWS,
+    );
+    let other_policy = |m: &AppModel| {
+        let job = m.item(other).unwrap().job.as_ref().unwrap();
+        assert_eq!(job.output.file_name().unwrap(), "copper.dds");
+        job.profile.alpha.policy
+    };
+    let before = other_policy(&m);
+    assert_ne!(before, AlphaPolicy::Data);
+    m.keep_alpha(IRON_N).unwrap();
+    settle(&mut m);
+    m.save().unwrap();
+    assert_eq!(
+        other_policy(&m),
+        before,
+        "Keep alpha changed the TGA's policy"
+    );
+    let saved = sdc_gui::project::ProjectDoc::open(&root);
+    assert_eq!(
+        saved.file_value(IRON_N, "alpha.policy"),
+        Some(json!("data"))
+    );
+    assert!(!saved.has_file_key(IRON_N));
+}
+
+#[test]
+fn keep_alpha_refuses_a_table_that_also_names_another_input() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    for (other, table) in [
+        ("pbr/iron_n.png.tga", None),
+        ("pbr/iron_n.png.tga", Some(IRON_N)),
+        ("pbr/iron_n.tga", Some("pbr/iron_n")),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        open_slot_files(d.path());
+        bumpy_n(&d.path().join("textures").join(other));
+        let mut files = format!(
+            "[inputs.'{other}']\nas = 'pbr/copper.tga'\n[files.'{other}']\nsubtype = 'pbr_albedo'\n\
+             [[rules]]\nmatch.glob = '**/iron_n.png'\nsubtype = 'pbr_normal'\n"
+        );
+        if let Some(table) = table {
+            files.push_str(&format!("[files.'{table}']\nsubtype = 'pbr_normal'\n"));
+        }
+        let mut m = open_saved_share(d.path(), &files, STEEL_BORROWS);
+        assert_eq!(keep_rows(&m, IRON_N), 1);
+        assert_eq!(
+            m.project.as_ref().unwrap().has_file_key(IRON_N),
+            table == Some(IRON_N)
+        );
+        m.open_problems(Some(sdc_gui::model::bottom::ProblemsFilter::Notes));
+        let mut h = keep_harness(m);
+        let button = h.get_by_role_and_label(
+            eframe::egui::accesskit::Role::Button,
+            "Keep alpha for pbr/iron_n.png",
+        );
+        assert!(button.accesskit_node().is_disabled(), "{other}, {table:?}");
+        let before = h.state().project.as_ref().unwrap().text();
+        let reason = h.state_mut().keep_alpha(IRON_N).unwrap_err();
+        assert!(reason.contains("sdc.toml"), "{reason}");
+        assert_eq!(h.state().project.as_ref().unwrap().text(), before);
+    }
+}
+
+#[test]
+fn keep_alpha_then_reset_preserves_the_saved_warning_acknowledgement() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let mut m = open_saved_share(
+        d.path(),
+        "[files.'pbr/iron_n']\nsubtype = 'pbr_normal'\nallow = ['CHAN-NOT-GRAY']\n",
+        STEEL_BORROWS,
+    );
+    assert_eq!(held(&m, IRON_N, "allow"), Some(json!(["CHAN-NOT-GRAY"])));
+    m.keep_alpha(IRON_N).unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    m.click_item(IRON_N, false, false);
+    m.ask_reset_all();
+    let mut h = keep_harness(m);
+    h.get_by_label("Reset all settings of 1 texture?");
+    h.get_by_role_and_label(eframe::egui::accesskit::Role::Button, "Reset")
+        .click();
+    h.step();
+    settle(h.state_mut());
+    assert!(h.state().dialog.is_none());
+    h.state_mut().save().unwrap();
+    let saved = sdc_gui::project::ProjectDoc::open(&d.path().join("textures"));
+    assert_eq!(saved.file_value(IRON_N, "alpha.policy"), None);
+    assert_eq!(
+        saved.file_value(IRON_N, "allow"),
+        Some(json!(["CHAN-NOT-GRAY"]))
+    );
 }
 
 #[test]
@@ -3662,14 +3777,27 @@ fn keep_alpha_checks_the_lending_owners_own_slot_lock() {
 
 #[test]
 fn keep_alpha_repaints_without_searching_for_a_slot_lock() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::bottom::KEEP_ALPHA_NAMES;
     use sdc_gui::model::sets::LOCK_SEARCHES;
     let d = tempfile::tempdir().unwrap();
     let mut m = old_share(d.path());
     m.open_problems(None);
     let mut h = keep_harness(m);
     let before = LOCK_SEARCHES.get();
+    h.get_by_role_and_label(
+        eframe::egui::accesskit::Role::Button,
+        "Keep alpha for pbr/iron_n.png",
+    );
+    let names = KEEP_ALPHA_NAMES.get();
+    assert!(names > 0);
     h.run_steps(3);
     assert_eq!(LOCK_SEARCHES.get(), before);
+    assert_eq!(
+        KEEP_ALPHA_NAMES.get(),
+        names,
+        "repaints rebuilt the accessible name"
+    );
 }
 
 #[test]
@@ -3757,7 +3885,11 @@ fn an_old_share_gets_a_keep_alpha_row() {
         .iter()
         .filter(|r| {
             matches!(&r.at, At::Texture(k) if k == IRON_N)
-                && r.fix == Some(Fix::KeepAlpha(Ok(IRON_N.into())))
+                && r.fix
+                    == Some(Fix::KeepAlpha {
+                        table: Ok(IRON_N.into()),
+                        name: format!("Keep alpha for {IRON_N}"),
+                    })
         })
         .cloned()
         .collect();

@@ -237,6 +237,7 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
         return vec![];
     }
     let tables = Tables::of(p);
+    let inputs = std::cell::LazyCell::new(|| input_key_counts(m));
     shared
         .into_iter()
         .filter_map(|(key, owner)| {
@@ -249,12 +250,47 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
                 return None;
             }
             let table = tables.keep_table(key).and_then(|table| {
+                if inputs.get(&table.to_lowercase()) != Some(&1) {
+                    return Err(format!(
+                        "The [files] key {table} in sdc.toml also matches another texture."
+                    ));
+                }
                 lock_refusal(owner, Some(SlotKind::Normal))?;
                 Ok(table)
             });
             Some((key.clone(), table))
         })
         .collect()
+}
+
+/// How many landed inputs each full name or stem governs. Item keys keep the real name after an input alias.
+fn input_key_counts(m: &AppModel) -> HashMap<String, usize> {
+    let mut counts = HashMap::new();
+    let mut add = |key: &str| {
+        let (full, stem) = forms(key);
+        for form in std::iter::once(full).chain(stem) {
+            *counts.entry(form).or_default() += 1;
+        }
+    };
+    for item in &m.items {
+        // A packed item's key is already its virtual stem. Resolve also matches its full virtual filename.
+        if item.kind == super::ItemKind::Packed {
+            if let Some((_, ext)) = item.job.as_ref().and_then(|j| j.game_path.rsplit_once('.')) {
+                add(&format!("{}.{ext}", item.key));
+                continue;
+            }
+        }
+        add(&item.key);
+    }
+    // A six-face cube has one item for all six physical inputs.
+    for (_, faces) in m.cube_face_keys() {
+        for face in faces {
+            if m.item(&face).is_none() {
+                add(&face);
+            }
+        }
+    }
+    counts
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
@@ -560,10 +596,15 @@ impl Tables {
         tables.is_empty().then(|| key.to_string())
     }
 
-    /// A user's Keep alpha writes a full filename even when an extensionless table also applies.
+    /// Use the existing table Reset reads, including its stem fallback. Create a full key only for an unconfigured file.
     fn keep_table(&self, key: &str) -> Result<String, String> {
-        let Some(at) = self.by_lower.get(&key.to_lowercase()) else {
-            return Ok(key.to_string());
+        let (full, stem) = forms(key);
+        let Some(at) = self.by_lower.get(&full) else {
+            let existing = stem
+                .as_ref()
+                .and_then(|s| self.by_lower.get(s))
+                .and_then(|at| at.first());
+            return Ok(existing.map_or_else(|| key.to_string(), |i| self.rows.get(*i).0.clone()));
         };
         if let [i] = at.as_slice() {
             return Ok(self.rows.get(*i).0.clone());
@@ -828,7 +869,7 @@ impl AppModel {
         }
         let rows = problems(self);
         let current = rows.iter().find_map(|r| match (&r.at, &r.fix) {
-            (At::Texture(k), Some(Fix::KeepAlpha(table))) if k == key => Some(table),
+            (At::Texture(k), Some(Fix::KeepAlpha { table, .. })) if k == key => Some(table),
             _ => None,
         });
         let changed = "The shared normal changed. Check Problems again.";

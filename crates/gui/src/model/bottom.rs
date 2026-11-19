@@ -387,7 +387,10 @@ pub enum Fix {
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
     StraightAlpha(String),
     /// Note JS7 (N-10): write `alpha.policy = "data"` for this shared normal.
-    KeepAlpha(Result<String, String>),
+    KeepAlpha {
+        table: Result<String, String>,
+        name: String,
+    },
     /// Note FC10 (CV8): remove the stored empty `match{n}` of the set (by id).
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
@@ -1309,7 +1312,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     for (k, table) in super::shared_alpha::rows(m, &views) {
         let Some(i) = m.item(&k) else { continue };
         out.push(Problem {
-            fix: Some(Fix::KeepAlpha(table)),
+            fix: Some(Fix::KeepAlpha {
+                table,
+                name: keep_alpha_name(&k),
+            }),
             detail: Some(KEEP_ALPHA_HOVER.into()),
             ..row(
                 Level::Info,
@@ -1455,6 +1461,17 @@ pub const TAG_AS_GRASS_HOVER: &str = "A 1:2 image whose bottom half is a normal 
 pub const STRAIGHT_ALPHA_HOVER: &str = "OpenEXR stores colour multiplied by alpha, so Tessalith divides it back on \
      load. If this file's colour is not premultiplied (straight alpha), Straight alpha reads it as stored \
      (alpha.exr_straight = true).";
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    pub static KEEP_ALPHA_NAMES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+fn keep_alpha_name(key: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    KEEP_ALPHA_NAMES.set(KEEP_ALPHA_NAMES.get() + 1);
+    format!("Keep alpha for {key}")
+}
+
 /// Note JS7: the hover of a Keep alpha row.
 pub const KEEP_ALPHA_HOVER: &str =
     "Write alpha.policy = \"data\" for this normal in sdc.toml, so the regular set's specular stays.";
