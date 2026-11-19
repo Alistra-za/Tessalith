@@ -9,7 +9,7 @@ use crate::model::items::{ItemKind, ItemStatus, TextureItem};
 use crate::model::pbr_export::json_entries;
 use crate::model::preview::{extra_inputs_key, DEBOUNCE};
 use crate::model::sets::set_views;
-use crate::model::sets::{SetView, SlotFill, SlotKind};
+use crate::model::sets::{slot_shown, SetView, SlotFill, SlotKind, SlotShown};
 use crate::model::viewport3d::FileSource;
 use crate::model::viewport3d::{read_file, Content, Viewport3d};
 use crate::model::AppModel;
@@ -164,10 +164,42 @@ pub struct MemberSlot {
 
 /// The set's filled slots (02 §1.1). With the PGPatcher entry (CS and a PBR set): the slot's path in
 /// `entry.slots[slotN]` when sdc names it there (a borrowed slot, or a file another set owns, `pbr_export::slots_of`),
-/// and for the set's own texture `<prefix>_<suffix>.dds`. A user's own `slotN` setting points at some other file
-/// and is not served. Without the entry (D3): [`plain_path`]. Coat and fuzz share slot 7: both claim an explicit
-/// slot-7 path, and the later one wins in [`Encoder::memory_sources`].
+/// and for the set's own texture `<prefix>_<suffix>.dds`. The preview shows what the JSON carries (review E1): a
+/// linked slot (`v.linked` with an item and a row) serves the linked file at the link's path, keyed by the row the
+/// link fills (`Encoder.members` is keyed by kind, so no two slots leave here with one kind); the row's own file is
+/// not served then, and neither is an own or borrowed file whose slot holds a link for another kind
+/// (`SlotShown::Replaced`). A typed path naming no file pushes nothing: the own file under it keeps only its prefix
+/// path and the view reads the game data for the rest. A link with no slot row also reads game data.
+/// Without the entry (D3): [`plain_path`], no links.
+/// Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one wins in
+/// [`Encoder::memory_sources`].
 pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Vec<MemberSlot> {
+    // The links' files first: each takes its row, and the row's own fill is then left out.
+    let mut linked_out: Vec<MemberSlot> = vec![];
+    // The plain preview has no entry, even when its SetView carries links.
+    if entry.is_some() {
+        for link in v.linked.values() {
+            let Some(key) = &link.item else {
+                continue;
+            };
+            // shortcut: no SlotKind uses game slot 5. Serve rowless links when members can be keyed by game slot.
+            let Some(row) = link.row else {
+                continue;
+            };
+            // Links are unique per game slot and each destination row belongs to one game slot.
+            let Some(item) = m.item(key) else {
+                continue;
+            };
+            linked_out.push(MemberSlot {
+                kind: row,
+                item: key.clone(),
+                job_key: item.job_key.clone(),
+                status: format!("{:?}", item.status),
+                sig: signature(item),
+                paths: vec![canon(&link.path)],
+            });
+        }
+    }
     let mut out = vec![];
     for (kind, fill) in &v.slots {
         let (key, own) = match fill {
@@ -178,6 +210,11 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
         let Some(item) = m.item(key) else {
             continue;
         };
+        let shown = slot_shown(v, *kind);
+        if matches!(shown, SlotShown::Replaced { .. }) || linked_out.iter().any(|s| s.kind == *kind)
+        {
+            continue;
+        }
         let mut paths = vec![];
         match entry {
             None => paths.push(plain_path(*kind)),
@@ -210,6 +247,7 @@ pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Ve
             paths,
         });
     }
+    out.extend(linked_out);
     out
 }
 
@@ -1036,6 +1074,8 @@ pub struct SetFingerprint {
 
 /// `None` when the set is gone.
 pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
+    // The candidate entries, not `written_json_entries`: a set whose statics drop its entry is still previewed on the
+    // plane. Its candidate carries no stored `slotN` command, as its written result would not (ruling 3b-F9).
     let (v, entry) = match json_entries(m).into_iter().find(|(v, _)| v.key == set_key) {
         Some((v, e)) => (v, Some(e)),
         None => (set_views(m).into_iter().find(|v| v.key == set_key)?, None),

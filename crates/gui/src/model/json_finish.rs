@@ -194,7 +194,7 @@ impl AppModel {
         let Some(d) = self.sets_doc.as_mut() else {
             return;
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = d.defer_record_save();
         let side = P::record(d, &shas);
         if d.read_only() {
             self.export.notes.push(super::sidecar_only_note(&side));

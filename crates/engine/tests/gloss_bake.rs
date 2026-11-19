@@ -283,3 +283,40 @@ fn a_pbr_set_still_bakes_roughness_only() {
         assert!(j.bake.is_none(), "{} bakes", j.input.display());
     }
 }
+
+/// N-12 (Note JS2): the bake's own `renormalize_bake` (provenance `set`) on a plain normal in a baking cs set never
+/// opts the set's complex `_m` into CL40's gloss bake.
+#[test]
+fn the_bakes_own_renormalize_bake_never_opts_into_the_gloss_bake() {
+    let d = tempfile::tempdir().unwrap();
+    wall_set(d.path(), |_| true);
+    put(
+        d.path(),
+        "wall_rmaos.png",
+        DynamicImage::ImageRgb8(ImageBuffer::from_fn(64, 64, |x, _| {
+            Rgb([(x * 4) as u8, 0, 255])
+        })),
+    );
+    let p = plan(request(
+        d.path(),
+        Target::Cs,
+        &[
+            CM,
+            "file:**/wall_n.png.subtype=normal",
+            "file:**/wall_rmaos.png.subtype=rmaos",
+        ],
+        &[],
+    ));
+    assert_eq!(
+        job(&p, "wall_m.png").profile.subtype,
+        Subtype::ComplexMaterial
+    );
+    assert!(
+        job(&p, "wall_rmaos.png").bake.is_some(),
+        "the set bakes from the plain normal"
+    );
+    assert!(
+        job(&p, "wall_m.png").bake.is_none(),
+        "no gloss bake without the user's opt-in"
+    );
+}

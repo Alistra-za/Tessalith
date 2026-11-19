@@ -123,7 +123,6 @@
         "SHADER-UNAVAILABLE",
         "SHADER-EXTRA-MAP",
         "SHADER-MISSING-MAP",
-        "SHADER-NORMAL-SPECULAR",
         "GRASS-SHAPE",
         "GRASS-TOP-OPAQUE",
         "GRASS-NORMALS",

@@ -426,7 +426,10 @@ pub const SCREENS: &[Screen] = &[
     Screen {
         name: "pgp material tab",
         fixture: "demo",
-        open: |h| select_set(h, "architecture/stone/cobble"),
+        open: |h| {
+            model(h).save().expect("saved material editor fixture");
+            select_set(h, "architecture/stone/cobble");
+        },
         steps: &[],
         act: None,
         // the path is the editor's name box (its header), drawn whatever the tab; the Specular level box is the
@@ -490,10 +493,11 @@ pub const SCREENS: &[Screen] = &[
         open: |h| material_tab(h, "pbr/metal", engine::shader::Shader::PbrLandscape),
         steps: &[],
         act: None,
-        // a control of the card's body: "PBR Landscape" is also the Sets column's shader value and its card's label
+        // a line of the card's body: "PBR Landscape" is also the Sets column's shader value and its card's label, and
+        // at 1100x800 the set editor's slot heading and Output files group put the template combo under the fold
         marker: &[
             has("textures/pbr/metal"),
-            has_role("ComboBox", "PBR texture set template"),
+            has("Shared (texture set, material object and PGPatcher JSON)"),
         ],
         transient: false,
         dialog: false,

@@ -177,6 +177,8 @@ mod no_codes;
 mod no_rnm_ui;
 #[path = "../no_set.rs"]
 mod no_set;
+#[path = "../normal_alpha.rs"]
+mod normal_alpha;
 #[path = "../open_cancel.rs"]
 mod open_cancel;
 #[path = "../open_in_textures.rs"]
@@ -299,6 +301,8 @@ mod skin_card;
 mod slot_alpha;
 #[path = "../slot_file_drop.rs"]
 mod slot_file_drop;
+#[path = "../slot_links.rs"]
+mod slot_links;
 #[path = "../slot_lock.rs"]
 mod slot_lock;
 #[path = "../slot_menu.rs"]

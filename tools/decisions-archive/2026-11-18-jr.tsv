@@ -1,0 +1,38 @@
+id	note	line	marker	superseder	superseder_quote	class	date	code_cites	remark
+HN2	HN		back	JR		partial	2026-11-18		goes: an empty chip is any slot with no file (JR1: a link is not empty); stays: the rest
+HN6	HN		back	JR		partial	2026-11-18		goes: the elide ladder ending in the leaf and its own-line trigger (JR5: the middle forms end with the unique tail, `…/<tail>` last, own line when the title does not fit beside the pill, then wrap); stays: the search form (HP7), the full id as name and hover; final wave at cb8a6e1e: shorter last title form, including the whole-id fallback
+HP7	HP		back	JR		partial	2026-11-18		goes: the middle form tried whatever its end (JR5: only when it ends with the tail); stays: the rest
+HP9	HP		back	JR		partial	2026-11-18		goes: nothing (JR1: a link is not empty); stays: the whole item
+HP12	HP		back	JR		partial	2026-11-18		goes: (a)'s Textures 259 px and Sets 240 px at 1055x770, the 259 px five-chip threshold and the 4 + 4 wrap (JJ2: five chips at the default 266 px; JI5, JR5: Sets measures 172 px with a set open); stays: the rounding rule, (b), (c), (d)
+JI3	JI		back	JR		partial	2026-11-18		goes: nothing (JR4: COMBO_W is the format combos' minimum); stays: the whole item
+JI5	JI		back	JR		partial	2026-11-18		goes: "stays an icon toggle" and the 2D squeeze in every tab (JR4: the painted mark, the Alpha heading as the dropdown's label; JR5: only while the Selection tab is in front); stays: the dropdown, Confirm, reset, ALPHA_W, ROWS_MIN 724
+HE1	HE		back	JR		partial	2026-11-18		goes: "the recipe picker already says RFAOS (skin)" (JR10: no selector; the packed row's title names the recipe, as the Output files line does, JR3); stays: the rest
+JO15	JO		back	JR		partial	2026-11-18		goes: nothing (JR10: the packed output's row offers Clear recipe then Change shader…, or Change shader… alone, never Remove from set); stays: the whole item
+JP5	JP		back	JR		partial	2026-11-18		goes: three lookups and "the last lookup never meets a key" (JR11: a fourth lookup; the fold lookup never meets a key); stays: the rest
+FM33	FM		back	JR		partial	2026-11-18		goes: a kept group reads off (JR6: no state word); stays: the rest
+Digest¶- Skin detection uses the recipe actually chosen	Digest		back	JR		partial	2026-11-18		goes: RFAOS offered only where buildable and the I2 cite (JR10: the metallic-only set's title hover; the model guard restated in JR10); stays: the rest
+Digest¶- The set editor's slots are grid rows	Digest		back	JR		partial	2026-11-18		goes: the icon toggle (JR4: the painted mark, one heading line; JR1: a linked row has no format, alpha or status); stays: the grid
+Digest¶- The set header shows only the input name box	Digest		back	JR		partial	2026-11-18		goes: nothing (JR3: the arrow on PBR sets only); stays: the whole line
+Digest¶- Slot context menus (cards and pill thumbnails)	Digest		back	JR		partial	2026-11-18		goes: nothing (JR1: a game-slot pick writes slotN, shown as a link only on a set that exports a JSON entry; JD2: Skin wet and Skin detail borrow); stays: the whole line; final wave at cb8a6e1e: entry eligibility includes statics
+Digest¶- The set editor is one scrolling column	Digest		back	JR		partial	2026-11-18		goes: nothing (JR5: the floor holds while Selection is in front); stays: the whole line
+Digest¶- Group headers carry their value	Digest		back	JR		partial	2026-11-18		goes: the feature groups' on/off words, Subsurface's mode while open, the blocked reason only while closed (JR6); stays: NiAlphaProperty, Matching, the blocked reason, the titles
+Digest¶- Coat settings group under the Multilayer checkbox	Digest		back	JR		partial	2026-11-18		goes: nothing (JR8, JR9: a linked slot feeds the defaults, a cleared one does not; a linked coat slot greys Fuzz); stays: the whole line
+Digest¶- Preview toolbar: three clusters	Digest		back	JR		partial	2026-11-18		goes: the 520 px floor alone (JR5, FC8: 520 px, 776 px from a 1280 px window, both only while Selection is in front; CENTRE_MIN behind a tab); stays: the clusters, Encode
+Digest¶- A set card uses a one-row heading only when	Digest		back	JR		partial	2026-11-18		goes: nothing (JR5: the shown title must also fit beside the pill); stays: the whole line
+HP6	HP		back	JR		partial	2026-11-18		goes: SETS_W 260, Sets narrowing only by tile rounding at 1055 and the 121/141 px figures (JJ2: 266; Sets yields the rest once Textures is at its minimum, 266 to 172 px, HP12); stays: Textures first, then Sets, the one move left
+HP10	HP		back	JR		partial	2026-11-18		goes: opening a set at 1055 narrows Sets only by 20 px (HP12 (a): 266 to 172 px); stays: the test support
+JR1	JR		back	JR		partial	2026-11-18		goes: shown only on a set that exports a JSON entry (`exports_json`), and a `slotN = ""` read as left out on every set (JR14: a set that writes an entry, `writes_entry`, statics included); stays: the rest; final wave at cb8a6e1e: slot display, discrete edits and painted chips
+JR9	JR		back	JR		partial	2026-11-18		goes: `features` computed where `exports_json` holds (JR14: where `writes_entry` holds, statics included); stays: the rest; final wave at cb8a6e1e: stored properties and active JSON groups
+JR¶Review E's sets plan	JR		back	JR		partial	2026-11-18		goes: the exported JSON changes only as JR8 and JR9 say (JR14: an entry also comes in or is held as a whole, 3b-F5 and 3b-F7); stays: the rest
+JR7	JR		back	JR		partial	2026-11-18		goes: nothing on which entry the simulator is given (JR7: the candidate entry, with no stored slotN command on a set that writes no entry, 3b-F9); stays: the rest; final wave at cb8a6e1e: destination rows, external paths and A/B preview
+JR14	JR		back	JR		partial	2026-11-18		goes: the wording at 0fc1c77e (fix round 1) and at 06035d6c (Task 15a), the latter moved by hand: the index key from the plan path, every excluded entry checked, a record fill kept under a stored slotN on a set that writes no entry, the editor's conflict 'exactly where Export blocks' (JR14: 3b-F11 to 3b-F15); JR1's item at 06035d6c, whose Resolving sentence named `game_path_in`, is moved by hand beside it (JR1 has its row above); stays: the rest; fix round 3: goes: the wording at 8143fc66 (fix round 2), moved by hand because the tool skips an id it has archived: an excluded set's raw conflict shown and not checked, Path… grouped with From another set, the index key from an explicit path asked for, the unconditional no-command promise (JR14: 3b-F16 to 3b-F18); stays: the rest; final wave at cb8a6e1e: settled hosts and disk paths, confirmed legacy pack, plan failure and Path edits (3b-F19,F20,F23,F27,F29,F30,F32)
+JR2	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: short IDs split at either separator
+JR3	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: all own jobs and files currently on disk
+JR4	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: measured headings, tested widths and refused controls
+JR5	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: shorter title fallback and Selection floor
+JR6	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: available feature ticks and blocked header conditions
+JR8	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: eligible local links, defaults and displacement checks
+JR10	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: recipe refusal, Undo, inherited recipes and packed navigation
+JR11	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: set filter identity and folder lifetime
+JR12	JR		back	JR		partial	2026-11-19		final wave at cb8a6e1e: exact output spelling carried across plans
+Digest¶- A group header carries a value only where	Digest		back	JR		partial	2026-11-19		final wave at cb8a6e1e: feature tick visibility and the active blocked header

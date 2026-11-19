@@ -98,7 +98,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 
 | Code | Severity | Meaning | Fix |
 |---|---|---|---|
-| `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member, an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
+| `SET-MISSING-COMPANION` | info | A roughness bake lacks a usable normal, or its normal lacks a roughness companion. A lender skips the missing-roughness Info when its normal supplies a borrower with an eligible roughness member. Also raised for an `_msn` without `_s` (except Eye) or a `_flow` without `_n`. <!-- D:R8,JS2 --> | Add the companion or ignore the Info. See [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
 | `SET-BAKE-RATIO` | warning | Tessalith no longer raises it. A size difference from the `_n` does not by itself prevent the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
@@ -139,7 +139,7 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `PACK-SIZE-MISMATCH` | error | Sources of one recipe, or an assigned helper and its target, have different aspect ratios. | Crop or resize the sources to one aspect ratio. |
 | `PACK-SOURCE-RESIZED` | info | Sources of one aspect ratio and different sizes: each smaller one was enlarged to the largest. | Nothing; supply maps of one size for exact control. |
 | `PACK-CONFLICT` | warning | A pre-packed file and raw maps target one output; the pre-packed file wins by default. | Remove one side, or set `packing.prefer`. |
-| `PACK-UNUSED-INPUT` | warning | A raw map is used by no recipe under the target. | Change the target, set a sub-type, or remove it. |
+| `PACK-UNUSED-INPUT` | warning | A packing input isn't used by this set, for example when no recipe under the target reads it, or when the set's own `_f` is its PBR fuzz texture in place of a fuzz map. | Remove it, or change the set's shader, the file's type or the target. |
 | `PACK-RECIPE-CONFLICT` | warning | The `_rfaos` and `_rmaos` keys of one set disagree on `packing.recipe`; the `_rfaos` entry wins. | Keep the recipe on one key. |
 | `PACK-RECIPE-UNBUILDABLE` | warning | An `rfaos` recipe the set can't build; `_rmaos` was built ([recipes](Texture-Packing.md#packing-loose-maps)). | Add roughness, glossiness or AO, or drop the setting. |
 
@@ -151,7 +151,6 @@ The rules and thresholds are on [Validation and output](Validation-and-Output.md
 | `SHADER-UNAVAILABLE` | warning | The shader isn't available under the target; it fell back. | Change the shader or target. |
 | `SHADER-EXTRA-MAP` | warning | A member the shader doesn't use; it still converts ([set shaders](Set-Shaders.md)). | |
 | `SHADER-MISSING-MAP` | warning | A map the shader requires is missing. | Add it. |
-| `SHADER-NORMAL-SPECULAR` | info | A `pbr`/`pbr_grass` set's own normal is a vanilla `normal` or `landscape_normal` and no member is a `pbr_normal`; the shader ignores its alpha. Shown in place of that normal's `SHADER-EXTRA-MAP` and the `_n` `SHADER-MISSING-MAP`; a second vanilla normal keeps its `SHADER-EXTRA-MAP`. | Set its sub-type to `pbr_normal` (GUI: **Use PBR normal**): the alpha is dropped and any `_rmaos` in the set bakes from it. A DDS kept as it is keeps its alpha: re-encode it (`reencode = true`) or convert its source image. <!-- D:JP1 --> |
 | `SKIN-WET-GREY` | warning | A `skin_wet` source is grey. Community Shaders ignores a grey wet map, so that file isn't written; the set's other files are. | Supply a tangent normal with the wet mask in alpha. |
 | `GRASS-SHAPE` | error | A `complex_grass` source isn't a power-of-two 1:2 image. | Supply e.g. 2048x4096. |
 | `GRASS-TOP-OPAQUE` | warning | The top half is fully opaque: no cutout. | Check the alpha. |

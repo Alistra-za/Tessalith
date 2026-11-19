@@ -96,7 +96,7 @@ fn check(w: f32, collapsed: bool) {
     );
     // The set editor's header row stays above it; its slot cards are gone.
     h.get_by_label("2D");
-    assert!(h.query_by_label("Match on this").is_none());
+    assert!(h.query_by_label_contains("Match on this").is_none());
 }
 
 #[test]
@@ -118,7 +118,7 @@ fn narrow_window_collapsed_columns() {
 fn in_2d_the_centre_is_the_set_editor_and_no_3d_view_exists() {
     let d = tempfile::tempdir().unwrap();
     let h = harness(d.path(), false, 1280.0, false);
-    assert!(h.query_all_by_label("Match on this").count() >= 1);
+    assert!(h.query_all_by_label_contains("Match on this").count() >= 1);
     assert!(h.query_by_label(FRAME_LABEL).is_none());
     assert!(!panel_never_built(&h.ctx, "header"));
     assert!(panel_never_built(&h.ctx, "set-3d"));

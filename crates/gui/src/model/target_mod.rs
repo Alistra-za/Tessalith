@@ -241,7 +241,7 @@ impl AppModel {
         let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
             return Err("sdc-project.toml is read-only, so the target mod can't be saved");
         };
-        let was_dirty = d.is_dirty();
+        let was_dirty = d.defer_record_save();
         d.set_target_mod(p.as_deref());
         if was_dirty {
             self.status_line =

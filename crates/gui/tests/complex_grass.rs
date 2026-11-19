@@ -323,7 +323,7 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
         ("landscape/leaf.png", "subtype", "landscape_diffuse"),
         ("landscape/odd.png", "subtype", "landscape_diffuse"),
         ("landscape/rock01.png", "subtype", "landscape_diffuse"),
-        ("landscape/rock01_normal.png", "subtype", "landscape_normal"),
+        ("landscape/rock01_normal.png", "subtype", "pbr_normal"),
         ("plants/g.png", "subtype", "complex_grass"),
         ("plants/g.png", "alpha.policy", "remove"),
     ]
@@ -335,6 +335,9 @@ fn a_scan_vote_retype_cleans_up_in_its_own_step() {
     });
     for snapshot in [&mut last.before, &mut last.after] {
         snapshot.sdc_toml = sdc_gui::project::apply_auto(&snapshot.sdc_toml, &writes);
+        snapshot
+            .project
+            .push_str("auto_normal = { \"landscape/rock01_normal.png\" = \"pbr_normal\" }\n");
     }
     assert_eq!(m.history.undo[n - 2], last);
 }

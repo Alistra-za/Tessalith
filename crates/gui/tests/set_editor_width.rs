@@ -5,7 +5,7 @@ mod support;
 use eframe::egui::{self, accesskit::Role};
 use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
-use sdc_gui::model::AppModel;
+use sdc_gui::model::{AppModel, CentreTab};
 use sdc_gui::ui::State;
 use support::*;
 
@@ -78,7 +78,8 @@ fn set_editor_is_one_column() {
             let mut rows = vec![diffuse, slot_rect(&h, "Normal _n"), cmds];
             for l in [
                 "Diffuse thumbnail",
-                "Match on this",
+                "Match on this (Diffuse)",
+                "Match on this (Normal _n)",
                 "Assign…",
                 "ready",
                 "warning",
@@ -142,8 +143,7 @@ fn the_set_name_is_shown_once() {
     );
 }
 
-/// C14: a feature's state shows once, in its own group's header ("off"); the Features group, whose ticks are the
-/// state, has no count beside its title.
+/// C14: the Features group, whose ticks are the state, has no count beside its title.
 #[test]
 fn the_features_group_has_no_header_value() {
     let d = tempfile::tempdir().unwrap();
@@ -157,6 +157,105 @@ fn the_features_group_has_no_header_value() {
         .filter_map(|n| n.value())
         .collect();
     assert!(beside.is_empty(), "Features header value {beside:?}");
+}
+
+/// The header values beside a group title: the "beside labels" form of `the_features_group_has_no_header_value`.
+fn beside(h: &H, title: &str) -> Vec<String> {
+    let t = h
+        .query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap_or_else(|| panic!("the {title} group"))
+        .rect();
+    h.query_all_by_role(Role::Label)
+        .filter(|n| n.rect().min.x > t.max.x && (n.rect().center().y - t.center().y).abs() < 2.0)
+        .filter_map(|n| n.value().map(|v| v.to_string()))
+        .collect()
+}
+
+/// C14: a feature's state shows once, in its Features tick and its control, never again in the group's header.
+#[test]
+fn a_feature_group_header_has_no_state_word() {
+    for (title, key) in [
+        ("Emissive settings", "emissive"),
+        ("Coat", "multilayer"),
+        ("Glint settings", "glint_on"),
+        ("Fuzz settings", "fuzz_on"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, id) = rock_set(d.path());
+        // One feature on: nothing blocks it.
+        m.set_json_value(&id, key, Some(serde_json::Value::Bool(true)));
+        let mut h = harness(m, 1400.0);
+        h.run();
+        let words = beside(&h, title);
+        assert!(
+            !words.iter().any(|w| w == "on" || w == "off"),
+            "{title} header repeats its state: {words:?}"
+        );
+    }
+}
+
+/// Click a group's title (scrolled into view first, as a user would).
+fn click_title(h: &mut H, title: &str) {
+    let n = h
+        .query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap_or_else(|| panic!("the {title} group"));
+    n.scroll_to_me();
+    h.run();
+    h.query_all_by_label(title)
+        .find(|n| n.accesskit_node().role() == Role::Label)
+        .unwrap()
+        .click();
+    h.run();
+}
+
+/// Is the Subsurface selector (a combo reading `mode`) on screen?
+fn selector_shows(h: &H, mode: &str) -> bool {
+    h.query_all_by_role(Role::ComboBox)
+        .any(|n| n.value().as_deref() == Some(mode))
+}
+
+/// C14 and Task 5: the Subsurface selector is the one control showing the mode, so the header says the mode only while
+/// the group is really closed (the user's click counts, not the default), and never while the selector is on screen.
+#[test]
+fn the_subsurface_header_says_the_mode_only_while_closed() {
+    // Off: closed by default.
+    let d = tempfile::tempdir().unwrap();
+    let (m, _) = rock_set(d.path());
+    let mut h = harness(m, 1400.0);
+    h.run();
+    assert_eq!(beside(&h, "Subsurface"), ["Off"], "closed at Off");
+    click_title(&mut h, "Subsurface");
+    assert!(beside(&h, "Subsurface").is_empty(), "opened by the user");
+    assert!(selector_shows(&h, "Off"), "the selector is on screen");
+
+    // On: open by default; the user closes it.
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = rock_set(d.path());
+    m.set_json_value(&id, "subsurface", Some(serde_json::Value::Bool(true)));
+    let mut h = harness(m, 1400.0);
+    h.run();
+    assert!(beside(&h, "Subsurface").is_empty(), "open by default");
+    assert!(selector_shows(&h, "Standard"));
+    click_title(&mut h, "Subsurface");
+    assert_eq!(beside(&h, "Subsurface"), ["Standard"], "closed by the user");
+}
+
+/// Task 5 and CC10: a Subsurface that is on but blocked reads its reason in the header, closed or open.
+#[test]
+fn a_blocked_subsurface_header_reads_its_reason_open_or_closed() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = rock_set(d.path());
+    for k in ["subsurface", "multilayer"] {
+        m.set_json_value(&id, k, Some(serde_json::Value::Bool(true)));
+    }
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let reason = ["Standard, blocked by multilayer"];
+    assert_eq!(beside(&h, "Subsurface"), reason, "closed");
+    click_title(&mut h, "Subsurface");
+    assert_eq!(beside(&h, "Subsurface"), reason, "opened by the user");
 }
 
 /// C14: the Assign… menu's header is the slot label, once ("Emissive / Skin (slot 3)", not "Slot 3: Emissive / Skin
@@ -180,6 +279,102 @@ fn the_assign_menu_header_is_the_slot_label() {
     );
     // The row's own label and the menu's header.
     assert_eq!(h.query_all_by_label("Emissive / Skin (slot 3)").count(), 2);
+}
+
+/// Review E24: a centre tab in front (Presets, Settings, JSON) does not take the set editor's floor, so the side
+/// columns keep the widths they have with nothing selected.
+#[test]
+fn a_centre_tab_in_front_does_not_take_the_editors_floor() {
+    for open in [
+        AppModel::open_presets,
+        AppModel::open_settings_tab,
+        AppModel::open_json_editor,
+    ] {
+        let left = |select: bool| {
+            let d = tempfile::tempdir().unwrap();
+            let (mut m, _) = rock_set(d.path());
+            if !select {
+                m.clear_selection();
+            }
+            open(&mut m);
+            assert_ne!(
+                m.centre_front(),
+                CentreTab::Selection,
+                "premise: a tab is in front"
+            );
+            let mut h = harness(m, 1057.0);
+            h.run();
+            sdc_gui::ui::centre_rect(&h.ctx).unwrap().min.x
+        };
+        let (with, without) = (left(true), left(false));
+        assert!(
+            (with - without).abs() < 0.5,
+            "the side columns keep their widths behind a centre tab: {with} against {without}"
+        );
+    }
+}
+
+#[test]
+fn selection_in_front_of_a_docked_view_keeps_the_editors_floor() {
+    let left = |dock: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, _) = rock_set(d.path());
+        if dock {
+            let sdc_gui::model::Selection::Set(key) = m.selection.clone() else {
+                panic!("selected set")
+            };
+            m.open_json_editor();
+            m.select_set(&key);
+            assert!(m.json_editor_open && m.centre_front() == CentreTab::Selection);
+        }
+        let mut h = harness(m, 1057.0);
+        h.run_steps(4);
+        sdc_gui::ui::centre_rect(&h.ctx).unwrap().left()
+    };
+    assert!(
+        (left(true) - left(false)).abs() < 0.5,
+        "a docked background view keeps the same editor floor"
+    );
+}
+
+/// Review E24, the preview's floor (K8, Note FC8): a texture expanded behind a centre tab does not take the preview's
+/// floor either. The floor is 776 px from 1280 px up, 520 below.
+#[test]
+fn a_centre_tab_in_front_does_not_take_the_previews_floor() {
+    for w in [1057.0, 1280.0] {
+        for open in [
+            AppModel::open_presets,
+            AppModel::open_settings_tab,
+            AppModel::open_json_editor,
+        ] {
+            let left = |expand: bool| {
+                let d = tempfile::tempdir().unwrap();
+                let (mut m, _) = rock_set(d.path());
+                m.clear_selection();
+                if expand {
+                    m.expand("landscape/leaf.png");
+                    assert!(m.expanded.is_some(), "premise: a texture is expanded");
+                }
+                open(&mut m);
+                if expand {
+                    assert!(m.expanded.is_some(), "premise: the tab keeps it expanded");
+                }
+                assert_ne!(
+                    m.centre_front(),
+                    CentreTab::Selection,
+                    "premise: a tab is in front"
+                );
+                let mut h = harness(m, w);
+                h.run_steps(4);
+                sdc_gui::ui::centre_rect(&h.ctx).unwrap().min.x
+            };
+            let (with, without) = (left(true), left(false));
+            assert!(
+                (with - without).abs() < 0.5,
+                "{w} px: the side columns keep their widths behind a centre tab: {with} against {without}"
+            );
+        }
+    }
 }
 
 /// A set whose diffuse row shows Confirm (`asks`: an undecided alpha on a plain diffuse) or the reset (its own alpha),

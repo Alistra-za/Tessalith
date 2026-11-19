@@ -652,8 +652,6 @@ impl AppModel {
             // `finish_json`: `copy_files` first, against the copy record.
             let old = doc.map(|d| d.copy_shas()).unwrap_or_default();
             let mut shas = old.clone();
-            // The file `dep_ok` looks for when the run leaves a dependency out.
-            let dep_file = |k: &str| p.untouched_root.as_ref().map(|r| r.join(k));
             let mut sources = SourceReads::new();
             for (src, dst, owner_key) in &p.copies {
                 // The writer checks ownership after jobs and earlier copies have written this destination.
@@ -665,9 +663,8 @@ impl AppModel {
                     continue;
                 }
                 let key = record_key(dst);
-                let by_run = (!owner_key.is_empty() && touched(owner_key))
-                    || produced.may_read_output(src)
-                    || dep_file(owner_key).is_some_and(|f| produced.may_read_output(&f));
+                let by_run =
+                    (!owner_key.is_empty() && touched(owner_key)) || produced.may_read_output(src);
                 if by_run {
                     // The owner's DDS comes from this run (its job, or an earlier copy): whether it is copied, and
                     // its bytes, are the run's.
@@ -683,7 +680,9 @@ impl AppModel {
                     continue;
                 }
                 // No row of this run can name the owner, so `dep_ok` with none is the writer's answer.
-                if !owner_key.is_empty() && pbr_export::dep_ok(p, &[], owner_key).is_err() {
+                if !owner_key.is_empty()
+                    && pbr_export::dep_ok(p, &[], owner_key, src, None).is_err()
+                {
                     continue;
                 }
                 let last = shas.get(&key).cloned();
@@ -704,8 +703,13 @@ impl AppModel {
             // Then `pbr_export::finish` and `record_json_sha`. Its text is built from this run's rows when an entry
             // depends on a job of the run, or on a file the run may produce (`dep_ok` reads it on disk).
             let run_dep = p.entries.iter().any(|(_, deps, _)| {
-                deps.iter().any(|k| {
-                    touched(k) || dep_file(k).is_some_and(|f| produced.may_read_output(&f))
+                deps.iter().any(|d| {
+                    touched(&d.job_key)
+                        || (p.leaves_sets_out
+                            && (produced.may_read_output(&d.output)
+                                || d.slot_file
+                                    .as_ref()
+                                    .is_some_and(|f| produced.may_read_output(f))))
                 })
             });
             if run_dep {
@@ -1695,6 +1699,9 @@ impl AppModel {
     /// The front half of Review's Export (`how` keeps the scope it was confirmed for), also run when a scan-finished
     /// read it waited for lands.
     pub(super) fn continue_review(&mut self, how: Continue) {
+        if self.refuse_failed_export_plan() {
+            return;
+        }
         if self.planning.is_some() || self.votes_pending.is_some() {
             self.continue_after_plan = Some(how);
             return;

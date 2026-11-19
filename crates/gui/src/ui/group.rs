@@ -1,4 +1,5 @@
-//! A framed collapsing group whose header row carries a value right-aligned (Marmoset style, layout v2 A3).
+//! A framed collapsing group whose header row carries a value right-aligned (Marmoset style, layout v2 A3). A group
+//! can also carry a value only while it is collapsed ([`group_closed_value`]).
 use eframe::egui;
 use egui::collapsing_header::CollapsingState;
 
@@ -25,6 +26,33 @@ pub fn group_with<R>(
     open_now: bool,
     body: impl FnOnce(&mut egui::Ui) -> R,
 ) -> Option<R> {
+    group_impl(ui, id, title, (value, None), default_open, open_now, body)
+}
+
+/// [`group`] for a group whose state shows only in a control inside its own body (C14, Task 10 review): `closed_value`
+/// is drawn while the group is really collapsed (the loaded `CollapsingState`, not `default_open`) and not while it is
+/// open, where the control is on screen. `value` shows in both states and wins over `closed_value`.
+pub fn group_closed_value<R>(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    title: &str,
+    values: (Option<egui::RichText>, Option<egui::RichText>),
+    default_open: bool,
+    body: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
+    group_impl(ui, id, title, values, default_open, false, body)
+}
+
+/// The one header drawing: `values` is (`value`, `closed_value`).
+pub(super) fn group_impl<R, T: Into<egui::WidgetText>>(
+    ui: &mut egui::Ui,
+    id: impl std::hash::Hash,
+    title: &str,
+    values: (Option<T>, Option<T>),
+    default_open: bool,
+    open_now: bool,
+    body: impl FnOnce(&mut egui::Ui) -> R,
+) -> Option<R> {
     egui::Frame::group(ui.style())
         .show(ui, |ui| {
             // shortcut: the Debug bound of egui ids is dodged by hashing to a u64 first; upgrade to `make_persistent_id(id)`
@@ -35,6 +63,9 @@ pub fn group_with<R>(
             if open_now {
                 state.set_open(true);
             }
+            // A click this frame shows from the next one (egui repaints after a toggle).
+            let (value, closed_value) = values;
+            let value = value.or_else(|| closed_value.filter(|_| !state.is_open()));
             let mut clicked = false;
             let mut h = state.show_header(ui, |ui| {
                 // The visible edge: a wider row above widens max_rect (egui unions it into the content), not the panel.
@@ -68,7 +99,8 @@ mod tests {
     use eframe::egui;
 
     /// (content width, view width) of a 300 px horizontal ScrollArea holding one group, after a few frames.
-    fn widths(value: bool) -> (f32, f32) {
+    /// `closed_only`: the value goes through `group_closed_value` (the group is closed, so it is drawn).
+    fn widths(value: bool, closed_only: bool) -> (f32, f32) {
         let ctx = egui::Context::default();
         let mut out = (0.0, 0.0);
         for _ in 0..3 {
@@ -81,7 +113,12 @@ mod tests {
             };
             let full = ctx.run_ui(input, |ui| {
                 let o = egui::ScrollArea::horizontal().show(ui, |ui| {
-                    super::group(ui, "g", "Coat", value.then(|| "off".into()), false, |_| {});
+                    let v = value.then(|| "off".into());
+                    if closed_only {
+                        super::group_closed_value(ui, "g", "Coat", (None, v), false, |_| {});
+                    } else {
+                        super::group(ui, "g", "Coat", v, false, |_| {});
+                    }
                 });
                 out = (o.content_size.x, o.inner_rect.width());
             });
@@ -94,11 +131,11 @@ mod tests {
     /// so every group was ~18 px wider than its panel and the panel scrolled sideways.
     #[test]
     fn a_group_header_never_widens_its_scroll_area() {
-        for value in [false, true] {
-            let (content, view) = widths(value);
+        for (value, closed_only) in [(false, false), (true, false), (true, true)] {
+            let (content, view) = widths(value, closed_only);
             assert!(
                 content <= view,
-                "value {value}: content {content} > view {view}"
+                "value {value}, closed only {closed_only}: content {content} > view {view}"
             );
         }
     }

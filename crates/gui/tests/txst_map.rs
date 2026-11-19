@@ -1129,6 +1129,66 @@ fn one_normal_is_written() {
     assert!(outs.next().is_some() && outs.next().is_none());
 }
 
+/// Ruling 3b-F13: a stored `slot2` of any value (`""` or a hand-edited `false`) on the mapped skin set C, which owns
+/// an unshared `_rfaos` and no normal, keeps the record from filling slot 2, as on main a0e2610c: the engine is told of
+/// no borrowed normal, so C's `_rfaos` bakes as main bakes it. With no slot key the record's normal is borrowed.
+#[test]
+fn a_stored_slot_key_keeps_the_record_normal_out_of_the_engine_inputs() {
+    use serde_json::json;
+    let borrowed = |m: &AppModel| sdc_gui::model::sets::borrowed_normal(m).get(M).cloned();
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    assert_eq!(
+        borrowed(&m).as_deref(),
+        Some(X),
+        "no slot key: the record's normal"
+    );
+    for value in [json!(""), json!(false)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = r(d.path());
+        m.set_json_value(M, "slot2", Some(value.clone()));
+        idle(&mut m);
+        assert_eq!(borrowed(&m), None, "slot2 = {value}");
+        assert_eq!(
+            m.request().unwrap().borrowed_normal.get(M),
+            None,
+            "slot2 = {value}: the request the engine gets"
+        );
+    }
+}
+
+/// Ruling 3b-F25: the slot2 edit above changes the engine's borrowed normal but plans nothing (`set_json_value` plans
+/// again only for `match*`, `path_contains` and `rename`), so the plan on screen is out of date with no plan running.
+/// A From another set row then says the plan must run again, not "Planning", and the click refuses with the same.
+#[test]
+fn with_the_plan_out_of_date_and_none_running_a_member_pick_says_it_must_plan_again() {
+    use sdc_gui::model::bulk::MenuAction;
+    use serde_json::json;
+    const AGAIN: &str = "The plan must run again first: pick a file once a new plan has finished";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = r(d.path());
+    m.set_json_value(M, "slot2", Some(json!("")));
+    idle(&mut m);
+    assert!(!m.full_plan_pending(), "premise: no plan is running");
+    assert!(!m.inputs_settled(), "premise: the plan is out of date");
+    let rows: Vec<_> = set_views(&m)
+        .iter()
+        .flat_map(|v| {
+            SlotKind::ALL
+                .iter()
+                .filter(|k| k.game_slot().is_some())
+                .flat_map(|k| m.slot_menu(&v.id, *k))
+                .collect::<Vec<_>>()
+        })
+        .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+        .collect();
+    assert!(!rows.is_empty(), "premise: a member is offered");
+    for e in &rows {
+        assert_eq!(e.disabled.as_deref(), Some(AGAIN), "{e:?}");
+    }
+    assert_eq!(m.run_menu(rows[0].action.clone()), Some(AGAIN.to_string()));
+}
+
 #[test]
 fn a_record_slot_nothing_writes_is_supplied() {
     let d = tempfile::tempdir().unwrap();
@@ -1215,6 +1275,38 @@ fn a_chosen_shader_on_it_wins() {
         sdc_gui::model::sets::set_shaders(&m).get(X),
         Some(&engine::shader::Shader::Skin)
     );
+}
+
+#[test]
+fn keep_alpha_uses_the_planned_shader_of_a_shared_skin_host() {
+    use engine::shader::{Shader, ShaderOrigin};
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let normal = "textures/s/x_normal.png";
+    for path in R_FILES.iter().copied().chain(["textures/armor/steel.png"]) {
+        colour(d.path(), path);
+    }
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgba([128u8, 128, 255, (x * 3 + y) as u8])
+    })
+    .save(d.path().join(normal))
+    .unwrap();
+    let sets = format!(
+        "{}[[sets]]\nid = \"textures/armor/steel\"\nborrow = {{ slot2 = \"{X}\" }}\n",
+        r_toml("", "")
+    );
+    std::fs::write(d.path().join("sdc-project.toml"), sets).unwrap();
+    let m = support::opened_as_the_app(d.path().into(), d.path().join("export"));
+    let pick = view(&m, X).shader.unwrap();
+    assert_eq!(
+        (pick.shader, pick.provenance),
+        (Shader::AdvancedSkin, ShaderOrigin::Set)
+    );
+    assert!(problems(&m)
+        .iter()
+        .any(|r| r.at == At::Texture(normal.into())
+            && r.is_note()
+            && r.shown().contains("shared with a regular set")));
 }
 
 #[test]

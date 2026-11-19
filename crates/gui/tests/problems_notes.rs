@@ -140,8 +140,8 @@ fn every_code_has_one_class_and_the_counts_match_the_plan() {
         .iter()
         .filter(|c| row_class(**c) == RowClass::Note)
         .count();
-    assert_eq!(engine::codes::Code::ALL.len(), 94);
-    assert_eq!(notes, 23);
+    assert_eq!(engine::codes::Code::ALL.len(), 93);
+    assert_eq!(notes, 22);
     assert_eq!(
         row_class(engine::codes::Code::ShaderUnavailable),
         RowClass::Problem
@@ -161,11 +161,10 @@ fn plain_normal_in_pbr(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// B3-13 (Note JP3): the set loses one counted problem ("needs _n"); a note never takes Ready away, so the set reads
-/// Ready exactly when the same set with a `pbr_normal` does. Baseline: `pbr_opened_plain` (rock01's normal decided
-/// `pbr_normal`, DirectX green; `support/mod.rs` `pbr_opened`).
+/// N-8, N-9 (Note JS4): rock01 on plain `pbr` with its own normal decided `normal` has no counted row and reads Ready
+/// exactly when the same set with a `pbr_normal` does (baseline `pbr_opened_plain`).
 #[test]
-fn the_set_loses_one_counted_problem_and_can_be_ready() {
+fn a_plain_normal_in_a_pbr_set_counts_nothing_and_the_set_can_be_ready() {
     use sdc_gui::model::bottom::{counts_for, set_ready, At};
     let base_dir = tempfile::tempdir().unwrap();
     let plain_dir = tempfile::tempdir().unwrap();
@@ -192,222 +191,19 @@ fn the_set_loses_one_counted_problem_and_can_be_ready() {
         set_ready(&plain, &rock01(&plain)),
         set_ready(&base, &rock01(&base))
     );
-}
-
-fn specular_rows(m: &AppModel) -> Vec<sdc_gui::model::bottom::Problem> {
-    sdc_gui::model::bottom::problems(m)
-        .iter()
-        .filter(|p| p.code == Some(engine::codes::Code::ShaderNormalSpecular))
-        .cloned()
-        .collect()
-}
-
-/// rock01 still carries the engine's "needs _n".
-fn needs_n(m: &AppModel) -> bool {
-    rock01(m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")
-}
-
-fn subtype_written(m: &AppModel) -> Option<serde_json::Value> {
-    m.project.as_ref().unwrap().file_value(NORMAL, "subtype")
-}
-
-fn specular_note(member: &str, shader: &str) -> Warning {
-    Warning::new(engine::codes::Code::ShaderNormalSpecular, "m")
-        .with_data(serde_json::json!({"member": member, "shader": shader, "map": "_n"}))
-}
-
-/// Only `specular_note(member, shader)`, on the set whose key is `set_key` (for states where no decision can be made).
-fn put_specular_note(m: &mut AppModel, set_key: &str, member: &str, shader: &str) {
-    for s in m.sets.iter_mut() {
-        s.warnings.clear();
-    }
-    m.sets
-        .iter_mut()
-        .find(|s| s.key == set_key)
-        .unwrap()
-        .warnings = vec![specular_note(member, shader)];
-    m.invalidate_views();
-}
-
-/// The button's AccessKit name, which names its file: the note's sentence says "Use PBR normal" too, so the bare label
-/// would find the sentence on the same row.
-fn use_pbr_normal_button(file: &str) -> String {
-    format!("{} for {file}", sdc_gui::model::bottom::USE_PBR_NORMAL)
-}
-
-/// B3-1, B3-2 (Note JP3): the set shows one note in place of "needs _n" and "not used", with **Use PBR normal**.
-/// One click writes `pbr_normal`, the note goes and "needs _n" does not come back; one Undo restores `normal`.
-#[test]
-fn use_pbr_normal_switches_the_type_in_one_click_and_one_undo_restores_it() {
-    use sdc_gui::model::bottom::{Fix, USE_PBR_NORMAL};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(!needs_n(&m), "the Info replaces needs _n");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(NORMAL.into())),
-        "Go to set outlines the normal's row"
-    );
-    let sentence = rows[0].shown().into_owned();
-    assert!(sentence.contains("_rmaos"), "{sentence}");
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    on_row(&h, &sentence, &use_pbr_normal_button("rock01_normal.png")).click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("pbr_normal"))
-    );
-    assert!(specular_rows(h.state()).is_empty(), "the note goes");
-    assert!(!needs_n(h.state()), "needs _n does not come back");
-    assert_eq!(h.state().undo_label(), Some(USE_PBR_NORMAL));
-    h.state_mut().undo();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        subtype_written(h.state()),
-        Some(serde_json::json!("normal"))
-    );
-    assert_eq!(specular_rows(h.state()).len(), 1, "the note is back");
-}
-
-/// B3-7 (Note BM): PBR Landscape takes a vanilla normal as its `_n`: no note.
-#[test]
-fn no_specular_note_under_pbr_landscape() {
-    let d = tempfile::tempdir().unwrap();
-    // `pbr_opened` leaves rock01 on its automatic pick, PBR Landscape (`textures/landscape/`).
-    let mut m = pbr_opened(d.path());
-    m.decide(
-        NORMAL,
-        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Normal),
-    );
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    assert!(specular_rows(&m).is_empty());
-    assert!(!rock01(&m)
-        .set_warnings
-        .iter()
-        .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular));
-}
-
-/// B3-11 (Note JP3): a locked slot turns the button off with `lock_refusal`'s reason, and the model writes nothing.
-#[test]
-fn use_pbr_normal_is_off_on_a_locked_slot() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    // Slot 2 is Normal (`SlotKind::slot_number`).
-    m.set_slot_lock("landscape/rock01", 2, true).unwrap();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(
-        sdc_gui::model::sets::locked_items(&m).contains_key(NORMAL),
-        "the normal fills rock01's slot 2"
+        !rock01(&plain)
+            .set_warnings
+            .iter()
+            .any(|w| w.code == engine::codes::Code::ShaderExtraMap
+                || (w.code == engine::codes::Code::ShaderMissingMap && w.data["map"] == "_n")),
+        "{:?}",
+        rock01(&plain).set_warnings
     );
-    let why = m.use_pbr_normal_refusal(NORMAL).expect("refused");
-    assert!(why.contains("is locked"), "{why}");
-    assert!(m.use_pbr_normal(NORMAL).is_err());
-    assert_eq!(subtype_written(&m), Some(serde_json::json!("normal")));
-    let sentence = specular_rows(&m)[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("is locked");
 }
-
-/// B3-11 (Note JP3): a read-only `sdc.toml` turns the button off with `fix_off`'s reason; the file is not written.
-#[test]
-fn use_pbr_normal_is_off_on_a_read_only_sdc_toml() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    assert!(m.save().is_ok());
-    let file = m.root.clone().unwrap().join("sdc.toml");
-    std::fs::write(&file, "[files\n").unwrap();
-    m.reload_documents();
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    // Read-only: the plan no longer reads the decision, so the note is put on the set directly.
-    let key = rock01(&m).key;
-    put_specular_note(&mut m, &key, "rock01_normal.png", "pbr");
-    assert!(m
-        .fix_off()
-        .is_some_and(|w| w.contains("sdc.toml is read-only")));
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "the note's row");
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(NORMAL.into())));
-    let before = std::fs::read(&file).unwrap();
-    let sentence = rows[0].shown().into_owned();
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    let b = on_row(&h, &sentence, &name);
-    assert!(b.accesskit_node().is_disabled());
-    b.hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("sdc.toml is read-only");
-    assert_eq!(std::fs::read(&file).unwrap(), before);
-}
-
-/// B3-11 (Note JP3): a kept DDS gets the note with its own sentence and no button; its type cannot drop the alpha.
-#[test]
-fn a_kept_dds_normal_gets_the_note_without_a_button() {
-    let d = tempfile::tempdir().unwrap();
-    let root = dds_pbr_sets(d.path(), &["iron"]);
-    let mut m = opened_as_the_app(root, d.path().join("export"));
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("iron"))
-        .expect("the set");
-    let key = v
-        .members
-        .iter()
-        .find(|k| k.ends_with("iron_n.dds"))
-        .expect("the kept _n")
-        .clone();
-    assert!(matches!(
-        m.item(&key).unwrap().kind,
-        sdc_gui::model::items::ItemKind::Dds
-    ));
-    put_specular_note(&mut m, &v.key, "iron_n.dds", "pbr");
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1);
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().contains("is a kept DDS"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(key.clone()))
-    );
-    assert!(m.use_pbr_normal_refusal(&key).is_some());
-}
-
-/// The kept `_n.dds` of `kept_dds_normal_wall`.
-const WALL_N: &str = "test/wall_n.dds";
 
 /// `textures/test/wall.png` decided `pbr_albedo` beside a kept `wall_n.dds` (no job: typed by its `_n` suffix as a
-/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`: the engine itself raises
-/// SHADER-NORMAL-SPECULAR on it (`engine/tests/shaders.rs` `a_kept_dds_normal_in_a_pbr_set_is_the_same_info`).
+/// vanilla normal), opened as the app opens a folder, with the set's shader picked `pbr`.
 fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     let r = dir.join("textures/test");
     std::fs::create_dir_all(&r).unwrap();
@@ -431,134 +227,18 @@ fn kept_dds_normal_wall(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// Final review I1 (Note JP3): a DDS with `reencode = true` has a job and is encoded again, so its type drops the
-/// alpha like any source image's: its note has the plain sentence and **Use PBR normal**, nothing refuses it, and the
-/// click writes `subtype = "pbr_normal"`. (A kept DDS: `a_kept_dds_normal_gets_the_note_without_a_button`.)
+/// N-9 (Note JS4), a pin: a kept DDS normal in a PBR set fills its `_n`: no EXTRA row and no "needs _n" row. (The
+/// set's own "needs _rmaos" is a SHADER-MISSING-MAP row too, so the match names the `_n`.)
 #[test]
-fn a_re_encoded_dds_normal_gets_the_note_with_its_button() {
-    use sdc_gui::model::bottom::Fix;
-    let d = tempfile::tempdir().unwrap();
-    let mut m = kept_dds_normal_wall(d.path());
-    m.set_reencode(&[WALL_N.to_string()], true);
-    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(
-        i.input.extension().is_some_and(|x| x == "dds"),
-        "precondition: a DDS input"
-    );
-    assert_eq!(
-        i.job.as_ref().map(|j| j.profile.subtype),
-        Some(engine::config::Subtype::Normal),
-        "precondition: re-encoded, as a vanilla normal"
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert_eq!(rows[0].fix, Some(Fix::UsePbrNormal(WALL_N.into())));
-    let sentence = rows[0].shown().into_owned();
-    // Final review M1: the words hold for a set with no _rmaos, as this one is.
-    assert!(
-        sentence.starts_with("wall_n.dds is a vanilla normal:")
-            && sentence.ends_with(
-                "Use PBR normal to drop the alpha and bake any _rmaos in this set from it."
-            ),
-        "{sentence}"
-    );
-    assert_eq!(m.use_pbr_normal_refusal(WALL_N), None);
-    m.open_problems(None);
-    let mut h = harness(m);
-    tooltips_now(&h);
-    h.run();
-    let button = use_pbr_normal_button("wall_n.dds");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .hover();
-    h.run();
-    h.run();
-    h.get_by_label_contains("its alpha is dropped, and any _rmaos in this set bakes from it");
-    h.get_by_role_and_label(egui::accesskit::Role::Button, &button)
-        .click();
-    h.step();
-    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-    h.run();
-    assert_eq!(
-        h.state()
-            .project
-            .as_ref()
-            .unwrap()
-            .file_value(WALL_N, "subtype"),
-        Some(serde_json::json!("pbr_normal"))
-    );
-}
-
-/// B3-27 (Note JP3): **Use PBR normal** keeps Enter and Space. Each key on the focused button writes `pbr_normal`, as
-/// a click does: it switches a type, as Rebuild Z does, so it is not a `click_only_button`.
-#[test]
-fn use_pbr_normal_answers_enter_and_space() {
-    let d = tempfile::tempdir().unwrap();
-    let mut m = plain_normal_in_pbr(d.path());
-    m.open_problems(None);
-    let mut h = harness(m);
-    h.run();
-    let name = use_pbr_normal_button("rock01_normal.png");
-    for key in [egui::Key::Enter, egui::Key::Space] {
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("normal")),
-            "{key:?}: before"
-        );
-        h.get_by_role_and_label(egui::accesskit::Role::Button, &name)
-            .focus();
-        h.run();
-        h.key_press(key);
-        h.step();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-        assert_eq!(
-            subtype_written(h.state()),
-            Some(serde_json::json!("pbr_normal")),
-            "{key:?}"
-        );
-        h.state_mut().undo();
-        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
-        h.run();
-    }
-}
-
-/// Final review M4 (Note JP3): with no injection, the engine's own SHADER-NORMAL-SPECULAR on a kept DDS joins its
-/// item (`extra_member` matches the engine's member name): the set's row has the kept-DDS sentence and no button.
-#[test]
-fn the_engines_own_note_on_a_kept_dds_has_no_button() {
+fn a_kept_dds_normal_in_a_pbr_set_has_no_shader_row() {
+    use engine::codes::Code;
     let d = tempfile::tempdir().unwrap();
     let m = kept_dds_normal_wall(d.path());
-    let i = m.item(WALL_N).expect("the _n");
-    assert!(i.kept_dds(), "precondition: kept as it is");
-    let v = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("wall"))
-        .expect("the set");
+    let rows = sdc_gui::model::bottom::problems(&m);
     assert!(
-        v.set_warnings
-            .iter()
-            .any(|w| w.code == engine::codes::Code::ShaderNormalSpecular),
-        "the engine raises it: {:?}",
-        v.set_warnings
-    );
-    let rows = specular_rows(&m);
-    assert_eq!(rows.len(), 1, "one note");
-    assert!(rows[0].is_note());
-    assert!(
-        matches!(&rows[0].at, sdc_gui::model::bottom::At::Set { key, .. } if *key == v.key),
-        "on the set"
-    );
-    assert_eq!(rows[0].fix, None, "B3-11: no button on a kept DDS");
-    assert!(
-        rows[0].shown().starts_with("wall_n.dds is a kept DDS:"),
-        "{}",
-        rows[0].shown()
-    );
-    assert_eq!(
-        rows[0].target,
-        Some(sdc_gui::model::nav::SlotTarget::Item(WALL_N.into()))
+        !rows.iter().any(|p| p.code == Some(Code::ShaderExtraMap)
+            || (p.code == Some(Code::ShaderMissingMap) && p.text.contains("needs _n"))),
+        "{rows:?}"
     );
 }
 
@@ -634,6 +314,15 @@ fn an_unused_input_note_names_the_file_and_the_reason() {
         sdc_gui::model::code_text::note_sentence(&odd),
         "no colon here",
         "a message that doesn't parse shows unchanged"
+    );
+}
+
+/// Controller ruling (2026-11-18): the code sentence no longer sends the user to the recipe combo, which is gone (A1-1).
+#[test]
+fn the_unused_input_sentence_names_the_shader_and_the_type() {
+    assert_eq!(
+        sdc_gui::model::code_text::code_sentence(engine::codes::Code::PackUnusedInput),
+        "A packing input isn't used by this set — remove it, or change the set's shader or the file's type"
     );
 }
 
@@ -1917,6 +1606,41 @@ fn the_status_line_scans_its_reasons_once_per_change() {
     assert_eq!(steps(&mut h), n + 3, "another set");
 }
 
+/// Final wave Group 7 (ledger 253, Q6 rank 1): the chip of a set filter resolves its set once per change of the
+/// filter or the views, not on every frame it is drawn.
+#[test]
+fn the_set_filter_chip_resolves_its_set_once_per_change() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{scope_label_lookups, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let rock = rock01(&m);
+    let other = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key != rock.key && !v.key.is_empty())
+        .expect("another set")
+        .clone();
+    m.open_problems(Some(ProblemsFilter::Set(rock.key.clone())));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&format!("Set: {} ×", rock.id));
+    let steps = |h: &mut Harness<'static, AppModel>| {
+        for _ in 0..5 {
+            h.step();
+        }
+        scope_label_lookups(h.state())
+    };
+    let n = steps(&mut h);
+    assert!(n >= 1, "the chip resolved its set");
+    assert_eq!(steps(&mut h), n, "five frames, no change: no lookup");
+    h.state_mut()
+        .open_problems(Some(ProblemsFilter::Set(other.key.clone())));
+    assert_eq!(steps(&mut h), n + 1, "another filter");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+    h.state_mut().invalidate_views();
+    assert_eq!(steps(&mut h), n + 2, "new views");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+}
+
 /// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
 /// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
 #[test]
@@ -2594,7 +2318,7 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     // Controller ruling 2: left to right, the fix, the second fix, then Go to set.
     let xs: Vec<f32> = [
         remove.as_str(),
-        "Change shader for landscape/rock01",
+        "Change shader for landscape/rock01 (SHADER-EXTRA-MAP)",
         "Go to set",
     ]
     .iter()
@@ -2765,7 +2489,7 @@ fn a_missing_map_row_offers_change_shader() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -2783,7 +2507,7 @@ fn a_missing_map_row_offers_change_shader() {
             .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
     );
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -3369,6 +3093,72 @@ fn a_shader_map_label_names_its_slot_card() {
     ] {
         assert_eq!(slot_for_shader_map(label), want, "{label}");
     }
+}
+
+/// Final wave Group 3 (review Important 4, ledger line 124): a SHADER-EXTRA-MAP row that names a packed output other
+/// than the RMAOS slot's (here vanilla's complex `_m`) keeps that member as its Go to set target.
+#[test]
+fn an_extra_packed_output_row_keeps_its_member_target() {
+    use sdc_gui::model::items::ItemKind;
+    use sdc_gui::model::nav::SlotTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    support::complex_material(&mut m, "landscape/rock01");
+    let (key, file) = rock01(&m)
+        .members
+        .iter()
+        .find_map(|k| {
+            let i = m.item(k).filter(|i| i.kind == ItemKind::Packed)?;
+            let f = i.job.as_ref()?.output.file_name()?.to_string_lossy();
+            f.contains("_m.").then(|| (k.clone(), f.into_owned()))
+        })
+        .expect("premise: rock01 packs a complex _m");
+    inject_set(&mut m, &[extra_map(&file)]);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(engine::codes::Code::ShaderExtraMap))
+        .expect("the SHADER-EXTRA-MAP row");
+    assert_eq!(row.target, Some(SlotTarget::Item(key)));
+}
+
+/// Final wave Group 3 (ledger line 255): a Problems set filter belongs to the project it was set in, so opening
+/// another folder drops it.
+#[test]
+fn opening_another_folder_drops_the_set_filter() {
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = rock01(&m).key;
+    let root = m.root.clone().expect("premise: a folder is open");
+    for f in [
+        ProblemsFilter::Set(key.clone()),
+        ProblemsFilter::SetNotes(key.clone()),
+        ProblemsFilter::SetChecks(key.clone()),
+    ] {
+        m.bottom.filter = Some(f.clone());
+        let e = tempfile::tempdir().unwrap();
+        let other = e.path().join("textures");
+        std::fs::create_dir_all(&other).unwrap();
+        m.open_folder(other);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, None, "{f:?} is the old project's");
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        // Reopening the same folder keeps it: its sets are the same sets.
+        m.bottom.filter = Some(f.clone());
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, Some(f.clone()), "{f:?}: same folder");
+    }
+    // A filter that names no set is not the folder's.
+    m.bottom.filter = Some(ProblemsFilter::Notes);
+    let e = tempfile::tempdir().unwrap();
+    m.open_folder(e.path().to_path_buf());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.bottom.filter, Some(ProblemsFilter::Notes));
 }
 
 /// Each set row that names a slot or a file carries it for Go to set; the others carry nothing.
@@ -5220,6 +5010,217 @@ fn a_key_less_sets_filter_follows_a_mixed_case_id() {
     );
     assert_eq!(*rows, *by_key);
     assert!(rows.iter().any(|p| p.text.contains("one.txt")), "{texts:?}");
+}
+
+/// Follow-up F7 (Note JR11): a filter opened by a keyed set's key follows the set once it loses every file and has no
+/// key: it lists the key-less set's rows, the same rows as a filter by its id.
+#[test]
+fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
+    use sdc_gui::model::bottom::{filtered, scope_key, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join("landscape/one.png"))
+    .unwrap();
+    // A text file no plan item matches: the entry stays and shows as "No file matches" once the image is gone.
+    std::fs::write(root.join("landscape/one.txt"), "notes").unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set("landscape/big");
+        s.add_member("landscape/big", "landscape/one.png");
+        s.add_member("landscape/big", "landscape/one.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let find = |m: &sdc_gui::model::AppModel| {
+        sdc_gui::model::sets::set_views(m)
+            .into_iter()
+            .find(|v| v.id == "landscape/big")
+            .expect("the set has a card")
+    };
+    let v = find(&m);
+    assert!(!v.key.is_empty(), "precondition: the set has a key: {v:?}");
+    let f = ProblemsFilter::Set(v.key.clone());
+    m.open_problems(Some(f.clone()));
+    // The set's only real file goes; the other files of the folder stay, so the plan still has items.
+    std::fs::remove_file(root.join("landscape/one.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = find(&m);
+    assert!(
+        v.key.is_empty(),
+        "precondition: every entry is missing, so no key: {v:?}"
+    );
+    // Final wave Group 6 (ledger 259): the rows are those of the filter the model holds, not of the local `f`.
+    let installed = m.bottom.filter.clone();
+    let rows = filtered(&m, installed.as_ref());
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    let by_id = filtered(&m, Some(&ProblemsFilter::Set(scope_key(&v).to_string())));
+    assert!(
+        rows.iter().any(|p| p.text.contains("one.txt")),
+        "the missing entry's row: {texts:?}"
+    );
+    assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+    assert_eq!(installed, Some(f.clone()), "nothing resets the filter");
+    // The chip resolves the key as the list does: it names the set, not the old output-root path.
+    let mut h = harness(m);
+    h.run();
+    assert!(
+        h.query_all_by_label_contains("Set: landscape/big").count() > 0,
+        "the chip names the set by its id"
+    );
+}
+
+/// A set filter's rows after the output root changes to `to` (an export folder), for a filter opened on `landscape/leaf`
+/// under `<tmp>/out/textures/sub`. `also` creates a key-less set of that name first.
+fn leaf_filter_after_a_root_change(
+    d: &std::path::Path,
+    to: std::path::PathBuf,
+    also: Option<&str>,
+) -> (Vec<String>, Vec<sdc_gui::model::bottom::Problem>) {
+    use sdc_gui::model::bottom::{filtered, ProblemsFilter};
+    let mut m = pbr_opened(d);
+    let root = m.root.clone().unwrap();
+    choose_export(&mut m, d.join("out/textures/sub"));
+    if let Some(id) = also {
+        std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+        m.edit_docs("t", None, true, |_, s| {
+            s.create_set(id);
+            s.add_member(id, "landscape/stray.txt")
+        });
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let views = sdc_gui::model::sets::set_views(&m);
+    let leaf = views
+        .iter()
+        .find(|v| v.id == "landscape/leaf")
+        .expect("the leaf set has a card");
+    assert!(!leaf.key.is_empty(), "precondition: {leaf:?}");
+    if let Some(id) = also {
+        let v = views.iter().find(|v| v.id == id).expect("the key-less set");
+        assert!(v.key.is_empty(), "precondition: {v:?}");
+    }
+    let f = ProblemsFilter::Set(leaf.key.clone());
+    m.open_problems(Some(f.clone()));
+    assert!(
+        !filtered(&m, Some(&f)).is_empty(),
+        "precondition: leaf has rows"
+    );
+    choose_export(&mut m, to);
+    assert!(m.bottom.filter.is_some(), "nothing resets the filter");
+    let ids = sdc_gui::model::sets::set_views(&m)
+        .iter()
+        .map(|v| v.id.clone())
+        .collect();
+    let f = m.bottom.filter.clone();
+    (ids, filtered(&m, f.as_ref()).to_vec())
+}
+
+/// Review of Task 12a (plan-mandated): a filter opened by a set's key under one output root keeps listing that set's
+/// rows after the root changes to an ancestor, even when a key-less set's id rebuilds the old key under the new root.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_moves_to_an_ancestor() {
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let nested = "sub/textures/landscape/leaf";
+    let (ids, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("out"), Some(nested));
+    assert!(ids.iter().any(|i| i == nested), "{ids:?}");
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+    assert!(
+        !rows.iter().any(|p| p.text.contains("stray.txt")),
+        "another set's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { id, .. } => id == "landscape/leaf",
+            At::Texture(t) => t == "landscape/leaf.png",
+            _ => false,
+        }),
+        "{texts:?}"
+    );
+}
+
+/// The plain case of the same rekey: an ordinary root change leaves the open filter on its set.
+#[test]
+fn a_set_filter_keeps_its_set_when_the_root_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, rows) = leaf_filter_after_a_root_change(d.path(), d.path().join("elsewhere"), None);
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(!rows.is_empty(), "the leaf set's rows: {texts:?}");
+}
+
+/// A key-less entry's id is typed by the user and read as it stands: one that reads like a key under the old output
+/// root (the folded root, a slash, `wall`) is still an id, so a root change leaves the filter on it and never on the
+/// different set `wall` whose key the rewritten value would be.
+#[test]
+fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let root = m.root.clone().unwrap();
+    std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
+    // The entry's id: what the key of a set `wall` is under the plan's output root now.
+    let id = engine::sets::set_key(&m.sets_root(), "wall");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| {
+        s.create_set(&id);
+        s.add_member(&id, "landscape/stray.txt")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let views = sdc_gui::model::sets::set_views(&m);
+    let entry = views.iter().find(|v| v.id == id).expect("the entry's card");
+    assert!(entry.key.is_empty(), "precondition: key-less: {entry:?}");
+    assert!(
+        !views.iter().any(|v| v.id == "wall"),
+        "precondition: no set wall yet"
+    );
+    let selected = "landscape/rock01";
+    m.select_set(&engine::sets::set_key(&m.sets_root(), selected));
+    let f = ProblemsFilter::Set(id.clone());
+    m.open_problems(Some(f.clone()));
+    let before = filtered(&m, Some(&f));
+    assert!(
+        before.iter().any(|p| p.text.contains("stray.txt")),
+        "precondition: the entry's row"
+    );
+    // The different set `wall` comes with the plan the move starts: one file at the top of the folder, too small for
+    // its format, so it has rows; its key under the new root is what a rewritten id would be.
+    image::ImageBuffer::from_fn(3, 3, |x, y| {
+        image::Rgb([(x * 40) as u8, (y * 40) as u8, 90u8])
+    })
+    .save(root.join("wall.png"))
+    .unwrap();
+    choose_export(&mut m, d.path().join("elsewhere"));
+    assert!(
+        sdc_gui::model::sets::set_views(&m)
+            .iter()
+            .any(|v| v.id == "wall" && !v.key.is_empty()),
+        "precondition: set wall has a key now"
+    );
+    let rows = filtered(&m, Some(&f));
+    let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
+    assert!(
+        rows.iter().any(|p| p.text.contains("stray.txt")),
+        "the entry's row: {texts:?}"
+    );
+    assert!(
+        rows.iter().all(|p| match &p.at {
+            At::Set { key, id: i } => key.is_empty() && *i == id,
+            _ => false,
+        }),
+        "another set's row: {texts:?}"
+    );
+    assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+    assert_eq!(
+        m.selection,
+        sdc_gui::model::Selection::Set(engine::sets::set_key(&m.sets_root(), selected)),
+        "the selected set moves even when the filter names an explicit id"
+    );
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it

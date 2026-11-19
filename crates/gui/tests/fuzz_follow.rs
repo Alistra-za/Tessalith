@@ -1133,9 +1133,9 @@ fn an_explicit_advanced_skin_that_writes_nothing_splits_gui_and_cli() {
 }
 
 /// Fuzz-27: in a set not read as PBR (Glow), an explicit PBR pick retypes the untouched recorded `normal` to
-/// `pbr_normal`, so B3's SHADER-NORMAL-SPECULAR note does not show; leaving PBR reverts it.
+/// `pbr_normal`; leaving PBR reverts it.
 #[test]
-fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
+fn an_explicit_pbr_pick_retypes_an_untouched_normal() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -1143,27 +1143,29 @@ fn an_explicit_pbr_pick_retypes_an_untouched_normal_and_the_b3_note_goes() {
         "",
         AcceptSuggestions::High,
     );
-    let normal_note = |m: &AppModel| {
-        bottom::problems(m)
-            .iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular))
-    };
     assert_eq!(set_view(&m).shader.map(|p| p.shader), Some(Shader::Glow));
     assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
-    assert!(!normal_note(&m));
     m.set_shader("m/rock01", Some(Shader::Pbr));
     idle(&mut m);
     assert_eq!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
-    assert!(auto_pbr(&m).contains(NORMAL));
-    assert!(!normal_note(&m), "{:?}", bottom::problems(&m));
+    assert_eq!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .auto_normal()
+            .get(NORMAL)
+            .map(String::as_str),
+        Some("pbr_normal")
+    );
+    assert!(!auto_pbr(&m).contains(NORMAL));
     m.set_shader("m/rock01", Some(Shader::Default));
     idle(&mut m);
     assert_ne!(subtype(&m, NORMAL), Some(json!("pbr_normal")));
+    assert_eq!(subtype(&m, NORMAL), Some(json!("normal")));
     assert!(!auto_pbr(&m).contains(NORMAL));
 }
 
-/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes, as B3-11's
-/// `use_pbr_normal_refusal` says), and its key never joins `auto_pbr`.
+/// Fuzz-28: a kept DDS fuzz map takes no type from the explicit PBR pick (a type cannot change its bytes), and its key never joins `auto_pbr`.
 #[test]
 fn an_explicit_pbr_pick_writes_no_type_on_a_kept_dds() {
     let d = tempfile::tempdir().unwrap();
@@ -1902,10 +1904,10 @@ fn an_export_queued_at_open_runs_on_the_switched_plan() {
     );
 }
 
-/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and B3 offers
-/// **Use PBR normal** on it.
+/// Fuzz-26: the switch clears only the Diffuse-slot `skin_albedo`; a `normal` the user wrote stays, and no SHADER row
+/// names it.
 #[test]
-fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
+fn the_switch_leaves_a_recorded_normal() {
     let d = tempfile::tempdir().unwrap();
     let before = "[files.\"m/rock01.png\"]\nsubtype = \"skin_albedo\"\n[files.\"m/rock01_n.png\"]\nsubtype = \"normal\"\n";
     let mut m = open_with(
@@ -1924,9 +1926,7 @@ fn the_switch_leaves_a_recorded_normal_and_b3_offers_the_pbr_normal() {
     );
     let rows = problems(&m);
     assert!(
-        rows.iter()
-            .any(|r| r.code == Some(Code::ShaderNormalSpecular)
-                && r.fix == Some(Fix::UsePbrNormal(NORMAL.into()))),
+        !rows.iter().any(|r| r.code == Some(Code::ShaderExtraMap) || r.code == Some(Code::ShaderMissingMap)),
         "{rows:?}"
     );
 }
@@ -2486,4 +2486,72 @@ fn a_mirror_borrowers_fuzz_slot_is_not_shown_filled() {
         ),
         "{borrower:?}"
     );
+}
+
+/// F16 (Note JQ53, N-41), a pin of existing behaviour: a kept `x_f.dds` beside the fuzz map is the set's `_f`. The GUI
+/// never writes there (it refuses an export folder that is or holds the opened one, and a CS PBR set goes under
+/// `textures\pbr\`), so `has_f` counts it, no `pbr_fuzz` is written and the map is listed unused; `sdc convert` into
+/// the same export folder plans the same.
+#[test]
+fn a_kept_f_beside_the_fuzz_map_is_the_sets_f_in_the_gui_and_the_cli() {
+    const WHY: &str = "x_fuzz.png: x_f.dds is the set's PBR fuzz texture (_f); not converted";
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/test");
+    std::fs::create_dir_all(&t).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, 90u8]))
+        .save(t.join("x.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
+        .save(t.join("x_n.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, _| Luma([(x * 3) as u8]))
+        .save(t.join("x_fuzz.png"))
+        .unwrap();
+    bc1_dds(&t.join("x_f.dds"));
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.set_shader("test/x", Some(Shader::Pbr));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let map = m.item("test/x_fuzz.png").expect("the map's item");
+    assert!(map.job.is_none(), "{:?}", map.job);
+    assert!(
+        matches!(&map.status, sdc_gui::model::items::ItemStatus::Skipped(why) if why == WHY),
+        "{:?}",
+        map.status
+    );
+    assert_eq!(
+        subtype(&m, "test/x_fuzz.png"),
+        None,
+        "has_f wrote no pbr_fuzz"
+    );
+    // `sdc convert` into the same export folder, on the saved text.
+    assert!(m.save().is_ok(), "the text sdc convert reads");
+    let mut r = engine::api::BatchRequest::new(
+        vec![d.path().join("textures")],
+        d.path().join("export"),
+        engine::config::Target::Cs,
+    );
+    r.recursive = true;
+    r.accept = AcceptSuggestions::High;
+    let rep =
+        engine::events::Reporter::new(std::sync::Arc::new(engine::events::VecSink::default()), "t");
+    let cli = engine::api::Engine::new()
+        .unwrap()
+        .plan(r, &rep, &engine::api::CancelToken::default())
+        .unwrap();
+    let map = cli
+        .jobs
+        .iter()
+        .find(|j| j.input.ends_with("x_fuzz.png"))
+        .expect("the CLI's job for the map");
+    assert!(
+        map.warnings
+            .iter()
+            .any(|w| w.code == Code::PackUnusedInput && w.message == WHY),
+        "{:?}",
+        map.warnings
+    );
+    assert!(cli
+        .jobs
+        .iter()
+        .all(|j| j.profile.subtype != Subtype::PbrFuzz));
 }

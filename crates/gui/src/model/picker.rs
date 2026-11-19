@@ -298,7 +298,7 @@ impl AppModel {
     pub fn set_export_folder(&mut self, path: std::path::PathBuf) {
         match self.sets_doc.as_mut().filter(|d| !d.read_only()) {
             Some(d) => {
-                let was_dirty = d.is_dirty();
+                let was_dirty = d.defer_record_save();
                 d.set_export_folder(&path);
                 if was_dirty {
                     self.status_line =

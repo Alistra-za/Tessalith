@@ -36,14 +36,21 @@ pub struct History {
     /// Note FC1 R5: the untouched recorded sub-types when the presets were saved; the settled plan re-types them.
     /// Part of the history so every reset (open, reload) drops it.
     pub retype_untouched: Vec<(String, serde_json::Value)>,
+    /// A deliberate Undo of a shader follow survives the replan it starts.
+    pub(super) normal_followed: std::collections::HashSet<String>,
 }
 
 impl History {
     pub const LIMIT: usize = 200;
 
     pub fn push(&mut self, c: Command) {
-        self.pushes += 1;
         self.redo.clear();
+        self.push_undo(c);
+    }
+
+    /// An automatic follow can offer its own Undo without discarding the user's Redo.
+    pub(super) fn push_undo(&mut self, c: Command) {
+        self.pushes += 1;
         if let (Some(last), Some(k)) = (self.undo.last_mut(), c.merge.as_ref()) {
             if last.merge.as_ref() == Some(k)
                 && last.created_file.is_none()
@@ -60,13 +67,29 @@ impl History {
     }
 
     pub fn apply_auto(&mut self, writes: &[crate::project::AutoWrite]) {
+        self.apply_auto_in(writes, |_, _| None);
+    }
+
+    pub(super) fn apply_auto_in(
+        &mut self,
+        writes: &[crate::project::AutoWrite],
+        mut adapt: impl FnMut(
+            &mut Snapshot,
+            Option<&crate::project::NewFileEntries>,
+        ) -> Option<Vec<crate::project::AutoWrite>>,
+    ) {
         if self.undo.is_empty() && self.redo.is_empty() {
             return;
         }
         let entries = crate::project::NewFileEntries::new(writes);
         let mut patched = std::collections::HashMap::<String, String>::new();
         for command in self.undo.iter_mut().chain(&mut self.redo) {
-            for text in [&mut command.before.sdc_toml, &mut command.after.sdc_toml] {
+            for state in [&mut command.before, &mut command.after] {
+                if let Some(allowed) = adapt(state, entries.as_ref()) {
+                    state.sdc_toml = crate::project::apply_auto(&state.sdc_toml, &allowed);
+                    continue;
+                }
+                let text = &mut state.sdc_toml;
                 *text = patched
                     .entry(std::mem::take(text))
                     .or_insert_with_key(|original| {
@@ -117,6 +140,7 @@ impl History {
         self.undo.clear();
         self.redo.clear();
         self.retype_untouched.clear();
+        self.normal_followed.clear();
     }
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()

@@ -116,7 +116,7 @@ fn the_set_editor_shows_slot_rows_alpha_and_slot_commands() {
         .key
         .clone();
     m.select_set(&key);
-    // Tall enough for the packed card's recipe choice and fill rows, which push the commands button down.
+    // Tall enough for the packed card's fill rows, which push the commands button down.
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -406,6 +406,9 @@ fn an_unset_number_shows_the_fixed_default_and_an_edit_is_the_sets_own() {
     h.run();
     assert!(spin_values(&h).contains(&"0.5".to_string()));
     assert_eq!(h.query_all_by_label("reset").count(), 1);
+    // The Output files group above the rows moved the button below the 900 px window: scroll to it first.
+    h.get_by_label("reset").scroll_to_me();
+    h.run();
     h.get_by_label("reset").click();
     h.run();
     assert!(!rock_settings(&h).contains_key("roughness_scale"));
@@ -1152,6 +1155,18 @@ fn a_coat_source_titles_the_subsurface_card_coat_colour_and_strength() {
     h.run();
     h.get_by_label("Coat colour + strength");
     assert!(h.query_by_label("Subsurface _s").is_none());
+    // Final wave Group 2: the Output files line of that file takes the row's title, not the bare slot's name.
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Coat colour + strength: ")
+            .is_some(),
+        "the _coat output line reads as its row"
+    );
+    assert!(
+        h.query_by_label_contains("Subsurface _s: ").is_none(),
+        "no output line calls the _coat Subsurface"
+    );
 }
 
 fn text_inputs(h: &Harness<'static, AppModel>) -> Vec<String> {
@@ -1178,7 +1193,7 @@ fn the_matching_header_lists_the_default_match1() {
 
 fn match_toggles(h: &Harness<'static, AppModel>) -> Vec<bool> {
     use eframe::egui::accesskit::Toggled;
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .map(|n| n.accesskit_node().toggled() == Some(Toggled::True))
         .collect()
 }
@@ -1210,12 +1225,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
             .count(),
         1
     );
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .click();
@@ -1225,12 +1240,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
         serde_json::json!(r"landscape\rock01_n")
     );
     assert!(text_inputs(&h).contains(&r"landscape\rock01_n".to_string()));
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .click();
@@ -1240,6 +1255,56 @@ fn the_card_toggles_mirror_the_matching_rows() {
         "back to the derived default"
     );
     assert_eq!(match_toggles(&h), vec![true, true]);
+}
+
+/// Final wave Group 4 (Important 5): Match on this is a discrete toggle, so each click is its own Undo step and one
+/// Undo takes back the last click only.
+#[test]
+fn each_match_click_is_one_undo_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    rock_selected(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let click_normal = |h: &mut Harness<'static, AppModel>| {
+        h.query_all_by_label_contains("Match on this")
+            .nth(1)
+            .unwrap()
+            .scroll_to_me();
+        h.run();
+        h.query_all_by_label_contains("Match on this")
+            .nth(1)
+            .unwrap()
+            .click();
+        h.step();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+    };
+    let steps = h.state().history.undo.len();
+    click_normal(&mut h);
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "premise: the first click turns the normal's match on"
+    );
+    click_normal(&mut h);
+    assert!(
+        !rock_settings(&h).contains_key("match2"),
+        "premise: the second click turns it off"
+    );
+    assert_eq!(
+        h.state().history.undo.len(),
+        steps + 2,
+        "two clicks, two Undo steps"
+    );
+    h.state_mut().undo();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "one Undo takes back the second click only"
+    );
 }
 
 /// Owner, 2026-10-12: + offers slots 3–8. A slot the set fills starts from the set's path for it; an empty slot adds
@@ -1444,6 +1509,92 @@ fn a_clashing_slot_card_shows_and_removes_either_member() {
         h.run();
         assert!(!members(&h).contains(&key), "{name} left the set");
         assert!(h.query_by_label_contains("both use slot 7").is_none());
+    }
+}
+
+/// Ruling 3b-F8: the editor's conflict line and its Remove buttons read what Export's clash reads. A clear or a typed
+/// path on slot 7 (`_cnr` + `_f`) or slot 3 (`_g` + `_sk`) leaves one path in the JSON, so the editor shows no conflict
+/// and Export has no clash block; before the command both show one.
+#[test]
+fn a_slot_the_json_overrides_shows_no_conflict_as_export_has_none() {
+    use sdc_gui::model::sets::SlotCommand;
+    let blocks = |m: &AppModel| -> Vec<String> {
+        sdc_gui::model::pbr_export::export_blocks(m)
+            .iter()
+            .map(|i| i.text.clone())
+            .collect()
+    };
+    let cases = [
+        (
+            7u8,
+            ["rock01_cnr.png", "rock01_f.png"],
+            "_cnr and _f both use slot 7",
+        ),
+        (
+            3,
+            ["rock01_g.png", "rock01_sk.png"],
+            "_g and _sk both use slot 3",
+        ),
+    ];
+    for (n, files, block) in cases {
+        let block = format!("landscape/rock01: {block}");
+        let line = format!("{} and {} both use slot {n}", files[0], files[1]);
+        for cmd in [
+            SlotCommand::Clear,
+            SlotCommand::Path(r"effects\white.dds".into()),
+        ] {
+            let d = tempfile::tempdir().unwrap();
+            let r = d.path().join("textures/landscape");
+            std::fs::create_dir_all(&r).unwrap();
+            for f in files {
+                image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+                    .save(r.join(f))
+                    .unwrap();
+            }
+            let mut m = pbr_opened(d.path());
+            if n == 3 {
+                // As `pbr_export::emissive_and_skin_sk_clash_on_any_set`: the two are decided by hand.
+                let pick = |m: &mut AppModel, f: &str, s: &str| {
+                    m.set_field(&format!("landscape/{f}"), "subtype", serde_json::json!(s))
+                };
+                pick(&mut m, files[0], "glow");
+                pick(&mut m, files[1], "skin_sk");
+                assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+            }
+            rock_selected(&mut m);
+            let mut h = harness(m);
+            h.run();
+            h.get_by_label_contains(&line);
+            for f in files {
+                h.get_by_label(&format!("Remove {f}"));
+            }
+            assert!(
+                blocks(h.state()).contains(&block),
+                "premise ({cmd:?}): {:?}",
+                blocks(h.state())
+            );
+            h.state_mut()
+                .set_slot_command("landscape/rock01", n, cmd.clone())
+                .unwrap();
+            assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+            h.run();
+            assert!(
+                !blocks(h.state()).contains(&block),
+                "{cmd:?}: {:?}",
+                blocks(h.state())
+            );
+            assert!(
+                h.query_by_label_contains(&format!("both use slot {n}"))
+                    .is_none(),
+                "{cmd:?}: the editor shows a conflict Export does not have"
+            );
+            for f in files {
+                assert!(
+                    h.query_by_label(&format!("Remove {f}")).is_none(),
+                    "{cmd:?}: Remove {f} is offered"
+                );
+            }
+        }
     }
 }
 
@@ -1689,7 +1840,7 @@ fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(eframe::egui::vec2(1400.0, 300.0))
+        .with_size(eframe::egui::vec2(1400.0, 420.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h
 }

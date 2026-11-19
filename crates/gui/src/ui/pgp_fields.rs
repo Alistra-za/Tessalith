@@ -4,7 +4,7 @@ use super::columns::AMBER;
 use crate::look::Combo036 as _;
 use crate::model::auto_flags::{auto_flags_for, hint, resolved_for};
 use crate::model::sets::{
-    is_pbr_grass, slot_matches, views, SetView, SlotFill, SlotKind, SlotMatch,
+    feature_slots, is_pbr_grass, slot_matches, views, SetView, SlotFill, SlotKind, SlotMatch,
 };
 use crate::model::AppModel;
 use crate::pgp::alpha::{AlphaFlags, BLEND_MODES, DEFAULT_FLAGS, DEFAULT_THRESH, TEST_FUNCS};
@@ -179,18 +179,19 @@ pub(crate) fn context(model: &AppModel, set: &str) -> Ctx {
 pub(crate) fn context_of(model: &AppModel, set: &str, v: Option<&SetView>) -> Ctx {
     #[cfg(feature = "test-hooks")]
     CONTEXT_BUILDS.set(CONTEXT_BUILDS.get() + 1);
-    let filled = |v: &SetView, s: SlotKind| v.slots.get(&s).is_some_and(SlotFill::is_filled);
+    let filled =
+        |v: &SetView, s: SlotKind| feature_slots(v).get(&s).is_some_and(SlotFill::is_filled);
     let read_only = model.sets_read_only_reason();
     let own: Settings = v.as_ref().map(|v| v.settings.clone()).unwrap_or_default();
     let derived = v.as_ref().and_then(|v| v.derived_match.clone());
     let ss = v.as_ref().map(|v| hint(model, v)).unwrap_or_default();
     let auto = v
         .as_ref()
-        .map(|v| auto_flags_for(v.json, &v.slots, &own, &ss))
+        .map(|v| auto_flags_for(v.json, feature_slots(v), &own, &ss))
         .unwrap_or_default();
     let eff = v
         .as_ref()
-        .map(|v| resolved_for(v.json, &v.slots, &own, &ss))
+        .map(|v| resolved_for(v.json, feature_slots(v), &own, &ss))
         .unwrap_or_else(|| own.clone());
     let (matches, addable) = v.map(slot_matches).unwrap_or_default();
     Ctx {
@@ -225,7 +226,8 @@ fn value(s: impl Into<String>) -> Option<egui::RichText> {
     Some(egui::RichText::new(s).weak())
 }
 
-/// The visual settings to Matching, each a framed group with its value in the header (layout v2 A3).
+/// The visual settings to Matching, each a framed group; a header carries a value only where one shows nowhere else
+/// (layout v2 A3, C14).
 pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
     let c = context(model, set);
     let mut edits: Vec<Edit> = vec![];
@@ -262,32 +264,31 @@ pub fn panel_main(ui: &mut egui::Ui, model: &mut AppModel, set: &str) {
                 continue;
             }
         }
-        // C14 (Note FB2): a feature's state shows once, in its own group's header; the Features ticks carry no count.
-        let head = match g {
-            Group::Material | Group::Features => None,
+        // C14 (Note FB2): a state shows once. The four feature groups say none: their Features tick is always drawn.
+        // Subsurface has no tick, its selector sits in the body, so its mode shows in the header only while the group is
+        // really closed (`group_closed_value`). The amber reason a feature that is on (in the JSON or by its files) is
+        // blocked shows open or closed (CC10): it is a reason, not a repeat.
+        let (head, closed_head) = match g {
             Group::Subsurface => {
                 let mode = sub_mode(&c.eff);
-                if mode == SubMode::Off {
-                    value(sub_text(mode))
-                } else {
-                    blocked_head(Feature::Subsurface, &c.eff, sub_text(mode))
-                        .or_else(|| value(sub_text(mode)))
-                }
+                let blocked = (mode != SubMode::Off)
+                    .then(|| blocked_head(Feature::Subsurface, &c.eff, sub_text(mode)))
+                    .flatten();
+                (blocked, value(sub_text(mode)))
             }
-            _ => match group_feature(g)
-                .filter(|f| feature_on(&c.eff, *f))
-                .and_then(|f| blocked_head(f, &c.eff, "on"))
-            {
-                Some(blocked) => Some(blocked),
-                None => value(if on { "on" } else { "off" }),
-            },
+            _ => (
+                group_feature(g)
+                    .filter(|f| feature_on(&c.eff, *f))
+                    .and_then(|f| blocked_head(f, &c.eff, "on")),
+                None,
+            ),
         };
         // K16: the id carries the state, so a group opens when its feature turns on and closes when it turns off.
-        super::group::group(
+        super::group::group_closed_value(
             ui,
             ("pgp", g as u8, on, kept, &c.set),
             group_title(g),
-            head,
+            (head, closed_head),
             on || kept,
             |ui| {
                 if g == Group::Subsurface {

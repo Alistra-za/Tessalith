@@ -8,9 +8,9 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 
 | Shader | Required maps | Optional maps | vanilla |
 |---|---|---|---|
-| `pbr` | albedo, `_n`, `_rmaos` | `_g` emissive, `_s` subsurface/coat, `_cnr`, `_f`, `_p` | no |
+| `pbr` | albedo, `_n` (`pbr_normal`, `normal` or `landscape_normal`), `_rmaos` <!-- D:JS4 --> | `_g` emissive, `_s` subsurface/coat, `_cnr`, `_f`, `_p` | no |
 | `pbr_landscape` | albedo (or landscape diffuse), `_n` | `_rmaos`, `_p` | no |
-| `pbr_grass` | albedo, `_n`, `_rmaos` | `_s` | no |
+| `pbr_grass` | albedo, `_n` (`pbr_normal`, `normal` or `landscape_normal`), `_rmaos` | `_s` | no |
 | `advanced_skin` | skin albedo, `_n`/`_msn`, `_rfaos` | `_sk`, `_wet` | no |
 | `default` | diffuse, `_n` | `_b`/`_bl` | yes |
 | `envmap` | diffuse, `_n` | `_m`, `_e` | yes |
@@ -24,7 +24,9 @@ Each set is made for one Skyrim shader. The shader says which maps the set shoul
 | `landscape` | diffuse, `_n` | | yes |
 | `complex_grass` | the complex-grass texture ([layout](PBR-Landscape.md#complex-grass)) | | yes |
 
-- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 --> A vanilla normal in a `pbr`/`pbr_grass` set with no `pbr_normal` gives one note instead: [SHADER-NORMAL-SPECULAR](Diagnostic-Codes.md#shaders-skin-and-grass).
+- **A missing required map** gives `SHADER-MISSING-MAP`, and **a member the shader doesn't use** gives `SHADER-EXTRA-MAP`. Both are warnings; extra members still convert. The GUI drops the first when a scanned mesh or texture set record already fills the map beside the set's diffuse, or when the set borrows that map from another set and its type is one the shader takes there. <!-- D:HE4,HH8 -->
+
+For roughness inputs, see [Variance and gloss bake](Texture-Packing.md#variance-and-gloss-bake). For shared specular, see [Keep alpha](GUI-Problems.md#keep-alpha).
 
 ## How the shader is picked
 

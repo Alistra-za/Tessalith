@@ -502,3 +502,48 @@ fn an_old_manifest_with_rnm_loads() {
     let (s, ev) = run(plan(d.path(), &r, &n, true, false));
     assert_eq!((s.converted, s.up_to_date), (0, 1), "{ev:#?}");
 }
+
+/// N-11 (Note JS3): a set that starts baking from a plain `normal` or a `landscape_normal` re-encodes its `_rmaos`
+/// once (its sources gain the bake) and leaves the `_n` up to date (N-13 for `landscape_normal`).
+#[test]
+fn a_plain_normal_that_starts_baking_re_encodes_only_its_roughness() {
+    for (folder, subtype) in [("pbr", "normal"), ("landscape", "landscape_normal")] {
+        let d = tempfile::tempdir().unwrap();
+        let dir = d.path().join("in/textures").join(folder);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::rename(bumpy_n(d.path(), 32, 0.0), dir.join("iron_n.png")).unwrap();
+        std::fs::rename(rmaos(d.path(), 32), dir.join("iron_rmaos.png")).unwrap();
+        let toml = |opt_out: bool| {
+            let mut t =
+                format!("[files.\"textures/{folder}/iron_n.png\"]\nsubtype = \"{subtype}\"\n");
+            if opt_out {
+                // DECISIONS R6: an explicit `renormalize` opts out, as every plain normal behaved before.
+                t.push_str("mips.normal = \"renormalize\"\n");
+            }
+            std::fs::write(d.path().join("in/sdc.toml"), t).unwrap();
+        };
+        let convert = || {
+            let mut req =
+                BatchRequest::new(vec![d.path().join("in")], d.path().join("out"), Target::Cs);
+            req.recursive = true;
+            req.accept = AcceptSuggestions::High;
+            req.on_existing = OnExisting::IfChanged;
+            let rep = Reporter::new(Arc::new(VecSink::default()), "starts-baking");
+            let e = Engine::new().unwrap();
+            let p = e.plan(req, &rep, &CancelToken::default()).unwrap();
+            e.run(p, &rep, &CancelToken::default()).unwrap()
+        };
+        toml(true);
+        let s = convert();
+        assert_eq!((s.converted, s.up_to_date), (2, 0), "{folder}");
+        toml(false);
+        let s = convert();
+        assert_eq!(
+            (s.converted, s.up_to_date),
+            (1, 1),
+            "{folder}: the _rmaos re-encodes once, the _n is unchanged"
+        );
+        let s = convert();
+        assert_eq!((s.converted, s.up_to_date), (0, 2), "{folder}");
+    }
+}

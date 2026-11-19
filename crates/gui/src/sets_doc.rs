@@ -503,6 +503,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AUTO_NORMAL_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl SetsDoc {
     pub fn open(root: &Path) -> SetsDoc {
         let mut d = SetsDoc {
@@ -580,12 +585,35 @@ impl SetsDoc {
         self.f.rev
     }
 
+    /// The text last loaded or saved (`TomlFile::saved_text`): it changes on every save and reload (Note JS5, N-26).
+    pub fn saved_text(&self) -> &str {
+        &self.f.saved_text
+    }
+
     pub fn path(&self) -> &Path {
         &self.f.path
     }
     pub fn is_dirty(&self) -> bool {
         self.f.dirty
     }
+    /// A save-if-clean site may persist a pending automatic normal listing. Other pending writes still wait for Save.
+    pub(crate) fn defer_record_save(&self) -> bool {
+        if !self.is_dirty() {
+            return false;
+        }
+        if self.user_dirty() {
+            return true;
+        }
+        let mut saved = self
+            .saved_text()
+            .parse()
+            .expect("saved text is serialized TOML");
+        let listing = shas_value(&Self::normal_listing(&self.f.doc));
+        project_value_same(&saved, "auto_normal", &listing)
+            || !put_project(&mut saved, "auto_normal", listing)
+            || saved.to_string() != self.text()
+    }
+
     pub fn user_dirty(&self) -> bool {
         self.f.user_dirty
     }
@@ -692,8 +720,13 @@ impl SetsDoc {
 
     /// Owner ruling (Note BV6): `[project] export_folder`, this project's export folder (GUI-only state).
     pub fn export_folder(&self) -> Option<std::path::PathBuf> {
-        self.project_str("export_folder")
-            .map(std::path::PathBuf::from)
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
+        Some(Path::new(
+            self.f.doc.get("project")?.get("export_folder")?.as_str()?,
+        ))
     }
     pub fn set_export_folder(&mut self, path: &std::path::Path) {
         self.set_project(
@@ -1177,6 +1210,96 @@ impl SetsDoc {
             "auto_skin",
             (!keys.is_empty()).then_some(Value::InlineTable(t)),
         );
+    }
+
+    /// Note JS5 (N-17, N-27): the tangent-space normal sub-types Tessalith wrote, each with the word it wrote
+    /// (`normal`, `landscape_normal` or `pbr_normal`). A key whose `[files]` sub-type no longer equals it is the
+    /// user's. `[project] auto_normal`.
+    pub fn auto_normal(&self) -> BTreeMap<String, String> {
+        #[cfg(test)]
+        AUTO_NORMAL_READS.set(AUTO_NORMAL_READS.get() + 1);
+        Self::normal_listing(&self.f.doc)
+    }
+
+    pub(crate) fn baseline(&self) -> &str {
+        &self.f.baseline_text
+    }
+
+    fn normal_listing(doc: &toml_edit::DocumentMut) -> BTreeMap<String, String> {
+        let t = doc.get("project").and_then(|p| p.get("auto_normal"));
+        t.and_then(Item::as_table_like)
+            .map(|t| {
+                t.iter()
+                    .map(|(k, v)| (k.to_string(), v.as_str().unwrap_or("").to_string()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// The word listed under this exact key, including after a recorder write.
+    pub(crate) fn auto_normal_word(&self, key: &str) -> Option<&str> {
+        self.f
+            .doc
+            .get("project")?
+            .get("auto_normal")?
+            .get(key)?
+            .as_str()
+    }
+
+    pub fn set_auto_normal(&mut self, keys: &BTreeMap<String, String>) {
+        self.set_project("auto_normal", shas_value(keys));
+    }
+
+    /// Replay just the recorder's changes. A shader pick or an explicit unlisting in this state still owns its keys.
+    pub(crate) fn apply_auto_normals(
+        text: &mut String,
+        before: &BTreeMap<String, String>,
+        after: &BTreeMap<String, String>,
+    ) {
+        let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
+            return;
+        };
+        let mut listing = Self::normal_listing(&doc);
+        for (key, old) in before {
+            if !after.contains_key(key) && listing.get(key) == Some(old) {
+                listing.remove(key);
+            }
+        }
+        for (key, word) in after {
+            if before.get(key) != Some(word) && listing.get(key) == before.get(key) {
+                listing.insert(key.clone(), word.clone());
+            }
+        }
+        let value = shas_value(&listing);
+        if !project_value_same(&doc, "auto_normal", &value)
+            && put_project(&mut doc, "auto_normal", value)
+        {
+            *text = doc.to_string();
+        }
+    }
+
+    pub(crate) fn touch_auto_normals(
+        &mut self,
+        before: &BTreeMap<String, String>,
+        after: &BTreeMap<String, String>,
+    ) {
+        if before != after {
+            Self::apply_auto_normals(&mut self.f.baseline_text, before, after);
+        }
+        self.f.update_user_dirty(&self.text());
+    }
+
+    /// Note JS7 (N-10, N-27): the owner normals the share step wrote `alpha.policy = "data"` on; one that no longer
+    /// holds `data` is the user's. `[project] auto_data`.
+    pub fn auto_data(&self) -> Vec<String> {
+        strings(self.f.doc.get("project").and_then(|p| p.get("auto_data")))
+    }
+    pub fn set_auto_data(&mut self, keys: &[String]) {
+        let mut arr = Array::new();
+        for k in keys {
+            arr.push(k.as_str());
+        }
+        self.set_project("auto_data", (!keys.is_empty()).then_some(Value::Array(arr)));
     }
 
     /// The `[[sets]]` entries, parsed once per revision (REPORT #9).

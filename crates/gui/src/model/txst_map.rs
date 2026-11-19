@@ -3,14 +3,17 @@
 
 use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
+use super::pbr_export::writes_entry;
 use super::sets::{
-    entry_of, missing_map_slot, recipe_suffix, renamed_output, DefaultOutputs, SetView, SlotFill,
-    SlotKind, LAST_GAME_SLOT, READ_ONLY,
+    entry_of, has_slot_clear, has_slot_link, link_row_kind, linked_map_slot, member_output_key,
+    missing_map_slot, projected_slot, recipe_suffix, renamed_output, slot_of, slot_string,
+    DefaultOutputs, SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
 use crate::pgp::prefix::check_rel_path;
 use crate::sets_doc::{SetEntry, TxstMap};
+use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::sets::{same_id, OutputKey};
 use engine::shader::Shader;
@@ -83,6 +86,17 @@ pub fn record_slot(item: &TextureItem) -> Option<u8> {
 /// Every output of a mapped set that its record names: (set id, output key, path under the export folder). A PBR set
 /// on CS is left out (its prefix names its outputs), and so is a record path `record_rel` refuses.
 pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey, PathBuf)> {
+    record_outputs(m, views)
+        .into_iter()
+        .map(|(id, key, rel, _)| (id, key, rel))
+        .collect()
+}
+
+/// Keep the record's game path beside its installation path through output selection.
+pub(super) fn record_outputs(
+    m: &AppModel,
+    views: &[SetView],
+) -> Vec<(String, OutputKey, PathBuf, String)> {
     let (Some(doc), Some(root)) = (m.sets_doc.as_ref(), m.root.as_deref()) else {
         return vec![];
     };
@@ -94,6 +108,8 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         .any(|e| e.txst.as_ref().is_some_and(TxstMap::is_base))
         .then(|| DefaultOutputs::new(m))
         .flatten();
+    // Ruling 3b-F21: the folders once per pass, not per member (`export_rel_in`).
+    let mut prefix = None;
     for e in entries.iter() {
         let Some(txst) = &e.txst else { continue };
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
@@ -109,9 +125,10 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         }
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
-            if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
+            if let Some((k, game, rel)) = member_write(root, v, item, &txst.slots, base) {
                 // Note HQ6: explicit paths are under the export folder.
-                out.push((v.id.clone(), k, m.export_rel(&rel)));
+                let prefix = prefix.get_or_insert_with(|| m.plan_prefix());
+                out.push((v.id.clone(), k, super::export_rel_in(prefix, &rel), game));
             }
         }
     }
@@ -265,6 +282,8 @@ pub(super) fn fill_from_records(
             continue;
         }
         // A slot another source already decided: its own file, an explicit borrow, a pin, or a `slotN` setting.
+        // Ruling 3b-F13: a `slotN` of any value decides it on every set, a set that writes no entry included, as on
+        // main: the decision feeds the engine's `borrowed_normal` input, so encoded bytes follow it.
         let decided = |v: &SetView, n: u8| {
             v.slots.keys().any(|k| k.slot_number() == Some(n))
                 || e.borrow.contains_key(&n)
@@ -310,6 +329,189 @@ pub(super) fn fill_from_records(
             !missing_map_slot(w)
                 .is_some_and(|n| filled.contains_key(&n) || supplied.contains_key(&n))
         });
+    }
+}
+
+/// Review E1: fills `linked` of every set that writes a PGPatcher entry (`writes_entry`: a JSON set whose statics keep
+/// the entry, Task 15a) from its non-empty `slotN` strings, and `features` of every such set:
+/// each path is resolved to the set and file that write it, and the row it fills is that file's kind when the kind
+/// belongs to the slot (a typed path's, or another kind's, is `link_row_kind`). A source is found in the index of every
+/// planned output (`written_outputs`), so the opened folder does not matter; the first set in display order that
+/// writes a path keeps it. Then each `SHADER-MISSING-MAP` warning of a slot that holds a link is dropped: the JSON
+/// names a file for it. Runs after `finish_view` and the short names.
+pub(super) fn link_slots(m: &AppModel, views: &mut [SetView]) {
+    let any_link = views.iter().any(|v| has_slot_link(&v.settings));
+    if !any_link && !views.iter().any(|v| has_slot_clear(&v.settings)) {
+        return;
+    }
+    if any_link {
+        set_links(m, views);
+    }
+    set_features(m, views);
+}
+
+/// Review E1 (Task 15a): the path PGPatcher puts in a game slot for a `slotN` string, folded for comparison: its
+/// explicit-slot rule (`pgpsim` `slots.rs`, `apply_slots`: ASCII lower case, `textures\` put in front unless the
+/// string starts with it, `""` clears). So `pbr\a\b_n.dds` and `textures\pbr\a\b_n.dds` name one file, while
+/// `other\textures\pbr\a\b_n.dds` names `textures\other\textures\…`. Unlike `game_key` (Note HG's record paths), no
+/// part of the path is cut. Applied to the `slotN` string on the lookup side only (ruling 3b-F6): an index key is
+/// already a game location.
+pub(crate) fn slot_path_key(path: &str) -> String {
+    let mut p = path.to_ascii_lowercase();
+    if !p.is_empty() && !p.starts_with("textures\\") {
+        p.insert_str(0, "textures\\");
+    }
+    p
+}
+
+/// One planned output in the link index (`written_outputs`).
+#[derive(Clone, Copy)]
+struct Written<'a> {
+    from: &'a str,
+    short: &'a str,
+    item: &'a str,
+    /// The output's slot kind (`slot_of`); `None` for an output that fills no slot (a complex `_m`).
+    kind: Option<SlotKind>,
+}
+
+/// Review E1 (Task 15a): every planned output of every set (each member that writes a file of its own, the members
+/// after the first of a slot kind and the unslotted outputs included), built in one pass. Rulings 3b-F6 and 3b-F16: a
+/// key is the projected game location of the landed plan, folded for lookup. From another set uses the same
+/// projection. An output without a game location is in no entry. The first set in display order that
+/// writes a path keeps it. The folders are read once per build.
+fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String, Written<'a>> {
+    let mut out = HashMap::new();
+    let roots = super::sets::output_roots(m);
+    for v in views {
+        for item in &v.members {
+            let Some(it) = m.item(item) else {
+                continue;
+            };
+            if let Some(p) = projected_slot(m, &roots, it, member_output_key(v, it).as_ref()) {
+                out.entry(p.to_ascii_lowercase()).or_insert(Written {
+                    from: &v.id,
+                    short: &v.short,
+                    item,
+                    kind: slot_of(it),
+                });
+            }
+        }
+    }
+    out
+}
+
+/// Tests: the planned-output index (`written_outputs`) of the current views as (key, set id, item key), sorted.
+#[cfg(feature = "test-hooks")]
+pub fn written_output_index(m: &AppModel) -> Vec<(String, String, String)> {
+    let views = super::sets::views(m);
+    let mut out: Vec<_> = written_outputs(m, &views)
+        .into_iter()
+        .map(|(k, w)| (k, w.from.to_string(), w.item.to_string()))
+        .collect();
+    out.sort();
+    out
+}
+
+/// Fills `linked` (see `link_slots`).
+fn set_links(m: &AppModel, views: &mut [SetView]) {
+    let written = written_outputs(m, views);
+    let found: Vec<BTreeMap<u8, SlotLink>> = views
+        .iter()
+        .map(|v| {
+            // The cheap test first: `writes_entry` reads the set's statics.
+            if !has_slot_link(&v.settings) || !writes_entry(m, v) {
+                return BTreeMap::new();
+            }
+            (1..=LAST_GAME_SLOT)
+                .filter_map(|n| {
+                    let path = slot_string(&v.settings, n).filter(|p| !p.is_empty())?;
+                    let (from, from_short, item, kind) = match written.get(&slot_path_key(path)) {
+                        Some(w) => (
+                            Some(w.from.to_string()),
+                            Some(w.short.to_string()),
+                            Some(w.item.to_string()),
+                            w.kind,
+                        ),
+                        None => (None, None, None, None),
+                    };
+                    // A link shows on the row of the game slot it sits on: a typed path to another kind's output
+                    // is that slot's row, not the source kind's.
+                    let row = kind
+                        .filter(|k| k.game_slot() == Some(n))
+                        .or_else(|| link_row_kind(v, n));
+                    Some((
+                        n,
+                        SlotLink {
+                            path: path.to_string(),
+                            from,
+                            from_short,
+                            item,
+                            kind,
+                            row,
+                        },
+                    ))
+                })
+                .collect()
+        })
+        .collect();
+    for (v, linked) in views.iter_mut().zip(found) {
+        if linked.is_empty() {
+            continue;
+        }
+        v.set_warnings.retain(|w| {
+            !(w.code == Code::ShaderMissingMap
+                && w.data["map"]
+                    .as_str()
+                    .and_then(linked_map_slot)
+                    .is_some_and(|n| linked.get(&n).is_some_and(|l| l.row.is_some())))
+        });
+        v.linked = linked;
+    }
+}
+
+/// Fills `features` of every set that writes an entry (`writes_entry`): a copy of `slots` that the exported `slotN`
+/// values override.
+/// A game slot holding a link from another set (a source set, an item and a kind; a typed path that names no set output
+/// counts for nothing) loses its own and borrowed fills and gets the file under the row the link fills (`row`), so the
+/// feature is the slot's, whatever the file was called in its source set. A cleared game slot (`slotN = ""`) over an
+/// own or borrowed file loses that fill and gets none. The fills are dropped from `slots` first and the links'
+/// rows inserted after, so a slot's link or clear never touches what another slot's link gives. A view's `features`
+/// is `None` when no link counts and no game slot is cleared over an own or borrowed file (ledger 240).
+fn set_features(m: &AppModel, views: &mut [SetView]) {
+    for v in views.iter_mut() {
+        let s = &v.settings;
+        if !(has_slot_link(s) || has_slot_clear(s)) || !writes_entry(m, v) {
+            continue;
+        }
+        let counts = |l: &SlotLink| l.from.is_some() && l.item.is_some() && l.kind.is_some();
+        let cleared = |n: u8| {
+            slot_string(&v.settings, n) == Some("")
+                && v.slots.iter().any(|(k, f)| {
+                    k.game_slot() == Some(n)
+                        && matches!(f, SlotFill::Own { .. } | SlotFill::Borrowed { .. })
+                })
+        };
+        let drops = |n: u8| v.linked.get(&n).is_some_and(counts) || cleared(n);
+        if !(1..=LAST_GAME_SLOT).any(drops) {
+            v.features = None;
+            continue;
+        }
+        let mut features = v.slots.clone();
+        features.retain(|k, _| !k.game_slot().is_some_and(drops));
+        for l in v.linked.values().filter(|l| counts(l)) {
+            // shortcut: a link on game slot 5 with no kind of the set on it has no row, so it turns no feature on;
+            // upgrade when slot 5 has a feature key.
+            if let (Some(row), Some(from), Some(item)) = (l.row, &l.from, &l.item) {
+                features.insert(
+                    row,
+                    SlotFill::Borrowed {
+                        from: from.clone(),
+                        item: item.clone(),
+                    },
+                );
+            }
+        }
+        v.features = Some(features);
     }
 }
 
@@ -766,6 +968,72 @@ mod tests {
             let rel = record_rel(Path::new(root), key, record).unwrap();
             let abs = Path::new(root).join(&rel);
             assert_eq!(engine::discover::game_path(&abs, &rel), record, "{root}");
+        }
+    }
+
+    /// Review E1 (Task 15a): `slot_path_key` is PGPatcher's explicit-slot rule (`pgpsim` `slots.rs`, the `slot1`..
+    /// `slot8` pass): lower case, `textures\` in front unless the string starts with it, nothing cut.
+    #[test]
+    fn a_slot_path_is_keyed_by_the_games_rule() {
+        let file = r"textures\pbr\arch\wall_n.dds";
+        for same in [
+            file,
+            r"pbr\arch\wall_n.dds",
+            r"TEXTURES\PBR\Arch\Wall_N.dds",
+        ] {
+            assert_eq!(slot_path_key(same), file, "{same}");
+        }
+        assert_eq!(
+            slot_path_key(r"other\textures\pbr\arch\wall_n.dds"),
+            r"textures\other\textures\pbr\arch\wall_n.dds"
+        );
+        assert_eq!(slot_path_key(""), "");
+    }
+
+    /// Ruling 3b-F10 (c): `slot_path_key` does not drift from `pgpsim`. For each spelling of `slot4`, the path the
+    /// simulated PGPatcher asks the game for (its `exists` callback) and puts in the material is the key.
+    #[test]
+    fn slot_path_key_is_the_path_pgpsim_looks_up() {
+        use std::cell::RefCell;
+        let mut source = pgpsim::MaterialState::builtin_default();
+        source.set_slot_raw(0, r"textures\arch\wall.dds");
+        let default = serde_json::Value::Null;
+        for spelling in [
+            r"textures\pbr\arch\wall_p.dds",
+            r"pbr\arch\wall_p.dds",
+            r"TEXTURES\PBR\Arch\Wall_P.dds",
+            r"Textures\other\x_p.dds",
+            r"other\textures\pbr\arch\wall_p.dds",
+            "textures/pbr/arch/wall_p.dds",
+            r"\textures\pbr\arch\wall_p.dds",
+        ] {
+            let seen = RefCell::new(vec![]);
+            let exists = |p: &str| {
+                seen.borrow_mut().push(p.to_string());
+                true
+            };
+            let entry = serde_json::json!({"match1": r"arch\wall.dds", "slot4": spelling});
+            let r = pgpsim::simulate(&pgpsim::SimInput {
+                entry: &entry,
+                default: &default,
+                nif_path: r"meshes\arch\wall.nif",
+                source: &source,
+                exists: &exists,
+            });
+            let key = slot_path_key(spelling);
+            let pgpsim::SimResult::Patched { material, .. } = r else {
+                panic!("{spelling}: {r:?}");
+            };
+            assert_eq!(
+                material.slots[3].raw.to_ascii_lowercase(),
+                key,
+                "{spelling}"
+            );
+            assert!(
+                seen.borrow().contains(&key),
+                "{spelling}: {:?}",
+                seen.borrow()
+            );
         }
     }
 }

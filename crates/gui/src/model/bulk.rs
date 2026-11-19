@@ -5,10 +5,11 @@ use super::fields::{
     hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
     EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
 };
+use super::items::TextureItem;
 use super::set_groups::GroupTarget;
 use super::sets::{
-    engine_inputs, game_path_in, locked_items, member_game_path, slot_gives, slot_of, SlotCommand,
-    SlotKind, NOTHING, SLOT_LOCKED,
+    locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
+    SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
 };
 use super::{AppModel, Dialog, Selection};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
@@ -1477,6 +1478,21 @@ impl AppModel {
         v
     }
 
+    /// Why `sdc-project.toml` takes no slot edit, when it does not.
+    fn slot_read_only_reason(&self) -> Option<String> {
+        self.sets_doc
+            .as_ref()
+            .and_then(|d| d.error())
+            .map(|e| format!("sdc-project.toml is read-only: {e}"))
+    }
+
+    /// Why a slot command on game slot `n` of `v` would be refused (read-only `sdc-project.toml`, a pinned slot), or
+    /// `None`. The slot menu disables its entries with it, and so do the row's **Unlink** and **Use this file**.
+    pub fn slot_command_off(&self, v: &super::sets::SetView, n: u8) -> Option<String> {
+        self.slot_read_only_reason()
+            .or_else(|| v.locks.contains(&n).then(|| SLOT_LOCKED.to_string()))
+    }
+
     /// F3a Task 8: the menu of slot card `kind` of set `set` (an id): the Slot commands window's commands, From
     /// another set (each other set's member of that kind that writes an output), then Lock or Unlock. A locked slot
     /// offers only Unlock.
@@ -1491,14 +1507,8 @@ impl AppModel {
         };
         let id = v.id.clone();
         let locked = v.locks.contains(&n);
-        let read_only = self
-            .sets_doc
-            .as_ref()
-            .and_then(|d| d.error())
-            .map(|e| format!("sdc-project.toml is read-only: {e}"));
-        let off = read_only
-            .clone()
-            .or_else(|| locked.then(|| SLOT_LOCKED.to_string()));
+        let read_only = self.slot_read_only_reason();
+        let off = self.slot_command_off(v, n);
         // The skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot: no slot command or PGPatcher lock. An empty
         // one takes a file from the set's folder or borrows another set's (Note JD), a borrowed one offers Clear (no
         // slot command clears it); then the source file and sdc's pin.
@@ -1687,8 +1697,7 @@ impl AppModel {
             n,
             cmd,
         };
-        let paths = engine_inputs(self).1;
-        let links: Vec<MenuEntry> = views
+        let members: Vec<(&super::sets::SetView, &String, &TextureItem)> = views
             .iter()
             .filter(|o| !same_id(&o.id, &id))
             .flat_map(|o| o.members.iter().map(move |k| (o, k)))
@@ -1696,16 +1705,37 @@ impl AppModel {
                 let it = self
                     .item(k)
                     .filter(|i| slot_of(i).and_then(SlotKind::slot_number) == Some(n))?;
-                Some(MenuEntry {
-                    action: MenuAction::SlotLink {
-                        set: id.clone(),
-                        n,
-                        item: k.clone(),
-                    },
-                    label: format!("{} — {}", o.id, it.name),
-                    // Listed but off when the game would find no file there.
-                    disabled: game_path_in(self, views, &paths, k).err(),
-                })
+                Some((o, k, it))
+            })
+            .collect();
+        // Ruling 3b-F21: a pick stores the path the settled plan writes. While the plan is not settled
+        // (`pick_waits`) every row is off with one reason and no member's path is read; else the folders are read once
+        // per menu (`output_roots`), never once per listed member. Ruling 3b-F24: the rows read the cached check, so
+        // an open menu does no project-wide work on a frame where nothing changed; the click checks again uncached.
+        let wait = (!members.is_empty())
+            .then(|| self.pick_waits_cached())
+            .flatten();
+        let roots = (!members.is_empty() && wait.is_none()).then(|| output_roots(self));
+        let links: Vec<MenuEntry> = members
+            .into_iter()
+            .map(|(o, k, it)| MenuEntry {
+                action: MenuAction::SlotLink {
+                    set: id.clone(),
+                    n,
+                    item: k.clone(),
+                },
+                label: format!("{} — {}", o.id, it.name),
+                // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
+                disabled: match &roots {
+                    Some(roots) => member_game_path_in(
+                        self,
+                        roots,
+                        it,
+                        super::sets::member_output_key(o, it).as_ref(),
+                    )
+                    .err(),
+                    None => wait.map(String::from),
+                },
             })
             .collect();
         let gives = slot_gives(self, &id, n);
@@ -1753,6 +1783,25 @@ impl AppModel {
         menu
     }
 
+    /// Review E1: the Messages line of a slot picked from another set, written for the menu and the Slot commands
+    /// dialog alike. Nothing is logged when `link_slots` did not resolve the new link to a set (no source, or no
+    /// view): the line names the set the file comes from.
+    fn log_slot_link(&mut self, set: &str, n: u8) {
+        let text = super::sets::views(self)
+            .iter()
+            .find(|v| v.id == set)
+            .and_then(|v| {
+                let l = v.linked.get(&n)?;
+                let from = l.from_short.as_deref()?;
+                let file = l.path.rsplit('\\').next().unwrap_or(&l.path);
+                let label = v.slot_label(l.row?, "");
+                Some(format!("{label} of {}: {file} (from set {from})", v.short))
+            });
+        if let Some(t) = text {
+            self.messages.log(super::messages::Severity::Info, t);
+        }
+    }
+
     /// Run a menu entry; a refused slot command comes back as its reason.
     pub fn run_menu(&mut self, a: MenuAction) -> Option<String> {
         match a {
@@ -1766,8 +1815,19 @@ impl AppModel {
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),
             MenuAction::SlotPath { .. } | MenuAction::FromAnotherSet => {}
             MenuAction::SlotLink { set, n, item } => {
+                // Ruling 3b-F21: the click checks again that the plan is settled and reads the settled path, so a row
+                // drawn before an edit stores nothing while that edit plans.
                 return match member_game_path(self, &item) {
-                    Ok(p) => self.set_slot_command(&set, n, SlotCommand::Path(p)).err(),
+                    Ok(p) => {
+                        // Final wave Group 4: re-picking the file the slot already names writes nothing (an equal
+                        // write is no step), so it logs nothing either.
+                        let pushes = self.history.pushes;
+                        let err = self.set_slot_command(&set, n, SlotCommand::Path(p)).err();
+                        if err.is_none() && self.history.pushes != pushes {
+                            self.log_slot_link(&set, n);
+                        }
+                        err
+                    }
                     Err(e) => Some(e),
                 };
             }
