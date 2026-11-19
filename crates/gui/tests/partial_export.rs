@@ -1138,8 +1138,7 @@ const GUARD_JSON: &str = r#"{
 }
 "#;
 
-/// Task 15a's guard, written first and kept unchanged through the task (fix round 1 changed one note's reason, under
-/// 3b-F7): on a project with no link and no clear, the
+/// Task 15a's guard, written first and kept unchanged through the task: on a project with no link and no clear, the
 /// export blocks and the written PGPatcher JSON are what the task's base gave (captured there). The `_cnr` + `_f` set
 /// blocks a whole export, so the JSON is taken from a whole export with that set's group excluded.
 #[test]
@@ -1166,9 +1165,100 @@ fn with_no_link_and_no_clear_export_blocks_and_writes_what_it_did() {
             .lines()
             .filter(|l| l.starts_with("not in JSON"))
             .collect::<Vec<_>>(),
-        // 3b-F7 (fix round 1): the excluded set's own clash now holds its entry; the base said "not exported yet".
-        ["not in JSON: arch/lacq (_cnr and _f both use slot 7)"]
+        ["not in JSON: arch/lacq (not exported yet)"]
     );
+}
+
+/// Ruling 3b-F12: `textures/arch` with no stored slot command anywhere. `lacq` gets `_cnr` + `_f` and `stone` turns
+/// emissive on with no `_g`, after a first export wrote their files (`lacq_f` was a height then).
+fn no_command_project(dir: &Path) -> AppModel {
+    use engine::config::{GreenConvention, Subtype};
+    let mut m = no_albedo_pair_with(
+        dir,
+        &[
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+            ("lacq_f.png", [128, 128, 128], Subtype::Height),
+        ],
+    );
+    m.decide("arch/stone_n.png", Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    m
+}
+
+/// Captured with the same steps on the code before fix round 1 (06035d6c, main's rule for a set with no slot command):
+/// `task-15a-fix2-f12-capture-06035d6c.log`.
+const NO_COMMAND_JSON: &str = r#"{
+  "$schema": "https://raw.githubusercontent.com/hakasapl/PGPatcher/main/schema/pbr.schema.json",
+  "default": {
+    "emissive": false,
+    "parallax": false,
+    "displacement_scale": 1.0,
+    "specular_level": 0.04,
+    "roughness_scale": 1.0,
+    "subsurface": false
+  },
+  "entries": [
+    {
+      "match1": "arch\\lacq.dds",
+      "lock_normal": true,
+      "lock_rmaos": true,
+      "multilayer": true,
+      "coat_normal": true,
+      "slot1": "textures\\arch\\lacq.dds",
+      "slot7": "textures\\arch\\lacq_f.dds"
+    },
+    {
+      "match1": "arch\\stone.dds",
+      "emissive": true
+    },
+    {
+      "match1": "arch\\leaf.dds",
+      "slot1": "textures\\arch\\leaf.dds",
+      "slot2": "textures\\arch\\leaf_n.dds",
+      "slot6": "textures\\arch\\leaf_rmaos.dds"
+    },
+    {
+      "match1": "arch\\wall.dds"
+    }
+  ]
+}
+"#;
+
+/// Ruling 3b-F12, the guard's variant: with no slot command anywhere, a set left out of the run is not checked. Its
+/// files are on disk from an earlier export, so its entry is written as main writes it, a slot 7 clash and a feature
+/// with no map included.
+#[test]
+fn with_no_slot_command_an_excluded_set_is_written_as_main_writes_it() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_command_project(d.path());
+    whole(&mut m);
+    m.decide("arch/lacq_f.png", Answer::Subtype(Subtype::PbrFuzz));
+    m.set_json_value("arch/stone", "emissive", Some(json!(true)));
+    idle(&mut m);
+    let blocks = |m: &AppModel| -> Vec<String> {
+        sdc_gui::model::pbr_export::export_blocks(m)
+            .iter()
+            .map(|i| i.text.clone())
+            .collect()
+    };
+    assert_eq!(
+        blocks(&m),
+        [
+            "arch/lacq: _cnr and _f both use slot 7",
+            "arch/stone: emissive is on but the set has no emissive texture (_g)"
+        ],
+        "premise"
+    );
+    group(&mut m, "Bad", &["arch/lacq", "arch/stone"]);
+    m.set_group_excluded("Bad", true).unwrap();
+    idle(&mut m);
+    assert!(blocks(&m).is_empty(), "{:?}", blocks(&m));
+    whole(&mut m);
+    assert_eq!(pgp_text(&m), NO_COMMAND_JSON, "{}", notes(&m));
+    assert!(!notes(&m).contains("not in JSON"), "{}", notes(&m));
 }
 
 // ---- Review E1 (Task 15a, R2): a resolved local link is a dependency exactly as a borrow is ----

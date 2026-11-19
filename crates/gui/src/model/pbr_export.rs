@@ -765,7 +765,8 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             })
             .collect()
     };
-    // 3b-F7: a set outside the run gates nothing (Note HF9), so its entry goes in only when its own checks pass.
+    // 3b-F7, 3b-F12: a set outside the run gates nothing (Note HF9). One with a stored slot command gets its entry
+    // only when its own checks pass; one with none is not checked, as on main.
     let (_, paths) = engine_inputs(m);
     let refused = |v: &SetView| -> Option<String> {
         let mut why = set_blocks(m, v).into_iter().map(|i| i.text);
@@ -778,7 +779,11 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
     let (mut entries, mut held) = (vec![], vec![]);
     // Design §5.1: a set with a texture-set block gets its entry only for the statics that use its diffuse.
     for (v, e) in written_json_entries(m) {
-        match (!m.in_run(&v.key)).then(|| refused(&v)).flatten() {
+        let commands = has_slot_link(&v.settings) || has_slot_clear(&v.settings);
+        match (commands && !m.in_run(&v.key))
+            .then(|| refused(&v))
+            .flatten()
+        {
             Some(why) => held.push((v.id.clone(), why)),
             None => entries.push((v.id.clone(), deps(&v), e)),
         }
