@@ -3500,7 +3500,7 @@ impl AppModel {
         let handed = h.clone();
         // Final review B-M7: the `pbr_fuzz` an explicit PBR pick wrote on the fuzz map, and its `auto_pbr` key, go
         // with it in this step: the pick was this set's (a value changed since is the user's and stays).
-        let fuzz_step = is_fuzz_member(item);
+        let fuzz_step = is_fuzz_member(item) && super::shared_alpha::safe_subtype_write(self)(item);
         self.edit_docs(&format!("Remove from {i}"), None, true, move |p, s| {
             let mut auto = s.auto_pbr();
             if fuzz_step && auto.contains(&it) {
@@ -3775,6 +3775,9 @@ impl AppModel {
         // Note DU6-DU7: the shader and the diffuse's sub-type (with Note DQ's recipe follow) are one step.
         self.batch_edit("Shader", |m| {
             m.edit_docs("Shader", None, true, pick);
+            if !super::shared_alpha::safe_subtype_write(m)(&item) {
+                return;
+            }
             if on {
                 m.edit_subtype("Shader", &item, Some(Subtype::SkinAlbedo));
             } else {

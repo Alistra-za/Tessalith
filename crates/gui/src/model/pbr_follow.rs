@@ -91,6 +91,17 @@ impl AppModel {
         if self.project.as_ref().is_none_or(|p| p.read_only()) {
             return;
         }
+        self.batch_edit(label, |m| {
+            m.edit(label, |p| match new {
+                Some(st) => p.set_file_value(key, "subtype", &json!(st)),
+                None => p.clear_file_value(key, "subtype"),
+            });
+            // The pick may have created the table another member would now use as its stem.
+            m.follow_subtype_pick(label, key, new);
+        });
+    }
+
+    fn follow_subtype_pick(&mut self, label: &str, key: &str, new: Option<Subtype>) {
         let follow = self.follow_of(key, new);
         // Recorded members whose file is gone, found once here (O(auto_pbr) lookups) rather than by scanning a copy
         // of every item key per entry. Anything the edit adds below is a live set member.
@@ -104,10 +115,6 @@ impl AppModel {
             .collect();
         let k = key.to_string();
         self.edit_docs(label, None, true, move |p, s| {
-            match new {
-                Some(st) => p.set_file_value(&k, "subtype", &json!(st)),
-                None => p.clear_file_value(&k, "subtype"),
-            }
             if s.read_only() {
                 return;
             }
@@ -213,7 +220,8 @@ impl AppModel {
         }
         // F3a Task 8: a member filling a locked slot, here or in a set borrowing it, keeps its sub-type (the bulk rule).
         let locked = locked_items(self);
-        let free = |mk: &&String| !locked.contains_key(*mk);
+        let safe = super::shared_alpha::safe_subtype_write(self);
+        let free = |mk: &&String| !locked.contains_key(*mk) && safe(mk);
         if leaves {
             // Note JS6 (N-28): an untouched listed `pbr_normal` goes back to the engine's type (`tangent_back`), unless
             // the set's explicit pick is a PBR-set shader, which keeps it `pbr_normal` (the pick types it).

@@ -11,6 +11,353 @@ use support::*;
 
 const WALL_N: &str = "test/wall_n.png";
 const ROCK_N: &str = "landscape/rock_n.png";
+const OTHER_WALL_N: &str = "test/wall_n.png.tga";
+
+/// A second input in a separate regular set. Its physical stem is the first normal's full table name.
+fn add_wall_collision(dir: &Path, m: &mut AppModel) -> AppModel {
+    let root = dir.join("textures");
+    m.save().unwrap();
+    bumpy_n(&root.join(OTHER_WALL_N));
+    std::fs::copy(root.join("test/wall.png"), root.join("test/steel.png")).unwrap();
+    let path = root.join("sdc.toml");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str("\n[inputs.'test/wall_n.png.tga']\nas = 'test/steel_n.tga'\n");
+    std::fs::write(path, text).unwrap();
+    let m = opened_as_the_app(root, dir.join("export"));
+    assert_eq!(
+        normal_owner(&m, "test/steel").as_deref(),
+        Some(OTHER_WALL_N)
+    );
+    m
+}
+
+#[test]
+fn a_shader_pick_keeps_the_second_normals_written_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    let mut m = add_wall_collision(d.path(), &mut m);
+    let source = image::open(d.path().join("textures").join(OTHER_WALL_N))
+        .unwrap()
+        .to_rgba8();
+    assert_eq!(
+        (source.get_pixel(0, 0)[3], source.get_pixel(63, 63)[3]),
+        (0, 252)
+    );
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    m.save().unwrap();
+    let job = m.item(OTHER_WALL_N).unwrap().job.as_ref().unwrap();
+    assert_eq!(
+        job.profile.subtype,
+        Subtype::Normal,
+        "the other set keeps its normal"
+    );
+    assert_eq!(job.profile.alpha.policy, AlphaPolicy::Data);
+    let out = job.output.clone();
+    export_through(&mut m);
+    settle(&mut m);
+    let bytes = std::fs::read(out).unwrap();
+    let f = engine::dds::read_dds(&bytes).unwrap();
+    let (w, h, r) = f.levels[0].clone();
+    let px = engine::decode::decode_level_rgba(f.format, w, h, &f.data[r]).unwrap();
+    assert!(px[0][3] < 0.05 && px.last().unwrap()[3] > 0.95);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+}
+
+#[test]
+fn the_recorder_and_diffuse_switch_leave_a_colliding_normal_alone() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let mut m = add_wall_collision(d.path(), &mut m);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")), "Switch");
+    settle(&mut m);
+    add_rmaos(&t, &mut m);
+    assert_eq!(
+        held(&m, WALL_N, "subtype"),
+        Some(json!("normal")),
+        "recorder"
+    );
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+}
+
+#[test]
+fn a_diffuse_revert_leaves_a_colliding_listed_normal_alone() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    settle(&mut m);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+    let mut m = add_wall_collision(d.path(), &mut m);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::Diffuse));
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+}
+
+#[test]
+fn the_diffuse_switch_checks_the_table_created_by_the_pick() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    std::fs::remove_file(t.join("wall_n.png")).unwrap();
+    bumpy_n(&t.join("wall.png.tga"));
+    let root = d.path().join("textures");
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[inputs.'test/wall.png.tga']\nas = 'test/wall_n.tga'\n",
+    )
+    .unwrap();
+    let mut m = AppModel::new(Default::default(), None, session());
+    m.accept = engine::policy::AcceptSuggestions::None;
+    m.open_folder(root);
+    settle(&mut m);
+    assert_eq!(held(&m, "test/wall.png", "subtype"), None);
+    m.decide("test/wall.png", Answer::Subtype(Subtype::PbrAlbedo));
+    assert_eq!(
+        held(&m, "test/wall.png", "subtype"),
+        Some(json!("pbr_albedo"))
+    );
+    assert!(!m
+        .sets_doc
+        .as_ref()
+        .unwrap()
+        .auto_pbr()
+        .contains(&"test/wall.png.tga".into()));
+}
+
+#[test]
+fn auto_cannot_clear_the_shared_normal_table() {
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    let mut m = add_wall_collision(d.path(), &mut m);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+    m.set_shader("test/wall", None);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+}
+
+#[test]
+fn the_first_recording_skips_a_full_key_that_would_also_be_a_stem() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    bumpy_n(&t.join("wall_n.png.tga"));
+    let root = d.path().join("textures");
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[inputs.'test/wall_n.png.tga']\nas = 'test/steel_n.tga'\n",
+    )
+    .unwrap();
+    let m = opened_as_the_app(root, d.path().join("export"));
+    assert_eq!(held(&m, WALL_N, "subtype"), None);
+    assert_eq!(listed(&m, WALL_N), None);
+    assert_eq!(held(&m, OTHER_WALL_N, "subtype"), Some(json!("normal")));
+}
+
+#[test]
+fn the_recorder_checks_the_tables_a_six_face_subtype_would_write() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    let dir = root.join("cubemaps");
+    std::fs::create_dir_all(&dir).unwrap();
+    for face in ["px", "nx", "py", "ny", "pz", "nz"] {
+        image::RgbImage::from_pixel(16, 16, Rgb([25, 45, 80]))
+            .save(dir.join(format!("chrome_e_{face}.png")))
+            .unwrap();
+    }
+    bumpy_n(&dir.join("chrome_e_nx.png.tga"));
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[inputs.'cubemaps/chrome_e_nx.png.tga']\nas = 'test/steel_n.tga'\n",
+    )
+    .unwrap();
+    let m = opened_as_the_app(root, d.path().join("export"));
+    let cube = m
+        .item("cubemaps/chrome_e_px.png")
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap();
+    assert_eq!(cube.cube.as_ref().unwrap().sources.len(), 6);
+    assert_eq!(
+        held(&m, "cubemaps/chrome_e_nx.png", "subtype"),
+        None,
+        "a secondary face would retype the TGA"
+    );
+    assert_eq!(held(&m, "cubemaps/chrome_e_px.png", "subtype"), None);
+}
+
+#[test]
+fn an_unwritable_listing_records_the_landscape_suggestion() {
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    let root = d.path().join("textures");
+    std::fs::write(root.join("sdc-project.toml"), "project = 'bad'\n").unwrap();
+    let mut m = opened_without_export(d.path());
+    assert!(!m.sets_doc.as_ref().unwrap().read_only());
+    assert_eq!(held(&m, ROCK_N, "subtype"), Some(json!("landscape_normal")));
+    assert_eq!(listed(&m, ROCK_N), None);
+    m.save().unwrap();
+    assert_eq!(
+        sdc_gui::project::ProjectDoc::open(&root).file_value(ROCK_N, "subtype"),
+        Some(json!("landscape_normal"))
+    );
+    m.set_shader("landscape/rock", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(
+        m.item(ROCK_N)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .profile
+            .alpha
+            .policy,
+        AlphaPolicy::Data
+    );
+}
+
+#[test]
+fn a_presets_new_type_wins_over_a_simultaneous_pbr_follow() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let key = "test/wall_detailx.png";
+    std::fs::rename(t.join("wall_n.png"), t.join("wall_detailx.png")).unwrap();
+    let presets = d.path().join("presets");
+    std::fs::create_dir(&presets).unwrap();
+    let preset = presets.join("custom.toml");
+    let alias = |suffix| {
+        format!("schema_version = 1\nid = 'custom'\nversion = '1.0.0'\nbase = 'cs-quality'\n[suffix_aliases]\ndetailx = '{suffix}'\n")
+    };
+    std::fs::write(&preset, alias("n")).unwrap();
+    let mut m = AppModel::new(Default::default(), None, session());
+    m.user_presets = Some(presets);
+    m.open_folder(d.path().join("textures"));
+    settle(&mut m);
+    assert_eq!(listed(&m, key).as_deref(), Some("normal"));
+    std::fs::write(preset, alias("p")).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(t.join("wall_rmaos.png"))
+        .unwrap();
+    m.presets_saved();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, key, "subtype"),
+        Some(json!("height")),
+        "the preset's write wins"
+    );
+    let row = sdc_gui::model::bottom::problems(&m);
+    let row = row
+        .iter()
+        .find(|r| r.text.contains("set automatically"))
+        .unwrap();
+    assert_eq!(
+        row.detail
+            .as_deref()
+            .unwrap()
+            .matches("wall_detailx.png")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn a_follow_only_recording_does_not_claim_high_confidence() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.accept = engine::policy::AcceptSuggestions::None;
+    add_rmaos(&t, &mut m);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("pbr_normal"));
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|r| r.text.contains("set automatically"))
+        .unwrap();
+    assert!(!row.text.contains("High confidence"), "{}", row.text);
+    let detail = row.detail.as_deref().unwrap();
+    assert!(
+        detail.contains("wall_n.png") && !detail.contains("High confidence"),
+        "{detail}"
+    );
+}
+
+fn skin_msn(dir: &Path, files: &str, borrow: &str) -> AppModel {
+    open_slot_files(dir);
+    let root = dir.join("textures");
+    std::fs::rename(root.join(IRON_N), root.join("pbr/iron_msn.png")).unwrap();
+    open_saved_share(
+        dir,
+        files,
+        &format!("[[sets]]\nid = 'pbr/iron'\nshader = 'advanced_skin'\n{borrow}"),
+    )
+}
+
+#[test]
+fn sharing_a_rule_typed_msn_never_writes_data() {
+    let d = tempfile::tempdir().unwrap();
+    let key = "pbr/iron_msn.png";
+    let mut m = skin_msn(
+        d.path(),
+        "[[rules]]\nmatch.glob = '**/iron_msn.png'\nsubtype = 'msn'\n",
+        "",
+    );
+    assert_eq!(held(&m, key, "subtype"), None);
+    assert_eq!(
+        m.item(key).unwrap().job.as_ref().unwrap().profile.subtype,
+        Subtype::Msn
+    );
+    share(&mut m, key, "armor/steel");
+    assert_eq!(held(&m, key, "alpha.policy"), None);
+    assert!(auto_data(&m).is_empty());
+}
+
+#[test]
+fn a_saved_msn_borrow_never_offers_keep_alpha() {
+    let d = tempfile::tempdir().unwrap();
+    let key = "pbr/iron_msn.png";
+    let mut m = skin_msn(
+        d.path(),
+        "[files.'pbr/iron_msn.png']\nsubtype = 'msn'\n",
+        STEEL_BORROWS,
+    );
+    assert_eq!(
+        m.item(key).unwrap().job.as_ref().unwrap().profile.subtype,
+        Subtype::Msn
+    );
+    assert_eq!(
+        sdc_gui::model::sets::borrowed_normal(&m)["armor/steel"],
+        "pbr/iron"
+    );
+    assert_eq!(keep_rows(&m, key), 0);
+    assert!(m.keep_alpha(key).is_err());
+    assert_eq!(held(&m, key, "alpha.policy"), None);
+}
+
+#[test]
+fn ending_an_old_msn_share_leaves_its_saved_data_alone() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let key = "pbr/iron_msn.png";
+    let mut m = skin_msn(
+        d.path(),
+        "[[rules]]\nmatch.glob = '**/iron_msn.png'\nsubtype = 'msn'\n\
+         [files.'pbr/iron_msn.png']\nalpha.policy = 'data'\n",
+        &format!("[project]\nauto_data = ['{key}']\n{STEEL_BORROWS}"),
+    );
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, key, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [key]);
+}
 
 /// `textures/landscape/rock.png`, `rock_n.png` and `rock_rmaos.png`: an automatic PBR Landscape set.
 fn rock(dir: &Path) {

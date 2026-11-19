@@ -234,13 +234,15 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
         return vec![];
     }
     let tables = Tables::of(p);
-    let inputs = std::cell::LazyCell::new(|| input_matches(m));
+    let inputs = std::cell::LazyCell::new(|| input_matches(m, &m.cube_face_keys()));
     shared
         .into_iter()
         .filter_map(|(key, owner)| {
             let i = m.item(key)?;
+            let profile = &i.job.as_ref()?.profile;
             if i.kept_dds()
-                || i.job.as_ref()?.profile.alpha.policy == AlphaPolicy::Data
+                || !tangent(profile.subtype)
+                || profile.alpha.policy == AlphaPolicy::Data
                 || i.analysis.as_ref()?.alpha != AlphaContent::Varying
                 || !tables.alpha(key).is_empty()
             {
@@ -259,18 +261,18 @@ pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<Strin
 
 #[derive(Clone, Copy)]
 enum InputMatch {
-    Full,
+    Full(Option<Subtype>),
     Stem,
     Multiple,
 }
 
 /// How each folded table key matches the landed inputs. Item keys keep the real name after an input alias.
-fn input_matches(m: &AppModel) -> HashMap<String, InputMatch> {
+fn input_matches(m: &AppModel, cubes: &[(String, Vec<String>)]) -> HashMap<String, InputMatch> {
     let mut matches = HashMap::new();
-    let mut add = |key: &str| {
+    let mut add = |key: &str, subtype| {
         let (full, stem) = forms(key);
-        for (form, kind) in
-            std::iter::once((full, InputMatch::Full)).chain(stem.map(|s| (s, InputMatch::Stem)))
+        for (form, kind) in std::iter::once((full, InputMatch::Full(subtype)))
+            .chain(stem.map(|s| (s, InputMatch::Stem)))
         {
             matches
                 .entry(form)
@@ -279,24 +281,54 @@ fn input_matches(m: &AppModel) -> HashMap<String, InputMatch> {
         }
     };
     for item in &m.items {
+        let subtype = item.job.as_ref().map(|j| j.profile.subtype);
         // A packed item's key is already its virtual stem. Resolve also matches its full virtual filename.
         if item.kind == super::ItemKind::Packed {
             if let Some((_, ext)) = item.job.as_ref().and_then(|j| j.game_path.rsplit_once('.')) {
-                add(&format!("{}.{ext}", item.key));
+                add(&format!("{}.{ext}", item.key), subtype);
                 continue;
             }
         }
-        add(&item.key);
+        add(&item.key, subtype);
     }
     // A six-face cube has one item for all six physical inputs.
-    for (_, faces) in m.cube_face_keys() {
+    for (_, faces) in cubes {
         for face in faces {
-            if m.item(&face).is_none() {
-                add(&face);
+            if m.item(face).is_none() {
+                add(face, Some(Subtype::Cubemap));
             }
         }
     }
     matches
+}
+
+/// An automatic subtype edit uses the same one-input destination as Keep alpha.
+pub(super) fn safe_subtype_write(m: &AppModel) -> impl Fn(&str) -> bool + '_ {
+    let index = std::cell::LazyCell::new(|| {
+        m.project.as_ref().map(|p| {
+            let tables = Tables::of(p);
+            let cubes = m.cube_face_keys();
+            let inputs = input_matches(m, &cubes);
+            // edit_docs copies the primary face's edit to all five secondary tables in the same step.
+            let unsafe_cubes: HashSet<_> = cubes
+                .into_iter()
+                .filter(|(_, faces)| {
+                    faces
+                        .iter()
+                        .any(|k| tables.single_input_table(k, &inputs).is_err())
+                })
+                .map(|(key, _)| key)
+                .collect();
+            (tables, inputs, unsafe_cubes)
+        })
+    });
+    move |key| {
+        index
+            .as_ref()
+            .is_some_and(|(tables, inputs, unsafe_cubes)| {
+                !unsafe_cubes.contains(key) && tables.single_input_table(key, inputs).is_ok()
+            })
+    }
 }
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
@@ -601,7 +633,7 @@ impl Tables {
     ) -> Result<(String, InputMatch), String> {
         let table = self.keep_table(key)?;
         match inputs.get(&table.to_lowercase()) {
-            Some(kind @ (InputMatch::Full | InputMatch::Stem)) => Ok((table, *kind)),
+            Some(kind @ (InputMatch::Full(_) | InputMatch::Stem)) => Ok((table, *kind)),
             _ => Err(format!(
                 "The [files] key {table} in sdc.toml also matches another texture."
             )),
@@ -724,7 +756,7 @@ fn changes(
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
     // creates or renames has no view before it, so it is `unsure` instead).
     let f = facts(m);
-    let inputs = std::cell::LazyCell::new(|| input_matches(m));
+    let inputs = std::cell::LazyCell::new(|| input_matches(m, &m.cube_face_keys()));
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
     let sh = shared_into_regular(&f, s, &normal_borrows(s), &gone, &b.targets, touched);
     let (now, unsure) = (&sh.out, &sh.unsure);
@@ -742,8 +774,10 @@ fn changes(
             && tables.typed_normal(k);
         if free && !already_data(&f, b.sub.get(k), tables, k) {
             // N9-m: a safe stem table is for Keep alpha; Share owns only full-name tables.
-            if let Ok((t, InputMatch::Full)) = tables.single_input_table(k, &inputs) {
-                c.write.push(t);
+            if let Ok((t, InputMatch::Full(Some(st)))) = tables.single_input_table(k, &inputs) {
+                if tangent(st) {
+                    c.write.push(t);
+                }
             }
         }
     }
@@ -757,10 +791,11 @@ fn changes(
             && !names(k, &now_f)
             && !names(k, &unsure_f)
             && !sh.blind
-            && !matches!(
-                inputs.get(&k.to_lowercase()),
-                Some(InputMatch::Multiple | InputMatch::Stem)
-            )
+            && match inputs.get(&k.to_lowercase()) {
+                None => true,
+                Some(InputMatch::Full(Some(st))) => tangent(*st) && tables.typed_normal(k),
+                _ => false,
+            }
         {
             c.clear.push(k.clone());
         }

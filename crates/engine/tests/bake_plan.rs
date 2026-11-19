@@ -1011,12 +1011,17 @@ fn normal_with_varying_alpha(dir: &Path, rel: &str) {
 fn a_pbr_normals_varying_alpha_is_dropped_without_a_message() {
     let d = tempfile::tempdir().unwrap();
     normal_with_varying_alpha(d.path(), "textures/pbr/iron_n.png");
+    normal_with_varying_alpha(d.path(), "textures/pbr/control_n.png");
     rough(d.path(), "textures/pbr/iron_rmaos.png", 64, 64);
     let sink = Arc::new(VecSink::default());
     let rep = Reporter::new(sink.clone(), "t");
     let e = Engine::new().unwrap();
     let p = e
-        .plan(req(d.path(), &[]), &rep, &CancelToken::default())
+        .plan(
+            req(d.path(), &["file:**/control_n.png.subtype=normal"]),
+            &rep,
+            &CancelToken::default(),
+        )
         .unwrap();
     let n = job(&p, "iron_n.png");
     assert_eq!(n.profile.subtype, Subtype::PbrNormal);
@@ -1028,4 +1033,19 @@ fn a_pbr_normals_varying_alpha_is_dropped_without_a_message() {
         !ev.contains("LossAlphaData"),
         "no LOSS-ALPHA-DATA in the run's events"
     );
+    let written = |name: &str| {
+        let bytes = std::fs::read(d.path().join("out/textures/pbr").join(name)).unwrap();
+        let f = engine::dds::read_dds(&bytes).unwrap();
+        let (w, h, r) = f.levels[0].clone();
+        let engine::decode::Decoded::Ldr(px) =
+            engine::decode::decode_level(f.format, w, h, &f.data[r]).unwrap()
+        else {
+            panic!("LDR expected")
+        };
+        px
+    };
+    let control = written("control_n.dds");
+    assert!(control[0][3].abs_diff(0) <= 2 && control.last().unwrap()[3].abs_diff(252) <= 2);
+    // BC7 Remove permits 254 when exact_opaque is off.
+    assert!(written("iron_n.dds").iter().all(|p| p[3] >= 254));
 }

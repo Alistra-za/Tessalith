@@ -140,6 +140,8 @@ impl AppModel {
         mut r5: Vec<(String, Option<Value>, bool)>,
     ) -> NormalPlan {
         let mut plan = NormalPlan::default();
+        let safe = super::shared_alpha::safe_subtype_write(self);
+        r5.retain(|(k, _, _)| safe(k));
         let (Some(view), Some(p), Some(s)) = (
             self.view_of(set),
             self.project.as_ref(),
@@ -150,7 +152,7 @@ impl AppModel {
         };
         let chosen = explicit_pick(&view);
         let own_n = match view.slots.get(&SlotKind::Normal) {
-            Some(SlotFill::Own { item }) => Some(item.clone()),
+            Some(SlotFill::Own { item }) if safe(item) => Some(item.clone()),
             _ => None,
         };
         let stored = |k: &str| {
