@@ -98,8 +98,9 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         let fixed_id = ui.scope_id().with("meshes-edit-footer-fixed");
         let fixed: f32 = ui.data_mut(|d| *d.get_temp_mut_or(fixed_id, 0.0f32));
         let floors = TOP_MIN_H + sp + tabs_h + TOP_MIN_H;
-        // shortcut: below about 300 px of panel height the floors and DIFF_MIN_H do not fit together and the panel
-        // clips (1280x720 with Review open leaves 323); upgrade when a window that small must work.
+        // shortcut: below about 300 px of panel height the floors and DIFF_MIN_H do not fit together; the editor's
+        // lower part (the tab strip, then the slot list) is cut off at the footer's top (the clip below) and the footer
+        // stays whole and clickable (1280x720 with Review open leaves 323); upgrade when a window that small must work.
         let list_cap = (ui.available_height() - floors - fixed).clamp(DIFF_MIN_H, DIFF_MAX_H);
         let footer = crate::ui::panel_ids::bottom(ui, "meshes-edit-export")
             .resizable(false)
@@ -110,6 +111,12 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
             *d.get_temp_mut_or(fixed_id, 0.0f32) =
                 (footer.response.rect.height() - footer.inner).max(0.0);
         });
+        // Reserving the footer moves the cursor's boundary but clips nothing: cut everything drawn from here (head,
+        // tab strip, tab list) at the footer's top, so that below the limit no editor widget paints or takes input
+        // inside the footer. Not a second layout pass: one clip rect for the rest of this ui.
+        let mut above = ui.clip_rect();
+        above.max.y = above.max.y.min(footer.response.rect.min.y);
+        ui.set_clip_rect(above);
         // Thin bars stay visible without hover, for the head's list and the tab list alike.
         ui.spacing_mut().scroll = crate::look::thin_scroll();
         // The spacing the head's scroll area leaves below itself is the head's too.

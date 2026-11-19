@@ -11735,6 +11735,67 @@ fn an_open_diff_gives_way_before_the_editor_loses_its_floors_at_1280x720() {
     );
 }
 
+/// The interact rect (clipped) of the widget behind an AccessKit node, from the last drawn pass.
+fn interact_rect_of(h: &AppH, node: egui::accesskit::NodeId) -> Option<egui::Rect> {
+    h.ctx.viewport(|v| {
+        v.this_pass
+            .widgets
+            .layers()
+            .flat_map(|(_, ws)| ws)
+            .find(|w| w.id.accesskit_id() == node)
+            .map(|w| w.interact_rect)
+    })
+}
+
+/// Fix round 2, Important (new): below the height where the editor's floors fit above the footer, the footer stays
+/// whole and clickable and nothing of the editor (head, tab strip) interacts inside it. Reserving a bottom panel only
+/// moves the parent's cursor boundary; the editor above is clipped to the rect over the footer.
+#[test]
+fn under_the_limit_no_editor_widget_interacts_inside_the_footer() {
+    use sdc_gui::model::bottom::BottomTab;
+    let mut crossed = 0;
+    for hgt in [480.0, 440.0, 400.0, 360.0] {
+        let (_d, mut h) = slot_list_session(egui::vec2(1280.0, hgt), BottomTab::Review);
+        let path = h.state().meshes.edit.as_ref().unwrap().data_path.clone();
+        let lines: Vec<String> = (0..20).map(|i| format!("block {i}: changed")).collect();
+        h.state_mut().meshes.nif_diff_view = Some((path, lines));
+        h.run_steps(8);
+        let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+        // The panel is too short for the floors: the strip (about 24 px) does not fit above the footer.
+        if r.footer.min.y > r.top.max.y + 24.0 {
+            continue;
+        }
+        crossed += 1;
+        for name in [
+            "Shader tab",
+            "Alpha tab",
+            "Controllers tab",
+            "Extra data tab",
+            "Show only this shape",
+        ] {
+            let Some(n) = h.query_by_label(name) else {
+                continue;
+            };
+            let id = n.accesskit_node().id();
+            let id = egui::accesskit::NodeId((u128::from(id) >> 64) as u64);
+            if let Some(i) = interact_rect_of(&h, id) {
+                assert!(
+                    i.max.y <= r.footer.min.y + 0.5 || i.height() <= 0.0,
+                    "{hgt}: {name} interacts under the footer: {i:?}, {r:?}"
+                );
+            }
+        }
+        // The footer is whole: its Close button still takes the click.
+        h.get_by_label("Close the diff").click();
+        h.run_steps(4);
+        assert!(
+            h.state().meshes.nif_diff_view.is_none(),
+            "{hgt}: the footer's Close took no click"
+        );
+    }
+    assert!(crossed >= 1, "no window height reached the limit");
+}
+
 /// Fix round 2, Important 3: egui's 64 px scrolled minimum applies to the Diff list too, so a cap between 40 and 64
 /// px was not obeyed (a cap of 60 gave 64 and the slot list fell to 44). At 1280x560 with Review open the panel leaves
 /// 312 px of room (323 at 720 and above): the list is its cap, under 64, and the slot list keeps its 48.
