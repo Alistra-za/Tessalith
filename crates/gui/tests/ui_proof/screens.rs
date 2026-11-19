@@ -89,14 +89,14 @@ pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
         };
         let found = s.nodes.iter().any(|x| {
             (n.role.is_empty() || x.role == n.role)
-                && x.rect.min.x >= left - 1.0
+                && x.rect.min.x >= left
                 && (x.label == n.text
                     || x.value.as_deref() == Some(n.text)
                     || x.placeholder.as_deref() == Some(n.text))
         }) || (n.role.is_empty()
             && s.texts
                 .iter()
-                .any(|t| t.text == n.text && t.rect.min.x >= left - 1.0));
+                .any(|t| t.text == n.text && t.rect.min.x >= left));
         found == n.present
     })
 }
@@ -731,4 +731,65 @@ fn the_sets_columns_slot_menu_is_not_the_editors() {
         !holds(&snap, editor.marker),
         "the editor's marker holds on the Sets column's menu"
     );
+}
+
+/// A frame with the Sets column's panel ending at x = 300, cobble's path in the editor, and the pin command starting at
+/// `pin_x`, as a node (`as_node`) or as painted text.
+fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
+    use crate::frame::{Node, Text};
+    use eframe::egui::{pos2, Rect};
+    let rect = |x: f32| Rect::from_min_size(pos2(x, 100.0), eframe::egui::vec2(200.0, 20.0));
+    let node = |label: &str, x: f32| Node {
+        parent: None,
+        depth: 0,
+        role: "Label".into(),
+        label: label.into(),
+        value: None,
+        placeholder: None,
+        rect: rect(x),
+        clip: None,
+        layer: None,
+        interactive: false,
+        focused: false,
+        disabled: false,
+        hovered: false,
+    };
+    let pin = "Pin this slot (always use this file)";
+    let mut nodes = vec![node("textures/architecture/stone/cobble", 400.0)];
+    let mut texts = vec![];
+    if as_node {
+        nodes.push(node(pin, pin_x));
+    } else {
+        texts.push(Text {
+            text: pin.into(),
+            rect: rect(pin_x),
+            clip: rect(pin_x),
+        });
+    }
+    Snapshot {
+        size: vec2_1280(),
+        nodes,
+        texts,
+        sets_right: Some(300.0),
+    }
+}
+
+/// The editor's marker wants the pin command at or right of the Sets column's edge itself: one starting half a point
+/// inside the column, as a node or as painted text, is the Sets column's.
+#[test]
+fn a_pin_command_inside_the_sets_columns_edge_is_not_the_editors() {
+    let editor = SCREENS
+        .iter()
+        .find(|s| s.name == "set editor slot menu")
+        .unwrap();
+    for as_node in [true, false] {
+        assert!(
+            holds(&pin_frame(300.0, as_node), editor.marker),
+            "a pin command at the edge is the editor's (as node: {as_node})"
+        );
+        assert!(
+            !holds(&pin_frame(299.5, as_node), editor.marker),
+            "a pin command 0.5 pt inside the Sets column is the editor's (as node: {as_node})"
+        );
+    }
 }
