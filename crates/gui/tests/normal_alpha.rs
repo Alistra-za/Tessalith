@@ -625,6 +625,44 @@ fn typing_the_listed_word_takes_the_key_off() {
     assert_eq!(m.untouched_normal(WALL_N), None);
 }
 
+#[test]
+fn claiming_a_new_recording_prompts_recovers_and_reopens_user_owned() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    std::fs::remove_file(t.join("wall_n.png")).unwrap();
+    let mut m = opened_without_export(d.path());
+    m.set_export_folder(d.path().join("export"));
+    settle(&mut m);
+    m.save().unwrap();
+    bumpy_n(&t.join("wall_n.png"));
+    m.replan();
+    settle(&mut m);
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Normal));
+    settle(&mut m);
+    assert_eq!(listed(&m, WALL_N), None);
+    assert!(
+        !m.request_close(),
+        "close must offer to save the claimed type"
+    );
+    let recovery = m.recovery_snapshot();
+    assert!(recovery
+        .iter()
+        .any(|(p, text)| p.ends_with("sdc.toml") && text == &m.project.as_ref().unwrap().text()));
+    for (path, text) in recovery {
+        std::fs::write(sdc_gui::crash_log::recovery_path(&path), text).unwrap();
+    }
+    let mut restored = opened_without_export(d.path());
+    assert_eq!(restored.undo_label(), Some("Restore crash edits"));
+    assert_eq!(held(&restored, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(listed(&restored, WALL_N), None);
+    restored.save().unwrap();
+    let mut reopened = opened_without_export(d.path());
+    add_rmaos(&t, &mut reopened);
+    assert_eq!(held(&reopened, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(listed(&reopened, WALL_N), None);
+}
+
 /// G1: the recorder wrote `normal` while the set was regular, and listed it; an `_rmaos` arrives and the set is PBR by
 /// evidence, so the listed normal becomes `pbr_normal` and its alpha is dropped silently, in the recorder's own step.
 #[test]
@@ -653,6 +691,115 @@ fn a_recorded_normal_follows_its_set_into_pbr() {
         "{:?}",
         m.undo_label()
     );
+}
+
+fn unlock_and_follow(dir: &Path) -> AppModel {
+    let t = wall(dir);
+    let mut m = opened_without_export(dir);
+    m.set_slot_lock("test/wall", 2, true).unwrap();
+    settle(&mut m);
+    add_rmaos(&t, &mut m);
+    assert!(m.slot_locked("test/wall", 2));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    m.set_slot_lock("test/wall", 2, false).unwrap();
+    settle(&mut m);
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
+    m
+}
+
+#[test]
+fn an_unlocked_normal_follow_leaves_the_locked_history_intact() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = unlock_and_follow(d.path());
+    m.undo();
+    settle(&mut m);
+    assert!(!m.slot_locked("test/wall", 2));
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
+    m.undo();
+    settle(&mut m);
+    assert!(m.slot_locked("test/wall", 2));
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+}
+
+#[test]
+fn an_unlocked_normal_follows_with_undo_in_problems() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::bottom::{problems, Fix};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = unlock_and_follow(d.path());
+    let rows = problems(&m);
+    let follow = rows
+        .iter()
+        .find(|r| r.text.contains("set automatically"))
+        .unwrap();
+    assert_eq!(follow.fix, Some(Fix::UndoLast));
+    m.open_problems(None);
+    let mut h = keep_harness(m);
+    h.get_by_label("Undo this change").click();
+    h.step();
+    settle(h.state_mut());
+    assert_eq!(h.state().untouched_normal(WALL_N), Some(Subtype::Normal));
+    assert!(!problems(h.state()).iter().any(|r| r.text == follow.text));
+}
+
+#[test]
+fn listing_b_keeps_as_ownership_in_the_snapshot_where_a_is_normal() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let mut m = opened_without_export(d.path());
+    m.save().unwrap();
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::Normal));
+    m.decide(WALL_N, Answer::Subtype(Subtype::Msn));
+    settle(&mut m);
+    assert_eq!(listed(&m, WALL_N).as_deref(), Some("normal"));
+    let b = "test/other_n.png";
+    bumpy_n(&t.join("other_n.png"));
+    m.replan();
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("msn")));
+    assert_eq!(listed(&m, WALL_N), None);
+    assert_eq!(m.untouched_normal(b), Some(Subtype::Normal));
+    m.undo();
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("normal")));
+    assert_eq!(
+        listed(&m, WALL_N).as_deref(),
+        Some("normal"),
+        "A is still owned here"
+    );
+    assert_eq!(m.untouched_normal(b), Some(Subtype::Normal));
+    add_rmaos(&t, &mut m);
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
+}
+
+#[test]
+fn a_follow_only_command_owns_its_listing_prune() {
+    let d = tempfile::tempdir().unwrap();
+    let t = wall(d.path());
+    let b = "test/other_n.png";
+    bumpy_n(&t.join("other_n.png"));
+    let mut m = opened_without_export(d.path());
+    m.set_slot_lock("test/wall", 2, true).unwrap();
+    settle(&mut m);
+    add_rmaos(&t, &mut m);
+    m.decide(b, Answer::Subtype(Subtype::Msn));
+    settle(&mut m);
+    assert_eq!(listed(&m, b).as_deref(), Some("normal"));
+    m.set_slot_lock("test/wall", 2, false).unwrap();
+    settle(&mut m);
+    assert_eq!(m.untouched_normal(WALL_N), Some(Subtype::PbrNormal));
+    assert_eq!(listed(&m, b), None);
+    m.undo();
+    settle(&mut m);
+    assert_eq!(
+        listed(&m, b).as_deref(),
+        Some("normal"),
+        "Undo restores the follow's prune"
+    );
+    m.undo();
+    settle(&mut m);
+    assert_eq!(listed(&m, b).as_deref(), Some("normal"));
 }
 
 /// An Undo of the follow step stays undone: the next settled plan does not retype the normal again (`normal-follow`

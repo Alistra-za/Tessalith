@@ -292,6 +292,9 @@ thread_local! {
 
 pub struct ProjectDoc {
     f: TomlFile,
+    /// Pending file values whose automatic status depends on the other document's ownership list.
+    claims: BTreeSet<(String, &'static str, String)>,
+    claim_dirty: bool,
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
     stash: Option<(DocumentMut, bool)>,
     /// `[export]` as last parsed, by `rev` (Note CN: Review and `view_key` read it every frame).
@@ -428,6 +431,8 @@ impl ProjectDoc {
                 ..Default::default()
             },
             stash: None,
+            claims: Default::default(),
+            claim_dirty: false,
             export_cache: Default::default(),
         })
     }
@@ -438,6 +443,8 @@ impl ProjectDoc {
     pub fn open(root: &Path) -> ProjectDoc {
         let mut d = ProjectDoc {
             f: TomlFile::open(root.join("sdc.toml")),
+            claims: Default::default(),
+            claim_dirty: false,
             stash: None,
             export_cache: Default::default(),
         };
@@ -448,6 +455,7 @@ impl ProjectDoc {
     /// Re-read the file, dropping unsaved edits.
     pub fn reload(&mut self) {
         self.stash = None;
+        self.clear_claims();
         self.f.reload();
         self.check();
     }
@@ -524,11 +532,45 @@ impl ProjectDoc {
         }
     }
     pub fn user_dirty(&self) -> bool {
-        self.f.user_dirty && !self.blamed()
+        (self.f.user_dirty || self.claim_dirty) && !self.blamed()
     }
 
     pub(crate) fn stashed_user_edit(&self) -> bool {
-        self.f.user_dirty && self.blamed()
+        (self.f.user_dirty || self.claim_dirty) && self.blamed()
+    }
+
+    pub(crate) fn claim(&mut self, key: &str, field: &'static str, word: &str) {
+        if self.f.baseline_text == self.f.saved_text {
+            return;
+        }
+        let value = Json::from(word);
+        let matches = |text: &str| {
+            Self::from_snapshot(text).is_some_and(|p| {
+                (field == "subtype" || p.has_file_key(key))
+                    && p.file_value(key, field).as_ref() == Some(&value)
+            })
+        };
+        if matches(self.baseline()) && !matches(&self.f.saved_text) {
+            self.claims.insert((key.to_owned(), field, word.to_owned()));
+        }
+    }
+
+    pub(crate) fn refresh_claims(&mut self, sets: &crate::sets_doc::SetsDoc) {
+        self.claim_dirty = self.claims.iter().any(|(key, field, word)| {
+            let listed = if *field == "subtype" {
+                sets.auto_normal_word(key) == Some(word)
+            } else {
+                sets.auto_data().contains(key)
+            };
+            !listed
+                && (*field == "subtype" || self.has_file_key(key))
+                && self.file_value(key, field).as_ref().and_then(Json::as_str) == Some(word)
+        });
+    }
+
+    fn clear_claims(&mut self) {
+        self.claims.clear();
+        self.claim_dirty = false;
     }
 
     fn apply_writes(&mut self, writes: &[AutoWrite]) -> bool {
@@ -560,9 +602,12 @@ impl ProjectDoc {
     }
 
     fn record_baseline(&mut self, writes: &[AutoWrite], baseline: &[AutoWrite]) {
-        let changed = self.apply_writes(writes);
         self.f.baseline_text = apply_auto(&self.f.baseline_text, baseline);
-        if changed {
+        self.record_writes(writes);
+    }
+
+    pub(crate) fn record_writes(&mut self, writes: &[AutoWrite]) {
+        if self.apply_writes(writes) {
             self.touch();
         } else {
             self.update_user_dirty();
@@ -1102,7 +1147,9 @@ impl ProjectDoc {
 
     /// Write the document (atomically: a temporary file, then rename).
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
-        self.f.save(force)
+        self.f.save(force)?;
+        self.clear_claims();
+        Ok(())
     }
 
     /// Note FP7 (T38): write the unsaved edits a blame stashed (the engine may still reject them: the file then opens
@@ -1113,6 +1160,7 @@ impl ProjectDoc {
         };
         self.f.write_text(doc.to_string(), false)?;
         *dirty = false;
+        self.clear_claims();
         Ok(true)
     }
 }

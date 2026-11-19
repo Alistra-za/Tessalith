@@ -1253,6 +1253,7 @@ impl SetsDoc {
     /// Replay just the recorder's changes. A shader pick or an explicit unlisting in this state still owns its keys.
     pub(crate) fn apply_auto_normals(
         text: &mut String,
+        files: &str,
         before: &BTreeMap<String, String>,
         after: &BTreeMap<String, String>,
     ) {
@@ -1260,8 +1261,18 @@ impl SetsDoc {
             return;
         };
         let mut listing = Self::normal_listing(&doc);
+        let project = std::cell::LazyCell::new(|| {
+            crate::project::ProjectDoc::from_snapshot(files).expect("serialized project")
+        });
         for (key, old) in before {
-            if !after.contains_key(key) && listing.get(key) == Some(old) {
+            if !after.contains_key(key)
+                && listing.get(key) == Some(old)
+                && project
+                    .file_value(key, "subtype")
+                    .as_ref()
+                    .and_then(Json::as_str)
+                    != Some(old)
+            {
                 listing.remove(key);
             }
         }
@@ -1280,11 +1291,12 @@ impl SetsDoc {
 
     pub(crate) fn touch_auto_normals(
         &mut self,
+        files: &str,
         before: &BTreeMap<String, String>,
         after: &BTreeMap<String, String>,
     ) {
         if before != after {
-            Self::apply_auto_normals(&mut self.f.baseline_text, before, after);
+            Self::apply_auto_normals(&mut self.f.baseline_text, files, before, after);
         }
         self.f.update_user_dirty(&self.text());
     }

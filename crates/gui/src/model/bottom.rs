@@ -1275,7 +1275,7 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
     // Note FC1: what the plan decided on its own and the project now records, one row with every texture on hover.
     if let Some(a) = &m.auto_note {
         out.push(Problem {
-            fix: None,
+            fix: a.step.and_then(undo),
             detail: Some(a.lines.join("\n")),
             ..row(Level::Info, At::Project, a.text.clone(), None)
         });

@@ -250,6 +250,13 @@ impl AppModel {
     }
 }
 
+pub(super) fn listed_write(w: &crate::project::AutoWrite) -> Option<&str> {
+    match (w.field, w.value.as_str()) {
+        ("subtype", Some(word @ ("normal" | "landscape_normal" | "pbr_normal"))) => Some(word),
+        _ => None,
+    }
+}
+
 /// Older Undo states can contain a user's same-word pick or a different alpha policy. Replay only decisions
 /// that the recorder owns in that state, keeping the corresponding ownership entry with its file write.
 pub(super) fn protected_normals(
@@ -267,13 +274,7 @@ pub(super) fn protected_normals(
     });
     let tables = std::cell::LazyCell::new(|| super::shared_alpha::Tables::of(&project));
     let mut protected = std::collections::HashSet::new();
-    for w in writes.iter().filter(|w| {
-        w.field == "subtype"
-            && matches!(
-                w.value.as_str(),
-                Some("pbr_normal" | "normal" | "landscape_normal")
-            )
-    }) {
+    for w in writes.iter().filter(|w| listed_write(w).is_some()) {
         let held = tables.subtype(&w.key);
         let ownership = || {
             settings
@@ -348,17 +349,9 @@ pub(super) fn list_normals(
     let mut changed = false;
     let mut added = false;
     for w in writes {
-        let (k, v) = (&w.key, &w.value);
-        if w.field != "subtype" {
-            continue;
-        }
-        if let Some(st) = serde_json::from_value(v.clone())
-            .ok()
-            .filter(|st| tangent(*st))
-        {
-            let w = word(st);
-            if listing.get(k) != Some(&w) {
-                listing.insert(k.clone(), w);
+        if let Some(word) = listed_write(w) {
+            if listing.get(&w.key).map(String::as_str) != Some(word) {
+                listing.insert(w.key.clone(), word.to_owned());
                 changed = true;
             }
             added = true;
@@ -403,13 +396,14 @@ pub(super) fn relist(p: &ProjectDoc, s: &mut SetsDoc, changes: &[(String, Option
 
 /// N-27: the user picked the word the list holds, so the key is theirs now (the rare write to `sdc-project.toml`). A
 /// different value needs no write: it already reads as the user's.
-pub(super) fn unlist_same(s: &mut SetsDoc, key: &str, new: Option<Subtype>) {
+pub(super) fn unlist_same(p: &mut ProjectDoc, s: &mut SetsDoc, key: &str, new: Option<Subtype>) {
     if s.read_only() {
         return;
     }
     let mut l = s.auto_normal();
     if new.is_some_and(|st| l.get(key).is_some_and(|w| *w == word(st))) {
-        l.remove(key);
+        let claimed = l.remove(key).expect("matched the listed word");
         s.set_auto_normal(&l);
+        p.claim(key, "subtype", &claimed);
     }
 }

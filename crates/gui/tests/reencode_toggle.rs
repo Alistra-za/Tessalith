@@ -97,6 +97,11 @@ fn reencode_button_writes_the_selector() {
     idle(&mut h);
     assert_eq!(toml(h.state()), before, "one Undo takes back both");
     assert!(!has_job(h.state(), "a.dds"));
+    assert!(
+        h.state_mut().request_close(),
+        "Undo leaves only pending image types"
+    );
+    assert!(h.state().recovery_snapshot().is_empty());
     h.state_mut().redo();
     idle(&mut h);
     assert_eq!(toml(h.state()), t, "one Redo puts back both");

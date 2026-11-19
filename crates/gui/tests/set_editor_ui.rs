@@ -1819,13 +1819,20 @@ fn diffuse_top(h: &Harness<'static, AppModel>) -> f32 {
         .fold(f32::MAX, f32::min)
 }
 
-/// Scroll the centre under `at` by `dy` points with the wheel, as a user would.
-fn wheel(h: &mut Harness<'static, AppModel>, at: eframe::egui::Pos2, dy: f32) {
+/// Wheel inside the visible editor. A slot row can already be below the viewport before scrolling.
+fn scroll_editor(h: &mut Harness<'static, AppModel>) {
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    let bar = h
+        .query_all_by_role(eframe::egui::accesskit::Role::ScrollBar)
+        .map(|n| n.rect())
+        .find(|r| r.height() > r.width() && centre.contains(r.center()))
+        .expect("the editor has a vertical scroll bar");
+    let at = eframe::egui::pos2(centre.center().x, bar.center().y);
     h.event(eframe::egui::Event::PointerMoved(at));
     h.run();
     h.event(eframe::egui::Event::MouseWheel {
         unit: eframe::egui::MouseWheelUnit::Point,
-        delta: eframe::egui::vec2(0.0, dy),
+        delta: eframe::egui::vec2(0.0, -3000.0),
         source: eframe::egui::MouseWheelSource::Wheel,
         modifiers: eframe::egui::Modifiers::NONE,
         phase: eframe::egui::TouchPhase::Move,
@@ -1840,7 +1847,7 @@ fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
-        .with_size(eframe::egui::vec2(1400.0, 420.0))
+        .with_size(eframe::egui::vec2(1400.0, 300.0))
         .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
     h
 }
@@ -1869,11 +1876,7 @@ fn the_set_editor_opens_at_its_top_after_a_scrolled_texture() {
     h.state_mut().select_item(&diffuse);
     h.run();
     let back = h.get_by_label_contains("← ").rect();
-    wheel(
-        &mut h,
-        eframe::egui::pos2(back.min.x + 40.0, back.min.y + 150.0),
-        -3000.0,
-    );
+    scroll_editor(&mut h);
     assert!(
         h.get_by_label_contains("← ").rect().min.y < back.min.y - 20.0,
         "the texture panel scrolled"
@@ -1902,17 +1905,13 @@ fn going_back_to_a_set_opens_it_at_its_top() {
     let mut h = short_harness(m);
     h.run();
     let top = diffuse_top(&h);
-    let at = eframe::egui::pos2(
-        h.get_by_label("Slot commands…").rect().min.x + 40.0,
-        top + 30.0,
-    );
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     assert!(diffuse_top(&h) < top - 20.0, "set A's editor scrolled");
     // B is scrolled too, so the old shared offset would survive the way back.
     h.state_mut().select_set(&keys[1]);
     h.run();
     let top_b = diffuse_top(&h);
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     assert!(diffuse_top(&h) < top_b - 20.0, "set B's editor scrolled");
     h.state_mut().select_set(&keys[0]);
     h.run();
@@ -1932,11 +1931,7 @@ fn the_offset_survives_a_replan_of_the_same_set() {
     let mut h = short_harness(m);
     h.run();
     let top = diffuse_top(&h);
-    let at = eframe::egui::pos2(
-        h.get_by_label("Slot commands…").rect().min.x + 40.0,
-        top + 30.0,
-    );
-    wheel(&mut h, at, -3000.0);
+    scroll_editor(&mut h);
     let scrolled = diffuse_top(&h);
     assert!(scrolled < top - 20.0, "the editor scrolled");
     h.state_mut().set_json_value(
@@ -1970,14 +1965,6 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
             .min
             .y
     };
-    let x = widget(
-        &h,
-        eframe::egui::accesskit::Role::DisclosureTriangle,
-        "Type",
-    )
-    .rect()
-    .min
-    .x + 40.0;
     // The set editor is scrolled first; the bulk panel then opens at its top, not at that offset.
     rock_selected(h.state_mut());
     h.run();
@@ -1986,8 +1973,9 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
     let top = type_header_y(&h);
     rock_selected(h.state_mut());
     h.run();
-    let at = eframe::egui::pos2(x, diffuse_top(&h) + 30.0);
-    wheel(&mut h, at, -3000.0);
+    let set_top = diffuse_top(&h);
+    scroll_editor(&mut h);
+    assert!(diffuse_top(&h) < set_top - 20.0, "the set editor scrolled");
     h.state_mut().select_all_visible();
     h.run();
     assert!(

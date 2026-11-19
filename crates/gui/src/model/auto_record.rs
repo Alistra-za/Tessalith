@@ -22,6 +22,8 @@ use std::path::Path;
 /// The last recording, for its Problems row.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AutoNote {
+    /// Only a shader follow has a command the row can undo.
+    pub step: Option<u64>,
     /// The row's count is the number of decisions. A follow-only row names no suggestion confidence.
     pub text: String,
     /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; the
@@ -386,7 +388,7 @@ impl AppModel {
         });
         // Note JS5 (N-17, G1): an untouched normal follows its set's settled pick into PBR, in this step and its row.
         // A deliberate Undo of a follow stays undone until a shader pick releases the marker.
-        let mut followed = HashSet::new();
+        let mut follows = Vec::new();
         let retyped: HashSet<_> = writes.iter().map(|w| w.key.clone()).collect();
         let mut promote = vec![];
         let listing = std::cell::OnceCell::new();
@@ -430,9 +432,7 @@ impl AppModel {
                     continue;
                 }
                 let old = json!(held);
-                followed.insert(k.clone());
-                promote.push(writes.len());
-                writes.push(AutoWrite {
+                follows.push(AutoWrite {
                     key: k.clone(),
                     field: "subtype",
                     value: old.clone(),
@@ -498,10 +498,20 @@ impl AppModel {
         }
         drop(safe);
         // Note FI3: after a re-encode step still on top, the recording joins it (`set_reencode`).
-        let join = self
+        let mut join = self
             .reencode_follow
             .take()
             .filter(|k| self.history.undo.last().and_then(|c| c.merge.as_ref()) == Some(k));
+        // A follow has its own command. If other writes join Re-encode, its replan picks up the follow.
+        let mut followed = HashSet::new();
+        if writes.is_empty() || join.is_none() {
+            join = None;
+            for w in follows {
+                followed.insert(w.key.clone());
+                promote.push(writes.len());
+                writes.push(w);
+            }
+        }
         if writes.is_empty() {
             return false;
         }
@@ -521,7 +531,7 @@ impl AppModel {
         let joins_switch = join
             .as_ref()
             .is_some_and(|k| self.fuzz_switch.as_ref().is_some_and(|sw| &sw.merge == k));
-        let before_step = (join.is_some() || !followed.is_empty())
+        let mut before_step = (join.is_some() || !followed.is_empty())
             .then(|| Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref()));
         let p = self
             .project
@@ -592,24 +602,36 @@ impl AppModel {
             &followed,
             &promoted,
         );
-        if joins_switch {
+        let joins_user = join.is_some() && !joins_switch;
+        if joins_user {
+            p.record_writes(&writes);
+        } else if joins_switch {
             p.touch_switch(&writes);
         } else {
             let allowed = super::normal_follow::allowed_writes(&writes, &protected);
             p.touch_auto(&writes, allowed.as_deref().unwrap_or(&writes));
         }
         super::normal_follow::list_normals(p, sets, &mut listing, &writes);
+        p.refresh_claims(sets);
         let listing_changed = sets.rev() != revs.1 && old_listing != listing;
-        if listing_changed {
+        if listing_changed && !joins_user {
             let allowed = super::normal_follow::allowed_listing(&old_listing, &listing, &protected);
-            sets.touch_auto_normals(&old_listing, &allowed);
+            sets.touch_auto_normals(p.baseline(), &old_listing, &allowed);
         }
         if revs == (p.rev(), sets.rev()) {
             return false;
         }
         if join.is_none() {
-            if listing_changed || !followed.is_empty() {
-                self.history.apply_auto_in(&writes, |state, new| {
+            let other = super::normal_follow::allowed_writes(&writes, &followed);
+            let replay = other.as_deref().unwrap_or(&writes);
+            let prior = super::normal_follow::allowed_listing(&old_listing, &listing, &followed);
+            // A follow's incidental pruning belongs to its command unless an ordinary recording also lists a normal.
+            let lists = old_listing != *prior
+                && replay
+                    .iter()
+                    .any(|w| super::normal_follow::listed_write(w).is_some());
+            if lists {
+                self.history.apply_auto_in(replay, |state, new, apply| {
                     let protected =
                         if new.is_some_and(|entries| entries.can_append(&state.sdc_toml)) {
                             HashSet::new()
@@ -617,52 +639,46 @@ impl AppModel {
                             super::normal_follow::protected_normals(
                                 &state.sdc_toml,
                                 &state.project,
-                                &writes,
+                                replay,
                                 &followed,
                                 &promoted,
                             )
                         };
+                    if let Some(writes) = super::normal_follow::allowed_writes(replay, &protected) {
+                        state.sdc_toml = crate::project::apply_auto(&state.sdc_toml, &writes);
+                    } else {
+                        apply(&mut state.sdc_toml);
+                    }
                     let allowed =
-                        super::normal_follow::allowed_listing(&old_listing, &listing, &protected);
+                        super::normal_follow::allowed_listing(&old_listing, &prior, &protected);
                     if old_listing != *allowed {
                         crate::sets_doc::SetsDoc::apply_auto_normals(
                             &mut state.project,
+                            &state.sdc_toml,
                             &old_listing,
                             &allowed,
                         );
                     }
-                    super::normal_follow::allowed_writes(&writes, &protected)
                 });
-            } else {
-                self.history.apply_auto(&writes);
+            } else if !replay.is_empty() {
+                self.history.apply_auto(replay);
             }
-        }
-        self.history
-            .normal_followed
-            .extend(followed.iter().cloned());
-        if let Some(mut before) = before_step {
-            // Undo of a follow opts out of that retype. Other decisions in the same pass stay recorded.
-            if join.is_none() {
-                let other: Vec<_> = writes
-                    .iter()
-                    .filter(|w| w.field != "subtype" || !followed.contains(&w.key))
-                    .cloned()
-                    .collect();
-                before.sdc_toml = crate::project::apply_auto(&before.sdc_toml, &other);
-                let mut prior = listing.clone();
-                for key in &followed {
-                    if let Some(old) = old_listing.get(key) {
-                        prior.insert(key.clone(), old.clone());
-                    }
-                }
-                if prior != old_listing {
+            if let Some(before) = before_step.as_mut().filter(|_| !replay.is_empty()) {
+                before.sdc_toml = crate::project::apply_auto(&before.sdc_toml, replay);
+                if lists {
                     crate::sets_doc::SetsDoc::apply_auto_normals(
                         &mut before.project,
+                        &before.sdc_toml,
                         &old_listing,
                         &prior,
                     );
                 }
             }
+        }
+        self.history
+            .normal_followed
+            .extend(followed.iter().cloned());
+        if let Some(before) = before_step {
             let after = Self::snapshot_of(Some(p), Some(sets));
             self.history.push_undo(super::history::Command {
                 before,
@@ -690,6 +706,7 @@ impl AppModel {
                 " (High confidence)"
             };
             self.auto_note = Some(AutoNote {
+                step: (!followed.is_empty()).then_some(self.history.pushes),
                 text: format!("{n} {noun}{s} set automatically{confidence}"),
                 lines: lines
                     .into_iter()

@@ -67,7 +67,7 @@ impl History {
     }
 
     pub fn apply_auto(&mut self, writes: &[crate::project::AutoWrite]) {
-        self.apply_auto_in(writes, |_, _| None);
+        self.apply_auto_in(writes, |state, _, apply| apply(&mut state.sdc_toml));
     }
 
     pub(super) fn apply_auto_in(
@@ -76,29 +76,28 @@ impl History {
         mut adapt: impl FnMut(
             &mut Snapshot,
             Option<&crate::project::NewFileEntries>,
-        ) -> Option<Vec<crate::project::AutoWrite>>,
+            &mut dyn FnMut(&mut String),
+        ),
     ) {
         if self.undo.is_empty() && self.redo.is_empty() {
             return;
         }
         let entries = crate::project::NewFileEntries::new(writes);
         let mut patched = std::collections::HashMap::<String, String>::new();
+        let mut apply = |text: &mut String| {
+            *text = patched
+                .entry(std::mem::take(text))
+                .or_insert_with_key(|original| {
+                    entries
+                        .as_ref()
+                        .and_then(|new| new.appended(original))
+                        .unwrap_or_else(|| crate::project::apply_auto(original, writes))
+                })
+                .clone();
+        };
         for command in self.undo.iter_mut().chain(&mut self.redo) {
             for state in [&mut command.before, &mut command.after] {
-                if let Some(allowed) = adapt(state, entries.as_ref()) {
-                    state.sdc_toml = crate::project::apply_auto(&state.sdc_toml, &allowed);
-                    continue;
-                }
-                let text = &mut state.sdc_toml;
-                *text = patched
-                    .entry(std::mem::take(text))
-                    .or_insert_with_key(|original| {
-                        entries
-                            .as_ref()
-                            .and_then(|new| new.appended(original))
-                            .unwrap_or_else(|| crate::project::apply_auto(original, writes))
-                    })
-                    .clone();
+                adapt(state, entries.as_ref(), &mut apply);
             }
         }
     }

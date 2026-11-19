@@ -2843,9 +2843,9 @@ impl AppModel {
         f(self);
         self.batch = false;
         let mut post = None;
-        if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_ref(), self.sets_doc.as_mut())
+        if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_mut(), self.sets_doc.as_mut())
         {
-            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), s);
+            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), p, s);
         }
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         // N8-d: equal text leaves any leftover data for the next user edit, even if a setter moved a revision.
@@ -4019,7 +4019,7 @@ impl AppModel {
         let mut post = None;
         if let Some(h) = &held {
             let t = post.insert(shared_alpha::Tables::of(p));
-            shared_alpha::unlist_user_data(h, t, s);
+            shared_alpha::unlist_user_data(h, t, p, s);
         }
         // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
         let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
@@ -4055,6 +4055,9 @@ impl AppModel {
         }
         self.drop_undo_note();
         let files_edit = before.project == after.project;
+        if let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_ref()) {
+            p.refresh_claims(s);
+        }
         self.history.push(history::Command {
             label: label.into(),
             before,
@@ -4157,6 +4160,13 @@ impl AppModel {
 
     fn apply_snapshot(&mut self, s: &history::Snapshot) {
         self.dropped_fills.clear();
+        if self
+            .auto_note
+            .as_ref()
+            .is_some_and(|note| note.step.is_some())
+        {
+            self.auto_note = None;
+        }
         // Fuzz-8: likewise the switch's row, and a switch step still waiting for its recording no longer applies.
         self.fuzz_note = None;
         self.fuzz_switch = None;
@@ -4176,6 +4186,9 @@ impl AppModel {
         // The JSON hash is not part of a step: export writes it outside history (spec §7.2, final review I2).
         if let Some(d) = self.sets_doc.as_mut() {
             d.restore_keeping_json_sha(&s.project);
+            if let Some(p) = self.project.as_mut() {
+                p.refresh_claims(d);
+            }
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
         self.replan_changed(files_edit);
