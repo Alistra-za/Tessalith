@@ -5895,6 +5895,117 @@ fn the_record_a_session_wrote_stays_its_own_after_an_undo() {
         .is_empty());
 }
 
+/// Project `p` whose draft (one op, 7.5, an hour old) lost at open to a newer kept autosave of its id holding `kept`
+/// (written from the draft with `edit`); the session is open on the kept autosave. Returns (P, the kept path).
+fn open_on_a_newer_kept_autosave(
+    d: &tempfile::TempDir,
+    m: &mut MeshesModel,
+    edit: impl FnOnce(EditDoc) -> EditDoc,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let p = project_folder(d, "p");
+    project_with_a_draft(m, &p);
+    let k = kept(d, &id_of(&p));
+    save(&k, &edit(load(&draft(&p)).unwrap().unwrap())).unwrap();
+    make_old(&draft(&p));
+    m.open_edit();
+    (p, k)
+}
+
+/// Review round 2 (Critical 1, ruling E6-G): the project cannot be written (its draft is held open by another
+/// program), the kept autosave the session opened is removed and every op reverted. The draft still holds 7.5, which
+/// the next open would load, so Select does not drop the session unsaved: here the kept autosave takes the empty state.
+#[cfg(windows)]
+#[test]
+fn reverting_to_no_ops_over_a_draft_with_ops_is_saved_before_leaving() {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| with_value(doc, 9.5));
+    assert_eq!(op_values(&m)[0].1, 9.5, "premise: the kept autosave opened");
+    let lock = std::fs::OpenOptions::new()
+        .read(true)
+        .share_mode(0)
+        .open(draft(&p))
+        .unwrap();
+    std::fs::remove_file(&k).unwrap();
+    m.edit_with(|e| e.revert(0));
+    let x = m.selected_nif.unwrap();
+    m.select_nif(y_nif(&m));
+    drop(lock);
+    m.select_nif(x);
+    m.open_edit();
+    assert!(
+        m.edit.as_ref().unwrap().doc.ops.is_empty(),
+        "the revert holds: {:?}",
+        op_values(&m)
+    );
+}
+
+/// Review round 2 (Important B3, ruling E6-G): ops equal to the OLDER of two files are not durable when the newer
+/// one would win at the next open. While neither file can be written (both held open, readable, by another program)
+/// Close is refused; once they can, Close saves and the revert holds.
+#[cfg(windows)]
+#[test]
+fn matching_the_older_draft_is_not_durable_when_a_newer_kept_autosave_wins() {
+    use std::os::windows::fs::OpenOptionsExt as _;
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| {
+        let mut two = doc.clone();
+        two.ops.push(with_value(doc, 9.5).ops.remove(0));
+        two
+    });
+    assert_eq!(op_values(&m).len(), 2, "premise: the kept autosave opened");
+    let hold = |f: &Path| {
+        std::fs::OpenOptions::new()
+            .read(true)
+            .share_mode(1) // FILE_SHARE_READ: readable, not movable, replaceable or deletable
+            .open(f)
+            .unwrap()
+    };
+    let locks = (hold(&draft(&p)), hold(&k));
+    m.edit_with(|e| e.revert(1));
+    m.close_edit();
+    assert!(m.edit.is_some(), "the older draft is not what opens next");
+    drop(locks);
+    m.close_edit();
+    m.open_edit();
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "the revert holds"
+    );
+    assert_eq!(doc_values(&draft(&p)), [7.5]);
+}
+
+/// Review round 2 (Important B3, ruling E6-G): a project session whose ops sit in the plain autosave it recovered (the
+/// next open would load that file) leaves without writing anything.
+#[test]
+fn a_recovered_plain_autosave_is_durable_where_it_is() {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    let theirs = project_with_a_draft(&mut m, &p);
+    make_old(&draft(&p));
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let mine = std::fs::read(autosave(&d)).unwrap();
+    m.set_project_root(Some(&p));
+    m.open_edit();
+    assert_eq!(
+        op_values(&m)[0].1,
+        12.5,
+        "premise: the autosave is recovered"
+    );
+    m.close_edit();
+    assert_eq!(
+        std::fs::read(draft(&p)).unwrap(),
+        theirs,
+        "the draft is not written"
+    );
+    assert!(kept_beside(&draft(&p)).is_empty(), "nothing moved aside");
+    assert_eq!(std::fs::read(autosave(&d)).unwrap(), mine);
+}
+
 /// Sets the modified time of `p` to that of `like`.
 fn same_time(p: &Path, like: &Path) {
     let t = std::fs::metadata(like).unwrap().modified().unwrap();

@@ -105,6 +105,9 @@ pub struct NifEdit {
     /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
     switch_wording: bool,
+    /// The save before an end (`save_for_switch`) worked and no op changed since: the session may end (ruling E6-G:
+    /// when not durable the saves are tried, and one that works allows the end).
+    saved_to_leave: bool,
     /// A retry of the two saves succeeded: the model ends the session and opens the wanted project's.
     switch_saved: bool,
     /// Attempts of the project switch's two saves (the test of ruling r4-2).
@@ -862,6 +865,7 @@ impl NifEdit {
             kept_older,
             switch_failed: false,
             switch_wording: false,
+            saved_to_leave: false,
             switch_saved: false,
             #[cfg(feature = "test-hooks")]
             switch_save_attempts: 0,
@@ -1473,7 +1477,10 @@ impl NifEdit {
             self.switch_save_attempts += 1;
         }
         let draft_err = match self.save_draft() {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                self.saved_to_leave = true;
+                return Ok(());
+            }
             Err(e) => e,
         };
         if self.project.is_none() {
@@ -1482,6 +1489,9 @@ impl NifEdit {
         match self.save_kept(&draft_err) {
             Ok(()) => {
                 self.unsaved = false;
+                // ruling E6-G: a kept autosave the next open would not find (the draft gone, or without its id)
+                // still holds the ops; the session may leave until its next change
+                self.saved_to_leave = true;
                 Ok(())
             }
             Err(kept_err) => Err(format!("{draft_err}; the autosave failed too: {kept_err}")),
@@ -1559,21 +1569,26 @@ impl NifEdit {
         true
     }
 
-    /// Ruling E6-C1: the session may end with nothing written, because its current ops are what is durably on disk
-    /// for it: in the draft (the plain autosave with no project) or in the kept autosave it wrote or loaded. No ops
-    /// and no file count as equal; a file that does not read or parse does not. Undo and redo history are not ops,
-    /// so they never hold a session back, and a draft is never written only for its id (E6-B). An untouched session
-    /// is equal without a read; a read-only one (no draft path) has nowhere to save.
+    /// Ruling E6-G (E6-C1 made exact): the session may end with nothing written, because its current ops are what the
+    /// next open would load: with a project, `pick_draft`'s decision over the draft, the kept autosave of its id and
+    /// the plain autosave as they are now; with none, the plain autosave. No winner and no ops count as equal; a
+    /// winner that does not read or parse does not. Undo and redo history are not ops, so they never hold a session
+    /// back, and a draft is never written only for its id (E6-B). An untouched session is equal without a read; a
+    /// read-only one (no draft path) has nowhere to save. Reads only.
     pub(super) fn durable(&self) -> bool {
         if !self.touched() || self.draft_path.as_os_str().is_empty() {
             return true;
         }
-        let equal = |p: &Path| match edit_doc::load(p) {
+        let next = match self.project {
+            Some(_) => pick_draft(&self.draft_path, self.autosave.as_deref(), &self.data_path)
+                .map(|p| p.doc),
+            None => edit_doc::load(&self.draft_path),
+        };
+        match next {
             Ok(Some(d)) => same_ops(&d.ops, &self.doc.ops),
             Ok(None) => self.doc.ops.is_empty(),
             Err(_) => false,
-        };
-        equal(&self.draft_path) || self.kept_autosave.as_deref().is_some_and(equal)
+        }
     }
 
     /// Ends a drag without saving it: what is left to save is `MeshesModel::may_end_edit`'s to decide.
@@ -1767,6 +1782,7 @@ impl NifEdit {
     /// tick) leaves the save to `flush`, except after a failed switch, where every change is the next try.
     fn ops_changed(&mut self, now: bool) {
         self.unsaved = true;
+        self.saved_to_leave = false;
         if now || self.switch_failed {
             self.save();
         }
@@ -2382,16 +2398,17 @@ impl MeshesModel {
     }
 
     /// Ruling E6-C, the one check before any session ends (another NIF, Close edit, the Edit toggle, a project
-    /// switch, a scan's reload): true when it may, because its ops are durable (`NifEdit::durable`, ruling E6-C1) or
-    /// a save made them so (the draft, then the kept autosave; with no project the plain autosave). Otherwise the
-    /// session stays as it is, its footer and export say why (`retarget_error`), and so does `error` for the refused
-    /// action. `switching`: the action is a project switch (its own wording, ruling r3-3).
+    /// switch, a scan's reload): true when it may, because the next open would load its ops (`NifEdit::durable`,
+    /// ruling E6-G) or a save worked (the draft, then the kept autosave; with no project the plain autosave; each never
+    /// over a file that is not the session's, E6-F). Otherwise the session stays as it is, its footer and export say
+    /// why (`retarget_error`), and so does `error` for the refused action. `switching`: the action is a project switch
+    /// (its own wording, ruling r3-3).
     fn may_end_edit(&mut self, switching: bool) -> bool {
         let Some(e) = self.edit.as_mut() else {
             return true;
         };
         e.end_drag();
-        if e.durable() {
+        if e.saved_to_leave || e.durable() {
             return true;
         }
         match e.save_for_switch() {
