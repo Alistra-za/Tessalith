@@ -372,12 +372,68 @@ pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
         .collect()
 }
 
-/// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52, 3c-57), between two `tree_hashes` snapshots taken around one
+/// Ruling 3c-62: capture the initial saves and the guarded writers' ownership records before Export can change them.
+#[derive(Default)]
+pub struct RemovalCredits {
+    pub initial_saves: std::collections::BTreeSet<PathBuf>,
+    /// Listed guarded output -> (the old spelling the writer finds in its folder, its recorded hash).
+    pub guarded_twins: std::collections::BTreeMap<PathBuf, (PathBuf, String)>,
+}
+
+impl RemovalCredits {
+    pub fn before_export(m: &AppModel) -> Self {
+        use sdc_gui::model::history::{case_twin, record_key, records_at};
+        use sdc_gui::model::review::JsonKind;
+        let mut credits = Self::default();
+        // Includes tentative stashed edits and dirty writable sets. Automatic-only sdc.toml edits also get saved.
+        credits
+            .initial_saves
+            .extend(m.recovery_snapshot().into_iter().map(|(path, _)| path));
+        if let Some(p) = m.project.as_ref().filter(|p| p.is_dirty()) {
+            credits.initial_saves.insert(p.path().to_path_buf());
+        }
+        if let Some(doc) = &m.sets_doc {
+            let lines = m.review_json();
+            let root = m.output_root();
+            for (kind, records) in [
+                (JsonKind::CsPbr, doc.cs_pbr_shas()),
+                (JsonKind::ComplexMaterial, doc.cm_json_shas()),
+                (JsonKind::Xpmf, doc.xpmf_shas()),
+                (JsonKind::CsSkin, doc.cs_skin_shas()),
+            ] {
+                // Each finisher resolves legacy relative records at its first (primary) output root.
+                let records = records_at(&records, &root);
+                for line in lines.iter().filter(|l| l.kind == kind) {
+                    if let Some(sha) = records.get(&record_key(&line.path)) {
+                        if let Some(old) = case_twin(&line.path) {
+                            credits
+                                .guarded_twins
+                                .insert(line.path.clone(), (old, sha.clone()));
+                        }
+                    }
+                }
+            }
+        }
+        credits
+    }
+}
+
+/// Compare a listing with no evidence of a settings save or a guarded JSON rename (e.g. a NIF-only comparison).
+pub fn listing_violations(
+    w: &sdc_gui::model::review::ReviewWrites,
+    before: &std::collections::BTreeMap<PathBuf, String>,
+    after: &std::collections::BTreeMap<PathBuf, String>,
+    store: Option<&Path>,
+) -> Vec<String> {
+    listing_violations_with_removals(w, before, after, store, &RemovalCredits::default())
+}
+
+/// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52, 3c-57, 3c-62), between two `tree_hashes` snapshots taken around one
 /// export. Every file whose bytes or name changed is listed, lies under a listed Also folder, or is credited to the one
 /// listed entry that causes it, by one of four kinds, each bound to its entry, its folder and its direction:
 /// (a) `<document>.recovery` REMOVED, beside a listed document the export saves (`sdc.toml`, `sdc-project.toml`: the
 ///     two `AppModel::save` writes and clears a recovery for);
-/// (b) the old case spelling of a listed JSON REMOVED, in that JSON's own folder;
+/// (b) the selected case twin of a listed guarded JSON REMOVED, with the hash its writer recorded before Export;
 /// (c) ONE `<stem>.<digits>.toml` CREATED beside a listed NIF record, holding that record's bytes from before (the record
 ///     moved aside, Note GD25); the credit is used up, so a second such file fails;
 /// (d) the autosave `nif-edits\<hash>.toml` of a listed NIF record's data path REMOVED, under the session's own scan
@@ -385,11 +441,12 @@ pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
 ///
 /// An entry changed when its own path, a file credited to it or (a folder) a file under it changed; every entry that
 /// did not change must be marked run-dependent. Returns the violations, empty when the rules hold.
-pub fn listing_violations(
+pub fn listing_violations_with_removals(
     w: &sdc_gui::model::review::ReviewWrites,
     before: &std::collections::BTreeMap<PathBuf, String>,
     after: &std::collections::BTreeMap<PathBuf, String>,
     store: Option<&Path>,
+    removals: &RemovalCredits,
 ) -> Vec<String> {
     use sdc_gui::model::review::HOVER_ALSO_FOLDER;
     let entries = listed(w);
@@ -407,7 +464,7 @@ pub fn listing_violations(
             .iter()
             .position(|e| e.hover == HOVER_ALSO_FOLDER && p.starts_with(&e.path))
             .or_else(|| entries.iter().position(|e| e.path == *p))
-            .or_else(|| credit(p, before, after, &entries, store, &mut moved));
+            .or_else(|| credit(p, before, after, &entries, store, &mut moved, removals));
         match at {
             Some(i) => touched[i] = true,
             None => out.push(format!(
@@ -437,6 +494,7 @@ fn credit(
     entries: &[Listed],
     store: Option<&Path>,
     moved: &mut [bool],
+    removals: &RemovalCredits,
 ) -> Option<usize> {
     use sdc_gui::model::review::{HOVER_NIF_RECORD, HOVER_PROJECT_TOML, HOVER_SDC_TOML};
     let name = p.file_name()?.to_string_lossy().into_owned();
@@ -445,23 +503,21 @@ fn credit(
     let find = |f: &dyn Fn(&Listed) -> bool| entries.iter().position(f);
     if removed {
         // (a) beside a document `AppModel::save` writes.
-        let saved = |e: &Listed| e.hover == HOVER_SDC_TOML || e.hover == HOVER_PROJECT_TOML;
+        let saved = |e: &Listed| {
+            matches!(e.hover, HOVER_SDC_TOML | HOVER_PROJECT_TOML)
+                && removals.initial_saves.contains(&e.path)
+        };
         if let Some(i) = find(&|e| saved(e) && sdc_gui::crash_log::recovery_path(&e.path) == p) {
             return Some(i);
         }
-        // (b) a JSON's other spelling, in its own folder.
-        let json = |e: &Listed| {
-            e.path
-                .extension()
-                .is_some_and(|x| x.eq_ignore_ascii_case("json"))
-        };
-        let spelling = |e: &Listed| {
-            let other = e.path.file_name().unwrap_or_default().to_string_lossy();
-            e.path.parent() == p.parent()
-                && *other != *name
-                && other.to_lowercase() == name.to_lowercase()
-        };
-        if let Some(i) = find(&|e| json(e) && spelling(e)) {
+        // (b) the guarded writer's own pre-run spelling and hash.
+        if let Some(i) = find(&|e| {
+            e.hover.is_empty()
+                && removals
+                    .guarded_twins
+                    .get(&e.path)
+                    .is_some_and(|(old, sha)| old == p && before.get(p) == Some(sha))
+        }) {
             return Some(i);
         }
         // (d) the autosave of the record's data path, under the session's scan store.

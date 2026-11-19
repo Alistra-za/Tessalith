@@ -2259,6 +2259,7 @@ struct Seen {
     listed: std::collections::BTreeSet<std::path::PathBuf>,
     changed: std::collections::BTreeSet<std::path::PathBuf>,
     w: sdc_gui::model::review::ReviewWrites,
+    removals: support::RemovalCredits,
 }
 
 /// The acceptance helper: open Review if it is not open, take its list, press its Export and hold the files that
@@ -2274,6 +2275,7 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     assert!(m.review.is_some(), "the header opens Review");
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     let w = (*m.review_writes()).clone();
+    let removals = support::RemovalCredits::before_export(m);
     let listed: BTreeSet<PathBuf> = support::listed(&w).into_iter().map(|e| e.path).collect();
     let before = support::tree_hashes(&[dir]);
     m.export_from_review();
@@ -2281,7 +2283,7 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
     let after = support::tree_hashes(&[dir]);
     // No scan store in these projects: no autosave can be credited.
-    let bad = support::listing_violations(&w, &before, &after, None);
+    let bad = support::listing_violations_with_removals(&w, &before, &after, None, &removals);
     assert!(bad.is_empty(), "{bad:#?}");
     let changed: BTreeSet<PathBuf> = before
         .keys()
@@ -2289,14 +2291,21 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
         .filter(|p| before.get(*p) != after.get(*p))
         .cloned()
         .collect();
-    Seen { listed, changed, w }
+    Seen {
+        listed,
+        changed,
+        w,
+        removals,
+    }
 }
 
 /// The first export of the acceptance test, checked under the listing rules (controller ruling).
 fn assert_every_changed_file_is_listed(mut m: AppModel, dir: &std::path::Path) {
     let out = m.output_root();
     let root = m.root.clone().unwrap();
-    let Seen { listed, changed, w } = export_and_compare(&mut m, dir);
+    let Seen {
+        listed, changed, w, ..
+    } = export_and_compare(&mut m, dir);
     // A file under a listed Also folder is that folder's entry.
     let folders = w.also_folders();
     let changed: std::collections::BTreeSet<std::path::PathBuf> = changed
@@ -2653,6 +2662,88 @@ fn snapshot(
         .collect()
 }
 
+/// Isolate one listed writer and simulate one additional removal across its export.
+fn unexpected_removal(
+    w: &sdc_gui::model::review::ReviewWrites,
+    removals: &support::RemovalCredits,
+    target: &std::path::Path,
+    gone: &std::path::Path,
+    old_hash: &str,
+) -> Vec<String> {
+    let mut w = w.clone();
+    w.outputs.retain(|e| e.path == target);
+    w.also_updated.retain(|e| e.path == target);
+    assert_eq!(support::listed(&w).len(), 1, "{target:?}");
+    support::listing_violations_with_removals(
+        &w,
+        &snapshot(&[(target, "before"), (gone, old_hash)]),
+        &snapshot(&[(target, "after")]),
+        None,
+        removals,
+    )
+}
+
+#[test]
+fn the_listing_rules_reject_a_foreign_json_twin() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let old = json.with_file_name("IRON_M.json");
+    std::fs::rename(&json, &old).unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert_eq!(
+        unexpected_removal(&s.w, &s.removals, &json, &old, "foreign").len(),
+        1
+    );
+}
+
+#[test]
+fn the_listing_rules_reject_twins_of_the_sidecar_and_pgpatcher_json() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    let side = m.sets_doc.as_ref().unwrap().sidecar_path();
+    let pgp = support::pgp_json_path(&m);
+    let mut twins = vec![];
+    for path in [side, pgp] {
+        let old = path.with_file_name(path.file_name().unwrap().to_ascii_uppercase());
+        let sha = sdc_gui::model::history::sha256_of(&path).unwrap();
+        std::fs::rename(&path, &old).unwrap();
+        twins.push((path, old, sha));
+    }
+    m.header_export_clicked();
+    m.expire_review_json();
+    let w = m.review_writes();
+    let removals = support::RemovalCredits::before_export(&m);
+    for (path, old, sha) in twins {
+        assert_eq!(
+            unexpected_removal(&w, &removals, &path, &old, &sha).len(),
+            1,
+            "{path:?}"
+        );
+    }
+}
+
+#[test]
+fn the_listing_rules_reject_recovery_removal_by_a_record_only_save() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    m.set_json_value(
+        "landscape/rock01",
+        "specular_level",
+        Some(serde_json::json!(0.07)),
+    );
+    m.save().unwrap();
+    idle(&mut m);
+    let doc = m.sets_doc.as_ref().unwrap().path().to_path_buf();
+    let recovery = sdc_gui::crash_log::recovery_path(&doc);
+    std::fs::write(&recovery, "crash").unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert!(s.changed.contains(&doc) && recovery.is_file());
+    assert_eq!(
+        unexpected_removal(&s.w, &s.removals, &doc, &recovery, "crash").len(),
+        1
+    );
+}
+
 /// A list of `also_updated` entries alone: (path, hover, marked).
 fn list_of(
     entries: &[(&std::path::Path, &'static str, bool)],
@@ -2734,8 +2825,10 @@ fn the_listing_rules_credit_a_recovery_file_only_beside_a_saved_document() {
         }],
         ..list_of(&[(doc, HOVER_PROJECT_TOML, false)])
     };
+    let mut removals = support::RemovalCredits::default();
+    removals.initial_saves.insert(doc.to_path_buf());
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations(&w, &snapshot(b), &snapshot(a), None)
+        support::listing_violations_with_removals(&w, &snapshot(b), &snapshot(a), None, &removals)
     };
     let beside_doc = Path::new(r"C:\p\sdc-project.toml.recovery");
     assert_eq!(
@@ -2759,6 +2852,11 @@ fn the_listing_rules_credit_an_old_spelling_only_of_a_json_in_its_folder() {
     use std::path::Path;
     let json = Path::new(r"C:\e\m\iron_m.json");
     let dds = Path::new(r"C:\e\m\iron.dds");
+    let twin = Path::new(r"C:\e\m\IRON_M.json");
+    let mut removals = support::RemovalCredits::default();
+    removals
+        .guarded_twins
+        .insert(json.to_path_buf(), (twin.to_path_buf(), "old".into()));
     let w = sdc_gui::model::review::ReviewWrites {
         outputs: [json, dds]
             .iter()
@@ -2770,17 +2868,15 @@ fn the_listing_rules_credit_an_old_spelling_only_of_a_json_in_its_folder() {
         ..Default::default()
     };
     let check = |gone: &Path| {
-        support::listing_violations(
+        support::listing_violations_with_removals(
             &w,
             &snapshot(&[(json, "1"), (dds, "1"), (gone, "old")]),
             &snapshot(&[(json, "2"), (dds, "2")]),
             None,
+            &removals,
         )
     };
-    assert_eq!(
-        check(Path::new(r"C:\e\m\IRON_M.json")),
-        Vec::<String>::new()
-    );
+    assert_eq!(check(twin), Vec::<String>::new());
     assert_eq!(
         check(Path::new(r"C:\e\M\iron_m.json")).len(),
         1,
@@ -2798,8 +2894,10 @@ fn the_listing_rules_credit_a_recovery_file_only_when_it_is_removed() {
     let doc = Path::new(r"C:\p\sdc.toml");
     let rec = Path::new(r"C:\p\sdc.toml.recovery");
     let w = list_of(&[(doc, HOVER_SDC_TOML, false)]);
+    let mut removals = support::RemovalCredits::default();
+    removals.initial_saves.insert(doc.to_path_buf());
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations(&w, &snapshot(b), &snapshot(a), None)
+        support::listing_violations_with_removals(&w, &snapshot(b), &snapshot(a), None, &removals)
     };
     assert_eq!(
         check(&[(doc, "old"), (rec, "crash")], &[(doc, "new")]),
