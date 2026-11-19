@@ -169,3 +169,11 @@ fn an_unknown_code_in_a_table_without_outer_pipes_is_found() {
         "{faults:?}"
     );
 }
+
+#[test]
+fn a_whole_table_inside_a_fence_is_not_read() {
+    let page = format!(
+        "{TABLE}\n```\n| Code | Severity | Meaning |\n|---|---|---|\n| `CCC-THREE` | info | c |\n```\n"
+    );
+    assert_eq!(check(&page, &two()), Vec::<String>::new());
+}
