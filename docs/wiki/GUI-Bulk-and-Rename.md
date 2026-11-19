@@ -6,6 +6,8 @@ For anyone fixing many textures or sets at once, reading files under corrected n
 
 Ctrl+click adds or removes one entry, Shift+click selects the range in the order shown, and Ctrl+A selects everything shown. Helper rows take Ctrl+click and Shift+click too. Textures and sets are never selected together, and entries a filter hides stay selected and are edited.
 
+A set with no files of its own is always selected on its own. Ctrl+A in the Sets column selects the visible sets that have files of their own. <!-- D:JV3 -->
+
 ## Editing them together
 
 With two or more textures selected, the centre shows their settings in one panel. A row only writes when you touch it, and it writes every selected texture that can take the value; the reasons for the others are on hover. **↺** resets a field on all of them, even a locked one. With several sets selected, chips pick which of their maps to edit. **Re-encode n DDS files** does for the selected DDS inputs what **Re-encode this file** does for one ([Texture settings](GUI-Texture-Panel.md#dds-files-in-the-folder)).
