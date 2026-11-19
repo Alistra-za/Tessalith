@@ -1630,6 +1630,36 @@ fn a_share_writes_no_data_over_the_users_alpha_under_another_spelling() {
     assert!(auto_data(&m).is_empty());
 }
 
+/// N8-a: a file whose only `[files]` table is spelled without the extension. The share step's `data` would land in
+/// that table, where no later step could tell it from the user's and take it back: the share writes nothing.
+#[test]
+fn a_share_writes_no_data_into_an_extensionless_table() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n\"]\nsubtype = \"pbr_normal\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table under the full name"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "subtype"),
+        Some(json!("pbr_normal")),
+        "precondition: read through the extension-less spelling"
+    );
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        None,
+        "no data written"
+    );
+    assert!(auto_data(&m).is_empty());
+}
+
 /// N8-a (finding 1): a listed key whose own `[files]` table is gone, with the user's `data` under the extension-less
 /// spelling. `file_value` falls back to that table, but it is not the one the share step writes: ending the share
 /// leaves the user's `data`.
