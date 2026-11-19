@@ -582,8 +582,9 @@ pub fn enter(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
 }
 
 fn enter_inner(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
-    crate::app_data();
-    let d = tempfile::tempdir().unwrap();
+    // the project folder goes in the one process-wide temp folder that holds the redirected app data, beside it (not in
+    // it: the key step hashes the app data), so everything the walk writes is under one temp root
+    let d = tempfile::tempdir_in(crate::app_data()).unwrap();
     let (mut h, run) = if s.fixture == NO_PROJECT {
         let m = AppModel::new(GuiSettings::default(), None, crate::support::session());
         let picker = Arc::new(fixtures::DriverPicker::default());
@@ -789,6 +790,19 @@ fn the_start_screen_text_is_not_on_an_open_project() {
     crate::app_data();
     let (h, _) = fixtures::start("demo", d.path(), false).unwrap();
     assert!(!holds(&snapshot(&h), start.marker));
+}
+
+/// Everything a screen of the list writes is under one temp root: its project folder and the redirected app data are
+/// both inside the process-wide temp folder, and neither inside the other.
+#[test]
+fn a_screens_folders_share_one_temp_root() {
+    let start = SCREENS.iter().find(|s| s.fixture == NO_PROJECT).unwrap();
+    let (d, _h) = enter(start, vec2_1280()).unwrap();
+    let root = crate::app_data();
+    let app_data = PathBuf::from(std::env::var_os("APPDATA").unwrap());
+    assert!(d.path().starts_with(root), "{:?} not in {root:?}", d.path());
+    assert!(app_data.starts_with(root), "{app_data:?} not in {root:?}");
+    assert!(!d.path().starts_with(&app_data) && !app_data.starts_with(d.path()));
 }
 
 #[test]

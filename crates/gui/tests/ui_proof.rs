@@ -100,14 +100,16 @@ fn play(h: &mut app_harness::H, run: &fixtures::Run, lines: &[&str], done: usize
     }
 }
 
-/// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process; every test that starts the app calls this.
-fn app_data() {
+/// `%APPDATA%` and `%LOCALAPPDATA%` in a temp dir for the whole process (its `appdata` folder); every test that starts
+/// the app calls this. Returns that temp dir: the walk's screens make their project folders in it, beside `appdata`.
+fn app_data() -> &'static std::path::Path {
     static DIR: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
     DIR.get_or_init(|| {
         let d = tempfile::tempdir().unwrap();
         app_harness::redirect_app_data(d.path());
         d
-    });
+    })
+    .path()
 }
 
 #[derive(Default)]
