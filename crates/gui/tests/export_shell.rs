@@ -417,6 +417,8 @@ fn a_queued_now_click_rechecks_the_sources_when_the_read_lands() {
     m.header_export_clicked();
     assert!(m.review.is_none() && m.export.running.is_none(), "queued");
     support::colour(&d.path().join("textures/g/a.png"), 91);
+    // The replan the landing starts has its result held, so the state right after the read is the test's to look at.
+    m.hold_plan_results = true;
     let end = std::time::Instant::now() + Duration::from_secs(60);
     while m.votes_pending() {
         assert!(std::time::Instant::now() < end, "the read never landed");
@@ -427,7 +429,8 @@ fn a_queued_now_click_rechecks_the_sources_when_the_read_lands() {
         "the read landed over a changed source: nothing may start on the old plan"
     );
     assert!(m.full_plan_pending(), "the changed source plans again");
-    assert!(m.wait_idle(Duration::from_secs(120)));
+    let msgs = held_plan(&mut m);
+    land_plan(&mut m, msgs);
     assert!(m.review.is_none(), "{:?}", m.dialog);
     assert!(d.path().join("export/textures/g/a.dds").is_file());
 }
@@ -920,20 +923,22 @@ fn a_scoped_review_header_is_not_stuck_on_an_answer_made_while_votes_were_pendin
     let db2 = dbdir.path().join("scan2.db");
     drop(modscan::store::Store::open(&db2).unwrap());
     m.scan_db = Some(db2);
+    // The plan's result is held and delivered by hand, so the state between the plan and its read lasts as long as
+    // the test wants (no polling for a window).
+    m.hold_plan_results = true;
     m.replan();
-    let end = std::time::Instant::now() + Duration::from_secs(60);
-    while !m.votes_pending() {
-        assert!(std::time::Instant::now() < end, "the plan never landed");
-        m.poll();
+    for x in held_plan(&mut m) {
+        m.handle_held(x);
     }
     assert!(
-        m.full_plan_pending(),
+        m.votes_pending() && m.full_plan_pending(),
         "guard: the post-plan read is pending"
     );
     // The header is drawn while it is pending: the whole-project answer is computed now (a pending plan and a NIF
     // edit both answer false).
     let _ = m.header_export_text();
     m.set_nif_review_rows(vec![]); // moves neither the view key nor the problems key
+    m.hold_plan_results = false;
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert!(m.export_scope().is_some(), "guard: still scoped");
     assert_eq!(m.header_export_text(), "Export 4 files now");
