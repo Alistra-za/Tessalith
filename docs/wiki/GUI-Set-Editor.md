@@ -31,14 +31,14 @@ Click a reason to go to its fix:
 
 One row per PGPatcher slot the set's shader uses, in slot order, at most 8. A filled slot the shader can't use stays, amber, with the reason on hover. The cubemap has no row: set it with a slot command.
 
-A heading line names the columns ("Slot", "File", "Format", "Alpha") while a row has a format dropdown. A format value cut short in a narrow window shows in full on hover. <!-- D:JR4 -->
+A heading line names the columns ("Slot", "File", "Format") while a row has a format dropdown, and "Alpha" while the Diffuse row has one. A format value cut short in a narrow window shows in full on hover. <!-- D:JR4 -->
 
 - Landscape sets add **Projected noise** and **Detail normal**. They aren't PGPatcher slots: [PBR Landscape](PBR-Landscape.md).
 - Slot 7 holds the set's `_cnr` or `_f`. With both, the row turns red, lists each with a ✕ to take one out, and export warns "_cnr and _f both use slot 7", because PGPatcher has one slot 7. A `_g` and an `_sk` on slot 3 clash the same way.
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
 - A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
 
-**Match on this** (Diffuse, Normal) is the small link mark right of the Format dropdown; hover it for its name. It makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). A linked slot has no mark: use **Matching** on the Material tab. <!-- D:JR1,JR4 -->
+**Match on this** (a filled Diffuse or Normal row of a set with a JSON entry) is the small link mark right of the Format dropdown; hover it for its name. It makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). A linked slot has no mark: use **Matching** on the Material tab. <!-- D:JR1,JR4 -->
 
 Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
@@ -51,14 +51,14 @@ Picking **Auto** or a shader outside the PBR family takes back what that pick wr
 
 ## Alpha
 
-The Diffuse row's alpha dropdown, under the "Alpha" heading, shows the texture's alpha type (**Remove**, **Cutout**, **Blend**, **Cutout + Blend**, **Data**: [Alpha](Texture-Types.md#alpha)). A pick writes `alpha.policy` as one undo step. **Confirm** sits beside it while the alpha is asked, and **↺** goes back to the inherited type once the texture has its own. <!-- D:JI5 -->
+The Diffuse row's alpha dropdown, under the "Alpha" heading, shows the texture's alpha type (**Remove**, **Cutout**, **Blend**, **Cutout + Blend**, **Data**: [Alpha](Texture-Types.md#alpha)). Picking another type writes `alpha.policy` as one undo step. **Confirm** sits beside it while the alpha is asked, and **↺** goes back to the inherited type once the texture has its own. <!-- D:JI5 -->
 
 ## Slot menus
 
 Right-click a slot row, or a member chip on a card. **Show in Explorer** there selects the source file.
 
-- **Clear**, **From this set** and **Path** are one undo step each. On a borrowed slot, From this set and Clear both drop the borrow. <!-- D:HC7 --> **Clear** on a slot that has a file of the set leaves the file out of the JSON: the row reads "Left out of the JSON: you cleared this slot." and **Use this file** gives the slot back. <!-- D:JR1 -->
-- **From another set** links the slot to a map of another set. It needs the same slot kind. A slot linked from another set shows the file and the set it comes from; click the set to open it. **Unlink** removes the link. A path you typed with **Path** that no set of the project writes reads "set by path" instead. The link turns its feature on in the JSON as a file of the set's own would ([which](GUI-PGPatcher-JSON.md#your-textures-turn-features-on)). <!-- D:JR1 -->
+- **Clear**, **From this set** and **Path** are one undo step each. On a borrowed slot, From this set and Clear both drop the borrow. <!-- D:HC7 --> On a set with a JSON entry, **Clear** on a slot with a file of the set leaves the file out of the JSON: the row reads "Left out of the JSON: you cleared this slot." and **Use this file** gives the slot back. <!-- D:JR1 -->
+- **From another set** (slots 1 to 8) links the slot to another set's map for the same game slot, so slot 7 offers Coat and Fuzz maps alike, and slot 3 Emissive and Skin. A slot linked from another set shows the file and the set it comes from; click the set to open it. **Unlink** removes the link. A path you typed with **Path** that no set writes reads "set by path" instead. **Unlink** and **Use this file** are off on a pinned slot. <!-- D:JR1 --> A linked slot counts as a file in that slot for the [automatic feature settings](GUI-PGPatcher-JSON.md#your-textures-turn-features-on).
 - On an Advanced skin set's empty **Skin wet** or **Skin detail** row, **Assign…** lists that kind of file from the set's own folder, if it's in no set or alone in a set of its own that you haven't changed. A file still waiting for a type is listed as *undecided* and is typed for the slot when you pick it. Pick a file to move it into the set, as one undo step. **From another set** borrows another set's map instead. These two slots have no Path. <!-- D:JD1 -->
 - **Pin this slot (always use this file)** keeps the slot's file as it is. A pinned slot refuses drags and slot commands, bulk edits skip it (*slot locked*), and automatic re-typing leaves it alone. Pinning the diffuse of an Advanced skin set has a side effect: [Texture types](Texture-Types.md#suffixes). The pin never goes into the PGPatcher JSON ([where it's saved](GUI-Sets-Column.md#where-set-edits-are-saved)).
 - **Keep the original texture** / **Let PGPatcher replace the texture** toggles the slot's PGPatcher lock (`lock_diffuse`, `lock_normal`, `lock_emissive`, `lock_parallax`, `lock_rmaos`, `lock_cnr`, `lock_subsurface`) on a set that writes a PGPatcher entry. PGPatcher then leaves the mesh's own texture in that slot. The file is still exported, and the card shows a padlock, *kept by PGPatcher*. A `slotN` command on the same slot wins ("slotN overrides the lock"). There is no cubemap lock, because `lock_cubemap` would clear the slot.
@@ -69,9 +69,9 @@ Right-click a slot row, or a member chip on a card. **Show in Explorer** there s
 
 ## Packed channel sources
 
-The set's shader and maps pick the packed map, `_rmaos` or `_rfaos`; the row's title shows which. A `packing.recipe` written in `sdc.toml` still wins; when the set can't build it or the shader doesn't read its map, its [Problems](GUI-Problems.md#rows-and-their-fixes) row offers **Clear recipe**. <!-- D:JR10 -->
+The set's shader and maps pick the packed map, `_rmaos` or `_rfaos`; the row's title shows which. A `packing.recipe` written in `sdc.toml` still wins ([Clear recipe](GUI-Problems.md#clear-recipe)). <!-- D:JR10 -->
 
-Under a packed output (`_rmaos`, `_rfaos`, `_m`, `_p`), each channel has a source picker: a helper or **Value**. A long file name is cut at the front, so you can still read its suffix, and the full name shows on hover. <!-- D:JR4 --> Picking a helper adds the channel to that helper's `helper.fills` and takes it off the others, as one undo step ([Packing PBR maps](Texture-Packing.md#helper-textures)). **Value** uses the channel's `packing.fill.*` with a **Reset**; it is greyed when the channel's file feeds it by name. The engine still decides: a pick that can't fill the channel shows the helper as not used, with the reason.
+Under a packed output, each editable channel has a source picker: a helper or **Value**. A long file name is cut at the front, so you can still read its suffix, and the full name shows on hover. <!-- D:JR4 --> Picking a helper adds the channel to that helper's `helper.fills` and takes it off the others, as one undo step ([Packing PBR maps](Texture-Packing.md#helper-textures)). **Value** uses the channel's `packing.fill.*` with a **Reset**; it is greyed when the channel's file feeds it by name. The engine still decides: a pick that can't fill the channel shows the helper as not used, with the reason.
 
 ## Also export tab
 

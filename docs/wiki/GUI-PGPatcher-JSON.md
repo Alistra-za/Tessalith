@@ -23,7 +23,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 | CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, [Rename](#rename), UV and cubemap, vertex colours and depth, texture locks. |
 
-A feature's state shows once. Coat, Emissive, Glint and Fuzz have no on or off in their header: the **Features** tick says it. Subsurface shows its mode, like "Standard", in its header while the group is closed. A feature that is on but blocked reads in amber, like "on, blocked by hair". Matching shows its count, like "2 matches", or an amber "matches nothing". <!-- D:JR6 --> Hover a plain-named key ("SSS width") to see its JSON key.
+A feature's state shows once. Coat, Emissive, Glint and Fuzz have no on or off word of their own in their header: the **Features** tick says it. Subsurface shows its mode, like "Standard", in its header while the group is closed. A feature that is on but blocked gives the reason in amber, like "on, blocked by hair". <!-- D:JR6 --> Matching shows its count, like "2 matches", or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
 
 ## Your textures turn features on
 
@@ -39,7 +39,7 @@ You rarely tick features by hand. Tessalith reads the set's files:
 
 These read "(auto)", with the reason on hover, and go into the JSON. Untick one to store an explicit off, which wins over the file; ↺ removes your choice again. Remove the texture and its auto value goes with it.
 
-A slot linked from another set counts as that kind of file; a path you typed counts only when another set writes it. <!-- D:JR8 --> A slot you cleared counts as empty, even when the set has a file for it. <!-- D:JR9 -->
+A slot linked from another set counts as a file in that slot, of the kind of the row it sits on (on slot 7, the Coat or the Fuzz row). A path you typed counts the same way when it names a file some set writes, this set included. The same rules apply as for a file of the set: a setting you made yourself wins, a feature another one blocks stays off, and on PBR grass only the Subsurface row turns a key on. <!-- D:JR8 --> A slot you cleared counts as empty, even when the set has a file for it. <!-- D:JR9 -->
 
 ## Features that can't go together
 
@@ -53,7 +53,7 @@ A feature that's on without its texture blocks export, so add the texture or tur
 
 ## Values you turned off are kept
 
-Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group stays and reads "kept, not used", and you can still edit or reset them. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
+Turn Coat, Emissive, Glint or Fuzz off and its values stay. While it has values to keep, the group stays, with "kept, not used" inside it, and you can still edit or reset them; with nothing kept it goes. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
 
 ## Numbers and colours
 

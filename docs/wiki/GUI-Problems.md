@@ -45,8 +45,8 @@ A row you must act on has its fix as a button.
 | A note about a change Tessalith made for you | **Undo this change** while that step is still the last one. While it has the button the note stays in the list, after the problems. <!-- D:FC3,JO3 --> |
 | `CHAN-NORMAL-LENGTH`, a short normal | **Rebuild Z**, which sets the file's `channels.reconstruct_z`. On a file you already exported the row then reads *Rebuild Z is on for this file: export again to rewrite it*, a queued note with no button, until the next export. <!-- D:JO9 --> |
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
-| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). For the set's packed output (`_rmaos`, `_rfaos`) there is no **Remove from set**: **Clear recipe**, then **Change shader…**, when a `packing.recipe` is written; otherwise **Change shader…** alone. <!-- D:JO15,JR10 --> |
-| `PACK-RECIPE-CONFLICT`, `PACK-RECIPE-UNBUILDABLE` | **Clear recipe** removes a `packing.recipe` the set can't build, or one its `_rmaos` and `_rfaos` entries disagree on, as one undo step, so the shader and the maps decide again. It shows only when the recipe is written on those entries in `sdc.toml`; a recipe from a preset or the project gets no button. <!-- D:JR10 --> |
+| `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). For the set's packed output (`_rmaos`, `_rfaos`) there is no **Remove from set**: the row offers **Clear recipe** ([when](#clear-recipe)) and **Change shader…**, either of which answers it, or **Change shader…** alone. <!-- D:JO15,JR10 --> |
+| `PACK-RECIPE-CONFLICT`, `PACK-RECIPE-UNBUILDABLE` | **Clear recipe** ([when](#clear-recipe)), or no button. |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
 | `SHADER-NORMAL-SPECULAR`, a note: *{file} is a vanilla normal…* (a PBR set's own normal) | **Use PBR normal**, which writes `subtype = "pbr_normal"`: the alpha is dropped and any `_rmaos` in the set bakes from it. Off on a locked slot or a read-only `sdc.toml`. A DDS kept as it is gets no button and reads *{file} is a kept DDS…*: it is not converted again, so its type can't drop the alpha. A DDS set to be encoded again (`reencode = true`) gets the button. <!-- D:JP3 --> |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
@@ -63,6 +63,10 @@ A row you must act on has its fix as a button.
 | *{n} saved settings name no file in this mode ({mode})* (grey, on Project; hover lists them) | **Entries ▾** lists each `[files]` entry with its own **Remove**; **Remove all** deletes every one as one undo step. [Before you remove one](#unmatched-files-entries). <!-- D:JI6 --> |
 
 **Remove from set**, **Delete set**, **Remove match**, **Turn off {feature}**, **Turn parallax off**, **Clear read-only flag**, **Clear recipe** and **Remove aliases from {id}** run on a mouse click only. Enter and Space do nothing on them, so a key press never takes a file out of a set or switches a feature off. <!-- D:JO16 -->
+
+### Clear recipe
+
+**Clear recipe** removes a `packing.recipe` the set can't build, one its two packed files disagree on, or one that names a packed map the set's shader doesn't read, so the shader and the maps decide again. It is offered under the `cs` target when a recipe other than `auto` is written on one of this set's own `_rmaos` or `_rfaos` files in `sdc.toml`. A recipe from a project default or a preset gets no button. One Undo step removes it from both files. <!-- D:JR10 -->
 
 ### Mark as intended
 
