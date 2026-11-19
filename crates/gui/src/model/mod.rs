@@ -2255,18 +2255,19 @@ impl AppModel {
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty),
         );
         // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's batch.
+        // N8-o: one index of the project document before the batch and one after it, only when a key is listed.
         let held = self
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .filter(|_| !self.automatic_step)
-            .map(|(p, s)| shared_alpha::listed_alpha(p, s));
+            .filter(|(_, s)| !self.automatic_step && !s.auto_data().is_empty())
+            .map(|(p, s)| shared_alpha::listed_alpha(&shared_alpha::Tables::of(p), s));
         self.batch = true;
         f(self);
         self.batch = false;
         if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_ref(), self.sets_doc.as_mut())
         {
-            shared_alpha::unlist_user_data(h, p, s);
+            shared_alpha::unlist_user_data(h, &shared_alpha::Tables::of(p), s);
         }
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         if after == before {
@@ -3385,28 +3386,45 @@ impl AppModel {
         // Note JS7 (N-33, N-37): a user's step that plans again runs the shared-alpha follow-on; its starting point is
         // read before the step. An automatic step (the recorder, the fuzz switch) and a step that does not plan (JSON
         // hash records, set groups, the crash restore) do not.
-        let start = if replan && !self.automatic_step {
-            shared_alpha::before(self)
-        } else {
-            None
-        };
         let user = !self.automatic_step;
+        // N8-o: the `[files]` keys are walked at most once per document state: `pre` indexes the project document
+        // before the edit (for the starting point and the list reader), `post` after it (for the unlisting and the
+        // follow-on). Neither is built when no reader needs it.
+        let listed = user
+            && self
+                .sets_doc
+                .as_ref()
+                .is_some_and(|s| !s.auto_data().is_empty());
+        let follows = user && replan && self.target == engine::config::Target::Cs;
+        let pre = (listed || follows)
+            .then(|| self.project.as_ref().map(shared_alpha::Tables::of))
+            .flatten();
+        let start = pre
+            .as_ref()
+            .filter(|_| follows)
+            .and_then(|t| shared_alpha::before(self, t));
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
         // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
-        let held = user.then(|| shared_alpha::listed_alpha(p, s));
+        let held = pre
+            .as_ref()
+            .filter(|_| listed)
+            .map(|t| shared_alpha::listed_alpha(t, s));
         f(p, s);
+        let mut post = None;
         if let Some(h) = &held {
-            shared_alpha::unlist_user_data(h, p, s);
+            let t = post.insert(shared_alpha::Tables::of(p));
+            shared_alpha::unlist_user_data(h, t, s);
         }
         // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
         let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
         // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
         if let Some(b) = start.as_ref().filter(|_| changed) {
-            self.follow_shared(b);
+            let t = post.unwrap_or_else(|| shared_alpha::Tables::of(p));
+            self.follow_shared(b, &t);
         }
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;

@@ -2702,3 +2702,51 @@ fn an_empty_borrower_is_not_gone_while_a_files_plan_is_out() {
     assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
     settle(&mut m);
 }
+
+/// N8-o (round 3, B5): one setting changed in a settled cs project with 4,000 `[files]` tables and 1,000 listed keys
+/// walks the `[files]` keys at most once per document state (before the edit, after it): the list reader, the
+/// unlisting and the follow-on share the two indexes. `armor/steel_n.png`'s table is spelled in upper case, so a
+/// per-owner read of its sub-type through the document's resolver would miss the exact spelling and walk every key; it
+/// goes through the index instead. The real step runs: the user's edit, then the follow-on, which clears the listed
+/// keys no regular set shares.
+#[test]
+fn a_step_walks_the_files_keys_once_per_document_state() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let mut toml = String::from("[files.'ARMOR/STEEL_N.PNG']\nsubtype = \"normal\"\n\n");
+    let mut listed = Vec::new();
+    for i in 0..4_000 {
+        toml.push_str(&format!(
+            "[files.\"old/f{i:04}.png\"]\nalpha.policy = \"data\"\n\n"
+        ));
+        if i % 4 == 0 {
+            listed.push(format!("\"old/f{i:04}.png\""));
+        }
+    }
+    std::fs::write(d.path().join("textures/sdc.toml"), toml).unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        format!("[project]\nauto_data = [{}]\n", listed.join(", ")),
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    settle(&mut m);
+    assert_eq!(auto_data(&m).len(), 1_000, "precondition: a long list");
+    assert!(
+        !m.project
+            .as_ref()
+            .unwrap()
+            .has_file_key("armor/steel_n.png"),
+        "precondition: the owner normal's table is spelled in another case"
+    );
+    let start = sdc_gui::project::key_walks();
+    m.edit_docs("user", None, true, |p, _| {
+        p.set_file_value("armor/steel.png", "alpha.policy", &json!("remove"))
+    });
+    let walks = sdc_gui::project::key_walks() - start;
+    assert!(
+        auto_data(&m).is_empty(),
+        "precondition: the follow-on ran and cleared the listed keys"
+    );
+    assert!(walks <= 2, "{walks} walks of the [files] keys in one step");
+}

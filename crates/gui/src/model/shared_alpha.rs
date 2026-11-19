@@ -287,7 +287,8 @@ fn borrow_targets(s: &SetsDoc) -> BTreeSet<String> {
         .collect()
 }
 
-pub(super) fn before(m: &AppModel) -> Option<Before> {
+/// `pre` is the index of the project document as it stands before the step (N8-o).
+pub(super) fn before(m: &AppModel, pre: &Tables) -> Option<Before> {
     if m.target != Target::Cs {
         return None;
     }
@@ -296,7 +297,7 @@ pub(super) fn before(m: &AppModel) -> Option<Before> {
     let sub = f
         .own_n
         .values()
-        .map(|k| (k.clone(), p.file_value(k, "subtype")))
+        .map(|k| (k.clone(), pre.subtype(k)))
         .collect();
     let targets = borrow_targets(s);
     // N8-f: the views' members are what the documents say only when the last landed full plan was asked with the
@@ -317,8 +318,8 @@ pub(super) fn before(m: &AppModel) -> Option<Before> {
 /// Review 2 Important 3: whether `k` is planned `data` after the step. The last plan answers for a sub-type the step
 /// left alone; a sub-type the step changed answers by its new type's built-in alpha (`normal`, `landscape_normal`:
 /// `data`; `pbr_normal` and a cleared type: not).
-fn already_data(f: &Facts, pre: Option<&Option<Value>>, p: &ProjectDoc, k: &str) -> bool {
-    let post = p.file_value(k, "subtype");
+fn already_data(f: &Facts, pre: Option<&Option<Value>>, tables: &Tables, k: &str) -> bool {
+    let post = tables.subtype(k);
     match pre {
         Some(pre) if *pre != post => matches!(
             post.and_then(|v| serde_json::from_value::<Subtype>(v).ok()),
@@ -420,6 +421,22 @@ impl Tables {
         at.into_iter().map(|i| self.rows.get(i)).collect()
     }
 
+    /// N8-o: the `subtype` that `ProjectDoc::file_value(key, "subtype")` reads, through the index: the table spelled
+    /// `key`, else the first (in `[files]` order) spelled as the full name in another case, else the first spelled as
+    /// the extension-less stem, as `find_key` picks it.
+    fn subtype(&self, key: &str) -> Option<Value> {
+        let (full, stem) = forms(key);
+        let first = |f: &String| self.by_lower.get(f)?.first().copied();
+        let exact = self
+            .by_lower
+            .get(&full)
+            .and_then(|at| at.iter().copied().find(|i| self.rows.get(*i).0 == key));
+        let at = exact
+            .or_else(|| first(&full))
+            .or_else(|| stem.as_ref().and_then(first))?;
+        self.rows.get(at).2.clone()
+    }
+
     /// The spellings of the tables that hold an `alpha.policy` for file `key`, with it.
     fn alpha(&self, key: &str) -> BTreeMap<String, Value> {
         self.matching(key)
@@ -517,6 +534,7 @@ fn changes(
     p: &ProjectDoc,
     s: &SetsDoc,
     touched: &BTreeSet<String>,
+    tables: &Tables,
 ) -> Changes {
     let mut c = Changes::default();
     if p.read_only() || s.read_only() {
@@ -536,9 +554,8 @@ fn changes(
     let data = Some(json!("data"));
     let raw = s.auto_data();
     let start = distinct(raw.clone());
-    // N8-a, N8-j: alpha is read as Task 6 reads it, from every `[files]` table that matches the file; the tables are
-    // read in one pass over the keys, and each file asks two lookups.
-    let tables = Tables::of(p);
+    // N8-a, N8-j, N8-o: alpha is read as Task 6 reads it, from every `[files]` table that matches the file, through the
+    // step's one index of the document after the edit; each file asks two lookups.
     // N8-f: a key any borrower makes unsure is not written either.
     for k in now.difference(&b.shared).filter(|k| !unsure.contains(*k)) {
         // N-39: a known alpha that does not vary has nothing to keep; an unknown one is kept (the safe side).
@@ -549,7 +566,7 @@ fn changes(
             && !f.locked.contains(k)
             && tables.alpha(k).is_empty()
             && tables.typed_normal(k);
-        if free && !already_data(f, b.sub.get(k), p, k) {
+        if free && !already_data(f, b.sub.get(k), tables, k) {
             // N8-e: the entry is the exact table written.
             if let Some(t) = tables.write_table(k) {
                 c.write.push(t);
@@ -593,18 +610,13 @@ fn changes(
 /// Each list entry with the `alpha.policy` of every `[files]` table that matches its file, by the table's spelling.
 pub(super) type ListedAlpha = Vec<(String, BTreeMap<String, Value>)>;
 
-/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step (one
-/// pass over the `[files]` keys, N8-j).
-pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> ListedAlpha {
-    let listed = s.auto_data();
-    if listed.is_empty() {
-        return vec![];
-    }
-    let tables = Tables::of(p);
-    listed
+/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step from
+/// `pre`, the index of the document before it (N8-o).
+pub(super) fn listed_alpha(pre: &Tables, s: &SetsDoc) -> ListedAlpha {
+    s.auto_data()
         .into_iter()
         .map(|e| {
-            let t = tables.alpha(&e);
+            let t = pre.alpha(&e);
             (e, t)
         })
         .collect()
@@ -615,17 +627,16 @@ pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> ListedAlpha {
 /// follow-on runs, so the follow-on's own writes never count. Tables are compared, not the value the file resolves
 /// to: a step that removes a table and so uncovers a `data` another table already held wrote nothing (N-27: a reset
 /// is files-only). A pick of the `data` a table already holds changes no table: `data_pick_unlists` takes that one.
-pub(super) fn unlist_user_data(held: &ListedAlpha, p: &ProjectDoc, s: &mut SetsDoc) {
+/// `post` is the index of the document after the user's edit (N8-o).
+pub(super) fn unlist_user_data(held: &ListedAlpha, post: &Tables, s: &mut SetsDoc) {
     if held.is_empty() {
         return;
     }
     let data = json!("data");
-    let tables = Tables::of(p);
     let mine: HashSet<&String> = held
         .iter()
         .filter(|(e, before)| {
-            tables
-                .alpha(e)
+            post.alpha(e)
                 .iter()
                 .any(|(t, v)| *v == data && before.get(t) != Some(&data))
         })
@@ -679,14 +690,14 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
 
 impl AppModel {
     /// Note JS7 (N-10, N-33): the follow-on at the end of a user's step on cs, inside the step, from its starting
-    /// point.
-    pub(super) fn follow_shared(&mut self, b: &Before) {
+    /// point; `post` is the step's index of the project document after the edit (N8-o).
+    pub(super) fn follow_shared(&mut self, b: &Before, post: &Tables) {
         let fx = facts(self);
         let Some(c) = self
             .project
             .as_ref()
             .zip(self.sets_doc.as_ref())
-            .map(|(p, s)| changes(&fx, b, p, s, &touched(self, b, s)))
+            .map(|(p, s)| changes(&fx, b, p, s, &touched(self, b, s), post))
         else {
             return;
         };

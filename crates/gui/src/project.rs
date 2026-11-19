@@ -248,6 +248,7 @@ pub(crate) fn find_key(t: &dyn TableLike, key: &str) -> Option<String> {
     }
     let lower = key.to_lowercase();
     let by = |want: &str| {
+        walked();
         t.iter()
             .map(|(k, _)| k)
             .find(|k| k.to_lowercase() == want)
@@ -705,6 +706,7 @@ impl ProjectDoc {
     }
 
     pub fn file_keys(&self) -> Vec<String> {
+        walked();
         self.files()
             .map(|t| t.iter().map(|(k, _)| k.to_string()).collect())
             .unwrap_or_default()
@@ -816,7 +818,24 @@ impl ProjectDoc {
     }
 }
 
-/// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    static KEY_WALKS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests (Note JS7, N8-o): how many times this thread has walked a document's `[files]` keys: a `file_keys` call, or a
+/// `find_key` pass that missed the exact spelling and compared every key.
+#[cfg(feature = "test-hooks")]
+pub fn key_walks() -> usize {
+    KEY_WALKS.with(std::cell::Cell::get)
+}
+
+/// Count one walk of the `[files]` keys (tests only; nothing in a build without `test-hooks`).
+fn walked() {
+    #[cfg(feature = "test-hooks")]
+    KEY_WALKS.with(|c| c.set(c.get() + 1));
+}
+
 /// Remove the dotted field `parts` from table `t`, and each sub-table that leaves empty; true when it was there.
 fn remove_field(t: &mut dyn TableLike, parts: &[&str]) -> bool {
     if parts.len() == 1 {
@@ -832,6 +851,7 @@ fn remove_field(t: &mut dyn TableLike, parts: &[&str]) -> bool {
     hit
 }
 
+/// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.
 fn without_ext(key: &str) -> Option<&str> {
     let dir_len = key.rfind('/').map_or(0, |i| i + 1);
     let dot = key[dir_len..].rfind('.').filter(|&d| d > 0)?;
