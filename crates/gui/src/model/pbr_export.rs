@@ -705,11 +705,17 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             untouched_root: m.untouched_root(),
         });
     }
+    // Review E1 (Task 15a): the local files the JSON names (`json_files`): a link that names a set's output is a dep as
+    // a borrow is; an own or borrowed file a `slotN` overrides is none (the set still converts its own).
     let deps = |v: &SetView| -> Vec<String> {
-        v.slots
-            .values()
-            .filter_map(|f| {
-                m.item(f.item()?)
+        json_files(v)
+            .filter_map(|f| match f {
+                JsonFile::Fill(_, fill) => fill.item(),
+                JsonFile::Linked(l) => l.item.as_deref(),
+                JsonFile::External(_) => None,
+            })
+            .filter_map(|item| {
+                m.item(item)
                     .map(|i| i.job_key.clone())
                     .filter(|j| !j.is_empty())
             })

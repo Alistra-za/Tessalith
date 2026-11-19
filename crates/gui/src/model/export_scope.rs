@@ -148,8 +148,8 @@ impl AppModel {
         self.export_sets(keys, format!("Export group {}", g.name));
     }
 
-    /// `keys` plus every set a slot of theirs borrows from, transitively. A host in an excluded group is left alone
-    /// unless it is in `keys`: its file on disk serves the borrower.
+    /// `keys` plus every set a slot of theirs borrows from or links to (a `slotN` that names its output), transitively.
+    /// A host in an excluded group is left alone unless it is in `keys`: its file on disk serves the borrower.
     fn with_hosts(&self, mut keys: BTreeSet<String>) -> BTreeSet<String> {
         let views = set_views(self);
         let excluded = self.excluded_sets();
@@ -158,10 +158,12 @@ impl AppModel {
             let Some(v) = views.iter().find(|v| v.key == k) else {
                 continue;
             };
-            for f in v.slots.values() {
-                let SlotFill::Borrowed { from, .. } = f else {
-                    continue;
-                };
+            // Review E1 (Task 15a): a `slotN` link that names a set's output brings that set in as a borrow does.
+            let borrowed = v.slots.values().filter_map(|f| match f {
+                SlotFill::Borrowed { from, .. } => Some(from),
+                _ => None,
+            });
+            for from in borrowed.chain(v.linked.values().filter_map(|l| l.from.as_ref())) {
                 let Some(h) = views.iter().find(|h| same_id(&h.id, from)) else {
                     continue;
                 };

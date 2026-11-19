@@ -1168,3 +1168,143 @@ fn with_no_link_and_no_clear_export_blocks_and_writes_what_it_did() {
         ["not in JSON: arch/lacq (not exported yet)"]
     );
 }
+
+// ---- Review E1 (Task 15a, R2): a resolved local link is a dependency exactly as a borrow is ----
+
+/// `no_albedo_pair` with a PBR set `arch/stone` (an albedo and a `_p`, written under its prefix) and a `wall_p`:
+/// `arch/leaf` has no height of its own.
+fn lender_project(dir: &Path) -> AppModel {
+    use engine::config::Subtype;
+    no_albedo_pair_with(
+        dir,
+        &[
+            ("stone.png", [120, 110, 100], Subtype::PbrAlbedo),
+            ("stone_p.png", [128, 128, 128], Subtype::Height),
+            ("wall_p.png", [100, 100, 100], Subtype::Height),
+        ],
+    )
+}
+
+/// `arch/leaf`'s slot 4 takes `arch/stone`'s height: through a borrow, or through a link to the same file.
+fn leaf_takes_stone(m: &mut AppModel, by_link: bool) {
+    if by_link {
+        let a = MenuAction::SlotLink {
+            set: "arch/leaf".into(),
+            n: 4,
+            item: "arch/stone_p.png".into(),
+        };
+        assert_eq!(m.run_menu(a), None);
+    } else {
+        m.edit_docs("share", None, true, |_, s| {
+            s.set_borrow("arch/leaf", 4, Some("arch/stone"))
+        });
+    }
+    idle(m);
+}
+
+/// Every file under `root`, as `/`-separated paths relative to it, sorted.
+fn files_under(root: &Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                let rel = p.strip_prefix(root).unwrap().to_string_lossy();
+                out.push(rel.replace('\\', "/"));
+            }
+        }
+    }
+    out.sort();
+    out
+}
+
+/// What a run left: the files under the export folder, `arch/leaf`'s entry in the written JSON, and the "not in JSON"
+/// notes.
+fn what_the_run_left(m: &AppModel) -> (Vec<String>, Option<serde_json::Value>, Vec<String>) {
+    let entry = serde_json::from_str::<serde_json::Value>(&pgp_text(m))
+        .ok()
+        .and_then(|j| {
+            j["entries"]
+                .as_array()?
+                .iter()
+                .find(|e| e["match1"] == r"arch\leaf.dds")
+                .cloned()
+        });
+    let held = notes(m)
+        .lines()
+        .filter(|l| l.starts_with("not in JSON"))
+        .map(String::from)
+        .collect();
+    (files_under(&m.export_root()), entry, held)
+}
+
+/// R2: Export set on the consumer alone, into a fresh folder: a borrow and a link to the same lender file end the same
+/// way (the lender comes in, the same files, the same entry).
+#[test]
+fn a_scoped_export_treats_a_linked_lender_as_a_borrowed_one() {
+    let run = |by_link: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = lender_project(d.path());
+        leaf_takes_stone(&mut m, by_link);
+        export_sets(&mut m, &["arch/leaf"], "Export set arch/leaf");
+        what_the_run_left(&m)
+    };
+    let (borrowed, linked) = (run(false), run(true));
+    assert!(
+        borrowed.0.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the borrow brings the lender in: {borrowed:?}"
+    );
+    assert!(borrowed.1.is_some(), "premise: {borrowed:?}");
+    assert_eq!(linked, borrowed);
+}
+
+/// R2: a lender left out of the run on purpose (an excluded group) and never exported: the entry is held with the same
+/// note whether it borrows or links the lender's file.
+#[test]
+fn an_excluded_linked_lender_holds_the_entry_as_a_borrowed_one_does() {
+    let run = |by_link: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = lender_project(d.path());
+        leaf_takes_stone(&mut m, by_link);
+        group(&mut m, "Lender", &["arch/stone"]);
+        m.set_group_excluded("Lender", true).unwrap();
+        whole(&mut m);
+        what_the_run_left(&m)
+    };
+    let (borrowed, linked) = (run(false), run(true));
+    assert!(
+        borrowed
+            .2
+            .contains(&"not in JSON: arch/leaf (not exported yet)".to_string()),
+        "premise: {borrowed:?}"
+    );
+    assert_eq!(linked, borrowed);
+}
+
+/// R2: a borrow under a link is not in the JSON, so it is no dependency of the entry: a never-exported excluded lender
+/// of that borrow holds nothing.
+#[test]
+fn a_borrow_under_a_link_is_no_dependency() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    leaf_takes_stone(&mut m, false);
+    let a = MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 4,
+        item: "arch/wall_p.png".into(),
+    };
+    assert_eq!(m.run_menu(a), None);
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    whole(&mut m);
+    let (files, entry, held) = what_the_run_left(&m);
+    assert!(!held.iter().any(|l| l.contains("arch/leaf")), "{held:?}");
+    assert!(
+        !files.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the lender was left out: {files:?}"
+    );
+    assert!(entry.is_some(), "{}", notes(&m));
+}
