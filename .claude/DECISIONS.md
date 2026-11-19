@@ -31,7 +31,7 @@ A new note goes at the end of this file and adds its letter to the index line of
 - nif: BT, CI, CM, CQ, CR, CS, CU, CV, CY, DJ, DK, GA, GC, GD, GF, GH, GP, GQ, GR
 - render3d: BT, CI, CJ, CM, CV, CX, DL, GA, GG, GJ, GL, GM, GN, GP, FM, GQ, GT, GX, GZ, IC, HX, IF, JL
 - pgpsim: AU, CM, GE
-- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT
+- Process and docs: Answers, BX, DM, FD, FG, FH, FM, HA, HB, HK, GS, GV, HM, HN, HO, GW, HP, HT, HU, HW, HX, HZ, JA, JI, JL, JM, JT, JU
 
 ## Digest
 
@@ -1955,3 +1955,8 @@ Rules from CLAUDE.md, `docs/DOCUMENTATION.md`, the mistakes logs and the `egui-u
   - Clippy with `-D warnings` (the gate's two clippy steps and CI): `clippy::exit` and `clippy::undocumented_unsafe_blocks` from the root `Cargo.toml` (JT2), and `disallowed-methods` from `crates/gui/clippy.toml` (JT3).
   - `tools/doc-lint.py` (the gate's `doc-lint` step and CI; by hand `py -3.13 -I tools\doc-lint.py`): history words over README.md, docs/gui.md and docs/wiki (JT7); "as above" and "as below" in docs/wiki; the `###` headings of each released CHANGELOG section (Main first, then Engine, GUI, CLI, Common; 0.8.0-alpha.1 allowlisted); wiki page budgets and `_Sidebar.md` coverage; at most two IMPORTANT lines a wiki page; over README.md, docs/gui.md and docs/wiki, no byte-order mark and no image with empty alt text. Six or more top-level bullets in a row print a warning and do not fail.
   - `.githooks/pre-commit` (at each commit where `core.hooksPath` is `.githooks`; neither the gate nor CI runs it), on the staged change, beside fmt, control bytes and duplicate note headings: a `.dds`, `.bsa`, `.ba2`, `.esp`, `.esm` or `.esl` outside `crates/render3d/shaders/cs/`; with `core.autocrlf=true`, a staged `.rs` whose working copy is LF (not one marked `-text` or `eol=lf`) and a CR byte in a staged text blob not marked `-text`; a `## Note` letter missing from the `## Index` block of `.claude/DECISIONS.md`; a `.claude/mistakes/*.md` entry not in the `- YYYY-MM-DD <what> → <instead> (<where>)` form.
+
+## Note JU — Tests for UI invariants and the codes page (main team, 2026-11-18)
+
+- **JU1 Every code has its row on the codes page.** `engine/tests/wiki_codes.rs` fails when a code in `Code::ALL` has no row on `docs/wiki/Diagnostic-Codes.md`, has two, or has a severity other than the engine's, and when a row names a code that does not exist. `SET-BAKE-RATIO` keeps its code under HD2 so an `allow` list naming it still loads; its row says it is no longer raised.
+- **JU2 This note's letter.** JR and JS are used by unmerged branches; the letter is checked again at the merge.

@@ -100,6 +100,7 @@ For anyone who saw a code in the Problems list or a conversion log: what it mean
 |---|---|---|---|
 | `SET-MISSING-COMPANION` | info | A PBR set lacks `_n` or a roughness member, an `_msn` lacks `_s`, or a `_flow` lacks `_n`. | Add it, or ignore. |
 | `SET-COMPANION-DDS` | warning | The companion exists only as DDS, so there is no bake. | Supply the source, or opt the DDS in. |
+| `SET-BAKE-RATIO` | warning | Tessalith no longer raises it: a roughness, `_rmaos` or complex `_m` map of another size than its `_n` gets the variance bake. An `allow` list may still name it, so an older config keeps loading. | Nothing to fix; delete it from the list when you like. |
 | `SET-EDIT-STALE` | info | A set edit or `set:` override names a set or file that doesn't exist. | Fix or remove it. |
 | `SUG-LOW-CONFIDENCE` | blocking | A sub-type or alpha meaning is unconfirmed. | Confirm it; High ones can be accepted in bulk. A lone file with an unknown suffix has no suggestion: [assign a type](Texture-Types.md#how-files-form-a-set). Acknowledging the code converts nothing that has no suggestion. On the command line: [CLI reference](CLI-Reference.md#why-you-usually-want---accept-suggestions-high). |
 | `SUG-CONTRADICTION` | warning | The content contradicts the suffix. | Confirm or change the sub-type. |

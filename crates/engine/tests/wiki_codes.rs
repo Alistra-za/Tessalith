@@ -4,12 +4,6 @@ use engine::codes::Code;
 use std::collections::BTreeMap;
 use std::path::Path;
 
-/// Codes that have no row on purpose. Each entry names why and when it goes.
-const NO_ROW: &[&str] = &[
-    // Never raised since Note HD2; removed in the next commit.
-    "SET-BAKE-RATIO",
-];
-
 /// The rows of the page: code -> severity word, in the order the page lists them. A row is a table line whose first
 /// cell is one code in backticks.
 fn page_rows(page: &str) -> Vec<(String, String)> {
@@ -40,9 +34,6 @@ fn every_code_has_its_row_on_the_codes_page_and_every_row_names_a_code() {
     let mut faults = Vec::new();
     for code in Code::ALL {
         let name = code.as_str();
-        if NO_ROW.contains(&name) {
-            continue;
-        }
         match by_code.get(name).map(Vec::as_slice) {
             None => faults.push(format!(
                 "{name}: no row on the codes page; add `| `{name}` | <severity> | ... |` to docs/wiki/Diagnostic-Codes.md"
@@ -69,14 +60,4 @@ fn every_code_has_its_row_on_the_codes_page_and_every_row_names_a_code() {
         }
     }
     assert!(faults.is_empty(), "{}", faults.join("\n"));
-}
-
-#[test]
-fn the_allowlist_names_only_codes_that_exist() {
-    for name in NO_ROW {
-        assert!(
-            Code::parse(name).is_some(),
-            "{name} is in NO_ROW but is not a code; delete the entry"
-        );
-    }
 }
