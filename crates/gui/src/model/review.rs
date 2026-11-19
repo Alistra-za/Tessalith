@@ -283,7 +283,7 @@ impl Produced {
             .borrow_mut()
             .entry(dir.to_path_buf())
             .or_insert_with(|| {
-                let resolved = super::target_mod::resolve_destination(dir);
+                let resolved = super::target_mod::resolve_review_directory(dir);
                 let key = record_key(resolved.as_deref().unwrap_or(dir));
                 (PathBuf::from(key), resolved.is_some())
             })

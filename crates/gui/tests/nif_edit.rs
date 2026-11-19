@@ -10851,8 +10851,7 @@ fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
     let model = &h.state().model;
     let w = model.review_writes_at_open();
     let removals = pending.after_export(model);
-    let bad =
-        support::listing_violations_with_removals(&w, &before, &after, Some(d.path()), &removals);
+    let bad = support::compare_listing(&w, &before, &after, Some(d.path()), &removals).violations;
     assert!(bad.is_empty(), "{bad:#?}");
 }
 

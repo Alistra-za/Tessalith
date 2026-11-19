@@ -2286,18 +2286,19 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     let before = support::tree_hashes(&[dir]);
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
-    assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
+    assert!(
+        pending.started(m) && m.export.summary.is_some(),
+        "{:?}",
+        m.export.notes
+    );
     let removals = pending.after_export(m);
     let after = support::tree_hashes(&[dir]);
     // No scan store in these projects: no autosave can be credited.
-    let bad = support::listing_violations_with_removals(&w, &before, &after, None, &removals);
-    assert!(bad.is_empty(), "{bad:#?}");
-    let changed: BTreeSet<PathBuf> = before
-        .keys()
-        .chain(after.keys())
-        .filter(|p| before.get(*p) != after.get(*p))
-        .cloned()
-        .collect();
+    let support::ListingComparison {
+        changed,
+        violations,
+    } = support::compare_listing(&w, &before, &after, None, &removals);
+    assert!(violations.is_empty(), "{violations:#?}");
     Seen {
         listed,
         changed,
@@ -2681,13 +2682,14 @@ fn unexpected_removal(
     w.outputs.retain(|e| e.path == target);
     w.also_updated.retain(|e| e.path == target);
     assert_eq!(support::listed(&w).len(), 1, "{target:?}");
-    support::listing_violations_with_removals(
+    support::compare_listing(
         &w,
         &snapshot(&[(target, "before"), (gone, old_hash)]),
         &snapshot(&[(target, "after")]),
         None,
         removals,
     )
+    .violations
 }
 
 #[test]
@@ -2719,6 +2721,44 @@ fn a_skipped_cm_finisher_cannot_credit_its_owned_twins_removal() {
 }
 
 #[test]
+#[cfg(windows)]
+fn a_failed_initial_save_cannot_credit_the_previous_cm_exports_twin() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let old = json.with_file_name("IRON_M.json");
+    std::fs::rename(&json, &old).unwrap();
+    let hash = sdc_gui::model::history::sha256_of(&old).unwrap();
+    m.set_field("m/iron.png", "mips.filter", serde_json::json!("tent"));
+    idle(&mut m);
+    let settings = m.project.as_ref().unwrap();
+    assert!(settings.is_dirty());
+    let lock = std::fs::File::options()
+        .read(true)
+        .share_mode(1)
+        .open(settings.path())
+        .unwrap();
+    m.header_export_clicked();
+    m.expire_review_json();
+    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
+    let w = m.review_writes();
+    let pending = support::PendingRemovals::before_export(&m);
+    m.export_from_review();
+    idle(&mut m);
+    drop(lock);
+    assert!(matches!(m.dialog, Some(Dialog::Error(_))), "{:?}", m.dialog);
+    assert!(m.project.as_ref().unwrap().is_dirty());
+    assert_eq!(sdc_gui::model::history::sha256_of(&old).unwrap(), hash);
+    let bad = unexpected_removal(&w, &pending.after_export(&m), &json, &old, &hash);
+    assert_eq!(
+        bad,
+        [format!(
+            "changed, not listed: {old:?} (before true, after false)"
+        )]
+    );
+}
+
+#[test]
 fn the_listing_rules_reject_a_foreign_json_twin() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, json) = cm_exported_once(d.path());
@@ -2738,7 +2778,7 @@ fn the_listing_rules_reject_twins_of_the_sidecar_and_pgpatcher_json() {
     let side = m.sets_doc.as_ref().unwrap().sidecar_path();
     let pgp = support::pgp_json_path(&m);
     let mut twins = vec![];
-    for path in [side, pgp] {
+    for path in [side, pgp.clone()] {
         let old = path.with_file_name(path.file_name().unwrap().to_ascii_uppercase());
         let sha = sdc_gui::model::history::sha256_of(&path).unwrap();
         std::fs::rename(&path, &old).unwrap();
@@ -2746,16 +2786,17 @@ fn the_listing_rules_reject_twins_of_the_sidecar_and_pgpatcher_json() {
     }
     m.header_export_clicked();
     m.expire_review_json();
-    let w = m.review_writes();
-    let pending = support::PendingRemovals::before_export(&m);
-    assert!(m.review_gate().is_ok());
-    m.export_from_review();
-    idle(&mut m);
+    let upper = pgp.with_file_name("TEXTURES.JSON");
+    let before = support::tree_hashes(&[pgp.parent().unwrap()]);
+    assert!(before.contains_key(&upper) && !before.contains_key(&pgp));
+    let s = export_and_compare(&mut m, d.path());
     assert!(m.export.summary.as_ref().is_some_and(|s| s.failed == 0));
-    let removals = pending.after_export(&m);
+    let after = support::tree_hashes(&[pgp.parent().unwrap()]);
+    assert!(after.contains_key(&pgp) && !after.contains_key(&upper));
+    assert!(s.changed.contains(&pgp) && !s.changed.contains(&upper));
     for (path, old, sha) in twins {
         assert_eq!(
-            unexpected_removal(&w, &removals, &path, &old, &sha).len(),
+            unexpected_removal(&s.w, &s.removals, &path, &old, &sha).len(),
             1,
             "{path:?}"
         );
@@ -2868,7 +2909,7 @@ fn the_listing_rules_credit_a_recovery_file_only_beside_a_saved_document() {
     let mut removals = support::RemovalCredits::default();
     removals.initial_saves.insert(doc.to_path_buf());
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations_with_removals(&w, &snapshot(b), &snapshot(a), None, &removals)
+        support::compare_listing(&w, &snapshot(b), &snapshot(a), None, &removals).violations
     };
     let beside_doc = Path::new(r"C:\p\sdc-project.toml.recovery");
     assert_eq!(
@@ -2908,13 +2949,14 @@ fn the_listing_rules_credit_an_old_spelling_only_of_a_json_in_its_folder() {
         ..Default::default()
     };
     let check = |gone: &Path| {
-        support::listing_violations_with_removals(
+        support::compare_listing(
             &w,
             &snapshot(&[(json, "1"), (dds, "1"), (gone, "old")]),
             &snapshot(&[(json, "2"), (dds, "2")]),
             None,
             &removals,
         )
+        .violations
     };
     assert_eq!(check(twin), Vec::<String>::new());
     assert_eq!(
@@ -2937,7 +2979,7 @@ fn the_listing_rules_credit_a_recovery_file_only_when_it_is_removed() {
     let mut removals = support::RemovalCredits::default();
     removals.initial_saves.insert(doc.to_path_buf());
     let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
-        support::listing_violations_with_removals(&w, &snapshot(b), &snapshot(a), None, &removals)
+        support::compare_listing(&w, &snapshot(b), &snapshot(a), None, &removals).violations
     };
     assert_eq!(
         check(&[(doc, "old"), (rec, "crash")], &[(doc, "new")]),
@@ -3264,6 +3306,7 @@ fn a_case_twin_beside_a_foreign_json_lists_the_json_and_counts_the_twin_under_it
     assert!(twin.is_file(), "guard: both spellings are on disk");
     let s = export_and_compare(&mut m, d.path());
     assert!(!twin.exists(), "the writer removed its own old spelling");
+    assert!(s.changed.contains(&twin) && !s.changed.contains(&json));
     assert_eq!(std::fs::read(&json).unwrap(), b"{ \"theirs\": true }\n");
     assert!(s.listed.contains(&json), "{:?}", s.w.outputs);
 }
@@ -3470,6 +3513,59 @@ fn a_directory_at_a_copy_destination_cannot_feed_a_later_copy_or_profile() {
     for path in [&leaf, &odd, &profile, doc.path(), &doc.sidecar_path()] {
         assert!(!s.changed.contains(path), "{path:?}");
         assert!(!s.listed.contains(path), "{path:?} in {:?}", s.listed);
+    }
+}
+
+#[test]
+fn a_dangling_junction_marks_the_borrowed_copy_and_both_records() {
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
+    use sdc_gui::model::set_groups::GroupTarget;
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    let src = d.path().join("textures");
+    for folder in ["alias", "real"] {
+        support::colour(&src.join(folder).join("rock.png"), 90);
+        support::flat(&src.join(folder).join("rock_n.png"));
+    }
+    support::colour(&src.join("other/leaf.png"), 90);
+    let mut m = support::opened_as_the_app(src, d.path().join("export"));
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    assert_eq!(
+        m.drop_choice("alias/rock_n.png", "other/leaf", DropChoice::Share),
+        DropOutcome::Joined
+    );
+    m.move_to_group(&["alias/rock".into()], GroupTarget::New("Owner".into()))
+        .unwrap();
+    m.set_group_excluded("Owner", true).unwrap();
+    idle(&mut m);
+    m.save().unwrap();
+    let out = m.export_root().join("textures");
+    std::fs::create_dir_all(&out).unwrap();
+    let real = out.join("real");
+    dir_link(&out.join("alias"), &real);
+    assert!(!real.exists());
+    assert!(m.sets_doc.as_ref().unwrap().copy_shas().is_empty());
+
+    let s = export_and_compare(&mut m, d.path());
+    let copy = out.join("other/leaf_n.dds");
+    assert_eq!(
+        std::fs::read(&copy).unwrap(),
+        std::fs::read(real.join("rock_n.dds")).unwrap()
+    );
+    let doc = m.sets_doc.as_ref().unwrap();
+    for (path, hover) in [
+        (copy.as_path(), HOVER_COPY),
+        (doc.path(), HOVER_PROJECT_TOML),
+        (&doc.sidecar_path(), HOVER_GENERATED),
+    ] {
+        assert!(s.changed.contains(path), "{path:?}");
+        assert!(
+            s.w.also_updated
+                .iter()
+                .any(|e| e.hover == hover && e.path == path && e.marked),
+            "{path:?}"
+        );
     }
 }
 

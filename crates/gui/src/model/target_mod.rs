@@ -175,7 +175,7 @@ pub fn overlaps(a: &Path, b: &Path) -> bool {
 
 fn canon(p: &Path) -> PathBuf {
     // The overlap check walks on past any failed read, as it always has.
-    let (full, _) = nearest_existing(p);
+    let (full, _) = nearest_existing(p, |_| true);
     PathBuf::from(full.to_string_lossy().to_lowercase())
 }
 
@@ -184,13 +184,22 @@ fn canon(p: &Path) -> PathBuf {
 /// case fold), so a missing folder under a retargeted junction is another destination. `None` when a read failed for
 /// another reason than "not found", or nothing on the path resolved: an indeterminate read, which equals nothing.
 pub(super) fn resolve_destination(p: &Path) -> Option<PathBuf> {
-    let (full, sure) = nearest_existing(p);
+    let (full, sure) = nearest_existing(p, |_| true);
+    sure.then_some(full)
+}
+
+/// A job can create a dangling link's target during export. Only append a component when the entry itself is absent.
+pub(super) fn resolve_review_directory(p: &Path) -> Option<PathBuf> {
+    let (full, sure) = nearest_existing(p, |part| {
+        part.symlink_metadata()
+            .is_err_and(|e| e.kind() == std::io::ErrorKind::NotFound)
+    });
     sure.then_some(full)
 }
 
 /// `p` as the canonical path of its nearest existing ancestor plus the missing components below it, and whether every
-/// read on the way was sure: false when one failed for another reason than "not found", or none resolved.
-fn nearest_existing(p: &Path) -> (PathBuf, bool) {
+/// failed read was an accepted missing component and an ancestor resolved.
+fn nearest_existing(p: &Path, missing: impl Fn(&Path) -> bool) -> (PathBuf, bool) {
     let (abs, mut sure) = match std::path::absolute(p) {
         Ok(a) => (a, true),
         Err(_) => (p.to_path_buf(), false),
@@ -200,7 +209,7 @@ fn nearest_existing(p: &Path) -> (PathBuf, bool) {
     let base = loop {
         match cur.canonicalize() {
             Ok(c) => break c,
-            Err(e) => sure &= e.kind() == std::io::ErrorKind::NotFound,
+            Err(e) => sure = sure && e.kind() == std::io::ErrorKind::NotFound && missing(cur),
         }
         match (cur.file_name(), cur.parent()) {
             (Some(n), Some(par)) => {

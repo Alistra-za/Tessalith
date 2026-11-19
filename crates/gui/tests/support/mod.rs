@@ -6,6 +6,7 @@ use engine::config::{AlphaPolicy, GreenConvention, Subtype};
 use image::{ImageBuffer, Luma, Rgb, Rgba};
 use sdc_gui::model::{Answer, AppModel};
 use sdc_gui::settings::GuiSettings;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -383,6 +384,8 @@ pub struct RemovalCredits {
 /// Capture ownership before Export, then match each candidate to its finisher's completed phase.
 #[derive(Default)]
 pub struct PendingRemovals {
+    drawer_epoch: u64,
+    folder_epoch: u64,
     initial_saves: std::collections::BTreeSet<PathBuf>,
     twins: Vec<(sdc_gui::model::review::JsonKind, PathBuf, PathBuf, String)>,
 }
@@ -391,7 +394,11 @@ impl PendingRemovals {
     pub fn before_export(m: &AppModel) -> Self {
         use sdc_gui::model::history::{case_twin, record_key, records_at};
         use sdc_gui::model::review::JsonKind;
-        let mut credits = Self::default();
+        let mut credits = Self {
+            drawer_epoch: m.drawer_epoch,
+            folder_epoch: m.folder_epoch,
+            ..Self::default()
+        };
         // Includes tentative stashed edits and dirty writable sets. Automatic-only sdc.toml edits also get saved.
         credits
             .initial_saves
@@ -424,7 +431,15 @@ impl PendingRemovals {
         credits
     }
 
+    // A new export advances the drawer epoch. Opening a folder advances both epochs.
+    pub fn started(&self, m: &AppModel) -> bool {
+        self.folder_epoch == m.folder_epoch && self.drawer_epoch != m.drawer_epoch
+    }
+
     pub fn after_export(self, m: &AppModel) -> RemovalCredits {
+        if !self.started(m) {
+            return RemovalCredits::default();
+        }
         RemovalCredits {
             initial_saves: self.initial_saves,
             guarded_twins: self
@@ -444,7 +459,44 @@ pub fn listing_violations(
     after: &std::collections::BTreeMap<PathBuf, String>,
     store: Option<&Path>,
 ) -> Vec<String> {
-    listing_violations_with_removals(w, before, after, store, &RemovalCredits::default())
+    compare_listing(w, before, after, store, &RemovalCredits::default()).violations
+}
+
+pub struct ListingComparison {
+    pub changed: BTreeSet<PathBuf>,
+    pub violations: Vec<String>,
+}
+
+/// The removed spelling must still open the single surviving entry under its listed name.
+fn replaced_spelling(
+    old: &Path,
+    entries: &[Listed],
+    before: &BTreeMap<PathBuf, String>,
+    after: &BTreeMap<PathBuf, String>,
+) -> bool {
+    if !old.symlink_metadata().is_ok_and(|m| m.is_file()) {
+        return false;
+    }
+    let Some(name) = old.file_name().and_then(|n| n.to_str()) else {
+        return false;
+    };
+    let folded = name.to_lowercase();
+    let same_name = |p: &Path| {
+        p.parent() == old.parent()
+            && p.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_lowercase() == folded)
+    };
+    let mut surviving = after.keys().filter(|p| same_name(p));
+    let Some(new) = surviving.next() else {
+        return false;
+    };
+    surviving.next().is_none()
+        && !before.keys().any(|p| p != old && same_name(p))
+        && entries.iter().any(|e| e.path == *new)
+        && old
+            .canonicalize()
+            .is_ok_and(|resolved| new.canonicalize().ok() == Some(resolved))
 }
 
 /// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52, 3c-57, 3c-62), between two `tree_hashes` snapshots taken around one
@@ -459,14 +511,14 @@ pub fn listing_violations(
 ///     store `store` only (Note GD5).
 ///
 /// An entry changed when its own path, a file credited to it or (a folder) a file under it changed; every entry that
-/// did not change must be marked run-dependent. Returns the violations, empty when the rules hold.
-pub fn listing_violations_with_removals(
+/// did not change must be marked run-dependent. Returns the changed paths and any violations.
+pub fn compare_listing(
     w: &sdc_gui::model::review::ReviewWrites,
     before: &std::collections::BTreeMap<PathBuf, String>,
     after: &std::collections::BTreeMap<PathBuf, String>,
     store: Option<&Path>,
     removals: &RemovalCredits,
-) -> Vec<String> {
+) -> ListingComparison {
     use sdc_gui::model::review::HOVER_ALSO_FOLDER;
     let entries = listed(w);
     // (c): the records whose one move aside has been seen.
@@ -477,8 +529,10 @@ pub fn listing_violations_with_removals(
         .keys()
         .chain(after.keys())
         .filter(|p| before.get(*p) != after.get(*p))
-        .collect::<std::collections::BTreeSet<_>>();
-    for p in changed {
+        .filter(|p| after.contains_key(*p) || !replaced_spelling(p, &entries, before, after))
+        .cloned()
+        .collect::<BTreeSet<_>>();
+    for p in &changed {
         let at = entries
             .iter()
             .position(|e| e.hover == HOVER_ALSO_FOLDER && p.starts_with(&e.path))
@@ -501,7 +555,10 @@ pub fn listing_violations_with_removals(
             ));
         }
     }
-    out
+    ListingComparison {
+        changed,
+        violations: out,
+    }
 }
 
 /// The listed entry a changed file not on the list counts under, by the four kinds of `listing_violations`, each bound
