@@ -107,6 +107,10 @@ impl AppModel {
         if self.export.running.is_some() {
             return;
         }
+        // Ruling 3c-32: before the scope changes.
+        if self.dialog_drops_click() {
+            return;
+        }
         let keys = self.with_hosts(keys);
         self.set_scope(Some(ExportScope { keys, label }));
         self.export_decided();

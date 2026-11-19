@@ -954,6 +954,67 @@ fn a_deferred_click_never_writes_over_a_dialog_that_appeared_meanwhile() {
     assert!(!m.export_queued());
 }
 
+/// Round 4, ruling 3c-32 (re-review B1/B4): the dialog check comes before EVERY dispatch, a pending one included. A
+/// deferred click that meets an error dialog while a plan is pending (the held answer is "now") is dropped with the
+/// warning, once, before anything is armed and before an open scoped Review loses its scope; the dialog answered
+/// and the plan landed, nothing is written.
+#[test]
+fn a_deferred_click_on_a_pending_plan_never_survives_a_dialog() {
+    for scoped in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = support::opened_chosen_decided(d.path());
+        if scoped {
+            scoped_review_with_the_opt_out(&mut m, "g/u");
+        } else {
+            m.set_export_without_review(true);
+        }
+        let mut h = harness(m);
+        h.run();
+        let m = h.state_mut();
+        m.hold_plan_results = true;
+        m.replan();
+        assert!(m.full_plan_pending(), "scoped {scoped}: guard: pending");
+        assert_eq!(
+            m.header_export_text(),
+            "Export 4 files now",
+            "scoped {scoped}: guard: the held answer writes"
+        );
+        m.after_commit
+            .push(Box::new(AppModel::header_export_clicked));
+        m.dialog = Some(Dialog::Error("a question".into()));
+        h.step();
+        let m = h.state_mut();
+        assert!(m.after_commit.is_empty(), "guard: the deferred click ran");
+        assert!(
+            !m.export_queued(),
+            "scoped {scoped}: a click that met a dialog is armed"
+        );
+        assert_eq!(
+            m.export_scope().is_some(),
+            scoped,
+            "scoped {scoped}: the dropped click changed the scope"
+        );
+        // The dialog is answered, then the plan lands.
+        m.dialog = None;
+        let msgs = held_plan(m);
+        land_plan(m, msgs);
+        assert!(
+            m.export.running.is_none() && m.export.summary.is_none() && nothing_written(d.path()),
+            "scoped {scoped}: the click wrote after the dialog was answered"
+        );
+        let warned = m
+            .messages
+            .entries()
+            .filter(|e| {
+                e.text
+                    .starts_with("Export not started: answer the open dialog")
+            })
+            .count();
+        assert_eq!(warned, 1, "scoped {scoped}: the warning, once");
+        assert_eq!(m.export_scope().is_some(), scoped, "scoped {scoped}");
+    }
+}
+
 /// `link` becomes a directory junction (Windows; a symlink elsewhere) to `target`. Neither needs admin rights.
 fn dir_link(link: &std::path::Path, target: &std::path::Path) {
     #[cfg(windows)]

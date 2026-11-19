@@ -2167,8 +2167,23 @@ impl AppModel {
 
     /// E3: the header's Export (and Ctrl+E): the whole project, then `export_decided`.
     pub fn header_export_clicked(&mut self) {
+        // Ruling 3c-32: before the scope of an open scoped Review is cleared.
+        if self.dialog_drops_click() {
+            return;
+        }
         self.set_scope(None);
         self.export_decided();
+    }
+
+    /// E3 (rulings 3c-27, 3c-32): an Export click that meets an open dialog (a click deferred a frame for a focused
+    /// field, Note FC8, runs before `actions::keys`' modal guard) is dropped with the warning, before anything is
+    /// armed, queued or opened and before any scope changes. True when it dropped the click.
+    pub(super) fn dialog_drops_click(&mut self) -> bool {
+        if self.dialog.is_none() {
+            return false;
+        }
+        self.queued_export_dropped();
+        true
     }
 
     /// E3, the one rule: nothing is written that the user was not shown. While a plan is in flight a whole-project
@@ -2176,6 +2191,10 @@ impl AppModel {
     /// at once (a scoped click always, and its Export queues as usual). With no plan in flight the click goes through
     /// `write_gate`. Runs under the scope as it is (Export set / group keeps theirs).
     pub(super) fn export_decided(&mut self) {
+        // Ruling 3c-32: the first step of every dispatch, pending or settled.
+        if self.dialog_drops_click() {
+            return;
+        }
         self.status_note = None;
         if self.root.is_none() {
             return;
@@ -2207,10 +2226,8 @@ impl AppModel {
     /// - ONE fresh eligibility read (and, for a waiting click, the label's count), then the write or Review.
     fn write_gate(&mut self, waited: bool) {
         let armed = self.armed.take();
-        // Ruling 3c-27: first for every click. One that did not wait can still come a frame late (a click deferred for
-        // a focused field, Note FC8, runs before `actions::keys`' modal guard).
-        if self.dialog.is_some() {
-            self.queued_export_dropped();
+        // Ruling 3c-27: first for every click, the waiting one included.
+        if self.dialog_drops_click() {
             return;
         }
         if waited {
