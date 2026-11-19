@@ -265,6 +265,24 @@ pub(super) fn may_change(path: &Path, last: Option<&str>) -> bool {
     matches!(disk_state(path, last), DiskState::New | DiskState::Ours)
 }
 
+/// Ruling 3c-55: the files this run may produce, which every decision of `build_review_writes` reads: the outputs of
+/// the run's jobs, every file under a listed Also folder, and each borrower copy the run may write, added in
+/// `copy_files`' order so an earlier copy is an input to every later copy and to every finisher.
+struct Produced {
+    keys: std::collections::HashSet<String>,
+    folders: Vec<PathBuf>,
+}
+
+impl Produced {
+    fn has(&self, p: &Path) -> bool {
+        self.keys.contains(&record_key(p)) || self.folders.iter().any(|f| p.starts_with(f))
+    }
+
+    fn add(&mut self, p: &Path) {
+        self.keys.insert(record_key(p));
+    }
+}
+
 /// Test hook: `AppModel::review_writes_probe` is on while this lives.
 #[cfg(feature = "test-hooks")]
 struct WritesProbe<'a>(&'a std::cell::Cell<bool>);
@@ -518,20 +536,17 @@ impl AppModel {
         } else {
             vec![]
         };
-        // What this run may produce: a row for every job in the run, whatever its state (the engine reports each one),
-        // the job's output, and every file under an Also folder. A dependency outside these is decided now.
-        let in_run = || self.items.iter().filter(|i| self.item_in_run(i));
-        let run_keys: std::collections::HashSet<String> = in_run()
-            .filter(|i| !i.job_key.is_empty())
+        // A row for every job in the run, whatever its state (the engine reports each one). A dependency outside these
+        // is decided now.
+        let run_keys: std::collections::HashSet<String> = self
+            .items
+            .iter()
+            .filter(|i| self.item_in_run(i) && !i.job_key.is_empty())
             .map(|i| i.job_key.to_ascii_lowercase())
             .collect();
-        let run_outputs: std::collections::HashSet<String> = in_run()
-            .filter_map(|i| i.job.as_ref().map(|j| record_key(&j.output)))
-            .collect();
         let touched = |key: &str| run_keys.contains(&key.to_ascii_lowercase());
-        let written = |p: &Path| {
-            run_outputs.contains(&record_key(p)) || also_folders.iter().any(|f| p.starts_with(f))
-        };
+        // Ruling 3c-55: the files this run may produce; the copies add theirs below, in the writer's order.
+        let mut produced = self.produced(&also_folders);
         let doc = self.sets_doc.as_ref();
         let mut preview = doc.map(crate::sets_doc::SetsDoc::record_preview);
         // A record save (`save_record`) runs: some exact finisher recorded a hash.
@@ -545,14 +560,21 @@ impl AppModel {
             // `finish_json`: `copy_files` first, against the copy record.
             let old = doc.map(|d| d.copy_shas()).unwrap_or_default();
             let mut shas = old.clone();
+            // The file `dep_ok` looks for when the run leaves a dependency out.
+            let dep_file = |k: &str| p.untouched_root.as_ref().map(|r| r.join(k));
             for (src, dst, owner_key) in &p.copies {
                 let key = record_key(dst);
-                if (!owner_key.is_empty() && touched(owner_key)) || written(src) {
-                    // The owner's DDS comes from this run: whether it is copied, and its bytes, are the run's.
+                let by_run = (!owner_key.is_empty() && touched(owner_key))
+                    || produced.has(src)
+                    || dep_file(owner_key).is_some_and(|f| produced.has(&f));
+                if by_run {
+                    // The owner's DDS comes from this run (its job, or an earlier copy): whether it is copied, and
+                    // its bytes, are the run's.
                     run_records = true;
                     if may_change(dst, shas.get(&key).map(String::as_str)) {
                         copies.push((dst.clone(), true));
                     }
+                    produced.add(dst);
                     continue;
                 }
                 // No row of this run can name the owner, so `dep_ok` with none is the writer's answer.
@@ -567,17 +589,18 @@ impl AppModel {
                 if changes {
                     copies.push((dst.clone(), false));
                 }
+                produced.add(dst);
             }
             if let (Some(r), true) = (preview.as_mut(), shas != old) {
                 r.set_copy_shas(&shas);
                 saves = true;
             }
             // Then `pbr_export::finish` and `record_json_sha`. Its text is built from this run's rows when an entry
-            // depends on a job of the run.
-            let run_dep = p
-                .entries
-                .iter()
-                .any(|(_, deps, _)| deps.iter().any(|k| touched(k)));
+            // depends on a job of the run, or on a file the run may produce (`dep_ok` reads it on disk).
+            let run_dep = p.entries.iter().any(|(_, deps, _)| {
+                deps.iter()
+                    .any(|k| touched(k) || dep_file(k).is_some_and(|f| produced.has(&f)))
+            });
             if run_dep {
                 run_records = true;
                 let last = self.pgp_record(&p.root, &p.path);
@@ -609,6 +632,7 @@ impl AppModel {
                 }
             }
         }
+        let written = |p: &Path| produced.has(p);
         // `finish_guarded` for each kind: written only with a project document, and recorded when the record moves.
         fn guarded<P: Guarded>(
             p: Option<&P>,
@@ -767,6 +791,20 @@ impl AppModel {
             Ok(()) => true,
             Err(engine::dds::Kept::Foreign) => self.pgp_overwrite_answered(p),
             Err(_) => false,
+        }
+    }
+
+    /// Ruling 3c-55: `Produced` before the copies: the output of every job in the run, whatever its state, and the
+    /// listed Also folders.
+    fn produced(&self, also_folders: &[PathBuf]) -> Produced {
+        Produced {
+            keys: self
+                .items
+                .iter()
+                .filter(|i| self.item_in_run(i))
+                .filter_map(|i| i.job.as_ref().map(|j| record_key(&j.output)))
+                .collect(),
+            folders: also_folders.to_vec(),
         }
     }
 

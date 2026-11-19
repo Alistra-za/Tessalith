@@ -3138,6 +3138,146 @@ fn an_excluded_owner_replaced_with_the_same_length_and_time_lists_the_copy() {
     assert_eq!(std::fs::read(&want).unwrap(), bytes);
 }
 
+// ---- Task 4 fix round 3 (rulings 3c-55 to 3c-58) ----
+
+/// A vanilla project where the run's copies feed each other: set `leaf-2` (leaf.png) borrows rock01's normal, so the
+/// export copies it to `leaf_n.dds`; set `leaf-3` holds `leaf_normal.png`, whose own output is that same `leaf_n.dds`,
+/// and is in an excluded group; set `odd` borrows `leaf_normal.png`, so its copy reads `leaf_n.dds` after the first copy
+/// made it. `leaf-2` is a Landscape set with an XPMF profile naming `leaf_n.dds`. Returns the model, odd's copy and the
+/// profile's path.
+fn chained_copies(d: &std::path::Path) -> (AppModel, std::path::PathBuf, std::path::PathBuf) {
+    use sdc_gui::model::set_groups::GroupTarget;
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    use serde_json::json;
+    support::flat(&d.join("textures/landscape/leaf_normal.png"));
+    let mut m = support::pbr_ready(d);
+    m.set_field("landscape/leaf.png", "subtype", json!("pbr_albedo"));
+    idle(&mut m);
+    let leaf = m.drop_new_set("landscape/leaf.png").unwrap();
+    idle(&mut m);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    let out = m.drop_new_set("landscape/leaf_normal.png").unwrap();
+    idle(&mut m);
+    for (item, set) in [
+        ("landscape/rock01_normal.png", leaf.as_str()),
+        ("landscape/leaf_normal.png", "landscape/odd"),
+    ] {
+        assert_eq!(
+            m.drop_choice(item, set, DropChoice::Share),
+            DropOutcome::Joined
+        );
+        idle(&mut m);
+    }
+    m.move_to_group(&[out], GroupTarget::New("Out".into()))
+        .unwrap();
+    m.set_group_excluded("Out", true).unwrap();
+    {
+        use engine::codes::Code;
+        use engine::config::{AlphaPolicy, Subtype};
+        use sdc_gui::model::Answer;
+        m.set_field(
+            "landscape/rock01_normal.png",
+            "subtype",
+            json!("landscape_normal"),
+        );
+        m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
+        m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
+        m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+        m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
+    }
+    m.set_shader(&leaf, Some(engine::shader::Shader::Landscape));
+    idle(&mut m);
+    m.set_xpmf_on(&leaf, true);
+    m.set_xpmf_value(&leaf, "editorIds", Some(json!(["MatoA"])));
+    m.set_xpmf_value(
+        &leaf,
+        "normalTexture",
+        Some(json!("textures/landscape/leaf_n.dds")),
+    );
+    idle(&mut m);
+    let land = m.export_root().join("textures").join("landscape");
+    let copies: Vec<_> = sdc_gui::model::pbr_export::prepare(&m)
+        .expect("the copies")
+        .copies
+        .into_iter()
+        .map(|(src, dst, _)| (src, dst))
+        .collect();
+    assert_eq!(
+        copies,
+        [
+            (land.join("rock01_n.dds"), land.join("leaf_n.dds")),
+            (land.join("leaf_n.dds"), land.join("odd_n.dds")),
+        ],
+        "guard: the second copy reads the first one's file"
+    );
+    let profile = m
+        .export_root()
+        .join("SKSE/Plugins/XPMF/tessalith_leaf-2.json")
+        .components()
+        .collect();
+    (m, land.join("odd_n.dds"), profile)
+}
+
+/// Ruling 3c-55: a borrower copy the run makes is a file the run produces. The second copy reads the first one's file
+/// (its owner is excluded), and the XPMF profile names it: both are written by the export and both are listed.
+#[test]
+fn a_file_an_earlier_copy_makes_feeds_a_later_copy_and_a_profile() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, odd, profile) = chained_copies(d.path());
+    let s = export_and_compare(&mut m, d.path());
+    assert!(odd.is_file() && profile.is_file(), "{:?}", m.export.notes);
+    for f in [&odd, &profile] {
+        assert!(s.listed.contains(f) && s.changed.contains(f), "{f:?}");
+    }
+}
+
+/// B7: an export scoped to a set outside the PGPatcher JSON, while an exported PBR set out of scope gets Tree Anim
+/// evidence. That set's entry depends on nothing in the run, so the JSON's text is decided now, from `review_json`'s
+/// prepared exports: their cache must see the evidence (ruling 3c-51 (c)).
+#[test]
+fn new_evidence_for_a_set_out_of_scope_lists_the_json_it_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([200u8, 100, 50]))
+        .save(r.join("rock01_s.png"))
+        .unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.set_field(
+        "landscape/rock01_s.png",
+        "subtype",
+        serde_json::json!("pbr_subsurface"),
+    );
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    let json = support::pgp_json_path(&m);
+    let odd = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.id == "landscape/odd")
+        .expect("the odd set")
+        .key;
+    m.export_sets([odd].into(), "Export set".into());
+    assert!(m.review.is_some(), "the scoped export opens Review");
+    let _ = m.review_writes();
+    let key = m
+        .item("landscape/rock01.png")
+        .and_then(|i| i.job.as_ref())
+        .and_then(|j| {
+            engine::shader::colour_mesh_key(&j.game_path, &j.output, Some(j.profile.subtype))
+        })
+        .expect("rock01's mesh key");
+    m.set_tree_anim([(key, true)].into());
+    let s = export_and_compare(&mut m, d.path());
+    assert!(
+        std::fs::read_to_string(&json)
+            .unwrap()
+            .contains("subsurface_foliage"),
+        "guard: the scoped export rewrote the JSON"
+    );
+    assert!(s.listed.contains(&json) && s.changed.contains(&json));
+}
+
 fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
