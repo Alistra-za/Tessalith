@@ -242,7 +242,11 @@ enum Act {
     NifDiff(String),
     Export,
     Close,
+    OptOut(bool),
 }
+
+/// Review's footer tick; the Settings tab's box is "Export without review" (two inputs never share a name).
+const OPT_OUT_TEXT: &str = "Export without review next time";
 
 pub(super) fn plural(n: usize) -> &'static str {
     if n == 1 {
@@ -711,6 +715,14 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 if ui.button("Close").clicked() {
                     act = Some(Act::Close);
                 }
+                if let Some(on) = super::settings_tab::opt_out_checkbox(
+                    ui,
+                    m,
+                    OPT_OUT_TEXT,
+                    "For this project only. The header's Export then writes at once while nothing needs a look. Turn it off in Settings.",
+                ) {
+                    act = Some(Act::OptOut(on));
+                }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = egui::Button::new(m.review_button_text());
                     match &gate {
@@ -944,6 +956,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             super::after_commit(ui.ctx(), model, move |m| m.review_export_pressed(press));
         }
         Some(Act::Close) => model.close_review(),
+        Some(Act::OptOut(on)) => model.set_export_without_review(on),
         None => {}
     }
 }

@@ -145,6 +145,53 @@ fn the_settings_tab_holds_exactly_four_groups() {
     }
 }
 
+fn settle(h: &mut H) {
+    assert!(h.state_mut().wait_idle(Duration::from_secs(120)));
+    h.run();
+}
+
+#[test]
+fn settings_turns_the_opt_out_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    settle(&mut h);
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(h.state().export_without_review());
+}
+
+// Ruling 3c-13: the setter refuses while the folder's open can be cancelled, so the box is drawn off with the reason.
+#[test]
+fn settings_opt_out_is_off_while_the_open_can_be_cancelled() {
+    let a = tempfile::tempdir().unwrap();
+    let od = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(a.path());
+    m.open_folder(support::mod_folder(od.path()));
+    assert!(m.can_cancel_open(), "guard: the open is in flight");
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let name = "Export without review";
+    assert!(h
+        .get_by_role_and_label(Role::CheckBox, name)
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_role_and_label(Role::CheckBox, name).hover();
+    h.run_steps(8);
+    h.get_by_label("Export without review can be set once the folder has finished opening.");
+    h.get_by_role_and_label(Role::CheckBox, name).click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}
+
 #[test]
 fn no_project_open_shows_no_project_controls() {
     let mut m = AppModel::placeholder(GuiSettings::default());
@@ -152,6 +199,7 @@ fn no_project_open_shows_no_project_controls() {
     let h = harness(m, 1280.0);
     h.get_by_label(PROJECT_HEADING);
     h.get_by_label("No project open");
+    assert!(h.query_by_label("Export without review").is_none());
     assert!(h.query_by_label_contains("Mode (this project)").is_none());
     assert!(h.query_by_label_contains("Preset (this project)").is_none());
     assert!(h.query_by_label("Choose export folder").is_none());

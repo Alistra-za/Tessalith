@@ -672,3 +672,45 @@ fn a_review_resize_sticks_across_a_tab_switch() {
     h.run_steps(4);
     assert!((height(&h) - want).abs() < 2.0, "{}", height(&h));
 }
+
+const OPT_OUT_TICK: &str = "Export without review next time";
+const OPT_OUT_WAIT: &str = "Export without review can be set once the folder has finished opening.";
+
+#[test]
+fn reviews_opt_out_tick_sets_the_project_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(support::opened_chosen_decided(d.path()));
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    settle(&mut h);
+    assert!(h.state().export_without_review());
+    // Ticking it again turns it off.
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+}
+
+// Ruling 3c-13: while the folder's open can still be cancelled the setter refuses, so the tick is drawn off.
+#[test]
+fn reviews_opt_out_tick_is_off_while_the_open_can_be_cancelled() {
+    let a = tempfile::tempdir().unwrap();
+    let od = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(a.path());
+    m.open_folder(support::mod_folder(od.path()));
+    assert!(m.can_cancel_open(), "guard: the open is in flight");
+    m.open_review();
+    assert!(m.review.is_some(), "guard: Review is open");
+    let mut h = harness(m);
+    h.run();
+    assert!(disabled(&h, OPT_OUT_TICK));
+    h.get_by_label(OPT_OUT_TICK).hover();
+    h.run_steps(8);
+    h.get_by_label(OPT_OUT_WAIT);
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}

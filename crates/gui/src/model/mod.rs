@@ -75,6 +75,11 @@ use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+/// Ruling 3c-13: why "Export without review" changes nothing while a folder's open can be cancelled; the status note
+/// of `set_export_without_review` and the hover of the two controls that draw it.
+pub const EXPORT_WITHOUT_REVIEW_WAIT: &str =
+    "Export without review can be set once the folder has finished opening.";
+
 /// Note FC11 (supersedes P21's note): a hash recorded while `sdc-project.toml` is read-only.
 pub const SIDECAR_ONLY: &str =
     "hash recorded in _sdc/generated.json only: sdc-project.toml is read-only";
@@ -1278,8 +1283,7 @@ impl AppModel {
     /// without a question (AG92, FC12), so a tick taken now could vanish unasked (ruling 3c-13).
     pub fn set_export_without_review(&mut self, on: bool) {
         if self.can_cancel_open() {
-            self.status_line =
-                "Export without review can be set once the folder has finished opening.".into();
+            self.status_line = EXPORT_WITHOUT_REVIEW_WAIT.into();
             return;
         }
         let Some(d) = self.sets_doc.as_mut().filter(|d| !d.read_only()) else {
