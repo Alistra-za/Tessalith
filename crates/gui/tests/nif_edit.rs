@@ -4198,6 +4198,11 @@ fn an_unreadable_export_file_blocks_and_writes_nothing() {
     assert!(exported(&d).is_dir());
     let doc = load(&m.edit.as_ref().unwrap().draft_path).unwrap().unwrap();
     assert!(doc.export.sha256.is_none());
+    assert!(
+        !nif_doc(&export_root(&d)).exists(),
+        "no record is written either"
+    );
+    assert_eq!(m.edit.as_ref().unwrap().doc.export.sha256, None);
 }
 
 /// The chip the export folder's records give a NIF (`pending_docs` walks `.sdc\nif-edits`), as a fresh start sees it.
@@ -4320,6 +4325,7 @@ fn a_source_change_after_export_makes_it_pending_again() {
     assert_eq!(export(&mut m), Ok(1));
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
     let src = changed_source(&m);
+    let record = std::fs::read(nif_doc(&export_root(&d))).unwrap();
     // the export re-reads the source copy: the change is on disk too
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
     m.edit_with(|e| e.reload_source(src.clone()).unwrap());
@@ -4327,7 +4333,9 @@ fn a_source_change_after_export_makes_it_pending_again() {
     assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
     assert!(e.pending());
     assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
-    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    // ruling E6-A: the forced re-export is the session's (its chip), the record is what the last export wrote
+    assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(std::fs::read(nif_doc(&export_root(&d))).unwrap(), record);
     assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
     assert_eq!(*e.source, src);
@@ -4344,6 +4352,7 @@ fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
     assert_eq!(export(&mut m), Ok(1));
     let src = changed_source(&m);
     m.close_edit();
+    let record = std::fs::read(nif_doc(&export_root(&d))).unwrap();
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
     m.open_edit();
     let e = m.edit.as_ref().unwrap();
@@ -4351,10 +4360,12 @@ fn reopening_an_exported_edit_with_a_changed_source_is_pending() {
     assert!(e.doc.ops.iter().all(|o| o.status == OpStatus::Applied));
     assert!(e.pending());
     assert!(e.doc.export.ops_hash.is_some(), "not None: the PGP warning");
-    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
-    // closed again before any export: the persisted document is still pending
+    assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
+    // ruling E6-A: the open wrote nothing in the export folder; the record's source is what makes it pending
+    assert_eq!(std::fs::read(nif_doc(&export_root(&d))).unwrap(), record);
+    // closed again before any export: the next open works the forced re-export out again
     m.close_edit();
-    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(std::fs::read(nif_doc(&export_root(&d))).unwrap(), record);
     m.open_edit();
     assert!(m.edit.as_ref().unwrap().pending());
     assert_eq!(export(&mut m), Ok(1));
@@ -5129,7 +5140,8 @@ fn placement_names_the_export_folder_mod() {
     );
 }
 
-/// Where a session without an export folder autosaves (Note GD5 (c)): `<scan.db's folder>\nif-edits\<hash>.toml`.
+/// Where a session with no project open saves its draft (Review E6; Note GD5 (c)):
+/// `<scan.db's folder>\nif-edits\<hash>.toml`. The export folder plays no part.
 fn autosave(d: &tempfile::TempDir) -> std::path::PathBuf {
     d.path()
         .join("nif-edits")
@@ -5628,20 +5640,140 @@ fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
 #[test]
 fn export_still_writes_the_record_in_the_export_folder() {
     let (d, mut m) = export_session();
+    // an ordinary folder: `sdc NIF Edits` is never a source anyway (GD28), so it would not show GQ3 at work
+    let e = d.path().join(r"mods\MyOut");
+    m.set_nif_export_root(Some(e.clone()));
     m.open_edit();
     gloss(&mut m, 12.5);
+    let c = [copy_at(&e, "out", 9)];
+    assert!(
+        pick_source(&c, Path::new(r"C:\elsewhere"), "meshes/x.nif").is_some(),
+        "premise: before the export the folder is a source like any other"
+    );
     assert_eq!(export(&mut m), Ok(1));
-    let e = export_root(&d);
     let rec = load(&nif_doc(&e)).unwrap().expect("the record is written");
-    let want = sha256_hex(&std::fs::read(exported(&d)).unwrap());
+    let want = sha256_hex(&std::fs::read(e.join(r"meshes\x.nif")).unwrap());
     assert_eq!(rec.export.sha256.as_deref(), Some(want.as_str()));
     // Note GQ3: the export folder holds our record, so it is never taken as a source
-    let c = [copy_at(&e, "out", 9)];
     assert!(pick_source(&c, Path::new(r"C:\elsewhere"), "meshes/x.nif").is_none());
 }
 
+/// An export of x.nif (one op, 7.5) that an earlier Tessalith left in the export folder (`mods\sdc NIF Edits`): its
+/// record carries no draft id and, when `stale`, names another source. The session is closed and no draft is left, so
+/// the next session has none of those ops. Returns the record's bytes.
+fn old_record_in_export_folder(d: &tempfile::TempDir, m: &mut MeshesModel, stale: bool) -> Vec<u8> {
+    m.open_edit();
+    gloss(m, 7.5);
+    assert_eq!(export(m), Ok(1));
+    m.close_edit();
+    let p = nif_doc(&export_root(d));
+    let mut r = load(&p).unwrap().unwrap();
+    r.id = None;
+    if stale {
+        r.source.sha256 = "0".repeat(64);
+    }
+    save(&p, &r).unwrap();
+    std::fs::remove_file(autosave(d)).unwrap();
+    std::fs::read(&p).unwrap()
+}
+
+/// Review E6 (Critical 3, ruling E6-A): opening a NIF writes nothing in the export folder, even when its record was
+/// made from another source (the forced re-export is worked out in memory).
+#[test]
+fn opening_never_rewrites_an_older_record_in_the_export_folder() {
+    let (d, mut m) = export_session();
+    let before = old_record_in_export_folder(&d, &mut m, true);
+    m.open_edit();
+    assert_eq!(m.error, None);
+    let e = m.edit.as_ref().unwrap();
+    assert!(
+        e.doc.ops.is_empty(),
+        "premise: the session has none of the record's ops"
+    );
+    assert!(e.pending(), "the record names another source: export again");
+    assert_eq!(
+        std::fs::read(nif_doc(&export_root(&d))).unwrap(),
+        before,
+        "the record holds its edits as before"
+    );
+}
+
+/// Ruling E6-A: a source reload changes the session, never the record in the export folder.
+#[test]
+fn a_source_reload_never_rewrites_the_record() {
+    let (d, mut m) = export_session();
+    let before = old_record_in_export_folder(&d, &mut m, false);
+    m.open_edit();
+    let src = changed_source(&m);
+    std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
+    m.edit_with(|e| e.reload_source(src.clone()).unwrap());
+    assert!(m.edit.as_ref().unwrap().pending());
+    assert_eq!(
+        std::fs::read(nif_doc(&export_root(&d))).unwrap(),
+        before,
+        "the reload wrote nothing in the export folder"
+    );
+}
+
+/// Ruling E6-A: a record holding edits this draft never had (an earlier Tessalith's document) is not replaced by an
+/// export; the row says why and nothing is written.
+#[test]
+fn export_never_replaces_an_older_record_with_other_edits() {
+    let (d, mut m) = export_session();
+    let before = old_record_in_export_folder(&d, &mut m, false);
+    let nif_before = std::fs::read(exported(&d)).unwrap();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let why = review_row(&m).blocked.expect("the row is blocked");
+    assert!(why.contains("or an earlier Tessalith"), "{why}");
+    export_fails(&mut m, "or an earlier Tessalith");
+    assert_eq!(std::fs::read(nif_doc(&export_root(&d))).unwrap(), before);
+    assert_eq!(std::fs::read(exported(&d)).unwrap(), nif_before);
+}
+
+/// The guard of ruling E6-A's block: the draft's own record is replaced by every later export, in the same session and
+/// in the next one.
+#[test]
+fn a_draft_replaces_its_own_record_at_every_export() {
+    let (d, mut m, _p) = session_in_project("proj", None);
+    m.open_edit();
+    gloss(&mut m, 7.5);
+    assert_eq!(export(&mut m), Ok(1));
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    m.close_edit();
+    m.open_edit();
+    gloss(&mut m, 13.5);
+    assert_eq!(review_row(&m).blocked, None);
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(doc_values(&nif_doc(&export_root(&d))), [7.5, 12.5, 13.5]);
+}
+
+/// Ruling E6-A: choosing a folder whose record was exported from another source makes the edit pending there, worked
+/// out in memory (the record is not rewritten).
+#[test]
+fn choosing_a_folder_whose_record_names_another_source_makes_the_edit_pending() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(!m.edit.as_ref().unwrap().pending());
+    let p = nif_doc(&export_root(&d));
+    let mut r = load(&p).unwrap().unwrap();
+    r.source.sha256 = "0".repeat(64);
+    save(&p, &r).unwrap();
+    let before = std::fs::read(&p).unwrap();
+    m.set_nif_export_root(Some(d.path().join(r"mods\MyOut")));
+    m.set_nif_export_root(Some(export_root(&d)));
+    assert!(
+        m.edit.as_ref().unwrap().pending(),
+        "the folder's export was made from another source"
+    );
+    assert_eq!(std::fs::read(&p).unwrap(), before);
+}
+
 /// Note GD5: no export folder, no default mod. The edit opens and works, autosaves to the app's folder, and its
-/// export is blocked with FB1's reason; choosing a folder later carries the edit there.
+/// export is blocked with FB1's reason; choosing a folder later lets it export there, and the draft stays put.
 #[test]
 fn no_export_folder_blocks_the_nif_row() {
     let (d, mut m) = export_session();

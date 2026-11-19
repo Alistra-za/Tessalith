@@ -69,6 +69,9 @@ pub struct NifEdit {
     project: Option<PathBuf>,
     /// The record an export leaves in the export folder (`edit_doc::doc_path`), when a folder is chosen.
     pub record_path: Option<PathBuf>,
+    /// The ops of the record at `record_path` when it is not this draft's (another id, or none: an earlier Tessalith's
+    /// document) and holds any; the export does not replace it while they differ from the session's (ruling E6-A).
+    foreign_record: Option<Vec<DocOp>>,
     /// Both empty without an export folder: export is blocked with `NO_EXPORT_FOLDER`.
     pub export_path: PathBuf,
     /// The export folder (empty without one).
@@ -712,17 +715,11 @@ impl NifEdit {
         if doc.id.is_none() {
             doc.id = Some(edit_doc::new_id(data_path));
         }
-        // the record wins: what was exported to the chosen folder, and from which source
+        // the record wins: what was exported to the chosen folder, and from which source (`take_record`, below)
         let record = match &record_path {
             Some(p) => edit_doc::load(p)?,
             None => None,
         };
-        let stale_export = record
-            .as_ref()
-            .is_some_and(|r| r.export.ops_hash.is_some() && r.source.sha256 != id.sha256);
-        if record_path.is_some() {
-            doc.export = record.map(|r| r.export).unwrap_or_default();
-        }
         if doc.dropped_clip_ops > 0 {
             open_lines.push(format!(
                 "{data_path}: {} clip edit(s) dropped: NIF Edit no longer edits clips.",
@@ -739,6 +736,7 @@ impl NifEdit {
             draft_path,
             project: project.map(Path::to_path_buf),
             record_path,
+            foreign_record: None,
             export_path,
             edit_mod,
             autosave: autosave.map(Path::to_path_buf),
@@ -813,21 +811,50 @@ impl NifEdit {
             unsaved: recovered,
             drag: None,
         };
+        if e.record_path.is_some() {
+            e.take_record(record);
+        }
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
         e.reapply();
         if changed {
             e.count_changed();
         }
-        // Note GQ1: the exported file was built from another source than this one (the record names it): the forced
-        // re-export reaches the record too, which the export folder's badges and the next open read.
-        if stale_export && e.doc.export.ops_hash.is_some() {
-            e.doc.export.ops_hash = Some(String::new());
-        }
-        if (changed || stale_export) && e.doc.export.sha256.is_some() {
-            e.save();
-            e.write_record();
-        }
+        // Ruling E6-A: open writes nothing; a forced re-export (GQ1) is worked out again at each open
         Ok(e)
+    }
+
+    /// Takes the export folder's record (`edit_doc::load` of `record_path`; None: never exported there): its export
+    /// entry becomes the session's, kept in memory only (ruling E6-A). A record exported from another source than the
+    /// current one makes the edit pending (Note GQ1's sentinel), and a record holding edits this draft does not have
+    /// (another draft's, or an earlier Tessalith's document) is remembered so the export never replaces it.
+    fn take_record(&mut self, record: Option<EditDoc>) {
+        let Some(r) = record else {
+            self.doc.export = ExportRec::default();
+            self.foreign_record = None;
+            return;
+        };
+        let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
+        let ours = r.id.is_some() && r.id == self.doc.id;
+        self.foreign_record = (!ours && !r.ops.is_empty()).then(|| r.ops.clone());
+        self.doc.export = r.export;
+        if stale {
+            self.doc.export.ops_hash = Some(String::new());
+        }
+    }
+
+    /// Ruling E6-A: why the export may not replace the record in the export folder: it holds edits that are not this
+    /// session's (`foreign_record`) and differ from them. Task 9 moves such documents; until then the export waits.
+    fn record_block(&self, foreign: Option<&[DocOp]>) -> Option<String> {
+        let theirs = foreign?;
+        let same = theirs.len() == self.doc.ops.len()
+            && theirs.iter().zip(&self.doc.ops).all(|(a, b)| a.op == b.op);
+        (!same).then(|| {
+            format!(
+                "{} holds other edits of this NIF (from another project or an earlier Tessalith); an export would \
+                 replace them. Move that file out of the folder to keep them, or choose another export folder.",
+                self.record_path.as_deref().unwrap_or(Path::new("")).display()
+            )
+        })
     }
 
     fn count_changed(&mut self) {
@@ -844,8 +871,8 @@ impl NifEdit {
         }
     }
 
-    /// Writes the record of the export (the document as it stands, with its export entry) to the export folder.
-    /// Nothing without one. A failure goes to `error`.
+    /// Writes the record of the export (the document as it stands, with its export entry) to the export folder; only
+    /// `write_out` calls it (ruling E6-A). Nothing without one. A failure goes to `error`.
     fn write_record(&mut self) {
         let Some(p) = self.record_path.clone() else {
             return;
@@ -856,7 +883,8 @@ impl NifEdit {
     }
 
     /// The source copy's bytes changed on disk (export step 1): the ops are re-anchored on them and the statuses
-    /// updated and saved.
+    /// updated and saved in the draft. The export folder is not written (ruling E6-A): the forced re-export (GQ1) is
+    /// in memory, and the next open works it out again from the record's source.
     pub fn reload_source(&mut self, source: Vec<u8>) -> Result<(), String> {
         let (scan, model) = read_source(&source)?;
         self.doc.source = source_id(&self.source_copy, &self.data_path, &source);
@@ -867,9 +895,6 @@ impl NifEdit {
         self.reapply();
         self.count_changed();
         self.save();
-        if self.doc.export.sha256.is_some() {
-            self.write_record(); // the forced re-export is part of what the export folder remembers
-        }
         Ok(())
     }
 
@@ -914,6 +939,9 @@ impl NifEdit {
         if self.edit_mod.as_os_str().is_empty() {
             return Some(NO_EXPORT_FOLDER.into());
         }
+        if let Some(why) = self.record_block(self.foreign_record.as_deref()) {
+            return Some(why);
+        }
         if let Some(e) = &self.apply_err {
             return Some(e.clone());
         }
@@ -950,6 +978,7 @@ impl NifEdit {
     pub fn uncovered_block(&self) -> Option<String> {
         self.retarget_error
             .clone()
+            .or_else(|| self.record_block(self.foreign_record.as_deref()))
             .or_else(|| self.apply_err.clone())
             .or_else(|| self.read_err.clone())
     }
@@ -1001,6 +1030,18 @@ impl NifEdit {
             Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
             Ok(_) => {}
         }
+        // Ruling E6-A: the record there now (read again: it may have come since the folder was chosen) is replaced
+        // only when it is this draft's or holds nothing this session lacks
+        if let Some(p) = &self.record_path {
+            let foreign = match edit_doc::load(p) {
+                Ok(Some(r)) if !(r.id.is_some() && r.id == self.doc.id) => Some(r.ops),
+                Ok(_) => None,
+                Err(e) => return ExportOutcome::Blocked(e),
+            };
+            if let Some(why) = self.record_block(foreign.as_deref().filter(|o| !o.is_empty())) {
+                return ExportOutcome::Blocked(why);
+            }
+        }
         // the draft first, when a drag was not flushed: the NIF is written from what the draft holds
         if self.unsaved {
             self.save();
@@ -1017,6 +1058,7 @@ impl NifEdit {
             ops_hash: Some(self.doc.ops_hash()),
         };
         self.up_to_date = true;
+        self.foreign_record = None;
         self.write_record();
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
@@ -1455,7 +1497,8 @@ impl NifEdit {
             }
             None => (PathBuf::new(), None, PathBuf::new(), None),
         };
-        self.doc.export = record.map(|r| r.export).unwrap_or_default();
+        // the folder's export state, a forced re-export when its record names another source (in memory, E6-A)
+        self.take_record(record);
         (self.edit_mod, self.record_path, self.export_path) = (edit_mod, record_path, export_path);
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
         self.export_note = None;
