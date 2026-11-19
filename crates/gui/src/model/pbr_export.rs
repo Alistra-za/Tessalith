@@ -354,6 +354,12 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
     )
 }
 
+/// E3 (ruling 3c-27): forget the cached `export_blocks` list, so the next read builds it from the disk as it is now. A
+/// write decision calls it; nothing per frame does.
+pub(super) fn drop_blocks(m: &AppModel) {
+    m.views.borrow_mut().blocks = None;
+}
+
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
     let mut out = vec![];
     // Note HL: an export folder picked after the target mod, or a hand-edited `target_mod`, still overlaps it.

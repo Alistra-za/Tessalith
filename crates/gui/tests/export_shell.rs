@@ -918,6 +918,89 @@ fn a_waiting_click_writes_only_when_nothing_changed_what_it_was_made_for() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// Round 3, ruling 3c-27 (re-review B1): the dialog check is the gate's first check for a click that did not wait
+/// too. A header click deferred one frame for a focused text field (Note FC8, `ui::after_commit`) runs first thing
+/// next frame, in `actions::keys`, before its modal guard; a dialog that appeared in between drops it with the queued
+/// click's warning.
+#[test]
+fn a_deferred_click_never_writes_over_a_dialog_that_appeared_meanwhile() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(
+        h.state().header_export_text(),
+        "Export 4 files now",
+        "guard"
+    );
+    // What `ui::after_commit` leaves when the click lands while a field has the focus.
+    h.state_mut()
+        .after_commit
+        .push(Box::new(AppModel::header_export_clicked));
+    h.state_mut().dialog = Some(Dialog::Error("a question".into()));
+    h.step();
+    let m = h.state_mut();
+    assert!(m.after_commit.is_empty(), "guard: the deferred click ran");
+    assert!(
+        m.export.running.is_none() && m.export.summary.is_none() && nothing_written(d.path()),
+        "the deferred click wrote over an open dialog"
+    );
+    assert!(
+        m.status_line.contains("answer the open dialog"),
+        "{}",
+        m.status_line
+    );
+    assert!(!m.export_queued());
+}
+
+/// `link` becomes a directory junction (Windows; a symlink elsewhere) to `target`. Neither needs admin rights.
+fn dir_link(link: &std::path::Path, target: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let ok = std::process::Command::new("cmd")
+            .args(["/C", "mklink", "/J"])
+            .arg(link)
+            .arg(target)
+            .output()
+            .expect("cmd runs");
+        assert!(ok.status.success(), "mklink /J failed: {ok:?}");
+    }
+    #[cfg(not(windows))]
+    std::os::unix::fs::symlink(target, link).unwrap();
+}
+
+/// Round 3, ruling 3c-27: the write decision drops the view-keyed `export_blocks` list, whose target-mod overlap check
+/// resolves the folders on disk. The export folder is a junction; retargeted into the target mod, every path string
+/// and every revision stay the same, so the list cached by the label still says "no blocker". The click must read it
+/// fresh: Review opens and nothing is written into the target mod.
+#[test]
+fn the_click_reads_the_export_blockers_fresh() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let (out, target) = (d.path().join("out"), d.path().join("target mod"));
+    let inside = target.join("textures out");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&inside).unwrap();
+    let link = d.path().join("export link");
+    dir_link(&link, &out);
+    support::choose_export(&mut m, link.clone());
+    m.set_target_mod(Some(target.clone())).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    // The label reads the blocker list now, and the cache keeps it.
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    std::fs::remove_dir(&link).unwrap();
+    dir_link(&link, &inside);
+    m.header_export_clicked();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        !inside.join("textures/g/a.dds").exists() && m.export.summary.is_none(),
+        "the click wrote into the target mod on a cached blocker list"
+    );
+    assert!(m.review.is_some(), "the overlap blocker opens Review");
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);

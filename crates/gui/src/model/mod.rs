@@ -2193,18 +2193,20 @@ impl AppModel {
     /// E3, rulings 3c-23 and 3c-26: the one gate to a write that skips Review, for the click that settled at once
     /// (`export_decided`) and for the click that waited (`settle_queued`, `waited`). Nothing earlier is passed in, and
     /// the armed click is taken on entry, so every exit leaves nothing armed. The order is fixed: an open dialog drops
-    /// a waiting click; a waiting click compares what it was made against (`ArmedWrite`: the scope, the destination,
+    /// the click, waiting or not (3c-27); a waiting click compares what it was made against (`ArmedWrite`: the scope, the destination,
     /// the target mod), and finds no scope set and no Review open, or opens Review; the source walk (a changed source
     /// plans again with a whole-project click armed, or opens the scoped Review; a click that already waited through
     /// its own replan opens Review instead of planning twice); then ONE fresh eligibility read (and, for a waiting
     /// click, the label's count); then the write or Review.
     fn write_gate(&mut self, waited: bool) {
         let armed = self.armed.take();
+        // Ruling 3c-27: first for every click. One that did not wait can still come a frame late (a click deferred for
+        // a focused field, Note FC8, runs before `actions::keys`' modal guard).
+        if self.dialog.is_some() {
+            self.queued_export_dropped();
+            return;
+        }
         if waited {
-            if self.dialog.is_some() {
-                self.queued_export_dropped();
-                return;
-            }
             let made_for = armed.as_ref().is_some_and(|a| {
                 let now = self.armed_now(a.replanned);
                 *a == now

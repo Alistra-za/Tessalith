@@ -511,11 +511,14 @@ impl AppModel {
             && !problem_rows()
     }
 
-    /// E3 (ruling 3c-18): `writes_without_review` for a write about to start: the JSON state is read fresh (the 1 s
-    /// cache is for the per-frame label). Once per dispatch, never per frame.
+    /// E3 (rulings 3c-18, 3c-27): `writes_without_review` for a write about to start, reading no cache whose value
+    /// depends on the filesystem: the JSON state is read fresh (the 1 s cache is for the per-frame label), and so is
+    /// the export blocker list (its target-mod overlap check resolves both folders on disk; a retargeted junction moves
+    /// no key). Once per dispatch, never per frame.
     pub(super) fn writes_without_review_fresh(&self) -> bool {
         self.review_json_cache.take();
         self.whole_json.take();
+        pbr_export::drop_blocks(self);
         self.writes_without_review()
     }
 
