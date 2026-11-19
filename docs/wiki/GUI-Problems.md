@@ -91,7 +91,7 @@ Each click is one undo step. <!-- D:JO4 -->
 
 ### Go to set
 
-**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md), closing an expanded texture preview first. When the row is about one slot or file (a missing map or a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
+**Go to set** closes an expanded texture preview and opens the set in the [Set editor](GUI-Set-Editor.md). In **2D**, a missing or unused map scrolls to its slot or file and outlines it for two seconds if the editor draws that row. Whole-set rows and **3D** open the set without an outline. <!-- D:JO8,JO14 -->
 
 ### Unmatched [files] entries
 
@@ -134,7 +134,7 @@ A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.
 
 Counts such as **N undecided** filter the list. Click the chip to clear it. **Checks** shows check rows.
 
-The ordinary set filter follows a set when its first file arrives. If its id matches another set's engine key, the filter shows the keyed set. An empty id shows no rows. Clicking an editor reason that opens Problems focuses that card's own row in either case. <!-- D:JV1,JV2,JV5 -->
+The set filter follows a set when its first file arrives. A matching engine key wins over an id. An empty id shows no rows. A reason that opens Problems shows its card's row in either case. Focus goes to its first action (fix, second fix, **Mark as intended**). With a disabled or missing action, the row takes focus unless Enter or Space would answer it. Then nothing takes focus. <!-- D:JV1,JV2,JV5 -->
 
 ## Hiding kinds of row
 
