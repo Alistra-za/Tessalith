@@ -732,6 +732,12 @@ pub fn reason_scans(m: &AppModel) -> u64 {
     m.reason_scans.get()
 }
 
+/// Every set lookup `scope_label` ran (final wave Group 7), not `cached_scope_label`'s cached answers.
+#[cfg(feature = "test-hooks")]
+pub fn scope_label_lookups(m: &AppModel) -> u64 {
+    m.scope_label_lookups.get()
+}
+
 /// `AppModel::export_files` counts that were not served from the cache.
 #[cfg(feature = "test-hooks")]
 pub fn export_files_builds(m: &AppModel) -> u64 {
@@ -1709,11 +1715,32 @@ impl AppModel {
     }
 }
 
-/// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip;
-/// `s` itself when no set matches.
-pub fn scope_label(m: &AppModel, s: &str) -> String {
+/// The set id a filter's stored scope key names, resolved as the list resolves it (`view_of`), for the filter's chip
+/// (read through `cached_scope_label`); `s` itself when no set matches.
+fn scope_label(m: &AppModel, s: &str) -> String {
+    #[cfg(feature = "test-hooks")]
+    m.scope_label_lookups.set(m.scope_label_lookups.get() + 1);
     let views = sets::views(m);
     view_of(&views, &m.sets_root(), s).map_or_else(|| s.to_string(), |v| v.id.clone())
+}
+
+/// `scope_label` for the Problems chip, which is drawn every frame (final wave Group 7, ledger 253): looked up once
+/// per set views build and stored key `s`. The views live in the same cache cell, which is emptied when they change.
+pub fn cached_scope_label(m: &AppModel, s: &str) -> String {
+    // Before the borrow: `views` writes the same cell.
+    let views = sets::views(m);
+    if let Some((.., l)) = m
+        .views
+        .borrow()
+        .scope_label
+        .as_ref()
+        .filter(|(v, k, _)| Arc::ptr_eq(v, &views) && k == s)
+    {
+        return l.clone();
+    }
+    let l = scope_label(m, s);
+    m.views.borrow_mut().scope_label = Some((views, s.to_string(), l.clone()));
+    l
 }
 
 /// `s`'s scope. A key no view holds still names its key's rows, as before; the empty string names no row.

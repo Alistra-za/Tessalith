@@ -1064,7 +1064,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let sets_off = model.sets_read_only_reason();
     let mark_off = model.mark_off_reason();
     let mut act = None;
-    let label = |k: &String| crate::model::bottom::scope_label(model, k);
+    let label = |k: &String| crate::model::bottom::cached_scope_label(model, k);
     let (pill_on, pill_to) = checks_pill(&model.bottom.filter);
     let (notes_on, notes_to) = notes_pill(&model.bottom.filter);
     if model.bottom.filter.is_some() || checks > 0 || notes > 0 || suggestions > 0 || hideable {

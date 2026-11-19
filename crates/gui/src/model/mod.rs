@@ -315,6 +315,8 @@ pub(crate) struct ViewCache {
     /// Final fix wave R2: `bottom::cached_set_reasons`, keyed on the `problems` build it read (held), the set key and
     /// the hidden kinds.
     pub set_reasons: Option<CachedReasons>,
+    /// Final wave Group 7: `bottom::cached_scope_label`, keyed on the views it read (held) and the filter's stored key.
+    pub scope_label: Option<(Arc<Vec<sets::SetView>>, String, String)>,
     /// `export_asks`, keyed by `evidence_rev` inside the view_key cell (R-b: Review reads them every frame).
     pub asks: Option<(u64, Arc<Vec<pbr_export::ExportIssue>>)>,
     /// `AppModel::export_files`, under the same key and `inner` tuple as `problems` (Task 6; ui-rules §9.1, §7.7).
@@ -607,6 +609,9 @@ pub struct AppModel {
     /// Final fix wave R2: the reason scans `bottom::cached_set_reasons` ran (see `bottom::reason_scans`).
     #[cfg(feature = "test-hooks")]
     pub(crate) reason_scans: std::cell::Cell<u64>,
+    /// Final wave Group 7: the set lookups `bottom::scope_label` ran (see `bottom::scope_label_lookups`).
+    #[cfg(feature = "test-hooks")]
+    pub(crate) scope_label_lookups: std::cell::Cell<u64>,
     #[cfg(feature = "test-hooks")]
     pub(crate) export_files_builds: std::cell::Cell<u64>,
     /// Backlog L54: worker replies `poll` dropped for an old generation or token, by `StaleKind` (see `stale_replies_dropped`).
@@ -937,6 +942,8 @@ impl AppModel {
             tab_count_scans: Default::default(),
             #[cfg(feature = "test-hooks")]
             reason_scans: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            scope_label_lookups: Default::default(),
             #[cfg(feature = "test-hooks")]
             export_files_builds: Default::default(),
             #[cfg(feature = "test-hooks")]

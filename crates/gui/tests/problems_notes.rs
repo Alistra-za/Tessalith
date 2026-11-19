@@ -1926,6 +1926,41 @@ fn the_status_line_scans_its_reasons_once_per_change() {
     assert_eq!(steps(&mut h), n + 3, "another set");
 }
 
+/// Final wave Group 7 (ledger 253, Q6 rank 1): the chip of a set filter resolves its set once per change of the
+/// filter or the views, not on every frame it is drawn.
+#[test]
+fn the_set_filter_chip_resolves_its_set_once_per_change() {
+    use engine::codes::{Code, Warning};
+    use sdc_gui::model::bottom::{scope_label_lookups, ProblemsFilter};
+    let (_d, mut m) = with_warnings(&[Warning::new(Code::ValMipError, "mip 3")]);
+    let rock = rock01(&m);
+    let other = sdc_gui::model::sets::views(&m)
+        .iter()
+        .find(|v| v.key != rock.key && !v.key.is_empty())
+        .expect("another set")
+        .clone();
+    m.open_problems(Some(ProblemsFilter::Set(rock.key.clone())));
+    let mut h = harness(m);
+    h.run();
+    h.get_by_label(&format!("Set: {} ×", rock.id));
+    let steps = |h: &mut Harness<'static, AppModel>| {
+        for _ in 0..5 {
+            h.step();
+        }
+        scope_label_lookups(h.state())
+    };
+    let n = steps(&mut h);
+    assert!(n >= 1, "the chip resolved its set");
+    assert_eq!(steps(&mut h), n, "five frames, no change: no lookup");
+    h.state_mut()
+        .open_problems(Some(ProblemsFilter::Set(other.key.clone())));
+    assert_eq!(steps(&mut h), n + 1, "another filter");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+    h.state_mut().invalidate_views();
+    assert_eq!(steps(&mut h), n + 2, "new views");
+    h.get_by_label(&format!("Set: {} ×", other.id));
+}
+
 /// `counts_for` (the tiles' and cards' predicate): a problem warning counts until it is marked, with the same sentence
 /// its row shows; an artist check never counts against Ready (Note CL, spec 7a.3).
 #[test]
