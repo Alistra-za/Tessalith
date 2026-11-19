@@ -1204,9 +1204,17 @@ fn two_sets_files(dir: &Path) {
         .unwrap();
 }
 
-/// `two_sets_files`, opened as the app opens them.
-fn two_sets(dir: &Path) -> AppModel {
+/// `two_sets_files` without `steel_n.png`: `armor/steel`'s Normal slot is empty, so a Share into it changes only its
+/// borrow line. (N8-r: a Share that replaces `steel_n.png`, an automatic member, puts that file in no set, which
+/// changes the borrower's membership, so that step writes nothing.)
+fn open_slot_files(dir: &Path) {
     two_sets_files(dir);
+    std::fs::remove_file(dir.join("textures/armor/steel_n.png")).unwrap();
+}
+
+/// `open_slot_files`, opened as the app opens them.
+fn two_sets(dir: &Path) -> AppModel {
+    open_slot_files(dir);
     let m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     let ids: Vec<String> = sdc_gui::model::sets::views(&m)
         .iter()
@@ -1221,22 +1229,110 @@ fn two_sets(dir: &Path) -> AppModel {
 
 const IRON_N: &str = "pbr/iron_n.png";
 
-/// Share `item` into set `into` as the Sets column does: `drop_choice` returns `AskReplace` when the slot is filled
-/// (sets.rs:2936-2946) and `Joined` when it is empty; it never returns `AskChoice` (that is `drop_on_set`'s).
+/// Share `item` into the empty Normal slot of set `into` as the Sets column does (`drop_choice` returns `Joined`), and
+/// let the plan land. A filled slot (`AskReplace`) is `share_replacing`'s.
 fn share(m: &mut AppModel, item: &str, into: &str) {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    match m.drop_choice(item, into, DropChoice::Share) {
+        DropOutcome::Joined => {}
+        other => panic!("not an empty slot: {other:?}"),
+    }
+    settle(m);
+}
+
+/// Share `item` over the filled Normal slot of set `into` and confirm Replace, as the Sets column does
+/// (`drop_choice` returns `AskReplace`, sets.rs `drop_choice`), and let the plan land.
+fn share_replacing(m: &mut AppModel, item: &str, into: &str) {
     use sdc_gui::model::sets::{DropChoice, DropOutcome};
     match m.drop_choice(item, into, DropChoice::Share) {
         DropOutcome::AskReplace { .. } => m
             .drop_replace(item, into, DropChoice::Share)
             .expect("shared"),
-        DropOutcome::Joined => {}
-        other => panic!("{other:?}"),
+        other => panic!("not a filled slot: {other:?}"),
     }
     settle(m);
 }
 
-/// N-10 (a): sharing a PBR set's normal into a regular set writes `alpha.policy = "data"` on it in the share's step.
-/// (b): the regular set picked PBR takes it back in that step; a regular pick writes it again.
+/// N8-m, N8-r (round 4; this test expected `data` and a list entry before): Share `iron_n` over `armor/steel`'s own
+/// `steel_n`, an automatic member, and confirm Replace. The Replace puts `steel_n` in no set (`[project] no_set`), so
+/// the borrower's membership changed in the step: it is not known, and the share writes and lists nothing in its step,
+/// nor when its plan lands (N8-g). A later step that changes no membership and makes the share newly regular (here
+/// the borrower picked PBR, then Default) writes it.
+#[test]
+fn a_share_replacing_an_automatic_normal_writes_nothing_in_its_step() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    let no_set = |m: &AppModel| m.sets_doc.as_ref().unwrap().no_set();
+    assert!(no_set(&m).is_empty(), "precondition");
+    share_replacing(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        no_set(&m),
+        vec!["armor/steel_n.png".to_string()],
+        "precondition: the Replace put the automatic member in no set"
+    );
+    assert!(
+        m.undo_label().is_some_and(|l| l.starts_with("Share into")),
+        "precondition: one step"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "a step that changed the borrower's membership writes nothing"
+    );
+    assert!(auto_data(&m).is_empty(), "and lists nothing");
+    m.set_shader("armor/steel", Some(Shader::Pbr));
+    settle(&mut m);
+    m.set_shader("armor/steel", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+}
+
+/// N8-r: the borrower's own diffuse goes to no set (its view is left with no file, and the listed `data` stays: the
+/// step changed its membership); then Back to its automatic set takes it out of no set. The views still show the
+/// borrower with no file, but it is not gone: the step that takes a file out of no set knows no set, so it clears
+/// nothing, and once the plan lands the borrower reads the shared normal again.
+#[test]
+fn a_file_back_from_no_set_keeps_the_shared_data() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.remove_member("armor/steel", "armor/steel.png").unwrap();
+    settle(&mut m);
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "armor/steel" && v.members.is_empty()),
+        "precondition: the borrower has no file"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the remove's step changed the borrower's membership and kept it"
+    );
+    m.back_to_automatic_set(&["armor/steel.png".to_string()])
+        .unwrap();
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a step that takes a file out of no set clears nothing"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == "armor/steel" && !v.members.is_empty()),
+        "the borrower has its file back"
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N-10 (a): sharing a PBR set's normal into a regular set's empty Normal slot writes `alpha.policy = "data"` on it in
+/// the share's step. (b): the regular set picked PBR takes it back in that step; a regular pick writes it again.
 #[test]
 fn a_shared_normal_keeps_its_alpha_while_a_regular_set_uses_it() {
     let d = tempfile::tempdir().unwrap();
@@ -1522,7 +1618,7 @@ fn a_set_the_running_plan_does_not_know_is_not_gone() {
 #[test]
 fn a_share_of_a_normal_with_no_varying_alpha_writes_nothing() {
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([128u8, 128, 255]))
         .save(d.path().join("textures/pbr/iron_n.png"))
         .unwrap();
@@ -1611,7 +1707,7 @@ const LISTED_AND_BORROWED: &str = "[project]\nauto_data = [\"pbr/iron_n.png\"]\n
 #[test]
 fn a_share_writes_no_data_over_the_users_alpha_under_another_spelling() {
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     std::fs::write(
         d.path().join("textures/sdc.toml"),
         "[files.\"pbr/iron_n.png\"]\nsubtype = \"pbr_normal\"\n\n[files.\"pbr/iron_n\"]\nalpha.policy = \"remove\"\n",
@@ -1642,7 +1738,7 @@ fn a_share_writes_no_data_over_the_users_alpha_under_another_spelling() {
 #[test]
 fn a_share_writes_no_data_into_an_extensionless_table() {
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     std::fs::write(
         d.path().join("textures/sdc.toml"),
         "[files.\"pbr/iron_n\"]\nsubtype = \"pbr_normal\"\n",
@@ -1961,7 +2057,7 @@ fn a_confirmed_data_on_a_listed_key_is_the_users() {
 fn a_share_that_cannot_list_writes_no_data() {
     use sdc_gui::model::sets::{SlotFill, SlotKind};
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     std::fs::write(
         d.path().join("textures/sdc-project.toml"),
         "project = \"bad\"\n",
@@ -2128,7 +2224,7 @@ fn ending_a_share_leaves_the_users_data_in_a_unicode_twin() {
 fn a_backslash_table_beside_the_shares_table_is_left_alone() {
     use sdc_gui::model::sets::SlotCommand;
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     std::fs::write(
         d.path().join("textures/sdc.toml"),
         "[files.'pbr\\iron_n.png']\nalpha.policy = \"remove\"\n",
@@ -2189,7 +2285,7 @@ fn drop_now(m: &mut AppModel, item: &str, into: &str, choice: sdc_gui::model::se
 /// `two_sets` plus a populated PBR set `pbr/gold` (`gold.png`, `gold_rmaos.png`, and `gold_n.png` when `with_n`);
 /// `iron_n` is shared into `armor/steel` and listed.
 fn shared_with_gold(dir: &Path, with_n: bool) -> AppModel {
-    two_sets_files(dir);
+    open_slot_files(dir);
     let pbr = dir.join("textures/pbr");
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([200u8, 160, 40]))
         .save(pbr.join("gold.png"))
@@ -2402,7 +2498,7 @@ fn aged(p: &Path) {
 fn a_crash_restore_keeps_the_list_it_restores() {
     use sdc_gui::model::sets::SlotCommand;
     let d = tempfile::tempdir().unwrap();
-    two_sets_files(d.path());
+    open_slot_files(d.path());
     // As saved (written as a file: since N8-p a step that runs the follow-on drops such an entry).
     std::fs::write(
         d.path().join("textures/sdc-project.toml"),

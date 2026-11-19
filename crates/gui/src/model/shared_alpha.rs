@@ -203,35 +203,58 @@ pub(super) fn shared_into_regular(
 
 /// A step's starting point (N-33), read before the step: the owner normals regular sets shared, the sub-type each
 /// owner's Normal-slot file held, the sets with no file (`empty`), the slot-2 borrow targets (`targets`, N8-b), and
-/// for N8-f: whether the views' members are what the documents say (`fresh`), each entry's membership lines
-/// (`members`) and the `[inputs]` aliases (`aliases`).
+/// for N8-f: whether the views' members are what the documents say (`fresh`), the sets document's membership fields
+/// (`members`, N8-r) and the `[inputs]` aliases (`aliases`).
 pub(super) struct Before {
     shared: BTreeSet<String>,
     sub: BTreeMap<String, Option<Value>>,
     empty: BTreeSet<String>,
     targets: BTreeSet<String>,
     fresh: bool,
-    members: BTreeMap<String, Membership>,
+    members: Membership,
     aliases: BTreeMap<String, String>,
 }
 
-/// What an `[[sets]]` entry says about which files the set holds: `created`, `renamed_from`, `add`, `remove`.
-type Membership = (bool, Option<String>, Vec<String>, Vec<String>);
+/// N8-f, N8-r: what the sets document says about which files the sets hold, from every field the engine's set edits
+/// are made of (`sets::engine_inputs`): each `[[sets]]` entry's `created`, `renamed_from`, `add`, `remove` and `share`
+/// lines, by folded id, and `[project] no_set`. A borrow line, a shader pick or a lock moves no file. (The `[inputs]`
+/// aliases, in the project document, are compared whole: `aliases`.)
+#[derive(Debug, Default, PartialEq)]
+struct Membership {
+    entries: BTreeMap<String, Lines>,
+    no_set: BTreeSet<String>,
+}
 
-/// N8-f: every entry's membership lines, by folded id.
-fn membership(s: &SetsDoc) -> BTreeMap<String, Membership> {
-    s.entries()
+/// One entry's membership lines.
+#[derive(Debug, Default, PartialEq)]
+struct Lines {
+    created: bool,
+    renamed_from: Option<String>,
+    add: Vec<String>,
+    remove: Vec<String>,
+    share: Vec<String>,
+}
+
+/// N8-f, N8-r: the one reader of `Membership`.
+fn membership(s: &SetsDoc) -> Membership {
+    let entries = s
+        .entries()
         .iter()
         .map(|e| {
-            let m = (
-                e.created,
-                e.renamed_from.clone(),
-                e.add.clone(),
-                e.remove.clone(),
-            );
-            (fold_id(&e.id), m)
+            let l = Lines {
+                created: e.created,
+                renamed_from: e.renamed_from.clone(),
+                add: e.add.clone(),
+                remove: e.remove.clone(),
+                share: e.share.clone(),
+            };
+            (fold_id(&e.id), l)
         })
-        .collect()
+        .collect();
+    Membership {
+        entries,
+        no_set: s.no_set().into_iter().collect(),
+    }
 }
 
 /// N8-f: the `[inputs]` aliases (a new input name moves a file to another automatic set at the next plan).
@@ -242,29 +265,32 @@ fn aliases(p: &ProjectDoc) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// N8-f: the sets whose files the step's own edit moved: an entry whose membership lines changed (a move, a replace,
-/// Fill from names, a hand-over, a rename, a new or deleted entry), and every set whose view holds a file one of
-/// those lines names (the set the file leaves). The views keep the last plan's members, so for these sets they are
-/// not what the documents say until the plan lands.
+/// N8-f, N8-r: the sets whose files the step's own edit moved: an entry whose membership lines changed (a move, a
+/// replace, Fill from names, a hand-over, a rename, a share line, a new or deleted entry), and every set whose view
+/// holds a file one of its `add` or `remove` lines names, or a file the step put in no set (the set the file leaves: a
+/// Replace or Remove of an automatic member). The views keep the last plan's members, so for these sets they are not
+/// what the documents say until the plan lands. (A file a share line names stays in its own set, Note HH1; a file the
+/// step took out of no set makes the whole step abstain: `rejoins`.)
 fn touched(m: &AppModel, b: &Before, s: &SetsDoc) -> BTreeSet<String> {
     let now = membership(s);
     let mut out = BTreeSet::new();
     let mut lines = BTreeSet::new();
     // An entry that is not there says what an entry with no membership lines says (a borrow or a shader pick that
     // creates the entry moves no file).
-    let none = Membership::default();
-    for id in b.members.keys().chain(now.keys()) {
+    let none = Lines::default();
+    for id in b.members.entries.keys().chain(now.entries.keys()) {
         let (x, y) = (
-            b.members.get(id).unwrap_or(&none),
-            now.get(id).unwrap_or(&none),
+            b.members.entries.get(id).unwrap_or(&none),
+            now.entries.get(id).unwrap_or(&none),
         );
         if x != y {
             out.insert(id.clone());
-            for (_, _, add, remove) in [x, y] {
-                lines.extend(add.iter().chain(remove).cloned());
+            for l in [x, y] {
+                lines.extend(l.add.iter().chain(&l.remove).cloned());
             }
         }
     }
+    lines.extend(now.no_set.difference(&b.members.no_set).cloned());
     if !lines.is_empty() {
         for v in views(m).iter() {
             let holds = v.members.iter().any(|mk| {
@@ -278,6 +304,12 @@ fn touched(m: &AppModel, b: &Before, s: &SetsDoc) -> BTreeSet<String> {
         }
     }
     out
+}
+
+/// N8-r: whether the step took a file out of no set. It rejoins a set the views cannot name (its automatic set, which
+/// the engine finds by name and alias, or a Move's target), so, as for an alias, no set is known in the step.
+fn rejoins(b: &Before, s: &SetsDoc) -> bool {
+    !b.members.no_set.is_subset(&membership(s).no_set)
 }
 
 /// The sets the slot-2 borrow lines of `s` name, by folded id.
@@ -544,8 +576,8 @@ fn changes(
     }
     // N8-f: views older than the documents (a set edit or an alias whose plan has not landed), or an alias the step
     // changed (it moves files between automatic sets at the next plan): no set is known, so nothing is written or
-    // cleared.
-    if !b.fresh || aliases(p) != b.aliases {
+    // cleared. N8-r: so with a file the step took out of no set.
+    if !b.fresh || aliases(p) != b.aliases || rejoins(b, s) {
         return c;
     }
     // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
@@ -785,6 +817,51 @@ mod tests {
                     "{key} vs {rel}"
                 );
             }
+        }
+    }
+
+    /// N8-r: `membership` reads every field of the sets document that changes which files a set holds (the fields
+    /// `sets::engine_inputs` makes the engine's set edits from), one row per field; a borrow line or a shader pick
+    /// changes none.
+    #[test]
+    fn membership_reads_every_field_that_moves_a_file() {
+        let read = |text: &str| {
+            let d = tempfile::tempdir().unwrap();
+            std::fs::write(d.path().join("sdc-project.toml"), text).unwrap();
+            let s = SetsDoc::open(d.path());
+            assert!(!s.read_only(), "{text}");
+            membership(&s)
+        };
+        let start = read("[[sets]]\nid = \"a/b\"\n");
+        let rows = [
+            ("created", "[[sets]]\nid = \"a/b\"\ncreated = true\n"),
+            (
+                "renamed_from",
+                "[[sets]]\nid = \"a/b\"\nrenamed_from = \"a/c\"\n",
+            ),
+            ("add", "[[sets]]\nid = \"a/b\"\nadd = [\"a/x.png\"]\n"),
+            ("remove", "[[sets]]\nid = \"a/b\"\nremove = [\"a/x.png\"]\n"),
+            (
+                "share",
+                "[[sets]]\nid = \"a/b\"\nshare = [\"a/x_ao.png\"]\n",
+            ),
+            (
+                "[project] no_set",
+                "[project]\nno_set = [\"a/x.png\"]\n\n[[sets]]\nid = \"a/b\"\n",
+            ),
+        ];
+        for (field, text) in rows {
+            assert_ne!(read(text), start, "{field} changes membership");
+        }
+        let controls = [
+            (
+                "borrow",
+                "[[sets]]\nid = \"a/b\"\nborrow = { slot2 = \"c/d\" }\n",
+            ),
+            ("shader", "[[sets]]\nid = \"a/b\"\nshader = \"pbr\"\n"),
+        ];
+        for (field, text) in controls {
+            assert_eq!(read(text), start, "{field} moves no file");
         }
     }
 
