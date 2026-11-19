@@ -6296,6 +6296,34 @@ fn export_never_replaces_an_older_record_with_other_edits() {
     assert_eq!(std::fs::read(exported(&d)).unwrap(), nif_before);
 }
 
+/// Ruling E6-A with E6-D: a carry-over gives the session another id (the project draft's, or a new one), yet the
+/// record it exported itself stays its own, in that session and after a reopen (its ops start the session's).
+#[test]
+fn a_carried_edit_still_replaces_the_record_it_exported() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    assert_eq!(op_values(&m).len(), 1, "premise: carried into the project");
+    gloss(&mut m, 13.5);
+    assert_eq!(review_row(&m).blocked, None);
+    assert_eq!(export(&mut m), Ok(1));
+    gloss(&mut m, 14.5);
+    m.close_edit();
+    // a record written under the old id (before the carry-over) and reopened in the project
+    let rec = nif_doc(&export_root(&d));
+    let mut r = load(&rec).unwrap().unwrap();
+    r.id = Some("0123456789abcdef".into());
+    save(&rec, &r).unwrap();
+    m.open_edit();
+    gloss(&mut m, 15.5);
+    assert_eq!(review_row(&m).blocked, None, "its ops start the session's");
+    assert_eq!(export(&mut m), Ok(1));
+    assert_eq!(doc_values(&rec), [12.5, 13.5, 14.5, 15.5]);
+}
+
 /// The guard of ruling E6-A's block: the draft's own record is replaced by every later export, in the same session and
 /// in the next one.
 #[test]

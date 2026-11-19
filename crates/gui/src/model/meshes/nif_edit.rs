@@ -72,6 +72,9 @@ pub struct NifEdit {
     /// The ops of the record at `record_path` when it is not this draft's (another id, or none: an earlier Tessalith's
     /// document) and holds any; the export does not replace it while they differ from the session's (ruling E6-A).
     foreign_record: Option<Vec<DocOp>>,
+    /// The id of the record at `record_path` this session knows to be its own (it matched the draft's id when taken,
+    /// or this session wrote it); a carry-over can change `doc.id` since (ruling E6-D), the record stays its own.
+    record_id: Option<String>,
     /// Both empty without an export folder: export is blocked with `NO_EXPORT_FOLDER`.
     pub export_path: PathBuf,
     /// The export folder (empty without one).
@@ -811,6 +814,7 @@ impl NifEdit {
             project: project.map(Path::to_path_buf),
             record_path,
             foreign_record: None,
+            record_id: None,
             export_path,
             edit_mod,
             autosave: autosave.map(Path::to_path_buf),
@@ -906,10 +910,12 @@ impl NifEdit {
         let Some(r) = record else {
             self.doc.export = ExportRec::default();
             self.foreign_record = None;
+            self.record_id = None;
             return;
         };
         let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
         let ours = r.id.is_some() && r.id == self.doc.id;
+        self.record_id = if ours { r.id.clone() } else { None };
         self.foreign_record = (!ours && !r.ops.is_empty()).then(|| r.ops.clone());
         self.doc.export = r.export;
         if stale {
@@ -917,11 +923,21 @@ impl NifEdit {
         }
     }
 
+    /// The record `r` is this session's: it carries the draft's id, or the id of the record this session took as its
+    /// own or wrote (`record_id`, which a carry-over's new id does not change).
+    fn owns_record(&self, r: &EditDoc) -> bool {
+        r.id.is_some() && (r.id == self.doc.id || r.id == self.record_id)
+    }
+
     /// Ruling E6-A: why the export may not replace the record in the export folder: it holds edits that are not this
-    /// session's (`foreign_record`) and differ from them. Task 9 moves such documents; until then the export waits.
+    /// session's (`foreign_record`) and that the session's ops do not start with, so the export would lose them. A
+    /// record whose ops begin the session's (an export of this edit before a carry-over, then reopened under the new
+    /// id) loses nothing. Task 9 moves the other documents; until then the export waits.
     fn record_block(&self, foreign: Option<&[DocOp]>) -> Option<String> {
         let theirs = foreign?;
-        (!same_ops(theirs, &self.doc.ops)).then(|| {
+        let kept =
+            theirs.len() <= self.doc.ops.len() && same_ops(theirs, &self.doc.ops[..theirs.len()]);
+        (!kept).then(|| {
             format!(
                 "{} holds other edits of this NIF (from another project or an earlier Tessalith); an export would \
                  replace them. Move that file out of the folder to keep them, or choose another export folder.",
@@ -1105,7 +1121,7 @@ impl NifEdit {
         // only when it is this draft's or holds nothing this session lacks
         if let Some(p) = &self.record_path {
             let foreign = match edit_doc::load(p) {
-                Ok(Some(r)) if !(r.id.is_some() && r.id == self.doc.id) => Some(r.ops),
+                Ok(Some(r)) if !self.owns_record(&r) => Some(r.ops),
                 Ok(_) => None,
                 Err(e) => return ExportOutcome::Blocked(e),
             };
@@ -1149,6 +1165,7 @@ impl NifEdit {
         self.doc.export = export;
         self.up_to_date = true;
         self.foreign_record = None;
+        self.record_id = self.doc.id.clone();
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
             rerun_pgpatcher: self.copies.iter().any(|c| c.derived),
