@@ -1772,6 +1772,8 @@ impl NifEdit {
         };
         (self.edit_mod, self.record_path, self.export_path) = (edit_mod, record_path, export_path);
         // the folder's export state, a forced re-export when its record names another source (in memory, E6-A)
+        // ruling E6-I: a partial export belongs to the folder it was made in; another folder has its own record
+        self.partial = None;
         self.take_record(record);
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
         self.export_note = None;

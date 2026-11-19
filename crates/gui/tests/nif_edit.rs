@@ -5854,6 +5854,33 @@ fn a_partial_export_keeps_its_row_until_it_is_repaired() {
     assert!(m.nif_review_rows().is_empty(), "the row is gone");
 }
 
+/// Ruling E6-I: a partial export belongs to its folder: in another folder whose record is current, the session is not
+/// pending.
+#[test]
+fn a_partial_export_does_not_follow_the_session_to_another_folder() {
+    let (d, mut m, _p) = session_in_project("p", None);
+    let (a, b) = (export_root(&d), d.path().join(r"mods\Other"));
+    std::fs::create_dir_all(&b).unwrap();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1), "X recorded in A");
+    m.set_nif_export_root(Some(b.clone()));
+    assert_eq!(export(&mut m), Ok(1), "X recorded in B");
+    m.set_nif_export_root(Some(a.clone()));
+    gloss(&mut m, 13.5);
+    read_only(&nif_doc(&a), true); // A's record cannot be replaced
+    let why = export(&mut m).unwrap_err();
+    assert!(why.contains("is in place, but its record"), "{why}");
+    assert!(m.undo_edit());
+    assert!(m.edit.as_ref().unwrap().pending(), "premise: partial in A");
+    m.set_nif_export_root(Some(b.clone()));
+    assert!(
+        !m.edit.as_ref().unwrap().pending(),
+        "B's record is current for these ops"
+    );
+    read_only(&nif_doc(&a), false);
+}
+
 /// Review E6 (Important 7, ruling E6-E): when the NIF is written and its record is not, the export is not reported as
 /// done: the export state stays where it was and the row stays pending with the reason. The next export of the same
 /// edit replaces the NIF it wrote itself without asking (the bytes are the same).
@@ -6337,6 +6364,14 @@ fn a_carried_edit_takes_the_project_drafts_id() {
     make_old(&draft(&p));
     m.set_project_root(Some(&p));
     assert_eq!(op_values(&m)[0].1, 12.5, "premise: the live edit is newer");
+    assert_eq!(
+        m.edit.as_ref().unwrap().doc.id.as_deref(),
+        Some(theirs.as_str()),
+        "the carried session takes P's id"
+    );
+    // ruling E6-H: the carry-over writes nothing; the next change saves into P, under P's id
+    gloss(&mut m, 12.75);
+    assert_eq!(doc_values(&draft(&p)), [12.5, 12.75]);
     assert_eq!(id_of(&p), theirs);
     // with no draft in the project, the carried edit gets an id of its own
     let q = project_folder(&d, "q");
@@ -6344,9 +6379,13 @@ fn a_carried_edit_takes_the_project_drafts_id() {
     gloss(&mut m, 13.5);
     let live = load(&autosave(&d)).unwrap().unwrap().id.unwrap();
     m.set_project_root(Some(&q));
-    // ruling E6-H: the carry into P wrote nothing, so the live edit (12.5) stayed in the autosave and goes on here
     assert_eq!(op_values(&m).last().unwrap().1, 13.5, "premise: carried");
-    gloss(&mut m, 14.5); // the carry-over writes nothing (E6-H): the next change saves into Q
+    assert_ne!(
+        m.edit.as_ref().unwrap().doc.id.as_deref(),
+        Some(live.as_str()),
+        "a new id"
+    );
+    gloss(&mut m, 14.5); // the next change saves into Q
     assert_ne!(id_of(&q), live, "a new id");
 }
 
