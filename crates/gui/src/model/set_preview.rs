@@ -1053,7 +1053,7 @@ pub fn followed_set(m: &AppModel) -> Option<String> {
         Selection::Set(k) => Some(k.clone()),
         // Note HF1: a no-set texture has no set.
         Selection::Item(k) => m.set_key_of_item(k),
-        Selection::None => None,
+        Selection::None | Selection::SetId(_) => None,
     }
 }
 

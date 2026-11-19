@@ -152,6 +152,52 @@ pub enum Selection {
     None,
     Item(String),
     Set(String),
+    SetId(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum SetTarget {
+    Key(String),
+    Id(String),
+}
+
+impl SetTarget {
+    pub fn of(key: &str, id: &str) -> Self {
+        if key.is_empty() {
+            Self::Id(id.into())
+        } else {
+            Self::Key(key.into())
+        }
+    }
+
+    pub fn view(v: &sets::SetView) -> Self {
+        Self::of(&v.key, &v.id)
+    }
+
+    pub fn selection(self) -> Selection {
+        match self {
+            Self::Key(k) => Selection::Set(k),
+            Self::Id(id) => Selection::SetId(id),
+        }
+    }
+
+    pub fn matches(&self, v: &sets::SetView) -> bool {
+        match self {
+            Self::Key(k) => !k.is_empty() && v.key == *k,
+            Self::Id(id) => engine::sets::same_id(&v.id, id),
+        }
+    }
+}
+
+impl Selection {
+    // Owned snapshot for a resolution miss or an action that outlives the frame.
+    pub fn set_target(&self) -> Option<SetTarget> {
+        match self {
+            Self::Set(k) => Some(SetTarget::Key(k.clone())),
+            Self::SetId(id) => Some(SetTarget::Id(id.clone())),
+            Self::None | Self::Item(_) => None,
+        }
+    }
 }
 
 pub use auto_record::FUZZ_SWITCH_HOVER;
@@ -2859,9 +2905,7 @@ impl AppModel {
         let old_root = self.sets_root.replace(view.output_root);
         self.rekey_scope(old_root.as_deref());
         self.rekey_filter(old_root.as_deref(), filter_names_an_id);
-        // Note JI2: a set key holds the output root, so an Also tick or a new export folder dropped the selected set
-        // (the Also export tab's own tick closed its editor). Rekey it as the scope is; a key not under the old root
-        // (a created set's empty key) is left as it is.
+        // Note JI2: rekey an engine key when its output root changes. A SetId survives the root replacement verbatim.
         if let (Some(old), Selection::Set(k)) = (old_root.as_deref(), &self.selection) {
             let new = self.sets_root();
             let id = engine::sets::set_id(old, k);
@@ -2894,14 +2938,15 @@ impl AppModel {
         self.counts_status();
         self.prune_selection();
         // Keep the selection when its item or set still exists; else nothing.
-        let gone = match &self.selection {
-            Selection::Item(k) => self.item(k).is_none(),
-            // Note GY5: a set that lost its card is gone too.
-            Selection::Set(k) => !sets::has_card(self, k),
-            Selection::None => false,
-        };
-        if gone {
-            self.selection = Selection::None;
+        match &self.selection {
+            Selection::Item(k) if self.item(k).is_none() => self.selection = Selection::None,
+            Selection::Set(k) if sets::has_card(self, k) => {}
+            Selection::Set(_) | Selection::SetId(_) => {
+                let views = sets::views(self);
+                self.selection = bottom::landed_index(&views, &self.sets_root(), &self.selection)
+                    .map_or(Selection::None, |i| SetTarget::view(&views[i]).selection());
+            }
+            _ => {}
         }
         if let Some(k) = self.expanded.clone() {
             if self.item(&k).is_none() {
@@ -3396,7 +3441,11 @@ impl AppModel {
 
     /// Select one set; any multi-selection ends (F3a D1).
     pub fn select_set(&mut self, key: &str) {
-        self.selection = Selection::Set(key.to_string());
+        self.select_target(SetTarget::Key(key.into()));
+    }
+
+    pub fn select_target(&mut self, target: SetTarget) {
+        self.selection = target.selection();
         self.reset_multi();
         self.bulk = Default::default();
         // Note FB7: also a click on the set already selected brings it to the front of the centre.

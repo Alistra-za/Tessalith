@@ -1662,41 +1662,61 @@ impl Scope {
 /// and its id, which folds the id), so a filter opened by a keyed set's key follows the set once it loses every file
 /// and has no key. The key wins. `None` for the empty string.
 fn view_of<'a>(views: &'a [sets::SetView], root: &Path, s: &str) -> Option<&'a sets::SetView> {
-    view_lookup(views, root, s).map(|(v, _)| v)
+    view_lookup(views, root, s, NameKind::Filter).map(|(i, _)| &views[i])
 }
 
-/// `view_of`, and whether `s` named the set by its id (the second and third lookups) rather than by a key (the first
-/// and fourth). The lookup order lives here only.
-fn view_lookup<'a>(
-    views: &'a [sets::SetView],
+#[derive(Clone, Copy, PartialEq)]
+enum NameKind {
+    Filter,
+    Key,
+    Id,
+}
+
+/// Returns the view index and whether the name matched a document id.
+fn view_lookup(
+    views: &[sets::SetView],
     root: &Path,
     s: &str,
-) -> Option<(&'a sets::SetView, bool)> {
-    if s.is_empty() {
+    kind: NameKind,
+) -> Option<(usize, bool)> {
+    if kind != NameKind::Id && s.is_empty() {
+        return None;
+    }
+    if kind != NameKind::Id {
+        if let Some(i) = views.iter().position(|v| v.key == s) {
+            return Some((i, false));
+        }
+    }
+    if kind != NameKind::Key {
+        let by_id = views
+            .iter()
+            .position(|v| v.key.is_empty() && v.id == s)
+            .or_else(|| views.iter().position(|v| engine::sets::same_id(&v.id, s)));
+        if let Some(i) = by_id {
+            return Some((i, true));
+        }
+    }
+    if kind == NameKind::Id {
         return None;
     }
     views
         .iter()
-        .find(|v| v.key == s)
-        .map(|v| (v, false))
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| v.key.is_empty() && v.id == s)
-                .map(|v| (v, true))
-        })
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| engine::sets::same_id(&v.id, s))
-                .map(|v| (v, true))
-        })
-        .or_else(|| {
-            views
-                .iter()
-                .find(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
-                .map(|v| (v, false))
-        })
+        .position(|v| v.key.is_empty() && engine::sets::set_key(root, &v.id) == s)
+        .map(|i| (i, false))
+}
+
+pub(super) fn landed_index(
+    views: &[sets::SetView],
+    root: &Path,
+    selected: &super::Selection,
+) -> Option<usize> {
+    use super::Selection;
+    let (s, kind) = match selected {
+        Selection::Set(k) => (k, NameKind::Key),
+        Selection::SetId(id) => (id, NameKind::Id),
+        _ => return None,
+    };
+    view_lookup(views, root, s, kind).map(|(i, _)| i)
 }
 
 impl AppModel {
@@ -1711,7 +1731,7 @@ impl AppModel {
             return false;
         };
         let views = sets::views(self);
-        view_lookup(&views, &self.sets_root(), k).is_some_and(|(_, by_id)| by_id)
+        view_lookup(&views, &self.sets_root(), k, NameKind::Filter).is_some_and(|(_, by_id)| by_id)
     }
 }
 

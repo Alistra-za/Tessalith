@@ -86,6 +86,7 @@ pub fn state_json(m: &AppModel) -> Value {
             Selection::None => "none".to_string(),
             Selection::Item(k) => format!("item:{k}"),
             Selection::Set(k) => format!("set:{}", id_of(&by_key, k)),
+            Selection::SetId(id) => format!("set:{id}"),
         },
         "selected_sets": selected.iter().map(|k| id_of(&by_key, k)).collect::<Vec<_>>(),
         "expanded": m.expanded,

@@ -5203,6 +5203,131 @@ fn key_less_sets(dir: &std::path::Path) -> AppModel {
     m
 }
 
+fn pick_id(m: &mut AppModel, id: &str) {
+    m.select_target(sdc_gui::model::SetTarget::Id(id.into()));
+}
+
+fn id_selection(id: &str) -> sdc_gui::model::Selection {
+    sdc_gui::model::Selection::SetId(id.into())
+}
+
+fn give_a_file(m: &mut AppModel, id: &str, rel: &str) {
+    let root = m.root.clone().unwrap();
+    image::ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+    })
+    .save(root.join(rel))
+    .unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("t", None, true, |_, s| s.add_member(id, rel));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+}
+
+fn view_by_id(m: &AppModel, id: &str) -> sdc_gui::model::sets::SetView {
+    sdc_gui::model::sets::set_views(m)
+        .into_iter()
+        .find(|v| engine::sets::same_id(&v.id, id))
+        .expect("the set has a card")
+}
+
+#[test]
+fn a_full_plan_keeps_a_key_less_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.selection, id_selection("landscape/other"));
+}
+
+#[test]
+fn a_key_less_selection_follows_the_set_once_it_has_a_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    give_a_file(&mut m, "landscape/empty", "landscape/one.png");
+    let v = view_by_id(&m, "landscape/empty");
+    assert!(
+        !v.key.is_empty(),
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(v.key.clone()));
+}
+
+#[test]
+fn a_mixed_case_key_less_selection_follows_the_set_once_it_has_a_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("Landscape/Big"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = view_by_id(&m, "Landscape/Big");
+    assert!(
+        v.key.is_empty() && v.id == "Landscape/Big",
+        "precondition: {v:?}"
+    );
+    pick_id(&mut m, "Landscape/Big");
+    give_a_file(&mut m, "Landscape/Big", "landscape/big.png");
+    let v = view_by_id(&m, "landscape/big");
+    assert!(
+        !v.key.is_empty(),
+        "precondition: the set has a key now: {v:?}"
+    );
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(v.key.clone()));
+}
+
+#[test]
+fn a_keyed_selection_follows_the_set_once_it_loses_its_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("landscape/solo"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    give_a_file(&mut m, "landscape/solo", "landscape/solo.png");
+    let v = view_by_id(&m, "landscape/solo");
+    assert!(!v.key.is_empty(), "precondition: a keyed set: {v:?}");
+    m.select_set(&v.key);
+    std::fs::remove_file(m.root.clone().unwrap().join("landscape/solo.png")).unwrap();
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = view_by_id(&m, "landscape/solo");
+    assert!(
+        v.key.is_empty(),
+        "precondition: the set lost its key: {v:?}"
+    );
+    assert_eq!(m.selection, id_selection("landscape/solo"));
+}
+
+#[test]
+fn a_selected_set_that_gains_its_key_brings_the_selection_tab_back() {
+    use sdc_gui::model::CentreTab;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/empty");
+    m.open_json_editor();
+    let mut h = harness(m);
+    h.run();
+    assert_eq!(h.state().centre_tab, CentreTab::Json, "precondition");
+    give_a_file(h.state_mut(), "landscape/empty", "landscape/one.png");
+    h.run();
+    let landed = view_by_id(h.state(), "landscape/empty");
+    assert!(!landed.key.is_empty());
+    assert_eq!(
+        h.state().selection,
+        sdc_gui::model::Selection::Set(landed.key)
+    );
+    assert_eq!(h.state().centre_tab, CentreTab::Selection);
+}
+
+#[test]
+fn deleting_a_selected_key_less_set_selects_no_other_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_sets(d.path());
+    pick_id(&mut m, "landscape/other");
+    assert!(m.delete_set("landscape/other"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.selection, sdc_gui::model::Selection::None);
+}
+
 /// B3-16, B3-17 (Note JP5; F6 N1): a key-less set is named by its id. Each of two key-less sets lists and reasons
 /// its own missing entry and not the other's, through the model, for both sets; the empty string names no set. The
 /// editor opens the first key-less set for the empty key (selection by key is Plan 3b's, F2): its status line reads
@@ -5499,6 +5624,7 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         !views.iter().any(|v| v.id == "wall"),
         "precondition: no set wall yet"
     );
+    pick_id(&mut m, &id);
     let f = ProblemsFilter::Set(id.clone());
     m.open_problems(Some(f.clone()));
     let before = filtered(&m, Some(&f));
@@ -5534,6 +5660,12 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         "another set's row: {texts:?}"
     );
     assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
+    assert_eq!(m.selection, id_selection(&id));
+    let entry = view_by_id(&m, &id);
+    assert!(entry.key.is_empty());
+    assert!(entry.missing.iter().any(|v| matches!(v,
+        sdc_gui::model::sets::Missing::File(path) if path.ends_with("stray.txt"))));
+    assert_ne!(view_by_id(&m, "wall").key, id);
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it

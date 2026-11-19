@@ -1388,7 +1388,7 @@ fn open_groups_of(
         keys.extend(match &model.selection {
             Selection::Item(k) => model.set_key_of_item(k),
             Selection::Set(k) => Some(k.clone()),
-            Selection::None => None,
+            Selection::None | Selection::SetId(_) => None,
         });
     }
     for k in keys {

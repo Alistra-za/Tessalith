@@ -452,7 +452,7 @@ fn centre(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State, three_d: b
                 set_preview::draw(ui, model, &mut state.set3d);
             }
         }
-        Selection::None => {
+        Selection::None | Selection::SetId(_) => {
             ui.centered_and_justified(|ui| ui.label("Select a texture or a set."));
         }
     }
