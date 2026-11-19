@@ -815,20 +815,24 @@ impl AppModel {
             return;
         }
         self.status_note = None;
-        self.continue_review();
+        // Ruling 3c-35: confirmed for the scope Review shows now.
+        self.continue_review(Continue::Review {
+            scope_rev: self.scope_rev,
+        });
     }
 
-    /// The front half of Review's Export, also run when a scan-finished read it waited for lands.
-    pub(super) fn continue_review(&mut self) {
+    /// The front half of Review's Export (`how` keeps the scope it was confirmed for), also run when a scan-finished
+    /// read it waited for lands.
+    pub(super) fn continue_review(&mut self, how: Continue) {
         if self.planning.is_some() || self.votes_pending.is_some() {
-            self.continue_after_plan = Some(Continue::Review);
+            self.continue_after_plan = Some(how);
             return;
         }
         if self.check_sources() > 0 && self.session.is_some() {
-            self.continue_after_plan = Some(Continue::Review);
+            self.continue_after_plan = Some(how);
             self.replan();
             return;
         }
-        self.run_continue(Continue::Review);
+        self.run_continue(how);
     }
 }

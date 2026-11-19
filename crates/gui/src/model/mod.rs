@@ -205,7 +205,8 @@ pub enum Dialog {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Continue {
     /// R3: Review's Export: the guards and the Review gate again, then the export (undecided textures skipped).
-    Review,
+    /// Ruling 3c-35: `scope_rev` is the scope the user confirmed it for; a different one when it runs drops it.
+    Review { scope_rev: u64 },
 }
 
 /// What was asked while an export ran: it happens when the export has ended.
@@ -1482,7 +1483,7 @@ impl AppModel {
                 }
                 _ if clicked => self.export_go(),
                 // A plan may still be in flight, or sources changed: the same front half as Review's Export.
-                Some(_) => self.continue_review(),
+                Some(how) => self.continue_review(how),
                 None => {}
             }
             // E3: this branch re-planned nothing and handed nothing over, so the read it ends is the settle.
@@ -2555,9 +2556,17 @@ impl AppModel {
 
     fn run_continue(&mut self, how: Continue) {
         match how {
-            Continue::Review => {
+            Continue::Review { scope_rev } => {
                 // K4: Review closed (another folder, Reload) drops its queued export.
                 if self.review.is_none() {
+                    return;
+                }
+                // Ruling 3c-35: confirmed for one scope; the header's Review (or Export set) changed it meanwhile.
+                if scope_rev != self.scope_rev {
+                    let note = "Export not started: what Review exports changed while the plan was running. \
+                                Check Review and press Export again.";
+                    self.status_line = note.into();
+                    self.messages.notify(messages::Severity::Warning, note);
                     return;
                 }
                 // Note GH8: no project means no texture run (`start_export_pass` needs one): the NIF export is due now,

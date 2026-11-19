@@ -1082,6 +1082,51 @@ fn the_click_reads_the_export_blockers_fresh() {
     assert!(m.review.is_some(), "the overlap blocker opens Review");
 }
 
+/// Round 4, ruling 3c-35 (re-review, out-of-scope observation 2): Review's Export, queued behind a plan, was
+/// confirmed for one scope. The header's "Review…" pressed before the plan lands clears the scope (the open Review
+/// becomes the whole project's); the queued export must not run for the whole project: nothing is written, the
+/// continuation is dropped and the user is told.
+#[test]
+fn a_queued_scoped_review_export_never_widens_to_the_whole_project() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let k = key_of(&m, "g/u");
+    m.export_sets([k].into(), "Export set g/u".into());
+    assert!(
+        m.review.is_some() && m.export_scope().is_some(),
+        "guard: scoped Review"
+    );
+    m.hold_plan_results = true;
+    m.replan();
+    m.export_from_review();
+    assert!(
+        m.export_queued(),
+        "guard: Review's Export waits for the plan"
+    );
+    assert_eq!(m.header_export_text(), "Review 4 files…", "guard");
+    m.header_export_clicked();
+    assert!(
+        m.review.is_some() && m.export_scope().is_none(),
+        "guard: the header's Review made the open Review the whole project's"
+    );
+    let msgs = held_plan(&mut m);
+    land_plan(&mut m, msgs);
+    assert!(
+        m.export.running.is_none() && m.export.summary.is_none() && nothing_written(d.path()),
+        "the export confirmed for set g/u ran for the whole project"
+    );
+    assert!(!m.export_queued(), "the continuation is dropped");
+    assert!(
+        m.status_line.contains("press Export again"),
+        "{}",
+        m.status_line
+    );
+    assert!(m
+        .messages
+        .entries()
+        .any(|e| e.text.contains("press Export again")));
+}
+
 /// Round 4, ruling 3c-34 (re-review B1): a fresh blocker read drops what was derived from the old one. The export
 /// folder junction overlaps the target mod while Problems is built (its overlap blocker is a counted row); then the
 /// junction is retargeted to a safe folder with no key moving. The click reads the blockers fresh, and must not answer
