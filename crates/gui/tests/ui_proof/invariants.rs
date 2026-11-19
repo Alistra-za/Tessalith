@@ -1322,8 +1322,8 @@ pub struct Allowed {
 /// How far a measured overflow may differ from an entry's.
 pub const PX_TOLERANCE: f32 = 2.0;
 
-/// Hits the tree has today. Each is a real fault in `crates/gui/src` that the task adding the invariant did not fix;
-/// delete the entry when it is fixed.
+/// Hits the tree has today: faults in `crates/gui/src` not fixed yet, and the known non-faults marked below (an
+/// ellipsis the author wrote inside a text). Delete an entry when its hit is gone.
 pub const ALLOWED: &[Allowed] = &[
     Allowed {
         screen: "presets tab",
