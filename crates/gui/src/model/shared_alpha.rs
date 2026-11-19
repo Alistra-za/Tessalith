@@ -515,7 +515,8 @@ struct Changes {
     clear: Vec<String>,
     list: Vec<String>,
     relist: bool,
-    /// N8-k: every other table matching a written or cleared file, which the attempt must leave byte for byte.
+    /// N8-k, N8-q: every table matching a written or cleared file that the step neither writes nor clears, which the
+    /// attempt must leave byte for byte.
     others: BTreeSet<String>,
 }
 
@@ -604,9 +605,13 @@ fn changes(
         c.relist = l != raw;
         c.list = l;
     }
-    for k in c.write.iter().chain(&c.clear) {
+    // N8-q: the read-back protects every matching table except the whole set the step means to write or clear: two
+    // listed spellings that are both cleared are not each other's protected twins.
+    let intended: HashSet<&String> = c.write.iter().chain(&c.clear).collect();
+    for k in &intended {
         let other = tables.matching(k).into_iter().map(|(t, ..)| t);
-        c.others.extend(other.filter(|t| *t != k).cloned());
+        c.others
+            .extend(other.filter(|t| !intended.contains(t)).cloned());
     }
     c
 }

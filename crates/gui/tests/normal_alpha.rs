@@ -2851,6 +2851,50 @@ fn an_entry_whose_table_is_gone_leaves_the_list_in_the_next_step() {
     );
 }
 
+/// N8-q (round 4): two distinct case spellings of one file, both listed and both holding `data` in their own exact
+/// table, as saved. Ending their last share clears both: neither is the other's protected twin in the read-back.
+#[test]
+fn ending_a_share_clears_two_listed_spellings_of_one_file() {
+    use sdc_gui::model::sets::SlotCommand;
+    const UPPER: &str = "PBR/IRON_N.PNG";
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n\n[files.'PBR/IRON_N.PNG']\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        t.join("sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\", \"PBR/IRON_N.PNG\"]\n\n[[sets]]\nid = \"armor/steel\"\nborrow = { slot2 = \"pbr/iron\" }\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    let exact_alpha = |m: &AppModel, k: &str| {
+        let p = m.project.as_ref().unwrap();
+        p.has_file_key(k)
+            .then(|| p.file_value(k, "alpha.policy"))
+            .flatten()
+    };
+    assert!(
+        !m.project.as_ref().unwrap().read_only() && !m.sets_doc.as_ref().unwrap().read_only(),
+        "precondition: both documents open for editing"
+    );
+    for k in [IRON_N, UPPER] {
+        assert_eq!(exact_alpha(&m, k), Some(json!("data")), "precondition: {k}");
+    }
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string(), UPPER.to_string()]);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    for k in [IRON_N, UPPER] {
+        assert_eq!(exact_alpha(&m, k), None, "{k} is cleared");
+    }
+    assert!(auto_data(&m).is_empty(), "both entries leave the list");
+    assert_eq!(m.undo_label(), Some("Clear slot 2 of armor/steel"));
+}
+
 /// N8-p: an entry whose exact table holds another value is dropped too, in a step that writes and clears nothing.
 #[test]
 fn an_entry_whose_table_holds_another_value_leaves_the_list() {
