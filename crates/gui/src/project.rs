@@ -522,29 +522,56 @@ impl ProjectDoc {
         if self.read_only() || self.entry(key).is_none() {
             return;
         }
-        fn remove(t: &mut dyn TableLike, parts: &[&str]) -> bool {
-            if parts.len() == 1 {
-                return t.remove(parts[0]).is_some();
-            }
-            let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
-                return false;
-            };
-            let hit = remove(sub, &parts[1..]);
-            if sub.is_empty() {
-                t.remove(parts[0]);
-            }
-            hit
-        }
         let parts: Vec<&str> = field.split('.').collect();
         if self
             .entry_mut(key)
-            .is_some_and(|entry| remove(entry, &parts))
+            .is_some_and(|entry| remove_field(entry, &parts))
         {
             self.touch();
         }
         if self.entry(key).is_some_and(|t| t.is_empty()) {
             self.remove_file_entry(key);
         }
+    }
+
+    /// Note JS7 (N8-k): remove `field` from the `[files]` table spelled byte for byte `key`, and only while it holds
+    /// `want`: the check and the removal are one operation on that one table, with no case, Unicode or extension-less
+    /// fallback (`clear_file_value` resolves the key as the engine matches it). The table goes when that leaves it
+    /// empty. True when it removed the value.
+    pub fn clear_exact_file_value(&mut self, key: &str, field: &str, want: &Json) -> bool {
+        if self.read_only() {
+            return false;
+        }
+        let parts: Vec<&str> = field.split('.').collect();
+        let Some(entry) = self
+            .f
+            .doc
+            .get_mut("files")
+            .and_then(Item::as_table_like_mut)
+            .and_then(|files| files.get_mut(key))
+            .and_then(Item::as_table_like_mut)
+        else {
+            return false;
+        };
+        let mut item = entry.get(parts[0]);
+        for part in &parts[1..] {
+            item = item.and_then(|i| i.get(part));
+        }
+        if item.and_then(toml_to_json).as_ref() != Some(want) || !remove_field(entry, &parts) {
+            return false;
+        }
+        let empty = entry.is_empty();
+        self.touch();
+        // `drop_entry` takes the exact spelling first, so this is the table just emptied.
+        if empty {
+            self.drop_entry(key);
+        }
+        true
+    }
+
+    /// The `[files]` table spelled byte for byte `key`, as text (N8-k's read-back of the tables a clear must leave).
+    pub fn exact_file_entry_text(&self, key: &str) -> Option<String> {
+        self.files()?.get(key).map(|i| i.to_string())
     }
 
     /// Every value in `key`'s entry by its dotted field name (`cubemap.yaw`), as `file_value` reads it.
@@ -790,6 +817,21 @@ impl ProjectDoc {
 }
 
 /// `key` without the extension of its file name (`a/b.png` → `a/b`), as the engine also matches keys.
+/// Remove the dotted field `parts` from table `t`, and each sub-table that leaves empty; true when it was there.
+fn remove_field(t: &mut dyn TableLike, parts: &[&str]) -> bool {
+    if parts.len() == 1 {
+        return t.remove(parts[0]).is_some();
+    }
+    let Some(sub) = t.get_mut(parts[0]).and_then(Item::as_table_like_mut) else {
+        return false;
+    };
+    let hit = remove_field(sub, &parts[1..]);
+    if sub.is_empty() {
+        t.remove(parts[0]);
+    }
+    hit
+}
+
 fn without_ext(key: &str) -> Option<&str> {
     let dir_len = key.rfind('/').map_or(0, |i| i + 1);
     let dot = key[dir_len..].rfind('.').filter(|&d| d > 0)?;

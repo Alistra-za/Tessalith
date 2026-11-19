@@ -488,6 +488,16 @@ struct Changes {
     clear: Vec<String>,
     list: Vec<String>,
     relist: bool,
+    /// N8-k: every other table matching a written or cleared file, which the attempt must leave byte for byte.
+    others: BTreeSet<String>,
+}
+
+/// N8-k: `auto_data` as distinct strings, in list order: a repeated entry is one key.
+fn distinct(list: Vec<String>) -> Vec<String> {
+    let mut seen = HashSet::new();
+    list.into_iter()
+        .filter(|k| seen.insert(k.clone()))
+        .collect()
 }
 
 /// One run, from the documents as the step left them: `data` on each key shared now and not at `b`; every listed key
@@ -515,7 +525,8 @@ fn changes(
     let sh = shared_into_regular(f, s, &gone, &b.targets, touched);
     let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
-    let start = s.auto_data();
+    let raw = s.auto_data();
+    let start = distinct(raw.clone());
     // N8-a, N8-j: alpha is read as Task 6 reads it, from every `[files]` table that matches the file; the tables are
     // read in one pass over the keys, and each file asks two lookups.
     let tables = Tables::of(p);
@@ -560,8 +571,12 @@ fn changes(
                 l.push(k.clone());
             }
         }
-        c.relist = l != start;
+        c.relist = l != raw;
         c.list = l;
+    }
+    for k in c.write.iter().chain(&c.clear) {
+        let other = tables.matching(k).into_iter().map(|(t, ..)| t);
+        c.others.extend(other.filter(|t| *t != k).cloned());
     }
     c
 }
@@ -622,6 +637,13 @@ pub(super) fn unlist_user_data(held: &ListedAlpha, p: &ProjectDoc, s: &mut SetsD
 /// only) makes the file writes fail.
 fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
     let (p0, s0) = (p.text(), s.text());
+    let others = |p: &ProjectDoc| -> Vec<Option<String>> {
+        c.others
+            .iter()
+            .map(|t| p.exact_file_entry_text(t))
+            .collect()
+    };
+    let others0 = others(p);
     if c.relist {
         s.set_auto_data(&c.list);
         if s.auto_data() != c.list {
@@ -632,11 +654,14 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
     for k in c.write.iter().filter(|_| !fail) {
         p.set_file_value(k, "alpha.policy", &json!("data"));
     }
+    // N8-k: each clear is exact and done once: the table spelled as the entry, and only while it holds `data`. One
+    // that no longer does is left as it is; its entry is off the list either way.
     for k in &c.clear {
-        p.clear_file_value(k, "alpha.policy");
+        p.clear_exact_file_value(k, "alpha.policy", &json!("data"));
     }
     let took = c.write.iter().all(|k| exact_alpha(p, k) == data)
-        && c.clear.iter().all(|k| exact_alpha(p, k) != data);
+        && c.clear.iter().all(|k| exact_alpha(p, k) != data)
+        && others(p) == others0;
     if !took {
         p.restore(&p0);
         s.restore(&s0);

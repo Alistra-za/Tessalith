@@ -2477,3 +2477,80 @@ fn a_failed_write_leaves_the_list_as_it_was() {
     );
     assert_eq!(auto_data(&m), start, "the list as it was");
 }
+
+/// The share's table `pbr/iron_n.png` holds `data`, listed twice in `auto_data`, and the user's `twin` table (another
+/// spelling of the same file) holds `remove`; `armor/steel` borrows `pbr/iron`'s normal. Then the share ends.
+fn ending_a_twice_listed_share_beside(twin: &str) -> (tempfile::TempDir, AppModel) {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        format!(
+            "[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n\n[files.'{twin}']\nalpha.policy = \"remove\"\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\", \"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("armor/steel", 2, Some("pbr/iron"))
+    });
+    settle(&mut m);
+    // The reviewer's "leave only Data in the listed table": the user takes out the sub-type the recorder wrote, so
+    // clearing the `data` empties the table and removes it.
+    m.edit_docs("user", None, true, |p, _| {
+        p.clear_file_value(IRON_N, "subtype")
+    });
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "subtype"),
+        None,
+        "precondition: the share's table holds only its data"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share's table holds data"
+    );
+    assert_eq!(auto_data(&m).len(), 2, "precondition: listed twice");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    (d, m)
+}
+
+/// N8-k (round 3, B1): a repeated list entry is one key and its clear is exact and done once: the share's own table
+/// loses its `data`, and the user's upper-case twin keeps its `remove`.
+#[test]
+fn a_twice_listed_clear_leaves_the_users_case_twin() {
+    let (_d, m) = ending_a_twice_listed_share_beside("PBR/IRON_N.PNG");
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "the share's own table is cleared"
+    );
+    assert_eq!(
+        held(&m, "PBR/IRON_N.PNG", "alpha.policy"),
+        Some(json!("remove")),
+        "the user's case twin keeps its value"
+    );
+}
+
+/// N8-k (B1): as above, with the user's extension-less table.
+#[test]
+fn a_twice_listed_clear_leaves_the_users_stem_twin() {
+    let (_d, m) = ending_a_twice_listed_share_beside("pbr/iron_n");
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "the share's own table is cleared"
+    );
+    assert_eq!(
+        held(&m, "pbr/iron_n", "alpha.policy"),
+        Some(json!("remove")),
+        "the user's stem twin keeps its value"
+    );
+}
