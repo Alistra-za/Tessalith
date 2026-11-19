@@ -332,7 +332,8 @@ fn the_header_label_holds_while_a_plan_is_pending() {
 /// the gate's count compare alone sends the click to Review. Removing the E3 eligibility read from the gate does NOT
 /// fail this test (`export_stopped` has no undecided-texture check); removing the Review fallback does (round 1
 /// mutation logs `task-2-fix1-mut-*`). The eligibility read's own test is
-/// `a_queued_click_opens_review_when_the_landed_plan_needs_eyes_at_an_unchanged_count`.#[test]
+/// `a_queued_click_opens_review_when_the_landed_plan_needs_eyes_at_an_unchanged_count`.
+#[test]
 fn a_queued_now_click_opens_review_when_the_plan_brings_a_problem() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened_chosen_decided(d.path());
