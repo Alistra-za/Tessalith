@@ -3382,6 +3382,65 @@ fn a_cm_json_whose_m_this_run_writes_is_marked_even_when_the_m_is_on_disk() {
     assert!(s.changed.contains(&json));
 }
 
+/// Ruling 3c-58: two borrowers of one excluded owner. One build of Review's list reads the owner's DDS once; each
+/// borrower's destination still gets its own check (both copies are listed when the owner changed).
+#[test]
+fn borrowers_of_one_owner_share_one_read_of_it_per_build() {
+    use sdc_gui::model::review::HOVER_COPY;
+    use sdc_gui::model::set_groups::GroupTarget;
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, leaf_copy) = vanilla_borrow(d.path());
+    assert_eq!(
+        m.drop_choice(
+            "landscape/rock01_normal.png",
+            "landscape/odd",
+            DropChoice::Share
+        ),
+        DropOutcome::Joined
+    );
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    let odd_copy = leaf_copy.with_file_name("odd_n.dds");
+    assert!(odd_copy.is_file(), "{:?}", m.export.notes);
+    let owner = m
+        .items
+        .iter()
+        .find(|i| i.name == "rock01_normal.png")
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.clone())
+        .expect("the owner's DDS");
+    m.move_to_group(
+        &["landscape/rock01".to_string()],
+        GroupTarget::New("Owner".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Owner", true).unwrap();
+    idle(&mut m);
+    // The owner changes on disk, so each borrower's own check lists its copy.
+    let mut bytes = std::fs::read(&owner).unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&owner, &bytes).unwrap();
+    m.header_export_clicked();
+    m.expire_review_json();
+    let reads = m.review_writes_source_reads();
+    let w = m.review_writes();
+    assert_eq!(
+        m.review_writes_source_reads() - reads,
+        1,
+        "one read per build"
+    );
+    let mut copies: Vec<_> = w
+        .also_updated
+        .iter()
+        .filter(|e| e.hover == HOVER_COPY)
+        .map(|e| e.path.clone())
+        .collect();
+    copies.sort();
+    assert_eq!(copies, [leaf_copy, odd_copy]);
+}
+
 fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {

@@ -283,6 +283,9 @@ impl Produced {
     }
 }
 
+/// Ruling 3c-58: one build's successful reads of copy sources, with their hash, by source path.
+type SourceReads = std::collections::HashMap<PathBuf, std::rc::Rc<(Vec<u8>, String)>>;
+
 /// Test hook: `AppModel::review_writes_probe` is on while this lives.
 #[cfg(feature = "test-hooks")]
 struct WritesProbe<'a>(&'a std::cell::Cell<bool>);
@@ -391,6 +394,12 @@ impl AppModel {
     #[cfg(feature = "test-hooks")]
     pub fn review_writes_fs_queries(&self) -> u64 {
         self.review_writes_fs.get()
+    }
+
+    /// Tests (ruling 3c-58): how many times `review_writes` read a borrowed copy's source.
+    #[cfg(feature = "test-hooks")]
+    pub fn review_writes_source_reads(&self) -> u64 {
+        self.review_writes_src_reads.get()
     }
 
     /// Counts one file-system query of `review_writes` (test hook).
@@ -562,6 +571,7 @@ impl AppModel {
             let mut shas = old.clone();
             // The file `dep_ok` looks for when the run leaves a dependency out.
             let dep_file = |k: &str| p.untouched_root.as_ref().map(|r| r.join(k));
+            let mut sources = SourceReads::new();
             for (src, dst, owner_key) in &p.copies {
                 let key = record_key(dst);
                 let by_run = (!owner_key.is_empty() && touched(owner_key))
@@ -582,7 +592,8 @@ impl AppModel {
                     continue;
                 }
                 let last = shas.get(&key).cloned();
-                let Some((sha, changes)) = self.copy_exact(src, dst, last.as_deref()) else {
+                let Some((sha, changes)) = self.copy_exact(src, dst, last.as_deref(), &mut sources)
+                else {
                     continue;
                 };
                 shas.insert(key, sha);
@@ -822,14 +833,35 @@ impl AppModel {
     /// writer reads it, and `may_replace` on those bytes. `None`: nothing is copied (the source cannot be read, or the
     /// destination is kept); else the hash it records and whether the copy changes the destination. Ruling 3c-51 (d):
     /// read at every build (once per `REVIEW_JSON_TTL` at most), never from a memo that could outlive a change of the
-    /// source's bytes under the same stamp.
-    fn copy_exact(&self, src: &Path, dst: &Path, last: Option<&str>) -> Option<(String, bool)> {
+    /// source's bytes under the same stamp. Ruling 3c-58: `sources` holds this build's successful reads, with their hash,
+    /// by source path, so borrowers of one owner share one read; a failed read is not kept, and the map ends with the
+    /// build. Each destination keeps its own `may_replace`.
+    fn copy_exact(
+        &self,
+        src: &Path,
+        dst: &Path,
+        last: Option<&str>,
+        sources: &mut SourceReads,
+    ) -> Option<(String, bool)> {
         use sha2::{Digest, Sha256};
-        self.writes_fs_query();
-        let bytes = std::fs::read(src).ok()?;
-        engine::dds::may_replace(dst, &bytes, super::history::recorded(last)).ok()?;
-        let changes = std::fs::read(dst).map_or(true, |b| b != bytes);
-        Some((hex::encode(Sha256::digest(&bytes)), changes))
+        let read = match sources.get(src) {
+            Some(r) => r.clone(),
+            None => {
+                self.writes_fs_query();
+                #[cfg(feature = "test-hooks")]
+                self.review_writes_src_reads
+                    .set(self.review_writes_src_reads.get() + 1);
+                let bytes = std::fs::read(src).ok()?;
+                let sha = hex::encode(Sha256::digest(&bytes));
+                let r = std::rc::Rc::new((bytes, sha));
+                sources.insert(src.to_path_buf(), r.clone());
+                r
+            }
+        };
+        let (bytes, sha) = &*read;
+        engine::dds::may_replace(dst, bytes, super::history::recorded(last)).ok()?;
+        let changes = std::fs::read(dst).map_or(true, |b| b != *bytes);
+        Some((sha.clone(), changes))
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
