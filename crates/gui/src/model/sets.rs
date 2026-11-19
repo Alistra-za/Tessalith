@@ -2250,9 +2250,16 @@ pub fn pinned_files(m: &AppModel) -> BTreeSet<String> {
         .collect()
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static LOCK_MAP_BUILDS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// The items filling a locked slot of any set (F3a Task 8), with the reason bulk edits skip them: "slot locked" in
 /// the set that owns the texture, else "slot locked in <set>" for a set borrowing it. The own lock wins.
 pub fn locked_items(m: &AppModel) -> BTreeMap<String, String> {
+    #[cfg(test)]
+    LOCK_MAP_BUILDS.set(LOCK_MAP_BUILDS.get() + 1);
     let mut out = BTreeMap::new();
     for v in views(m).iter() {
         for (k, f) in &v.slots {

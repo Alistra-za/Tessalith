@@ -367,6 +367,11 @@ fn entry_of(t: &Table) -> Option<SetEntry> {
     })
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static AUTO_NORMAL_READS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl SetsDoc {
     pub fn open(root: &Path) -> SetsDoc {
         let mut d = SetsDoc {
@@ -1031,6 +1036,8 @@ impl SetsDoc {
     /// (`normal`, `landscape_normal` or `pbr_normal`). A key whose `[files]` sub-type no longer equals it is the
     /// user's. `[project] auto_normal`.
     pub fn auto_normal(&self) -> BTreeMap<String, String> {
+        #[cfg(test)]
+        AUTO_NORMAL_READS.set(AUTO_NORMAL_READS.get() + 1);
         let t = self.f.doc.get("project").and_then(|p| p.get("auto_normal"));
         t.and_then(Item::as_table_like)
             .map(|t| {
@@ -1040,6 +1047,17 @@ impl SetsDoc {
             })
             .unwrap_or_default()
     }
+
+    /// The word listed under this exact key, including after a recorder write.
+    pub(crate) fn auto_normal_word(&self, key: &str) -> Option<&str> {
+        self.f
+            .doc
+            .get("project")?
+            .get("auto_normal")?
+            .get(key)?
+            .as_str()
+    }
+
     pub fn set_auto_normal(&mut self, keys: &BTreeMap<String, String>) {
         let mut t = toml_edit::InlineTable::new();
         for (k, v) in keys {

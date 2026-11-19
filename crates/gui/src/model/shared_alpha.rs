@@ -304,30 +304,33 @@ fn input_matches(m: &AppModel, cubes: &[(String, Vec<String>)]) -> HashMap<Strin
 
 /// An automatic subtype edit uses the same one-input destination as Keep alpha.
 pub(super) fn safe_subtype_write(m: &AppModel) -> impl Fn(&str) -> bool + '_ {
-    let index = std::cell::LazyCell::new(|| {
-        m.project.as_ref().map(|p| {
-            let tables = Tables::of(p);
-            let cubes = m.cube_face_keys();
-            let inputs = input_matches(m, &cubes);
-            // edit_docs copies the primary face's edit to all five secondary tables in the same step.
-            let unsafe_cubes: HashSet<_> = cubes
-                .into_iter()
-                .filter(|(_, faces)| {
-                    faces
-                        .iter()
-                        .any(|k| tables.single_input_table(k, &inputs).is_err())
-                })
-                .map(|(key, _)| key)
-                .collect();
-            (tables, inputs, unsafe_cubes)
-        })
-    });
-    move |key| {
-        index
+    let guard = std::cell::LazyCell::new(|| {
+        m.project
             .as_ref()
-            .is_some_and(|(tables, inputs, unsafe_cubes)| {
-                !unsafe_cubes.contains(key) && tables.single_input_table(key, inputs).is_ok()
-            })
+            .map(|p| subtype_write_guard(m, Tables::of(p)))
+    });
+    move |key| guard.as_ref().is_some_and(|safe| safe(key))
+}
+
+/// The recorder also uses these tables to read the held subtype and alpha of each normal.
+pub(super) fn subtype_write_guard(
+    m: &AppModel,
+    tables: impl std::borrow::Borrow<Tables>,
+) -> impl Fn(&str) -> bool {
+    let cubes = m.cube_face_keys();
+    let inputs = input_matches(m, &cubes);
+    // edit_docs copies the primary face's edit to all five secondary tables in the same step.
+    let unsafe_cubes: HashSet<_> = cubes
+        .into_iter()
+        .filter(|(_, faces)| {
+            faces
+                .iter()
+                .any(|k| tables.borrow().single_input_table(k, &inputs).is_err())
+        })
+        .map(|(key, _)| key)
+        .collect();
+    move |key| {
+        !unsafe_cubes.contains(key) && tables.borrow().single_input_table(key, &inputs).is_ok()
     }
 }
 
@@ -590,10 +593,10 @@ impl Tables {
         at.into_iter().map(|i| self.rows.get(i)).collect()
     }
 
-    /// N8-o: the `subtype` that `ProjectDoc::file_value(key, "subtype")` reads, through the index: the table spelled
+    /// N8-o: the table that `ProjectDoc::file_value` reads, through the index: the table spelled
     /// `key`, else the first (in `[files]` order) spelled as the full name in another case, else the first spelled as
     /// the extension-less stem, as `find_key` picks it.
-    fn subtype(&self, key: &str) -> Option<Value> {
+    fn resolved_row(&self, key: &str) -> Option<&Row> {
         let (full, stem) = forms(key);
         let first = |f: &String| self.by_lower.get(f)?.first().copied();
         let exact = self
@@ -603,11 +606,19 @@ impl Tables {
         let at = exact
             .or_else(|| first(&full))
             .or_else(|| stem.as_ref().and_then(first))?;
-        self.rows.get(at).2.clone()
+        Some(self.rows.get(at))
+    }
+
+    pub(super) fn subtype(&self, key: &str) -> Option<Value> {
+        self.resolved_row(key)?.2.clone()
+    }
+
+    pub(super) fn file_key(&self, key: &str) -> Option<&str> {
+        Some(&self.resolved_row(key)?.0)
     }
 
     /// The spellings of the tables that hold an `alpha.policy` for file `key`, with it.
-    fn alpha(&self, key: &str) -> BTreeMap<String, Value> {
+    pub(super) fn alpha(&self, key: &str) -> BTreeMap<String, Value> {
         self.matching(key)
             .into_iter()
             .filter_map(|(k, a, _)| Some((k.clone(), a.clone()?)))

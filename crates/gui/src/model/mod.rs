@@ -4662,6 +4662,87 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(1)));
     }
 
+    #[test]
+    fn a_settled_recorder_builds_its_normal_facts_once() {
+        let d = tempfile::tempdir().unwrap();
+        let root = d.path().join("textures");
+        std::fs::create_dir(&root).unwrap();
+        let normal = image::RgbImage::from_pixel(16, 16, image::Rgb([128, 128, 255]));
+        let mut files = String::new();
+        let mut sets = String::from("[project.auto_normal]\n");
+        for i in 0..2_048 {
+            let key = format!("rock{i}_n.png");
+            files.push_str(&format!("[files.'{key}']\nsubtype = 'pbr_normal'\n"));
+            sets.push_str(&format!("'{key}' = 'pbr_normal'\n"));
+            if i < 16 {
+                normal.save(root.join(key)).unwrap();
+            }
+        }
+        sets.push_str("\n[[sets]]\nid = 'rock0'\nshader = 'pbr'\n");
+        std::fs::write(root.join("sdc.toml"), files).unwrap();
+        std::fs::write(root.join("sdc-project.toml"), sets).unwrap();
+        let mut m = bare_model();
+        m.open_folder(root);
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        assert_eq!(m.sets_doc.as_ref().unwrap().auto_normal().len(), 2_048);
+        let candidates = sets::views(&m);
+        assert_eq!(candidates.len(), 16);
+        assert!(candidates.iter().all(|v| v
+            .shader
+            .as_ref()
+            .is_some_and(|p| p.bakes_any_tangent())
+            && matches!(
+                v.slots.get(&sets::SlotKind::Normal),
+                Some(sets::SlotFill::Own { .. })
+            )));
+        let counts = || {
+            [
+                crate::sets_doc::AUTO_NORMAL_READS.get(),
+                crate::project::key_walks(),
+                sets::LOCK_MAP_BUILDS.get(),
+            ]
+        };
+        let before = counts();
+        assert!(
+            !m.record_auto_decisions(),
+            "every normal already has its recorded type"
+        );
+        let after = counts();
+        let builds: [usize; 3] = std::array::from_fn(|i| after[i] - before[i]);
+        assert_eq!(
+            builds,
+            [1, 1, 1],
+            "auto_normal reads, [files] walks and lock maps in one recorder pass"
+        );
+
+        // The next pass has a listed plain normal to promote under the same PBR pick.
+        let key = "rock0_n.png";
+        let sets = m.sets_doc.as_mut().unwrap();
+        let mut listing = sets.auto_normal();
+        listing.insert(key.into(), "normal".into());
+        sets.set_auto_normal(&listing);
+        m.project
+            .as_mut()
+            .unwrap()
+            .set_file_value(key, "subtype", &serde_json::json!("normal"));
+        let reads = crate::sets_doc::AUTO_NORMAL_READS.get();
+        assert!(m.record_auto_decisions());
+        assert_eq!(
+            crate::sets_doc::AUTO_NORMAL_READS.get() - reads,
+            1,
+            "verifying the write reuses the listing"
+        );
+        assert_eq!(
+            m.sets_doc.as_ref().unwrap().auto_normal_word(key),
+            Some("pbr_normal")
+        );
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(key, "subtype"),
+            Some(serde_json::json!("pbr_normal"))
+        );
+        assert!(m.wait_idle(Duration::from_secs(60)));
+    }
+
     /// An opened, planned project on `cs`: a PBR set whose `_rmaos` is packed (rock01, with a prefix, so its outputs
     /// are explicit), a plain set with an output name (leaf) and a plain set that mirrors its source (moss).
     fn packed_named_model(dir: &Path) -> AppModel {

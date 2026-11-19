@@ -8,13 +8,14 @@
 //! `auto_normal` is decided by the normal rule alone, in every path: it is never in `auto_pbr` afterwards.
 // shortcut: list keys are not renamed with `[files]` keys (`retarget_auto`, input renames), so a renamed file reads as
 // the user's and its old entry stays until Tessalith next writes the list; rename list keys there if it matters.
-use super::sets::{locked_items, views, SlotFill, SlotKind};
+use super::sets::{locked_items, SlotFill, SlotKind};
 use super::AppModel;
 use crate::project::ProjectDoc;
 use crate::sets_doc::SetsDoc;
-use engine::config::{Subtype, Target};
+use engine::config::Subtype;
 use engine::shader::Shader;
 use serde_json::{json, Value};
+use std::collections::BTreeMap;
 
 /// A tangent-space normal type, the three the automatic typing moves between (`msn` is never one).
 pub(crate) fn tangent(st: Subtype) -> bool {
@@ -48,50 +49,50 @@ pub(super) fn explicit_pick(v: &super::sets::SetView) -> Option<Shader> {
     v.shader_choice
 }
 
-/// The spellings among `keys` (`ProjectDoc::file_keys`) of the `[files]` tables that hold `field` for file `key`. The
-/// engine applies every `[files]` key that matches the file (`path_key_matches`: any case, the full path or the
-/// extension-less one), so this is the one reader of "does the file hold a value" (`alpha_free`, `shared_alpha`).
-pub(super) fn holders(p: &ProjectDoc, keys: &[String], key: &str, field: &str) -> Vec<String> {
-    keys.iter()
-        .filter(|k| engine::overrides::path_key_matches(k, key))
-        .filter(|k| p.file_value(k, field).is_some())
-        .cloned()
-        .collect()
-}
-
 /// N-17: the key has no `alpha.policy`, or only the `data` the share step wrote (a listed `auto_data` key still at
 /// `data`). The engine applies every `[files]` table that matches the file, so the extension-less spelling counts
 /// too: `alpha.policy` there is the user's. `untouched_normal`, the recorder and the Switch read this one rule.
 pub(super) fn alpha_free(p: &ProjectDoc, s: &SetsDoc, key: &str) -> bool {
-    // Runs per shader pick, diffuse edit and settled plan, never per frame.
-    match holders(p, &p.file_keys(), key, "alpha.policy").as_slice() {
-        [] => true,
-        // N8-e (amends N6-j): the one holder is the table the share step wrote, spelled byte for byte as its list
-        // entry, still holding `data`; a `data` in any other table (a case twin, the extension-less one) is the user's.
-        [one] => {
-            p.file_value(one, "alpha.policy") == Some(json!("data"))
-                && s.auto_data().iter().any(|k| k == one)
-        }
-        _ => false,
+    let holders = p
+        .file_keys()
+        .into_iter()
+        .filter(|k| engine::overrides::path_key_matches(k, key))
+        .filter_map(|k| p.file_value(&k, "alpha.policy").map(|value| (k, value)));
+    free_alpha_holders(holders, |k| s.auto_data().iter().any(|listed| listed == k))
+}
+
+/// N8-e: only a single Data holder listed under exactly that spelling belongs to Share.
+pub(super) fn free_alpha_holders(
+    mut holders: impl Iterator<Item = (String, Value)>,
+    listed: impl FnOnce(&str) -> bool,
+) -> bool {
+    let Some((key, value)) = holders.next() else {
+        return true;
+    };
+    holders.next().is_none() && value.as_str() == Some("data") && listed(&key)
+}
+
+pub(super) fn listed_tangent(listed: &str, held: Value) -> Option<Subtype> {
+    if held.as_str() != Some(listed) {
+        return None;
     }
+    serde_json::from_value(held).ok().filter(|st| tangent(*st))
 }
 
 impl AppModel {
     /// The untouched normal's held type, or `None`.
     pub fn untouched_normal(&self, key: &str) -> Option<Subtype> {
         let (p, s) = (self.project.as_ref()?, self.sets_doc.as_ref()?);
-        let listed = s.auto_normal().remove(key)?;
+        let listed = s.auto_normal_word(key)?;
         let held = p.file_value(key, "subtype")?;
-        if held.as_str() != Some(listed.as_str())
-            || !alpha_free(p, s, key)
+        let st = listed_tangent(listed, held)?;
+        if !alpha_free(p, s, key)
             || locked_items(self).contains_key(key)
             || self.item(key).is_none_or(|i| i.kept_dds())
         {
             return None;
         }
-        serde_json::from_value::<Subtype>(held)
-            .ok()
-            .filter(|st| tangent(*st))
+        Some(st)
     }
 
     /// N-19: the type an untouched normal takes outside a PBR set: the engine's suggestion, `landscape_normal` under
@@ -247,26 +248,6 @@ impl AppModel {
     ) -> Vec<(String, Option<Value>, bool)> {
         self.normal_plan(set, shader, r5).retype
     }
-
-    /// G1: each set's own Normal-slot member that its settled pick (not derived) moves into PBR.
-    // shortcut: an automatic pick leaving the PBR family never reverts an automatic `pbr_normal` (a `pbr_normal` is PBR
-    // evidence itself, shader.rs:665; spec limit 2); upgrade if a set is seen stuck that way.
-    pub(crate) fn normals_to_follow(&self) -> Vec<(String, Subtype)> {
-        if self.target != Target::Cs {
-            return vec![];
-        }
-        views(self)
-            .iter()
-            .filter_map(|v| {
-                let pick = v.shader.as_ref().filter(|p| p.bakes_any_tangent())?;
-                let Some(SlotFill::Own { item }) = v.slots.get(&SlotKind::Normal) else {
-                    return None;
-                };
-                let st = self.normal_for(item, pick.shader)?;
-                (st == Subtype::PbrNormal).then(|| (item.clone(), st))
-            })
-            .collect()
-    }
 }
 
 /// Lists every tangent-space sub-type in `writes` with its word (the recorder's step). N-27: entries whose `[files]`
@@ -274,28 +255,38 @@ impl AppModel {
 pub(super) fn list_normals(
     p: &ProjectDoc,
     s: &mut SetsDoc,
+    mut listing: BTreeMap<String, String>,
     writes: &[(String, &'static str, Value)],
 ) {
     if s.read_only() {
         return;
     }
-    let before = s.auto_normal();
-    let mut l = before.clone();
+    let mut changed = false;
     let mut added = false;
     for (k, f, v) in writes {
-        let st = serde_json::from_value::<Subtype>(v.clone()).ok();
-        if *f == "subtype" && st.is_some_and(tangent) {
-            l.insert(k.clone(), word(st.unwrap_or(Subtype::Normal)));
+        if *f != "subtype" {
+            continue;
+        }
+        if let Some(st) = serde_json::from_value(v.clone())
+            .ok()
+            .filter(|st| tangent(*st))
+        {
+            let w = word(st);
+            if listing.get(k) != Some(&w) {
+                listing.insert(k.clone(), w);
+                changed = true;
+            }
             added = true;
         }
     }
     if added {
-        l.retain(|k, w| {
+        let count = listing.len();
+        listing.retain(|k, w| {
             p.file_value(k, "subtype").as_ref().and_then(Value::as_str) == Some(w.as_str())
         });
-    }
-    if l != before {
-        s.set_auto_normal(&l);
+        if changed || listing.len() != count {
+            s.set_auto_normal(&listing);
+        }
     }
 }
 

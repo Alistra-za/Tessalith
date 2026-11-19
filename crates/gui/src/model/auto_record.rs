@@ -364,7 +364,9 @@ impl AppModel {
         // recording can write, so a blocked recording keeps it for the next one.
         let retype = std::mem::take(&mut self.history.retype_untouched);
         let mut writes: Vec<(String, &'static str, serde_json::Value)> = vec![];
-        let safe = super::shared_alpha::safe_subtype_write(self);
+        let tables = std::cell::LazyCell::new(|| super::shared_alpha::Tables::of(doc));
+        let safe =
+            std::cell::LazyCell::new(|| super::shared_alpha::subtype_write_guard(self, &*tables));
         let mut previous = HashMap::new();
         if !retype.is_empty() {
             let shaders = self.shaders_by_member();
@@ -373,7 +375,7 @@ impl AppModel {
                     .auto_pick(&k, shaders.get(&k).copied())
                     .map(|st| json!(st));
                 if let Some(new) =
-                    new.filter(|n| *n != old && doc.file_value(&k, "subtype") == Some(old.clone()))
+                    new.filter(|n| *n != old && tables.subtype(&k).as_ref() == Some(&old))
                 {
                     if safe(&k) {
                         previous.insert(k.clone(), old);
@@ -389,44 +391,58 @@ impl AppModel {
         // The marker keeps an Undo of the step undone, as `auto_written` does below.
         let mut followed: Vec<String> = vec![];
         let mut promote = vec![];
-        if sets.is_some() {
-            for (k, _) in self.normals_to_follow() {
-                if previous.contains_key(&k)
-                    || !safe(&k)
+        let listing = std::cell::OnceCell::new();
+        let mut into_pbr = HashSet::new();
+        // shortcut: an automatic pick leaving PBR never reverts its own PBR normal (itself PBR evidence).
+        // Revisit if a set stays in PBR after its other PBR maps are removed.
+        if let Some(s) = sets.filter(|_| self.target == Target::Cs) {
+            let locked = super::sets::locked_items(self);
+            let auto_data =
+                std::cell::LazyCell::new(|| s.auto_data().into_iter().collect::<HashSet<_>>());
+            for v in super::sets::views(self)
+                .iter()
+                .filter(|v| v.shader.as_ref().is_some_and(|p| p.bakes_any_tangent()))
+            {
+                let Some(SlotFill::Own { item: k }) = v.slots.get(&SlotKind::Normal) else {
+                    continue;
+                };
+                if locked.contains_key(k)
+                    || self.item(k).is_none_or(|i| i.kept_dds())
+                    || !super::normal_follow::free_alpha_holders(
+                        tables.alpha(k).into_iter(),
+                        |holder| auto_data.contains(holder),
+                    )
+                {
+                    continue;
+                }
+                // The same free slot can promote a first recording or follow an already listed subtype.
+                into_pbr.insert(k.clone());
+                let Some(word) = listing.get_or_init(|| s.auto_normal()).get(k) else {
+                    continue;
+                };
+                let Some(held) = tables
+                    .subtype(k)
+                    .and_then(|v| super::normal_follow::listed_tangent(word, v))
+                else {
+                    continue;
+                };
+                if held == Subtype::PbrNormal
+                    || previous.contains_key(k)
                     || self
                         .history
                         .auto_written
                         .contains(&(k.clone(), "normal-follow"))
+                    || !safe(k)
                 {
                     continue;
                 }
-                let old = doc.file_value(&k, "subtype").unwrap_or(json!(null));
+                let old = json!(held);
                 previous.insert(k.clone(), old.clone());
                 followed.push(k.clone());
                 promote.push(writes.len());
-                writes.push((k, "subtype", old));
+                writes.push((k.clone(), "subtype", old));
             }
         }
-        // Note JS5 (N-19): a never-recorded tangent-space `_n` in its set's own Normal slot, under a pick that
-        // `bakes_any_tangent`, is recorded `pbr_normal` straight away (a PBR Landscape set's `landscape_normal`
-        // too), when `alpha_free` holds, it is not locked and it is not a kept DDS.
-        let locked = super::sets::locked_items(self);
-        let into_pbr: HashSet<String> = match sets {
-            Some(s) if self.target == Target::Cs => super::sets::views(self)
-                .iter()
-                .filter(|v| v.shader.as_ref().is_some_and(|p| p.bakes_any_tangent()))
-                .filter_map(|v| match v.slots.get(&SlotKind::Normal) {
-                    Some(SlotFill::Own { item }) => Some(item.clone()),
-                    _ => None,
-                })
-                .filter(|k| {
-                    super::normal_follow::alpha_free(doc, s, k)
-                        && !locked.contains_key(k)
-                        && self.item(k).is_some_and(|i| !i.kept_dds())
-                })
-                .collect(),
-            _ => Default::default(),
-        };
         for i in &self.items {
             let own = matches!(i.kind, ItemKind::Image | ItemKind::Dds)
                 && !matches!(i.status, ItemStatus::PackedInto(_) | ItemStatus::Skipped(_));
@@ -446,7 +462,12 @@ impl AppModel {
             ] {
                 let Some(v) = v else { continue };
                 let done = self.history.auto_written.contains(&(i.key.clone(), f));
-                if done || doc.file_value(&i.key, f).is_some() {
+                if done
+                    || tables
+                        .file_key(&i.key)
+                        .and_then(|k| doc.file_value(k, f))
+                        .is_some()
+                {
                     continue;
                 }
                 if f == "subtype" {
@@ -497,17 +518,16 @@ impl AppModel {
         let clean_before = !self.prompts_unsaved();
         self.automatic_step = true;
         self.edit_docs(&label, join.clone(), true, |p, s| {
+            let mut listing = listing.into_inner().unwrap_or_else(|| s.auto_normal());
             // A parseable document can still have a scalar `project`. Keep the original type unless the listing took.
             if !promote.is_empty() {
-                let mut listing = s.auto_normal();
                 for &idx in &promote {
                     listing.insert(writes[idx].0.clone(), "pbr_normal".into());
                 }
                 s.set_auto_normal(&listing);
-                let recorded = s.auto_normal();
                 for idx in promote {
                     let (k, _, v) = &mut writes[idx];
-                    if recorded.get(k).is_some_and(|word| word == "pbr_normal") {
+                    if s.auto_normal_word(k) == Some("pbr_normal") {
                         *v = json!(Subtype::PbrNormal);
                     }
                 }
@@ -518,7 +538,7 @@ impl AppModel {
             for (k, f, v) in types.chain(other) {
                 p.set_file_value(k, f, v);
             }
-            super::normal_follow::list_normals(p, s, &writes);
+            super::normal_follow::list_normals(p, s, listing, &writes);
         });
         self.automatic_step = false;
         self.note_listing(sets_clean);
