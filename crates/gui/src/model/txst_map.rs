@@ -5,10 +5,9 @@ use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
 use super::pbr_export::writes_entry;
 use super::sets::{
-    engine_inputs_in, entry_of, game_path_in, has_slot_clear, has_slot_link, link_row_kind,
-    linked_map_slot, missing_map_slot, recipe_suffix, renamed_output, slot_of, slot_string,
-    writes_own_output, DefaultOutputs, SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT,
-    READ_ONLY,
+    entry_of, has_slot_clear, has_slot_link, link_row_kind, linked_map_slot, missing_map_slot,
+    output_game_path, recipe_suffix, renamed_output, slot_of, slot_string, DefaultOutputs, SetView,
+    SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
@@ -339,7 +338,8 @@ pub(super) fn link_slots(m: &AppModel, views: &mut [SetView]) {
 /// explicit-slot rule (`pgpsim` `slots.rs`, `apply_slots`: ASCII lower case, `textures\` put in front unless the
 /// string starts with it, `""` clears). So `pbr\a\b_n.dds` and `textures\pbr\a\b_n.dds` name one file, while
 /// `other\textures\pbr\a\b_n.dds` names `textures\other\textures\…`. Unlike `game_key` (Note HG's record paths), no
-/// part of the path is cut.
+/// part of the path is cut. Applied to the `slotN` string on the lookup side only (ruling 3b-F6): an index key is
+/// already a game location.
 pub(crate) fn slot_path_key(path: &str) -> String {
     let mut p = path.to_ascii_lowercase();
     if !p.is_empty() && !p.starts_with("textures\\") {
@@ -359,22 +359,19 @@ struct Written<'a> {
 }
 
 /// Review E1 (Task 15a): every planned output of every set (each member that writes a file of its own, the members
-/// after the first of a slot kind and the unslotted outputs included), by `slot_path_key` of the path a link to it is
-/// written with (`game_path_in`, the Path… and From another set menus' own function), built in one pass. The first set
-/// in display order that writes a path keeps it.
-fn written_outputs<'a>(
-    m: &'a AppModel,
-    views: &'a [SetView],
-    paths: &BTreeMap<OutputKey, PathBuf>,
-) -> HashMap<String, Written<'a>> {
+/// after the first of a slot kind and the unslotted outputs included), built in one pass. Ruling 3b-F6: a key is the
+/// game location of the file the job writes (`output_game_path`, folded), the path the Path… and From another set
+/// menus write; an output under no `textures` folder has none and is in no entry. The first set in display order that
+/// writes a path keeps it.
+fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String, Written<'a>> {
     let mut out = HashMap::new();
     for v in views {
         for item in &v.members {
-            let Some(it) = m.item(item).filter(|i| writes_own_output(i)) else {
+            let Some(it) = m.item(item) else {
                 continue;
             };
-            if let Ok(p) = game_path_in(m, views, paths, item) {
-                out.entry(slot_path_key(&p)).or_insert(Written {
+            if let Some(p) = output_game_path(m, it) {
+                out.entry(p.to_ascii_lowercase()).or_insert(Written {
                     from: &v.id,
                     short: &v.short,
                     item,
@@ -386,10 +383,21 @@ fn written_outputs<'a>(
     out
 }
 
+/// Tests: the planned-output index (`written_outputs`) of the current views as (key, set id, item key), sorted.
+#[cfg(feature = "test-hooks")]
+pub fn written_output_index(m: &AppModel) -> Vec<(String, String, String)> {
+    let views = super::sets::views(m);
+    let mut out: Vec<_> = written_outputs(m, &views)
+        .into_iter()
+        .map(|(k, w)| (k, w.from.to_string(), w.item.to_string()))
+        .collect();
+    out.sort();
+    out
+}
+
 /// Fills `linked` (see `link_slots`).
 fn set_links(m: &AppModel, views: &mut [SetView]) {
-    let paths = engine_inputs_in(m, views).1;
-    let written = written_outputs(m, views, &paths);
+    let written = written_outputs(m, views);
     let found: Vec<BTreeMap<u8, SlotLink>> = views
         .iter()
         .map(|v| {

@@ -1480,3 +1480,258 @@ fn with_a_linked_slot_1_the_no_albedo_info_is_not_raised() {
     );
     assert!(!keeps(&m));
 }
+
+// ---- Task 15a fix round 1 (ruling 3b-F6): the planned-output index holds where each file is written ----
+
+/// One layout of the index table: the project's PNGs (paths under the opened folder) and `sdc-project.toml`, the
+/// producing output (its file name), the consumer's slot, the game location of the written DDS (`None`: under no
+/// `textures` folder) and spellings that name no written file.
+struct Layout {
+    name: &'static str,
+    files: &'static [&'static str],
+    toml: &'static str,
+    /// Files decided `pbr_albedo` after the folder is opened.
+    albedos: &'static [&'static str],
+    out_name: &'static str,
+    slot: u8,
+    real: Option<&'static str>,
+    invented: &'static [&'static str],
+}
+
+const LAYOUTS: &[Layout] = &[
+    Layout {
+        name: "plain own output",
+        files: &["textures/p/plain.png"],
+        toml: "",
+        albedos: &[],
+        out_name: "plain.dds",
+        slot: 1,
+        real: Some(r"textures\p\plain.dds"),
+        invented: &[],
+    },
+    Layout {
+        name: "packed output",
+        files: &["textures/s/q_roughness.png", "textures/s/q_ao.png"],
+        toml: "",
+        albedos: &[],
+        out_name: "q_rmaos.dds",
+        slot: 6,
+        real: Some(r"textures\s\q_rmaos.dds"),
+        invented: &[],
+    },
+    Layout {
+        name: "packed output mapped away, its set borrowing slot 6",
+        // The lender is a PBR set, so the borrowed `_rmaos` has a path of its own (a borrow from a set that is not
+        // PBR has none, and Export refuses it).
+        files: &[
+            "textures/s/q.png",
+            "textures/s/q_roughness.png",
+            "textures/s/q_ao.png",
+            "textures/t/w_roughness.png",
+            "textures/t/w_ao.png",
+        ],
+        toml: "[[sets]]\nid = \"textures/s/q\"\nshader = \"pbr\"\n[[sets]]\nid = \"textures/t/w\"\n[sets.borrow]\n\
+               slot6 = \"textures/s/q\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"W\"\n\
+               slot6 = \"textures/z/w_rmaos.dds\"\n",
+        albedos: &["textures/s/q.png"],
+        out_name: "w_rmaos.dds",
+        slot: 6,
+        real: Some(r"textures\z\w_rmaos.dds"),
+        invented: &[r"textures\t\w_rmaos.dds"],
+    },
+    Layout {
+        name: "output mapped to another folder",
+        files: &["textures/p/map.png"],
+        toml: "[[sets]]\nid = \"textures/p/map\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"B\"\n\
+               slot1 = \"textures/b/body.dds\"\n",
+        albedos: &[],
+        out_name: "body.dds",
+        slot: 1,
+        real: Some(r"textures\b\body.dds"),
+        invented: &[r"textures\p\body.dds"],
+    },
+    Layout {
+        name: "output mapped under mod_a\\textures",
+        files: &["mod_a/textures/m/x.png"],
+        toml: "[[sets]]\nid = \"mod_a/textures/m/x\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"X\"\n\
+               slot1 = \"textures/m2/y.dds\"\n",
+        albedos: &[],
+        out_name: "y.dds",
+        slot: 1,
+        real: Some(r"textures\m2\y.dds"),
+        invented: &[r"textures\mod_a\textures\m2\y.dds", r"textures\m\y.dds"],
+    },
+    Layout {
+        name: "legacy output_name outside textures",
+        files: &["arch/leaf.png"],
+        toml: "[[sets]]\nid = \"arch/leaf\"\noutput_name = \"maple\"\n",
+        albedos: &[],
+        out_name: "maple.dds",
+        slot: 1,
+        real: None,
+        invented: &[r"textures\arch\maple.dds"],
+    },
+];
+
+const CONSUMER: &str = "textures/c/con";
+
+/// `layout` opened as the app opens a folder, with a PBR consumer `textures/c/con` (an albedo) in an excluded group,
+/// so it writes an entry but no file and blocks nothing.
+fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
+    for f in layout.files.iter().chain(&["textures/c/con.png"]) {
+        let p = dir.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |x, y| {
+            image::Rgb([(x * 4) as u8, (y * 4) as u8, 90u8])
+        })
+        .save(&p)
+        .unwrap();
+    }
+    let toml = format!(
+        "{}[[sets]]\nid = \"{CONSUMER}\"\nshader = \"pbr\"\n",
+        layout.toml
+    );
+    std::fs::write(dir.join("sdc-project.toml"), toml).unwrap();
+    let mut m = opened_as_the_app(dir.to_path_buf(), dir.join("export"));
+    for f in layout.albedos.iter().chain(&["textures/c/con.png"]) {
+        m.decide(f, Answer::Subtype(Subtype::PbrAlbedo));
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let ids = vec![CONSUMER.to_string()];
+    m.move_to_group(
+        &ids,
+        sdc_gui::model::set_groups::GroupTarget::New("Consumer".into()),
+    )
+    .expect("grouped");
+    m.set_group_excluded("Consumer", true).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// Every `.dds` under `root`, `/`-separated and relative to it.
+fn dds_under(root: &std::path::Path) -> Vec<String> {
+    let mut out = vec![];
+    let mut todo = vec![root.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        let entries = std::fs::read_dir(&d).unwrap_or_else(|e| panic!("{}: {e}", d.display()));
+        for e in entries {
+            let p = e.unwrap_or_else(|e| panic!("{}: {e}", d.display())).path();
+            if p.is_dir() {
+                todo.push(p);
+            } else if p.extension().is_some_and(|x| x.eq_ignore_ascii_case("dds")) {
+                out.push(
+                    p.strip_prefix(root)
+                        .unwrap()
+                        .to_string_lossy()
+                        .replace('\\', "/"),
+                );
+            }
+        }
+    }
+    out
+}
+
+/// The game location of `rel` (a path under the export folder): from its first `textures` folder on, lower case,
+/// backslashes; `None` under no `textures` folder.
+fn game_location(rel: &str) -> Option<String> {
+    let parts: Vec<String> = rel
+        .split(['/', '\\'])
+        .map(str::to_ascii_lowercase)
+        .collect();
+    let i = parts.iter().position(|c| c == "textures")?;
+    Some(parts[i..].join("\\"))
+}
+
+/// Ruling 3b-F6: for each layout, after a real export into a fresh folder, every index key names a DDS the export
+/// wrote at that game location, every written DDS that has a game location is a key, and a consumer whose slot names
+/// the real path gets the producing job as a dependency while one naming an invented spelling gets an external path.
+#[test]
+fn the_output_index_holds_where_each_file_is_written() {
+    use sdc_gui::model::txst_map::written_output_index;
+    for layout in LAYOUTS {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = layout_project(d.path(), layout);
+        let case = layout.name;
+        let producer = m
+            .items
+            .iter()
+            .find(|i| {
+                i.job
+                    .as_ref()
+                    .is_some_and(|j| j.output.file_name().is_some_and(|n| n == layout.out_name))
+            })
+            .unwrap_or_else(|| panic!("{case}: premise: an item writes {}", layout.out_name))
+            .clone();
+        let set = views(&m)
+            .iter()
+            .find(|v| v.members.contains(&producer.key))
+            .unwrap_or_else(|| panic!("{case}: premise: the producer has a set"))
+            .id
+            .clone();
+        export_through(&mut m);
+        assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+        let notes = m.export.notes.join("\n");
+        assert!(
+            m.export_root().is_dir(),
+            "{case}: premise: the export ran: {notes} {:?} {}",
+            block_texts(&m),
+            m.status_line
+        );
+        let written = dds_under(&m.export_root());
+        assert!(
+            written.iter().any(|f| f.ends_with(layout.out_name)),
+            "{case}: premise: the export wrote {}: {written:?} {notes}",
+            layout.out_name
+        );
+        let index = written_output_index(&m);
+        let keys: Vec<&str> = index.iter().map(|(k, _, _)| k.as_str()).collect();
+        // The consumer is left out of the run, so its own planned output is a key with no file yet.
+        for (k, _, _) in index.iter().filter(|(_, s, _)| s != CONSUMER) {
+            assert!(
+                written
+                    .iter()
+                    .any(|f| game_location(f).as_deref() == Some(k.as_str())),
+                "{case}: key {k} names no written DDS: {written:?}"
+            );
+        }
+        for f in &written {
+            if let Some(g) = game_location(f) {
+                assert!(
+                    keys.contains(&g.as_str()),
+                    "{case}: {f} is no key: {keys:?}"
+                );
+            }
+        }
+        let con = |m: &AppModel| views(m).iter().find(|v| v.id == CONSUMER).unwrap().clone();
+        let deps = |m: &AppModel| {
+            sdc_gui::model::pbr_export::prepare(m)
+                .and_then(|p| p.entries.into_iter().find(|(id, _, _)| id == CONSUMER))
+                .map(|(_, deps, _)| deps)
+                .unwrap_or_default()
+        };
+        let key = format!("slot{}", layout.slot);
+        if let Some(real) = layout.real {
+            m.set_json_value(CONSUMER, &key, Some(json!(real)));
+            let l = con(&m).linked[&layout.slot].clone();
+            assert_eq!(l.from.as_deref(), Some(set.as_str()), "{case}: {real}");
+            assert!(
+                deps(&m).contains(&producer.job_key),
+                "{case}: {:?}",
+                deps(&m)
+            );
+        } else {
+            let entry = m
+                .slot_menu(CONSUMER, SlotKind::Diffuse)
+                .into_iter()
+                .find(|e| matches!(&e.action, MenuAction::SlotLink { item, .. } if *item == producer.key))
+                .unwrap_or_else(|| panic!("{case}: the picker lists {}", producer.key));
+            assert!(entry.disabled.is_some(), "{case}: {entry:?}");
+        }
+        for wrong in layout.invented {
+            m.set_json_value(CONSUMER, &key, Some(json!(wrong)));
+            let l = con(&m).linked[&layout.slot].clone();
+            assert_eq!(l.from, None, "{case}: {wrong} is external");
+            assert!(!deps(&m).contains(&producer.job_key), "{case}: {wrong}");
+        }
+    }
+}

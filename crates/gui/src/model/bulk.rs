@@ -7,8 +7,8 @@ use super::fields::{
 };
 use super::set_groups::GroupTarget;
 use super::sets::{
-    engine_inputs, game_path_in, locked_items, member_game_path, slot_gives, slot_of, SlotCommand,
-    SlotKind, NOTHING, SLOT_LOCKED,
+    locked_items, member_game_path, slot_gives, slot_of, SlotCommand, SlotKind, NOTHING,
+    SLOT_LOCKED,
 };
 use super::{AppModel, Dialog, Selection};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
@@ -1696,7 +1696,6 @@ impl AppModel {
             n,
             cmd,
         };
-        let paths = engine_inputs(self).1;
         let links: Vec<MenuEntry> = views
             .iter()
             .filter(|o| !same_id(&o.id, &id))
@@ -1712,8 +1711,8 @@ impl AppModel {
                         item: k.clone(),
                     },
                     label: format!("{} — {}", o.id, it.name),
-                    // Listed but off when the game would find no file there.
-                    disabled: game_path_in(self, views, &paths, k).err(),
+                    // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
+                    disabled: member_game_path(self, k).err(),
                 })
             })
             .collect();

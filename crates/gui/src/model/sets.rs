@@ -2637,34 +2637,53 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
 pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
-/// backslashes, `.dds`), from the current documents: its planned output path when it has one (a PBR output under
-/// `textures\pbr\`, as the automatic slot paths, DECISIONS P11), else its game path (`textures\…`). A member with no
-/// `textures` folder above it has none.
+/// backslashes, `.dds`): where its job writes it (`output_game_path`). A member whose output is under no `textures`
+/// folder has none.
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
-    let paths = engine_inputs(m).1;
-    game_path_in(m, &views(m), &paths, item)
+    let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
+    if !writes_own_output(it) || it.job_key.is_empty() {
+        return Err(format!("{} writes no output", it.name));
+    }
+    output_game_path(m, it).ok_or_else(|| NO_GAME_PATH.into())
 }
 
-/// `member_game_path` over views and output paths already built (the slot menu builds them once).
-pub(crate) fn game_path_in(
-    m: &AppModel,
-    views: &[SetView],
-    paths: &BTreeMap<OutputKey, PathBuf>,
-    item: &str,
-) -> Result<String, String> {
-    let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
-    let job = it
-        .job
-        .as_ref()
-        .ok_or_else(|| format!("{} writes no output", it.name))?;
-    if let Some(p) = item_output_key(views, it).and_then(|k| paths.get(&k)) {
-        return Ok(p.to_string_lossy().replace('/', "\\"));
+/// Review E1 (Task 15a, ruling 3b-F6): the game location of the file `it`'s job writes: its plan path (`job_key`,
+/// the file the finalizer checks on disk) as a path under the export folder (`export_rel`), from its first `textures`
+/// folder on, backslashes, spelt as the job's output is. Never composed from the source folder, and never a
+/// `textures\` put in front of an output under no `textures` folder: `None` then, and for an item that writes no
+/// output of its own.
+pub(crate) fn output_game_path(m: &AppModel, it: &TextureItem) -> Option<String> {
+    let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
+    if it.job_key.is_empty() {
+        return None;
     }
-    // `game_path` starts at the last `textures` folder, else it is the path under the opened folder.
-    if !job.game_path.starts_with("textures/") {
-        return Err(NO_GAME_PATH.into());
-    }
-    Ok(written_game_path(job).replace('/', "\\"))
+    let rel = m.export_rel(Path::new(&it.job_key));
+    let rel = rel.to_string_lossy();
+    let parts: Vec<&str> = rel.split(['/', '\\']).filter(|c| !c.is_empty()).collect();
+    let tail = &parts[parts
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("textures"))?..];
+    // The job key is folded; the output path keeps the spelling. Its last parts are the same file.
+    let spelt: Vec<String> = job
+        .output
+        .components()
+        .rev()
+        .take(tail.len())
+        .map(|c| c.as_os_str().to_string_lossy().into_owned())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let same = spelt.len() == tail.len()
+        && spelt
+            .iter()
+            .zip(tail)
+            .all(|(a, b)| a.eq_ignore_ascii_case(b));
+    Some(if same {
+        spelt.join("\\")
+    } else {
+        tail.join("\\")
+    })
 }
 
 /// The game path a member's export writes (wave 2 #4, Note R9): the folder of `game_path` and the file name of
@@ -4709,27 +4728,23 @@ pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKe
         return Some(OutputKey::File(item.key.clone()));
     }
     let suffix = recipe_suffix(item)?;
+    // Ruling 3b-F6: the producing set is the one the packed output is a member of, also when a borrow holds the slot
+    // its card would fill.
     let set = views
         .iter()
-        .find(|v| {
-            v.slots
-                .values()
-                .any(|f| matches!(f, SlotFill::Own { item: i } if *i == item.key))
-        })?
+        .find(|v| v.members.contains(&item.key))?
         .id
         .clone();
     Some(OutputKey::Packed { set, suffix })
 }
 
-/// Item key → the id of the first view, in display order, holding it as its own: the set `item_output_key` names for
-/// a packed output, built once for a loop over every item.
+/// Item key → the id of the first view, in display order, it is a member of: the set `item_output_key` names for a
+/// packed output, built once for a loop over every item.
 pub(crate) fn packed_owners(views: &[SetView]) -> HashMap<&str, &str> {
     let mut out = HashMap::new();
     for v in views {
-        for f in v.slots.values() {
-            if let SlotFill::Own { item } = f {
-                out.entry(item.as_str()).or_insert(v.id.as_str());
-            }
+        for item in &v.members {
+            out.entry(item.as_str()).or_insert(v.id.as_str());
         }
     }
     out
