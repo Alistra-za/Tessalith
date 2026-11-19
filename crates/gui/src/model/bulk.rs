@@ -1813,8 +1813,11 @@ impl AppModel {
                 // drawn before an edit stores nothing while that edit plans.
                 return match member_game_path(self, &item) {
                     Ok(p) => {
+                        // Final wave Group 4: re-picking the file the slot already names writes nothing (an equal
+                        // write is no step), so it logs nothing either.
+                        let pushes = self.history.pushes;
                         let err = self.set_slot_command(&set, n, SlotCommand::Path(p)).err();
-                        if err.is_none() {
+                        if err.is_none() && self.history.pushes != pushes {
                             self.log_slot_link(&set, n);
                         }
                         err

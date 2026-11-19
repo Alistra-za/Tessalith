@@ -798,6 +798,44 @@ fn use_this_file_over_a_borrow_keeps_the_borrow_and_the_sets_sharing_through() {
     click_and_check_the_borrows_stay(m, &before, "Use wall_n.png for Normal _n");
 }
 
+/// Final wave Group 4 (Important 5): picking from another set the file a slot already links to writes nothing, so it
+/// makes no Undo step and logs no Info line; the first pick logs one.
+#[test]
+fn re_picking_the_linked_file_writes_and_logs_nothing() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let pick = MenuAction::SlotLink {
+        set: LEAF.into(),
+        n: 1,
+        item: WALL_ALBEDO.into(),
+    };
+    let (logged, steps) = (m.messages.entries().count(), m.history.undo.len());
+    assert_eq!(m.run_menu(pick.clone()), None);
+    assert_eq!(
+        (m.messages.entries().count(), m.history.undo.len()),
+        (logged + 1, steps + 1),
+        "premise: the first pick links, logs once and is one step"
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let text = m.sets_doc.as_ref().unwrap().text();
+    assert_eq!(m.run_menu(pick), None);
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().text(),
+        text,
+        "nothing is written"
+    );
+    assert_eq!(m.history.undo.len(), steps + 1, "no Undo step");
+    assert_eq!(
+        m.messages.entries().count(),
+        logged + 1,
+        "no second Info line: {:?}",
+        m.messages
+            .entries()
+            .map(|e| e.text.clone())
+            .collect::<Vec<_>>()
+    );
+}
+
 /// Fix round 1 (I1 of the review): a link shows on the row of the slot it sits on, whatever kind the typed path's
 /// file is. Unlink then acts on that slot.
 #[test]

@@ -4550,6 +4550,13 @@ impl AppModel {
         });
     }
 
+    /// A Match on this click (`matchN` of set `set`) as a step of its own (final wave Group 4): a discrete toggle never
+    /// merges with the edit before it, as `set_json_value` does per set and key for typing, so one Undo takes back one
+    /// click.
+    pub fn toggle_match(&mut self, set: &str, key: &str, v: Option<Value>) {
+        self.batch_edit(&format!("Change {key}"), |m| m.set_json_value(set, key, v));
+    }
+
     /// A JSON value of set `set`. Material values do not plan; match fields do (P7).
     pub fn set_json_value(&mut self, set: &str, key: &str, v: Option<Value>) {
         if !self.sets_editable() {

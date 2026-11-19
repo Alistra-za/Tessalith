@@ -81,8 +81,8 @@ enum Act {
     Fill(String, RawMap, Option<u8>),
     /// Note DY18: a packed channel's source (packed key, channel, helper item key; `None` = a value).
     ChannelHelper(String, u8, Option<String>),
-    /// A PGPatcher setting of a set: (set id, key, value; `None` removes it).
-    Json(String, String, Option<Value>),
+    /// A Match on this click: (set id, `matchN`, value; `None` removes it), one Undo step each (`toggle_match`).
+    Match(String, String, Option<Value>),
     /// Note AN: read a locked slot's original textures (set id, slot) on a worker.
     AskOriginal(String, u8),
     /// F3a Task 8: a slot menu pick.
@@ -355,7 +355,7 @@ pub fn draw(
             Act::ParallaxReset(k) => model.clear_field(&k, "alpha.parallax"),
             Act::Fill(k, role, v) => model.set_pack_fill(&k, role, v),
             Act::ChannelHelper(k, c, h) => model.set_channel_helper(&k, c, h.as_deref()),
-            Act::Json(set, k, v) => model.set_json_value(&set, &k, v),
+            Act::Match(set, k, v) => model.toggle_match(&set, &k, v),
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::OpenSet(id) => {
@@ -1220,7 +1220,7 @@ fn row(
                     refused.as_deref().unwrap_or_default(),
                 ) {
                     let (k, val) = match_toggle(n, !on, &path);
-                    acts.push(Act::Json(v.id.clone(), k, val));
+                    acts.push(Act::Match(v.id.clone(), k, val));
                 }
             }
             let Some((i, job)) = own_job.filter(|_| slot == SlotKind::Diffuse) else {

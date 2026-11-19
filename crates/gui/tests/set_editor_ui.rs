@@ -1257,6 +1257,56 @@ fn the_card_toggles_mirror_the_matching_rows() {
     assert_eq!(match_toggles(&h), vec![true, true]);
 }
 
+/// Final wave Group 4 (Important 5): Match on this is a discrete toggle, so each click is its own Undo step and one
+/// Undo takes back the last click only.
+#[test]
+fn each_match_click_is_one_undo_step() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    rock_selected(&mut m);
+    let mut h = harness(m);
+    h.run();
+    let click_normal = |h: &mut Harness<'static, AppModel>| {
+        h.query_all_by_label("Match on this")
+            .nth(1)
+            .unwrap()
+            .scroll_to_me();
+        h.run();
+        h.query_all_by_label("Match on this")
+            .nth(1)
+            .unwrap()
+            .click();
+        h.step();
+        assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+        h.run();
+    };
+    let steps = h.state().history.undo.len();
+    click_normal(&mut h);
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "premise: the first click turns the normal's match on"
+    );
+    click_normal(&mut h);
+    assert!(
+        !rock_settings(&h).contains_key("match2"),
+        "premise: the second click turns it off"
+    );
+    assert_eq!(
+        h.state().history.undo.len(),
+        steps + 2,
+        "two clicks, two Undo steps"
+    );
+    h.state_mut().undo();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    assert_eq!(
+        rock_settings(&h)["match2"],
+        serde_json::json!(r"landscape\rock01_n"),
+        "one Undo takes back the second click only"
+    );
+}
+
 /// Owner, 2026-10-12: + offers slots 3–8. A slot the set fills starts from the set's path for it; an empty slot adds
 /// an empty row that warns until a path is typed.
 #[test]
