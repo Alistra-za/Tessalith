@@ -2632,6 +2632,9 @@ enum Planted {
     SetUpButton,
     /// A status circle painted in a layer egui moves by a transform: an error, never a judgement.
     TransformedLayer,
+    /// An amber circle on the bottom edge of a named label, clipped to the label: the label holds the part that shows
+    /// and not the whole circle, so it is no name for the dot.
+    ClippedDot,
 }
 
 struct PlantedScreen(Planted);
@@ -2653,6 +2656,7 @@ impl PlantedScreen {
             Planted::ShortHandleDecoy => "Short handle decoy screen",
             Planted::SetUpButton => "Set up screen",
             Planted::TransformedLayer => "Transformed layer screen",
+            Planted::ClippedDot => "Clipped dot screen",
         };
         ui.label(title);
         if let Planted::Dots = kind {
@@ -2679,6 +2683,15 @@ impl PlantedScreen {
                         })
                     })
                 });
+            return;
+        }
+        if let Planted::ClippedDot = kind {
+            let row = ui.label("a label that holds only the part of the dot that shows");
+            ui.painter().with_clip_rect(row.rect).circle_filled(
+                row.rect.left_bottom() + vec2(20.0, 0.0),
+                4.0,
+                AMBER,
+            );
             return;
         }
         if let Planted::TransformedLayer = kind {
@@ -2716,6 +2729,12 @@ impl PlantedScreen {
                 | Planted::ShortHandleDecoy
         ) {
             ui.style_mut().spacing.scroll = sdc_gui::look::thin_scroll();
+        }
+        if let Planted::ShortHandle = kind {
+            // a transparent track with an opaque handle: only the handle (12 px at the shortest) shows the bar
+            let scroll = &mut ui.style_mut().spacing.scroll;
+            scroll.dormant_background_opacity = 0.0;
+            scroll.dormant_handle_opacity = 1.0;
         }
         let tall = if matches!(kind, Planted::ShortHandle | Planted::ShortHandleDecoy) {
             6000.0
@@ -2786,6 +2805,7 @@ impl Entry for PlantedScreen {
             Planted::ShortHandleDecoy => "test-only transparent short handle with a decoy",
             Planted::SetUpButton => "test-only set up button",
             Planted::TransformedLayer => "test-only transformed layer",
+            Planted::ClippedDot => "test-only clipped dot",
         }
     }
 
@@ -2802,6 +2822,7 @@ impl Entry for PlantedScreen {
         const SHORT_DECOY: &[Needle] = &[crate::screens::has("Short handle decoy screen")];
         const SET_UP: &[Needle] = &[crate::screens::has("Set up screen")];
         const MOVED: &[Needle] = &[crate::screens::has("Transformed layer screen")];
+        const CLIPPED_DOT: &[Needle] = &[crate::screens::has("Clipped dot screen")];
         match self.0 {
             Planted::HiddenBar => HIDDEN,
             Planted::ClippedDecoy => CLIPPED,
@@ -2815,6 +2836,7 @@ impl Entry for PlantedScreen {
             Planted::ShortHandleDecoy => SHORT_DECOY,
             Planted::SetUpButton => SET_UP,
             Planted::TransformedLayer => MOVED,
+            Planted::ClippedDot => CLIPPED_DOT,
         }
     }
 
@@ -2981,6 +3003,26 @@ fn a_dot_is_named_by_the_innermost_node_of_its_own_layer() {
         .filter(|d| d.fill.a() == 255 && d.radius == 4.0)
         .count();
     assert_eq!(status, 5, "{:?}", snap.discs);
+}
+
+/// A named node that holds only the part of a circle a clip shows is no name for the dot: the node must hold the whole
+/// circle (its rect is the widget's full rect, so a circle that a clip cuts part of is judged like any other).
+#[test]
+fn a_node_holding_only_the_visible_part_of_a_dot_does_not_name_it() {
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(PlantedScreen(Planted::ClippedDot))];
+    let walked = walk(&mut list, &mut real_checker);
+    assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    let got: Vec<(&str, &str)> = walked
+        .hits
+        .iter()
+        .map(|h| (h.what.as_str(), h.invariant))
+        .collect();
+    assert_eq!(
+        got,
+        [("amber dot", "status_dot_named"); 3],
+        "{:?}",
+        walked.hits
+    );
 }
 
 /// A frame with the pointer in the window is an error of its screen, not a pass: the bar's opacity at rest cannot be
@@ -3214,6 +3256,14 @@ fn a_short_handle_is_judged_on_the_bars_own_paint() {
             .iter()
             .any(|x| x.alpha > 0 && x.rect.height() < 20.0 && strip.contains_rect(x.rect)),
         "the fixture paints a visible handle under 20 px: {:?}",
+        short.filled
+    );
+    assert!(
+        short
+            .filled
+            .iter()
+            .any(|x| x.alpha == 0 && x.rect.height() > 100.0 && strip.contains_rect(x.rect)),
+        "the track of the fixture is transparent: {:?}",
         short.filled
     );
     let (hits, errors) = observe_bars(&short);
