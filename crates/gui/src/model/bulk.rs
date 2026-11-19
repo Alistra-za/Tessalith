@@ -7,8 +7,8 @@ use super::fields::{
 };
 use super::set_groups::GroupTarget;
 use super::sets::{
-    locked_items, member_game_path, slot_gives, slot_of, SlotCommand, SlotKind, NOTHING,
-    SLOT_LOCKED,
+    engine_inputs, locked_items, member_game_path, member_game_path_in, slot_gives, slot_of,
+    SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
 };
 use super::{AppModel, Dialog, Selection};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
@@ -1696,6 +1696,8 @@ impl AppModel {
             n,
             cmd,
         };
+        // Ruling 3b-F14: the export inputs are built once per menu, as main did, not once per listed member.
+        let paths = engine_inputs(self).1;
         let links: Vec<MenuEntry> = views
             .iter()
             .filter(|o| !same_id(&o.id, &id))
@@ -1712,7 +1714,7 @@ impl AppModel {
                     },
                     label: format!("{} — {}", o.id, it.name),
                     // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
-                    disabled: member_game_path(self, k).err(),
+                    disabled: member_game_path_in(self, &o.id, &paths, it).err(),
                 })
             })
             .collect();

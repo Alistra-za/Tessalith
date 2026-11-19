@@ -938,7 +938,8 @@ pub fn shared_cells(v: &SetView, cells: Vec<SlotCell>) -> Vec<SlotCell> {
 pub fn view_row(v: &SetView) -> Vec<SlotCell> {
     let mut cells = shared_cells(v, slot_row(v.shader.as_ref(), &v.slots));
     // Ruling 3b-F8: a conflict is what Export's clash reads, both fills kept by the JSON (a clear or a link leaves one
-    // path on the slot, so none).
+    // path on the slot, so none). Ruling 3b-F14: the read allocates nothing (`json_files` is an iterator over the view)
+    // and runs only for a card whose raw slots clash, so a frame without a clash does no new work.
     for c in &mut cells {
         c.clash = c
             .clash
@@ -1169,6 +1170,18 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
     SET_VIEWS_CLONES.with(|c| c.set(c.get() + 1));
     // shortcut: a clone per call for the ~20 callers that take ownership; switch them to `views` if it shows in a profile.
     (*views(m)).clone()
+}
+
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Test probe: how many times `engine_inputs_in` ran on this thread (ruling 3b-F14).
+    static ENGINE_INPUT_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: how many times the export inputs (`engine_inputs_in`) were built on this thread.
+#[cfg(feature = "test-hooks")]
+pub fn engine_input_builds() -> u64 {
+    ENGINE_INPUT_BUILDS.with(std::cell::Cell::get)
 }
 
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
@@ -1874,6 +1887,8 @@ pub(crate) fn engine_inputs_in(
     m: &AppModel,
     views: &[SetView],
 ) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
+    #[cfg(feature = "test-hooks")]
+    ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
     let entries = m.sets_doc.as_ref().map(|d| d.entries()).unwrap_or_default();
     let mut edits = vec![];
     for e in entries.iter().filter(|e| e.created) {
@@ -2655,16 +2670,30 @@ pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 /// folder has none.
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
     let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
+    let views = views(m);
+    let set = views.iter().find(|v| v.members.contains(&it.key));
+    let paths = engine_inputs_in(m, &views).1;
+    member_game_path_in(m, set.map_or("", |v| v.id.as_str()), &paths, it)
+}
+
+/// `member_game_path` for a member of set `set` over export inputs already built (ruling 3b-F14: the slot menu builds
+/// them once per call, not once per member).
+pub(crate) fn member_game_path_in(
+    m: &AppModel,
+    set: &str,
+    paths: &BTreeMap<OutputKey, PathBuf>,
+    it: &TextureItem,
+) -> Result<String, String> {
     if !writes_own_output(it) || it.job_key.is_empty() {
         return Err(format!("{} writes no output", it.name));
     }
-    let (views, paths) = (views(m), engine_inputs(m).1);
-    output_game_path(m, &views, &paths, it).ok_or_else(|| NO_GAME_PATH.into())
+    output_game_path(m, set, paths, it).ok_or_else(|| NO_GAME_PATH.into())
 }
 
 /// Review E1 (Task 15a, rulings 3b-F6 and 3b-F11): the game location of the file `it`'s job writes, spelt as on
-/// disk. The path is the one the job writes: an explicit output path (`paths`, keyed by `item_output_key`: a PBR
-/// set's under its current prefix, a mapped record path), which the next plan writes, so it is read before that plan
+/// disk. The path is the one the job writes: an explicit output path (`paths`, keyed as `item_output_key` keys it, a
+/// packed output by its producing set `set`: a PBR set's under its current prefix, a mapped record path), which the
+/// next plan writes, so it is read before that plan
 /// lands too; else the job's output, under the output folder. Its filesystem components are walked (`.` and empty
 /// parts are gone, as the writer resolves them) and cut at the first `textures` component (ASCII case-insensitive),
 /// then joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as
@@ -2672,7 +2701,7 @@ pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
 /// writes no output of its own. The link index folds the result with ASCII lower case.
 pub(crate) fn output_game_path(
     m: &AppModel,
-    views: &[SetView],
+    set: &str,
     paths: &BTreeMap<OutputKey, PathBuf>,
     it: &TextureItem,
 ) -> Option<String> {
@@ -2680,7 +2709,16 @@ pub(crate) fn output_game_path(
     if it.job_key.is_empty() {
         return None;
     }
-    let explicit = item_output_key(views, it).and_then(|k| paths.get(&k));
+    // The producing set is passed in (ruling 3b-F14), so no view is searched per member.
+    let key = if it.kind == ItemKind::Packed {
+        recipe_suffix(it).map(|suffix| OutputKey::Packed {
+            set: set.to_string(),
+            suffix,
+        })
+    } else {
+        Some(OutputKey::File(it.key.clone()))
+    };
+    let explicit = key.and_then(|k| paths.get(&k));
     let rel: &Path = match explicit {
         Some(p) => p,
         // An output outside both folders (the folder changed and the plan has not landed) is read as none.

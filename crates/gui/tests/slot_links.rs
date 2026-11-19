@@ -1964,3 +1964,38 @@ fn the_output_index_holds_where_each_file_is_written() {
         }
     }
 }
+
+/// Ruling 3b-F14: the slot menu's From another set list builds the export inputs once per call, as main did, never
+/// once per listed member: three heights in three sets cost one build, and a menu drawn again costs one more.
+#[test]
+fn the_slot_menu_builds_the_export_inputs_once_per_call() {
+    use sdc_gui::model::sets::engine_input_builds;
+    let d = tempfile::tempdir().unwrap();
+    let m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("a_p.png", [128, 128, 128], Subtype::Height),
+            ("b_p.png", [128, 128, 128], Subtype::Height),
+            ("c_p.png", [128, 128, 128], Subtype::Height),
+        ],
+    );
+    let links = |m: &AppModel| {
+        m.slot_menu(LEAF, SlotKind::Height)
+            .into_iter()
+            .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+            .count()
+    };
+    // The views are built (and cached) before counting.
+    let _ = views(&m);
+    let before = engine_input_builds();
+    assert!(links(&m) >= 3, "premise: three members listed");
+    let once = engine_input_builds() - before;
+    assert!(once <= 1, "one menu built the export inputs {once} times");
+    let before = engine_input_builds();
+    let _ = links(&m);
+    assert!(
+        engine_input_builds() - before <= 1,
+        "a second frame: {}",
+        engine_input_builds() - before
+    );
+}

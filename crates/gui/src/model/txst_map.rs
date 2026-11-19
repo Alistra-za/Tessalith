@@ -374,7 +374,7 @@ fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String,
             let Some(it) = m.item(item) else {
                 continue;
             };
-            if let Some(p) = output_game_path(m, views, &paths, it) {
+            if let Some(p) = output_game_path(m, &v.id, &paths, it) {
                 out.entry(p.to_ascii_lowercase()).or_insert(Written {
                     from: &v.id,
                     short: &v.short,
