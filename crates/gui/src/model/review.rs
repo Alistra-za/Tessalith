@@ -564,7 +564,8 @@ impl AppModel {
         let mut run_records = false;
         // (path, marked): the JSON files and copies the export may change.
         let mut json: Vec<(PathBuf, bool)> = vec![];
-        let mut copies: Vec<(PathBuf, bool)> = vec![];
+        let mut copies = std::collections::BTreeMap::new();
+        let mut run_copy_destination = false;
         if let Some(p) = &prep.pgp {
             // `finish_json`: `copy_files` first, against the copy record.
             let old = doc.map(|d| d.copy_shas()).unwrap_or_default();
@@ -573,6 +574,13 @@ impl AppModel {
             let dep_file = |k: &str| p.untouched_root.as_ref().map(|r| r.join(k));
             let mut sources = SourceReads::new();
             for (src, dst, owner_key) in &p.copies {
+                // The writer checks ownership after jobs and earlier copies have written this destination.
+                if produced.has(dst) {
+                    run_copy_destination = true;
+                    run_records = true;
+                    copies.insert(dst.clone(), true);
+                    continue;
+                }
                 let key = record_key(dst);
                 let by_run = (!owner_key.is_empty() && touched(owner_key))
                     || produced.has(src)
@@ -582,7 +590,7 @@ impl AppModel {
                     // its bytes, are the run's.
                     run_records = true;
                     if may_change(dst, shas.get(&key).map(String::as_str)) {
-                        copies.push((dst.clone(), true));
+                        copies.insert(dst.clone(), true);
                     }
                     produced.add(dst);
                     continue;
@@ -598,7 +606,7 @@ impl AppModel {
                 };
                 shas.insert(key, sha);
                 if changes {
-                    copies.push((dst.clone(), false));
+                    copies.insert(dst.clone(), false);
                 }
                 produced.add(dst);
             }
@@ -736,13 +744,21 @@ impl AppModel {
                 std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes())
             };
             if self.sets_unsaved() || recorded {
-                put(d.path().to_path_buf(), HOVER_PROJECT_TOML, false);
+                put(
+                    d.path().to_path_buf(),
+                    HOVER_PROJECT_TOML,
+                    run_copy_destination,
+                );
             } else if run_records && !d.read_only() {
                 put(d.path().to_path_buf(), HOVER_PROJECT_TOML, true);
             }
             // `put_side` writes the sidecar only for a value it does not hold.
             if r.side_changed() || run_records {
-                put(d.sidecar_path(), HOVER_GENERATED, !r.side_changed());
+                put(
+                    d.sidecar_path(),
+                    HOVER_GENERATED,
+                    run_copy_destination || !r.side_changed(),
+                );
             }
         }
         let out = self.output_root();
@@ -756,8 +772,6 @@ impl AppModel {
                 true,
             );
         }
-        copies.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
-        copies.dedup_by(|a, b| a.0 == b.0);
         for (c, marked) in copies {
             put(c.components().collect(), HOVER_COPY, marked);
         }

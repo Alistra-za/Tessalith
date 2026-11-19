@@ -3311,8 +3311,64 @@ fn a_file_an_earlier_copy_makes_feeds_a_later_copy_and_a_profile() {
     let (mut m, odd, profile) = chained_copies(d.path());
     let s = export_and_compare(&mut m, d.path());
     assert!(odd.is_file() && profile.is_file(), "{:?}", m.export.notes);
-    for f in [&odd, &profile] {
-        assert!(s.listed.contains(f) && s.changed.contains(f), "{f:?}");
+    let leaf = odd.with_file_name("leaf_n.dds");
+    let entries = support::listed(&s.w);
+    for f in [&leaf, &odd, &profile] {
+        assert!(s.changed.contains(f), "{f:?}");
+        assert!(entries.iter().any(|e| e.path == *f && e.marked), "{f:?}");
+    }
+}
+
+#[test]
+fn a_job_writing_a_borrowers_destination_marks_the_copy_and_both_records() {
+    use engine::config::GreenConvention;
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
+    use sdc_gui::model::set_groups::GroupTarget;
+    use sdc_gui::model::Answer;
+    let d = tempfile::tempdir().unwrap();
+    let key = "landscape/leaf_normal.png";
+    let leaf = d.path().join("textures").join(key);
+    support::colour(&leaf, 255);
+    let (mut m, owner_source, dst) = vanilla_borrow(d.path());
+    m.set_field(key, "subtype", serde_json::json!("landscape_normal"));
+    m.decide(key, Answer::Green(GreenConvention::Directx));
+    idle(&mut m);
+    assert_eq!(m.item(key).unwrap().job.as_ref().unwrap().output, dst);
+    let first = export_and_compare(&mut m, d.path());
+    let owner = std::fs::read(dst.with_file_name("rock01_n.dds")).unwrap();
+    assert_ne!(std::fs::read(&dst).unwrap(), owner);
+    assert!(m.sets_doc.as_ref().unwrap().copy_shas().is_empty());
+
+    // The leaf job's next DDS matches the excluded owner, so the copy writer adopts it.
+    m.move_to_group(
+        &["landscape/rock01".to_string()],
+        GroupTarget::New("Owner".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Owner", true).unwrap();
+    std::fs::copy(owner_source, &leaf).unwrap();
+    m.replan();
+    idle(&mut m);
+    m.save().unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert_eq!(std::fs::read(&dst).unwrap(), owner);
+    let doc = m.sets_doc.as_ref().unwrap();
+    for (path, hover) in [
+        (dst.as_path(), HOVER_COPY),
+        (doc.path(), HOVER_PROJECT_TOML),
+        (&doc.sidecar_path(), HOVER_GENERATED),
+    ] {
+        assert!(s.changed.contains(path), "{path:?}");
+        for run in [&first, &s] {
+            assert!(
+                run.w
+                    .also_updated
+                    .iter()
+                    .any(|e| e.hover == hover && e.path == path && e.marked),
+                "{path:?} in {:?}",
+                run.w.also_updated
+            );
+        }
     }
 }
 
