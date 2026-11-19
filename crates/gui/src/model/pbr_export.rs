@@ -80,7 +80,10 @@ fn fill_path<'a>(
 
 /// Only an in-place export can install a DDS relative to the input's textures directory itself.
 fn in_place_textures(m: &AppModel, output: &Path) -> bool {
-    output
+    let Ok(resolved) = output.canonicalize() else {
+        return false;
+    };
+    resolved
         .file_name()
         .is_some_and(|n| n.eq_ignore_ascii_case("textures"))
         && m.root
@@ -128,9 +131,10 @@ fn slots_of(
         let requested = requested.to_string_lossy().replace('/', "\\");
         let written = m.item(item).and_then(|i| {
             let rel = written_output_rel(roots, i)?;
-            let game = match game_location_of(rel) {
-                None if in_place => game_location_of(&Path::new("textures").join(rel)),
-                game => game,
+            let game = if in_place {
+                game_location_of(&Path::new("textures").join(rel))
+            } else {
+                game_location_of(rel)
             }?;
             Some(game.to_ascii_lowercase())
         });
@@ -145,13 +149,7 @@ fn slots_of(
         let at_own_path = *kind != SlotKind::SkinSk
             && v.pbr
             && default_prefix(&v.settings, v.derived_match.as_deref().unwrap_or("")).is_some_and(
-                |pre| {
-                    path.eq_ignore_ascii_case(
-                        &output_rel(&pre, kind.suffix())
-                            .to_string_lossy()
-                            .replace('/', "\\"),
-                    )
-                },
+                |pre| path_lower(Path::new(&path)) == path_lower(&output_rel(&pre, kind.suffix())),
             );
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {

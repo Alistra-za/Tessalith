@@ -2764,6 +2764,74 @@ fn unmapped_height_keeps_the_source_game_paths_ascii_case() {
     assert_eq!(slot, r"textures\armor\rock_p.dds");
 }
 
+#[cfg(windows)]
+#[test]
+fn in_place_mapped_height_keeps_the_inner_textures_folder() {
+    check_in_place_mapped_height("Mod", "ModAlias/textures");
+}
+
+#[cfg(windows)]
+#[test]
+fn in_place_mapped_height_through_a_junction_to_textures_uses_the_resolved_root() {
+    check_in_place_mapped_height(r"Mod\textures", "ModAlias");
+}
+
+#[cfg(windows)]
+fn check_in_place_mapped_height(junction_target: &str, export: &str) {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let textures = d.path().join("Mod/textures");
+    std::fs::create_dir_all(&textures).unwrap();
+    let junction = std::process::Command::new("cmd")
+        .current_dir(d.path())
+        .args(["/C", "mklink", "/J", "ModAlias", junction_target])
+        .output()
+        .unwrap();
+    assert!(junction.status.success(), "{junction:?}");
+    std::fs::write(
+        textures.join("sdc-project.toml"),
+        "[[sets]]\nid = 'armor/rock'\nshader = 'pbr'\n[sets.txst]\n\
+         plugin = 'a.esp'\nformid = '1'\nedid = 'R'\nslot4 = 'textures/armor/textures/stone_p.dds'\n",
+    )
+    .unwrap();
+    let mut m = rock_height(&textures, "armor/rock_p.png", d.path().join(export));
+    m.add_cs_block("armor/rock", Kind::Txst);
+    m.set_cs_statics("armor/rock", Statics::Always);
+    let doc = fresh_document(&mut m, "mapped");
+    assert!(textures.join("armor/textures/stone_p.dds").is_file());
+    let slot = disk_set(&doc, r"armor\rock.dds")["slot4"].as_str().unwrap();
+    let rel = slot.strip_prefix(r"textures\").unwrap_or(slot);
+    assert!(
+        textures.join(rel).is_file(),
+        "JSON names missing file {slot}"
+    );
+    assert_eq!(slot, r"armor\textures\stone_p.dds");
+}
+
+#[test]
+fn owned_albedo_omits_the_slot_for_a_unicode_case_only_rename() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["textures/k/rock.png"],
+        albedos: &["textures/k/rock.png"],
+        json: &[
+            ("textures/k/rock", "match1", r"stone\É"),
+            ("textures/k/rock", "rename", r"textures\pbr\stone\é"),
+        ],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    let doc = fresh_document(&mut m, "lowercase");
+    assert!(m.export_root().join(r"textures\pbr\stone\é.dds").is_file());
+    let entry = disk_set(&doc, r"stone\É.dds");
+    assert!(entry.get("slot1").is_none(), "{entry}");
+    // The complete JSON written by main (68574cfc) for this match and rename.
+    assert_eq!(
+        sdc_gui::model::history::sha256_of(&pgp_json_path(&m)).as_deref(),
+        Some("6693a7adf2314b937a4cdb3fcdac87c8226504b97cf584ea2265bd4dfc1c89aa")
+    );
+}
+
 #[test]
 fn unlink_replans_the_record_normal_before_export() {
     use sdc_gui::model::cs_pbr::{Kind, Statics};
