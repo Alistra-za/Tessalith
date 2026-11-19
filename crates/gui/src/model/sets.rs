@@ -407,10 +407,11 @@ pub struct SetView {
     /// game slot is cleared over an own or borrowed file. Only a set that writes a PGPatcher entry
     /// (`pbr_export::writes_entry`) has any (`link_slots`); set by `build_views` and `splice_views`.
     pub features: Option<BTreeMap<SlotKind, SlotFill>>,
-    /// The files this set's own members write (review E13): each own slot's planned output in slot order, then each
-    /// member with a job that fills no slot (a complex `_m`, a packed output with no card) in member order, each path
-    /// once. Each entry is the slot (`None` for an unslotted member), the item's key and its output path. Borrowed and
-    /// linked slots are other sets' files. Set at the end of `finish_view`, so both view builders give it.
+    /// The files this set's own members write (review E13): each own slot's planned output in slot order, then every
+    /// other member with a job in member order (a complex `_m` or a packed output that fills no slot, an own file a
+    /// borrow displaced, a second member of one kind), each path once. Each entry is the member's slot kind (`slot_of`;
+    /// `None` for an unslotted member), the item's key and its output path. Borrowed and linked slots are other sets'
+    /// files. Set at the end of `finish_view`, so both view builders give it.
     pub outputs: Vec<(Option<SlotKind>, String, PathBuf)>,
 }
 
@@ -709,6 +710,18 @@ impl SetView {
             self.slot_text(slot)
         } else {
             slot_label(slot, key)
+        }
+    }
+
+    /// The title of the editor's row for `slot` filled by `item`: `card_title` (a `_coat` reads "Coat colour +
+    /// strength", complex grass its own), and the Rmaos slot reads `slot_text`. The Output files lines use it too, so
+    /// a file has one name in both places (final wave Group 2).
+    pub fn row_title(&self, slot: SlotKind, item: Option<&str>) -> &'static str {
+        match item {
+            Some(item) if slot != SlotKind::Rmaos => {
+                card_title(slot, item, self.shader.as_ref().map(|p| p.shader))
+            }
+            _ => self.slot_label(slot, ""),
         }
     }
 
@@ -1741,16 +1754,18 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
             v.outputs.push((Some(*kind), item.clone(), out.clone()));
         }
     }
-    // Members that fill no slot but still convert (`unslotted_packed`'s items). `view_reads` covers their `job_key`.
+    // Then every other member that converts, in member order (final wave Group 2): one that fills no slot
+    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind. `view_reads` covers
+    // their `job_key`.
     for key in &v.members {
-        let Some(i) = m.item(key).filter(|i| slot_of(i).is_none()) else {
+        let Some(i) = m.item(key) else {
             continue;
         };
         let Some(out) = i.job.as_ref().map(|j| &j.output) else {
             continue;
         };
         if !v.outputs.iter().any(|(_, _, p)| p == out) {
-            v.outputs.push((None, key.clone(), out.clone()));
+            v.outputs.push((slot_of(i), key.clone(), out.clone()));
         }
     }
 }

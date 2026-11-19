@@ -10,6 +10,7 @@ use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::sets::*;
 use sdc_gui::model::{Answer, AppModel, Selection};
 use sdc_gui::pgp::writer::document;
+use sdc_gui::ui::set_editor::OUTPUTS_COUNT_NOTE;
 use serde_json::{json, Value};
 use support::*;
 
@@ -86,7 +87,7 @@ fn every_listed_output_exists_after_export() {
     let mut h = harness(m);
     let n = listed.len();
     assert!(
-        h.query_by_label_contains(&format!("{n}, all written"))
+        h.query_by_label_contains(&format!("{n}, all on disk"))
             .is_some(),
         "closed header summary"
     );
@@ -122,7 +123,7 @@ fn every_listed_output_of_the_pbr_set_exists_after_export() {
     select_set(&mut m, "arch/wall");
     let h = harness(m);
     assert!(h
-        .query_by_label_contains(&format!("{}, all written", listed.len()))
+        .query_by_label_contains(&format!("{}, all on disk", listed.len()))
         .is_some());
 }
 
@@ -159,13 +160,63 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
     assert!(listed[..listed.len() - 1]
         .iter()
         .all(|(k, _, _)| k.is_some()));
+    let paths: std::collections::BTreeSet<_> = listed.iter().map(|(_, _, p)| p).collect();
+    assert_eq!(paths.len(), listed.len(), "each path once: {listed:?}");
     select_set(&mut m, LEAF);
-    let h = harness(m);
+    let mut h = harness(m);
     assert!(
-        h.query_by_label_contains(&format!("{}, not exported yet", listed.len()))
+        h.query_by_label_contains(&format!("{}, none on disk", listed.len()))
             .is_some(),
         "the count includes it"
     );
+    // Final wave Group 2: the unslotted line is labelled with the name its row under the cards uses, and it gets
+    // its Show in Explorer once the file exists.
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    h.get_by_label(OUTPUTS_COUNT_NOTE);
+    let line = format!("leaf_m.png: {}", out.display());
+    assert!(
+        h.query_by_label(&line).is_some(),
+        "the unslotted line {line:?}"
+    );
+    let name = out.file_name().unwrap().to_string_lossy().into_owned();
+    let show = format!("Show {name} in Explorer");
+    assert!(h.query_by_label(&show).is_none(), "no file yet");
+    std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+    std::fs::write(&out, b"dds").unwrap();
+    // StatCache's TTL would hold the "missing" read above.
+    h.state().stats.borrow_mut().clear();
+    h.run();
+    assert!(h.query_by_label(&show).is_some(), "{show} once it exists");
+}
+
+/// Final wave Group 2: a set none of whose members writes a file has an empty Output files group that says so, and a
+/// header that reads "none".
+#[test]
+fn a_set_that_writes_nothing_says_so() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.edit_docs("t", None, true, |_, s| s.create_set("arch/empty"));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let v = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/empty")
+        .expect("premise: the created set has a view")
+        .clone();
+    assert!(set_outputs(&v).is_empty(), "premise: no member writes");
+    // A set with no file is not in the plan's list (`m.sets`): select it by its view's key.
+    m.select_set(&v.key);
+    let mut h = harness(m);
+    let header = h.get_by_label_contains("Output files").rect();
+    assert!(
+        h.query_all_by_label("none")
+            .any(|n| (n.rect().center().y - header.center().y).abs() < 4.0),
+        "the header reads none"
+    );
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    h.get_by_label("Nothing is written for this set.");
+    assert!(h.query_by_label(OUTPUTS_COUNT_NOTE).is_none());
 }
 
 #[test]
@@ -226,7 +277,7 @@ fn a_set_with_some_files_written_says_k_of_n() {
     let n = listed.len();
     let h = harness(m);
     assert!(h
-        .query_by_label_contains(&format!("{} of {n} written", n - 1))
+        .query_by_label_contains(&format!("{} of {n} on disk", n - 1))
         .is_some());
 }
 
@@ -237,7 +288,7 @@ fn show_in_explorer_waits_for_the_file() {
     select_set(&mut m, LEAF);
     let mut h = harness(m);
     assert!(
-        h.query_by_label_contains("not exported yet").is_some(),
+        h.query_by_label_contains("none on disk").is_some(),
         "closed and not silent"
     );
     assert!(

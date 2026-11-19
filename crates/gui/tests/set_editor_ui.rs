@@ -1155,6 +1155,18 @@ fn a_coat_source_titles_the_subsurface_card_coat_colour_and_strength() {
     h.run();
     h.get_by_label("Coat colour + strength");
     assert!(h.query_by_label("Subsurface _s").is_none());
+    // Final wave Group 2: the Output files line of that file takes the row's title, not the bare slot's name.
+    h.get_by_label_contains("Output files").click();
+    h.run();
+    assert!(
+        h.query_by_label_contains("Coat colour + strength: ")
+            .is_some(),
+        "the _coat output line reads as its row"
+    );
+    assert!(
+        h.query_by_label_contains("Subsurface _s: ").is_none(),
+        "no output line calls the _coat Subsurface"
+    );
 }
 
 fn text_inputs(h: &Harness<'static, AppModel>) -> Vec<String> {

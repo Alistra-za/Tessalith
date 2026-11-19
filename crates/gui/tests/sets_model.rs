@@ -1560,6 +1560,57 @@ fn a_lender_with_its_own_file_and_a_borrow_line_lends_its_own() {
     ));
 }
 
+/// Final wave Group 2 (review Important 3, Q5 b): rock01 owns a normal and borrows rock02's into its Normal slot, and
+/// its own normal still converts (leaf could borrow it). The Output files list is what the set's own members write, so
+/// the displaced normal is listed after the ordered slot pass, under its slot kind.
+#[test]
+fn the_output_files_list_an_own_normal_a_borrow_displaced() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = rock02_opened(d.path(), false, true);
+    let normal = key_of(&m, "rock01_normal.png");
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow("landscape/rock01", 2, Some("landscape/rock02"));
+    });
+    idle(&mut m);
+    let out = m
+        .item(&normal)
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.clone())
+        .expect("premise: the displaced normal still has a job");
+    let views = set_views(&m);
+    let v = view(&views, "landscape/rock01");
+    assert!(
+        matches!(
+            v.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { .. })
+        ),
+        "premise: the borrow holds the Normal slot"
+    );
+    let listed = set_outputs(v);
+    let at = listed
+        .iter()
+        .position(|(k, i, p)| *i == normal && *p == out && *k == Some(SlotKind::Normal))
+        .unwrap_or_else(|| panic!("the displaced normal is listed: {listed:?}"));
+    let own_slots = v
+        .slots
+        .values()
+        .filter(|f| matches!(f, SlotFill::Own { .. }))
+        .count();
+    assert!(
+        at >= own_slots,
+        "it comes after the {own_slots} own slots: {listed:?}"
+    );
+    // The packed RMAOS output is both an own slot and a member: listed once.
+    let paths: std::collections::BTreeSet<_> = listed.iter().map(|(_, _, p)| p).collect();
+    assert_eq!(paths.len(), listed.len(), "each path once: {listed:?}");
+    assert!(
+        listed
+            .iter()
+            .any(|(k, i, _)| *k == Some(SlotKind::Rmaos) && i == "landscape/rock01_rmaos"),
+        "premise: the packed output is listed: {listed:?}"
+    );
+}
+
 /// Note JN2: what `sdc-project.toml` says set `id` borrows for slot `n`.
 fn borrow_of(m: &sdc_gui::model::AppModel, id: &str, n: u8) -> Option<String> {
     m.sets_doc

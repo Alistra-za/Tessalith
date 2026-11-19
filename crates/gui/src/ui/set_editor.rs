@@ -22,8 +22,8 @@ use crate::model::out_size::{human, SizeEst};
 use crate::model::pack_fills::{channel_helpers, channel_roles, fill_rows, FillRow};
 use crate::model::pbr_export::export_blocks;
 use crate::model::sets::{
-    card_title, editor_cells, is_json_set, set_outputs, shows_json_panel, slot_clash_text, slot_of,
-    slot_shown, views, SetView, SlotCell, SlotCommand, SlotFill, SlotKind, SlotLink, SlotShown,
+    editor_cells, is_json_set, set_outputs, shows_json_panel, slot_clash_text, slot_of, slot_shown,
+    views, SetView, SlotCell, SlotCommand, SlotFill, SlotKind, SlotLink, SlotShown,
     DETAIL_NORMAL_HOVER,
 };
 use crate::model::AppModel;
@@ -461,24 +461,29 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     ui.separator();
 }
 
-/// Review E13: the files this set's own slots write, in a group closed by default. Its header says how many are on disk
-/// (`stat_is_file` is cached with a TTL, so the closed header costs no stat per frame); an open group lists each file
-/// with a Show in Explorer button once it exists. The lines are built only while the group is open.
+/// The first line of an open Output files group: what its header counts (final wave Group 2, a proposed string).
+pub const OUTPUTS_COUNT_NOTE: &str =
+    "The count is of the files at these paths now, whichever export wrote them.";
+
+/// Review E13: the files this set's own members write, in a group closed by default. Its header counts the files at
+/// these paths now, whichever export wrote them (`stat_is_file` is cached with a TTL, so the closed header costs no
+/// stat per frame); an open group says so, then lists each file with a Show in Explorer button once it exists. The
+/// lines are built only while the group is open.
 fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     let files = set_outputs(v);
     let n = files.len();
-    let written = files
+    let on_disk = files
         .iter()
         .filter(|(_, _, p)| model.stat_is_file(p))
         .count();
     let summary = if n == 0 {
         "none".to_string()
-    } else if written == n {
-        format!("{n}, all written")
-    } else if written == 0 {
-        format!("{n}, not exported yet")
+    } else if on_disk == n {
+        format!("{n}, all on disk")
+    } else if on_disk == 0 {
+        format!("{n}, none on disk")
     } else {
-        format!("{written} of {n} written")
+        format!("{on_disk} of {n} on disk")
     };
     let id = ui.scope_id().with(("set-outputs", &v.id));
     let mut reveal = None;
@@ -493,11 +498,13 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                 ui.weak("Nothing is written for this set.");
                 return;
             }
+            ui.weak(OUTPUTS_COUNT_NOTE);
             let root = model.export_root();
             for (kind, item, abs) in files {
-                // A slot's own name, or for a member that fills no slot the name its row under the cards uses.
+                // The editor row's title (`row_title`), or for a member that fills no slot the name its row under
+                // the cards uses. A path outside the export folder shows whole.
                 let label = match kind {
-                    Some(k) => v.slot_label(*k, ""),
+                    Some(k) => v.row_title(*k, Some(item.as_str())),
                     None => model.item(item).map_or("File", |i| i.name.as_str()),
                 };
                 let rel = abs.strip_prefix(&root).unwrap_or(abs);
@@ -892,12 +899,7 @@ fn row(
     }
     let top = ui.cursor().min;
     let locked = slot.slot_number().is_some_and(|n| v.locks.contains(&n));
-    let title = match fill.item() {
-        Some(item) if slot != SlotKind::Rmaos => {
-            card_title(slot, item, v.shader.as_ref().map(|p| p.shader))
-        }
-        _ => v.slot_label(slot, ""),
-    };
+    let title = v.row_title(slot, fill.item());
     // Review E1: what the exported JSON carries. A linked texture belongs to the other set, so a `Linked` row has no
     // item: no thumbnail, format, alpha or status of its own, and no row to reveal.
     let shown = slot_shown(v, slot);
