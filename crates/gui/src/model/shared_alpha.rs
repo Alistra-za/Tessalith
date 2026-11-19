@@ -340,38 +340,65 @@ fn forms(rel: &str) -> (String, Option<String>) {
 /// `alpha.policy` and `subtype`, indexed by the lower-cased spelling. A file's matching tables are then two lookups (its
 /// two `forms`), never a walk over every key.
 pub(super) struct Tables {
-    rows: Vec<(String, Option<Value>, Option<Value>)>,
+    rows: rows::Rows,
     by_lower: HashMap<String, Vec<usize>>,
-    /// Tests: the rows a lookup examined.
-    #[cfg(test)]
-    visits: std::cell::Cell<usize>,
+}
+
+/// One table: its spelling, `alpha.policy` and `subtype`.
+type Row = (String, Option<Value>, Option<Value>);
+
+/// The rows, readable only one index at a time through `get`, which counts each read under `cfg(test)`: a lookup that
+/// walked every row would have to read each one, and the count shows it.
+mod rows {
+    use super::Row;
+
+    #[derive(Default)]
+    pub(super) struct Rows {
+        all: Vec<Row>,
+        #[cfg(test)]
+        pub(super) visits: std::cell::Cell<usize>,
+    }
+
+    impl Rows {
+        pub(super) fn push(&mut self, row: Row) -> usize {
+            self.all.push(row);
+            self.all.len() - 1
+        }
+
+        pub(super) fn get(&self, i: usize) -> &Row {
+            #[cfg(test)]
+            self.visits.set(self.visits.get() + 1);
+            &self.all[i]
+        }
+
+        #[cfg(test)]
+        pub(super) fn len(&self) -> usize {
+            self.all.len()
+        }
+    }
 }
 
 impl Tables {
     pub(super) fn of(p: &ProjectDoc) -> Tables {
         let mut t = Tables {
-            rows: vec![],
+            rows: rows::Rows::default(),
             by_lower: HashMap::new(),
-            #[cfg(test)]
-            visits: Default::default(),
         };
         for k in p.file_keys() {
+            let lower = k.to_lowercase();
             let row = (
                 k.clone(),
                 p.file_value(&k, "alpha.policy"),
                 p.file_value(&k, "subtype"),
             );
-            t.by_lower
-                .entry(k.to_lowercase())
-                .or_default()
-                .push(t.rows.len());
-            t.rows.push(row);
+            let i = t.rows.push(row);
+            t.by_lower.entry(lower).or_default().push(i);
         }
         t
     }
 
     /// The tables that match file `key` as the engine matches them, in `[files]` order.
-    fn matching(&self, key: &str) -> Vec<&(String, Option<Value>, Option<Value>)> {
+    fn matching(&self, key: &str) -> Vec<&Row> {
         let (full, stem) = forms(key);
         let mut at: Vec<usize> = std::iter::once(full)
             .chain(stem)
@@ -381,9 +408,7 @@ impl Tables {
             .collect();
         at.sort_unstable();
         at.dedup();
-        #[cfg(test)]
-        self.visits.set(self.visits.get() + at.len());
-        at.into_iter().map(|i| &self.rows[i]).collect()
+        at.into_iter().map(|i| self.rows.get(i)).collect()
     }
 
     /// The spellings of the tables that hold an `alpha.policy` for file `key`, with it.
@@ -426,7 +451,7 @@ impl Tables {
     fn exact_alpha(&self, entry: &str) -> Option<Value> {
         let at = self.by_lower.get(&entry.to_lowercase())?;
         at.iter()
-            .map(|i| &self.rows[*i])
+            .map(|i| self.rows.get(*i))
             .find(|(k, ..)| k == entry)
             .and_then(|(_, a, _)| a.clone())
     }
@@ -731,9 +756,9 @@ mod tests {
             assert_eq!(t.exact_alpha(e), Some(json!("data")));
         }
         assert_eq!(
-            t.visits.get(),
-            2_000,
-            "each lookup examines its own table only"
+            t.rows.visits.get(),
+            4_000,
+            "each of the 4,000 lookups reads its own table only"
         );
     }
 }
