@@ -7522,6 +7522,90 @@ fn a_carry_finishes_only_when_its_cleanup_did() {
     assert_eq!(vals(&m), [12.5], "the carried ops load");
 }
 
+/// Review round 5 (Critical "Make plain unwritable, request Q, restore plain, then choose writable P ...", Important
+/// "Wait for P because plain is unwritable, make P's draft unreadable ..." and the out-of-scope "Fail a carry into P,
+/// request Q while P is still blocked ...", rulings E6-R3, E6-R4): one waiting target, the latest request; a failure
+/// clears only when the next open at home loads the ops.
+#[test]
+fn one_waiting_target_and_a_failure_clears_only_when_durable() {
+    table(&[
+        (
+            "make plain unwritable, request Q, restore plain, then choose writable P before making the retry edit",
+            || {
+                let (d, mut m) = export_session();
+                let (p, q) = (project_folder(&d, "p"), project_folder(&d, "q"));
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                read_only(&autosave(&d), true);
+                gloss(&mut m, 13.5);
+                m.set_project_root(Some(&q));
+                assert_eq!(
+                    m.edit.as_ref().unwrap().draft_path,
+                    autosave(&d),
+                    "premise: Q waits"
+                );
+                read_only(&autosave(&d), false);
+                m.set_project_root(Some(&p));
+                m.set_project_root(Some(&p)); // the next frame
+                gloss(&mut m, 14.5);
+                assert_eq!(m.edit.as_ref().unwrap().draft_path, draft(&p), "the edit is P's");
+                assert_eq!(doc_values(&draft(&p)), [12.5, 13.5, 14.5]);
+                assert!(!q.join("_sdc").exists(), "nothing is written to Q");
+            },
+        ),
+        (
+            "wait for P because plain is unwritable, make P's draft unreadable, restore plain, edit to retry, then \
+             Export",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                read_only(&autosave(&d), true);
+                gloss(&mut m, 13.5);
+                m.set_project_root(Some(&p));
+                std::fs::create_dir_all(draft(&p).parent().unwrap()).unwrap();
+                std::fs::write(draft(&p), b"not a document [[[").unwrap();
+                read_only(&autosave(&d), false);
+                gloss(&mut m, 14.5);
+                let r = export(&mut m);
+                assert!(!exported(&d).exists(), "nothing is exported: {r:?}");
+                assert!(!nif_doc(&export_root(&d)).exists(), "no record: {r:?}");
+                let why = r.unwrap_err();
+                assert!(why.contains("while changing the project"), "the reason: {why}");
+                assert_eq!(std::fs::read(draft(&p)).unwrap(), b"not a document [[[");
+            },
+        ),
+        (
+            "fail a carry into P, request Q while P is still blocked, replace plain with a future-dated different \
+             edit, repair P, return to P, then Export",
+            || {
+                let (d, mut m) = export_session();
+                let (p, q) = (project_folder(&d, "p"), project_folder(&d, "q"));
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                std::fs::write(p.join("_sdc"), b"a file").unwrap();
+                m.set_project_root(Some(&p));
+                m.set_project_root(Some(&q));
+                assert_eq!(
+                    m.edit.as_ref().unwrap().draft_path,
+                    draft(&p),
+                    "premise: P's session waits"
+                );
+                let other = with_value(load(&autosave(&d)).unwrap().unwrap(), 99.5);
+                save(&autosave(&d), &other).unwrap();
+                ahead(&autosave(&d), 3600);
+                std::fs::remove_file(p.join("_sdc")).unwrap();
+                m.set_project_root(Some(&p));
+                let r = export(&mut m);
+                assert!(!exported(&d).exists(), "nothing is exported: {r:?}");
+                let why = r.unwrap_err();
+                assert!(why.contains("Could not save the edits of"), "the reason stays: {why}");
+            },
+        ),
+    ]);
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.

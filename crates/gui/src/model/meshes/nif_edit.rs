@@ -1788,6 +1788,15 @@ impl NifEdit {
         if self.save_draft().is_err() {
             return false;
         }
+        // ruling E6-R4: the failure clears only when the next open here loads these ops (a newer plain autosave with
+        // other edits can still win), not because a write worked
+        if let Err(w) = self.durable_why() {
+            let why =
+                format!("they were saved, but opening this NIF again would not load them ({w})");
+            let switching = self.switch_wording;
+            self.set_switch_failed(&why, switching);
+            return false;
+        }
         self.switch_failed = false;
         self.retarget_error = None;
         self.retarget_fail = None; // the export folder's record is read again
@@ -2692,6 +2701,16 @@ impl MeshesModel {
         let Some(to) = self.pending_root.take() else {
             return;
         };
+        // ruling E6-R3: a retry finishes only the switch to the project the app has open now
+        if to != self.project_root {
+            self.error = Some(format!(
+                "The edits of {} were saved, but the project switch they waited for ({}) is no longer the open \
+                 project; the edit stays open here.",
+                e.data_path,
+                to.as_deref().map_or("no project".into(), |p| p.display().to_string())
+            ));
+            return;
+        }
         if e.project == to && e.saved_in_draft() {
             return;
         }
@@ -2757,8 +2776,10 @@ impl MeshesModel {
     ///   autosave) and the NIF opens again from the new place. When no save works the session stays open, blocked,
     ///   the wanted root waits in `pending_root`, and nothing is retried until the next edit (ruling r3-3).
     pub(super) fn switch_project(&mut self, to: Option<&Path>) {
+        // ruling E6-R3: one waiting target, the latest request: each request replaces it (each branch that waits sets
+        // it again), and a carry that succeeds leaves none
+        self.pending_root = None;
         let Some(e) = self.edit.as_mut() else {
-            self.pending_root = None;
             return;
         };
         if e.switch_failed && e.project.as_deref() == to {
@@ -2802,11 +2823,15 @@ impl MeshesModel {
                 }
                 Ok(None) => {} // the project's own edits are newer: the NIF opens there, below
                 // never overwritten: the edits stay in the autosave, and the draft is not opened over them
+                // ruling E6-R4: the carry is not done: the switch waits for P, failed, with this reason (and the Export
+                // block) until a carry succeeds
                 Err(why) => {
-                    self.error = Some(format!(
-                        "Could not move the edits of {} into the project: {why}. They stay in the autosave.",
-                        e.data_path
-                    ));
+                    let why = format!(
+                        "could not move them into the project: {why}; they stay in the autosave"
+                    );
+                    e.set_switch_failed(&why, true);
+                    self.error = e.retarget_error.clone();
+                    self.pending_root = Some(Some(p.to_path_buf()));
                     return;
                 }
             }
