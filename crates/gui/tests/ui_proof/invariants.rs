@@ -771,7 +771,8 @@ fn holds_the_longer_text(cut: &str, value: &str) -> bool {
 /// Whether a painted text keeps its full value, exactly as painted (`source`, untrimmed; `elided` when egui cut it):
 /// - not cut (no ellipsis in it, not elided): nothing to keep;
 /// - cut by egui: some field of the node (`held`: name, value, description) holds the whole source, trailing ellipses
-///   included, so a node holding only the shortened start does not pass;
+///   included, so a node holding only the shortened start does not pass; and a source that has an ellipsis of its own
+///   (a text the app cut by hand before egui cut it again) passes the next rule too;
 /// - an ellipsis in it: a field holds a longer text it is cut from (`holds_the_longer_text`, after the named
 ///   decorations are stripped), or the whole source is in `authored`.
 ///
@@ -779,8 +780,8 @@ fn holds_the_longer_text(cut: &str, value: &str) -> bool {
 /// (egui-0.37.0/src/widgets/label.rs line 281), and shows that text on hover when the galley is elided (lines 284 to
 /// 292), so its value holds the whole source.
 fn cut_text_kept(source: &str, elided: bool, held: &[&str], authored: &[&str]) -> bool {
-    if elided {
-        return held.iter().any(|v| v.contains(source));
+    if elided && !held.iter().any(|v| v.contains(source)) {
+        return false;
     }
     if !source.contains('…') {
         return true;
@@ -1763,7 +1764,8 @@ fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
 
 /// A test-only entry with cut texts: hand-cut texts whose node keeps no longer value (the faults: a middle cut named
 /// by itself, a self-named `report…`, a leading slash the name lost, a text egui cut whose name lacks its trailing
-/// ellipsis), and fine ones (a `Label::truncate`, a hand cut named by the full path, with and without a decoration).
+/// ellipsis, a hand cut egui cut again), and fine ones (a `Label::truncate`, a hand cut named by the full path, with and
+/// without a decoration, an authored label egui cut).
 struct CutTexts;
 
 const CUT_MARKER: &[Needle] = &[crate::screens::has_role("Label", "some/long/…/name")];
@@ -1794,6 +1796,9 @@ fn cut_texts_ui(ui: &mut eframe::egui::Ui) {
         .accessible_name("other/long/path/to/the/name");
     ui.put(slot(200.0, 200.0), label("pick/…/z ▾"))
         .accessible_name("pick/a/b/z");
+    // egui cuts both again: a text the app cut by hand, named only by itself (a fault), and an authored label (fine)
+    ui.put(slot(260.0, 40.0), label("report/final…").truncate());
+    ui.put(slot(290.0, 40.0), label("Settings…").truncate());
 }
 
 impl Entry for CutTexts {
@@ -1818,7 +1823,7 @@ impl Entry for CutTexts {
 }
 
 /// The cut-text invariant goes through `walk` and `verdict` beside a clean shipped entry: the exact failure list is the
-/// four faulty texts at each size, and nothing for the three fine ones.
+/// six faulty texts at each size, and nothing for the five fine ones.
 #[test]
 fn a_cut_text_without_its_full_value_fails_the_walk() {
     let mut list: Vec<Box<dyn Entry>> = vec![the_start_screen(), Box::new(CutTexts)];
@@ -1836,7 +1841,7 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
     }
     assert_eq!(calls, want_calls, "the checker ran on every frame");
     assert!(walked.errors.is_empty(), "{:?}", walked.errors);
-    // the fixture is the case in question: egui cut two galleys, and six more painted texts show an ellipsis
+    // the fixture is the case in question: egui cut four galleys, and six more painted texts show an ellipsis
     let snap = CutTexts.at(SIZES[0]).unwrap();
     let mut elided: Vec<&str> = snap
         .texts
@@ -1845,7 +1850,15 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
         .map(|t| t.source.as_str())
         .collect();
     elided.sort();
-    assert_eq!(elided, ["a long label that egui cuts", "abcdefghijkl…"]);
+    assert_eq!(
+        elided,
+        [
+            "Settings…",
+            "a long label that egui cuts",
+            "abcdefghijkl…",
+            "report/final…"
+        ]
+    );
     assert_eq!(
         snap.texts
             .iter()
@@ -1860,6 +1873,7 @@ fn a_cut_text_without_its_full_value_fails_the_walk() {
         ("report… ▾", "Label"),
         ("/root…file", "Label"),
         ("abcdefghijkl…", "Button"),
+        ("report/final…", "Label"),
     ];
     let mut got: Vec<&str> = bad.iter().map(|m| head(m)).collect();
     got.sort();
@@ -1980,9 +1994,13 @@ fn a_cut_text_must_keep_its_whole_value_exactly() {
     assert!(kept("head……", false, &["head and the rest"], none));
     assert!(!kept("…", false, &["…"], none));
     assert!(kept("…", false, &["Loading the list"], none));
-    // a galley egui cut: the whole source, ellipsis included, must be in the node
-    assert!(kept("abcdef…", true, &["abcdef…"], none));
+    // a galley egui cut: the whole source, ellipsis included, must be in the node; a source with its own ellipsis was
+    // cut by hand before egui cut it again, so it needs a longer field or its whole text in AUTHORED too
+    assert!(!kept("abcdef…", true, &["abcdef…"], none), "a double cut");
+    assert!(kept("abcdef…", true, &["abcdef…", "abcdefghij"], none));
+    assert!(kept("Settings…", true, &["Settings…"], &["Settings…"]));
     assert!(!kept("abcdef…", true, &["abcdef"], none));
+    assert!(!kept("abcdef…", true, &["abcdefghij"], none));
     assert!(kept("the full text", true, &["x", "the full text"], none));
     assert!(!kept("the full text", true, &["other"], none));
     // a text with no ellipsis that egui did not cut has nothing to keep
