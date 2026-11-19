@@ -2264,6 +2264,33 @@ fn replacing_a_normal_with_a_lent_one_writes_and_clears_nothing() {
     assert_eq!(held(&m, "pbr/gold_n.png", "alpha.policy"), None);
 }
 
+/// N8-f (round 2, fresh): after the move, and before its plan lands, the user makes an unrelated `[files]` edit. The
+/// views still put `iron_n` in `pbr/iron`, and nothing in that step changes membership, so only the stale-plan check
+/// stops the step from reading "`pbr/gold` has no normal" and clearing the shared normal's `data`.
+#[test]
+fn a_step_before_the_moves_plan_lands_keeps_the_data() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = shared_with_gold(d.path(), false);
+    drop_now(&mut m, IRON_N, "pbr/gold", DropChoice::Move);
+    m.edit_docs("unrelated", None, true, |p, _| {
+        p.set_file_value("pbr/gold.png", "alpha.policy", &json!("remove"))
+    });
+    assert_eq!(
+        held(&m, "pbr/gold.png", "alpha.policy"),
+        Some(json!("remove")),
+        "precondition: the edit landed"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a step on a stale plan keeps it"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
 /// N8-f (B2): one step makes `iron_n` shared by a known regular set and by a set the step creates (no files yet, so
 /// unsure). A key any borrower makes unsure is neither written nor cleared.
 #[test]
