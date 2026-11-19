@@ -7487,6 +7487,41 @@ fn displaced_loser(foreign_draft: bool) {
     );
 }
 
+/// Review round 5 (Critical "Give kept, draft and plain successively later future timestamps, hold kept readable but
+/// deny its rename, carry plain into P, then quit and reopen", ruling E6-R2): a carry that cannot move the loser aside
+/// replaces no draft and deletes no plain autosave; it stays failed with its reason.
+#[cfg(windows)]
+#[test]
+fn a_carry_finishes_only_when_its_cleanup_did() {
+    let (d, mut m) = export_session();
+    let (p, k) = three_versions(&d, &mut m);
+    ahead(&k, 3600);
+    ahead(&draft(&p), 7200);
+    ahead(&autosave(&d), 10800);
+    let (theirs, plain) = (
+        std::fs::read(draft(&p)).unwrap(),
+        std::fs::read(autosave(&d)).unwrap(),
+    );
+    let lock = hold(&k, 1);
+    m.set_project_root(Some(&p));
+    let why = m.edit.as_ref().unwrap().export_block().unwrap_or_default();
+    let (draft_now, plain_now) = (
+        std::fs::read(draft(&p)).ok(),
+        std::fs::read(autosave(&d)).ok(),
+    );
+    drop(lock);
+    assert_eq!(draft_now, Some(theirs), "P's draft is not replaced");
+    assert_eq!(plain_now, Some(plain), "the plain autosave stays");
+    assert!(
+        why.starts_with("Could not save the edits of"),
+        "the failed carry says why: {why}"
+    );
+    drop(m); // quit
+    let mut m = restart(&d, &p);
+    m.open_edit();
+    assert_eq!(vals(&m), [12.5], "the carried ops load");
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.

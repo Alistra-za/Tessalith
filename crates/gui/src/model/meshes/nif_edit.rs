@@ -1612,6 +1612,19 @@ impl NifEdit {
             Some(_) => "The edit document",
             None => "The autosave",
         };
+        // ruling E6-R2: a session that took a plain autosave in (a carry, or a recovery) removes it after this save;
+        // the kept loser it must move aside so the next open loads these ops goes first, and when that move fails
+        // neither the draft is replaced nor the plain autosave removed
+        if self.project.is_some() && self.plain_fp.is_some() {
+            if let Some((k, fp)) = self.kept_older.clone() {
+                if k.is_file() && edit_doc::is_known(&k, Some(&fp)) {
+                    if !self.move_aside(&k, "The kept autosave") {
+                        return Err(self.error.take().unwrap_or_default());
+                    }
+                    self.kept_older = None;
+                }
+            }
+        }
         if !self.free_unseen(&path, self.draft_fp.clone(), what) {
             return Err(self.error.take().unwrap_or_default());
         }
@@ -2774,10 +2787,12 @@ impl MeshesModel {
                         e.unsaved = false;
                     } else {
                         e.save();
-                        if e.unsaved {
+                        // ruling E6-R2: the carry succeeded only when P's next open loads these ops (`durable`), not
+                        // when a write did
+                        if let Err(w) = e.durable_why() {
                             // ruling E6-R: the reason stays on the footer and the export, and the switch waits, so each
                             // later save tries P's draft again, until P's own files load these ops
-                            let why = e.error.take().unwrap_or_default();
+                            let why = e.error.take().unwrap_or(w);
                             e.set_switch_failed(&why, true);
                             self.error = e.retarget_error.clone();
                             self.pending_root = Some(Some(p.to_path_buf()));
