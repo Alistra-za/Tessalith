@@ -11584,6 +11584,10 @@ fn slot_list_session(
         Some(true),
         "the pending list is not expanded in the replay"
     );
+    assert!(
+        h.query_by_label_contains("Revert 1:").is_some(),
+        "no pending row after the window shrank"
+    );
     (d, h)
 }
 
@@ -11780,26 +11784,37 @@ fn under_the_limit_no_editor_widget_interacts_inside_the_footer() {
         if r.footer.min.y > r.top.max.y + 24.0 {
             continue;
         }
-        crossed += 1;
+        // Every expected widget must be found (a missing node fails, naming it). A widget that is clipped has an
+        // interact rect that ends at the footer's top or is empty; one with none counts as contained only when its
+        // layout rect lies wholly under the footer's top.
         for name in [
             "Shader tab",
             "Alpha tab",
             "Controllers tab",
             "Extra data tab",
             "Show only this shape",
+            "Pending edits (5)",
+            "Revert 1:",
         ] {
-            let Some(n) = h.query_by_label(name) else {
-                continue;
-            };
+            let n = h
+                .query_all_by_label_contains(name)
+                .next()
+                .unwrap_or_else(|| panic!("{hgt}: no node for {name}: {r:?}"));
+            let layout = n.rect();
             let id = n.accesskit_node().id();
             let id = egui::accesskit::NodeId((u128::from(id) >> 64) as u64);
-            if let Some(i) = interact_rect_of(&h, id) {
-                assert!(
+            match interact_rect_of(&h, id) {
+                Some(i) => assert!(
                     i.max.y <= r.footer.min.y + 0.5 || i.height() <= 0.0,
                     "{hgt}: {name} interacts under the footer: {i:?}, {r:?}"
-                );
+                ),
+                None => assert!(
+                    layout.min.y >= r.footer.min.y - 0.5,
+                    "{hgt}: {name} at {layout:?} has no interact rect and is not under the footer: {r:?}"
+                ),
             }
         }
+        crossed += 1;
         // The footer is whole: its Close button still takes the click.
         h.get_by_label("Close the diff").click();
         h.run_steps(4);
@@ -11834,10 +11849,12 @@ fn a_diff_cap_under_64_px_is_obeyed_at_1280x560() {
         .filter(|b| b.height() > b.width() && r.footer.contains_rect(b.shrink(0.5)))
         .collect();
     assert_eq!(bars.len(), 1, "the Diff list's bar: {bars:?} in {r:?}");
+    // The list is its cap: the panel's room is 312 px here (footer bottom 430 - head top 118), less the editor's floors
+    // (48 head + 3 spacing + 60 strip + 48 slot list) and the 93 px the footer takes besides its list: 60 px.
     let list = bars[0].height();
     assert!(
-        (40.0 - 0.5..64.0 - 0.5).contains(&list),
-        "Diff list {list} px: its cap is under 64 here, {r:?}"
+        (list - 60.0).abs() <= 0.5,
+        "Diff list {list} px, its cap is 60 here: {r:?}"
     );
 }
 
