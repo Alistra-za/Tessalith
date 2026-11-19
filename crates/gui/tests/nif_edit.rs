@@ -6160,6 +6160,22 @@ fn a_failed_save_of_an_edit_is_kept_by_the_next_switch() {
     assert_eq!(doc_values(&draft(&a)), [12.5], "the old draft is as it was");
 }
 
+/// Ruling E6-B with E6-E: an edit whose save failed stays unsaved, so Export tries the draft again first and, when it
+/// still fails, writes no NIF.
+#[test]
+fn an_export_after_a_failed_save_tries_the_draft_first() {
+    let (d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    read_only(&draft(&p), true);
+    gloss(&mut m, 13.5);
+    let r = export(&mut m);
+    read_only(&draft(&p), false);
+    let why = r.unwrap_err();
+    assert!(why.contains("could not be saved"), "{why}");
+    assert!(!exported(&d).exists(), "no NIF written");
+}
+
 /// Ruling E6-B (review Q6): a draft written before drafts had an id is not rewritten by a switch just to add one.
 #[test]
 fn a_switch_never_writes_a_draft_only_for_its_id() {
