@@ -56,7 +56,7 @@ While a text field has the keyboard, only **Ctrl+K**, **Ctrl+S** and **Esc** act
 | Global | Ctrl+S | Save |
 | Global | Ctrl+Z | Undo |
 | Global | Ctrl+Y or Ctrl+Shift+Z | Redo |
-| Textures grid | Ctrl+A | Select every visible texture (every set when a set is active) |
+| Textures grid | Ctrl+A | Select every visible texture (every visible set with files when a set is active) |
 | Textures grid | Left | Select the texture to the left |
 | Textures grid | Right | Select the texture to the right |
 | Textures grid | Up | Select the texture above |
