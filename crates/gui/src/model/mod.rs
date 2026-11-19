@@ -2268,7 +2268,7 @@ impl AppModel {
                 let pre = shared_alpha::Tables::of(p);
                 (
                     shared_alpha::before(self, &pre),
-                    listed.then(|| shared_alpha::listed_alpha(&pre, s)),
+                    listed.then(|| shared_alpha::listed_without_data(&pre, s)),
                 )
             })
             .unwrap_or_default();
@@ -3432,7 +3432,7 @@ impl AppModel {
         let held = pre
             .as_ref()
             .filter(|_| listed)
-            .map(|t| shared_alpha::listed_alpha(t, s));
+            .map(|t| shared_alpha::listed_without_data(t, s));
         f(p, s);
         let mut post = None;
         if let Some(h) = &held {

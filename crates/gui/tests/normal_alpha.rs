@@ -1111,8 +1111,6 @@ fn the_switch_takes_an_untouched_key_off_auto_pbr() {
 /// `alpha.policy = "data"`, raises no error, and survives retypes (the user's own, and shader picks).
 #[test]
 fn data_is_offered_on_a_pbr_normal_and_sticks() {
-    use eframe::egui::accesskit::Role;
-    use egui_kittest::kittest::{NodeT, Queryable};
     let d = tempfile::tempdir().unwrap();
     wall(d.path());
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
@@ -1120,33 +1118,8 @@ fn data_is_offered_on_a_pbr_normal_and_sticks() {
     settle(&mut m);
     assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
     m.select_item(WALL_N);
-    let mut h = egui_kittest::Harness::builder()
-        .with_context_setup(|ctx| {
-            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
-        })
-        .with_size(eframe::egui::vec2(1400.0, 900.0))
-        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
-    h.run();
-    {
-        let combos: Vec<_> = h
-            .query_all_by_role(Role::ComboBox)
-            .filter(|n| n.accesskit_node().value().as_deref() == Some("Remove"))
-            .collect();
-        assert_eq!(combos.len(), 1, "the Alpha combo shows Remove");
-        assert!(
-            !combos[0].accesskit_node().is_disabled(),
-            "the Alpha row is on"
-        );
-        combos[0].click();
-    }
-    h.run();
-    {
-        let data: Vec<_> = h.query_all_by_label("Data").collect();
-        assert_eq!(data.len(), 1, "one Data option, in the open Alpha list");
-        data[0].click();
-    }
-    h.step();
-    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    let mut h = keep_harness(m);
+    pick_data_over_remove(&mut h);
     h.run();
     let m = h.state_mut();
     assert_eq!(held(m, WALL_N, "alpha.policy"), Some(json!("data")));
@@ -3717,6 +3690,70 @@ fn ending_a_share_keeps_data_if_a_second_input_now_matches_the_listed_table() {
 }
 
 #[test]
+fn picking_data_for_the_tga_keeps_the_png_listed_until_unshare() {
+    use sdc_gui::model::sets::SlotCommand;
+    const OTHER: &str = "pbr/iron_n.png.tga";
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    let open = || opened_as_the_app(root.clone(), d.path().join("export"));
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.save().unwrap();
+    drop(m);
+
+    bumpy_n(&root.join(OTHER));
+    let path = root.join("sdc.toml");
+    let mut files = std::fs::read_to_string(&path).unwrap();
+    files.push_str(
+        "\n[inputs.'pbr/iron_n.png.tga']\nas = 'pbr/copper.tga'\n\
+         [files.'pbr/iron_n.png.tga']\nsubtype = 'pbr_albedo'\nalpha.policy = 'remove'\n",
+    );
+    std::fs::write(path, files).unwrap();
+    let mut m = open();
+    assert_eq!(auto_data(&m), [IRON_N]);
+    assert_eq!(held(&m, OTHER, "alpha.policy"), Some(json!("remove")));
+    m.select_item(OTHER);
+    let mut h = keep_harness(m);
+    pick_data_over_remove(&mut h);
+    h.state_mut().save().unwrap();
+    drop(h);
+
+    let m = open();
+    assert_eq!(held(&m, OTHER, "alpha.policy"), Some(json!("data")));
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [IRON_N], "the picker claimed only the TGA");
+    drop(m);
+    std::fs::remove_file(root.join(OTHER)).unwrap();
+    let mut m = open();
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    m.save().unwrap();
+    let m = open();
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(auto_data(&m).is_empty());
+    assert_eq!(held(&m, OTHER, "alpha.policy"), Some(json!("data")));
+}
+
+#[test]
+fn changing_an_exact_table_to_data_keeps_its_listed_case_twin() {
+    const TWIN: &str = "PBR/IRON_N.PNG";
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let mut m = open_saved_share(
+        d.path(),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = 'data'\n\
+         [files.'pbr/iron_n.png']\nalpha.policy = 'remove'\n",
+        &format!("[project]\nauto_data = ['{TWIN}']\n{STEEL_BORROWS}"),
+    );
+    assert_eq!(auto_data(&m), [TWIN]);
+    m.set_field(IRON_N, "alpha.policy", json!("data"));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [TWIN]);
+}
+
+#[test]
 fn keep_alpha_leaves_an_aliased_double_extension_input_alone() {
     let d = tempfile::tempdir().unwrap();
     open_slot_files(d.path());
@@ -3874,6 +3911,106 @@ fn keep_alpha_follows_the_visible_borrow_for_duplicate_set_ids() {
 }
 
 #[test]
+fn a_duplicate_borrower_keeps_the_first_shares_saved_data() {
+    use sdc_gui::model::sets::{borrowed_normal, SlotCommand};
+    let d = tempfile::tempdir().unwrap();
+    rock(d.path());
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(auto_data(&m), [IRON_N]);
+    m.save().unwrap();
+    drop(m);
+
+    let root = d.path().join("textures");
+    let path = root.join("sdc-project.toml");
+    let mut sets = std::fs::read_to_string(&path).unwrap();
+    sets.push_str("\n[[sets]]\nid = 'ARMOR/STEEL'\nborrow = { slot2 = 'landscape/rock' }\n");
+    std::fs::write(path, sets).unwrap();
+    let open = || opened_as_the_app(root.clone(), d.path().join("export"));
+    let mut m = open();
+    assert_eq!(borrowed_normal(&m)["armor/steel"], "pbr/iron");
+    m.set_alpha("armor/steel.png", AlphaPolicy::Remove);
+    settle(&mut m);
+    m.save().unwrap();
+    drop(m);
+    let mut m = open();
+    assert_eq!(
+        held(&m, "armor/steel.png", "alpha.policy"),
+        Some(json!("remove"))
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [IRON_N]);
+    assert_eq!(held(&m, ROCK_N, "alpha.policy"), None);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert!(!borrowed_normal(&m).contains_key("armor/steel"));
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(held(&m, ROCK_N, "alpha.policy"), None);
+    assert!(auto_data(&m).is_empty());
+}
+
+fn pinned_iron_lends_to_steel(dir: &Path, files: &str, steel: &str) -> AppModel {
+    use sdc_gui::model::sets::borrowed_normal;
+    open_slot_files(dir);
+    rock(dir);
+    let m = open_saved_share(dir, files, &format!(
+        "{steel}[[sets]]\nid = 'pbr/iron'\nborrow = {{ slot2 = 'landscape/rock' }}\nlock = ['slot2']\n"
+    ));
+    let borrows = borrowed_normal(&m);
+    assert_eq!(borrows["pbr/iron"], "landscape/rock");
+    assert_eq!(borrows["armor/steel"], "pbr/iron");
+    assert!(m.slot_locked("pbr/iron", 2));
+    m
+}
+
+#[test]
+fn the_lending_slot_lock_prevents_an_automatic_data_write() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pinned_iron_lends_to_steel(
+        d.path(),
+        "[files.'landscape/rock_n.png']\nsubtype = 'pbr_normal'\n",
+        &format!("{STEEL_BORROWS}shader = 'pbr'\n"),
+    );
+    assert_eq!(
+        m.item(ROCK_N)
+            .unwrap()
+            .job
+            .as_ref()
+            .unwrap()
+            .profile
+            .alpha
+            .policy,
+        AlphaPolicy::Remove
+    );
+    m.set_shader("armor/steel", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(auto_data(&m).is_empty());
+    m.set_shader("pbr/iron", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(held(&m, ROCK_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [ROCK_N], "rock's own slot is unlocked");
+}
+
+#[test]
+fn the_lending_slot_lock_prevents_an_automatic_data_clear() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pinned_iron_lends_to_steel(
+        d.path(),
+        "[files.'pbr/iron_n.png']\nsubtype = 'pbr_normal'\nalpha.policy = 'data'\n",
+        LISTED_AND_BORROWED,
+    );
+    assert_eq!(auto_data(&m), [IRON_N]);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), [IRON_N]);
+}
+
+#[test]
 fn keep_alpha_checks_the_lending_owners_own_slot_lock() {
     use egui_kittest::kittest::{NodeT, Queryable};
     let d = tempfile::tempdir().unwrap();
@@ -3997,6 +4134,27 @@ fn keep_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
         .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
     h.run();
     h
+}
+
+fn pick_data_over_remove(h: &mut egui_kittest::Harness<'_, AppModel>) {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let combos: Vec<_> = h
+        .query_all_by_role(Role::ComboBox)
+        .filter(|n| n.accesskit_node().value().as_deref() == Some("Remove"))
+        .collect();
+    assert_eq!(combos.len(), 1, "the Alpha combo shows Remove");
+    assert!(
+        !combos[0].accesskit_node().is_disabled(),
+        "the Alpha row is on"
+    );
+    combos[0].click();
+    h.run();
+    let data: Vec<_> = h.query_all_by_label("Data").collect();
+    assert_eq!(data.len(), 1, "one Data option, in the open Alpha list");
+    data[0].click();
+    h.step();
+    settle(h.state_mut());
 }
 
 /// N-10: a project opened with a share already in that state shows one Note row on the shared normal; Keep alpha

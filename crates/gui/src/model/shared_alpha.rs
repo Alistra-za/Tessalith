@@ -10,7 +10,7 @@
 //! Note row.
 use super::bottom::{problems, At, Fix};
 use super::normal_follow::tangent;
-use super::sets::{lock_refusal, locked_items, own_fills, views, SetView, SlotFill, SlotKind};
+use super::sets::{lock_refusal, own_fills, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
 use crate::project::ProjectDoc;
 use crate::sets_doc::SetsDoc;
@@ -23,8 +23,8 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 /// From the views (rebuilt when the sets document changed) and the last plan, by folded set id: the sets shown
 /// (`known`), each set's automatic shader (a chosen one is read from the documents), its own Normal-slot file before
-/// any borrow (`own_n`, the set resolver's own fills, N8-b), the files in locked slots, the files with no job or a kept
-/// DDS (`inert`), the files the last plan planned `data` (review 1 Minor 7), the files whose analysis is known and
+/// any borrow (`own_n`, the set resolver's own fills, N8-b), those with a locked owning slot, the files with no job
+/// or a kept DDS (`inert`), the files the last plan planned `data` (review 1 Minor 7), the files whose analysis is known and
 /// whose alpha does not vary (`flat`, N-39), the sets whose view holds no file (`memberless`), those of them read
 /// while no plan is out (`empty`, N-40), and whether a plan is out (`plan_out`).
 #[derive(Default)]
@@ -42,22 +42,20 @@ pub(super) struct Facts {
 }
 
 pub(super) fn facts(m: &AppModel) -> Facts {
-    let mut f = Facts {
-        locked: locked_items(m).into_keys().collect(),
-        ..Facts::default()
-    };
     // N-40 (review 5 Minor 1): view members come from the last landed plan, so while a plan is out a set it does not
     // know yet (New set, Duplicate into, a rename's new id) has none either; nothing counts as empty then, and such
     // sets stay `unsure`.
-    let plan_out = m.full_plan_pending();
-    f.plan_out = plan_out;
+    let mut f = Facts {
+        plan_out: m.full_plan_pending(),
+        ..Facts::default()
+    };
     for v in views(m).iter() {
         let id = fold_id(&v.id);
         f.known.insert(id.clone());
         if v.members.is_empty() {
             f.memberless.insert(id.clone());
         }
-        if v.members.is_empty() && !plan_out {
+        if v.members.is_empty() && !f.plan_out {
             f.empty.insert(id.clone());
         }
         if let Some(p) = v
@@ -70,6 +68,9 @@ pub(super) fn facts(m: &AppModel) -> Facts {
         // N8-b: the set's own file, as the set resolver lends it (own-first, JN1), not the displayed slot, which shows
         // a borrow line in place of it.
         if let Some(SlotFill::Own { item }) = own_fills(m, &v.members).get(&SlotKind::Normal) {
+            if v.locks.contains(&2) {
+                f.locked.insert(item.clone());
+            }
             match m
                 .item(item)
                 .filter(|i| !i.kept_dds())
@@ -125,25 +126,21 @@ pub(super) struct Share {
 pub(super) fn shared_into_regular(
     f: &Facts,
     s: &SetsDoc,
+    borrows: &BTreeMap<String, String>,
     gone: &BTreeSet<String>,
     targets: &BTreeSet<String>,
     touched: &BTreeSet<String>,
 ) -> Share {
-    let mut borrows = BTreeMap::new();
     let mut chosen = BTreeMap::new();
     for e in s.entries().iter() {
-        let id = fold_id(&e.id);
-        if let Some(l) = e.borrow.get(&2) {
-            borrows.insert(id.clone(), fold_id(l));
-        }
         if let Some(x) = e.shader {
-            chosen.insert(id, x);
+            chosen.insert(fold_id(&e.id), x);
         }
     }
     let shader = |id: &str| chosen.get(id).copied().or_else(|| f.auto.get(id).copied());
     let unread = |id: &str| f.memberless.contains(id) && !gone.contains(id);
     let mut sh = Share::default();
-    for (b, first) in &borrows {
+    for (b, first) in borrows {
         // N8-m: a borrower whose membership the step changed is never gone from the views, which predate the step.
         let moved = touched.contains(b);
         if gone.contains(b) && !moved {
@@ -411,11 +408,18 @@ fn rejoins(b: &Before, s: &SetsDoc) -> bool {
     !b.members.no_set.is_subset(&membership(s).no_set)
 }
 
-/// The sets the slot-2 borrow lines of `s` name, by folded id.
-fn borrow_targets(s: &SetsDoc) -> BTreeSet<String> {
+/// Slot 2 reads the first entry for a folded set id, even if that entry has no borrow.
+fn normal_borrows(s: &SetsDoc) -> BTreeMap<String, String> {
+    let mut seen = HashSet::new();
     s.entries()
         .iter()
-        .filter_map(|e| e.borrow.get(&2).map(|l| fold_id(l)))
+        .filter_map(|e| {
+            let id = fold_id(&e.id);
+            if !seen.insert(id.clone()) {
+                return None;
+            }
+            Some((id, fold_id(e.borrow.get(&2)?)))
+        })
         .collect()
 }
 
@@ -431,13 +435,14 @@ pub(super) fn before(m: &AppModel, pre: &Tables) -> Option<Before> {
         .values()
         .map(|k| (k.clone(), pre.subtype(k)))
         .collect();
-    let targets = borrow_targets(s);
+    let borrows = normal_borrows(s);
+    let targets = borrows.values().cloned().collect();
     // N8-f: the views' members are what the documents say only when the last landed full plan was asked with the
     // documents as they are outside `[files]`: the fast re-plan's request signature (`plan_sig`, set by every
     // re-plan) still equals the landed one's. A set edit or an alias since then (a plan out, or failed) differs.
     let fresh = m.landed_sig.is_some_and(|l| l == m.plan_sig.1);
     Some(Before {
-        shared: shared_into_regular(&f, s, &f.empty, &targets, &BTreeSet::new()).out,
+        shared: shared_into_regular(&f, s, &borrows, &f.empty, &targets, &BTreeSet::new()).out,
         sub,
         empty: f.empty.clone(),
         targets,
@@ -721,7 +726,7 @@ fn changes(
     let f = facts(m);
     let inputs = std::cell::LazyCell::new(|| input_matches(m));
     let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let sh = shared_into_regular(&f, s, &gone, &b.targets, touched);
+    let sh = shared_into_regular(&f, s, &normal_borrows(s), &gone, &b.targets, touched);
     let (now, unsure) = (&sh.out, &sh.unsure);
     // N8-a, N8-j, N8-o: alpha is read as Task 6 reads it, from every `[files]` table that matches the file, through the
     // step's one index of the document after the edit; each file asks two lookups.
@@ -789,40 +794,21 @@ fn changes(
     c
 }
 
-/// Each list entry with the `alpha.policy` of every `[files]` table that matches its file, by the table's spelling.
-pub(super) type ListedAlpha = Vec<(String, BTreeMap<String, Value>)>;
-
-/// N8-c, N8-h (N-34): the list entries with the alpha of every table matching each, read before a user's step from
-/// `pre`, the index of the document before it (N8-o).
-pub(super) fn listed_alpha(pre: &Tables, s: &SetsDoc) -> ListedAlpha {
+/// Listed tables that a user's edit could change to Data.
+pub(super) fn listed_without_data(pre: &Tables, s: &SetsDoc) -> Vec<String> {
+    let data = Some(json!("data"));
     s.auto_data()
         .into_iter()
-        .map(|e| {
-            let t = pre.alpha(&e);
-            (e, t)
-        })
+        .filter(|e| pre.exact_alpha(e) != data)
         .collect()
 }
 
-/// N8-c, N8-h (N-34): an entry the user's step itself wrote `data` for, in any table matching its file (one that held
-/// no `data` before the step), holds the user's own value now: it leaves `auto_data` in that step, before the
-/// follow-on runs, so the follow-on's own writes never count. Tables are compared, not the value the file resolves
-/// to: a step that removes a table and so uncovers a `data` another table already held wrote nothing (N-27: a reset
-/// is files-only). A pick of the `data` a table already holds changes no table: `data_pick_unlists` takes that one.
-/// `post` is the index of the document after the user's edit (N8-o).
-pub(super) fn unlist_user_data(held: &ListedAlpha, post: &Tables, s: &mut SetsDoc) {
-    if held.is_empty() {
-        return;
-    }
-    let data = json!("data");
-    let mine: HashSet<&String> = held
+/// A user's write claims only the exact table that gained Data. A same-value pick is handled by `data_pick_unlists`.
+pub(super) fn unlist_user_data(without_data: &[String], post: &Tables, s: &mut SetsDoc) {
+    let data = Some(json!("data"));
+    let mine: HashSet<&String> = without_data
         .iter()
-        .filter(|(e, before)| {
-            post.alpha(e)
-                .iter()
-                .any(|(t, v)| *v == data && before.get(t) != Some(&data))
-        })
-        .map(|(e, _)| e)
+        .filter(|e| post.exact_alpha(e) == data)
         .collect();
     if mine.is_empty() {
         return;
@@ -921,24 +907,24 @@ impl AppModel {
         }
     }
 
-    /// N-34 (review 2 Minor 3): the user's Data pick on a file the share step listed makes the value the user's: the
-    /// entries naming the file leave `auto_data` in the pick's step (a rare write to `sdc-project.toml`). False when
-    /// none is listed, so the caller writes the value as usual.
+    /// Claim the listed table the picker writes, including when it already holds Data.
     pub(super) fn data_pick_unlists(&mut self, label: &str, key: &str) -> bool {
-        let names = |e: &String| engine::overrides::path_key_matches(e, key);
-        let listed = self
-            .sets_doc
-            .as_ref()
-            .is_some_and(|s| !s.read_only() && s.auto_data().iter().any(names));
-        if !listed || self.project.as_ref().is_none_or(ProjectDoc::read_only) {
+        let (Some(p), Some(s)) = (&self.project, &self.sets_doc) else {
+            return false;
+        };
+        let mut list = s.auto_data();
+        if list.is_empty() || p.read_only() || s.read_only() {
             return false;
         }
-        let k = key.to_string();
-        self.edit_docs(label, None, true, move |p, s| {
-            p.set_file_value(&k, "alpha.policy", &json!("data"));
-            let mut l = s.auto_data();
-            l.retain(|x| !engine::overrides::path_key_matches(x, &k));
-            s.set_auto_data(&l);
+        let Some(table) = p.file_table_key(key).filter(|t| list.contains(t)) else {
+            return false;
+        };
+        self.edit_docs(label, None, true, |p, s| {
+            p.set_exact_file_value(&table, "alpha.policy", &json!("data"));
+            if exact_alpha(p, &table) == Some(json!("data")) {
+                list.retain(|e| e != &table);
+                s.set_auto_data(&list);
+            }
         });
         true
     }

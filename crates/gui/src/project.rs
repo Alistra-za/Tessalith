@@ -422,6 +422,11 @@ impl ProjectDoc {
         self.f.doc.get("files")?.as_table_like()
     }
 
+    /// The existing table a picker edit to `key` would write.
+    pub(crate) fn file_table_key(&self, key: &str) -> Option<String> {
+        find_file_key(self.files()?, key)
+    }
+
     /// The entry for `key`, matched the way the engine matches (case-insensitively), as a table or inline table.
     fn entry(&self, key: &str) -> Option<&dyn TableLike> {
         let files = self.files()?;
