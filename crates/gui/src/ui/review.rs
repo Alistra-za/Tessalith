@@ -712,16 +712,19 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     });
             });
             ui.horizontal(|ui| {
+                // Ruling 3c-43: with no project (a meshes-only Review) there is no key to set, so no box.
+                if m.project.is_some() {
+                    if let Some(on) = super::settings_tab::opt_out_checkbox(
+                        ui,
+                        m,
+                        OPT_OUT_TEXT,
+                        "For this project only. The header's Export then writes at once while nothing needs a look. Turn it off in Settings.",
+                    ) {
+                        act = Some(Act::OptOut(on));
+                    }
+                }
                 if ui.button("Close").clicked() {
                     act = Some(Act::Close);
-                }
-                if let Some(on) = super::settings_tab::opt_out_checkbox(
-                    ui,
-                    m,
-                    OPT_OUT_TEXT,
-                    "For this project only. The header's Export then writes at once while nothing needs a look. Turn it off in Settings.",
-                ) {
-                    act = Some(Act::OptOut(on));
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     let button = egui::Button::new(m.review_button_text());

@@ -693,6 +693,46 @@ fn reviews_opt_out_tick_sets_the_project_key() {
     assert!(!h.state().export_without_review());
 }
 
+// Round 1: the tick sits left of Close, and every footer control lies inside the Review panel at 1100 points.
+#[test]
+fn reviews_opt_out_tick_sits_left_of_close_inside_the_footer() {
+    let d = tempfile::tempdir().unwrap();
+    let h = review_at(d.path(), egui::vec2(1100.0, 864.0));
+    let panel = support::panel(&h.ctx, "bottom-review");
+    let tick = h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK).rect();
+    let close = h.get_by_role_and_label(Role::Button, "Close").rect();
+    let export_text = h.state().review_button_text();
+    let export = h.get_by_role_and_label(Role::Button, &export_text).rect();
+    assert!(tick.right() <= close.left(), "{tick:?} {close:?}");
+    assert!(close.right() <= export.left(), "{close:?} {export:?}");
+    for (name, r) in [("tick", tick), ("Close", close), ("Export", export)] {
+        assert!(panel.contains_rect(r), "{name} {r:?} outside {panel:?}");
+    }
+}
+
+// Minor: a project document that takes no edit draws the box off with its own reason.
+#[test]
+fn reviews_opt_out_tick_is_off_for_a_read_only_project_document() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(&bad));
+    assert!(m.sets_doc.as_ref().unwrap().read_only(), "guard");
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    assert!(disabled(&h, OPT_OUT_TICK));
+    h.get_by_label(OPT_OUT_TICK).hover();
+    h.run_steps(8);
+    h.get_by_label_contains("sdc-project.toml is read-only");
+    h.get_by_role_and_label(Role::CheckBox, OPT_OUT_TICK)
+        .click();
+    h.run();
+    assert!(!h.state().export_without_review());
+}
+
 // Ruling 3c-13: while the folder's open can still be cancelled the setter refuses, so the tick is drawn off.
 #[test]
 fn reviews_opt_out_tick_is_off_while_the_open_can_be_cancelled() {

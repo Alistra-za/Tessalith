@@ -10876,6 +10876,10 @@ fn meshes_only_review_exports_the_nif_edit() {
     assert_eq!(h.state().model.review_gate(), Ok((0, 0)));
     let b = h.get_by_role_and_label(AkRole::Button, "Export 1 NIF edit");
     assert!(!b.accesskit_node().is_disabled());
+    // Ruling 3c-43: no project, nothing to set the key for: the opt-out box is not drawn (Review is, as the button shows).
+    assert!(h
+        .query_by_label("Export without review next time")
+        .is_none());
     h.get_by_role_and_label(AkRole::Button, "Export 1 NIF edit")
         .click();
     h.run_steps(6);

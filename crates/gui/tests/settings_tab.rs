@@ -166,6 +166,47 @@ fn settings_turns_the_opt_out_off() {
         .click();
     settle(&mut h);
     assert!(h.state().export_without_review());
+    // Off again, then the header's Export opens Review first and writes nothing.
+    h.get_by_role_and_label(Role::CheckBox, "Export without review")
+        .click();
+    settle(&mut h);
+    assert!(!h.state().export_without_review());
+    let label = header_export_label(&h);
+    h.get_by_label(&label).click();
+    settle(&mut h);
+    assert!(h.state().review.is_some(), "Review opened");
+    assert!(h.state().export.running.is_none());
+    let out = h.state().export_root();
+    assert!(
+        !out.exists() || std::fs::read_dir(&out).unwrap().next().is_none(),
+        "nothing written under {out:?}"
+    );
+}
+
+// Minor: a project document that takes no edit draws the box off with its own reason.
+#[test]
+fn settings_opt_out_is_off_for_a_read_only_project_document() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    let bad = d.path().join("bad");
+    std::fs::create_dir_all(&bad).unwrap();
+    std::fs::write(bad.join("sdc-project.toml"), "[[sets]\nbroken").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(&bad));
+    assert!(m.sets_doc.as_ref().unwrap().read_only(), "guard");
+    m.open_settings_tab();
+    let mut h = harness(m, 1400.0);
+    h.run();
+    let name = "Export without review";
+    assert!(h
+        .get_by_role_and_label(Role::CheckBox, name)
+        .accesskit_node()
+        .is_disabled());
+    h.get_by_role_and_label(Role::CheckBox, name).hover();
+    h.run_steps(8);
+    h.get_by_label_contains("sdc-project.toml is read-only");
+    h.get_by_role_and_label(Role::CheckBox, name).click();
+    h.run();
+    assert!(!h.state().export_without_review());
 }
 
 // Ruling 3c-13: the setter refuses while the folder's open can be cancelled, so the box is drawn off with the reason.
