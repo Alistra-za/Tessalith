@@ -44,7 +44,8 @@ pub(super) fn guarded_write(
 /// writes, known before the run; `out` then gets the hash it records. `None`: this run decides whether the file is
 /// written and with what, so nothing is recorded here. Returns whether the file is listed (`Some(marked)`) and whether
 /// the run decides a hash record. Ruling 3c-48: a case-only rename (`remove_own_case_twin` drops sdc's own file under
-/// the old spelling) changes the file's name on disk, so it is a change; the removed spelling counts under this entry.
+/// the old spelling) changes the file's name on disk, so it is a change; the removed spelling counts under this entry,
+/// whatever `may_replace` then says of the file (3c-51 (a)).
 pub(super) fn guarded_plan(
     path: &Path,
     text: Option<&str>,
@@ -60,8 +61,9 @@ pub(super) fn guarded_plan(
         let changes = renamed || super::review::may_change(path, last.as_deref());
         return (changes.then_some(true), true);
     };
+    // Ruling 3c-51 (a): the twin goes before `may_replace` is asked, so a kept file still loses its old spelling.
     if engine::dds::may_replace(path, text.as_bytes(), recorded(last.as_deref())).is_err() {
-        return (None, false);
+        return (renamed.then_some(false), false);
     }
     out.insert(key, hex::encode(Sha256::digest(text.as_bytes())));
     let changes = renamed || std::fs::read(path).map_or(true, |b| b != text.as_bytes());

@@ -2733,6 +2733,31 @@ fn the_listing_rules_credit_a_recovery_file_only_when_it_is_removed() {
     assert_eq!(changed.len(), 1, "{changed:?}");
 }
 
+/// Ruling 3c-51 (b): the scan-store autosave of a listed NIF record's data path counts under that record when the
+/// export removed it; one created, or one of another data path, is a change of its own.
+#[test]
+fn the_listing_rules_credit_a_removed_nif_autosave_to_its_record() {
+    use sdc_gui::model::meshes::edit_doc::autosave_path;
+    use sdc_gui::model::review::HOVER_NIF_RECORD;
+    use std::path::Path;
+    let rec = Path::new(r"C:\m\out\.sdc\nif-edits\meshes\x.nif.sdc-nifedit.toml");
+    let store = Path::new(r"C:\appdata\sdc");
+    let mine = autosave_path(store, r"meshes\x.nif").unwrap();
+    let other = autosave_path(store, r"meshes\y.nif").unwrap();
+    let w = list_of(&[(rec, HOVER_NIF_RECORD, false)]);
+    let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
+        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+    };
+    assert_eq!(
+        check(&[(rec, "old"), (&mine, "ops")], &[(rec, "new")]),
+        Vec::<String>::new()
+    );
+    let created = check(&[(rec, "old")], &[(rec, "new"), (&mine, "ops")]);
+    assert_eq!(created.len(), 1, "{created:?}");
+    let theirs = check(&[(rec, "old"), (&other, "ops")], &[(rec, "new")]);
+    assert_eq!(theirs.len(), 1, "{theirs:?}");
+}
+
 /// Ruling 3c-52: no blanket exemption. Of two listed copies, one changes; the other, unchanged, passes only when it is
 /// itself marked run-dependent.
 #[test]
@@ -2975,6 +3000,142 @@ fn cm_project(dir: &std::path::Path) -> AppModel {
     m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(80)));
     idle(&mut m);
     m
+}
+
+/// Makes the empty folder `dir` case-sensitive, so two names that differ in case only can sit side by side (on
+/// Windows with `fsutil`; other systems are case-sensitive already).
+fn case_sensitive(dir: &std::path::Path) {
+    #[cfg(windows)]
+    {
+        let out = std::process::Command::new("fsutil.exe")
+            .args(["file", "setCaseSensitiveInfo"])
+            .arg(dir)
+            .arg("enable")
+            .output()
+            .expect("fsutil runs");
+        assert!(
+            out.status.success(),
+            "this test needs a case-sensitive folder: {}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+    }
+    #[cfg(not(windows))]
+    let _ = dir;
+}
+
+/// B1: a case-sensitive folder holds both the recorded JSON under its old spelling `IRON_M.json` and a foreign
+/// `iron_m.json`. The writer removes its own old spelling first, then keeps the foreign file (ruling 3c-51 (a)): the
+/// JSON is listed and the removed spelling counts under it.
+#[test]
+fn a_case_twin_beside_a_foreign_json_lists_the_json_and_counts_the_twin_under_it() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cm_project(d.path());
+    let folder = m.export_root().join("m");
+    std::fs::create_dir_all(&folder).unwrap();
+    case_sensitive(&folder);
+    export_and_compare(&mut m, d.path());
+    let json = folder.join("iron_m.json");
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    let twin = folder.join("IRON_M.json");
+    std::fs::rename(&json, &twin).unwrap();
+    std::fs::write(&json, b"{ \"theirs\": true }\n").unwrap();
+    assert!(twin.is_file(), "guard: both spellings are on disk");
+    let s = export_and_compare(&mut m, d.path());
+    assert!(!twin.exists(), "the writer removed its own old spelling");
+    assert_eq!(std::fs::read(&json).unwrap(), b"{ \"theirs\": true }\n");
+    assert!(s.listed.contains(&json), "{:?}", s.w.outputs);
+}
+
+/// B7: new Tree Anim evidence lands while Review is open on an exported set with an automatic subsurface: the
+/// PGPatcher JSON switches to foliage. Review's list is built again (ruling 3c-51 (c)) and lists the JSON.
+#[test]
+fn new_tree_anim_evidence_while_review_is_open_lists_the_json() {
+    use std::sync::Arc;
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/landscape");
+    std::fs::create_dir_all(&r).unwrap();
+    image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([200u8, 100, 50]))
+        .save(r.join("rock01_s.png"))
+        .unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.set_field(
+        "landscape/rock01_s.png",
+        "subtype",
+        serde_json::json!("pbr_subsurface"),
+    );
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    let json = support::pgp_json_path(&m);
+    let before =
+        std::fs::read_to_string(&json).unwrap_or_else(|e| panic!("{e}: {:?}", m.export.notes));
+    assert!(
+        before.contains("subsurface") && !before.contains("subsurface_foliage"),
+        "{before}"
+    );
+    m.header_export_clicked();
+    let a = m.review_writes();
+    // The diffuse's mesh key, as `auto_flags::hint` looks it up.
+    let key = m
+        .item("landscape/rock01.png")
+        .and_then(|i| i.job.as_ref())
+        .and_then(|j| {
+            engine::shader::colour_mesh_key(&j.game_path, &j.output, Some(j.profile.subtype))
+        })
+        .expect("rock01's mesh key");
+    m.set_tree_anim([(key, true)].into());
+    let rebuilt = !Arc::ptr_eq(&a, &m.review_writes());
+    let s = export_and_compare(&mut m, d.path());
+    assert!(
+        std::fs::read_to_string(&json)
+            .unwrap()
+            .contains("subsurface_foliage"),
+        "guard: the JSON switched"
+    );
+    assert!(s.listed.contains(&json) && s.changed.contains(&json));
+    assert!(rebuilt, "new evidence builds a new list");
+}
+
+/// B7: the owner of a borrowed slot is in an excluded group, and its DDS is replaced by other bytes of the same length
+/// and modified time after Review read it. Past the expiry the copy is read again (ruling 3c-51 (d)): listed, and it
+/// changes.
+#[test]
+fn an_excluded_owner_replaced_with_the_same_length_and_time_lists_the_copy() {
+    use sdc_gui::model::review::HOVER_COPY;
+    use sdc_gui::model::set_groups::GroupTarget;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, want) = vanilla_borrow(d.path());
+    export_and_compare(&mut m, d.path());
+    let owner = m
+        .items
+        .iter()
+        .find(|i| i.name == "rock01_normal.png")
+        .and_then(|i| i.job.as_ref())
+        .map(|j| j.output.clone())
+        .expect("the owner's DDS");
+    m.move_to_group(
+        &["landscape/rock01".to_string()],
+        GroupTarget::New("Owner".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Owner", true).unwrap();
+    idle(&mut m);
+    m.header_export_clicked();
+    let _ = m.review_writes();
+    let mut bytes = std::fs::read(&owner).unwrap();
+    let t = std::fs::metadata(&owner).unwrap().modified().unwrap();
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    std::fs::write(&owner, &bytes).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&owner)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+    m.expire_review_json();
+    let s = export_and_compare(&mut m, d.path());
+    assert_eq!(listed_with(&s, HOVER_COPY), std::slice::from_ref(&want));
+    assert_eq!(std::fs::read(&want).unwrap(), bytes);
 }
 
 fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {

@@ -576,9 +576,6 @@ pub struct AppModel {
     review_json_cache: std::cell::RefCell<Option<review::JsonCache>>,
     /// E7: `review_writes` for its key, and when it was built; the footer draws from the `Arc`.
     review_writes_cache: std::cell::RefCell<Option<review::WritesCache>>,
-    /// E7: each vanilla copy's plan for Review, kept beside the stamps it was read under so the files are read again
-    /// only when one changed (it outlives `review_writes_cache`'s 1 s).
-    copy_sha_memo: std::cell::RefCell<review::CopyMemo>,
     /// E7 (test hook): the list Review showed when it opened (`open_review` takes it; `start_export_pass` takes
     /// `review`, so it cannot live there).
     #[cfg(feature = "test-hooks")]
@@ -963,7 +960,6 @@ impl AppModel {
             views: Default::default(),
             review_json_cache: Default::default(),
             review_writes_cache: Default::default(),
-            copy_sha_memo: Default::default(),
             #[cfg(feature = "test-hooks")]
             review_writes_open: Default::default(),
             #[cfg(feature = "test-hooks")]

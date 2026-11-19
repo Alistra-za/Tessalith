@@ -222,6 +222,8 @@ pub(super) struct WritesKey {
     doc_unsaved: bool,
     reencode_all: bool,
     nif_rows: u64,
+    /// Ruling 3c-51 (c): the Tree Anim evidence the PGPatcher JSON's auto flags read (as the JSON editor's key).
+    evidence: u64,
     answer: Option<JsonAnswer>,
 }
 
@@ -241,23 +243,9 @@ pub(super) struct Prepared {
     skin: Option<cs_skin_json::PendingCsSkin>,
 }
 
-/// `review_json`'s cache: its view key, when it was read, its lines and what it prepared.
-pub(super) type JsonCache = (super::ViewKey, Instant, Vec<JsonLine>, Arc<Prepared>);
-
-/// E7: what one vanilla copy whose owner is outside the run was read under (the source's and the destination's stamps
-/// and the recorded hash), and what `copy_exact` answered. Only an answer of "copied" is kept: a kept destination or
-/// a source that could not be read is asked again at the next build.
-pub(super) type CopyMemo = std::collections::HashMap<
-    PathBuf,
-    (
-        (
-            Option<engine::policy::SourceStamp>,
-            Option<engine::policy::SourceStamp>,
-            Option<String>,
-        ),
-        (String, bool),
-    ),
->;
+/// `review_json`'s cache: its view key and the Tree Anim evidence's revision (ruling 3c-51 (c), as the JSON editor's
+/// key), when it was read, its lines and what it prepared.
+pub(super) type JsonCache = (super::ViewKey, u64, Instant, Vec<JsonLine>, Arc<Prepared>);
 
 /// Ruling 3c-46: the NIF export writes this row (and saves its record): not blocked, and, when the file at its export
 /// path is not Tessalith's, answered Overwrite.
@@ -380,8 +368,8 @@ impl AppModel {
     }
 
     /// Tests (ruling 3c-49): how many file-system queries `review_writes` made, building its list or checking its key:
-    /// every `output_root()` call made while it runs (`view_key()` makes one), the copies' stamps and reads, and its
-    /// reads of the PGPatcher JSON and `sdc-project.toml`.
+    /// every `output_root()` call made while it runs (`view_key()` makes one), the copies' reads, and its reads of the
+    /// PGPatcher JSON and `sdc-project.toml`.
     #[cfg(feature = "test-hooks")]
     pub fn review_writes_fs_queries(&self) -> u64 {
         self.review_writes_fs.get()
@@ -455,6 +443,7 @@ impl AppModel {
             doc_unsaved: self.sets_unsaved(),
             reencode_all: self.reencode_all,
             nif_rows: self.nif_rows_rev,
+            evidence: self.evidence_rev,
             answer: self.review.as_ref().and_then(|r| r.json_answer.clone()),
         }
     }
@@ -485,6 +474,7 @@ impl AppModel {
             && k.doc_unsaved == self.sets_unsaved()
             && k.reencode_all == self.reencode_all
             && k.nif_rows == self.nif_rows_rev
+            && k.evidence == self.evidence_rev
             && k.answer.as_ref() == self.review.as_ref().and_then(|r| r.json_answer.as_ref())
     }
 
@@ -570,7 +560,7 @@ impl AppModel {
                     continue;
                 }
                 let last = shas.get(&key).cloned();
-                let Some((sha, changes)) = self.copy_exact(src, dst, last) else {
+                let Some((sha, changes)) = self.copy_exact(src, dst, last.as_deref()) else {
                     continue;
                 };
                 shas.insert(key, sha);
@@ -792,27 +782,16 @@ impl AppModel {
 
     /// `copy_files` for one copy whose owner is outside this run (ruling 3c-50): the owner's DDS read now, as the
     /// writer reads it, and `may_replace` on those bytes. `None`: nothing is copied (the source cannot be read, or the
-    /// destination is kept); else the hash it records and whether the copy changes the destination. Kept per
-    /// destination while both files' stamps and the recorded hash are unchanged.
-    fn copy_exact(&self, src: &Path, dst: &Path, last: Option<String>) -> Option<(String, bool)> {
-        use engine::policy::SourceStamp;
+    /// destination is kept); else the hash it records and whether the copy changes the destination. Ruling 3c-51 (d):
+    /// read at every build (once per `REVIEW_JSON_TTL` at most), never from a memo that could outlive a change of the
+    /// source's bytes under the same stamp.
+    fn copy_exact(&self, src: &Path, dst: &Path, last: Option<&str>) -> Option<(String, bool)> {
         use sha2::{Digest, Sha256};
         self.writes_fs_query();
-        let key = (SourceStamp::of(src), SourceStamp::of(dst), last);
-        if let Some((k, v)) = self.copy_sha_memo.borrow().get(dst) {
-            if *k == key {
-                return Some(v.clone());
-            }
-        }
-        self.writes_fs_query();
         let bytes = std::fs::read(src).ok()?;
-        engine::dds::may_replace(dst, &bytes, super::history::recorded(key.2.as_deref())).ok()?;
+        engine::dds::may_replace(dst, &bytes, super::history::recorded(last)).ok()?;
         let changes = std::fs::read(dst).map_or(true, |b| b != bytes);
-        let plan = (hex::encode(Sha256::digest(&bytes)), changes);
-        self.copy_sha_memo
-            .borrow_mut()
-            .insert(dst.to_path_buf(), (key, plan.clone()));
-        Some(plan)
+        Some((hex::encode(Sha256::digest(&bytes)), changes))
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
@@ -824,8 +803,8 @@ impl AppModel {
     /// `review_json`'s lines and the exports it prepared for them (`review_writes` reads their texts, ruling 3c-46).
     fn review_json_parts(&self) -> (Vec<JsonLine>, Arc<Prepared>) {
         let key = self.view_key();
-        if let Some((k, at, lines, prep)) = &*self.review_json_cache.borrow() {
-            if *k == key && at.elapsed() < REVIEW_JSON_TTL {
+        if let Some((k, ev, at, lines, prep)) = &*self.review_json_cache.borrow() {
+            if *k == key && *ev == self.evidence_rev && at.elapsed() < REVIEW_JSON_TTL {
                 return (lines.clone(), prep.clone());
             }
         }
@@ -877,8 +856,13 @@ impl AppModel {
             let rels = p.files.iter().map(|f| &f.rel).collect();
             files(JsonKind::CsSkin, &p.root, rels, d.cs_skin_shas());
         }
-        *self.review_json_cache.borrow_mut() =
-            Some((key, Instant::now(), lines.clone(), prep.clone()));
+        *self.review_json_cache.borrow_mut() = Some((
+            key,
+            self.evidence_rev,
+            Instant::now(),
+            lines.clone(),
+            prep.clone(),
+        ));
         (lines, prep)
     }
 

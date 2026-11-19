@@ -10792,6 +10792,55 @@ fn a_cancelled_export_drops_the_overwrite_answer() {
     );
 }
 
+/// Plan 3c Task 4, ruling 3c-51 (b): pending edits recovered from a newer scan-store autosave, and Review's Export is
+/// their first save. The export writes the NIF and its record and removes the autosave; Review's list holds every
+/// change, the autosave counted under the listed record (`support::listing_violations`).
+#[test]
+fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
+    app_data();
+    let t = tempfile::tempdir().unwrap();
+    let model = support::opened(&t.path().join("mod"));
+    let d = files(false);
+    let mut app = sdc_gui::app::SdcApp::new(model);
+    app.meshes.procs = sdc_gui::model::meshes::no_procs;
+    app.meshes.store_path = Some(d.path().join("scan.db"));
+    scan_and_select(&mut app.meshes, d.path());
+    // An edit made with no export folder autosaves beside the scan store (Note GD5)…
+    app.meshes.set_nif_export_root(None);
+    app.meshes.open_edit();
+    tick(&mut app.meshes, 40.5);
+    app.meshes.edit.as_mut().unwrap().flush();
+    app.meshes.close_edit();
+    assert!(autosave(&d).is_file());
+    // …and the next session, in the Textures export folder, recovers it unsaved (Note GD11).
+    let root = app.model.nif_export_root();
+    app.meshes.set_nif_export_root(root);
+    app.meshes.open_edit();
+    assert_eq!(op_values(&app.meshes).len(), 1, "recovered");
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(1400.0, 900.0))
+        .build_ui_state(
+            move |ui, app: &mut sdc_gui::app::SdcApp| eframe::App::ui(app, ui, &mut frame),
+            app,
+        );
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    assert!(autosave(&d).is_file(), "guard: nothing saved before Export");
+    let (store, mods) = (d.path().join("nif-edits"), d.path().join("mods"));
+    let roots = [t.path(), store.as_path(), mods.as_path()];
+    let before = support::tree_hashes(&roots);
+    export_from_review(&mut h);
+    let after = support::tree_hashes(&roots);
+    assert!(!autosave(&d).exists(), "the export's save removed it");
+    let w = h.state().model.review_writes_at_open();
+    let bad = support::listing_violations(&w, &before, &after);
+    assert!(bad.is_empty(), "{bad:#?}");
+}
+
 // ---- Note GH5, GH8: the footer before any edit, and Review's NIF export with no project ----
 
 /// Note GH5: nothing edited is the idle state with no export folder too (the folder check used to come first and

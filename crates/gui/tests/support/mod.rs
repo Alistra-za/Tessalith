@@ -449,6 +449,26 @@ fn credit(
         {
             return Some(i);
         }
+        // (d) the autosave of the record's data path, beside the scan store `p` sits under.
+        let store = p
+            .parent()
+            .filter(|d| d.file_name().is_some_and(|n| n == "nif-edits"))
+            .and_then(Path::parent);
+        if let Some(store) = store {
+            let autosave_of = |e: &Listed| {
+                let rec = e.path.to_string_lossy();
+                let data = rec
+                    .split_once(r"\.sdc\nif-edits\")?
+                    .1
+                    .strip_suffix(".sdc-nifedit.toml")?;
+                sdc_gui::model::meshes::edit_doc::autosave_path(store, data).ok()
+            };
+            if let Some(i) =
+                find(&|e| e.hover == HOVER_NIF_RECORD && autosave_of(e).as_deref() == Some(p))
+            {
+                return Some(i);
+            }
+        }
     }
     // (c)
     if created {
