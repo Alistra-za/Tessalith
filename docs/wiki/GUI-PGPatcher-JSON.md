@@ -39,7 +39,7 @@ You rarely tick features by hand. Tessalith reads the set's files:
 
 These read "(auto)", with the reason on hover, and go into the JSON. Untick one to store an explicit off, which wins over the file; ↺ removes your choice again. Remove the texture and its auto value goes with it.
 
-A slot linked from another set counts as a file in that slot, of the kind of the row it sits on (on slot 7, the Coat or the Fuzz row). A path you typed counts the same way when it names a file some set writes, this set included. The same rules apply as for a file of the set: a setting you made yourself wins, a feature another one blocks stays off, and on PBR grass only the Subsurface row turns a key on. <!-- D:JR8 --> A slot you cleared counts as empty, even when the set has a file for it. <!-- D:JR9 -->
+On a set that writes a JSON entry, a link to a local map counts as the kind of its destination row (Coat or Fuzz on slot 7). With **Path**, enter the map’s planned DDS path from `textures\` down. You can leave off the leading `textures\`. Letter case for A to Z makes no difference. For example, `pbr\arch\wall_n.dds` matches `textures\pbr\arch\wall_n.dds`. A mod folder before `textures` makes it a different path. If two sets write that game path, the first in the Sets column supplies the file. An external path can fill the JSON slot without turning a feature on. Your explicit off wins. On PBR grass only Subsurface can turn on automatically. <!-- D:JR8,JR14 --> Clearing a slot removes its file’s automatic setting. A value such as emissive scale stays in the project and goes back into the JSON when the feature is active again. <!-- D:JR9 -->
 
 ## Features that can't go together
 

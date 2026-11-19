@@ -138,6 +138,11 @@ impl TomlFile {
     }
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(crate) static SKIPPED_IDS_COPIED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 pub struct ProjectDoc {
     f: TomlFile,
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
@@ -699,10 +704,18 @@ impl ProjectDoc {
 
     /// `[export]` (Track A, TA9), the default when absent or unparsable. Cached by `rev`.
     pub fn export_config(&self) -> ExportConfig {
+        self.with_export_config(|c| {
+            #[cfg(test)]
+            SKIPPED_IDS_COPIED.with(|n| n.set(n.get() + c.skip.len()));
+            c.clone()
+        })
+    }
+
+    pub(crate) fn with_export_config<T>(&self, read: impl FnOnce(&ExportConfig) -> T) -> T {
         let rev = self.rev();
         if let Some((r, c)) = &*self.export_cache.borrow() {
             if *r == rev {
-                return c.clone();
+                return read(c);
             }
         }
         let c = self
@@ -710,8 +723,9 @@ impl ProjectDoc {
             .ok()
             .and_then(|c| c.export)
             .unwrap_or_default();
-        *self.export_cache.borrow_mut() = Some((rev, c.clone()));
-        c
+        let result = read(&c);
+        *self.export_cache.borrow_mut() = Some((rev, c));
+        result
     }
 
     /// Write `[export]` as `cfg`: only the fields that differ from the default, so a tick does not freeze today's

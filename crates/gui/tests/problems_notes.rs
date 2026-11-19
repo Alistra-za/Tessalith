@@ -6313,9 +6313,31 @@ fn a_set_filter_keeps_its_set_when_the_root_changes() {
 /// different set `wall` whose key the rewritten value would be.
 #[test]
 fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
-    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
     let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_opened(d.path());
+    let (m, id) = move_root_with_id_filter(d.path(), None);
+    assert_eq!(m.selection, id_selection(&id));
+    let entry = view_by_id(&m, &id);
+    assert!(entry.key.is_empty());
+    assert!(entry.missing.iter().any(|v| matches!(v,
+        sdc_gui::model::sets::Missing::File(path) if path.ends_with("stray.txt"))));
+    assert_ne!(view_by_id(&m, "wall").key, id);
+}
+
+#[test]
+fn a_keyed_selection_moves_when_the_filter_names_a_key_less_id() {
+    let d = tempfile::tempdir().unwrap();
+    let selected = "landscape/rock01";
+    let (m, _) = move_root_with_id_filter(d.path(), Some(selected));
+    assert_eq!(
+        m.selection,
+        sdc_gui::model::Selection::Set(engine::sets::set_key(&m.sets_root(), selected)),
+        "the selected set moves even when the filter names an explicit id"
+    );
+}
+
+fn move_root_with_id_filter(dir: &std::path::Path, keyed_set: Option<&str>) -> (AppModel, String) {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let mut m = pbr_opened(dir);
     let root = m.root.clone().unwrap();
     std::fs::write(root.join("landscape/stray.txt"), "notes").unwrap();
     // The entry's id: what the key of a set `wall` is under the plan's output root now.
@@ -6334,7 +6356,11 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         !views.iter().any(|v| v.id == "wall"),
         "precondition: no set wall yet"
     );
-    pick_id(&mut m, &id);
+    if let Some(selected) = keyed_set {
+        m.select_set(&engine::sets::set_key(&m.sets_root(), selected));
+    } else {
+        pick_id(&mut m, &id);
+    }
     let f = ProblemsFilter::Set(id.clone());
     m.open_problems(Some(f.clone()));
     let before = filtered(&m, Some(&f));
@@ -6349,7 +6375,7 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
     })
     .save(root.join("wall.png"))
     .unwrap();
-    choose_export(&mut m, d.path().join("elsewhere"));
+    choose_export(&mut m, dir.join("elsewhere"));
     assert!(
         sdc_gui::model::sets::set_views(&m)
             .iter()
@@ -6370,12 +6396,7 @@ fn a_key_less_ids_filter_is_not_rekeyed_when_the_root_changes() {
         "another set's row: {texts:?}"
     );
     assert_eq!(m.bottom.filter, Some(f.clone()), "the id is left as it is");
-    assert_eq!(m.selection, id_selection(&id));
-    let entry = view_by_id(&m, &id);
-    assert!(entry.key.is_empty());
-    assert!(entry.missing.iter().any(|v| matches!(v,
-        sdc_gui::model::sets::Missing::File(path) if path.ends_with("stray.txt"))));
-    assert_ne!(view_by_id(&m, "wall").key, id);
+    (m, id)
 }
 
 /// Final review I2 (Note JP5): a filter opened on a key-less set's id follows the set once a file lands in it and it

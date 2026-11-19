@@ -7,7 +7,7 @@ use sdc_gui::model::items::{ItemKind, ItemStatus};
 use sdc_gui::model::pbr_export::json_entries;
 use sdc_gui::model::preview::DEBOUNCE;
 use sdc_gui::model::set_preview::*;
-use sdc_gui::model::sets::{member_game_path, views, SetView, SlotKind};
+use sdc_gui::model::sets::{member_game_path, SetView, SlotKind};
 use sdc_gui::model::viewport3d::FileSource;
 use sdc_gui::model::AppModel;
 use sdc_gui::pgp::writer::EntryInput;
@@ -87,16 +87,7 @@ fn rock(m: &AppModel) -> (SetView, EntryInput) {
 
 /// What `member_slots` serves for the set `arch/leaf`, built as the preview builds it.
 fn leaf_slots(m: &AppModel) -> Vec<MemberSlot> {
-    let v = views(m)
-        .iter()
-        .find(|v| v.id == "arch/leaf")
-        .unwrap()
-        .clone();
-    let e = json_entries(m)
-        .into_iter()
-        .find(|(v, _)| v.id == "arch/leaf")
-        .unwrap()
-        .1;
+    let (v, e) = rock_named(m, "arch/leaf");
     member_slots(m, &v, Some(&e))
 }
 
@@ -154,6 +145,128 @@ fn a_slot_7_link_serves_only_the_link() {
         !s.iter().any(|i| i == "arch/leaf_f.png"),
         "the own _f is not in the JSON, so not served"
     );
+}
+
+#[test]
+fn an_unresolved_typed_path_serves_only_the_local_prefix() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let normal = |m: &AppModel| {
+        leaf_slots(m)
+            .into_iter()
+            .find(|s| s.kind == SlotKind::Normal)
+            .unwrap()
+    };
+    let prefix = "textures/pbr/arch/leaf_n.dds";
+    assert!(normal(&m).paths.iter().any(|p| p == prefix));
+    let missing = r"textures\elsewhere\normal.dds";
+    m.set_json_value("arch/leaf", "slot2", Some(serde_json::json!(missing)));
+    let slots = leaf_slots(&m);
+    assert!(
+        slots.iter().all(|s| !s.paths.contains(&canon(missing))),
+        "no local bytes for the typed path"
+    );
+    assert_eq!(
+        normal(&m).paths,
+        [prefix],
+        "the own normal keeps only its prefix"
+    );
+}
+
+#[test]
+fn a_coat_link_skips_a_replaced_borrowed_fuzz() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("moss_f.png", [200, 200, 200], Subtype::PbrFuzz),
+            ("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal),
+        ],
+    );
+    m.edit_docs("Share fuzz", None, true, |_, s| {
+        s.set_borrow("arch/leaf", 7, Some("arch/moss"))
+    });
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        leaf_slots(&m).iter().any(|s| s.item == "arch/moss_f.png"),
+        "premise: borrowed fuzz is served"
+    );
+    m.run_menu(MenuAction::SlotLink {
+        set: "arch/leaf".into(),
+        n: 7,
+        item: "arch/lacq_cnr.png".into(),
+    });
+    let slots = leaf_slots(&m);
+    assert!(
+        slots.iter().any(|s| s.item == "arch/lacq_cnr.png"),
+        "linked coat is served"
+    );
+    assert!(
+        slots.iter().all(|s| s.item != "arch/moss_f.png"),
+        "replaced borrowed fuzz is skipped"
+    );
+}
+
+#[test]
+fn an_unresolved_link_uses_the_game_texture_in_the_preview_scene() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let key = rock_named(&m, "arch/wall").0.key;
+    m.select_set(&key);
+    let local = member_game_path(&m, "arch/leaf_n.png").unwrap();
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(local)));
+    let mut preview = SetPreview::new(Some(bsa_db(d.path())), DEFAULT_CAP);
+    run(&mut preview, &m);
+    let Some(Content::Builtin { textures, .. }) = preview.v3.content() else {
+        panic!("expected the built-in preview");
+    };
+    assert!(matches!(
+        textures.get(&canon(&local)),
+        Some(FileSource::Memory { .. })
+    ));
+
+    let external = r"textures\clutter\vanilla_m.dds";
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(external)));
+    run(&mut preview, &m);
+    let Some(Content::Builtin {
+        material, textures, ..
+    }) = preview.v3.content()
+    else {
+        panic!("expected the built-in preview after resync");
+    };
+    assert_eq!(material.slots[1].norm, canon(external));
+    assert_eq!(
+        textures.get(&canon(external)),
+        Some(&FileSource::Bsa {
+            archive: d.path().join("Skyrim - Textures0.bsa"),
+            norm: canon(external),
+        })
+    );
+    assert!(
+        !textures.contains_key(&canon(&local)),
+        "old linked bytes survived resync"
+    );
+}
+
+#[test]
+fn a_link_with_no_preview_row_contributes_no_local_bytes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let local = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.set_json_value("arch/leaf", "slot5", Some(serde_json::json!(local)));
+    let (v, entry) = rock_named(&m, "arch/leaf");
+    assert_eq!(v.linked[&5].item.as_deref(), Some("arch/wall_n.png"));
+    assert!(v.linked[&5].row.is_none());
+    assert_eq!(entry.slots[&5], local);
+    let mut enc = Encoder::new(DEFAULT_CAP);
+    enc.sync(&m, member_slots(&m, &v, Some(&entry)), Instant::now(), true);
+    settle(&mut enc, &m);
+    let sources = enc.memory_sources();
+    assert!(
+        !sources.contains_key(&canon(&local)),
+        "rowless link served local bytes"
+    );
+    assert!(sources.contains_key("textures/pbr/arch/leaf_n.dds"));
 }
 
 fn no_shared_kind(slots: &[MemberSlot]) {
@@ -230,8 +343,18 @@ fn syncing_an_unchanged_linked_set_twice_resets_no_member() {
     enc.sync(&m, slots.clone(), Instant::now(), true);
     settle(&mut enc, &m);
     let first = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    enc.set_mode(PreviewMode::Source, Instant::now());
+    settle(&mut enc, &m);
+    let source = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    assert_ne!(first, source, "the linked PNG has two distinct A/B encodes");
     enc.sync(&m, slots.clone(), Instant::now(), false);
     enc.sync(&m, slots, Instant::now(), false);
+    assert!(matches!(&enc.members[&SlotKind::Normal].state, EncState::Fresh(e) if e.id == source));
+    assert!(
+        enc.has_alt(SlotKind::Normal),
+        "unchanged sync keeps the other A/B copy"
+    );
+    enc.set_mode(PreviewMode::Encoded, Instant::now());
     assert!(
         enc.settled(),
         "an unchanged sync leaves every member settled"

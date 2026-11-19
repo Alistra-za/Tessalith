@@ -2,7 +2,7 @@
 //! the engine inputs (`set_edits`, `output_paths`) and the drop rules. No egui types.
 use super::history::{sha256_of, CreatedFile};
 use super::items::{ItemKind, ItemStatus, SetItem, TextureItem};
-use super::txst_map::{fill_from_records, link_slots, record_paths, record_shared_sets};
+use super::txst_map::{fill_from_records, link_slots, record_shared_sets};
 use super::AppModel;
 use crate::pgp::prefix::{
     active_matches, check_file_name, check_rel_path, derive_match_diffuse, is_path_key, output_rel,
@@ -515,7 +515,7 @@ pub enum JsonFile<'a> {
     /// An own or borrowed file the JSON keeps: no `slotN` overrides its game slot (or it has none, 9 and 10).
     Fill(SlotKind, &'a SlotFill),
     /// A `slotN` that names a set's output: a local file, on the row the link fills.
-    Linked(&'a SlotLink),
+    Linked(u8, &'a SlotLink),
     /// A `slotN` no set writes, on game slot `n`: it fills the slot, and there is no local file to check.
     External(u8),
 }
@@ -525,7 +525,7 @@ impl JsonFile<'_> {
     pub fn fills(&self, kind: SlotKind) -> bool {
         match self {
             JsonFile::Fill(k, _) => *k == kind,
-            JsonFile::Linked(l) => l.row == Some(kind),
+            JsonFile::Linked(_, l) => l.row == Some(kind),
             JsonFile::External(n) => kind.game_slot() == Some(*n),
         }
     }
@@ -541,7 +541,7 @@ pub fn json_files(v: &SetView) -> impl Iterator<Item = JsonFile<'_>> {
         .filter(|(k, f)| f.is_filled() && !k.game_slot().is_some_and(|n| v.linked.contains_key(&n)))
         .map(|(k, f)| JsonFile::Fill(*k, f));
     let links = v.linked.iter().map(|(n, l)| match l.from {
-        Some(_) => JsonFile::Linked(l),
+        Some(_) => JsonFile::Linked(*n, l),
         None => JsonFile::External(*n),
     });
     fills.chain(links)
@@ -1213,11 +1213,11 @@ pub fn set_views(m: &AppModel) -> Vec<SetView> {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
-    /// Test probe: how many times `engine_inputs_in` ran on this thread (ruling 3b-F14).
+    /// Test probe: how many times the plan's output paths were built on this thread (ruling 3b-F14).
     static ENGINE_INPUT_BUILDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
 }
 
-/// Tests: how many times the export inputs (`engine_inputs_in`) were built on this thread.
+/// Tests: how many times the export inputs were built on this thread.
 #[cfg(feature = "test-hooks")]
 pub fn engine_input_builds() -> u64 {
     ENGINE_INPUT_BUILDS.with(std::cell::Cell::get)
@@ -1272,7 +1272,7 @@ pub fn root_reads() -> (u64, u64) {
 /// call, never per member.
 pub(crate) fn output_roots(m: &AppModel) -> [PathBuf; 2] {
     let export = m.export_root();
-    [m.output_root_in(&m.also_config(), &export), export]
+    [m.output_root_in(&export), export]
 }
 
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
@@ -1288,7 +1288,7 @@ pub(crate) type ViewReads<'a> = (
     bool,
     Option<&'a str>,
     &'a str,
-    Option<&'a Path>,
+    Option<&'a std::ffi::OsStr>,
 );
 
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
@@ -1299,7 +1299,7 @@ pub(crate) type ViewReads<'a> = (
 /// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
 /// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
 /// `link_slots` reads the output path to find the set a `slotN` link names: `job_key`, and the settled job's output
-/// (`written_game_location`, ruling 3b-F16), whose spelling can change while the folded job key stays (a mapping
+/// (`projected_slot`, ruling 3b-F45), whose spelling can change while the folded job key stays (a mapping
 /// removed between two spellings of one folder), so a moved output rebuilds the views and no link is carried.
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
 pub(crate) fn view_reads(i: &TextureItem) -> ViewReads<'_> {
@@ -1309,7 +1309,7 @@ pub(crate) fn view_reads(i: &TextureItem) -> ViewReads<'_> {
         i.waiting,
         i.job.as_ref().map(|j| j.game_path.as_str()),
         i.job_key.as_str(),
-        i.job.as_ref().map(|j| j.output.as_path()),
+        i.job.as_ref().map(|j| j.output.as_os_str()),
     )
 }
 
@@ -1788,7 +1788,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         Ok(p) => v.prefix = Some(p),
         Err(e) => v.prefix_error = Some(e.0),
     }
-    // Review E13: the files the set's own slots write (`view_reads` covers `job_key`, so a moved output rebuilds this).
+    // Output files shows the plan's exact spelling, which view_reads compares even for equivalent paths.
     v.outputs.clear();
     for (kind, fill) in &v.slots {
         let SlotFill::Own { item } = fill else {
@@ -1802,8 +1802,7 @@ fn finish_view(m: &AppModel, v: &mut SetView) {
         }
     }
     // Then every other member that converts, in member order (final wave Group 2): one that fills no slot
-    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind. `view_reads` covers
-    // their `job_key`.
+    // (`unslotted_packed`'s items), an own file a borrow displaced, a second member of one kind.
     for key in &v.members {
         let Some(i) = m.item(key) else {
             continue;
@@ -2004,14 +2003,14 @@ pub(super) fn recipe_suffix(i: &TextureItem) -> Option<String> {
 
 /// The engine inputs of the current documents and plan (spec §2.1, DECISIONS P1–P2).
 pub fn engine_inputs(m: &AppModel) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
-    engine_inputs_in(m, &views(m))
+    plan_outputs(m, &views(m), None)
 }
 
-/// `engine_inputs` over views already built: `link_slots` runs while the views are being built, so it cannot ask the
-/// cache for them.
-pub(crate) fn engine_inputs_in(
+/// When submitting a plan, retain the game paths of the mappings and prefixes that win collision checks.
+pub(super) fn plan_outputs(
     m: &AppModel,
     views: &[SetView],
+    mut game_paths: Option<&mut BTreeMap<OutputKey, PathBuf>>,
 ) -> (Vec<SetEdit>, BTreeMap<OutputKey, PathBuf>) {
     #[cfg(feature = "test-hooks")]
     ENGINE_INPUT_BUILDS.with(|c| c.set(c.get() + 1));
@@ -2057,7 +2056,7 @@ pub(crate) fn engine_inputs_in(
     let mut paths = BTreeMap::new();
     // F3b D2: a set's `output_name` on any target; on CS a PBR set's prefix names its outputs instead.
     let mut named = output_name_paths(m, views);
-    let record = record_paths(m, views);
+    let record = super::txst_map::record_outputs(m, views);
     if m.target != Target::Cs && record.is_empty() {
         paths.extend(named);
         return (edits, paths);
@@ -2066,7 +2065,7 @@ pub(crate) fn engine_inputs_in(
     // key *before* the duplicate checks, so a name a record replaced reserves nothing. The checks below then run on
     // final paths, on every target, and a record path that loses one leaves its file on its default path.
     let cs = m.target == Target::Cs;
-    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(k, _)| k.clone()).collect();
+    let rec_keys: BTreeSet<OutputKey> = record.iter().map(|(_, k, _, _)| k.clone()).collect();
     named.retain(|(k, _)| !rec_keys.contains(k));
     let mut candidates = if cs {
         output_candidates(m, views)
@@ -2098,7 +2097,7 @@ pub(crate) fn engine_inputs_in(
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
-    for (_, key, rel) in named.chain(candidates) {
+    for (owner, key, rel) in named.chain(candidates) {
         if !cs {
             // Off cs an output name takes no checks, as before records existed; it only reserves its path.
             seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase());
@@ -2113,13 +2112,21 @@ pub(crate) fn engine_inputs_in(
         // both as IN-DUPLICATE, the sets would stop being PBR sets, the paths would vanish, and the two-pass planning
         // would flip between two plans.)
         if seen.insert(rel.to_string_lossy().replace('\\', "/").to_lowercase()) {
+            if !owner.is_empty() {
+                if let Some(game) = game_paths.as_deref_mut() {
+                    game.insert(key.clone(), rel.clone());
+                }
+            }
             paths.insert(key, rel);
         }
     }
     // Record paths last: they take the same checks on every target.
-    for (key, rel) in record {
+    for (_, key, rel, game_path) in record {
         let low = rel.to_string_lossy().replace('\\', "/").to_lowercase();
         if !mirrored.contains(&low) && seen.insert(low) {
+            if let Some(game) = game_paths.as_deref_mut() {
+                game.insert(key.clone(), PathBuf::from(game_path.to_ascii_lowercase()));
+            }
             paths.insert(key, rel);
         }
     }
@@ -2498,7 +2505,7 @@ pub(crate) mod linear {
         let mut paths = BTreeMap::new();
         let views = views(m);
         let mut named = output_name_paths(m, &views);
-        let record = record_paths(m, &views);
+        let record = super::super::txst_map::record_paths(m, &views);
         let cs = m.target == Target::Cs;
         if !cs && record.is_empty() {
             paths.extend(named);
@@ -2808,7 +2815,7 @@ pub const PICK_PLAN_AGAIN: &str =
     "The plan must run again first: pick a file once a new plan has finished";
 
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
-/// backslashes, `.dds`): where its settled job writes it (`written_game_location`). Ruling 3b-F21: only on a settled
+/// backslashes, `.dds`): the game path of its settled job (`projected_slot`). Ruling 3b-F21: only on a settled
 /// plan (`AppModel::pick_waits` says why not), and never a path a pending edit asks for. A member whose output is under
 /// no `textures` folder has none.
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
@@ -2816,52 +2823,53 @@ pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
         return Err(why.into());
     }
     let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
-    member_game_path_in(&output_roots(m), it)
+    let key = item_output_key(&views(m), it);
+    member_game_path_in(m, &output_roots(m), it, key.as_ref())
 }
 
 /// `member_game_path` over the folders the caller read once per call (`output_roots`, rulings 3b-F14 and 3b-F21),
-/// on a settled plan: the settled job's output, never an explicit path asked for (the engine may write another file
-/// name, and an output with no game location keeps its error).
+/// on a settled plan. A member outside the plan's game locations keeps its disabled reason.
 pub(crate) fn member_game_path_in(
+    m: &AppModel,
     roots: &[PathBuf; 2],
     it: &TextureItem,
+    key: Option<&OutputKey>,
 ) -> Result<String, String> {
     if !writes_own_output(it) || it.job_key.is_empty() {
         return Err(format!("{} writes no output", it.name));
     }
-    written_game_location(roots, it).ok_or_else(|| NO_GAME_PATH.into())
+    projected_slot(m, roots, it, key).ok_or_else(|| NO_GAME_PATH.into())
 }
 
-/// Review E1 (Task 15a, rulings 3b-F6, 3b-F11 and 3b-F16): the game location of the file `it`'s settled job writes,
-/// spelt as on disk: the job's output under the output folder or the export folder (`roots`, read once per call). An
-/// explicit path asked for is not read: the engine may settle on another file name (a mapped `rock_fuzz.png` typed
-/// `pbr_fuzz` writes `rock_f.dds`). `None` for an output under no `textures` folder, one outside both folders (the
-/// folder changed and the plan has not landed), and an item that writes no output of its own. The link index folds the
-/// result with ASCII lower case, and the views are rebuilt when the output moves (`view_reads` holds it).
-pub(crate) fn written_game_location(roots: &[PathBuf; 2], it: &TextureItem) -> Option<String> {
+/// F45: the landed plan supplies the game directory. Engine renames affect only the final filename.
+pub(crate) fn projected_slot(
+    m: &AppModel,
+    roots: &[PathBuf; 2],
+    it: &TextureItem,
+    key: Option<&OutputKey>,
+) -> Option<String> {
     let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
-    if it.job_key.is_empty() {
+    if it.job_key.is_empty() || !roots.iter().any(|root| job.output.starts_with(root)) {
         return None;
     }
-    game_location_of(roots.iter().find_map(|r| job.output.strip_prefix(r).ok())?)
-}
-
-/// Ruling 3b-F11: the game location of `rel` (a path under the output folder): its filesystem components (`.` and
-/// empty parts are gone, as the writer resolves them) from the first `textures` component (ASCII case-insensitive) on,
-/// joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as text;
-/// `None` under no `textures` folder (never a `textures\` put in front).
-fn game_location_of(rel: &Path) -> Option<String> {
-    let parts: Vec<String> = rel
+    let game = key
+        .and_then(|k| m.slot_paths.get(k))
+        .map(PathBuf::as_path)
+        .unwrap_or_else(|| Path::new(&job.game_path));
+    let mut path: PathBuf = game
         .components()
-        .filter_map(|c| match c {
-            std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
-            _ => None,
-        })
+        .filter(|c| *c != std::path::Component::CurDir)
         .collect();
-    let at = parts
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case("textures"))?;
-    Some(parts[at..].join("\\"))
+    if !path
+        .components()
+        .next()?
+        .as_os_str()
+        .eq_ignore_ascii_case("textures")
+    {
+        return None;
+    }
+    path.set_file_name(job.output.file_name()?);
+    Some(path.to_string_lossy().replace('/', "\\"))
 }
 
 /// The game path a member's export writes (wave 2 #4, Note R9): the folder of `game_path` and the file name of
@@ -4681,7 +4689,8 @@ impl AppModel {
             );
             return Ok(());
         }
-        // `RemoveSlotKey` never reaches the borrow arm above: it plans nothing, as `FromSet` on an unshared slot.
+        // Removing a slot key can uncover a record-derived normal used by the engine.
+        let replan = matches!(cmd, SlotCommand::RemoveSlotKey);
         let v = match cmd {
             SlotCommand::FromSet | SlotCommand::RemoveSlotKey => None,
             SlotCommand::Clear => Some(Value::from("")),
@@ -4695,7 +4704,7 @@ impl AppModel {
             }
         };
         let id = set.to_string();
-        self.edit_docs(&format!("Change {key}"), None, false, move |_, d| {
+        self.edit_docs(&format!("Change {key}"), None, replan, move |_, d| {
             d.set_value(&id, &key, v)
         });
         Ok(())
@@ -4926,6 +4935,18 @@ pub fn item_output_key(views: &[SetView], item: &TextureItem) -> Option<OutputKe
         .id
         .clone();
     Some(OutputKey::Packed { set, suffix })
+}
+
+/// The member's source set is already known in the picker and the slot index.
+pub(super) fn member_output_key(set: &SetView, item: &TextureItem) -> Option<OutputKey> {
+    if item.kind == ItemKind::Packed {
+        Some(OutputKey::Packed {
+            set: set.id.clone(),
+            suffix: recipe_suffix(item)?,
+        })
+    } else {
+        Some(OutputKey::File(item.key.clone()))
+    }
 }
 
 /// Item key → the id of the first view, in display order, it is a member of: the set `item_output_key` names for a

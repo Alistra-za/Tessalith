@@ -1375,7 +1375,52 @@ fn an_excluded_linked_lender_holds_the_entry_as_a_borrowed_one_does() {
             .contains(&"not in JSON: arch/leaf (not exported yet)".to_string()),
         "premise: {borrowed:?}"
     );
+    assert!(
+        linked.1.is_none(),
+        "the held consumer reached disk: {linked:?}"
+    );
+    assert!(
+        !linked.0.iter().any(|f| f.ends_with("stone_p.dds")),
+        "{linked:?}"
+    );
     assert_eq!(linked, borrowed);
+}
+
+fn excluded_unicode_lender(by_link: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    m.set_json_value("arch/stone", "rename", Some(json!(r"textures\İ\stone")));
+    idle(&mut m);
+    leaf_takes_stone(&mut m, by_link);
+    whole(&mut m);
+    let slot = what_the_run_left(&m).1.unwrap()["slot4"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    let actual = out(&m, &slot.replace('\\', "/"));
+    assert!(slot.contains('İ') && actual.is_file(), "{slot}");
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    let folded = out(&m, &slot.to_lowercase().replace('\\', "/"));
+    std::fs::create_dir_all(folded.parent().unwrap()).unwrap();
+    std::fs::rename(&actual, &folded).unwrap();
+    whole(&mut m);
+    let (_, entry, held) = what_the_run_left(&m);
+    assert!(entry.is_none(), "the combining-dot DDS admitted {entry:?}");
+    assert!(held.contains(&"not in JSON: arch/leaf (not exported yet)".to_owned()));
+    std::fs::rename(folded, actual).unwrap();
+    whole(&mut m);
+    assert_eq!(what_the_run_left(&m).1.unwrap()["slot4"], json!(slot));
+}
+
+#[test]
+fn an_excluded_unicode_lenders_link_checks_the_written_path() {
+    excluded_unicode_lender(true);
+}
+
+#[test]
+fn an_excluded_unicode_lenders_borrow_checks_the_written_path() {
+    excluded_unicode_lender(false);
 }
 
 /// R2: a borrow under a link is not in the JSON, so it is no dependency of the entry: a never-exported excluded lender

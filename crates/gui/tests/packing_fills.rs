@@ -965,8 +965,15 @@ fn a_recipe_conflict_row_clears_both_entries() {
     m.open_problems(None);
     let mut h = app(m);
     h.run();
-    h.get_by_label("Clear the packing recipe of rock01_rfaos.dds (PACK-RECIPE-CONFLICT)")
-        .click();
+    let clear = "Clear the packing recipe of rock01_rfaos.dds (PACK-RECIPE-CONFLICT)";
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.get_by_label(clear).hover();
+    h.run_steps(4);
+    h.get_by_label_contains("A project or preset recipe can apply next.");
+    h.get_by_label(clear).click();
     h.run();
     idle(h.state_mut());
     h.run();
@@ -1569,6 +1576,16 @@ fn slot_row_values_read_in_full_under_a_heading() {
                     })
                     .unwrap_or_else(|| panic!("{w}: the {l} heading"))
             };
+            assert!(
+                !h.query_all_by_role(Role::Label).any(|n| {
+                    let r = n.rect();
+                    centre.contains_rect(r)
+                        && (r.center().y - head.center().y).abs() < 2.0
+                        && n.value().unwrap_or_default().is_empty()
+                        && n.accesskit_node().label().unwrap_or_default().is_empty()
+                }),
+                "{w}: empty heading cells have no label"
+            );
             let (slot, file) = (on_line("Slot"), on_line("File"));
             assert!(
                 slot.max.x <= file.min.x && file.max.x <= head.min.x,
@@ -1810,6 +1827,41 @@ fn bc4_set(dir: &Path) -> AppModel {
     m
 }
 
+#[test]
+fn warm_format_fits_follow_the_button_font() {
+    warm_row_fit(sdc_gui::ui::paint_counts::Work::Format);
+}
+
+#[test]
+fn warm_picker_fits_follow_the_button_font() {
+    warm_row_fit(sdc_gui::ui::paint_counts::Work::Picker);
+}
+
+fn warm_row_fit(work: sdc_gui::ui::paint_counts::Work) {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = editor(fixture(d.path()));
+    settle(&mut h);
+    h.run_steps(4);
+    let warm = work.count();
+    assert!(warm > 0);
+    h.run_steps(4);
+    assert_eq!(work.count(), warm, "unchanged rows repeated text fitting");
+    h.ctx.global_style_mut(|s| {
+        s.text_styles
+            .get_mut(&egui::TextStyle::Button)
+            .unwrap()
+            .size += 1.0
+    });
+    h.run_steps(4);
+    let changed = work.count();
+    assert!(
+        changed > warm,
+        "the font change must invalidate measured widths"
+    );
+    h.run_steps(4);
+    assert_eq!(work.count(), changed);
+}
+
 const BC4_VALUE: &str = "BC4 · linear (one channel)";
 
 /// The BC4 format combos' value and rect.
@@ -1840,47 +1892,93 @@ fn a_long_format_value_reads_in_full_at_1280_and_1536() {
             assert!(r.width() > 96.0, "{w}: the combo widened ({r:?})");
             assert!(!painted_cut(&h, r), "{w}: {value} reads in full ({r:?})");
             assert_eq!(painted_in(&h, r), value, "{w}: painted as it is valued");
+            h.ctx.global_style_mut(|s| {
+                s.interaction.tooltip_delay = 0.0;
+                s.interaction.show_tooltips_only_when_still = false;
+            });
+            h.hover_at(r.center());
+            h.run_steps(4);
+            assert!(
+                h.query_by_role_and_label(Role::Label, &value).is_none(),
+                "uncut value needs no tooltip"
+            );
         }
     }
 }
 
-/// Review F1: a value the row has no room for is cut, and the hover holds it whole (rule 3.4). At the 724 px floor the
-/// long BC4 value still fits (the File cell only needs `FILE_MIN`), so the cut is made with a larger Button font: the
-/// combo wants more than the row can give.
+/// At the editor floor the full R8 value is available on hover, including the reason on a disabled combo.
 #[test]
 fn a_cut_format_value_has_its_full_text_on_hover() {
+    const VALUE: &str = "R8 · linear (one channel, uncompressed)";
+    const NAME: &str = "Height _p format";
     let d = tempfile::tempdir().unwrap();
-    let mut h = editor_at(bc4_set(d.path()), 1024.0, 800.0);
+    let dir = d.path().join("m");
+    std::fs::create_dir_all(&dir).unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgba([
+            (x * 4) as u8,
+            (y * 4) as u8,
+            90,
+            if x < 32 { 255 } else { 0 },
+        ])
+    })
+    .save(dir.join("rock01.png"))
+    .unwrap();
+    let mut m = suffix_set(d.path(), &["p"], engine::policy::AcceptSuggestions::None);
+    m.decide(DIFFUSE, sdc_gui::model::Answer::Subtype(Subtype::Diffuse));
+    idle(&mut m);
+    m.set_shader("m/rock01", Some(Shader::Pbr));
+    m.set_slot_lock("m/rock01", 7, true).unwrap();
+    idle(&mut m);
+    m.set_format(
+        "m/rock01_p.png",
+        engine::config::Format::R8,
+        engine::config::ColorTag::Unorm,
+    );
+    idle(&mut m);
+    let mut h = editor_at(m, 1239.0, 900.0);
     h.ctx.global_style_mut(|s| {
-        s.text_styles
-            .insert(egui::TextStyle::Button, egui::FontId::proportional(60.0));
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
     });
-    settle(&mut h);
-    let (_, r) = bc4_combos(&h).into_iter().next().expect("a BC4 combo");
-    // The text is taller than the combo then, so `painted_cut` would see no galley in it: compare the widths instead.
-    let text_w = h.ctx.fonts_mut(|f| {
-        f.layout_no_wrap(
-            BC4_VALUE.to_string(),
-            egui::FontId::proportional(60.0),
-            egui::Color32::WHITE,
-        )
-        .size()
-        .x
-    });
+    h.run_steps(4);
+    let floor = sdc_gui::ui::set_editor::ROWS_MIN;
+    let centre = |h: &Harness<'static, AppModel>| {
+        sdc_gui::ui::centre_rect(&h.ctx)
+            .unwrap()
+            .intersect(h.ctx.content_rect())
+            .width()
+    };
+    h.set_size(egui::vec2(1239.0 + floor - centre(&h), 900.0));
+    h.run_steps(4);
     assert!(
-        text_w > r.width(),
-        "the value ({text_w} px) is cut by its combo ({r:?})"
+        (centre(&h) - floor).abs() <= 0.5,
+        "editor width {} vs {floor}",
+        centre(&h)
     );
-    h.get_by_role_and_label(Role::ComboBox, "Height _p format")
-        .scroll_to_me();
-    h.run();
-    h.get_by_role_and_label(Role::ComboBox, "Height _p format")
-        .hover();
-    h.run();
-    h.run();
-    assert!(
-        h.query_all_by_label(BC4_VALUE)
-            .any(|n| n.accesskit_node().role() == Role::Label),
-        "the hover shows {BC4_VALUE}"
-    );
+    h.get_by_label("Slot confirm alpha");
+    for locked in [false, true] {
+        let expected = if locked {
+            h.state_mut()
+                .project
+                .as_mut()
+                .unwrap()
+                .set_error("rejected by the engine");
+            format!("{VALUE}\n{}", h.state().toml_read_only_reason().unwrap())
+        } else {
+            VALUE.to_string()
+        };
+        h.get_by_label(NAME).scroll_to_me();
+        h.run_steps(4);
+        let combo = h.get_by_label(NAME);
+        assert_eq!(combo.value().as_deref(), Some(VALUE));
+        assert!(
+            painted_cut(&h, combo.rect()),
+            "R8 at the floor, locked {locked}: {:?}",
+            combo.rect()
+        );
+        combo.hover();
+        h.run_steps(4);
+        h.get_by_role_and_label(Role::Label, &expected);
+    }
 }

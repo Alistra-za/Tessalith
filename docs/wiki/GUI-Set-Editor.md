@@ -25,7 +25,7 @@ Click a reason to go to its fix:
 
 ## Output files
 
-**Output files** lists the files this set writes. **Show in Explorer** appears once a file exists. <!-- D:JR3 --> Each line names the slot (or the file, for one that fills no slot, such as a complex `_m`) and the path under the export folder; hover it for the full path. A file a slot links from another set isn't listed: that set writes it. The group starts closed, with a count in its header such as "2 of 3 written", and the 3D view leaves it out. <!-- D:JR3 -->
+In 2D, **Output files** lists this set’s planned DDS files, including a file a share or link displaced and files without slots. Other sets list their own files. Lines use the row title or file name. Paths outside the export folder show in full. Hover a path for its full spelling. The closed header counts files present now, such as “2 of 3 on disk”. **Show in Explorer** appears for each file on disk. <!-- D:JR3 -->
 
 ## Slot rows
 
@@ -38,7 +38,7 @@ A heading line names the columns ("Slot", "File", "Format") while a row has a fo
 - A `_coat` fills Subsurface, which then reads **Coat colour + strength**.
 - A complex `_m` has no row. Its **Enable parallax** box sits under the rows ([Texture settings](GUI-Texture-Panel.md#changing-a-setting)).
 
-**Match on this** (a Diffuse or Normal row holding a file of the set, while the JSON panel shows) is the small link mark right of the Format dropdown; hover it for its name. It makes PGPatcher apply the entry to meshes with that exact texture in that slot ([Matching](GUI-PGPatcher-JSON.md#matching)). A linked slot has no mark: use **Matching** on the Material tab. <!-- D:JR1,JR4 -->
+On an own or borrowed Diffuse or Normal row, **Match on this** is the link mark in the Flags column while the JSON panel shows. It matches meshes with that exact texture. For a linked row use [Matching](GUI-PGPatcher-JSON.md#matching) on the Material tab. <!-- D:JR1,JR4 -->
 
 Drop a file from Explorer on a row to fill it. It must be a texture of the open folder and fit the slot; files are never copied, and the row says why if it refuses. The **Shader** dropdown lists the Mode's shaders, **Auto** clears your pick, and how a shader is chosen is on [Set shaders](Set-Shaders.md#how-the-shader-is-picked).
 
@@ -57,8 +57,8 @@ The Diffuse row's alpha dropdown, under the "Alpha" heading, shows the texture's
 
 Right-click a slot row, or a member chip on a card. **Show in Explorer** there selects the source file.
 
-- **Clear**, **From this set** and **Path** are one undo step each. On a borrowed slot, From this set and Clear both drop the borrow. <!-- D:HC7 --> On a set with a JSON entry, a cleared slot leaves the file under it, the set's own or a shared one, out of the JSON and reads "Left out of the JSON: you cleared this slot." **Use this file** runs **From this set**, so a shared file is dropped. <!-- D:JR1 -->
-- **From another set** (slots 1 to 8) links the slot to another set's map for the same game slot, so slot 7 offers Coat and Fuzz maps alike, and slot 3 Emissive and Skin. A slot linked from another set shows the file and the set it comes from; click the set to open it. **Unlink** removes the link. A path you typed with **Path** that no set writes reads "set by path" instead. **Unlink** and **Use this file** are off on a pinned slot. <!-- D:JR1 --> A linked slot counts as a file in that slot for the [automatic feature settings](GUI-PGPatcher-JSON.md#your-textures-turn-features-on).
+- **Clear**, **From this set** and **Path** each take one Undo step. Clear and From this set drop a share on a borrowed slot. <!-- D:HC7 --> On a set that writes a JSON entry, a cleared row reads “Left out of the JSON: you cleared this slot.” **Use this file** removes the clear and uses the file underneath, including a shared file. <!-- D:JR1 -->
+- **From another set** links slots 1 to 8 to a map for the same game slot. Slot 7 offers Coat and Fuzz, slot 3 Emissive and Skin. Click the source set to open it. An external **Path** reads “set by path”. **Unlink** removes the slot command and keeps any share underneath. Both Unlink and Use this file are off on a pinned slot. <!-- D:JR1 --> A link to a local map can turn on [automatic feature settings](GUI-PGPatcher-JSON.md#your-textures-turn-features-on).
 - On an Advanced skin set's empty **Skin wet** or **Skin detail** row, **Assign…** lists that kind of file from the set's own folder, if it's in no set or alone in a set of its own that you haven't changed. A file still waiting for a type is listed as *undecided* and is typed for the slot when you pick it. Pick a file to move it into the set, as one undo step. **From another set** borrows another set's map instead. These two slots have no Path. <!-- D:JD1 -->
 - **Pin this slot (always use this file)** keeps the slot's file as it is. A pinned slot refuses drags and slot commands, bulk edits skip it (*slot locked*), and automatic re-typing leaves it alone. Pinning the diffuse of an Advanced skin set has a side effect: [Texture types](Texture-Types.md#suffixes). The pin never goes into the PGPatcher JSON ([where it's saved](GUI-Sets-Column.md#where-set-edits-are-saved)).
 - **Keep the original texture** / **Let PGPatcher replace the texture** toggles the slot's PGPatcher lock (`lock_diffuse`, `lock_normal`, `lock_emissive`, `lock_parallax`, `lock_rmaos`, `lock_cnr`, `lock_subsurface`) on a set that writes a PGPatcher entry. PGPatcher then leaves the mesh's own texture in that slot. The file is still exported, and the card shows a padlock, *kept by PGPatcher*. A `slotN` command on the same slot wins ("slotN overrides the lock"). There is no cubemap lock, because `lock_cubemap` would clear the slot.

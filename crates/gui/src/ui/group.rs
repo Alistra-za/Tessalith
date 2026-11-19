@@ -44,11 +44,11 @@ pub fn group_closed_value<R>(
 }
 
 /// The one header drawing: `values` is (`value`, `closed_value`).
-fn group_impl<R>(
+pub(super) fn group_impl<R, T: Into<egui::WidgetText>>(
     ui: &mut egui::Ui,
     id: impl std::hash::Hash,
     title: &str,
-    values: (Option<egui::RichText>, Option<egui::RichText>),
+    values: (Option<T>, Option<T>),
     default_open: bool,
     open_now: bool,
     body: impl FnOnce(&mut egui::Ui) -> R,

@@ -5,9 +5,9 @@ use super::items::{ItemKind, ItemStatus, TextureItem};
 use super::known_paths::TxstRecord;
 use super::pbr_export::writes_entry;
 use super::sets::{
-    entry_of, has_slot_clear, has_slot_link, link_row_kind, linked_map_slot, missing_map_slot,
-    recipe_suffix, renamed_output, slot_of, slot_string, written_game_location, DefaultOutputs,
-    SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
+    entry_of, has_slot_clear, has_slot_link, link_row_kind, linked_map_slot, member_output_key,
+    missing_map_slot, projected_slot, recipe_suffix, renamed_output, slot_of, slot_string,
+    DefaultOutputs, SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
@@ -86,6 +86,17 @@ pub fn record_slot(item: &TextureItem) -> Option<u8> {
 /// Every output of a mapped set that its record names: (set id, output key, path under the export folder). A PBR set
 /// on CS is left out (its prefix names its outputs), and so is a record path `record_rel` refuses.
 pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey, PathBuf)> {
+    record_outputs(m, views)
+        .into_iter()
+        .map(|(id, key, rel, _)| (id, key, rel))
+        .collect()
+}
+
+/// Keep the record's game path beside its installation path through output selection.
+pub(super) fn record_outputs(
+    m: &AppModel,
+    views: &[SetView],
+) -> Vec<(String, OutputKey, PathBuf, String)> {
     let (Some(doc), Some(root)) = (m.sets_doc.as_ref(), m.root.as_deref()) else {
         return vec![];
     };
@@ -114,10 +125,10 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         }
         for key in &v.members {
             let Some(item) = m.item(key) else { continue };
-            if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
+            if let Some((k, game, rel)) = member_write(root, v, item, &txst.slots, base) {
                 // Note HQ6: explicit paths are under the export folder.
                 let prefix = prefix.get_or_insert_with(|| m.plan_prefix());
-                out.push((v.id.clone(), k, super::export_rel_in(prefix, &rel)));
+                out.push((v.id.clone(), k, super::export_rel_in(prefix, &rel), game));
             }
         }
     }
@@ -365,9 +376,8 @@ struct Written<'a> {
 
 /// Review E1 (Task 15a): every planned output of every set (each member that writes a file of its own, the members
 /// after the first of a slot kind and the unslotted outputs included), built in one pass. Rulings 3b-F6 and 3b-F16: a
-/// key is the game location of the file the settled job writes (`written_game_location`, folded), the path From
-/// another set writes while the plan is current; an explicit path asked for is never read here, so the index holds no
-/// prediction. An output under no `textures` folder has none and is in no entry. The first set in display order that
+/// key is the projected game location of the landed plan, folded for lookup. From another set uses the same
+/// projection. An output without a game location is in no entry. The first set in display order that
 /// writes a path keeps it. The folders are read once per build.
 fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String, Written<'a>> {
     let mut out = HashMap::new();
@@ -377,7 +387,7 @@ fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String,
             let Some(it) = m.item(item) else {
                 continue;
             };
-            if let Some(p) = written_game_location(&roots, it) {
+            if let Some(p) = projected_slot(m, &roots, it, member_output_key(v, it).as_ref()) {
                 out.entry(p.to_ascii_lowercase()).or_insert(Written {
                     from: &v.id,
                     short: &v.short,

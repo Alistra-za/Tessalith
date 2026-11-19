@@ -169,25 +169,24 @@ pub struct MemberSlot {
 /// link fills (`Encoder.members` is keyed by kind, so no two slots leave here with one kind); the row's own file is
 /// not served then, and neither is an own or borrowed file whose slot holds a link for another kind
 /// (`SlotShown::Replaced`). A typed path naming no file pushes nothing: the own file under it keeps only its prefix
-/// path and the view reads the game data for the rest. Without the entry (D3): [`plain_path`], no links.
+/// path and the view reads the game data for the rest. A link with no slot row also reads game data.
+/// Without the entry (D3): [`plain_path`], no links.
 /// Coat and fuzz share slot 7: both claim an explicit slot-7 path, and the later one wins in
 /// [`Encoder::memory_sources`].
 pub fn member_slots(m: &AppModel, v: &SetView, entry: Option<&EntryInput>) -> Vec<MemberSlot> {
     // The links' files first: each takes its row, and the row's own fill is then left out.
     let mut linked_out: Vec<MemberSlot> = vec![];
+    // The plain preview has no entry, even when its SetView carries links.
     if entry.is_some() {
         for link in v.linked.values() {
             let Some(key) = &link.item else {
                 continue;
             };
-            // shortcut: a link on game slot 5 with no kind of the set on it has no row to key its member by, so it is
-            // not served and the view reads the game data; upgrade when `Encoder.members` is keyed by more than `SlotKind`.
+            // shortcut: no SlotKind uses game slot 5. Serve rowless links when members can be keyed by game slot.
             let Some(row) = link.row else {
                 continue;
             };
-            if linked_out.iter().any(|s| s.kind == row) {
-                continue;
-            }
+            // Links are unique per game slot and each destination row belongs to one game slot.
             let Some(item) = m.item(key) else {
                 continue;
             };
@@ -1079,7 +1078,8 @@ fn fingerprint_of(
 ) -> SetFingerprint {
     let entry = super::pbr_export::exports_json(m, v).then(|| {
         let (_, paths) = super::sets::engine_inputs(m);
-        super::pbr_export::candidate_input(m, v, all, &paths)
+        let roots = super::sets::output_roots(m);
+        super::pbr_export::candidate_input(m, v, all, &paths, &roots)
     });
     SetFingerprint {
         set_key: target.clone(),

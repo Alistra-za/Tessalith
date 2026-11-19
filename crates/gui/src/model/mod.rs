@@ -699,6 +699,9 @@ pub struct AppModel {
     /// The export folder `sets` were planned with (audit 08c-3): set ids strip it, also while a re-plan for a new
     /// export folder runs. `None` before the first plan.
     sets_root: Option<PathBuf>,
+    /// Game paths selected by PBR prefixes and TXST mappings. Only a successful full plan installs its paths.
+    slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
+    pending_slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
     /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
     items_rev: u64,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
@@ -1080,6 +1083,8 @@ impl AppModel {
             rename_cache: Default::default(),
             sets: vec![],
             sets_root: None,
+            slot_paths: BTreeMap::new(),
+            pending_slot_paths: BTreeMap::new(),
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
@@ -1248,6 +1253,8 @@ impl AppModel {
         self.export_after_plan = false;
         self.continue_after_plan = None;
         self.last_inputs = None;
+        self.slot_paths.clear();
+        self.pending_slot_paths.clear();
         self.inputs_rev += 1;
         self.auto_replans = 0;
         self.reset_type_follow();
@@ -1396,9 +1403,13 @@ impl AppModel {
     /// inherited. Without one (no folder open, or an `sdc-project.toml` that does not parse) the pick lives in
     /// `gui.toml` (Note BV6), so that is the choice.
     pub fn export_folder_chosen(&self) -> Option<PathBuf> {
+        self.export_folder_ref().map(Path::to_owned)
+    }
+
+    pub(crate) fn export_folder_ref(&self) -> Option<&Path> {
         match self.sets_doc.as_ref().filter(|d| !d.read_only()) {
-            Some(d) => d.export_folder(),
-            None => self.settings.export_folder.clone(),
+            Some(d) => d.export_folder_ref(),
+            None => self.settings.export_folder.as_deref(),
         }
     }
 
@@ -1413,6 +1424,13 @@ impl AppModel {
 
     /// What the next plan uses: the folder, recursive, High suggestions accepted (Note U3), the in-memory `sdc.toml` (DECISIONS N4).
     pub fn request(&self) -> Option<BatchRequest> {
+        self.request_with_paths(None)
+    }
+
+    fn request_with_paths(
+        &self,
+        game: Option<&mut BTreeMap<engine::sets::OutputKey, PathBuf>>,
+    ) -> Option<BatchRequest> {
         let root = self.root.clone()?;
         let project = self.project.as_ref()?;
         let mut req = BatchRequest::new(vec![root], self.output_root(), Target::Cs);
@@ -1436,7 +1454,7 @@ impl AppModel {
         });
         req.user_config = self.user_config.clone();
         req.user_presets = self.user_presets.clone();
-        let (edits, paths) = sets::engine_inputs(self);
+        let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
         req.shared_roughness = sets::shared_roughness(self);
@@ -1624,15 +1642,19 @@ impl AppModel {
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
-        let (Some(session), Some(req), Some(root)) =
-            (self.session.clone(), self.request(), self.root.clone())
-        else {
+        let mut slot_paths = BTreeMap::new();
+        let (Some(session), Some(req), Some(root)) = (
+            self.session.clone(),
+            self.request_with_paths(Some(&mut slot_paths)),
+            self.root.clone(),
+        ) else {
             return;
         };
         if let Some(c) = self.planning.take() {
             c.cancel();
         }
         self.plan_failed = false;
+        self.pending_slot_paths = slot_paths;
         self.generation += 1;
         self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
@@ -2263,10 +2285,21 @@ impl AppModel {
         self.export_go();
     }
 
+    /// A failed replan leaves the previous jobs on screen. Both Export buttons need a successful plan.
+    fn refuse_failed_export_plan(&mut self) -> bool {
+        if self.root.is_some() && self.plan_failed {
+            self.dialog = Some(Dialog::Error(
+                "The last plan failed. Reopen the folder to plan it again before exporting.".into(),
+            ));
+            return true;
+        }
+        false
+    }
+
     /// `export_clicked` for the scope as it is (Export set / group keeps theirs).
     fn export_go(&mut self) {
         self.status_note = None;
-        if self.root.is_none() {
+        if self.root.is_none() || self.refuse_failed_export_plan() {
             return;
         }
         // A plan is in flight (just opened, or an edit): the items on screen are the previous plan's, so the checks
@@ -2280,6 +2313,7 @@ impl AppModel {
             self.replan();
             return;
         }
+        self.expand_scope_hosts();
         self.export_checks();
     }
 
@@ -2347,7 +2381,7 @@ impl AppModel {
     /// Ruling 3b-F21: why a From another set pick may not store a member's path now, or `None`. It waits on what Export
     /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
     /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
-    /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it. A running
+    /// plan failed for good (`plan_failed`), as Export does: the items are then the plan before it. A running
     /// plan or read reads "Planning…" (`PICK_PLANNING`); the other two say the plan must run again (`PICK_PLAN_AGAIN`,
     /// ruling 3b-F25). Uncached: the click re-checks with it (`member_game_path`); the menu rows read
     /// `pick_waits_cached`.
@@ -3017,11 +3051,13 @@ impl AppModel {
             .and_then(|i| i.set_key.clone());
         let selected_expanded = self.expanded.is_some()
             && self.selection == Selection::Item(self.expanded.clone().unwrap_or_default());
-        // Asked under the old plan's views and root, before they are replaced (`rekey_filter` below).
+        // Resolve the filter under the old plan before moving its key to the new root.
         let filter_names_an_id = self.set_filter_names_an_id();
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
+        let paths_changed = self.slot_paths != self.pending_slot_paths;
+        self.slot_paths = std::mem::take(&mut self.pending_slot_paths);
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
         self.request_dds_thumbs();
@@ -3031,15 +3067,7 @@ impl AppModel {
         let old_sets = std::mem::replace(&mut self.sets, view.sets);
         let old_root = self.sets_root.replace(view.output_root);
         self.rekey_scope(old_root.as_deref());
-        self.rekey_filter(old_root.as_deref(), filter_names_an_id);
-        // Note JI2: rekey an engine key when its output root changes. A SetId survives the root replacement verbatim.
-        if let (Some(old), Selection::Set(k)) = (old_root.as_deref(), &self.selection) {
-            let new = self.sets_root();
-            let id = engine::sets::set_id(old, k);
-            if old != new.as_path() && id != *k {
-                self.selection = Selection::Set(engine::sets::set_key(&new, &id));
-            }
-        }
+        self.rekey_selected_and_filtered_sets(old_root.as_deref(), filter_names_an_id);
         // Note HQ6: after the output root lands, since the game paths are read under it.
         self.refresh_game_paths();
         self.unmatched_keys = view.unmatched;
@@ -3051,7 +3079,9 @@ impl AppModel {
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
         // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (FL7).
         if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
-            self.carry_views(carried, &old_key, &scope, false);
+            if !paths_changed {
+                self.carry_views(carried, &old_key, &scope, false);
+            }
         }
         // Fast re-plan: this plan ran on every edit so far.
         self.dirty_keys.clear();
@@ -4881,6 +4911,66 @@ mod tests {
         assert!(m.wait_idle(Duration::from_secs(60)));
         assert_eq!(m.target, Target::Cs);
         m
+    }
+
+    #[test]
+    fn a_warm_assign_menu_copies_no_skipped_set_ids() {
+        use crate::project::SKIPPED_IDS_COPIED;
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_also_settings(|c| c.skip = (0..3000).map(|n| format!("sets/{n}")).collect());
+        assert!(m.wait_idle(Duration::from_secs(60)));
+        let menu = || m.slot_menu("landscape/rock01", sets::SlotKind::Diffuse);
+        assert!(menu()
+            .iter()
+            .any(|e| matches!(e.action, bulk::MenuAction::SlotLink { .. })));
+        SKIPPED_IDS_COPIED.set(0);
+        assert_eq!(m.also_config().skip.len(), 3000);
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "the probe observes a whole configuration copy"
+        );
+        menu();
+        assert_eq!(
+            SKIPPED_IDS_COPIED.get(),
+            3000,
+            "a cache hit copied skip entries"
+        );
+    }
+
+    #[test]
+    fn reselecting_the_same_folder_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        let before = m.pick_key();
+        m.set_export_folder(m.export_root());
+        assert!(!m.inputs_unsettled());
+        assert!(
+            before != m.pick_key(),
+            "reselecting the folder must invalidate the row cache"
+        );
+    }
+
+    #[test]
+    fn terminal_failure_with_equal_inputs_changes_the_pick_key() {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = packed_named_model(d.path());
+        m.set_export_folder(m.export_root());
+        let pending = m.pick_key();
+        m.handle(WorkerMsg::Planned {
+            generation: m.generation,
+            result: Err(PlanFailure {
+                message: "failed".into(),
+                config: false,
+            }),
+        });
+        assert!(!m.inputs_unsettled() && !m.full_plan_pending());
+        assert!(
+            pending != m.pick_key(),
+            "terminal failure must invalidate the row cache"
+        );
+        assert_eq!(m.pick_waits_cached(), Some(sets::PICK_PLAN_AGAIN));
     }
 
     /// Final fix I1: the indexed `engine_inputs` and `output_candidates` equal the linear scans they replaced, on a

@@ -553,6 +553,15 @@ fn keeping_a_hand_edited_json_leaves_it_and_the_record() {
     assert_eq!(m.sets_doc.as_ref().unwrap().last_json_sha256(), before);
 }
 
+fn dep(key: &str) -> JsonDependency {
+    JsonDependency {
+        job_key: key.into(),
+        output: key.into(),
+        slot_file: None,
+        slot: None,
+    }
+}
+
 #[test]
 fn finish_leaves_out_sets_whose_outputs_did_not_export() {
     use sdc_gui::model::export::{Row, RowState};
@@ -564,7 +573,7 @@ fn finish_leaves_out_sets_whose_outputs_did_not_export() {
         entries: vec![
             (
                 "a/one".into(),
-                vec!["a/one.dds".into()],
+                vec![dep("a/one.dds")],
                 EntryInput {
                     derived_match: "a\\one".into(),
                     ..Default::default()
@@ -572,7 +581,7 @@ fn finish_leaves_out_sets_whose_outputs_did_not_export() {
             ),
             (
                 "a/two".into(),
-                vec!["a/two.dds".into()],
+                vec![dep("a/two.dds")],
                 EntryInput {
                     derived_match: "a\\two".into(),
                     ..Default::default()
@@ -580,7 +589,7 @@ fn finish_leaves_out_sets_whose_outputs_did_not_export() {
             ),
         ],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     let rows = vec![
@@ -635,11 +644,11 @@ fn finish_with_every_set_failed_keeps_the_old_json_even_with_a_delete_section() 
         root: Default::default(),
         path: path.clone(),
         entries: vec![
-            ("a/one".into(), vec!["a/one.dds".into()], set),
+            ("a/one".into(), vec![dep("a/one.dds")], set),
             ("delete section 1".into(), vec![], section.clone()),
         ],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     let rows = vec![Row {
@@ -666,7 +675,7 @@ fn finish_with_every_set_failed_keeps_the_old_json_even_with_a_delete_section() 
         path: path.clone(),
         entries: vec![("delete section 1".into(), vec![], section)],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     let mut notes = vec![];
@@ -704,7 +713,7 @@ fn finish_copies_borrowed_slots_and_skips_what_did_not_export() {
             (gone, dir.path().join("x.dds"), "o/gone.dds".into()),
             (stale, dir.path().join("y.dds"), "o/stale.dds".into()),
         ],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     let row = |k: &str, state| Row {
@@ -834,7 +843,7 @@ fn an_unfinished_export_writes_no_json_and_says_why() {
         path: path.clone(),
         entries: vec![("a/one".into(), vec![], Default::default())],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     assert_eq!(
@@ -852,7 +861,7 @@ fn an_unfinished_export_writes_no_json_and_says_why() {
         path: Default::default(),
         entries: vec![],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     assert_eq!(unfinished_note(&v, false), None);
@@ -868,14 +877,14 @@ fn an_identical_file_on_disk_is_not_asked_about() {
         path: dir.path().join("x.json"),
         entries: vec![(
             "a/one".into(),
-            vec!["a/one.dds".into()],
+            vec![dep("a/one.dds")],
             EntryInput {
                 derived_match: "a\\one".into(),
                 ..Default::default()
             },
         )],
         copies: vec![],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     let rows = vec![Row {
@@ -1374,7 +1383,7 @@ fn an_unfinished_vanilla_export_says_the_copies_were_not_made() {
         path: std::path::PathBuf::new(),
         entries: vec![],
         copies: vec![("a.dds".into(), "b_n.dds".into(), "a.dds".into())],
-        untouched_root: None,
+        leaves_sets_out: false,
         held: vec![],
     };
     assert_eq!(

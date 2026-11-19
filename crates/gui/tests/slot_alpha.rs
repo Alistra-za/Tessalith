@@ -369,7 +369,7 @@ fn alpha_reads_in_full(set: &str, m: AppModel, want: &str, w: f32) {
 /// Pin of the alpha value's place: in full, under its heading, on a set that asks (Confirm shows, the tightest row),
 /// at 1280 and at a wide window.
 #[test]
-fn the_alpha_value_reads_in_full_at_1280() {
+fn the_alpha_value_reads_in_full_at_1280_and_1600() {
     for w in [1280.0, 1600.0] {
         let d = tempfile::tempdir().unwrap();
         let m = leaf(d.path());
@@ -397,6 +397,7 @@ fn the_alpha_value_reads_in_full_on_a_json_set() {
         alpha_reads_in_full("rock", m, want, w);
     }
 }
+
 /// The link mark's rings (two 1.5 px circles) painted inside `r`.
 fn rings(h: &Harness<'static, AppModel>, r: egui::Rect) -> usize {
     fn count(s: &egui::Shape, r: egui::Rect) -> usize {

@@ -66,7 +66,7 @@ A row you must act on has its fix as a button.
 
 ### Clear recipe
 
-**Clear recipe** removes the `packing.recipe` written on the set's two packed files, and nothing else: one the set can't build, one the two files disagree on, or one that names a packed map the set's shader doesn't read. With no recipe left, the shader and the maps decide. A recipe from a project default or a preset applies next instead, and the warning can stay. It is offered under the `cs` target when a recipe other than `auto` is written on one of this set's own `_rmaos` or `_rfaos` files in `sdc.toml`. A recipe from a project default or a preset gets no button. One Undo step removes it from both files. <!-- D:JR10 -->
+On the `cs` target, **Clear recipe** appears when this set has a recipe other than `auto` on its `_rmaos` or `_rfaos` file in `sdc.toml` and Problems flags the recipe or packed map. It removes `packing.recipe` from both file entries. One Undo restores the values you had. A project or preset recipe can apply next and keep the warning. Otherwise the shader and maps choose the recipe. <!-- D:JR10 -->
 
 ### Mark as intended
 

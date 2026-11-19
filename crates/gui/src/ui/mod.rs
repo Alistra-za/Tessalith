@@ -52,6 +52,58 @@ use std::cell::RefCell;
 /// The badge rule lives in the model (the "Has warnings" filter shares it).
 pub use crate::model::counts_toward_badge;
 
+/// Retain a drawing value while it is in use. Text layout must run outside the context lock.
+fn paint_cached<T: Clone + Send + Sync + 'static>(
+    ctx: &egui::Context,
+    key: egui::Id,
+    build: impl FnOnce() -> T,
+) -> T {
+    type Cache<T> = egui::cache::FramePublisher<egui::Id, T>;
+    if let Some(value) = ctx.memory_mut(|m| {
+        let cache = m.caches.cache::<Cache<T>>();
+        let value = cache.get(&key)?.clone();
+        cache.set(key, value.clone());
+        Some(value)
+    }) {
+        return value;
+    }
+    let value = build();
+    ctx.memory_mut(|m| m.caches.cache::<Cache<T>>().set(key, value.clone()));
+    value
+}
+
+/// Measurements of set-editor paint work on the current GUI thread.
+#[cfg(feature = "test-hooks")]
+pub mod paint_counts {
+    use std::cell::Cell;
+
+    #[derive(Clone, Copy)]
+    pub enum Work {
+        Title,
+        TitleFit,
+        ShortTitles,
+        OutputSummary,
+        OutputLine,
+        Format,
+        Picker,
+    }
+
+    thread_local! { static BUILDS: Cell<[usize; 7]> = const { Cell::new([0; 7]) }; }
+
+    impl Work {
+        pub(super) fn built(self) {
+            BUILDS.with(|b| {
+                let mut counts = b.get();
+                counts[self as usize] += 1;
+                b.set(counts);
+            });
+        }
+        pub fn count(self) -> usize {
+            BUILDS.with(|b| b.get()[self as usize])
+        }
+    }
+}
+
 /// Per-window drawing state that is not part of the model.
 #[derive(Default)]
 pub struct State {

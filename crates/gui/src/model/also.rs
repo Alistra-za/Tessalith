@@ -54,13 +54,15 @@ pub(super) fn phase_name(p: Phase) -> &'static str {
 impl AppModel {
     /// `[export]` of the project (the default without a usable `sdc.toml`).
     pub fn also_config(&self) -> ExportConfig {
+        self.export_project()
+            .map(ProjectDoc::export_config)
+            .unwrap_or_default()
+    }
+
+    fn export_project(&self) -> Option<&ProjectDoc> {
         #[cfg(feature = "test-hooks")]
         sets::count_root_read(true);
-        self.project
-            .as_ref()
-            .filter(|p| !p.read_only())
-            .map(|p| p.export_config())
-            .unwrap_or_default()
+        self.project.as_ref().filter(|p| !p.read_only())
     }
 
     /// (Vanilla, CM) from `[export] also`.
@@ -196,31 +198,31 @@ impl AppModel {
     /// Review M1: only in the cs mode, so a tick left from it never sends the plan or the NIF edits into a PBR folder
     /// no export can fill (Review names TA20 instead).
     pub fn also_root(&self) -> Option<PathBuf> {
-        self.also_root_in(&self.also_config(), &self.export_root())
+        self.also_root_in(&self.export_root())
     }
 
-    /// `also_root` over the configuration (`c`) and the export folder (`export`) the caller read, each once (ruling
-    /// 3b-F21).
-    fn also_root_in(&self, c: &ExportConfig, export: &Path) -> Option<PathBuf> {
-        let (vanilla, cm) = ticks_of(c);
-        ((vanilla || cm) && self.target == Target::Cs).then(|| {
-            let loc = self
-                .chosen_also_location()
-                .unwrap_or_else(|| export.to_path_buf());
-            let [pbr, ..] = self.folders_in(c, loc);
-            pbr
+    /// Borrow the cached configuration: a root lookup on a warm Assign frame never copies the skip list.
+    fn also_root_in(&self, export: &Path) -> Option<PathBuf> {
+        self.export_project()?.with_export_config(|c| {
+            let (vanilla, cm) = ticks_of(c);
+            ((vanilla || cm) && self.target == Target::Cs).then(|| {
+                let loc = self
+                    .chosen_also_location()
+                    .unwrap_or_else(|| export.to_path_buf());
+                let [pbr, ..] = self.folders_in(c, loc);
+                pbr
+            })
         })
     }
 
     /// The folder the plan and the PBR outputs are under: the PBR folder while a tick is on, else the export folder.
     pub fn output_root(&self) -> PathBuf {
-        self.output_root_in(&self.also_config(), &self.export_root())
+        self.output_root_in(&self.export_root())
     }
 
-    /// `output_root` over the configuration (`c`) and the export folder (`export`) the caller read, each once (ruling
-    /// 3b-F21: `sets::output_roots` reads both folders with one read of each).
-    pub(crate) fn output_root_in(&self, c: &ExportConfig, export: &Path) -> PathBuf {
-        self.also_root_in(c, export)
+    /// `sets::output_roots` already read the export folder; use that same path for both roots.
+    pub(crate) fn output_root_in(&self, export: &Path) -> PathBuf {
+        self.also_root_in(export)
             .unwrap_or_else(|| export.to_path_buf())
     }
 

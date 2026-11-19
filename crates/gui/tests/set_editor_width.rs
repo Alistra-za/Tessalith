@@ -314,6 +314,29 @@ fn a_centre_tab_in_front_does_not_take_the_editors_floor() {
     }
 }
 
+#[test]
+fn selection_in_front_of_a_docked_view_keeps_the_editors_floor() {
+    let left = |dock: bool| {
+        let d = tempfile::tempdir().unwrap();
+        let (mut m, _) = rock_set(d.path());
+        if dock {
+            let sdc_gui::model::Selection::Set(key) = m.selection.clone() else {
+                panic!("selected set")
+            };
+            m.open_json_editor();
+            m.select_set(&key);
+            assert!(m.json_editor_open && m.centre_front() == CentreTab::Selection);
+        }
+        let mut h = harness(m, 1057.0);
+        h.run_steps(4);
+        sdc_gui::ui::centre_rect(&h.ctx).unwrap().left()
+    };
+    assert!(
+        (left(true) - left(false)).abs() < 0.5,
+        "a docked background view keeps the same editor floor"
+    );
+}
+
 /// Review E24, the preview's floor (K8, Note FC8): a texture expanded behind a centre tab does not take the preview's
 /// floor either. The floor is 776 px from 1280 px up, 520 below.
 #[test]

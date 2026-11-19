@@ -186,11 +186,118 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
     // StatCache's TTL would hold the "missing" read above.
     h.state().stats.borrow_mut().clear();
     h.run();
-    assert!(h.query_by_label(&show).is_some(), "{show} once it exists");
+    let button = h.get_by_label(&show).rect();
+    let right = h
+        .get_by_label_contains(&format!("1 of {} on disk", listed.len()))
+        .rect()
+        .right();
+    let scroll = sdc_gui::look::thin_scroll();
+    assert!(
+        button.right() + scroll.bar_width + scroll.bar_outer_margin <= right,
+        "the output button clears the scroll bar: {button:?}, right {right}"
+    );
 }
 
-/// Final wave Group 2: a set none of whose members writes a file has an empty Output files group that says so, and a
-/// header that reads "none".
+#[test]
+fn warm_output_strings_follow_the_disk_count_and_the_displayed_files() {
+    use sdc_gui::ui::paint_counts::Work::{OutputLine, OutputSummary};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, "arch/wall");
+    let v = views(&m);
+    let files = set_outputs(v.iter().find(|v| v.id == "arch/wall").unwrap());
+    let mut h = harness(m);
+    h.run_steps(4);
+    let closed = OutputSummary.count();
+    assert!(closed > 0);
+    assert_eq!(OutputLine.count(), 0, "closed group built its file lines");
+    h.run_steps(4);
+    assert_eq!(
+        OutputSummary.count(),
+        closed,
+        "unchanged count rebuilt its summary"
+    );
+    h.get_by_label_contains("Output files").click();
+    h.run_steps(4);
+    assert_eq!(OutputLine.count(), files.len(), "each open line built once");
+    let path = &files[0].2;
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(path, b"dds").unwrap();
+    h.state().stats.borrow_mut().clear();
+    h.run_steps(4);
+    h.get_by_label(&format!("1 of {} on disk", files.len()));
+    assert_eq!(OutputSummary.count(), closed + 1);
+    assert_eq!(
+        OutputLine.count(),
+        files.len(),
+        "disk count changed the path strings"
+    );
+    let moved = path.with_file_name("renamed-output.dds");
+    let m = h.state_mut();
+    let item = m.items.iter_mut().find(|i| i.key == files[0].1).unwrap();
+    item.job.as_mut().unwrap().output = moved.clone();
+    m.invalidate_views();
+    h.run_steps(4);
+    h.get_by_label_contains(moved.to_str().unwrap());
+    assert_eq!(
+        OutputLine.count(),
+        files.len() + 1,
+        "only the renamed path needs a new line"
+    );
+}
+
+#[test]
+fn a_truncated_output_has_one_hover_with_the_absolute_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let path = m.export_root().join(format!(
+        "textures/arch/{}wall.dds",
+        "weathered_stone_".repeat(8)
+    ));
+    m.items
+        .iter_mut()
+        .find(|i| i.key == WALL_ALBEDO)
+        .unwrap()
+        .job
+        .as_mut()
+        .unwrap()
+        .output = path.clone();
+    m.invalidate_views();
+    select_set(&mut m, "arch/wall");
+    let mut h = harness_at(m, 1057.0);
+    h.ctx.global_style_mut(|s| {
+        s.interaction.tooltip_delay = 0.0;
+        s.interaction.show_tooltips_only_when_still = false;
+    });
+    h.run_steps(4);
+    h.get_by_label_contains("Output files").scroll_to_me();
+    h.run();
+    h.get_by_label_contains("Output files").click();
+    h.run_steps(4);
+    h.get_by_label(OUTPUTS_COUNT_NOTE);
+    let label = format!("Diffuse: {}", path.display());
+    h.get_by_label(&label).scroll_to_me();
+    h.run_steps(4);
+    let line = h.get_by_label(&label);
+    assert!(
+        painted_cut(&h, line.rect()),
+        "premise: the displayed path is elided"
+    );
+    line.hover();
+    h.run_steps(4);
+    h.get_by_label(&path.display().to_string());
+    let relative = path.strip_prefix(h.state().export_root()).unwrap();
+    let repeated = format!(
+        "Diffuse: {}",
+        relative.display().to_string().replace('/', "\\")
+    );
+    assert!(
+        h.query_by_label(&repeated).is_none(),
+        "only the absolute path appears on hover"
+    );
+}
+
+/// The empty Output files group explains the count.
 #[test]
 fn a_set_that_writes_nothing_says_so() {
     let d = tempfile::tempdir().unwrap();
@@ -610,7 +717,7 @@ fn a_link_over_an_own_file_shows_the_link_and_unlink_restores_it() {
 }
 
 #[test]
-fn an_own_file_under_a_link_for_the_other_kind_says_it_is_not_written() {
+fn an_own_file_under_a_link_for_the_other_kind_still_converts() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair_with(
         d.path(),
@@ -627,8 +734,10 @@ fn an_own_file_under_a_link_for_the_other_kind_says_it_is_not_written() {
     select_set(&mut m, LEAF);
     let h = harness(m);
     assert!(
-        h.query_by_label("leaf_f.png is not written: slot 7 is linked.")
-            .is_some(),
+        h.query_by_label(
+            "leaf_f.png still converts to DDS. The JSON uses the linked file for slot 7."
+        )
+        .is_some(),
         "the own file's line"
     );
     assert!(
@@ -746,13 +855,13 @@ fn chain_borrows(m: &AppModel) -> Vec<Option<String>> {
 
 /// Clicks `button` on moss's editor and checks ruling 3b-W1: the borrow lines are byte-identical to `before`'s, one
 /// Undo step, the row shows the shared file with no link or clear left, and the plan's borrowed normals are the
-/// model's (the action needs no plan).
+/// model's after the edit settles.
 fn click_and_check_the_borrows_stay(mut m: AppModel, before: &str, button: &str) {
     select_set(&mut m, MOSS);
     let mut h = harness(m);
     let steps = h.state().history.undo.len();
     h.get_by_label(button).click();
-    h.run();
+    h.step();
     assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
     h.run();
     let m = h.state();
@@ -1204,6 +1313,17 @@ fn blocked_with_reason(m: AppModel, control: &str, reason: &str) {
     assert!(h.query_by_label_contains(reason).is_some(), "{reason}");
 }
 
+#[test]
+fn a_read_only_sets_document_explains_the_refused_match_toggle() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    select_set(&mut m, "arch/wall");
+    std::fs::write(d.path().join("sdc-project.toml"), "[").unwrap();
+    m.sets_doc = Some(sdc_gui::sets_doc::SetsDoc::open(d.path()));
+    let reason = m.sets_read_only_reason().expect("read-only document");
+    blocked_with_reason(m, "Match on this (Diffuse)", &reason);
+}
+
 /// Whether the selected set's `control` is greyed.
 fn greyed(m: AppModel, control: &str) -> (AppModel, bool) {
     use egui_kittest::kittest::NodeT;
@@ -1453,6 +1573,216 @@ fn exported_entry(m: &mut AppModel, match1: &str) -> (Option<Value>, String) {
 
 const LEAF_MATCH: &str = r"arch\leaf.dds";
 const NO_HEIGHT: &str = "arch/leaf: parallax is on but the set has no height texture (_p)";
+
+/// Each run has its own JSON name so a refused export cannot pass on an earlier file.
+fn fresh_document(m: &mut AppModel, name: &str) -> Value {
+    m.set_json_name(name);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let path = pgp_json_path(m);
+    assert!(!path.exists(), "fresh export destination {path:?}");
+    export_through(m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("{path:?}: {e}; {} {:?}", m.status_line, m.export.notes));
+    serde_json::from_slice(&bytes).expect("written PGPatcher JSON")
+}
+
+fn disk_set<'a>(doc: &'a Value, match1: &str) -> &'a Value {
+    doc["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["match1"] == match1)
+        .unwrap_or_else(|| panic!("missing {match1} in {doc}"))
+}
+
+#[test]
+fn linked_and_cleared_feature_defaults_change_the_json_on_disk() {
+    for (n, file, subtype, feature) in [
+        (3, "wall_g.png", Subtype::PbrEmissive, "emissive"),
+        (4, "wall_p.png", Subtype::Height, "parallax"),
+        (7, "wall_cnr.png", Subtype::CoatNormal, "multilayer"),
+        (7, "wall_f.png", Subtype::PbrFuzz, "fuzz"),
+        (8, "wall_s.png", Subtype::PbrSubsurface, "subsurface"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = no_albedo_pair_with(d.path(), &[(file, [128, 128, 255], subtype)]);
+        let wall_match = r"arch\wall.dds";
+        if subtype == Subtype::PbrFuzz {
+            for set in ["arch/wall", LEAF] {
+                m.set_json_value(set, "fuzz.weight", Some(json!(0.375)));
+            }
+        }
+        let before = fresh_document(&mut m, "before");
+        let own = disk_set(&before, wall_match);
+        let enabled = own
+            .get(feature)
+            .unwrap_or_else(|| panic!("{file}: missing {feature} in {own}"));
+        if feature == "fuzz" {
+            assert_eq!(enabled["weight"], 0.375);
+        } else {
+            assert_eq!(enabled, &json!(true));
+        }
+        assert!(disk_set(&before, LEAF_MATCH).get(feature).is_none());
+        let item = format!("arch/{file}");
+        let path = member_game_path(&m, &item).unwrap();
+        link(&mut m, n, &item);
+        m.set_slot_command("arch/wall", n, SlotCommand::Clear)
+            .unwrap();
+        let after = fresh_document(&mut m, "after");
+        let (linked, cleared) = (disk_set(&after, LEAF_MATCH), disk_set(&after, wall_match));
+        let slot = format!("slot{n}");
+        assert_eq!(linked[&slot], json!(path));
+        assert_eq!(cleared[&slot], json!(""));
+        assert_eq!(linked.get(feature), Some(enabled), "{file}: linked default");
+        assert!(
+            cleared.get(feature).is_none(),
+            "{file}: cleared default in {cleared}"
+        );
+        if subtype == Subtype::CoatNormal {
+            assert_eq!(linked["coat_normal"], true);
+            assert!(cleared.get("coat_normal").is_none());
+        }
+    }
+}
+
+#[test]
+fn explicit_off_and_a_stored_property_follow_feature_activation_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("glow_g.png", [255, 128, 0], Subtype::PbrEmissive)],
+    );
+    m.set_json_value(LEAF, "emissive_scale", Some(json!(2.5)));
+    m.set_json_value(LEAF, "emissive", Some(json!(false)));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    link(&mut m, 3, "arch/glow_g.png");
+    let off = fresh_document(&mut m, "explicit-off");
+    let e = disk_set(&off, LEAF_MATCH);
+    assert!(e["slot3"].is_string());
+    assert!(e.get("emissive").is_none() && e.get("emissive_scale").is_none());
+    assert_eq!(leaf(&m).settings["emissive"], false);
+    m.set_json_value(LEAF, "emissive", None);
+    let on = fresh_document(&mut m, "active");
+    let e = disk_set(&on, LEAF_MATCH);
+    assert_eq!(e["emissive"], true);
+    assert_eq!(e["emissive_scale"], 2.5);
+    m.set_slot_command(LEAF, 3, SlotCommand::Clear).unwrap();
+    let clear = fresh_document(&mut m, "cleared");
+    let e = disk_set(&clear, LEAF_MATCH);
+    assert_eq!(e["slot3"], "");
+    assert!(e.get("emissive").is_none() && e.get("emissive_scale").is_none());
+    assert_eq!(leaf(&m).settings["emissive_scale"], 2.5);
+    link(&mut m, 3, "arch/glow_g.png");
+    assert_eq!(
+        disk_set(&fresh_document(&mut m, "reactivated"), LEAF_MATCH)["emissive_scale"],
+        2.5
+    );
+}
+
+#[test]
+fn a_linked_s_uses_the_subsurface_mode_of_its_destination_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures/arch/plants")).unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("plants/fern.png", [20, 80, 20], Subtype::PbrAlbedo),
+            ("skin_s.png", [200, 160, 150], Subtype::PbrSubsurface),
+            ("glow_g.png", [255, 128, 0], Subtype::PbrEmissive),
+        ],
+    );
+    let fern = "arch/plants/fern";
+    let fern_match = r"arch\plants\fern.dds";
+    let skin = "arch/skin_s.png";
+    m.set_shader(fern, Some(engine::shader::Shader::PbrGrass));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    for (set, n, item) in [
+        (fern, 8, skin),
+        (fern, 3, "arch/glow_g.png"),
+        (LEAF, 8, skin),
+    ] {
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLink {
+                set: set.into(),
+                n,
+                item: item.into()
+            }),
+            None
+        );
+    }
+    let before = fresh_document(&mut m, "subsurface");
+    let grass = disk_set(&before, fern_match);
+    assert_eq!(
+        grass["slot3"],
+        member_game_path(&m, "arch/glow_g.png").unwrap()
+    );
+    assert_eq!(grass["slot8"], member_game_path(&m, skin).unwrap());
+    assert_eq!(grass["subsurface_foliage"], true);
+    assert!(grass.get("subsurface").is_none() && grass.get("emissive").is_none());
+    let standard = disk_set(&before, LEAF_MATCH);
+    assert_eq!(standard["subsurface"], true);
+    assert!(standard.get("subsurface_foliage").is_none() && standard.get("coat_diffuse").is_none());
+    m.set_json_value(LEAF, "multilayer", Some(json!(true)));
+    m.set_slot_command(fern, 8, SlotCommand::Clear).unwrap();
+    let after = fresh_document(&mut m, "coat");
+    let coat = disk_set(&after, LEAF_MATCH);
+    assert_eq!(coat["multilayer"], true);
+    assert_eq!(coat["coat_diffuse"], true);
+    assert!(coat.get("subsurface").is_none() && coat.get("subsurface_foliage").is_none());
+    let grass = disk_set(&after, fern_match);
+    assert_eq!(grass["slot8"], "");
+    assert!(grass.get("subsurface_foliage").is_none());
+}
+
+#[test]
+fn a_height_link_and_clear_change_the_scale_rows_for_both_landscapes() {
+    use sdc_gui::model::bottom::{problems, At};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf.png", [80; 3], Subtype::PbrAlbedo),
+            ("wall_p.png", [128; 3], Subtype::Height),
+        ],
+    );
+    for id in [LEAF, "arch/wall"] {
+        m.set_shader(id, Some(engine::shader::Shader::PbrLandscape));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    m.set_json_value(LEAF, "displacement_scale", Some(json!(5.0)));
+    let rows = |m: &mut AppModel| {
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        m.poll();
+        let mut ids: Vec<_> = problems(m)
+            .iter()
+            .filter(|p| p.code == Some(Code::ChkParallaxScale))
+            .map(|p| match &p.at {
+                At::Set { id, .. } => id.clone(),
+                at => panic!("scale warning at {at:?}"),
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert!(rows(&mut m).is_empty(), "only wall owns a height");
+    link(&mut m, 4, "arch/wall_p.png");
+    let v = leaf(&m);
+    assert!(v.json && v.linked[&4].item.as_deref() == Some("arch/wall_p.png"));
+    assert_eq!(
+        rows(&mut m),
+        [LEAF, "arch/wall"],
+        "linked height joins the comparison"
+    );
+    m.set_slot_command("arch/wall", 4, SlotCommand::Clear)
+        .unwrap();
+    assert!(
+        rows(&mut m).is_empty(),
+        "clearing the owned height removes both rows"
+    );
+    m.undo();
+    assert_eq!(rows(&mut m), [LEAF, "arch/wall"], "Undo restores both rows");
+}
 
 /// R1 (a): Parallax set by hand on a set with no height of its own, and a height linked from another set: Export does
 /// not refuse the set, and the written JSON carries the linked path and the key.
@@ -1778,6 +2108,19 @@ fn a_set_the_statics_rule_drops_takes_no_link_and_no_clear() {
         "{:?}",
         slot_shown(&v, SlotKind::Normal)
     );
+    let never = fresh_document(&mut m, "never");
+    disk_set(&never, r"arch\wall.dds");
+    assert!(never["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["match1"] != LEAF_MATCH));
+    m.set_cs_statics(LEAF, Statics::Always);
+    let always = fresh_document(&mut m, "always");
+    let e = disk_set(&always, LEAF_MATCH);
+    assert_eq!(e["slot4"], member_game_path(&m, "arch/bump_p.png").unwrap());
+    assert_eq!(e["parallax"], true);
+    assert_eq!(e["slot2"], "");
 }
 
 const REC_LEAF: &str = "textures/n/leaf";
@@ -2103,6 +2446,595 @@ const LAYOUTS: &[Layout] = &[
 
 const CONSUMER: &str = "textures/c/con";
 
+fn check_renamed_borrow(layout: &Layout, lender: &str, mod_root: &str, excluded: bool) {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), layout);
+    m.edit_docs("Borrow", None, true, |_, s| {
+        s.set_borrow(CONSUMER, layout.slot, Some(lender))
+    });
+    m.set_group_excluded("Consumer", false).unwrap();
+    let root = m.export_root().join(mod_root);
+    let written = layout.real.unwrap();
+    if excluded {
+        m.move_to_group(
+            &[lender.to_string()],
+            sdc_gui::model::set_groups::GroupTarget::New("Lender".into()),
+        )
+        .unwrap();
+        m.set_group_excluded("Lender", true).unwrap();
+        bc1_dds(&root.join(written));
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.export_group("Consumer");
+    if m.review.is_some() {
+        m.export_from_review();
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let path = pgp_json_path(&m);
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{e}: {:?}", m.export.notes));
+    let doc: Value = serde_json::from_slice(&bytes).unwrap();
+    let slot = disk_set(&doc, r"c\con.dds")[format!("slot{}", layout.slot)]
+        .as_str()
+        .unwrap();
+    assert!(root.join(slot).is_file(), "JSON names missing file {slot}");
+    assert_eq!(slot, written);
+    if layout.slot == 7 {
+        let own = disk_set(&doc, r"r\rock.dds")["slot7"].as_str().unwrap();
+        assert!(
+            root.join(own).is_file(),
+            "lender's slot7 names missing file {own}"
+        );
+        assert_eq!(own, written);
+    }
+    if excluded {
+        std::fs::rename(root.join(slot), root.join(layout.invented[0])).unwrap();
+        m.set_json_name("missing");
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let (entry, notes) = exported_entry(&mut m, r"c\con.dds");
+        assert!(entry.is_none(), "{entry:?}");
+        assert!(
+            notes.contains("not in JSON: textures/c/con (not exported yet)"),
+            "{notes}"
+        );
+        assert!(
+            notes.contains("not in JSON: textures/r/rock (not exported yet)"),
+            "{notes}"
+        );
+    }
+}
+
+#[test]
+fn renamed_borrow_writes_the_mapped_fuzz_jobs_filename() {
+    let fuzz = LAYOUTS.iter().find(|l| l.out_name == "rock_f.dds").unwrap();
+    check_renamed_borrow(fuzz, "textures/r/rock", "", false);
+}
+
+#[test]
+fn renamed_borrow_checks_the_excluded_fuzz_jobs_exact_unicode_path() {
+    let fuzz = LAYOUTS.iter().find(|l| l.out_name == "rock_f.dds").unwrap();
+    let layout = Layout {
+        toml: "[[sets]]\nid = \"textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"R\"\n\
+               slot7 = \"textures/İ/rock_fuzz.dds\"\n",
+        real: Some(r"textures\İ\rock_f.dds"),
+        invented: &[r"textures\İ\rock_fuzz.dds"],
+        ..*fuzz
+    };
+    check_renamed_borrow(&layout, "textures/r/rock", "", true);
+}
+
+#[test]
+fn renamed_borrow_writes_the_game_location_of_a_remapped_height() {
+    let layout = Layout {
+        files: &["mod_a/textures/r/rock_height.png"],
+        toml: "[[sets]]\nid = \"mod_a/textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"R\"\n\
+               slot4 = \"textures/z/stone_p.dds\"\n",
+        subtypes: &[("mod_a/textures/r/rock_height.png", Subtype::Height)],
+        slot: 4,
+        real: Some(r"textures\z\stone_p.dds"),
+        ..LAYOUTS[0]
+    };
+    check_renamed_borrow(&layout, "mod_a/textures/r/rock", "mod_a", false);
+}
+
+#[test]
+fn renamed_borrow_without_a_game_location_checks_the_path_the_game_reads() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["arch/rock_p.png", "textures/n/leaf_g.png"],
+        toml: "[[sets]]\nid = \"arch/rock\"\noutput_name = \"stone\"\n\
+               [[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\n[sets.borrow]\nslot4 = \"arch/rock\"\n",
+        subtypes: &[("arch/rock_p.png", Subtype::Height), ("textures/n/leaf_g.png", Subtype::PbrEmissive)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    m.set_group_excluded("Consumer", false).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
+    assert!(
+        m.export_root().join("arch/stone_p.dds").is_file(),
+        "{notes}"
+    );
+    assert!(entry.is_none(), "file outside textures admitted {entry:?}");
+    let textures = m.export_root().join("textures");
+    bc1_dds(&textures.join("arch/stone_p.dds"));
+    let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
+    let entry = entry.expect(&notes);
+    assert!(textures.join(entry["slot4"].as_str().unwrap()).is_file());
+}
+
+#[test]
+fn locked_boolean_slot_checks_the_derived_height_it_writes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = locked_height_project(d.path());
+    let (entry, notes) = exported_entry(&mut m, r"n\leaf.dds");
+    let root = m.export_root();
+    assert!(root.join("arch/stone_p.dds").is_file(), "{notes}");
+    assert!(
+        entry.is_none(),
+        "locked slot4 names a missing DDS: {entry:?}"
+    );
+    assert!(
+        notes.contains("not in JSON: textures/n/leaf (not exported yet)"),
+        "{notes}"
+    );
+    bc1_dds(&root.join("textures/arch/stone_p.dds"));
+    let doc = fresh_document(&mut m, "present");
+    let entry = disk_set(&doc, r"n\leaf.dds");
+    assert_eq!(entry["lock_parallax"], true);
+    let slot = entry["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"arch\stone_p.dds");
+    assert!(root.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn staging_textures_above_the_export_folder_is_outside_the_game_path() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = locked_height_project(&d.path().join("source"));
+    let pack = d.path().join("textures/stage/Pack");
+    m.set_export_folder(pack.clone());
+    let doc = fresh_document(&mut m, "staged");
+    let match1 = r"n\leaf.dds";
+    assert!(pack.join("arch/stone_p.dds").is_file());
+    assert!(
+        doc["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["match1"] != match1),
+        "staging folder admitted a missing game slot: {doc}"
+    );
+    bc1_dds(&pack.join("textures/arch/stone_p.dds"));
+    let doc = fresh_document(&mut m, "installed");
+    let slot = disk_set(&doc, match1)["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"arch\stone_p.dds");
+    assert!(pack.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn excluded_legacy_lender_needs_its_physical_height_as_well_as_the_game_file() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = locked_height_project(d.path());
+    m.move_to_group(
+        &["arch/rock".into()],
+        sdc_gui::model::set_groups::GroupTarget::New("Lender".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Lender", true).unwrap();
+    let root = m.export_root();
+    bc1_dds(&root.join("textures/arch/stone_p.dds"));
+    let physical = root.join("arch/stone_p.dds");
+    let doc = fresh_document(&mut m, "excluded");
+    assert!(!physical.exists());
+    let match1 = r"n\leaf.dds";
+    assert!(
+        doc["entries"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|e| e["match1"] != match1),
+        "unrelated game file admitted the missing lender: {doc}"
+    );
+    bc1_dds(&physical);
+    let doc = fresh_document(&mut m, "restored");
+    let slot = disk_set(&doc, match1)["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"arch\stone_p.dds");
+    assert!(root.join("textures").join(slot).is_file());
+}
+
+#[test]
+fn renamed_albedo_keeps_the_interior_dot_in_its_published_slot() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = LAYOUTS.iter().find(|l| l.out_name == "wall.dds").unwrap();
+    let mut m = layout_project(d.path(), layout);
+    let doc = fresh_document(&mut m, "renamed");
+    let slot = disk_set(&doc, r"k\rock.dds")["slot1"].as_str().unwrap();
+    assert!(m.export_root().join(slot).is_file());
+    assert_eq!(slot, r"textures\stone\.\wall.dds");
+}
+
+#[test]
+fn excluded_slot7_clash_checks_both_jobs_under_their_mod() {
+    let d = tempfile::tempdir().unwrap();
+    let id = "mod_a/textures/arch/lacq";
+    let layout = Layout {
+        files: &[
+            "mod_a/textures/arch/lacq_cnr.png",
+            "mod_a/textures/arch/lacq_f.png",
+        ],
+        toml: "[[sets]]\nid = \"mod_a/textures/arch/lacq\"\nshader = \"pbr\"\n",
+        subtypes: &[
+            ("mod_a/textures/arch/lacq_cnr.png", Subtype::CoatNormal),
+            ("mod_a/textures/arch/lacq_f.png", Subtype::PbrFuzz),
+        ],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    m.move_to_group(
+        &[id.into()],
+        sdc_gui::model::set_groups::GroupTarget::New("Clash".into()),
+    )
+    .unwrap();
+    m.set_group_excluded("Clash", true).unwrap();
+    m.set_group_excluded("Consumer", false).unwrap();
+    let root = m.export_root().join("mod_a");
+    for name in ["lacq_f.dds", "lacq_cnr.dds"] {
+        bc1_dds(&root.join("textures/arch").join(name));
+    }
+    let doc = fresh_document(&mut m, "clash");
+    let match1 = r"mod_a\textures\arch\lacq.dds";
+    let slot = disk_set(&doc, match1)["slot7"].as_str().unwrap();
+    assert_eq!(slot, r"textures\arch\lacq_f.dds");
+    assert!(root.join(slot).is_file());
+    let coat = root.join("textures/arch/lacq_cnr.dds");
+    std::fs::rename(&coat, coat.with_extension("saved")).unwrap();
+    let doc = fresh_document(&mut m, "missing_coat");
+    assert!(doc["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["match1"] != match1));
+    assert!(m
+        .export
+        .notes
+        .contains(&format!("not in JSON: {id} (not exported yet)")));
+}
+
+fn rock_height(root: &std::path::Path, input: &str, export: std::path::PathBuf) -> AppModel {
+    let file = root.join(input);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    image::RgbImage::new(64, 64).save(file).unwrap();
+    let mut m = opened_as_the_app(root.to_path_buf(), export);
+    m.decide(input, Answer::Subtype(Subtype::Height));
+    let id = views(&m)[0].id.clone();
+    m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+#[test]
+fn in_place_height_uses_its_job_beside_the_source() {
+    use engine::events::{Reporter, VecSink};
+    use sdc_gui::model::pbr_export::{finish, prepare, Finish};
+    let d = tempfile::tempdir().unwrap();
+    let data = d.path().join("Mod");
+    let textures = data.join("textures");
+    // The GUI's Export button refuses this layout. Exercise the finalizer with the engine's real rows.
+    let mut m = rock_height(&textures, "armor/rock_p.png", textures.clone());
+    let pending = prepare(&m).unwrap();
+    let sink = std::sync::Arc::new(VecSink::default());
+    let reporter = Reporter::new(sink.clone(), "in-place");
+    let session = session();
+    let cancel = engine::api::CancelToken::default();
+    let plan = session
+        .plan(m.request().unwrap(), &reporter, &cancel)
+        .unwrap();
+    session.run(plan, &reporter, &cancel).unwrap();
+    for event in sink.take() {
+        m.export.on_event(event);
+    }
+    assert!(textures.join("armor/rock_p.dds").is_file());
+    let mut notes = vec![];
+    assert!(
+        matches!(
+            finish(&pending, &m.export.rows, None, &mut notes),
+            Finish::Written(_)
+        ),
+        "{notes:?}"
+    );
+    let doc: Value = serde_json::from_slice(&std::fs::read(pending.path).unwrap()).unwrap();
+    let slot = disk_set(&doc, r"armor\rock.dds")["slot4"].as_str().unwrap();
+    assert_eq!(slot, r"textures\armor\rock_p.dds");
+    assert!(data.join(slot).is_file());
+}
+
+#[test]
+fn unmapped_height_keeps_the_source_game_paths_ascii_case() {
+    let d = tempfile::tempdir().unwrap();
+    let export = d.path().join("export");
+    let mut m = rock_height(d.path(), "textures/Armor/rock_p.png", export.clone());
+    let doc = fresh_document(&mut m, "height");
+    let slot = disk_set(&doc, r"armor\rock.dds")["slot4"].as_str().unwrap();
+    assert!(export.join(slot).is_file());
+    assert_eq!(slot, r"textures\armor\rock_p.dds");
+}
+
+#[cfg(windows)]
+#[test]
+fn in_place_mapped_height_keeps_the_inner_textures_folder() {
+    check_in_place_mapped_height("Mod", "ModAlias/textures");
+}
+
+#[cfg(windows)]
+#[test]
+fn in_place_mapped_height_through_a_junction_to_textures_uses_the_resolved_root() {
+    check_in_place_mapped_height(r"Mod\textures", "ModAlias");
+}
+
+#[cfg(windows)]
+fn check_in_place_mapped_height(junction_target: &str, export: &str) {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let textures = d.path().join("Mod/textures");
+    std::fs::create_dir_all(&textures).unwrap();
+    let junction = std::process::Command::new("cmd")
+        .current_dir(d.path())
+        .args(["/C", "mklink", "/J", "ModAlias", junction_target])
+        .output()
+        .unwrap();
+    assert!(junction.status.success(), "{junction:?}");
+    std::fs::write(
+        textures.join("sdc-project.toml"),
+        "[[sets]]\nid = 'armor/rock'\nshader = 'pbr'\n[sets.txst]\n\
+         plugin = 'a.esp'\nformid = '1'\nedid = 'R'\nslot4 = 'textures/armor/textures/stone_p.dds'\n",
+    )
+    .unwrap();
+    let mut m = rock_height(&textures, "armor/rock_p.png", d.path().join(export));
+    m.add_cs_block("armor/rock", Kind::Txst);
+    m.set_cs_statics("armor/rock", Statics::Always);
+    let doc = fresh_document(&mut m, "mapped");
+    assert!(textures.join("armor/textures/stone_p.dds").is_file());
+    let slot = disk_set(&doc, r"armor\rock.dds")["slot4"].as_str().unwrap();
+    let rel = slot.strip_prefix(r"textures\").unwrap_or(slot);
+    assert!(
+        textures.join(rel).is_file(),
+        "JSON names missing file {slot}"
+    );
+    assert_eq!(slot, r"armor\textures\stone_p.dds");
+}
+
+#[test]
+fn owned_albedo_omits_the_slot_for_a_unicode_case_only_rename() {
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["textures/k/rock.png"],
+        albedos: &["textures/k/rock.png"],
+        json: &[
+            ("textures/k/rock", "match1", r"stone\É"),
+            ("textures/k/rock", "rename", r"textures\pbr\stone\é"),
+        ],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    let doc = fresh_document(&mut m, "lowercase");
+    assert!(m.export_root().join(r"textures\pbr\stone\é.dds").is_file());
+    let entry = disk_set(&doc, r"stone\É.dds");
+    assert!(entry.get("slot1").is_none(), "{entry}");
+    // The complete JSON written by main (68574cfc) for this match and rename.
+    assert_eq!(
+        sdc_gui::model::history::sha256_of(&pgp_json_path(&m)).as_deref(),
+        Some("6693a7adf2314b937a4cdb3fcdac87c8226504b97cf584ea2265bd4dfc1c89aa")
+    );
+}
+
+#[cfg(windows)]
+mod mapped_slot_matrix {
+    use super::*;
+    use engine::events::{Reporter, VecSink};
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    use sdc_gui::model::pbr_export::{finish, prepare, Finish};
+    use std::fs;
+
+    #[test]
+    fn separate() {
+        check("separate");
+    }
+
+    #[test]
+    fn in_place() {
+        check("in_place");
+    }
+
+    #[test]
+    fn parent_junction() {
+        check("parent_junction");
+    }
+
+    #[test]
+    fn payload_junction() {
+        check("payload_junction");
+    }
+
+    fn check(layout: &str) {
+        let d = tempfile::tempdir().unwrap();
+        let data = d.path().join("Mod");
+        fs::create_dir(&data).unwrap();
+        let textures = data.join("textures");
+        let junction = |link, target| {
+            let result = std::process::Command::new("cmd")
+                .current_dir(d.path())
+                .args(["/C", "mklink", "/J", link, target])
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{result:?}");
+        };
+        let export = match layout {
+            "separate" => d.path().join("export"),
+            "in_place" => textures.clone(),
+            "parent_junction" => {
+                junction("ModAlias", "Mod");
+                d.path().join("ModAlias/textures")
+            }
+            "payload_junction" => {
+                fs::create_dir(d.path().join("Payload")).unwrap();
+                junction(r"Mod\textures", "Payload");
+                d.path().join("Payload")
+            }
+            _ => unreachable!(),
+        };
+        let (input, prefix, installed) = if layout == "separate" {
+            (&data, "textures/", export.join("textures"))
+        } else {
+            (&textures, "", textures.clone())
+        };
+        fs::create_dir_all(textures.join("armor")).unwrap();
+        let owner = format!("{prefix}armor/rock");
+        let borrow = format!("{prefix}armor/borrow");
+        let pick = format!("{prefix}armor/pick");
+        let height = format!("{owner}_p.png");
+        for key in [&height, &format!("{borrow}.png"), &format!("{pick}.png")] {
+            image::RgbImage::new(64, 64).save(input.join(key)).unwrap();
+        }
+        fs::write(input.join("sdc-project.toml"), format!(
+            "[[sets]]\nid = '{owner}'\nshader = 'pbr'\n[sets.txst]\nplugin = 'a.esp'\nformid = '1'\nedid = 'R'\n\
+             slot4 = 'textures/armor/textures/stone_p.dds'\n[[sets]]\nid = '{borrow}'\nshader = 'pbr'\n\
+             [sets.borrow]\nslot4 = '{owner}'\n[[sets]]\nid = '{pick}'\nshader = 'pbr'\n"
+        )).unwrap();
+        let mut m = opened_as_the_app(input.clone(), export);
+        m.decide(&height, Answer::Subtype(Subtype::Height));
+        for id in [&borrow, &pick] {
+            m.decide(&format!("{id}.png"), Answer::Subtype(Subtype::PbrAlbedo));
+        }
+        m.add_cs_block(&owner, Kind::Txst);
+        m.set_cs_statics(&owner, Statics::Always);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let choice = m
+            .slot_menu(&pick, SlotKind::Height)
+            .into_iter()
+            .find(|e| matches!(&e.action, MenuAction::SlotLink { item, .. } if item == &height))
+            .unwrap();
+        assert_eq!(choice.disabled, None);
+        assert_eq!(m.run_menu(choice.action), None);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+
+        // The same-folder GUI guard precedes the engine. Give the real finalizer the engine's run rows.
+        let pending = prepare(&m).unwrap();
+        let sink = std::sync::Arc::new(VecSink::default());
+        let reporter = Reporter::new(sink.clone(), layout);
+        let session = session();
+        let cancel = engine::api::CancelToken::default();
+        let plan = session
+            .plan(m.request().unwrap(), &reporter, &cancel)
+            .unwrap();
+        session.run(plan, &reporter, &cancel).unwrap();
+        for event in sink.take() {
+            m.export.on_event(event);
+        }
+        let mut notes = vec![];
+        assert!(
+            matches!(
+                finish(&pending, &m.export.rows, None, &mut notes),
+                Finish::Written(_)
+            ),
+            "{notes:?}"
+        );
+        let doc: Value = serde_json::from_slice(&fs::read(&pending.path).unwrap()).unwrap();
+        let mut missing = Vec::new();
+        for name in ["rock", "borrow", "pick"] {
+            let slot = disk_set(&doc, &format!(r"armor\{name}.dds"))["slot4"]
+                .as_str()
+                .unwrap();
+            let lower = slot.to_ascii_lowercase();
+            let rel = lower.strip_prefix(r"textures\").unwrap_or(&lower);
+            if let Err(err) = fs::File::open(installed.join(rel)) {
+                missing.push(format!("{name}: {slot} ({err})"));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "{layout}: opening published slot4: {missing:?}"
+        );
+        assert_eq!(
+            views(&m).iter().find(|v| v.id == pick).unwrap().linked[&4]
+                .item
+                .as_deref(),
+            Some(height.as_str())
+        );
+        // A successful height row must not vouch for a different string in the pending document.
+        if layout == "separate" {
+            for (id, name) in [(&owner, "rock"), (&borrow, "borrow"), (&pick, "pick")] {
+                let mut bad = pending.clone();
+                bad.path = pending.path.with_file_name(format!("bad-{name}.json"));
+                let (_, _, entry) = bad
+                    .entries
+                    .iter_mut()
+                    .find(|(set, _, _)| set == id)
+                    .unwrap();
+                entry.slots.insert(4, r"textures\stone_p.dds".into());
+                let mut notes = vec![];
+                assert!(
+                    matches!(
+                        finish(&bad, &m.export.rows, None, &mut notes),
+                        Finish::Written(_)
+                    ),
+                    "{notes:?}"
+                );
+                let doc: Value = serde_json::from_slice(&fs::read(bad.path).unwrap()).unwrap();
+                assert!(
+                    doc["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|entry| entry["match1"] != format!(r"armor\{name}.dds")),
+                    "{name}: successful row admitted a different slot4: {doc}"
+                );
+                assert!(
+                    notes.contains(&format!("not in JSON: {id} (not exported yet)")),
+                    "{notes:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn unlink_replans_the_record_normal_before_export() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let d = tempfile::tempdir().unwrap();
+    let layout = Layout {
+        files: &["textures/n/leaf_p.png", "textures/r/rock_n.png"],
+        toml: "[[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"L\"\n\
+               slot2 = \"textures/r/rock_n.dds\"\n[[sets]]\nid = \"textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"2\"\nedid = \"R\"\n\
+               slot2 = \"textures/r/rock_n.dds\"\n",
+        subtypes: &[("textures/n/leaf_p.png", Subtype::Height), ("textures/r/rock_n.png", Subtype::Normal)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    m.decide(
+        "textures/r/rock_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    m.set_slot_command(
+        REC_LEAF,
+        2,
+        SlotCommand::Path(r"textures\other\x_n.dds".into()),
+    )
+    .unwrap();
+    m.add_cs_block(REC_LEAF, Kind::Txst);
+    m.set_cs_statics(REC_LEAF, Statics::Always);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(m.inputs_settled() && !borrowed_normal(&m).contains_key(REC_LEAF));
+    select_set(&mut m, REC_LEAF);
+    let mut h = harness(m);
+    h.get_by_label("Unlink Normal _n").click();
+    h.step();
+    let m = h.state_mut();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(borrowed_normal(m)[REC_LEAF], "textures/r/rock");
+    assert!(m.inputs_settled(), "Unlink left the installed plan stale");
+    let (entry, notes) = exported_entry(m, r"n\leaf.dds");
+    assert_eq!(entry.expect(&notes)["slot2"], r"textures\r\rock_n.dds");
+}
+
 /// `layout` opened as the app opens a folder, with a PBR consumer `textures/c/con` (an albedo) in an excluded group,
 /// so it writes an entry but no file and blocks nothing.
 fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
@@ -2140,6 +3072,55 @@ fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
     m.set_group_excluded("Consumer", true).unwrap();
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m
+}
+
+fn locked_height_project(dir: &std::path::Path) -> AppModel {
+    let layout = Layout {
+        files: &["arch/rock_p.png", "textures/n/leaf_g.png"],
+        toml: "[[sets]]\nid = \"arch/rock\"\noutput_name = \"stone\"\n\
+               [[sets]]\nid = \"textures/n/leaf\"\nshader = \"pbr\"\nlock_parallax = true\nslot4 = false\n\
+               [sets.borrow]\nslot4 = \"arch/rock\"\n",
+        subtypes: &[("arch/rock_p.png", Subtype::Height), ("textures/n/leaf_g.png", Subtype::PbrEmissive)],
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(dir, &layout);
+    m.set_group_excluded("Consumer", false).unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+#[test]
+fn a_link_uses_the_first_writer_in_display_order_when_game_paths_coincide() {
+    let d = tempfile::tempdir().unwrap();
+    let files = &["east/textures/p/plain.png", "west/textures/p/plain.png"];
+    let layout = Layout {
+        files,
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    let game = r"textures\p\plain.dds";
+    for item in files {
+        assert_eq!(member_game_path(&m, item).unwrap(), game);
+    }
+    assert_ne!(
+        m.item(files[0]).unwrap().job.as_ref().unwrap().output,
+        m.item(files[1]).unwrap().job.as_ref().unwrap().output,
+        "distinct DDS files provide the same game path"
+    );
+    m.set_slot_command(CONSUMER, 1, SlotCommand::Path(game.into()))
+        .unwrap();
+    for item in files {
+        let first = item.trim_end_matches(".png");
+        let order = vec![first.to_string()];
+        m.edit_docs("Order sets", None, true, |_, s| s.set_order(&order));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let v = views(&m);
+        let link = &v.iter().find(|v| v.id == CONSUMER).unwrap().linked[&1];
+        assert_eq!(
+            (link.from.as_deref(), link.item.as_deref()),
+            (Some(first), Some(*item))
+        );
+    }
 }
 
 /// Every `.dds` under `root`, `/`-separated and relative to it.
@@ -2241,7 +3222,7 @@ fn the_output_index_holds_where_each_file_is_written() {
         let deps = |m: &AppModel| {
             sdc_gui::model::pbr_export::prepare(m)
                 .and_then(|p| p.entries.into_iter().find(|(id, _, _)| id == CONSUMER))
-                .map(|(_, deps, _)| deps)
+                .map(|(_, deps, _)| deps.into_iter().map(|d| d.job_key).collect::<Vec<_>>())
                 .unwrap_or_default()
         };
         let key = format!("slot{}", layout.slot);
@@ -2700,6 +3681,39 @@ fn a_pack_displaced_by_a_borrow_and_mapped_to_its_default_path_is_no_collision()
     );
 }
 
+#[test]
+fn an_excluded_borrower_names_the_pack_written_under_its_lenders_legacy_name() {
+    let layout = LAYOUTS
+        .iter()
+        .find(|l| l.out_name == "w_rmaos.dds")
+        .unwrap();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), layout);
+    // Export the consumer's albedo before giving it the borrow and leaving it out.
+    m.export_group("Consumer");
+    if m.review.is_some() {
+        m.export_from_review();
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.edit_docs("Legacy name and borrow", None, true, |_, s| {
+        s.set_txst("textures/t/w", None);
+        s.set_output_name("textures/t/w", Some("w"));
+        s.set_borrow(CONSUMER, 6, Some("textures/t/w"));
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let written = r"textures\t\w_rmaos.dds";
+    assert!(!m.export_root().join("textures/t/w_rmaos.dds").exists());
+    let (entry, notes) = exported_entry(&mut m, r"c\con.dds");
+    let entry = entry.unwrap_or_else(|| panic!("consumer missing: {notes}"));
+    assert_eq!(
+        entry["slot6"],
+        json!(written),
+        "the excluded consumer's pack"
+    );
+    let named = entry["slot6"].as_str().unwrap().replace('\\', "/");
+    assert!(m.export_root().join(named).is_file(), "{notes}");
+}
+
 // ---- Task 15a fix round 4 (ruling 3b-F21): a member pick stores only a settled path ----
 
 /// The reason a From another set row gives while the plan is out (ruling 3b-F21).
@@ -2759,6 +3773,78 @@ const MAPLE: Layout = Layout {
     invented: &[],
     json: &[],
 };
+
+#[test]
+fn a_fresh_scoped_export_after_a_terminal_remap_failure_is_refused() {
+    use sdc_gui::model::Dialog;
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &MAPLE);
+    let path = r"textures\z\new.dds";
+    m.set_json_value(CONSUMER, "slot1", Some(json!(path)));
+    let mut map = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/leaf")
+        .unwrap()
+        .txst
+        .clone()
+        .unwrap();
+    map.slots.insert(1, path.into());
+    m.hold_plan_results = true;
+    m.map_record("arch/leaf", map).unwrap();
+    m.handle_held(WorkerMsg::Planned {
+        generation: m.generation(),
+        result: Err(PlanFailure {
+            message: "remap failed".into(),
+            config: false,
+        }),
+    });
+    m.dialog = None;
+    assert!(m.inputs_settled() && !m.full_plan_pending());
+    assert_eq!(writer_of(&m, "body.dds"), "arch/leaf.png");
+    m.export_group("Consumer");
+    assert!(
+        matches!(&m.dialog, Some(Dialog::Error(why)) if why.contains("plan failed")),
+        "the fresh export must explain the failed plan: {:?}",
+        m.dialog
+    );
+    assert!(m.export.running.is_none() && m.review.is_none() && !m.export_queued());
+    assert!(!pgp_json_path(&m).exists());
+    m.dialog = None;
+    m.open_review();
+    m.export_from_review();
+    assert!(matches!(&m.dialog, Some(Dialog::Error(why)) if why.contains("plan failed")));
+    assert!(m.export.running.is_none() && !m.export_queued());
+}
+
+#[test]
+fn a_queued_group_export_includes_the_mirrored_host_at_the_new_root() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &LAYOUTS[0]);
+    let path = r"textures\p\plain.dds";
+    m.set_json_value(CONSUMER, "slot1", Some(json!(path)));
+    let fresh = d.path().join("fresh");
+    m.set_export_folder(fresh.clone());
+    m.export_group("Consumer");
+    assert!(m.export_queued());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    if m.review.is_some() {
+        m.export_from_review();
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    assert!(
+        fresh.join("textures/p/plain.dds").is_file(),
+        "the queued export missed the mirrored host: {:?}",
+        m.export.notes
+    );
+    let doc: Value = serde_json::from_slice(&std::fs::read(pgp_json_path(&m)).unwrap()).unwrap();
+    assert!(doc["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|e| e["match1"] == r"c\con.dds" && e["slot1"] == path));
+}
 
 /// Ruling 3b-F21: while another set's edit is planning, the mapped fuzz member's row is off with the planning reason
 /// and a pick stores nothing (f8fbe807 offered and stored the asked-for `textures\z\rock_fuzz.dds`, a file the export
@@ -2869,7 +3955,7 @@ fn a_member_pick_after_a_failed_replan_is_refused() {
     });
     // The user closes the error.
     m.dialog = None;
-    // Export's own checks find nothing to wait for here: no plan is out and the inputs are the failed plan's.
+    // No plan is out and the request inputs still match. Only the terminal failure makes these jobs stale.
     assert!(!m.full_plan_pending(), "premise: no plan is out");
     assert!(m.inputs_settled(), "premise: Export's inputs check passes");
     // Ruling 3b-F25: no plan is running, so the reason says the plan must run again.
