@@ -3541,6 +3541,42 @@ fn open_saved_share(dir: &Path, files: &str, sets: &str) -> AppModel {
 }
 
 #[test]
+fn keep_alpha_on_a_reopened_listed_normal_survives_unshare() {
+    use sdc_gui::model::sets::SlotCommand;
+    use sdc_gui::project::ProjectDoc;
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    m.save().unwrap();
+    drop(m);
+
+    let mut files = ProjectDoc::open(&root);
+    assert!(files.clear_exact_file_value(IRON_N, "alpha.policy", &json!("data")));
+    files.save(false).unwrap();
+    let mut m = opened_as_the_app(root.clone(), d.path().join("export"));
+    assert_eq!(auto_data(&m), [IRON_N]);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    m.keep_alpha(IRON_N).unwrap();
+    let listed_after_keep = auto_data(&m);
+    settle(&mut m);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    m.save().unwrap();
+
+    let saved = ProjectDoc::open(&root);
+    assert_eq!(
+        saved.file_value(IRON_N, "alpha.policy"),
+        Some(json!("data"))
+    );
+    let sets = sdc_gui::sets_doc::SetsDoc::open(&root);
+    assert!(listed_after_keep.is_empty(), "Keep alpha takes ownership");
+    assert!(sets.auto_data().is_empty());
+    assert!(sets.entries().iter().all(|e| !e.borrow.contains_key(&2)));
+}
+
+#[test]
 fn keep_alpha_writes_one_literal_table_and_undo_restores_both_documents() {
     for (spellings, target) in [
         (vec![], IRON_N),
