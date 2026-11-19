@@ -328,11 +328,11 @@ fn the_header_label_holds_while_a_plan_is_pending() {
     );
 }
 
-/// Two guards hold this outcome: the rule in `settle_queued` and the export guards (`export_stopped`, which opens
-/// Review for an undecided texture). Removing the rule alone does not fail this test (the guards still open Review);
-/// removing the Review fallback does (mutation evidence: `task-2-fix1-mut-*` logs). In that part it pins behaviour
-/// the guards already gave; the count half of the dispatch has its own test below.
-#[test]
+/// The fixture's undecided diffuse brings a writable normal with it, so the export count goes from four to five and
+/// the gate's count compare alone sends the click to Review. Removing the E3 eligibility read from the gate does NOT
+/// fail this test (`export_stopped` has no undecided-texture check); removing the Review fallback does (round 1
+/// mutation logs `task-2-fix1-mut-*`). The eligibility read's own test is
+/// `a_queued_click_opens_review_when_the_landed_plan_needs_eyes_at_an_unchanged_count`.#[test]
 fn a_queued_now_click_opens_review_when_the_plan_brings_a_problem() {
     let d = tempfile::tempdir().unwrap();
     let mut m = support::opened_chosen_decided(d.path());
@@ -737,6 +737,28 @@ fn a_queued_click_walks_the_sources_before_it_reads_eligibility() {
     land_plan(&mut m, msgs);
     assert!(m.review.is_none(), "{:?}", m.dialog);
     assert!(steel_written(d.path()), "the second plan writes");
+}
+
+/// Round 2, evidence rule (B6): the E3 eligibility read alone sends a queued click to Review. The count the label
+/// showed (4) is unchanged at landing, so the count compare cannot save it; a NIF edit that would be written appears
+/// meanwhile. Removing the eligibility read from the gate fails this test (mutation log
+/// `task-2-fix2-mut-eligibility-removed.log`).
+#[test]
+fn a_queued_click_opens_review_when_the_landed_plan_needs_eyes_at_an_unchanged_count() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    m.hold_plan_results = true;
+    m.replan();
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.header_export_clicked();
+    assert!(m.export_queued(), "guard: queued behind the plan");
+    let msgs = held_plan(&mut m);
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
+    land_plan(&mut m, msgs);
+    assert_eq!(m.export_files(), 4, "guard: the count is unchanged");
+    assert!(m.review.is_some(), "a NIF edit to write opens Review");
+    assert!(m.export.running.is_none() && nothing_written(d.path()));
 }
 
 /// Round 2, ruling 3c-23 (B3): the eligibility read comes AFTER the source walk. The JSON is edited while the walk
