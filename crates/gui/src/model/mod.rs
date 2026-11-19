@@ -538,6 +538,9 @@ pub struct AppModel {
     /// The export folder `sets` were planned with (audit 08c-3): set ids strip it, also while a re-plan for a new
     /// export folder runs. `None` before the first plan.
     sets_root: Option<PathBuf>,
+    /// Game paths selected by PBR prefixes and TXST mappings. Only a successful full plan installs its paths.
+    slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
+    pending_slot_paths: BTreeMap<engine::sets::OutputKey, PathBuf>,
     /// Bumped whenever `items` is replaced (or announced with `invalidate_views`): the set-view cache key.
     items_rev: u64,
     /// Note FI15: the opened folder's output game paths and their revision (see `output_game_paths`).
@@ -913,6 +916,8 @@ impl AppModel {
             rename_cache: Default::default(),
             sets: vec![],
             sets_root: None,
+            slot_paths: BTreeMap::new(),
+            pending_slot_paths: BTreeMap::new(),
             unmatched_keys: vec![],
             batch_preset: String::new(),
             batch: false,
@@ -1075,6 +1080,8 @@ impl AppModel {
         self.export_after_plan = false;
         self.continue_after_plan = None;
         self.last_inputs = None;
+        self.slot_paths.clear();
+        self.pending_slot_paths.clear();
         self.inputs_rev += 1;
         self.auto_replans = 0;
         self.reset_type_follow();
@@ -1244,6 +1251,13 @@ impl AppModel {
 
     /// What the next plan uses: the folder, recursive, High suggestions accepted (Note U3), the in-memory `sdc.toml` (DECISIONS N4).
     pub fn request(&self) -> Option<BatchRequest> {
+        self.request_with_paths(None)
+    }
+
+    fn request_with_paths(
+        &self,
+        game: Option<&mut BTreeMap<engine::sets::OutputKey, PathBuf>>,
+    ) -> Option<BatchRequest> {
         let root = self.root.clone()?;
         let project = self.project.as_ref()?;
         let mut req = BatchRequest::new(vec![root], self.output_root(), Target::Cs);
@@ -1267,7 +1281,7 @@ impl AppModel {
         });
         req.user_config = self.user_config.clone();
         req.user_presets = self.user_presets.clone();
-        let (edits, paths) = sets::engine_inputs(self);
+        let (edits, paths) = sets::plan_outputs(self, &sets::views(self), game);
         req.set_edits = edits;
         req.output_paths = paths;
         req.shared_roughness = sets::shared_roughness(self);
@@ -1455,15 +1469,19 @@ impl AppModel {
         // Note FC1: read the presets once per plan, not per frame (the export gate asks every frame).
         self.missing_preset_id = self.missing_preset();
         self.refresh_banner();
-        let (Some(session), Some(req), Some(root)) =
-            (self.session.clone(), self.request(), self.root.clone())
-        else {
+        let mut slot_paths = BTreeMap::new();
+        let (Some(session), Some(req), Some(root)) = (
+            self.session.clone(),
+            self.request_with_paths(Some(&mut slot_paths)),
+            self.root.clone(),
+        ) else {
             return;
         };
         if let Some(c) = self.planning.take() {
             c.cancel();
         }
         self.plan_failed = false;
+        self.pending_slot_paths = slot_paths;
         self.generation += 1;
         self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
@@ -2865,6 +2883,8 @@ impl AppModel {
         // Final fix I2: the views of the plan before, to splice (`carry_views` below).
         let old_key = self.view_key();
         let carried = std::mem::take(&mut *self.views.borrow_mut());
+        let paths_changed = self.slot_paths != self.pending_slot_paths;
+        self.slot_paths = std::mem::take(&mut self.pending_slot_paths);
         self.target = view.target;
         let old_items = std::mem::replace(&mut self.items, view.items);
         self.request_dds_thumbs();
@@ -2886,7 +2906,9 @@ impl AppModel {
         // Final fix I2: only the sets whose views changed are built again (the frame after a full plan must not
         // rebuild 3k views). The export blocks and asks are built again: they are checked on each full plan (FL7).
         if let Some(scope) = self.full_plan_changes(&old_items, &old_sets, old_root.as_deref()) {
-            self.carry_views(carried, &old_key, &scope, false);
+            if !paths_changed {
+                self.carry_views(carried, &old_key, &scope, false);
+            }
         }
         // Fast re-plan: this plan ran on every edit so far.
         self.dirty_keys.clear();

@@ -2832,6 +2832,176 @@ fn owned_albedo_omits_the_slot_for_a_unicode_case_only_rename() {
     );
 }
 
+#[cfg(windows)]
+mod mapped_slot_matrix {
+    use super::*;
+    use engine::events::{Reporter, VecSink};
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    use sdc_gui::model::pbr_export::{finish, prepare, Finish};
+    use std::fs;
+
+    #[test]
+    fn separate() {
+        check("separate");
+    }
+
+    #[test]
+    fn in_place() {
+        check("in_place");
+    }
+
+    #[test]
+    fn parent_junction() {
+        check("parent_junction");
+    }
+
+    #[test]
+    fn payload_junction() {
+        check("payload_junction");
+    }
+
+    fn check(layout: &str) {
+        let d = tempfile::tempdir().unwrap();
+        let data = d.path().join("Mod");
+        fs::create_dir(&data).unwrap();
+        let textures = data.join("textures");
+        let junction = |link, target| {
+            let result = std::process::Command::new("cmd")
+                .current_dir(d.path())
+                .args(["/C", "mklink", "/J", link, target])
+                .output()
+                .unwrap();
+            assert!(result.status.success(), "{result:?}");
+        };
+        let export = match layout {
+            "separate" => d.path().join("export"),
+            "in_place" => textures.clone(),
+            "parent_junction" => {
+                junction("ModAlias", "Mod");
+                d.path().join("ModAlias/textures")
+            }
+            "payload_junction" => {
+                fs::create_dir(d.path().join("Payload")).unwrap();
+                junction(r"Mod\textures", "Payload");
+                d.path().join("Payload")
+            }
+            _ => unreachable!(),
+        };
+        let (input, prefix, installed) = if layout == "separate" {
+            (&data, "textures/", export.join("textures"))
+        } else {
+            (&textures, "", textures.clone())
+        };
+        fs::create_dir_all(textures.join("armor")).unwrap();
+        let owner = format!("{prefix}armor/rock");
+        let borrow = format!("{prefix}armor/borrow");
+        let pick = format!("{prefix}armor/pick");
+        let height = format!("{owner}_p.png");
+        for key in [&height, &format!("{borrow}.png"), &format!("{pick}.png")] {
+            image::RgbImage::new(64, 64).save(input.join(key)).unwrap();
+        }
+        fs::write(input.join("sdc-project.toml"), format!(
+            "[[sets]]\nid = '{owner}'\nshader = 'pbr'\n[sets.txst]\nplugin = 'a.esp'\nformid = '1'\nedid = 'R'\n\
+             slot4 = 'textures/armor/textures/stone_p.dds'\n[[sets]]\nid = '{borrow}'\nshader = 'pbr'\n\
+             [sets.borrow]\nslot4 = '{owner}'\n[[sets]]\nid = '{pick}'\nshader = 'pbr'\n"
+        )).unwrap();
+        let mut m = opened_as_the_app(input.clone(), export);
+        m.decide(&height, Answer::Subtype(Subtype::Height));
+        for id in [&borrow, &pick] {
+            m.decide(&format!("{id}.png"), Answer::Subtype(Subtype::PbrAlbedo));
+        }
+        m.add_cs_block(&owner, Kind::Txst);
+        m.set_cs_statics(&owner, Statics::Always);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let choice = m
+            .slot_menu(&pick, SlotKind::Height)
+            .into_iter()
+            .find(|e| matches!(&e.action, MenuAction::SlotLink { item, .. } if item == &height))
+            .unwrap();
+        assert_eq!(choice.disabled, None);
+        assert_eq!(m.run_menu(choice.action), None);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+
+        // The same-folder GUI guard precedes the engine. Give the real finalizer the engine's run rows.
+        let pending = prepare(&m).unwrap();
+        let sink = std::sync::Arc::new(VecSink::default());
+        let reporter = Reporter::new(sink.clone(), layout);
+        let session = session();
+        let cancel = engine::api::CancelToken::default();
+        let plan = session
+            .plan(m.request().unwrap(), &reporter, &cancel)
+            .unwrap();
+        session.run(plan, &reporter, &cancel).unwrap();
+        for event in sink.take() {
+            m.export.on_event(event);
+        }
+        let mut notes = vec![];
+        assert!(
+            matches!(
+                finish(&pending, &m.export.rows, None, &mut notes),
+                Finish::Written(_)
+            ),
+            "{notes:?}"
+        );
+        let doc: Value = serde_json::from_slice(&fs::read(&pending.path).unwrap()).unwrap();
+        let mut missing = Vec::new();
+        for name in ["rock", "borrow", "pick"] {
+            let slot = disk_set(&doc, &format!(r"armor\{name}.dds"))["slot4"]
+                .as_str()
+                .unwrap();
+            let lower = slot.to_ascii_lowercase();
+            let rel = lower.strip_prefix(r"textures\").unwrap_or(&lower);
+            if let Err(err) = fs::File::open(installed.join(rel)) {
+                missing.push(format!("{name}: {slot} ({err})"));
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "{layout}: opening published slot4: {missing:?}"
+        );
+        assert_eq!(
+            views(&m).iter().find(|v| v.id == pick).unwrap().linked[&4]
+                .item
+                .as_deref(),
+            Some(height.as_str())
+        );
+        // A successful height row must not vouch for a different string in the pending document.
+        if layout == "separate" {
+            for (id, name) in [(&owner, "rock"), (&borrow, "borrow"), (&pick, "pick")] {
+                let mut bad = pending.clone();
+                bad.path = pending.path.with_file_name(format!("bad-{name}.json"));
+                let (_, _, entry) = bad
+                    .entries
+                    .iter_mut()
+                    .find(|(set, _, _)| set == id)
+                    .unwrap();
+                entry.slots.insert(4, r"textures\stone_p.dds".into());
+                let mut notes = vec![];
+                assert!(
+                    matches!(
+                        finish(&bad, &m.export.rows, None, &mut notes),
+                        Finish::Written(_)
+                    ),
+                    "{notes:?}"
+                );
+                let doc: Value = serde_json::from_slice(&fs::read(bad.path).unwrap()).unwrap();
+                assert!(
+                    doc["entries"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .all(|entry| entry["match1"] != format!(r"armor\{name}.dds")),
+                    "{name}: successful row admitted a different slot4: {doc}"
+                );
+                assert!(
+                    notes.contains(&format!("not in JSON: {id} (not exported yet)")),
+                    "{notes:?}"
+                );
+            }
+        }
+    }
+}
+
 #[test]
 fn unlink_replans_the_record_normal_before_export() {
     use sdc_gui::model::cs_pbr::{Kind, Statics};

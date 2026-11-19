@@ -558,6 +558,7 @@ fn dep(key: &str) -> JsonDependency {
         job_key: key.into(),
         output: key.into(),
         slot_file: None,
+        slot: None,
     }
 }
 

@@ -1727,7 +1727,13 @@ impl AppModel {
                 label: format!("{} — {}", o.id, it.name),
                 // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
                 disabled: match &roots {
-                    Some(roots) => member_game_path_in(roots, it).err(),
+                    Some(roots) => member_game_path_in(
+                        self,
+                        roots,
+                        it,
+                        super::sets::member_output_key(o, it).as_ref(),
+                    )
+                    .err(),
                     None => wait.map(String::from),
                 },
             })

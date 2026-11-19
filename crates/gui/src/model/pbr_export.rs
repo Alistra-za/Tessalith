@@ -3,9 +3,9 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, feature_slots, game_location_of, has_slot_clear, has_slot_link, item_output_key,
-    item_output_key_in, json_files, json_keeps_fill, output_candidates, packed_owners, set_views,
-    slot_string, written_output_rel, JsonFile, SetView, SlotFill, SlotKind,
+    engine_inputs, feature_slots, has_slot_clear, has_slot_link, item_output_key,
+    item_output_key_in, json_files, json_keeps_fill, output_candidates, packed_owners,
+    projected_slot, set_views, slot_string, JsonFile, SetView, SlotFill, SlotKind,
 };
 use super::txst_map::{record_entries, slot_path_key};
 use super::AppModel;
@@ -78,19 +78,6 @@ fn fill_path<'a>(
         .and_then(|k| paths.get(&k))
 }
 
-/// Only an in-place export can install a DDS relative to the input's textures directory itself.
-fn in_place_textures(m: &AppModel, output: &Path) -> bool {
-    let Ok(resolved) = output.canonicalize() else {
-        return false;
-    };
-    resolved
-        .file_name()
-        .is_some_and(|n| n.eq_ignore_ascii_case("textures"))
-        && m.root
-            .as_ref()
-            .is_some_and(|input| engine::discover::holds(output, input))
-}
-
 fn same_slot_file(requested: &str, written: &str) -> bool {
     Path::new(&slot_path_key(requested).replace('\\', "/"))
         == Path::new(&written.replace('\\', "/"))
@@ -105,11 +92,10 @@ fn slots_of(
     paths: &BTreeMap<OutputKey, PathBuf>,
     m: &AppModel,
     roots: &[PathBuf; 2],
-    in_place: bool,
 ) -> (BTreeMap<u8, String>, BTreeMap<u8, SlotKind>) {
     let mut out = BTreeMap::new();
-    // Only the fill that supplied the final string can require a separate file at the game's path.
-    let mut unlocated = BTreeMap::new();
+    // Two fills can share a slot number. Only the winning fill supplies its string.
+    let mut winners = BTreeMap::new();
     for (kind, fill) in &v.slots {
         let (item, borrowed) = match fill {
             SlotFill::Borrowed { item, .. } => (item, true),
@@ -119,25 +105,19 @@ fn slots_of(
         // Note HL5: a no-albedo set's outputs stay at the mesh's own paths: the mapped output (a rel path under
         // `textures`), else the file's game path.
         let json_only = v.json && !v.pbr;
-        let requested = match fill_path(item, views, paths, m) {
+        let Some(it) = m.item(item) else { continue };
+        let key = item_output_key(views, it);
+        let requested = match key.as_ref().and_then(|k| paths.get(k)) {
             // Note HQ6: an explicit path is under the export folder, as the JSON names it.
             Some(p) => p.clone(),
-            None if json_only => match m.item(item).and_then(|i| i.job.as_ref()) {
+            None if json_only => match it.job.as_ref() {
                 Some(j) => PathBuf::from(&j.game_path).with_extension("dds"),
                 None => continue,
             },
             None => continue,
         };
         let requested = requested.to_string_lossy().replace('/', "\\");
-        let written = m.item(item).and_then(|i| {
-            let rel = written_output_rel(roots, i)?;
-            let game = if in_place {
-                game_location_of(&Path::new("textures").join(rel))
-            } else {
-                game_location_of(rel)
-            }?;
-            Some(game.to_ascii_lowercase())
-        });
+        let written = projected_slot(m, roots, it, key.as_ref()).map(|s| s.to_ascii_lowercase());
         let path = match &written {
             Some(game) if !same_slot_file(&requested, game) => game.clone(),
             _ => requested,
@@ -154,11 +134,7 @@ fn slots_of(
         // `game_slot`: the skin `_wet` and `_detail_n` (9, 10) are no PGPatcher slot, even in a borrowing JSON set.
         if let (true, Some(n)) = (borrowed || !at_own_path, kind.game_slot()) {
             out.insert(n, path);
-            if written.is_none() {
-                unlocated.insert(n, *kind);
-            } else {
-                unlocated.remove(&n);
-            }
+            winners.insert(n, *kind);
         }
     }
     if v.json && !v.pbr {
@@ -182,7 +158,7 @@ fn slots_of(
             out.insert(n, s.clone());
         }
     }
-    (out, unlocated)
+    (out, winners)
 }
 
 /// Note HL5: the diffuse path of a no-albedo JSON set whose slot 1 is empty: the mapping's slot 1, else the set's base
@@ -306,7 +282,6 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     let (_, paths) = engine_inputs(m);
     let views = set_views(m);
     let roots = super::sets::output_roots(m);
-    let in_place = in_place_textures(m, &roots[0]);
     views
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
@@ -323,7 +298,7 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
             } else {
                 full
             };
-            let (e, _) = entry_for(v, &views, &paths, m, &roots, in_place);
+            let (e, _) = entry_for(v, &views, &paths, m, &roots);
             (full.clone(), e)
         })
         .collect()
@@ -335,9 +310,8 @@ fn entry_for(
     paths: &BTreeMap<OutputKey, PathBuf>,
     m: &AppModel,
     roots: &[PathBuf; 2],
-    in_place: bool,
 ) -> (EntryInput, BTreeMap<u8, SlotKind>) {
-    let (slots, unlocated) = slots_of(v, views, paths, m, roots, in_place);
+    let (slots, winners) = slots_of(v, views, paths, m, roots);
     let mut settings = crate::model::auto_flags::resolved_for(
         v.json,
         feature_slots(v),
@@ -351,7 +325,7 @@ fn entry_for(
         derived_match: v.derived_match.clone().unwrap_or_default(),
         section: false,
     };
-    (entry, unlocated)
+    (entry, winners)
 }
 
 /// `s` less its string `slot1`-`slot8` (links and clears).
@@ -734,44 +708,46 @@ pub struct JsonDependency {
     pub output: PathBuf,
     /// A successful row alone cannot vouch for a slot path that has no matching producer.
     pub slot_file: Option<PathBuf>,
+    /// The 1-based JSON slot and the game path of its local producer.
+    pub slot: Option<(u8, String)>,
 }
 
 fn dependency(
     m: &AppModel,
+    views: &[SetView],
     roots: &[PathBuf; 2],
     f: JsonFile<'_>,
     entry: &EntryInput,
-    unlocated: &BTreeMap<u8, SlotKind>,
+    winners: &BTreeMap<u8, SlotKind>,
 ) -> Option<JsonDependency> {
-    let (item, probe) = match f {
+    let (item, number) = match f {
         JsonFile::Fill(k, fill) => (
             fill.item()?,
-            k.game_slot()
-                .filter(|n| unlocated.get(n) == Some(&k))
-                .and_then(|n| entry.written_slot(n)),
+            k.game_slot().filter(|n| winners.get(n) == Some(&k)),
         ),
-        JsonFile::Linked(link) => (link.item.as_deref()?, None),
+        JsonFile::Linked(n, link) => (link.item.as_deref()?, Some(n)),
         JsonFile::External(_) => return None,
     };
     let item = m.item(item)?;
     let job = item.job.as_ref().filter(|_| !item.job_key.is_empty())?;
-    let slot_file = probe.map(|slot| {
-        let path = PathBuf::from(slot.replace('\\', "/"));
-        let game_path = if path
-            .components()
-            .next()
-            .is_some_and(|c| c.as_os_str().eq_ignore_ascii_case("textures"))
-        {
-            path
-        } else {
-            Path::new("textures").join(path)
-        };
-        roots[0].join(game_path)
-    });
+    let mut slot_file = None;
+    let slot = number
+        .filter(|&n| entry.written_slot(n).is_some())
+        .map(|n| {
+            let projected = projected_slot(m, roots, item, item_output_key(views, item).as_ref());
+            let game = projected.unwrap_or_else(|| {
+                // A legacy output outside textures also needs the installed copy the reader opens.
+                let game = slot_path_key(&super::sets::written_game_path(job).replace('/', "\\"));
+                slot_file = Some(roots[0].join(&game));
+                game
+            });
+            (n, game.to_ascii_lowercase())
+        });
     Some(JsonDependency {
         job_key: item.job_key.clone(),
         output: job.output.clone(),
         slot_file,
+        slot,
     })
 }
 
@@ -855,7 +831,6 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
     // Review E1 (Task 15a): the local files the JSON names (`json_files`): a link that names a set's output is a dep as
     // a borrow is; an own or borrowed file a `slotN` overrides is none (the set still converts its own).
     let roots = super::sets::output_roots(m);
-    let in_place = in_place_textures(m, &roots[0]);
     // 3b-F7, 3b-F12: a set outside the run gates nothing (Note HF9). One with a stored slot command gets its entry
     // only when its own checks pass; one with none is not checked, as on main.
     let (_, paths) = engine_inputs(m);
@@ -877,9 +852,9 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
         {
             Some(why) => held.push((v.id.clone(), why)),
             None => {
-                let (e, unlocated) = entry_for(v, &views, &paths, m, &roots, in_place);
+                let (e, winners) = entry_for(v, &views, &paths, m, &roots);
                 let deps = json_files(v)
-                    .filter_map(|f| dependency(m, &roots, f, &e, &unlocated))
+                    .filter_map(|f| dependency(m, &views, &roots, f, &e, &winners))
                     .collect();
                 entries.push((v.id.clone(), deps, e));
             }
@@ -996,7 +971,14 @@ pub fn finish(
     for (id, deps, e) in &p.entries {
         match deps
             .iter()
-            .map(|d| dep_ok(p, rows, &d.job_key, &d.output, d.slot_file.as_deref()))
+            .map(|d| {
+                if let Some((n, game)) = &d.slot {
+                    if !e.written_slot(*n).is_some_and(|s| same_slot_file(s, game)) {
+                        return Err("not exported yet".into());
+                    }
+                }
+                dep_ok(p, rows, &d.job_key, &d.output, d.slot_file.as_deref())
+            })
             .find_map(Result::err)
         {
             None => kept.push(e.clone()),
