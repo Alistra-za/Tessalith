@@ -505,6 +505,12 @@ pub struct MeshesModel {
     rows_cache: Option<RowsCache>,
     /// Note GH3: the opened texture folder (`AppModel.root`), set by the app each frame (`set_project_root`).
     project_root: Option<PathBuf>,
+    /// Review E6: the root a project switch wanted while its session could not be saved (both saves failed); the
+    /// session stays open until an edit or a call with another root tries again. None: no switch waits.
+    pending_root: Option<Option<PathBuf>>,
+    /// Attempts of the switch's two saves by sessions that ended (`switch_save_attempts_for_test` adds the open one).
+    #[cfg(feature = "test-hooks")]
+    switch_attempts_done: u32,
     /// Roots opened this session, each with its pill's on/off as it was left (the current root's is `project_on`).
     project_seen: HashMap<PathBuf, bool>,
     /// The This project pill is on.
@@ -664,6 +670,9 @@ impl MeshesModel {
             row_builds: 0,
             rows_cache: None,
             project_root: None,
+            pending_root: None,
+            #[cfg(feature = "test-hooks")]
+            switch_attempts_done: 0,
             project_seen: HashMap::new(),
             project_on: false,
             project_tex: None,
@@ -1412,8 +1421,11 @@ impl MeshesModel {
     }
 
     /// Note GH3: the opened texture folder (`AppModel.root`); the app calls this each frame. The pill's on/off is kept
-    /// per root for the session: a root not opened before starts on.
+    /// per root for the session: a root not opened before starts on. Review E6: the open NIF edit's draft lives with
+    /// the project, so a change saves it into the old project (or a kept autosave), ends the session and opens the
+    /// NIF again from the new place (`switch_project`); the same root again does no I/O.
     pub fn set_project_root(&mut self, root: Option<&Path>) {
+        self.finish_switch(); // a retry that saved since the last call
         if self.project_root.as_deref() == root {
             return;
         }
@@ -1424,6 +1436,7 @@ impl MeshesModel {
         if let Some(r) = root {
             self.project_on = self.project_seen.get(r).copied().unwrap_or(true);
         }
+        self.switch_project(root);
     }
 
     /// Note GH3 (owner O11 (a)): the opened folder's output game paths (`textures/…`, lower case, `/`), `rev` bumped

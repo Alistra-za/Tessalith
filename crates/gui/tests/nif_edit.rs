@@ -169,6 +169,7 @@ fn an_edit_on_an_escaping_path_does_not_open() {
             fixture("TestNifFile_Skinned_SE.nif"),
             copy("A", 1, false),
             p,
+            None,
             Some(&edit_mod),
             None,
         );
@@ -531,12 +532,14 @@ fn clip_only_text() -> String {
     [DOC_HEAD, EXPORTED, OP_ADD_SEQUENCE, OP_RENAME_SEQUENCE].concat()
 }
 
-fn open_with(edit_mod: &Path, autosave: Option<&Path>) -> NifEdit {
+/// A session on x.nif in the project `project` (its draft is under it), no export folder.
+fn open_with(project: &Path, autosave: Option<&Path>) -> NifEdit {
     NifEdit::open(
         fixture("TestNifFile_Skinned_SE.nif"),
         copy("A", 1, false),
         "meshes/x.nif",
-        Some(edit_mod),
+        Some(project),
+        None,
         autosave,
     )
     .unwrap()
@@ -545,7 +548,7 @@ fn open_with(edit_mod: &Path, autosave: Option<&Path>) -> NifEdit {
 #[test]
 fn a_document_of_only_clip_ops_opens_empty_and_says_so() {
     let d = tempfile::tempdir().unwrap();
-    let p = doc_path(d.path(), "meshes/x.nif").unwrap();
+    let p = draft_path(d.path(), "meshes/x.nif").unwrap();
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, clip_only_text()).unwrap();
     let e = open_with(d.path(), None);
@@ -673,12 +676,13 @@ fn a_bad_field_in_a_document_reports_its_line() {
 #[test]
 fn a_clip_key_edit_that_depended_on_a_dropped_clip_op_does_not_apply() {
     let bytes = with_uv_ctrl(&fixture("TestNifFile_Skinned_SE.nif"));
-    let open = |edit_mod: Option<&Path>| {
+    let open = |project: Option<&Path>| {
         NifEdit::open(
             bytes.clone(),
             copy("A", 1, false),
             "meshes/x.nif",
-            edit_mod,
+            project,
+            None,
             None,
         )
         .unwrap()
@@ -723,7 +727,7 @@ fn a_clip_key_edit_that_depended_on_a_dropped_clip_op_does_not_apply() {
             .to_text()
             .replacen("[[ops]]", &format!("{OP_ADD_SEQUENCE}[[ops]]"), 1);
         let dir = tempfile::tempdir().unwrap();
-        let p = doc_path(dir.path(), "meshes/x.nif").unwrap();
+        let p = draft_path(dir.path(), "meshes/x.nif").unwrap();
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, text).unwrap();
         let mut e = open(Some(dir.path()));
@@ -747,34 +751,35 @@ fn a_clip_key_edit_that_depended_on_a_dropped_clip_op_does_not_apply() {
     }
 }
 
-/// Final review I3: an export-folder change reaches Messages with the drop line when the new folder's document opens
-/// in place of an untouched session. A touched session keeps its own document (nothing is loaded into it), and the
-/// folder's document, clip ops and all, is kept aside whole at the next save.
+/// Final review I3 (Review E6: it is a project's draft now, not the export folder's document): opening a project
+/// reaches Messages with the drop line when the project's draft opens in place of an untouched session. A touched
+/// session keeps its own document (nothing is loaded into it), and the project's draft, clip ops and all, is kept
+/// aside whole at the next save.
 #[test]
-fn a_folder_change_says_what_it_dropped_and_keeps_the_other_document_whole() {
-    let doc_in = |out: &Path| {
-        let p = nif_doc(out);
+fn opening_a_project_says_what_it_dropped_and_keeps_the_other_draft_whole() {
+    let draft_in = |proj: &Path| {
+        let p = draft(proj);
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(&p, clip_only_text()).unwrap();
         p
     };
-    // untouched: the same NIF reopens from the new folder
+    // untouched: the same NIF reopens from the project's draft
     let (d, mut m) = export_session();
     m.open_edit();
-    let out = d.path().join("mods").join("MyOut");
-    doc_in(&out);
+    let proj = project_folder(&d, "proj");
+    draft_in(&proj);
     m.messages.clear();
-    m.set_nif_export_root(Some(out));
+    m.set_project_root(Some(&proj));
     assert_eq!(m.messages, vec![CLIP_ONLY_LINE.to_string()]);
     assert_eq!(m.edit.as_ref().unwrap().doc.ops.len(), 0);
-    // touched: its edit moves; the destination's document is not loaded, so nothing is dropped
+    // touched: its edit moves; the destination's draft is not loaded, so nothing is dropped
     let (d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    let out = d.path().join("mods").join("MyOut");
-    let p = doc_in(&out);
+    let proj = project_folder(&d, "proj");
+    let p = draft_in(&proj);
     m.messages.clear();
-    m.set_nif_export_root(Some(out));
+    m.set_project_root(Some(&proj));
     assert!(
         m.messages.iter().all(|l| !l.contains("dropped")),
         "{:?}",
@@ -1266,7 +1271,7 @@ fn glossiness_edit_reaches_the_viewport_without_a_reload() {
     let e = m.edit.as_ref().unwrap();
     assert_eq!(e.doc.ops.len(), 1);
     assert_eq!(e.doc.ops[0].status, OpStatus::Applied);
-    let saved = load(&e.doc_path).unwrap().expect("saved after the push");
+    let saved = load(&e.draft_path).unwrap().expect("saved after the push");
     assert_eq!(saved.ops.len(), 1);
     assert!(m.undo_edit());
     assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
@@ -1561,7 +1566,7 @@ fn a_failed_reopen_returns_the_view_to_the_mesh() {
     let (_d, mut m) = session(false);
     m.open_edit();
     assert!(matches!(m.v3.content(), Some(Content::Parsed { .. })));
-    let p = m.edit.as_ref().unwrap().doc_path.clone();
+    let p = m.edit.as_ref().unwrap().draft_path.clone();
     std::fs::create_dir_all(p.parent().unwrap()).unwrap();
     std::fs::write(&p, "not = [a document").unwrap();
     m.open_edit();
@@ -1663,7 +1668,8 @@ fn view(m: MeshesModel) -> Harness<'static, MeshesModel> {
 /// A read-only edit session on `bytes` without a scan (no store, no preview).
 fn direct(bytes: Vec<u8>) -> MeshesModel {
     let mut m = MeshesModel::empty();
-    m.edit = Some(NifEdit::open(bytes, copy("A", 1, false), "meshes/x.nif", None, None).unwrap());
+    m.edit =
+        Some(NifEdit::open(bytes, copy("A", 1, false), "meshes/x.nif", None, None, None).unwrap());
     m
 }
 
@@ -3025,6 +3031,7 @@ fn authored_key_errors_block_export() {
             b.clone(),
             copy("A", 1, false),
             "meshes/x.nif",
+            None,
             Some(&edit_mod),
             None,
         )
@@ -3254,6 +3261,7 @@ fn managed_variable_change_rewrites_clip_ids() {
             scenes::managed_clip(),
             copy("A", 1, false),
             "meshes/x.nif",
+            None,
             None,
             None,
         )
@@ -3805,7 +3813,7 @@ fn export_writes_the_patched_nif_and_records_its_hash() {
     let want = nif::edit::apply(&e.source, &e.doc.ops()).unwrap().bytes;
     assert_ne!(want, *e.source);
     assert_eq!(std::fs::read(exported(&d)).unwrap(), want);
-    let saved = load(&e.doc_path).unwrap().unwrap();
+    let saved = load(e.record_path.as_ref().unwrap()).unwrap().unwrap();
     assert_eq!(
         saved.export.sha256.as_deref(),
         Some(sha256_hex(&want).as_str())
@@ -3884,7 +3892,12 @@ fn export_drops_orphan_blocks_and_records_the_written_hash() {
         "the export is the compacted patch"
     );
     assert_eq!(
-        load(&e.doc_path).unwrap().unwrap().export.sha256.as_deref(),
+        load(e.record_path.as_ref().unwrap())
+            .unwrap()
+            .unwrap()
+            .export
+            .sha256
+            .as_deref(),
         Some(sha256_hex(&written).as_str())
     );
     assert_eq!(e.cleanup_note, None);
@@ -3939,7 +3952,12 @@ fn export_without_cleanup_writes_the_patch_and_says_why() {
     let why = nif::edit::compact(&e.patched, 5).unwrap_err();
     assert_eq!(std::fs::read(exported(&d)).unwrap(), *e.patched);
     assert_eq!(
-        load(&e.doc_path).unwrap().unwrap().export.sha256.as_deref(),
+        load(e.record_path.as_ref().unwrap())
+            .unwrap()
+            .unwrap()
+            .export
+            .sha256
+            .as_deref(),
         Some(sha256_hex(&e.patched).as_str())
     );
     let line = format!("Exported without cleanup: {why}.");
@@ -4178,15 +4196,24 @@ fn an_unreadable_export_file_blocks_and_writes_nothing() {
     std::fs::create_dir_all(exported(&d)).unwrap();
     export_fails(&mut m, ": Cannot read ");
     assert!(exported(&d).is_dir());
-    let doc = load(&m.edit.as_ref().unwrap().doc_path).unwrap().unwrap();
+    let doc = load(&m.edit.as_ref().unwrap().draft_path).unwrap().unwrap();
     assert!(doc.export.sha256.is_none());
 }
 
+/// The chip the export folder's records give a NIF (`pending_docs` walks `.sdc\nif-edits`), as a fresh start sees it.
 fn badge_of(m: &MeshesModel, name: &str) -> Option<DocBadge> {
     m.pending_docs()
         .into_iter()
         .find(|(k, _)| k.ends_with(name))
         .map(|(_, b)| b)
+}
+
+/// The chip the session keeps current in memory (`doc_badges`): it follows the draft, which is not in the export folder.
+fn chip_of(m: &MeshesModel, name: &str) -> Option<DocBadge> {
+    m.doc_badges
+        .iter()
+        .find(|(k, _)| k.ends_with(name))
+        .map(|(_, b)| *b)
 }
 
 #[test]
@@ -4202,8 +4229,13 @@ fn pending_list_and_chips() {
     gloss(&mut m, 12.5);
     assert_eq!(export(&mut m), Ok(1));
     assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Exported));
-    assert_eq!(badge_of(&m, "y.nif"), Some(DocBadge::Pending));
-    // A new session on the same store reads the chips from the edit documents, without a scan or an open edit.
+    assert_eq!(chip_of(&m, "y.nif"), Some(DocBadge::Pending));
+    assert_eq!(
+        badge_of(&m, "y.nif"),
+        None,
+        "Review E6: an edit not exported has no record in the export folder"
+    );
+    // A new session on the same store reads the chips from the records, without a scan or an open edit.
     let mut fresh = MeshesModel::new(
         Some(d.path().join("scan.db")),
         MeshesSettings {
@@ -4224,7 +4256,7 @@ fn pending_list_and_chips() {
             .map(|(_, b)| *b)
     };
     assert_eq!(chips("x.nif"), Some(DocBadge::Exported));
-    assert_eq!(chips("y.nif"), Some(DocBadge::Pending));
+    assert_eq!(chips("y.nif"), None, "a draft is read when its NIF opens");
     // Meshes UI T2: the column is locked on the shapes while Edit is open; the chips are in the NIF list.
     m.close_edit();
     let mut h = view(m);
@@ -4248,7 +4280,12 @@ fn undo_after_export_makes_it_pending_again() {
         e.doc.export.sha256.is_some(),
         "undo keeps the export record"
     );
-    assert_eq!(badge_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(chip_of(&m, "x.nif"), Some(DocBadge::Pending));
+    assert_eq!(
+        badge_of(&m, "x.nif"),
+        Some(DocBadge::Exported),
+        "the record in the export folder is what the last export wrote"
+    );
     // Our own file is replaced without asking.
     assert_eq!(export(&mut m), Ok(1));
     let e = m.edit.as_ref().unwrap();
@@ -4333,7 +4370,7 @@ fn reopening_a_never_exported_edit_with_a_changed_source_writes_no_document() {
     let (d, mut m) = export_session();
     m.open_edit();
     gloss(&mut m, 12.5);
-    let doc = m.edit.as_ref().unwrap().doc_path.clone();
+    let doc = m.edit.as_ref().unwrap().draft_path.clone();
     let before = std::fs::read_to_string(&doc).unwrap();
     let src = changed_source(&m);
     m.close_edit();
@@ -5099,6 +5136,510 @@ fn autosave(d: &tempfile::TempDir) -> std::path::PathBuf {
         .join(format!("{}.toml", sha256_hex(b"meshes\\x.nif")))
 }
 
+// ---- Review E6: the draft lives with the project, the export folder keeps only a record ----
+
+/// Where a session in `project` saves its draft of `meshes\x.nif`.
+fn draft(p: &Path) -> std::path::PathBuf {
+    p.join(r"_sdc\nif-edits\meshes\x.nif.sdc-nifedit.toml")
+}
+
+/// `export_session`'s export folder (`mods\sdc NIF Edits`).
+fn export_root(d: &tempfile::TempDir) -> std::path::PathBuf {
+    d.path().join("mods").join(EDIT_MOD)
+}
+
+/// A folder `name` in the session's temp dir, made.
+fn project_folder(d: &tempfile::TempDir, name: &str) -> std::path::PathBuf {
+    let p = d.path().join(name);
+    std::fs::create_dir_all(&p).unwrap();
+    p
+}
+
+/// `export_session` with the project `name` opened (a folder in its temp dir) and `export` chosen as the export
+/// folder (None: `mods\sdc NIF Edits`, as every session of this binary has).
+fn session_in_project(
+    name: &str,
+    export: Option<&Path>,
+) -> (tempfile::TempDir, MeshesModel, std::path::PathBuf) {
+    let (d, mut m) = export_session();
+    if let Some(e) = export {
+        m.set_nif_export_root(Some(e.to_path_buf()));
+    }
+    let p = project_folder(&d, name);
+    m.set_project_root(Some(&p));
+    (d, m, p)
+}
+
+/// Every `*.toml` under `dir`, oldest name first.
+fn tomls_under(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = vec![];
+    let Ok(rd) = std::fs::read_dir(dir) else {
+        return out;
+    };
+    for f in rd {
+        let p = f.unwrap().path();
+        if p.is_dir() {
+            out.extend(tomls_under(&p));
+        } else if p.extension().is_some_and(|x| x == "toml") {
+            out.push(p);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// The values the document's ops set, as `op_values` reads them from a session.
+fn doc_values(p: &Path) -> Vec<f32> {
+    load(p)
+        .unwrap()
+        .unwrap_or_else(|| panic!("{} holds no document", p.display()))
+        .ops
+        .iter()
+        .map(|d| match &d.op {
+            Op::SetField {
+                value: Value::F32(v),
+                ..
+            } => f32::from_bits(*v),
+            o => panic!("{o:?}"),
+        })
+        .collect()
+}
+
+/// Project B with its own draft of `meshes\x.nif` (one op, 7.5), made by a session of its own that is then closed.
+/// The model is left with project B open and no session.
+fn project_with_a_draft(m: &mut MeshesModel, b: &Path) -> Vec<u8> {
+    m.set_project_root(Some(b));
+    m.open_edit();
+    gloss(m, 7.5);
+    m.close_edit();
+    assert!(draft(b).exists(), "B holds its own draft");
+    std::fs::read(draft(b)).unwrap()
+}
+
+/// The kept autosave of the NIF's draft `id`.
+fn kept(d: &tempfile::TempDir, id: &str) -> std::path::PathBuf {
+    kept_autosave_path(d.path(), "meshes\\x.nif", id)
+}
+
+/// The id the draft in `p` carries.
+fn id_of(p: &Path) -> String {
+    load(&draft(p))
+        .unwrap()
+        .unwrap()
+        .id
+        .expect("a saved draft has its id")
+}
+
+/// The files a save moved aside from the kept autosave `k` (`<stem>.<seconds>.toml` in its folder), oldest name first.
+fn moved_aside_from(k: &Path) -> Vec<std::path::PathBuf> {
+    kept_beside(k)
+}
+
+/// Sets the modified time of `p` an hour back, so a newer file beside it wins a GD11 comparison.
+fn make_old(p: &Path) {
+    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
+    std::fs::File::options()
+        .write(true)
+        .open(p)
+        .unwrap()
+        .set_modified(old)
+        .unwrap();
+}
+
+#[test]
+fn an_edit_is_saved_with_the_project_not_in_the_export_folder() {
+    let (d, mut m, p) = session_in_project("proj", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(draft(&p).exists(), "the draft is saved under the project");
+    assert!(
+        !nif_doc(&export_root(&d)).exists(),
+        "nothing is written to the export folder before an export"
+    );
+}
+
+#[test]
+fn with_no_project_the_edit_is_saved_in_local_app_data() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(autosave(&d).exists(), "the autosave beside the store");
+    assert!(!nif_doc(&export_root(&d)).exists());
+}
+
+#[test]
+fn changing_the_export_folder_writes_nothing() {
+    let (d, mut m, p) = session_in_project("proj", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(
+        draft(&p).exists(),
+        "premise: the draft is under the project"
+    );
+    let before = std::fs::read(draft(&p)).unwrap();
+    let new = d.path().join(r"mods\MyOut");
+    m.set_nif_export_root(Some(new.clone()));
+    assert_eq!(m.nif_export_root.as_deref(), Some(new.as_path()));
+    assert_eq!(std::fs::read(draft(&p)).unwrap(), before);
+    assert!(!nif_doc(&new).exists());
+    assert!(
+        std::fs::read_dir(&new).map_or(true, |mut r| r.next().is_none()),
+        "the new folder is still empty"
+    );
+    assert_eq!(op_values(&m).len(), 1, "the edit stays open as it was");
+}
+
+#[test]
+fn a_project_switch_saves_to_the_old_project_and_ends_the_edit() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    let b_bytes = project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.set_project_root(Some(&b));
+    assert_eq!(doc_values(&draft(&a)), [12.5], "A's draft holds A's edit");
+    assert_eq!(
+        std::fs::read(draft(&b)).unwrap(),
+        b_bytes,
+        "B's is untouched"
+    );
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "the open session holds B's ops"
+    );
+    assert_eq!(
+        tomls_under(&b.join(r"_sdc\nif-edits")),
+        [draft(&b)],
+        "nothing of A's reached B"
+    );
+}
+
+#[test]
+fn closing_the_project_saves_the_draft_and_ends_the_edit() {
+    let (d, mut m, a) = session_in_project("a", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.set_project_root(None);
+    assert_eq!(doc_values(&draft(&a)), [12.5]);
+    assert!(!autosave(&d).exists(), "nothing goes to the autosave");
+    assert!(
+        m.edit.as_ref().is_some_and(|e| e.doc.ops.is_empty()),
+        "the reopened session has no ops"
+    );
+}
+
+#[test]
+fn opening_a_project_carries_the_autosave_into_it() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(
+        autosave(&d).exists(),
+        "premise: the edit is in the autosave"
+    );
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    assert_eq!(doc_values(&draft(&p)), [12.5]);
+    assert!(!autosave(&d).exists(), "the autosave is deleted (GD5 (c))");
+    assert!(m.edit.as_ref().unwrap().touched());
+    assert_eq!(op_values(&m).len(), 1, "the same session goes on");
+}
+
+/// Ruling r3-1: a session nothing was done in writes nothing and makes no folder.
+#[test]
+fn an_untouched_session_writes_nothing_on_a_switch() {
+    let (d, mut m, a) = session_in_project("a", None);
+    m.open_edit();
+    let b = project_folder(&d, "b");
+    m.set_project_root(Some(&b));
+    assert!(m.edit.is_some(), "premise: the NIF reopens in B");
+    m.set_project_root(None);
+    assert!(m.edit.is_some(), "premise: and again with no project");
+    assert!(!a.join("_sdc").exists());
+    assert!(!b.join("_sdc").exists());
+    assert!(tomls_under(&d.path().join("nif-edits")).is_empty());
+}
+
+#[test]
+fn a_removed_project_folder_keeps_the_edit_on_a_switch() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    let b_bytes = project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    std::fs::remove_dir_all(&a).unwrap();
+    m.messages.clear();
+    m.set_project_root(Some(&b));
+    assert!(!a.exists(), "the removed folder is not made again");
+    assert_eq!(
+        doc_values(&kept(&d, &id)),
+        [12.5],
+        "the kept autosave holds the edit"
+    );
+    assert!(
+        m.messages
+            .iter()
+            .any(|l| l.starts_with("Could not save the edits of meshes\\x.nif to ")),
+        "{:?}",
+        m.messages
+    );
+    assert_eq!(std::fs::read(draft(&b)).unwrap(), b_bytes);
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "the session is B's"
+    );
+}
+
+/// Ruling r3-2: the fallback is keyed on the draft's id; another draft's kept autosave and the plain autosave stay.
+#[test]
+fn a_fallback_never_overwrites_another_kept_autosave() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    // another project's kept autosave of this NIF, and the plain no-project autosave (older than B's draft)
+    let other = kept(&d, "0123456789abcdef");
+    save(&other, &doc()).unwrap();
+    save(&autosave(&d), &doc()).unwrap();
+    make_old(&autosave(&d));
+    let (other_bytes, plain_bytes) = (
+        std::fs::read(&other).unwrap(),
+        std::fs::read(autosave(&d)).unwrap(),
+    );
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    assert_eq!(
+        doc_values(&kept(&d, &id)),
+        [12.5],
+        "its own file is written"
+    );
+    assert_eq!(std::fs::read(&other).unwrap(), other_bytes);
+    assert_eq!(std::fs::read(autosave(&d)).unwrap(), plain_bytes);
+}
+
+/// Ruling r3-2: a renamed project keeps its draft id, so opening it again brings back the edit the old path could not
+/// save (a drag that was not flushed).
+#[test]
+fn a_renamed_project_gets_its_unflushed_edit_back() {
+    let (d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    make_old(&draft(&p));
+    tick(&mut m, 40.5); // a drag, not flushed
+    assert_eq!(op_values(&m).len(), 2);
+    let id = id_of(&p);
+    let p2 = d.path().join("p2");
+    std::fs::rename(&p, &p2).unwrap();
+    m.set_project_root(Some(&p2));
+    assert!(!p.exists(), "the old path is not made again");
+    assert!(kept(&d, &id).exists(), "the drag was kept at the switch");
+    let v: Vec<f32> = op_values(&m).iter().map(|v| v.1).collect();
+    assert_eq!(v, [12.5, 40.5], "the kept autosave is newer than the draft");
+    gloss(&mut m, 13.5);
+    assert!(!kept(&d, &id).exists(), "its next save removes it");
+    assert_eq!(doc_values(&draft(&p2)), [12.5, 40.5, 13.5]);
+}
+
+#[test]
+fn another_project_never_loads_a_kept_autosave_that_is_not_its_own() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    let a_kept = std::fs::read(kept(&d, &id)).unwrap();
+    let values = |m: &MeshesModel| op_values(m).iter().map(|v| v.1).collect::<Vec<_>>();
+    assert_eq!(values(&m), [7.5], "B's session holds B's ops only");
+    m.set_project_root(None);
+    assert!(
+        m.edit.as_ref().unwrap().doc.ops.is_empty(),
+        "no project: only the plain autosave is read"
+    );
+    assert_eq!(std::fs::read(kept(&d, &id)).unwrap(), a_kept);
+    // B opened afresh reads its own draft again
+    m.set_project_root(Some(&b));
+    assert_eq!(values(&m), [7.5]);
+    assert_eq!(std::fs::read(kept(&d, &id)).unwrap(), a_kept);
+}
+
+/// Ruling r3-3, r4-2: both saves fail, so the edit stays open and blocked; nothing is retried per frame, only by the
+/// next edit.
+#[test]
+fn when_both_saves_fail_the_edit_stays_open_and_export_is_blocked() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let id = id_of(&a);
+    let blocker = d.path().join("nif-edits");
+    std::fs::write(&blocker, b"a file where the autosave folder goes").unwrap();
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    assert!(m.edit.is_some(), "the session is not dropped");
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5],
+        "it still holds A's edit, not B's"
+    );
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(
+        why.starts_with("Could not save the edits of meshes\\x.nif while changing the project: "),
+        "{why}"
+    );
+    let (tries, lines, stamp) = (
+        m.switch_save_attempts_for_test(),
+        m.messages.len(),
+        std::fs::metadata(&blocker).unwrap().modified().unwrap(),
+    );
+    assert_eq!(tries, 1, "one attempt of the two saves");
+    for _ in 0..10 {
+        m.set_project_root(Some(&b));
+    }
+    assert_eq!(
+        m.switch_save_attempts_for_test(),
+        tries,
+        "no per-frame retry"
+    );
+    assert_eq!(m.messages.len(), lines);
+    assert_eq!(
+        std::fs::metadata(&blocker).unwrap().modified().unwrap(),
+        stamp
+    );
+    // the autosave folder works again: the next edit tries again, keeps the edits and ends the session
+    std::fs::remove_file(&blocker).unwrap();
+    gloss(&mut m, 13.5);
+    assert_eq!(m.switch_save_attempts_for_test(), tries + 1);
+    assert_eq!(doc_values(&kept(&d, &id)), [12.5, 13.5]);
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [7.5],
+        "B opens"
+    );
+}
+
+/// Recursively copies `from` to `to` (a project folder).
+fn copy_dir(from: &Path, to: &Path) {
+    std::fs::create_dir_all(to).unwrap();
+    for f in std::fs::read_dir(from).unwrap() {
+        let p = f.unwrap().path();
+        let t = to.join(p.file_name().unwrap());
+        if p.is_dir() {
+            copy_dir(&p, &t);
+        } else {
+            std::fs::copy(&p, &t).unwrap();
+        }
+    }
+}
+
+/// Ruling r4-3: a copy of a project holds the same draft id; its fallback moves the original's kept autosave aside.
+#[test]
+fn a_copied_project_never_replaces_the_kept_autosave_of_its_original() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 7.5);
+    let id = id_of(&a);
+    let a2 = d.path().join("a2");
+    copy_dir(&a, &a2);
+    assert_eq!(id_of(&a2), id, "the copy keeps the draft's id");
+    gloss(&mut m, 12.5);
+    std::fs::remove_dir_all(&a).unwrap();
+    m.set_project_root(Some(&b));
+    let k = kept(&d, &id);
+    assert_eq!(doc_values(&k), [7.5, 12.5], "A's edit is kept");
+    let a_edit = std::fs::read(&k).unwrap();
+    // A2's own draft is the newer file, so its session does not take the original's kept autosave
+    make_old(&k);
+    let now = std::time::SystemTime::now();
+    std::fs::File::options()
+        .write(true)
+        .open(draft(&a2))
+        .unwrap()
+        .set_modified(now)
+        .unwrap();
+    m.set_project_root(Some(&a2));
+    assert_eq!(op_values(&m).len(), 1, "A2's session holds A2's draft");
+    gloss(&mut m, 9.5);
+    std::fs::remove_dir_all(&a2).unwrap();
+    m.set_project_root(Some(&b));
+    assert_eq!(
+        doc_values(&k),
+        [7.5, 9.5],
+        "the kept autosave now holds A2's edit"
+    );
+    let aside = moved_aside_from(&k);
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(std::fs::read(&aside[0]).unwrap(), a_edit);
+}
+
+/// Ruling r4-5: back in its own project, a session whose switch failed saves there and goes on.
+#[test]
+fn returning_to_the_own_project_after_both_saves_failed_keeps_the_session() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b"));
+    project_with_a_draft(&mut m, &b);
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    gloss(&mut m, 13.5);
+    let shape = lit_shape(m.edit.as_ref().unwrap()).0;
+    m.select_edit(Selection::Shape(shape));
+    // A's folder stays, but `_sdc` is a plain file: no draft can be written there; and no autosave folder either
+    std::fs::remove_dir_all(a.join("_sdc")).unwrap();
+    std::fs::write(a.join("_sdc"), b"a file").unwrap();
+    std::fs::write(d.path().join("nif-edits"), b"a file").unwrap();
+    m.set_project_root(Some(&b));
+    let why = m.edit.as_ref().unwrap().export_block().unwrap();
+    assert!(why.contains("while changing the project"), "{why}");
+    let before = ops(&m);
+    std::fs::remove_file(a.join("_sdc")).unwrap();
+    m.set_project_root(Some(&a));
+    let e = m.edit.as_ref().unwrap();
+    assert!(
+        !e.export_block()
+            .is_some_and(|w| w.contains("while changing the project")),
+        "the switch reason is gone"
+    );
+    assert_eq!(doc_values(&draft(&a)), [12.5, 13.5]);
+    assert_eq!(ops(&m), before, "the same session, its ops unchanged");
+    assert_eq!(e.selection, Selection::Shape(shape));
+    assert!(
+        m.undo_edit() && m.undo_edit(),
+        "both steps are still undoable"
+    );
+    assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
+}
+
+#[test]
+fn export_still_writes_the_record_in_the_export_folder() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let e = export_root(&d);
+    let rec = load(&nif_doc(&e)).unwrap().expect("the record is written");
+    let want = sha256_hex(&std::fs::read(exported(&d)).unwrap());
+    assert_eq!(rec.export.sha256.as_deref(), Some(want.as_str()));
+    // Note GQ3: the export folder holds our record, so it is never taken as a source
+    let c = [copy_at(&e, "out", 9)];
+    assert!(pick_source(&c, Path::new(r"C:\elsewhere"), "meshes/x.nif").is_none());
+}
+
 /// Note GD5: no export folder, no default mod. The edit opens and works, autosaves to the app's folder, and its
 /// export is blocked with FB1's reason; choosing a folder later carries the edit there.
 #[test]
@@ -5117,7 +5658,7 @@ fn no_export_folder_blocks_the_nif_row() {
         m.edit.as_ref().unwrap().blocked.as_deref(),
         Some(NO_EXPORT_FOLDER)
     );
-    assert_eq!(m.edit.as_ref().unwrap().doc_path, autosave(&d));
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, autosave(&d));
     assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 1);
     assert!(
         !nif_doc(&d.path().join("mods").join(EDIT_MOD)).exists(),
@@ -5128,30 +5669,32 @@ fn no_export_folder_blocks_the_nif_row() {
     m.close_edit();
     m.open_edit();
     assert_eq!(op_values(&m).len(), 1, "recovered from the autosave");
-    // a folder is chosen: the edit goes with it, and its first save there drops the autosave
+    // a folder is chosen: the draft stays in the autosave (it follows the project, not the folder), and the export
+    // leaves its record in the folder (Review E6; was GD5 (a)-(c): the edit moved to the folder)
     let out = d.path().join(r"mods\MyOut");
     m.set_nif_export_root(Some(out.clone()));
-    assert_eq!(m.edit.as_ref().unwrap().doc_path, nif_doc(&out));
-    assert!(autosave(&d).is_file(), "(a): the switch writes nothing");
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, autosave(&d));
+    assert!(!nif_doc(&out).exists(), "the switch writes nothing");
     gloss(&mut m, 13.5);
-    assert_eq!(load(&nif_doc(&out)).unwrap().unwrap().ops.len(), 2);
-    assert!(!autosave(&d).exists());
+    assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 2);
+    assert!(!nif_doc(&out).exists(), "an edit writes no record");
     assert_eq!(m.edit.as_ref().unwrap().blocked, None);
     assert_eq!(export(&mut m), Ok(1));
+    assert!(nif_doc(&out).is_file(), "the export writes its record");
 }
 
-/// Note GD11: an autosave this session never loaded is never deleted. Edit without a folder, close, choose a
-/// folder, reopen: the autosave (newer than the folder's none) is offered, and its first save there migrates it.
+/// Note GD11: an autosave this session never loaded is never deleted. Edit without a project, close, open a
+/// project, reopen: the autosave (newer than the project's none) is offered, and its first save there migrates it.
 #[test]
-fn an_autosave_is_recovered_when_a_folder_is_chosen_before_reopening() {
+fn an_autosave_is_recovered_when_a_project_is_opened_before_reopening() {
     let (d, mut m) = export_session();
     m.set_nif_export_root(None);
     m.open_edit();
     gloss(&mut m, 12.5);
     m.close_edit();
     assert!(autosave(&d).is_file());
-    let out = d.path().join(r"mods\MyOut");
-    m.set_nif_export_root(Some(out.clone()));
+    let out = project_folder(&d, "proj");
+    m.set_project_root(Some(&out));
     m.messages.clear();
     m.open_edit();
     assert_eq!(m.error, None);
@@ -5165,20 +5708,20 @@ fn an_autosave_is_recovered_when_a_folder_is_chosen_before_reopening() {
     );
     gloss(&mut m, 13.5);
     assert_eq!(
-        load(&nif_doc(&out)).unwrap().unwrap().ops.len(),
+        load(&draft(&out)).unwrap().unwrap().ops.len(),
         2,
         "the autosave is not lost"
     );
     assert!(
         !autosave(&d).exists(),
-        "migrated into the folder, then removed"
+        "migrated into the project, then removed"
     );
 }
 
-/// Note GD11: a folder document newer than the autosave wins; the autosave stays, named in Messages, and a save in
-/// the folder leaves it alone.
+/// Note GD11: a project draft newer than the autosave wins; the autosave stays, named in Messages, and a save in
+/// the project leaves it alone.
 #[test]
-fn an_older_autosave_stays_when_the_folders_edit_is_newer() {
+fn an_older_autosave_stays_when_the_projects_draft_is_newer() {
     let (d, mut m) = export_session();
     m.set_nif_export_root(None);
     m.open_edit();
@@ -5186,8 +5729,8 @@ fn an_older_autosave_stays_when_the_folders_edit_is_newer() {
     m.close_edit();
     let aside = d.path().join("autosave.aside");
     std::fs::rename(autosave(&d), &aside).unwrap();
-    let out = d.path().join(r"mods\MyOut");
-    m.set_nif_export_root(Some(out.clone()));
+    let out = project_folder(&d, "proj");
+    m.set_project_root(Some(&out));
     m.open_edit();
     gloss(&mut m, 7.5);
     m.close_edit();
@@ -5202,7 +5745,7 @@ fn an_older_autosave_stays_when_the_folders_edit_is_newer() {
     m.messages.clear();
     m.open_edit();
     assert_eq!(op_values(&m).len(), 1);
-    assert_eq!(op_values(&m)[0].1, 7.5, "the newer folder edit wins");
+    assert_eq!(op_values(&m)[0].1, 7.5, "the newer project draft wins");
     assert_eq!(
         m.messages,
         vec![format!(
@@ -5214,9 +5757,12 @@ fn an_older_autosave_stays_when_the_folders_edit_is_newer() {
     assert!(autosave(&d).is_file(), "an autosave never loaded stays");
 }
 
-/// An autosave of one op (12.5) older than MyOut's document (one op, 7.5), and the session open on MyOut's: the
-/// autosave is not loaded (GD11). Returns the autosave's bytes.
-fn older_autosave_open_on_newer_folder(d: &tempfile::TempDir, m: &mut MeshesModel) -> Vec<u8> {
+/// An autosave of one op (12.5) older than the project's draft (one op, 7.5), and the session open on the draft:
+/// the autosave is not loaded (GD11). Returns the autosave's bytes and the project.
+fn older_autosave_open_on_newer_draft(
+    d: &tempfile::TempDir,
+    m: &mut MeshesModel,
+) -> (Vec<u8>, std::path::PathBuf) {
     m.set_nif_export_root(None);
     m.open_edit();
     gloss(m, 12.5);
@@ -5224,36 +5770,27 @@ fn older_autosave_open_on_newer_folder(d: &tempfile::TempDir, m: &mut MeshesMode
     let mine = std::fs::read(autosave(d)).unwrap();
     let aside = d.path().join("autosave.aside");
     std::fs::rename(autosave(d), &aside).unwrap();
-    m.set_nif_export_root(Some(d.path().join(r"mods\MyOut")));
+    let proj = project_folder(d, "proj");
+    m.set_project_root(Some(&proj));
     m.open_edit();
     gloss(m, 7.5);
     m.close_edit();
     std::fs::rename(&aside, autosave(d)).unwrap();
-    let old = std::time::SystemTime::now() - std::time::Duration::from_secs(3600);
-    std::fs::File::options()
-        .write(true)
-        .open(autosave(d))
-        .unwrap()
-        .set_modified(old)
-        .unwrap();
+    make_old(&autosave(d));
     m.open_edit();
-    assert_eq!(op_values(m)[0].1, 7.5, "the folder's document opens");
+    assert_eq!(op_values(m)[0].1, 7.5, "the project's draft opens");
     m.messages.clear();
-    mine
+    (mine, proj)
 }
 
-/// Note GD24: an autosave and a folder document with the same modified time: the folder's opens, the autosave stays
-/// (named in Messages) and a save in the folder leaves it.
+/// Note GD24: an autosave and a project draft with the same modified time: the draft opens, the autosave stays
+/// (named in Messages) and a save in the project leaves it.
 #[test]
-fn equal_times_keep_the_folder_document_and_the_autosave() {
+fn equal_times_keep_the_project_draft_and_the_autosave() {
     let (d, mut m) = export_session();
-    let mine = older_autosave_open_on_newer_folder(&d, &mut m);
+    let (mine, out) = older_autosave_open_on_newer_draft(&d, &mut m);
     m.close_edit();
-    let out = d.path().join(r"mods\MyOut");
-    let t = std::fs::metadata(nif_doc(&out))
-        .unwrap()
-        .modified()
-        .unwrap();
+    let t = std::fs::metadata(draft(&out)).unwrap().modified().unwrap();
     std::fs::File::options()
         .write(true)
         .open(autosave(&d))
@@ -5262,7 +5799,7 @@ fn equal_times_keep_the_folder_document_and_the_autosave() {
         .unwrap();
     m.messages.clear();
     m.open_edit();
-    assert_eq!(op_values(&m)[0].1, 7.5, "the folder's document opens");
+    assert_eq!(op_values(&m)[0].1, 7.5, "the project's draft opens");
     assert_eq!(
         m.messages,
         vec![format!(
@@ -5296,12 +5833,17 @@ fn kept_beside(a: &Path) -> Vec<std::path::PathBuf> {
 }
 
 /// Note GD26: a move-aside name already taken (this second's and the next two) is skipped: the move takes a free
-/// later name, and the files already there are unchanged.
+/// later name, and the files already there are unchanged. (Review E6: the file moved aside is the project's draft that
+/// a carried-over edit replaces; the autosave is never written without being the session's.)
 #[test]
 fn a_move_aside_skips_names_already_taken() {
     let (d, mut m) = export_session();
-    let mine = older_autosave_open_on_newer_folder(&d, &mut m);
-    let a = autosave(&d);
+    let proj = project_folder(&d, "proj");
+    let theirs = project_with_a_draft(&mut m, &proj);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let a = draft(&proj);
     let stem = a.file_stem().unwrap().to_string_lossy().into_owned();
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -5313,8 +5855,7 @@ fn a_move_aside_skips_names_already_taken() {
     for t in &taken {
         std::fs::write(t, b"another instance's").unwrap();
     }
-    m.set_nif_export_root(None);
-    gloss(&mut m, 13.5);
+    m.set_project_root(Some(&proj));
     for t in &taken {
         assert_eq!(
             std::fs::read(t).unwrap(),
@@ -5322,31 +5863,31 @@ fn a_move_aside_skips_names_already_taken() {
             "{t:?} unchanged"
         );
     }
-    let new: Vec<_> = kept_aside(&d)
+    let new: Vec<_> = kept_beside(&a)
         .into_iter()
         .filter(|p| !taken.contains(p))
         .collect();
     assert_eq!(new.len(), 1, "{new:?}");
-    assert_eq!(std::fs::read(&new[0]).unwrap(), mine);
+    assert_eq!(std::fs::read(&new[0]).unwrap(), theirs);
 }
 
-/// Note GD25: a newer autosave recovered over a folder document with other edits never overwrites it: the first save
-/// moves the folder's document aside, and Messages names the kept file.
+/// Note GD25: a newer autosave recovered over a project draft with other edits never overwrites it: the first save
+/// moves the project's draft aside, and Messages names the kept file.
 #[test]
-fn a_recovered_autosave_keeps_the_folder_document_it_replaced() {
+fn a_recovered_autosave_keeps_the_project_draft_it_replaced() {
     let (d, mut m) = export_session();
-    let out = d.path().join(r"mods\MyOut");
+    let out = project_folder(&d, "proj");
     m.set_nif_export_root(None);
     m.open_edit();
     gloss(&mut m, 12.5);
     m.close_edit();
     let aside = d.path().join("autosave.aside");
     std::fs::rename(autosave(&d), &aside).unwrap();
-    m.set_nif_export_root(Some(out.clone()));
+    m.set_project_root(Some(&out));
     m.open_edit();
     gloss(&mut m, 7.5);
     m.close_edit();
-    let theirs = std::fs::read(nif_doc(&out)).unwrap();
+    let theirs = std::fs::read(draft(&out)).unwrap();
     std::fs::rename(&aside, autosave(&d)).unwrap();
     let later = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
     std::fs::File::options()
@@ -5359,115 +5900,92 @@ fn a_recovered_autosave_keeps_the_folder_document_it_replaced() {
     m.open_edit();
     assert_eq!(op_values(&m)[0].1, 12.5, "the newer autosave opens");
     gloss(&mut m, 13.5);
-    let kept = kept_beside(&nif_doc(&out));
+    let kept = kept_beside(&draft(&out));
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(
         std::fs::read(&kept[0]).unwrap(),
         theirs,
-        "the folder's edits survive"
+        "the project's edits survive"
     );
-    assert_eq!(load(&nif_doc(&out)).unwrap().unwrap().ops.len(), 2);
-    m.set_nif_export_root(Some(out.clone()));
+    assert_eq!(load(&draft(&out)).unwrap().unwrap().ops.len(), 2);
+    m.set_nif_export_root(m.nif_export_root.clone()); // the next frame moves the session's lines to Messages
     assert_eq!(
         m.messages.last(),
         Some(&format!(
             "The edit document {} held edits of meshes/x.nif that this session did not open: kept as {}.",
-            nif_doc(&out).display(),
+            draft(&out).display(),
             kept[0].display()
         ))
     );
 }
 
-/// Note GD25: a touched session moved onto a folder with its own document of the NIF never overwrites it: the first
-/// save there moves that document aside.
+/// Note GD25: a touched session carried into a project with its own draft of the NIF never overwrites it: the first
+/// save there (the carry-over's) moves that draft aside.
 #[test]
-fn a_folder_change_keeps_the_destination_document_it_replaced() {
+fn opening_a_project_keeps_the_draft_it_replaced() {
     let (d, mut m) = export_session();
-    let out = d.path().join(r"mods\MyOut");
-    m.set_nif_export_root(Some(out.clone()));
-    m.open_edit();
-    gloss(&mut m, 7.5);
-    m.close_edit();
-    let theirs = std::fs::read(nif_doc(&out)).unwrap();
-    m.set_nif_export_root(Some(d.path().join("mods").join(EDIT_MOD)));
+    let out = project_folder(&d, "proj");
+    let theirs = project_with_a_draft(&mut m, &out);
+    m.set_project_root(None);
     m.open_edit();
     gloss(&mut m, 12.5);
-    m.set_nif_export_root(Some(out.clone()));
-    assert_eq!(
-        std::fs::read(nif_doc(&out)).unwrap(),
-        theirs,
-        "the switch writes nothing"
-    );
-    gloss(&mut m, 13.5);
-    let kept = kept_beside(&nif_doc(&out));
+    m.set_project_root(Some(&out));
+    let kept = kept_beside(&draft(&out));
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(
         std::fs::read(&kept[0]).unwrap(),
         theirs,
-        "the destination's edits survive"
+        "the project's edits survive"
     );
-    assert_eq!(load(&nif_doc(&out)).unwrap().unwrap().ops.len(), 2);
+    assert_eq!(doc_values(&draft(&out)), [12.5]);
+    gloss(&mut m, 13.5);
     gloss(&mut m, 14.5);
-    assert_eq!(kept_beside(&nif_doc(&out)).len(), 1, "moved aside once");
+    assert_eq!(kept_beside(&draft(&out)).len(), 1, "moved aside once");
+    assert_eq!(doc_values(&draft(&out)), [12.5, 13.5, 14.5]);
 }
 
-/// Note GD19: the failed folder change's fallback never overwrites an autosave this session did not open: it is moved
-/// aside first, and Messages names both files.
+/// Note GD19 (replaces the failed folder change's fallback, which is gone with GD12): a project switch whose save
+/// fails keeps the edits in a kept autosave, and the plain autosave an older session left is not replaced by it.
 #[test]
-fn a_failed_folder_change_moves_an_unloaded_autosave_aside() {
+fn a_failed_project_switch_leaves_the_plain_autosave_alone() {
     let (d, mut m) = export_session();
-    let mine = older_autosave_open_on_newer_folder(&d, &mut m);
-    let bad = d.path().join(r"mods\Bad");
-    std::fs::create_dir_all(nif_doc(&bad).parent().unwrap()).unwrap();
-    std::fs::write(nif_doc(&bad), b"not = [toml").unwrap();
-    m.set_nif_export_root(Some(bad.clone()));
+    let (mine, proj) = older_autosave_open_on_newer_draft(&d, &mut m);
     gloss(&mut m, 13.5);
-    m.set_nif_export_root(Some(bad.clone())); // the next frame moves the session's lines to Messages
-    let kept = kept_aside(&d);
-    assert_eq!(kept.len(), 1, "{kept:?}");
+    let id = id_of(&proj);
+    std::fs::remove_dir_all(&proj).unwrap();
+    let other = project_folder(&d, "other");
+    m.set_project_root(Some(&other));
+    assert_eq!(doc_values(&kept(&d, &id)), [7.5, 13.5]);
     assert_eq!(
-        std::fs::read(&kept[0]).unwrap(),
+        std::fs::read(autosave(&d)).unwrap(),
         mine,
-        "the unloaded autosave survives"
+        "the plain autosave is as it was"
     );
     assert_eq!(
-        load(&autosave(&d)).unwrap().unwrap().ops.len(),
-        2,
-        "the live work"
-    );
-    assert_eq!(
-        m.messages,
-        vec![format!(
-            "The autosave {} held edits of meshes/x.nif that this session did not open: kept as {}.",
-            autosave(&d).display(),
-            kept[0].display()
-        )]
+        kept_aside(&d),
+        [kept(&d, &id)],
+        "only the kept autosave is beside it, nothing was moved aside"
     );
 }
 
-/// Note GD19: clearing the export folder does not claim an autosave it never loaded: the first save there moves it
-/// aside; from then on the autosave is the session's (a later folder's first save removes it).
+/// Note GD19 (replaces "clearing the folder never overwrites an unloaded autosave"): closing the project opens the
+/// autosave an older session left (it is the session's document then, so nothing is overwritten) and leaves the
+/// project's draft as it was.
 #[test]
-fn clearing_the_folder_never_overwrites_an_unloaded_autosave() {
+fn closing_the_project_opens_the_autosave_and_leaves_the_draft() {
     let (d, mut m) = export_session();
-    let mine = older_autosave_open_on_newer_folder(&d, &mut m);
-    m.set_nif_export_root(None);
+    let (mine, proj) = older_autosave_open_on_newer_draft(&d, &mut m);
+    let theirs = std::fs::read(draft(&proj)).unwrap();
+    m.set_project_root(None);
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5],
+        "the autosave's edit opens"
+    );
+    assert_eq!(std::fs::read(draft(&proj)).unwrap(), theirs);
     gloss(&mut m, 13.5);
-    let kept = kept_aside(&d);
-    assert_eq!(kept.len(), 1, "{kept:?}");
-    assert_eq!(std::fs::read(&kept[0]).unwrap(), mine);
     assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 2);
-    m.set_nif_export_root(Some(d.path().join(r"mods\MyOut")));
-    gloss(&mut m, 14.5);
-    assert!(
-        !autosave(&d).exists(),
-        "the session's own autosave moved into the folder"
-    );
-    assert_eq!(
-        std::fs::read(&kept[0]).unwrap(),
-        mine,
-        "the one aside stays"
-    );
+    assert!(kept_aside(&d).is_empty(), "{mine:?} was loaded, not moved");
 }
 
 #[test]
@@ -5488,20 +6006,24 @@ fn an_export_folder_outside_the_instance_is_not_checked_and_still_exports() {
     assert!(nif_doc(&out).is_file());
 }
 
-/// Note GD5 (a), (b), (d): a folder change keeps the live edit in memory and writes nothing; the new folder's saved
-/// edit of the NIF is replaced by it (said in Messages), and the old folder's stays there (named in Messages).
+/// Note GD5 (a) (Review E6: the draft stays where it is): a folder change keeps the open session as it is and writes
+/// nothing; it takes the new folder's record (what was exported there), and no Messages line says a thing moved.
 #[test]
 fn changing_the_export_folder_keeps_the_edit_in_memory() {
     let (d, mut m) = export_session();
     let out = d.path().join(r"mods\MyOut");
     let old = d.path().join("mods").join(EDIT_MOD);
-    // MyOut already has an edit of x.nif (one op, 7.5).
+    // MyOut already holds the record of an export of x.nif (one op, 7.5).
     m.set_nif_export_root(Some(out.clone()));
     m.open_edit();
     gloss(&mut m, 7.5);
+    assert_eq!(export(&mut m), Ok(1));
     m.close_edit();
     let theirs = std::fs::read(nif_doc(&out)).unwrap();
-    // Back to the first folder: an edit there, a shape selected and a drag in progress (not saved yet).
+    let their_hash = load(&nif_doc(&out)).unwrap().unwrap().export.sha256;
+    assert!(their_hash.is_some(), "premise: the record has an export");
+    std::fs::remove_file(autosave(&d)).unwrap(); // the session below starts clean
+                                                 // Back to the first folder: an edit there, a shape selected and a drag in progress (not saved yet).
     m.set_nif_export_root(Some(old.clone()));
     m.open_edit();
     assert_eq!(m.edit.as_ref().unwrap().doc.ops.len(), 0);
@@ -5510,47 +6032,39 @@ fn changing_the_export_folder_keeps_the_edit_in_memory() {
     m.select_edit(Selection::Shape(shape));
     tick(&mut m, 40.5);
     m.messages.clear();
+    let draft_before = std::fs::read(autosave(&d)).unwrap();
     m.set_nif_export_root(Some(out.clone()));
     let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.doc_path, nif_doc(&out));
+    assert_eq!(e.draft_path, autosave(&d), "the draft stays");
+    assert_eq!(e.record_path, Some(nif_doc(&out)));
     assert_eq!(e.export_path, out.join(r"meshes\x.nif"));
-    assert_eq!(op_values(&m).len(), 2, "(b): the live edit wins");
+    assert_eq!(op_values(&m).len(), 2, "the live edit stays");
     assert_eq!(op_values(&m)[0].1, 12.5);
     assert_eq!(
         e.selection,
         Selection::Shape(shape),
         "the selection is kept"
     );
+    assert_eq!(e.doc.export.sha256, their_hash, "the new folder's record");
     assert_eq!(
         std::fs::read(nif_doc(&out)).unwrap(),
         theirs,
-        "(a): the switch writes nothing"
+        "the switch writes no record"
     );
     assert_eq!(
-        load(&nif_doc(&old)).unwrap().unwrap().ops.len(),
-        1,
-        "(d): the old folder keeps what was saved there; the drag was not saved by the switch"
+        std::fs::read(autosave(&d)).unwrap(),
+        draft_before,
+        "the switch does not save the drag"
     );
-    assert_eq!(
-        m.messages,
-        vec![
-            format!(
-                "Export folder changed: the open edit of meshes/x.nif goes to {}; the edits saved there are kept aside at the next save.",
-                nif_doc(&out).display()
-            ),
-            format!(
-                "Export folder changed: the edits saved before stay in {}.",
-                nif_doc(&old).display()
-            ),
-        ]
-    );
-    // dirty: closing the edit saves it in the new folder
+    assert!(!nif_doc(&old).exists());
+    assert!(m.messages.is_empty(), "{:?}", m.messages);
+    // dirty: closing the edit saves the drag in the draft
     m.close_edit();
-    assert_eq!(load(&nif_doc(&out)).unwrap().unwrap().ops.len(), 2);
+    assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 2);
 }
 
-/// Note GD12: a root change whose folder holds an edit document that does not load is not taken: the row is
-/// blocked with the reason, nothing is written to the old folder, and a later root that works clears it.
+/// Note GD12 (an export folder whose record does not load): the root is not taken, the row is blocked with the
+/// reason, the draft goes on saving where it is, and a later root that works clears it.
 #[test]
 fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     let (d, mut m) = export_session();
@@ -5558,7 +6072,6 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     assert_eq!(m.nif_export_root.as_deref(), Some(old.as_path()));
     m.open_edit();
     gloss(&mut m, 12.5);
-    let before = std::fs::read(nif_doc(&old)).unwrap();
     let bad = d.path().join(r"mods\Bad");
     std::fs::create_dir_all(nif_doc(&bad).parent().unwrap()).unwrap();
     std::fs::write(nif_doc(&bad), b"not = [toml").unwrap();
@@ -5572,17 +6085,13 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     let head = format!("could not open the edit document in {}: ", bad.display());
     assert!(why.starts_with(&head), "{why}");
     gloss(&mut m, 13.5);
-    assert_eq!(
-        std::fs::read(nif_doc(&old)).unwrap(),
-        before,
-        "no write to the old folder"
-    );
+    assert!(!nif_doc(&old).exists(), "no record in the old folder");
     export_fails(&mut m, &head);
     assert!(!old.join(r"meshes\x.nif").exists());
     assert_eq!(
         load(&autosave(&d)).unwrap().unwrap().ops.len(),
         2,
-        "the work is kept in the autosave meanwhile"
+        "the draft keeps saving"
     );
     // asked again (the next frame): still blocked; a root that works clears it
     m.set_nif_export_root(Some(bad.clone()));
@@ -5591,10 +6100,12 @@ fn a_malformed_document_in_the_new_folder_blocks_the_row() {
     m.set_nif_export_root(Some(good.clone()));
     assert_eq!(m.nif_export_root.as_deref(), Some(good.as_path()));
     assert_eq!(review_row(&m).blocked, None);
-    m.close_edit();
-    assert_eq!(load(&nif_doc(&good)).unwrap().unwrap().ops.len(), 2);
-    assert!(!autosave(&d).exists(), "moved into the folder that worked");
-    assert_eq!(std::fs::read(nif_doc(&old)).unwrap(), before);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(
+        nif_doc(&good).is_file(),
+        "the record is in the folder that worked"
+    );
+    assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 2);
 }
 
 /// Note HS12: a touched edit never takes as its export folder the folder holding its source copy (an export there
@@ -5685,18 +6196,12 @@ fn idle_frames_after_an_export_hash_nothing() {
     assert!(ops_hash_count() > n, "an edit is hashed again");
 }
 
-/// Note GD13: a session undone back to the source after an export is not idle: on a folder change it keeps its live
-/// document and its redo, and the folder's saved edit is replaced (said in Messages).
+/// Note GD13 (Review E6: a folder change is a light switch): a session undone back to the source after an export keeps
+/// its document and its redo when the export folder changes, and nothing says a thing moved.
 #[test]
 fn an_undone_session_keeps_its_live_document_on_a_folder_change() {
     let (d, mut m) = export_session();
     let out = d.path().join(r"mods\MyOut");
-    let old = d.path().join("mods").join(EDIT_MOD);
-    m.set_nif_export_root(Some(out.clone()));
-    m.open_edit();
-    gloss(&mut m, 7.5);
-    m.close_edit();
-    m.set_nif_export_root(Some(old.clone()));
     m.open_edit();
     gloss(&mut m, 12.5);
     assert_eq!(export(&mut m), Ok(1));
@@ -5705,90 +6210,77 @@ fn an_undone_session_keeps_its_live_document_on_a_folder_change() {
     m.messages.clear();
     m.set_nif_export_root(Some(out.clone()));
     let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.doc_path, nif_doc(&out));
+    assert_eq!(e.record_path, Some(nif_doc(&out)));
+    assert!(e.doc.ops.is_empty(), "the live (undone) document stays");
+    assert!(e.history.can_redo(), "its redo stays");
+    assert_eq!(e.doc.export.sha256, None, "nothing was exported to MyOut");
+    assert!(m.messages.is_empty(), "{:?}", m.messages);
+    assert!(m.redo_edit());
+    assert_eq!(op_values(&m)[0].1, 12.5);
+}
+
+/// Note GD13, GD21 (Review E6: the carry-over into a project): a session undone back to the source is not idle: opening
+/// a project keeps its live document and its redo, and the project's draft is kept aside (said in Messages).
+#[test]
+fn an_undone_session_stays_when_a_project_is_opened() {
+    let (d, mut m) = export_session();
+    let proj = project_folder(&d, "proj");
+    project_with_a_draft(&mut m, &proj);
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(m.undo_edit());
+    m.messages.clear();
+    m.set_project_root(Some(&proj));
+    let e = m.edit.as_ref().unwrap();
+    assert_eq!(e.draft_path, draft(&proj));
     assert!(e.doc.ops.is_empty(), "the live (undone) document stays");
     assert!(e.history.can_redo(), "its redo stays");
     assert_eq!(
         m.messages.first(),
         Some(&format!(
-            "Export folder changed: the open edit of meshes/x.nif goes to {}; the edits saved there are kept aside at the next save.",
-            nif_doc(&out).display()
+            "Project opened: the open edit of meshes/x.nif goes to {}; the edits saved there are kept aside at the next save.",
+            draft(&proj).display()
         ))
     );
-    assert!(m.redo_edit());
-    assert_eq!(op_values(&m)[0].1, 12.5);
-}
-
-/// Note GD21: a recovered autosave with no ops (every edit undone without a folder) is unsaved live state: a folder
-/// change before the next edit keeps it, and the new folder's saved edit is replaced (said in Messages).
-#[test]
-fn a_recovered_empty_autosave_stays_on_a_folder_change() {
-    let (d, mut m) = export_session();
-    let out = d.path().join(r"mods\MyOut");
-    m.set_nif_export_root(Some(out.clone()));
-    m.open_edit();
-    gloss(&mut m, 7.5);
-    m.close_edit();
-    m.set_nif_export_root(None);
-    m.open_edit();
-    gloss(&mut m, 12.5);
-    assert!(m.undo_edit());
-    m.close_edit();
-    assert!(load(&autosave(&d)).unwrap().unwrap().ops.is_empty());
-    m.set_nif_export_root(Some(d.path().join(r"mods\Good")));
-    m.open_edit();
-    assert!(
-        m.edit.as_ref().unwrap().doc.ops.is_empty(),
-        "the empty autosave is recovered"
-    );
-    m.messages.clear();
-    m.set_nif_export_root(Some(out.clone()));
-    let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.doc_path, nif_doc(&out));
-    assert!(e.doc.ops.is_empty(), "the recovered state stays");
     assert_eq!(
-        m.messages.first(),
-        Some(&format!(
-            "Export folder changed: the open edit of meshes/x.nif goes to {}; the edits saved there are kept aside at the next save.",
-            nif_doc(&out).display()
-        ))
+        kept_beside(&draft(&proj)).len(),
+        1,
+        "the draft was kept aside"
     );
 }
 
-/// Note GD27: a save that fails leaves the session unsaved: a recovered empty autosave whose save into the folder
-/// fails is still touched, and a folder change keeps it.
+/// Note GD27: a save that fails leaves the session unsaved: a recovered empty autosave whose save into the project
+/// fails is still touched, and a project switch then keeps it in the kept autosave.
 #[test]
 fn a_failed_save_keeps_a_recovered_empty_autosave_touched() {
     let (d, mut m) = export_session();
-    let out = d.path().join(r"mods\MyOut");
-    m.set_nif_export_root(Some(out.clone()));
-    m.open_edit();
-    gloss(&mut m, 7.5);
-    m.close_edit();
     m.set_nif_export_root(None);
     m.open_edit();
     gloss(&mut m, 12.5);
     assert!(m.undo_edit());
     m.close_edit();
-    let good = d.path().join(r"mods\Good");
-    m.set_nif_export_root(Some(good.clone()));
+    let good = project_folder(&d, "good");
+    m.set_project_root(Some(&good));
     m.open_edit();
     assert!(
         m.edit.as_ref().unwrap().doc.ops.is_empty(),
         "the empty autosave is recovered"
     );
-    std::fs::create_dir_all(nif_doc(&good)).unwrap(); // the save cannot write a directory
+    std::fs::create_dir_all(draft(&good)).unwrap(); // the save cannot write a directory
     m.edit_with(|e| e.flush());
     let e = m.edit.as_ref().unwrap();
     assert!(e.error.is_some() || m.error.is_some(), "the save failed");
     assert!(e.touched(), "still unsaved");
-    m.set_nif_export_root(Some(out.clone()));
-    let e = m.edit.as_ref().unwrap();
-    assert_eq!(e.doc_path, nif_doc(&out));
-    assert!(e.doc.ops.is_empty(), "the recovered state stays");
+    let id = e.doc.id.clone().unwrap();
+    m.set_project_root(Some(&project_folder(&d, "other")));
+    assert!(
+        load(&kept(&d, &id)).unwrap().unwrap().ops.is_empty(),
+        "the recovered state is kept"
+    );
 }
 
-/// Note GD12: back to the folder the edit never left, the block clears and the edit saves there.
+/// Note GD12: back to the folder the session never left, the block clears and the draft goes on saving.
 #[test]
 fn going_back_from_a_failed_folder_change_clears_the_block() {
     let (d, mut m) = export_session();
@@ -5803,24 +6295,32 @@ fn going_back_from_a_failed_folder_change_clears_the_block() {
     assert!(review_row(&m).blocked.is_some());
     m.set_nif_export_root(Some(old.clone()));
     assert_eq!(review_row(&m).blocked, None);
-    assert_eq!(load(&nif_doc(&old)).unwrap().unwrap().ops.len(), 2);
+    assert_eq!(load(&autosave(&d)).unwrap().unwrap().ops.len(), 2);
 }
 
-/// Note GD5: a session with no edits takes the new folder's saved edit (nothing live to keep).
+/// Note GD5, GD13 (Review E6: the new folder's saved edit is no longer loaded into an idle session): a session with
+/// no edits keeps its empty document when the folder changes, and takes only the new folder's export record.
 #[test]
-fn an_idle_session_takes_the_new_folders_edit() {
+fn an_idle_session_takes_only_the_new_folders_record() {
     let (d, mut m) = export_session();
     let out = d.path().join(r"mods\MyOut");
     m.set_nif_export_root(Some(out.clone()));
     m.open_edit();
     gloss(&mut m, 7.5);
+    assert_eq!(export(&mut m), Ok(1));
     m.close_edit();
+    std::fs::remove_file(autosave(&d)).unwrap();
     m.set_nif_export_root(Some(d.path().join("mods").join(EDIT_MOD)));
     m.open_edit();
     m.messages.clear();
     m.set_nif_export_root(Some(out.clone()));
-    assert_eq!(op_values(&m).len(), 1, "MyOut's edit is loaded");
-    assert_eq!(op_values(&m)[0].1, 7.5);
+    assert_eq!(
+        op_values(&m).len(),
+        0,
+        "MyOut's record is not loaded as edits"
+    );
+    let e = m.edit.as_ref().unwrap();
+    assert!(e.doc.export.sha256.is_some(), "it is its export state");
     assert!(m.messages.is_empty());
 }
 
@@ -5929,7 +6429,8 @@ fn the_app_passes_the_textures_export_folder_to_the_meshes_view() {
         h.state().meshes.nif_export_root.as_deref(),
         Some(first.as_path())
     );
-    // Export to ▾ changes (Note GD5): the open edit moves to the new folder in memory; what was saved stays.
+    // Export to ▾ changes (Note GD5, Review E6): the open edit takes the new folder for its record only; its draft is
+    // with the opened project (the app's first frame carried it there) and nothing is written to either folder.
     let want = t.path().join("other");
     h.state_mut().model.set_export_folder(want.clone());
     assert_eq!(h.state().model.export_root(), want);
@@ -5937,20 +6438,22 @@ fn the_app_passes_the_textures_export_folder_to_the_meshes_view() {
     let m = &h.state().meshes;
     assert_eq!(m.nif_export_root.as_deref(), Some(want.as_path()));
     let e = m.edit.as_ref().unwrap();
-    assert!(e.doc_path.starts_with(&want));
-    assert_eq!(e.doc.ops.len(), 1, "the live edit goes with it");
-    assert_eq!(
-        load(&nif_doc(&first)).unwrap().unwrap().ops.len(),
-        1,
-        "saved where it was"
-    );
-    let line = format!(
-        "Export folder changed: the edits saved before stay in {}.",
-        nif_doc(&first).display()
-    );
+    assert_eq!(e.record_path, Some(nif_doc(&want)));
     assert!(
-        h.state().model.messages.entries().any(|m| m.text == line),
-        "the app logs the meshes' lines in Messages"
+        e.draft_path.starts_with(t.path().join("mod")),
+        "the draft is under the project: {}",
+        e.draft_path.display()
+    );
+    assert_eq!(e.doc.ops.len(), 1, "the live edit stays");
+    assert_eq!(load(&e.draft_path).unwrap().unwrap().ops.len(), 1);
+    assert!(!nif_doc(&first).exists() && !nif_doc(&want).exists());
+    assert!(
+        h.state()
+            .model
+            .messages
+            .entries()
+            .all(|m| !m.text.contains("Export folder changed")),
+        "no line says the edit moved"
     );
 }
 
@@ -7074,7 +7577,7 @@ fn shader_colour_picker_flushes_on_popup_close() {
     let (mut m, a) = specular_scene([0.5; 3]);
     // `direct` has no document path (nothing to save): give it one.
     let d = tempfile::tempdir().unwrap();
-    m.edit.as_mut().unwrap().doc_path = d.path().join("x.toml");
+    m.edit.as_mut().unwrap().draft_path = d.path().join("x.toml");
     let mut h = view(m);
     h.run_steps(2);
     let well = |h: &mut Harness<'static, MeshesModel>| {
@@ -7090,7 +7593,7 @@ fn shader_colour_picker_flushes_on_popup_close() {
     assert_eq!(ops(h.state()).len(), 6, "scene + the first pick");
     // The close flushed the merged step to disk.
     let e = h.state().edit.as_ref().unwrap();
-    assert_eq!(load(&e.doc_path).unwrap().unwrap().ops.len(), 6, "saved");
+    assert_eq!(load(&e.draft_path).unwrap().unwrap().ops.len(), 6, "saved");
     well(&mut h);
     type_picker_byte(&mut h, 2, 51); // B
     h.key_press(egui::Key::Escape);
@@ -8715,6 +9218,7 @@ fn exportable(b: Vec<u8>) -> (tempfile::TempDir, NifEdit) {
         b,
         copy("A", 1, false),
         "meshes/x.nif",
+        None,
         Some(&edit_mod),
         None,
     )
@@ -9725,6 +10229,7 @@ fn heel_field_follows_undo_and_stays_in_its_session() {
             "meshes/y.nif",
             None,
             None,
+            None,
         )
         .unwrap(),
     );
@@ -9795,6 +10300,7 @@ fn heel_notes_for_no_geometry_and_a_negative_height() {
             scenes::heel_scene(),
             copy("A", 1, false),
             "meshes/y.nif",
+            None,
             None,
             None,
         )
@@ -10241,6 +10747,7 @@ fn a_flag_warning_opens_its_list_in_the_next_session() {
             typed(0, 1 << 21),
             copy("A", 1, false),
             "meshes/y.nif",
+            None,
             None,
             None,
         )

@@ -58,6 +58,9 @@ fn is_clip_op(o: &toml::Value) -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct EditDoc {
     pub version: u32,
+    /// The draft's stable id: see `new_id`. A document without one gets one in memory when a session opens it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub source: SourceId,
     #[serde(default)]
     pub export: ExportRec,
@@ -71,6 +74,7 @@ impl EditDoc {
     pub fn new(source: SourceId) -> EditDoc {
         EditDoc {
             version: 1,
+            id: None,
             source,
             export: ExportRec::default(),
             ops: Vec::new(),
@@ -155,6 +159,25 @@ pub fn win(data_path: &str) -> Result<String, String> {
     }
 }
 
+/// The draft's stable id: the first 16 hex characters of the SHA-256 of `"{nanos since epoch}-{process id}-{data_path}"`.
+pub fn new_id(data_path: &str) -> String {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_nanos());
+    let h = sha256_hex(format!("{nanos}-{}-{data_path}", std::process::id()).as_bytes());
+    h[..16].to_string()
+}
+
+/// Where a NIF edit's draft lives with a project: `<project>\_sdc\nif-edits\<win>.sdc-nifedit.toml`.
+pub fn draft_path(project: &Path, data_path: &str) -> Result<PathBuf, String> {
+    Ok(project
+        .join("_sdc")
+        .join("nif-edits")
+        .join(format!("{}.sdc-nifedit.toml", win(data_path)?)))
+}
+
+/// The record an export leaves in the export folder (`<export folder>\.sdc\nif-edits\<win>.sdc-nifedit.toml`): the
+/// document as exported, which `pick_source` (Note GQ3) and the badges read.
 pub fn doc_path(edit_mod: &Path, data_path: &str) -> Result<PathBuf, String> {
     Ok(edit_mod
         .join(".sdc")
@@ -171,6 +194,17 @@ pub fn autosave_path(dir: &Path, data_path: &str) -> Result<PathBuf, String> {
         .join(format!("{}.toml", sha256_hex(key.as_bytes()))))
 }
 
+/// Where a kept autosave of one draft goes: `<dir>\nif-edits\<SHA-256 of the lowercase data path>.<id>.toml`. It
+/// holds the edits a project switch could not save into the project, keyed on the draft's id so no other draft's
+/// file is touched.
+pub fn kept_autosave_path(dir: &Path, data_path: &str, id: &str) -> PathBuf {
+    let key = win(data_path)
+        .unwrap_or_else(|_| data_path.replace('/', "\\"))
+        .to_ascii_lowercase();
+    dir.join("nif-edits")
+        .join(format!("{}.{id}.toml", sha256_hex(key.as_bytes())))
+}
+
 pub fn export_path(edit_mod: &Path, data_path: &str) -> Result<PathBuf, String> {
     Ok(edit_mod.join(win(data_path)?))
 }
@@ -181,6 +215,33 @@ pub fn save(path: &Path, doc: &EditDoc) -> Result<(), String> {
     }
     engine::dds::write_atomic(path, doc.to_text().as_bytes())
         .map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `save` into a project: refuses when `root` is not an existing folder (a renamed, moved or deleted project is never
+/// re-created at its old path) and only then creates `_sdc\nif-edits\…` under it.
+pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<(), String> {
+    if !root.is_dir() {
+        return Err(format!("{} no longer exists", root.display()));
+    }
+    save(path, doc)
+}
+
+/// Writes `doc` to a file that does not exist yet: the name is reserved with `create_new` (so a file another session
+/// wrote is never replaced), then the document is written over the reservation. An empty reservation left by a failed
+/// write is removed.
+pub fn save_new(path: &Path, doc: &EditDoc) -> Result<(), String> {
+    if let Some(p) = path.parent() {
+        std::fs::create_dir_all(p).map_err(|e| format!("{}: {e}", p.display()))?;
+    }
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(path)
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    engine::dds::write_atomic(path, doc.to_text().as_bytes()).map_err(|e| {
+        let _ = std::fs::remove_file(path); // the empty reservation only
+        format!("{}: {e}", path.display())
+    })
 }
 
 #[cfg(feature = "test-hooks")]

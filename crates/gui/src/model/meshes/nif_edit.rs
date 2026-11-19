@@ -62,20 +62,37 @@ pub const GENERATED_HINTS: [&str; 7] = [
 pub struct NifEdit {
     pub doc: EditDoc,
     pub history: NifHistory,
-    /// Where the document is saved: the export folder's, else `autosave` (Note GD5). Empty with neither (a test's
-    /// read-only session): nothing is saved.
-    pub doc_path: PathBuf,
+    /// Where the working document (the draft) is saved: under the project (`edit_doc::draft_path`), else `autosave`.
+    /// Empty with neither (a test's read-only session): nothing is saved.
+    pub draft_path: PathBuf,
+    /// The project the draft belongs to; None: the draft is the autosave.
+    project: Option<PathBuf>,
+    /// The record an export leaves in the export folder (`edit_doc::doc_path`), when a folder is chosen.
+    pub record_path: Option<PathBuf>,
     /// Both empty without an export folder: export is blocked with `NO_EXPORT_FOLDER`.
     pub export_path: PathBuf,
+    /// The export folder (empty without one).
     pub edit_mod: PathBuf,
-    /// Note GD5 (c): the app-folder document of this NIF used while no export folder is chosen; removed by the first
-    /// save into a folder, but only when this session's document holds it (`owns_autosave`, Note GD11).
+    /// Note GD5 (c): the app-folder document of this NIF used while no project is open; removed by the first save
+    /// into a project, but only when this session's document holds it (`owns_autosave`, Note GD11).
     pub autosave: Option<PathBuf>,
     /// Note GD11: the autosave's content is part of this live document (saved there, or recovered from it).
     owns_autosave: bool,
-    /// Note GD25: the file at `doc_path` (in a folder) holds edits this session never loaded: a newer autosave was
-    /// recovered over it, or a folder change replaced it. The next save moves it aside first (`free_unseen`).
+    /// Note GD25: the file at `draft_path` (in a project) holds edits this session never loaded: a newer autosave
+    /// was recovered over it, or a carry-over replaced it. The next save moves it aside first (`free_unseen`).
     doc_unseen: bool,
+    /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded; only that one is replaced by
+    /// it, and the first save into the project draft deletes it.
+    kept_autosave: Option<PathBuf>,
+    /// The draft on disk carries `doc.id` (false until the next successful draft save when `open` made the id).
+    id_on_disk: bool,
+    /// `retarget_error` is the project switch's (both saves failed), not a record folder's.
+    switch_failed: bool,
+    /// A retry of the two saves succeeded: the model ends the session and opens the wanted project's.
+    switch_saved: bool,
+    /// Attempts of the project switch's two saves (the test of ruling r4-2).
+    #[cfg(feature = "test-hooks")]
+    switch_save_attempts: u32,
     /// Note GD11: lines for Messages from `open` (an autosave recovered, or left because the folder's is newer) and,
     /// Note GD19, from a save that moved an autosave aside; `MeshesModel` moves them to its `messages`.
     pub open_lines: Vec<String>,
@@ -143,10 +160,10 @@ pub struct NifEdit {
     pub export_note: Option<(String, bool)>,
     /// Note CQ5: "Exported without cleanup: <reason>." after an export that wrote the patch uncompacted.
     pub cleanup_note: Option<String>,
-    /// Note GD12: the export folder changed but its edit document did not load: the session stays on its old paths,
-    /// writes nothing (no save, no export) and is blocked with this reason until a root change succeeds.
+    /// Export is blocked with this reason: the export folder's record did not load (Note GD12), or (`switch_failed`)
+    /// a project switch could not save the edits anywhere and they are still open here.
     pub retarget_error: Option<String>,
-    /// Note GD20: the failed root change behind `retarget_error`: (root, its edit document, that file's length and
+    /// Note GD20: the failed export folder change behind `retarget_error`: (root, its record, that file's length and
     /// time). The same key is not tried again, so a bad folder is read once, not each frame.
     retarget_fail: Option<RetargetKey>,
     /// Note GD23: `doc.pending()` (it serialises and hashes the ops) keyed on (rev, op count, export record's hash).
@@ -577,30 +594,23 @@ fn keep_base(op: &mut Op, old: &Op) {
     }
 }
 
-/// Note GD11: with a folder chosen, an autosave of the NIF that is newer than the folder's document (or the folder has
-/// none) is offered the GD5 (b) way: it is the document, keeping the folder document's export record, and the session
-/// owns it (its first save in the folder removes it). An older one stays, named in Messages. Without a folder the
-/// document is the autosave. Returns (document, owns the autosave, Messages lines, recovered).
-fn recover_autosave(
+/// Note GD11: with a project open, an autosave `a` of the NIF (the plain one, or the kept one of the draft's id) that
+/// is newer than the project's draft (or the project has none) is offered: it is the document, and the session owns
+/// it (its first save in the project removes it). An older one stays, named in Messages. The draft's id stays the
+/// document's. Returns (document, Messages lines, recovered).
+fn recover_from(
     saved: Option<EditDoc>,
-    doc_path: &Path,
-    edit_mod: &Path,
-    autosave: Option<&Path>,
+    draft_path: &Path,
+    a: &Path,
     data_path: &str,
-) -> (Option<EditDoc>, bool, Vec<String>, bool) {
-    if edit_mod.as_os_str().is_empty() {
-        return (saved, autosave.is_some(), vec![], false);
-    }
-    let Some(a) = autosave.filter(|a| a.is_file()) else {
-        return (saved, false, vec![], false);
-    };
+) -> (Option<EditDoc>, Vec<String>, bool) {
     let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    if saved.is_some() && mtime(a) <= mtime(doc_path) {
+    if saved.is_some() && mtime(a) <= mtime(draft_path) {
         let line = format!(
             "Older edits of {data_path} stay autosaved in {}.",
             a.display()
         );
-        return (saved, false, vec![line], false);
+        return (saved, vec![line], false);
     }
     match edit_doc::load(a) {
         Ok(Some(mut mine)) => {
@@ -613,57 +623,106 @@ fn recover_autosave(
                     "The newer edits of {data_path} autosaved in {} opened instead of {}'s saved edits; those are \
                      kept aside at the next save.",
                     a.display(),
-                    doc_path.display()
+                    draft_path.display()
                 ),
             };
-            mine.export = saved.map(|s| s.export).unwrap_or_default();
-            (Some(mine), true, vec![line], true)
+            if let Some(id) = saved.and_then(|s| s.id) {
+                mine.id = Some(id);
+            }
+            (Some(mine), vec![line], true)
         }
-        Ok(None) => (saved, false, vec![], false),
-        // never deleted or overwritten: it stays for the user, and the folder's document opens
+        Ok(None) => (saved, vec![], false),
+        // never deleted or overwritten: it stays for the user, and the project's draft opens
         Err(e) => {
             let line = format!("The autosave {} does not load and stays: {e}", a.display());
-            (saved, false, vec![line], false)
+            (saved, vec![line], false)
         }
     }
 }
 
+/// The folder the plain autosave lives in (`<dir>\nif-edits\<sha>.toml`), where kept autosaves go too.
+fn autosave_dir(autosave: &Path) -> Option<&Path> {
+    autosave.parent()?.parent()
+}
+
 impl NifEdit {
-    /// Opens `source`, the bytes of `source_copy`, at `data_path`. `edit_mod` None: the document lives at `autosave`
-    /// (Note GD5) and export is blocked; neither: read-only with an in-memory document. A saved document is loaded
-    /// (Err when it is malformed or newer: it is never overwritten); when its source hash differs, its ops are
-    /// re-anchored on the new source and `source_changed` counts the outcomes.
+    /// Opens `source`, the bytes of `source_copy`, at `data_path`. The draft is read from the project's
+    /// (`edit_doc::draft_path`), or from `autosave` with no project; neither: read-only with an in-memory document.
+    /// `export_root` None: export is blocked; with one, the export state (`doc.export`) is the record's there. A saved
+    /// document is loaded (Err when it is malformed or newer: it is never overwritten); when its source hash differs,
+    /// its ops are re-anchored on the new source and `source_changed` counts the outcomes.
     pub fn open(
         source: Vec<u8>,
         source_copy: PathCopy,
         data_path: &str,
-        edit_mod: Option<&Path>,
+        project: Option<&Path>,
+        export_root: Option<&Path>,
         autosave: Option<&Path>,
     ) -> Result<NifEdit, String> {
         edit_doc::win(data_path)?; // read-only too: the session never opens on such a path
         let (scan, model) = read_source(&source)?;
         let id = source_id(&source_copy, data_path, &source);
-        let (edit_mod, doc_path, export_path) = match edit_mod {
+        let (edit_mod, record_path, export_path) = match export_root {
             Some(m) => (
                 m.to_path_buf(),
-                edit_doc::doc_path(m, data_path)?,
+                Some(edit_doc::doc_path(m, data_path)?),
                 edit_doc::export_path(m, data_path)?,
             ),
-            None => (
-                PathBuf::new(),
-                autosave.map(Path::to_path_buf).unwrap_or_default(),
-                PathBuf::new(),
-            ),
+            None => (PathBuf::new(), None, PathBuf::new()),
         };
-        let saved = match doc_path.as_os_str().is_empty() {
+        let draft_path = match project {
+            Some(p) => edit_doc::draft_path(p, data_path)?,
+            None => autosave.map(Path::to_path_buf).unwrap_or_default(),
+        };
+        let saved = match draft_path.as_os_str().is_empty() {
             true => None,
-            false => edit_doc::load(&doc_path)?,
+            false => edit_doc::load(&draft_path)?,
         };
         let had_doc = saved.is_some();
-        let (saved, owns_autosave, open_lines, recovered) =
-            recover_autosave(saved, &doc_path, &edit_mod, autosave, data_path);
-        let mut open_lines = open_lines;
+        let had_id = saved.as_ref().is_some_and(|d| d.id.is_some());
+        // Note GD11: with a project, a newer kept autosave of the draft's id (a switch that could not save into the
+        // project) or else a newer plain autosave is offered; with none the draft is the autosave itself.
+        let mut saved = saved;
+        let mut open_lines = vec![];
+        let mut recovered = false;
+        let mut kept_autosave = None;
+        let mut owns_autosave = project.is_none() && autosave.is_some();
+        if project.is_some() {
+            let k = saved
+                .as_ref()
+                .and_then(|d| d.id.as_deref())
+                .zip(autosave.and_then(autosave_dir))
+                .map(|(i, dir)| edit_doc::kept_autosave_path(dir, data_path, i))
+                .filter(|k| k.is_file());
+            if let Some(k) = k {
+                let (s, l, r) = recover_from(saved, &draft_path, &k, data_path);
+                (saved, recovered) = (s, r);
+                open_lines.extend(l);
+                kept_autosave = r.then_some(k);
+            }
+            if let Some(a) = autosave.filter(|a| !recovered && a.is_file()) {
+                let (s, l, r) = recover_from(saved, &draft_path, a, data_path);
+                (saved, recovered) = (s, r);
+                open_lines.extend(l);
+                owns_autosave = r;
+            }
+        }
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
+        let id_on_disk = had_id && !recovered;
+        if doc.id.is_none() {
+            doc.id = Some(edit_doc::new_id(data_path));
+        }
+        // the record wins: what was exported to the chosen folder, and from which source
+        let record = match &record_path {
+            Some(p) => edit_doc::load(p)?,
+            None => None,
+        };
+        let stale_export = record
+            .as_ref()
+            .is_some_and(|r| r.export.ops_hash.is_some() && r.source.sha256 != id.sha256);
+        if record_path.is_some() {
+            doc.export = record.map(|r| r.export).unwrap_or_default();
+        }
         if doc.dropped_clip_ops > 0 {
             open_lines.push(format!(
                 "{data_path}: {} clip edit(s) dropped: NIF Edit no longer edits clips.",
@@ -677,13 +736,21 @@ impl NifEdit {
         let mut e = NifEdit {
             doc,
             history: NifHistory::default(),
-            doc_path,
+            draft_path,
+            project: project.map(Path::to_path_buf),
+            record_path,
             export_path,
             edit_mod,
             autosave: autosave.map(Path::to_path_buf),
             owns_autosave,
-            // Note GD25: a recovered autosave replaced the folder's document, which this session never shows
+            // Note GD25: a recovered autosave replaced the project's draft, which this session never shows
             doc_unseen: recovered && had_doc,
+            kept_autosave,
+            id_on_disk,
+            switch_failed: false,
+            switch_saved: false,
+            #[cfg(feature = "test-hooks")]
+            switch_save_attempts: 0,
             open_lines,
             source_blocks: block_count(&source),
             source: Arc::new(source),
@@ -749,11 +816,16 @@ impl NifEdit {
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
         e.reapply();
         if changed {
-            let was_exported = e.doc.export.ops_hash.is_some();
             e.count_changed();
-            if was_exported {
-                e.save(); // the forced re-export (GQ1) must reach the persisted document, as in reload_source
-            }
+        }
+        // Note GQ1: the exported file was built from another source than this one (the record names it): the forced
+        // re-export reaches the record too, which the export folder's badges and the next open read.
+        if stale_export && e.doc.export.ops_hash.is_some() {
+            e.doc.export.ops_hash = Some(String::new());
+        }
+        if (changed || stale_export) && e.doc.export.sha256.is_some() {
+            e.save();
+            e.write_record();
         }
         Ok(e)
     }
@@ -772,6 +844,17 @@ impl NifEdit {
         }
     }
 
+    /// Writes the record of the export (the document as it stands, with its export entry) to the export folder.
+    /// Nothing without one. A failure goes to `error`.
+    fn write_record(&mut self) {
+        let Some(p) = self.record_path.clone() else {
+            return;
+        };
+        if let Err(e) = edit_doc::save(&p, &self.doc) {
+            self.error = Some(e);
+        }
+    }
+
     /// The source copy's bytes changed on disk (export step 1): the ops are re-anchored on them and the statuses
     /// updated and saved.
     pub fn reload_source(&mut self, source: Vec<u8>) -> Result<(), String> {
@@ -784,6 +867,9 @@ impl NifEdit {
         self.reapply();
         self.count_changed();
         self.save();
+        if self.doc.export.sha256.is_some() {
+            self.write_record(); // the forced re-export is part of what the export folder remembers
+        }
         Ok(())
     }
 
@@ -816,6 +902,7 @@ impl NifEdit {
     }
 
     pub fn export_block(&self) -> Option<String> {
+        // the project switch's block (`switch_failed`) and an export folder's bad record share this field
         if let Some(why) = &self.retarget_error {
             return Some(why.clone());
         }
@@ -914,6 +1001,10 @@ impl NifEdit {
             Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
             Ok(_) => {}
         }
+        // the draft first, when a drag was not flushed: the NIF is written from what the draft holds
+        if self.unsaved {
+            self.save();
+        }
         if let Err(e) = engine::dds::write_atomic(&path, &out) {
             return ExportOutcome::Blocked(format!("Cannot write {}: {e}", path.display()));
         }
@@ -926,7 +1017,7 @@ impl NifEdit {
             ops_hash: Some(self.doc.ops_hash()),
         };
         self.up_to_date = true;
-        self.save();
+        self.write_record();
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
             rerun_pgpatcher: self.copies.iter().any(|c| c.derived),
@@ -1079,51 +1170,166 @@ impl NifEdit {
     }
 
     fn save(&mut self) {
-        // Note GD12: the old folder is no longer the destination; the autosave keeps the work until a root change
-        // succeeds (that one saves in the new folder and removes it)
-        if self.retarget_error.is_some() {
+        // The project switch could not save anywhere: each save tries the same two again (A's draft, then the kept
+        // autosave); a success hands the session to the model, which ends it (`switch_saved`).
+        if self.switch_failed {
             self.unsaved = true;
-            if let Some(a) = self.autosave.clone() {
-                if self.free_unseen(&a) {
-                    match edit_doc::save(&a, &self.doc) {
-                        Ok(()) => self.owns_autosave = true,
-                        Err(e) => self.error = Some(e),
-                    }
+            match self.save_for_switch() {
+                Ok(()) => {
+                    self.switch_saved = true;
+                    self.switch_failed = false;
+                    self.retarget_error = None;
+                    self.retarget_fail = None;
+                    self.refresh_blocked();
                 }
+                Err(why) => self.set_switch_failed(&why),
             }
             return;
         }
-        if self.doc_path.as_os_str().is_empty() {
+        if self.draft_path.as_os_str().is_empty() {
             self.unsaved = false;
             return;
         }
-        let path = self.doc_path.clone();
+        let path = self.draft_path.clone();
         if !self.free_unseen(&path) {
             return;
         }
         // Note GD27: unsaved until the write succeeds, so a failed save keeps the session touched
-        if let Err(e) = edit_doc::save(&path, &self.doc) {
+        if let Err(e) = self.write_draft(&path) {
             self.error = Some(e);
             return;
         }
+        self.draft_saved(&path);
+    }
+
+    /// The draft's own write: into the project (never re-creating a project folder that is gone), else the autosave.
+    fn write_draft(&self, path: &Path) -> Result<(), String> {
+        match &self.project {
+            Some(p) => edit_doc::save_in(p, path, &self.doc),
+            None => edit_doc::save(path, &self.doc),
+        }
+    }
+
+    /// After the draft at `path` was written: the session is saved, the draft carries its id, and what the project
+    /// draft makes redundant is removed: an autosave this document holds (Note GD5 (c), GD11), and the kept autosave
+    /// this session wrote or loaded. A file it never loaded is not ours to delete.
+    fn draft_saved(&mut self, path: &Path) {
         self.unsaved = false;
-        if self.autosave.as_ref() == Some(&path) {
+        self.id_on_disk = true;
+        if self.autosave.as_deref() == Some(path) {
             self.owns_autosave = true;
         }
-        // Note GD5 (c), GD11: saved in a folder, an autosave this document holds has done its job; one it never
-        // loaded is not ours to delete
-        if let Some(a) = self
-            .autosave
-            .clone()
-            .filter(|_| self.owns_autosave && !self.edit_mod.as_os_str().is_empty())
-        {
+        if self.project.is_none() {
+            return;
+        }
+        let mut gone = vec![];
+        if let Some(a) = self.autosave.clone().filter(|_| self.owns_autosave) {
             self.owns_autosave = false;
-            if let Err(e) = std::fs::remove_file(&a) {
+            gone.push(a);
+        }
+        gone.extend(self.kept_autosave.take());
+        for f in gone {
+            if let Err(e) = std::fs::remove_file(&f) {
                 if e.kind() != std::io::ErrorKind::NotFound {
-                    self.error = Some(format!("{}: {e}", a.display()));
+                    self.error = Some(format!("{}: {e}", f.display()));
                 }
             }
         }
+    }
+
+    /// The project switch's save: the draft in its own project, and when that fails (the folder is gone, renamed or
+    /// not writable) the kept autosave keyed on the draft's id. Err(reason) when both fail. Counted by
+    /// `switch_save_attempts`.
+    fn save_for_switch(&mut self) -> Result<(), String> {
+        #[cfg(feature = "test-hooks")]
+        {
+            self.switch_save_attempts += 1;
+        }
+        let path = self.draft_path.clone();
+        let draft = match self.free_unseen(&path) {
+            true => self.write_draft(&path),
+            false => Err(self.error.take().unwrap_or_default()),
+        };
+        let draft_err = match draft {
+            Ok(()) => {
+                self.draft_saved(&path);
+                return Ok(());
+            }
+            Err(e) => e,
+        };
+        match self.save_kept(&draft_err) {
+            Ok(()) => {
+                self.unsaved = false;
+                Ok(())
+            }
+            Err(kept_err) => Err(format!("{draft_err}; the autosave failed too: {kept_err}")),
+        }
+    }
+
+    /// Writes the kept autosave `<sha>.<id>.toml` beside the plain autosave, never over a file this session did not
+    /// write or load (that one is moved aside first, Note GD19), and says so in Messages.
+    fn save_kept(&mut self, draft_err: &str) -> Result<(), String> {
+        let (Some(dir), Some(id)) = (
+            self.autosave.as_deref().and_then(autosave_dir),
+            self.doc.id.as_deref(),
+        ) else {
+            return Err("there is no autosave folder".into());
+        };
+        let k = edit_doc::kept_autosave_path(dir, &self.data_path, id);
+        let ours = self.kept_autosave.as_deref() == Some(k.as_path());
+        if ours {
+            edit_doc::save(&k, &self.doc)?;
+        } else {
+            if k.is_file() && !self.move_aside(&k, "The kept autosave") {
+                return Err(self.error.take().unwrap_or_default());
+            }
+            edit_doc::save_new(&k, &self.doc)?;
+        }
+        self.kept_autosave = Some(k.clone());
+        let project = self.project.as_deref().unwrap_or(Path::new(""));
+        self.open_lines.push(format!(
+            "Could not save the edits of {} to {}: {draft_err}. They are kept in {}.",
+            edit_doc::win(&self.data_path).unwrap_or_else(|_| self.data_path.clone()),
+            project.display(),
+            k.display()
+        ));
+        Ok(())
+    }
+
+    /// The switch's block: both saves failed, the edits stay open here (ruling r3-3).
+    fn set_switch_failed(&mut self, why: &str) {
+        let line = format!(
+            "Could not save the edits of {} while changing the project: {why}. They are still open here. Make a \
+             change to try again, or open the project again.",
+            edit_doc::win(&self.data_path).unwrap_or_else(|_| self.data_path.clone())
+        );
+        self.switch_failed = true;
+        self.unsaved = true;
+        if self.retarget_error.as_ref() != Some(&line) {
+            self.retarget_error = Some(line);
+            self.refresh_blocked();
+        }
+    }
+
+    /// Back in the session's own project after a failed switch (ruling r4-5): the draft is saved there and the
+    /// session goes on as it was. False (the failed state stays) when that save fails too.
+    pub(super) fn save_back_into_own_project(&mut self) -> bool {
+        let path = self.draft_path.clone();
+        if !self.free_unseen(&path) || self.write_draft(&path).is_err() {
+            return false;
+        }
+        self.switch_failed = false;
+        self.retarget_error = None;
+        self.retarget_fail = None; // the export folder's record is read again
+        self.draft_saved(&path);
+        self.refresh_blocked();
+        true
+    }
+
+    /// Whether a project switch has to save this session: it holds work (`touched`) that is not on disk in its
+    /// draft (unsaved, the draft gone with its folder, or the draft without the id).
+    pub(super) fn needs_switch_save(&self) -> bool {
+        self.touched() && (self.unsaved || !self.id_on_disk || !self.draft_path.is_file())
     }
 
     /// Note GD19, GD25: before this session writes `path`, a file there with edits it never loaded (an autosave it
@@ -1131,7 +1337,7 @@ impl NifEdit {
     /// (named in Messages), never overwritten. False (write nothing) when the move fails.
     fn free_unseen(&mut self, path: &Path) -> bool {
         let doc = self.autosave.as_deref() != Some(path);
-        if (doc && !(self.doc_unseen && path == self.doc_path)) || (!doc && self.owns_autosave) {
+        if (doc && !(self.doc_unseen && path == self.draft_path)) || (!doc && self.owns_autosave) {
             return true;
         }
         let what = if doc {
@@ -1143,6 +1349,16 @@ impl NifEdit {
             self.doc_unseen &= !doc;
             return true;
         }
+        let moved = self.move_aside(path, what);
+        if moved {
+            self.doc_unseen &= !doc;
+        }
+        moved
+    }
+
+    /// Moves the file `path` to `<stem>.<unix seconds>.toml` beside it, naming it in the session's lines. False
+    /// (nothing written) when that fails; the reason is in `error`.
+    fn move_aside(&mut self, path: &Path, what: &str) -> bool {
         let secs = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs());
@@ -1166,7 +1382,6 @@ impl NifEdit {
         };
         match std::fs::rename(path, &to) {
             Ok(()) => {
-                self.doc_unseen &= !doc;
                 self.open_lines.push(format!(
                     "{what} {} held edits of {} that this session did not open: kept as {}.",
                     path.display(),
@@ -1183,12 +1398,41 @@ impl NifEdit {
         }
     }
 
-    /// Note GD5 (a), (b), (d): the export folder changed while this edit is touched (GD13). The document stays in
-    /// memory and moves to `root` (or to `autosave` with none) unsaved: the switch writes nothing, the next save writes there.
-    /// It takes the export record of `root`'s saved document (that record describes `root`'s file). Returns the
-    /// lines for Messages; Err (nothing moved, the reason as the row shows it) when `root`'s saved document does not
-    /// load, so it is never overwritten, or when `root` holds the source copy (Note HS12).
-    pub fn retarget(&mut self, root: Option<&Path>) -> Result<Vec<String>, String> {
+    /// Note GD5 (c), GD11: a project is opened while this edit is touched and its draft is still the autosave. The
+    /// document stays in memory and moves to the project's draft (`edit_doc::draft_path`); the caller saves it there.
+    /// A draft the project already holds is never loaded over it: it is kept aside by that save (Notes GD19, GD25).
+    /// Returns the lines for Messages; Err (nothing moved, the reason) when the project is not a folder or its
+    /// draft does not load, so it is never overwritten.
+    pub fn retarget(&mut self, project: &Path) -> Result<Vec<String>, String> {
+        if !project.is_dir() {
+            return Err(format!("{} no longer exists", project.display()));
+        }
+        let draft = edit_doc::draft_path(project, &self.data_path)?;
+        let theirs = edit_doc::load(&draft)?;
+        let mut lines = vec![];
+        if theirs.is_some() {
+            lines.push(format!(
+                "Project opened: the open edit of {} goes to {}; the edits saved there are kept aside at the next \
+                 save.",
+                self.data_path,
+                draft.display()
+            ));
+        }
+        // Note GD25: the destination's edits were never loaded: the first save moves them aside
+        self.doc_unseen = theirs.is_some();
+        // the autosave is this session's document (`owns_autosave`): the first save into the project removes it
+        (self.project, self.draft_path) = (Some(project.to_path_buf()), draft);
+        self.id_on_disk = false;
+        self.drag = None;
+        self.history.break_merge();
+        self.unsaved = true;
+        Ok(lines)
+    }
+
+    /// The export folder changed: the session keeps its draft and takes the new folder's record (`export`); nothing
+    /// is written. Err (nothing moved, the reason as the row shows it) when the record does not load, so it is never
+    /// overwritten, or when `root` holds the source copy (Note HS12).
+    pub fn set_record_root(&mut self, root: Option<&Path>) -> Result<(), String> {
         // Note HS12: an export there would replace the source copy (pick_source skips that folder as well)
         if let Some(r) = root.filter(|r| same_dir(Path::new(&self.source_copy.root), r)) {
             return Err(format!(
@@ -1201,53 +1445,23 @@ impl NifEdit {
         let cannot = |r: &Path, e: String| {
             format!("could not open the edit document in {}: {e}", r.display())
         };
-        let (edit_mod, doc_path, export_path) = match root {
-            Some(r) => (
-                r.to_path_buf(),
-                edit_doc::doc_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
-                edit_doc::export_path(r, &self.data_path).map_err(|e| cannot(r, e))?,
-            ),
-            None => (
-                PathBuf::new(),
-                self.autosave.clone().unwrap_or_default(),
-                PathBuf::new(),
-            ),
+        let (edit_mod, record_path, export_path, record) = match root {
+            Some(r) => {
+                let p = edit_doc::doc_path(r, &self.data_path).map_err(|e| cannot(r, e))?;
+                let export_path =
+                    edit_doc::export_path(r, &self.data_path).map_err(|e| cannot(r, e))?;
+                let record = edit_doc::load(&p).map_err(|e| cannot(r, e))?;
+                (r.to_path_buf(), Some(p), export_path, record)
+            }
+            None => (PathBuf::new(), None, PathBuf::new(), None),
         };
-        let theirs = match root {
-            Some(r) => edit_doc::load(&doc_path).map_err(|e| cannot(r, e))?,
-            None => None,
-        };
-        let mut lines = vec![];
-        if theirs.is_some() {
-            lines.push(format!(
-                "Export folder changed: the open edit of {} goes to {}; the edits saved there are kept aside at the \
-                 next save.",
-                self.data_path,
-                doc_path.display()
-            ));
-        }
-        // (d): the old folder's document stays (FC11 lists it when its export hash is recorded); the autosave is ours
-        if !self.edit_mod.as_os_str().is_empty() && self.doc_path.is_file() {
-            lines.push(format!(
-                "Export folder changed: the edits saved before stay in {}.",
-                self.doc_path.display()
-            ));
-        }
-        // Note GD25: the destination's edits were never loaded: the first save moves them aside
-        self.doc_unseen = theirs.is_some();
-        self.doc.export = theirs.map(|t| t.export).unwrap_or_default();
-        // without a folder the document is the autosave; an autosave this session never loaded is moved aside by the
-        // first save there (Note GD19), not claimed here
-        (self.edit_mod, self.doc_path, self.export_path) = (edit_mod, doc_path, export_path);
-        self.drag = None;
-        self.history.break_merge();
-        self.unsaved = true;
+        self.doc.export = record.map(|r| r.export).unwrap_or_default();
+        (self.edit_mod, self.record_path, self.export_path) = (edit_mod, record_path, export_path);
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
         self.export_note = None;
         self.refresh_blocked();
-        Ok(lines)
+        Ok(())
     }
-
     /// Appends `ops` as one undo step. A push with the same merge key as the previous one (the next tick of a
     /// drag) replaces the drag's ops instead, each keeping the `base` of the drag's op with its merge key: a drag
     /// is one op (or one op per colour channel), plus the controller's start / stop while they follow the keys
@@ -1322,6 +1536,7 @@ impl NifEdit {
             Ok(mut d) => {
                 d.export = std::mem::take(&mut self.doc.export);
                 d.source = self.doc.source.clone();
+                d.id = self.doc.id.clone();
                 self.doc = d;
             }
             Err(e) => {
@@ -1859,6 +2074,89 @@ pub fn block_check_count() -> usize {
 }
 
 impl MeshesModel {
+    /// Attempts of the project switch's two saves so far, by the open session and the ones before it (ruling r4-2).
+    #[cfg(feature = "test-hooks")]
+    pub fn switch_save_attempts_for_test(&self) -> u32 {
+        self.switch_attempts_done + self.edit.as_ref().map_or(0, |e| e.switch_save_attempts)
+    }
+
+    /// Ends the session and opens the same NIF again in the current project, keeping the selection (what a project
+    /// switch does once the edits are saved).
+    fn reopen_keeping_selection(&mut self) {
+        let Some(selection) = self.edit.as_ref().map(|e| e.selection) else {
+            return;
+        };
+        self.drop_edit();
+        self.open_edit();
+        let keep = self.edit.as_ref().is_some_and(|e| match selection {
+            Selection::Root => true,
+            Selection::Shape(id) => e.parsed.shapes.iter().any(|s| s.id.0 == id),
+        });
+        if keep {
+            self.select_edit(selection);
+        }
+    }
+
+    /// A retry of a failed project switch saved (`NifEdit::save`): the session ends and the wanted project's opens.
+    pub(super) fn finish_switch(&mut self) {
+        if !self.edit.as_ref().is_some_and(|e| e.switch_saved) {
+            return;
+        }
+        // the wanted root is `project_root` (set by `set_project_root` before it asked the session)
+        self.pending_root = None;
+        self.reopen_keeping_selection();
+    }
+
+    /// The opened project changed (`MeshesModel::set_project_root`): what the open edit does (review E6).
+    /// - back in the project a failed switch left (ruling r4-5): the draft is saved there and the session goes on;
+    /// - none to a project with a touched session: it moves to the project's draft (Note GD5 (c)), the one carry-over;
+    /// - a project to another or to none: the edits are saved in the old project's draft (or, when that fails, in
+    ///   a kept autosave), then the session ends and the NIF opens again from the new place. When neither save
+    ///   works the session stays open, blocked, and nothing is retried until the next edit (ruling r3-3).
+    pub(super) fn switch_project(&mut self, to: Option<&Path>) {
+        let Some(e) = self.edit.as_mut() else { return };
+        if e.switch_failed && e.project.as_deref() == to {
+            self.pending_root = None;
+            e.save_back_into_own_project();
+            return;
+        }
+        e.flush(); // a drag not saved yet; in a failed switch this is the retry
+        if e.switch_failed {
+            self.pending_root = Some(to.map(Path::to_path_buf));
+            return;
+        }
+        if e.switch_saved {
+            self.finish_switch();
+            return;
+        }
+        match (e.project.is_some(), to) {
+            (false, Some(p)) if e.touched() => match e.retarget(p) {
+                Ok(lines) => {
+                    self.messages.extend(lines);
+                    e.save();
+                    return;
+                }
+                // never overwritten: the edits stay in the autosave, and the draft is not opened over them
+                Err(why) => {
+                    self.error = Some(format!(
+                        "Could not move the edits of {} into the project: {why}. They stay in the autosave.",
+                        e.data_path
+                    ));
+                    return;
+                }
+            },
+            (true, _) if e.needs_switch_save() => {
+                if let Err(why) = e.save_for_switch() {
+                    e.set_switch_failed(&why);
+                    self.pending_root = Some(to.map(Path::to_path_buf));
+                    return;
+                }
+            }
+            _ => {}
+        }
+        self.reopen_keeping_selection();
+    }
+
     /// Where NIF edits go: the chosen export folder, and nowhere without one (Note GD5 supersedes CI29's
     /// `<instance>\mods\sdc NIF Edits` default).
     pub fn edit_mod(&self) -> Option<PathBuf> {
@@ -1920,7 +2218,14 @@ impl MeshesModel {
             .clone();
         let bytes = read_file(&FileSource::from_store(src.kind, &src.root, path))?;
         let autosave = self.autosave_of(path);
-        let mut e = NifEdit::open(bytes, src, path, edit_mod, autosave.as_deref())?;
+        let mut e = NifEdit::open(
+            bytes,
+            src,
+            path,
+            self.project_root.as_deref(),
+            edit_mod,
+            autosave.as_deref(),
+        )?;
         e.copies = copies;
         e.weight_sibling = weight_sibling_of(path)
             .filter(|s| store.copies_of_path(s).is_ok_and(|c| !c.is_empty()));
@@ -1989,6 +2294,10 @@ impl MeshesModel {
         }
         if let Some(mut e) = self.edit.take() {
             e.flush();
+            #[cfg(feature = "test-hooks")]
+            {
+                self.switch_attempts_done += e.switch_save_attempts;
+            }
             self.messages.append(&mut e.open_lines);
             if let Some(err) = e.error {
                 self.error = Some(err);
@@ -2070,6 +2379,7 @@ impl MeshesModel {
         let before = e.materials();
         e.push(ops, merge);
         self.edit_changed(before);
+        self.finish_switch();
     }
 
     pub fn undo_edit(&mut self) -> bool {
@@ -2079,6 +2389,7 @@ impl MeshesModel {
         let before = e.materials();
         let done = e.undo();
         self.edit_changed(before);
+        self.finish_switch();
         done
     }
 
@@ -2089,6 +2400,7 @@ impl MeshesModel {
         let before = e.materials();
         let done = e.redo();
         self.edit_changed(before);
+        self.finish_switch();
         done
     }
 
@@ -2105,6 +2417,7 @@ impl MeshesModel {
         let before = e.materials();
         f(e);
         self.edit_changed(before);
+        self.finish_switch();
     }
 
     /// "Check that files exist": on, the slot warnings include missing files; off, they are dropped again.
@@ -2459,29 +2772,31 @@ impl MeshesModel {
         e.placement = Some(p);
     }
 
-    /// The app sets the Textures export folder each frame (Note CI29). A change re-reads the chips. An open session
-    /// that is touched (GD13) keeps its document in memory and moves to the new folder unsaved
-    /// (`NifEdit::retarget`, Note GD5); an untouched one has nothing live, so the same NIF is reopened from the new
-    /// folder: its edit document there, or a fresh one.
-    /// The selected shape is kept.
+    /// The app sets the Textures export folder each frame (Note CI29). A change re-reads the chips and is a light
+    /// switch for an open session: it keeps its draft and takes the new folder's record (`NifEdit::set_record_root`),
+    /// writes nothing, and drops the Review answers given for the old folder's files. A folder that cannot be taken
+    /// (its record does not load, or it holds the source copy) blocks the session's export with the reason and is
+    /// not taken. The selected shape is kept.
     pub fn set_nif_export_root(&mut self, root: Option<PathBuf>) {
         // Note GD19: the session's lines (an autosave moved aside by a save) reach Messages on the next frame
         if let Some(e) = &mut self.edit {
             self.messages.append(&mut e.open_lines);
         }
         if self.nif_export_root == root {
-            // Note GD12: back to the folder the edit never left: it is its destination again
-            if let Some(e) = self.edit.as_mut().filter(|e| e.retarget_error.is_some()) {
+            // Note GD12: back to the folder the session never left: its record is current again
+            if let Some(e) = self
+                .edit
+                .as_mut()
+                .filter(|e| e.retarget_error.is_some() && !e.switch_failed)
+            {
                 e.retarget_error = None;
                 e.retarget_fail = None;
                 e.refresh_blocked();
-                e.flush();
             }
             return;
         }
-        // Note GD12: the root is taken only once the live edit has moved there; until then the edit is blocked.
-        if let Some(e) = self.edit.as_mut().filter(|e| e.touched()) {
-            // Note GD20: a failure is tried again only when the root or its document's length or time changed (a
+        if let Some(e) = self.edit.as_mut() {
+            // Note GD20: a failure is tried again only when the root or its record's length or time changed (a
             // stat per frame, never a read)
             let key = root.as_deref().map(|r| {
                 let p = edit_doc::doc_path(r, &e.data_path).unwrap_or_default();
@@ -2493,49 +2808,32 @@ impl MeshesModel {
             if key.is_some() && e.retarget_fail == key {
                 return;
             }
-            match e.retarget(root.as_deref()) {
-                Ok(lines) => {
-                    self.messages.extend(lines);
-                    e.retarget_error = None;
+            match e.set_record_root(root.as_deref()) {
+                Ok(()) => {
                     e.retarget_fail = None;
+                    if !e.switch_failed {
+                        e.retarget_error = None;
+                    }
                     e.refresh_blocked();
                 }
                 Err(why) => {
                     e.retarget_fail = key;
-                    if e.retarget_error.as_ref() != Some(&why) {
+                    if !e.switch_failed && e.retarget_error.as_ref() != Some(&why) {
                         e.retarget_error = Some(why);
                         e.refresh_blocked();
                     }
                     return;
                 }
             }
-            self.nif_export_root = root;
-            self.clear_nif_answers(); // Note GD29: they were given for the old folder's files
-            self.refresh_doc_badges();
-            self.refresh_placement();
-            self.edit_checks();
-            return;
         }
         self.nif_export_root = root;
-        self.clear_nif_answers();
+        self.clear_nif_answers(); // Note GD29: they were given for the old folder's files
         self.refresh_doc_badges();
-        let Some(selection) = self.edit.as_ref().map(|e| e.selection) else {
-            return;
-        };
-        // Flushes to the old folder.
-        self.drop_edit();
-        // The selected NIF is the edited one: selecting another ends the session.
-        self.open_edit();
-        // Root too (T2 review Minor 1): the reopen starts on `first_selection`, which may be a shape.
-        let keep = self.edit.as_ref().is_some_and(|e| match selection {
-            Selection::Root => true,
-            Selection::Shape(id) => e.parsed.shapes.iter().any(|s| s.id.0 == id),
-        });
-        if keep {
-            self.select_edit(selection);
+        self.refresh_placement();
+        if self.edit.is_some() {
+            self.edit_checks();
         }
     }
-
     /// The preview after a change (R10): each changed shape's material goes to the loaded content; a texture path
     /// the content's map lacks (and the store has), or a material the viewport refuses, reloads the same view with
     /// the map extended.
