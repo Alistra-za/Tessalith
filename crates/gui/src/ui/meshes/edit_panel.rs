@@ -24,30 +24,34 @@ const TABS: [&str; 4] = ["Shader", "Alpha", "Controllers", "Extra data"];
 /// Note GH5: the footer's line for an edit with no export folder; Review's footer says the same.
 const SKIPPED_NO_FOLDER: &str = "Skipped until an export folder is chosen";
 
-/// Where the edit panel's three vertical parts were laid out in the last pass (tests only): `top` is the head's
-/// consumed rect, `tab_area` the slot list's OUTER rect (a horizontal bar included), `footer` the export footer.
+/// Where the edit panel's three vertical parts were laid out in the last COMPLETED pass that drew the panel (tests
+/// only): `top` is the head's consumed rect, `tab_area` the slot list's OUTER rect (a horizontal bar included),
+/// `footer` the export footer, `tabs_h` the tab-strip height that pass used for its split (28.0 on the panel's first
+/// pass, the measured height after).
 #[cfg(feature = "test-hooks")]
 #[derive(Clone, Copy, Debug)]
 pub struct EditPanelRects {
     pub top: egui::Rect,
     pub tab_area: egui::Rect,
     pub footer: egui::Rect,
+    pub tabs_h: f32,
 }
 
 #[cfg(feature = "test-hooks")]
 const RECTS: &str = "meshes-edit-panel-rects";
 
-/// (pass, head, tab area) of the pass that drew the panel.
+/// (pass, head, tab area, tab-strip height used) of the pass that drew the panel.
 #[cfg(feature = "test-hooks")]
-fn store_rects(ctx: &egui::Context, top: egui::Rect, tab_area: egui::Rect) {
+fn store_rects(ctx: &egui::Context, top: egui::Rect, tab_area: egui::Rect, tabs_h: f32) {
     let pass = ctx.cumulative_pass_nr();
-    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(RECTS), (pass, top, tab_area)));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(RECTS), (pass, top, tab_area, tabs_h)));
 }
 
-/// The rects of the last completed pass, `None` when that pass did not draw the edit panel (no edit open).
+/// The rects of the last completed pass that drew the edit panel. Not a current-pass query: during the first pass
+/// after the panel closes it still returns the old entry; a completed pass that omitted the panel gives `None`.
 #[cfg(feature = "test-hooks")]
 pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
-    let (pass, top, tab_area): (u64, egui::Rect, egui::Rect) =
+    let (pass, top, tab_area, tabs_h): (u64, egui::Rect, egui::Rect, f32) =
         ctx.data(|d| d.get_temp(egui::Id::unique(RECTS)))?;
     // The counter moves on when a pass ends: read between passes, the panel's own pass is one behind.
     if ctx.cumulative_pass_nr().saturating_sub(pass) > 1 {
@@ -58,6 +62,7 @@ pub fn layout_rects(ctx: &egui::Context) -> Option<EditPanelRects> {
         top,
         tab_area,
         footer,
+        tabs_h,
     })
 }
 
@@ -158,8 +163,8 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         // Meshes UI T6 (Note CZ21): what the tabs act on, always in sight.
         ui.add(egui::Label::new(editing_line(e)).truncate());
         ui.separator();
-        let tabs_h = ui.cursor().min.y - tabs_start;
-        ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32) = tabs_h);
+        let measured = ui.cursor().min.y - tabs_start;
+        ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32) = measured);
         // Both ways: a wide row scrolls instead of widening the panel. Its OUTER height (a horizontal bar included)
         // is what is left, never more: egui's 64 px scrolled minimum, or the whole `avail` as a minimum, is applied
         // to the inner viewport, and the bar is added on top, under the footer.
@@ -185,6 +190,7 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
                 egui::pos2(ui.max_rect().min.x, tab_y),
                 egui::pos2(ui.max_rect().max.x, ui.cursor().min.y - sp),
             ),
+            tabs_h,
         );
     }
     apply(m, act);

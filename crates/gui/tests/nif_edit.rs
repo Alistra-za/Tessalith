@@ -11852,9 +11852,14 @@ fn the_first_pass_puts_no_part_of_the_editor_under_the_footer() {
     let (shape, _) = lit_shape(h.state().meshes.edit.as_ref().unwrap());
     h.state_mut().meshes.select_edit(Selection::Shape(shape));
     h.state_mut().model.open_review();
+    // A frame can run more than one pass, and a later pass would have measured the strip: allow one.
+    h.ctx
+        .options_mut(|o| o.max_passes = std::num::NonZeroUsize::new(1).unwrap());
     h.step();
     let r =
         sdc_gui::ui::meshes::layout_rects(&h.ctx).expect("the edit panel drew in the first pass");
+    // The rects are those of a pass that split the room with the 28 px estimate.
+    assert_eq!(r.tabs_h, 28.0, "not the first pass of the panel: {r:?}");
     assert!(
         r.top.max.y <= r.tab_area.min.y + 0.5,
         "head over the slot list: {r:?}"
