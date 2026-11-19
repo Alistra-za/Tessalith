@@ -1258,10 +1258,10 @@ impl NifEdit {
         }
         Some(if self.draft_path.as_os_str().is_empty() {
             "This edit has no draft location."
-        } else if self.save_failed {
-            "The last save failed. Make another edit to try again."
         } else if self.drag.is_some() {
             "Finish the edit to save the draft."
+        } else if self.save_failed {
+            "The last save failed. Make another edit to try again."
         } else {
             "The draft is saved with your first edit."
         })
@@ -2165,10 +2165,10 @@ impl NifEdit {
     /// tick) leaves the save to `flush`, except after a failed switch, where every change is the next try.
     fn ops_changed(&mut self, now: bool) {
         self.unsaved = true;
-        if self.held_stale {
-            // undo (or redo) back to what the file holds names it again
-            self.held_stale = !same_ops(&self.held_ops, &self.doc.ops);
-        }
+        // ruling E6-Y10: a change starts a save that has not failed: the line keeps naming the file until that save
+        // fails (`held_failed` compares the ops again, so an undo back to what the file holds names it) or works
+        self.held_stale = false;
+        self.save_failed = false;
         if now || self.switch_failed {
             self.save();
         }

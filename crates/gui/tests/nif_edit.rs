@@ -15555,6 +15555,98 @@ fn the_disabled_draft_button_shows_its_reason_on_hover() {
     h.get_by_label("The draft is saved with your first edit.");
 }
 
+/// A session in project `p` whose draft cannot be written (`_sdc` is a file), with one edit that failed to save.
+fn session_with_a_failed_first_save() -> (tempfile::TempDir, MeshesModel) {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    std::fs::write(p.join("_sdc"), b"a file where the folder goes").unwrap();
+    m.set_project_root(Some(&p));
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_off_reason(),
+        Some("The last save failed. Make another edit to try again.")
+    );
+    (d, m)
+}
+
+/// The footer's hover text of the disabled Show in Explorer, on screen.
+fn hover_reason(h: &mut Harness<'static, MeshesModel>, text: &str) {
+    h.run_steps(4);
+    h.get_by_label("Show in Explorer: the draft").hover();
+    h.run_steps(30);
+    h.get_by_label(text);
+}
+
+/// Ruling E6-Y8, on screen: a failed save.
+#[test]
+fn the_failed_save_hover_is_on_screen() {
+    let (_d, m) = session_with_a_failed_first_save();
+    hover_reason(
+        &mut view(m),
+        "The last save failed. Make another edit to try again.",
+    );
+}
+
+/// Ruling E6-Y10: after a failed save the next drag has made the edit the hover asked for.
+#[test]
+fn a_drag_after_a_failed_save_says_finish_the_edit() {
+    let (_d, mut m) = session_with_a_failed_first_save();
+    tick(&mut m, 40.5);
+    hover_reason(&mut view(m), "Finish the edit to save the draft.");
+}
+
+/// Ruling E6-Y8, on screen: a session with no draft location.
+#[test]
+fn the_no_location_hover_is_on_screen() {
+    let m = direct(fixture("TestNifFile_Animated_LE.nif"));
+    hover_reason(&mut view(m), "This edit has no draft location.");
+}
+
+/// Ruling E6-Y10: A is saved, the save of B fails, and a drag to C is a pending save that has not failed: the line
+/// keeps naming the draft, which holds A.
+#[test]
+fn a_drag_after_a_failed_save_keeps_naming_the_draft() {
+    let (_d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    read_only(&draft(&p), true);
+    gloss(&mut m, 13.5);
+    assert_eq!(m.edit.as_ref().unwrap().draft_on_disk(), None, "B failed");
+    tick(&mut m, 40.5); // a drag to C, its save waits for the release
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains(&format!("Draft saved in {}", draft(&p).display()));
+    assert!(!h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+    read_only(&draft(&p), false);
+}
+
+/// Ruling E6-Y10: A saved, the replacement denied, undo to no ops (that save fails), then a drag back to A: between
+/// that drag's tick and its release the line names the draft.
+#[test]
+fn a_drag_back_to_the_written_ops_names_the_draft_before_the_release() {
+    let (_d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    tick(&mut m, 40.5);
+    m.edit.as_mut().unwrap().flush();
+    assert_eq!(op_values(&m).len(), 1);
+    read_only(&draft(&p), true);
+    assert!(m.edit.as_mut().unwrap().undo());
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_on_disk(),
+        None,
+        "no ops differ from A"
+    );
+    tick(&mut m, 40.5); // the same op again, not released yet
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains(&format!("Draft saved in {}", draft(&p).display()));
+    read_only(&draft(&p), false);
+}
+
 /// Ruling E6-Y1: an edit whose save failed is not on disk, so the line does not name the older draft.
 #[test]
 fn an_edit_whose_save_fails_does_not_name_the_older_draft() {
