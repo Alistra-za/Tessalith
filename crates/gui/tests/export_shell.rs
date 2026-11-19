@@ -1090,6 +1090,62 @@ fn a_scoped_review_header_reads_the_sdc_toml_writability_of_the_whole_project() 
     );
 }
 
+/// `text` appended to `sdc.toml` by hand (a comment: the project's settings stay the same).
+fn edit_sdc_toml_by_hand(toml: &std::path::Path, text: &str) {
+    let mut s = std::fs::read_to_string(toml).unwrap_or_default();
+    s.push_str(text);
+    std::fs::write(toml, s).unwrap();
+}
+
+/// Round 3, ruling 3c-29 (re-review B1): the replan guarantee for a hand-edited `sdc.toml`. The first hand edit arms
+/// the click and plans (the walk's reload plans, then the gate plans again for the click). A second hand edit while the
+/// click waits ends in Review: nothing is written and nothing is armed. The plan `check_sources` starts for the
+/// reload is the reload's own; the gate requests none.
+#[test]
+fn a_click_that_waited_through_a_hand_edited_sdc_toml_never_replans_for_a_second_one() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let toml = m.root.clone().unwrap().join("sdc.toml");
+    // On disk and taken, so the edits below are the only changes.
+    edit_sdc_toml_by_hand(&toml, "# start\n");
+    assert_eq!(m.check_sources(), 1, "guard: the hand edit is seen");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.hold_plan_results = true;
+    edit_sdc_toml_by_hand(&toml, "# by hand 1\n");
+    m.header_export_clicked();
+    assert!(
+        m.full_plan_pending() && m.export_queued() && m.review.is_none(),
+        "guard: the first change arms the click and plans"
+    );
+    let mut msgs = held_plan(&mut m);
+    edit_sdc_toml_by_hand(&toml, "# by hand 2\n");
+    // Deliver until the click's plan lands (the reload's own first plan is superseded by the gate's).
+    loop {
+        for x in msgs {
+            m.handle_held(x);
+        }
+        if !(m.export_queued() && m.full_plan_pending()) {
+            break;
+        }
+        msgs = held_plan(&mut m);
+    }
+    assert!(
+        m.review.is_some() && !m.export_queued(),
+        "the second change opens Review and leaves nothing armed"
+    );
+    assert!(m.export.running.is_none() && nothing_written(d.path()));
+    // The reload's own plan lands; it carries no click.
+    m.hold_plan_results = false;
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        !m.export_queued() && m.export.summary.is_none() && nothing_written(d.path()),
+        "nothing was written after the reload's plan either"
+    );
+    assert!(m.review.is_some());
+}
+
 /// A scoped Review for set `id` (the opt-out is on afterwards, so opening it did not write).
 fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     let k = key_of(m, id);
