@@ -2750,3 +2750,38 @@ fn a_step_walks_the_files_keys_once_per_document_state() {
     );
     assert!(walks <= 2, "{walks} walks of the [files] keys in one step");
 }
+
+/// N8-k: `ProjectDoc::clear_exact_file_value` touches only the table spelled byte for byte as the key, and only while
+/// it holds the value: no case twin, no extension-less table, no other value.
+#[test]
+fn the_exact_remover_touches_only_its_own_table_while_it_holds_the_value() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join("sdc.toml"),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = \"data\"\n\n[files.'pbr/iron_n']\nalpha.policy = \"data\"\n\n[files.'pbr/iron_n.png']\nalpha.policy = \"remove\"\nsubtype = \"pbr_normal\"\n",
+    )
+    .unwrap();
+    let mut p = sdc_gui::project::ProjectDoc::open(d.path());
+    assert!(!p.read_only(), "{:?}", p.error());
+    let start = p.text();
+    let data = json!("data");
+    assert!(
+        !p.clear_exact_file_value("Pbr/Iron_N.png", "alpha.policy", &data),
+        "no table spelled so: nothing, no twin"
+    );
+    assert!(
+        !p.clear_exact_file_value("pbr/iron_n.png", "alpha.policy", &data),
+        "the exact table holds another value: nothing"
+    );
+    assert_eq!(p.text(), start, "nothing changed");
+    assert!(p.clear_exact_file_value("PBR/IRON_N.PNG", "alpha.policy", &data));
+    assert!(
+        !p.has_file_key("PBR/IRON_N.PNG"),
+        "the emptied exact table goes"
+    );
+    assert_eq!(p.file_value("pbr/iron_n", "alpha.policy"), Some(data));
+    assert_eq!(
+        p.file_value("pbr/iron_n.png", "alpha.policy"),
+        Some(json!("remove"))
+    );
+}
