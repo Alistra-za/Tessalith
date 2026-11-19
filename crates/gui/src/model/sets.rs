@@ -1198,6 +1198,16 @@ pub fn views(m: &AppModel) -> Arc<Vec<SetView>> {
     views
 }
 
+/// Document-only cards have no plan warnings. Seed their resolved view to exercise coded Problems rows.
+#[cfg(feature = "test-hooks")]
+pub fn inject_view_warnings(m: &mut AppModel, id: &str, warnings: Vec<Warning>) {
+    m.invalidate_views();
+    views(m);
+    let mut cache = m.views.borrow_mut();
+    let views = Arc::make_mut(cache.views.as_mut().unwrap());
+    views.iter_mut().find(|v| v.id == id).unwrap().set_warnings = warnings;
+}
+
 #[cfg(test)]
 thread_local! {
     /// Test probe: how many deep clones `set_views` made on this thread.

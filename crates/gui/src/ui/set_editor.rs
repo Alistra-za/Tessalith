@@ -237,9 +237,8 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
             super::problems::focus_row(ui.ctx(), super::problems::row_id(&p));
         }
         Act::Problems => {
-            // The list shows at least the rows the link counts, a slot reason's row too: their hidden kinds show
-            // again, as a reason's does.
-            for code in hidden_reason_kinds(model, scope_key(v)) {
+            // Show the editor's counted kinds before opening the ordinary JP5 filter.
+            for code in hidden_reason_kinds(model, v) {
                 model.set_kind_hidden(code, false);
             }
             model.open_problems(Some(ProblemsFilter::Set(scope_key(v).to_string())));

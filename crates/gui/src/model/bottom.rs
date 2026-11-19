@@ -679,9 +679,7 @@ pub fn set_ready_in(f: &Flagged, v: &sets::SetView) -> bool {
         && !v.members.iter().any(|t| f.textures.contains(t))
 }
 
-/// Note JP5 (B3-16, B3-19): the name a set's Problems filter, its reasons, the card's hover and its badges' clicks use:
-/// its engine key, or for a set with no key (a created set with no file yet, or one whose every entry is missing) its
-/// id.
+/// Note JP5: an ordinary Problems filter names a set by its engine key or, for a key-less set, its document id.
 pub fn scope_key(v: &sets::SetView) -> &str {
     if v.key.is_empty() {
         &v.id
@@ -1873,9 +1871,7 @@ fn reasons_for_view(v: &sets::SetView, rows: Vec<&Problem>) -> Vec<Reason> {
     rows.into_iter().map(|p| reason(v, p, &drawn)).collect()
 }
 
-/// `set_reasons` for the set editor's status line, which reads it every frame (final review Minor 1): scanned once
-/// per `problems()` build, scope key `key` (see `scope_key`) and hidden kinds, as `cached_tab_counts`. The set views
-/// it reads live in the same cache cell, which is emptied when they change.
+/// The status line's reasons, cached by problems, resolved view id and hidden kinds. Rebuilding the views clears it.
 pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     // Both before the borrow: `problems` writes the same cell.
     let all = problems(m);
@@ -1896,11 +1892,10 @@ pub fn cached_set_reasons(m: &AppModel, v: &sets::SetView) -> Arc<Vec<Reason>> {
     r
 }
 
-/// Review E4: the hidden kinds among the rows `set_reasons` counts for the set `key` (a set's scope key, `scope_key`:
-/// its key, or a key-less set's id), slot reasons' rows included: what "+k more in Problems" shows again.
-pub fn hidden_reason_kinds(m: &AppModel, key: &str) -> Vec<Code> {
+/// The hidden kinds among the resolved editor view's counted rows, including slot reasons.
+pub fn hidden_reason_kinds(m: &AppModel, v: &sets::SetView) -> Vec<Code> {
     let hidden = m.hidden_kinds();
-    with_counted_rows(m, key, |_, rows| {
+    with_view_rows(m, v, |_, rows| {
         rows.into_iter()
             .filter(|p| is_hidden(p, &hidden))
             .filter_map(|p| p.code)

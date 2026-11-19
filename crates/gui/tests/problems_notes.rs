@@ -5326,6 +5326,69 @@ fn empty_id_set(dir: &std::path::Path) -> AppModel {
     m
 }
 
+fn check_more_unhides_own_kind(mut m: AppModel, id: &str, other_id: &str) {
+    use engine::codes::Code;
+    use sdc_gui::model::bottom::{is_hidden, problems, At};
+
+    let other_key = view_by_id(&m, other_id).key;
+    m.sets
+        .iter_mut()
+        .find(|s| s.key == other_key)
+        .unwrap()
+        .warnings = vec![Warning::new(Code::ValCoverage, "other card")];
+    sdc_gui::model::sets::inject_view_warnings(
+        &mut m,
+        id,
+        vec![
+            Warning::new(Code::ValMipError, "mip"),
+            Warning::new(Code::LossReencode, "encode"),
+            Warning::new(Code::InNonfinite, "input"),
+            Warning::new(Code::ChanNotGray, "colour"),
+        ],
+    );
+    m.set_kind_hidden(Code::ChanNotGray, true);
+    m.set_kind_hidden(Code::ValCoverage, true);
+    let all = problems(&m);
+    let hidden_row = |id: &str, code| {
+        all.iter()
+            .find(|p| {
+                matches!(&p.at, At::Set { id: row_id, .. } if row_id == id)
+                    && p.code == Some(code)
+                    && is_hidden(p, &m.hidden_kinds())
+            })
+            .unwrap()
+    };
+    let own = hidden_row(id, Code::ChanNotGray);
+    let other = hidden_row(other_id, Code::ValCoverage);
+    pick_id(&mut m, id);
+    let mut h = harness(m);
+    h.run();
+    click_and_settle(&mut h, "+2 more in Problems");
+    let hidden = h.state().hidden_kinds();
+    assert!(
+        !is_hidden(own, &hidden) && is_hidden(other, &hidden),
+        "only the selected card's kind should be shown, hidden: {hidden:?}"
+    );
+    // The link opens an ordinary filter. Clear it to see both cards' row visibility together.
+    h.state_mut().open_problems(None);
+    h.run();
+    h.get_by_label(own.shown().as_ref());
+    assert!(h.query_by_label(other.shown().as_ref()).is_none());
+}
+
+#[test]
+fn more_in_problems_unhides_own_kind_for_a_key_shaped_id() {
+    let d = tempfile::tempdir().unwrap();
+    let (m, id) = wall_cards(d.path());
+    check_more_unhides_own_kind(m, &id, "wall");
+}
+
+#[test]
+fn more_in_problems_unhides_own_kind_for_an_empty_id() {
+    let d = tempfile::tempdir().unwrap();
+    check_more_unhides_own_kind(empty_id_set(d.path()), "", "landscape/rock01");
+}
+
 #[test]
 fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
     use sdc_gui::model::bottom::{filtered, problems, At, ProblemsFilter};
