@@ -302,6 +302,77 @@ fn ctrl_a_on_sets_selects_the_visible_sets() {
     assert!(!sel.contains(&leaf));
 }
 
+fn grouped_column(
+    dir: &std::path::Path,
+    open: &[&str],
+) -> (Harness<'static, AppModel>, [String; 3]) {
+    use sdc_gui::model::set_groups::GroupTarget;
+    let (mut m, keys) = rock_leaf_odd(dir);
+    for (group, ids) in [("Rock", open), ("Leaves", &["landscape/leaf"][..])] {
+        let members: Vec<_> = ids.iter().map(|&id| id.to_owned()).collect();
+        m.move_to_group(&members, GroupTarget::New(group.into()))
+            .unwrap();
+    }
+    let mut h = harness(m);
+    h.run();
+    (h, keys)
+}
+
+fn click_card(h: &mut Harness<'static, AppModel>, id: &str, modifiers: egui::Modifiers) {
+    h.query_all_by_label(id)
+        .find(|n| in_sets_column(h, n.rect()))
+        .unwrap()
+        .click_modifiers(modifiers);
+    h.run();
+}
+
+fn fold_leaves(h: &mut Harness<'static, AppModel>) {
+    h.get_by_label_contains("Group Leaves,").click();
+    h.run();
+    assert!(h
+        .query_by_label_contains("Set landscape/leaf, position")
+        .is_none());
+}
+
+#[test]
+fn ctrl_a_skips_folded_groups() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, [rock, _, odd]) = grouped_column(d.path(), &["landscape/rock01", "landscape/odd"]);
+    fold_leaves(&mut h);
+    click_card(&mut h, "landscape/odd", egui::Modifiers::NONE);
+    assert_eq!(h.state().selection, Selection::Set(odd.clone()));
+    h.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    h.run();
+    assert_eq!(h.state().selected_sets(), [rock, odd]);
+}
+
+#[test]
+fn shift_range_skips_folded_groups() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, [rock, _, odd]) = grouped_column(d.path(), &["landscape/rock01"]);
+    assert_eq!(
+        visible_ids(h.state()),
+        ["landscape/rock01", "landscape/leaf", "landscape/odd"]
+    );
+    fold_leaves(&mut h);
+    click_card(&mut h, "landscape/rock01", egui::Modifiers::NONE);
+    click_card(&mut h, "landscape/odd", egui::Modifiers::SHIFT);
+    assert_eq!(h.state().selected_sets(), [rock, odd]);
+}
+
+#[test]
+fn folded_groups_keep_existing_selection() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, [rock, leaf, _]) = grouped_column(d.path(), &["landscape/rock01"]);
+    click_card(&mut h, "landscape/rock01", egui::Modifiers::NONE);
+    click_card(&mut h, "landscape/leaf", egui::Modifiers::COMMAND);
+    let selected = h.state().selected_sets();
+    assert_eq!(selected, [rock, leaf.clone()]);
+    fold_leaves(&mut h);
+    assert_eq!(h.state().selected_sets(), selected);
+    assert_eq!(h.state().selection, Selection::Set(leaf));
+}
+
 #[test]
 fn the_selection_summary_counts_the_hidden_sets() {
     let d = tempfile::tempdir().unwrap();

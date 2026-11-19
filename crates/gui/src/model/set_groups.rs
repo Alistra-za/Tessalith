@@ -189,7 +189,7 @@ impl AppModel {
         };
         let views = set_views(self);
         let keys: Vec<String> = self
-            .set_order()
+            .set_order(false)
             .into_iter()
             .filter(|k| {
                 views

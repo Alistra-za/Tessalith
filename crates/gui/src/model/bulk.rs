@@ -14,7 +14,7 @@ use super::sets::{
 use super::{AppModel, Dialog, Selection, SetTarget};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
 use engine::policy::ResolvedJob;
-use engine::sets::same_id;
+use engine::sets::{fold_id, same_id};
 use serde_json::Value;
 
 /// F3a D1: every selected key of one kind, the active one included, in the order they were added. It is in effect
@@ -148,13 +148,22 @@ impl AppModel {
         keys
     }
 
-    /// The keys of the sets the column shows, in display order (R17: the Sets filter applied).
-    pub(super) fn set_order(&self) -> Vec<String> {
+    /// Keyed sets in filtered display order. Ctrl+A and Shift ranges also skip folded groups (JV6).
+    pub(super) fn set_order(&self, skip_folded: bool) -> Vec<String> {
+        let mut folded = std::collections::HashSet::new();
+        if skip_folded && !self.settings.group_collapsed.is_empty() {
+            for group in self.sets_doc.iter().flat_map(|d| d.groups()) {
+                if self.group_collapsed(&group.name) {
+                    folded.extend(group.sets.iter().map(|id| fold_id(id)));
+                }
+            }
+        }
         let views = super::sets::views(self);
         self.visible_sets()
             .iter()
             .map(|&i| &views[i])
             .filter(|v| !v.key.is_empty())
+            .filter(|v| folded.is_empty() || !folded.contains(&fold_id(&v.id)))
             .map(|v| v.key.clone())
             .collect()
     }
@@ -175,7 +184,7 @@ impl AppModel {
                 if matches!(self.selection, Selection::SetId(_)) {
                     self.go_to_target(SetTarget::Key(key), None);
                 } else {
-                    let order = self.set_order();
+                    let order = self.set_order(shift);
                     self.click(&key, ctrl, shift, true, &order);
                 }
             }
@@ -264,7 +273,7 @@ impl AppModel {
     pub fn select_all_visible(&mut self) {
         let sets = matches!(self.selection, Selection::Set(_) | Selection::SetId(_));
         let keys = if sets {
-            self.set_order()
+            self.set_order(true)
         } else {
             self.visible_keys()
         };
@@ -293,7 +302,7 @@ impl AppModel {
         }
         let keys = &self.multi.keys;
         let shown: std::collections::HashSet<String> = if sets {
-            self.set_order()
+            self.set_order(false)
         } else {
             self.shown_keys()
         }
