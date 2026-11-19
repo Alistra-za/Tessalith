@@ -2028,3 +2028,152 @@ fn an_edit_that_writes_the_held_value_clears_nothing() {
         "and adds no Undo step"
     );
 }
+
+/// `two_sets_files` with the user's `[files]` table `table` holding `alpha.policy = "data"` for `IRON_N`, which is
+/// listed although its own lower-case table is absent; `armor/steel` borrows it, then the share ends.
+fn ending_the_share_over(table: &str) -> (tempfile::TempDir, AppModel) {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        format!("[files.'{table}']\nalpha.policy = \"data\"\n"),
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("armor/steel", 2, Some("pbr/iron"))
+    });
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table spelled as the list entry"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    (d, m)
+}
+
+/// N8-e (round 2, B1): the list entry names the exact table the share step wrote. A case twin of it holding the
+/// user's `data` is not that table: ending the share clears nothing.
+#[test]
+fn ending_a_share_leaves_the_users_data_in_a_case_twin() {
+    let (_d, m) = ending_the_share_over("PBR/IRON_N.PNG");
+    assert_eq!(
+        held(&m, "PBR/IRON_N.PNG", "alpha.policy"),
+        Some(json!("data")),
+        "the user's data in the case twin stays"
+    );
+}
+
+/// N8-e (B1): as above, with a twin that differs from the listed spelling only by Unicode case.
+#[test]
+fn ending_a_share_leaves_the_users_data_in_a_unicode_twin() {
+    use sdc_gui::model::sets::SlotCommand;
+    const ARZ_N: &str = "pbr/ärz_n.png";
+    let d = tempfile::tempdir().unwrap();
+    let pbr = d.path().join("textures/pbr");
+    let armor = d.path().join("textures/armor");
+    for f in [&pbr, &armor] {
+        std::fs::create_dir_all(f).unwrap();
+    }
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([120u8, 90, 60]))
+        .save(pbr.join("ärz.png"))
+        .unwrap();
+    bumpy_n(&pbr.join("ärz_n.png"));
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([100u8, 0, 255]))
+        .save(pbr.join("ärz_rmaos.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([90u8, 90, 100]))
+        .save(armor.join("steel.png"))
+        .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.'PBR/ÄRZ_N.PNG']\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/ärz_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.edit_docs("seed", None, true, |_, s| {
+        s.set_borrow("armor/steel", 2, Some("pbr/ärz"))
+    });
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(ARZ_N),
+        "precondition: no table spelled as the list entry"
+    );
+    assert_eq!(auto_data(&m), vec![ARZ_N.to_string()], "precondition");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, "PBR/ÄRZ_N.PNG", "alpha.policy"),
+        Some(json!("data")),
+        "the user's data in the Unicode twin stays"
+    );
+}
+
+/// N8-e (B1), a pin: a `[files]` key with a literal backslash names no file (the engine matches `/` only), so the
+/// share writes and lists the slash-form table, and ending the share clears that one and leaves the other alone.
+#[test]
+fn a_backslash_table_beside_the_shares_table_is_left_alone() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.'pbr\\iron_n.png']\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert_eq!(
+        held(&m, "pbr\\iron_n.png", "alpha.policy"),
+        Some(json!("remove"))
+    );
+}
+
+/// N8-e (B5, amends N6-j): a listed key whose own table is gone, with the user's `data` in the extension-less table:
+/// that `data` is the user's for Task 6 too, so a shader pick neither retypes nor clears the normal's sub-type.
+#[test]
+fn a_users_stem_data_keeps_the_normal_out_of_shader_picks() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::write(
+        d.path().join("textures/sdc.toml"),
+        "[files.\"pbr/iron_n\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    let typed = held(&m, IRON_N, "subtype");
+    m.set_shader("pbr/iron", Some(Shader::Default));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "subtype"),
+        typed,
+        "the pick leaves the sub-type"
+    );
+    assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
+}

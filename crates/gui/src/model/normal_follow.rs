@@ -64,12 +64,13 @@ pub(super) fn holders(p: &ProjectDoc, keys: &[String], key: &str, field: &str) -
 /// too: `alpha.policy` there is the user's. `untouched_normal`, the recorder and the Switch read this one rule.
 pub(super) fn alpha_free(p: &ProjectDoc, s: &SetsDoc, key: &str) -> bool {
     // Runs per shader pick, diffuse edit and settled plan, never per frame.
-    match holders(p, &p.file_keys(), key, "alpha.policy").len() {
-        0 => true,
-        // The one table `file_value` reads, holding the `data` the share step wrote.
-        1 => {
-            p.file_value(key, "alpha.policy") == Some(json!("data"))
-                && s.auto_data().iter().any(|k| k == key)
+    match holders(p, &p.file_keys(), key, "alpha.policy").as_slice() {
+        [] => true,
+        // N8-e (amends N6-j): the one holder is the table the share step wrote, spelled byte for byte as its list
+        // entry, still holding `data`; a `data` in any other table (a case twin, the extension-less one) is the user's.
+        [one] => {
+            p.file_value(one, "alpha.policy") == Some(json!("data"))
+                && s.auto_data().iter().any(|k| k == one)
         }
         _ => false,
     }

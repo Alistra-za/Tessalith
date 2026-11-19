@@ -235,21 +235,37 @@ fn already_data(f: &Facts, pre: Option<&Option<Value>>, p: &ProjectDoc, k: &str)
     }
 }
 
-/// N8-a: a `[files]` spelling of file `key`'s full path (any case), as `find_key` matches it before it falls back to
-/// the extension-less spelling.
-fn full_name(spelling: &str, key: &str) -> bool {
-    spelling.to_lowercase() == key.to_lowercase()
+/// N8-e: the `[files]` table the share step writes `data` into for file `key`, and so the exact string it lists: the
+/// table spelled `key`, else the one `find_key` picks among its full-name spellings in another case (the first in
+/// `[files]` order), else a new `[files."<key>"]`. `None` when the file's only table is spelled without the extension:
+/// `set_file_value` would write there, where a `data` is the user's (no write; Task 9's row shows it).
+fn write_table(keys: &[String], key: &str) -> Option<String> {
+    if keys.iter().any(|k| k == key) {
+        return Some(key.to_string());
+    }
+    let lower = key.to_lowercase();
+    if let Some(k) = keys.iter().find(|k| k.to_lowercase() == lower) {
+        return Some(k.clone());
+    }
+    (!keys
+        .iter()
+        .any(|k| engine::overrides::path_key_matches(k, key)))
+    .then(|| key.to_string())
 }
 
-/// N8-a: the share step's write lands in a table spelled with the file's full name: there is one, or there is no table
-/// for the file yet (`set_file_value` creates `[files."<key>"]`). A file whose only table is spelled without the
-/// extension is the user's to set: `set_file_value` would write there, and a later run could not tell that `data`
-/// from the user's (no write; Task 9's row shows it).
-fn writes_own_table(keys: &[String], key: &str) -> bool {
-    keys.iter().any(|k| full_name(k, key))
-        || !keys
-            .iter()
-            .any(|k| engine::overrides::path_key_matches(k, key))
+/// N8-e: the `alpha.policy` of the table spelled byte for byte `entry` (a list entry): no case or Unicode twin, no
+/// extension-less table, no fallback.
+fn exact_alpha(p: &ProjectDoc, entry: &str) -> Option<Value> {
+    p.has_file_key(entry)
+        .then(|| p.file_value(entry, "alpha.policy"))
+        .flatten()
+}
+
+/// Whether list entry `entry` names one of `items` (item keys), as the engine matches a `[files]` key to a file.
+fn names_any(entry: &str, items: &BTreeSet<String>) -> bool {
+    items
+        .iter()
+        .any(|i| engine::overrides::path_key_matches(entry, i))
 }
 
 /// What one run changes (Note JS7).
@@ -293,21 +309,20 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
             && !f.flat.contains(k)
             && !f.locked.contains(k)
             && alpha(k).is_empty()
-            && writes_own_table(&keys, k)
             && typed_normal(k);
         if free && !already_data(f, b.sub.get(k), p, k) {
-            c.write.push(k.clone());
+            // N8-e: the entry is the exact table written.
+            if let Some(t) = write_table(&keys, k) {
+                c.write.push(t);
+            }
         }
     }
     for k in &start {
-        // N8-a: only the `data` the share step wrote: the one holder, in a table spelled with the file's full name
-        // (the one `file_value` reads); a `data` anywhere else is the user's.
-        let h = alpha(k);
-        let ours = matches!(h.as_slice(), [one] if full_name(one, k))
-            && p.file_value(k, "alpha.policy") == data
-            && !f.locked.contains(k);
+        // N8-e: only the `data` the share step wrote: the table spelled exactly as the entry; a `data` in any other
+        // table is the user's.
+        let ours = exact_alpha(p, k) == data && !names_any(k, &f.locked);
         // N8-b: in a `blind` step a borrow may read any of them.
-        if ours && !now.contains(k) && !unsure.contains(k) && !sh.blind {
+        if ours && !names_any(k, now) && !names_any(k, unsure) && !sh.blind {
             c.clear.push(k.clone());
         }
     }
@@ -315,7 +330,7 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
         // N-27: stale entries (no longer `data`) are pruned only on this, Tessalith's own, write.
         let mut l: Vec<String> = start
             .iter()
-            .filter(|k| !c.clear.contains(k) && p.file_value(k, "alpha.policy") == data)
+            .filter(|k| !c.clear.contains(k) && exact_alpha(p, k) == data)
             .cloned()
             .collect();
         for k in &c.write {
@@ -376,12 +391,8 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc) {
         p.clear_file_value(k, "alpha.policy");
     }
     let mut l = c.list.clone();
-    l.retain(|k| !c.write.contains(k) || p.file_value(k, "alpha.policy") == data);
-    for k in c
-        .clear
-        .iter()
-        .filter(|k| p.file_value(k, "alpha.policy") == data)
-    {
+    l.retain(|k| !c.write.contains(k) || exact_alpha(p, k) == data);
+    for k in c.clear.iter().filter(|k| exact_alpha(p, k) == data) {
         l.push(k.clone());
     }
     if l != c.list {
@@ -407,14 +418,15 @@ impl AppModel {
         }
     }
 
-    /// N-34 (review 2 Minor 3): the user's Data pick on a key the share step listed makes the value the user's: the
-    /// key leaves `auto_data` in the pick's step (a rare write to `sdc-project.toml`). False when the key is not
-    /// listed, so the caller writes the value as usual.
+    /// N-34 (review 2 Minor 3): the user's Data pick on a file the share step listed makes the value the user's: the
+    /// entries naming the file leave `auto_data` in the pick's step (a rare write to `sdc-project.toml`). False when
+    /// none is listed, so the caller writes the value as usual.
     pub(super) fn data_pick_unlists(&mut self, label: &str, key: &str) -> bool {
+        let names = |e: &String| engine::overrides::path_key_matches(e, key);
         let listed = self
             .sets_doc
             .as_ref()
-            .is_some_and(|s| !s.read_only() && s.auto_data().iter().any(|k| k == key));
+            .is_some_and(|s| !s.read_only() && s.auto_data().iter().any(names));
         if !listed || self.project.as_ref().is_none_or(ProjectDoc::read_only) {
             return false;
         }
@@ -422,7 +434,7 @@ impl AppModel {
         self.edit_docs(label, None, true, move |p, s| {
             p.set_file_value(&k, "alpha.policy", &json!("data"));
             let mut l = s.auto_data();
-            l.retain(|x| *x != k);
+            l.retain(|x| !engine::overrides::path_key_matches(x, &k));
             s.set_auto_data(&l);
         });
         true
