@@ -6893,6 +6893,143 @@ fn a_file_is_cleaned_up_only_while_it_holds_the_ops_the_session_took() {
     ]);
 }
 
+/// Project `p` with one edit (12.5) saved in its draft by the open session. Returns (d, m, p).
+fn saved_in_p() -> (tempfile::TempDir, MeshesModel, std::path::PathBuf) {
+    let (d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(doc_values(&draft(&p)), [12.5], "premise: saved in P");
+    (d, m, p)
+}
+
+/// Review round 4 (Critical "Rename P to P2 ..." and Important "deny metadata access ...", ruling E6-P): a leave is
+/// allowed only where the next open loads the live ops: the session's home, or a switch destination whose draft carries
+/// this session's draft id, checked as the home is (its own files, then the selection with the plain autosave). Each
+/// row's first words are the review's sequence.
+#[test]
+fn a_leave_is_allowed_only_where_the_next_open_loads_the_ops() {
+    let mut rows: Vec<(&str, fn())> = vec![
+        (
+            "rename P to P2, leave P's draft holding X, put a newer plain autosave holding Y, open P2",
+            || {
+                let (d, mut m, p) = saved_in_p();
+                make_old(&draft(&p));
+                let p2 = d.path().join("p2");
+                std::fs::rename(&p, &p2).unwrap();
+                let y = with_value(load(&draft(&p2)).unwrap().unwrap(), 99.5);
+                save(&autosave(&d), &y).unwrap();
+                age(&autosave(&d), 60); // newer than P's draft, older than anything the switch writes
+                m.set_project_root(Some(&p2));
+                assert_eq!(
+                    vals(&m),
+                    [12.5],
+                    "the switch is refused or P2 loads the live ops, never Y"
+                );
+            },
+        ),
+        (
+            "a destination whose draft has the same ops under another id is not the session's place",
+            || {
+                let (d, mut m, p) = saved_in_p();
+                let q = project_folder(&d, "q");
+                let mut theirs = load(&draft(&p)).unwrap().unwrap();
+                theirs.id = Some("0123456789abcdef".into());
+                save(&draft(&q), &theirs).unwrap();
+                let id = id_of(&p);
+                std::fs::remove_dir_all(&p).unwrap();
+                m.set_project_root(Some(&q));
+                assert_eq!(
+                    m.edit.as_ref().unwrap().draft_path,
+                    draft(&p),
+                    "the home decides: the session stays"
+                );
+                assert_eq!(doc_values(&kept(&d, &id)), [12.5], "kept under its own id");
+            },
+        ),
+        (
+            "a no-project destination is not the session's place, whatever the plain autosave holds",
+            || {
+                let (d, mut m, p) = saved_in_p();
+                std::fs::create_dir_all(autosave(&d).parent().unwrap()).unwrap();
+                std::fs::copy(draft(&p), autosave(&d)).unwrap(); // the shared file holds the same ops
+                let id = id_of(&p);
+                std::fs::remove_dir_all(&p).unwrap();
+                m.set_project_root(None);
+                assert_eq!(
+                    m.edit.as_ref().unwrap().draft_path,
+                    draft(&p),
+                    "the home decides: the session stays"
+                );
+                assert_eq!(doc_values(&kept(&d, &id)), [12.5], "kept under its own id");
+            },
+        ),
+    ];
+    rows.extend(windows_rows_p());
+    table(&rows);
+}
+
+/// E6-P's rows that need Windows (a junction).
+#[cfg(windows)]
+fn windows_rows_p() -> Vec<(&'static str, fn())> {
+    vec![(
+        "open the newer kept edit, revert to the older draft's ops while the draft cannot be replaced, deny metadata \
+         access to the kept directory, then Close and restore access",
+        a_kept_autosave_that_cannot_be_checked_is_not_absent,
+    )]
+}
+
+#[cfg(not(windows))]
+fn windows_rows_p() -> Vec<(&'static str, fn())> {
+    vec![]
+}
+
+/// Points `link` at `target` with a directory junction (no privilege needed). A junction at its own path is a loop:
+/// every path through it fails with "cannot be resolved" (error 1921), not "not found".
+#[cfg(windows)]
+fn junction(link: &Path, target: &Path) {
+    let ok = std::process::Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(link)
+        .arg(target)
+        .output()
+        .unwrap()
+        .status
+        .success();
+    assert!(ok, "mklink /J {}", link.display());
+}
+
+/// E6-P's unknown row: the kept autosave's folder cannot be checked (a junction loop stands in for denied metadata
+/// access: an ACL deny does not stop Windows reading a file's attributes), so whether the newer kept edit is there is
+/// unknown, and unknown is not absent.
+#[cfg(windows)]
+fn a_kept_autosave_that_cannot_be_checked_is_not_absent() {
+    let (d, mut m) = export_session();
+    let (p, k) = open_on_a_newer_kept_autosave(&d, &mut m, |doc| {
+        let mut two = doc.clone();
+        two.ops.push(with_value(doc, 9.5).ops.remove(0));
+        two
+    });
+    assert_eq!(vals(&m), [7.5, 9.5], "premise: the kept autosave opened");
+    let lock = hold(&draft(&p), 1);
+    m.edit_with(|e| e.revert(1));
+    assert_eq!(vals(&m), [7.5], "premise: reverted to the draft's ops");
+    let (dir, real) = (d.path().join("nif-edits"), d.path().join("nif-edits-real"));
+    std::fs::rename(&dir, &real).unwrap();
+    junction(&dir, &dir);
+    let unknown = std::fs::metadata(&k).is_err_and(|e| e.kind() != std::io::ErrorKind::NotFound);
+    m.close_edit();
+    let refused = m.edit.is_some();
+    std::fs::remove_dir(&dir).unwrap(); // the junction only
+    std::fs::rename(&real, &dir).unwrap();
+    drop(lock);
+    assert!(unknown, "premise: the kept autosave cannot be checked");
+    assert!(refused, "Close is refused while it cannot tell");
+    m.close_edit();
+    assert!(m.edit.is_none(), "with access back, Close saves and ends");
+    m.open_edit();
+    assert_eq!(vals(&m), [7.5], "the reverted op is not restored");
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.

@@ -687,13 +687,22 @@ fn pick_from(
         plain: None,
         unreadable: None,
     };
+    // ruling E6-P: a candidate whose presence cannot be told is not absent: no one can say what the next open loads
+    let mut unknown = None;
+    let mut there = |f: &Path| {
+        let (is, why) = present(f);
+        unknown = unknown.take().or(why);
+        is
+    };
     let k = p
         .doc
         .as_ref()
         .and_then(|d| d.id.as_deref())
         .zip(autosave.and_then(autosave_dir))
         .map(|(i, dir)| edit_doc::kept_autosave_path(dir, data_path, i))
-        .filter(|k| k.is_file());
+        .filter(|k| there(k));
+    let a = autosave.filter(|a| with_plain && there(a));
+    p.unreadable = unknown;
     // ruling E6-H: the file whose document is the current winner; each next candidate is weighed against it
     let mut winner = draft_path.to_path_buf();
     if let Some(k) = k {
@@ -714,7 +723,7 @@ fn pick_from(
             Recovery::Unreadable(why) => p.unreadable = Some(why),
         }
     }
-    if let Some(a) = autosave.filter(|a| with_plain && a.is_file()) {
+    if let Some(a) = a {
         let (s, l, r) = recover_from(p.doc.take(), &winner, a, data_path);
         p.doc = s;
         p.lines.extend(l);
@@ -756,13 +765,27 @@ fn recover_from(
     a: &Path,
     data_path: &str,
 ) -> (Option<EditDoc>, Vec<String>, Recovery) {
-    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    if saved.is_some() && mtime(a) <= mtime(winner) {
-        let line = format!(
-            "Older edits of {data_path} stay autosaved in {}.",
-            a.display()
-        );
-        return (saved, vec![line], Recovery::Older);
+    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified());
+    if saved.is_some() {
+        match (mtime(a), mtime(winner)) {
+            (Ok(t), Ok(w)) if t <= w => {
+                let line = format!(
+                    "Older edits of {data_path} stay autosaved in {}.",
+                    a.display()
+                );
+                return (saved, vec![line], Recovery::Older);
+            }
+            (Ok(_), Ok(_)) => {}
+            // ruling E6-P: an order that cannot be told is not "older": no one can say which the next open loads
+            (Err(e), _) | (_, Err(e)) => {
+                let line = format!(
+                    "The autosave {} cannot be weighed against {} and stays: {e}",
+                    a.display(),
+                    winner.display()
+                );
+                return (saved, vec![line.clone()], Recovery::Unreadable(line));
+            }
+        }
     }
     match edit_doc::load_fp(a) {
         Ok(Some((mine, fp))) => {
@@ -798,6 +821,19 @@ fn recover_from(
 fn checked_id(mut d: EditDoc) -> EditDoc {
     d.id = d.id.filter(|i| edit_doc::valid_id(i));
     d
+}
+
+/// Ruling E6-P: whether the candidate `f` is a file: (false, None) when it is not there (or not a file), (false,
+/// Some(why)) when that cannot be told (any metadata error other than "not found"): unknown is not absent.
+fn present(f: &Path) -> (bool, Option<String>) {
+    match std::fs::metadata(f) {
+        Ok(m) => (m.is_file(), None),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => (false, None),
+        Err(e) => (
+            false,
+            Some(format!("{} cannot be checked: {e}", f.display())),
+        ),
+    }
 }
 
 /// The same ops in the same order; their statuses are worked out again on every apply, so they are not compared.
@@ -1717,35 +1753,46 @@ impl NifEdit {
         if !self.touched() || self.draft_path.as_os_str().is_empty() {
             return Ok(());
         }
-        // ruling E6-H1: a project session is durable in the project's own files (the draft and the kept autosave of
-        // its id); the plain autosave, shared by every project and by no-project use, never makes it so. Because the
-        // next open there still weighs that file (Note GD11), it must not win with other ops either.
-        let project = self.project.is_some();
-        self.durable_in(project, &self.draft_path, !project)?;
-        match project {
-            true => self.durable_in(true, &self.draft_path, true),
-            false => Ok(()),
+        match self.project {
+            Some(_) => self.durable_at(&self.draft_path),
+            None => self.durable_in(false, &self.draft_path, false),
         }
     }
 
-    /// Ruling E6-K for a leave: `durable_why`, or, for a project switch to `dest` (Some(the new root)) away from a
-    /// project folder that is gone, the open there loads the ops from that project's own files (a renamed project
-    /// finds its kept autosave by the draft's id, ruling r3-2). Else the first reason.
+    /// Ruling E6-H1, the home check of a project session whose draft is at `draft`: the project's own files (the draft
+    /// and the kept autosave of its id) load the ops, because the plain autosave, shared by every project and by
+    /// no-project use, never makes a project session durable; and, because the next open there still weighs that file
+    /// (Note GD11), the full selection with it loads them too.
+    fn durable_at(&self, draft: &Path) -> Result<(), String> {
+        self.durable_in(true, draft, false)?;
+        self.durable_in(true, draft, true)
+    }
+
+    /// Ruling E6-P (narrows E6-K) for a leave: `durable_why` for one place, nothing else. The place is the session's
+    /// home; the only other one is a project switch's destination `dest` (Some(the new root)), away from a project
+    /// folder that is gone, whose draft of this NIF carries this session's draft id (the same project renamed or
+    /// moved): there the home check runs on that project's files (`durable_at`, the plain autosave included, as the
+    /// open there will run a moment later). A destination with no project, or whose draft has another id, no id or is
+    /// absent, is never such a place: the home's answer stands.
     pub(super) fn durable_leaving(&self, dest: Option<&Option<PathBuf>>) -> Result<(), String> {
         let own = self.durable_why();
         // only when the session's project folder is gone (renamed or removed): otherwise its own place decides
         let gone = self.project.as_deref().is_some_and(|p| !p.is_dir());
-        let Some(to) = dest.filter(|to| own.is_err() && gone && **to != self.project) else {
+        let Some(Some(to)) = dest.filter(|to| own.is_err() && gone && **to != self.project) else {
             return own;
         };
-        let there = match to {
-            Some(p) => edit_doc::draft_path(p, &self.data_path),
-            None => self.autosave.clone().ok_or_else(String::new),
+        let Ok(d) = edit_doc::draft_path(to, &self.data_path) else {
+            return own;
         };
-        match there {
-            // the plain autosave is shared by every project: it is not what an open there is sure to load
-            Ok(d) if self.durable_in(to.is_some(), &d, false).is_ok() => Ok(()),
-            _ => own,
+        let ours = match edit_doc::load(&d) {
+            Ok(Some(t)) => checked_id(t)
+                .id
+                .is_some_and(|i| self.doc.id.as_ref() == Some(&i)),
+            _ => false,
+        };
+        match ours && self.durable_at(&d).is_ok() {
+            true => Ok(()),
+            false => own,
         }
     }
 
