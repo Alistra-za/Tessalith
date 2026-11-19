@@ -717,9 +717,7 @@ fn pick_from(
                 winner = k;
             }
             // ruling E6-L: remembered with the bytes it holds now; other bytes there later are left alone
-            Recovery::Older => {
-                p.kept_older = edit_doc::fingerprint(&k).ok().flatten().map(|fp| (k, fp))
-            }
+            Recovery::Older(fp) => p.kept_older = Some((k, fp)),
             Recovery::Stays => {}
             Recovery::Unreadable(why) => p.unreadable = Some(why),
         }
@@ -739,7 +737,7 @@ fn pick_from(
                 }
             }
             Recovery::Unreadable(why) => p.unreadable = Some(why),
-            Recovery::Older | Recovery::Stays => {}
+            Recovery::Older(_) | Recovery::Stays => {}
         }
     }
     Ok(p)
@@ -750,8 +748,8 @@ fn pick_from(
 enum Recovery {
     /// It is the document: the fingerprint of the bytes read.
     Won(String),
-    /// The draft is newer (or as new): the autosave stays as it is.
-    Older,
+    /// The draft is newer (or as new): the autosave stays as it is (the fingerprint of its bytes, read: ruling E6-P3).
+    Older(String),
     /// It is gone: nothing to offer.
     Stays,
     /// It is newer but does not load (the reason): it stays for the user, and no one can say what the next open loads.
@@ -773,11 +771,22 @@ fn recover_from(
     if saved.is_some() {
         match (mtime(a), mtime(winner)) {
             (Ok(t), Ok(w)) if t <= w => {
-                let line = format!(
-                    "Older edits of {data_path} stay autosaved in {}.",
-                    a.display()
-                );
-                return (saved, vec![line], Recovery::Older);
+                // ruling E6-P3: an older file is still read: contents that cannot be read are "cannot tell"
+                return match edit_doc::fingerprint(a) {
+                    Ok(Some(fp)) => {
+                        let line = format!(
+                            "Older edits of {data_path} stay autosaved in {}.",
+                            a.display()
+                        );
+                        (saved, vec![line], Recovery::Older(fp))
+                    }
+                    Ok(None) => (saved, vec![], Recovery::Stays),
+                    Err(e) => {
+                        let line =
+                            format!("The autosave {} cannot be read and stays: {e}", a.display());
+                        (saved, vec![line.clone()], Recovery::Unreadable(line))
+                    }
+                };
             }
             (Ok(_), Ok(_)) => {}
             // ruling E6-P: an order that cannot be told is not "older": no one can say which the next open loads
@@ -1785,7 +1794,13 @@ impl NifEdit {
         if !self.touched() || self.draft_path.as_os_str().is_empty() {
             return Ok(());
         }
-        match self.project {
+        match &self.project {
+            // ruling E6-P2: a home that is gone is "cannot tell", never "no document and no ops" (a renamed project's
+            // same-id draft elsewhere may hold other ops): only `durable_leaving`'s destination clause can allow a leave
+            Some(p) if !p.is_dir() => Err(format!(
+                "the project folder {} is not there, so what it holds cannot be told",
+                p.display()
+            )),
             Some(_) => self.durable_at(&self.draft_path),
             None => self.durable_in(false, &self.draft_path, false),
         }

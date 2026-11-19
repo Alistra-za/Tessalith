@@ -5526,10 +5526,18 @@ fn another_project_never_loads_a_kept_autosave_that_is_not_its_own() {
     let id = id_of(&a);
     std::fs::remove_dir_all(&a).unwrap();
     m.set_project_root(Some(&b));
-    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave); undone to no ops the session
-    // matches the removed project (nothing) and the switch finishes
+    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave). Ruling E6-P2 (was: undone to no
+    // ops the switch finishes): a home that is gone cannot tell, so undone it still waits; once the user puts A's
+    // folder back (empty) the session matches it and the switch finishes
     assert_eq!(vals(&m), [12.5], "premise: the switch waits");
     assert!(m.undo_edit());
+    m.set_project_root(Some(&b));
+    assert!(
+        m.edit.as_ref().unwrap().draft_path.starts_with(&a),
+        "undone, the switch still waits: A is gone"
+    );
+    std::fs::create_dir(&a).unwrap();
+    m.set_project_root(None);
     m.set_project_root(Some(&b));
     let a_kept = std::fs::read(kept(&d, &id)).unwrap();
     let values = |m: &MeshesModel| op_values(m).iter().map(|v| v.1).collect::<Vec<_>>();
@@ -5636,9 +5644,18 @@ fn a_copied_project_never_replaces_the_kept_autosave_of_its_original() {
     m.set_project_root(Some(&b));
     let k = kept(&d, &id);
     assert_eq!(doc_values(&k), [7.5, 12.5], "A's edit is kept");
-    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave); undone to no ops the session
-    // matches the removed project and ends, its last state in the kept autosave
+    // ruling E6-K: the switch waits (no open finds a removed project's kept autosave). Ruling E6-P2 (was: undone to no
+    // ops the session matches the removed project and ends): a home that is gone cannot tell, so undone it still
+    // waits; once the user puts A's folder back (empty) the session matches it and ends, its last state in the kept
+    // autosave
     assert!(m.undo_edit() && m.undo_edit());
+    m.set_project_root(Some(&b));
+    assert!(
+        m.edit.as_ref().unwrap().draft_path.starts_with(&a),
+        "undone, the switch still waits: A is gone"
+    );
+    std::fs::create_dir(&a).unwrap();
+    m.set_project_root(None);
     m.set_project_root(Some(&b));
     assert!(
         m.edit.as_ref().unwrap().draft_path.starts_with(&b),
@@ -7340,6 +7357,80 @@ fn export_decides_on_what_it_reads_then() {
             },
         ),
     ]);
+}
+
+// ---- Review round 5 ----
+
+/// Review round 5 (Critical "Save X in P, rename P to P2, undo X ..." and Important "put an older autosave at the kept
+/// or plain name, deny reads of its contents ...", rulings E6-P2, E6-P3): a home that is gone, and a candidate whose
+/// contents cannot be read, are "cannot tell", never "no edits" or "older".
+#[test]
+fn a_vanished_home_or_an_unreadable_candidate_cannot_tell() {
+    let mut rows: Vec<(&str, fn())> =
+        vec![(
+        "save X in P, rename P to P2, undo X while the editor still points at P, then select P2",
+        || {
+            let (d, mut m, p) = saved_in_p();
+            let p2 = d.path().join("p2");
+            std::fs::rename(&p, &p2).unwrap();
+            assert!(m.undo_edit());
+            assert!(vals(&m).is_empty(), "premise: undone");
+            m.set_project_root(Some(&p2));
+            assert!(vals(&m).is_empty(), "refused, or P2 loads the undo: never X");
+            m.close_edit();
+            if m.edit.is_none() {
+                m.open_edit();
+            }
+            assert!(vals(&m).is_empty(), "the next open loads the undo");
+        },
+    )];
+    rows.extend(windows_rows_p3());
+    table(&rows);
+}
+
+/// E6-P3's rows that need Windows (a share-mode lock that leaves attributes readable and contents not).
+#[cfg(windows)]
+fn windows_rows_p3() -> Vec<(&'static str, fn())> {
+    vec![
+        (
+            "save X in P, put an older autosave at the kept name, deny reads of its contents, then Close",
+            || older_candidate_unreadable(true),
+        ),
+        (
+            "save X in P, put an older autosave at the plain name, deny reads of its contents, then Close",
+            || older_candidate_unreadable(false),
+        ),
+    ]
+}
+
+#[cfg(not(windows))]
+fn windows_rows_p3() -> Vec<(&'static str, fn())> {
+    vec![]
+}
+
+/// E6-P3's row: an older candidate (the kept autosave of the draft's id, or the plain autosave) whose contents cannot
+/// be read keeps the session open until it can be read.
+#[cfg(windows)]
+fn older_candidate_unreadable(at_kept: bool) {
+    let (d, mut m, p) = saved_in_p();
+    let f = match at_kept {
+        true => kept(&d, &id_of(&p)),
+        false => autosave(&d),
+    };
+    std::fs::create_dir_all(f.parent().unwrap()).unwrap();
+    save(&f, &with_value(load(&draft(&p)).unwrap().unwrap(), 99.5)).unwrap();
+    age(&f, 3600);
+    let lock = hold(&f, 0);
+    let attributes = std::fs::metadata(&f).is_ok();
+    m.close_edit();
+    let refused = m.edit.is_some();
+    drop(lock);
+    assert!(attributes, "premise: its attributes are readable");
+    assert!(refused, "Close is refused while it cannot be read");
+    m.close_edit();
+    assert!(m.edit.is_none(), "once it can be read, Close ends");
+    m.open_edit();
+    assert_eq!(vals(&m), [12.5], "the older autosave does not open");
 }
 
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
