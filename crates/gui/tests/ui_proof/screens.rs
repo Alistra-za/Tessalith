@@ -746,20 +746,7 @@ impl Entry for ScreenEntry {
             h,
             key,
             &|app: &SdcApp| app.model.export.running.is_some(),
-            &|app: &SdcApp| {
-                let e = &app.model.export;
-                format!(
-                    "{} {} {} {} {:?} {} {} {}",
-                    e.revision,
-                    e.rows.len(),
-                    e.events.len(),
-                    e.summary.is_some(),
-                    e.error,
-                    e.notes.len(),
-                    e.outputs.len(),
-                    app.model.drawer_epoch.wrapping_sub(app.model.folder_epoch)
-                )
-            },
+            &export_witness,
             // a timeout is an error of this screen and key (`strike`)
             &mut |h| settle(h, 4),
             marker,
@@ -777,6 +764,22 @@ impl Entry for ScreenEntry {
     fn release(&mut self) {
         self.open = None;
     }
+}
+
+/// The export's record as the key step's second witness compares it before and after a key (`ScreenEntry::press`).
+fn export_witness(app: &SdcApp) -> String {
+    let e = &app.model.export;
+    format!(
+        "{} {} {} {} {:?} {} {} {}",
+        e.revision,
+        e.rows.len(),
+        e.events.len(),
+        e.summary.is_some(),
+        e.error,
+        e.notes.len(),
+        e.outputs.len(),
+        app.model.drawer_epoch.wrapping_sub(app.model.folder_epoch)
+    )
 }
 
 /// Every screen of `SCREENS`, each as one entry.
@@ -809,6 +812,19 @@ fn a_screens_folders_share_one_temp_root() {
     assert!(d.path().starts_with(root), "{:?} not in {root:?}", d.path());
     assert!(app_data.starts_with(root), "{app_data:?} not in {root:?}");
     assert!(!d.path().starts_with(&app_data) && !app_data.starts_with(d.path()));
+}
+
+/// An export that starts bumps `drawer_epoch` alone, so the witness sees a second export that ends exactly as the first
+/// did; opening a folder bumps both epochs and is no export.
+#[test]
+fn the_export_witness_counts_the_exports_started() {
+    let start = SCREENS.iter().find(|s| s.fixture == NO_PROJECT).unwrap();
+    let (_d, mut h) = enter(start, vec2_1280()).unwrap();
+    let before = export_witness(h.state());
+    h.state_mut().model.drawer_epoch += 1;
+    assert_ne!(export_witness(h.state()), before, "an export started");
+    h.state_mut().model.folder_epoch += 1;
+    assert_eq!(export_witness(h.state()), before, "a folder opened");
 }
 
 #[test]
