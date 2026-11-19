@@ -609,8 +609,8 @@ pub struct ShaderPick {
 }
 
 impl ShaderPick {
-    /// Note JS2 (N-7): a set under this pick bakes from any tangent-space normal: a PBR-set shader, picked or
-    /// automatic, never derived.
+    /// Note JS2 (N-7): a picked or automatic PBR-family or Advanced Skin shader can bake a plain normal.
+    /// Advanced Skin excludes landscape normals. Derived picks use the legacy bake rule.
     pub fn bakes_any_tangent(&self) -> bool {
         self.provenance != ShaderOrigin::Derived && self.shader.is_pbr_or_advanced_skin()
     }

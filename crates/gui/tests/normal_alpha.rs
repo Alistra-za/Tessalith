@@ -1677,6 +1677,70 @@ fn two_sets(dir: &Path) -> AppModel {
 
 const IRON_N: &str = "pbr/iron_n.png";
 
+#[test]
+fn a_borrowed_slot_shows_the_first_normal_but_bakes_from_the_lenders_priority_pick() {
+    use sdc_gui::model::sets::{views, SlotFill, SlotKind};
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let root = d.path().join("textures");
+    let bumpy = "pbr/z_n.png";
+    bumpy_n(&root.join(bumpy));
+    image::RgbImage::from_pixel(64, 64, Rgb([128, 128, 255]))
+        .save(root.join(IRON_N))
+        .unwrap();
+    std::fs::copy(
+        root.join("pbr/iron_rmaos.png"),
+        root.join("armor/steel_rmaos.png"),
+    )
+    .unwrap();
+    let mut m = open_saved_share(
+        d.path(),
+        "[files.'pbr/iron_n.png']\nsubtype = 'landscape_normal'\n[files.'pbr/z_n.png']\nsubtype = 'normal'\n",
+        "[[sets]]\nid = 'pbr/iron'\nshader = 'pbr'\nadd = ['pbr/z_n.png']\n[[sets]]\nid = 'armor/steel'\nshader = 'pbr'\n",
+    );
+    assert_eq!(normal_owner(&m, "pbr/iron").as_deref(), Some(IRON_N));
+    share(&mut m, IRON_N, "armor/steel");
+    assert!(
+        matches!(views(&m).iter().find(|v| v.id == "armor/steel").unwrap().slots.get(&SlotKind::Normal),
+        Some(SlotFill::Borrowed {item, ..}) if item == IRON_N)
+    );
+    let check_sources = |m: &AppModel, source: &str| {
+        for key in ["armor/steel_rmaos.png", "pbr/iron_rmaos.png"] {
+            let job = m.item(key).unwrap().job.as_ref().unwrap();
+            assert_eq!(
+                job.bake.as_ref().unwrap().normal,
+                root.join(source),
+                "bake source of {key}"
+            );
+        }
+    };
+    check_sources(&m, bumpy);
+    let out = m
+        .item("armor/steel_rmaos.png")
+        .unwrap()
+        .job
+        .as_ref()
+        .unwrap()
+        .output
+        .clone();
+    export_through(&mut m);
+    settle(&mut m);
+    let bytes = std::fs::read(out).unwrap();
+    let dds = engine::dds::read_dds(&bytes).unwrap();
+    let red = |level: usize| {
+        let (w, h, r) = dds.levels[level].clone();
+        let pixels = engine::decode::decode_level_rgba(dds.format, w, h, &dds.data[r]).unwrap();
+        pixels[0][0]
+    };
+    assert!(
+        red(1) > red(0) + 2.0 / 255.0,
+        "the bumpy normal raises roughness in mip 1"
+    );
+    m.set_field(IRON_N, "subtype", json!("pbr_normal"));
+    settle(&mut m);
+    check_sources(&m, IRON_N);
+}
+
 /// Share `item` into the empty Normal slot of set `into` as the Sets column does (`drop_choice` returns `Joined`), and
 /// let the plan land. A filled slot (`AskReplace`) is `share_replacing`'s.
 fn share(m: &mut AppModel, item: &str, into: &str) {

@@ -1570,6 +1570,15 @@ fn a_named_fuzz_output_leaves_a_hand_made_f_the_sets_f_in_place() {
 /// would clash), and the reason says what that `_f` is instead of calling it the PBR fuzz texture.
 #[test]
 fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
+    check_height_f_reason("[files.\"iron_f.png\"]\nsubtype = \"height\"\n");
+}
+
+#[test]
+fn a_rule_typed_f_is_named_for_its_resolved_subtype() {
+    check_height_f_reason("[[rules]]\nmatch.glob = 'iron_f.png'\nsubtype = 'height'\n");
+}
+
+fn check_height_f_reason(config: &str) {
     let d = fixture(
         &[
             "iron.png",
@@ -1577,7 +1586,7 @@ fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
             "iron_fuzz.png",
             "iron_f.png",
         ],
-        "[files.\"iron_f.png\"]\nsubtype = \"height\"\n",
+        config,
     );
     let p = plan(&d);
     assert_eq!(job(&p, "iron_f.png").profile.subtype, Subtype::Height);
@@ -1593,6 +1602,15 @@ fn an_f_typed_away_from_pbr_fuzz_is_named_for_what_it_is() {
 /// (JQ53), and `iron_f.bmp`, typed height, sorts before it.
 #[test]
 fn the_f_that_writes_the_pbr_fuzz_texture_is_named_before_one_typed_away() {
+    check_f_order("[files.\"iron_f.bmp\"]\nsubtype = \"height\"\n");
+}
+
+#[test]
+fn a_rule_typed_f_sorts_after_the_kept_fuzz_dds() {
+    check_f_order("[[rules]]\nmatch.glob = 'iron_f.bmp'\nsubtype = 'height'\n");
+}
+
+fn check_f_order(config: &str) {
     let d = fixture(
         &[
             "iron.png",
@@ -1600,7 +1618,7 @@ fn the_f_that_writes_the_pbr_fuzz_texture_is_named_before_one_typed_away() {
             "iron_fuzz.png",
             "iron_f.bmp",
         ],
-        "[files.\"iron_f.bmp\"]\nsubtype = \"height\"\n",
+        config,
     );
     std::fs::write(d.path().join("in/iron_f.dds"), b"DDS made by hand").unwrap();
     let mut r = in_place(&d, OnExisting::IfChanged);

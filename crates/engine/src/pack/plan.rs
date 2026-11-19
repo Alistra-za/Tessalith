@@ -882,48 +882,28 @@ pub fn fuzz_reading(ctx: &ResolveCtx, set: &TextureSet, this: &InputFile) -> Fuz
     }
 }
 
-/// Fuzz-4 (Note JQ53, F15): the set's own `_f`, a member with suffix `f` by path (an image or a kept DDS), not the fuzz
-/// map's own earlier output (`group::is_fuzz_own_f`). `dead(f)` marks a member that writes nothing (no job). A member
-/// that writes the PBR fuzz texture comes first, then by path; `None` when the set has none. Policy's Fuzz-4 gate and
-/// `fuzz_f_output`'s guard count every such member through the set's suffixes, so this is `Some` exactly when they
-/// see an `_f`: only the name it gives differs.
-pub(crate) fn pbr_f_member<'f>(
-    ctx: &ResolveCtx,
-    set: &TextureSet,
-    files: &'f [InputFile],
-    dead: impl Fn(&InputFile) -> bool,
-) -> Option<&'f InputFile> {
-    if !set.suffixes.contains("f") {
-        return None;
-    }
-    let writes_f = |f: &InputFile| {
-        !dead(f)
-            && (f.kind == InputKind::Dds
-                || crate::policy::subtype_override(ctx, f).is_none_or(|s| s == Subtype::PbrFuzz))
+/// Fuzz-4 (Note JQ53): the set's own `_f` members, excluding a fuzz map's earlier output.
+pub(crate) fn pbr_f_members<'a>(
+    ctx: &'a ResolveCtx,
+    set: &'a TextureSet,
+    files: &'a [InputFile],
+) -> impl Iterator<Item = &'a InputFile> {
+    let members: &[_] = if set.suffixes.contains("f") {
+        &set.members
+    } else {
+        &[]
     };
-    set.members
-        .iter()
-        .map(|&i| &files[i])
-        .filter(|f| {
-            split_suffix_with(
-                &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
-                ctx.registry.alias_table(),
-            )
-            .suffix
-            .as_deref()
-                == Some("f")
-                && !crate::group::is_fuzz_own_f(set, files, f)
-        })
-        .min_by(|a, b| (!writes_f(a), &a.path).cmp(&(!writes_f(b), &b.path)))
-}
-
-/// `pbr_f_member`'s file name before load (no member is dead yet); `api::pbr_read_fuzz` asks it.
-pub(crate) fn pbr_f_name(
-    ctx: &ResolveCtx,
-    set: &TextureSet,
-    files: &[InputFile],
-) -> Option<String> {
-    pbr_f_member(ctx, set, files, |_| false).map(|f| name(&f.path))
+    let aliases = ctx.registry.alias_table();
+    members.iter().map(move |&i| &files[i]).filter(move |f| {
+        split_suffix_with(
+            &f.rel.file_stem().unwrap_or_default().to_string_lossy(),
+            aliases,
+        )
+        .suffix
+        .as_deref()
+            == Some("f")
+            && !crate::group::is_fuzz_own_f(set, files, f)
+    })
 }
 
 /// Note DR: whether `f` is a `_f` that a set already Advanced skin packs into the `_rfaos` G channel (a `_f` whose
@@ -1000,8 +980,16 @@ pub fn plan_packing(
             _ => None,
         })
         .collect();
-    // F15: a member with no job writes nothing (failed, cancelled, or skipped as a duplicate).
-    let planned: BTreeSet<PathBuf> = jobs.iter().map(|j| j.input.clone()).collect();
+    // A kept _f.dds supplies fuzz by name. Converted inputs have a resolved subtype.
+    let kept_dds = skipped
+        .iter()
+        .filter(|s| s.code == Some(Code::InDdsSkipped))
+        .map(|s| (s.path.clone(), Subtype::PbrFuzz));
+    let subtypes: BTreeMap<_, _> = jobs
+        .iter()
+        .map(|j| (j.input.clone(), j.profile.subtype))
+        .chain(kept_dds)
+        .collect();
     let renamed: BTreeMap<PathBuf, InputFile> = sets
         .iter()
         .flat_map(|set| joined_helper_names(ctx, set, files))
@@ -1076,27 +1064,25 @@ pub fn plan_packing(
                 let reading = fuzz_reading(ctx, set, f);
                 // Fuzz-4: under PBR the set's own `_f` wins; the fuzz map is listed unused after the loop.
                 if reading == FuzzReading::Pbr && waiting.contains_key(&f.path) {
-                    let dead =
-                        |m: &InputFile| m.kind == InputKind::Image && !planned.contains(&m.path);
-                    if let Some(fm) = pbr_f_member(ctx, set, files, dead) {
+                    if let Some(fm) = pbr_f_members(ctx, set, files)
+                        .min_by_key(|m| (subtypes.get(&m.path) != Some(&Subtype::PbrFuzz), &m.path))
+                    {
                         let n = name(&fm.path);
-                        // F15 (Note JQ53): the reason says what the `_f` member is (proposed strings).
-                        let reason = if failed.contains(&fm.path) {
-                            format!("{n}, the set's _f, failed to load")
-                        } else if cancelled.contains(&fm.path) {
-                            format!("{n}, the set's _f, was cancelled")
-                        } else if dead(fm) {
-                            format!("{n}, the set's _f, is skipped")
-                        } else {
-                            match crate::policy::subtype_override(ctx, fm) {
-                                Some(st) if st != Subtype::PbrFuzz && fm.kind != InputKind::Dds => {
-                                    format!(
-                                        "{n} ({}) is written at the set's _f path",
-                                        json!(st).as_str().unwrap_or_default()
-                                    )
-                                }
-                                _ => format!("{n} is the set's PBR fuzz texture (_f)"),
+                        let reason = match subtypes.get(&fm.path) {
+                            Some(Subtype::PbrFuzz) => {
+                                format!("{n} is the set's PBR fuzz texture (_f)")
                             }
+                            Some(st) => format!(
+                                "{n} ({}) is written at the set's _f path",
+                                json!(st).as_str().unwrap_or_default()
+                            ),
+                            None if failed.contains(&fm.path) => {
+                                format!("{n}, the set's _f, failed to load")
+                            }
+                            None if cancelled.contains(&fm.path) => {
+                                format!("{n}, the set's _f, was cancelled")
+                            }
+                            None => format!("{n}, the set's _f, is skipped"),
                         };
                         f_wins.entry(f.path.clone()).or_insert(reason);
                         continue;

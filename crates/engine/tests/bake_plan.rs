@@ -862,6 +862,60 @@ fn a_landscape_normal_in_a_pbr_landscape_set_bakes() {
     assert!(bake_flag(&ev, "landscape/rock"));
 }
 
+#[test]
+fn advanced_skin_reports_its_landscape_normal_as_extra_and_leaves_roughness_unbaked() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "skin/body_n.png", 64, 64);
+    rough(d.path(), "skin/body_rfaos.png", 64, 64);
+    std::fs::write(
+        d.path().join("in/sdc.toml"),
+        "[files.'skin/body_n.png']\nsubtype = 'landscape_normal'\n",
+    )
+    .unwrap();
+    let mut r = req(d.path(), &[]);
+    r.set_shaders
+        .insert("skin/body".into(), engine::shader::Shader::AdvancedSkin);
+    let (p, ev) = plan(r);
+    let n = job(&p, "body_n.png");
+    assert_eq!(n.profile.subtype, Subtype::LandscapeNormal);
+    let member = job(&p, "body_rfaos.png");
+    assert_eq!(member.profile.subtype, Subtype::SkinRfaos);
+    assert_eq!(
+        member.profile.mips.levels,
+        MipLevels::Keyword(MipKeyword::Full)
+    );
+    assert!(matches!(member.status, engine::policy::JobStatus::Ready));
+    assert!(ev.iter().any(|e| matches!(&e.kind, EventKind::SetResolved {warnings, ..}
+        if warnings.iter().any(|w| w.code == Code::ShaderExtraMap && w.data["member"] == "body_n.dds"))));
+    assert!(
+        member.bake.is_none(),
+        "Advanced Skin must not bake from its EXTRA landscape normal"
+    );
+    assert!(!bake_flag(&ev, "skin/body"));
+}
+
+#[test]
+fn advanced_skin_cannot_bake_from_a_lent_landscape_normal() {
+    let d = tempfile::tempdir().unwrap();
+    normal(d.path(), "pbr/rock_n.png", 64, 64);
+    rough(d.path(), "pbr/rock_rmaos.png", 64, 64);
+    rough(d.path(), "skin/body_rfaos.png", 64, 64);
+    let mut r = req(d.path(), &["file:**/rock_n.png.subtype=landscape_normal"]);
+    borrow(&mut r, &[("skin/body", "pbr/rock")]);
+    let (p, _) = plan(r);
+    assert!(job(&p, "rock_rmaos.png")
+        .bake
+        .as_ref()
+        .is_some_and(|b| b.normal.ends_with("rock_n.png")));
+    let skin = job(&p, "body_rfaos.png");
+    assert_eq!(
+        skin.shader.as_ref().unwrap().shader,
+        engine::shader::Shader::AdvancedSkin
+    );
+    assert!(skin.bake.is_none(), "the borrowing shader decides");
+    assert!(codes(skin).contains(&Code::SetMissingCompanion));
+}
+
 /// N-7, N-15: under an explicit regular shader a plain `normal` does not bake, and the `_rmaos` says why.
 #[test]
 fn a_plain_normal_under_a_regular_shader_does_not_bake() {

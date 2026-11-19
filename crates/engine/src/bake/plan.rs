@@ -358,24 +358,21 @@ fn is_dds(j: &ResolvedJob) -> bool {
             .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
 }
 
-/// Note JS2 (N-7): the set whose roughness bakes reads any tangent-space normal when its pick
-/// `bakes_any_tangent`. Read from the set's own jobs (api.rs sets `shader` first).
-fn any_tangent(jobs: &[ResolvedJob], idx: &[usize]) -> bool {
-    idx.iter()
+/// The roughness member's shader decides which of the owner's normal types it can bake, in priority order.
+/// Advanced Skin treats a landscape normal as SHADER-EXTRA-MAP (NF-8).
+fn own_normal(jobs: &[ResolvedJob], owner: &[usize], receiver: &[usize]) -> Option<usize> {
+    use Subtype::{LandscapeNormal, Normal, PbrNormal};
+    let shader = receiver
+        .iter()
         .find_map(|&i| jobs[i].shader.as_ref())
-        .is_some_and(crate::shader::ShaderPick::bakes_any_tangent)
-}
-
-/// The set's `_n` (DECISIONS R9, Note JS2): its first `pbr_normal` job by path that did not fail; when `any` (the
-/// baking set's [`any_tangent`]), else its first `normal`, else its first `landscape_normal`.
-fn own_normal(jobs: &[ResolvedJob], idx: &[usize], any: bool) -> Option<usize> {
-    first_of(jobs, idx, Subtype::PbrNormal).or_else(|| {
-        any.then(|| {
-            first_of(jobs, idx, Subtype::Normal)
-                .or_else(|| first_of(jobs, idx, Subtype::LandscapeNormal))
-        })
-        .flatten()
-    })
+        .filter(|p| p.bakes_any_tangent())
+        .map(|p| p.shader);
+    let types: &[Subtype] = match shader {
+        Some(crate::shader::Shader::AdvancedSkin) => &[PbrNormal, Normal],
+        Some(_) => &[PbrNormal, Normal, LandscapeNormal],
+        None => &[PbrNormal],
+    };
+    types.iter().find_map(|&st| first_of(jobs, owner, st))
 }
 
 /// The set's first job of sub-type `st` by path that is not a DDS and did not fail.
@@ -421,11 +418,10 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         .borrowed
         .iter()
         .filter(|(b, _)| !roughness_members(jobs, of(b)).is_empty())
-        .filter_map(|(b, o)| own_normal(jobs, of(o), any_tangent(jobs, of(b))))
+        .filter_map(|(b, o)| own_normal(jobs, of(o), of(b)))
         .collect();
     for set in cx.sets {
         let idx = of(&set.key);
-        let any = any_tangent(jobs, idx);
         // Spec §10 SET-MISSING-COMPANION, the two triggers that are not about the bake (any target).
         for &i in idx {
             let lacking = match jobs[i].profile.subtype {
@@ -459,10 +455,7 @@ pub fn plan_bakes(cx: &BakeCtx, jobs: &mut [ResolvedJob]) -> BTreeSet<String> {
         let shared = cx.shared.contains(&set.key);
         // A borrowed Normal slot (GUI) stands in for the set's own `_n` (DECISIONS Note R M4-final-1).
         let owner = cx.borrowed.get(&set.key);
-        let normal = match owner {
-            Some(o) => own_normal(jobs, of(o), any),
-            None => own_normal(jobs, idx, any),
-        };
+        let normal = own_normal(jobs, owner.map_or(idx, |o| of(o)), idx);
         let members = roughness_members(jobs, idx);
         match (normal, members.is_empty()) {
             (None, true) => {}
