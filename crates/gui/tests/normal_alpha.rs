@@ -3496,10 +3496,12 @@ fn an_alias_batch_drops_a_stale_entry_before_the_user_reuses_its_spelling() {
 
 /// How many Keep alpha rows name `key`.
 fn keep_rows(m: &AppModel, key: &str) -> usize {
-    use sdc_gui::model::bottom::{problems, Fix};
+    use sdc_gui::model::bottom::{problems, At, Fix};
     problems(m)
         .iter()
-        .filter(|r| r.fix == Some(Fix::KeepAlpha(key.into())))
+        .filter(|r| {
+            matches!(&r.at, At::Texture(k) if k == key) && matches!(r.fix, Some(Fix::KeepAlpha(_)))
+        })
         .count()
 }
 
@@ -3528,6 +3530,210 @@ fn old_share(dir: &Path) -> AppModel {
 const KEEP_SENTENCE: &str =
     "iron_n.png is shared with a regular set, which reads its alpha as specular; its alpha is not kept";
 
+const STEEL_BORROWS: &str = "[[sets]]\nid = \"armor/steel\"\nborrow = { slot2 = \"pbr/iron\" }\n";
+
+fn open_saved_share(dir: &Path, files: &str, sets: &str) -> AppModel {
+    let root = dir.join("textures");
+    std::fs::write(root.join("sdc.toml"), files).unwrap();
+    std::fs::write(root.join("sdc-project.toml"), sets).unwrap();
+    opened_as_the_app(root, dir.join("export"))
+}
+
+#[test]
+fn keep_alpha_writes_one_literal_full_table_and_undo_restores_both_documents() {
+    for (spellings, target) in [
+        (vec!["pbr/iron_n"], IRON_N),
+        (vec!["PBR/IRON_N.PNG", "pbr/iron_n"], "PBR/IRON_N.PNG"),
+        (vec!["PBR/IRON_N.PNG", IRON_N, "Pbr/Iron_N.png"], IRON_N),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        open_slot_files(d.path());
+        let files: String = spellings
+            .iter()
+            .map(|k| format!("[files.\"{k}\"]\nsubtype = \"pbr_normal\"\n"))
+            .collect();
+        let mut m = open_saved_share(d.path(), &files, LISTED_AND_BORROWED);
+        let before = m.project.as_ref().unwrap().text();
+        let sets = m.sets_doc.as_ref().unwrap().text();
+        assert_eq!(keep_rows(&m, IRON_N), 1);
+        assert_eq!(auto_data(&m), [IRON_N]);
+        m.keep_alpha(IRON_N).unwrap();
+        settle(&mut m);
+        m.save().unwrap();
+        let saved: toml_edit::DocumentMut =
+            std::fs::read_to_string(d.path().join("textures/sdc.toml"))
+                .unwrap()
+                .parse()
+                .unwrap();
+        let policies: Vec<_> = saved["files"]
+            .as_table_like()
+            .unwrap()
+            .iter()
+            .filter_map(|(k, t)| Some((k, t.get("alpha")?.get("policy")?.as_str()?)))
+            .collect();
+        assert_eq!(policies, [(target, "data")]);
+        assert!(auto_data(&m).is_empty());
+        assert_eq!(m.undo_label(), Some("Keep alpha"));
+        m.undo();
+        settle(&mut m);
+        assert_eq!(m.project.as_ref().unwrap().text(), before);
+        assert_eq!(m.sets_doc.as_ref().unwrap().text(), sets);
+    }
+}
+
+#[test]
+fn keep_alpha_refuses_two_folded_full_tables() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let mut m = open_saved_share(d.path(), "[files.\"PBR/IRON_N.PNG\"]\nsubtype = \"pbr_normal\"\n[files.\"Pbr/Iron_N.png\"]\nsubtype = \"pbr_normal\"\n", STEEL_BORROWS);
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+    m.open_problems(None);
+    let mut h = keep_harness(m);
+    let button = h
+        .query_all_by(|n| n.label().is_some_and(|s| s.starts_with("Keep alpha for ")))
+        .next()
+        .unwrap();
+    assert!(button.accesskit_node().is_disabled());
+    let before = h.state().project.as_ref().unwrap().text();
+    let reason = h.state_mut().keep_alpha(IRON_N).unwrap_err();
+    assert!(reason.contains("sdc.toml"), "{reason}");
+    assert_eq!(h.state().project.as_ref().unwrap().text(), before);
+}
+
+#[test]
+fn keep_alpha_counts_a_resolved_record_fill() {
+    use sdc_gui::model::sets::borrowed_normal;
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let mut m = open_saved_share(d.path(), "", "[[sets]]\nid = \"armor/steel\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"E\"\nslot2 = \"textures/pbr/iron_n.dds\"\n");
+    assert_eq!(
+        borrowed_normal(&m).get("armor/steel").map(String::as_str),
+        Some("pbr/iron")
+    );
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+    m.set_slot_lock("armor/steel", 1, true).unwrap();
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    assert!(auto_data(&m).is_empty());
+}
+
+#[test]
+fn keep_alpha_follows_the_visible_borrow_for_duplicate_set_ids() {
+    use sdc_gui::model::sets::borrowed_normal;
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    rock(d.path());
+    let m = open_saved_share(d.path(), "", &format!("{STEEL_BORROWS}[[sets]]\nid = \"ARMOR/STEEL\"\nborrow = {{ slot2 = \"landscape/rock\" }}\n"));
+    assert_eq!(
+        borrowed_normal(&m).get("armor/steel").map(String::as_str),
+        Some("pbr/iron")
+    );
+    assert_eq!((keep_rows(&m, IRON_N), keep_rows(&m, ROCK_N)), (1, 0));
+}
+
+#[test]
+fn keep_alpha_checks_the_lending_owners_own_slot_lock() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    rock(d.path());
+    let mut m = open_saved_share(d.path(), "", &format!("{STEEL_BORROWS}[[sets]]\nid = \"pbr/iron\"\nborrow = {{ slot2 = \"landscape/rock\" }}\nlock = [\"slot2\"]\n"));
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+    let why = m
+        .keep_alpha(IRON_N)
+        .expect_err("iron lends its own locked Normal slot");
+    assert!(why.contains("slot 2 of pbr/iron"), "{why}");
+    m.open_problems(None);
+    let mut h = keep_harness(m);
+    let disabled = |h: &egui_kittest::Harness<'_, AppModel>| {
+        h.query_all_by(|n| n.label().is_some_and(|s| s.starts_with("Keep alpha for ")))
+            .next()
+            .unwrap()
+            .accesskit_node()
+            .is_disabled()
+    };
+    assert!(disabled(&h));
+    h.state_mut().set_slot_lock("pbr/iron", 2, false).unwrap();
+    settle(h.state_mut());
+    h.run();
+    assert!(!disabled(&h));
+}
+
+#[test]
+fn keep_alpha_repaints_without_searching_for_a_slot_lock() {
+    use sdc_gui::model::sets::LOCK_SEARCHES;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_share(d.path());
+    m.open_problems(None);
+    let mut h = keep_harness(m);
+    let before = LOCK_SEARCHES.get();
+    h.run_steps(3);
+    assert_eq!(LOCK_SEARCHES.get(), before);
+}
+
+#[test]
+fn keep_alpha_waits_for_a_pending_replace() {
+    use sdc_gui::model::sets::{DropChoice, DropOutcome};
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    assert!(matches!(
+        m.drop_choice(IRON_N, "armor/steel", DropChoice::Share),
+        DropOutcome::AskReplace { .. }
+    ));
+    m.drop_replace(IRON_N, "armor/steel", DropChoice::Share)
+        .unwrap();
+    assert_eq!(
+        m.keep_alpha(IRON_N).unwrap_err(),
+        "Wait for the plan to finish"
+    );
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
+    settle(&mut m);
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+}
+
+#[test]
+fn keep_alpha_refreshes_on_undo_and_redo_before_the_plan_lands() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = old_share(d.path());
+    m.set_alpha(IRON_N, AlphaPolicy::Remove);
+    settle(&mut m);
+    m.clear_field(IRON_N, "alpha.policy");
+    settle(&mut m);
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+    m.undo();
+    assert_eq!(keep_rows(&m, IRON_N), 0);
+    m.redo();
+    assert_eq!(keep_rows(&m, IRON_N), 1);
+}
+
+#[test]
+fn keep_alpha_names_each_project_relative_path() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let root = d.path().join("textures");
+    std::fs::create_dir_all(root.join("weapons")).unwrap();
+    for name in ["iron.png", "iron_n.png", "iron_rmaos.png"] {
+        std::fs::copy(root.join("pbr").join(name), root.join("weapons").join(name)).unwrap();
+    }
+    std::fs::copy(root.join("armor/steel.png"), root.join("armor/helm.png")).unwrap();
+    let mut m = open_saved_share(d.path(), "", &format!("{STEEL_BORROWS}[[sets]]\nid = \"armor/helm\"\nborrow = {{ slot2 = \"weapons/iron\" }}\n"));
+    m.open_problems(None);
+    let h = keep_harness(m);
+    for key in [IRON_N, "weapons/iron_n.png"] {
+        assert!(
+            h.query_by_role_and_label(
+                eframe::egui::accesskit::Role::Button,
+                &format!("Keep alpha for {key}")
+            )
+            .is_some(),
+            "{key}"
+        );
+    }
+}
+
 fn keep_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
     let mut h = egui_kittest::Harness::builder()
         .with_context_setup(|ctx| {
@@ -3544,12 +3750,15 @@ fn keep_harness(m: AppModel) -> egui_kittest::Harness<'static, AppModel> {
 #[test]
 fn an_old_share_gets_a_keep_alpha_row() {
     use egui_kittest::kittest::Queryable;
-    use sdc_gui::model::bottom::{problems, Fix};
+    use sdc_gui::model::bottom::{problems, At, Fix};
     let d = tempfile::tempdir().unwrap();
     let mut m = old_share(d.path());
     let rows: Vec<_> = problems(&m)
         .iter()
-        .filter(|r| r.fix == Some(Fix::KeepAlpha(IRON_N.into())))
+        .filter(|r| {
+            matches!(&r.at, At::Texture(k) if k == IRON_N)
+                && r.fix == Some(Fix::KeepAlpha(Ok(IRON_N.into())))
+        })
         .cloned()
         .collect();
     assert_eq!(rows.len(), 1);
@@ -3559,7 +3768,7 @@ fn an_old_share_gets_a_keep_alpha_row() {
     let mut h = keep_harness(m);
     h.get_by_role_and_label(
         eframe::egui::accesskit::Role::Button,
-        "Keep alpha for iron_n.png",
+        "Keep alpha for pbr/iron_n.png",
     )
     .focus();
     h.run();
@@ -3593,7 +3802,7 @@ fn keep_alpha_is_off_on_a_locked_slot() {
     let h = keep_harness(m);
     let b = h.get_by_role_and_label(
         eframe::egui::accesskit::Role::Button,
-        "Keep alpha for iron_n.png",
+        "Keep alpha for pbr/iron_n.png",
     );
     assert!(b.accesskit_node().is_disabled());
 }

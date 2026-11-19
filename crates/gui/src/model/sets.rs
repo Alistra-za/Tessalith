@@ -926,6 +926,12 @@ pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Whole member searches for an item's slot lock on this thread.
+    pub static LOCK_SEARCHES: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
 /// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
 /// `PackedInto`, kind `Helper`, `job.profile.subtype`); `entry_view` the keys (`add`/`remove` matching);
@@ -2134,7 +2140,7 @@ fn replans(key: &str) -> bool {
 pub const SLOT_LOCKED: &str = "slot locked";
 
 /// Why `slot` of `v` takes no change: it is locked (F3a Task 8).
-fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
+pub(super) fn lock_refusal(v: &SetView, slot: Option<SlotKind>) -> Result<(), String> {
     match slot.and_then(SlotKind::slot_number) {
         Some(n) if v.locks.contains(&n) => {
             Err(format!("slot {n} of {} is locked; unlock it first", v.id))
@@ -2547,6 +2553,8 @@ impl AppModel {
 
     /// Why `item` cannot leave its set: it fills a locked slot there (F3a Task 8).
     pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
+        #[cfg(feature = "test-hooks")]
+        LOCK_SEARCHES.with(|c| c.set(c.get() + 1));
         // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JP3).
         let views = views(self);
         let Some(v) = view_with_member(&views, item) else {

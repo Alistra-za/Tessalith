@@ -387,7 +387,7 @@ pub enum Fix {
     /// Note FC10 (BQ15): write `alpha.exr_straight = true` for this item.
     StraightAlpha(String),
     /// Note JS7 (N-10): write `alpha.policy = "data"` for this shared normal.
-    KeepAlpha(String),
+    KeepAlpha(Result<String, String>),
     /// Note FC10 (CV8): remove the stored empty `match{n}` of the set (by id).
     RemoveMatch(String, u8),
     /// Note FC10 (T8): drop the `suffix_aliases` table of a skipped user preset file (the file, the preset's id).
@@ -602,6 +602,9 @@ pub fn problems(m: &AppModel) -> Arc<Vec<Problem>> {
 pub(super) fn problems_inner(m: &AppModel) -> super::ProblemsKey {
     (
         m.evidence_rev,
+        m.project
+            .as_ref()
+            .map_or(0, crate::project::ProjectDoc::rev),
         m.export.revision,
         m.export.running.is_some(),
         // Note FC3: an `Undo` fix is built only while its step is the top one.
@@ -1303,10 +1306,10 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
             });
         }
     }
-    for k in super::shared_alpha::row_keys(m) {
+    for (k, table) in super::shared_alpha::rows(m, &views) {
         let Some(i) = m.item(&k) else { continue };
         out.push(Problem {
-            fix: Some(Fix::KeepAlpha(k.clone())),
+            fix: Some(Fix::KeepAlpha(table)),
             detail: Some(KEEP_ALPHA_HOVER.into()),
             ..row(
                 Level::Info,

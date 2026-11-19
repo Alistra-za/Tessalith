@@ -707,15 +707,15 @@ fn fix_click(
         }
         // Drawn by `fix_button`.
         Fix::ChangeShader(_) | Fix::SetType(_) => false,
-        Fix::KeepAlpha(k) => {
-            let file = m.item(k).map_or(k.as_str(), |i| i.name.as_str());
-            let why = off.map(str::to_string).or_else(|| m.leaves_locked(k).err());
+        Fix::KeepAlpha(table) => {
+            let At::Texture(key) = &p.at else { return None };
+            let why = off.or_else(|| table.as_ref().err().map(String::as_str));
             let b = ui.add_enabled(why.is_none(), egui::Button::new("Keep alpha"));
             b.widget_info(|| {
                 egui::WidgetInfo::labeled(
                     egui::Role::Button,
                     why.is_none(),
-                    format!("Keep alpha for {file}"),
+                    format!("Keep alpha for {key}"),
                 )
             });
             match why {
@@ -1319,9 +1319,11 @@ fn apply_fix(ui: &egui::Ui, model: &mut AppModel, fix: Fix, at: At) {
         }
         // Their buttons ask for `Act::Shader` and `Act::Pick` (`fix_button`).
         Fix::ChangeShader(_) | Fix::SetType(_) => {}
-        Fix::KeepAlpha(k) => {
-            if let Err(why) = model.keep_alpha(&k) {
-                model.status_line = why;
+        Fix::KeepAlpha(table) => {
+            if let (At::Texture(key), Ok(table)) = (at, table) {
+                if let Err(why) = model.keep_alpha_shown(&key, Some(&table)) {
+                    model.status_line = why;
+                }
             }
         }
     }

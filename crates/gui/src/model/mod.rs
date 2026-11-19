@@ -269,8 +269,8 @@ fn read_only_banner(error: &str) -> String {
     )
 }
 
-/// `(evidence_rev, export.revision, export running, history.pushes, scan_stamp)`.
-type ProblemsKey = (u64, u64, bool, u64, cs_pbr::Stamp);
+/// `(evidence_rev, project.rev(), export.revision, export running, history.pushes, scan_stamp)`.
+type ProblemsKey = (u64, u64, u64, bool, u64, cs_pbr::Stamp);
 
 /// `ViewCache::set_reasons`: (the `problems` build, the set key, the hidden kinds, the reasons).
 pub(crate) type CachedReasons = (
@@ -291,7 +291,7 @@ pub(crate) struct ViewCache {
     pub excluded_sets: Option<Arc<std::collections::HashSet<String>>>,
     pub blocks: Option<Arc<Vec<pbr_export::ExportIssue>>>,
     pub hits: Option<Arc<Vec<sections::DeleteHit>>>,
-    /// Keyed by `ProblemsKey` (evidence_rev, export.revision, export running, history.pushes, scan stamp) inside the view_key cell (K9).
+    /// Keyed by `ProblemsKey` inside the view_key cell (K9).
     pub problems: Option<(ProblemsKey, Arc<Vec<bottom::Problem>>)>,
     /// Review E2: `bottom::cached_tab_counts`, keyed on the `problems` build it counted (held, so its address is never
     /// reused) and the hidden kinds.

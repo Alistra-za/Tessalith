@@ -1218,6 +1218,38 @@ fn a_chosen_shader_on_it_wins() {
 }
 
 #[test]
+fn keep_alpha_uses_the_planned_shader_of_a_shared_skin_host() {
+    use engine::shader::{Shader, ShaderOrigin};
+    use sdc_gui::model::bottom::At;
+    let d = tempfile::tempdir().unwrap();
+    let normal = "textures/s/x_normal.png";
+    for path in R_FILES.iter().copied().chain(["textures/armor/steel.png"]) {
+        colour(d.path(), path);
+    }
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        image::Rgba([128u8, 128, 255, (x * 3 + y) as u8])
+    })
+    .save(d.path().join(normal))
+    .unwrap();
+    let sets = format!(
+        "{}[[sets]]\nid = \"textures/armor/steel\"\nborrow = {{ slot2 = \"{X}\" }}\n",
+        r_toml("", "")
+    );
+    std::fs::write(d.path().join("sdc-project.toml"), sets).unwrap();
+    let m = support::opened_as_the_app(d.path().into(), d.path().join("export"));
+    let pick = view(&m, X).shader.unwrap();
+    assert_eq!(
+        (pick.shader, pick.provenance),
+        (Shader::AdvancedSkin, ShaderOrigin::Set)
+    );
+    assert!(problems(&m)
+        .iter()
+        .any(|r| r.at == At::Texture(normal.into())
+            && r.is_note()
+            && r.shown().contains("shared with a regular set")));
+}
+
+#[test]
 fn wet_comes_with_the_normal() {
     let d = tempfile::tempdir().unwrap();
     let m = r(d.path());

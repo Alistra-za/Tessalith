@@ -8,8 +8,9 @@
 //! value or removed leaves the list in the next step the follow-on runs in (N8-p); a user's Data pick takes the key off
 //! (N-34). What a step cannot see (a set's automatic shader and its Normal-slot member are the last plan's) is Task 9's
 //! Note row.
+use super::bottom::{problems, At, Fix};
 use super::normal_follow::tangent;
-use super::sets::{locked_items, own_fills, views, SlotFill, SlotKind};
+use super::sets::{lock_refusal, locked_items, own_fills, views, SetView, SlotFill, SlotKind};
 use super::AppModel;
 use crate::project::ProjectDoc;
 use crate::sets_doc::SetsDoc;
@@ -201,28 +202,57 @@ pub(super) fn shared_into_regular(
     sh
 }
 
-/// Note JS7 (N-10, N-38): a confirmed regular borrower is enough for a Note, even if another borrow is unsure.
-pub(super) fn row_keys(m: &AppModel) -> Vec<String> {
-    let (Target::Cs, Some(p), Some(s)) = (m.target, &m.project, &m.sets_doc) else {
+/// The planned regular borrowers' resolved Normal slots, including record fills. A Note carries the
+/// exact table its button will edit, or the reason the button is disabled.
+pub(super) fn rows(m: &AppModel, views: &[SetView]) -> Vec<(String, Result<String, String>)> {
+    let (Target::Cs, Some(p), Some(_)) = (m.target, &m.project, &m.sets_doc) else {
         return vec![];
     };
-    let targets = borrow_targets(s);
-    if targets.is_empty() {
+    let owners: HashMap<_, _> = views
+        .iter()
+        .filter(|v| {
+            v.shader
+                .as_ref()
+                .is_some_and(|p| p.shader.is_pbr_or_advanced_skin())
+        })
+        .map(|v| (fold_id(&v.id), v))
+        .collect();
+    let mut shared = BTreeMap::new();
+    for v in views {
+        if v.members.is_empty()
+            || v.shader
+                .as_ref()
+                .is_none_or(|p| p.shader.is_pbr_or_advanced_skin())
+        {
+            continue;
+        }
+        let Some(SlotFill::Borrowed { from, item }) = v.slots.get(&SlotKind::Normal) else {
+            continue;
+        };
+        if let Some(owner) = owners.get(&fold_id(from)) {
+            shared.insert(item, *owner);
+        }
+    }
+    if shared.is_empty() {
         return vec![];
     }
-    let f = facts(m);
-    let shared = shared_into_regular(&f, s, &f.empty, &targets, &BTreeSet::new());
     let tables = Tables::of(p);
     shared
-        .out
         .into_iter()
-        .filter(|k| {
-            !f.inert.contains(k)
-                && !f.planned_data.contains(k)
-                && tables.alpha(k).is_empty()
-                && m.item(k)
-                    .and_then(|i| i.analysis.as_ref())
-                    .is_some_and(|a| a.alpha == AlphaContent::Varying)
+        .filter_map(|(key, owner)| {
+            let i = m.item(key)?;
+            if i.kept_dds()
+                || i.job.as_ref()?.profile.alpha.policy == AlphaPolicy::Data
+                || i.analysis.as_ref()?.alpha != AlphaContent::Varying
+                || !tables.alpha(key).is_empty()
+            {
+                return None;
+            }
+            let table = tables.keep_table(key).and_then(|table| {
+                lock_refusal(owner, Some(SlotKind::Normal))?;
+                Ok(table)
+            });
+            Some((key.clone(), table))
         })
         .collect()
 }
@@ -530,6 +560,22 @@ impl Tables {
         tables.is_empty().then(|| key.to_string())
     }
 
+    /// A user's Keep alpha writes a full filename even when an extensionless table also applies.
+    fn keep_table(&self, key: &str) -> Result<String, String> {
+        let Some(at) = self.by_lower.get(&key.to_lowercase()) else {
+            return Ok(key.to_string());
+        };
+        if let [i] = at.as_slice() {
+            return Ok(self.rows.get(*i).0.clone());
+        }
+        if at.iter().any(|i| self.rows.get(*i).0 == key) {
+            return Ok(key.to_string());
+        }
+        Err(format!(
+            "More than one [files] table in sdc.toml matches {key}. Use the file's exact spelling."
+        ))
+    }
+
     /// N8-e: the `alpha.policy` of the table spelled byte for byte `entry` (a list entry): no case or Unicode twin,
     /// no extension-less table, no fallback.
     fn exact_alpha(&self, entry: &str) -> Option<Value> {
@@ -769,11 +815,29 @@ fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc, fail: bool) {
 impl AppModel {
     /// Note JS7: the user's Data pick stays theirs when the last regular borrower goes away.
     pub fn keep_alpha(&mut self, key: &str) -> Result<(), String> {
-        if let Some(why) = self.fix_off().or_else(|| self.leaves_locked(key).err()) {
+        self.keep_alpha_shown(key, None)
+    }
+
+    pub(crate) fn keep_alpha_shown(
+        &mut self,
+        key: &str,
+        shown: Option<&str>,
+    ) -> Result<(), String> {
+        if let Some(why) = self.fix_off() {
             return Err(why);
         }
+        let rows = problems(self);
+        let current = rows.iter().find_map(|r| match (&r.at, &r.fix) {
+            (At::Texture(k), Some(Fix::KeepAlpha(table))) if k == key => Some(table),
+            _ => None,
+        });
+        let changed = "The shared normal changed. Check Problems again.";
+        let table = current.ok_or(changed)?.as_ref().map_err(Clone::clone)?;
+        if shown.is_some_and(|shown| shown != table) {
+            return Err(changed.into());
+        }
         self.edit_docs("Keep alpha", None, true, |d, _| {
-            d.set_file_value(key, "alpha.policy", &json!("data"));
+            d.set_exact_file_value(table, "alpha.policy", &json!("data"));
         });
         Ok(())
     }
@@ -825,6 +889,14 @@ impl AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keep_alpha_reuses_the_single_unicode_folded_full_name() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("sdc.toml"), "[files.\"PBR/Ärz_N.PNG\"]\n").unwrap();
+        let tables = Tables::of(&ProjectDoc::open(d.path()));
+        assert_eq!(tables.keep_table("pbr/ärz_n.png").unwrap(), "PBR/Ärz_N.PNG");
+    }
 
     /// `forms` gives exactly the keys `engine::overrides::path_key_matches` accepts.
     #[test]
