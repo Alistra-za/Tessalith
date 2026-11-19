@@ -1106,3 +1106,77 @@ fn the_switch_takes_an_untouched_key_off_auto_pbr() {
         (Some(json!("pbr_normal")), Some("pbr_normal".into()), false)
     );
 }
+
+/// N-18: on a `pbr_normal` in a PBR set the texture panel's Alpha row offers Data; picking it writes
+/// `alpha.policy = "data"`, raises no error, and survives retypes (the user's own, and shader picks).
+#[test]
+fn data_is_offered_on_a_pbr_normal_and_sticks() {
+    use eframe::egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    wall(d.path());
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(&mut m);
+    assert_eq!(held(&m, WALL_N, "subtype"), Some(json!("pbr_normal")));
+    m.select_item(WALL_N);
+    let mut h = egui_kittest::Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(eframe::egui::vec2(1400.0, 900.0))
+        .build_ui_state(|ui, m: &mut AppModel| sdc_gui::ui::draw(ui, m), m);
+    h.run();
+    {
+        let combos: Vec<_> = h
+            .query_all_by_role(Role::ComboBox)
+            .filter(|n| n.accesskit_node().value().as_deref() == Some("Remove"))
+            .collect();
+        assert_eq!(combos.len(), 1, "the Alpha combo shows Remove");
+        assert!(
+            !combos[0].accesskit_node().is_disabled(),
+            "the Alpha row is on"
+        );
+        combos[0].click();
+    }
+    h.run();
+    {
+        let data: Vec<_> = h.query_all_by_label("Data").collect();
+        assert_eq!(data.len(), 1, "one Data option, in the open Alpha list");
+        data[0].click();
+    }
+    h.step();
+    assert!(h.state_mut().wait_idle(Duration::from_secs(60)));
+    h.run();
+    let m = h.state_mut();
+    assert_eq!(held(m, WALL_N, "alpha.policy"), Some(json!("data")));
+    let j = m.item(WALL_N).and_then(|i| i.job.clone()).unwrap();
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
+    assert!(
+        j.warnings
+            .iter()
+            .all(|w| w.severity != engine::codes::Severity::Error),
+        "{:?}",
+        j.warnings
+    );
+    m.set_field(WALL_N, "subtype", json!("normal"));
+    settle(m);
+    m.set_field(WALL_N, "subtype", json!("pbr_normal"));
+    settle(m);
+    assert_eq!(
+        held(m, WALL_N, "alpha.policy"),
+        Some(json!("data")),
+        "the user's retypes"
+    );
+    m.set_shader("test/wall", Some(Shader::Default));
+    settle(m);
+    m.set_shader("test/wall", Some(Shader::Pbr));
+    settle(m);
+    assert_eq!(
+        held(m, WALL_N, "alpha.policy"),
+        Some(json!("data")),
+        "the picks"
+    );
+    let j = m.item(WALL_N).and_then(|i| i.job.clone()).unwrap();
+    assert_eq!(j.profile.alpha.policy, AlphaPolicy::Data);
+}
