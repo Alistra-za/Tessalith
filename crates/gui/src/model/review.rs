@@ -13,11 +13,11 @@ use std::time::{Duration, Instant};
 /// sleeping past it.
 pub const REVIEW_JSON_TTL: Duration = Duration::from_secs(1);
 
-/// E3 (ruling 3c-19): the whole project's expensive terms of the write-now rule, held while a scope is set.
+/// E3 (ruling 3c-24): the whole project's keyed terms, held while a scope is set: the export file count, the export\n/// blockers (the gate's one set-view walk), the undecided count and the counted Problems rows. Nothing else is held.
 #[derive(Debug, Clone, Copy)]
 pub(super) struct WholeTerms {
     files: usize,
-    gate_ok: bool,
+    blocks: usize,
     undecided: usize,
     problem_rows: bool,
 }
@@ -122,18 +122,7 @@ impl AppModel {
         }
         let mut lines = vec![];
         // K13: vanilla (and a project without a PBR set) writes no PGPatcher JSON.
-        if let Some(p) = pbr_export::prepare(self).filter(|p| !p.entries.is_empty()) {
-            let state = disk_state(&p.path, self.pgp_record(&p.root, &p.path).as_deref());
-            let sha = (state == DiskState::Edited)
-                .then(|| sha256_of(&p.path))
-                .flatten();
-            lines.push(JsonLine {
-                kind: JsonKind::PgPatcher,
-                path: p.path,
-                state,
-                sha,
-            });
-        }
+        lines.extend(self.pgp_json_line());
         let doc = self.sets_doc.as_ref();
         let mut files = |kind, root: PathBuf, rels: Vec<String>, shas| {
             // As the finishers read them: a relative record is under the export folder.
@@ -169,6 +158,21 @@ impl AppModel {
         }
         *self.review_json_cache.borrow_mut() = Some((key, Instant::now(), lines.clone()));
         lines
+    }
+
+    /// The PGPatcher JSON this export would write and its state on disk (uncached: one file read).
+    fn pgp_json_line(&self) -> Option<JsonLine> {
+        let p = pbr_export::prepare(self).filter(|p| !p.entries.is_empty())?;
+        let state = disk_state(&p.path, self.pgp_record(&p.root, &p.path).as_deref());
+        let sha = (state == DiskState::Edited)
+            .then(|| sha256_of(&p.path))
+            .flatten();
+        Some(JsonLine {
+            kind: JsonKind::PgPatcher,
+            path: p.path,
+            state,
+            sha,
+        })
     }
 
     /// C4: Keep (false) or Overwrite (true) the edited PGPatcher JSON, for the file as it is now. No-op while Review
@@ -282,6 +286,27 @@ impl AppModel {
 
     /// Ok((files, skipped_undecided)) or Err(the reason the button shows), in A9's order.
     pub fn review_gate(&self) -> Result<(usize, usize), String> {
+        self.gate_check(
+            || pbr_export::export_blocks(self).len(),
+            self.also_runs(),
+            || self.unanswered_overwrites(),
+        )?;
+        Ok(if self.root.is_none() {
+            (0, 0)
+        } else {
+            (self.export_files(), self.undecided())
+        })
+    }
+
+    /// The gate's checks in A9's order. The caller says where its keyed term (the export blockers) comes from, whether
+    /// an Also export runs, and where the unanswered overwrites come from: the whole-project header reads the same
+    /// checks with its own sources (`whole_gate`), everything else live.
+    fn gate_check(
+        &self,
+        blocks: impl FnOnce() -> usize,
+        also: bool,
+        unanswered: impl Fn() -> Vec<String>,
+    ) -> Result<(), String> {
         if self.root.is_none() {
             // Note GH8: with no project Review exports NIF edits only, to the gui.toml folder (never a `sdc-out` guess).
             // No NIF row at all is the fresh-start state, which keeps its old reason; a blocked row (no folder) says why.
@@ -297,10 +322,10 @@ impl AppModel {
             if !self.nif_rows_written() {
                 return Err("Open a folder first".into());
             }
-            if let Some(name) = self.unanswered_overwrites().first() {
+            if let Some(name) = unanswered().first() {
                 return Err(format!("Answer Keep or Overwrite for {name}"));
             }
-            return Ok((0, 0));
+            return Ok(());
         }
         // `toml_read_only_reason` is `Some` exactly when `project.read_only()` (both read the load error).
         if let Some(why) = self.toml_read_only_reason() {
@@ -318,24 +343,36 @@ impl AppModel {
         if let Some((text, _)) = self.missing_preset_text() {
             return Err(text);
         }
-        let n = pbr_export::export_blocks(self).len();
+        let n = blocks();
         if n > 0 {
             return Err(format!("Fix {} first", counted(n, "blocker", "blockers")));
         }
         // Note CN: the Also rows, after the blocks and before the overwrite questions (A9); nothing writes (7.1, 7.2).
-        if self.also_runs() {
+        if also {
             self.also_gate()?;
         }
         // Note FC5: then every overwrite question (supersedes CA7's "no choice made: asked after the export").
-        if let Some(name) = self.unanswered_overwrites().first() {
+        if let Some(name) = unanswered().first() {
             return Err(format!("Answer Keep or Overwrite for {name}"));
         }
-        Ok((self.export_files(), self.undecided()))
+        Ok(())
     }
 
     /// Note FC5: the file names of the overwrite questions Review has no answer for: an edited PGPatcher JSON, then
     /// each NIF whose export path holds a file Tessalith did not write (a blocked NIF row is skipped, never asked).
     pub fn unanswered_overwrites(&self) -> Vec<String> {
+        // shortcut: the header asks this every frame (export_is_clean), so `review_json` rereads the JSON files once a
+        // second through its 1 s cache, even with no PGPatcher JSON edited (knowing that needs the same read); add a
+        // cheap "any PBR set" check or an mtime key if a large CS PBR or CM set list makes that read show in a profile.
+        let pgp = self
+            .review_json()
+            .into_iter()
+            .find(|l| l.kind == JsonKind::PgPatcher);
+        self.unanswered_with(pgp)
+    }
+
+    /// `unanswered_overwrites` for a PGPatcher JSON line the caller read (the whole-project header reads its own).
+    fn unanswered_with(&self, pgp: Option<JsonLine>) -> Vec<String> {
         let answered = self.review.as_ref().and_then(|r| r.json_answer.as_ref());
         let name = |p: &Path| {
             p.file_name().map_or_else(
@@ -343,10 +380,7 @@ impl AppModel {
                 |n| n.to_string_lossy().into_owned(),
             )
         };
-        // shortcut: the header asks this every frame (export_is_clean), so `review_json` rereads the JSON files once a
-        // second through its 1 s cache, even with no PGPatcher JSON edited (knowing that needs the same read); add a
-        // cheap "any PBR set" check or an mtime key if a large CS PBR or CM set list makes that read show in a profile.
-        let json = self.review_json().into_iter().filter(|l| {
+        let json = pgp.into_iter().filter(|l| {
             l.kind == JsonKind::PgPatcher
                 && l.state == DiskState::Edited
                 && !answered.is_some_and(|a| a.answers(l))
@@ -449,6 +483,7 @@ impl AppModel {
                     .iter()
                     .any(|l| l.kind == JsonKind::PgPatcher && l.state == DiskState::Edited)
             },
+            self.also_runs(),
             || self.has_problem_rows(),
         )
     }
@@ -462,6 +497,7 @@ impl AppModel {
         gate_ok: impl FnOnce() -> bool,
         undecided: impl FnOnce() -> usize,
         json_edited: impl FnOnce() -> bool,
+        also: bool,
         problem_rows: impl FnOnce() -> bool,
     ) -> bool {
         self.export_without_review()
@@ -471,7 +507,7 @@ impl AppModel {
             && undecided() == 0
             && !self.nif_rows_written()
             && !json_edited()
-            && !self.also_runs()
+            && !also
             && !problem_rows()
     }
 
@@ -483,9 +519,9 @@ impl AppModel {
         self.writes_without_review()
     }
 
-    /// E3 (ruling 3c-19): the whole project's expensive terms while a scope is set: file count, gate, undecided and
-    /// problem rows, read through `with_whole_view` once per change of what they read (the view key and the problems
-    /// key), so the per-frame cost is one key compare. Nothing volatile is held here (see `whole_pair`).
+    /// E3 (ruling 3c-24): the whole project's keyed terms while a scope is set, read through `with_whole_view` once
+    /// per change of what they read (the view key and the problems key), so the per-frame cost is one key compare.
+    /// Nothing else is held (see `whole_pair`, `whole_gate`).
     fn whole_terms(&self) -> WholeTerms {
         let key = (self.view_key(), super::bottom::problems_inner(self));
         if let Some((v, p, t)) = &*self.whole_cache.borrow() {
@@ -495,7 +531,7 @@ impl AppModel {
         }
         let t = self.with_whole_view(|| WholeTerms {
             files: self.export_files(),
-            gate_ok: self.review_gate().is_ok(),
+            blocks: pbr_export::export_blocks(self).len(),
             undecided: self.undecided(),
             problem_rows: self.has_problem_rows(),
         });
@@ -503,20 +539,35 @@ impl AppModel {
         t
     }
 
-    /// E3: the PGPatcher JSON of the whole project is edited, re-read once per `REVIEW_JSON_TTL` (one file read) and
-    /// whenever the view key moves, like `review_json`'s own cache, which a scope's lines occupy.
-    fn whole_json_edited(&self) -> bool {
+    /// E3: the whole project's PGPatcher JSON line, re-read once per `REVIEW_JSON_TTL` (one file read) and whenever
+    /// the view key moves: the 1 s cache is for drawing only (ruling 3c-18); a write reads fresh. It has a slot of its
+    /// own because `review_json`'s cache holds the scope's lines.
+    fn whole_pgp_line(&self) -> Option<JsonLine> {
         let key = self.view_key();
-        if let Some((k, at, edited)) = &*self.whole_json.borrow() {
+        if let Some((k, at, line)) = &*self.whole_json.borrow() {
             if *k == key && at.elapsed() < REVIEW_JSON_TTL {
-                return *edited;
+                return line.clone();
             }
         }
-        let edited = self.with_whole_view(|| self.pgp_json_edited());
-        *self.whole_json.borrow_mut() = Some((key, Instant::now(), edited));
-        edited
+        let line = self.with_whole_view(|| self.pgp_json_line());
+        *self.whole_json.borrow_mut() = Some((key, Instant::now(), line.clone()));
+        line
     }
 
+    /// The whole project's gate, every part live except the keyed blocker count and the 1 s JSON line: the same
+    /// checks as `review_gate`, with the Also check of the whole project (a tick runs on a whole-project export, a
+    /// scope or not) and the JSON line of the whole project.
+    fn whole_gate(&self) -> Result<(), String> {
+        if self.export_scope().is_none() {
+            return self.review_gate().map(|_| ());
+        }
+        let t = self.whole_terms();
+        self.gate_check(
+            || t.blocks,
+            self.also_on(),
+            || self.unanswered_with(self.whole_pgp_line()),
+        )
+    }
     /// E3 (ruling 3c-14): `(writes_without_review, export_files)` of the whole project, whatever scope an open Review
     /// was made for (a header click clears the scope first). With no scope it is the live pair. With one, the
     /// expensive terms are the held `whole_terms` and the JSON term has its own 1 s cache; everything volatile
@@ -529,9 +580,13 @@ impl AppModel {
         let t = self.whole_terms();
         let writes = self.writes_rule(
             || t.files,
-            || t.gate_ok,
+            || self.whole_gate().is_ok(),
             || t.undecided,
-            || self.whole_json_edited(),
+            || {
+                self.whole_pgp_line()
+                    .is_some_and(|l| l.state == DiskState::Edited)
+            },
+            self.also_on(),
             || t.problem_rows,
         );
         (writes, t.files)
@@ -539,11 +594,7 @@ impl AppModel {
 
     /// The gate as the header reads it: the whole project's (ruling 3c-21), as the label's answer is.
     fn whole_gate_ok(&self) -> bool {
-        if self.export_scope().is_none() {
-            self.review_gate().is_ok()
-        } else {
-            self.whole_terms().gate_ok
-        }
+        self.whole_gate().is_ok()
     }
 
     /// `whole_pair().0`, without counting files when there is no scope.

@@ -788,6 +788,87 @@ fn scoped_review_with_the_opt_out(m: &mut AppModel, id: &str) {
     m.set_export_without_review(true);
 }
 
+// Ruling 3c-24, one test per input of the header's answer that flips without moving the view key or the Problems key,
+// each with a scoped Review open: the label and the accent follow in the same frame.
+#[test]
+fn a_scoped_review_header_follows_a_foreign_nif_row_going_away() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", Some([7; 32]))]);
+    assert!(
+        m.header_export_text().starts_with("Review ") && !m.header_accent(),
+        "guard: the unanswered foreign NIF closes the gate: {}",
+        m.header_export_text()
+    );
+    m.set_nif_review_rows(vec![]);
+    assert_eq!(
+        m.header_export_text(),
+        "Export 4 files now",
+        "the label follows the row"
+    );
+    assert!(m.header_accent(), "the accent follows the row");
+}
+
+#[test]
+fn a_scoped_review_header_follows_an_overwrite_answer_given_in_review() {
+    use sdc_gui::model::meshes::export::GuardChoice;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    m.set_export_without_review(false);
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", Some([7; 32]))]);
+    assert!(
+        !m.header_accent(),
+        "guard: the unanswered overwrite closes the whole project's gate"
+    );
+    let mut row = support::nif_row("meshes\\x.nif", Some([7; 32]));
+    row.answer = Some(GuardChoice::KeepTheirs);
+    m.set_nif_review_rows(vec![row]);
+    assert!(m.header_accent(), "the answer opens the gate: accent on");
+}
+
+#[test]
+fn a_scoped_review_header_follows_the_also_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    assert_eq!(m.header_export_text(), "Export 4 files now", "guard");
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.also_on(), "guard: the tick took: {}", m.status_line);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.export_scope().is_some(), "guard: still scoped");
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "the whole project with an Also tick opens Review: {}",
+        m.header_export_text()
+    );
+    m.set_also_tick(AlsoTarget::Vanilla, false);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(m.header_export_text(), "Export 4 files now");
+}
+
+#[test]
+fn a_scoped_review_header_follows_a_restored_json() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = exported_row_free_pbr(d.path());
+    let original = std::fs::read(&json).unwrap();
+    m.set_export_without_review(false);
+    let id = sdc_gui::model::sets::set_views(&m)[0].id.clone();
+    let k = key_of(&m, &id);
+    m.export_sets([k].into(), format!("Export set {id}"));
+    assert!(m.review.is_some() && m.export_scope().is_some(), "guard");
+    std::fs::write(&json, "{ \"edited\": true }\n").unwrap();
+    m.expire_review_json();
+    assert!(
+        !m.header_accent(),
+        "guard: the edited JSON's unanswered overwrite closes the whole project's gate"
+    );
+    std::fs::write(&json, &original).unwrap();
+    m.expire_review_json();
+    assert!(m.header_accent(), "the restored JSON opens the gate");
+}
+
 // Ruling 3c-19: the whole-project answer under a scope keeps its volatile terms live (the JSON recheck, the NIF
 // rows, the pending plan), so none of them can leave a stale "now" or a stale Review behind.
 #[test]

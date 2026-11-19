@@ -377,7 +377,7 @@ pub type AfterCommit = Box<dyn FnOnce(&mut AppModel)>;
 /// E3: the whole-project header answer `(writes_without_review, export_files)` and the keys it was read under.
 type WholeAnswer = (ViewKey, ProblemsKey, review::WholeTerms);
 /// E3: whether the whole project's PGPatcher JSON is edited, the view key and the time it was read.
-type WholeJson = (ViewKey, Instant, bool);
+type WholeJson = (ViewKey, Instant, Option<review::JsonLine>);
 
 /// What a scan-database read reads: the mesh keys, the database and its stamp.
 type VoteInputs = (BTreeSet<String>, Option<PathBuf>, cs_pbr::Stamp);
