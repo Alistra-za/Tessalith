@@ -981,11 +981,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
                                     None,
                                 ),
                                 // A packed output is skipped by `extra_member`: Change shader… alone, and Go to
-                                // set still outlines its row.
+                                // set still outlines its row, whichever packed output it is (final wave Group 3).
                                 None => (
                                     shader(),
                                     None,
-                                    packed_output_key(m, v, member).map(SlotTarget::Item),
+                                    packed_member_key(m, v, member).map(SlotTarget::Item),
                                     None,
                                 ),
                             }
@@ -1490,6 +1490,22 @@ fn packed_output_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<St
         .file_name()
         .is_some_and(|f| f == member);
     named.then(|| k.clone())
+}
+
+/// The key of `v`'s packed member (any recipe: the RMAOS slot's, a complex `_m`, a parallax pack) whose output file
+/// name is `member`: the Go to set target of a SHADER-EXTRA-MAP row that `extra_member` skips (final wave Group 3).
+fn packed_member_key(m: &AppModel, v: &sets::SetView, member: &str) -> Option<String> {
+    v.members
+        .iter()
+        .find(|k| {
+            m.item(k).is_some_and(|i| {
+                i.kind == items::ItemKind::Packed
+                    && i.job
+                        .as_ref()
+                        .is_some_and(|j| j.output.file_name().is_some_and(|f| f == member))
+            })
+        })
+        .cloned()
 }
 
 /// Owner A1-7: [`packed_output_key`] when a recipe is written on either packed key of that set

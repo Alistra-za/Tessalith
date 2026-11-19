@@ -3380,6 +3380,72 @@ fn a_shader_map_label_names_its_slot_card() {
     }
 }
 
+/// Final wave Group 3 (review Important 4, ledger line 124): a SHADER-EXTRA-MAP row that names a packed output other
+/// than the RMAOS slot's (here vanilla's complex `_m`) keeps that member as its Go to set target.
+#[test]
+fn an_extra_packed_output_row_keeps_its_member_target() {
+    use sdc_gui::model::items::ItemKind;
+    use sdc_gui::model::nav::SlotTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    m.set_target(engine::config::Target::Vanilla);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    support::complex_material(&mut m, "landscape/rock01");
+    let (key, file) = rock01(&m)
+        .members
+        .iter()
+        .find_map(|k| {
+            let i = m.item(k).filter(|i| i.kind == ItemKind::Packed)?;
+            let f = i.job.as_ref()?.output.file_name()?.to_string_lossy();
+            f.contains("_m.").then(|| (k.clone(), f.into_owned()))
+        })
+        .expect("premise: rock01 packs a complex _m");
+    inject_set(&mut m, &[extra_map(&file)]);
+    let rows = sdc_gui::model::bottom::problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.code == Some(engine::codes::Code::ShaderExtraMap))
+        .expect("the SHADER-EXTRA-MAP row");
+    assert_eq!(row.target, Some(SlotTarget::Item(key)));
+}
+
+/// Final wave Group 3 (ledger line 255): a Problems set filter belongs to the project it was set in, so opening
+/// another folder drops it.
+#[test]
+fn opening_another_folder_drops_the_set_filter() {
+    use sdc_gui::model::bottom::ProblemsFilter;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened(d.path());
+    let key = rock01(&m).key;
+    let root = m.root.clone().expect("premise: a folder is open");
+    for f in [
+        ProblemsFilter::Set(key.clone()),
+        ProblemsFilter::SetNotes(key.clone()),
+        ProblemsFilter::SetChecks(key.clone()),
+    ] {
+        m.bottom.filter = Some(f.clone());
+        let e = tempfile::tempdir().unwrap();
+        let other = e.path().join("textures");
+        std::fs::create_dir_all(&other).unwrap();
+        m.open_folder(other);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, None, "{f:?} is the old project's");
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        // Reopening the same folder keeps it: its sets are the same sets.
+        m.bottom.filter = Some(f.clone());
+        m.open_folder(root.clone());
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(m.bottom.filter, Some(f.clone()), "{f:?}: same folder");
+    }
+    // A filter that names no set is not the folder's.
+    m.bottom.filter = Some(ProblemsFilter::Notes);
+    let e = tempfile::tempdir().unwrap();
+    m.open_folder(e.path().to_path_buf());
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(m.bottom.filter, Some(ProblemsFilter::Notes));
+}
+
 /// Each set row that names a slot or a file carries it for Go to set; the others carry nothing.
 #[test]
 fn set_rows_carry_their_go_to_set_target() {

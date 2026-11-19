@@ -1095,6 +1095,17 @@ impl AppModel {
         self.dropped_fills.clear();
         self.scan_db_error = None;
         let same_folder = self.root.as_ref() == Some(&root);
+        // A Problems filter on a set names a set of this folder: another folder's sets are other sets (final wave
+        // Group 3). A cancelled open goes back to the previous folder without it.
+        if !same_folder {
+            use bottom::ProblemsFilter::{Set, SetChecks, SetNotes};
+            if matches!(
+                self.bottom.filter,
+                Some(Set(_) | SetNotes(_) | SetChecks(_))
+            ) {
+                self.bottom.filter = None;
+            }
+        }
         self.ignored_by_plan = false;
         let project = ProjectDoc::open(&root);
         self.project = Some(project);
