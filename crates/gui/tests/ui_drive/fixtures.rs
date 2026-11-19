@@ -147,10 +147,15 @@ pub fn lookup(name: &str) -> Result<Fixture, String> {
 
 /// Build the fixture in `dir` and start the app on it; `wgpu` false skips the GPU (no `render()`).
 pub fn start(fixture: &str, dir: &Path, wgpu: bool) -> Result<(H, Run), String> {
+    start_with(fixture, dir, if wgpu { harness } else { plain_harness })
+}
+
+/// `start` with the harness `make` builds.
+pub fn start_with(fixture: &str, dir: &Path, make: fn(AppModel) -> H) -> Result<(H, Run), String> {
     let m = lookup(fixture)?(dir);
     let picker = Arc::new(DriverPicker::default());
     m.picker.set_backend(picker.clone());
-    let mut h = if wgpu { harness(m) } else { plain_harness(m) };
+    let mut h = make(m);
     h.state_mut().shell_log = Some(vec![]);
     settle(&mut h, 10);
     Ok((

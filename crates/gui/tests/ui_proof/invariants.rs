@@ -78,8 +78,8 @@ pub struct Pressed {
     pub running_on_key_down: bool,
     /// The same flag after the key came up and the app settled.
     pub running_after_settle: bool,
-    /// The export's record (rows, events, summary, error, notes) differs from before the key: a second witness that
-    /// does not depend on when the flag is read.
+    /// The export's record (rows, events, summary, error, notes, and on the real app the count of exports started)
+    /// differs from before the key: a second witness that does not depend on when the flag is read.
     pub witness_changed: bool,
     /// The entry's marker still holds: false when the key closed the screen.
     pub shown: bool,
@@ -1283,7 +1283,7 @@ fn press_keys(e: &mut dyn Entry, size: Vec2, walked: &mut Walked) {
                 size,
                 name,
                 format!("{name}: export record changed"),
-                "changed the export's record (rows, events, summary, error or notes) without export.running being seen: an export started and ended inside the key's frames",
+                "changed the export's record (rows, events, summary, error, notes or the count of exports started) without export.running being seen: an export started and ended inside the key's frames",
             ));
         }
     }

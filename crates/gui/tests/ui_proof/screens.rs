@@ -16,7 +16,7 @@
 //! - A real scan (the Meshes view's winners and mods come from a scan database): the `meshes view` entry sets made-up
 //!   rows on the model, as the doc shot does.
 
-use crate::app_harness::{plain_harness, settle, H};
+use crate::app_harness::{plain_harness_no_mo2, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
 use crate::invariants::{arm, strike, Entry, Pressed};
@@ -589,7 +589,7 @@ fn enter_inner(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String>
         let m = AppModel::new(GuiSettings::default(), None, crate::support::session());
         let picker = Arc::new(fixtures::DriverPicker::default());
         m.picker.set_backend(picker.clone());
-        let mut h = plain_harness(m);
+        let mut h = plain_harness_no_mo2(m);
         settle(&mut h, 6);
         let run = fixtures::Run {
             dir: d.path().to_path_buf(),
@@ -597,7 +597,7 @@ fn enter_inner(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String>
         };
         (h, run)
     } else {
-        fixtures::start(s.fixture, d.path(), false)?
+        fixtures::start_with(s.fixture, d.path(), plain_harness_no_mo2)?
     };
     h.set_size(size);
     if !settle(&mut h, 2) {
@@ -736,8 +736,9 @@ impl Entry for ScreenEntry {
     }
 
     /// The export witnesses: the running flag the app's gate uses (read on the key-down frame and after settling) and
-    /// the export's record. The record cannot see an export that starts and ends inside the key's frames without
-    /// changing any of these fields; the model has no counter of finished exports to read instead.
+    /// the export's record, with how often an export has started since the folder opened (`drawer_epoch` less
+    /// `folder_epoch`: opening a folder bumps both, starting an export only the first), so a second export that fails
+    /// exactly as the first did is still seen.
     fn press(&mut self, key: Key) -> Result<Pressed, String> {
         let marker = self.screen.marker;
         let (_, h) = self.open.as_mut().ok_or("the screen is not open")?;
@@ -748,14 +749,15 @@ impl Entry for ScreenEntry {
             &|app: &SdcApp| {
                 let e = &app.model.export;
                 format!(
-                    "{} {} {} {} {:?} {} {}",
+                    "{} {} {} {} {:?} {} {} {}",
                     e.revision,
                     e.rows.len(),
                     e.events.len(),
                     e.summary.is_some(),
                     e.error,
                     e.notes.len(),
-                    e.outputs.len()
+                    e.outputs.len(),
+                    app.model.drawer_epoch.wrapping_sub(app.model.folder_epoch)
                 )
             },
             // a timeout is an error of this screen and key (`strike`)
