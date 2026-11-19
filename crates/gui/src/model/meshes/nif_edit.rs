@@ -1565,10 +1565,18 @@ impl NifEdit {
             match self.save_for_switch() {
                 Ok(()) => {
                     self.switch_saved = true;
-                    self.switch_failed = false;
-                    self.retarget_error = None;
-                    self.retarget_fail = None;
-                    self.refresh_blocked();
+                    // ruling E6-R: the failure, its reason and the Export block clear only once the next open here
+                    // loads these ops; a save that reached only the kept autosave keeps them (and stays unsaved, so
+                    // the next change tries the draft again)
+                    match self.durable() {
+                        true => {
+                            self.switch_failed = false;
+                            self.retarget_error = None;
+                            self.retarget_fail = None;
+                            self.refresh_blocked();
+                        }
+                        false => self.unsaved = true,
+                    }
                 }
                 Err(why) => self.set_switch_failed(&why, self.switch_wording),
             }
@@ -2651,6 +2659,12 @@ impl MeshesModel {
         if e.project == to && e.saved_in_draft() {
             return;
         }
+        // ruling E6-R: a no-project edit enters a project only through the one carry (`switch_project`), never through
+        // the ordinary open, which would leave the edit in the shared plain autosave
+        if e.project.is_none() && to.is_some() {
+            self.switch_project(to.as_deref());
+            return;
+        }
         // ruling E6-K: the retry just saved; when the next open still would not load the edits the switch keeps
         // waiting, in the failed state, without saving the same edits a second time
         if let Err(w) = e.durable_leaving(Some(&to)) {
@@ -2738,10 +2752,12 @@ impl MeshesModel {
                     } else {
                         e.save();
                         if e.unsaved {
-                            // the reason stays on the footer and the export until a save into P works
+                            // ruling E6-R: the reason stays on the footer and the export, and the switch waits, so each
+                            // later save tries P's draft again, until P's own files load these ops
                             let why = e.error.take().unwrap_or_default();
                             e.set_switch_failed(&why, true);
                             self.error = e.retarget_error.clone();
+                            self.pending_root = Some(Some(p.to_path_buf()));
                         }
                     }
                     return;

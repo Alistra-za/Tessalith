@@ -7135,6 +7135,84 @@ fn a_replaced_kept_loser_stays_at_its_name() {
     assert!(open, "the leave is refused: nowhere took the edit");
 }
 
+/// Review round 4 (Critical "Edit without a project, make plain unwritable, request fresh P ..." and Important "Carry
+/// X into P with `_sdc` blocked by a file ...", ruling E6-R): every route by which a no-project edit enters P runs the
+/// one carry, and its failure stays until P's own files would load the live ops.
+#[test]
+fn every_route_into_a_project_runs_the_one_carry() {
+    table(&[
+        (
+            "edit without a project, make plain unwritable, request fresh P, restore write access, and make one more \
+             edit",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                read_only(&autosave(&d), true);
+                gloss(&mut m, 13.5); // not saved
+                m.set_project_root(Some(&p));
+                assert_eq!(
+                    m.edit.as_ref().unwrap().draft_path,
+                    autosave(&d),
+                    "premise: the switch waits"
+                );
+                read_only(&autosave(&d), false);
+                gloss(&mut m, 14.5);
+                assert_eq!(
+                    doc_values(&draft(&p)),
+                    [12.5, 13.5, 14.5],
+                    "P's draft holds the edit after the retry"
+                );
+                if autosave(&d).exists() {
+                    std::fs::remove_file(autosave(&d)).unwrap();
+                }
+                drop(m); // quit
+                let mut m = restart(&d, &p);
+                m.open_edit();
+                assert_eq!(vals(&m), [12.5, 13.5, 14.5], "reopening P loads it");
+            },
+        ),
+        (
+            "carry X into P with _sdc blocked by a file, leave the obstruction in place, make edit Y, then quit and \
+             reopen P",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                std::fs::write(p.join("_sdc"), b"a file").unwrap();
+                m.set_project_root(Some(&p));
+                assert_eq!(vals(&m), [12.5], "premise: carried, P's draft not written");
+                gloss(&mut m, 13.5);
+                let why = m.edit.as_ref().unwrap().export_block().unwrap_or_default();
+                assert!(
+                    why.starts_with("Could not save the edits of"),
+                    "the reason is still shown: {why}"
+                );
+                assert_eq!(m.quick_export_block().as_deref(), Some(why.as_str()));
+                std::fs::remove_file(p.join("_sdc")).unwrap();
+                gloss(&mut m, 14.5);
+                assert_eq!(
+                    doc_values(&draft(&p)),
+                    [12.5, 13.5, 14.5],
+                    "the next save writes P's draft"
+                );
+                assert!(!m
+                    .edit
+                    .as_ref()
+                    .unwrap()
+                    .export_block()
+                    .is_some_and(|w| w.starts_with("Could not save the edits of")));
+                drop(m); // quit
+                let mut m = restart(&d, &p);
+                m.open_edit();
+                assert_eq!(vals(&m), [12.5, 13.5, 14.5], "reopening P loads X and Y");
+            },
+        ),
+    ]);
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.
