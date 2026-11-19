@@ -982,4 +982,51 @@ mod tests {
         );
         assert_eq!(slot_path_key(""), "");
     }
+
+    /// Ruling 3b-F10 (c): `slot_path_key` does not drift from `pgpsim`. For each spelling of `slot4`, the path the
+    /// simulated PGPatcher asks the game for (its `exists` callback) and puts in the material is the key.
+    #[test]
+    fn slot_path_key_is_the_path_pgpsim_looks_up() {
+        use std::cell::RefCell;
+        let mut source = pgpsim::MaterialState::builtin_default();
+        source.set_slot_raw(0, r"textures\arch\wall.dds");
+        let default = serde_json::Value::Null;
+        for spelling in [
+            r"textures\pbr\arch\wall_p.dds",
+            r"pbr\arch\wall_p.dds",
+            r"TEXTURES\PBR\Arch\Wall_P.dds",
+            r"Textures\other\x_p.dds",
+            r"other\textures\pbr\arch\wall_p.dds",
+            "textures/pbr/arch/wall_p.dds",
+            r"\textures\pbr\arch\wall_p.dds",
+        ] {
+            let seen = RefCell::new(vec![]);
+            let exists = |p: &str| {
+                seen.borrow_mut().push(p.to_string());
+                true
+            };
+            let entry = serde_json::json!({"match1": r"arch\wall.dds", "slot4": spelling});
+            let r = pgpsim::simulate(&pgpsim::SimInput {
+                entry: &entry,
+                default: &default,
+                nif_path: r"meshes\arch\wall.nif",
+                source: &source,
+                exists: &exists,
+            });
+            let key = slot_path_key(spelling);
+            let pgpsim::SimResult::Patched { material, .. } = r else {
+                panic!("{spelling}: {r:?}");
+            };
+            assert_eq!(
+                material.slots[3].raw.to_ascii_lowercase(),
+                key,
+                "{spelling}"
+            );
+            assert!(
+                seen.borrow().contains(&key),
+                "{spelling}: {:?}",
+                seen.borrow()
+            );
+        }
+    }
 }

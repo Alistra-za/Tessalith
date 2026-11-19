@@ -1263,6 +1263,55 @@ fn export_takes_a_linked_slot_7_over_an_own_cnr_and_f() {
     assert_eq!(e["slot7"], json!(path));
 }
 
+/// Ruling 3b-F10 (a), pinning 3b-F5: a typed path no set writes on slot 7 (`_cnr` + `_f`) or slot 3 (`_g` + `_sk`)
+/// is the one path the JSON carries there, so the clash block goes and the written entry names the typed path.
+#[test]
+fn export_takes_a_typed_path_over_a_clashing_slot_7_or_3() {
+    let cases = [
+        (
+            7u8,
+            [
+                ("leaf_cnr.png", Subtype::CoatNormal),
+                ("leaf_f.png", Subtype::PbrFuzz),
+            ],
+            "arch/leaf: _cnr and _f both use slot 7",
+        ),
+        (
+            3,
+            [
+                ("leaf_g.png", Subtype::PbrEmissive),
+                ("leaf_sk.png", Subtype::SkinSk),
+            ],
+            "arch/leaf: _g and _sk both use slot 3",
+        ),
+    ];
+    let typed = r"textures\other\typed.dds";
+    for (n, files, clash) in cases {
+        let d = tempfile::tempdir().unwrap();
+        let extra: Vec<_> = files
+            .iter()
+            .map(|(f, s)| (*f, [128, 128, 255], *s))
+            .collect();
+        let mut m = no_albedo_pair_with(d.path(), &extra);
+        assert!(
+            block_texts(&m).iter().any(|b| b == clash),
+            "premise (slot {n}): {:?}",
+            block_texts(&m)
+        );
+        m.set_slot_command(LEAF, n, SlotCommand::Path(typed.into()))
+            .unwrap();
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert!(
+            !block_texts(&m).iter().any(|b| b == clash),
+            "slot {n}: {:?}",
+            block_texts(&m)
+        );
+        let (e, notes) = exported_entry(&mut m, LEAF_MATCH);
+        let e = e.unwrap_or_else(|| panic!("slot {n}: no entry for arch/leaf: {notes}"));
+        assert_eq!(e[format!("slot{n}")], json!(typed), "slot {n}");
+    }
+}
+
 /// R1 (d): a clear over a fill that has no output path (a borrow from `arch/bump`, a set that is not PBR, so its
 /// output has no explicit path): the JSON clears the slot, so nothing blocks on that path.
 #[test]

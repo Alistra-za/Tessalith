@@ -1204,13 +1204,15 @@ fn leaf_takes_stone(m: &mut AppModel, by_link: bool) {
     idle(m);
 }
 
-/// Every file under `root`, as `/`-separated paths relative to it, sorted.
+/// Every file under `root`, as `/`-separated paths relative to it, sorted. An unreadable folder or entry fails the
+/// test, naming the folder (ruling 3b-F10: a skipped one would hide a missing file).
 fn files_under(root: &Path) -> Vec<String> {
     let mut out = vec![];
     let mut todo = vec![root.to_path_buf()];
     while let Some(d) = todo.pop() {
-        for e in std::fs::read_dir(&d).into_iter().flatten().flatten() {
-            let p = e.path();
+        let entries = std::fs::read_dir(&d).unwrap_or_else(|e| panic!("{}: {e}", d.display()));
+        for e in entries {
+            let p = e.unwrap_or_else(|e| panic!("{}: {e}", d.display())).path();
             if p.is_dir() {
                 todo.push(p);
             } else {

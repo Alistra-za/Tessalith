@@ -23,3 +23,5 @@ HP6	HP		back	JR		partial	2026-11-18		goes: SETS_W 260, Sets narrowing only by ti
 HP10	HP		back	JR		partial	2026-11-18		goes: opening a set at 1055 narrows Sets only by 20 px (HP12 (a): 266 to 172 px); stays: the test support
 JR1	JR		back	JR		partial	2026-11-18		goes: shown only on a set that exports a JSON entry (`exports_json`), and a `slotN = ""` read as left out on every set (JR14: a set that writes an entry, `writes_entry`, statics included); stays: the rest
 JR9	JR		back	JR		partial	2026-11-18		goes: `features` computed where `exports_json` holds (JR14: where `writes_entry` holds, statics included); stays: the rest
+JR¶Review E's sets plan	JR		back	JR		partial	2026-11-18		goes: the exported JSON changes only as JR8 and JR9 say (JR14: an entry also comes in or is held as a whole, 3b-F5 and 3b-F7); stays: the rest
+JR7	JR		back	JR		partial	2026-11-18		goes: nothing on which entry the simulator is given (JR7: the candidate entry, with no stored slotN command on a set that writes no entry, 3b-F9); stays: the rest
