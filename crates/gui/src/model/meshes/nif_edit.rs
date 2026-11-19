@@ -351,19 +351,35 @@ pub fn edit_slot_shown(shader_type: u32, slsf1: u32, slsf2: u32, slot: usize) ->
     }
 }
 
+/// The four texture clamp modes in nif.xml's `TexClampMode` order (S is U, T is V).
+pub const CLAMP_MODE_LABELS: [&str; 4] = [
+    "Clamp both",
+    "Clamp U, wrap V",
+    "Wrap U, clamp V",
+    "Wrap both",
+];
+
+/// A clamp mode in words; a value outside 0-3 reads "Other (n)".
+pub fn clamp_mode_label(n: u32) -> String {
+    match CLAMP_MODE_LABELS.get(n as usize) {
+        Some(l) => (*l).to_string(),
+        None => format!("Other ({n})"),
+    }
+}
+
 /// A field in words, as the tabs name it (Meshes UI T3: no `Slsf1` or `UvOffset(0)` in the pending list).
 pub fn field_label(f: Field) -> String {
     let axis = |n: u8| ["U", "V"].get(n as usize).copied().unwrap_or("?");
     let rgb = |n: u8| ["R", "G", "B"].get(n as usize).copied().unwrap_or("?");
     match f {
         Field::ShaderType => "Shader type".into(),
-        Field::Slsf1 => "SLSF1 flags".into(),
-        Field::Slsf2 => "SLSF2 flags".into(),
+        Field::Slsf1 => "Shader flags 1".into(),
+        Field::Slsf2 => "Shader flags 2".into(),
         Field::UvOffset(n) => format!("UV offset {}", axis(n)),
         Field::UvScale(n) => format!("UV scale {}", axis(n)),
         Field::EmissiveColor(n) => format!("Emissive colour {}", rgb(n)),
         Field::EmissiveMultiple => "Emissive multiple".into(),
-        Field::ClampMode => "Clamp mode".into(),
+        Field::ClampMode => "Texture wrap".into(),
         Field::Alpha => "Shader alpha".into(),
         Field::Refraction => "Refraction strength".into(),
         Field::Glossiness => "Glossiness".into(),
@@ -500,7 +516,7 @@ pub fn op_name(op: &Op) -> String {
     match op {
         Op::SetField { field, .. } | Op::SetBits { field, .. } => {
             let f = field_label(*field);
-            // "Shader type" reads "Set shader type"; an initialism ("SLSF1 flags", "UV offset U") keeps its case.
+            // "Shader type" reads "Set shader type"; an initialism ("UV offset U") keeps its case.
             let mut c = f.chars();
             match (c.next(), c.next()) {
                 (Some(a), Some(b)) if b.is_lowercase() => {

@@ -67,7 +67,10 @@ pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u
                 ui.weak(format!("slot {}: {p}", i + 1));
             }
             if slots.iter().all(String::is_empty) {
-                ui.colored_label(AMBER, "The TXST has no textures");
+                ui.colored_label(AMBER, "This texture set has no textures")
+                    .on_hover_ui(|ui| {
+                        ui.label("The plugin's texture set (TXST) lists no texture files.");
+                    });
             }
         });
     }

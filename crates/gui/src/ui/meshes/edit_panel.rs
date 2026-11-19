@@ -161,7 +161,13 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         });
         ui.data_mut(|d| d.insert_temp(tab_id, tab));
         // Meshes UI T6 (Note CZ21): what the tabs act on, always in sight.
-        ui.add(egui::Label::new(editing_line(e)).truncate());
+        let (line, class) = editing_line(e);
+        let r = ui.add(egui::Label::new(line).truncate());
+        if let Some(class) = class {
+            r.on_hover_ui(|ui| {
+                ui.label(class);
+            });
+        }
         ui.separator();
         let measured = ui.cursor().min.y - tabs_start;
         ui.data_mut(|d| *d.get_temp_mut_or(tabs_h_id, 28.0f32) = measured);
@@ -196,19 +202,31 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     apply(m, act);
 }
 
-/// "Editing: BodyMesh (BSTriShape)", or "Editing: Root (NiNode)" while the root is selected.
-fn editing_line(e: &NifEdit) -> String {
+/// "Editing: BodyMesh", or "Editing: Root" while the root is selected, and the block's NIF class for the hover.
+fn editing_line(e: &NifEdit) -> (String, Option<String>) {
     match e.selection {
-        Selection::Root if e.model.root_kind.is_empty() => "Editing: Root".into(),
-        Selection::Root => format!("Editing: Root ({})", e.model.root_kind),
+        Selection::Root => (
+            "Editing: Root".into(),
+            Some(&*e.model.root_kind)
+                .filter(|k| !k.is_empty())
+                .map(block_type_hover),
+        ),
         Selection::Shape(b) => match e.model.shape(b) {
-            Some(s) => format!(
-                "Editing: {} ({:?})",
-                s.name.as_deref().unwrap_or("(unnamed)"),
-                s.kind
+            Some(s) => (
+                format!("Editing: {}", s.name.as_deref().unwrap_or("(unnamed)")),
+                Some(block_type_hover(&format!("{:?}", s.kind))),
             ),
-            None => format!("Editing: block {b} (not in this NIF)"),
+            None => (format!("Editing: block {b} (not in this NIF)"), None),
         },
+    }
+}
+
+/// The hover of the editing line: the block's NIF class, with a sentence for the two a modder meets most.
+fn block_type_hover(kind: &str) -> String {
+    match kind {
+        "BSDynamicTriShape" => "Block type: BSDynamicTriShape, a shape whose vertices the game can move while it plays, as on heads and faces.".into(),
+        "BSFadeNode" => "Block type: BSFadeNode, the NIF's top node. The game fades it out with distance.".into(),
+        _ => format!("Block type: {kind}."),
     }
 }
 

@@ -558,7 +558,13 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
             if f == crate::model::meshes::NifFilter::Wins && m.selected_mod.is_none() {
                 continue;
             }
-            if ui.selectable_label(m.filter == f, f.label()).clicked() {
+            let r = ui.selectable_label(m.filter == f, f.label());
+            if f == crate::model::meshes::NifFilter::Wins {
+                r.clone().on_hover_ui(|ui| {
+                    ui.label("NIFs where this mod's copy is the one the game loads.");
+                });
+            }
+            if r.clicked() {
                 m.filter = f;
             }
         }
@@ -1380,7 +1386,7 @@ fn shape(
         s.block,
     );
     let bold = |t: String| egui::RichText::new(t).strong();
-    ui.label(match s.shader_kind {
+    let shader = ui.label(match s.shader_kind {
         1 => bold(
             s.shader_type
                 .map_or_else(|| "type ?".into(), shader_type_name),
@@ -1392,6 +1398,11 @@ fn shape(
         )),
         _ => egui::RichText::new("No shader"),
     });
+    if let (1, Some(t)) = (s.shader_kind, s.shader_type) {
+        shader.on_hover_ui(|ui| {
+            ui.label(format!("Shader type {t} in the NIF."));
+        });
+    }
     let empty = s.textures.iter().filter(|t| t.is_none()).count();
     ui.indent(("slots", s.block), |ui| {
         for (i, t) in s.textures.iter().enumerate() {

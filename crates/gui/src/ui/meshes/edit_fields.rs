@@ -1,7 +1,9 @@
 //! The edit panel's Shader and Alpha tabs (spec §7, plan A17). Widgets only read the session; every change is
 //! collected in an [`Act`] that `edit_panel::panel` applies after drawing.
 use crate::look::Combo036 as _;
-use crate::model::meshes::nif_edit::{edit_slot_label, edit_slot_shown, NifEdit, Selection};
+use crate::model::meshes::nif_edit::{
+    clamp_mode_label, edit_slot_label, edit_slot_shown, NifEdit, Selection, CLAMP_MODE_LABELS,
+};
 use crate::model::meshes::pg_entries::pg_ignore;
 use crate::model::meshes::{shader_type_name, MeshesModel, SHADER_TYPES};
 use crate::pgp::alpha::{AlphaFlags, BLEND_MODES, DEFAULT_FLAGS, DEFAULT_THRESH, TEST_FUNCS};
@@ -366,14 +368,19 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
             .selected_text(&shown)
             .show_ui_036(ui, |ui| {
                 for (i, n) in SHADER_TYPES.iter().enumerate() {
-                    ui.selectable_value(&mut t, i as u32, format!("{n} ({i})"));
+                    ui.selectable_value(&mut t, i as u32, *n);
                 }
             })
             .response;
         let typ = egui::Role::ComboBox;
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
-        r.on_hover_text(TYPE_HOVER);
+        r.on_hover_ui(|ui| {
+            ui.label(format!(
+                "Shader type {} in the NIF. {TYPE_HOVER}",
+                lt.shader_type
+            ));
+        });
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {
                 at: at.clone(),
@@ -452,28 +459,47 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         p.emissive_multiple,
     );
     ui.horizontal(|ui| {
-        row_label(ui, "Clamp mode");
+        row_label(ui, "Texture wrap");
         let mut c = p.texture_clamp_mode;
-        let r = ui.add(egui::DragValue::new(&mut c));
+        let shown = clamp_mode_label(c);
+        let r = egui::ComboBox::from_id_salt(("meshes-edit-clamp", at.block))
+            .width(200.0)
+            .selected_text(&shown)
+            .show_ui_036(ui, |ui| {
+                for (i, n) in CLAMP_MODE_LABELS.iter().enumerate() {
+                    ui.selectable_value(&mut c, i as u32, *n);
+                }
+                // A value outside 0-3 stays shown and selected, but cannot be picked again.
+                if p.texture_clamp_mode as usize >= CLAMP_MODE_LABELS.len() {
+                    ui.add_enabled(false, egui::Button::selectable(true, shown.clone()));
+                }
+            })
+            .response;
         set_name(
             &r,
-            egui::Role::SpinButton,
-            "Clamp mode",
-            Some(c as f64),
+            egui::Role::ComboBox,
+            "Texture wrap",
             None,
+            Some(shown),
         );
         take_focus(ui, &r, Field::ClampMode);
+        let clamp = p.texture_clamp_mode;
+        r.on_hover_ui(|ui| {
+            ui.label(format!(
+                "Clamp mode {clamp} in the NIF. Wrap repeats the texture past its edge; clamp stretches the edge pixel."
+            ));
+        });
         if c != p.texture_clamp_mode {
-            let op = Op::SetField {
-                at: at.clone(),
-                field: Field::ClampMode,
-                value: Value::U32(c),
-                base: Value::U32(p.texture_clamp_mode),
-            };
-            let key = merge_key(&op);
-            act.push = Some((vec![op], Some(key)));
+            act.push = Some((
+                vec![Op::SetField {
+                    at: at.clone(),
+                    field: Field::ClampMode,
+                    value: Value::U32(c),
+                    base: Value::U32(p.texture_clamp_mode),
+                }],
+                None,
+            ));
         }
-        act.flush |= r.drag_stopped() || r.lost_focus();
     });
     warnings(
         ui,
@@ -534,11 +560,25 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
     }
 
     ui.separator();
-    for (label, field, v, names) in [
-        ("SLSF1", Field::Slsf1, lt.slsf1, &SLSF1_NAMES),
-        ("SLSF2", Field::Slsf2, lt.slsf2, &SLSF2_NAMES),
+    for (label, title, nifskope, field, v, names) in [
+        (
+            "SLSF1",
+            "Shader flags 1",
+            "SLSF1 in NifSkope.",
+            Field::Slsf1,
+            lt.slsf1,
+            &SLSF1_NAMES,
+        ),
+        (
+            "SLSF2",
+            "Shader flags 2",
+            "SLSF2 in NifSkope.",
+            Field::Slsf2,
+            lt.slsf2,
+            &SLSF2_NAMES,
+        ),
     ] {
-        egui::CollapsingHeader::new(format!("{label} 0x{v:08X}"))
+        let section = egui::CollapsingHeader::new(format!("{title} (0x{v:08X})"))
             .id_salt(("meshes-edit-flags", e.session, label, at.block)) // final review Minor 1: per session
             // Meshes UI T6 (Note CZ21): closed by default, so the slots and the values come first; open when a flag
             // has a warning, so its Fix is in sight. shortcut: `default_open` acts on the first draw only, so a warning
@@ -615,6 +655,9 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                     }
                 }
             });
+        section.header_response.on_hover_ui(|ui| {
+            ui.label(nifskope);
+        });
     }
 }
 
@@ -872,7 +915,10 @@ pub(super) fn alpha_tab(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
     };
     let on_shape = anchor_shape(&e.model, shape.block);
     let Some(a) = shape.alpha.and_then(|b| e.model.alphas.get(&b)) else {
-        ui.label("This shape has no NiAlphaProperty.");
+        ui.label("This shape has no alpha settings.")
+            .on_hover_ui(|ui| {
+                ui.label("The NIF has no NiAlphaProperty block for this shape.");
+            });
         if ui.button("Add alpha").clicked() {
             act.push = Some((
                 vec![Op::AddAlpha {

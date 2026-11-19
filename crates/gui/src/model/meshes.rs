@@ -59,10 +59,10 @@ pub const SHADER_TYPES: [&str; 21] = [
     "FO4 Dismemberment",
 ];
 
-/// `Environment Map (1)`; an unknown number shows as `type N`.
+/// `Environment Map`, without its number (the hover says it); an unknown number shows as `type N`.
 pub fn shader_type_name(t: u32) -> String {
     match SHADER_TYPES.get(t as usize) {
-        Some(n) => format!("{n} ({t})"),
+        Some(n) => (*n).to_string(),
         None => format!("type {t}"),
     }
 }
@@ -130,7 +130,7 @@ impl NifFilter {
     pub fn label(self) -> &'static str {
         match self {
             NifFilter::All => "All",
-            NifFilter::Wins => "Wins",
+            NifFilter::Wins => "Winning",
             NifFilter::Overridden => "Overridden",
             NifFilter::Conflicted => "Conflicted",
             NifFilter::Problems => "Problems",

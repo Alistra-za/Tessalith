@@ -2133,7 +2133,7 @@ fn edit_cards_show_the_edited_values() {
     // The flags are no longer on the card; the edit panel's Shader tab shows the edited word.
     h.state_mut().select_edit(Selection::Shape(shape));
     h.run_steps(3);
-    h.get_by_label(&format!("SLSF1 0x{f1_now:08X}"));
+    h.get_by_label(&format!("Shader flags 1 (0x{f1_now:08X})"));
 }
 
 #[test]
@@ -2566,6 +2566,103 @@ fn edit_controls_have_names_and_roles() {
         h.get_by_role_and_label(AkRole::ComboBox, l);
     }
     h.get_by_role_and_label(AkRole::Slider, "Threshold");
+}
+
+/// Review jargon list: the clamp mode names follow nif.xml's TexClampMode (S is U, T is V).
+#[test]
+fn clamp_mode_labels_follow_the_nif_order() {
+    assert_eq!(
+        CLAMP_MODE_LABELS,
+        [
+            "Clamp both",
+            "Clamp U, wrap V",
+            "Wrap U, clamp V",
+            "Wrap both"
+        ]
+    );
+    assert_eq!(clamp_mode_label(3), "Wrap both");
+    assert_eq!(clamp_mode_label(7), "Other (7)");
+}
+
+/// One BSTriShape "S" with a BSLightingShaderProperty whose clamp mode is `clamp`.
+fn one_shape_clamp(clamp: u32) -> Vec<u8> {
+    let mut n = Nif::new(100);
+    let s = n.string("S");
+    n.block("BSTriShape", one_tri(s, 1));
+    let mut lsp = scenes::lsp(0, -1);
+    lsp[60..64].copy_from_slice(&clamp.to_le_bytes()); // after the shader type, the net, 2 flag words, uv, texture set, emissive
+    n.block("BSLightingShaderProperty", lsp);
+    n.bytes()
+}
+
+/// Review jargon list: a clamp mode outside 0-3 is shown as "Other (7)", drawing never changes it, and a pick of one
+/// of the four named values is the usual SetField op.
+#[test]
+fn an_unknown_clamp_mode_is_shown_and_never_changed() {
+    let mut m = direct(one_shape_clamp(7));
+    select(&mut m, "S");
+    let mut h = view(m);
+    h.run_steps(5);
+    let combo = h.get_by_role_and_label(AkRole::ComboBox, "Texture wrap");
+    assert_eq!(combo.accesskit_node().value().as_deref(), Some("Other (7)"));
+    assert!(h.query_by_label("Clamp mode").is_none());
+    {
+        let e = h.state().edit.as_ref().unwrap();
+        assert!(e.doc.ops().is_empty());
+        assert!(!e.touched());
+    }
+    h.get_by_role_and_label(AkRole::ComboBox, "Texture wrap")
+        .click();
+    h.run_steps(4);
+    let other = h.get_by_label("Other (7)");
+    assert!(other.accesskit_node().is_disabled());
+    h.get_by_label("Wrap both").click();
+    h.run_steps(4);
+    let o = ops(h.state());
+    assert_eq!(o.len(), 1, "{o:?}");
+    match &o[0] {
+        Op::SetField {
+            field, value, base, ..
+        } => {
+            assert_eq!(*field, Field::ClampMode);
+            assert_eq!(*value, Value::U32(3));
+            assert_eq!(*base, Value::U32(7));
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Review jargon list: a face-tint shape (type 4) and a block on the NIF panel read in plain words; the class names
+/// are on hover only.
+#[test]
+fn the_nif_panel_uses_plain_labels_and_keeps_the_class_on_hover() {
+    let mut n = builder::Nif::new(100);
+    let (a, b) = (n.string("A"), n.string("B"));
+    n.block("BSTriShape", one_tri(a, 2));
+    n.block("BSTriShape", one_tri(b, 3));
+    n.block("BSLightingShaderProperty", scenes::lsp(0, -1));
+    n.block("BSLightingShaderProperty", scenes::lsp(4, -1));
+    let mut m = direct(n.bytes());
+    select(&mut m, "B");
+    let mut h = view(m);
+    h.run_steps(5);
+    h.get_by_label("Editing: B").hover();
+    h.run_steps(30);
+    h.get_by_label_contains("Block type: BSTriShape");
+    assert_eq!(
+        h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+            .accesskit_node()
+            .value()
+            .as_deref(),
+        Some("Face Tint")
+    );
+    h.get_by_role_and_label(AkRole::ComboBox, "Texture wrap");
+    assert!(h.query_by_label("Clamp mode").is_none());
+    h.get_by_label_contains("Shader flags 1 (0x");
+    h.get_by_label_contains("Shader flags 2 (0x");
+    for bad in ["SLSF1", "SLSF2", "BSDynamicTriShape", "(4)"] {
+        assert_eq!(h.query_all_by_label_contains(bad).count(), 0, "{bad}");
+    }
 }
 
 /// A colour change is three channel ops; a drag of the picker merges them as three ops with the first bases.
@@ -4180,17 +4277,17 @@ fn a_red_row_opens_the_pending_list_and_rows_read_as_words() {
     h.run_steps(3);
     h.get_by_label("Pending edits (2)");
     h.get_by_label("Blocked: 1 edit cannot be applied.");
-    h.get(row(": SLSF1 flags"));
+    h.get(row(": Shader flags 1"));
     assert!(h.query_by_label_contains("Slsf1").is_none());
     h.get_by_label_contains(": Texture slot 1: ");
     // Closed by hand, Show opens it again.
     h.get_by_label("Pending edits (2)").click();
     h.run_steps(3);
-    assert!(h.query(row(": SLSF1 flags")).is_none());
+    assert!(h.query(row(": Shader flags 1")).is_none());
     h.get_by_role_and_label(AkRole::Button, "Show pending edits")
         .click();
     h.run_steps(3);
-    h.get(row(": SLSF1 flags"));
+    h.get(row(": Shader flags 1"));
 }
 
 /// Meshes UI T3: without an export folder Review… stays on. Note GH5: an untouched session reads the idle "No edits" line,
@@ -4368,7 +4465,7 @@ fn a_path_typed_without_enter_survives_a_click_on_a_later_control() {
     );
     let mut h = view(m);
     h.run_steps(3);
-    let clear = format!("Clear the flag: {SKIN_TINT} (SLSF1 flags)");
+    let clear = format!("Clear the flag: {SKIN_TINT} (Shader flags 1)");
     h.get_by_role_and_label(AkRole::Button, &clear)
         .scroll_to_me();
     h.run_steps(3);
@@ -9132,7 +9229,7 @@ fn a_shader_type_change_clears_the_flag_in_the_same_undo_step() {
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
         .click();
     h.run_steps(3);
-    h.get_by_label("Default (0)").click();
+    h.get_by_label("Default").click();
     h.run_steps(3);
     h.get_by_label("Skin tint flag cleared: it needs the Skin Tint shader type.");
     assert!(h.query_by_label(SKIN_TINT).is_none());
@@ -9166,7 +9263,7 @@ fn a_type_change_off_11_clears_the_mlp_flag_in_the_same_undo_step() {
     h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
         .click();
     h.run_steps(3);
-    h.get_by_label("Environment Map (1)").click();
+    h.get_by_label("Environment Map").click();
     h.run_steps(3);
     h.get_by_label("Multi-layer parallax flag cleared: it needs shader type 11.");
     let m = h.state_mut();
@@ -9605,7 +9702,7 @@ fn the_panel_says_which_shape_it_edits() {
     select(&mut m, "S");
     let mut h = view(m);
     h.run_steps(2);
-    let line = h.get_by_label("Editing: S (BSTriShape)").rect();
+    let line = h.get_by_label("Editing: S").rect();
     let tabs = h.get_by_label("Extra data tab").rect();
     assert!(
         line.min.y >= tabs.max.y,
@@ -9613,10 +9710,10 @@ fn the_panel_says_which_shape_it_edits() {
     );
     h.state_mut().select_edit(Selection::Root);
     h.run_steps(2);
-    h.get_by_label("Editing: Root (NiNode)");
+    h.get_by_label("Editing: Root");
 }
 
-/// The Shader tab puts the texture slots first, and the SLSF1 / SLSF2 flag lists start closed.
+/// The Shader tab puts the texture slots first, and the two shader-flag lists start closed.
 #[test]
 fn shader_tab_shows_slots_first_and_flags_closed() {
     let mut m = direct(scenes::shared_alpha_and_set());
@@ -9632,18 +9729,21 @@ fn shader_tab_shows_slots_first_and_flags_closed() {
     assert!(slot.max.y <= ty.min.y, "slots first: {slot:?} {ty:?}");
     assert!(
         h.query_by_label("Specular").is_none(),
-        "SLSF1 starts closed"
+        "the first flag list starts closed"
     );
-    h.get_by_label_contains("SLSF1 0x").click();
+    h.get_by_label_contains("Shader flags 1 (0x").click();
     h.run_steps(3);
     h.get_by_label("Specular");
 }
 
-/// Meshes UI T6: opens the Shader tab's SLSF1 and SLSF2 flag lists (closed by default). T6 review Minor 4: a list
+/// Meshes UI T6: opens the Shader tab's two shader-flag lists (closed by default). T6 review Minor 4: a list
 /// already open (its first flag is drawn) is left open.
 fn open_flags(h: &mut Harness<'static, MeshesModel>) {
     use nif::material::{SLSF1_NAMES, SLSF2_NAMES};
-    for (flags, first) in [("SLSF1 0x", SLSF1_NAMES[0]), ("SLSF2 0x", SLSF2_NAMES[0])] {
+    for (flags, first) in [
+        ("Shader flags 1 (0x", SLSF1_NAMES[0]),
+        ("Shader flags 2 (0x", SLSF2_NAMES[0]),
+    ] {
         if h.query_by_role_and_label(AkRole::CheckBox, first).is_some() {
             continue;
         }
@@ -9772,7 +9872,7 @@ fn repeated_fix_and_conflict_buttons_have_unique_names() {
     h.run_steps(2);
     h.get_by_role_and_label(
         AkRole::Button,
-        &format!("Clear the flag: {SKIN_TINT} (SLSF1 flags)"),
+        &format!("Clear the flag: {SKIN_TINT} (Shader flags 1)"),
     );
     // T7 review Minor 5: two fix buttons on one tab have two different names.
     let mut m = direct(typed(0, (1 << 21) | (1 << 10)));
@@ -9852,7 +9952,7 @@ fn the_editing_line_names_unnamed_and_missing_shapes() {
     m.select_edit(Selection::Shape(12));
     let mut h = view(m);
     h.run_steps(2);
-    h.get_by_label("Editing: (unnamed) (BSTriShape)");
+    h.get_by_label("Editing: (unnamed)");
     h.state_mut().select_edit(Selection::Shape(999));
     h.run_steps(2);
     h.get_by_label("Editing: block 999 (not in this NIF)");

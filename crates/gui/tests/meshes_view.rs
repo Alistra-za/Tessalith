@@ -230,7 +230,7 @@ fn shapes_show_shader_type_flags_and_slot_resolution() {
     h.run();
     h.get_by_label("LE mesh: optimise it for SSE, e.g. with Cathedral Assets Optimizer.");
     h.get_by_label_contains("Body");
-    h.get_by_label_contains("Environment Map (1)");
+    h.get_by_label_contains("Environment Map");
     // Meshes UI T2: the winning mod of each texture sits in Details, closed by default.
     assert!(h.query_by_label_contains("→ A (2 copies)").is_none());
     h.get_by_label("Details of NIF block 4").click();
@@ -1441,19 +1441,34 @@ fn overridden_in_any_mod_lists_the_losing_copies_and_wins_is_hidden() {
     assert!(!m.nif_at(first).0.wins);
     let mut h = harness(m);
     h.run();
-    assert!(h.query_by_role_and_label(Role::Button, "Wins").is_none());
+    assert!(h.query_by_role_and_label(Role::Button, "Winning").is_none());
     h.get_by_role_and_label(Role::Button, "Overridden");
     h.get_by_label("meshes/rock.nif");
     h.get_by_role_and_label(Role::Label, "A");
     let a = h.state().mods.iter().find(|r| r.name == "A").unwrap().id;
     h.state_mut().select_mod(a);
     h.run();
-    h.get_by_role_and_label(Role::Button, "Wins").click();
+    h.get_by_role_and_label(Role::Button, "Winning").click();
     h.run();
     assert_eq!(rows_of(h.state_mut()), [row("meshes/tree/oak.nif", "A")]);
     // Back in "Any mod" the hidden Wins chip is not left on.
     h.state_mut().any_mod();
     assert_eq!(h.state().filter, NifFilter::All);
+}
+
+/// Review jargon list: the Wins chip reads "Winning", and its hover says which NIFs it keeps.
+#[test]
+fn the_nif_filter_reads_winning() {
+    let (_d, mut m) = scanned();
+    let a = m.mods.iter().find(|r| r.name == "A").unwrap().id;
+    m.select_mod(a);
+    let mut h = harness(m);
+    h.run();
+    // The row chip "Wins" (status_label) is another text; the filter chip is the Button.
+    assert!(h.query_by_role_and_label(Role::Button, "Wins").is_none());
+    h.get_by_role_and_label(Role::Button, "Winning").hover();
+    h.run_steps(30);
+    h.get_by_label_contains("is the one the game loads");
 }
 
 /// Note GC test 5: the texture chip cuts the list to the meshes that use the texture, with the search, the mod and the
@@ -2076,7 +2091,7 @@ fn shader_line_is_the_bare_type_name_and_slots_are_indented() {
     let mut h = harness(shapes_model(vec![shape(vec![Some("textures/a.dds")])]));
     h.run();
     assert!(h.query_by_label_contains("Lighting:").is_none());
-    h.get_by_label("Environment Map (1)");
+    h.get_by_label("Environment Map");
     let head = h.get_by_label_contains("#0 Body").rect().min.x;
     let slot = h.get_by_label_contains("slot 1").rect().min.x;
     assert!(slot > head + 4.0, "slot x {slot} vs header x {head}");
