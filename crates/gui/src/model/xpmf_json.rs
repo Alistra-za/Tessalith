@@ -762,14 +762,15 @@ impl super::json_finish::Guarded for PendingXpmf {
     fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
         self.folders()
             .map(|f| {
-                // `finish` writes a profile whose own textures are on disk after the run: decided now when they are
-                // there now, by the run when a missing one is this run's to write.
+                // `finish` writes a profile whose own textures are on disk after the run: decided now when each is
+                // there now and none is this run's to write (ruling 3c-56), by the run when every one is there now or
+                // may be written by it.
                 let files = f
                     .files
                     .iter()
                     .filter_map(|(rel, text)| {
                         let path = f.root.join(rel);
-                        if missing_texture(f, rel, Path::is_file).is_none() {
+                        if missing_texture(f, rel, |t| t.is_file() && !written(t)).is_none() {
                             Some((path, Some(text.clone())))
                         } else {
                             missing_texture(f, rel, |t| t.is_file() || written(t))

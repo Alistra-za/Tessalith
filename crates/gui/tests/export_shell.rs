@@ -3278,6 +3278,26 @@ fn new_evidence_for_a_set_out_of_scope_lists_the_json_it_changes() {
     assert!(s.listed.contains(&json) && s.changed.contains(&json));
 }
 
+/// Ruling 3c-56: the complex-material JSON's `_m` is on disk and also planned in this run. The writer checks it after
+/// the CM phase, which Review cannot know, so a changed JSON is listed and marked.
+#[test]
+fn a_cm_json_whose_m_this_run_writes_is_marked_even_when_the_m_is_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let iron = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.key.ends_with("m/iron"))
+        .expect("the iron set")
+        .id;
+    m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(40)));
+    m.save().unwrap();
+    idle(&mut m);
+    let s = export_and_compare(&mut m, d.path());
+    let out: Vec<_> = s.w.outputs.iter().filter(|o| o.path == json).collect();
+    assert!(out.len() == 1 && out[0].marked, "{:?}", s.w.outputs);
+    assert!(s.changed.contains(&json));
+}
+
 fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
