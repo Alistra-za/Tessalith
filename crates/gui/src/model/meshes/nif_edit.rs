@@ -1724,6 +1724,11 @@ impl NifEdit {
             true => edit_doc::save(&k, &self.doc)?,
             false => edit_doc::save_new(&k, &self.doc)?,
         };
+        // ruling E6-Q2: the loser this write displaced (moved aside, or found unchanged and replaced) is retired; the
+        // session's own (path, fingerprint) is what a later write here is checked against
+        if self.kept_older.as_ref().is_some_and(|(at, _)| *at == k) {
+            self.kept_older = None;
+        }
         self.kept_autosave = Some(k.clone());
         self.kept_fp = Some(fp);
         let project = self.project.as_deref().unwrap_or(Path::new(""));

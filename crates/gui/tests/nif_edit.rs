@@ -7433,6 +7433,60 @@ fn older_candidate_unreadable(at_kept: bool) {
     assert_eq!(vals(&m), [12.5], "the older autosave does not open");
 }
 
+/// Review round 5 (Important "Open a future-dated draft with an older kept loser, lock the draft against replacement,
+/// edit, attempt Close, then edit again", ruling E6-Q2): once the session's kept file is published at the loser's name,
+/// the loser it displaced is retired; the session's own file there is replaced by its next save.
+#[cfg(windows)]
+#[test]
+fn a_loser_the_session_displaced_is_retired() {
+    table(&[
+        (
+            "open a future-dated draft with an older kept loser, lock the draft against replacement, edit, attempt \
+             Close, then edit again",
+            || displaced_loser(false),
+        ),
+        (
+            "the same with the draft replaced by another program before the lock",
+            || displaced_loser(true),
+        ),
+    ]);
+}
+
+/// E6-Q2's rows; `foreign_draft`: the draft holds bytes the session never loaded, so its save stops before the draft.
+#[cfg(windows)]
+fn displaced_loser(foreign_draft: bool) {
+    let (d, mut m) = export_session();
+    let p = project_folder(&d, "p");
+    project_with_a_draft(&mut m, &p);
+    let k = kept(&d, &id_of(&p));
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 9.5)).unwrap();
+    make_old(&k);
+    ahead(&draft(&p), 3600);
+    m.open_edit();
+    assert_eq!(vals(&m), [7.5], "premise: the draft won");
+    if foreign_draft {
+        save(
+            &draft(&p),
+            &with_value(load(&draft(&p)).unwrap().unwrap(), 8.5),
+        )
+        .unwrap();
+        ahead(&draft(&p), 3600);
+    }
+    let lock = hold(&draft(&p), 1);
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let refused = m.edit.is_some();
+    gloss(&mut m, 13.5);
+    let kept_now = load(&k).ok().flatten().map(|_| doc_values(&k));
+    drop(lock);
+    assert!(refused, "premise: the future-dated draft still wins");
+    assert_eq!(
+        kept_now,
+        Some(vec![7.5, 12.5, 13.5]),
+        "the latest edit is kept on disk"
+    );
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.
