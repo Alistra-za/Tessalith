@@ -1765,14 +1765,15 @@ fn the_dim_box_offers_no_resize_button() {
 #[test]
 fn an_accepted_suggestion_reads_auto_with_its_reason_on_hover() {
     let d = tempfile::tempdir().unwrap();
-    let mut model = opened_as_the_app(mod_folder(d.path()), d.path().join("export"));
-    // Note FC1 (R1): the opening recorded the accepted types as project values; with that step undone (and not
-    // recorded again) the type is the accepted suggestion once more.
-    assert!(model
-        .undo_label()
-        .is_some_and(|l| l.ends_with("automatically")));
-    model.undo();
-    assert!(model.wait_idle(std::time::Duration::from_secs(60)));
+    let root = mod_folder(d.path());
+    // The crash-restore step keeps the accepted suggestion visible before it is recorded (FB5).
+    std::fs::write(
+        sdc_gui::crash_log::recovery_path(&root.join("sdc.toml")),
+        "# recovered\n",
+    )
+    .unwrap();
+    let mut model = opened_as_the_app(root, d.path().join("export"));
+    assert_eq!(model.undo_label(), Some("Restore crash edits"));
     model.select_item("landscape/rock01.png");
     let mut h = harness(model);
     h.ctx.global_style_mut(|s| {

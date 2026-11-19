@@ -187,6 +187,53 @@ pub fn opened(dir: &Path) -> AppModel {
     m
 }
 
+pub fn png_4x4() -> Vec<u8> {
+    let mut bytes = std::io::Cursor::new(Vec::new());
+    image::RgbImage::from_pixel(4, 4, Rgb([128, 128, 128]))
+        .write_to(&mut bytes, image::ImageFormat::Png)
+        .unwrap();
+    bytes.into_inner()
+}
+
+pub fn write_auto_png(dir: &Path, name: &str) {
+    let textures = dir.join("textures");
+    std::fs::create_dir_all(&textures).unwrap();
+    std::fs::write(textures.join(name), png_4x4()).unwrap();
+}
+
+pub fn write_auto_decidable(dir: &Path) {
+    write_auto_png(dir, "teeth_n.png");
+    colour(&dir.join("textures/other_unknown.png"), 90);
+}
+
+pub fn auto_project(dir: &Path) -> AppModel {
+    write_auto_decidable(dir);
+    let mut m = AppModel::new(GuiSettings::default(), None, session());
+    m.open_folder(dir.to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m
+}
+
+pub fn set_type(m: &mut AppModel, file: &str, subtype: &str) {
+    m.set_field(
+        &format!("textures/{file}"),
+        "subtype",
+        serde_json::json!(subtype),
+    );
+}
+
+pub fn touch_sdc_toml_by_hand(dir: &Path, text: &str) {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("sdc.toml"))
+        .unwrap();
+    file.write_all(text.as_bytes()).unwrap();
+    file.set_modified(std::time::SystemTime::now() + Duration::from_secs(2))
+        .unwrap();
+}
+
 pub fn cs_opened_chosen(dir: &Path) -> AppModel {
     let m = opened(dir);
     assert_eq!(m.target, engine::config::Target::Cs);

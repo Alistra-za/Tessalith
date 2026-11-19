@@ -529,6 +529,8 @@ impl SetsDoc {
         if self.f.dirty && !was_dirty {
             self.f.dirty = false;
             self.f.saved_text = self.text();
+            self.f.baseline_text.clone_from(&self.f.saved_text);
+            self.f.user_dirty = false;
         }
     }
 
@@ -559,9 +561,13 @@ impl SetsDoc {
     pub fn is_dirty(&self) -> bool {
         self.f.dirty
     }
+    pub fn user_dirty(&self) -> bool {
+        self.f.user_dirty
+    }
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
+        self.f.user_dirty = self.text() != self.f.baseline_text;
     }
     pub fn read_only(&self) -> bool {
         self.f.read_only()
@@ -601,6 +607,7 @@ impl SetsDoc {
         let review = self.export_without_review();
         let target = self.target_mod();
         let old = self.text();
+        let user_dirty = self.f.user_dirty;
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
             self.set_project(LAST_SHA, sha.map(Value::from));
@@ -634,9 +641,12 @@ impl SetsDoc {
         if self.text() == old {
             self.f.doc = doc;
             self.f.dirty = dirty;
+            self.f.user_dirty = user_dirty;
         } else {
             // The `set_*` calls above touch the document; back at the saved text it is clean again (Note FB3).
-            self.f.dirty = self.text() != self.f.saved_text;
+            let restored = self.text();
+            self.f.dirty = restored != self.f.saved_text;
+            self.f.user_dirty = restored != self.f.baseline_text;
         }
     }
 

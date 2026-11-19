@@ -1,5 +1,5 @@
 //! Note FC1: the GUI's automatic decisions (High suggestions, mesh-vote sub-types, mesh-alpha verdicts) are written
-//! into the project as plain values, each recording its own undo step with one Problems row; a missing preset blocks
+//! into the project as plain values, each recording a baseline value with one Problems row; a missing preset blocks
 //! the export with a row.
 mod support;
 use eframe::egui;
@@ -82,7 +82,7 @@ fn cli_job<'a>(p: &'a engine::api::Plan, name: &str) -> &'a engine::policy::Reso
 }
 
 #[test]
-fn auto_accepted_types_are_recorded_and_undoable() {
+fn auto_accepted_types_are_recorded_as_the_baseline() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
     rgb(&root, "a/rock_n.png", [128, 128, 255]);
@@ -95,20 +95,17 @@ fn auto_accepted_types_are_recorded_and_undoable() {
         "project_file",
         "a recorded value is a plain project value"
     );
-    assert!(m.is_dirty(), "the recording is an unsaved change");
+    assert!(m.needs_write() && !m.unsaved());
     assert_eq!(subtype(&m, "a/rock_n.png"), Some(json!("normal")));
     let t = text(&m);
     assert_eq!(t.lines().next(), Some("# my notes"), "{t}");
     assert!(t.contains("subtype = \"normal\""), "{t}");
-    // The plan that the recording started finds nothing new: exactly one step.
-    assert_eq!(auto_steps(&m), 1, "{:?}", m.history.undo);
-    assert_eq!(m.undo_label(), Some("Set 1 type automatically"));
+    // The follow-up plan adds no history.
+    assert_eq!(auto_steps(&m), 0, "{:?}", m.history.undo);
+    assert!(!m.can_undo());
     let row = auto_row(&m).expect("the combined row");
     assert_eq!(row.text, "1 type set automatically (High confidence)");
-    assert_eq!(
-        (row.at.clone(), row.fix.clone()),
-        (At::Project, Some(Fix::UndoLast))
-    );
+    assert_eq!((row.at.clone(), row.fix.clone()), (At::Project, None));
     assert!(
         row.detail.as_deref().unwrap_or("").contains("rock_n.png: "),
         "{row:?}"
@@ -119,19 +116,10 @@ fn auto_accepted_types_are_recorded_and_undoable() {
         cli_job(&p, "rock_n.png").provenance["subtype"],
         job.provenance["subtype"]
     );
-    // Undo takes the entry out, and the next plan does not record it again.
     m.undo();
     assert!(m.wait_idle(WAIT));
-    assert_eq!(subtype(&m, "a/rock_n.png"), None);
-    assert_eq!(auto_steps(&m), 0);
-    assert!(m.can_redo(), "the redo step survives the plan");
-    assert!(auto_row(&m).is_none());
-    assert_eq!(text(&m).lines().next(), Some("# my notes"));
-    // Redo puts it back, and the plan after it records nothing new.
-    m.redo();
-    assert!(m.wait_idle(WAIT));
     assert_eq!(subtype(&m, "a/rock_n.png"), Some(json!("normal")));
-    assert_eq!(auto_steps(&m), 1);
+    assert_eq!(text(&m).lines().next(), Some("# my notes"));
     assert!(!m.can_redo());
 }
 
@@ -158,9 +146,9 @@ fn the_automatic_row_explains_high_confidence() {
     }
 }
 
-/// R2: a recording a user's edit leads to is its own undo step; Undo takes back only the recording.
+/// Undo takes back the user's edit and keeps the automatic recording.
 #[test]
-fn a_recording_after_a_user_edit_is_its_own_step() {
+fn a_recording_after_a_user_edit_survives_its_undo() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
     rgb(&root, "a/x.png", [90, 60, 30]);
@@ -175,10 +163,10 @@ fn a_recording_after_a_user_edit_is_its_own_step() {
     m.set_field("a/x_mask.png", "helper.role", json!("none"));
     assert!(m.wait_idle(WAIT));
     let st = subtype(&m, "a/x_mask.png").expect("its type is recorded");
-    assert_eq!(m.history.undo.len(), steps + 2, "{:?}", m.history.undo);
-    assert_eq!(m.undo_label(), Some("Set 1 type automatically"));
+    assert_eq!(m.history.undo.len(), steps + 1, "{:?}", m.history.undo);
+    assert_eq!(auto_steps(&m), 0);
     let row = auto_row(&m).expect("the row");
-    assert_eq!(row.fix, Some(Fix::UndoLast));
+    assert_eq!(row.fix, None);
     assert!(
         row.detail.as_deref().unwrap_or("").contains(&format!(
             "x_mask.png: {}",
@@ -188,13 +176,13 @@ fn a_recording_after_a_user_edit_is_its_own_step() {
     );
     m.undo();
     assert!(m.wait_idle(WAIT));
-    assert_eq!(subtype(&m, "a/x_mask.png"), None);
+    assert_eq!(subtype(&m, "a/x_mask.png"), Some(st));
     assert_eq!(
         value(&m, "a/x_mask.png", "helper.role"),
-        Some(json!("none"))
+        Some(json!("opacity"))
     );
-    assert_eq!(m.history.undo.len(), steps + 1, "the user's edit stays");
-    assert!(auto_row(&m).is_none(), "its Undo was for the undone step");
+    assert_eq!(m.history.undo.len(), steps);
+    assert!(!m.unsaved());
 }
 
 /// R5: deciding a diffuse as `pbr_albedo` switches its set's members, also one whose type the plan recorded on its
@@ -467,7 +455,8 @@ fn nothing_is_recorded_over_a_crash_restore() {
         t.starts_with("target = \"vanilla\"\n") && !t.contains("\"cs\""),
         "{t}"
     );
-    assert_eq!(m.undo_label(), Some("Set 1 type automatically"));
+    assert!(subtype(&m, "a/rock_n.png").is_some());
+    assert!(!m.can_undo());
 }
 
 /// The leading comments of a comment-only `sdc.toml` stay first when an entry is added, and come back when it goes.
@@ -550,9 +539,7 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
         Some(json!("cutout"))
     );
     assert_eq!(value(&m, "a/wall.png", "alpha.threshold"), Some(json!(100)));
-    // Its own step and row; the count is of values, not only types.
-    assert_eq!(m.history.undo.len(), steps + 1);
-    assert_eq!(m.undo_label(), Some("Set 1 value automatically"));
+    assert_eq!(m.history.undo.len(), steps, "the mesh verdict adds no step");
     let row = auto_row(&m).expect("the row");
     assert_eq!(row.text, "1 value set automatically (High confidence)");
     assert_eq!(row.detail.as_deref(), Some("wall.png: cutout"));
@@ -571,7 +558,7 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
 /// Note HR2: a mesh `remove` on a varying alpha is recorded like any mesh verdict; an Undo stays undone; the CLI
 /// plans the same from the text with no evidence.
 #[test]
-fn a_mesh_remove_is_recorded_and_stays_undone() {
+fn a_mesh_remove_is_recorded_and_survives_undo() {
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("textures");
     varying(&root, "a/wall.png");
@@ -606,8 +593,8 @@ fn a_mesh_remove_is_recorded_and_stays_undone() {
     assert!(m.wait_idle(WAIT));
     assert_eq!(
         value(&m, "a/wall.png", "alpha.policy"),
-        None,
-        "the Undo stays undone"
+        Some(json!("remove")),
+        "Undo keeps the mesh verdict"
     );
 }
 
@@ -701,8 +688,8 @@ fn three_types(dir: &Path) -> (std::path::PathBuf, AppModel) {
         rgb(&root, k, [128, 128, 255]);
     }
     let m = support::opened_as_the_app(root.clone(), dir.join("export"));
-    assert_eq!(m.undo_label(), Some("Set 3 types automatically"));
-    assert!(m.is_dirty() && m.only_automatic_unsaved());
+    assert!(!m.can_undo());
+    assert!(m.needs_write() && !m.unsaved());
     (root, m)
 }
 
@@ -750,25 +737,23 @@ fn an_automatic_only_folder_reloads_without_a_dialog() {
     assert_eq!(m.dialog, None);
     assert!(m.wait_idle(WAIT));
     // A new history: the next plan records the same types again.
-    assert_eq!(m.undo_label(), Some("Set 3 types automatically"));
+    assert!(!m.can_undo());
     for k in THREE {
         assert_eq!(subtype(&m, k), Some(json!("normal")), "{k}");
     }
 }
 
 #[test]
-fn save_stays_live_and_writes_the_automatic_types() {
+fn header_save_is_off_for_automatic_types() {
     let d = tempfile::tempdir().unwrap();
     let (root, m) = three_types(d.path());
     assert!(!sdc_gui::ui::header::window_title(&m).contains('●'));
     let mut h = harness(m);
     h.run();
     let save = h.get_by_label("Save");
-    assert!(!save.accesskit_node().is_disabled(), "Save is live");
-    save.click();
-    h.run();
-    assert_eq!(saved_types(&root), 3);
-    assert!(!h.state().is_dirty());
+    assert!(save.accesskit_node().is_disabled());
+    assert_eq!(saved_types(&root), 0);
+    assert!(h.state().needs_write());
 }
 
 /// Review Focus 5: a user edit on top of the recording ends the no-dialog state; Save writes both.
@@ -778,7 +763,7 @@ fn a_user_edit_after_the_recording_asks_and_saves_both() {
     let (root, mut m) = three_types(d.path());
     m.set_field("a/x_n.png", "format", json!("bc7"));
     assert!(m.wait_idle(WAIT));
-    assert!(!m.only_automatic_unsaved());
+    assert!(m.unsaved());
     assert!(sdc_gui::ui::header::window_title(&m).ends_with(" ●"));
     assert!(!m.request_close());
     assert_eq!(m.dialog, Some(sdc_gui::model::Dialog::CloseUnsaved));
@@ -808,11 +793,11 @@ fn a_reencode_and_its_recording_ask_on_close() {
     }
     support::bc1_dds(&root.join("a/v.dds"));
     let mut m = support::opened_as_the_app(root, d.path().join("export"));
-    assert!(m.only_automatic_unsaved());
+    assert!(m.needs_write() && !m.unsaved());
     m.set_reencode(&["a/v.dds".to_string()], true);
     assert!(m.wait_idle(WAIT));
     assert_eq!(m.undo_label(), Some("Re-encode 1 DDS file"));
-    assert!(m.prompts_unsaved());
+    assert!(m.unsaved());
     assert!(!m.request_close());
     assert_eq!(m.dialog, Some(sdc_gui::model::Dialog::CloseUnsaved));
 }

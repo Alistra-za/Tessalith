@@ -9,6 +9,7 @@
 use super::items::{ItemKind, ItemStatus};
 use super::sets::{SlotFill, SlotKind};
 use super::{fields, AppModel};
+use crate::project::AutoWrite;
 use engine::config::{PackRecipe, Subtype, Target};
 use engine::group::{is_fuzz_stem, split_suffix_with};
 use engine::policy::{AcceptSuggestions, Provenance};
@@ -20,15 +21,18 @@ use std::path::Path;
 /// The last recording, for its Problems row.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AutoNote {
-    /// The row's text, `{n} types set automatically (High confidence)`; its count is the step label's.
+    /// The row's text, `{n} types set automatically (High confidence)`; its count is the number of decisions.
     pub text: String,
     /// `file name: value`, one per written value (a threshold rides on its policy's line), for the row's hover; the
     /// last line explains High confidence when a sub-type was set.
     pub lines: Vec<String>,
-    /// The `history.pushes` the step left: the row offers Undo only while it is the top step.
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FuzzNote {
+    pub text: String,
+    pub lines: Vec<String>,
     pub step: u64,
-    /// Note FI4: nothing prompted to be saved just before it, so while it is the top step nothing does.
-    pub clean_before: bool,
 }
 
 /// A written value as the row lists it: `cutout`, a number.
@@ -62,11 +66,8 @@ pub(crate) struct FuzzSwitch {
     lines: Vec<String>,
     /// The Diffuse-slot keys whose `skin_albedo` the switch cleared.
     keys: Vec<String>,
-    /// The `history.pushes` the switch's step left (moved by the joined recording): the row offers Undo, and the
-    /// switch counts as automatic (FI4), only while it is the top step.
+    /// The switch row offers Undo while its step (including any joined recording) is on top.
     step: u64,
-    /// Note FI4: nothing prompted to be saved just before the switch.
-    clean_before: bool,
 }
 
 impl AppModel {
@@ -225,16 +226,21 @@ impl AppModel {
         if keys.is_empty() {
             return false;
         }
-        let clean_before = !self.prompts_unsaved();
         let merge = format!("fuzz-switch-{}", self.history.pushes);
         let n = keys.len();
         let s = if n == 1 { "" } else { "s" };
         let label = format!("Switch {n} fuzz-map set{s} off Advanced Skin");
-        let cleared = keys.clone();
-        self.edit_docs(&label, Some(merge.clone()), true, move |p, _| {
-            for k in &cleared {
-                p.clear_file_value(k, "subtype");
-            }
+        let cleared: Vec<_> = keys
+            .iter()
+            .map(|key| AutoWrite {
+                key: key.clone(),
+                field: "subtype",
+                value: serde_json::Value::Null,
+                only_if: Some(json!(Subtype::SkinAlbedo)),
+            })
+            .collect();
+        self.edit_docs(&label, Some(merge.clone()), true, |p, _| {
+            p.touch_auto(&cleared)
         });
         self.reencode_follow = Some(merge.clone());
         self.fuzz_switch = Some(FuzzSwitch {
@@ -242,7 +248,6 @@ impl AppModel {
             lines: vec![],
             keys,
             step: self.history.pushes,
-            clean_before,
         });
         true
     }
@@ -257,19 +262,6 @@ impl AppModel {
             }
         }
         self.fuzz_switch_checked = false;
-    }
-
-    /// FI4: the switch, with what joined it, is the only unsaved change since a document that asked nothing: its row
-    /// (or, before the row is built, its step) is the top step.
-    pub(super) fn only_switch_unsaved(&self) -> bool {
-        let top = |clean: bool, step: u64| clean && step == self.history.pushes;
-        self.fuzz_note
-            .as_ref()
-            .is_some_and(|n| top(n.clean_before, n.step))
-            || self
-                .fuzz_switch
-                .as_ref()
-                .is_some_and(|s| top(s.clean_before, s.step))
     }
 
     /// Fuzz-8: once the switch's step is complete (the plan settled with nothing more to record), its Problems row:
@@ -298,14 +290,13 @@ impl AppModel {
             .chain(switch.lines)
             .chain([FUZZ_SWITCH_HOVER.to_string()])
             .collect();
-        self.fuzz_note = Some(AutoNote {
+        self.fuzz_note = Some(FuzzNote {
             text: format!(
                 "{n} set{s} left Advanced Skin (a _fuzz or _sheen map alone no longer picks it)"
             ),
             lines,
             // The switch's own step (I2): a user edit since then is the top step, and the row offers no Undo.
             step: switch.step,
-            clean_before: switch.clean_before,
         });
         // Fuzz-29: as after `auto_note`, so the cached rows show it on the next frame.
         self.invalidate_views();
@@ -344,9 +335,7 @@ impl AppModel {
         self.replan();
     }
 
-    /// Write the settled plan's own decisions for the fields no entry sets yet, as one undo step of its own (`Set
-    /// {n} types automatically`, `values` when an alpha is among them) and one Problems row. Each `(key, field)` is written once per history
-    /// (`History::auto_written`), so an Undo of the step stays undone. True when it wrote (and re-planned).
+    /// Record planner decisions into the baseline. Only a recording caused by a re-encode joins its step.
     pub(super) fn record_auto_decisions(&mut self) -> bool {
         // Never over a running export, nor over the crash restore its toast can still undo (Note FB5).
         if self.export.running.is_some() || self.crash_restore_on_top() {
@@ -358,7 +347,7 @@ impl AppModel {
         // R5: after a presets save, an untouched sub-type follows the new pick (`presets_saved`). Taken only once the
         // recording can write, so a blocked recording keeps it for the next one.
         let retype = std::mem::take(&mut self.history.retype_untouched);
-        let mut writes: Vec<(String, &'static str, serde_json::Value)> = vec![];
+        let mut writes = vec![];
         let mut lines = vec![];
         // The key each line names, so a switch's row can drop the lines of the files its own lines already name.
         let mut line_keys: Vec<String> = vec![];
@@ -379,7 +368,12 @@ impl AppModel {
                         show_type(&new)
                     ));
                     line_keys.push(k.clone());
-                    writes.push((k, "subtype", new));
+                    writes.push(AutoWrite {
+                        key: k,
+                        field: "subtype",
+                        value: new,
+                        only_if: Some(old),
+                    });
                 }
             }
         }
@@ -401,8 +395,7 @@ impl AppModel {
                 ("alpha.threshold", threshold),
             ] {
                 let Some(v) = v else { continue };
-                let done = self.history.auto_written.contains(&(i.key.clone(), f));
-                if done || doc.file_value(&i.key, f).is_some() {
+                if doc.file_value(&i.key, f).is_some() {
                     continue;
                 }
                 if f != "alpha.threshold" {
@@ -415,7 +408,12 @@ impl AppModel {
                     lines.push(format!("{}: {v}", file_name(&i.key)));
                     line_keys.push(i.key.clone());
                 }
-                writes.push((i.key.clone(), f, v));
+                writes.push(AutoWrite {
+                    key: i.key.clone(),
+                    field: f,
+                    value: v,
+                    only_if: None,
+                });
             }
         }
         // Note FI3: after a re-encode step still on top, the recording joins it (`set_reencode`).
@@ -429,18 +427,19 @@ impl AppModel {
         let n = lines.len();
         let noun = if only_types { "type" } else { "value" };
         let s = if n == 1 { "" } else { "s" };
-        let label = format!("Set {n} {noun}{s} automatically");
-        for (k, f, _) in &writes {
-            self.history.auto_written.insert((k.clone(), f));
-        }
         if let Some(k) = join {
+            let label = format!("Set {n} {noun}{s} automatically");
             // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
             // switch's row lists what it joined.
             let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
             let pushes = self.history.pushes;
             self.edit_docs(&label, Some(k), true, |p, _| {
-                for (k, f, v) in &writes {
-                    p.set_file_value(k, f, v);
+                if joins_switch {
+                    p.touch_auto(&writes);
+                } else {
+                    for w in &writes {
+                        p.set_file_value(&w.key, w.field, &w.value);
+                    }
                 }
             });
             if let Some(sw) = self.fuzz_switch.as_mut().filter(|_| joins_switch) {
@@ -458,27 +457,40 @@ impl AppModel {
             }
             return self.history.pushes != pushes;
         }
-        let clean_before = !self.prompts_unsaved();
-        let wrote = self.batch_edit(&label, |m| {
-            m.edit("Set automatically", |p| {
-                for (k, f, v) in &writes {
-                    p.set_file_value(k, f, v);
-                }
-            })
-        });
-        if wrote {
-            let typed = writes.iter().any(|(_, f, _)| *f == "subtype");
-            self.auto_note = Some(AutoNote {
-                text: format!("{n} {noun}{s} set automatically (High confidence)"),
-                lines: lines
-                    .into_iter()
-                    .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
-                    .collect(),
-                step: self.history.pushes,
-                clean_before,
-            });
-            self.invalidate_views();
+        // A six-file cube's settings apply to all its faces (DT31).
+        for (key, faces) in self.cube_face_keys() {
+            let others: Vec<_> = writes
+                .iter()
+                .filter(|w| w.key == key)
+                .flat_map(|w| {
+                    faces.iter().map(|face| AutoWrite {
+                        key: face.clone(),
+                        ..w.clone()
+                    })
+                })
+                .collect();
+            writes.extend(others);
         }
-        wrote
+        let p = self
+            .project
+            .as_mut()
+            .expect("writable document checked above");
+        let rev = p.rev();
+        p.touch_auto(&writes);
+        if p.rev() == rev {
+            return false;
+        }
+        self.history.apply_auto(&writes);
+        let typed = writes.iter().any(|w| w.field == "subtype");
+        self.auto_note = Some(AutoNote {
+            text: format!("{n} {noun}{s} set automatically (High confidence)"),
+            lines: lines
+                .into_iter()
+                .chain(typed.then(|| HIGH_CONFIDENCE.to_string()))
+                .collect(),
+        });
+        self.invalidate_views();
+        self.replan_changed(true);
+        true
     }
 }

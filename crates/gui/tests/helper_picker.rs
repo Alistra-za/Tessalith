@@ -275,8 +275,7 @@ fn picker_is_one_undo_step() {
         fixture(d.path(), &TWO_AO, TWO_AO_TOML),
         egui::vec2(1400.0, 900.0),
     );
-    // Steps before the pick: the opening's "Set n types automatically" (Note FC1), if any.
-    let steps = h.state().history.undo.len();
+    assert!(!h.state().can_undo());
     pick(&mut h, AO_SOURCE, "x_cavity2.png");
     assert_eq!(
         value(&h, "x_cavity2.png", "helper.fills"),
@@ -289,7 +288,7 @@ fn picker_is_one_undo_step() {
         Some(json!(["rmaos.b"]))
     );
     assert_eq!(value(&h, "x_cavity2.png", "helper.fills"), None);
-    assert_eq!(h.state().history.undo.len(), steps, "one step");
+    assert!(!h.state().can_undo(), "one step");
 }
 
 /// The "Value" option of the open combo `name`: (enabled, its hover text after hovering it).

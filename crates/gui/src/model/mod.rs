@@ -541,6 +541,8 @@ pub struct AppModel {
     pub accept: AcceptSuggestions,
     pub session: Option<Arc<Session>>,
     pub root: Option<PathBuf>,
+    /// Neither document existed at open, and the project has yet to complete a Save.
+    pub never_saved: bool,
     pub project: Option<ProjectDoc>,
     pub sets_doc: Option<crate::sets_doc::SetsDoc>,
     pub history: history::History,
@@ -721,8 +723,7 @@ pub struct AppModel {
     /// Note FC1 (AM14): `Choose preset…` was clicked on this pass (`ctx.cumulative_pass_nr`); the header opens its
     /// Preset menu if it draws within two passes, and drops a stale request.
     pub choose_preset: Option<u64>,
-    /// Note FC1: the last automatic recording: its row text, its lines (the row's hover) and the `history.pushes`
-    /// it left.
+    /// The most recent automatic recording, shown under Notes.
     pub(crate) auto_note: Option<auto_record::AutoNote>,
     /// Fuzz-8: the settled plan after an open clears a `skin_albedo` recorded only because of a fuzz map. On by
     /// default; tests of `fuzz_recorded_skin` alone turn it off.
@@ -732,7 +733,7 @@ pub struct AppModel {
     /// Fuzz-8: the switch was tried in this open (it runs once per open).
     fuzz_switch_checked: bool,
     /// Fuzz-8: the switch's Problems row, with Undo while its step is on top.
-    pub(crate) fuzz_note: Option<auto_record::AutoNote>,
+    pub(crate) fuzz_note: Option<auto_record::FuzzNote>,
     /// Note FC1 (AM14): `preset` names no installed preset; computed once per plan request.
     missing_preset_id: Option<String>,
     /// Export was clicked while sources had changed: it starts when the fresh plan arrives.
@@ -945,6 +946,7 @@ impl AppModel {
             accept: AcceptSuggestions::High,
             session: None,
             root: None,
+            never_saved: false,
             project: None,
             sets_doc: None,
             history: history::History::default(),
@@ -1178,6 +1180,8 @@ impl AppModel {
         self.scan_db_error = None;
         let same_folder = self.root.as_ref() == Some(&root);
         self.ignored_by_plan = false;
+        self.never_saved =
+            !root.join("sdc.toml").exists() && !root.join("sdc-project.toml").exists();
         let project = ProjectDoc::open(&root);
         self.project = Some(project);
         self.sets_doc = Some(crate::sets_doc::SetsDoc::open(&root));
@@ -1763,8 +1767,6 @@ impl AppModel {
                 // so the re-read files are where the history left them. Note FC14: unless the re-open restored crash
                 // edits as a step; then its history is the one that matches the documents (and the toast's Undo).
                 if self.history.undo.is_empty() {
-                    // Note FP3 (T36): the re-read documents lost the automatic types the old history marked written.
-                    history.auto_written.clear();
                     history.pushes = history.pushes.max(self.history.pushes);
                     self.history = history;
                 }
@@ -2754,9 +2756,11 @@ impl AppModel {
         // A hand edit of a clean `sdc.toml` is simply taken (nothing to lose): the next plan reads it. With unsaved
         // edits the save dialog still asks (audit 2026-10-14 finding 3). Automatic types alone are recorded again
         // (Note FI4).
-        let hand_edited = self.project.as_ref().is_some_and(|p| {
-            (!p.is_dirty() || self.only_automatic_unsaved()) && p.changed_on_disk()
-        });
+        let hand_edited = !self.unsaved()
+            && self
+                .project
+                .as_ref()
+                .is_some_and(ProjectDoc::changed_on_disk);
         if hand_edited {
             if let Some(p) = self.project.as_mut() {
                 p.reload();
@@ -3881,8 +3885,6 @@ impl AppModel {
 
     fn apply_snapshot(&mut self, s: &history::Snapshot) {
         self.dropped_fills.clear();
-        // Note FC1: the row's Undo is for its own step; `pushes` does not move on an undo.
-        self.auto_note = None;
         // Fuzz-8: likewise the switch's row, and a switch step still waiting for its recording no longer applies.
         self.fuzz_note = None;
         self.fuzz_switch = None;
@@ -4428,35 +4430,39 @@ impl AppModel {
     }
 
     pub fn is_dirty(&self) -> bool {
+        self.needs_write()
+            || (self.ignored_by_plan
+                && self
+                    .project
+                    .as_ref()
+                    .is_some_and(ProjectDoc::has_stashed_edits))
+    }
+
+    pub(crate) fn project_user_dirty(&self) -> bool {
+        self.project
+            .as_ref()
+            .is_some_and(|p| p.user_dirty() || (self.ignored_by_plan && p.stashed_user_edit()))
+    }
+
+    /// The user's changes since the last save, including a tentative edit the retry plan still holds.
+    pub fn unsaved(&self) -> bool {
+        self.project_user_dirty()
+            || self
+                .sets_doc
+                .as_ref()
+                .is_some_and(crate::sets_doc::SetsDoc::user_dirty)
+    }
+
+    pub fn needs_write(&self) -> bool {
         self.project.as_ref().is_some_and(ProjectDoc::is_dirty)
-            || self.tentative_edits().is_some()
             || self
                 .sets_doc
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
     }
 
-    /// Note FI4 (owner O1 (b)): the only unsaved change is FC1's automatic recording, or the Fuzz-8 switch on open with
-    /// the recording that joined it, still the top step. It neither asks on close, open or reload nor marks the title;
-    /// Save stays live and writes it.
-    /// shortcut: a user edit followed by its Undo leaves `pushes` advanced, so that state prompts although the text
-    /// equals the automatic state; compare the document with the recording's snapshot if users report it.
-    pub fn only_automatic_unsaved(&self) -> bool {
-        (self
-            .auto_note
-            .as_ref()
-            .is_some_and(|a| a.clean_before && a.step == self.history.pushes)
-            || self.only_switch_unsaved())
-            && !self
-                .sets_doc
-                .as_ref()
-                .is_some_and(crate::sets_doc::SetsDoc::is_dirty)
-            && self.tentative_edits().is_none()
-    }
-
-    /// Unsaved changes the close, open and reload dialogs ask about: a user's, not only automatic ones (Note FI4).
-    pub fn prompts_unsaved(&self) -> bool {
-        self.is_dirty() && !self.only_automatic_unsaved()
+    pub fn write_project_now(&mut self) {
+        let _ = self.save();
     }
 
     /// The unsaved `sdc.toml` edits stashed by a blame that is still tentative (the retry plan has not landed), so
@@ -4472,8 +4478,14 @@ impl AppModel {
     pub fn recovery_snapshot(&self) -> Vec<(std::path::PathBuf, String)> {
         let mut out = vec![];
         // Note FI4: automatic types alone are recorded again on the next plan, so a restore never offers them.
-        let only_auto = self.only_automatic_unsaved();
-        if let Some(p) = self.project.as_ref().filter(|p| p.is_dirty() && !only_auto) {
+        if !self.unsaved() {
+            return out;
+        }
+        if let Some(p) = self
+            .project
+            .as_ref()
+            .filter(|p| p.is_dirty() || p.user_dirty())
+        {
             out.push((p.path().to_path_buf(), p.text()));
         }
         if let (Some(p), Some(text)) = (self.project.as_ref(), self.tentative_edits()) {
@@ -4495,7 +4507,7 @@ impl AppModel {
         let key = (
             self.project
                 .as_ref()
-                .map(|p| (p.rev(), p.is_dirty(), self.only_automatic_unsaved())),
+                .map(|p| (p.rev(), p.is_dirty(), self.unsaved())),
             self.sets_doc
                 .as_ref()
                 .map(|s| (s.rev(), s.is_dirty(), s.read_only())),
@@ -4563,7 +4575,7 @@ impl AppModel {
         #[allow(clippy::permissions_set_readonly_false)]
         perm.set_readonly(false);
         std::fs::set_permissions(path, perm).map_err(fail)?;
-        if self.prompts_unsaved() {
+        if self.unsaved() {
             self.status_line = "Read-only flag cleared: Save to write your changes".into();
             self.refresh_banner();
         } else {
@@ -4657,7 +4669,7 @@ impl AppModel {
     /// Reload both documents from disk (the banner's Reload), then plan once.
     /// The banner's Reload: at once when nothing is unsaved, else ask first (`Dialog::ReloadUnsaved`).
     pub fn request_reload(&mut self) {
-        if self.prompts_unsaved() {
+        if self.unsaved() {
             self.dialog = Some(Dialog::ReloadUnsaved);
         } else {
             self.reload_documents();
@@ -4694,6 +4706,7 @@ impl AppModel {
     /// document is not written (audit 2026-10-14 finding 3: writing it would offer "Overwrite" over a hand edit
     /// the GUI never loaded).
     pub fn save(&mut self) -> Result<(), SaveError> {
+        let user_save = self.unsaved();
         let mut wrote = false;
         // Note FP7 (T38): a blame that is still tentative holds the user's unsaved edits; Save writes those.
         if let Some(p) = self.project.as_mut().filter(|_| self.ignored_by_plan) {
@@ -4732,9 +4745,17 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
+        if let Some(p) = self.project.as_mut() {
+            p.accept_saved_text();
+        }
         if wrote {
-            self.refresh_banner(); // the save removed the saved documents' recovery files
-            self.messages.notify(messages::Severity::Info, "Saved");
+            self.refresh_banner();
+            if user_save {
+                self.messages.notify(messages::Severity::Info, "Saved");
+            }
+        }
+        if !self.needs_write() {
+            self.never_saved = false;
         }
         Ok(())
     }
@@ -4787,7 +4808,7 @@ impl AppModel {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
             false
-        } else if self.prompts_unsaved() {
+        } else if self.unsaved() {
             self.dialog = Some(Dialog::OpenUnsaved(root));
             false
         } else {
@@ -4850,7 +4871,7 @@ impl AppModel {
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Close));
             false
-        } else if self.prompts_unsaved() {
+        } else if self.unsaved() {
             self.dialog = Some(Dialog::CloseUnsaved);
             false
         } else {

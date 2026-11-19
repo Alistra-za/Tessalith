@@ -2036,8 +2036,7 @@ fn the_switch_alone_asks_nothing() {
         );
         assert!(m.fuzz_note_for_test().is_some(), "{accept:?}");
         assert!(m.is_dirty(), "{accept:?}");
-        assert!(!m.prompts_unsaved(), "{accept:?}");
-        assert!(m.only_automatic_unsaved(), "{accept:?}");
+        assert!(!m.unsaved(), "{accept:?}");
         assert!(
             !sdc_gui::ui::header::window_title(&m).ends_with('●'),
             "{accept:?}"
@@ -2060,7 +2059,7 @@ fn a_user_edit_after_the_switch_asks() {
         );
         user_edit(&mut m);
         idle(&mut m);
-        assert!(m.prompts_unsaved(), "{accept:?}");
+        assert!(m.unsaved(), "{accept:?}");
         assert!(!m.request_close(), "{accept:?}");
         m.dialog = None;
         assert!(!m.request_open(d.path().to_path_buf()), "{accept:?}");
@@ -2070,7 +2069,7 @@ fn a_user_edit_after_the_switch_asks() {
     }
 }
 
-/// Fix round 1, I1: a later automatic recording in its own step, after a clean switch, still asks nothing.
+/// Fix round 1, I1: a later automatic recording, after a clean switch, still asks nothing.
 #[test]
 fn a_later_recording_after_the_switch_asks_nothing() {
     let d = tempfile::tempdir().unwrap();
@@ -2085,14 +2084,13 @@ fn a_later_recording_after_the_switch_asks_nothing() {
     m.replan();
     idle(&mut m);
     assert!(subtype(&m, "m/stone01.png").is_some(), "recorded");
-    assert!(m.history.pushes > pushes, "a step of its own");
-    assert!(!m.prompts_unsaved());
+    assert_eq!(m.history.pushes, pushes, "recording adds no step");
+    assert!(!m.unsaved());
 }
 
-/// Fix round 1, I1: Undo of an unsaved switch leaves the saved text, so nothing is unsaved; Undo of a saved switch
-/// leaves a change the user made, so it asks.
+/// Undo of the switch is the user's decision, whether or not the switch reached disk.
 #[test]
-fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
+fn undoing_the_switch_asks_before_and_after_save() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2102,7 +2100,10 @@ fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
     );
     m.undo();
     idle(&mut m);
-    assert!(!m.is_dirty() && !m.prompts_unsaved());
+    assert!(
+        !m.needs_write() && m.unsaved(),
+        "Undo rejects the new automatic baseline"
+    );
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2113,7 +2114,7 @@ fn the_switchs_undo_asks_only_when_it_changes_the_saved_text() {
     m.save().unwrap();
     m.undo();
     idle(&mut m);
-    assert!(m.prompts_unsaved());
+    assert!(m.unsaved());
 }
 
 /// Fix round 1, I1: between the switch and its row, the switch alone asks nothing.
@@ -2124,7 +2125,7 @@ fn the_window_before_the_switch_row_asks_nothing() {
         let mut m = old_unsettled(d.path(), accept);
         until_switch_pending(&mut m);
         assert!(m.is_dirty(), "{accept:?}");
-        assert!(!m.prompts_unsaved(), "{accept:?}");
+        assert!(!m.unsaved(), "{accept:?}");
         assert!(m.request_close(), "{accept:?}");
         idle(&mut m);
     }
@@ -2147,17 +2148,9 @@ fn a_user_edit_before_the_switch_row_takes_no_undo_from_it() {
             .find(|r| r.text == text)
             .expect("the switch row is listed");
         assert_eq!(row.fix, None, "{accept:?}: {rows:?}");
-        assert!(m.prompts_unsaved(), "{accept:?}");
-        // The normal Undo takes back the user's edit only (under High the recording's own step is on top of it).
-        let undos = if accept == AcceptSuggestions::High {
-            2
-        } else {
-            1
-        };
-        for _ in 0..undos {
-            m.undo();
-            idle(&mut m);
-        }
+        assert!(m.unsaved(), "{accept:?}");
+        m.undo();
+        idle(&mut m);
         assert_eq!(
             m.project
                 .as_ref()

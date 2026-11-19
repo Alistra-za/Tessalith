@@ -6,13 +6,270 @@ use engine::presets::AlsoTarget;
 use sdc_gui::model::{AppModel, Dialog};
 use std::time::Duration;
 
+use egui::accesskit::Role;
+use egui_kittest::kittest::Queryable;
+use sdc_gui::settings::GuiSettings;
+
+#[test]
+fn write_project_files_now_puts_the_automatic_types_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(support::auto_project(d.path()));
+    settle(&mut h);
+    assert!(
+        !d.path().join("sdc.toml").exists(),
+        "nothing written at open"
+    );
+    h.get_by_role_and_label(Role::Button, "Write project files now")
+        .click();
+    settle(&mut h);
+    let toml = std::fs::read_to_string(d.path().join("sdc.toml")).unwrap();
+    assert!(
+        toml.contains("teeth_n.png") && toml.contains("subtype"),
+        "{toml}"
+    );
+    assert!(!sdc_gui::ui::header::window_title(h.state()).ends_with(" ●"));
+    assert!(!h.state().history.can_undo());
+    assert_eq!(
+        h.query_all_by_label("Write project files now").count(),
+        0,
+        "the line is gone"
+    );
+    assert_eq!(
+        h.query_all_by_label_contains("New project: nothing saved yet.")
+            .count(),
+        0
+    );
+}
+
+#[test]
+fn no_line_when_there_is_nothing_to_write() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures")).unwrap();
+    image::RgbImage::new(4, 4)
+        .save(d.path().join("textures/mystery_unknown.png"))
+        .unwrap(); // no rule types it
+    let mut m = AppModel::new(GuiSettings::default(), None, support::session());
+    m.open_folder(d.path().to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut h = harness(m);
+    settle(&mut h);
+    assert_eq!(
+        h.query_all_by_label_contains("New project: nothing saved yet.")
+            .count(),
+        0
+    );
+}
+
+#[test]
+#[ignore = "Task 11"]
+fn the_new_project_line_and_the_next_step_both_read_at_1100_px() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness_sized(support::auto_project(d.path()), egui::vec2(1100.0, 800.0));
+    settle(&mut h);
+    let line = h
+        .get_by_label_contains("New project: nothing saved yet.")
+        .rect();
+    let next = h
+        .get_by_label_contains("a type: start with Undecided.")
+        .rect(); // Task 11: "1 texture needs a type: …"
+    assert!(!line.intersects(next), "{line:?} {next:?}");
+    for r in [line, next] {
+        assert!(r.max.x <= 1100.0 && r.min.x >= 0.0, "{r:?} is cut");
+    }
+}
+
+#[test]
+fn opening_a_folder_leaves_save_undo_and_the_dot_off() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/teeth_n.png", "subtype")
+            .is_some(),
+        "the plan decided a type"
+    );
+    assert!(!m.unsaved());
+    assert!(!m.history.can_undo());
+    assert!(!sdc_gui::ui::header::window_title(&m).ends_with(" ●"));
+    assert!(m.request_close(), "close does not ask");
+    assert!(m.needs_write(), "the automatic types are not on disk yet");
+}
+
+#[test]
+fn a_user_edit_then_undo_is_clean_again() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::set_type(&mut m, "other_unknown.png", "diffuse");
+    assert!(m.unsaved() && m.history.can_undo());
+    m.undo();
+    assert!(!m.unsaved() && !m.history.can_undo());
+}
+
+#[test]
+fn the_next_save_or_export_writes_the_automatic_types() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::choose_export(&mut m, d.path().join("out"));
+    support::export_through(&mut m);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let toml = std::fs::read_to_string(d.path().join("sdc.toml")).unwrap();
+    assert!(toml.contains("subtype"), "{toml}");
+    assert!(!m.needs_write());
+}
+
+#[test]
+fn a_hand_edit_reloads_over_automatic_values_without_asking() {
+    // Review Focus 3.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::touch_sdc_toml_by_hand(
+        d.path(),
+        "[files.\"textures/other_unknown.png\"]\nsubtype = \"diffuse\"\n",
+    );
+    m.check_sources();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.dialog.is_none(), "{:?}", m.dialog);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/other_unknown.png", "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    assert!(!m.unsaved());
+}
+
+#[test]
+fn undo_of_an_edit_made_before_the_automatic_values_keeps_them() {
+    // Undo snapshots hold whole documents: an edit before the automatic values land must not undo them.
+    let d = tempfile::tempdir().unwrap();
+    support::write_auto_decidable(d.path());
+    let mut m = AppModel::new(GuiSettings::default(), None, support::session());
+    m.open_folder(d.path().to_path_buf());
+    support::set_type(&mut m, "other_unknown.png", "diffuse"); // before the plan settles
+    assert!(
+        m.unsaved() && m.can_undo(),
+        "the user step precedes the automatic record"
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.undo();
+    assert!(!m.unsaved() && !m.history.can_undo());
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/teeth_n.png", "subtype")
+            .is_some(),
+        "the automatic type is still in the document"
+    );
+}
+
+#[test]
+fn a_direct_save_moves_the_baseline() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::choose_export(&mut m, d.path().join("out")); // set_export_folder saves sdc-project.toml at once
+    m.set_export_without_review(true);
+    assert!(!m.unsaved(), "a direct save never lights the dot");
+    support::set_type(&mut m, "other_unknown.png", "diffuse");
+    m.save().unwrap();
+    m.undo();
+    assert!(m.unsaved(), "Undo differs from the newly saved baseline");
+    m.redo();
+    assert!(!m.unsaved(), "Redo restores the newly saved baseline");
+}
+
+#[test]
+fn an_undo_across_a_later_automatic_record_is_clean_at_once() {
+    // The user step comes first, the automatic record second; the Undo must keep the automatic value, with no
+    // wait for a plan: `unsaved()` is read straight after `undo()`.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::set_type(&mut m, "other_unknown.png", "diffuse");
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    support::write_auto_png(d.path(), "teeth2_n.png"); // a second file the plan types automatically (High)
+    m.check_sources();
+    m.replan(); // A directory rescan discovers the new file.
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m
+        .project
+        .as_ref()
+        .unwrap()
+        .file_value("textures/teeth2_n.png", "subtype")
+        .is_some());
+    m.undo();
+    assert!(!m.unsaved(), "clean at once, no plan awaited");
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/teeth2_n.png", "subtype")
+            .is_some(),
+        "Undo kept it"
+    );
+    m.redo();
+    assert!(m.unsaved());
+    assert!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("textures/teeth2_n.png", "subtype")
+            .is_some(),
+        "Redo kept it"
+    );
+}
+
+#[test]
+fn choosing_an_export_folder_keeps_the_new_project_line() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::auto_project(d.path());
+    support::choose_export(&mut m, d.path().join("out"));
+    let mut h = harness(m);
+    settle(&mut h);
+    h.get_by_label_contains("New project: nothing saved yet.");
+    assert!(!d.path().join("sdc.toml").exists());
+}
+
+#[test]
+fn a_real_save_clears_the_new_project_line() {
+    let d = tempfile::tempdir().unwrap();
+    support::colour(&d.path().join("textures/mystery_unknown.png"), 90);
+    let mut m = AppModel::new(GuiSettings::default(), None, support::session());
+    m.open_folder(d.path().to_path_buf());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(!m.needs_write());
+    let set = m.drop_new_set("textures/mystery_unknown.png").unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.rename_set(&set, "first").unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.save().unwrap();
+    assert!(!m.never_saved);
+    assert!(d.path().join("sdc-project.toml").is_file());
+    assert!(!d.path().join("sdc.toml").exists());
+    m.rename_set("first", "second").unwrap();
+    assert!(m.needs_write());
+    let mut h = harness(m);
+    settle(&mut h);
+    assert_eq!(
+        h.query_all_by_label_contains("New project: nothing saved yet.")
+            .count(),
+        0
+    );
+}
+
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
+    harness_sized(model, egui::vec2(1400.0, 900.0))
+}
+
+fn harness_sized(model: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
     Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
         })
         .with_step_dt(0.25)
-        .with_size(egui::vec2(1400.0, 900.0))
+        .with_size(size)
         .build_ui_state(
             |ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model),
             model,

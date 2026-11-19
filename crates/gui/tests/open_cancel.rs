@@ -227,7 +227,7 @@ fn cancel_does_not_keep_the_automatic_types_marked_written() {
         lone_normal(&root, k);
     }
     let mut m = support::opened_as_the_app(root, d.path().join("export"));
-    assert!(m.only_automatic_unsaved());
+    assert!(m.needs_write() && !m.unsaved());
     let other = d.path().join("other");
     lone_normal(&other, "b/w_n.png");
     assert!(m.request_open(other));

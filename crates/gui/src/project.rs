@@ -37,6 +37,7 @@ impl std::fmt::Display for SaveError {
 
 /// The state both project files share (REPORT #15): the document, its disk stamp, unsaved-edit flag, load error and
 /// revision. `ProjectDoc` and `SetsDoc` wrap it; every edit ends with `touch()`, so `rev` names the edited document.
+#[derive(Default)]
 pub(crate) struct TomlFile {
     pub(crate) path: PathBuf,
     pub(crate) doc: DocumentMut,
@@ -44,6 +45,9 @@ pub(crate) struct TomlFile {
     pub(crate) dirty: bool,
     /// The text last loaded or saved: `restore` compares with it, so an Undo back to it is clean (Note FB3).
     pub(crate) saved_text: String,
+    /// The saved text with subsequent automatic decisions applied. Undo compares against it for the title and prompts.
+    pub(crate) baseline_text: String,
+    pub(crate) user_dirty: bool,
     pub(crate) error: Option<String>,
     /// Changes with every edit, restore and reload, from one counter for every document (DECISIONS Note Y7).
     pub(crate) rev: u64,
@@ -53,12 +57,7 @@ impl TomlFile {
     pub(crate) fn open(path: PathBuf) -> TomlFile {
         let mut f = TomlFile {
             path,
-            doc: DocumentMut::new(),
-            disk: None,
-            dirty: false,
-            saved_text: String::new(),
-            error: None,
-            rev: 0,
+            ..Default::default()
         };
         f.reload();
         f
@@ -79,12 +78,15 @@ impl TomlFile {
             },
         }
         self.saved_text = self.doc.to_string();
+        self.baseline_text.clone_from(&self.saved_text);
+        self.user_dirty = false;
         self.rev = crate::sets_doc::next_rev();
     }
 
     /// An unsaved edit, made just before.
     pub(crate) fn touch(&mut self) {
         self.dirty = true;
+        self.user_dirty = true;
         self.rev = crate::sets_doc::next_rev();
     }
 
@@ -106,7 +108,9 @@ impl TomlFile {
         if let Ok(doc) = text.parse::<DocumentMut>() {
             self.doc = doc;
             self.touch();
-            self.dirty = self.doc.to_string() != self.saved_text;
+            let restored = self.text();
+            self.dirty = restored != self.saved_text;
+            self.user_dirty = restored != self.baseline_text;
         }
     }
 
@@ -132,10 +136,141 @@ impl TomlFile {
         }
         engine::dds::write_atomic(&self.path, text.as_bytes())
             .map_err(|e| write_error(&self.path, e))?;
+        self.baseline_text.clone_from(&text);
+        self.user_dirty = false;
         self.saved_text = text;
         self.disk = SourceStamp::of(&self.path);
         Ok(())
     }
+}
+
+/// A planner decision may fill an absent field or replace a particular previously recorded value.
+#[derive(Clone)]
+pub struct AutoWrite {
+    pub key: String,
+    pub field: &'static str,
+    pub value: Json,
+    pub only_if: Option<Json>,
+}
+
+/// Use the live editor's key matching, dotted fields and comment preservation on a history snapshot.
+pub fn apply_auto(text: &str, writes: &[AutoWrite]) -> String {
+    let Ok(doc) = text.parse() else {
+        return text.to_owned();
+    };
+    let mut project = ProjectDoc {
+        f: TomlFile {
+            doc,
+            ..Default::default()
+        },
+        stash: None,
+        export_cache: Default::default(),
+    };
+    project.apply_writes(writes);
+    project.text()
+}
+
+/// The editor's spelling of a batch of new file entries. For simple snapshots the editor appends
+/// these same bytes, so Undo can receive them without rebuilding thousands of unrelated tables.
+pub(crate) struct NewFileEntries {
+    names: Vec<String>,
+    tables: String,
+}
+
+impl NewFileEntries {
+    pub(crate) fn new(writes: &[AutoWrite]) -> Option<Self> {
+        if writes.is_empty()
+            || writes
+                .iter()
+                .any(|w| w.only_if.is_some() || w.value.is_null())
+        {
+            return None;
+        }
+        let mut names: Vec<_> = writes
+            .iter()
+            .map(|w| {
+                // Match find_key's order: a following extension can affect Unicode lowercasing.
+                let lower = w.key.to_lowercase();
+                without_ext(&lower).map(str::to_owned).unwrap_or(lower)
+            })
+            .collect();
+        names.sort_unstable();
+        names.dedup();
+        let tables = apply_auto("", writes);
+        (!tables.is_empty()).then_some(Self { names, tables })
+    }
+
+    pub(crate) fn appended(&self, text: &str) -> Option<String> {
+        let mut out = String::new();
+        if !text.is_empty() {
+            let folded = text.to_lowercase();
+            if self.names.iter().any(|key| folded.contains(key)) || !files_append_at_end(text) {
+                return None;
+            }
+            out.reserve_exact(text.len() + self.tables.len() + 2);
+            out.push_str(text);
+            if !text.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push('\n');
+        }
+        out.push_str(&self.tables);
+        Some(out)
+    }
+}
+
+/// History contains valid TOML. In this layout all file sections are flat, consecutive and last.
+/// Other layouts, escaped keys, and trailing decorations require the editor's placement rules.
+fn files_append_at_end(text: &str) -> bool {
+    let body = text.strip_suffix('\n').unwrap_or(text);
+    if body.is_empty()
+        || body.ends_with('\n')
+        || body.as_bytes().contains(&b'\r')
+        || body.as_bytes().contains(&b'\\')
+        || body.contains("\"\"\"")
+        || body.contains("'''")
+    {
+        return false;
+    }
+    let bare = |s: &str| {
+        !s.is_empty()
+            && s.bytes()
+                .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
+    };
+    let mut in_section = false;
+    let mut in_files = false;
+    for line in body.split('\n') {
+        if line.is_empty() {
+            continue;
+        }
+        if let Some(key) = line
+            .strip_prefix("[files.\"")
+            .and_then(|s| s.strip_suffix("\"]"))
+        {
+            if key.contains('"') {
+                return false;
+            }
+            in_files = true;
+            in_section = true;
+        } else if let Some(table) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if in_files || table == "files" || !bare(table) {
+                return false;
+            }
+            in_section = true;
+        } else if !in_section {
+            let Some((field, _)) = line.split_once('=') else {
+                return false;
+            };
+            let field = field.trim_end();
+            if field == "files" || !bare(field) {
+                return false;
+            }
+        } else if !line.as_bytes()[0].is_ascii_alphanumeric() && !line.starts_with('_') {
+            // Among other things this rejects comments at EOF and indented or quoted headers.
+            return false;
+        }
+    }
+    true
 }
 
 pub struct ProjectDoc {
@@ -338,7 +473,45 @@ impl ProjectDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
+        if !self.blamed() {
+            self.f.user_dirty = self.text() != self.f.baseline_text;
+        }
     }
+    pub fn user_dirty(&self) -> bool {
+        self.f.user_dirty && !self.blamed()
+    }
+
+    pub(crate) fn stashed_user_edit(&self) -> bool {
+        self.f.user_dirty && self.blamed()
+    }
+
+    fn apply_writes(&mut self, writes: &[AutoWrite]) {
+        for w in writes {
+            if self.file_value(&w.key, w.field) == w.only_if {
+                if w.value.is_null() {
+                    self.clear_file_value(&w.key, w.field);
+                } else {
+                    self.set_file_value(&w.key, w.field, &w.value);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn touch_auto(&mut self, writes: &[AutoWrite]) {
+        let user_dirty = self.f.user_dirty;
+        self.apply_writes(writes);
+        self.f.baseline_text = apply_auto(&self.f.baseline_text, writes);
+        self.f.user_dirty = user_dirty;
+    }
+
+    /// Undoing an automatic fuzz switch can return to disk while differing from the baseline.
+    pub(crate) fn accept_saved_text(&mut self) {
+        if !self.is_dirty() && self.user_dirty() {
+            self.f.baseline_text.clone_from(&self.f.saved_text);
+            self.f.user_dirty = false;
+        }
+    }
+
     pub fn rev(&self) -> u64 {
         self.f.rev
     }

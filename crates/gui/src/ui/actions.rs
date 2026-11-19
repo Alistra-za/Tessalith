@@ -670,7 +670,7 @@ pub fn keys(ctx: &egui::Context, model: &mut AppModel, set_modal: bool) -> Optio
             .any(|s| ctx.input_mut(|i| i.consume_key(s.mods, s.key)))
         {
             super::after_commit(ctx, model, |m| {
-                if m.is_dirty() {
+                if m.unsaved() {
                     // A failed save raises its own dialog.
                     let _ = m.save();
                 }

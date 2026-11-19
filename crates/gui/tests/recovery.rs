@@ -59,6 +59,24 @@ fn restore_toast(m: &AppModel) -> bool {
 }
 
 #[test]
+fn recovery_keeps_automatic_types_beside_a_user_sets_edit() {
+    let d = tempfile::tempdir().unwrap();
+    let (_, mut m) = three_types(d.path());
+    m.edit_docs("Rename set", None, false, |_, s| {
+        s.rename_set("a/x", "a/new")
+    });
+    let files = m.recovery_snapshot();
+    let (_, types) = files
+        .iter()
+        .find(|(path, _)| path.ends_with("sdc.toml"))
+        .expect("recover the automatic types too");
+    assert_eq!(types.matches("subtype = \"normal\"").count(), 3);
+    assert!(files
+        .iter()
+        .any(|(path, text)| path.ends_with("sdc-project.toml") && text.contains("a/new")));
+}
+
+#[test]
 fn crash_edits_come_back_on_open() {
     let d = tempfile::tempdir().unwrap();
     let (m, file, rec) = crashed(d.path(), ORIGINAL, CRASHED);
@@ -328,7 +346,7 @@ fn three_types(dir: &Path) -> (PathBuf, AppModel) {
             .unwrap();
     }
     let m = opened_as_the_app(root.clone(), dir.join("export"));
-    assert_eq!(m.undo_label(), Some("Set 3 types automatically"));
+    assert!(!m.can_undo());
     (root, m)
 }
 
@@ -345,7 +363,15 @@ fn an_automatic_only_state_leaves_no_recovery_text() {
     assert!(m.recovery_changed().is_some_and(|f| !has_toml(&f)));
     m.set_field("a/x_n.png", "format", serde_json::json!("bc7"));
     assert!(m.wait_idle(Duration::from_secs(60)));
-    assert!(has_toml(&m.recovery_snapshot()));
+    let snapshot = m.recovery_snapshot();
+    let (_, text) = snapshot
+        .iter()
+        .find(|(path, _)| path.ends_with("sdc.toml"))
+        .unwrap();
+    assert!(
+        text.contains("format = \"bc7\"") && text.matches("subtype = \"normal\"").count() == 3,
+        "{text}"
+    );
     // The panic hook's copy is refreshed when the state flips.
     assert!(m.recovery_changed().is_some_and(|f| has_toml(&f)));
 }
@@ -361,7 +387,7 @@ fn an_automatic_only_close_and_reopen_offers_no_restore() {
     assert!(!recovery_path(&file).exists());
     drop(m);
     let m = opened_as_the_app(root, d.path().join("export"));
-    // No crash-restore step: the top step is the recording again.
+    // The automatic baseline needs no recovery step.
     assert!(!restore_toast(&m));
-    assert_eq!(m.undo_label(), Some("Set 3 types automatically"));
+    assert!(!m.can_undo());
 }

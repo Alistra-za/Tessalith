@@ -191,9 +191,8 @@ pub fn short_name(name: &str) -> String {
 /// The weak line under a body that names the files an unsaved-changes question is about.
 /// Only the documents with unsaved changes (Note FI4).
 fn files_hint(ui: &mut egui::Ui, model: &AppModel) {
-    let toml =
-        model.project.as_ref().is_some_and(|p| p.is_dirty()) || model.tentative_edits().is_some();
-    let sets = model.sets_doc.as_ref().is_some_and(|s| s.is_dirty());
+    let toml = model.project_user_dirty();
+    let sets = model.sets_doc.as_ref().is_some_and(|s| s.user_dirty());
     let files: Vec<&str> = [(toml, "sdc.toml"), (sets, "sdc-project.toml")]
         .into_iter()
         .filter_map(|(dirty, f)| dirty.then_some(f))

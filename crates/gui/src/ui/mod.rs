@@ -97,6 +97,23 @@ pub fn draw_with(ui: &mut egui::Ui, model: &mut AppModel, state: &mut State) {
     draw_with_scan(ui, model, state, None);
 }
 
+pub(crate) fn new_project_line(ui: &mut egui::Ui, model: &mut AppModel) {
+    if model.never_saved && model.needs_write() {
+        panel_ids::top(ui, "new-project-line").show(ui, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                ui.label("New project: nothing saved yet.");
+                let r = ui.button("Write project files now").on_hover_text(
+                    "Writes sdc.toml and sdc-project.toml with the types Tessalith set, so sdc.exe plans the same.",
+                );
+                commit_click(ui, &r, model, AppModel::write_project_now);
+            });
+        });
+    } else {
+        // A panel consumes one parent id. Keep focused editors and pending values stable as the line appears.
+        ui.skip_ahead_auto_ids(1);
+    }
+}
+
 /// [`draw_with`] with the mod scan's row under the header (the app passes its Meshes model; tests pass `None`).
 pub fn draw_with_scan(
     ui: &mut egui::Ui,
@@ -141,12 +158,14 @@ pub fn draw_with_scan(
     model.nav.cols = 0;
     if let Some(m) = scan {
         header::draw(ui, model, Some(&mut *m));
+        new_project_line(ui, model);
         if meshes::scan_row_shown(m) {
             panel_ids::top(ui, "textures-scan").show(ui, |ui| meshes::scan_row(ui, m));
         }
         meshes::scan_dialogs(ui.ctx(), m);
     } else {
         header::draw(ui, model, None);
+        new_project_line(ui, model);
     }
     // A9: what is left under the header and the scan row, for windows that must not cover them.
     record_centre_rect(ui);

@@ -328,6 +328,8 @@ fn review_export_is_disabled_with_the_blocker_count() {
 #[test]
 fn deciding_a_row_in_review_keeps_the_columns_usable() {
     let d = tempfile::tempdir().unwrap();
+    let root = mod_folder(d.path());
+    std::fs::write(root.join("sdc.toml"), "# existing project\n").unwrap();
     let mut h = harness(opened(d.path()));
     h.run();
     press_export(&mut h);

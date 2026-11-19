@@ -196,7 +196,9 @@ fn a_long_value_does_not_widen_the_column() {
 #[test]
 fn rows_stay_inside_the_column_at_1100() {
     let d = tempfile::tempdir().unwrap();
-    let h = harness(model(d.path()), 1100.0);
+    let mut m = model(d.path());
+    m.save().unwrap(); // Measure the full settings column after the new-project line closes.
+    let h = harness(m, 1100.0);
     let c = centre(&h);
     let edge = h.ctx.content_rect().right() - 8.0;
     assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");

@@ -46,7 +46,7 @@ pub fn window_title(model: &AppModel) -> String {
         None => crate::PRODUCT_NAME.to_string(),
     };
     // Note FI4: automatic types alone are not marked.
-    if model.prompts_unsaved() {
+    if model.unsaved() {
         t.push_str(" ●");
     }
     t
@@ -150,22 +150,22 @@ fn right_end(ui: &mut egui::Ui, model: &mut AppModel) {
     push_right(ui, button_width(ui, &text) + others);
     export_to_menu(ui, model, text, full);
     // Note FC8: a focused text field may hold the only unsaved edit, so Save is live while one has the focus.
+    let unsaved = model.unsaved();
     let r = ui.add_enabled(
-        model.is_dirty() || super::actions::text_field_focused(ui.ctx()),
+        unsaved || super::actions::text_field_focused(ui.ctx()),
         egui::Button::new("Save").min_size(egui::vec2(save_w, h)),
     );
-    let r = if model.only_automatic_unsaved() {
-        r.on_hover_text(
-            "Save the texture types Tessalith changed automatically, so sdc.exe plans the same",
-        )
-    } else {
+    let r = if unsaved {
         r
+    } else {
+        r.on_hover_text("Nothing to save.")
+            .on_disabled_hover_text("Nothing to save.")
     };
     // Note FC8 (supersedes BS7's refusal): the field commits first, then this click saves. That relies on the header
     // and the bottom panel drawing before the central fields (`blur_on_press` runs first); `after_commit` covers a
     // press and release in one frame.
     super::commit_click(ui, &r, model, |m| {
-        if m.is_dirty() {
+        if m.unsaved() {
             // A failed save raises its own dialog.
             let _ = m.save();
         }

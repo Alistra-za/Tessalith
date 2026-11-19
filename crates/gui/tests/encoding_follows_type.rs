@@ -331,7 +331,9 @@ fn a_cleared_format_is_an_info_row_with_undo() {
     assert!(!counts_as_ready_problem(&rows[0]));
     m.undo();
     idle(&mut m);
-    assert!(!problems(&m).iter().any(|p| edit_rows(&p)));
+    assert!(!problems(&m)
+        .iter()
+        .any(|p| edit_rows(&p) && !p.text.contains("set automatically")));
     assert_eq!(
         file(&m, "format"),
         Some(json!("bc7")),

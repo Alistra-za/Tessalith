@@ -408,6 +408,7 @@ impl eframe::App for SdcApp {
             crate::ui::actions::keys(&ctx, &mut self.model, self.state.drops.pending.is_some());
             // C7: the one header in both views (MO2… framed with Mode), then the bottom panel (R7), then the view.
             crate::ui::header::draw(ui, &mut self.model, Some(&mut self.meshes));
+            crate::ui::new_project_line(ui, &mut self.model);
             crate::ui::record_centre_rect(ui);
             let nif_preview = self.meshes.selected_nif.is_some();
             crate::ui::bottom::draw(ui, &mut self.model, &mut self.state.drawer, nif_preview);

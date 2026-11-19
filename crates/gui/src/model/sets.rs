@@ -3655,9 +3655,6 @@ impl AppModel {
         // Note FC1 R5: a sub-type the plan recorded on its own and nobody changed takes the chosen shader's type in
         // this step (the CLI never reads the set's shader, so `sdc.toml` must name it). Back to Auto it goes, and the
         // next settled plan records what the plan picks then.
-        for (k, _, _) in &retype {
-            self.history.auto_written.remove(&(k.clone(), "subtype"));
-        }
         // Fuzz-9: a value the PBR step clears in this pick was its own, never the user's.
         let step_cleared: HashSet<String> = retype
             .iter()
