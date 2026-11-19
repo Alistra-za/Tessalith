@@ -1046,11 +1046,17 @@ fn assert_mark_at_top_centre(label: &str, letter: &str, locks: bool) {
         &[("lacq_cnr.png", [128, 128, 255], Subtype::CoatNormal)],
     );
     for (n, item) in [(6, "arch/wall_rmaos.png"), (7, "arch/lacq_cnr.png")] {
-        m.run_menu(MenuAction::SlotLink {
-            set: "arch/leaf".into(),
-            n,
-            item: item.into(),
-        });
+        // Ruling 3b-F21: a pick waits for the plan the lock before it started.
+        idle(&mut m);
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLink {
+                set: "arch/leaf".into(),
+                n,
+                item: item.into(),
+            }),
+            None,
+            "{item}"
+        );
         if locks {
             m.set_slot_lock("arch/leaf", n, true).unwrap();
             m.run_menu(MenuAction::PgpLock {

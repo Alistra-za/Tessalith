@@ -5,10 +5,11 @@ use super::fields::{
     hidden_reason, views_of, weighting_option_lock, FieldView, BC3_CHOICES, BC3_CUSTOM, BC3_SEARCH,
     EDGE_FIELD, EFFORT_FIELDS, FIELDS, FILTER_FIELD, LEVELS_FIELD, NO_SEARCH, WEIGHTING,
 };
+use super::items::TextureItem;
 use super::set_groups::GroupTarget;
 use super::sets::{
-    engine_inputs, locked_items, member_game_path, member_game_path_in, output_roots, slot_gives,
-    slot_of, SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
+    locked_items, member_game_path, member_game_path_in, output_roots, slot_gives, slot_of,
+    SlotCommand, SlotKind, NOTHING, SLOT_LOCKED,
 };
 use super::{AppModel, Dialog, Selection};
 use engine::config::{ColorTag, Format, MipFilter, Subtype, Target};
@@ -1696,11 +1697,7 @@ impl AppModel {
             n,
             cmd,
         };
-        // Rulings 3b-F14, 3b-F16: the folders are read once per menu, and the export inputs (the paths a pending edit
-        // asks for) are built once and only while a plan is out, never once per listed member.
-        let roots = output_roots(self);
-        let asked = self.full_plan_pending().then(|| engine_inputs(self).1);
-        let links: Vec<MenuEntry> = views
+        let members: Vec<(&super::sets::SetView, &String, &TextureItem)> = views
             .iter()
             .filter(|o| !same_id(&o.id, &id))
             .flat_map(|o| o.members.iter().map(move |k| (o, k)))
@@ -1708,16 +1705,28 @@ impl AppModel {
                 let it = self
                     .item(k)
                     .filter(|i| slot_of(i).and_then(SlotKind::slot_number) == Some(n))?;
-                Some(MenuEntry {
-                    action: MenuAction::SlotLink {
-                        set: id.clone(),
-                        n,
-                        item: k.clone(),
-                    },
-                    label: format!("{} — {}", o.id, it.name),
-                    // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
-                    disabled: member_game_path_in(&o.id, asked.as_ref(), &roots, it).err(),
-                })
+                Some((o, k, it))
+            })
+            .collect();
+        // Ruling 3b-F21: a pick stores the path the settled plan writes. While the plan is not settled
+        // (`pick_waits`) every row is off with one reason and no member's path is read; else the folders are read once
+        // per menu (`output_roots`), never once per listed member.
+        let wait = (!members.is_empty()).then(|| self.pick_waits()).flatten();
+        let roots = (!members.is_empty() && wait.is_none()).then(|| output_roots(self));
+        let links: Vec<MenuEntry> = members
+            .into_iter()
+            .map(|(o, k, it)| MenuEntry {
+                action: MenuAction::SlotLink {
+                    set: id.clone(),
+                    n,
+                    item: k.clone(),
+                },
+                label: format!("{} — {}", o.id, it.name),
+                // Listed but off when the game would find no file there (no game location, ruling 3b-F6).
+                disabled: match &roots {
+                    Some(roots) => member_game_path_in(roots, it).err(),
+                    None => wait.map(String::from),
+                },
             })
             .collect();
         let gives = slot_gives(self, &id, n);
@@ -1797,6 +1806,8 @@ impl AppModel {
             MenuAction::Slot { set, n, cmd } => return self.set_slot_command(&set, n, cmd).err(),
             MenuAction::SlotPath { .. } | MenuAction::FromAnotherSet => {}
             MenuAction::SlotLink { set, n, item } => {
+                // Ruling 3b-F21: the click checks again that the plan is settled and reads the settled path, so a row
+                // drawn before an edit stores nothing while that edit plans.
                 return match member_game_path(self, &item) {
                     Ok(p) => {
                         let err = self.set_slot_command(&set, n, SlotCommand::Path(p)).err();

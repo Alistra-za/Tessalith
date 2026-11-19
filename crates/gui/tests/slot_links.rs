@@ -1442,6 +1442,8 @@ fn every_pick_the_menu_offers_is_a_link_to_its_set() {
             "{item}: {lines:?}"
         );
         m.undo();
+        // Ruling 3b-F21: the undo plans again, and the next pick waits for that plan.
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     }
     let glass = member_game_path(&m, "arch/glass_m.png").unwrap();
     m.set_slot_command(LEAF, 3, SlotCommand::Path(glass))
@@ -2024,17 +2026,128 @@ fn the_slot_menu_builds_the_export_inputs_once_per_call() {
     assert!(links(&m) >= 3, "premise: three members listed");
     let once = engine_input_builds() - before;
     assert!(once <= 1, "one menu built the export inputs {once} times");
-    // Ruling 3b-F16: the output and export folders are read once per menu call, not per listed member.
-    let roots = sdc_gui::model::sets::output_root_reads();
-    let _ = links(&m);
-    let reads = sdc_gui::model::sets::output_root_reads() - roots;
-    assert!(reads <= 1, "one menu read the folders {reads} times");
     let before = engine_input_builds();
     let _ = links(&m);
     assert!(
         engine_input_builds() - before <= 1,
         "a second frame: {}",
         engine_input_builds() - before
+    );
+}
+
+/// `no_albedo_pair_with` three extra heights (with `more`, six and two diffuses), with the Vanilla tick on: a CS
+/// project whose mirrored members are read under the PBR folder.
+fn ticked_heights(dir: &std::path::Path, more: bool) -> AppModel {
+    const ALL: [(&str, [u8; 3], Subtype); 8] = [
+        ("a_p.png", [128, 128, 128], Subtype::Height),
+        ("b_p.png", [128, 128, 128], Subtype::Height),
+        ("c_p.png", [128, 128, 128], Subtype::Height),
+        ("d_p.png", [128, 128, 128], Subtype::Height),
+        ("e_p.png", [128, 128, 128], Subtype::Height),
+        ("f_p.png", [128, 128, 128], Subtype::Height),
+        ("g.png", [128, 128, 128], Subtype::Diffuse),
+        ("h.png", [128, 128, 128], Subtype::Diffuse),
+    ];
+    let mut m = no_albedo_pair_with(dir, if more { &ALL[..] } else { &ALL[..3] });
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(m.also_root().is_some(), "premise: a tick on cs");
+    let _ = views(&m);
+    m
+}
+
+/// The (export configuration, export folder) reads `f` makes on this thread (ruling 3b-F21).
+fn reads_of(f: impl FnOnce()) -> (u64, u64) {
+    let (c0, e0) = sdc_gui::model::sets::root_reads();
+    f();
+    let (c1, e1) = sdc_gui::model::sets::root_reads();
+    (c1 - c0, e1 - e0)
+}
+
+fn height_links(m: &AppModel) -> usize {
+    m.slot_menu(LEAF, SlotKind::Height)
+        .into_iter()
+        .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+        .count()
+}
+
+/// Ruling 3b-F21: with an Also tick on CS (where the output folder is made of the export configuration and the export
+/// folder), the From another set list reads both once per menu call (`output_roots`) beside the settled check
+/// (`pick_waits`), and nothing per listed member or per item; the link index reads them once beside its views. While
+/// a plan is out the list reads no folder and builds no export inputs.
+#[test]
+fn the_menu_and_the_index_read_the_folders_once_whatever_the_members() {
+    use sdc_gui::model::sets::engine_input_builds;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = ticked_heights(d.path(), false);
+    let fuzz = |m: &AppModel| m.slot_menu(LEAF, SlotKind::Fuzz);
+    assert!(
+        !fuzz(&m)
+            .iter()
+            .any(|e| matches!(e.action, MenuAction::SlotLink { .. })),
+        "premise: no other set has a fuzz map"
+    );
+    let none_listed = reads_of(|| {
+        fuzz(&m);
+    });
+    let settled = reads_of(|| {
+        assert_eq!(m.pick_waits(), None, "premise: settled");
+    });
+    let mut listed = 0;
+    let menu = reads_of(|| listed = height_links(&m));
+    assert!(listed >= 3, "premise: three heights listed");
+    assert_eq!(
+        menu,
+        (none_listed.0 + settled.0 + 1, none_listed.1 + settled.1 + 1),
+        "a menu with members reads the folders once beside the settled check"
+    );
+    let views_alone = reads_of(|| {
+        let _ = views(&m);
+    });
+    let index = reads_of(|| {
+        let _ = sdc_gui::model::txst_map::written_output_index(&m);
+    });
+    assert_eq!(index, (views_alone.0 + 1, views_alone.1 + 1), "the index");
+    // Twice the members and more items: the same reads.
+    let d2 = tempfile::tempdir().unwrap();
+    let big = ticked_heights(d2.path(), true);
+    assert!(big.items.len() > m.items.len() + 4, "premise: more items");
+    let mut big_listed = 0;
+    let big_menu = reads_of(|| big_listed = height_links(&big));
+    assert!(big_listed >= 6, "premise: six heights listed");
+    assert_eq!(
+        reads_of(|| {
+            let _ = big.pick_waits();
+        }),
+        settled,
+        "the settled check reads nothing per item"
+    );
+    assert_eq!(big_menu, menu, "nothing per listed member or item");
+    // A plan out: every row is off and no member path, folder or export input is read.
+    m.hold_plan_results = true;
+    m.set_json_value(LEAF, "rename", Some(json!(r"textures\arch\leaf2")));
+    assert!(m.full_plan_pending(), "premise: a plan is out");
+    let _ = views(&m);
+    let none_listed = reads_of(|| {
+        fuzz(&m);
+    });
+    let builds = engine_input_builds();
+    let pending = reads_of(|| {
+        let rows = m.slot_menu(LEAF, SlotKind::Height);
+        let links: Vec<_> = rows
+            .iter()
+            .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }))
+            .collect();
+        assert!(links.len() >= 3, "premise: listed");
+        assert!(links
+            .iter()
+            .all(|e| e.disabled.as_deref() == Some(PICK_PLANNING)));
+    });
+    assert_eq!(pending, none_listed, "no folder read while planning");
+    assert_eq!(
+        engine_input_builds(),
+        builds,
+        "no export inputs while planning"
     );
 }
 
@@ -2153,4 +2266,187 @@ fn a_pack_displaced_by_a_borrow_and_mapped_to_its_default_path_is_no_collision()
         m.export_root().join("textures/t/w_rmaos.dds").is_file(),
         "{notes}"
     );
+}
+
+// ---- Task 15a fix round 4 (ruling 3b-F21): a member pick stores only a settled path ----
+
+/// The reason a From another set row gives while the plan is out (ruling 3b-F21).
+const PICK_PLANNING: &str = "Planning: pick a file once the plan has finished";
+
+/// The consumer's stored `slot{n}`, if any.
+fn stored_slot(m: &AppModel, n: u8) -> Option<Value> {
+    views(m)
+        .iter()
+        .find(|v| v.id == CONSUMER)
+        .and_then(|v| v.settings.get(&format!("slot{n}")).cloned())
+}
+
+/// The consumer's From another set row for `item` on the card of `kind`.
+fn pick_row(m: &AppModel, kind: SlotKind, item: &str) -> sdc_gui::model::bulk::MenuEntry {
+    m.slot_menu(CONSUMER, kind)
+        .into_iter()
+        .find(|e| matches!(&e.action, MenuAction::SlotLink { item: i, .. } if i == item))
+        .unwrap_or_else(|| panic!("the menu lists {item}"))
+}
+
+/// The item that writes `out_name`.
+fn writer_of(m: &AppModel, out_name: &str) -> String {
+    m.items
+        .iter()
+        .find(|i| {
+            i.job
+                .as_ref()
+                .is_some_and(|j| j.output.file_name().is_some_and(|n| n == out_name))
+        })
+        .unwrap_or_else(|| panic!("premise: an item writes {out_name}"))
+        .key
+        .clone()
+}
+
+/// Let the held plan messages through and every plan land.
+fn land(m: &mut AppModel) {
+    m.hold_plan_results = false;
+    for x in m.take_held() {
+        m.sender().send(x).unwrap();
+    }
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+}
+
+/// The CS `arch/leaf.png` with the legacy `output_name = "maple"` and a TXST mapping of slot 1 to
+/// `textures\z\body.dds`, which the settled plan writes.
+const MAPLE: Layout = Layout {
+    name: "maple mapped to body",
+    files: &["arch/leaf.png"],
+    toml: "[[sets]]\nid = \"arch/leaf\"\noutput_name = \"maple\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\n\
+           edid = \"L\"\nslot1 = \"textures/z/body.dds\"\n",
+    albedos: &[],
+    subtypes: &[],
+    out_name: "body.dds",
+    slot: 1,
+    real: Some(r"textures\z\body.dds"),
+    invented: &[],
+    json: &[],
+};
+
+/// Ruling 3b-F21: while another set's edit is planning, the mapped fuzz member's row is off with the planning reason
+/// and a pick stores nothing (f8fbe807 offered and stored the asked-for `textures\z\rock_fuzz.dds`, a file the export
+/// never writes). Once the plan lands the pick stores `textures\z\rock_f.dds`, the file the producer writes.
+#[test]
+fn a_member_pick_waits_for_the_plan_and_then_stores_the_written_path() {
+    let layout = LAYOUTS
+        .iter()
+        .find(|l| l.out_name == "rock_f.dds")
+        .expect("the fuzz layout");
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), layout);
+    let producer = writer_of(&m, "rock_f.dds");
+    let pick = MenuAction::SlotLink {
+        set: CONSUMER.into(),
+        n: 7,
+        item: producer.clone(),
+    };
+    m.hold_plan_results = true;
+    // Another set's edit that plans again: the consumer's rename.
+    m.set_json_value(CONSUMER, "rename", Some(json!(r"textures\c\con2")));
+    assert!(m.full_plan_pending(), "premise: a plan is out");
+    assert_eq!(
+        pick_row(&m, SlotKind::Fuzz, &producer).disabled.as_deref(),
+        Some(PICK_PLANNING)
+    );
+    assert_eq!(m.run_menu(pick.clone()), Some(PICK_PLANNING.to_string()));
+    assert_eq!(stored_slot(&m, 7), None, "nothing is stored while planning");
+    land(&mut m);
+    assert_eq!(pick_row(&m, SlotKind::Fuzz, &producer).disabled, None);
+    assert_eq!(m.run_menu(pick), None);
+    assert_eq!(
+        stored_slot(&m, 7).and_then(|v| v.as_str().map(str::to_ascii_lowercase)),
+        Some(r"textures\z\rock_f.dds".to_string())
+    );
+}
+
+/// Ruling 3b-F21: with the TXST mapping removed and `output_name = "maple"` kept, the pending plan asks for
+/// `arch/maple.dds`, which has no game location. Before the plan lands the row is off with the planning reason and a
+/// pick stores nothing (f8fbe807 fell back to the old `textures\z\body.dds` and stored it); after it lands the row is
+/// off with the no-game-location reason and a pick still stores nothing.
+#[test]
+fn a_removed_mapping_offers_no_old_path_before_or_after_the_plan() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &MAPLE);
+    let producer = writer_of(&m, "body.dds");
+    let pick = MenuAction::SlotLink {
+        set: CONSUMER.into(),
+        n: 1,
+        item: producer.clone(),
+    };
+    assert_eq!(
+        pick_row(&m, SlotKind::Diffuse, &producer).disabled,
+        None,
+        "premise: the mapped output is offered"
+    );
+    m.hold_plan_results = true;
+    m.unmap_record("arch/leaf").unwrap();
+    assert!(m.full_plan_pending(), "premise: a plan is out");
+    assert_eq!(
+        pick_row(&m, SlotKind::Diffuse, &producer)
+            .disabled
+            .as_deref(),
+        Some(PICK_PLANNING)
+    );
+    assert_eq!(m.run_menu(pick.clone()), Some(PICK_PLANNING.to_string()));
+    assert_eq!(stored_slot(&m, 1), None, "nothing is stored while planning");
+    land(&mut m);
+    assert!(
+        m.item(&producer)
+            .and_then(|i| i.job.as_ref())
+            .is_some_and(|j| j.output.ends_with("arch/maple.dds")),
+        "premise: the output is arch/maple.dds"
+    );
+    const NO_PATH: &str = "no game path (not under a textures folder)";
+    assert_eq!(
+        pick_row(&m, SlotKind::Diffuse, &producer)
+            .disabled
+            .as_deref(),
+        Some(NO_PATH)
+    );
+    assert_eq!(m.run_menu(pick), Some(NO_PATH.to_string()));
+    assert_eq!(stored_slot(&m, 1), None, "nothing is stored after the plan");
+}
+
+/// Ruling 3b-F21: a replan that fails for good leaves the items of the plan before it, so a pick then would store the
+/// path that plan wrote. The row is off and the pick is refused, nothing stored (f8fbe807 stored the stale
+/// `textures\z\body.dds`).
+#[test]
+fn a_member_pick_after_a_failed_replan_is_refused() {
+    use sdc_gui::worker::{PlanFailure, WorkerMsg};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &MAPLE);
+    let producer = writer_of(&m, "body.dds");
+    let pick = MenuAction::SlotLink {
+        set: CONSUMER.into(),
+        n: 1,
+        item: producer.clone(),
+    };
+    m.hold_plan_results = true;
+    m.unmap_record("arch/leaf").unwrap();
+    m.handle_held(WorkerMsg::Planned {
+        generation: m.generation(),
+        result: Err(PlanFailure {
+            message: "the plan failed".into(),
+            config: false,
+        }),
+    });
+    // The user closes the error.
+    m.dialog = None;
+    // Export's own checks find nothing to wait for here: no plan is out and the inputs are the failed plan's.
+    assert!(!m.full_plan_pending(), "premise: no plan is out");
+    assert!(m.inputs_settled(), "premise: Export's inputs check passes");
+    const FAILED: &str = "The last plan failed: pick a file once a new plan has finished";
+    assert_eq!(
+        pick_row(&m, SlotKind::Diffuse, &producer)
+            .disabled
+            .as_deref(),
+        Some(FAILED)
+    );
+    assert_eq!(m.run_menu(pick), Some(FAILED.to_string()), "refused");
+    assert_eq!(stored_slot(&m, 1), None, "nothing is stored");
 }

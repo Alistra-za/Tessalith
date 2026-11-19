@@ -1186,22 +1186,36 @@ pub fn engine_input_builds() -> u64 {
 
 #[cfg(feature = "test-hooks")]
 thread_local! {
-    /// Test probe: how many times `output_roots` ran on this thread (ruling 3b-F16).
-    static OUTPUT_ROOT_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    /// Test probe (ruling 3b-F21): the reads of the export configuration (`also_config`, a clone) and of the export
+    /// folder (`export_root`) on this thread, the two values the output folder is made of.
+    static ROOT_READS: std::cell::Cell<(u64, u64)> = const { std::cell::Cell::new((0, 0)) };
 }
 
-/// Tests: how many times the output and export folders were read (`output_roots`) on this thread.
+/// Count one read of the export configuration (`config`) or of the export folder.
 #[cfg(feature = "test-hooks")]
-pub fn output_root_reads() -> u64 {
-    OUTPUT_ROOT_READS.with(std::cell::Cell::get)
+pub(crate) fn count_root_read(config: bool) {
+    ROOT_READS.with(|c| {
+        let (cfg, folder) = c.get();
+        c.set(if config {
+            (cfg + 1, folder)
+        } else {
+            (cfg, folder + 1)
+        });
+    });
 }
 
-/// The two folders a job's output is read under, the output folder first, then the export folder. Ruling 3b-F16: read
-/// once per index build or menu call (each read clones the export configuration), never per member.
+/// Tests: (export configuration reads, export folder reads) on this thread so far.
+#[cfg(feature = "test-hooks")]
+pub fn root_reads() -> (u64, u64) {
+    ROOT_READS.with(std::cell::Cell::get)
+}
+
+/// The two folders a job's output is read under, the output folder first, then the export folder. Ruling 3b-F21: one
+/// read of the export configuration and one of the export folder make both; called once per index build or menu
+/// call, never per member.
 pub(crate) fn output_roots(m: &AppModel) -> [PathBuf; 2] {
-    #[cfg(feature = "test-hooks")]
-    OUTPUT_ROOT_READS.with(|c| c.set(c.get() + 1));
-    [m.output_root(), m.export_root()]
+    let export = m.export_root();
+    [m.output_root_in(&m.also_config(), &export), export]
 }
 
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
@@ -1986,6 +2000,8 @@ pub(crate) fn engine_inputs_in(
     explicit.extend(rec_keys.iter());
     let last = m.last_inputs.as_ref().map(|l| &l.output_paths);
     let owners = packed_owners(views);
+    // Ruling 3b-F21: the folders once per build, not per item (`export_key_in`).
+    let prefix = m.plan_prefix();
     let mirrored: BTreeSet<String> = m
         .items
         .iter()
@@ -1996,7 +2012,7 @@ pub(crate) fn engine_inputs_in(
             !explicit.contains(&k) && !last.is_some_and(|l| l.contains_key(&k))
         })
         // Note HQ6: explicit paths are under the export folder, job keys under the plan's output root.
-        .map(|it| m.export_key(&it.job_key))
+        .map(|it| super::export_key_in(&prefix, &it.job_key))
         .collect();
     let mut seen = BTreeSet::new();
     let named = named.into_iter().map(|(k, rel)| (String::new(), k, rel));
@@ -2040,6 +2056,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
         .any(|e| e.output_name.is_some())
         .then(|| DefaultOutputs::new(m))
         .flatten();
+    // Ruling 3b-F21: the folders once per pass, not per member (`export_rel_in`).
+    let mut prefix = None;
     for e in entries.iter() {
         let Some(name) = e.output_name.as_deref() else {
             continue;
@@ -2077,7 +2095,8 @@ pub fn output_name_paths(m: &AppModel, views: &[SetView]) -> Vec<(OutputKey, Pat
             } else {
                 OutputKey::File(item.key.clone())
             };
-            out.push((k, m.export_rel(&rel)));
+            let prefix = prefix.get_or_insert_with(|| m.plan_prefix());
+            out.push((k, super::export_rel_in(prefix, &rel)));
         }
     }
     out
@@ -2695,54 +2714,34 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
 /// Why a member outside a `textures` folder cannot be linked (F3a Task 8).
 pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 
+/// Ruling 3b-F21: why a From another set row is off while the plan is out (`AppModel::pick_waits`).
+pub const PICK_PLANNING: &str = "Planning: pick a file once the plan has finished";
+/// Ruling 3b-F21: why a From another set row is off after a plan failed for good (`AppModel::pick_waits`).
+pub const PICK_PLAN_FAILED: &str = "The last plan failed: pick a file once a new plan has finished";
+
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
-/// backslashes, `.dds`): where its job writes it (`written_game_location`). A member whose output is under no
-/// `textures` folder has none. While a plan is out (`full_plan_pending`) the path the pending edit asks for is shown
-/// instead, a prediction for display only (ruling 3b-F16).
+/// backslashes, `.dds`): where its settled job writes it (`written_game_location`). Ruling 3b-F21: only on a settled
+/// plan (`AppModel::pick_waits` says why not), and never a path a pending edit asks for. A member whose output is under
+/// no `textures` folder has none.
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
+    if let Some(why) = m.pick_waits() {
+        return Err(why.into());
+    }
     let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
-    let views = views(m);
-    let set = views.iter().find(|v| v.members.contains(&it.key));
-    let asked = m.full_plan_pending().then(|| engine_inputs_in(m, &views).1);
-    let roots = output_roots(m);
-    member_game_path_in(
-        set.map_or("", |v| v.id.as_str()),
-        asked.as_ref(),
-        &roots,
-        it,
-    )
+    member_game_path_in(&output_roots(m), it)
 }
 
-/// `member_game_path` for a member of set `set`, over what the caller read once per call (rulings 3b-F14, 3b-F16):
-/// the folders (`output_roots`) and, only while a plan is out, the export inputs (`asked`), whose explicit path for
-/// the output is what the pending edit asks for. With the plan current (`asked` is `None`) the settled job's output is
-/// read: the engine may write another file name than the one asked for.
+/// `member_game_path` over the folders the caller read once per call (`output_roots`, rulings 3b-F14 and 3b-F21),
+/// on a settled plan: the settled job's output, never an explicit path asked for (the engine may write another file
+/// name, and an output with no game location keeps its error).
 pub(crate) fn member_game_path_in(
-    set: &str,
-    asked: Option<&BTreeMap<OutputKey, PathBuf>>,
     roots: &[PathBuf; 2],
     it: &TextureItem,
 ) -> Result<String, String> {
     if !writes_own_output(it) || it.job_key.is_empty() {
         return Err(format!("{} writes no output", it.name));
     }
-    // The producing set is passed in (ruling 3b-F14), so no view is searched per member.
-    let key = || {
-        if it.kind == ItemKind::Packed {
-            recipe_suffix(it).map(|suffix| OutputKey::Packed {
-                set: set.to_string(),
-                suffix,
-            })
-        } else {
-            Some(OutputKey::File(it.key.clone()))
-        }
-    };
-    let predicted = asked
-        .and_then(|paths| paths.get(&key()?))
-        .and_then(|p| game_location_of(p));
-    predicted
-        .or_else(|| written_game_location(roots, it))
-        .ok_or_else(|| NO_GAME_PATH.into())
+    written_game_location(roots, it).ok_or_else(|| NO_GAME_PATH.into())
 }
 
 /// Review E1 (Task 15a, rulings 3b-F6, 3b-F11 and 3b-F16): the game location of the file `it`'s settled job writes,

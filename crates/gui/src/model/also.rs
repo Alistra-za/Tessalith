@@ -21,6 +21,14 @@ pub fn is_pbr_set(v: &sets::SetView) -> bool {
     v.shader.as_ref().is_some_and(|p| p.shader.is_pbr_family())
 }
 
+/// (Vanilla, CM) ticked in configuration `c`.
+fn ticks_of(c: &ExportConfig) -> (bool, bool) {
+    (
+        c.also.contains(&AlsoTarget::Vanilla),
+        c.also.contains(&AlsoTarget::Cm),
+    )
+}
+
 /// Why an "Also export as" tick (`on`: ticked now) is off, in one order for Export to ▾, Review and the set editor's
 /// Also export tab (Note JI2): `busy` (the caller's text), no folder (the model's edit would be a silent no-op), a
 /// read-only `sdc.toml`, then TA20 for an unticked box outside the cs mode (a tick left from it stays clickable).
@@ -46,6 +54,8 @@ pub(super) fn phase_name(p: Phase) -> &'static str {
 impl AppModel {
     /// `[export]` of the project (the default without a usable `sdc.toml`).
     pub fn also_config(&self) -> ExportConfig {
+        #[cfg(feature = "test-hooks")]
+        sets::count_root_read(true);
         self.project
             .as_ref()
             .filter(|p| !p.read_only())
@@ -55,11 +65,7 @@ impl AppModel {
 
     /// (Vanilla, CM) from `[export] also`.
     pub fn also_ticks(&self) -> (bool, bool) {
-        let c = self.also_config();
-        (
-            c.also.contains(&AlsoTarget::Vanilla),
-            c.also.contains(&AlsoTarget::Cm),
-        )
+        ticks_of(&self.also_config())
     }
 
     /// Either tick is on.
@@ -159,10 +165,13 @@ impl AppModel {
 
     /// TA10: where the three folders go: `[project] also_location`, else the export folder.
     pub fn also_location(&self) -> PathBuf {
-        self.sets_doc
-            .as_ref()
-            .and_then(|d| d.also_location())
+        self.chosen_also_location()
             .unwrap_or_else(|| self.export_root())
+    }
+
+    /// `[project] also_location`, if set.
+    fn chosen_also_location(&self) -> Option<PathBuf> {
+        self.sets_doc.as_ref().and_then(|d| d.also_location())
     }
 
     /// The project name the engine names the folders by: the opened folder's name (`also::project_name`).
@@ -174,8 +183,12 @@ impl AppModel {
     /// The PBR, Vanilla and CM folders: the location joined with `[export.names]` (default `<project> PBR`, …).
     pub fn also_folders(&self) -> [PathBuf; 3] {
         let loc = self.also_location();
-        self.also_config()
-            .folder_names(&self.also_project().unwrap_or_default())
+        self.folders_in(&self.also_config(), loc)
+    }
+
+    /// `also_folders` under location `loc`, named by configuration `c`.
+    fn folders_in(&self, c: &ExportConfig, loc: PathBuf) -> [PathBuf; 3] {
+        c.folder_names(&self.also_project().unwrap_or_default())
             .map(|n| loc.join(n))
     }
 
@@ -183,12 +196,32 @@ impl AppModel {
     /// Review M1: only in the cs mode, so a tick left from it never sends the plan or the NIF edits into a PBR folder
     /// no export can fill (Review names TA20 instead).
     pub fn also_root(&self) -> Option<PathBuf> {
-        (self.also_on() && self.target == Target::Cs).then(|| self.also_folders()[0].clone())
+        self.also_root_in(&self.also_config(), &self.export_root())
+    }
+
+    /// `also_root` over the configuration (`c`) and the export folder (`export`) the caller read, each once (ruling
+    /// 3b-F21).
+    fn also_root_in(&self, c: &ExportConfig, export: &Path) -> Option<PathBuf> {
+        let (vanilla, cm) = ticks_of(c);
+        ((vanilla || cm) && self.target == Target::Cs).then(|| {
+            let loc = self
+                .chosen_also_location()
+                .unwrap_or_else(|| export.to_path_buf());
+            let [pbr, ..] = self.folders_in(c, loc);
+            pbr
+        })
     }
 
     /// The folder the plan and the PBR outputs are under: the PBR folder while a tick is on, else the export folder.
     pub fn output_root(&self) -> PathBuf {
-        self.also_root().unwrap_or_else(|| self.export_root())
+        self.output_root_in(&self.also_config(), &self.export_root())
+    }
+
+    /// `output_root` over the configuration (`c`) and the export folder (`export`) the caller read, each once (ruling
+    /// 3b-F21: `sets::output_roots` reads both folders with one read of each).
+    pub(crate) fn output_root_in(&self, c: &ExportConfig, export: &Path) -> PathBuf {
+        self.also_root_in(c, export)
+            .unwrap_or_else(|| export.to_path_buf())
     }
 
     /// Note CI29 / P16: where NIF edits go, handed to the Meshes model every frame by `app.rs`: `output_root()` when

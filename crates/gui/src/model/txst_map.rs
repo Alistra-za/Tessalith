@@ -97,6 +97,8 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
         .any(|e| e.txst.as_ref().is_some_and(TxstMap::is_base))
         .then(|| DefaultOutputs::new(m))
         .flatten();
+    // Ruling 3b-F21: the folders once per pass, not per member (`export_rel_in`).
+    let mut prefix = None;
     for e in entries.iter() {
         let Some(txst) = &e.txst else { continue };
         let Some(v) = views.iter().find(|v| same_id(&v.id, &e.id)) else {
@@ -114,7 +116,8 @@ pub fn record_entries(m: &AppModel, views: &[SetView]) -> Vec<(String, OutputKey
             let Some(item) = m.item(key) else { continue };
             if let Some((k, _, rel)) = member_write(root, v, item, &txst.slots, base) {
                 // Note HQ6: explicit paths are under the export folder.
-                out.push((v.id.clone(), k, m.export_rel(&rel)));
+                let prefix = prefix.get_or_insert_with(|| m.plan_prefix());
+                out.push((v.id.clone(), k, super::export_rel_in(prefix, &rel)));
             }
         }
     }

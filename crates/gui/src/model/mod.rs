@@ -259,6 +259,20 @@ impl EngineInputs {
     }
 }
 
+/// `AppModel::export_rel` under `prefix` (`plan_prefix`), read once by a caller that loops over items, so the
+/// folders are not read per item (ruling 3b-F21).
+pub(crate) fn export_rel_in(prefix: &Path, rel: &Path) -> PathBuf {
+    // `/`-separated, as the explicit paths it joins.
+    PathBuf::from(prefix.join(rel).to_string_lossy().replace('\\', "/"))
+}
+
+/// `AppModel::export_key` under `prefix` (`export_rel_in`).
+pub(crate) fn export_key_in(prefix: &Path, rel: &str) -> String {
+    export_rel_in(prefix, Path::new(rel))
+        .to_string_lossy()
+        .to_lowercase()
+}
+
 fn read_only_banner(error: &str) -> String {
     // A list of removed keys (ruling FR-a) keeps one key per line; the sentence goes under it.
     let sep = if error.contains('\n') { "\n" } else { " — " };
@@ -736,6 +750,9 @@ pub struct AppModel {
     votes_read: Option<VoteInputs>,
     generation: u64,
     planning: Option<CancelToken>,
+    /// Ruling 3b-F21: the last full plan failed for good (no retry runs), so the items are still the plan before it;
+    /// set by `plan_failed`, cleared when the next plan starts. A From another set pick waits (`pick_waits`).
+    plan_failed: bool,
     /// Fast re-plan (R2 §5): bumped by every `replan`; its partial and its full plan carry this value.
     pub edit_seq: u64,
     /// The `edit_seq` of the newest partial or full plan that landed: an older partial is dropped.
@@ -979,6 +996,7 @@ impl AppModel {
             votes_read: None,
             generation: 0,
             planning: None,
+            plan_failed: false,
             edit_seq: 0,
             applied_seq: 0,
             dirty_keys: Default::default(),
@@ -1139,13 +1157,7 @@ impl AppModel {
     /// Note HQ1: `rel`, a path under the output root the sets were planned with, as a path under the export folder
     /// (a game path once it starts at `textures`).
     pub fn export_rel(&self, rel: &Path) -> PathBuf {
-        // `/`-separated, as the explicit paths it joins.
-        PathBuf::from(
-            self.plan_prefix()
-                .join(rel)
-                .to_string_lossy()
-                .replace('\\', "/"),
-        )
+        export_rel_in(&self.plan_prefix(), rel)
     }
 
     /// The folders between the export folder and the plan's output root (Note HQ1); empty while the export folder
@@ -1159,9 +1171,7 @@ impl AppModel {
 
     /// A plan path (a `job_key`) as an explicit-path key: under the export folder, `/`, lower case (Note HQ6).
     pub fn export_key(&self, rel: &str) -> String {
-        self.export_rel(Path::new(rel))
-            .to_string_lossy()
-            .to_lowercase()
+        export_key_in(&self.plan_prefix(), rel)
     }
 
     /// The export folder the user chose for this project (Note FB1): with a usable project document (loaded, not
@@ -1178,6 +1188,8 @@ impl AppModel {
     /// Where an export would write: the chosen folder, else `<root>/sdc-out` (only a place to name; Review blocks the
     /// export until a folder is chosen, Note FB1).
     pub fn export_root(&self) -> PathBuf {
+        #[cfg(feature = "test-hooks")]
+        sets::count_root_read(false);
         self.export_folder_chosen()
             .unwrap_or_else(|| self.root.clone().unwrap_or_default().join("sdc-out"))
     }
@@ -1409,6 +1421,7 @@ impl AppModel {
         if let Some(c) = self.planning.take() {
             c.cancel();
         }
+        self.plan_failed = false;
         self.generation += 1;
         self.send_partial(files_edit, &session, &req, &root);
         // A re-plan with no step pushed since (a scan, a superseded plan) keeps the blame of the plan it replaces.
@@ -1848,6 +1861,7 @@ impl AppModel {
                 }
             }
         }
+        self.plan_failed = true;
         self.status_line = format!("Planning failed: {}", f.message);
         self.raise_error(f.message);
     }
@@ -2046,7 +2060,7 @@ impl AppModel {
         }
         // A plan is in flight (just opened, or an edit): the items on screen are the previous plan's, so the checks
         // wait for the plan that lands (spec §2.6: the button is never silently disabled).
-        if self.planning.is_some() || self.votes_pending.is_some() {
+        if self.full_plan_pending() {
             self.export_after_plan = true;
             return;
         }
@@ -2110,13 +2124,32 @@ impl AppModel {
         self.start_export_pass();
     }
 
-    /// True (with an error dialog) when the plan on screen is not the one for these sets.
-    fn plan_unsettled(&mut self) -> bool {
-        if !self
-            .last_inputs
+    /// The plan on screen is not the one for these sets: the inputs the latest plan was requested with differ from
+    /// the ones the model would send now. Export refuses then (`plan_unsettled`) and a member pick waits
+    /// (`pick_waits`).
+    fn inputs_unsettled(&self) -> bool {
+        self.last_inputs
             .as_ref()
             .is_some_and(|l| *l != EngineInputs::of(self))
-        {
+    }
+
+    /// Ruling 3b-F21: why a From another set pick may not store a member's path now, or `None`. It waits on what Export
+    /// waits on before it checks anything: a full plan or a scan-database read out (`full_plan_pending`, `export_go`)
+    /// and a plan that is not the one for these sets (`inputs_unsettled`, `export_stopped`). It also waits after a
+    /// plan failed for good (`plan_failed`), which Export does not: the items are then the plan before it.
+    pub fn pick_waits(&self) -> Option<&'static str> {
+        if self.full_plan_pending() || self.inputs_unsettled() {
+            Some(sets::PICK_PLANNING)
+        } else if self.plan_failed {
+            Some(sets::PICK_PLAN_FAILED)
+        } else {
+            None
+        }
+    }
+
+    /// True (with an error dialog) when the plan on screen is not the one for these sets.
+    fn plan_unsettled(&mut self) -> bool {
+        if !self.inputs_unsettled() {
             return false;
         }
         let mut msg = String::from(
