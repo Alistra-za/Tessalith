@@ -851,6 +851,51 @@ fn a_linked_rows_file_and_set_link_describe_their_hovers() {
     );
 }
 
+/// Final wave Group 8 (ledger 68): a linked row reads "file · from set X": the separator is painted between the file
+/// name and the set link, not to the right of the link.
+#[test]
+fn a_linked_rows_separator_sits_between_the_file_and_the_set_link() {
+    use eframe::egui::Shape;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, WALL_ALBEDO).unwrap();
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: LEAF.into(),
+            n: 1,
+            item: WALL_ALBEDO.into(),
+        }),
+        None
+    );
+    select_set(&mut m, LEAF);
+    let h = harness(m);
+    let open = h.get_by_label("Open set arch/wall (Diffuse)").rect();
+    let file = h
+        .query_all_by_label(game.rsplit('\\').next().unwrap())
+        .map(|n| n.rect())
+        .find(|r| (r.center().y - open.center().y).abs() < 4.0)
+        .expect("the file label on the link's row");
+    fn dots(s: &Shape, out: &mut Vec<eframe::egui::Rect>) {
+        match s {
+            Shape::Vec(v) => v.iter().for_each(|s| dots(s, out)),
+            Shape::Text(t) if t.galley.job.text == " · " => out.push(t.visual_bounding_rect()),
+            _ => {}
+        }
+    }
+    let mut found = vec![];
+    for c in &h.output().shapes {
+        dots(&c.shape, &mut found);
+    }
+    let dot = found
+        .into_iter()
+        .find(|r| (r.center().y - open.center().y).abs() < 4.0)
+        .expect("a separator on the link's row");
+    assert!(
+        file.right() <= dot.left() && dot.right() <= open.left(),
+        "file {file:?}, separator {dot:?}, link {open:?}: the separator is between them"
+    );
+}
+
 /// Final wave Group 4 (Important 5): picking from another set the file a slot already links to writes nothing, so it
 /// makes no Undo step and logs no Info line; the first pick logs one.
 #[test]

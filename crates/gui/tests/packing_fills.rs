@@ -830,8 +830,8 @@ fn metallic_only_with(dir: &Path, extra: &str) -> AppModel {
 
 const RFAOS_WHY: &str = "RFAOS needs a roughness, glossiness or AO source";
 
-/// Final review I2: RFAOS cannot be built from a metallic-only set, so the model refuses it with the reason and
-/// moves nothing (the fills stay on the planned `_rmaos` key).
+/// Note JR10 (was final review I2): RFAOS cannot be built from a metallic-only set, so the model refuses it with the
+/// reason and moves nothing (the fills stay on the planned `_rmaos` key).
 #[test]
 fn rfaos_on_a_metallic_only_set_is_refused_with_the_reason() {
     let d = tempfile::tempdir().unwrap();

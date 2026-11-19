@@ -1381,12 +1381,31 @@ fn linked_cell(
         |ui| {
             if let (Some(from), Some(short)) = (&link.from, &link.from_short) {
                 ui.set_max_width(half);
+                // Sides lays its right side out right to left and `horizontal` keeps that direction, so the link is
+                // added first and the separator lands on its left (final wave Group 8, ledger 68). The link truncates
+                // in what the separator leaves of the half.
                 ui.horizontal(|ui| {
                     ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
-                    ui.label(egui::RichText::new(" · ").small().weak());
-                    let r = ui.add(egui::Link::new(
-                        egui::RichText::new(format!("from set {short}")).small(),
-                    ));
+                    let sep = egui::RichText::new(" · ").small().weak();
+                    let sep_w = egui::WidgetText::from(sep.clone())
+                        .into_galley(
+                            ui,
+                            Some(egui::TextWrapMode::Extend),
+                            f32::INFINITY,
+                            egui::TextStyle::Small,
+                        )
+                        .size()
+                        .x;
+                    let room =
+                        (ui.available_width() - sep_w - ui.spacing().item_spacing.x).max(0.0);
+                    let r = ui
+                        .scope(|ui| {
+                            ui.set_max_width(room);
+                            ui.add(egui::Link::new(
+                                egui::RichText::new(format!("from set {short}")).small(),
+                            ))
+                        })
+                        .inner;
                     let r = r.on_hover_ui(|ui| {
                         ui.label(format!("from set {short}"));
                         ui.label("Open the set this file comes from.");
@@ -1406,6 +1425,7 @@ fn linked_cell(
                     if r.clicked() {
                         acts.push(Act::OpenSet(from.clone()));
                     }
+                    ui.label(sep);
                 });
             }
         },

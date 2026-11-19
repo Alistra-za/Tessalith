@@ -3253,18 +3253,14 @@ impl AppModel {
             return None;
         }
         let mut changed = BTreeSet::new();
-        // Note HG: a record fill reads other sets' output paths (`job_key`), so in a mapped project a moved output is
-        // a change of its set (`splice_views` then builds every view).
-        let mapped = self
-            .sets_doc
-            .as_ref()
-            .is_some_and(|d| d.entries().iter().any(|e| e.txst.is_some()));
+        // Note HG: a record fill and a `slotN` link read other sets' output paths; `view_reads` holds the job key and
+        // output, so a moved output is a change of its set (final wave Group 8, ledger 37 and 52).
         // Both lists are sorted the same way (`PlanView::build`), so a pairwise compare finds any key change.
         for (a, b) in old_items.iter().zip(&self.items) {
             if a.key != b.key || a.set_key != b.set_key {
                 return None;
             }
-            if sets::view_reads(a) != sets::view_reads(b) || (mapped && a.job_key != b.job_key) {
+            if sets::view_reads(a) != sets::view_reads(b) {
                 changed.extend(b.set_key.clone());
             }
         }

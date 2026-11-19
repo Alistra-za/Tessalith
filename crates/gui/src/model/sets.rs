@@ -395,16 +395,18 @@ pub struct SetView {
     pub txst: Option<TxstMap>,
     /// The engine's recipe reports for this set (`SetItem::recipes`), read by the Sets column pill.
     pub recipes: Vec<engine::events::RecipeReport>,
-    /// The id's last `/`-parts that tell it from every other set (see [`short_names`]). Set by `build_views`.
+    /// The id's last parts that tell it from every other set (see [`short_names`]). Set by `build_views`; a view
+    /// `splice_views` rebuilds keeps its old value.
     pub short: String,
     /// Game slot (1..=8) → the non-empty string `slotN` the set's JSON entry carries, resolved to the set that writes
     /// that path. Only a set that writes a PGPatcher entry (`pbr_export::writes_entry`) has any (`link_slots`); set by
     /// `build_views`.
     pub linked: BTreeMap<u8, SlotLink>,
     /// The fills the exported JSON's feature keys read (`feature_slots`): `slots` with the own and borrowed fills of
-    /// each game slot that holds a link from another set (a set output, not a typed path) or a clear (`slotN = ""`)
-    /// left out, and each such link's file under the row it fills (`SlotLink::row`). `None` when no link counts and no
-    /// game slot is cleared over an own or borrowed file. Only a set that writes a PGPatcher entry
+    /// each game slot that holds a link from another set (a path, typed or picked, that resolves to a set's output)
+    /// or a clear (`slotN = ""`) left out, and each such link's file under the row it fills (`SlotLink::row`). `None`
+    /// when no link counts and no game slot is cleared over an own or borrowed file. Only a set that writes a PGPatcher
+    /// entry
     /// (`pbr_export::writes_entry`) has any (`link_slots`); set by `build_views` and `splice_views`.
     pub features: Option<BTreeMap<SlotKind, SlotFill>>,
     /// The files this set's own members write (review E13): each own slot's planned output in slot order, then every
@@ -1372,11 +1374,16 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
     views
 }
 
-/// A short display name per set id, in the order of `ids`: the last `k` `/`-parts, `k` the smallest value from
+/// A short display name per set id, in the order of `ids`: the last `k` parts, `k` the smallest value from
 /// `min(2, parts)` up for which no other id has the same last `k` parts (compared folded, as `same_id` does, Note
-/// BF). Ids equal after folding keep the whole id.
+/// BF). Parts are split as `fold_id` splits them (at `/` or `\`, the ends trimmed; final wave Group 8, ledger 19),
+/// and a short keeps the id's own separators. Ids equal after folding keep the whole id.
 pub fn short_names(ids: &[&str]) -> Vec<String> {
-    let parts: Vec<Vec<&str>> = ids.iter().map(|id| id.split('/').collect()).collect();
+    const SEP: [char; 2] = ['/', '\\'];
+    let parts: Vec<Vec<&str>> = ids
+        .iter()
+        .map(|id| id.trim_matches(SEP).split(SEP).collect())
+        .collect();
     let folded: Vec<Vec<String>> = parts
         .iter()
         .map(|p| p.iter().map(|s| fold_id(s)).collect())
@@ -1406,10 +1413,20 @@ pub fn short_names(ids: &[&str]) -> Vec<String> {
             }
         }
     }
-    parts
-        .iter()
+    ids.iter()
+        .zip(&parts)
         .zip(&k)
-        .map(|(p, &k)| p[p.len().saturating_sub(k)..].join("/"))
+        .map(|((id, p), &k)| {
+            if k >= p.len() {
+                return id.to_string();
+            }
+            // k < p.len(), so the trimmed id has at least k separators.
+            let t = id.trim_matches(SEP);
+            t.rmatch_indices(SEP)
+                .nth(k - 1)
+                .map_or(t, |(i, _)| &t[i + 1..])
+                .to_string()
+        })
         .collect()
 }
 

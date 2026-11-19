@@ -465,8 +465,8 @@ fn set_links(m: &AppModel, views: &mut [SetView]) {
 /// counts for nothing) loses its own and borrowed fills and gets the file under the row the link fills (`row`), so the
 /// feature is the slot's, whatever the file was called in its source set. A cleared game slot (`slotN = ""`) over an
 /// own or borrowed file loses that fill and gets none. The fills are dropped from `slots` first and the links'
-/// rows inserted after, so a slot's link or clear never touches what another slot's link gives. `None` when nothing
-/// changes.
+/// rows inserted after, so a slot's link or clear never touches what another slot's link gives. A view's `features`
+/// is `None` when no link counts and no game slot is cleared over an own or borrowed file (ledger 240).
 fn set_features(m: &AppModel, views: &mut [SetView]) {
     for v in views.iter_mut() {
         let s = &v.settings;

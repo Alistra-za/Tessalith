@@ -4257,6 +4257,17 @@ fn short_names_keep_two_parts_and_differ() {
     );
     // ids equal after folding never get a unique tail: both keep the whole id
     assert_eq!(short_names(&["a/B", "A/b"]), vec!["a/B", "A/b"]);
+    // Final wave Group 8 (ledger 19): a verbatim `\` id splits where folding puts a `/`, and the short keeps its own
+    // separators
+    assert_eq!(
+        short_names(&["arch\\stone\\wall", "arch/stone/floor"]),
+        vec!["stone\\wall", "stone/floor"]
+    );
+    assert_eq!(
+        short_names(&["a\\stone\\m", "b/stone/m"]),
+        vec!["a\\stone\\m", "b/stone/m"],
+        "tails equal after folding grow until they differ"
+    );
 }
 
 /// Final wave Group 6 (ledger 18): each view's `short` is the shortest unique tail of at least two parts, so an id of
