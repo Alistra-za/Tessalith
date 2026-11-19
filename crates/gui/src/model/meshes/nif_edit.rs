@@ -632,11 +632,11 @@ struct Picked {
     plain: Option<String>,
 }
 
-/// Note GD11, ruling E6-D: the one recovery decision, for `open` in a project, for the live carry-over into one
-/// (`NifEdit::retarget`) and for what is durable (`NifEdit::durable`, ruling E6-G). It reads the project's draft at
-/// `draft_path` (Err when it does not load: it is never overwritten), then the kept autosave of its id, then (when
-/// that one did not win) the plain autosave `autosave`: each time the newer wins, the draft at equal times (GD24).
-/// Reads only.
+/// Note GD11, rulings E6-D and E6-H: the one recovery decision, for `open` in a project, for the live carry-over into
+/// one (`NifEdit::retarget`) and for what is durable (`NifEdit::durable`, ruling E6-G). It reads the project's draft
+/// at `draft_path` (Err when it does not load: it is never overwritten), then weighs the kept autosave of its id, then
+/// the plain autosave `autosave`, each against the winner so far: the newest of the three wins, the earlier file at
+/// equal times (the draft first, GD24). Reads only.
 fn pick_draft(
     draft_path: &Path,
     autosave: Option<&Path>,
@@ -659,26 +659,33 @@ fn pick_draft(
         .zip(autosave.and_then(autosave_dir))
         .map(|(i, dir)| edit_doc::kept_autosave_path(dir, data_path, i))
         .filter(|k| k.is_file());
+    // ruling E6-H: the file whose document is the current winner; each next candidate is weighed against it
+    let mut winner = draft_path.to_path_buf();
     if let Some(k) = k {
-        let (s, l, r) = recover_from(p.doc.take(), draft_path, &k, data_path);
+        let (s, l, r) = recover_from(p.doc.take(), &winner, &k, data_path);
         p.doc = s;
         p.lines.extend(l);
         match r {
             Recovery::Won(fp) => {
-                p.kept = Some((k, fp));
+                p.kept = Some((k.clone(), fp));
                 p.draft_won = false;
+                winner = k;
             }
             Recovery::Older => p.kept_older = Some(k),
             Recovery::Stays => {}
         }
     }
-    if let Some(a) = autosave.filter(|a| p.kept.is_none() && a.is_file()) {
-        let (s, l, r) = recover_from(p.doc.take(), draft_path, a, data_path);
+    if let Some(a) = autosave.filter(|a| a.is_file()) {
+        let (s, l, r) = recover_from(p.doc.take(), &winner, a, data_path);
         p.doc = s;
         p.lines.extend(l);
         if let Recovery::Won(fp) = r {
             p.plain = Some(fp);
             p.draft_won = false;
+            // a kept autosave the plain one beat is moved aside at the next save, like one the draft beat
+            if let Some((k, _)) = p.kept.take() {
+                p.kept_older = Some(k);
+            }
         }
     }
     Ok(p)
@@ -696,17 +703,18 @@ enum Recovery {
 }
 
 /// Note GD11: with a project open, an autosave `a` of the NIF (the plain one, or the kept one of the draft's id) that
-/// is newer than the project's draft (or the project has none) is offered: it is the document, and the session owns
-/// it (its first save in the project removes it). An older one stays, named in Messages. The draft's id stays the
+/// is newer than `winner`, the file the current document `saved` came from (the project's draft, or a kept autosave
+/// that beat it; ruling E6-H), or there is no document, is offered: it is the document, and the session owns it (its
+/// first save in the project removes it). An older one stays, named in Messages. The draft's id stays the
 /// document's. Returns (document, Messages lines, what happened to `a`).
 fn recover_from(
     saved: Option<EditDoc>,
-    draft_path: &Path,
+    winner: &Path,
     a: &Path,
     data_path: &str,
 ) -> (Option<EditDoc>, Vec<String>, Recovery) {
     let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
-    if saved.is_some() && mtime(a) <= mtime(draft_path) {
+    if saved.is_some() && mtime(a) <= mtime(winner) {
         let line = format!(
             "Older edits of {data_path} stay autosaved in {}.",
             a.display()
@@ -725,7 +733,7 @@ fn recover_from(
                     "The newer edits of {data_path} autosaved in {} opened instead of {}'s saved edits; those are \
                      kept aside at the next save.",
                     a.display(),
-                    draft_path.display()
+                    winner.display()
                 ),
             };
             if let Some(id) = saved.and_then(|s| s.id) {
@@ -2451,7 +2459,13 @@ impl MeshesModel {
             match e.retarget(p) {
                 Ok(Some(lines)) => {
                     self.messages.extend(lines);
-                    e.save();
+                    // ruling E6-H: ops the project would load already (`durable`, E6-G) write nothing; the next
+                    // change saves them into it
+                    if e.durable() {
+                        e.unsaved = false;
+                    } else {
+                        e.save();
+                    }
                     return;
                 }
                 Ok(None) => {} // the project's own edits are newer: the NIF opens there, below

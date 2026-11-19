@@ -5354,10 +5354,19 @@ fn opening_a_project_carries_the_autosave_into_it() {
     );
     let p = project_folder(&d, "p");
     m.set_project_root(Some(&p));
-    assert_eq!(doc_values(&draft(&p)), [12.5]);
-    assert!(!autosave(&d).exists(), "the autosave is deleted (GD5 (c))");
+    // ruling E6-H: the carried ops are what the project would load (the autosave wins there), so nothing is written
+    // yet; the next change saves the session into the project
+    assert!(!draft(&p).exists(), "nothing written at the carry-over");
+    assert!(
+        autosave(&d).exists(),
+        "the edit stays in the autosave until then"
+    );
     assert!(m.edit.as_ref().unwrap().touched());
     assert_eq!(op_values(&m).len(), 1, "the same session goes on");
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, draft(&p));
+    gloss(&mut m, 13.5);
+    assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+    assert!(!autosave(&d).exists(), "the autosave is deleted (GD5 (c))");
 }
 
 /// Ruling r3-1: a session nothing was done in writes nothing and makes no folder.
@@ -6006,6 +6015,117 @@ fn a_recovered_plain_autosave_is_durable_where_it_is() {
     assert_eq!(std::fs::read(autosave(&d)).unwrap(), mine);
 }
 
+/// Sets the modified time of `p` `secs` seconds back.
+fn age(p: &Path, secs: u64) {
+    let t = std::time::SystemTime::now() - std::time::Duration::from_secs(secs);
+    std::fs::File::options()
+        .write(true)
+        .open(p)
+        .unwrap()
+        .set_modified(t)
+        .unwrap();
+}
+
+/// Project P with its draft (7.5) and a kept autosave of its id (9.5), and a live session with no project whose edit
+/// (12.5) is in the plain autosave. The files' ages are set by the caller. Returns (P, the kept path).
+fn three_versions(
+    d: &tempfile::TempDir,
+    m: &mut MeshesModel,
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let p = project_folder(d, "p");
+    project_with_a_draft(m, &p);
+    let k = kept(d, &id_of(&p));
+    save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 9.5)).unwrap();
+    m.set_project_root(None);
+    m.open_edit();
+    gloss(m, 12.5);
+    (p, k)
+}
+
+/// Review round 2 (Important 4, ruling E6-H): P's draft < P's kept autosave < the live edit: the newest, the live
+/// edit, goes into P; the two older files keep their bytes.
+#[test]
+fn the_newest_of_three_versions_is_carried_into_the_project() {
+    let (d, mut m) = export_session();
+    let (p, k) = three_versions(&d, &mut m);
+    age(&draft(&p), 7200);
+    age(&k, 3600);
+    let (theirs, kept_bytes) = (
+        std::fs::read(draft(&p)).unwrap(),
+        std::fs::read(&k).unwrap(),
+    );
+    m.set_project_root(Some(&p));
+    assert_eq!(
+        op_values(&m).iter().map(|v| v.1).collect::<Vec<_>>(),
+        [12.5],
+        "the live edit is the newest"
+    );
+    assert_eq!(m.edit.as_ref().unwrap().draft_path, draft(&p));
+    gloss(&mut m, 13.5);
+    assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+    let aside = kept_beside(&draft(&p));
+    assert_eq!(aside.len(), 1, "{aside:?}");
+    assert_eq!(std::fs::read(&aside[0]).unwrap(), theirs);
+    let older = moved_aside_from(&k);
+    assert_eq!(
+        older.len(),
+        1,
+        "the older kept autosave is moved aside: {older:?}"
+    );
+    assert_eq!(std::fs::read(&older[0]).unwrap(), kept_bytes);
+}
+
+/// Ruling E6-H: when the project's side wins (here its kept autosave), Messages name the plain autosave the live edit
+/// stays in.
+#[test]
+fn a_project_side_win_names_the_live_autosave_it_leaves() {
+    let (d, mut m) = export_session();
+    let (p, k) = three_versions(&d, &mut m);
+    age(&draft(&p), 7200);
+    age(&autosave(&d), 3600);
+    let mine = std::fs::read(autosave(&d)).unwrap();
+    m.messages.clear();
+    m.set_project_root(Some(&p));
+    assert_eq!(op_values(&m)[0].1, 9.5, "the kept autosave is the newest");
+    assert!(
+        m.messages.iter().any(|l| *l
+            == format!(
+                "Older edits of meshes/x.nif stay autosaved in {}.",
+                autosave(&d).display()
+            )),
+        "{:?}",
+        m.messages
+    );
+    assert_eq!(std::fs::read(autosave(&d)).unwrap(), mine);
+    assert!(k.exists());
+}
+
+/// Review round 2 (Important B5, ruling E6-H): redo history alone writes nothing into a project: the carried
+/// session's ops (none) are what the project would load (the empty autosave), so no draft is made and the autosave
+/// stays.
+#[test]
+fn redo_history_alone_writes_nothing_into_a_project() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(m.undo_edit());
+    let empty = std::fs::read(autosave(&d)).unwrap();
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    let e = m.edit.as_ref().unwrap();
+    assert!(
+        e.history.can_redo(),
+        "premise: the session is carried with its redo"
+    );
+    assert!(!draft(&p).exists(), "no draft for history alone");
+    assert!(!p.join("_sdc").exists());
+    assert_eq!(
+        std::fs::read(autosave(&d)).unwrap(),
+        empty,
+        "the autosave stays"
+    );
+}
+
 /// Sets the modified time of `p` to that of `like`.
 fn same_time(p: &Path, like: &Path) {
     let t = std::fs::metadata(like).unwrap().modified().unwrap();
@@ -6122,7 +6242,9 @@ fn a_carried_edit_takes_the_project_drafts_id() {
     gloss(&mut m, 13.5);
     let live = load(&autosave(&d)).unwrap().unwrap().id.unwrap();
     m.set_project_root(Some(&q));
-    assert_eq!(op_values(&m)[0].1, 13.5, "premise: carried");
+    // ruling E6-H: the carry into P wrote nothing, so the live edit (12.5) stayed in the autosave and goes on here
+    assert_eq!(op_values(&m).last().unwrap().1, 13.5, "premise: carried");
+    gloss(&mut m, 14.5); // the carry-over writes nothing (E6-H): the next change saves into Q
     assert_ne!(id_of(&q), live, "a new id");
 }
 
@@ -6812,6 +6934,7 @@ fn a_move_aside_skips_names_already_taken() {
         std::fs::write(t, b"another instance's").unwrap();
     }
     m.set_project_root(Some(&proj));
+    gloss(&mut m, 13.5); // ruling E6-H: the carry-over writes nothing; the next change saves into the project
     for t in &taken {
         assert_eq!(
             std::fs::read(t).unwrap(),
@@ -6876,7 +6999,8 @@ fn a_recovered_autosave_keeps_the_project_draft_it_replaced() {
 }
 
 /// Note GD25: a touched session carried into a project with its own draft of the NIF never overwrites it: the first
-/// save there (the carry-over's) moves that draft aside.
+/// save there moves that draft aside. Ruling E6-H: the carry-over itself writes nothing (its ops are what the project
+/// would load), so that first save is the next change's.
 #[test]
 fn opening_a_project_keeps_the_draft_it_replaced() {
     let (d, mut m) = export_session();
@@ -6886,6 +7010,12 @@ fn opening_a_project_keeps_the_draft_it_replaced() {
     m.open_edit();
     gloss(&mut m, 12.5);
     m.set_project_root(Some(&out));
+    assert!(
+        kept_beside(&draft(&out)).is_empty(),
+        "nothing written at the carry-over"
+    );
+    assert_eq!(std::fs::read(draft(&out)).unwrap(), theirs);
+    gloss(&mut m, 13.5);
     let kept = kept_beside(&draft(&out));
     assert_eq!(kept.len(), 1, "{kept:?}");
     assert_eq!(
@@ -6893,8 +7023,7 @@ fn opening_a_project_keeps_the_draft_it_replaced() {
         theirs,
         "the project's edits survive"
     );
-    assert_eq!(doc_values(&draft(&out)), [12.5]);
-    gloss(&mut m, 13.5);
+    assert_eq!(doc_values(&draft(&out)), [12.5, 13.5]);
     gloss(&mut m, 14.5);
     assert_eq!(kept_beside(&draft(&out)).len(), 1, "moved aside once");
     assert_eq!(doc_values(&draft(&out)), [12.5, 13.5, 14.5]);
@@ -7176,12 +7305,13 @@ fn an_undone_session_keeps_its_live_document_on_a_folder_change() {
 }
 
 /// Note GD13, GD21 (Review E6: the carry-over into a project): a session undone back to the source is not idle: opening
-/// a project keeps its live document and its redo, and the project's draft is kept aside (said in Messages).
+/// a project keeps its live document and its redo, and the project's draft is kept aside at the next save (said in
+/// Messages). Ruling E6-H: history alone writes nothing, so the draft is untouched until then.
 #[test]
 fn an_undone_session_stays_when_a_project_is_opened() {
     let (d, mut m) = export_session();
     let proj = project_folder(&d, "proj");
-    project_with_a_draft(&mut m, &proj);
+    let theirs = project_with_a_draft(&mut m, &proj);
     m.set_project_root(None);
     m.open_edit();
     gloss(&mut m, 12.5);
@@ -7199,11 +7329,18 @@ fn an_undone_session_stays_when_a_project_is_opened() {
             draft(&proj).display()
         ))
     );
+    assert!(
+        kept_beside(&draft(&proj)).is_empty(),
+        "history alone moves nothing aside"
+    );
+    assert_eq!(std::fs::read(draft(&proj)).unwrap(), theirs);
+    assert!(m.redo_edit());
     assert_eq!(
         kept_beside(&draft(&proj)).len(),
         1,
-        "the draft was kept aside"
+        "the next save keeps the draft aside"
     );
+    assert_eq!(doc_values(&draft(&proj)), [12.5]);
 }
 
 /// Note GD27: a save that fails leaves the session unsaved: a recovered empty autosave whose save into the project
@@ -7401,7 +7538,8 @@ fn the_app_passes_the_textures_export_folder_to_the_meshes_view() {
         e.draft_path.display()
     );
     assert_eq!(e.doc.ops.len(), 1, "the live edit stays");
-    assert_eq!(load(&e.draft_path).unwrap().unwrap().ops.len(), 1);
+    // ruling E6-H: the first frame's carry-over wrote nothing (the ops are what the project would load)
+    assert!(!e.draft_path.exists(), "{}", e.draft_path.display());
     assert!(!nif_doc(&first).exists() && !nif_doc(&want).exists());
     assert!(
         h.state()
