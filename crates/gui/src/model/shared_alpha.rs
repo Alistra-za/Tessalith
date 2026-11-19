@@ -575,17 +575,11 @@ fn changes(
     if p.read_only() || s.read_only() {
         return c;
     }
-    // N8-f: views older than the documents (a set edit or an alias whose plan has not landed), or an alias the step
-    // changed (it moves files between automatic sets at the next plan): no set is known, so nothing is written or
-    // cleared. N8-r: so with a file the step took out of no set.
-    if !b.fresh || aliases(p) != b.aliases || rejoins(b, s) {
+    // N8-f: views older than the documents (a set edit or an alias whose plan has not landed): no set is known, so
+    // nothing is written, cleared or dropped.
+    if !b.fresh {
         return c;
     }
-    // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
-    // creates or renames has no view before it, so it is `unsure` instead).
-    let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
-    let sh = shared_into_regular(f, s, &gone, &b.targets, touched);
-    let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let raw = s.auto_data();
     // N8-p: the list holds only what is still true. Before any clear is decided, an entry whose exact table is absent
@@ -594,6 +588,21 @@ fn changes(
     let true_now = |k: &String| tables.exact_alpha(k) == data;
     let stale = !raw.iter().all(true_now);
     let start: Vec<String> = distinct(raw.clone()).into_iter().filter(true_now).collect();
+    // N8-f: an alias the step changed (it moves files between automatic sets at the next plan), N8-r: a file the step
+    // took out of no set: no set is known, so no file value is written or cleared. N8-t: the drop above needs only the
+    // exact table, not where a file goes, so it still lands.
+    if aliases(p) != b.aliases || rejoins(b, s) {
+        if stale {
+            c.list = start;
+            c.relist = c.list != raw;
+        }
+        return c;
+    }
+    // Review 4 Important 1: a set with no file before and after the step is one whose files are gone (a set the step
+    // creates or renames has no view before it, so it is `unsure` instead).
+    let gone: BTreeSet<String> = f.empty.intersection(&b.empty).cloned().collect();
+    let sh = shared_into_regular(f, s, &gone, &b.targets, touched);
+    let (now, unsure) = (&sh.out, &sh.unsure);
     // N8-a, N8-j, N8-o: alpha is read as Task 6 reads it, from every `[files]` table that matches the file, through the
     // step's one index of the document after the edit; each file asks two lookups.
     // N8-f: a key any borrower makes unsure is not written either.

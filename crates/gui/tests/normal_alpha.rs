@@ -3119,3 +3119,70 @@ fn the_exact_setter_writes_only_its_own_spelling_without_a_walk() {
     assert_eq!(p.file_value(IRON_N, "alpha.policy"), Some(json!("remove")));
     assert_eq!(twins(&p), before);
 }
+
+/// N8-t (round 5, the reviewer's sequence): as saved, the listed table was re-spelled by hand (`PBR/IRON_N.PNG` holds
+/// the `data` now, no table is spelled as the entry), `armor/steel` borrows the normal, and an unrelated texture is in
+/// no set. The user's first step takes that texture back to its automatic set: a rejoin, which writes and clears no
+/// file value, but the stale entry still leaves the list in that step. Later the user writes their own `data` under the
+/// original spelling between sessions and ends the share: nothing lists it, so it stays.
+#[test]
+fn a_rejoin_step_drops_a_stale_entry_too() {
+    use sdc_gui::model::sets::SlotCommand;
+    const UPPER: &str = "PBR/IRON_N.PNG";
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::create_dir_all(t.join("misc")).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([70u8, 90, 110]))
+        .save(t.join("misc/pebble.png"))
+        .unwrap();
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        t.join("sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\nno_set = [\"misc/pebble.png\"]\n\n[[sets]]\nid = \"armor/steel\"\nborrow = { slot2 = \"pbr/iron\" }\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(t.clone(), d.path().join("export"));
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table spelled as the entry"
+    );
+    assert!(m.is_no_set("misc/pebble.png"), "precondition: in no set");
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.back_to_automatic_set(&["misc/pebble.png".to_string()])
+        .unwrap();
+    assert!(!m.is_no_set("misc/pebble.png"), "precondition: rejoined");
+    assert!(
+        auto_data(&m).is_empty(),
+        "the stale entry leaves the list in the rejoin step"
+    );
+    assert_eq!(
+        held(&m, UPPER, "alpha.policy"),
+        Some(json!("data")),
+        "the rejoin step changes no file value"
+    );
+    settle(&mut m);
+    m.save().expect("saved");
+    drop(m);
+    let mut text = std::fs::read_to_string(t.join("sdc.toml")).unwrap();
+    text.push_str("\n[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n");
+    std::fs::write(t.join("sdc.toml"), text).unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    assert!(
+        m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: the user's own table under the original spelling"
+    );
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "ending the share leaves the user's data"
+    );
+}
