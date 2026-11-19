@@ -4259,12 +4259,32 @@ fn short_names_keep_two_parts_and_differ() {
     assert_eq!(short_names(&["a/B", "A/b"]), vec!["a/B", "A/b"]);
 }
 
+/// Final wave Group 6 (ledger 18): each view's `short` is the shortest unique tail of at least two parts, so an id of
+/// three parts never keeps its whole id (the old assert accepted any non-empty tail, the whole id included).
 #[test]
 fn every_view_has_its_short_name() {
     let d = tempfile::tempdir().unwrap();
-    let m = pbr_opened(d.path());
+    for id in ["arch/stone/wall", "arch/stone/floor"] {
+        let p = d.path().join("textures").join(format!("{id}.png"));
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(8, 8, |_, _| image::Rgb([90u8; 3]))
+            .save(&p)
+            .unwrap();
+    }
+    let m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
     let v = views(&m);
-    assert!(v
-        .iter()
-        .all(|v| !v.short.is_empty() && v.id.ends_with(&v.short)));
+    for (id, short) in [
+        ("arch/stone/wall", "stone/wall"),
+        ("arch/stone/floor", "stone/floor"),
+    ] {
+        let got = &v
+            .iter()
+            .find(|v| v.id == id)
+            .unwrap_or_else(|| panic!("a view {id}"))
+            .short;
+        assert_eq!(
+            got, short,
+            "{id}: the shortest unique tail, not the whole id"
+        );
+    }
 }

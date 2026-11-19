@@ -18,7 +18,7 @@ use sdc_gui::settings::GuiSettings;
 use serde_json::json;
 use std::path::Path;
 use std::time::Duration;
-use support::{painted_cut, painted_in, session};
+use support::{painted_cut, painted_elided, painted_in, session};
 
 const DIFFUSE: &str = "m/rock01.png";
 const SK: &str = "m/rock01_sk.png";
@@ -894,6 +894,11 @@ fn a_metallic_only_skin_set_says_why_it_keeps_rmaos() {
         title.accesskit_node().description().as_deref(),
         Some(KEEPS_RMAOS)
     );
+    // Final wave Group 6 (ledger 125): hover the title first, as the positive case does, so the absent tooltip is
+    // a real check and not the absence of any tooltip.
+    title.hover();
+    h.run();
+    h.run();
     assert!(h.query_by_label(KEEPS_RMAOS).is_none());
 }
 
@@ -1554,6 +1559,21 @@ fn slot_row_values_read_in_full_under_a_heading() {
                 head.max.y <= fmt.min.y && head.min.x < fmt.max.x && head.max.x > fmt.min.x,
                 "{w}: the heading sits over the Format column"
             );
+            // Final wave Group 6 (ledger 140): "Slot" and "File" are on the heading's line, left of "Format", in
+            // that order.
+            let on_line = |l: &str| {
+                h.query_all_by_label(l)
+                    .map(|n| n.rect())
+                    .find(|r| {
+                        centre.contains_rect(*r) && (r.center().y - head.center().y).abs() < 2.0
+                    })
+                    .unwrap_or_else(|| panic!("{w}: the {l} heading"))
+            };
+            let (slot, file) = (on_line("Slot"), on_line("File"));
+            assert!(
+                slot.max.x <= file.min.x && file.max.x <= head.min.x,
+                "{w}: Slot {slot:?}, File {file:?}, Format {head:?} in order"
+            );
         }
     }
 }
@@ -1621,10 +1641,8 @@ fn pickers_line_up(tag: &str, h: &Harness<'static, AppModel>) {
             .strip_prefix("Source: ")
             .expect("value is Source: {file}");
         let shown = painted_in(h, *r);
-        assert!(
-            !painted_cut(h, *r) || shown.starts_with('…'),
-            "{tag}: {name}: egui cut {shown:?}"
-        );
+        // Final wave Group 6 (ledger 140): egui never cuts it again, a hand cut ("…" in front) included.
+        assert!(!painted_elided(h, *r), "{tag}: {name}: egui cut {shown:?}");
         if file == "value" {
             assert_eq!(shown, "value", "{tag}: {name}");
         } else {

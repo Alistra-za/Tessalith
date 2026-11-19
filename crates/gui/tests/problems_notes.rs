@@ -5339,12 +5339,9 @@ fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
         v.key.is_empty(),
         "precondition: every entry is missing, so no key: {v:?}"
     );
-    assert_eq!(
-        m.bottom.filter,
-        Some(f.clone()),
-        "nothing resets the filter"
-    );
-    let rows = filtered(&m, Some(&f));
+    // Final wave Group 6 (ledger 259): the rows are those of the filter the model holds, not of the local `f`.
+    let installed = m.bottom.filter.clone();
+    let rows = filtered(&m, installed.as_ref());
     let texts: Vec<&str> = rows.iter().map(|p| p.text.as_str()).collect();
     let by_id = filtered(&m, Some(&ProblemsFilter::Set(scope_key(&v).to_string())));
     assert!(
@@ -5352,6 +5349,7 @@ fn a_keyed_sets_filter_follows_the_set_once_it_loses_its_key() {
         "the missing entry's row: {texts:?}"
     );
     assert_eq!(*rows, *by_id, "the rows of a filter by its id");
+    assert_eq!(installed, Some(f.clone()), "nothing resets the filter");
     // The chip resolves the key as the list does: it names the set, not the old output-root path.
     let mut h = harness(m);
     h.run();

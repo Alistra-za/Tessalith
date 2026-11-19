@@ -216,6 +216,15 @@ fn a_set_that_writes_nothing_says_so() {
     h.run();
     h.get_by_label("Nothing is written for this set.");
     assert!(h.query_by_label(OUTPUTS_COUNT_NOTE).is_none());
+    // Final wave Group 6 (ledger 140): no row has a format combo, so the slot rows draw no heading line.
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).expect("the centre is drawn");
+    for l in ["Format", "Alpha"] {
+        assert!(
+            !h.query_all_by_label(l)
+                .any(|n| centre.contains_rect(n.rect())),
+            "no {l} heading"
+        );
+    }
 }
 
 #[test]
@@ -280,25 +289,39 @@ fn a_set_with_some_files_written_says_k_of_n() {
         .is_some());
 }
 
+/// Final wave Group 6 (ledger 107): with a file on disk the closed group shows no Show in Explorer and the open one
+/// does, so the closed assert fails if the group opens by default; with no file the open group shows none.
 #[test]
 fn show_in_explorer_waits_for_the_file() {
     let d = tempfile::tempdir().unwrap();
     let mut m = no_albedo_pair(d.path());
+    let leaf = views(&m).iter().find(|v| v.id == LEAF).unwrap().clone();
+    let (n, first) = (set_outputs(&leaf).len(), set_outputs(&leaf)[0].2.clone());
+    assert!(n >= 2, "premise: leaf writes two files");
+    std::fs::create_dir_all(first.parent().unwrap()).unwrap();
+    std::fs::write(&first, b"dds").unwrap();
     select_set(&mut m, LEAF);
     let mut h = harness(m);
+    let show = format!("Show {} in Explorer", first.display());
     assert!(
-        h.query_by_label_contains("none on disk").is_some(),
+        h.query_by_label_contains(&format!("1 of {n} on disk"))
+            .is_some(),
         "closed and not silent"
     );
     assert!(
-        h.query_by_label_contains(" in Explorer").is_none(),
-        "closed by default"
+        h.query_by_label(&show).is_none(),
+        "closed by default, though the file is there"
     );
     h.get_by_label_contains("Output files").click();
     h.run();
     assert!(
-        h.query_by_label_contains(" in Explorer").is_none(),
-        "nothing exported yet"
+        h.query_by_label(&show).is_some(),
+        "open: the file on disk has its button"
+    );
+    assert_eq!(
+        h.query_all_by_label_contains(" in Explorer").count(),
+        1,
+        "only the file that is there"
     );
 }
 
@@ -946,6 +969,11 @@ fn a_long_linked_file_name_keeps_the_set_link_inside_its_cell() {
         unlink.max.x <= edge,
         "Unlink {unlink:?} passes the centre's edge {edge}"
     );
+    // Final wave Group 6 (ledger 69): every control of the row right of the Sets column, a control that starts past
+    // the edge included; the left bound is the Sets column's edge, not the centre rect the edge is taken from.
+    let sets_right = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets")
+        .expect("the Sets column")
+        .right();
     let mut row_nodes = vec![];
     for role in [
         egui::accesskit::Role::Button,
@@ -958,9 +986,7 @@ fn a_long_linked_file_name_keeps_the_set_link_inside_its_cell() {
             h.query_all_by_role(role)
                 .filter(|n| n.accesskit_node().raw_bounds().is_some())
                 .map(|n| n.rect())
-                .filter(|r| {
-                    on_row(r) && r.min.x >= full.min.x && r.min.x < edge && r.width() > 0.0
-                }),
+                .filter(|r| on_row(r) && r.min.x >= sets_right && r.width() > 0.0),
         );
     }
     assert!(

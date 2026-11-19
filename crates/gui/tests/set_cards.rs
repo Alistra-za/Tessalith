@@ -1352,9 +1352,11 @@ fn title_probe(h: &Harness<'static, AppModel>, id: &str) -> (String, usize, egui
     (text, rows, r)
 }
 
-/// The status pill's kind label of the card whose title is `title`: of every painted copy of the set's kind text,
-/// the one nearest the title vertically (the pill sits on the title's row or the row under it).
+/// The status pill's kind label of the card whose title is `title`: of every painted copy of the set's kind text
+/// inside the Sets column (final wave Group 6, ledger 202: the set editor paints the same text), the one nearest the
+/// title vertically (the pill sits on the title's row or the row under it).
 fn pill_of(h: &Harness<'static, AppModel>, id: &str, title: egui::Rect) -> egui::Rect {
+    let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
     let v = set_views(h.state())
         .into_iter()
         .find(|v| v.id == id)
@@ -1372,12 +1374,13 @@ fn pill_of(h: &Harness<'static, AppModel>, id: &str, title: egui::Rect) -> egui:
         flat(&c.shape, kind, &mut all);
     }
     all.into_iter()
+        .filter(|r| panel.contains_rect(*r))
         .min_by(|a, b| {
             (a.center().y - title.center().y)
                 .abs()
                 .total_cmp(&(b.center().y - title.center().y).abs())
         })
-        .unwrap_or_else(|| panic!("the pill's {kind:?} label is painted"))
+        .unwrap_or_else(|| panic!("the pill's {kind:?} label is painted in the Sets column"))
 }
 
 /// Task 9 review: a title too wide for the room beside the pill takes its own line (one line high, the pill
@@ -1395,8 +1398,8 @@ fn a_title_too_wide_beside_the_pill_takes_its_own_line() {
     );
 }
 
-/// A pin of the narrower state: with a set open the Sets column is 172 px at 1055x770 and the narrow layout was
-/// already chosen before the fix, so this passes on the old code too.
+/// A pin of the narrower state: with a set open the Sets column is at its floor at 1055x770 and the narrow layout
+/// was already chosen before the fix, so this passes on the old code too.
 #[test]
 fn a_title_in_the_narrowest_column_with_a_set_open_stays_on_one_line_above_the_pill() {
     own_line_case(
@@ -1431,10 +1434,6 @@ fn own_line_case(ids: [&str; 2], open: bool) {
     h.run();
     h.run();
     let panel = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").expect("the Sets column");
-    println!(
-        "MEASURED Sets column width at 1055x770, set open {open}: {}",
-        panel.width()
-    );
     for id in ids {
         // the narrow layout: the title beside the position and handle at the card's full width, the pill below
         let (text, rows, r) = title_probe(&h, id);

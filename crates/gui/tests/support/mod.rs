@@ -588,6 +588,21 @@ pub fn painted_cut<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -
     painted_galleys(h, r).into_iter().any(|(_, cut)| cut)
 }
 
+/// Whether egui elided any text painted inside `r.expand(1.0)` (a hand cut such as `front_cut`'s leading `…` is not
+/// egui's; final wave Group 6, ledger 140).
+pub fn painted_elided<S>(h: &egui_kittest::Harness<'_, S>, r: eframe::egui::Rect) -> bool {
+    use eframe::egui::Shape;
+    fn flat(s: &Shape, r: eframe::egui::Rect) -> bool {
+        match s {
+            Shape::Vec(v) => v.iter().any(|s| flat(s, r)),
+            Shape::Text(t) => r.contains_rect(t.visual_bounding_rect()) && t.galley.elided,
+            _ => false,
+        }
+    }
+    let r = r.expand(1.0);
+    h.output().shapes.iter().any(|c| flat(&c.shape, r))
+}
+
 /// The filled rects of one shape (nested shapes flattened), each with its fill's alpha.
 pub fn fill_rects_of(s: &eframe::egui::Shape, out: &mut Vec<(eframe::egui::Rect, u8)>) {
     use eframe::egui::Shape;

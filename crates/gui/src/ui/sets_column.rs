@@ -489,7 +489,8 @@ fn check_badge_text(checks: &[(&str, &Warning)]) -> (usize, String) {
 /// The longest form of a set id that `fits` and keeps `tail` (the view's `short`, the shortest tail no other set
 /// shares): the id, its middle elided, then `…/<tail>`. Note HP (SC4): when the search lies inside one middle
 /// segment, `…/<that segment>/<rest>` is tried right after the id. When nothing fits, `…/<tail>` is returned anyway
-/// (the whole id when the tail is the id) and the title wraps; two cards never read the same (review E24).
+/// (the whole id when the tail is the id, or when `…/<tail>` would be no shorter than it: final wave Group 6, ledger
+/// 187) and the title wraps; two cards never read the same (review E24).
 fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> String {
     use super::header::elide_middle;
     let len = id.chars().count();
@@ -516,7 +517,12 @@ fn fit_title(id: &str, tail: &str, query: &str, fits: impl Fn(&str) -> bool) -> 
             return t;
         }
     }
-    format!("…/{tail}")
+    let last = format!("…/{tail}");
+    if last.chars().count() < len {
+        last
+    } else {
+        id.to_string()
+    }
 }
 
 /// The width of `text` in the small font, as a button or pill would paint it (a few short strings per card per frame).
@@ -4189,6 +4195,18 @@ mod tests {
         // any other member: its tail, or an em dash
         assert_eq!(tag_text(None, "_m"), "_m");
         assert_eq!(tag_text(None, ""), "—");
+    }
+
+    /// Final wave Group 6 (ledger 187): the last resort `…/<tail>` is never as long as the id it stands for.
+    #[test]
+    fn the_tail_form_is_never_longer_than_the_id() {
+        let none = |_: &str| false;
+        // "…/stone/m" is 9 characters, as many as the id: the id is shown
+        assert_eq!(fit_title("x/stone/m", "stone/m", "", none), "x/stone/m");
+        assert_eq!(
+            fit_title("textures/arch/eye/m", "eye/m", "", none),
+            "…/eye/m"
+        );
     }
 
     #[test]

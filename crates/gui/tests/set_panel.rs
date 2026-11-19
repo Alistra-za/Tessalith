@@ -473,4 +473,36 @@ fn header_values_stay_inside_the_panel_with_coat_on() {
             v.rect()
         );
     }
+    // Final wave Group 6 (ledger 212): a blocked feature's amber reason ("{state}, blocked by {x}", CC10) still shows
+    // in the Coat and Emissive headers once Hair blocks both, and it stays inside the centre too.
+    // Written as the key: the Hair tick is itself blocked (by Coat and Emissive) and refuses a click.
+    use sdc_gui::pgp::settings::{feature_key, Feature};
+    h.state_mut().0.set_json_value(
+        "landscape/rock01",
+        feature_key(Feature::Hair),
+        Some(serde_json::Value::Bool(true)),
+    );
+    h.run();
+    let p = centre(&h);
+    let reasons: Vec<egui::Rect> = ["Coat", "Emissive"]
+        .iter()
+        .flat_map(|t| {
+            let r = title(&h, t).rect();
+            h.query_all_by_role(Role::Label)
+                .filter(move |n| {
+                    n.rect().min.x > r.max.x
+                        && (n.rect().center().y - r.center().y).abs() < 2.0
+                        && n.value().is_some_and(|v| v.contains("blocked by"))
+                })
+                .map(|n| n.rect())
+                .collect::<Vec<_>>()
+        })
+        .collect();
+    assert!(
+        !reasons.is_empty(),
+        "premise: a blocked header reason shows"
+    );
+    for r in reasons {
+        assert!(r.max.x <= p.max.x, "blocked reason at {r:?}, panel {p:?}");
+    }
 }
