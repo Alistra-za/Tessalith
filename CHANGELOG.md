@@ -62,8 +62,9 @@
 - After **Rebuild Z** the exported row says it is queued until the next export.
 - A row's buttons sit right after its sentence.
 - Counts of one now read in the singular: "1 file, 1 problem" in the Export button's hover, "1 warning" in the Files tab, "1 note" in the 3D view's Details, "1 texture selected" in the bulk panel, and "Analysing 0 / 1 file…" on the plan bar.
-- A PBR set whose own normal is a vanilla `normal` no longer warns that `_n` is missing and the normal is unused, and may now read Ready. It gets one note, `SHADER-NORMAL-SPECULAR`, and the GUI's **Use PBR normal** switches it in one click.
-- `sdc inspect` shows the note; `sdc convert`'s log, which prints warnings only, no longer prints the two false warnings.
+- A normal that only a PBR set uses needs no action: Tessalith types it PBR normal and drops its alpha. A plain `normal` in a PBR, PBR Grass, PBR Landscape or Advanced Skin set is now the set's `_n`, and its `_rmaos` is variance-baked from it; an `_rmaos` that starts baking is re-encoded once by `sdc convert … --on-existing if-changed`.
+- In a PBR Landscape set the GUI now types an untouched landscape normal PBR normal too, since Community Shaders' PBR terrain does not read its alpha; that `_n` is re-encoded once, without its alpha, at the next export.
+- A normal that a regular set also uses keeps its alpha: sharing it writes `alpha.policy = "data"` for you, and where a regular set reads one without it (a project that already shares one, or a change the next plan shows), Problems offers **Keep alpha**.
 - GUI: a complex-grass source whose corner normal isn't unit length is now a note while Tessalith renormalises the written file. It no longer keeps the texture or its set from Ready. With the normal base level kept as authored, it is still a problem.
 - GUI: a set whose entries match no file now lists its own problems, such as "No file matches …", in the Problems filter, and the filter keeps showing that set once a file lands in it. The set editor lists them too; with two such sets, it shows this only for the first. "Not ready: this set has no files yet." shows for a set with nothing in it, and for one whose problems you all marked as intended.
 

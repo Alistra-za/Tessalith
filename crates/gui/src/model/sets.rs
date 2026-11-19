@@ -2555,7 +2555,7 @@ impl AppModel {
     pub(crate) fn leaves_locked(&self, item: &str) -> Result<(), String> {
         #[cfg(feature = "test-hooks")]
         LOCK_SEARCHES.with(|c| c.set(c.get() + 1));
-        // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JP3).
+        // Borrowed from the cached views, not cloned: this runs per drawn row per frame (Note JS4).
         let views = views(self);
         let Some(v) = view_with_member(&views, item) else {
             return Ok(());

@@ -1681,7 +1681,7 @@ mod tests {
         }
     }
 
-    /// B3-7 (Note JP1): `msn`, a detail normal and a coat normal are not a tangent-space `_n`; nothing changes.
+    /// B3-7 (Note JS4): `msn`, a detail normal and a coat normal are not a tangent-space `_n`; nothing changes.
     #[test]
     fn msn_coat_and_detail_normals_still_miss_pbr_n() {
         use crate::codes::Code::*;
@@ -1747,7 +1747,7 @@ mod tests {
         assert!(check_maps(&p, Target::Cs, &ms).is_empty());
     }
 
-    /// B3-7 (Note JP1, Note BM): PBR Landscape takes a vanilla normal as its `_n` and says nothing; Default (what a
+    /// B3-7 (Note JS4, Note BM): PBR Landscape takes a vanilla normal as its `_n` and says nothing; Default (what a
     /// `pbr` request falls back to on vanilla) and a derived pick are untouched.
     #[test]
     fn pbr_landscape_default_and_derived_raise_nothing() {

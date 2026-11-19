@@ -59,7 +59,7 @@ A **helper** is a source file that fills one channel of another output in its ow
 | Role (`helper.role`) | Suggested target | Also offered |
 |---|---|---|
 | Opacity (`opacity`) | the colour texture's alpha (`diffuse.a`) | packed channels |
-| Specular (`specular`) | the `_n` alpha of a non-PBR set (`n.a`), plus its packed channel in the tables above | other packed channels |
+| Specular (`specular`) | the `_n` alpha of a non-PBR set (`n.a`), or of a PBR set's normal shared into one (it holds `alpha.policy = "data"`), plus its [packed channel for the target](#packing-loose-maps) | other packed channels |
 | Fuzz weight, PBR (`fuzzweight`) | the PBR `_f` alpha (`f.a`) | packed channels |
 | Subsurface weight, PBR (`subsurfaceweight`) | the PBR `_s` alpha (`s.a`) | packed channels |
 | Roughness, glossiness, metallic, AO, height, fuzz mask (skin), `_orm`, curvature, cavity | the packed channels of the tables above | any planned alpha target; the `_cnr` alpha (`cnr.a`, coat roughness) is offered, never suggested |
@@ -118,7 +118,7 @@ A helper that fills nothing is reported (`PACK-UNUSED-INPUT`, or `IN-PACKING-INP
 
 ## Variance and gloss bake
 
-In a `cs` PBR set with an `_n` and an `_rmaos` or `_rfaos`, the detail the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces don't look too shiny. Mip 0 stays as authored; `mips.bake_clamp` limits the amount. A `_cnr` bakes into its own coat roughness. <!-- D:HD1 -->
+In a `cs` set whose shader is PBR, PBR Grass, PBR Landscape or Advanced Skin, with a tangent-space `_n` (`pbr_normal`, else `normal`, else `landscape_normal`) and an `_rmaos` or `_rfaos`, the detail the normal map loses in each smaller mip is added to the roughness mips, so distant surfaces don't look too shiny. A `pbr_normal` bakes under any shader. Mip 0 stays as authored; `mips.bake_clamp` limits the amount. A `_cnr` bakes into its own coat roughness. <!-- D:HD1,JS2 -->
 
 - **Both files must be in the batch.** Otherwise the bake is skipped and reported (`SET-MISSING-COMPANION`, `SET-COMPANION-DDS`). Sizes needn't match: a smaller, larger or differently shaped map bakes from the `_n` at the matching detail. A map with `mips.levels = "none"` isn't baked. A shared `_rmaos` (borrowed by several sets in the GUI) is never baked. <!-- D:HD2,HD5 -->
-- **Complex `_m` gloss bake (opt-in).** Set `mips.normal = "renormalize_bake"` (GUI: *Normal handling: Renormalise and bake*) on the set's `_n`. Every smaller mip of the `_m`'s green channel then gets the detail the normal loses, so distant surfaces shimmer less; mip 0 is unchanged. The conditions above apply.
+- **Complex `_m` gloss bake (opt-in).** Set `mips.normal = "renormalize_bake"` (GUI: *Normal handling: Renormalise and bake*) on the set's `_n`. Every smaller mip of the `_m`'s green channel then gets the detail the normal loses, so distant surfaces shimmer less; mip 0 is unchanged. The conditions above apply. The bake's own setting on a plain normal is not this opt-in. <!-- D:JS2 -->

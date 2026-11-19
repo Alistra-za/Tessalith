@@ -47,7 +47,7 @@ A row you must act on has its fix as a button.
 | `CHK-Z-SIGN` (a check) | **Rebuild Z**, which clears the row. <!-- D:JO15 --> |
 | `SHADER-EXTRA-MAP`, a note: *{file} isn't read by the {shader} shader…* | **Remove from set** for that file, then **Change shader…**. The file leaves the set as **Remove member** does: [Textures in no set](GUI-Sets-Column.md#textures-in-no-set). <!-- D:JO15 --> |
 | `SHADER-MISSING-MAP`, `SHADER-UNAVAILABLE` | **Change shader…**, a menu of the shaders the set's shader combo offers. <!-- D:JO15 --> |
-| `SHADER-NORMAL-SPECULAR`, a note: *{file} is a vanilla normal…* (a PBR set's own normal) | **Use PBR normal**, which writes `subtype = "pbr_normal"`: the alpha is dropped and any `_rmaos` in the set bakes from it. Off on a locked slot or a read-only `sdc.toml`. A DDS kept as it is gets no button and reads *{file} is a kept DDS…*: it is not converted again, so its type can't drop the alpha. A DDS set to be encoded again (`reencode = true`) gets the button. <!-- D:JP3 --> |
+| *{file} is shared with a regular set, which reads its alpha as specular; its alpha is not kept* (a note) | **Keep alpha**, which writes `alpha.policy = "data"`. Off on a locked slot or a read-only `sdc.toml`. [Sharing a PBR set's normal into a regular set](GUI-Sets-Column.md#moving-textures-between-sets) writes it for you; this row shows what that step cannot see, such as a type decision that turns a set regular at the next plan. <!-- D:JS7 --> |
 | *The file name and the contents point to different types* | **Set type…**, the type picker. <!-- D:JO15 --> |
 | *Parallax is on but the source has no alpha* | **Turn parallax off**, which writes `alpha.parallax = false`. <!-- D:JO15 --> |
 | A PGPatcher feature clash | **Turn off {feature}** for each of the two; neither is the default. <!-- D:FN5 --> |
@@ -80,7 +80,7 @@ Each click is one undo step. <!-- D:JO4 -->
 
 ### Go to set
 
-**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md), closing an expanded texture preview first. When the row is about one slot or file (a missing map, a map the shader doesn't read, a PBR set's vanilla normal), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14,JP3 -->
+**Go to set** selects the set and opens it in the [Set editor](GUI-Set-Editor.md), closing an expanded texture preview first. When the row is about one slot or file (a missing map or a map the shader doesn't read), the editor scrolls to that slot row or file and outlines it for two seconds. A row about the whole set opens the set and outlines nothing, and so does any row while the editor shows **3D**. <!-- D:JO8,JO14 -->
 
 ### Unmatched [files] entries
 
