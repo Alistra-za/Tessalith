@@ -85,7 +85,7 @@ Each one names the edge it guards, so the failure message points at the bug:
   ```
   [B2 re-review; `ui/group.rs` tests]
   With no renderer, each `FullOutput` must drop or clear its texture deltas (`drop_without_applying_deltas()` as above, or `full.textures_delta.clear()`): epaint 0.37 panics on a dropped, unapplied delta ("Dropped TexturesDelta with 1 unapplied deltas"). [E37 T5, T6]
-- **Test at the sizes users have:** 1280×800 and 1100 wide, not only 1600. [B1 final I2]
+- **Test at the sizes users have:** 1280×800 and 1100 wide, not only 1600. The window edge and a Label cut by its clip are checked by `ui_proof` `invariants::nothing_past_the_window_edge` and `invariants::no_clipped_text`; limits in Note JU5. Pin a column edge yourself. [B1 final I2]
 
 ## 3. Clipped rects and scrolling
 - **AccessKit bounds aren't clipped.** To know whether a widget can be clicked, read its clipped `interact_rect` from the pass's widget list, matched by its unclipped rect:
