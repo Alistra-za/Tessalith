@@ -138,19 +138,31 @@ pub const HOVER_COPY: &str = "A vanilla file a set borrows, copied so PGPatcher 
 pub const HOVER_NIF: &str = "The NIF with your edits.";
 pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
 pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
+/// Ruling 3c-50: the sentence a run-dependent entry's hover adds after its own (proposed to the owner).
+pub const HOVER_MARKED: &str = "It changes only if this export's new files change it.";
 
 /// E7: one file (or, with an Also tick, one folder) the export changes besides its outputs, and what it is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReviewWrite {
     pub path: PathBuf,
     pub hover: &'static str,
+    /// Ruling 3c-50: whether the file changes is decided by what this run writes, so it may stay as it is.
+    pub marked: bool,
+}
+
+/// E7: one DDS or JSON file the export writes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Output {
+    pub path: PathBuf,
+    /// Ruling 3c-50, as `ReviewWrite::marked`: every planned DDS until Task 8 reads the engine's currency verdict.
+    pub marked: bool,
 }
 
 /// E7: every path the export touches. `outputs` are the DDS and JSON files; `also_updated` the rest, in the order
-/// the footer names them.
+/// the footer names them. No count is taken from a marked entry (ruling 3c-50).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct ReviewWrites {
-    pub outputs: Vec<PathBuf>,
+    pub outputs: Vec<Output>,
     pub also_updated: Vec<ReviewWrite>,
     /// Ruling 3c-49: the footer's text for each entry of `also_updated`, built with the list, so a frame formats none.
     pub labels: Vec<AlsoLabel>,
@@ -171,6 +183,8 @@ pub struct AlsoLabel {
     pub shown: String,
     /// The accessible name: "{name} ({shown})".
     pub name: String,
+    /// The hover's text: what the file is, and for a marked entry `HOVER_MARKED` after it (ruling 3c-50).
+    pub hover: String,
 }
 
 impl ReviewWrites {
@@ -230,9 +244,9 @@ pub(super) struct Prepared {
 /// `review_json`'s cache: its view key, when it was read, its lines and what it prepared.
 pub(super) type JsonCache = (super::ViewKey, Instant, Vec<JsonLine>, Arc<Prepared>);
 
-/// E7: what one vanilla copy's plan was read under (the source's and the destination's stamps, the recorded hash and
-/// whether this run writes the source), and what `pbr_export::copy_plan` answered. Only an answer of "copied" is
-/// kept: a kept destination or a source that could not be read is asked again at the next build.
+/// E7: what one vanilla copy whose owner is outside the run was read under (the source's and the destination's stamps
+/// and the recorded hash), and what `copy_exact` answered. Only an answer of "copied" is kept: a kept destination or
+/// a source that could not be read is asked again at the next build.
 pub(super) type CopyMemo = std::collections::HashMap<
     PathBuf,
     (
@@ -240,9 +254,8 @@ pub(super) type CopyMemo = std::collections::HashMap<
             Option<engine::policy::SourceStamp>,
             Option<engine::policy::SourceStamp>,
             Option<String>,
-            bool,
         ),
-        Option<(String, bool)>,
+        (String, bool),
     ),
 >;
 
@@ -255,6 +268,13 @@ fn nif_row_written(r: &super::meshes::NifReviewRow) -> bool {
         (&r.blocked, r.foreign, r.answer),
         (Some(_), _, _) | (None, Some(_), None) | (None, Some(_), Some(GuardChoice::KeepTheirs))
     )
+}
+
+/// Ruling 3c-50: a write whose bytes this run decides can change the file at `path` only when the file is absent or
+/// Tessalith's (its recorded hash is `last`). `may_replace` lets a file edited outside Tessalith be replaced only by
+/// the same bytes, and keeps one it cannot read; the hash records may still change, so they are listed either way.
+pub(super) fn may_change(path: &Path, last: Option<&str>) -> bool {
+    matches!(disk_state(path, last), DiskState::New | DiskState::Ours)
 }
 
 /// Test hook: `AppModel::review_writes_probe` is on while this lives.
@@ -304,6 +324,11 @@ fn also_labels(also: &[ReviewWrite], unchosen: Option<&Path>) -> Vec<AlsoLabel> 
                     label
                 },
                 shown,
+                hover: if w.marked {
+                    format!("{} {HOVER_MARKED}", w.hover)
+                } else {
+                    w.hover.to_string()
+                },
             }
         })
         .collect()
@@ -477,14 +502,15 @@ impl AppModel {
             .is_some_and(|s| s.is_dirty() && !s.read_only())
     }
 
-    /// Ruling 3c-46: every entry is decided by the predicate the export itself uses for that write, on the same inputs,
-    /// as the disk will be after a clean run of this plan. The finishers run in `finish_export`'s order (copies, the
-    /// PGPatcher JSON, CS PBR, complex material, XPMF, CS skin), each against Review's copy of the hash records, so the
-    /// two record files are listed when a value the writer would store differs from the stored one.
+    /// Ruling 3c-50: a write decided only from what exists before the run (the documents, a destination and its recorded
+    /// hash, an answer, a file outside this run's outputs read now) is decided by the writer's own function on those
+    /// inputs, and listed exactly. A write whose decision depends on what the run produces (a DDS it may write, the rows
+    /// a JSON's text is built from) is listed and marked, with the record files its hash goes to; nothing stands in for
+    /// the run's bytes. The finishers run in `finish_export`'s order (copies, the PGPatcher JSON, CS PBR, complex
+    /// material, XPMF, CS skin), each exact one against Review's copy of the hash records.
     fn build_review_writes(&self, prep: &Prepared) -> ReviewWrites {
-        use super::export::{Row, RowState};
-        use super::json_finish::{plan_guarded, Guarded, UNKNOWN_SHA};
-        // What this run writes: the plan's DDS outputs (the brief's broad rule until Task 8), each counted as done.
+        use super::json_finish::{plan_guarded, Guarded};
+        // What this run writes: the plan's DDS outputs (the brief's broad rule until Task 8, each marked).
         let written_items = || {
             self.items
                 .iter()
@@ -502,64 +528,84 @@ impl AppModel {
         } else {
             vec![]
         };
-        let run: std::collections::HashSet<String> = written_items()
-            .map(|(_, j)| record_key(&j.output))
+        // What this run may produce: a row for every job in the run, whatever its state (the engine reports each one),
+        // the job's output, and every file under an Also folder. A dependency outside these is decided now.
+        let in_run = || self.items.iter().filter(|i| self.item_in_run(i));
+        let run_keys: std::collections::HashSet<String> = in_run()
+            .filter(|i| !i.job_key.is_empty())
+            .map(|i| i.job_key.to_ascii_lowercase())
             .collect();
+        let run_outputs: std::collections::HashSet<String> = in_run()
+            .filter_map(|i| i.job.as_ref().map(|j| record_key(&j.output)))
+            .collect();
+        let touched = |key: &str| run_keys.contains(&key.to_ascii_lowercase());
         let written = |p: &Path| {
-            run.contains(&record_key(p)) || also_folders.iter().any(|f| p.starts_with(f))
+            run_outputs.contains(&record_key(p)) || also_folders.iter().any(|f| p.starts_with(f))
         };
-        let rows: Vec<Row> = written_items()
-            .filter(|(i, _)| !i.job_key.is_empty())
-            .map(|(i, _)| Row {
-                job_key: i.job_key.clone(),
-                path: String::new(),
-                state: RowState::UpToDate,
-                warnings: vec![],
-            })
-            .collect();
         let doc = self.sets_doc.as_ref();
         let mut preview = doc.map(crate::sets_doc::SetsDoc::record_preview);
-        // A record save (`save_record`) runs: some finisher recorded a hash.
+        // A record save (`save_record`) runs: some exact finisher recorded a hash.
         let mut saves = false;
-        // (path, certain): the JSON files and copies whose bytes change.
+        // Some finisher whose write the run decides may record a hash (ruling 3c-50).
+        let mut run_records = false;
+        // (path, marked): the JSON files and copies the export may change.
         let mut json: Vec<(PathBuf, bool)> = vec![];
-        let mut copies: Vec<PathBuf> = vec![];
+        let mut copies: Vec<(PathBuf, bool)> = vec![];
         if let Some(p) = &prep.pgp {
             // `finish_json`: `copy_files` first, against the copy record.
             let old = doc.map(|d| d.copy_shas()).unwrap_or_default();
             let mut shas = old.clone();
             for (src, dst, owner_key) in &p.copies {
-                if !owner_key.is_empty() && pbr_export::dep_ok(p, &rows, owner_key).is_err() {
+                let key = record_key(dst);
+                if (!owner_key.is_empty() && touched(owner_key)) || written(src) {
+                    // The owner's DDS comes from this run: whether it is copied, and its bytes, are the run's.
+                    run_records = true;
+                    if may_change(dst, shas.get(&key).map(String::as_str)) {
+                        copies.push((dst.clone(), true));
+                    }
                     continue;
                 }
-                let key = record_key(dst);
+                // No row of this run can name the owner, so `dep_ok` with none is the writer's answer.
+                if !owner_key.is_empty() && pbr_export::dep_ok(p, &[], owner_key).is_err() {
+                    continue;
+                }
                 let last = shas.get(&key).cloned();
-                let Some(plan) = self.copy_plan(src, dst, last, written(src)) else {
+                let Some((sha, changes)) = self.copy_exact(src, dst, last) else {
                     continue;
                 };
-                match plan {
-                    None => {
-                        shas.insert(key, UNKNOWN_SHA.into());
-                        copies.push(dst.clone());
-                    }
-                    Some((sha, changes)) => {
-                        shas.insert(key, sha);
-                        if changes {
-                            copies.push(dst.clone());
-                        }
-                    }
+                shas.insert(key, sha);
+                if changes {
+                    copies.push((dst.clone(), false));
                 }
             }
             if let (Some(r), true) = (preview.as_mut(), shas != old) {
                 r.set_copy_shas(&shas);
                 saves = true;
             }
-            // Then `pbr_export::finish` and `record_json_sha`.
-            if let Some((text, _)) = pbr_export::json_text(p, &rows, &mut vec![]) {
+            // Then `pbr_export::finish` and `record_json_sha`. Its text is built from this run's rows when an entry
+            // depends on a job of the run.
+            let run_dep = p
+                .entries
+                .iter()
+                .any(|(_, deps, _)| deps.iter().any(|k| touched(k)));
+            if run_dep {
+                run_records = true;
+                let last = self.pgp_record(&p.root, &p.path);
+                // A file edited outside Tessalith changes only with Review's Overwrite answer (otherwise only the same
+                // bytes are written over it).
+                let changes = match disk_state(&p.path, last.as_deref()) {
+                    DiskState::New | DiskState::Ours => true,
+                    DiskState::Edited => self.pgp_overwrite_answered(p),
+                    DiskState::Unreadable => false,
+                };
+                if changes {
+                    json.push((p.path.clone(), true));
+                }
+            } else if let Some((text, _)) = pbr_export::json_text(p, &[], &mut vec![]) {
                 if self.pgp_writes(p, &text) {
                     self.writes_fs_query();
                     if std::fs::read(&p.path).map_or(true, |b| b != text.as_bytes()) {
-                        json.push((p.path.clone(), true));
+                        json.push((p.path.clone(), false));
                     }
                     if let (Some(r), Some(d)) = (preview.as_mut(), doc) {
                         use sha2::{Digest, Sha256};
@@ -581,12 +627,14 @@ impl AppModel {
             written: &dyn Fn(&Path) -> bool,
             json: &mut Vec<(PathBuf, bool)>,
             saves: &mut bool,
+            run_records: &mut bool,
         ) {
             let (Some(p), Some(d), Some(r)) = (p, doc, preview) else {
                 return;
             };
             let recorded = P::recorded(d);
-            let out = plan_guarded(p, &recorded, written, json);
+            let (out, run) = plan_guarded(p, &recorded, written, json);
+            *run_records |= run;
             if out != recorded {
                 P::preview(r, &out);
                 *saves = true;
@@ -599,6 +647,7 @@ impl AppModel {
             &written,
             &mut json,
             &mut saves,
+            &mut run_records,
         );
         guarded(
             prep.cm.as_ref(),
@@ -607,6 +656,7 @@ impl AppModel {
             &written,
             &mut json,
             &mut saves,
+            &mut run_records,
         );
         guarded(
             prep.xpmf.as_ref(),
@@ -615,6 +665,7 @@ impl AppModel {
             &written,
             &mut json,
             &mut saves,
+            &mut run_records,
         );
         guarded(
             prep.skin.as_ref(),
@@ -623,62 +674,80 @@ impl AppModel {
             &written,
             &mut json,
             &mut saves,
+            &mut run_records,
         );
 
-        let mut outputs: Vec<PathBuf> = written_items()
-            .map(|(_, j)| j.output.clone())
-            .chain(json.into_iter().map(|(p, _)| p))
+        let mut outputs: Vec<Output> = written_items()
+            .map(|(_, j)| (j.output.clone(), true))
+            .chain(json)
             // A plan's output path can mix `/` and `\`; one path, one spelling.
-            .map(|p| p.components().collect::<PathBuf>())
+            .map(|(p, marked)| Output {
+                path: p.components().collect(),
+                marked,
+            })
             // A file in a listed Also folder is counted by the folder's entry.
-            .filter(|p| !also_folders.iter().any(|f| p.starts_with(f)))
+            .filter(|o| !also_folders.iter().any(|f| o.path.starts_with(f)))
             .collect();
-        outputs.sort();
-        outputs.dedup();
+        // One entry per path, unmarked when any finisher decides it exactly.
+        outputs.sort_by(|a, b| (&a.path, a.marked).cmp(&(&b.path, b.marked)));
+        outputs.dedup_by(|a, b| a.path == b.path);
         let mut also: Vec<ReviewWrite> = vec![];
-        let mut put = |path: PathBuf, hover: &'static str| also.push(ReviewWrite { path, hover });
+        let mut put = |path: PathBuf, hover: &'static str, marked: bool| {
+            also.push(ReviewWrite {
+                path,
+                hover,
+                marked,
+            })
+        };
         // `save()` first: `sdc.toml` when it holds unsaved edits.
         if let (Some(p), true) = (&self.project, self.project_unsaved()) {
-            put(p.path().to_path_buf(), HOVER_SDC_TOML);
+            put(p.path().to_path_buf(), HOVER_SDC_TOML, false);
         }
         if let (Some(d), Some(r)) = (doc, &preview) {
             // `save()` writes unsaved edits; `save_record` writes the document's text after a record, which changes the
-            // file when that text differs from the file's.
+            // file when that text differs from the file's. A record the run decides may change it too.
             let recorded = saves && !d.read_only() && {
                 self.writes_fs_query();
                 std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes())
             };
             if self.sets_unsaved() || recorded {
-                put(d.path().to_path_buf(), HOVER_PROJECT_TOML);
+                put(d.path().to_path_buf(), HOVER_PROJECT_TOML, false);
+            } else if run_records && !d.read_only() {
+                put(d.path().to_path_buf(), HOVER_PROJECT_TOML, true);
             }
             // `put_side` writes the sidecar only for a value it does not hold.
-            if r.side_changed() {
-                put(d.sidecar_path(), HOVER_GENERATED);
+            if r.side_changed() || run_records {
+                put(d.sidecar_path(), HOVER_GENERATED, !r.side_changed());
             }
         }
         let out = self.output_root();
-        // The engine plans into `export/<root prefix>` (Note HQ1), and its manifest lives there.
+        // The engine plans into `export/<root prefix>` (Note HQ1), and its manifest lives there. It is written whenever
+        // the export runs, but may come out as it was: marked.
         if let Some(root) = &self.root {
             let planned = engine::discover::effective_output_root(root, &out);
-            put(planned.join("_sdc").join("manifest.jsonl"), HOVER_MANIFEST);
+            put(
+                planned.join("_sdc").join("manifest.jsonl"),
+                HOVER_MANIFEST,
+                true,
+            );
         }
-        copies.sort();
-        copies.dedup();
-        for c in copies {
-            put(c.components().collect(), HOVER_COPY);
+        copies.sort_by(|a, b| (&a.0, a.1).cmp(&(&b.0, b.1)));
+        copies.dedup_by(|a, b| a.0 == b.0);
+        for (c, marked) in copies {
+            put(c.components().collect(), HOVER_COPY, marked);
         }
         // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
         for r in self.nif_rows.iter().filter(|r| nif_row_written(r)) {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
-                put(p, HOVER_NIF);
+                put(p, HOVER_NIF, false);
             }
             if let Ok(p) = super::meshes::edit_doc::doc_path(&out, &r.path) {
-                put(p, HOVER_NIF_RECORD);
+                put(p, HOVER_NIF_RECORD, false);
             }
         }
         // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".
         for f in also_folders {
-            put(f, HOVER_ALSO_FOLDER);
+            put(f, HOVER_ALSO_FOLDER, true);
         }
         let unchosen = self
             .export_folder_chosen()
@@ -706,44 +775,40 @@ impl AppModel {
             super::history::recorded(last.as_deref()),
         ) {
             Ok(()) => true,
-            Err(engine::dds::Kept::Foreign) => self
-                .review
-                .as_ref()
-                .and_then(|r| r.json_answer.as_ref())
-                .is_some_and(|a| {
-                    a.overwrite
-                        && a.path == p.path
-                        && a.sha.is_some()
-                        && sha256_of(&p.path) == a.sha
-                }),
+            Err(engine::dds::Kept::Foreign) => self.pgp_overwrite_answered(p),
             Err(_) => false,
         }
     }
 
-    /// `pbr_export::copy_plan`, kept per destination while both files' stamps, the recorded hash and whether this run
-    /// writes the source are unchanged.
-    fn copy_plan(
-        &self,
-        src: &Path,
-        dst: &Path,
-        last: Option<String>,
-        src_written: bool,
-    ) -> Option<Option<(String, bool)>> {
+    /// `finish_json`'s Overwrite arm: Review's answer is Overwrite, for the PGPatcher JSON as it is on disk now.
+    fn pgp_overwrite_answered(&self, p: &pbr_export::PendingJson) -> bool {
+        self.review
+            .as_ref()
+            .and_then(|r| r.json_answer.as_ref())
+            .is_some_and(|a| {
+                a.overwrite && a.path == p.path && a.sha.is_some() && sha256_of(&p.path) == a.sha
+            })
+    }
+
+    /// `copy_files` for one copy whose owner is outside this run (ruling 3c-50): the owner's DDS read now, as the
+    /// writer reads it, and `may_replace` on those bytes. `None`: nothing is copied (the source cannot be read, or the
+    /// destination is kept); else the hash it records and whether the copy changes the destination. Kept per
+    /// destination while both files' stamps and the recorded hash are unchanged.
+    fn copy_exact(&self, src: &Path, dst: &Path, last: Option<String>) -> Option<(String, bool)> {
         use engine::policy::SourceStamp;
+        use sha2::{Digest, Sha256};
         self.writes_fs_query();
-        let key = (
-            SourceStamp::of(src),
-            SourceStamp::of(dst),
-            last,
-            src_written,
-        );
+        let key = (SourceStamp::of(src), SourceStamp::of(dst), last);
         if let Some((k, v)) = self.copy_sha_memo.borrow().get(dst) {
             if *k == key {
                 return Some(v.clone());
             }
         }
         self.writes_fs_query();
-        let plan = pbr_export::copy_plan(src, dst, key.2.as_deref(), src_written)?;
+        let bytes = std::fs::read(src).ok()?;
+        engine::dds::may_replace(dst, &bytes, super::history::recorded(key.2.as_deref())).ok()?;
+        let changes = std::fs::read(dst).map_or(true, |b| b != bytes);
+        let plan = (hex::encode(Sha256::digest(&bytes)), changes);
         self.copy_sha_memo
             .borrow_mut()
             .insert(dst.to_path_buf(), (key, plan.clone()));

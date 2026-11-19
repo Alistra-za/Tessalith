@@ -471,15 +471,20 @@ impl super::json_finish::Guarded for PendingCm {
         d.set_cm_json_shas(shas)
     }
     fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        // `finish` writes a file whose `_m` is on disk after the run: decided now when it is there now, by the run when
+        // only this run writes it.
         let files = self
             .files
             .iter()
             .map(|(rel, text)| (self.root.join(rel), text))
-            .filter(|(path, _)| {
-                let dds = json_dds(path);
-                dds.is_file() || written(&dds)
+            .filter_map(|(path, text)| {
+                let dds = json_dds(&path);
+                if dds.is_file() {
+                    Some((path, Some(text.clone())))
+                } else {
+                    written(&dds).then_some((path, None))
+                }
             })
-            .map(|(path, text)| (path, Some(text.clone())))
             .collect();
         vec![(self.root.clone(), files)]
     }

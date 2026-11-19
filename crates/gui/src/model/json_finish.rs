@@ -40,59 +40,59 @@ pub(super) fn guarded_write(
     }
 }
 
-/// The value Review records for a file whose text is not known before the run: it never equals a stored hash, so the
-/// records count as changed (ruling 3c-47).
-pub(super) const UNKNOWN_SHA: &str = "unknown until the export writes it";
-
-/// E7 (ruling 3c-46): what `guarded_write` would do with `text` at `path`, asked of the disk now and written nowhere.
-/// `None`: the file is kept. `Some(changes)`: it is written (and `out` gets the hash it would record), and `changes`
-/// says whether that changes the file. A `text` of `None` is not known before the run (it depends on a DDS this run
-/// writes): only an absent file or one whose hash is recorded is replaced, and the change is assumed. Ruling 3c-48: a
-/// case-only rename (`remove_own_case_twin` drops sdc's own file under the old spelling) changes the file's name on
-/// disk, so it is a change; the removed spelling counts under this entry.
+/// E7 (ruling 3c-50): what `guarded_write` does at `path`, asked of the disk now and written nowhere. `text`: the text it
+/// writes, known before the run; `out` then gets the hash it records. `None`: this run decides whether the file is
+/// written and with what, so nothing is recorded here. Returns whether the file is listed (`Some(marked)`) and whether
+/// the run decides a hash record. Ruling 3c-48: a case-only rename (`remove_own_case_twin` drops sdc's own file under
+/// the old spelling) changes the file's name on disk, so it is a change; the removed spelling counts under this entry.
 pub(super) fn guarded_plan(
     path: &Path,
     text: Option<&str>,
     out: &mut BTreeMap<String, String>,
-) -> Option<bool> {
+) -> (Option<bool>, bool) {
     use super::history::{own_case_twin, record_key, recorded};
     use sha2::{Digest, Sha256};
     let key = record_key(path);
     let last = out.get(&key).cloned();
     // On a case-insensitive disk `path` reads the twin, which is ours, so `may_replace` answers as after the removal.
     let renamed = own_case_twin(path, last.as_deref()).is_some();
-    let new = text.map_or(&[][..], str::as_bytes);
-    engine::dds::may_replace(path, new, recorded(last.as_deref())).ok()?;
     let Some(text) = text else {
-        out.insert(key, UNKNOWN_SHA.into());
-        return Some(true);
+        let changes = renamed || super::review::may_change(path, last.as_deref());
+        return (changes.then_some(true), true);
     };
+    if engine::dds::may_replace(path, text.as_bytes(), recorded(last.as_deref())).is_err() {
+        return (None, false);
+    }
     out.insert(key, hex::encode(Sha256::digest(text.as_bytes())));
-    Some(renamed || std::fs::read(path).map_or(true, |b| b != text.as_bytes()))
+    let changes = renamed || std::fs::read(path).map_or(true, |b| b != text.as_bytes());
+    (changes.then_some(false), false)
 }
 
-/// E7 (ruling 3c-46): `Guarded::write` asked instead of done: the record it would return, and in `list` each file it
-/// would change, with whether that change is certain (`false`: its text is not known before the run).
+/// E7 (ruling 3c-50): `Guarded::write` asked instead of done: the record it returns for the files decided before the
+/// run, whether the run decides some record, and in `list` each file it may change, marked when the run decides it.
 pub(super) fn plan_guarded<P: Guarded>(
     p: &P,
     recorded: &BTreeMap<String, String>,
     written: &dyn Fn(&Path) -> bool,
     list: &mut Vec<(PathBuf, bool)>,
-) -> BTreeMap<String, String> {
+) -> (BTreeMap<String, String>, bool) {
     let mut out = recorded.clone();
+    let mut run = false;
     for (root, files) in p.planned(written) {
         out = super::history::records_at(&out, &root);
         for (path, text) in files {
-            if guarded_plan(&path, text.as_deref(), &mut out) == Some(true) {
-                list.push((path, text.is_some()));
+            let (listed, by_run) = guarded_plan(&path, text.as_deref(), &mut out);
+            run |= by_run;
+            if let Some(marked) = listed {
+                list.push((path, marked));
             }
         }
     }
-    out
+    (out, run)
 }
 
-/// One folder of a guarded export's planned files: its root, and each file with its text (`None`: not known before the
-/// run).
+/// One folder of a guarded export's planned files: its root, and each file with its text (`None`: this run decides
+/// whether it is written, or its text).
 pub(super) type PlannedFolder = (PathBuf, Vec<(PathBuf, Option<String>)>);
 
 /// What a kind of guarded JSON export hands the shared finisher.
@@ -113,9 +113,9 @@ pub(super) trait Guarded {
     /// Files of this export that now hold their text (for the Also walk).
     fn current(&self) -> Vec<PathBuf>;
     fn record(d: &mut SetsDoc, shas: &BTreeMap<String, String>) -> std::io::Result<()>;
-    /// E7 (ruling 3c-46): the files `write` would go through, per folder in its order, as the disk will be after a
-    /// clean run: `written` says whether this run writes a file (a DDS output), so a file the kind needs on disk is
-    /// there when it is now or when this run writes it.
+    /// E7 (ruling 3c-50): the files `write` may go through, per folder in its order, each with its text when that and
+    /// whether it is written are decided before the run, else `None`. `written` says whether this run may write a file
+    /// (a DDS output).
     fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<PlannedFolder>;
     /// `record`, applied to Review's copy of the records.
     fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>);

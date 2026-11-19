@@ -347,6 +347,125 @@ pub fn tree_hashes(roots: &[&Path]) -> std::collections::BTreeMap<PathBuf, Strin
     out
 }
 
+/// E7: one entry of Review's list as the listing rules read it: its path, what it is (`""` for an output) and whether
+/// it is marked run-dependent (ruling 3c-50).
+pub struct Listed {
+    pub path: PathBuf,
+    pub hover: &'static str,
+    pub marked: bool,
+}
+
+/// Review's list, outputs first.
+pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
+    w.outputs
+        .iter()
+        .map(|o| Listed {
+            path: o.path.clone(),
+            hover: "",
+            marked: o.marked,
+        })
+        .chain(w.also_updated.iter().map(|e| Listed {
+            path: e.path.clone(),
+            hover: e.hover,
+            marked: e.marked,
+        }))
+        .collect()
+}
+
+/// E7, the listing rules (rulings 3c-48, 3c-51, 3c-52), between two `tree_hashes` snapshots taken around one export.
+/// Every file whose bytes or name changed is listed, lies under a listed Also folder, or is credited to one listed entry
+/// by one of four kinds, each with its direction checked:
+/// (a) a removed `<document>.recovery` beside a listed document;
+/// (b) a removed old case spelling of a listed file;
+/// (c) a created `<stem>.<digits>.toml` beside a listed NIF record, holding that record's bytes from before (the record
+///     moved aside, Note GD25);
+/// (d) a removed scan-store autosave `nif-edits\<hash>.toml` of a listed NIF record's data path (Note GD5).
+///
+/// An entry changed when its own path, a file credited to it or (a folder) a file under it changed; every entry that
+/// did not change must be marked run-dependent. Returns the violations, empty when the rules hold.
+pub fn listing_violations(
+    w: &sdc_gui::model::review::ReviewWrites,
+    before: &std::collections::BTreeMap<PathBuf, String>,
+    after: &std::collections::BTreeMap<PathBuf, String>,
+) -> Vec<String> {
+    use sdc_gui::model::review::HOVER_ALSO_FOLDER;
+    let entries = listed(w);
+    let mut touched = vec![false; entries.len()];
+    let mut out = vec![];
+    let changed = before
+        .keys()
+        .chain(after.keys())
+        .filter(|p| before.get(*p) != after.get(*p))
+        .collect::<std::collections::BTreeSet<_>>();
+    for p in changed {
+        let at = entries
+            .iter()
+            .position(|e| e.hover == HOVER_ALSO_FOLDER && p.starts_with(&e.path))
+            .or_else(|| entries.iter().position(|e| e.path == *p))
+            .or_else(|| credit(p, before, after, &entries));
+        match at {
+            Some(i) => touched[i] = true,
+            None => out.push(format!(
+                "changed, not listed: {p:?} (before {}, after {})",
+                before.contains_key(p),
+                after.contains_key(p)
+            )),
+        }
+    }
+    for (e, t) in entries.iter().zip(touched) {
+        if !t && !e.marked {
+            out.push(format!(
+                "listed, not changed, not marked: {:?} ({:?})",
+                e.path, e.hover
+            ));
+        }
+    }
+    out
+}
+
+/// The listed entry a changed file not on the list counts under, by the four kinds of `listing_violations`.
+fn credit(
+    p: &Path,
+    before: &std::collections::BTreeMap<PathBuf, String>,
+    after: &std::collections::BTreeMap<PathBuf, String>,
+    entries: &[Listed],
+) -> Option<usize> {
+    use sdc_gui::model::review::HOVER_NIF_RECORD;
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let removed = before.contains_key(p) && !after.contains_key(p);
+    let created = !before.contains_key(p) && after.contains_key(p);
+    let find = |f: &dyn Fn(&Listed) -> bool| entries.iter().position(f);
+    if removed {
+        // (a)
+        if let Some(doc) = name.strip_suffix(".recovery") {
+            let doc = p.with_file_name(doc);
+            if let Some(i) = find(&|e| e.path == doc) {
+                return Some(i);
+            }
+        }
+        // (b)
+        let lower = p.to_string_lossy().to_lowercase();
+        if let Some(i) = find(&|e| e.path != p && e.path.to_string_lossy().to_lowercase() == lower)
+        {
+            return Some(i);
+        }
+    }
+    // (c)
+    if created {
+        return find(&|e| {
+            let stem = e.path.file_stem().unwrap_or_default().to_string_lossy();
+            e.hover == HOVER_NIF_RECORD
+                && e.path.parent() == p.parent()
+                && name
+                    .strip_prefix(&format!("{stem}."))
+                    .and_then(|r| r.strip_suffix(".toml"))
+                    .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                && before.get(&e.path) == after.get(p)
+        });
+    }
+    None
+}
+
 /// E7: `pbr_opened` (export folder `dir/export`), then leaf (Diffuse, Cutout) and odd (Diffuse, Acknowledge DimSmall)
 /// decided, not rock01's `decide_all` lines. Review's gate is open, so a first export really writes files, among them
 /// a PGPatcher JSON.

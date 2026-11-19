@@ -495,10 +495,8 @@ impl super::json_finish::Guarded for PendingCsSkin {
             .iter()
             .filter_map(|f| {
                 let path = self.root.join(&f.rel);
-                // shortcut: the text hashes the diffuse's bytes and leaves out a texture not on disk (`text_now`), so with
-                // a DDS of the file written by this run it is not known before the run: listed as changed, with both
-                // record files (a third case beside ruling 3c-47's two). Upgrade when the currency preview (Task 8) says
-                // which DDS this run really rewrites.
+                // Ruling 3c-50: the text hashes the diffuse's bytes and leaves out a texture not on disk (`text_now`), so
+                // with a DDS of the file this run may write, the run decides it.
                 let pending = std::iter::once(&f.diffuse)
                     .chain(f.outputs.iter().map(|(_, o)| o))
                     .any(|p| written(p));

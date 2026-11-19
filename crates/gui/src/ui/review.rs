@@ -391,11 +391,11 @@ fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>) {
         from_head = !head;
     }
     let one = |ui: &mut egui::Ui, i: usize| {
-        let (e, l) = (&list[i], &labels[i]);
+        let l = &labels[i];
         let r = ui.label(l.text.as_str());
         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &l.name));
         r.on_hover_ui(|ui| {
-            ui.label(e.hover);
+            ui.label(l.hover.as_str());
             ui.weak(l.shown.as_str());
         });
     };
@@ -406,9 +406,9 @@ fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>) {
         let r = ui.label("…");
         r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &w.whole));
         r.on_hover_ui(|ui| {
-            for (e, l) in list.iter().zip(labels) {
+            for l in labels.iter().take(n) {
                 ui.label(l.text.trim_end_matches(','));
-                ui.weak(format!("{} {}", e.hover, l.shown));
+                ui.weak(format!("{} {}", l.hover, l.shown));
             }
         });
     }

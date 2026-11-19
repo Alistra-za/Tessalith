@@ -804,31 +804,6 @@ pub fn copy_files(
     }
 }
 
-/// E7 (ruling 3c-46): what `copy_files` would do with one copy, asked of the disk now and written nowhere, once its
-/// owner passed `dep_ok`. `src_written`: this run writes the owner's DDS, so its bytes are not known before the run
-/// (the bytes on disk now stand in for the "same bytes" test). `None`: nothing is copied (the source cannot be read, or
-/// the destination is kept). `Some(Some(sha))`: copied, recording `sha`, and the copy changes the file;
-/// `Some(None)`: copied, bytes not known before the run.
-pub(super) fn copy_plan(
-    src: &std::path::Path,
-    dst: &std::path::Path,
-    last: Option<&str>,
-    src_written: bool,
-) -> Option<Option<(String, bool)>> {
-    use sha2::{Digest, Sha256};
-    let bytes = match std::fs::read(src) {
-        Ok(b) => b,
-        Err(_) if src_written => vec![],
-        Err(_) => return None,
-    };
-    engine::dds::may_replace(dst, &bytes, recorded(last)).ok()?;
-    if src_written {
-        return Some(None);
-    }
-    let changes = std::fs::read(dst).map_or(true, |b| b != bytes);
-    Some(Some((hex::encode(Sha256::digest(&bytes)), changes)))
-}
-
 /// The PGPatcher JSON text `finish` writes after a run with these `rows`, and its entry count; `None` (with its note)
 /// when it writes none.
 pub(super) fn json_text(

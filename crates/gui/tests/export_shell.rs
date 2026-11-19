@@ -2261,20 +2261,11 @@ struct Seen {
     w: sdc_gui::model::review::ReviewWrites,
 }
 
-/// The acceptance helper: open Review if it is not open, take its list, press its Export and compare the files that
-/// changed under `dir` (the union of both snapshots, so a removed or renamed file is a change, ruling 3c-48) with the
-/// list, under the listing rules and nothing else:
-/// 1. a changed path under a listed Also folder counts as listed;
-/// 2. the manifest is a listed path whenever the export runs, changed or not;
-/// 3. (ruling 3c-48) a `.recovery` sibling of a listed document, the old case spelling of a listed JSON and a NIF record
-///    moved aside beside a listed record count under that entry.
-///
-/// Every changed file must be listed (ruling 3c-47). A listed file may stay unchanged only where its bytes cannot be
-/// known before the run: the manifest; a vanilla copy (its source is a DDS this run writes) and the two record files
-/// for its hash (3c-47); and a DDS output, which the brief lists for every file the plan writes until Task 8 narrows
-/// it to the ones that will change.
+/// The acceptance helper: open Review if it is not open, take its list, press its Export and hold the files that
+/// changed under `dir` (the union of both snapshots, so a removed or renamed file is a change) to the listing rules
+/// (`support::listing_violations`, rulings 3c-50 to 3c-52): every changed file is listed or credited to one listed
+/// entry, and every listed entry that did not change is marked run-dependent.
 fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
-    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_MANIFEST, HOVER_PROJECT_TOML};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
     if m.review.is_none() {
@@ -2283,101 +2274,40 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     assert!(m.review.is_some(), "the header opens Review");
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     let w = (*m.review_writes()).clone();
-    let listed: BTreeSet<PathBuf> = w
-        .outputs
-        .iter()
-        .cloned()
-        .chain(w.also_updated.iter().map(|r| r.path.clone()))
-        .collect();
+    let listed: BTreeSet<PathBuf> = support::listed(&w).into_iter().map(|e| e.path).collect();
     let before = support::tree_hashes(&[dir]);
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
     let after = support::tree_hashes(&[dir]);
+    let bad = support::listing_violations(&w, &before, &after);
+    assert!(bad.is_empty(), "{bad:#?}");
     let changed: BTreeSet<PathBuf> = before
         .keys()
         .chain(after.keys())
         .filter(|p| before.get(*p) != after.get(*p))
         .cloned()
         .collect();
-    let also_dirs = w.also_folders();
-    let seen: BTreeSet<PathBuf> = changed
-        .iter()
-        .map(|p| {
-            also_dirs
-                .iter()
-                .find(|f| p.starts_with(f))
-                .cloned()
-                .unwrap_or_else(|| credited(p, &w).unwrap_or_else(|| p.clone()))
-        })
-        .collect();
-    let unlisted: Vec<&PathBuf> = seen.difference(&listed).collect();
-    assert!(unlisted.is_empty(), "changed, not listed: {unlisted:?}");
-    let entry = |p: &PathBuf| w.also_updated.iter().find(|e| &e.path == p);
-    let copy_listed = w.also_updated.iter().any(|e| e.hover == HOVER_COPY);
-    let may_stay = |p: &PathBuf| {
-        let dds = w.outputs.contains(p) && p.extension().is_some_and(|e| e == "dds");
-        let hover = entry(p).map(|e| e.hover);
-        dds || hover == Some(HOVER_MANIFEST)
-            || (copy_listed
-                && matches!(
-                    hover,
-                    Some(HOVER_COPY | HOVER_PROJECT_TOML | HOVER_GENERATED)
-                ))
-    };
-    let stayed: Vec<&PathBuf> = listed.difference(&seen).filter(|p| !may_stay(p)).collect();
-    assert!(stayed.is_empty(), "listed, not changed: {stayed:?}");
-    Seen {
-        listed,
-        changed: seen,
-        w,
-    }
-}
-
-/// Rule 3 (ruling 3c-48): the listed entry a removed or moved file counts under, if any.
-fn credited(
-    p: &std::path::Path,
-    w: &sdc_gui::model::review::ReviewWrites,
-) -> Option<std::path::PathBuf> {
-    use sdc_gui::model::review::HOVER_NIF_RECORD;
-    let name = p.file_name()?.to_string_lossy().into_owned();
-    let all = || {
-        w.outputs
-            .iter()
-            .chain(w.also_updated.iter().map(|e| &e.path))
-    };
-    // (a) `<document>.recovery`, removed when the listed document is saved.
-    if let Some(doc) = name.strip_suffix(".recovery") {
-        let doc = p.with_file_name(doc);
-        if all().any(|l| *l == doc) {
-            return Some(doc);
-        }
-    }
-    // (b) the old case spelling of a listed JSON, removed when it is written under its new one.
-    let lower = p.to_string_lossy().to_lowercase();
-    if let Some(l) = all().find(|l| **l != *p && l.to_string_lossy().to_lowercase() == lower) {
-        return Some(l.clone());
-    }
-    // (c) a NIF edit record moved aside to `<stem>.<seconds>.toml` beside a listed record.
-    w.also_updated
-        .iter()
-        .filter(|e| e.hover == HOVER_NIF_RECORD && e.path.parent() == p.parent())
-        .find(|e| {
-            let stem = e.path.file_stem().unwrap_or_default().to_string_lossy();
-            name.strip_prefix(&format!("{stem}."))
-                .and_then(|r| r.strip_suffix(".toml"))
-                .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
-        })
-        .map(|e| e.path.clone())
+    Seen { listed, changed, w }
 }
 
 /// The first export of the acceptance test, checked under the listing rules (controller ruling).
 fn assert_every_changed_file_is_listed(mut m: AppModel, dir: &std::path::Path) {
     let out = m.output_root();
     let root = m.root.clone().unwrap();
-    let Seen {
-        listed, changed, ..
-    } = export_and_compare(&mut m, dir);
+    let Seen { listed, changed, w } = export_and_compare(&mut m, dir);
+    // A file under a listed Also folder is that folder's entry.
+    let folders = w.also_folders();
+    let changed: std::collections::BTreeSet<std::path::PathBuf> = changed
+        .into_iter()
+        .map(|p| {
+            folders
+                .iter()
+                .find(|f| p.starts_with(f))
+                .cloned()
+                .unwrap_or(p)
+        })
+        .collect();
     // A first export that really writes files: every listed file is new, so the two sets are equal.
     assert!(!changed.is_empty());
     assert_eq!(changed, listed, "changed vs listed");
@@ -2475,22 +2405,42 @@ fn vanilla_borrow(d: &std::path::Path) -> (AppModel, std::path::PathBuf, std::pa
     (m, source, want)
 }
 
-/// (1) Nothing changed since the last export: Review lists the DDS outputs (the brief's broad rule until Task 8) and
-/// the manifest, and nothing else: no JSON, no record file.
+/// (1) Nothing changed since the last export: everything Review lists is decided by this run (ruling 3c-50): the DDS
+/// outputs (until Task 8), the PGPatcher JSON built from the run's rows, the two record files its hash goes to and the
+/// manifest. Each is marked; the JSON comes out as it was.
 #[test]
-fn a_repeat_export_with_nothing_changed_lists_only_the_manifest_besides_the_outputs() {
-    use sdc_gui::model::review::HOVER_MANIFEST;
+fn a_repeat_export_with_nothing_changed_lists_only_marked_entries() {
+    use sdc_gui::model::review::{
+        HOVER_GENERATED, HOVER_MANIFEST, HOVER_MARKED, HOVER_PROJECT_TOML,
+    };
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_exported_once(d.path());
+    let json = support::pgp_json_path(&m);
     let s = export_and_compare(&mut m, d.path());
-    let also: Vec<_> = s.w.also_updated.iter().map(|e| e.hover).collect();
-    assert_eq!(also, [HOVER_MANIFEST], "{:?}", s.w.also_updated);
-    assert!(
-        s.w.outputs
+    let also: Vec<_> =
+        s.w.also_updated
             .iter()
-            .all(|p| p.extension().is_some_and(|e| e == "dds")),
+            .map(|e| (e.hover, e.marked))
+            .collect();
+    assert_eq!(
+        also,
+        [
+            (HOVER_PROJECT_TOML, true),
+            (HOVER_GENERATED, true),
+            (HOVER_MANIFEST, true)
+        ],
         "{:?}",
-        s.w.outputs
+        s.w.also_updated
+    );
+    assert!(s.w.outputs.iter().all(|o| o.marked), "{:?}", s.w.outputs);
+    assert!(s.listed.contains(&json) && !s.changed.contains(&json));
+    // A marked entry's hover says so after what the file is.
+    for (e, l) in s.w.also_updated.iter().zip(&s.w.labels) {
+        assert_eq!(l.hover, format!("{} {HOVER_MARKED}", e.hover));
+    }
+    assert_eq!(
+        HOVER_MARKED,
+        "It changes only if this export's new files change it."
     );
 }
 
@@ -2580,11 +2530,12 @@ fn an_unrecorded_json_with_the_same_bytes_lists_only_the_record_files() {
     }
 }
 
-/// (5) A file Tessalith did not write sits where a borrowed copy goes: the writer keeps it, so Review lists neither it
-/// nor a record change for it.
+/// (5) A file Tessalith did not write sits where a borrowed copy goes: the writer replaces it only with the same bytes,
+/// so the copy is not listed. Whether those are the owner's new bytes is this run's (ruling 3c-50), so the two record
+/// files its hash would go to are listed, marked; here they stay as they are.
 #[test]
-fn a_foreign_copy_destination_is_not_listed_and_not_changed() {
-    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED};
+fn a_foreign_copy_destination_is_not_listed_and_its_records_are_marked() {
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
     let d = tempfile::tempdir().unwrap();
     let (mut m, _, want) = vanilla_borrow(d.path());
     export_and_compare(&mut m, d.path());
@@ -2595,11 +2546,14 @@ fn a_foreign_copy_destination_is_not_listed_and_not_changed() {
         "{:?}",
         s.w.also_updated
     );
-    assert!(
-        listed_with(&s, HOVER_GENERATED).is_empty(),
-        "{:?}",
-        s.w.also_updated
-    );
+    for hover in [HOVER_PROJECT_TOML, HOVER_GENERATED] {
+        let e: Vec<_> =
+            s.w.also_updated
+                .iter()
+                .filter(|e| e.hover == hover)
+                .collect();
+        assert!(e.len() == 1 && e[0].marked, "{:?}", s.w.also_updated);
+    }
     assert!(!s.changed.contains(&want));
     assert_eq!(std::fs::read(&want).unwrap(), b"hand made");
 }
@@ -2647,6 +2601,14 @@ fn a_recovery_file_removed_by_a_listed_save_counts_under_the_document() {
     std::fs::write(&recovery, "# edits from a crash\n").unwrap();
     let s = export_and_compare(&mut m, d.path());
     assert_eq!(listed_with(&s, HOVER_SDC_TOML), [toml]);
+    // Decided before the run: not marked, and its hover is the file's alone.
+    let i =
+        s.w.also_updated
+            .iter()
+            .position(|e| e.hover == HOVER_SDC_TOML)
+            .unwrap();
+    assert!(!s.w.also_updated[i].marked);
+    assert_eq!(s.w.labels[i].hover, HOVER_SDC_TOML);
     assert!(!recovery.exists(), "the save removed it");
     assert!(!s.listed.contains(&recovery), "not an entry of its own");
 }
@@ -2654,36 +2616,7 @@ fn a_recovery_file_removed_by_a_listed_save_counts_under_the_document() {
 /// The complex-material fixture of `cm_json.rs`: `iron` (diffuse + `_m`) under `<dir>/src/m`, its JSON export on,
 /// exported once. Returns the model and the JSON's path.
 fn cm_exported_once(dir: &std::path::Path) -> (AppModel, std::path::PathBuf) {
-    use image::{ImageBuffer, Rgb, Rgba};
-    let r = dir.join("src/m");
-    std::fs::create_dir_all(&r).unwrap();
-    let rgb = |x: u32, y: u32| [(x * 4) as u8, (y * 4) as u8, 90u8];
-    ImageBuffer::from_fn(64, 64, |x, y| Rgb(rgb(x, y)))
-        .save(r.join("iron.png"))
-        .unwrap();
-    ImageBuffer::from_fn(64, 64, |x, y| {
-        let [a, b, c] = rgb(x, y);
-        Rgba([a, b, c, (40 + x * 2) as u8])
-    })
-    .save(r.join("iron_m.png"))
-    .unwrap();
-    let settings = sdc_gui::settings::GuiSettings {
-        export_folder: Some(dir.join("export")),
-        ..Default::default()
-    };
-    let mut m = AppModel::new(settings, None, support::session());
-    m.accept = engine::policy::AcceptSuggestions::High;
-    m.open_folder(dir.join("src"));
-    assert!(m.wait_idle(Duration::from_secs(60)));
-    support::choose_export(&mut m, dir.join("export"));
-    let iron = sdc_gui::model::sets::set_views(&m)
-        .into_iter()
-        .find(|v| v.key.ends_with("m/iron"))
-        .expect("the iron set")
-        .id;
-    m.set_cm_export(&iron, true);
-    m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(80)));
-    assert!(m.wait_idle(Duration::from_secs(60)));
+    let mut m = cm_project(dir);
     export_and_compare(&mut m, dir);
     let json = m.export_root().join("m").join("iron_m.json");
     assert!(json.is_file(), "{:?}", m.export.notes);
@@ -2709,34 +2642,119 @@ fn a_case_only_rename_lists_the_json_and_counts_the_old_spelling_under_it() {
     assert_eq!(names, ["iron_m.json"], "written under its new spelling");
 }
 
-/// (c) A NIF edit record moved aside to `<stem>.<seconds>.toml` (Note GD25) counts under the listed record beside it,
-/// and under nothing else.
-// shortcut: the NIF export runs in `MeshesModel` (app.rs hands it the rows), which this binary does not build; the move
-// itself is pinned by `nif_edit.rs`'s own tests. This pins the listing: the row's record is listed and the rule credits
-// a moved-aside file to it. Upgrade to a full run when a test harness drives both models.
+/// A snapshot as `support::tree_hashes` returns it, from (path, bytes' stand-in) pairs.
+fn snapshot(
+    files: &[(&std::path::Path, &str)],
+) -> std::collections::BTreeMap<std::path::PathBuf, String> {
+    files
+        .iter()
+        .map(|(p, h)| (p.to_path_buf(), h.to_string()))
+        .collect()
+}
+
+/// A list of `also_updated` entries alone: (path, hover, marked).
+fn list_of(
+    entries: &[(&std::path::Path, &'static str, bool)],
+) -> sdc_gui::model::review::ReviewWrites {
+    use sdc_gui::model::review::{ReviewWrite, ReviewWrites};
+    ReviewWrites {
+        also_updated: entries
+            .iter()
+            .map(|(p, hover, marked)| ReviewWrite {
+                path: p.to_path_buf(),
+                hover,
+                marked: *marked,
+            })
+            .collect(),
+        ..Default::default()
+    }
+}
+
+/// (c) A NIF edit record moved aside to `<stem>.<seconds>.toml` (Note GD25) counts under the listed record beside it
+/// when it is created holding the record's bytes from before, and under nothing else (ruling 3c-52: the direction is
+/// checked). The move itself runs in `nif_edit.rs`'s tests; this pins the rule on snapshots.
 #[test]
 fn a_nif_record_moved_aside_counts_under_the_listed_record() {
-    use sdc_gui::model::review::{HOVER_NIF, HOVER_NIF_RECORD};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = pbr_exported_once(d.path());
-    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
-    m.header_export_clicked();
-    let w = (*m.review_writes()).clone();
-    let record = w
-        .also_updated
-        .iter()
-        .find(|e| e.hover == HOVER_NIF_RECORD)
-        .expect("the row's record is listed")
-        .path
-        .clone();
-    assert!(w.also_updated.iter().any(|e| e.hover == HOVER_NIF));
-    let stem = record.file_stem().unwrap().to_string_lossy().into_owned();
-    let moved = record.with_file_name(format!("{stem}.1763500000.toml"));
-    assert_eq!(credited(&moved, &w), Some(record.clone()));
-    let other = record.with_file_name(format!("{stem}.backup.toml"));
-    assert_eq!(credited(&other, &w), None, "only `<stem>.<seconds>.toml`");
-    let elsewhere = d.path().join(format!("{stem}.1763500000.toml"));
-    assert_eq!(credited(&elsewhere, &w), None, "only beside the record");
+    use sdc_gui::model::review::HOVER_NIF_RECORD;
+    use std::path::Path;
+    let rec = Path::new(r"C:\m\out\.sdc\nif-edits\meshes\x.nif.sdc-nifedit.toml");
+    let w = list_of(&[(rec, HOVER_NIF_RECORD, false)]);
+    let moved = rec.with_file_name("x.nif.sdc-nifedit.1763500000.toml");
+    let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
+        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+    };
+    assert_eq!(
+        check(&[(rec, "old")], &[(rec, "new"), (&moved, "old")]),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        check(&[(rec, "old")], &[(rec, "new"), (&moved, "other")]).len(),
+        1,
+        "other bytes are not the record moved aside"
+    );
+    assert_eq!(
+        check(&[(rec, "old"), (&moved, "old")], &[(rec, "new")]).len(),
+        1,
+        "a removal is not a move aside"
+    );
+    let other = rec.with_file_name("x.nif.sdc-nifedit.backup.toml");
+    assert_eq!(
+        check(&[(rec, "old")], &[(rec, "new"), (&other, "old")]).len(),
+        1,
+        "only `<stem>.<seconds>.toml`"
+    );
+    let elsewhere = Path::new(r"C:\m\x.nif.sdc-nifedit.1763500000.toml");
+    assert_eq!(
+        check(&[(rec, "old")], &[(rec, "new"), (elsewhere, "old")]).len(),
+        1,
+        "only beside the record"
+    );
+}
+
+/// Ruling 3c-52: a `.recovery` beside a listed document counts under it only when the save removed it; one created or
+/// changed by the export is a change of its own.
+#[test]
+fn the_listing_rules_credit_a_recovery_file_only_when_it_is_removed() {
+    use sdc_gui::model::review::HOVER_SDC_TOML;
+    use std::path::Path;
+    let doc = Path::new(r"C:\p\sdc.toml");
+    let rec = Path::new(r"C:\p\sdc.toml.recovery");
+    let w = list_of(&[(doc, HOVER_SDC_TOML, false)]);
+    let check = |b: &[(&Path, &str)], a: &[(&Path, &str)]| {
+        support::listing_violations(&w, &snapshot(b), &snapshot(a))
+    };
+    assert_eq!(
+        check(&[(doc, "old"), (rec, "crash")], &[(doc, "new")]),
+        Vec::<String>::new()
+    );
+    let created = check(&[(doc, "old")], &[(doc, "new"), (rec, "crash")]);
+    assert_eq!(created.len(), 1, "{created:?}");
+    let changed = check(&[(doc, "old"), (rec, "a")], &[(doc, "new"), (rec, "b")]);
+    assert_eq!(changed.len(), 1, "{changed:?}");
+}
+
+/// Ruling 3c-52: no blanket exemption. Of two listed copies, one changes; the other, unchanged, passes only when it is
+/// itself marked run-dependent.
+#[test]
+fn the_listing_rules_need_each_unchanged_entry_marked() {
+    use sdc_gui::model::review::HOVER_COPY;
+    use std::path::Path;
+    let (a, b) = (Path::new(r"C:\e\a_n.dds"), Path::new(r"C:\e\b_n.dds"));
+    let before = snapshot(&[(a, "1"), (b, "1")]);
+    let after = snapshot(&[(a, "2"), (b, "1")]);
+    let bad = support::listing_violations(
+        &list_of(&[(a, HOVER_COPY, true), (b, HOVER_COPY, false)]),
+        &before,
+        &after,
+    );
+    assert_eq!(bad.len(), 1, "{bad:?}");
+    assert!(bad[0].contains("b_n.dds"), "{bad:?}");
+    let ok = support::listing_violations(
+        &list_of(&[(a, HOVER_COPY, false), (b, HOVER_COPY, true)]),
+        &before,
+        &after,
+    );
+    assert_eq!(ok, Vec::<String>::new());
 }
 
 #[test]
@@ -2789,6 +2807,174 @@ fn review_writes_is_cached() {
     assert!(Arc::ptr_eq(&c, &d2));
     m.expire_review_json();
     assert!(!Arc::ptr_eq(&c, &m.review_writes()));
+}
+
+// ---- Task 4 fix round 2 (rulings 3c-50 to 3c-52): one row per finding of the re-review ----
+
+fn idle(m: &mut AppModel) {
+    assert!(m.wait_idle(Duration::from_secs(120)));
+}
+
+/// Finding 1: the borrower's copy already holds the owner's next DDS while its record names the old one. The writer
+/// adopts it (same bytes) and records the new hash: both record files change and are listed.
+#[test]
+fn a_copy_already_holding_the_owners_next_dds_lists_both_record_files() {
+    use sdc_gui::model::review::{HOVER_GENERATED, HOVER_PROJECT_TOML};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, source, want) = vanilla_borrow(d.path());
+    let old = std::fs::read(&source).unwrap();
+    let next = |p: &std::path::Path| {
+        image::ImageBuffer::from_fn(64, 64, |x, _| image::Rgb([120u8, x as u8, 255]))
+            .save(p)
+            .unwrap()
+    };
+    // The owner's next DDS, as an export writes it.
+    next(&source);
+    m.replan();
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    let n = std::fs::read(&want).unwrap();
+    // Back to the old one, exported: the copy and its record are the old DDS again.
+    std::fs::write(&source, &old).unwrap();
+    m.replan();
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    assert_ne!(std::fs::read(&want).unwrap(), n, "guard: the old DDS");
+    // The next DDS put at the copy by hand, then the owner changed to it.
+    std::fs::write(&want, &n).unwrap();
+    next(&source);
+    m.replan();
+    idle(&mut m);
+    let s = export_and_compare(&mut m, d.path());
+    assert!(!s.changed.contains(&want), "adopted, not rewritten");
+    for f in [
+        listed_with(&s, HOVER_PROJECT_TOML),
+        listed_with(&s, HOVER_GENERATED),
+    ] {
+        assert_eq!(f.len(), 1, "{:?}", s.w.also_updated);
+        assert!(s.changed.contains(&f[0]), "{:?} changes", f[0]);
+    }
+}
+
+/// Finding 2: an Advanced skin JSON on disk with the bytes the export writes, its hash records removed. The finisher
+/// adopts it and records its hash: both record files change and are listed.
+#[test]
+fn an_unrecorded_skin_json_with_its_bytes_lists_both_record_files() {
+    use sdc_gui::model::review::{HOVER_GENERATED, HOVER_PROJECT_TOML};
+    let d = tempfile::tempdir().unwrap();
+    let r = d.path().join("textures/x");
+    for s in ["", "_rfaos", "_wet", "_detail_n"] {
+        support::colour(&r.join(format!("h{s}.png")), 90);
+    }
+    let mut m = support::opened_as_the_app(d.path().to_path_buf(), d.path().join("export"));
+    assert_eq!(m.target, engine::config::Target::Cs);
+    export_and_compare(&mut m, d.path());
+    let json = m.export_root().join("textures/x/h.csskin.json");
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    let project = m.sets_doc.as_ref().unwrap().path().to_path_buf();
+    let text = std::fs::read_to_string(&project).unwrap();
+    let kept: String = text
+        .lines()
+        .filter(|l| !l.contains("cs_skin_sha256"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(kept, text, "guard: the record was there");
+    std::fs::write(&project, kept).unwrap();
+    std::fs::remove_file(m.root.clone().unwrap().join("_sdc").join("generated.json")).unwrap();
+    m.reload_documents();
+    idle(&mut m);
+    let s = export_and_compare(&mut m, d.path());
+    assert!(!s.changed.contains(&json), "adopted, not rewritten");
+    for f in [
+        listed_with(&s, HOVER_PROJECT_TOML),
+        listed_with(&s, HOVER_GENERATED),
+    ] {
+        assert_eq!(f.len(), 1, "{:?}", s.w.also_updated);
+        assert!(s.changed.contains(&f[0]), "{:?} changes", f[0]);
+    }
+}
+
+/// B1: two PBR sets exported, then one set's DDS dropped from the manifest. The engine keeps that DDS as unknown, its
+/// set leaves the PGPatcher JSON, and the JSON is written with one set: it is listed and changes.
+#[test]
+fn a_two_set_json_with_one_manifest_entry_gone_lists_the_json() {
+    use image::{ImageBuffer, Rgb};
+    let d = tempfile::tempdir().unwrap();
+    let t = d.path().join("textures/test");
+    std::fs::create_dir_all(&t).unwrap();
+    for (n, g) in [("wall", 120u8), ("door", 60)] {
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([g, g, g]))
+            .save(t.join(format!("{n}.png")))
+            .unwrap();
+        ImageBuffer::from_fn(64, 64, |_, _| Rgb([200u8, 100, 50]))
+            .save(t.join(format!("{n}_rmaos.png")))
+            .unwrap();
+    }
+    let mut m = support::opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    for n in ["wall", "door"] {
+        let id = sdc_gui::model::sets::views(&m)
+            .iter()
+            .find(|v| v.key.ends_with(n))
+            .expect("the set")
+            .id
+            .clone();
+        m.set_shader(&id, Some(engine::shader::Shader::Pbr));
+        idle(&mut m);
+    }
+    export_and_compare(&mut m, d.path());
+    let json = support::pgp_json_path(&m);
+    let two = std::fs::read_to_string(&json).unwrap();
+    let root = m.root.clone().unwrap();
+    let manifest = engine::discover::effective_output_root(&root, &m.output_root())
+        .join("_sdc")
+        .join("manifest.jsonl");
+    let text = std::fs::read_to_string(&manifest).unwrap();
+    let kept: String = text
+        .lines()
+        .filter(|l| !l.contains("wall.dds"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(kept, text, "guard: wall.dds was in the manifest");
+    std::fs::write(&manifest, kept).unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert!(s.listed.contains(&json), "{:?}", s.w.outputs);
+    assert!(s.changed.contains(&json), "the JSON keeps one set");
+    assert_ne!(std::fs::read_to_string(&json).unwrap(), two);
+}
+
+/// `cm_exported_once` before its export: the project, its JSON export on.
+fn cm_project(dir: &std::path::Path) -> AppModel {
+    use image::{ImageBuffer, Rgb, Rgba};
+    let r = dir.join("src/m");
+    std::fs::create_dir_all(&r).unwrap();
+    let rgb = |x: u32, y: u32| [(x * 4) as u8, (y * 4) as u8, 90u8];
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb(rgb(x, y)))
+        .save(r.join("iron.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        let [a, b, c] = rgb(x, y);
+        Rgba([a, b, c, (40 + x * 2) as u8])
+    })
+    .save(r.join("iron_m.png"))
+    .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, support::session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(dir.join("src"));
+    idle(&mut m);
+    support::choose_export(&mut m, dir.join("export"));
+    let iron = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.key.ends_with("m/iron"))
+        .expect("the iron set")
+        .id;
+    m.set_cm_export(&iron, true);
+    m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(80)));
+    idle(&mut m);
+    m
 }
 
 fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
