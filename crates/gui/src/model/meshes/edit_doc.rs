@@ -218,12 +218,15 @@ pub fn export_path(edit_mod: &Path, data_path: &str) -> Result<PathBuf, String> 
     Ok(edit_mod.join(win(data_path)?))
 }
 
-pub fn save(path: &Path, doc: &EditDoc) -> Result<(), String> {
+/// Writes `doc` to `path` (replacing what is there); Ok(the fingerprint of the bytes written, ruling E6-F).
+pub fn save(path: &Path, doc: &EditDoc) -> Result<String, String> {
     if let Some(p) = path.parent() {
         std::fs::create_dir_all(p).map_err(|e| format!("{}: {e}", p.display()))?;
     }
-    engine::dds::write_atomic(path, doc.to_text().as_bytes())
-        .map_err(|e| format!("{}: {e}", path.display()))
+    let text = doc.to_text();
+    engine::dds::write_atomic(path, text.as_bytes())
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(sha256_hex(text.as_bytes()))
 }
 
 /// `save` into a project: refuses when `root` is not an existing folder (a renamed, moved or deleted project is never
@@ -231,7 +234,7 @@ pub fn save(path: &Path, doc: &EditDoc) -> Result<(), String> {
 /// `create_dir`, so a root that went away in between fails the first one, and checks the root again just before the
 /// write (whose own parent creation then finds them made). Ruling E6-E2: the root going away between that last check
 /// and the rename is a window std cannot close; it is accepted.
-pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<(), String> {
+pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<String, String> {
     let gone = || format!("{} no longer exists", root.display());
     if !root.is_dir() {
         return Err(gone());
@@ -254,8 +257,10 @@ pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<(), String> {
     if !root.is_dir() {
         return Err(gone());
     }
-    engine::dds::write_atomic(path, doc.to_text().as_bytes())
-        .map_err(|e| format!("{}: {e}", path.display()))
+    let text = doc.to_text();
+    engine::dds::write_atomic(path, text.as_bytes())
+        .map_err(|e| format!("{}: {e}", path.display()))?;
+    Ok(sha256_hex(text.as_bytes()))
 }
 
 /// Writes `doc` to a file that does not exist yet, never replacing one (ruling E6-E): a temporary beside it is written
@@ -263,7 +268,7 @@ pub fn save_in(root: &Path, path: &Path, doc: &EditDoc) -> Result<(), String> {
 /// wrote there meanwhile stays as it is), and the temporary is removed. On a volume without hard links the document is
 /// written through the handle `create_new` returned (it still never replaces a file, but a crash can leave it short).
 /// Ruling E6-E2: two Tessalith instances working one kept autosave at the same moment are not coordinated beyond this.
-pub fn save_new(path: &Path, doc: &EditDoc) -> Result<(), String> {
+pub fn save_new(path: &Path, doc: &EditDoc) -> Result<String, String> {
     use std::io::Write as _;
     let dir = path
         .parent()
@@ -295,8 +300,9 @@ pub fn save_new(path: &Path, doc: &EditDoc) -> Result<(), String> {
     write_hook("kept written");
     let linked = std::fs::hard_link(&tmp, path);
     let _ = std::fs::remove_file(&tmp); // the name holds the bytes now, or the link failed
+    let fp = sha256_hex(bytes.as_bytes());
     match linked {
-        Ok(()) => Ok(()),
+        Ok(()) => Ok(fp),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Err(err(e)),
         Err(_) => {
             let mut f = std::fs::OpenOptions::new()
@@ -306,7 +312,7 @@ pub fn save_new(path: &Path, doc: &EditDoc) -> Result<(), String> {
                 .map_err(err)?;
             let written = f.write_all(bytes.as_bytes()).and_then(|()| f.sync_all());
             drop(f);
-            written.map_err(|e| {
+            written.map(|()| fp).map_err(|e| {
                 let _ = std::fs::remove_file(path); // the file this call made
                 err(e)
             })
@@ -356,15 +362,45 @@ pub fn load_count() -> usize {
 }
 
 pub fn load(path: &Path) -> Result<Option<EditDoc>, String> {
+    load_fp(path).map(|d| d.map(|(d, _)| d))
+}
+
+/// `load`, with the fingerprint (SHA-256 hex) of the bytes the document was parsed from (ruling E6-F: the session
+/// remembers it, and a file is its own only while it still has exactly those bytes).
+pub fn load_fp(path: &Path) -> Result<Option<(EditDoc, String)>, String> {
     #[cfg(feature = "test-hooks")]
     LOADS.with(|n| n.set(n.get() + 1));
-    match std::fs::read_to_string(path) {
+    match std::fs::read(path) {
         // Note GD30: the file is named, as in the read error (an autosave's name alone is a hash)
-        Ok(t) => EditDoc::from_text(&t)
-            .map(Some)
-            .map_err(|e| format!("{}: {e}", path.display())),
+        Ok(b) => {
+            let fp = sha256_hex(&b);
+            let t = String::from_utf8(b).map_err(|e| format!("{}: {e}", path.display()))?;
+            EditDoc::from_text(&t)
+                .map(|d| Some((d, fp)))
+                .map_err(|e| format!("{}: {e}", path.display()))
+        }
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// The fingerprint of the file at `path` now: Ok(None) when there is none, Err when it cannot be read.
+pub fn fingerprint(path: &Path) -> Result<Option<String>, String> {
+    match std::fs::read(path) {
+        Ok(b) => Ok(Some(sha256_hex(&b))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("{}: {e}", path.display())),
+    }
+}
+
+/// Ruling E6-F: the file at `path` is as this session knows it: absent, or holding exactly the bytes whose
+/// fingerprint is `known` (what the session last loaded or wrote there). Anything else (other bytes, an unreadable
+/// file, a file where it knew none) is not the session's to replace or delete.
+pub fn is_known(path: &Path, known: Option<&str>) -> bool {
+    match fingerprint(path) {
+        Ok(None) => true,
+        Ok(Some(h)) => known == Some(h.as_str()),
+        Err(_) => false,
     }
 }
 

@@ -69,27 +69,34 @@ pub struct NifEdit {
     project: Option<PathBuf>,
     /// The record an export leaves in the export folder (`edit_doc::doc_path`), when a folder is chosen.
     pub record_path: Option<PathBuf>,
-    /// The ops of the record at `record_path` when it is not this draft's (another id, or none: an earlier Tessalith's
-    /// document) and holds any; the export does not replace it while they differ from the session's (ruling E6-A).
+    /// The ops of the record at `record_path` when the session does not know it as its own (`record_fp` None) and it
+    /// holds any; the export does not replace it unless they begin the session's ops (rulings E6-A, E6-F).
     foreign_record: Option<Vec<DocOp>>,
-    /// The id of the record at `record_path` this session knows to be its own (it matched the draft's id when taken,
-    /// or this session wrote it); a carry-over can change `doc.id` since (ruling E6-D), the record stays its own.
-    record_id: Option<String>,
+    /// Ruling E6-F: the fingerprint of the record this session knows as its own: read while it held nothing the
+    /// session lacked (its ops empty or the first of the session's), or written by this session's export. An equal
+    /// draft id is not ownership.
+    record_fp: Option<String>,
+    /// The record's (length, modified time) when last read, so a moved or changed record is read again while it blocks.
+    record_meta: Option<(u64, Option<std::time::SystemTime>)>,
     /// Both empty without an export folder: export is blocked with `NO_EXPORT_FOLDER`.
     pub export_path: PathBuf,
     /// The export folder (empty without one).
     pub edit_mod: PathBuf,
     /// Note GD5 (c): the app-folder document of this NIF used while no project is open; removed by the first save
-    /// into a project, but only when this session's document holds it (`owns_autosave`, Note GD11).
+    /// into a project, but only while it holds the bytes this session loaded or wrote there (`plain_fp`, Note GD11).
     pub autosave: Option<PathBuf>,
-    /// Note GD11: the autosave's content is part of this live document (saved there, or recovered from it).
-    owns_autosave: bool,
-    /// Note GD25: the file at `draft_path` (in a project) holds edits this session never loaded: a newer autosave
-    /// was recovered over it, or a carry-over replaced it. The next save moves it aside first (`free_unseen`).
-    doc_unseen: bool,
-    /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded; only that one is replaced by
-    /// it, and the first save into the project draft deletes it.
+    /// Ruling E6-F: the fingerprint of the draft at `draft_path` as this session last loaded or wrote it; None when it
+    /// knows none of its own there (absent at open, or another document it never showed: a recovered autosave won
+    /// over it, or a carry-over came in). The draft is replaced only while it holds these bytes (or is absent);
+    /// otherwise it is moved aside first (`free_unseen`, Notes GD19, GD25).
+    draft_fp: Option<String>,
+    /// Ruling E6-F: with a project, the plain autosave's bytes this session recovered or carried in (it removes that
+    /// file after its first project save only while it still holds them).
+    plain_fp: Option<String>,
+    /// The kept autosave (`edit_doc::kept_autosave_path`) this session wrote or loaded, with the fingerprint of those
+    /// bytes (`kept_fp`); it is replaced or deleted (after the first project save) only while it holds them.
     kept_autosave: Option<PathBuf>,
+    kept_fp: Option<String>,
     /// Ruling E6-D: the kept autosave of the draft's id that lost to the newer draft at open; the first draft save
     /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
     /// are kept.
@@ -610,29 +617,37 @@ struct Picked {
     doc: Option<EditDoc>,
     /// GD11's lines for Messages.
     lines: Vec<String>,
-    /// The kept autosave of the draft's id won: the session holds it.
-    kept: Option<PathBuf>,
-    /// The kept autosave of the draft's id lost to the draft: the next save moves it aside (ruling E6-D).
+    /// The project's draft as read (id checked) and the fingerprint of its bytes; None when there is none.
+    draft: Option<(EditDoc, String)>,
+    /// The draft is the document (it won, or nothing else did).
+    draft_won: bool,
+    /// The kept autosave of the draft's id won, with the fingerprint of the bytes read: the session holds it.
+    kept: Option<(PathBuf, String)>,
+    /// The kept autosave of the draft's id lost: the next save moves it aside (ruling E6-D).
     kept_older: Option<PathBuf>,
-    /// The plain autosave won.
-    plain: bool,
+    /// The plain autosave won: the fingerprint of the bytes read.
+    plain: Option<String>,
 }
 
-/// Note GD11, ruling E6-D: the one recovery decision, for `open` in a project and for the live carry-over into one
-/// (`NifEdit::retarget`). The project's draft `saved` against the kept autosave of its id, then (when that one did
-/// not win) against the plain autosave `autosave`: each time the newer wins, the draft at equal times (GD24).
+/// Note GD11, ruling E6-D: the one recovery decision, for `open` in a project, for the live carry-over into one
+/// (`NifEdit::retarget`) and for what is durable (`NifEdit::durable`, ruling E6-G). It reads the project's draft at
+/// `draft_path` (Err when it does not load: it is never overwritten), then the kept autosave of its id, then (when
+/// that one did not win) the plain autosave `autosave`: each time the newer wins, the draft at equal times (GD24).
+/// Reads only.
 fn pick_draft(
-    saved: Option<EditDoc>,
     draft_path: &Path,
     autosave: Option<&Path>,
     data_path: &str,
-) -> Picked {
+) -> Result<Picked, String> {
+    let draft = edit_doc::load_fp(draft_path)?.map(|(d, fp)| (checked_id(d), fp));
     let mut p = Picked {
-        doc: saved,
+        doc: draft.as_ref().map(|(d, _)| d.clone()),
         lines: vec![],
+        draft_won: draft.is_some(),
+        draft,
         kept: None,
         kept_older: None,
-        plain: false,
+        plain: None,
     };
     let k = p
         .doc
@@ -646,7 +661,10 @@ fn pick_draft(
         p.doc = s;
         p.lines.extend(l);
         match r {
-            Recovery::Won => p.kept = Some(k),
+            Recovery::Won(fp) => {
+                p.kept = Some((k, fp));
+                p.draft_won = false;
+            }
             Recovery::Older => p.kept_older = Some(k),
             Recovery::Stays => {}
         }
@@ -655,16 +673,19 @@ fn pick_draft(
         let (s, l, r) = recover_from(p.doc.take(), draft_path, a, data_path);
         p.doc = s;
         p.lines.extend(l);
-        p.plain = r == Recovery::Won;
+        if let Recovery::Won(fp) = r {
+            p.plain = Some(fp);
+            p.draft_won = false;
+        }
     }
-    p
+    Ok(p)
 }
 
 /// What `recover_from` did with an autosave.
 #[derive(PartialEq)]
 enum Recovery {
-    /// It is the document.
-    Won,
+    /// It is the document: the fingerprint of the bytes read.
+    Won(String),
     /// The draft is newer (or as new): the autosave stays as it is.
     Older,
     /// It is gone or does not load: it stays for the user.
@@ -689,8 +710,9 @@ fn recover_from(
         );
         return (saved, vec![line], Recovery::Older);
     }
-    match edit_doc::load(a).map(checked) {
-        Ok(Some(mut mine)) => {
+    match edit_doc::load_fp(a) {
+        Ok(Some((mine, fp))) => {
+            let mut mine = checked_id(mine);
             let line = match &saved {
                 None => format!(
                     "Recovered the edits of {data_path} autosaved in {}.",
@@ -706,7 +728,7 @@ fn recover_from(
             if let Some(id) = saved.and_then(|s| s.id) {
                 mine.id = Some(id);
             }
-            (Some(mine), vec![line], Recovery::Won)
+            (Some(mine), vec![line], Recovery::Won(fp))
         }
         Ok(None) => (saved, vec![], Recovery::Stays),
         // never deleted or overwritten: it stays for the user, and the project's draft opens
@@ -719,16 +741,26 @@ fn recover_from(
 
 /// Ruling E6-E: a document read from disk keeps its id only when it has `new_id`'s form (`edit_doc::valid_id`);
 /// otherwise it has none (a new one is made in memory), so a crafted id never reaches `kept_autosave_path`.
-fn checked(d: Option<EditDoc>) -> Option<EditDoc> {
-    d.map(|mut d| {
-        d.id = d.id.filter(|i| edit_doc::valid_id(i));
-        d
-    })
+fn checked_id(mut d: EditDoc) -> EditDoc {
+    d.id = d.id.filter(|i| edit_doc::valid_id(i));
+    d
 }
 
 /// The same ops in the same order; their statuses are worked out again on every apply, so they are not compared.
 fn same_ops(a: &[DocOp], b: &[DocOp]) -> bool {
     a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x.op == y.op)
+}
+
+/// `theirs` are the first ops of `ours` (empty included): replacing `theirs` with `ours` erases no op.
+fn starts(theirs: &[DocOp], ours: &[DocOp]) -> bool {
+    theirs.len() <= ours.len() && same_ops(theirs, &ours[..theirs.len()])
+}
+
+/// A file's (length, modified time); None when it cannot be read.
+fn file_meta(p: &Path) -> Option<(u64, Option<std::time::SystemTime>)> {
+    std::fs::metadata(p)
+        .ok()
+        .map(|m| (m.len(), m.modified().ok()))
 }
 
 /// The folder the plain autosave lives in (`<dir>\nif-edits\<sha>.toml`), where kept autosaves go too.
@@ -765,28 +797,32 @@ impl NifEdit {
             Some(p) => edit_doc::draft_path(p, data_path)?,
             None => autosave.map(Path::to_path_buf).unwrap_or_default(),
         };
-        let saved = match draft_path.as_os_str().is_empty() {
-            true => None,
-            false => checked(edit_doc::load(&draft_path)?),
-        };
-        let had_doc = saved.is_some();
         // Note GD11: with a project, a newer kept autosave of the draft's id (a switch that could not save into the
         // project) or else a newer plain autosave is offered (`pick_draft`); with none the draft is the autosave.
-        let mut saved = saved;
+        // Ruling E6-F: the fingerprints of what the session took as its own.
         let mut open_lines = vec![];
-        let mut recovered = false;
-        let mut kept_autosave = None;
-        let mut kept_older = None;
-        let mut owns_autosave = project.is_none() && autosave.is_some();
-        if project.is_some() {
-            let p = pick_draft(saved, &draft_path, autosave, data_path);
-            saved = p.doc;
-            open_lines = p.lines;
-            recovered = p.kept.is_some() || p.plain;
-            kept_autosave = p.kept;
-            kept_older = p.kept_older;
-            owns_autosave = p.plain;
-        }
+        let (mut kept_autosave, mut kept_fp, mut kept_older, mut plain_fp) =
+            (None, None, None, None);
+        let (saved, draft_fp) = match (project, draft_path.as_os_str().is_empty()) {
+            (_, true) => (None, None),
+            (None, false) => match edit_doc::load_fp(&draft_path)? {
+                Some((d, fp)) => (Some(checked_id(d)), Some(fp)),
+                None => (None, None),
+            },
+            (Some(_), false) => {
+                let p = pick_draft(&draft_path, autosave, data_path)?;
+                open_lines = p.lines;
+                if let Some((k, fp)) = p.kept {
+                    (kept_autosave, kept_fp) = (Some(k), Some(fp));
+                }
+                kept_older = p.kept_older;
+                plain_fp = p.plain;
+                // a draft the session does not show is not its own: the next save moves it aside (GD25)
+                let draft_fp = p.draft.filter(|_| p.draft_won).map(|(_, fp)| fp);
+                (p.doc, draft_fp)
+            }
+        };
+        let recovered = kept_autosave.is_some() || plain_fp.is_some();
         let mut doc = saved.unwrap_or_else(|| EditDoc::new(id.clone()));
         // the id every draft save writes (`write_draft` writes `doc`); a draft without one gets it with its next edit
         if doc.id.is_none() {
@@ -794,7 +830,7 @@ impl NifEdit {
         }
         // the record wins: what was exported to the chosen folder, and from which source (`take_record`, below)
         let record = match &record_path {
-            Some(p) => edit_doc::load(p)?,
+            Some(p) => edit_doc::load_fp(p)?,
             None => None,
         };
         if doc.dropped_clip_ops > 0 {
@@ -814,14 +850,15 @@ impl NifEdit {
             project: project.map(Path::to_path_buf),
             record_path,
             foreign_record: None,
-            record_id: None,
+            record_fp: None,
+            record_meta: None,
             export_path,
             edit_mod,
             autosave: autosave.map(Path::to_path_buf),
-            owns_autosave,
-            // Note GD25: a recovered autosave replaced the project's draft, which this session never shows
-            doc_unseen: recovered && had_doc,
+            draft_fp,
+            plain_fp,
             kept_autosave,
+            kept_fp,
             kept_older,
             switch_failed: false,
             switch_wording: false,
@@ -902,42 +939,71 @@ impl NifEdit {
         Ok(e)
     }
 
-    /// Takes the export folder's record (`edit_doc::load` of `record_path`; None: never exported there): its export
+    /// Takes the export folder's record (`edit_doc::load_fp` of `record_path`; None: never exported there): its export
     /// entry becomes the session's, kept in memory only (ruling E6-A). A record exported from another source than the
-    /// current one makes the edit pending (Note GQ1's sentinel), and a record holding edits this draft does not have
-    /// (another draft's, or an earlier Tessalith's document) is remembered so the export never replaces it.
-    fn take_record(&mut self, record: Option<EditDoc>) {
-        let Some(r) = record else {
+    /// current one makes the edit pending (Note GQ1's sentinel). Ruling E6-F: a record holding nothing the session
+    /// lacks (its ops empty or the first of the session's) is known as the session's own by its fingerprint; any
+    /// other is remembered (`foreign_record`) so the export never replaces it. An equal draft id is not ownership.
+    fn take_record(&mut self, record: Option<(EditDoc, String)>) {
+        self.record_meta = self.record_path.as_deref().and_then(file_meta);
+        let Some((r, fp)) = record else {
             self.doc.export = ExportRec::default();
             self.foreign_record = None;
-            self.record_id = None;
+            self.record_fp = None;
             return;
         };
         let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
-        let ours = r.id.is_some() && r.id == self.doc.id;
-        self.record_id = if ours { r.id.clone() } else { None };
-        self.foreign_record = (!ours && !r.ops.is_empty()).then(|| r.ops.clone());
+        let known = starts(&r.ops, &self.doc.ops);
+        self.record_fp = known.then_some(fp);
+        self.foreign_record = (!known).then(|| r.ops.clone());
         self.doc.export = r.export;
         if stale {
             self.doc.export.ops_hash = Some(String::new());
         }
     }
 
-    /// The record `r` is this session's: it carries the draft's id, or the id of the record this session took as its
-    /// own or wrote (`record_id`, which a carry-over's new id does not change).
-    fn owns_record(&self, r: &EditDoc) -> bool {
-        r.id.is_some() && (r.id == self.doc.id || r.id == self.record_id)
+    /// Ruling E6-F: a block from the record is read again when the record's file changed (moved away, replaced): the
+    /// app's per-frame `set_nif_export_root` calls this, which stats the file only while a block holds.
+    pub(super) fn recheck_record(&mut self) {
+        let Some(p) = self
+            .record_path
+            .clone()
+            .filter(|_| self.foreign_record.is_some())
+        else {
+            return;
+        };
+        if file_meta(&p) == self.record_meta {
+            return;
+        }
+        match edit_doc::load_fp(&p) {
+            Ok(r) => self.take_record(r),
+            Err(e) => self.error = Some(e),
+        }
+        self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
+        self.refresh_blocked();
+    }
+
+    /// Ruling E6-F at the write: the record at `record_path` may be replaced when it is absent, holds exactly the
+    /// bytes this session knows as its own (`record_fp`), or holds nothing the session's ops lack. Else the reason.
+    fn record_write_block(&self) -> Option<String> {
+        let p = self.record_path.as_deref()?;
+        if self.record_fp.is_some() && edit_doc::is_known(p, self.record_fp.as_deref()) {
+            return None;
+        }
+        match edit_doc::load(p) {
+            Ok(None) => None,
+            Ok(Some(r)) => self.record_block(Some(&r.ops)),
+            Err(e) => Some(e),
+        }
     }
 
     /// Ruling E6-A: why the export may not replace the record in the export folder: it holds edits that are not this
     /// session's (`foreign_record`) and that the session's ops do not start with, so the export would lose them. A
-    /// record whose ops begin the session's (an export of this edit before a carry-over, then reopened under the new
-    /// id) loses nothing. Task 9 moves the other documents; until then the export waits.
+    /// record whose ops begin the session's (an export of this edit before a carry-over, then reopened) loses nothing.
+    /// Task 9 moves the other documents; until then the export waits.
     fn record_block(&self, foreign: Option<&[DocOp]>) -> Option<String> {
         let theirs = foreign?;
-        let kept =
-            theirs.len() <= self.doc.ops.len() && same_ops(theirs, &self.doc.ops[..theirs.len()]);
-        (!kept).then(|| {
+        (!starts(theirs, &self.doc.ops)).then(|| {
             format!(
                 "{} holds other edits of this NIF (from another project or an earlier Tessalith); an export would \
                  replace them. Move that file out of the folder to keep them, or choose another export folder.",
@@ -962,10 +1028,10 @@ impl NifEdit {
 
     /// Writes `record` (the document as exported, with its new export entry) to the export folder; only `write_out`
     /// calls it (ruling E6-A). Ok with no folder.
-    fn write_record(&self, record: &EditDoc) -> Result<(), String> {
+    fn write_record(&self, record: &EditDoc) -> Result<Option<String>, String> {
         match &self.record_path {
-            Some(p) => edit_doc::save(p, record),
-            None => Ok(()),
+            Some(p) => edit_doc::save(p, record).map(Some),
+            None => Ok(None),
         }
     }
 
@@ -1117,17 +1183,10 @@ impl NifEdit {
             Ok(Some(h)) if overwrite != Some(h) => return ExportOutcome::Foreign,
             Ok(_) => {}
         }
-        // Ruling E6-A: the record there now (read again: it may have come since the folder was chosen) is replaced
-        // only when it is this draft's or holds nothing this session lacks
-        if let Some(p) = &self.record_path {
-            let foreign = match edit_doc::load(p) {
-                Ok(Some(r)) if !self.owns_record(&r) => Some(r.ops),
-                Ok(_) => None,
-                Err(e) => return ExportOutcome::Blocked(e),
-            };
-            if let Some(why) = self.record_block(foreign.as_deref().filter(|o| !o.is_empty())) {
-                return ExportOutcome::Blocked(why);
-            }
+        // Rulings E6-A, E6-F: the record there now (read again: it may have come or changed since it was taken) is
+        // replaced only when it is absent, the session's known bytes, or holds nothing this session lacks
+        if let Some(why) = self.record_write_block() {
+            return ExportOutcome::Blocked(why);
         }
         // the draft first, when a drag was not flushed: the NIF is written from what the draft holds, and not at all
         // when the draft cannot be saved (ruling E6-E)
@@ -1156,16 +1215,20 @@ impl NifEdit {
             export: export.clone(),
             ..self.doc.clone()
         };
-        if let Err(e) = self.write_record(&record) {
-            return ExportOutcome::Blocked(format!(
-                "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
-                path.display()
-            ));
-        }
+        let fp = match self.write_record(&record) {
+            Ok(fp) => fp,
+            Err(e) => {
+                return ExportOutcome::Blocked(format!(
+                    "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
+                    path.display()
+                ))
+            }
+        };
         self.doc.export = export;
         self.up_to_date = true;
         self.foreign_record = None;
-        self.record_id = self.doc.id.clone();
+        self.record_fp = fp;
+        self.record_meta = self.record_path.as_deref().and_then(file_meta);
         self.cleanup_note = skipped.map(|why| format!("Exported without cleanup: {why}."));
         ExportOutcome::Written {
             rerun_pgpatcher: self.copies.iter().any(|c| c.derived),
@@ -1339,34 +1402,44 @@ impl NifEdit {
             self.unsaved = false;
             return;
         }
-        let path = self.draft_path.clone();
-        if !self.free_unseen(&path) {
-            return;
-        }
         // Note GD27: unsaved until the write succeeds, so a failed save keeps the session touched
-        if let Err(e) = self.write_draft(&path) {
+        if let Err(e) = self.save_draft() {
             self.error = Some(e);
-            return;
         }
-        self.draft_saved(&path);
+    }
+
+    /// Ruling E6-F: the draft's write, never over bytes this session does not know as its own there (`draft_fp`):
+    /// those are moved aside first (`free_unseen`), and nothing is written when that fails.
+    fn save_draft(&mut self) -> Result<(), String> {
+        let path = self.draft_path.clone();
+        let what = match self.project {
+            Some(_) => "The edit document",
+            None => "The autosave",
+        };
+        if !self.free_unseen(&path, self.draft_fp.clone(), what) {
+            return Err(self.error.take().unwrap_or_default());
+        }
+        let fp = self.write_draft(&path)?;
+        self.draft_fp = Some(fp);
+        self.draft_saved();
+        Ok(())
     }
 
     /// The draft's own write: into the project (never re-creating a project folder that is gone), else the autosave.
-    fn write_draft(&self, path: &Path) -> Result<(), String> {
+    /// Ok(the fingerprint written).
+    fn write_draft(&self, path: &Path) -> Result<String, String> {
         match &self.project {
             Some(p) => edit_doc::save_in(p, path, &self.doc),
             None => edit_doc::save(path, &self.doc),
         }
     }
 
-    /// After the draft at `path` was written: the session is saved, the draft carries its id, and what the project
-    /// draft makes redundant is removed: an autosave this document holds (Note GD5 (c), GD11), and the kept autosave
-    /// this session wrote or loaded. A file it never loaded is not ours to delete.
-    fn draft_saved(&mut self, path: &Path) {
+    /// After the draft was written: the session is saved, the draft carries its id, and what the project draft makes
+    /// redundant is removed: the plain autosave this session recovered or carried in (Note GD5 (c), GD11) and the
+    /// kept autosave it wrote or loaded, each only while it holds the bytes the session knows (ruling E6-F): a file
+    /// replaced since is not the session's to delete.
+    fn draft_saved(&mut self) {
         self.unsaved = false;
-        if self.autosave.as_deref() == Some(path) {
-            self.owns_autosave = true;
-        }
         if self.project.is_none() {
             return;
         }
@@ -1376,13 +1449,12 @@ impl NifEdit {
                 self.kept_older = Some(k);
             }
         }
-        let mut gone = vec![];
-        if let Some(a) = self.autosave.clone().filter(|_| self.owns_autosave) {
-            self.owns_autosave = false;
-            gone.push(a);
-        }
-        gone.extend(self.kept_autosave.take());
-        for f in gone {
+        let plain = self.autosave.clone().zip(self.plain_fp.take());
+        let kept = self.kept_autosave.take().zip(self.kept_fp.take());
+        for (f, fp) in plain.into_iter().chain(kept) {
+            if !edit_doc::is_known(&f, Some(&fp)) {
+                continue;
+            }
             if let Err(e) = std::fs::remove_file(&f) {
                 if e.kind() != std::io::ErrorKind::NotFound {
                     self.error = Some(format!("{}: {e}", f.display()));
@@ -1400,16 +1472,8 @@ impl NifEdit {
         {
             self.switch_save_attempts += 1;
         }
-        let path = self.draft_path.clone();
-        let draft = match self.free_unseen(&path) {
-            true => self.write_draft(&path),
-            false => Err(self.error.take().unwrap_or_default()),
-        };
-        let draft_err = match draft {
-            Ok(()) => {
-                self.draft_saved(&path);
-                return Ok(());
-            }
+        let draft_err = match self.save_draft() {
+            Ok(()) => return Ok(()),
             Err(e) => e,
         };
         if self.project.is_none() {
@@ -1424,8 +1488,9 @@ impl NifEdit {
         }
     }
 
-    /// Writes the kept autosave `<sha>.<id>.toml` beside the plain autosave, never over a file this session did not
-    /// write or load (that one is moved aside first, Note GD19), and says so in Messages.
+    /// Writes the kept autosave `<sha>.<id>.toml` beside the plain autosave, never over bytes this session did not
+    /// write or load there (`kept_fp`; another file is moved aside first, Note GD19, ruling E6-F), and says so in
+    /// Messages.
     fn save_kept(&mut self, draft_err: &str) -> Result<(), String> {
         let (Some(dir), Some(id)) = (
             self.autosave.as_deref().and_then(autosave_dir),
@@ -1434,16 +1499,20 @@ impl NifEdit {
             return Err("there is no autosave folder".into());
         };
         let k = edit_doc::kept_autosave_path(dir, &self.data_path, id);
-        let ours = self.kept_autosave.as_deref() == Some(k.as_path());
-        if ours {
-            edit_doc::save(&k, &self.doc)?;
-        } else {
-            if k.is_file() && !self.move_aside(&k, "The kept autosave") {
-                return Err(self.error.take().unwrap_or_default());
-            }
-            edit_doc::save_new(&k, &self.doc)?;
+        let known = self
+            .kept_fp
+            .clone()
+            .filter(|_| self.kept_autosave.as_deref() == Some(k.as_path()));
+        if !self.free_unseen(&k, known, "The kept autosave") {
+            return Err(self.error.take().unwrap_or_default());
         }
+        // what is left at the name is this session's own bytes (replaced), or nothing (published, never replacing)
+        let fp = match k.is_file() {
+            true => edit_doc::save(&k, &self.doc)?,
+            false => edit_doc::save_new(&k, &self.doc)?,
+        };
         self.kept_autosave = Some(k.clone());
+        self.kept_fp = Some(fp);
         let project = self.project.as_deref().unwrap_or(Path::new(""));
         self.open_lines.push(format!(
             "Could not save the edits of {} to {}: {draft_err}. They are kept in {}.",
@@ -1480,14 +1549,12 @@ impl NifEdit {
     /// Back in the session's own project after a failed switch (ruling r4-5): the draft is saved there and the
     /// session goes on as it was. False (the failed state stays) when that save fails too.
     pub(super) fn save_back_into_own_project(&mut self) -> bool {
-        let path = self.draft_path.clone();
-        if !self.free_unseen(&path) || self.write_draft(&path).is_err() {
+        if self.save_draft().is_err() {
             return false;
         }
         self.switch_failed = false;
         self.retarget_error = None;
         self.retarget_fail = None; // the export folder's record is read again
-        self.draft_saved(&path);
         self.refresh_blocked();
         true
     }
@@ -1520,28 +1587,13 @@ impl NifEdit {
         !self.unsaved && self.kept_autosave.is_none()
     }
 
-    /// Note GD19, GD25: before this session writes `path`, a file there with edits it never loaded (an autosave it
-    /// does not hold, or the folder document `doc_unseen` marks) is moved aside to `<stem>.<unix seconds>.toml`
-    /// (named in Messages), never overwritten. False (write nothing) when the move fails.
-    fn free_unseen(&mut self, path: &Path) -> bool {
-        let doc = self.autosave.as_deref() != Some(path);
-        if (doc && !(self.doc_unseen && path == self.draft_path)) || (!doc && self.owns_autosave) {
-            return true;
-        }
-        let what = if doc {
-            "The edit document"
-        } else {
-            "The autosave"
-        };
-        if !path.is_file() {
-            self.doc_unseen &= !doc;
-            return true;
-        }
-        let moved = self.move_aside(path, what);
-        if moved {
-            self.doc_unseen &= !doc;
-        }
-        moved
+    /// Notes GD19, GD25, ruling E6-F: before this session writes `path`, a file there that is not as it knows it
+    /// (`known`: the fingerprint of the bytes it last loaded or wrote there; other bytes, an unreadable file, or a
+    /// file where it knew none) is moved aside to `<stem>.<unix seconds>.toml` (named in Messages), never overwritten.
+    /// False (write nothing) when the move fails.
+    fn free_unseen(&mut self, path: &Path, known: Option<String>, what: &str) -> bool {
+        // a folder at the name is not moved: the write fails on it and destroys nothing
+        path.is_dir() || edit_doc::is_known(path, known.as_deref()) || self.move_aside(path, what)
     }
 
     /// Moves the file `path` to `<stem>.<unix seconds>.toml` beside it, naming it in the session's lines. False
@@ -1600,16 +1652,11 @@ impl NifEdit {
             return Err(format!("{} no longer exists", project.display()));
         }
         let draft = edit_doc::draft_path(project, &self.data_path)?;
-        let theirs = checked(edit_doc::load(&draft)?);
-        let picked = pick_draft(
-            theirs.clone(),
-            &draft,
-            self.autosave.as_deref(),
-            &self.data_path,
-        );
-        if !picked.plain {
+        let picked = pick_draft(&draft, self.autosave.as_deref(), &self.data_path)?;
+        let Some(plain_fp) = picked.plain else {
             return Ok(None);
-        }
+        };
+        let theirs = picked.draft.map(|(d, _)| d);
         self.kept_older = picked.kept_older;
         self.doc.id = Some(
             theirs
@@ -1626,9 +1673,11 @@ impl NifEdit {
                 draft.display()
             ));
         }
-        // Note GD25: the destination's edits were never loaded: the first save moves them aside
-        self.doc_unseen = theirs.is_some();
-        // the autosave is this session's document (`owns_autosave`): the first save into the project removes it
+        // Note GD25, ruling E6-F: the destination's edits were never loaded, so none of the draft's bytes are the
+        // session's (the first save moves them aside); the autosave's are, so the first save into the project
+        // removes it while it still holds them
+        self.draft_fp = None;
+        self.plain_fp = Some(plain_fp);
         (self.project, self.draft_path) = (Some(project.to_path_buf()), draft);
         self.drag = None;
         self.history.break_merge();
@@ -1657,14 +1706,14 @@ impl NifEdit {
                 let p = edit_doc::doc_path(r, &self.data_path).map_err(|e| cannot(r, e))?;
                 let export_path =
                     edit_doc::export_path(r, &self.data_path).map_err(|e| cannot(r, e))?;
-                let record = edit_doc::load(&p).map_err(|e| cannot(r, e))?;
+                let record = edit_doc::load_fp(&p).map_err(|e| cannot(r, e))?;
                 (r.to_path_buf(), Some(p), export_path, record)
             }
             None => (PathBuf::new(), None, PathBuf::new(), None),
         };
+        (self.edit_mod, self.record_path, self.export_path) = (edit_mod, record_path, export_path);
         // the folder's export state, a forced re-export when its record names another source (in memory, E6-A)
         self.take_record(record);
-        (self.edit_mod, self.record_path, self.export_path) = (edit_mod, record_path, export_path);
         self.up_to_date = !self.pending() && self.doc.export.sha256.is_some();
         self.export_note = None;
         self.refresh_blocked();
@@ -2910,6 +2959,9 @@ impl MeshesModel {
     /// skipped, else Err listing each skipped NIF and why. Each write is a line in Messages, with its placement.
     pub fn export_nif_edits(&mut self) -> Result<usize, String> {
         self.foreign_cache.take(); // check again at write time
+        if let Some(e) = self.edit.as_mut() {
+            e.recheck_record(); // ruling E6-F: a moved blocking record no longer blocks
+        }
         let rows = self.nif_review_rows();
         self.nif_answers.clear();
         let (mut written, mut skipped) = (0, vec![]);
@@ -3059,6 +3111,10 @@ impl MeshesModel {
             self.messages.append(&mut e.open_lines);
         }
         if self.nif_export_root == root {
+            // Ruling E6-F: a record that blocks is read again once its file changed (a stat per frame while it blocks)
+            if let Some(e) = self.edit.as_mut() {
+                e.recheck_record();
+            }
             // Note GD12: back to the folder the session never left: its record is current again
             if let Some(e) = self
                 .edit

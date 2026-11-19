@@ -5775,6 +5775,126 @@ fn an_export_whose_record_fails_is_not_reported_as_done() {
     assert!(load(&rec).unwrap().unwrap().export.sha256.is_some());
 }
 
+/// `doc` with its first op's value set to `v`.
+fn with_value(mut doc: EditDoc, v: f32) -> EditDoc {
+    if let Op::SetField { value, .. } = &mut doc.ops[0].op {
+        *value = Value::F32(v.to_bits());
+    }
+    doc
+}
+
+/// Review round 2 (Critical B2, ruling E6-F): an equal draft id is not ownership. A copy B of project A (same id)
+/// never replaces A's record when that record holds an op B's draft lacks.
+#[test]
+fn a_copied_project_never_replaces_the_record_of_its_original() {
+    let (d, mut m) = export_session();
+    let (a, b) = (project_folder(&d, "a"), project_folder(&d, "b2"));
+    std::fs::remove_dir(&b).unwrap();
+    m.set_project_root(Some(&a));
+    m.open_edit();
+    gloss(&mut m, 7.5);
+    copy_dir(&a, &b);
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let rec = nif_doc(&export_root(&d));
+    let before = std::fs::read(&rec).unwrap();
+    m.set_project_root(Some(&b));
+    assert_eq!(id_of(&b), id_of(&a), "premise: the copy keeps the id");
+    gloss(&mut m, 9.5);
+    assert!(review_row(&m).blocked.is_some(), "A's record holds 12.5");
+    export_fails(&mut m, "holds other edits");
+    assert_eq!(std::fs::read(&rec).unwrap(), before);
+}
+
+/// Review round 2 (Critical B3, ruling E6-F): a draft replaced on disk after it was opened (another edit) is not the
+/// session's: leaving moves it aside before the session's edits are written.
+#[test]
+fn leaving_never_overwrites_a_draft_replaced_on_disk() {
+    let (_d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let other = with_value(load(&draft(&p)).unwrap().unwrap(), 9.5);
+    save(&draft(&p), &other).unwrap();
+    let theirs = std::fs::read(draft(&p)).unwrap();
+    m.close_edit();
+    let aside = kept_beside(&draft(&p));
+    assert_eq!(aside.len(), 1, "the other edit is kept aside: {aside:?}");
+    assert_eq!(std::fs::read(&aside[0]).unwrap(), theirs);
+    assert_eq!(
+        doc_values(&draft(&p)),
+        [12.5],
+        "the session's edit is saved"
+    );
+}
+
+/// Review round 2 (B1 table, ruling E6-F): the plain autosave a project session recovered is deleted after the
+/// project save only while it holds the bytes the session loaded; other bytes at that name stay.
+#[test]
+fn a_reused_autosave_name_is_not_deleted() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    m.close_edit();
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    m.open_edit();
+    assert_eq!(
+        op_values(&m)[0].1,
+        12.5,
+        "premise: the autosave is recovered"
+    );
+    let other = with_value(load(&autosave(&d)).unwrap().unwrap(), 9.5);
+    save(&autosave(&d), &other).unwrap();
+    let theirs = std::fs::read(autosave(&d)).unwrap();
+    gloss(&mut m, 13.5);
+    assert_eq!(doc_values(&draft(&p)), [12.5, 13.5]);
+    assert_eq!(
+        std::fs::read(autosave(&d)).unwrap(),
+        theirs,
+        "another session's autosave stays"
+    );
+}
+
+/// Review round 2 (Important B2, ruling E6-F): moving the record that blocks the export away clears the block on the
+/// next frame, without reopening the edit.
+#[test]
+fn moving_a_blocking_record_away_clears_the_block() {
+    let (d, mut m) = export_session();
+    old_record_in_export_folder(&d, &mut m, false);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert!(review_row(&m).blocked.is_some(), "premise: blocked");
+    let rec = nif_doc(&export_root(&d));
+    std::fs::rename(&rec, d.path().join("moved.toml")).unwrap();
+    let root = m.nif_export_root.clone();
+    m.set_nif_export_root(root); // the app's next frame
+    assert_eq!(review_row(&m).blocked, None, "the block is read again");
+    // with the record gone, the NIF there is no longer recorded as Tessalith's (E6-E1): it asks, then exports
+    answer(&mut m, GuardChoice::Overwrite);
+    assert_eq!(export(&mut m), Ok(1));
+}
+
+/// Ruling E6-F: the record this session wrote stays its own after a carry-over changed its id, even when its ops no
+/// longer start the session's (an undone export), which the prefix rule alone would refuse.
+#[test]
+fn the_record_a_session_wrote_stays_its_own_after_an_undo() {
+    let (d, mut m) = export_session();
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    assert_eq!(export(&mut m), Ok(1));
+    let p = project_folder(&d, "p");
+    m.set_project_root(Some(&p));
+    assert!(m.undo_edit(), "premise: carried with its history");
+    assert!(m.edit.as_ref().unwrap().doc.ops.is_empty());
+    assert_eq!(review_row(&m).blocked, None);
+    assert_eq!(export(&mut m), Ok(1));
+    assert!(load(&nif_doc(&export_root(&d)))
+        .unwrap()
+        .unwrap()
+        .ops
+        .is_empty());
+}
+
 /// Sets the modified time of `p` to that of `like`.
 fn same_time(p: &Path, like: &Path) {
     let t = std::fs::metadata(like).unwrap().modified().unwrap();
