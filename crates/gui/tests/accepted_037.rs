@@ -44,6 +44,7 @@ fn reviewing(d: &Path) -> Harness<'static, AppModel> {
     m.export_clicked();
     assert!(m.wait_idle(WAIT));
     assert!(m.review.is_some(), "Review is open");
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

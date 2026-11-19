@@ -731,6 +731,7 @@ fn review_has_no_half_size_or_stale_group() {
         },
     ]);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -764,6 +765,7 @@ fn review_has_no_half_size_or_stale_group() {
         "NIF edits (1)",
         "NIF edits skipped (1)",
         "None",
+        "Options",
         "PBR",
         "PBR folder name",
         &tab,

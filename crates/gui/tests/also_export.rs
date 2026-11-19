@@ -708,6 +708,7 @@ fn reviewing(d: &Path, w: f32) -> H {
     m.export_clicked();
     idle(&mut m);
     assert!(m.review.is_some());
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, w);
     settle(&mut h);
     h
@@ -885,7 +886,7 @@ fn reviews_export_stays_disabled_with_the_also_reason() {
         })
         .expect("Review's Export");
     assert!(button.accesskit_node().is_disabled());
-    // The reason is drawn beside the button (as before) and in the Also section.
+    // The reason is drawn beside the button and in Blockers.
     assert!(h.query_all_by_label(reason).count() >= 2);
     set_ro(false);
 }
@@ -1154,6 +1155,7 @@ fn recipe_link_over_the_settings_tab_shows_the_also_export_tab() {
     m.select_set(&k);
     m.open_settings_tab();
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert_eq!(h.state().centre_front(), CentreTab::Settings, "fixture");
@@ -1229,6 +1231,7 @@ fn recipe_link_from_3d_switches_to_2d() {
     tick(&mut m, AlsoTarget::Vanilla);
     m.settings.set_view_3d = true;
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let steel = steel_key(&m);
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
@@ -1306,6 +1309,7 @@ fn the_recipe_link_is_not_drawn_without_a_pbr_set() {
         .all(|v| !sdc_gui::model::also::is_pbr_set(v)));
     assert_eq!(m.recipe_set(), None);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert!(has_label(&h, "Also export as"), "Review's Also column");
@@ -1385,6 +1389,7 @@ fn cs_review_without_a_tick_has_the_also_column() {
     let mut m = project(d.path());
     assert!(!m.also_on());
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = ui_harness(m, 1600.0);
     settle(&mut h);
     assert!(has_label(&h, "Also export as"));
@@ -1417,6 +1422,7 @@ fn a_stale_tick_can_be_cleared_in_the_vanilla_mode() {
         assert!(m.also_on());
         let label = if from_review {
             m.open_review();
+            m.review.as_mut().unwrap().options_open = true;
             "Vanilla"
         } else {
             "Also export as Vanilla"
@@ -1451,6 +1457,7 @@ fn the_also_controls_are_off_while_an_export_runs() {
         .clone();
     m.select_set(&steel_key);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     m.export.running = Some(Default::default());
     let mut h = ui_harness(m, 1600.0);
     h.run_steps(4);
@@ -1537,6 +1544,7 @@ fn a_long_skip_list_scrolls_and_its_last_row_works() {
     let mut m = support::opened_as_the_app(root, d.path().join("out"));
     tick(&mut m, AlsoTarget::Vanilla);
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let last = sdc_gui::model::sets::views(&m)
         .iter()
         .find(|v| v.id.ends_with("set09"))
@@ -1625,6 +1633,8 @@ fn a_name_draft_is_cancelled_by_esc_and_stays_with_its_project() {
     h.state_mut().export_clicked();
     settle(&mut h);
     assert!(h.state().review.is_some());
+    h.state_mut().review.as_mut().unwrap().options_open = true;
+    settle(&mut h);
     assert_ne!(
         field(&h).accesskit_node().value().as_deref(),
         Some("Plain"),

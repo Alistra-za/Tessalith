@@ -51,6 +51,9 @@ pub const NO_EXPORT_FOLDER: &str = "No export folder chosen";
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Review {
+    pub options_open: bool,
+    /// Open Options when an Also blocker appears, while allowing the user to close it afterward.
+    pub(crate) also_blocked: bool,
     /// C4, R6: the answer, given in Review, for the edited PGPatcher JSON.
     pub json_answer: Option<JsonAnswer>,
     /// Note CN (Review Focus 5, P9): with a tick on, why `sdc.toml` cannot be saved; taken when Review opens and
@@ -414,9 +417,10 @@ impl AppModel {
     /// Open Review (its answers are kept when it is already open) and show its tab.
     pub fn open_review(&mut self) {
         let unwritable = self.also_toml_unwritable();
-        self.review
-            .get_or_insert_with(Review::default)
-            .toml_unwritable = unwritable;
+        let review = self.review.get_or_insert_with(Review::default);
+        review.toml_unwritable = unwritable;
+        review.options_open = false;
+        review.also_blocked = false;
         self.show_tab(BottomTab::Review);
         // E7: the list Review opens with reads the disk as it is now, not a second-old answer.
         self.review_writes_cache.take();

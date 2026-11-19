@@ -445,6 +445,7 @@ fn no_sdc_out_path_is_shown_before_a_folder_is_chosen() {
     idle(&mut m);
     assert!(m.also_on() && m.export_folder_chosen().is_none());
     m.open_review();
+    m.review.as_mut().unwrap().options_open = true;
     let mut h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

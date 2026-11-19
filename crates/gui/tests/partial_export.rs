@@ -974,7 +974,8 @@ fn the_scope_keys_the_texture_counts_and_lists() {
 fn a_scoped_review_has_no_also_column() {
     use eframe::egui;
     use egui_kittest::kittest::Queryable;
-    let also_column = |m: AppModel| {
+    let also_column = |mut m: AppModel| {
+        m.review.as_mut().unwrap().options_open = true;
         let mut h = egui_kittest::Harness::builder()
             .with_context_setup(|ctx| {
                 sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");

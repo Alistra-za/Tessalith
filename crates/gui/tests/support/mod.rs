@@ -187,6 +187,12 @@ pub fn opened(dir: &Path) -> AppModel {
     m
 }
 
+pub fn cs_opened_chosen(dir: &Path) -> AppModel {
+    let m = opened(dir);
+    assert_eq!(m.target, engine::config::Target::Cs);
+    m
+}
+
 /// `opened` before the export folder is chosen: `gui.toml` names one, the project has none (Note FB1), and nothing
 /// is written to the project folder.
 pub fn opened_unchosen(dir: &Path) -> AppModel {

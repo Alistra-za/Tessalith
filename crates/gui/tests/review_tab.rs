@@ -13,6 +13,123 @@ use support::*;
 
 const ROCK: &str = "landscape/rock01.png";
 
+#[test]
+fn reviews_first_screen_is_blockers_list_and_button() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = harness(cs_opened_chosen(d.path()));
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    assert_eq!(h.query_all_by_label("Skip these sets").count(), 0);
+    assert_eq!(
+        h.query_all_by_label_contains("Choose where the Also folders go")
+            .count(),
+        0
+    );
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    assert_eq!(h.query_all_by_label_contains("▸").count(), 0);
+    let list = h.get_by_label("What will be written").rect();
+    for heading in ["Blockers (", "Undecided ("] {
+        assert!(h.get_by_label_contains(heading).rect().bottom() <= list.top());
+    }
+    let export = h
+        .get_by_role_and_label(Role::Button, &h.state().review_button_text())
+        .rect();
+    assert!(list.bottom() <= export.top());
+}
+
+#[test]
+fn opening_review_again_closes_options() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cs_opened_chosen(d.path());
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    for open in [true, false, true] {
+        h.get_by_role_and_label(Role::DisclosureTriangle, "Options")
+            .click();
+        h.run();
+        assert_eq!(h.state().review.as_ref().unwrap().options_open, open);
+        assert_eq!(h.query_by_label("Skip these sets").is_some(), open);
+    }
+    h.state_mut().open_review();
+    h.run();
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn a_closed_options_still_names_the_also_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    let mut h = harness(m);
+    h.state_mut().header_export_clicked();
+    settle(&mut h);
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options · Also export as Vanilla");
+    h.get_by_label_contains("plus the Vanilla folder");
+}
+
+#[test]
+fn a_closed_options_names_the_skipped_sets_and_both_cm_folders() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Cm, true);
+    m.set_skip_also("landscape/rock01", true);
+    m.set_skip_also("landscape/leaf", true);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.header_export_clicked();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(
+        Role::DisclosureTriangle,
+        "Options · Also export as Vanilla and CM · skipping 2 sets",
+    );
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn an_also_blocker_opens_options_and_names_the_reason_in_blockers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(engine::presets::AlsoTarget::Vanilla, true);
+    m.set_also_location(&m.root.clone().unwrap());
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.open_review();
+    let reason = m.also_gate().unwrap_err();
+    let mut h = harness(m);
+    h.run();
+    assert!(h.state().review.as_ref().unwrap().options_open);
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    h.get_by_role_and_label(Role::Button, "Choose where the Also folders go…");
+    let heading = h.get_by_label("Blockers (1)").rect();
+    let next = h.get_by_label_contains("Undecided (").rect();
+    assert!(h
+        .query_all_by_label(&reason)
+        .any(|n| n.rect().top() >= heading.bottom() && n.rect().right() <= next.left()));
+    assert!(disabled(&h, &h.state().review_button_text()));
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options")
+        .click();
+    h.run();
+    assert!(!h.state().review.as_ref().unwrap().options_open);
+    h.get_by_label("Blockers (1)");
+    assert!(h.query_by_label("Skip these sets").is_none());
+}
+
+#[test]
+fn the_footer_says_when_every_output_will_be_reencoded() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = cs_opened_chosen(d.path());
+    m.open_review();
+    let mut h = harness(m);
+    let text = "Re-encode every output is on: every file is written again.";
+    h.run();
+    assert!(h.query_by_label(text).is_none());
+    h.state_mut().reencode_all = true;
+    h.run();
+    assert!(support::panel(&h.ctx, "review-footer").contains_rect(h.get_by_label(text).rect()));
+}
+
 fn harness(model: AppModel) -> Harness<'static, AppModel> {
     harness_dt(model, 0.25)
 }

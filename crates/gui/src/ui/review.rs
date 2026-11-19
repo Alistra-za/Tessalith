@@ -420,10 +420,8 @@ fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>) {
 /// Note FB10: under this window width the Review sections stack in one scroll area.
 const STACK_BELOW: f32 = 1200.0;
 
-/// A column: its heading, then `body` in a scroll area of its own.
-/// `key` names the scroll area, so a heading that carries a count keeps the column's scroll position.
-fn column(ui: &mut egui::Ui, key: &str, heading: &str, body: impl FnOnce(&mut egui::Ui)) {
-    ui.strong(heading);
+/// Each column scrolls independently. Its key stays the same as the heading's count changes.
+fn column(ui: &mut egui::Ui, key: &str, body: impl FnOnce(&mut egui::Ui)) {
     // ui-rules 3.2: a bar drawn without hover, so a column that overflows says so.
     ui.spacing_mut().scroll = crate::look::thin_scroll();
     egui::ScrollArea::vertical()
@@ -485,11 +483,8 @@ fn name_field(
     }
 }
 
-/// Review's "Also export as" column (Note CN, owner answers 5 and 6): the ticks, the location, the folder names, Keep
-/// metal brightness and the CM lines, the sets to skip, and the gate's Also reason (`gate`). It names what
-/// is written and why it cannot be yet, never that it will succeed (Task 11 M5). The recipe is in a set's Also export
-/// tab (Note JI2).
-fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut Option<Act>) {
+/// The Also settings under Options (Note CN, owner answers 5 and 6). The recipe link opens a set's Also export tab (JI2).
+fn also_section(ui: &mut egui::Ui, m: &AppModel, act: &mut Option<Act>) {
     let cfg = m.also_config();
     let (v, c) = m.also_ticks();
     let busy = m.export.running.is_some().then_some(also::EXPORT_RUNNING);
@@ -617,9 +612,6 @@ fn also_section(ui: &mut egui::Ui, m: &AppModel, gate: Option<&str>, act: &mut O
     })
     .response
     .on_disabled_hover_text(off.as_deref().unwrap_or_default());
-    if let Some(why) = gate {
-        ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
-    }
     // Note JI2 (correction 6): the recipe is on a PBR set's Also export tab, so with no PBR set there is no link.
     if m.recipe_set().is_some()
         && ui
@@ -703,7 +695,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let json = m.review_json();
     let writes = m.review_writes();
     let nif_rows = m.nif_review_rows();
-    // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
+    // Note CN85: Also settings are available in the cs mode or while a tick is on.
     // Note HF10: none for a scope, which Also never runs on.
     let also_on = (m.also_on() || m.target == Target::Cs) && m.export_scope().is_none();
     let also_err = if m.also_runs() {
@@ -716,6 +708,8 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         .filter(|r| r.blocked.as_deref().is_some_and(|b| b != NO_EXPORT_FOLDER))
         .collect();
     let mut act = None;
+    let also_blocked = also_err.is_some();
+    let mut options_open = review.options_open || (also_blocked && !review.also_blocked);
     // Note FC14: the footer's lists share one scroll area of at most a third of the tab, so the columns keep room.
     let footer_cap = ui.available_height() / 3.0;
     // The footer first, pinned to the bottom, so the columns scroll above it and it is never clipped.
@@ -813,6 +807,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                         }
                     });
             });
+            if m.reencode_all {
+                ui.label("Re-encode every output is on: every file is written again.");
+            }
             ui.horizontal(|ui| {
                 // Ruling 3c-43: with no project (a meshes-only Review) there is no key to set, so no box.
                 if m.project.is_some() {
@@ -859,7 +856,11 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         });
     // Note FB4: the missing export folder counts, because the gate enforces it; Note FC5: so does an unanswered
     // overwrite question.
+    let also_row = also_err
+        .as_deref()
+        .filter(|why| Some(*why) != toml_row.as_deref());
     let blockers = blocks.len()
+        + usize::from(also_row.is_some())
         + usize::from(!folder_chosen)
         + usize::from(preset_row.is_some())
         + usize::from(toml_row.is_some())
@@ -873,9 +874,12 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .any(|r| r.blocked.is_none() && r.foreign.is_some());
     let n_cols = if also_on { 3 } else { 2 };
     let heading = |i: usize| match i {
-        0 => ("Blockers", format!("Blockers ({blockers})")),
-        1 => ("Undecided", format!("Undecided ({})", undecided.len())),
-        _ => ("Also export as", "Also export as".to_string()),
+        0 => ("Blockers", Some(format!("Blockers ({blockers})"))),
+        1 => (
+            "Undecided",
+            Some(format!("Undecided ({})", undecided.len())),
+        ),
+        _ => ("Options", None),
     };
     // One body per column, drawn side by side or stacked (Note FB10).
     let mut body = |ui: &mut egui::Ui, i: usize| match i {
@@ -902,6 +906,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             }
             if let Some(why) = &toml_row {
                 ui.colored_label(RED, why);
+            }
+            if let Some(why) = also_row {
+                ui.add(egui::Label::new(egui::RichText::new(why).color(RED)).wrap());
             }
             if let Some((text, hover)) = &preset_row {
                 ui.horizontal_wrapped(|ui| {
@@ -987,7 +994,31 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                 act = Some(Act::AcceptAll);
             }
         }
-        _ => also_section(ui, m, also_err.as_deref(), &mut act),
+        _ => {
+            let mut text = String::from("Options");
+            if !options_open {
+                let cfg = m.also_config();
+                if cfg.also.contains(&AlsoTarget::Cm) {
+                    text.push_str(" · Also export as Vanilla and CM");
+                } else if cfg.also.contains(&AlsoTarget::Vanilla) {
+                    text.push_str(" · Also export as Vanilla");
+                }
+                let n = cfg.skip.len();
+                if n > 0 {
+                    text.push_str(&format!(" · skipping {n} set{}", plural(n)));
+                }
+            }
+            let response = egui::CollapsingHeader::new(text)
+                .id_salt("review-options")
+                .open(Some(options_open))
+                .show_unindented(ui, |ui| {
+                    ui.strong("Also export as");
+                    also_section(ui, m, &mut act);
+                });
+            if response.header_response.clicked() {
+                options_open = !options_open;
+            }
+        }
     };
     // Note HF9: a scoped review says what it exports above the columns.
     if let Some(s) = m.export_scope() {
@@ -1001,7 +1032,9 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             .auto_shrink([false, true])
             .show(ui, |ui| {
                 for i in 0..n_cols {
-                    ui.strong(heading(i).1);
+                    if let Some(text) = heading(i).1 {
+                        ui.strong(text);
+                    }
                     body(ui, i);
                     ui.add_space(6.0);
                 }
@@ -1012,10 +1045,17 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             ui.columns(n_cols, |cols| {
                 for (i, c) in cols.iter_mut().enumerate() {
                     let (key, text) = heading(i);
-                    column(c, key, &text, |ui| body(ui, i));
+                    if let Some(text) = text {
+                        c.strong(text);
+                    }
+                    column(c, key, |ui| body(ui, i));
                 }
             })
         });
+    }
+    if let Some(review) = &mut model.review {
+        review.options_open = options_open;
+        review.also_blocked = also_blocked;
     }
     match act {
         Some(Act::AlsoTick(t, on)) => model.set_also_tick(t, on),
