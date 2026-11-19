@@ -1958,5 +1958,4 @@ Rules from CLAUDE.md, `docs/DOCUMENTATION.md`, the mistakes logs and the `egui-u
 
 ## Note JU — Tests for UI invariants and the codes page (main team, 2026-11-18)
 
-- **JU1 Every code has its row on the codes page.** `engine/tests/wiki_codes.rs` fails when a code in `Code::ALL` has no row on `docs/wiki/Diagnostic-Codes.md`, has two, or has a severity other than the engine's, and when a row names a code that does not exist. `SET-BAKE-RATIO` keeps its code under HD2 so an `allow` list naming it still loads; its row says it is no longer raised.
-- **JU2 This note's letter.** JR and JS are used by unmerged branches; the letter is checked again at the merge.
+- **JU1 Every code has its row on the codes page.** `engine/tests/wiki_codes.rs` reads the rows of the rendered tables of `docs/wiki/Diagnostic-Codes.md` whose first column is headed `Code` (outside fenced blocks, with or without outer pipes) and fails when a code in `Code::ALL` has no row, has two, or has a severity other than the engine's, when a row names a code that does not exist, when a data row of such a table does not start with one code in single backticks, and when the page has no such table. `SET-BAKE-RATIO` keeps its code under HD2 so an `allow` list naming it still loads; its row says it is no longer raised.
