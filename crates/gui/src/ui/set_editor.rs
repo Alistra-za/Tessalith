@@ -223,6 +223,7 @@ fn status_act(ui: &egui::Ui, model: &mut AppModel, v: &SetView, act: Act, three_
                 model.settings.set_view_3d = false;
                 model.save_settings();
             }
+            // Slot reasons come from warnings on a keyed plan set.
             model.go_to_set(&v.key, Some(SlotTarget::Slot(kind)));
             let id = slot_row_id(&v.id, kind).with("assign");
             ui.data_mut(|d| d.insert_temp(egui::Id::unique(ASSIGN_FOCUS), id));
@@ -372,6 +373,7 @@ pub fn draw(
             Act::AskOriginal(set, n) => model.ask_original_textures(&set, n),
             Act::Slot(a) => super::slot_commands::run(model, cmds, a),
             Act::OpenSet(id) => {
+                // The link source owns a planned member output; a key-less view has no members.
                 if let Some(key) = views(model)
                     .iter()
                     .find(|s| s.id == id)
@@ -619,6 +621,13 @@ pub(super) enum SetTab {
 const TAB_ID: &str = "set-editor-tab";
 /// Set with the tab by Review's link: the tab row scrolls to the top once, so the recipe is in view.
 const SCROLL_ID: &str = "set-editor-tab-scroll";
+
+pub(super) fn show_main_tab(ctx: &egui::Context) {
+    ctx.data_mut(|d| {
+        d.insert_temp(egui::Id::unique(TAB_ID), SetTab::Main);
+        d.remove::<bool>(egui::Id::unique(SCROLL_ID));
+    });
+}
 
 /// Open the set editor on its Also export tab, scrolled to it (Review's "Recipe settings…", Note JI2).
 pub fn show_also_tab(ctx: &egui::Context) {

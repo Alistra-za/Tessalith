@@ -11,7 +11,7 @@ use crate::look::Combo036 as _;
 use crate::model::pbr_export::{json_issues, json_name, written_json_entries, JsonIssues};
 use crate::model::sections::{delete_hits, not_written_reason, DeleteHit};
 use crate::model::sets::{slot_matches, SetView};
-use crate::model::AppModel;
+use crate::model::{AppModel, SetTarget};
 use crate::pgp::prefix::{
     active_matches, json_rename, match_toggle, stored_set_match, RENAMED_MATCH_NOTE,
 };
@@ -89,7 +89,7 @@ enum Act {
     Edits(Owner, Vec<(String, Option<Value>)>),
     AddSection,
     RemoveSection(usize),
-    Select(String),
+    Select(SetTarget),
     /// A key added from the + menu was removed before it had a value.
     Unpend(Owner, String),
     /// A key (or a match mode switched on a pill with no path) waits for its value.
@@ -260,8 +260,7 @@ pub fn view(ui: &mut egui::Ui, model: &mut AppModel) {
                 }
                 model.remove_section(i);
             }
-            // Note FB7: `select_set` brings the set's editor to the front of the centre.
-            Act::Select(key) => model.select_set(&key),
+            Act::Select(target) => model.go_to_target(target, None),
             Act::Fold(id) => {
                 if !nav.closed.remove(&id) {
                     nav.closed.insert(id);
@@ -687,7 +686,7 @@ fn set_entry(
                 .on_hover_text("Select this set in the main window")
                 .clicked()
             {
-                acts.push(Act::Select(v.key.clone()));
+                acts.push(Act::Select(SetTarget::view(v)));
             }
         });
         for h in &mine {

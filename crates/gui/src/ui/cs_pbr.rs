@@ -550,12 +550,13 @@ pub fn pgp_panel(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
     }
     let on = model.pgp_written(v);
     let title = if on { PGP_PANEL } else { PGP_PANEL_OFF };
-    super::group::group(
+    super::group::group_with(
         ui,
         ("pgp-panel", on, v.id.as_str()),
         title,
         None,
         on,
+        super::pgp_fields::focus_request(ui.ctx()).is_some_and(|(s, _)| s == v.id),
         |ui| {
             ui.weak(if on {
                 PGP_PANEL_NOTE

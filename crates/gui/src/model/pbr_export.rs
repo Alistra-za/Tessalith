@@ -8,7 +8,7 @@ use super::sets::{
     projected_slot, set_views, slot_string, JsonFile, SetView, SlotFill, SlotKind,
 };
 use super::txst_map::{record_entries, slot_path_key};
-use super::AppModel;
+use super::{AppModel, SetTarget};
 use crate::pgp::prefix::{
     check_file_name, check_json_path, default_prefix, matches_nothing, output_rel, pitfalls,
     rename_hits_elsewhere, subsurface_pitfalls,
@@ -565,7 +565,7 @@ fn set_blocks(m: &AppModel, v: &SetView) -> Vec<ExportIssue> {
         let field = e.split_once(':').map_or(e, |(f, _)| f);
         // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
         crate::pgp::prefix::is_path_key(field)
-            .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
+            .then(|| Fix::FixPath(SetTarget::view(v), field.to_string()))
     };
     if let Some(e) = &v.prefix_error {
         out.push(ExportIssue {

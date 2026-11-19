@@ -112,6 +112,61 @@ fn app_data() -> &'static std::path::Path {
     .path()
 }
 
+#[test]
+fn popped_json_show_opens_the_second_borrower_from_meshes() {
+    use egui_kittest::kittest::Queryable;
+    use sdc_gui::model::{pbr_export::written_json_entries, CentreTab, Selection};
+    use sdc_gui::ui::{header, json_editor::WINDOW_TITLE};
+
+    app_data();
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::key_less_json_sets(d.path());
+    let id = "landscape/other";
+    let entries = written_json_entries(&m);
+    let at = entries
+        .iter()
+        .position(|(v, _)| v.key.is_empty() && v.id == id)
+        .unwrap();
+    m.expand("landscape/rock01.png");
+    m.open_json_editor();
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.run_steps(4);
+    h.get_by_label(&format!("Pop out {WINDOW_TITLE}")).click();
+    h.run_steps(4);
+    assert!(h.state().model.json_editor_popped);
+    header::set_meshes_view(&h.ctx, true);
+    h.run_steps(4);
+    assert!(header::meshes_view_active(&h.ctx));
+    assert!(!h.state().model.reveal_centre);
+    assert_eq!(
+        h.state().model.expanded.as_deref(),
+        Some("landscape/rock01.png")
+    );
+    h.get_by_label(&format!("Dock {WINDOW_TITLE}"));
+    assert_eq!(h.query_all_by_label("Show").count(), entries.len());
+    h.query_all_by_label("Show").nth(at).unwrap().scroll_to_me();
+    h.run_steps(4);
+    h.query_all_by_label("Show").nth(at).unwrap().click();
+    h.run_steps(4);
+    assert_eq!(h.state().model.selection, Selection::SetId(id.into()));
+    assert!(h.state().model.expanded.is_none());
+    assert!(
+        !header::meshes_view_active(&h.ctx),
+        "Show must reveal the main Textures view"
+    );
+    assert_eq!(h.state().model.centre_front(), CentreTab::Selection);
+    assert!(h.state().model.json_editor_open && h.state().model.json_editor_popped);
+    h.get_by_label(&format!("Close {WINDOW_TITLE}")).click();
+    h.run_steps(4);
+    let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+    assert!(h
+        .query_all_by_label(id)
+        .any(|n| centre.contains(n.rect().center())));
+    h.get_by_label("Also export").scroll_to_me();
+    h.run_steps(4);
+    assert!(centre.contains(h.get_by_label("Also export").rect().center()));
+}
+
 #[derive(Default)]
 struct Tiny {
     clicks: Vec<u32>,

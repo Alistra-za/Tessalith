@@ -503,12 +503,13 @@ fn matching(ui: &mut egui::Ui, c: &Ctx, edits: &mut Vec<Edit>) {
     } else {
         value(format!("{n} match{}", if n == 1 { "" } else { "es" }))
     };
-    super::group::group(
+    super::group::group_with(
         ui,
         ("pgp-matching-group", c.set),
         "Matching",
         head,
         true,
+        focus_request(ui.ctx()).is_some_and(|(s, k)| s == c.set && k.starts_with("match")),
         |ui| matching_body(ui, c, edits),
     );
 }
@@ -518,7 +519,7 @@ const FOCUS_PASSES: u64 = 10;
 
 /// Note FC3 (P13): the live `Fix path` request (set id, field), one-shot: it is dropped once taken or after
 /// `FOCUS_PASSES`, so it never holds the Advanced group open.
-fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
+pub(super) fn focus_request(ctx: &egui::Context) -> Option<(String, String)> {
     let id = egui::Id::unique(super::problems::FOCUS_FIELD);
     let (s, k, at) = ctx.data(|d| d.get_temp::<(String, String, u64)>(id))?;
     if ctx.cumulative_pass_nr() > at + FOCUS_PASSES {

@@ -372,8 +372,8 @@ pub enum Fix {
     /// P26, owner 2026-11-04: two exclusive features of a set (by id) are both on. The row offers one
     /// `TurnFeatureOff` button per feature, neither a default; the modder picks which one goes.
     FeatureClash(String, Feature, Feature),
-    /// P13: go to the set (by key) and focus the path field (a settings key) the blocker names.
-    FixPath(String, String),
+    /// P13: open the blocker's set by engine key or document id and focus its path field (a settings key).
+    FixPath(super::SetTarget, String),
     /// R-fills-2, Z11: undo the step that caused the row; only built while that step is the top of the history.
     UndoLast,
     /// Note GD1: open the NIF on this tab and field.

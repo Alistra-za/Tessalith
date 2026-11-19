@@ -5361,6 +5361,41 @@ fn toggling_two_keyed_sets_down_to_one_opens_its_editor() {
     assert!(sdc_gui::ui::set_editor_shown(&m, false));
 }
 
+#[test]
+fn go_to_set_on_a_key_less_sets_row_opens_that_set() {
+    use sdc_gui::model::bottom::{filtered, At, ProblemsFilter};
+    let id = "landscape/other";
+    for click_link in [false, true] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = key_less_sets(d.path());
+        let filter = ProblemsFilter::Set(id.into());
+        let rows = filtered(&m, Some(&filter));
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(&rows[0].at, At::Set { key, id: row }
+            if key.is_empty() && row == id));
+        let texture = "landscape/rock01.png";
+        m.expand(texture);
+        m.open_problems(Some(filter));
+        let mut h = harness(m);
+        h.run();
+        assert_eq!(h.state().expanded.as_deref(), Some(texture));
+        if click_link {
+            h.get_by_role_and_label(egui::accesskit::Role::Link, id)
+                .click();
+        } else {
+            h.get_by_label("Go to set").click();
+        }
+        h.run();
+        assert_eq!(h.state().selection, id_selection(id));
+        assert!(h.state().expanded.is_none());
+        assert_eq!(
+            h.state().centre_front(),
+            sdc_gui::model::CentreTab::Selection
+        );
+        assert_editor(&h, id);
+    }
+}
+
 fn assert_editor(h: &Harness<'static, AppModel>, id: &str) {
     use egui::accesskit::Role;
     let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
@@ -5564,10 +5599,42 @@ fn f2_on_a_texture_in_an_output_eligible_set_renames_the_input() {
 }
 
 #[test]
-fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
-    use sdc_gui::model::bottom::{filtered, problems, At, ProblemsFilter};
-    let d = tempfile::tempdir().unwrap();
-    let mut m = key_less_sets(d.path());
+fn the_unnamed_sets_focused_problems_row_reopens_its_editor() {
+    for click_link in [true, false] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = empty_id_set(d.path());
+        pick_id(&mut m, "");
+        let mut h = harness(m);
+        h.run();
+        let reason = h
+            .get_by_label_contains("go to the fix")
+            .accesskit_node()
+            .label()
+            .unwrap();
+        click_and_settle(&mut h, &reason);
+        assert!(h
+            .get_by_label("Remove landscape/empty-id.txt from ")
+            .accesskit_node()
+            .is_focused());
+        h.state_mut().expand("landscape/rock01.png");
+        h.run();
+        if click_link {
+            h.get_by_role_and_label(egui::accesskit::Role::Link, "Unnamed set")
+                .click();
+        } else {
+            h.get_by_label("Go to set").click();
+        }
+        h.run();
+        assert_eq!(h.state().selection, id_selection(""));
+        assert!(h.state().expanded.is_none());
+        assert_eq!(h.state().resolved_selection().view().unwrap().id, "");
+        let centre = sdc_gui::ui::centre_rect(&h.ctx).unwrap();
+        assert!(centre.contains(h.get_by_label("Also export").rect().center()));
+    }
+}
+
+fn empty_id_set(dir: &std::path::Path) -> AppModel {
+    let mut m = key_less_sets(dir);
     let rel = "landscape/empty-id.txt";
     std::fs::write(m.root.as_ref().unwrap().join(rel), "notes").unwrap();
     m.edit_docs("t", None, true, |_, doc| {
@@ -5576,6 +5643,14 @@ fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
     });
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     assert!(view_by_id(&m, "").key.is_empty());
+    m
+}
+
+#[test]
+fn an_empty_id_has_editor_reasons_but_the_empty_filter_has_no_rows() {
+    use sdc_gui::model::bottom::{filtered, problems, At, ProblemsFilter};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = empty_id_set(d.path());
     assert!(problems(&m)
         .iter()
         .any(|p| matches!(&p.at, At::Set { key, id }

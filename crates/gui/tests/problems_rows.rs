@@ -411,6 +411,99 @@ fn a_feature_clash_offers_both_features_and_each_turns_off_only_its_own() {
     }
 }
 
+#[test]
+fn fix_path_on_a_key_less_set_opens_that_set_and_its_field() {
+    use sdc_gui::model::pbr_export::export_blocks;
+    use sdc_gui::model::{Selection, SetTarget};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = key_less_json_sets(d.path());
+    let id = "landscape/other";
+    m.set_json_value(id, "rename", Some(serde_json::json!("..\\name")));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let blocks = export_blocks(&m);
+    let issue = blocks
+        .iter()
+        .find(|b| b.set_id == id && b.text.contains("rename:"))
+        .expect("the second borrower's rename issue");
+    assert!(issue.set_key.is_empty());
+    let rows = problems(&m);
+    let row = rows
+        .iter()
+        .find(|p| p.at == At::Project && p.text == issue.text)
+        .expect("the target's issue in unfiltered Problems");
+    assert_eq!(
+        row.fix,
+        Some(Fix::FixPath(SetTarget::Id(id.into()), "rename".into()))
+    );
+    m.select_target(SetTarget::Id("landscape/empty".into()));
+    let mut h = harness(m);
+    h.run();
+    // Leave the editor on Also export, then expand a real texture under Problems.
+    h.get_by_label("Also export").scroll_to_me();
+    h.run();
+    h.get_by_label("Also export").click();
+    h.run();
+    assert!(h.query_by_label("Advanced TruePBR settings").is_none());
+    h.get_by_label("All sets in this project");
+    let texture = "landscape/rock01.png";
+    h.state_mut().expand(texture);
+    h.run();
+    assert_eq!(h.state().expanded.as_deref(), Some(texture));
+    assert_eq!(h.query_all_by_label("Fix path").count(), 1);
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run();
+    h.get_by_label("Fix path").click();
+    for _ in 0..4 {
+        h.run();
+    }
+    assert_eq!(h.state().selection, Selection::SetId(id.into()));
+    assert!(h.state().expanded.is_none());
+    assert_eq!(h.state().centre_tab, sdc_gui::model::CentreTab::Selection);
+    h.get_by_label("Advanced TruePBR settings");
+    let focused = h
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .find(|n| n.accesskit_node().is_focused())
+        .expect("a focused text field");
+    assert_eq!(
+        focused.accesskit_node().value().as_deref(),
+        Some("..\\name")
+    );
+}
+
+#[test]
+fn fix_path_reopens_matching_inside_a_collapsed_landscape_panel() {
+    use sdc_gui::ui::cs_pbr::PGP_PANEL;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_ready(d.path());
+    let (id, key) = rock_id(&m);
+    let bad = r"..\bad-match";
+    m.set_json_value(&id, "match1", Some(serde_json::json!(bad)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(problems(&m)
+        .iter()
+        .any(|p| p.text.contains("match1:") && matches!(p.fix, Some(Fix::FixPath(..)))));
+    m.select_set(&key);
+    let mut h = harness(m);
+    h.run();
+    for heading in ["Matching", PGP_PANEL] {
+        h.get_by_label(heading).scroll_to_me();
+        h.run();
+        h.get_by_label(heading).click();
+        h.run();
+    }
+    assert!(h.query_by_label("Matching").is_none());
+    h.get_by_label("Fix path").scroll_to_me();
+    h.run();
+    h.get_by_label("Fix path").click();
+    for _ in 0..4 {
+        h.run();
+    }
+    assert!(h
+        .query_all_by_role(egui::accesskit::Role::TextInput)
+        .any(|n| n.accesskit_node().is_focused()
+            && n.accesskit_node().value().as_deref() == Some(bad)));
+}
+
 /// P13: a path that blocks goes to its set and focuses the field that holds it.
 #[test]
 fn a_path_blocker_offers_fix_path() {
@@ -424,7 +517,13 @@ fn a_path_blocker_offers_fix_path() {
         .find(|p| p.text.contains("rename:"))
         .cloned()
         .expect("the rename blocker");
-    assert_eq!(row.fix, Some(Fix::FixPath(key.clone(), "rename".into())));
+    assert_eq!(
+        row.fix,
+        Some(Fix::FixPath(
+            sdc_gui::model::SetTarget::Key(key.clone()),
+            "rename".into()
+        ))
+    );
     let mut h = harness(m);
     h.run();
     h.get_by_label("Fix path").click();
