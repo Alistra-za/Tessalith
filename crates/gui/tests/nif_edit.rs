@@ -10793,8 +10793,8 @@ fn a_cancelled_export_drops_the_overwrite_answer() {
 }
 
 /// Plan 3c Task 4, ruling 3c-51 (b): pending edits recovered from a newer scan-store autosave, and Review's Export is
-/// their first save. The export writes the NIF and its record and removes the autosave; Review's list holds every
-/// change, the autosave counted under the listed record (`support::listing_violations`).
+/// their first save. With dirty texture settings, the export removes both the NIF autosave and the settings recovery.
+/// Each removal counts under its own listed document.
 #[test]
 fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
     app_data();
@@ -10830,14 +10830,29 @@ fn reviews_export_of_a_recovered_autosave_lists_what_it_changes() {
     sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
     h.run_steps(4);
     assert!(autosave(&d).is_file(), "guard: nothing saved before Export");
+    let m = &mut h.state_mut().model;
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Alpha(engine::config::AlphaPolicy::Blend),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let settings = m.project.as_ref().unwrap();
+    assert!(settings.is_dirty());
+    let recovery = sdc_gui::crash_log::recovery_path(settings.path());
+    std::fs::write(&recovery, "pending texture settings").unwrap();
     let (store, mods) = (d.path().join("nif-edits"), d.path().join("mods"));
     let roots = [t.path(), store.as_path(), mods.as_path()];
     let before = support::tree_hashes(&roots);
+    let pending = support::PendingRemovals::before_export(&h.state().model);
     export_from_review(&mut h);
     let after = support::tree_hashes(&roots);
     assert!(!autosave(&d).exists(), "the export's save removed it");
-    let w = h.state().model.review_writes_at_open();
-    let bad = support::listing_violations(&w, &before, &after, Some(d.path()));
+    assert!(before.contains_key(&recovery) && !after.contains_key(&recovery));
+    let model = &h.state().model;
+    let w = model.review_writes_at_open();
+    let removals = pending.after_export(model);
+    let bad =
+        support::listing_violations_with_removals(&w, &before, &after, Some(d.path()), &removals);
     assert!(bad.is_empty(), "{bad:#?}");
 }
 

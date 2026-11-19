@@ -372,7 +372,7 @@ pub fn listed(w: &sdc_gui::model::review::ReviewWrites) -> Vec<Listed> {
         .collect()
 }
 
-/// Ruling 3c-62: capture the initial saves and the guarded writers' ownership records before Export can change them.
+/// Removals that the export's saves and guarded JSON finishers can account for.
 #[derive(Default)]
 pub struct RemovalCredits {
     pub initial_saves: std::collections::BTreeSet<PathBuf>,
@@ -380,7 +380,14 @@ pub struct RemovalCredits {
     pub guarded_twins: std::collections::BTreeMap<PathBuf, (PathBuf, String)>,
 }
 
-impl RemovalCredits {
+/// Capture ownership before Export, then match each candidate to its finisher's completed phase.
+#[derive(Default)]
+pub struct PendingRemovals {
+    initial_saves: std::collections::BTreeSet<PathBuf>,
+    twins: Vec<(sdc_gui::model::review::JsonKind, PathBuf, PathBuf, String)>,
+}
+
+impl PendingRemovals {
     pub fn before_export(m: &AppModel) -> Self {
         use sdc_gui::model::history::{case_twin, record_key, records_at};
         use sdc_gui::model::review::JsonKind;
@@ -407,8 +414,8 @@ impl RemovalCredits {
                     if let Some(sha) = records.get(&record_key(&line.path)) {
                         if let Some(old) = case_twin(&line.path) {
                             credits
-                                .guarded_twins
-                                .insert(line.path.clone(), (old, sha.clone()));
+                                .twins
+                                .push((kind, line.path.clone(), old, sha.clone()));
                         }
                     }
                 }
@@ -416,9 +423,21 @@ impl RemovalCredits {
         }
         credits
     }
+
+    pub fn after_export(self, m: &AppModel) -> RemovalCredits {
+        RemovalCredits {
+            initial_saves: self.initial_saves,
+            guarded_twins: self
+                .twins
+                .into_iter()
+                .filter(|(kind, _, _, _)| m.guarded_json_phase_passed(*kind))
+                .map(|(_, path, old, sha)| (path, (old, sha)))
+                .collect(),
+        }
+    }
 }
 
-/// Compare a listing with no evidence of a settings save or a guarded JSON rename (e.g. a NIF-only comparison).
+/// Compare synthetic snapshots with no evidence of a settings save or a guarded JSON rename.
 pub fn listing_violations(
     w: &sdc_gui::model::review::ReviewWrites,
     before: &std::collections::BTreeMap<PathBuf, String>,
@@ -433,7 +452,7 @@ pub fn listing_violations(
 /// listed entry that causes it, by one of four kinds, each bound to its entry, its folder and its direction:
 /// (a) `<document>.recovery` REMOVED, beside a listed document the export saves (`sdc.toml`, `sdc-project.toml`: the
 ///     two `AppModel::save` writes and clears a recovery for);
-/// (b) the selected case twin of a listed guarded JSON REMOVED, with the hash its writer recorded before Export;
+/// (b) the selected case twin of a listed guarded JSON REMOVED, with its pre-run hash and a passing finisher phase;
 /// (c) ONE `<stem>.<digits>.toml` CREATED beside a listed NIF record, holding that record's bytes from before (the record
 ///     moved aside, Note GD25); the credit is used up, so a second such file fails;
 /// (d) the autosave `nif-edits\<hash>.toml` of a listed NIF record's data path REMOVED, under the session's own scan

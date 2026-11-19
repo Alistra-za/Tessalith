@@ -124,6 +124,20 @@ pub(super) trait Guarded {
 }
 
 impl AppModel {
+    /// Test evidence for a prepared guarded JSON: did its phase pass this export's gate?
+    #[cfg(feature = "test-hooks")]
+    pub fn guarded_json_phase_passed(&self, kind: super::review::JsonKind) -> bool {
+        use super::review::JsonKind;
+        let gate = match kind {
+            JsonKind::CsPbr => super::cs_pbr_export::PendingCs::GATE,
+            JsonKind::ComplexMaterial => super::cm_json::PendingCm::GATE,
+            JsonKind::Xpmf => super::xpmf_json::PendingXpmf::GATE,
+            JsonKind::CsSkin => super::cs_skin_json::PendingCsSkin::GATE,
+            JsonKind::PgPatcher => return false,
+        };
+        self.json_gate(gate).is_ok()
+    }
+
     /// Why the JSON of a kind gated on `gate` is not written, or `Ok`. A cancel or an error always holds it back. After
     /// that a plain export needs `failed == 0`; an Also export needs it for `gate`'s phase alone (a CM gate falls back
     /// to the PBR phase when no CM phase ran: the file sits in the PBR folder).

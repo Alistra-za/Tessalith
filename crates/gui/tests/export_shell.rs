@@ -2281,12 +2281,13 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
     assert!(m.review.is_some(), "the header opens Review");
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     let w = (*m.review_writes()).clone();
-    let removals = support::RemovalCredits::before_export(m);
+    let pending = support::PendingRemovals::before_export(m);
     let listed: BTreeSet<PathBuf> = support::listed(&w).into_iter().map(|e| e.path).collect();
     let before = support::tree_hashes(&[dir]);
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
+    let removals = pending.after_export(m);
     let after = support::tree_hashes(&[dir]);
     // No scan store in these projects: no autosave can be credited.
     let bad = support::listing_violations_with_removals(&w, &before, &after, None, &removals);
@@ -2690,6 +2691,34 @@ fn unexpected_removal(
 }
 
 #[test]
+fn a_skipped_cm_finisher_cannot_credit_its_owned_twins_removal() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let old = json.with_file_name("IRON_M.json");
+    std::fs::rename(&json, &old).unwrap();
+    let hash = sdc_gui::model::history::sha256_of(&old).unwrap();
+    // Fail a texture write while the required iron_m.dds and the owned JSON still exist.
+    let diffuse = json.with_file_name("iron.dds");
+    std::fs::remove_file(&diffuse).unwrap();
+    std::fs::create_dir(&diffuse).unwrap();
+    m.reencode_all = true;
+    let s = export_and_compare(&mut m, d.path());
+    assert!(m.export.summary.as_ref().unwrap().failed > 0);
+    assert!(m
+        .export
+        .notes
+        .iter()
+        .any(|n| n.contains("Complex material JSON not written")));
+    assert_eq!(
+        sdc_gui::model::history::sha256_of(&old).as_deref(),
+        Some(hash.as_str())
+    );
+    let bad = unexpected_removal(&s.w, &s.removals, &json, &old, &hash);
+    let missing = format!("changed, not listed: {old:?} (before true, after false)");
+    assert_eq!(bad, [missing]);
+}
+
+#[test]
 fn the_listing_rules_reject_a_foreign_json_twin() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, json) = cm_exported_once(d.path());
@@ -2718,7 +2747,12 @@ fn the_listing_rules_reject_twins_of_the_sidecar_and_pgpatcher_json() {
     m.header_export_clicked();
     m.expire_review_json();
     let w = m.review_writes();
-    let removals = support::RemovalCredits::before_export(&m);
+    let pending = support::PendingRemovals::before_export(&m);
+    assert!(m.review_gate().is_ok());
+    m.export_from_review();
+    idle(&mut m);
+    assert!(m.export.summary.as_ref().is_some_and(|s| s.failed == 0));
+    let removals = pending.after_export(&m);
     for (path, old, sha) in twins {
         assert_eq!(
             unexpected_removal(&w, &removals, &path, &old, &sha).len(),
