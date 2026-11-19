@@ -178,7 +178,8 @@ fn assert_column_bar_at_rest(h: &H, id: &str, what: &str) {
             continue;
         }
         let label = n.accesskit_node().label().unwrap_or_default();
-        let limit = bar_clearance(&label, track, bar_width);
+        // a set card is a "Set ..." button in the Sets column
+        let limit = bar_clearance(id == "sets" && label.starts_with("Set "), track, bar_width);
         assert!(
             r.max.x <= limit + 0.5,
             "{label:?} {r:?} reaches the {what}'s bar {track:?}"

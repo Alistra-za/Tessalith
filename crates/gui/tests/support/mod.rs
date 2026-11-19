@@ -486,21 +486,23 @@ pub fn dds_pbr_sets(dir: &Path, sets: &[&str]) -> PathBuf {
     dir.join("textures")
 }
 
-/// Every filled rect painted in `shapes` (nested shapes flattened), with its fill's alpha.
+/// The filled rects of one shape (nested shapes flattened), each with its fill's alpha.
+pub fn fill_rects_of(s: &eframe::egui::Shape, out: &mut Vec<(eframe::egui::Rect, u8)>) {
+    use eframe::egui::Shape;
+    match s {
+        Shape::Vec(v) => v.iter().for_each(|x| fill_rects_of(x, out)),
+        Shape::Rect(r) => out.push((r.rect, r.fill.a())),
+        _ => {}
+    }
+}
+
+/// Every filled rect painted in `shapes`, with its fill's alpha.
 pub fn filled_rects(
     shapes: &[eframe::egui::epaint::ClippedShape],
 ) -> Vec<(eframe::egui::Rect, u8)> {
-    use eframe::egui::Shape;
-    fn walk(s: &Shape, out: &mut Vec<(eframe::egui::Rect, u8)>) {
-        match s {
-            Shape::Vec(v) => v.iter().for_each(|x| walk(x, out)),
-            Shape::Rect(r) => out.push((r.rect, r.fill.a())),
-            _ => {}
-        }
-    }
     let mut all = vec![];
     for s in shapes {
-        walk(&s.shape, &mut all);
+        fill_rects_of(&s.shape, &mut all);
     }
     all
 }
@@ -531,10 +533,10 @@ pub fn bar_rects_in<S>(
 }
 
 /// The x a control may reach beside a scroll bar whose track is `track`: short of the 10 px the bar takes when hovered
-/// (`bar_width`), or, for a set card (a frame whose own margin is wider than the rest, labelled "Set ..."), short of the
-/// track itself at rest.
-pub fn bar_clearance(label: &str, track: eframe::egui::Rect, bar_width: f32) -> f32 {
-    if label.starts_with("Set ") {
+/// (`bar_width`), or, for a set card (a frame in the Sets column whose own margin is wider than the rest), short of the
+/// track itself at rest. The caller says whether the control is a set card.
+pub fn bar_clearance(is_set_card: bool, track: eframe::egui::Rect, bar_width: f32) -> f32 {
+    if is_set_card {
         track.min.x
     } else {
         track.max.x - bar_width

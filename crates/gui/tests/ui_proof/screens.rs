@@ -570,6 +570,11 @@ fn pointer_away(h: &mut H) -> Result<(), String> {
     if !settle(h, 2) {
         return Err("the window did not go idle after the pointer left it".into());
     }
+    pointer_is_away(h)
+}
+
+/// Proves egui has no pointer position.
+fn pointer_is_away(h: &H) -> Result<(), String> {
     if h.ctx.input(|i| i.pointer.latest_pos()).is_some() {
         return Err("the pointer is still in the window after PointerGone".into());
     }
@@ -600,11 +605,14 @@ impl Entry for ScreenEntry {
     fn at(&mut self, size: Vec2) -> Result<Snapshot, String> {
         if !self.screen.transient {
             if let Some((_, h)) = &mut self.open {
+                // the pointer left on the first visit and nothing since has brought it back; the event is queued before
+                // the one settle and the state is asserted after it
                 h.set_size(size);
+                h.event(eframe::egui::Event::PointerGone);
                 if !settle(h, 2) {
                     return Err("the window did not go idle after the resize".into());
                 }
-                pointer_away(h)?;
+                pointer_is_away(h)?;
                 let snap = snapshot(h);
                 if !holds(&snap, self.screen.marker) {
                     return Err(format!(
@@ -618,6 +626,8 @@ impl Entry for ScreenEntry {
         // the old window and its folder go before the new ones are built
         self.open = None;
         let (d, mut h) = enter(self.screen, size)?;
+        // the paint's layers are read from the frames that follow
+        crate::frame::track_paint(&h.ctx);
         pointer_away(&mut h)?;
         let snap = snapshot(&h);
         if !holds(&snap, self.screen.marker) {
@@ -863,7 +873,9 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         sets_right: Some(300.0),
         filled: vec![],
         discs: vec![],
+        paint_layers_known: false,
         pointer: None,
+        panels: vec![],
     }
 }
 

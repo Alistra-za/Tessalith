@@ -50,19 +50,65 @@ pub struct Snapshot {
     /// The right edge of the Sets column's panel (`ui::panel_ids::panel_rect`), when the frame built it: the set
     /// editor is the area right of it.
     pub sets_right: Option<f32>,
-    /// Every filled rect the frame paints, with its fill's alpha: where a scroll bar's track and handle show.
+    /// Every filled rect the frame paints, with its fill's alpha, its clip and (with `track_paint`) its layer: where a
+    /// scroll bar's track and handle show.
     pub filled: Vec<Filled>,
-    /// Every filled circle the frame paints: where a status dot shows.
+    /// Every filled circle the frame paints, with its clip and layer: where a status dot shows.
     pub discs: Vec<Disc>,
+    /// Whether every painted shape above has its layer: true only when `track_paint` was installed before the frame and
+    /// the layers it read hold exactly the shapes egui output. False means `layer` is `None` everywhere.
+    pub paint_layers_known: bool,
     /// Where the pointer is, when egui has one in the window; `None` is a frame with no pointer (a bar at rest).
     pub pointer: Option<Pos2>,
+    /// The outer rects of the named panels the frame built (`ui::panel_ids`), and the centre column as "centre": what
+    /// names the area a scroll bar belongs to.
+    pub panels: Vec<(String, Rect)>,
 }
+
+impl Snapshot {
+    /// The rect of the named panel (see `panels`).
+    pub fn panel(&self, name: &str) -> Option<Rect> {
+        self.panels.iter().find(|(n, _)| n == name).map(|(_, r)| *r)
+    }
+}
+
+/// The panels `Snapshot::panels` looks for (`ui::panel_ids` salts); "centre" is read from `ui::centre_rect`.
+const PANEL_NAMES: [&str; 24] = [
+    "header",
+    "status",
+    "textures",
+    "textures-strip",
+    "textures-scan",
+    "sets",
+    "sets-strip",
+    "bottom",
+    "bottom-strip",
+    "bottom-review",
+    "review-footer",
+    "preview-settings",
+    "preview-settings-strip",
+    "preview-toolbar",
+    "preview-notes",
+    "meshes-bar",
+    "meshes-tree",
+    "meshes-edit",
+    "meshes-edit-export",
+    "meshes-3d-anim",
+    "meshes-3d-bar",
+    "meshes-3d-details",
+    "set-3d-bar",
+    "set-3d-details",
+];
 
 /// A painted filled rect.
 #[derive(Clone, Debug)]
 pub struct Filled {
     pub rect: Rect,
     pub alpha: u8,
+    /// The clip rect the shape was painted with.
+    pub clip: Rect,
+    /// The egui layer that painted it (the `Debug` text a node's `layer` has), when known.
+    pub layer: Option<String>,
 }
 
 /// A painted filled circle.
@@ -71,18 +117,78 @@ pub struct Disc {
     pub center: Pos2,
     pub radius: f32,
     pub fill: egui::Color32,
+    pub clip: Rect,
+    pub layer: Option<String>,
 }
 
-fn discs_in(s: &Shape, out: &mut Vec<Disc>) {
+fn discs_in(s: &Shape, clip: Rect, layer: &Option<String>, out: &mut Vec<Disc>) {
     match s {
-        Shape::Vec(v) => v.iter().for_each(|s| discs_in(s, out)),
+        Shape::Vec(v) => v.iter().for_each(|s| discs_in(s, clip, layer, out)),
         Shape::Circle(c) if c.fill.a() > 0 => out.push(Disc {
             center: c.center,
             radius: c.radius,
             fill: c.fill,
+            clip,
+            layer: layer.clone(),
         }),
         _ => {}
     }
+}
+
+fn fills_in(s: &Shape, clip: Rect, layer: &Option<String>, out: &mut Vec<Filled>) {
+    let mut found = vec![];
+    crate::support::fill_rects_of(s, &mut found);
+    out.extend(found.into_iter().map(|(rect, alpha)| Filled {
+        rect,
+        alpha,
+        clip,
+        layer: layer.clone(),
+    }));
+}
+
+/// What `PaintLayers` read at the end of the last pass: the shapes of every layer, each with its layer.
+#[derive(Default)]
+pub struct PaintLayers {
+    filled: Vec<Filled>,
+    discs: Vec<Disc>,
+    /// How many shapes the layers held: equals `FullOutput::shapes.len()` when no layer was missed.
+    total: usize,
+}
+
+impl egui::Plugin for PaintLayers {
+    fn debug_name(&self) -> &'static str {
+        "PaintLayers"
+    }
+
+    fn on_end_pass(&mut self, ui: &mut egui::Ui) {
+        // egui's output drops which layer painted a shape; the layers' paint lists still hold it until the pass ends
+        let ctx = ui.ctx().clone();
+        let mut layers: Vec<egui::LayerId> =
+            ctx.memory(|m| m.areas().visible_layer_ids().into_iter().collect());
+        layers.push(egui::LayerId::background());
+        layers.sort_by_key(|l| format!("{l:?}"));
+        layers.dedup();
+        self.filled.clear();
+        self.discs.clear();
+        self.total = 0;
+        ctx.graphics(|g| {
+            for l in &layers {
+                let Some(list) = g.get(*l) else { continue };
+                let name = Some(format!("{l:?}"));
+                for cs in list.all_entries() {
+                    self.total += 1;
+                    fills_in(&cs.shape, cs.clip_rect, &name, &mut self.filled);
+                    discs_in(&cs.shape, cs.clip_rect, &name, &mut self.discs);
+                }
+            }
+        });
+    }
+}
+
+/// Installs `PaintLayers` on `ctx` (once; a second call does nothing). A `Snapshot` of a frame run after this has the
+/// paint's layers.
+pub fn track_paint(ctx: &egui::Context) {
+    ctx.add_plugin(PaintLayers::default());
 }
 
 const INTERACTIVE_ROLES: [&str; 10] = [
@@ -225,9 +331,27 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
     for c in &h.output().shapes {
         flatten(&c.shape, c.clip_rect, &mut texts, &mut bare_ellipses);
     }
-    let mut discs = Vec::new();
-    for c in &h.output().shapes {
-        discs_in(&c.shape, &mut discs);
+    // The paint with its layers when `track_paint` saw this frame and held every shape of the output; else the output's
+    // shapes alone, with no layer.
+    let tracked = h.ctx.plugin_opt::<PaintLayers>().and_then(|p| {
+        let p = p.lock();
+        (p.total == h.output().shapes.len()).then(|| (p.filled.clone(), p.discs.clone()))
+    });
+    let paint_layers_known = tracked.is_some();
+    let (filled, discs) = tracked.unwrap_or_else(|| {
+        let (mut filled, mut discs) = (vec![], vec![]);
+        for c in &h.output().shapes {
+            fills_in(&c.shape, c.clip_rect, &None, &mut filled);
+            discs_in(&c.shape, c.clip_rect, &None, &mut discs);
+        }
+        (filled, discs)
+    });
+    let mut panels: Vec<(String, Rect)> = PANEL_NAMES
+        .iter()
+        .filter_map(|n| sdc_gui::ui::panel_ids::panel_rect(&h.ctx, n).map(|r| (n.to_string(), r)))
+        .collect();
+    if let Some(r) = sdc_gui::ui::centre_rect(&h.ctx) {
+        panels.push(("centre".to_string(), r));
     }
     Snapshot {
         size: h.ctx.content_rect().size(),
@@ -235,12 +359,11 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
         texts,
         bare_ellipses,
         sets_right: sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").map(|r| r.max.x),
-        filled: crate::support::filled_rects(&h.output().shapes)
-            .into_iter()
-            .map(|(rect, alpha)| Filled { rect, alpha })
-            .collect(),
+        filled,
         discs,
+        paint_layers_known,
         pointer: h.ctx.input(|i| i.pointer.latest_pos()),
+        panels,
     }
 }
 
