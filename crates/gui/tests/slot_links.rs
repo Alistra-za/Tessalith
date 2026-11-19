@@ -1650,6 +1650,8 @@ struct Layout {
     slot: u8,
     real: Option<&'static str>,
     invented: &'static [&'static str],
+    /// JSON settings set after the folder is opened: (set id, key, value).
+    json: &'static [(&'static str, &'static str, &'static str)],
 }
 
 const LAYOUTS: &[Layout] = &[
@@ -1662,6 +1664,7 @@ const LAYOUTS: &[Layout] = &[
         slot: 1,
         real: Some(r"textures\p\plain.dds"),
         invented: &[],
+        json: &[],
     },
     Layout {
         name: "packed output",
@@ -1672,6 +1675,7 @@ const LAYOUTS: &[Layout] = &[
         slot: 6,
         real: Some(r"textures\s\q_rmaos.dds"),
         invented: &[],
+        json: &[],
     },
     Layout {
         name: "packed output mapped away, its set borrowing slot 6",
@@ -1692,6 +1696,7 @@ const LAYOUTS: &[Layout] = &[
         slot: 6,
         real: Some(r"textures\z\w_rmaos.dds"),
         invented: &[r"textures\t\w_rmaos.dds"],
+        json: &[],
     },
     Layout {
         name: "output mapped to another folder",
@@ -1703,6 +1708,7 @@ const LAYOUTS: &[Layout] = &[
         slot: 1,
         real: Some(r"textures\b\body.dds"),
         invented: &[r"textures\p\body.dds"],
+        json: &[],
     },
     Layout {
         name: "output mapped under mod_a\\textures",
@@ -1714,6 +1720,7 @@ const LAYOUTS: &[Layout] = &[
         slot: 1,
         real: Some(r"textures\m2\y.dds"),
         invented: &[r"textures\mod_a\textures\m2\y.dds", r"textures\m\y.dds"],
+        json: &[],
     },
     Layout {
         name: "legacy output_name outside textures",
@@ -1724,6 +1731,40 @@ const LAYOUTS: &[Layout] = &[
         slot: 1,
         real: None,
         invented: &[r"textures\arch\maple.dds"],
+        json: &[],
+    },
+    Layout {
+        name: "a folder whose Unicode lower case differs (I with a dot)",
+        files: &["textures/\u{130}/plain.png"],
+        toml: "",
+        albedos: &[],
+        out_name: "plain.dds",
+        slot: 1,
+        real: Some("textures\\\u{130}\\plain.dds"),
+        invented: &["textures\\i\u{307}\\plain.dds"],
+        json: &[],
+    },
+    Layout {
+        name: "a PBR rename with an interior '.'",
+        files: &["textures/k/rock.png"],
+        toml: "[[sets]]\nid = \"textures/k/rock\"\nshader = \"pbr\"\n",
+        albedos: &["textures/k/rock.png"],
+        out_name: "wall.dds",
+        slot: 1,
+        real: Some(r"textures\stone\wall.dds"),
+        invented: &[],
+        json: &[("textures/k/rock", "rename", r"textures\stone\.\wall")],
+    },
+    Layout {
+        name: "two textures folders: the first wins",
+        files: &["mod_a/textures/a/textures/b.png"],
+        toml: "",
+        albedos: &[],
+        out_name: "b.dds",
+        slot: 1,
+        real: Some(r"textures\a\textures\b.dds"),
+        invented: &[r"textures\b.dds"],
+        json: &[],
     },
 ];
 
@@ -1749,6 +1790,9 @@ fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
     let mut m = opened_as_the_app(dir.to_path_buf(), dir.join("export"));
     for f in layout.albedos.iter().chain(&["textures/c/con.png"]) {
         m.decide(f, Answer::Subtype(Subtype::PbrAlbedo));
+    }
+    for (set, key, value) in layout.json {
+        m.set_json_value(set, key, Some(json!(value)));
     }
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     let ids = vec![CONSUMER.to_string()];
@@ -1839,7 +1883,8 @@ fn the_output_index_holds_where_each_file_is_written() {
         );
         let index = written_output_index(&m);
         let keys: Vec<&str> = index.iter().map(|(k, _, _)| k.as_str()).collect();
-        // The consumer is left out of the run, so its own planned output is a key with no file yet.
+        // The consumer is left out of this run, so its own planned output is a key with no file yet; the export at
+        // the end includes it and checks every key.
         for (k, _, _) in index.iter().filter(|(_, s, _)| s != CONSUMER) {
             assert!(
                 written
@@ -1886,6 +1931,27 @@ fn the_output_index_holds_where_each_file_is_written() {
             let l = con(&m).linked[&layout.slot].clone();
             assert_eq!(l.from, None, "{case}: {wrong} is external");
             assert!(!deps(&m).contains(&producer.job_key), "{case}: {wrong}");
+        }
+        // Ruling 3b-F11: with the consumer in the run as well, every index key names a written DDS.
+        m.set_json_value(CONSUMER, &key, None);
+        m.set_group_excluded("Consumer", false).unwrap();
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        export_through(&mut m);
+        assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+        let written = dds_under(&m.export_root());
+        let index = written_output_index(&m);
+        assert!(
+            index.iter().any(|(_, s, _)| s == CONSUMER),
+            "{case}: premise: the consumer's output is a key: {index:?}"
+        );
+        for (k, _, _) in &index {
+            assert!(
+                written
+                    .iter()
+                    .any(|f| game_location(f).as_deref() == Some(k.as_str())),
+                "{case}: with the consumer exported, key {k} names no written DDS: {written:?} {}",
+                m.export.notes.join("\n")
+            );
         }
     }
 }

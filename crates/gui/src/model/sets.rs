@@ -2662,13 +2662,14 @@ pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
     output_game_path(m, &views, &paths, it).ok_or_else(|| NO_GAME_PATH.into())
 }
 
-/// Review E1 (Task 15a, ruling 3b-F6): the game location of the file `it`'s job writes. An output with an explicit
-/// path (`paths`, keyed by `item_output_key`: a PBR set's under its current prefix, a mapped record path) is written
-/// there by the next plan, so that path is read, before the plan lands too; else its plan path (`job_key`, the file
-/// the finalizer checks on disk) as a path under the export folder (`export_rel`). Either from its first `textures`
-/// folder on, backslashes, spelt as the job's output is when the two name one file. Never composed from the source
-/// folder, and never a `textures\` put in front of an output under no `textures` folder: `None` then, and for an item
-/// that writes no output of its own.
+/// Review E1 (Task 15a, rulings 3b-F6 and 3b-F11): the game location of the file `it`'s job writes, spelt as on
+/// disk. The path is the one the job writes: an explicit output path (`paths`, keyed by `item_output_key`: a PBR
+/// set's under its current prefix, a mapped record path), which the next plan writes, so it is read before that plan
+/// lands too; else the job's output, under the output folder. Its filesystem components are walked (`.` and empty
+/// parts are gone, as the writer resolves them) and cut at the first `textures` component (ASCII case-insensitive),
+/// then joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as
+/// text. `None` for an output under no `textures` folder (never a `textures\` put in front) and for an item that
+/// writes no output of its own. The link index folds the result with ASCII lower case.
 pub(crate) fn output_game_path(
     m: &AppModel,
     views: &[SetView],
@@ -2679,36 +2680,25 @@ pub(crate) fn output_game_path(
     if it.job_key.is_empty() {
         return None;
     }
-    let rel = match item_output_key(views, it).and_then(|k| paths.get(&k)) {
-        Some(p) => p.clone(),
-        None => m.export_rel(Path::new(&it.job_key)),
-    };
-    let rel = rel.to_string_lossy();
-    let parts: Vec<&str> = rel.split(['/', '\\']).filter(|c| !c.is_empty()).collect();
-    let tail = &parts[parts
-        .iter()
-        .position(|c| c.eq_ignore_ascii_case("textures"))?..];
-    // The job key is folded; the output path keeps the spelling. Its last parts are the same file.
-    let spelt: Vec<String> = job
-        .output
-        .components()
-        .rev()
-        .take(tail.len())
-        .map(|c| c.as_os_str().to_string_lossy().into_owned())
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    let same = spelt.len() == tail.len()
-        && spelt
+    let explicit = item_output_key(views, it).and_then(|k| paths.get(&k));
+    let rel: &Path = match explicit {
+        Some(p) => p,
+        // An output outside both folders (the folder changed and the plan has not landed) is read as none.
+        None => [m.output_root(), m.export_root()]
             .iter()
-            .zip(tail)
-            .all(|(a, b)| a.eq_ignore_ascii_case(b));
-    Some(if same {
-        spelt.join("\\")
-    } else {
-        tail.join("\\")
-    })
+            .find_map(|r| job.output.strip_prefix(r).ok())?,
+    };
+    let parts: Vec<String> = rel
+        .components()
+        .filter_map(|c| match c {
+            std::path::Component::Normal(s) => Some(s.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect();
+    let at = parts
+        .iter()
+        .position(|c| c.eq_ignore_ascii_case("textures"))?;
+    Some(parts[at..].join("\\"))
 }
 
 /// The game path a member's export writes (wave 2 #4, Note R9): the folder of `game_path` and the file name of
