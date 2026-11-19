@@ -6563,6 +6563,57 @@ fn an_older_kept_autosave_is_moved_aside_by_the_next_save() {
     assert_eq!(std::fs::read(&aside[0]).unwrap(), old);
 }
 
+/// Review round 3 (B1, ruling E6-L): a fingerprint belongs to ops the session adopted or wrote; a file with other bytes
+/// at a remembered name is not the session's to delete or move.
+#[test]
+fn a_file_is_cleaned_up_only_while_it_holds_the_ops_the_session_took() {
+    table(&[
+        ("a carry leaves another session's plain autosave", || {
+            let (d, mut m) = export_session();
+            let p = project_folder(&d, "p");
+            m.set_nif_export_root(None);
+            m.open_edit();
+            gloss(&mut m, 12.5);
+            read_only(&autosave(&d), true); // the plain autosave cannot be replaced: Close is refused
+            gloss(&mut m, 13.5);
+            m.close_edit();
+            assert!(m.edit.is_some(), "premise: Close refused");
+            read_only(&autosave(&d), false);
+            gloss(&mut m, 14.5); // the retry saves
+            let other = with_value(load(&autosave(&d)).unwrap().unwrap(), 99.5);
+            save(&autosave(&d), &other).unwrap(); // another session's edit at the same name
+            let theirs = std::fs::read(autosave(&d)).unwrap();
+            m.set_project_root(Some(&p));
+            let kept_somewhere = tomls_under(&d.path().join("nif-edits"))
+                .iter()
+                .any(|f| std::fs::read(f).unwrap() == theirs);
+            assert!(kept_somewhere, "the other session's edit still exists");
+        }),
+        (
+            "a kept autosave that lost and was replaced since is not moved",
+            || {
+                let (d, mut m) = export_session();
+                let p = project_folder(&d, "p");
+                project_with_a_draft(&mut m, &p);
+                let k = kept(&d, &id_of(&p));
+                save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 9.5)).unwrap();
+                make_old(&k);
+                m.open_edit();
+                assert_eq!(vals(&m), [7.5], "premise: the draft won");
+                save(&k, &with_value(load(&draft(&p)).unwrap().unwrap(), 99.5)).unwrap();
+                let replaced = std::fs::read(&k).unwrap();
+                gloss(&mut m, 12.5);
+                assert_eq!(
+                    std::fs::read(&k).unwrap(),
+                    replaced,
+                    "the replacement stays where it is"
+                );
+                assert!(moved_aside_from(&k).is_empty());
+            },
+        ),
+    ]);
+}
+
 /// Note GD21 (replaces `a_recovered_empty_autosave_stays_on_a_folder_change`): an autosave with no ops (every edit
 /// undone) and no history, newer than the project's draft, is recovered when the project opens: the session holds
 /// that empty state, unsaved, and the project's draft is kept aside at its first save.

@@ -100,7 +100,7 @@ pub struct NifEdit {
     /// Ruling E6-D: the kept autosave of the draft's id that lost to the newer draft at open; the first draft save
     /// moves it to `<sha>.<id>.<secs>.toml` (`move_aside`, as `free_unseen` does), so its name is free and its bytes
     /// are kept.
-    kept_older: Option<PathBuf>,
+    kept_older: Option<(PathBuf, String)>,
     /// `retarget_error` says no save worked when the session was to end (a project switch, or ruling E6-C's other
     /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
@@ -634,7 +634,7 @@ struct Picked {
     /// The kept autosave of the draft's id won, with the fingerprint of the bytes read: the session holds it.
     kept: Option<(PathBuf, String)>,
     /// The kept autosave of the draft's id lost: the next save moves it aside (ruling E6-D).
-    kept_older: Option<PathBuf>,
+    kept_older: Option<(PathBuf, String)>,
     /// The plain autosave won: the fingerprint of the bytes read.
     plain: Option<String>,
     /// Ruling E6-K: a candidate newer than the winner so far could not be read (the reason): `open` shows the winner,
@@ -693,7 +693,10 @@ fn pick_from(
                 p.draft_won = false;
                 winner = k;
             }
-            Recovery::Older => p.kept_older = Some(k),
+            // ruling E6-L: remembered with the bytes it holds now; other bytes there later are left alone
+            Recovery::Older => {
+                p.kept_older = edit_doc::fingerprint(&k).ok().flatten().map(|fp| (k, fp))
+            }
             Recovery::Stays => {}
             Recovery::Unreadable(why) => p.unreadable = Some(why),
         }
@@ -707,9 +710,7 @@ fn pick_from(
                 p.plain = Some(fp);
                 p.draft_won = false;
                 // a kept autosave the plain one beat is moved aside at the next save, like one the draft beat
-                if let Some((k, _)) = p.kept.take() {
-                    p.kept_older = Some(k);
-                }
+                p.kept_older = p.kept.take();
             }
             Recovery::Unreadable(why) => p.unreadable = Some(why),
             Recovery::Older | Recovery::Stays => {}
@@ -987,9 +988,10 @@ impl NifEdit {
 
     /// Takes the export folder's record (`edit_doc::load_fp` of `record_path`; None: never exported there): its export
     /// entry becomes the session's, kept in memory only (ruling E6-A). A record exported from another source than the
-    /// current one makes the edit pending (Note GQ1's sentinel). Ruling E6-F: a record holding nothing the session
-    /// lacks (its ops empty or the first of the session's) is known as the session's own by its fingerprint; any
-    /// other is remembered (`foreign_record`) so the export never replaces it. An equal draft id is not ownership.
+    /// current one makes the edit pending (Note GQ1's sentinel). Rulings E6-F, E6-L: a record with the session's ops,
+    /// or the bytes it wrote there, is known as its own by its fingerprint; one holding nothing the session lacks (its
+    /// ops empty or the first of the session's) may be replaced; any other is remembered (`foreign_record`) so the
+    /// export never replaces it. An equal draft id is not ownership.
     fn take_record(&mut self, record: Option<(EditDoc, String)>) {
         self.record_meta = self.record_path.as_deref().and_then(file_meta);
         let Some((r, fp)) = record else {
@@ -1001,9 +1003,12 @@ impl NifEdit {
         };
         self.record_source = Some(r.source.sha256.clone());
         let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
-        let known = starts(&r.ops, &self.doc.ops);
-        self.record_fp = known.then_some(fp);
-        self.foreign_record = (!known).then(|| r.ops.clone());
+        // ruling E6-L: the fingerprint is the session's when these are its ops (it takes the record's export state as
+        // its own) or the bytes it wrote there; a record that only begins the session's ops loses nothing (not
+        // foreign) but is not the session's either
+        let ours = Some(&fp) == self.record_fp.as_ref() || same_ops(&r.ops, &self.doc.ops);
+        self.record_fp = ours.then_some(fp);
+        self.foreign_record = (!starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
         self.doc.export = r.export;
         if stale {
             self.doc.export.ops_hash = Some(String::new());
@@ -1510,9 +1515,13 @@ impl NifEdit {
             return;
         }
         // ruling E6-D: the older kept autosave goes to `<sha>.<id>.<secs>.toml`; a failed move is tried by the next save
-        if let Some(k) = self.kept_older.take().filter(|k| k.is_file()) {
-            if !self.move_aside(&k, "The kept autosave") {
-                self.kept_older = Some(k);
+        // ruling E6-L: only while it still holds the bytes it lost with; other bytes there are not the session's
+        if let Some((k, fp)) = self.kept_older.take() {
+            if k.is_file()
+                && edit_doc::is_known(&k, Some(&fp))
+                && !self.move_aside(&k, "The kept autosave")
+            {
+                self.kept_older = Some((k, fp));
             }
         }
         let plain = self.autosave.clone().zip(self.plain_fp.take());
@@ -1783,11 +1792,12 @@ impl NifEdit {
                 draft.display()
             ));
         }
-        // Note GD25, ruling E6-F: the destination's edits were never loaded, so none of the draft's bytes are the
-        // session's (the first save moves them aside); the autosave's are, so the first save into the project
-        // removes it while it still holds them
-        self.draft_fp = None;
-        self.plain_fp = Some(plain_fp);
+        // Note GD25, rulings E6-F, E6-L: the destination's edits were never loaded, so none of the draft's bytes are
+        // the session's (the first save moves them aside). The plain autosave is the session's only while it holds
+        // the bytes the session itself last loaded or wrote there (its `draft_fp`): the fingerprint `pick_draft` read
+        // belongs to a document the session does not adopt (it keeps its own ops)
+        let own = self.draft_fp.take();
+        self.plain_fp = own.filter(|fp| *fp == plain_fp);
         (self.project, self.draft_path) = (Some(project.to_path_buf()), draft);
         self.drag = None;
         self.history.break_merge();
