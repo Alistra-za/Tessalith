@@ -37,6 +37,9 @@ pub struct Snapshot {
     pub size: Vec2,
     pub nodes: Vec<Node>,
     pub texts: Vec<Text>,
+    /// The right edge of the Sets column's panel (`ui::panel_ids::panel_rect`), when the frame built it: the set
+    /// editor is the area right of it.
+    pub sets_right: Option<f32>,
 }
 
 const INTERACTIVE_ROLES: [&str; 10] = [
@@ -170,6 +173,7 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
         size: h.ctx.content_rect().size(),
         nodes,
         texts,
+        sets_right: sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").map(|r| r.max.x),
     }
 }
 

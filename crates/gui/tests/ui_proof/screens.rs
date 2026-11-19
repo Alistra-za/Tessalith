@@ -33,12 +33,12 @@ pub const NO_PROJECT: &str = "none";
 
 /// One condition on a frame: a node of `role` (any role when empty) named `text`, or a painted text equal to it, is
 /// there (`present`) or is not.
-/// `right_of`, when not empty, names a node (by label) whose left edge the node must not lie left of: the Sets column
-/// is left of the set editor, so a node right of the editor's "Diffuse" slot label is the editor's.
+/// `right_of_sets` asks for the node to start at or right of the Sets column's panel (`Snapshot::sets_right`): the set
+/// editor is the area right of that panel, and a menu opened from a Sets chip opens inside it.
 pub struct Needle {
     pub role: &'static str,
     pub text: &'static str,
-    pub right_of: &'static str,
+    pub right_of_sets: bool,
     pub present: bool,
 }
 
@@ -46,7 +46,7 @@ pub const fn has(text: &'static str) -> Needle {
     Needle {
         role: "",
         text,
-        right_of: "",
+        right_of_sets: false,
         present: true,
     }
 }
@@ -55,16 +55,16 @@ pub const fn has_role(role: &'static str, text: &'static str) -> Needle {
     Needle {
         role,
         text,
-        right_of: "",
+        right_of_sets: false,
         present: true,
     }
 }
 
-const fn has_right_of(text: &'static str, anchor: &'static str) -> Needle {
+const fn has_right_of_sets(text: &'static str) -> Needle {
     Needle {
         role: "",
         text,
-        right_of: anchor,
+        right_of_sets: true,
         present: true,
     }
 }
@@ -73,7 +73,7 @@ const fn lacks(text: &'static str) -> Needle {
     Needle {
         role: "",
         text,
-        right_of: "",
+        right_of_sets: false,
         present: false,
     }
 }
@@ -81,14 +81,11 @@ const fn lacks(text: &'static str) -> Needle {
 /// True when every needle of `marker` holds on `s`.
 pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
     marker.iter().all(|n| {
-        let left = if n.right_of.is_empty() {
-            f32::MIN
-        } else {
-            s.nodes
-                .iter()
-                .filter(|x| x.label == n.right_of)
-                .map(|x| x.rect.min.x)
-                .fold(f32::MAX, f32::min)
+        // no Sets column panel in the frame: nothing is right of it
+        let left = match (n.right_of_sets, s.sets_right) {
+            (false, _) => f32::MIN,
+            (true, Some(edge)) => edge,
+            (true, None) => f32::MAX,
         };
         let found = s.nodes.iter().any(|x| {
             (n.role.is_empty() || x.role == n.role)
@@ -148,24 +145,49 @@ fn select_set(h: &mut H, id: &str) {
     model(h).select_set(&k);
 }
 
-/// Right-clicks the widest node named `label` (the slot row, which carries the menu; the row's name beside it is not clickable) that lies right of the set editor's first slot row ("Diffuse") (the editor's
-/// own, not the Sets column's).
-fn right_click_in_editor(h: &mut H, label: &str) {
+/// The nodes named `label` that lie wholly right of the Sets column's panel and inside the window (the set editor's),
+/// or, with `in_sets`, wholly inside the Sets column's panel.
+fn nodes_in<'h>(h: &'h H, label: &'h str, in_sets: bool) -> Vec<egui_kittest::Node<'h>> {
     use egui_kittest::kittest::Queryable as _;
+    let sets = sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets")
+        .expect("the Sets column's panel was never built");
+    let window = h.ctx.content_rect();
+    h.query_all_by_label(label)
+        .filter(|n| {
+            let r = n.rect();
+            if in_sets {
+                sets.contains_rect(r)
+            } else {
+                r.min.x >= sets.max.x && window.contains_rect(r)
+            }
+        })
+        .collect()
+}
+
+/// Right-clicks the widest node named `label` right of the Sets column's panel: the set editor's slot row, which
+/// carries the menu (the row's name beside it is not clickable).
+fn right_click_in_editor(h: &mut H, label: &str) {
     settle(h, 4);
-    let anchor = h
-        .query_all_by_label("Diffuse")
-        .map(|n| n.rect().min.x)
-        .fold(f32::MAX, f32::min);
-    let target = h
-        .query_all_by_label(label)
-        .filter(|n| n.rect().min.x >= anchor - 1.0)
+    let nodes = nodes_in(h, label, false);
+    let target = nodes
+        .iter()
         .max_by(|a, b| a.rect().width().total_cmp(&b.rect().width()))
-        .unwrap_or_else(|| panic!("no {label:?} in the set editor (right of x {anchor})"));
+        .unwrap_or_else(|| panic!("no {label:?} right of the Sets column's panel"));
     target.click_secondary();
     h.run_steps(2);
 }
 
+/// Right-clicks the widest node named `label` inside the Sets column's panel: a set card's chip.
+fn right_click_in_sets(h: &mut H, label: &str) {
+    settle(h, 4);
+    let nodes = nodes_in(h, label, true);
+    let target = nodes
+        .iter()
+        .max_by(|a, b| a.rect().width().total_cmp(&b.rect().width()))
+        .unwrap_or_else(|| panic!("no {label:?} inside the Sets column's panel"));
+    target.click_secondary();
+    h.run_steps(2);
+}
 /// A set's Material tab after giving it `shader`.
 fn material_tab(h: &mut H, set: &str, shader: engine::shader::Shader) {
     model(h).set_shader(set, Some(shader));
@@ -314,11 +336,14 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/cobble"),
         steps: &[],
-        // right-clicks the RMAOS row inside the set editor; the Sets column's chip of that name is not the target
+        // Right-clicks the RMAOS row right of the Sets column's panel (the editor's), and the marker wants the pin command
+        // there too; a menu from a Sets chip opens inside that panel (`the_sets_columns_slot_menu_is_not_the_editors`).
+        // Limit: the marker does not carry the slot's number (the editor's menu title is the bare `RMAOS`), so it
+        // identifies "the editor's slot menu on cobble", not which slot.
         act: Some(|h| right_click_in_editor(h, "RMAOS")),
         marker: &[
             has("textures/architecture/stone/cobble"),
-            has_right_of("Pin this slot (always use this file)", "Diffuse"),
+            has_right_of_sets("Pin this slot (always use this file)"),
         ],
         transient: true,
     },
@@ -676,4 +701,34 @@ const SAVE_BUTTON: &[Needle] = &[has_role("Button", "Save")];
 
 fn vec2_1280() -> Vec2 {
     eframe::egui::vec2(1280.0, 800.0)
+}
+
+/// The competing menu: a right-click on cobble's RMAOS chip in the Sets column opens a slot menu that has the same pin
+/// command, and the editor entry's marker does not hold on that frame.
+#[test]
+fn the_sets_columns_slot_menu_is_not_the_editors() {
+    let editor = SCREENS
+        .iter()
+        .find(|s| s.name == "set editor slot menu")
+        .unwrap();
+    crate::app_data();
+    let d = tempfile::tempdir().unwrap();
+    let (mut h, _run) = fixtures::start("demo", d.path(), false).unwrap();
+    select_set(&mut h, "architecture/stone/cobble");
+    right_click_in_sets(&mut h, "RMAOS");
+    assert!(settle(&mut h, 4));
+    let snap = snapshot(&h);
+    // the Sets column's menu is open: its title names the slot, and the pin command is in the frame
+    assert!(
+        holds(&snap, &[has("Slot 6: RMAOS")]),
+        "the Sets column's slot menu did not open"
+    );
+    assert!(
+        holds(&snap, &[has("Pin this slot (always use this file)")]),
+        "the Sets column's slot menu has no pin command"
+    );
+    assert!(
+        !holds(&snap, editor.marker),
+        "the editor's marker holds on the Sets column's menu"
+    );
 }

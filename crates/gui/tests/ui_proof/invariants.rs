@@ -168,7 +168,15 @@ pub struct Visit {
 
 /// Every entry at every size: one frame, one `run_checks`, every frame invariant. A visit that fails is collected and
 /// the walk goes on. Afterwards each entry's marker is checked against every other entry's screen at the middle size.
-pub fn walk(entries: &mut [Box<dyn Entry>]) -> Walked {
+/// The checker the shipped walk runs on each frame; the proof passes a wrapper that records its calls.
+pub fn real_checker(_screen: &str, _size: Vec2, snap: &Snapshot) -> Vec<Finding> {
+    run_checks(snap)
+}
+
+pub fn walk(
+    entries: &mut [Box<dyn Entry>],
+    checker: &mut dyn FnMut(&str, Vec2, &Snapshot) -> Vec<Finding>,
+) -> Walked {
     let mut walked = Walked {
         hits: vec![],
         errors: vec![],
@@ -187,7 +195,7 @@ pub fn walk(entries: &mut [Box<dyn Entry>]) -> Walked {
                     continue;
                 }
             };
-            let findings = run_checks(&snap);
+            let findings = checker(e.name(), size, &snap);
             let frame = Frame {
                 screen: e.name(),
                 size,
@@ -336,7 +344,7 @@ pub fn verdict(walked: &Walked, allowed: &[Allowed]) -> Vec<String> {
         match slot {
             Some(i) => left[i] -= 1,
             None => out.push(format!(
-                "{}; if it cannot be fixed now, add it to ALLOWED in crates/gui/tests/ui_proof/invariants.rs with its screen, size, name, count and px, and a reason",
+                "{}; if it cannot be fixed now, add it to ALLOWED in crates/gui/tests/ui_proof/invariants.rs with its screen, size, name, ordinal, count and px, and a reason",
                 h.text()
             )),
         }
@@ -356,7 +364,7 @@ pub fn verdict(walked: &Walked, allowed: &[Allowed]) -> Vec<String> {
 fn the_walk_finds_nothing_new_on_any_screen() {
     let start = std::time::Instant::now();
     let mut list = entries();
-    let walked = walk(&mut list);
+    let walked = walk(&mut list, &mut real_checker);
     println!(
         "walk: {} screens x {} sizes in {:.1?}, {} hits, {} errors",
         list.len(),
@@ -464,9 +472,21 @@ fn the_start_screen() -> Box<dyn Entry> {
 #[test]
 fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
     let mut list: Vec<Box<dyn Entry>> = vec![the_start_screen(), Box::new(Faulty)];
-    let walked = walk(&mut list);
+    // the checker is a wrapper that records each call and runs the real one: a visit that skips it leaves no record
+    let mut calls: Vec<(String, (f32, f32))> = vec![];
+    let walked = walk(&mut list, &mut |screen, size, snap| {
+        calls.push((screen.to_string(), (size.x, size.y)));
+        real_checker(screen, size, snap)
+    });
     let bad = verdict(&walked, &[]);
     println!("{bad:#?}");
+    let mut want_calls = vec![];
+    for name in ["start screen", "test-only faulty screen"] {
+        for size in SIZES {
+            want_calls.push((name.to_string(), (size.x, size.y)));
+        }
+    }
+    assert_eq!(calls, want_calls, "the checker ran on every frame");
     assert!(walked.errors.is_empty(), "{:?}", walked.errors);
     // (a) every visit happened, and each ran `run_checks` on the frame the entry shows
     let count = |mut e: Box<dyn Entry>, size: Vec2| run_checks(&e.at(size).unwrap()).len();
@@ -503,13 +523,20 @@ fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
         bad.iter().all(|m| m.contains("ALLOWED")),
         "every failure says what to do about it: {bad:#?}"
     );
+    // the narrow-window line names the widget's role
+    assert!(
+        bad.iter().any(|m| m.starts_with(
+            r#"test-only faulty screen at 1100x800: window_edge "Far away" #0 (600.0 px): Button ["#
+        )),
+        "{bad:#?}"
+    );
 }
 
 /// A visit that fails is a collected failure naming screen and size; the walk goes on to the other sizes and entries.
 #[test]
 fn a_failed_visit_is_collected_and_the_walk_goes_on() {
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(Broken), Box::new(Faulty)];
-    let walked = walk(&mut list);
+    let walked = walk(&mut list, &mut real_checker);
     let bad = verdict(&walked, &[]);
     assert!(
         bad.iter()
@@ -533,6 +560,23 @@ fn a_failed_visit_is_collected_and_the_walk_goes_on() {
             .count(),
         SIZES.len()
     );
+    // findings survive a failed visit: a real hit from the broken entry's later size and one from the entry after it
+    assert!(
+        walked
+            .hits
+            .iter()
+            .any(|h| h.screen == "test-only broken screen" && h.size.x == 1280.0),
+        "{:?}",
+        walked.hits
+    );
+    assert!(
+        walked
+            .hits
+            .iter()
+            .any(|h| h.screen == "test-only faulty screen" && h.invariant == "window_edge"),
+        "{:?}",
+        walked.hits
+    );
 }
 
 /// A shipped-kind entry whose `open` panics is a collected failure naming screen and size; a clean entry beside it is
@@ -549,7 +593,7 @@ fn an_entry_whose_open_panics_is_collected_and_the_walk_goes_on() {
         transient: false,
     };
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(ScreenEntry::new(&BOOM)), the_start_screen()];
-    let walked = walk(&mut list);
+    let walked = walk(&mut list, &mut real_checker);
     let bad = verdict(&walked, &[]);
     assert!(
         SIZES.iter().all(|s| bad.iter().any(|m| m
@@ -586,7 +630,7 @@ fn a_marker_another_screen_satisfies_fails() {
         }
     }
     let mut list: Vec<Box<dyn Entry>> = vec![Box::new(Faulty), Box::new(Twin)];
-    let walked = walk(&mut list);
+    let walked = walk(&mut list, &mut real_checker);
     assert!(
         walked.errors.iter().any(|e| e.contains(
             "marker of \"test-only twin\" also holds on the screen \"test-only faulty screen\""
