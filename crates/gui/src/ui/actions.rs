@@ -314,7 +314,7 @@ pub static ACTIONS: &[Action] = &[
     // Textures grid
     a(
         "select-all",
-        "Select every visible texture (every set when a set is active)",
+        "Select visible tiles or, from a set, matching sets with their own files",
         Grid,
         &[ctrl(Key::A)],
         |m, _| m.select_all_visible(),

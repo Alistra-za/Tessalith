@@ -111,7 +111,7 @@ After a complete export, Tessalith writes `<export folder>\PBRNIFPatcher\<name>.
 
 ## The JSON editor
 
-Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button beside the Material tab, or from the command palette. It shows the whole JSON as one tab, with one entry per PBR set and then your delete sections. **Pop out** gives it its own window.
+Open it from **Export to ▾ → PGPatcher JSON editor…**, from the button beside the Material tab, or from the command palette. The editor shows the whole JSON in one tab. Only set entries that will be written get a row and a **Show** button. Click **Show** to open that set in the main window. Your delete sections follow the set entries. **Pop out** gives it its own window.
 
 ![The JSON editor.](../img/gui/GUI-PGPatcher-JSON/json-editor.png)
 

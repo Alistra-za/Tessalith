@@ -132,7 +132,9 @@ A `_fuzz` or `_sheen` map doesn't make a set Advanced Skin ([why](Texture-Types.
 
 ## Narrowing the list
 
-Click a row's subject to select it in the Textures view. Arriving from a count (**N undecided**, a set's **⚠** badge) opens the list narrowed, with a chip to clear it. The **Checks** pill narrows to check rows.
+Counts such as **N undecided** filter the list. Click the chip to clear it. **Checks** shows check rows.
+
+The ordinary set filter follows a set when its first file arrives. If its id matches another set's engine key, the filter shows the keyed set. An empty id shows no rows. Clicking an editor reason that opens Problems focuses that card's own row in either case. <!-- D:JV1,JV2,JV5 -->
 
 ## Hiding kinds of row
 
@@ -140,5 +142,5 @@ Click a row's subject to select it in the Textures view. Arriving from a count (
 
 - **The tab** counts hidden problem rows apart: `Problems (12 · 60 hidden)`. A hidden note counts nowhere. <!-- D:JO6 -->
 - **The list's first line** says what is hidden, with the project's numbers: "2 kinds hidden in this project (60 rows). Hidden rows still count for Ready." <!-- D:JO6 -->
-- **Kinds ▾ (n hidden)** counts the rows this list hides, notes included. <!-- D:JO6 -->
-- **Showing them again:** tick the kind again in **Kinds ▾**, or click "+k more in Problems" on a set's status line, which shows the hidden kinds of that set's rows again ([Set editor](GUI-Set-Editor.md#is-the-set-ready)).
+- **Kinds ▾ (n hidden)** counts hidden rows in this list, including notes. <!-- D:JO6 -->
+- Restore kinds in **Kinds ▾** or with [**+k more in Problems**](GUI-Set-Editor.md#is-the-set-ready).
