@@ -489,6 +489,31 @@ impl super::json_finish::Guarded for PendingCsSkin {
     ) -> std::io::Result<()> {
         d.set_cs_skin_shas(shas)
     }
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        let files = self
+            .files
+            .iter()
+            .filter_map(|f| {
+                let path = self.root.join(&f.rel);
+                // shortcut: the text hashes the diffuse's bytes and leaves out a texture not on disk (`text_now`), so with
+                // a DDS of the file written by this run it is not known before the run: listed as changed, with both
+                // record files (a third case beside ruling 3c-47's two). Upgrade when the currency preview (Task 8) says
+                // which DDS this run really rewrites.
+                let pending = std::iter::once(&f.diffuse)
+                    .chain(f.outputs.iter().map(|(_, o)| o))
+                    .any(|p| written(p));
+                if pending {
+                    return Some((path, None));
+                }
+                // `finish` skips a file whose diffuse cannot be read.
+                text_now(f).ok().map(|(text, _)| (path, Some(text)))
+            })
+            .collect();
+        vec![(self.root.clone(), files)]
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_cs_skin_shas(shas);
+    }
 }
 
 #[cfg(test)]

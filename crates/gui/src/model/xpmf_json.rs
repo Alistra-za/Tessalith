@@ -12,7 +12,7 @@ use engine::sets::same_id;
 use engine::shader::Shader;
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The vendored schema's `$id`, written as `$schema` (XPMF ignores it; editors use it).
 pub const SCHEMA_URL: &str =
@@ -617,6 +617,20 @@ pub fn prepare(m: &AppModel) -> Option<PendingXpmf> {
     Some(p)
 }
 
+/// cm_json's rule (ruling R2): a profile naming an output of this project that is not on disk is not written; the
+/// first such texture of `rel`, by `on_disk`.
+fn missing_texture<'a>(
+    p: &'a PendingXpmf,
+    rel: &str,
+    on_disk: impl Fn(&Path) -> bool,
+) -> Option<&'a String> {
+    p.own_textures
+        .get(rel)
+        .into_iter()
+        .flatten()
+        .find(|t| !on_disk(&p.root.join(t)))
+}
+
 /// After a clean export: write each profile whose own textures are on disk, unless it was edited outside Tessalith,
 /// then report the recorded profiles this run did not write (never deleted). `shas` is the record (path → hash of
 /// what was last written there); returns the new record.
@@ -630,14 +644,7 @@ pub fn finish(
     let mut written = 0;
     for (rel, text) in &p.files {
         let path = p.root.join(rel);
-        // cm_json's rule (ruling R2): a profile naming an output of this project that is not on disk is not written.
-        let missing = p
-            .own_textures
-            .get(rel)
-            .into_iter()
-            .flatten()
-            .find(|t| !p.root.join(t).is_file());
-        if let Some(t) = missing {
+        if let Some(t) = missing_texture(p, rel, |t| t.is_file()) {
             notes.push(format!(
                 "{}: {t} was not exported; JSON not written",
                 path.display()
@@ -751,5 +758,23 @@ impl super::json_finish::Guarded for PendingXpmf {
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
         d.set_xpmf_shas(shas)
+    }
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        self.folders()
+            .map(|f| {
+                let files = f
+                    .files
+                    .iter()
+                    .filter(|(rel, _)| {
+                        missing_texture(f, rel, |t| t.is_file() || written(t)).is_none()
+                    })
+                    .map(|(rel, text)| (f.root.join(rel), Some(text.clone())))
+                    .collect();
+                (f.root.clone(), files)
+            })
+            .collect()
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_xpmf_shas(shas);
     }
 }

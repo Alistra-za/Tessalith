@@ -305,7 +305,7 @@ pub fn refuse_clashes(out: &mut [CmTarget], exporting: impl Fn(&str) -> bool) {
 
 use super::history::{orphans, records_at};
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// What an export about to start writes once it has ended (computed when it starts, like the CS PBR files).
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -382,6 +382,11 @@ pub fn prepare(m: &AppModel) -> Option<PendingCm> {
     Some(p)
 }
 
+/// The `_m` a complex material JSON at `path` belongs to: it is written only while that file is on disk.
+fn json_dds(path: &Path) -> PathBuf {
+    path.with_extension("dds")
+}
+
 /// After a clean export (design §6): write each file whose `_m` is on disk, unless it was edited outside Tessalith,
 /// then report the recorded files this run did not write (D7: never deleted). `shas` is the record (path → hash of
 /// what was last written there); returns the new record.
@@ -396,7 +401,7 @@ pub fn finish(
     let mut written = 0;
     for (rel, text) in &p.files {
         let path = p.root.join(rel);
-        let dds = path.with_extension("dds");
+        let dds = json_dds(&path);
         if !dds.is_file() {
             notes.push(format!(
                 "{}: {} was not exported; JSON not written",
@@ -464,6 +469,22 @@ impl super::json_finish::Guarded for PendingCm {
         shas: &BTreeMap<String, String>,
     ) -> std::io::Result<()> {
         d.set_cm_json_shas(shas)
+    }
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<super::json_finish::PlannedFolder> {
+        let files = self
+            .files
+            .iter()
+            .map(|(rel, text)| (self.root.join(rel), text))
+            .filter(|(path, _)| {
+                let dds = json_dds(path);
+                dds.is_file() || written(&dds)
+            })
+            .map(|(path, text)| (path, Some(text.clone())))
+            .collect();
+        vec![(self.root.clone(), files)]
+    }
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>) {
+        r.set_cm_json_shas(shas);
     }
 }
 

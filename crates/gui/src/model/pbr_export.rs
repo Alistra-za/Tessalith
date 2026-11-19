@@ -746,7 +746,7 @@ fn exported(rows: &[Row], key: &str) -> Result<(), String> {
 
 /// Note HF9: one dep of an entry: written or up to date in this run, or, on a run that leaves sets out, untouched by it
 /// and on disk ("leave it alone" keeps an entry whose source changed since).
-fn dep_ok(p: &PendingJson, rows: &[Row], key: &str) -> Result<(), String> {
+pub(super) fn dep_ok(p: &PendingJson, rows: &[Row], key: &str) -> Result<(), String> {
     let touched = rows.iter().any(|r| r.job_key.eq_ignore_ascii_case(key));
     match &p.untouched_root {
         Some(root) if !touched => {
@@ -804,15 +804,40 @@ pub fn copy_files(
     }
 }
 
-/// After a successful export: the JSON of the sets that fully exported (spec §6.1, §6.4).
-pub fn finish(
+/// E7 (ruling 3c-46): what `copy_files` would do with one copy, asked of the disk now and written nowhere, once its
+/// owner passed `dep_ok`. `src_written`: this run writes the owner's DDS, so its bytes are not known before the run
+/// (the bytes on disk now stand in for the "same bytes" test). `None`: nothing is copied (the source cannot be read, or
+/// the destination is kept). `Some(Some(sha))`: copied, recording `sha`, and the copy changes the file;
+/// `Some(None)`: copied, bytes not known before the run.
+pub(super) fn copy_plan(
+    src: &std::path::Path,
+    dst: &std::path::Path,
+    last: Option<&str>,
+    src_written: bool,
+) -> Option<Option<(String, bool)>> {
+    use sha2::{Digest, Sha256};
+    let bytes = match std::fs::read(src) {
+        Ok(b) => b,
+        Err(_) if src_written => vec![],
+        Err(_) => return None,
+    };
+    engine::dds::may_replace(dst, &bytes, recorded(last)).ok()?;
+    if src_written {
+        return Some(None);
+    }
+    let changes = std::fs::read(dst).map_or(true, |b| b != bytes);
+    Some(Some((hex::encode(Sha256::digest(&bytes)), changes)))
+}
+
+/// The PGPatcher JSON text `finish` writes after a run with these `rows`, and its entry count; `None` (with its note)
+/// when it writes none.
+pub(super) fn json_text(
     p: &PendingJson,
     rows: &[Row],
-    last_sha: Option<&str>,
     notes: &mut Vec<String>,
-) -> Finish {
+) -> Option<(String, usize)> {
     if p.entries.is_empty() {
-        return Finish::Nothing;
+        return None;
     }
     let mut kept = vec![];
     for (id, deps, e) in &p.entries {
@@ -830,14 +855,14 @@ pub fn finish(
         notes.push(
             "PGPatcher JSON not written: there is no PBR set, and delete sections alone are not written".into(),
         );
-        return Finish::Nothing;
+        return None;
     }
     if kept.iter().all(|e| e.section) {
         notes.push(
             "PGPatcher JSON not written: no PBR set exported completely (the previous JSON is kept; delete sections alone would remove shapes with no PBR replacement)"
                 .into(),
         );
-        return Finish::Nothing;
+        return None;
     }
     let doc = document(&kept);
     if let Err(errs) = validate(&doc.to_value()) {
@@ -845,9 +870,21 @@ pub fn finish(
             "PGPatcher JSON not written: it does not validate ({})",
             errs[0]
         ));
-        return Finish::Nothing;
+        return None;
     }
-    let text = to_text(&doc);
+    Some((to_text(&doc), kept.len()))
+}
+
+/// After a successful export: the JSON of the sets that fully exported (spec §6.1, §6.4).
+pub fn finish(
+    p: &PendingJson,
+    rows: &[Row],
+    last_sha: Option<&str>,
+    notes: &mut Vec<String>,
+) -> Finish {
+    let Some((text, kept)) = json_text(p, rows, notes) else {
+        return Finish::Nothing;
+    };
     // Note BV3: a file edited outside Tessalith asks (P21); one that cannot be read is kept.
     match engine::dds::may_replace(&p.path, text.as_bytes(), recorded(last_sha)) {
         Ok(()) => {}
@@ -862,7 +899,7 @@ pub fn finish(
             notes.push(format!(
                 "PGPatcher JSON written: {} ({})",
                 p.path.display(),
-                super::code_text::counted(kept.len(), "entry", "entries")
+                super::code_text::counted(kept, "entry", "entries")
             ));
             sha256_of(&p.path).map_or(Finish::Nothing, Finish::Written)
         }

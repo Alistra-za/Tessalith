@@ -2254,46 +2254,93 @@ fn a_missing_destination_is_resolved_through_its_nearest_existing_parent() {
 
 // ---- Task 4 (E7): Review lists every file the export touches ----
 
-/// The acceptance test's body: the changed files under the project folder, against what Review listed when it
-/// opened. Two listing rules and no other exemption: a changed path under a listed Also folder counts as listed, and
-/// the manifest is one listed path whenever the export runs.
-fn assert_every_changed_file_is_listed(mut m: AppModel, dir: &std::path::Path) {
+/// One export run seen from outside: what Review listed when its Export was pressed, and what changed on disk.
+struct Seen {
+    listed: std::collections::BTreeSet<std::path::PathBuf>,
+    changed: std::collections::BTreeSet<std::path::PathBuf>,
+    w: sdc_gui::model::review::ReviewWrites,
+}
+
+/// The acceptance helper: open Review if it is not open, take its list, press its Export and compare the files that
+/// changed under `dir` (the union of both snapshots, so a removed or renamed file is a change) with the
+/// list, under the listing rules and nothing else:
+/// 1. a changed path under a listed Also folder counts as listed;
+/// 2. the manifest is a listed path whenever the export runs, changed or not.
+///
+/// Every changed file must be listed (ruling 3c-47). A listed file may stay unchanged only where its bytes cannot be
+/// known before the run: the manifest; a vanilla copy (its source is a DDS this run writes) and the two record files
+/// for its hash (3c-47); and a DDS output, which the brief lists for every file the plan writes until Task 8 narrows
+/// it to the ones that will change.
+fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_MANIFEST, HOVER_PROJECT_TOML};
     use std::collections::BTreeSet;
     use std::path::PathBuf;
-    let out = m.output_root();
-    let root = m.root.clone().unwrap();
-    m.header_export_clicked();
+    if m.review.is_none() {
+        m.header_export_clicked();
+    }
     assert!(m.review.is_some(), "the header opens Review");
-    let listed: BTreeSet<PathBuf> = {
-        let w = m.review_writes();
-        w.outputs
-            .iter()
-            .cloned()
-            .chain(w.also_updated.iter().map(|r| r.path.clone()))
-            .collect()
-    };
+    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
+    let w = (*m.review_writes()).clone();
+    let listed: BTreeSet<PathBuf> = w
+        .outputs
+        .iter()
+        .cloned()
+        .chain(w.also_updated.iter().map(|r| r.path.clone()))
+        .collect();
     let before = support::tree_hashes(&[dir]);
     m.export_from_review();
     assert!(m.wait_idle(Duration::from_secs(120)));
+    assert!(m.export.summary.is_some(), "{:?}", m.export.notes);
     let after = support::tree_hashes(&[dir]);
-    let changed: BTreeSet<PathBuf> = after
-        .iter()
-        .filter(|(p, h)| before.get(*p) != Some(*h))
-        .map(|(p, _)| p.clone())
+    let changed: BTreeSet<PathBuf> = before
+        .keys()
+        .chain(after.keys())
+        .filter(|p| before.get(*p) != after.get(*p))
+        .cloned()
         .collect();
-    // A first export that really writes files: equality under the two listing rules only (controller ruling).
-    assert!(!changed.is_empty());
-    let also_dirs: Vec<PathBuf> = m.review_writes_at_open().also_folders();
-    let changed: BTreeSet<PathBuf> = changed
-        .into_iter()
+    let also_dirs = w.also_folders();
+    let seen: BTreeSet<PathBuf> = changed
+        .iter()
         .map(|p| {
             also_dirs
                 .iter()
                 .find(|f| p.starts_with(f))
                 .cloned()
-                .unwrap_or(p)
+                .unwrap_or_else(|| p.clone())
         })
         .collect();
+    let unlisted: Vec<&PathBuf> = seen.difference(&listed).collect();
+    assert!(unlisted.is_empty(), "changed, not listed: {unlisted:?}");
+    let entry = |p: &PathBuf| w.also_updated.iter().find(|e| &e.path == p);
+    let copy_listed = w.also_updated.iter().any(|e| e.hover == HOVER_COPY);
+    let may_stay = |p: &PathBuf| {
+        let dds = w.outputs.contains(p) && p.extension().is_some_and(|e| e == "dds");
+        let hover = entry(p).map(|e| e.hover);
+        dds || hover == Some(HOVER_MANIFEST)
+            || (copy_listed
+                && matches!(
+                    hover,
+                    Some(HOVER_COPY | HOVER_PROJECT_TOML | HOVER_GENERATED)
+                ))
+    };
+    let stayed: Vec<&PathBuf> = listed.difference(&seen).filter(|p| !may_stay(p)).collect();
+    assert!(stayed.is_empty(), "listed, not changed: {stayed:?}");
+    Seen {
+        listed,
+        changed: seen,
+        w,
+    }
+}
+
+/// The first export of the acceptance test, checked under the listing rules (controller ruling).
+fn assert_every_changed_file_is_listed(mut m: AppModel, dir: &std::path::Path) {
+    let out = m.output_root();
+    let root = m.root.clone().unwrap();
+    let Seen {
+        listed, changed, ..
+    } = export_and_compare(&mut m, dir);
+    // A first export that really writes files: every listed file is new, so the two sets are equal.
+    assert!(!changed.is_empty());
     assert_eq!(changed, listed, "changed vs listed");
     assert!(listed.contains(&root.join("_sdc").join("generated.json")));
     // The engine plans into `<export>\<root prefix>` (Note HQ1; here `textures`), so its manifest is there, not at
@@ -2318,6 +2365,228 @@ fn review_lists_every_file_with_an_also_tick() {
     assert!(m.wait_idle(Duration::from_secs(120)));
     assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
     assert_every_changed_file_is_listed(m, d.path());
+}
+
+// ---- Task 4 fix round 1 (rulings 3c-46, 3c-47): repeat exports, each from a project exported once ----
+
+/// `pbr_opened_chosen_decided`, exported once through Review (checked by the helper) and settled.
+fn pbr_exported_once(dir: &std::path::Path) -> AppModel {
+    let mut m = support::pbr_opened_chosen_decided(dir);
+    export_and_compare(&mut m, dir);
+    assert!(m.review.is_none());
+    m
+}
+
+/// The listed entry with `hover`, if any.
+fn listed_with(s: &Seen, hover: &str) -> Vec<std::path::PathBuf> {
+    s.w.also_updated
+        .iter()
+        .filter(|e| e.hover == hover)
+        .map(|e| e.path.clone())
+        .collect()
+}
+
+/// A vanilla project where a new set `leaf` borrows rock01's normal (as `pbr_export.rs::vanilla_borrow`): the model,
+/// the owner's source image and the copy's path.
+fn vanilla_borrow(d: &std::path::Path) -> (AppModel, std::path::PathBuf, std::path::PathBuf) {
+    use sdc_gui::model::sets::{set_views, DropChoice, DropOutcome, SlotFill, SlotKind};
+    use serde_json::json;
+    let mut m = support::pbr_ready(d);
+    let idle = |m: &mut AppModel| assert!(m.wait_idle(Duration::from_secs(60)));
+    let leaf = m
+        .items
+        .iter()
+        .find(|i| i.name == "leaf.png")
+        .unwrap()
+        .key
+        .clone();
+    m.set_field(&leaf, "subtype", json!("pbr_albedo"));
+    idle(&mut m);
+    let id = m.drop_new_set(&leaf).unwrap();
+    idle(&mut m);
+    m.set_target(engine::config::Target::Vanilla);
+    idle(&mut m);
+    let normal = set_views(&m)
+        .iter()
+        .find(|v| v.id == "landscape/rock01")
+        .and_then(|v| match v.slots.get(&SlotKind::Normal) {
+            Some(SlotFill::Own { item }) => Some(item.clone()),
+            _ => None,
+        })
+        .expect("rock01 owns a normal map");
+    assert!(matches!(
+        m.drop_choice(&normal, &id, DropChoice::Share),
+        DropOutcome::Joined
+    ));
+    idle(&mut m);
+    m.set_field(&normal, "subtype", json!("landscape_normal"));
+    idle(&mut m);
+    let views = set_views(&m);
+    let borrower = views.iter().find(|v| v.id == id).unwrap();
+    let Some(SlotFill::Own { item: d_item }) = borrower.slots.get(&SlotKind::Diffuse) else {
+        panic!("the new set owns its diffuse: {:?}", borrower.slots);
+    };
+    let dout = m.item(d_item).unwrap().job.as_ref().unwrap().output.clone();
+    let stem = dout.file_stem().unwrap().to_string_lossy().into_owned();
+    let want: std::path::PathBuf = dout
+        .with_file_name(format!("{stem}_n.dds"))
+        .components()
+        .collect();
+    let source = m.item(&normal).unwrap().input.clone();
+    (m, source, want)
+}
+
+/// (1) Nothing changed since the last export: Review lists the DDS outputs (the brief's broad rule until Task 8) and
+/// the manifest, and nothing else: no JSON, no record file.
+#[test]
+fn a_repeat_export_with_nothing_changed_lists_only_the_manifest_besides_the_outputs() {
+    use sdc_gui::model::review::HOVER_MANIFEST;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    let s = export_and_compare(&mut m, d.path());
+    let also: Vec<_> = s.w.also_updated.iter().map(|e| e.hover).collect();
+    assert_eq!(also, [HOVER_MANIFEST], "{:?}", s.w.also_updated);
+    assert!(
+        s.w.outputs
+            .iter()
+            .all(|p| p.extension().is_some_and(|e| e == "dds")),
+        "{:?}",
+        s.w.outputs
+    );
+}
+
+/// (2) The owner of a borrowed slot changed: the borrower's copy is replaced from the DDS this run writes, and its hash
+/// goes into both record files. All three are listed, and all three change.
+#[test]
+fn a_changed_owner_lists_the_borrowed_copy_and_both_record_files() {
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, source, want) = vanilla_borrow(d.path());
+    let first = export_and_compare(&mut m, d.path());
+    assert!(first.changed.contains(&want), "the first export copies");
+    image::ImageBuffer::from_fn(64, 64, |x, _| image::Rgb([120u8, x as u8, 255]))
+        .save(&source)
+        .unwrap();
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let s = export_and_compare(&mut m, d.path());
+    assert_eq!(listed_with(&s, HOVER_COPY), std::slice::from_ref(&want));
+    for f in [
+        want,
+        listed_with(&s, HOVER_PROJECT_TOML)[0].clone(),
+        listed_with(&s, HOVER_GENERATED)[0].clone(),
+    ] {
+        assert!(s.changed.contains(&f), "{f:?} changes: {:?}", s.changed);
+    }
+}
+
+/// (3) A saved set edit changes the next PGPatcher JSON while the old file is Tessalith's: the JSON and
+/// `sdc-project.toml` (its new hash) are listed and change.
+#[test]
+fn a_saved_edit_that_changes_our_json_lists_it_and_the_project_record() {
+    use sdc_gui::model::review::HOVER_PROJECT_TOML;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    let json = support::pgp_json_path(&m);
+    m.set_json_value(
+        "landscape/rock01",
+        "specular_level",
+        Some(serde_json::json!(0.07)),
+    );
+    m.save().unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let s = export_and_compare(&mut m, d.path());
+    let project = listed_with(&s, HOVER_PROJECT_TOML);
+    assert_eq!(project.len(), 1, "{:?}", s.w.also_updated);
+    for f in [&json, &project[0]] {
+        assert!(s.listed.contains(f) && s.changed.contains(f), "{f:?}");
+    }
+}
+
+/// (4) A JSON with no record that already holds the bytes the export would write: the writer adopts it (same bytes,
+/// so the JSON does not change) and records its hash in both record files. Those two are listed; the JSON is not.
+#[test]
+fn an_unrecorded_json_with_the_same_bytes_lists_only_the_record_files() {
+    use sdc_gui::model::review::{HOVER_GENERATED, HOVER_PROJECT_TOML};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    let json = support::pgp_json_path(&m);
+    // Forget the records: the JSON on disk is now one Tessalith has no hash for.
+    let project = m.sets_doc.as_ref().unwrap().path().to_path_buf();
+    let text = std::fs::read_to_string(&project).unwrap();
+    let kept: String = text
+        .lines()
+        .filter(|l| !l.contains("json_sha256"))
+        .map(|l| format!("{l}\n"))
+        .collect();
+    assert_ne!(kept, text, "guard: the record was there");
+    std::fs::write(&project, kept).unwrap();
+    std::fs::remove_file(m.root.clone().unwrap().join("_sdc").join("generated.json")).unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.header_export_clicked();
+    // Unrecorded: Review asks; Keep is the answer that leaves the file as it is.
+    m.answer_review_json(false);
+    let s = export_and_compare(&mut m, d.path());
+    assert!(
+        !s.listed.contains(&json) && !s.changed.contains(&json),
+        "{json:?}"
+    );
+    for f in [
+        listed_with(&s, HOVER_PROJECT_TOML),
+        listed_with(&s, HOVER_GENERATED),
+    ] {
+        assert_eq!(f.len(), 1, "{:?}", s.w.also_updated);
+        assert!(s.changed.contains(&f[0]), "{:?} changes", f[0]);
+    }
+}
+
+/// (5) A file Tessalith did not write sits where a borrowed copy goes: the writer keeps it, so Review lists neither it
+/// nor a record change for it.
+#[test]
+fn a_foreign_copy_destination_is_not_listed_and_not_changed() {
+    use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED};
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _, want) = vanilla_borrow(d.path());
+    export_and_compare(&mut m, d.path());
+    std::fs::write(&want, b"hand made").unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert!(
+        listed_with(&s, HOVER_COPY).is_empty(),
+        "{:?}",
+        s.w.also_updated
+    );
+    assert!(
+        listed_with(&s, HOVER_GENERATED).is_empty(),
+        "{:?}",
+        s.w.also_updated
+    );
+    assert!(!s.changed.contains(&want));
+    assert_eq!(std::fs::read(&want).unwrap(), b"hand made");
+}
+
+/// (6) A NIF whose export path holds a file Tessalith did not write, answered Keep: the NIF export skips it, so
+/// Review lists neither the NIF nor its record.
+#[test]
+fn a_foreign_nif_answered_keep_is_not_listed() {
+    use sdc_gui::model::meshes::export::GuardChoice;
+    use sdc_gui::model::review::{HOVER_NIF, HOVER_NIF_RECORD};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    let mut row = support::nif_row("meshes\\x.nif", Some([7; 32]));
+    row.answer = Some(GuardChoice::KeepTheirs);
+    m.set_nif_review_rows(vec![row]);
+    let s = export_and_compare(&mut m, d.path());
+    assert!(
+        listed_with(&s, HOVER_NIF).is_empty(),
+        "{:?}",
+        s.w.also_updated
+    );
+    assert!(listed_with(&s, HOVER_NIF_RECORD).is_empty());
+    assert!(!s
+        .changed
+        .iter()
+        .any(|p| p.to_string_lossy().contains("x.nif")));
 }
 
 #[test]

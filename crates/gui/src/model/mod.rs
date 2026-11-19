@@ -573,13 +573,12 @@ pub struct AppModel {
     /// The cached set views and export blocks (DECISIONS Note Y7).
     pub(crate) views: std::cell::RefCell<ViewCache>,
     /// K3: `review_json` for a view key, and when it was read; cleared with `review`.
-    review_json_cache: std::cell::RefCell<Option<(ViewKey, Instant, Vec<review::JsonLine>)>>,
+    review_json_cache: std::cell::RefCell<Option<review::JsonCache>>,
     /// E7: `review_writes` for its key, and when it was built; the footer draws from the `Arc`.
     review_writes_cache: std::cell::RefCell<Option<review::WritesCache>>,
-    /// E7: the sha of each vanilla copy's target, kept beside the target's stamp so a file is hashed again only when
-    /// its stamp changed (it outlives `review_writes_cache`'s 1 s).
-    copy_sha_memo:
-        std::cell::RefCell<std::collections::HashMap<PathBuf, (SourceStamp, Option<String>)>>,
+    /// E7: each vanilla copy's plan for Review, kept beside the stamps it was read under so the files are read again
+    /// only when one changed (it outlives `review_writes_cache`'s 1 s).
+    copy_sha_memo: std::cell::RefCell<review::CopyMemo>,
     /// E7 (test hook): the list Review showed when it opened (`open_review` takes it; `start_export_pass` takes
     /// `review`, so it cannot live there).
     #[cfg(feature = "test-hooks")]

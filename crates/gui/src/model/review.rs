@@ -2,6 +2,7 @@
 //! only what the user answered; blockers and undecided textures are read live from the model.
 use super::code_text::counted;
 use super::history::{record_key, records_at, sha256_of};
+use super::meshes::export::GuardChoice;
 use super::{
     bottom::BottomTab, cm_json, cs_pbr_export, cs_skin_json, pbr_export, xpmf_json, AppModel,
     Continue, ExportPress, ItemStatus,
@@ -184,6 +185,46 @@ pub(super) struct WritesCache {
     value: Arc<ReviewWrites>,
 }
 
+/// The exports `review_json` prepared, kept beside its lines so `review_writes` reads the texts they would write
+/// without preparing them again (ruling 3c-46).
+pub(super) struct Prepared {
+    pgp: Option<pbr_export::PendingJson>,
+    cs: Option<cs_pbr_export::PendingCs>,
+    cm: Option<cm_json::PendingCm>,
+    xpmf: Option<xpmf_json::PendingXpmf>,
+    skin: Option<cs_skin_json::PendingCsSkin>,
+}
+
+/// `review_json`'s cache: its view key, when it was read, its lines and what it prepared.
+pub(super) type JsonCache = (super::ViewKey, Instant, Vec<JsonLine>, Arc<Prepared>);
+
+/// E7: what one vanilla copy's plan was read under (the source's and the destination's stamps, the recorded hash and
+/// whether this run writes the source), and what `pbr_export::copy_plan` answered. Only an answer of "copied" is
+/// kept: a kept destination or a source that could not be read is asked again at the next build.
+pub(super) type CopyMemo = std::collections::HashMap<
+    PathBuf,
+    (
+        (
+            Option<engine::policy::SourceStamp>,
+            Option<engine::policy::SourceStamp>,
+            Option<String>,
+            bool,
+        ),
+        Option<(String, bool)>,
+    ),
+>;
+
+/// Ruling 3c-46: the NIF export writes this row (and saves its record): not blocked, and, when the file at its export
+/// path is not Tessalith's, answered Overwrite.
+// shortcut: this is `MeshesModel::export_nif_edits`' own test, its three skip arms over the same row fields; it is a match
+// inside that loop in a NIF-team file, with nothing callable. Upgrade to calling it when nif_edit exposes one.
+fn nif_row_written(r: &super::meshes::NifReviewRow) -> bool {
+    !matches!(
+        (&r.blocked, r.foreign, r.answer),
+        (Some(_), _, _) | (None, Some(_), None) | (None, Some(_), Some(GuardChoice::KeepTheirs))
+    )
+}
+
 fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
@@ -242,7 +283,7 @@ impl AppModel {
         #[cfg(feature = "test-hooks")]
         self.review_writes_builds
             .set(self.review_writes_builds.get() + 1);
-        let value = Arc::new(self.build_review_writes(&self.review_json()));
+        let value = Arc::new(self.build_review_writes(&self.review_json_parts().1));
         *self.review_writes_cache.borrow_mut() = Some(WritesCache {
             key,
             at: Instant::now(),
@@ -255,12 +296,14 @@ impl AppModel {
     /// `project.rev()` carries them; the view key carries the plan and scope revisions and the output folder.
     fn writes_key(&self) -> WritesKey {
         use std::hash::{Hash, Hasher};
-        // The NIF rows the export writes: their paths and whether each is blocked (a count alone would miss a row
-        // that became blocked).
+        // The NIF rows the export writes: their paths, whether each is blocked, its foreign file and its answer (ruling
+        // 3c-46: a foreign row answered Keep is not written).
         let mut h = std::collections::hash_map::DefaultHasher::new();
         for r in &self.nif_rows {
             r.path.hash(&mut h);
             r.blocked.is_none().hash(&mut h);
+            r.foreign.hash(&mut h);
+            r.answer.map(|a| a == GuardChoice::Overwrite).hash(&mut h);
         }
         WritesKey {
             view: self.view_key(),
@@ -292,52 +335,180 @@ impl AppModel {
             .is_some_and(|s| s.is_dirty() && !s.read_only())
     }
 
-    fn build_review_writes(&self, lines: &[JsonLine]) -> ReviewWrites {
-        let answer = self.review.as_ref().and_then(|r| r.json_answer.as_ref());
-        // The JSON files the finishers write: a new or Tessalith's own file; an edited PGPatcher JSON only when Review's
-        // answer for these very bytes is Overwrite. Any other edited file is kept, with a note.
-        let json: Vec<&JsonLine> = lines
-            .iter()
-            .filter(|l| match l.state {
-                DiskState::New | DiskState::Ours => true,
-                DiskState::Edited => {
-                    l.kind == JsonKind::PgPatcher
-                        && answer.is_some_and(|a| a.overwrite && a.answers(l))
-                }
-                DiskState::Unreadable => false,
+    /// Ruling 3c-46: every entry is decided by the predicate the export itself uses for that write, on the same inputs,
+    /// as the disk will be after a clean run of this plan. The finishers run in `finish_export`'s order (copies, the
+    /// PGPatcher JSON, CS PBR, complex material, XPMF, CS skin), each against Review's copy of the hash records, so the
+    /// two record files are listed when a value the writer would store differs from the stored one.
+    fn build_review_writes(&self, prep: &Prepared) -> ReviewWrites {
+        use super::export::{Row, RowState};
+        use super::json_finish::{plan_guarded, Guarded, UNKNOWN_SHA};
+        // What this run writes: the plan's DDS outputs (the brief's broad rule until Task 8), each counted as done.
+        let written_items = || {
+            self.items
+                .iter()
+                .filter(|i| self.writes_a_file(i))
+                .filter_map(|i| i.job.as_ref().map(|j| (i, j)))
+        };
+        // The Vanilla and CM folders of a whole-project Also run: the engine plans and writes their files.
+        let also_folders: Vec<PathBuf> = if self.also_runs() {
+            let folders = self.also_folders();
+            let cm = self.also_ticks().1;
+            [Some(folders[1].clone()), cm.then(|| folders[2].clone())]
+                .into_iter()
+                .flatten()
+                .collect()
+        } else {
+            vec![]
+        };
+        let run: std::collections::HashSet<String> = written_items()
+            .map(|(_, j)| record_key(&j.output))
+            .collect();
+        let written = |p: &Path| {
+            run.contains(&record_key(p)) || also_folders.iter().any(|f| p.starts_with(f))
+        };
+        let rows: Vec<Row> = written_items()
+            .filter(|(i, _)| !i.job_key.is_empty())
+            .map(|(i, _)| Row {
+                job_key: i.job_key.clone(),
+                path: String::new(),
+                state: RowState::UpToDate,
+                warnings: vec![],
             })
             .collect();
-        let mut outputs: Vec<PathBuf> = self
-            .items
-            .iter()
-            .filter(|i| self.writes_a_file(i))
-            .filter_map(|i| i.job.as_ref().map(|j| j.output.clone()))
-            .chain(json.iter().map(|l| l.path.clone()))
+        let doc = self.sets_doc.as_ref();
+        let mut preview = doc.map(crate::sets_doc::SetsDoc::record_preview);
+        // A record save (`save_record`) runs: some finisher recorded a hash.
+        let mut saves = false;
+        // (path, certain): the JSON files and copies whose bytes change.
+        let mut json: Vec<(PathBuf, bool)> = vec![];
+        let mut copies: Vec<PathBuf> = vec![];
+        if let Some(p) = &prep.pgp {
+            // `finish_json`: `copy_files` first, against the copy record.
+            let old = doc.map(|d| d.copy_shas()).unwrap_or_default();
+            let mut shas = old.clone();
+            for (src, dst, owner_key) in &p.copies {
+                if !owner_key.is_empty() && pbr_export::dep_ok(p, &rows, owner_key).is_err() {
+                    continue;
+                }
+                let key = record_key(dst);
+                let last = shas.get(&key).cloned();
+                let Some(plan) = self.copy_plan(src, dst, last, written(src)) else {
+                    continue;
+                };
+                match plan {
+                    None => {
+                        shas.insert(key, UNKNOWN_SHA.into());
+                        copies.push(dst.clone());
+                    }
+                    Some((sha, changes)) => {
+                        shas.insert(key, sha);
+                        if changes {
+                            copies.push(dst.clone());
+                        }
+                    }
+                }
+            }
+            if let (Some(r), true) = (preview.as_mut(), shas != old) {
+                r.set_copy_shas(&shas);
+                saves = true;
+            }
+            // Then `pbr_export::finish` and `record_json_sha`.
+            if let Some((text, _)) = pbr_export::json_text(p, &rows, &mut vec![]) {
+                if self.pgp_writes(p, &text) {
+                    if std::fs::read(&p.path).map_or(true, |b| b != text.as_bytes()) {
+                        json.push((p.path.clone(), true));
+                    }
+                    if let (Some(r), Some(d)) = (preview.as_mut(), doc) {
+                        use sha2::{Digest, Sha256};
+                        let sha = hex::encode(Sha256::digest(text.as_bytes()));
+                        let mut shas = records_at(&d.pgp_json_shas(), &p.root);
+                        shas.insert(record_key(&p.path), sha.clone());
+                        r.set_last_json_sha256(&sha);
+                        r.set_pgp_json_shas(&shas);
+                        saves = true;
+                    }
+                }
+            }
+        }
+        // `finish_guarded` for each kind: written only with a project document, and recorded when the record moves.
+        fn guarded<P: Guarded>(
+            p: Option<&P>,
+            doc: Option<&crate::sets_doc::SetsDoc>,
+            preview: Option<&mut crate::sets_doc::RecordPreview>,
+            written: &dyn Fn(&Path) -> bool,
+            json: &mut Vec<(PathBuf, bool)>,
+            saves: &mut bool,
+        ) {
+            let (Some(p), Some(d), Some(r)) = (p, doc, preview) else {
+                return;
+            };
+            let recorded = P::recorded(d);
+            let out = plan_guarded(p, &recorded, written, json);
+            if out != recorded {
+                P::preview(r, &out);
+                *saves = true;
+            }
+        }
+        guarded(
+            prep.cs.as_ref(),
+            doc,
+            preview.as_mut(),
+            &written,
+            &mut json,
+            &mut saves,
+        );
+        guarded(
+            prep.cm.as_ref(),
+            doc,
+            preview.as_mut(),
+            &written,
+            &mut json,
+            &mut saves,
+        );
+        guarded(
+            prep.xpmf.as_ref(),
+            doc,
+            preview.as_mut(),
+            &written,
+            &mut json,
+            &mut saves,
+        );
+        guarded(
+            prep.skin.as_ref(),
+            doc,
+            preview.as_mut(),
+            &written,
+            &mut json,
+            &mut saves,
+        );
+
+        let mut outputs: Vec<PathBuf> = written_items()
+            .map(|(_, j)| j.output.clone())
+            .chain(json.into_iter().map(|(p, _)| p))
             // A plan's output path can mix `/` and `\`; one path, one spelling.
-            .map(|p| p.components().collect())
+            .map(|p| p.components().collect::<PathBuf>())
+            // A file in a listed Also folder is counted by the folder's entry.
+            .filter(|p| !also_folders.iter().any(|f| p.starts_with(f)))
             .collect();
         outputs.sort();
         outputs.dedup();
         let mut also: Vec<ReviewWrite> = vec![];
         let mut put = |path: PathBuf, hover: &'static str| also.push(ReviewWrite { path, hover });
-        // `save()` first: `sdc.toml`, then `sdc-project.toml` (each only when it holds unsaved edits).
+        // `save()` first: `sdc.toml` when it holds unsaved edits.
         if let (Some(p), true) = (&self.project, self.project_unsaved()) {
             put(p.path().to_path_buf(), HOVER_SDC_TOML);
         }
-        // `record_json_sha` and `copy_files` record a hash and save `sdc-project.toml` when it differs from the record:
-        // true of a JSON that is new (or edited, and overwritten), never of one Tessalith wrote and would write the
-        // same bytes to.
-        // shortcut: a JSON of ours (`Ours`) is assumed to keep its bytes, so it alone does not list `sdc-project.toml`;
-        // upgrade when the review can render the text it would write.
-        let rewritten = json.iter().any(|l| l.state != DiskState::Ours);
-        let copies = self.vanilla_copies_changed();
-        let records = rewritten || !copies.is_empty();
-        if let Some(d) = &self.sets_doc {
-            if self.sets_unsaved() || (records && !d.read_only()) {
+        if let (Some(d), Some(r)) = (doc, &preview) {
+            // `save()` writes unsaved edits; `save_record` writes the document's text after a record, which changes the
+            // file when that text differs from the file's.
+            let recorded = saves
+                && !d.read_only()
+                && std::fs::read(d.path()).ok().as_deref() != Some(r.text().as_bytes());
+            if self.sets_unsaved() || recorded {
                 put(d.path().to_path_buf(), HOVER_PROJECT_TOML);
             }
-            // `put_side` writes the sidecar whenever a record is made.
-            if !json.is_empty() || !copies.is_empty() {
+            // `put_side` writes the sidecar only for a value it does not hold.
+            if r.side_changed() {
                 put(d.sidecar_path(), HOVER_GENERATED);
             }
         }
@@ -346,12 +517,14 @@ impl AppModel {
             let planned = engine::discover::effective_output_root(root, &self.output_root());
             put(planned.join("_sdc").join("manifest.jsonl"), HOVER_MANIFEST);
         }
+        copies.sort();
+        copies.dedup();
         for c in copies {
-            put(c, HOVER_COPY);
+            put(c.components().collect(), HOVER_COPY);
         }
         // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
         let out = self.output_root();
-        for r in self.nif_rows.iter().filter(|r| r.blocked.is_none()) {
+        for r in self.nif_rows.iter().filter(|r| nif_row_written(r)) {
             if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
                 put(p, HOVER_NIF);
             }
@@ -360,12 +533,8 @@ impl AppModel {
             }
         }
         // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".
-        if self.also_runs() {
-            let folders = self.also_folders();
-            put(folders[1].clone(), HOVER_ALSO_FOLDER);
-            if self.also_ticks().1 {
-                put(folders[2].clone(), HOVER_ALSO_FOLDER);
-            }
+        for f in also_folders {
+            put(f, HOVER_ALSO_FOLDER);
         }
         ReviewWrites {
             outputs,
@@ -373,61 +542,92 @@ impl AppModel {
         }
     }
 
-    /// The vanilla borrowed-slot copies the export would write: a target that is missing, or whose hash is not the one
-    /// recorded for it (`SetsDoc::copy_shas`). The hash is read again only when the target's stamp changed.
-    fn vanilla_copies_changed(&self) -> Vec<PathBuf> {
-        use engine::policy::SourceStamp;
-        if self.target == engine::config::Target::Cs {
-            return vec![];
+    /// `finish_json`'s decision for the PGPatcher JSON `text` (ruling 3c-46): `pbr_export::finish` writes a file that is
+    /// absent, holds these bytes or is Tessalith's (`may_replace`); a file edited outside Tessalith only with Review's
+    /// Overwrite answer for the bytes on disk now.
+    fn pgp_writes(&self, p: &pbr_export::PendingJson, text: &str) -> bool {
+        let last = self.pgp_record(&p.root, &p.path);
+        match engine::dds::may_replace(
+            &p.path,
+            text.as_bytes(),
+            super::history::recorded(last.as_deref()),
+        ) {
+            Ok(()) => true,
+            Err(engine::dds::Kept::Foreign) => self
+                .review
+                .as_ref()
+                .and_then(|r| r.json_answer.as_ref())
+                .is_some_and(|a| {
+                    a.overwrite
+                        && a.path == p.path
+                        && a.sha.is_some()
+                        && sha256_of(&p.path) == a.sha
+                }),
+            Err(_) => false,
         }
-        let Some(p) = super::pbr_export::prepare(self).filter(|p| !p.copies.is_empty()) else {
-            return vec![];
-        };
-        let recorded = self
-            .sets_doc
-            .as_ref()
-            .map(|d| d.copy_shas())
-            .unwrap_or_default();
-        let mut memo = self.copy_sha_memo.borrow_mut();
-        let mut out = vec![];
-        for (_, dst, _) in &p.copies {
-            let sha = match SourceStamp::of(dst) {
-                None => None,
-                Some(st) => match memo.get(dst) {
-                    Some((old, sha)) if *old == st => sha.clone(),
-                    _ => {
-                        let sha = sha256_of(dst);
-                        memo.insert(dst.clone(), (st, sha.clone()));
-                        sha
-                    }
-                },
-            };
-            let now = recorded.get(&record_key(dst));
-            if sha.is_none() || sha.as_ref() != now {
-                out.push(dst.clone());
+    }
+
+    /// `pbr_export::copy_plan`, kept per destination while both files' stamps, the recorded hash and whether this run
+    /// writes the source are unchanged.
+    fn copy_plan(
+        &self,
+        src: &Path,
+        dst: &Path,
+        last: Option<String>,
+        src_written: bool,
+    ) -> Option<Option<(String, bool)>> {
+        use engine::policy::SourceStamp;
+        let key = (
+            SourceStamp::of(src),
+            SourceStamp::of(dst),
+            last,
+            src_written,
+        );
+        if let Some((k, v)) = self.copy_sha_memo.borrow().get(dst) {
+            if *k == key {
+                return Some(v.clone());
             }
         }
-        out.sort();
-        out.dedup();
-        out
+        let plan = pbr_export::copy_plan(src, dst, key.2.as_deref(), src_written)?;
+        self.copy_sha_memo
+            .borrow_mut()
+            .insert(dst.to_path_buf(), (key, plan.clone()));
+        Some(plan)
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
     /// `REVIEW_JSON_TTL`, since Review draws it every frame and it reads the files (AG128).
     pub fn review_json(&self) -> Vec<JsonLine> {
+        self.review_json_parts().0
+    }
+
+    /// `review_json`'s lines and the exports it prepared for them (`review_writes` reads their texts, ruling 3c-46).
+    fn review_json_parts(&self) -> (Vec<JsonLine>, Arc<Prepared>) {
         let key = self.view_key();
-        if let Some((k, at, lines)) = &*self.review_json_cache.borrow() {
+        if let Some((k, at, lines, prep)) = &*self.review_json_cache.borrow() {
             if *k == key && at.elapsed() < REVIEW_JSON_TTL {
-                return lines.clone();
+                return (lines.clone(), prep.clone());
             }
         }
+        let prep = Arc::new(Prepared {
+            pgp: pbr_export::prepare(self),
+            cs: cs_pbr_export::prepare(self),
+            cm: cm_json::prepare(self),
+            xpmf: xpmf_json::prepare(self),
+            skin: cs_skin_json::prepare(self),
+        });
         let mut lines = vec![];
         // K13: vanilla (and a project without a PBR set) writes no PGPatcher JSON.
-        lines.extend(self.pgp_json_line());
+        lines.extend(
+            prep.pgp
+                .as_ref()
+                .filter(|p| !p.entries.is_empty())
+                .map(|p| self.pgp_line(p)),
+        );
         let doc = self.sets_doc.as_ref();
-        let mut files = |kind, root: PathBuf, rels: Vec<String>, shas| {
+        let mut files = |kind, root: &Path, rels: Vec<&String>, shas| {
             // As the finishers read them: a relative record is under the export folder.
-            let shas = records_at(&shas, &root);
+            let shas = records_at(&shas, root);
             for rel in rels {
                 let path = root.join(rel);
                 let state = disk_state(&path, shas.get(&record_key(&path)).map(String::as_str));
@@ -439,41 +639,47 @@ impl AppModel {
                 });
             }
         };
-        if let (Some(p), Some(d)) = (cs_pbr_export::prepare(self), doc) {
-            let rels = p.files.into_iter().map(|(r, _)| r).collect();
-            files(JsonKind::CsPbr, p.root, rels, d.cs_pbr_shas());
+        if let (Some(p), Some(d)) = (&prep.cs, doc) {
+            let rels = p.files.iter().map(|(r, _)| r).collect();
+            files(JsonKind::CsPbr, &p.root, rels, d.cs_pbr_shas());
         }
-        if let (Some(p), Some(d)) = (cm_json::prepare(self), doc) {
-            let rels = p.files.into_iter().map(|(r, _)| r).collect();
-            files(JsonKind::ComplexMaterial, p.root, rels, d.cm_json_shas());
+        if let (Some(p), Some(d)) = (&prep.cm, doc) {
+            let rels = p.files.iter().map(|(r, _)| r).collect();
+            files(JsonKind::ComplexMaterial, &p.root, rels, d.cm_json_shas());
         }
-        if let (Some(p), Some(d)) = (xpmf_json::prepare(self), doc) {
+        if let (Some(p), Some(d)) = (&prep.xpmf, doc) {
             for f in p.folders() {
-                let rels = f.files.iter().map(|(r, _)| r.clone()).collect();
-                files(JsonKind::Xpmf, f.root.clone(), rels, d.xpmf_shas());
+                let rels = f.files.iter().map(|(r, _)| r).collect();
+                files(JsonKind::Xpmf, &f.root, rels, d.xpmf_shas());
             }
         }
-        if let (Some(p), Some(d)) = (cs_skin_json::prepare(self), doc) {
-            let rels = p.files.into_iter().map(|f| f.rel).collect();
-            files(JsonKind::CsSkin, p.root, rels, d.cs_skin_shas());
+        if let (Some(p), Some(d)) = (&prep.skin, doc) {
+            let rels = p.files.iter().map(|f| &f.rel).collect();
+            files(JsonKind::CsSkin, &p.root, rels, d.cs_skin_shas());
         }
-        *self.review_json_cache.borrow_mut() = Some((key, Instant::now(), lines.clone()));
-        lines
+        *self.review_json_cache.borrow_mut() =
+            Some((key, Instant::now(), lines.clone(), prep.clone()));
+        (lines, prep)
     }
 
     /// The PGPatcher JSON this export would write and its state on disk (uncached: one file read).
     fn pgp_json_line(&self) -> Option<JsonLine> {
         let p = pbr_export::prepare(self).filter(|p| !p.entries.is_empty())?;
+        Some(self.pgp_line(&p))
+    }
+
+    /// The line of the PGPatcher JSON `p` would write: its state on disk, and its hash when edited.
+    fn pgp_line(&self, p: &pbr_export::PendingJson) -> JsonLine {
         let state = disk_state(&p.path, self.pgp_record(&p.root, &p.path).as_deref());
         let sha = (state == DiskState::Edited)
             .then(|| sha256_of(&p.path))
             .flatten();
-        Some(JsonLine {
+        JsonLine {
             kind: JsonKind::PgPatcher,
-            path: p.path,
+            path: p.path.clone(),
             state,
             sha,
-        })
+        }
     }
 
     /// C4: Keep (false) or Overwrite (true) the edited PGPatcher JSON, for the file as it is now. No-op while Review
@@ -716,7 +922,6 @@ impl AppModel {
     /// Note FC5: Review's Keep (false) or Overwrite (true) for the NIF at `path`, for the file with hash `sha256`;
     /// `app.rs` passes it to `MeshesModel::set_nif_answer`. No-op while Review is closed.
     pub fn answer_review_nif(&mut self, path: &str, overwrite: bool, sha256: [u8; 32]) {
-        use super::meshes::export::GuardChoice;
         if self.review.is_none() {
             return;
         }

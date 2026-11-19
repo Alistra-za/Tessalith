@@ -36,6 +36,117 @@ fn json_to_toml_deep(v: &Json) -> Option<Value> {
         _ => json_to_toml(v),
     }
 }
+/// `set_project`'s test: removing an absent key or writing the stored value is no edit (trace-debug #58).
+fn project_value_same(doc: &toml_edit::DocumentMut, key: &str, v: &Option<Value>) -> bool {
+    let now = doc
+        .get("project")
+        .and_then(|p| p.get(key))
+        .and_then(item_json); // review M7: a hand-written `[project.<key>]` table too
+    match v {
+        None => now.is_none(),
+        Some(x) => now.is_some() && toml_to_json(&Item::Value(x.clone())) == now,
+    }
+}
+
+/// `set_project`'s write into `doc`; false when no `[project]` table can be made there.
+fn put_project(doc: &mut toml_edit::DocumentMut, key: &str, v: Option<Value>) -> bool {
+    let Some(p) = sub_table(doc.as_table_mut(), "project", || Item::Table(Table::new())) else {
+        return false;
+    };
+    match v {
+        Some(v) => set_value(p, key, v),
+        None => {
+            p.remove(key);
+        }
+    }
+    true
+}
+
+/// A hash table as the document stores it (`None`: an empty table is removed).
+fn shas_value(shas: &BTreeMap<String, String>) -> Option<Value> {
+    let mut t = toml_edit::InlineTable::new();
+    for (k, v) in shas {
+        t.insert(k, Value::from(v.as_str()));
+    }
+    (!shas.is_empty()).then_some(Value::InlineTable(t))
+}
+
+/// A hash table as the sidecar stores it.
+fn shas_json(shas: &BTreeMap<String, String>) -> Json {
+    let m = shas
+        .iter()
+        .map(|(k, v)| (k.clone(), Json::from(v.as_str())));
+    Json::Object(m.collect())
+}
+
+/// `put_side`'s test: the sidecar already holds `v` under `key`, so nothing is written.
+fn side_same(side: &serde_json::Map<String, Json>, key: &str, v: &Json) -> bool {
+    side.get(key) == Some(v)
+}
+
+/// E7 (ruling 3c-46): the hash records an export would make, applied to a copy of the document and the sidecar with
+/// the tests `set_project` and `put_side` use, so Review can say which of `sdc-project.toml` and `_sdc/generated.json`
+/// they change. Each method is the setter of the same name on `SetsDoc`.
+pub struct RecordPreview {
+    doc: toml_edit::DocumentMut,
+    side: serde_json::Map<String, Json>,
+    read_only: bool,
+    side_changed: bool,
+}
+
+impl RecordPreview {
+    fn project(&mut self, key: &str, v: Option<Value>) {
+        if !self.read_only && !project_value_same(&self.doc, key, &v) {
+            put_project(&mut self.doc, key, v);
+        }
+    }
+
+    fn side(&mut self, key: &str, v: Json) {
+        if !side_same(&self.side, key, &v) {
+            self.side.insert(key.to_string(), v);
+            self.side_changed = true;
+        }
+    }
+
+    fn record_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) {
+        self.project(key, shas_value(shas));
+        self.side(key, shas_json(shas));
+    }
+
+    pub fn set_last_json_sha256(&mut self, sha: &str) {
+        self.project(LAST_SHA, Some(Value::from(sha)));
+        self.side(LAST_SHA, Json::from(sha));
+    }
+    pub fn set_pgp_json_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(PGP_SHA, shas);
+    }
+    pub fn set_copy_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(COPY_SHA, shas);
+    }
+    pub fn set_cs_pbr_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CS_SHA, shas);
+    }
+    pub fn set_cm_json_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CM_SHA, shas);
+    }
+    pub fn set_xpmf_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(XPMF_SHA, shas);
+    }
+    pub fn set_cs_skin_shas(&mut self, shas: &BTreeMap<String, String>) {
+        self.record_shas(CS_SKIN_SHA, shas);
+    }
+
+    /// The text a save of the document would write now.
+    pub fn text(&self) -> String {
+        self.doc.to_string()
+    }
+
+    /// Some record differs from the sidecar's, so `put_side` writes `_sdc/generated.json`.
+    pub fn side_changed(&self) -> bool {
+        self.side_changed
+    }
+}
+
 /// GUI tweaks G4: the array of extra PGPatcher entries (delete sections).
 const SECTIONS: &str = "pgp_sections";
 /// Design §5: `[project] cs_pbr_sha256`, path under the export root → hash of the CS JSON sdc last wrote there.
@@ -425,7 +536,7 @@ impl SetsDoc {
     /// the next Save writes, as before the sidecar; Note FC14: the error is returned, since a read-only document has
     /// no such copy.
     fn put_side(&mut self, key: &str, v: Json) -> std::io::Result<()> {
-        if self.side.get(key) == Some(&v) {
+        if side_same(&self.side, key, &v) {
             return Ok(());
         }
         self.side.insert(key.to_string(), v);
@@ -543,32 +654,12 @@ impl SetsDoc {
     }
 
     fn set_project(&mut self, key: &str, v: Option<Value>) {
-        // Removing an absent key or writing the stored value is no edit (trace-debug #58).
-        let now = self
-            .f
-            .doc
-            .get("project")
-            .and_then(|p| p.get(key))
-            .and_then(item_json); // review M7: a hand-written `[project.<key>]` table too
-        let same = match &v {
-            None => now.is_none(),
-            Some(x) => now.is_some() && toml_to_json(&Item::Value(x.clone())) == now,
-        };
-        if self.read_only() || same {
+        if self.read_only() || project_value_same(&self.f.doc, key, &v) {
             return;
         }
-        let Some(p) = sub_table(self.f.doc.as_table_mut(), "project", || {
-            Item::Table(Table::new())
-        }) else {
-            return;
-        };
-        match v {
-            Some(v) => set_value(p, key, v),
-            None => {
-                p.remove(key);
-            }
+        if put_project(&mut self.f.doc, key, v) {
+            self.f.touch();
         }
-        self.f.touch();
     }
 
     /// Owner ruling (Note BV6): `[project] export_folder`, this project's export folder (GUI-only state).
@@ -663,21 +754,25 @@ impl SetsDoc {
     }
 
     fn set_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) {
-        let mut t = toml_edit::InlineTable::new();
-        for (k, v) in shas {
-            t.insert(k, Value::from(v.as_str()));
-        }
-        self.set_project(key, (!shas.is_empty()).then_some(Value::InlineTable(t)));
+        self.set_project(key, shas_value(shas));
     }
 
     /// A hash record made now: the document's copy (if writable) and the sidecar (Note FC11). Err: the sidecar was not
     /// written (Note FC14).
     fn record_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
         self.set_shas(key, shas);
-        let m = shas
-            .iter()
-            .map(|(k, v)| (k.clone(), Json::from(v.as_str())));
-        self.put_side(key, Json::Object(m.collect()))
+        self.put_side(key, shas_json(shas))
+    }
+
+    /// E7 (ruling 3c-46): a copy of the records as they are now, for Review to apply the hash records an export would
+    /// make and read which of the two files they change. Nothing is written.
+    pub fn record_preview(&self) -> RecordPreview {
+        RecordPreview {
+            doc: self.f.doc.clone(),
+            side: self.side.clone(),
+            read_only: self.read_only(),
+            side_changed: false,
+        }
     }
 
     pub fn cs_pbr_shas(&self) -> BTreeMap<String, String> {

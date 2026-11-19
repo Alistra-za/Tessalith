@@ -40,6 +40,57 @@ pub(super) fn guarded_write(
     }
 }
 
+/// The value Review records for a file whose text is not known before the run: it never equals a stored hash, so the
+/// records count as changed (ruling 3c-47).
+pub(super) const UNKNOWN_SHA: &str = "unknown until the export writes it";
+
+/// E7 (ruling 3c-46): what `guarded_write` would do with `text` at `path`, asked of the disk now and written nowhere.
+/// `None`: the file is kept. `Some(changes)`: it is written (and `out` gets the hash it would record), and `changes`
+/// says whether that changes the file. A `text` of `None` is not known before the run (it depends on a DDS this run
+/// writes): only an absent file or one whose hash is recorded is replaced, and the change is assumed.
+pub(super) fn guarded_plan(
+    path: &Path,
+    text: Option<&str>,
+    out: &mut BTreeMap<String, String>,
+) -> Option<bool> {
+    use super::history::{record_key, recorded};
+    use sha2::{Digest, Sha256};
+    let key = record_key(path);
+    let last = out.get(&key).cloned();
+    let new = text.map_or(&[][..], str::as_bytes);
+    engine::dds::may_replace(path, new, recorded(last.as_deref())).ok()?;
+    let Some(text) = text else {
+        out.insert(key, UNKNOWN_SHA.into());
+        return Some(true);
+    };
+    out.insert(key, hex::encode(Sha256::digest(text.as_bytes())));
+    Some(std::fs::read(path).map_or(true, |b| b != text.as_bytes()))
+}
+
+/// E7 (ruling 3c-46): `Guarded::write` asked instead of done: the record it would return, and in `list` each file it
+/// would change, with whether that change is certain (`false`: its text is not known before the run).
+pub(super) fn plan_guarded<P: Guarded>(
+    p: &P,
+    recorded: &BTreeMap<String, String>,
+    written: &dyn Fn(&Path) -> bool,
+    list: &mut Vec<(PathBuf, bool)>,
+) -> BTreeMap<String, String> {
+    let mut out = recorded.clone();
+    for (root, files) in p.planned(written) {
+        out = super::history::records_at(&out, &root);
+        for (path, text) in files {
+            if guarded_plan(&path, text.as_deref(), &mut out) == Some(true) {
+                list.push((path, text.is_some()));
+            }
+        }
+    }
+    out
+}
+
+/// One folder of a guarded export's planned files: its root, and each file with its text (`None`: not known before the
+/// run).
+pub(super) type PlannedFolder = (PathBuf, Vec<(PathBuf, Option<String>)>);
+
 /// What a kind of guarded JSON export hands the shared finisher.
 pub(super) trait Guarded {
     /// How the kind's notes start: `<NAME> not written: <why>`.
@@ -58,6 +109,12 @@ pub(super) trait Guarded {
     /// Files of this export that now hold their text (for the Also walk).
     fn current(&self) -> Vec<PathBuf>;
     fn record(d: &mut SetsDoc, shas: &BTreeMap<String, String>) -> std::io::Result<()>;
+    /// E7 (ruling 3c-46): the files `write` would go through, per folder in its order, as the disk will be after a
+    /// clean run: `written` says whether this run writes a file (a DDS output), so a file the kind needs on disk is
+    /// there when it is now or when this run writes it.
+    fn planned(&self, written: &dyn Fn(&Path) -> bool) -> Vec<PlannedFolder>;
+    /// `record`, applied to Review's copy of the records.
+    fn preview(r: &mut crate::sets_doc::RecordPreview, shas: &BTreeMap<String, String>);
 }
 
 impl AppModel {
