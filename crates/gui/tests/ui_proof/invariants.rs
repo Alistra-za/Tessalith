@@ -8,7 +8,7 @@
 
 use crate::checks::{run_checks, Finding};
 use crate::frame::{snapshot, Snapshot};
-use crate::screens::{entries, holds, Needle};
+use crate::screens::{entries, holds, Needle, Screen, ScreenEntry};
 use eframe::egui::{vec2, Vec2};
 use egui_kittest::Harness;
 
@@ -44,6 +44,10 @@ pub struct Hit {
     pub size: Vec2,
     pub invariant: &'static str,
     pub what: String,
+    /// The widget's top edge, in px: what orders same-named hits.
+    pub y: f32,
+    /// Among the hits of this screen, size, invariant and name, the widget's place from the top (0 is the upper).
+    pub ordinal: usize,
     /// How far the widget is past the edge, or how much of the text is clipped, in px.
     pub px: f32,
     pub message: String,
@@ -52,8 +56,15 @@ pub struct Hit {
 impl Hit {
     fn text(&self) -> String {
         format!(
-            "{} at {}x{}: {} {:?} ({:.1} px): {}",
-            self.screen, self.size.x, self.size.y, self.invariant, self.what, self.px, self.message
+            "{} at {}x{}: {} {:?} #{} ({:.1} px): {}",
+            self.screen,
+            self.size.x,
+            self.size.y,
+            self.invariant,
+            self.what,
+            self.ordinal,
+            self.px,
+            self.message
         )
     }
 }
@@ -79,6 +90,8 @@ fn from_findings(
             size: f.size,
             invariant,
             what: x.subject.label.clone(),
+            y: x.subject.rect[1],
+            ordinal: 0,
             px: px(x, f.size),
             message: format!(
                 "{} {:?}: {} ({}); {instead}",
@@ -141,6 +154,16 @@ pub struct Walked {
     pub hits: Vec<Hit>,
     /// Visits that could not be made, and markers other entries' screens satisfy; never allowed.
     pub errors: Vec<String>,
+    /// Every visit that was completed: what the frame invariants were run on.
+    pub visits: Vec<Visit>,
+}
+
+/// One completed visit: the screen at a size, and how many findings `run_checks` returned for its frame.
+#[derive(Debug, PartialEq)]
+pub struct Visit {
+    pub screen: String,
+    pub size: (f32, f32),
+    pub findings: usize,
 }
 
 /// Every entry at every size: one frame, one `run_checks`, every frame invariant. A visit that fails is collected and
@@ -149,6 +172,7 @@ pub fn walk(entries: &mut [Box<dyn Entry>]) -> Walked {
     let mut walked = Walked {
         hits: vec![],
         errors: vec![],
+        visits: vec![],
     };
     let mut middle: Vec<Option<Snapshot>> = vec![];
     for e in entries.iter_mut() {
@@ -169,9 +193,16 @@ pub fn walk(entries: &mut [Box<dyn Entry>]) -> Walked {
                 size,
                 findings: &findings,
             };
+            let first = walked.hits.len();
             for invariant in FRAME_INVARIANTS {
                 walked.hits.extend(invariant(&frame));
             }
+            number_same_named(&mut walked.hits[first..]);
+            walked.visits.push(Visit {
+                screen: e.name().to_string(),
+                size: (size.x, size.y),
+                findings: findings.len(),
+            });
             if i == 1 {
                 kept = Some(snap);
             }
@@ -193,13 +224,29 @@ pub fn walk(entries: &mut [Box<dyn Entry>]) -> Walked {
     walked
 }
 
-/// One allowed hit: the screen, the invariant, the size, the widget's exact name, how many hits it covers and how far
-/// past the edge (or clipped) each is, in px, within `PX_TOLERANCE`; and why it is allowed today.
+/// Numbers the hits of one frame that share an invariant and a name, top to bottom.
+fn number_same_named(hits: &mut [Hit]) {
+    let mut order: Vec<usize> = (0..hits.len()).collect();
+    order.sort_by(|&a, &b| hits[a].y.total_cmp(&hits[b].y));
+    for &i in &order {
+        let before = order
+            .iter()
+            .take_while(|&&j| j != i)
+            .filter(|&&j| hits[j].invariant == hits[i].invariant && hits[j].what == hits[i].what)
+            .count();
+        hits[i].ordinal = before;
+    }
+}
+
+/// One allowed hit: the screen, the invariant, the size, the widget's exact name and its place among the same-named
+/// hits from the top (`ordinal`), how many hits it covers and how far past the edge (or clipped) each is, in px, within
+/// `PX_TOLERANCE`; and why it is allowed today.
 pub struct Allowed {
     pub screen: &'static str,
     pub invariant: &'static str,
     pub size: (f32, f32),
     pub what: &'static str,
+    pub ordinal: usize,
     pub count: usize,
     pub px: f32,
     pub reason: &'static str,
@@ -216,6 +263,7 @@ pub const ALLOWED: &[Allowed] = &[
         invariant: "window_edge",
         size: (1100.0, 800.0),
         what: "Preset target",
+        ordinal: 0,
         count: 1,
         px: 78.1,
         reason: "the target combo ends past the right edge (x 1078..1178)",
@@ -225,6 +273,7 @@ pub const ALLOWED: &[Allowed] = &[
         invariant: "window_edge",
         size: (1100.0, 800.0),
         what: "derived from the set",
+        ordinal: 0,
         count: 1,
         px: 91.7,
         reason:
@@ -235,6 +284,7 @@ pub const ALLOWED: &[Allowed] = &[
         invariant: "window_edge",
         size: (1100.0, 800.0),
         what: "derived from the set",
+        ordinal: 1,
         count: 1,
         px: 107.3,
         reason:
@@ -245,6 +295,7 @@ pub const ALLOWED: &[Allowed] = &[
         invariant: "clipped_text",
         size: (1100.0, 800.0),
         what: "derived from the set",
+        ordinal: 0,
         count: 1,
         px: 99.7,
         reason: "the first row's tag sticks out of its clip",
@@ -254,6 +305,7 @@ pub const ALLOWED: &[Allowed] = &[
         invariant: "clipped_text",
         size: (1100.0, 800.0),
         what: "derived from the set",
+        ordinal: 1,
         count: 1,
         px: 115.3,
         reason: "the second row's tag sticks out of its clip",
@@ -266,6 +318,7 @@ fn covers(a: &Allowed, h: &Hit) -> bool {
         && (a.size.0 - h.size.x).abs() < 0.5
         && (a.size.1 - h.size.y).abs() < 0.5
         && a.what == h.what
+        && a.ordinal == h.ordinal
         && (a.px - h.px).abs() <= PX_TOLERANCE
 }
 
@@ -291,8 +344,8 @@ pub fn verdict(walked: &Walked, allowed: &[Allowed]) -> Vec<String> {
     for (a, n) in allowed.iter().zip(&left) {
         if *n > 0 {
             out.push(format!(
-                "ALLOWED in crates/gui/tests/ui_proof/invariants.rs holds {} / {} / {}x{} / {:?} / count {} / {:.1} px ({}), but {} of its hits did not come; delete or correct the entry",
-                a.screen, a.invariant, a.size.0, a.size.1, a.what, a.count, a.px, a.reason, n
+                "ALLOWED in crates/gui/tests/ui_proof/invariants.rs holds {} / {} / {}x{} / {:?} #{} / count {} / {:.1} px ({}), but {} of its hits did not come; delete or correct the entry",
+                a.screen, a.invariant, a.size.0, a.size.1, a.what, a.ordinal, a.count, a.px, a.reason, n
             ));
         }
     }
@@ -319,18 +372,24 @@ fn the_walk_finds_nothing_new_on_any_screen() {
     }
     let bad = verdict(&walked, ALLOWED);
     assert!(bad.is_empty(), "{bad:#?}");
+    assert_eq!(
+        walked.visits.len(),
+        list.len() * SIZES.len(),
+        "a visit was not completed or not recorded"
+    );
 }
 
-/// A test-only entry: a tiny UI with a button that ends past the narrowest window's edge and a label cut by its clip.
-/// It is not in the shipped list: a shipped entry opens the real app, which has no widget to plant.
+/// A test-only entry: a tiny UI with a button that ends past the window's right edge at every size and a label cut by
+/// its clip. It is not in the shipped list: a shipped entry opens the real app, which has no widget to plant.
 struct Faulty;
 
 const FAULTY_MARKER: &[Needle] = &[crate::screens::has_role("Button", "Far away")];
 
 fn faulty_ui(ui: &mut eframe::egui::Ui) {
     use eframe::egui::{pos2, Rect};
+    // 1000 + 700 = 1700: past the edge of the 1100, 1280 and 1600 wide windows by 600, 420 and 100 px
     ui.put(
-        Rect::from_min_size(pos2(1000.0, 20.0), vec2(200.0, 24.0)),
+        Rect::from_min_size(pos2(1000.0, 20.0), vec2(700.0, 24.0)),
         eframe::egui::Button::new("Far away"),
     );
     ui.scope(|ui| {
@@ -386,59 +445,64 @@ impl Entry for Broken {
     }
 }
 
-/// The faulty entry goes through `walk` and `verdict`, the code the shipped list goes through, beside a clean shipped
-/// entry: the final failure list holds both diagnostics for it and nothing for the clean one.
-#[test]
-fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
-    let clean = entries()
+/// The start of a failure message up to its px: screen, size, invariant, name and ordinal, without the rect text.
+fn head(message: &str) -> &str {
+    &message[..message.find(" px): ").expect("a hit line") + " px)".len()]
+}
+
+fn the_start_screen() -> Box<dyn Entry> {
+    entries()
         .into_iter()
         .find(|e| e.name() == "start screen")
-        .expect("the start screen entry");
-    let mut list: Vec<Box<dyn Entry>> = vec![clean, Box::new(Faulty)];
+        .expect("the start screen entry")
+}
+
+/// The faulty entry goes through `walk` and `verdict`, the code the shipped list goes through, beside a clean shipped
+/// entry. The six visits are exactly those of the two entries at the three sizes, and the final failure list is
+/// exactly the six diagnostics of the faulty entry (the button past the edge and the clipped label, at each size):
+/// nothing for the clean one, and none dropped.
+#[test]
+fn a_widget_past_the_edge_and_a_clipped_text_fail_the_walk() {
+    let mut list: Vec<Box<dyn Entry>> = vec![the_start_screen(), Box::new(Faulty)];
     let walked = walk(&mut list);
     let bad = verdict(&walked, &[]);
     println!("{bad:#?}");
-    let of = |inv: &str, what: &str| {
-        walked
-            .hits
-            .iter()
-            .filter(|x| {
-                x.screen == "test-only faulty screen" && x.invariant == inv && x.what == what
-            })
-            .map(|x| (x.size.x, x.size.y))
-            .collect::<Vec<_>>()
-    };
-    // 1000 + 200 = 1200: past the 1100 window only, by 100 px
-    assert_eq!(of("window_edge", "Far away"), vec![(1100.0, 800.0)]);
-    assert!(
-        walked
-            .hits
-            .iter()
-            .any(|x| x.invariant == "window_edge" && (x.px - 100.0).abs() < 0.5),
-        "{:?}",
-        walked.hits
-    );
-    // cut by its clip at every size, the third size 1600x900
-    assert_eq!(
-        of("clipped_text", "cut label sticking out"),
-        vec![(1100.0, 800.0), (1280.0, 800.0), (1600.0, 900.0)]
-    );
-    assert!(
-        bad.iter().any(|m| m.starts_with(
-            "test-only faulty screen at 1100x800: window_edge \"Far away\" (100.0 px): Button"
-        )),
-        "{bad:#?}"
-    );
-    assert!(
-        bad.iter()
-            .any(|m| m.contains("clipped_text \"cut label sticking out\"")),
-        "{bad:#?}"
-    );
-    assert!(
-        bad.iter().all(|m| m.starts_with("test-only faulty screen")),
-        "nothing is reported for the clean entry: {bad:#?}"
-    );
     assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    // (a) every visit happened, and each ran `run_checks` on the frame the entry shows
+    let count = |mut e: Box<dyn Entry>, size: Vec2| run_checks(&e.at(size).unwrap()).len();
+    let mut expected = vec![];
+    for (name, make) in [
+        ("start screen", the_start_screen as fn() -> Box<dyn Entry>),
+        ("test-only faulty screen", || -> Box<dyn Entry> {
+            Box::new(Faulty)
+        }),
+    ] {
+        for size in SIZES {
+            expected.push(Visit {
+                screen: name.into(),
+                size: (size.x, size.y),
+                findings: count(make(), size),
+            });
+        }
+    }
+    assert_eq!(walked.visits, expected);
+    // (b) exactly these failures, sorted
+    let mut got: Vec<&str> = bad.iter().map(|m| head(m)).collect();
+    got.sort();
+    let mut want = vec![
+        r#"test-only faulty screen at 1100x800: window_edge "Far away" #0 (600.0 px)"#,
+        r#"test-only faulty screen at 1280x800: window_edge "Far away" #0 (420.0 px)"#,
+        r#"test-only faulty screen at 1600x900: window_edge "Far away" #0 (100.0 px)"#,
+        r#"test-only faulty screen at 1100x800: clipped_text "cut label sticking out" #0 (160.0 px)"#,
+        r#"test-only faulty screen at 1280x800: clipped_text "cut label sticking out" #0 (160.0 px)"#,
+        r#"test-only faulty screen at 1600x900: clipped_text "cut label sticking out" #0 (160.0 px)"#,
+    ];
+    want.sort();
+    assert_eq!(got, want, "{bad:#?}");
+    assert!(
+        bad.iter().all(|m| m.contains("ALLOWED")),
+        "every failure says what to do about it: {bad:#?}"
+    );
 }
 
 /// A visit that fails is a collected failure naming screen and size; the walk goes on to the other sizes and entries.
@@ -455,25 +519,60 @@ fn a_failed_visit_is_collected_and_the_walk_goes_on() {
     // the later sizes of the broken entry and the whole faulty entry were still visited
     assert!(
         walked
-            .hits
+            .visits
             .iter()
-            .any(|h| h.screen == "test-only broken screen" && h.size.x == 1280.0),
+            .any(|v| v.screen == "test-only broken screen" && v.size.0 == 1280.0),
         "{:?}",
-        walked.hits
+        walked.visits
     );
-    assert!(
+    assert_eq!(
         walked
-            .hits
+            .visits
             .iter()
-            .any(|h| h.screen == "test-only faulty screen"),
+            .filter(|v| v.screen == "test-only faulty screen")
+            .count(),
+        SIZES.len()
+    );
+}
+
+/// A shipped-kind entry whose `open` panics is a collected failure naming screen and size; a clean entry beside it is
+/// still visited at every size.
+#[test]
+fn an_entry_whose_open_panics_is_collected_and_the_walk_goes_on() {
+    static BOOM: Screen = Screen {
+        name: "test-only exploding screen",
+        fixture: "demo",
+        open: |_| panic!("boom in open"),
+        steps: &[],
+        act: None,
+        marker: &[crate::screens::has("never drawn")],
+        transient: false,
+    };
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(ScreenEntry::new(&BOOM)), the_start_screen()];
+    let walked = walk(&mut list);
+    let bad = verdict(&walked, &[]);
+    assert!(
+        SIZES.iter().all(|s| bad.iter().any(|m| m
+            .starts_with(&format!("test-only exploding screen at {}x{}: ", s.x, s.y))
+            && m.contains("boom in open"))),
+        "{bad:#?}"
+    );
+    assert_eq!(
+        walked
+            .visits
+            .iter()
+            .filter(|v| v.screen == "start screen")
+            .count(),
+        SIZES.len(),
         "{:?}",
-        walked.hits
+        walked.visits
     );
 }
 
 /// A marker that another entry's screen satisfies is a failure naming both.
 #[test]
 fn a_marker_another_screen_satisfies_fails() {
+    // Twin draws the faulty UI, so the faulty marker holds on it.
     struct Twin;
     impl Entry for Twin {
         fn name(&self) -> &str {
@@ -497,23 +596,26 @@ fn a_marker_another_screen_satisfies_fails() {
     );
 }
 
-fn hit(invariant: &'static str, what: &str, px: f32) -> Hit {
+fn hit(invariant: &'static str, what: &str, ordinal: usize, px: f32) -> Hit {
     Hit {
         screen: "s".into(),
         size: SIZES[0],
         invariant,
         what: what.into(),
+        y: 0.0,
+        ordinal,
         px,
         message: String::new(),
     }
 }
 
-fn entry(what: &'static str, count: usize, px: f32) -> Allowed {
+fn entry(what: &'static str, ordinal: usize, count: usize, px: f32) -> Allowed {
     Allowed {
         screen: "s",
         invariant: "window_edge",
         size: (SIZES[0].x, SIZES[0].y),
         what,
+        ordinal,
         count,
         px,
         reason: "r",
@@ -524,47 +626,69 @@ fn walked(hits: Vec<Hit>) -> Walked {
     Walked {
         hits,
         errors: vec![],
+        visits: vec![],
     }
 }
 
-/// The allowlist is exact: size, name, count and px must all agree, and what it covers is consumed one for one.
+/// The allowlist is exact: size, name, ordinal, count and px must all agree, and what it covers is consumed one for
+/// one.
 #[test]
 fn an_allowed_hit_must_match_exactly_and_is_consumed_one_for_one() {
     let two = walked(vec![
-        hit("window_edge", "tag", 92.0),
-        hit("window_edge", "tag", 107.0),
+        hit("window_edge", "tag", 0, 92.0),
+        hit("window_edge", "tag", 1, 107.0),
     ]);
-    let exact = [entry("tag", 1, 91.0), entry("tag", 1, 108.0)];
+    let exact = [entry("tag", 0, 1, 91.0), entry("tag", 1, 1, 108.0)];
     assert!(verdict(&two, &exact).is_empty());
+    // the two rows exchange their overflows: both entries are wrong
+    let swapped = [entry("tag", 0, 1, 108.0), entry("tag", 1, 1, 91.0)];
+    assert_eq!(verdict(&two, &swapped).len(), 4);
     // one fixed: the other entry is stale
-    let one = walked(vec![hit("window_edge", "tag", 92.0)]);
+    let one = walked(vec![hit("window_edge", "tag", 0, 92.0)]);
     let stale = verdict(&one, &exact);
     assert_eq!(stale.len(), 1, "{stale:?}");
     assert!(stale[0].contains("did not come"), "{stale:?}");
     // a third hit: unmatched
     let three = walked(vec![
-        hit("window_edge", "tag", 92.0),
-        hit("window_edge", "tag", 92.0),
-        hit("window_edge", "tag", 107.0),
+        hit("window_edge", "tag", 0, 92.0),
+        hit("window_edge", "tag", 0, 92.0),
+        hit("window_edge", "tag", 1, 107.0),
     ]);
     let extra = verdict(&three, &exact);
     assert_eq!(extra.len(), 1, "{extra:?}");
     // one entry with a count of two is consumed twice
     let both = walked(vec![
-        hit("window_edge", "tag", 92.0),
-        hit("window_edge", "tag", 92.5),
+        hit("window_edge", "tag", 0, 92.0),
+        hit("window_edge", "tag", 0, 92.5),
     ]);
-    assert!(verdict(&both, &[entry("tag", 2, 92.0)]).is_empty());
-    assert_eq!(verdict(&both, &[entry("tag", 3, 92.0)]).len(), 1);
-    assert_eq!(verdict(&both, &[entry("tag", 1, 92.0)]).len(), 1);
+    assert!(verdict(&both, &[entry("tag", 0, 2, 92.0)]).is_empty());
+    assert_eq!(verdict(&both, &[entry("tag", 0, 3, 92.0)]).len(), 1);
+    assert_eq!(verdict(&both, &[entry("tag", 0, 1, 92.0)]).len(), 1);
     // other size, px off by 10, a name that is only part of the widget's
-    let mut moved = entry("tag", 1, 92.0);
+    let mut moved = entry("tag", 0, 1, 92.0);
     moved.size = (1280.0, 800.0);
-    let h = walked(vec![hit("window_edge", "tag", 92.0)]);
+    let h = walked(vec![hit("window_edge", "tag", 0, 92.0)]);
     assert_eq!(verdict(&h, &[moved]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("tag", 1, 102.0)]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("ta", 1, 92.0)]).len(), 2);
-    assert_eq!(verdict(&h, &[entry("tag", 1, 94.0)]).len(), 0);
+    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 102.0)]).len(), 2);
+    assert_eq!(verdict(&h, &[entry("ta", 0, 1, 92.0)]).len(), 2);
+    assert_eq!(verdict(&h, &[entry("tag", 0, 1, 94.0)]).len(), 0);
+}
+
+/// Same-named hits of one frame are numbered from the top, whatever order they were found in.
+#[test]
+fn same_named_hits_are_numbered_from_the_top() {
+    let mut hits = vec![
+        hit("window_edge", "tag", 0, 1.0),
+        hit("window_edge", "other", 0, 1.0),
+        hit("window_edge", "tag", 0, 1.0),
+    ];
+    hits[0].y = 500.0;
+    hits[2].y = 400.0;
+    number_same_named(&mut hits);
+    assert_eq!(
+        hits.iter().map(|h| h.ordinal).collect::<Vec<_>>(),
+        vec![1, 0, 0]
+    );
 }
 
 /// Errors are never allowed.
@@ -573,6 +697,7 @@ fn an_error_is_never_allowed() {
     let w = Walked {
         hits: vec![],
         errors: vec!["s at 1100x800: did not go idle".into()],
+        visits: vec![],
     };
     assert_eq!(verdict(&w, &[]).len(), 1);
 }

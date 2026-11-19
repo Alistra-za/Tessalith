@@ -33,9 +33,12 @@ pub const NO_PROJECT: &str = "none";
 
 /// One condition on a frame: a node of `role` (any role when empty) named `text`, or a painted text equal to it, is
 /// there (`present`) or is not.
+/// `right_of`, when not empty, names a node (by label) whose left edge the node must not lie left of: the Sets column
+/// is left of the set editor, so a node right of the editor's "Diffuse" slot label is the editor's.
 pub struct Needle {
     pub role: &'static str,
     pub text: &'static str,
+    pub right_of: &'static str,
     pub present: bool,
 }
 
@@ -43,6 +46,7 @@ pub const fn has(text: &'static str) -> Needle {
     Needle {
         role: "",
         text,
+        right_of: "",
         present: true,
     }
 }
@@ -51,6 +55,16 @@ pub const fn has_role(role: &'static str, text: &'static str) -> Needle {
     Needle {
         role,
         text,
+        right_of: "",
+        present: true,
+    }
+}
+
+const fn has_right_of(text: &'static str, anchor: &'static str) -> Needle {
+    Needle {
+        role: "",
+        text,
+        right_of: anchor,
         present: true,
     }
 }
@@ -59,6 +73,7 @@ const fn lacks(text: &'static str) -> Needle {
     Needle {
         role: "",
         text,
+        right_of: "",
         present: false,
     }
 }
@@ -66,12 +81,25 @@ const fn lacks(text: &'static str) -> Needle {
 /// True when every needle of `marker` holds on `s`.
 pub fn holds(s: &Snapshot, marker: &[Needle]) -> bool {
     marker.iter().all(|n| {
+        let left = if n.right_of.is_empty() {
+            f32::MIN
+        } else {
+            s.nodes
+                .iter()
+                .filter(|x| x.label == n.right_of)
+                .map(|x| x.rect.min.x)
+                .fold(f32::MAX, f32::min)
+        };
         let found = s.nodes.iter().any(|x| {
             (n.role.is_empty() || x.role == n.role)
+                && x.rect.min.x >= left - 1.0
                 && (x.label == n.text
                     || x.value.as_deref() == Some(n.text)
                     || x.placeholder.as_deref() == Some(n.text))
-        }) || (n.role.is_empty() && s.texts.iter().any(|t| t.text == n.text));
+        }) || (n.role.is_empty()
+            && s.texts
+                .iter()
+                .any(|t| t.text == n.text && t.rect.min.x >= left - 1.0));
         found == n.present
     })
 }
@@ -84,6 +112,8 @@ pub struct Screen {
     pub open: fn(&mut H),
     /// Step lines (`ui_drive/steps.rs`) run after `open`, for a menu or popup a click opens.
     pub steps: &'static [&'static str],
+    /// A last action `steps` cannot express (a click scoped to a region), run after `steps`.
+    pub act: Option<fn(&mut H)>,
     /// What only this screen shows. It must not hold before `open` or, with `steps`, before the steps, and no other
     /// entry's screen may satisfy it.
     pub marker: &'static [Needle],
@@ -118,6 +148,24 @@ fn select_set(h: &mut H, id: &str) {
     model(h).select_set(&k);
 }
 
+/// Right-clicks the widest node named `label` (the slot row, which carries the menu; the row's name beside it is not clickable) that lies right of the set editor's first slot row ("Diffuse") (the editor's
+/// own, not the Sets column's).
+fn right_click_in_editor(h: &mut H, label: &str) {
+    use egui_kittest::kittest::Queryable as _;
+    settle(h, 4);
+    let anchor = h
+        .query_all_by_label("Diffuse")
+        .map(|n| n.rect().min.x)
+        .fold(f32::MAX, f32::min);
+    let target = h
+        .query_all_by_label(label)
+        .filter(|n| n.rect().min.x >= anchor - 1.0)
+        .max_by(|a, b| a.rect().width().total_cmp(&b.rect().width()))
+        .unwrap_or_else(|| panic!("no {label:?} in the set editor (right of x {anchor})"));
+    target.click_secondary();
+    h.run_steps(2);
+}
+
 /// A set's Material tab after giving it `shader`.
 fn material_tab(h: &mut H, set: &str, shader: engine::shader::Shader) {
     model(h).set_shader(set, Some(shader));
@@ -131,6 +179,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: NO_PROJECT,
         open: nothing,
         steps: &[],
+        act: None,
         marker: &[has("Open a folder of source textures to begin.")],
         transient: false,
     },
@@ -142,6 +191,7 @@ pub const SCREENS: &[Screen] = &[
             model(h).toggle_tab(BottomTab::Problems);
         },
         steps: &[],
+        act: None,
         marker: &[has("Kinds ▾"), has("← architecture/stone/stonewall")],
         transient: false,
     },
@@ -150,6 +200,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: nothing,
         steps: &[r#"{"op":"click","at":{"starts":"Export to","role":"Button"}}"#],
+        act: None,
         marker: &[has("Re-encode every output")],
         transient: true,
     },
@@ -158,6 +209,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).open_settings_tab(),
         steps: &[],
+        act: None,
         marker: CLOSE_SETTINGS,
         transient: false,
     },
@@ -166,6 +218,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).select_item("architecture/stone/stonewall.png"),
         steps: &[r#"{"op":"right_click","at":{"label":"stonewall.png","index":1}}"#],
+        act: None,
         marker: &[has("Copy settings from stonewall.png to 0 selected…")],
         transient: true,
     },
@@ -174,6 +227,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).select_item("plants/fern.png"),
         steps: &[],
+        act: None,
         marker: &[has("← plants/fern"), has("Alpha threshold")],
         transient: false,
     },
@@ -182,6 +236,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/stonewall"),
         steps: &[r#"{"op":"right_click","at":{"label":"architecture/stone/stonewall","index":0}}"#],
+        act: None,
         marker: &[has("Fill from names…")],
         transient: true,
     },
@@ -190,6 +245,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).open_review(),
         steps: &[],
+        act: None,
         marker: &[has("What will be written")],
         transient: false,
     },
@@ -203,6 +259,7 @@ pub const SCREENS: &[Screen] = &[
             m.presets_model().select(&id);
         },
         steps: &[],
+        act: None,
         marker: &[has(
             "Built-in presets are read-only: Duplicate makes an editable copy.",
         )],
@@ -213,6 +270,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).open_json_editor(),
         steps: &[],
+        act: None,
         marker: &[has("+ Add a delete section")],
         transient: false,
     },
@@ -226,6 +284,7 @@ pub const SCREENS: &[Screen] = &[
             m.open_rename(RenameMode::Inputs);
         },
         steps: &[],
+        act: None,
         marker: &[has("Rename 2 inputs")],
         transient: false,
     },
@@ -234,6 +293,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| model(h).open_marker_dialog(),
         steps: &[],
+        act: None,
         marker: &[has("F0 = (code/255)^1.6")],
         transient: false,
     },
@@ -242,6 +302,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/stonewall"),
         steps: &[],
+        act: None,
         marker: &[
             has("textures/architecture/stone/stonewall"),
             lacks("Fill from names…"),
@@ -252,10 +313,12 @@ pub const SCREENS: &[Screen] = &[
         name: "set editor slot menu",
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/cobble"),
-        steps: &[r#"{"op":"right_click","at":{"label":"RMAOS","index":1}}"#],
+        steps: &[],
+        // right-clicks the RMAOS row inside the set editor; the Sets column's chip of that name is not the target
+        act: Some(|h| right_click_in_editor(h, "RMAOS")),
         marker: &[
             has("textures/architecture/stone/cobble"),
-            has("Slot 6: RMAOS"),
+            has_right_of("Pin this slot (always use this file)", "Diffuse"),
         ],
         transient: true,
     },
@@ -268,6 +331,7 @@ pub const SCREENS: &[Screen] = &[
             sdc_gui::ui::set_editor::show_also_tab(&h.ctx);
         },
         steps: &[],
+        act: None,
         marker: &[
             has("textures/architecture/stone/cobble"),
             has("Skip vanilla/CM for this set"),
@@ -279,10 +343,11 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| select_set(h, "architecture/stone/cobble"),
         steps: &[],
+        act: None,
         marker: &[
             has("textures/architecture/stone/cobble"),
             lacks("Skip vanilla/CM for this set"),
-            lacks("Slot 6: RMAOS"),
+            lacks("Pin this slot (always use this file)"),
         ],
         transient: false,
     },
@@ -291,6 +356,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "helpers",
         open: |h| model(h).select_item("props/crate_roughness.png"),
         steps: &[],
+        act: None,
         marker: &[has("← props/crate"), has_role("ComboBox", "Helper role")],
         transient: false,
     },
@@ -299,6 +365,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: meshes_view,
         steps: &[],
+        act: None,
         marker: &[has("5 of 5 NIFs")],
         transient: false,
     },
@@ -307,6 +374,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: nothing,
         steps: &[r#"{"op":"click","at":{"label":"MO2…"}}"#],
+        act: None,
         marker: &[has("Scan a folder…")],
         transient: true,
     },
@@ -315,6 +383,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| material_tab(h, "actors/body", engine::shader::Shader::AdvancedSkin),
         steps: &[],
+        act: None,
         marker: &[has("textures/actors/body"), has("RFAOS, empty")],
         transient: false,
     },
@@ -323,6 +392,7 @@ pub const SCREENS: &[Screen] = &[
         fixture: "demo",
         open: |h| material_tab(h, "pbr/metal", engine::shader::Shader::PbrLandscape),
         steps: &[],
+        act: None,
         marker: &[has("textures/pbr/metal"), has("PBR Landscape")],
         transient: false,
     },
@@ -405,6 +475,21 @@ fn at_text(size: Vec2) -> String {
 /// before its step lines run, or when it does not hold afterwards. Keep the `TempDir` alive as long as the harness:
 /// dropping it deletes the project folder the app reads.
 pub fn enter(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
+    // the whole visit is inside the handler: a panic or an idle timeout in the fixture or in `open` is a failure of
+    // this screen at this size, not the end of the walk
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| enter_inner(s, size))).unwrap_or_else(
+        |e| {
+            let why = e
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
+                .unwrap_or_default();
+            Err(format!("panicked: {why}"))
+        },
+    )
+}
+
+fn enter_inner(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
     crate::app_data();
     let d = tempfile::tempdir().unwrap();
     let (mut h, run) = if s.fixture == NO_PROJECT {
@@ -433,19 +518,13 @@ pub fn enter(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
     if !settle(&mut h, 4) {
         return Err("the window did not go idle after `open`".into());
     }
-    if !s.steps.is_empty() && holds(&snapshot(&h), s.marker) {
+    let last_step = !s.steps.is_empty() || s.act.is_some();
+    if last_step && holds(&snapshot(&h), s.marker) {
         return Err("the marker already holds before the step lines run, so the steps are not what shows it; choose a marker only the last step satisfies".into());
     }
-    let entered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        crate::play(&mut h, &run, s.steps, 0)
-    }));
-    if let Err(e) = entered {
-        let why = e
-            .downcast_ref::<String>()
-            .cloned()
-            .or_else(|| e.downcast_ref::<&str>().map(|s| s.to_string()))
-            .unwrap_or_default();
-        return Err(format!("a step line failed: {why}"));
+    crate::play(&mut h, &run, s.steps, 0);
+    if let Some(act) = s.act {
+        act(&mut h);
     }
     if !settle(&mut h, 4) {
         return Err("the window did not go idle after the step lines".into());
@@ -460,6 +539,12 @@ pub fn enter(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String> {
 pub struct ScreenEntry {
     screen: &'static Screen,
     open: Option<(tempfile::TempDir, H)>,
+}
+
+impl ScreenEntry {
+    pub fn new(screen: &'static Screen) -> Self {
+        ScreenEntry { screen, open: None }
+    }
 }
 
 impl Entry for ScreenEntry {
@@ -501,8 +586,19 @@ impl Entry for ScreenEntry {
 pub fn entries() -> Vec<Box<dyn Entry>> {
     SCREENS
         .iter()
-        .map(|screen| Box::new(ScreenEntry { screen, open: None }) as Box<dyn Entry>)
+        .map(|screen| Box::new(ScreenEntry::new(screen)) as Box<dyn Entry>)
         .collect()
+}
+
+/// The start screen has no window under it to compare with in `enter`; its text must not be on a window with a project
+/// open.
+#[test]
+fn the_start_screen_text_is_not_on_an_open_project() {
+    let start = SCREENS.iter().find(|s| s.fixture == NO_PROJECT).unwrap();
+    let d = tempfile::tempdir().unwrap();
+    crate::app_data();
+    let (h, _) = fixtures::start("demo", d.path(), false).unwrap();
+    assert!(!holds(&snapshot(&h), start.marker));
 }
 
 #[test]
@@ -524,6 +620,7 @@ fn an_entry_that_opens_nothing_fails() {
             fixture: "demo",
             open: nothing,
             steps: &[],
+            act: None,
             marker: CLOSE_SETTINGS,
             transient: false,
         },
@@ -543,6 +640,7 @@ fn an_entry_whose_marker_is_already_on_the_window_fails() {
             fixture: "demo",
             open: nothing,
             steps: &[],
+            act: None,
             marker: SAVE_BUTTON,
             transient: false,
         },
@@ -562,6 +660,7 @@ fn an_entry_whose_marker_is_there_before_its_last_step_fails() {
             fixture: "demo",
             open: |h| model(h).open_settings_tab(),
             steps: &[r#"{"op":"settle"}"#],
+            act: None,
             marker: CLOSE_SETTINGS,
             transient: false,
         },
