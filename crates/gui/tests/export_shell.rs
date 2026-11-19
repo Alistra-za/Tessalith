@@ -1195,6 +1195,11 @@ fn a_scoped_review_header_follows_an_overwrite_answer_given_in_review() {
     row.answer = Some(GuardChoice::KeepTheirs);
     m.set_nif_review_rows(vec![row]);
     assert!(m.header_accent(), "the answer opens the gate: accent on");
+    // Round 3 (evidence rule): the label too. A NIF edit to write keeps it on Review, with or without the opt-out.
+    assert_eq!(m.header_export_text(), "Review 4 files + 1 NIF edit…");
+    m.set_export_without_review(true);
+    assert_eq!(m.header_export_text(), "Review 4 files + 1 NIF edit…");
+    assert!(m.header_accent(), "the answered gate stays open");
 }
 
 #[test]
@@ -1212,9 +1217,12 @@ fn a_scoped_review_header_follows_the_also_tick() {
         "the whole project with an Also tick opens Review: {}",
         m.header_export_text()
     );
+    // Round 3 (evidence rule): a valid Also tick leaves the whole project's gate open, so the accent stays on.
+    assert!(m.header_accent(), "the valid tick keeps the gate open");
     m.set_also_tick(AlsoTarget::Vanilla, false);
     assert!(m.wait_idle(Duration::from_secs(60)));
     assert_eq!(m.header_export_text(), "Export 4 files now");
+    assert!(m.header_accent());
 }
 
 #[test]
@@ -1236,6 +1244,21 @@ fn a_scoped_review_header_follows_a_restored_json() {
     std::fs::write(&json, &original).unwrap();
     m.expire_review_json();
     assert!(m.header_accent(), "the restored JSON opens the gate");
+    // Round 3 (evidence rule): with the opt-out the label follows the same flips as the accent.
+    m.set_export_without_review(true);
+    assert!(m.export_scope().is_some(), "guard: still scoped");
+    assert_eq!(m.header_export_text(), "Export 3 files now", "guard");
+    std::fs::write(&json, "{ \"edited\": true }\n").unwrap();
+    m.expire_review_json();
+    assert!(
+        m.header_export_text().starts_with("Review ") && !m.header_accent(),
+        "the edited JSON: {}",
+        m.header_export_text()
+    );
+    std::fs::write(&json, &original).unwrap();
+    m.expire_review_json();
+    assert_eq!(m.header_export_text(), "Export 3 files now");
+    assert!(m.header_accent());
 }
 
 // Ruling 3c-19: the whole-project answer under a scope keeps its volatile terms live (the JSON recheck, the NIF
@@ -1271,6 +1294,62 @@ fn a_scoped_review_header_follows_the_json_going_edited() {
     );
 }
 
+/// Round 3, evidence rule (re-review B4): the stale state a held whole-project answer would leave IS reachable. A
+/// scan-finished read whose reply changes nothing clears `votes_pending` and settles at once, moving neither the view
+/// key nor the Problems key. The answer taken when the read started was "Review" (a NIF edit to write); the row goes
+/// while the read is pending, and the header must read "now" once the reply lands. A cached rule answer (the
+/// stale-answer mutation, `task-2-fix3-mut-votes-stale-answer.log`) stays on Review and fails the last asserts.
+#[test]
+fn a_scoped_review_header_follows_an_unchanged_scan_reply() {
+    use sdc_gui::model::bottom::export_files_builds;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    // The database is part of the view key: set it, and let its first read land, before the scope opens.
+    let dbdir = tempfile::tempdir().unwrap();
+    let db = dbdir.path().join("scan.db");
+    drop(modscan::store::Store::open(&db).unwrap());
+    m.scan_db = Some(db);
+    m.refresh_mesh_votes(false);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    scoped_review_with_the_opt_out(&mut m, "g/u");
+    // The frame after the opt-out: its `sdc-project.toml` change reruns the checks (`refresh_checks`, keyed on the
+    // document's revision), which moves the view key. Done here, so the reply's own poll moves nothing.
+    m.poll();
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
+    // A scan finished: the read goes to the worker, and its reply waits in the channel until the next poll.
+    m.refresh_mesh_votes(false);
+    assert!(
+        m.votes_pending() && m.full_plan_pending(),
+        "guard: the read is pending"
+    );
+    assert!(
+        m.header_export_text().starts_with("Review "),
+        "guard: the answer held at the read's start is Review: {}",
+        m.header_export_text()
+    );
+    let builds = export_files_builds(&m);
+    m.set_nif_review_rows(vec![]); // moves neither the view key nor the Problems key
+    let end = std::time::Instant::now() + Duration::from_secs(60);
+    while m.votes_pending() {
+        assert!(std::time::Instant::now() < end, "the read never landed");
+        m.poll();
+    }
+    assert!(
+        !m.full_plan_pending(),
+        "guard: the unchanged reply settled without a plan"
+    );
+    assert!(m.export_scope().is_some(), "guard: still scoped");
+    assert_eq!(m.header_export_text(), "Export 4 files now");
+    assert!(m.header_accent());
+    assert_eq!(
+        export_files_builds(&m),
+        builds,
+        "guard: no key moved (no file count was rebuilt)"
+    );
+}
+
+/// Kept from round 2 as a pin: the post-plan read's landing moves the view key, so it cannot catch a held answer (the
+/// test above does).
 #[test]
 fn a_scoped_review_header_is_not_stuck_on_an_answer_made_while_votes_were_pending() {
     let d = tempfile::tempdir().unwrap();
