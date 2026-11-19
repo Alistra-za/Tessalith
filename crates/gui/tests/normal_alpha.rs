@@ -2437,6 +2437,42 @@ fn a_reset_that_uncovers_data_drops_the_stale_entry_in_the_same_step() {
     assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
 }
 
+/// N8-h: removing a full-name table uncovers the stem's existing Data. Neither table gained Data.
+#[test]
+fn a_reset_that_uncovers_data_keeps_the_entry_while_a_set_plan_is_pending() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let root = d.path().join("textures");
+    std::fs::write(
+        root.join("sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nalpha.policy = \"remove\"\n\n[files.\"pbr/iron_n\"]\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(root, d.path().join("export"));
+    m.rename_set("armor/steel", "armor/plate").unwrap();
+    settle(&mut m);
+    // Undo restores the recorded list and starts a plan for the restored set name.
+    m.undo();
+    assert!(m.full_plan_pending());
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("remove")));
+    assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
+
+    m.reset_all_settings(&[IRON_N.to_string()]);
+    assert!(!m.project.as_ref().unwrap().has_file_key(IRON_N));
+    assert_eq!(held(&m, "pbr/iron_n", "alpha.policy"), Some(json!("data")));
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "uncovering existing Data leaves the full-name entry listed"
+    );
+}
+
 /// N8-h (B4), a pin of the batch compare: a bulk Data on a six-file cube is copied to its other face entries in the
 /// same batch (DT31); a listed secondary face that the copy wrote `data` into leaves the list.
 #[test]
