@@ -176,10 +176,12 @@ pub struct NifEdit {
     /// The last export's result line, and whether it is an error. While `partial` holds, an op change keeps it: it is
     /// the reason the session stays pending.
     pub export_note: Option<(String, bool)>,
-    /// Ruling E6-I: an export wrote its NIF (the SHA-256 hex of those bytes) and not its record. Until an export
-    /// writes the record, the session is pending whatever its ops are, and that NIF counts as this session's
-    /// (`foreign_hash`). In memory only.
+    /// Rulings E6-I, E6-N: an export wrote its NIF (the SHA-256 hex of those bytes) and not its record. Its one use:
+    /// the next Export may replace that NIF without the Overwrite question (`foreign_hash`), and with no record and no
+    /// ops it names the undone edit (`undone_export`). Pending is worked out from disk (`nif_drift`). In memory only.
     partial: Option<String>,
+    /// Ruling E6-N: the installed NIF is not the one the record names (`derive_export`, read from disk).
+    nif_drift: bool,
     /// Ruling E6-J: the SHA-256 of the source the export record was built from (taken from the record, or set by an
     /// export); None without a record. A source change forces a re-export only when the source differs from it.
     record_source: Option<String>,
@@ -264,6 +266,13 @@ pub const NIF_UNANSWERED: &str =
     "the file on disk was not written by Tessalith: answer Keep or Overwrite on its row";
 pub const NIF_KEPT: &str = "you kept the file on disk";
 pub const NIF_CHANGED_SINCE: &str = "changed on disk since you answered";
+/// Ruling E6-N: the installed NIF is not the one the export record names (a partial export, or a NIF replaced since);
+/// Export this NIF repairs it, so this is its hover while it is on.
+pub const NIF_NOT_RECORDED: &str =
+    "The exported NIF is not the one last recorded: Export this NIF writes these edits and their record again";
+/// Ruling E6-N: no ops, and the installed NIF holds an edit since undone; nothing is written for it.
+pub const NIF_UNDONE: &str =
+    "The exported NIF holds an edit that was undone: redo it and export to repair the export";
 /// Note GP10: the write found a file Tessalith did not write that the row had not (it changed in between).
 pub const NIF_FOREIGN_AT_WRITE: &str =
     "the file on disk changed before the write: answer Keep or Overwrite on its row";
@@ -942,6 +951,7 @@ impl NifEdit {
             notice: None,
             export_note: None,
             partial: None,
+            nif_drift: false,
             record_source: None,
             cleanup_note: None,
             retarget_error: None,
@@ -1002,7 +1012,6 @@ impl NifEdit {
             return;
         };
         self.record_source = Some(r.source.sha256.clone());
-        let stale = r.export.ops_hash.is_some() && r.source.sha256 != self.doc.source.sha256;
         // ruling E6-L: the fingerprint is the session's when these are its ops (it takes the record's export state as
         // its own) or the bytes it wrote there; a record that only begins the session's ops loses nothing (not
         // foreign) but is not the session's either
@@ -1010,9 +1019,40 @@ impl NifEdit {
         self.record_fp = ours.then_some(fp);
         self.foreign_record = (!starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
         self.doc.export = r.export;
-        if stale {
-            self.doc.export.ops_hash = Some(String::new());
-        }
+        self.derive_export();
+    }
+
+    /// Ruling E6-N: whether the installed NIF is the one the record names (`nif_drift`), read from disk (one read and
+    /// hash of the NIF) when the session meets a folder: open, a folder change, a record read again, a source reload,
+    /// an Export. Never per frame. A NIF that cannot be read is not known to be the recorded one.
+    fn derive_export(&mut self) {
+        self.nif_drift = match (
+            &self.doc.export.sha256,
+            self.export_path.as_os_str().is_empty(),
+        ) {
+            (Some(rec), false) => match std::fs::read(&self.export_path) {
+                Ok(b) => edit_doc::sha256_hex(&b) != *rec,
+                Err(e) => e.kind() != std::io::ErrorKind::NotFound,
+            },
+            _ => false,
+        };
+    }
+
+    /// Ruling E6-N (E6-J): the record was exported from another source than the current one, computed from the
+    /// record's source hash each time (the loaded export state is never overwritten).
+    fn stale_source(&self) -> bool {
+        self.doc.export.ops_hash.is_some()
+            && self
+                .record_source
+                .as_deref()
+                .is_some_and(|s| s != self.doc.source.sha256)
+    }
+
+    /// Ruling E6-N: the session has no ops and the installed NIF holds an export of an edit since undone (the record
+    /// names another NIF, or a first export left no record while this session knows the NIF it wrote).
+    fn undone_export(&self) -> bool {
+        self.doc.ops.is_empty()
+            && (self.nif_drift || (self.doc.export.sha256.is_none() && self.partial.is_some()))
     }
 
     /// Ruling E6-F: a block from the record is read again when the record's file changed (moved away, replaced): the
@@ -1073,13 +1113,7 @@ impl NifEdit {
             .filter(|d| d.status == OpStatus::Conflict)
             .count();
         self.source_changed = Some((self.doc.ops.len() - n, n));
-        // the exported file was built from another source than the current one: force a re-export (write_out sets a
-        // real hash again). Ruling E6-J: the record's source decides, not the draft's.
-        if self.doc.export.ops_hash.is_some()
-            && self.record_source.as_deref() != Some(self.doc.source.sha256.as_str())
-        {
-            self.doc.export.ops_hash = Some(String::new());
-        }
+        // a source other than the record's makes the edit pending (`stale_source`, computed, ruling E6-N)
     }
 
     /// Writes `record` (the document as exported, with its new export entry) to the export folder; only `write_out`
@@ -1103,6 +1137,7 @@ impl NifEdit {
         self.source = Arc::new(source);
         self.reapply();
         self.count_changed();
+        self.derive_export();
         self.ops_changed(true);
         Ok(())
     }
@@ -1121,9 +1156,10 @@ impl NifEdit {
     }
 
     /// `doc.pending()`, computed once per change (Note GD23): every op change makes a new `rev`, and an export or a
-    /// folder change a new export record. Ruling E6-I: a partial export is pending whatever the ops are.
+    /// folder change a new export record. Ruling E6-N: also pending when the record names another source, the
+    /// installed NIF is not the one the record names, or a NIF of an undone edit is installed (all from disk).
     pub fn pending(&self) -> bool {
-        if self.partial.is_some() {
+        if self.stale_source() || self.nif_drift || self.undone_export() {
             return true;
         }
         let key = (self.rev, self.doc.ops.len());
@@ -1142,6 +1178,10 @@ impl NifEdit {
         // the project switch's block (`switch_failed`) and an export folder's bad record share this field
         if let Some(why) = &self.retarget_error {
             return Some(why.clone());
+        }
+        // ruling E6-N: an installed NIF of an edit since undone is not idle; no write repairs it from no ops
+        if self.undone_export() {
+            return Some(NIF_UNDONE.into());
         }
         // Note GH5: nothing edited is the idle state with or without a folder, and wins over `apply_err` too (a reloaded
         // source that stops parsing with no ops reads idle; `error` still says why).
@@ -1284,6 +1324,7 @@ impl NifEdit {
             Err(e) => {
                 // ruling E6-I: the NIF in place is this session's and not recorded: pending until repaired
                 self.partial = export.sha256.clone();
+                self.derive_export(); // ruling E6-N: the NIF in place is not the recorded one
                 return ExportOutcome::Blocked(format!(
                     "{} is in place, but its record could not be saved ({e}); the edit stays pending: export it again.",
                     path.display()
@@ -1293,6 +1334,7 @@ impl NifEdit {
         self.doc.export = export;
         self.record_source = Some(self.doc.source.sha256.clone());
         self.partial = None;
+        self.nif_drift = false; // the NIF just written is the one the record now names
         self.up_to_date = true;
         self.foreign_record = None;
         self.record_fp = fp;
@@ -1320,10 +1362,7 @@ impl NifEdit {
             }
         };
         self.apply_err = None;
-        // the last export's line no longer describes these edits, except a partial export's (ruling E6-I)
-        if self.partial.is_none() {
-            self.export_note = None;
-        }
+        self.export_note = None; // the last export's line no longer describes these edits
         self.cleanup_note = None;
         for (d, o) in self.doc.ops.iter_mut().zip(&a.outcomes) {
             if let Outcome::ReAnchored { block } = o {
@@ -2947,7 +2986,12 @@ impl MeshesModel {
             );
         }
         if !e.edit_mod.as_os_str().is_empty() {
-            match DocBadge::of(&e.doc) {
+            // ruling E6-N: the live chip follows the session's pending state, which is worked out from disk
+            let badge = match e.doc.has_conflicts() || !e.pending() {
+                true => DocBadge::of(&e.doc),
+                false => Some(DocBadge::Pending),
+            };
+            match badge {
                 Some(b) => self.doc_badges.insert(e.data_path.clone(), b),
                 None => self.doc_badges.remove(&e.data_path),
             };
@@ -3080,6 +3124,15 @@ impl MeshesModel {
             Some(r) => r.blocked,
             None => Some(NO_EDITS.into()),
         }
+    }
+
+    /// Ruling E6-N: while `Export this NIF` is on, why it matters now: the installed NIF is not the one the record
+    /// names, and this export repairs that. None otherwise.
+    pub fn quick_export_note(&self) -> Option<&'static str> {
+        self.edit
+            .as_ref()
+            .is_some_and(|e| e.nif_drift)
+            .then_some(NIF_NOT_RECORDED)
     }
 
     /// Final review Minor 2: the click on `Export this NIF` opens Review instead of writing, because the file at the

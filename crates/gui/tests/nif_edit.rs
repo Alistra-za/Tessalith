@@ -5841,15 +5841,12 @@ fn a_partial_export_keeps_its_row_until_it_is_repaired() {
     let row = review_row(&m);
     assert_eq!(row.blocked, None, "Export can repair it");
     assert_eq!(row.foreign, None, "the NIF in place is this session's");
-    assert!(
-        m.edit
-            .as_ref()
-            .unwrap()
-            .export_note
-            .as_ref()
-            .is_some_and(|(t, _)| t.contains("is in place, but its record")),
-        "the reason stays: {:?}",
-        m.edit.as_ref().unwrap().export_note
+    // ruling E6-N (was: the reason kept in `export_note`): the reason is worked out from disk and is the enabled
+    // Export this NIF's hover
+    assert_eq!(
+        m.quick_export_note(),
+        Some(NIF_NOT_RECORDED),
+        "the reason stays"
     );
     assert_eq!(m.quick_export_block(), None);
     read_only(&rec, false);
@@ -5859,6 +5856,123 @@ fn a_partial_export_keeps_its_row_until_it_is_repaired() {
     assert_eq!(doc_values(&rec), [12.5]);
     assert_eq!(r.export.sha256, Some(sha256_hex(&nif_x)));
     assert!(m.nif_review_rows().is_empty(), "the row is gone");
+}
+
+/// A new model on the same folders (a restart), project `p` opened and x.nif selected.
+fn restart(d: &tempfile::TempDir, p: &Path) -> MeshesModel {
+    let mut m = MeshesModel::new(Some(d.path().join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    scan_and_select(&mut m, d.path());
+    let x = m
+        .nifs
+        .iter()
+        .find(|n| n.path.ends_with("x.nif"))
+        .unwrap()
+        .copy_id;
+    m.select_nif(x);
+    m.set_project_root(Some(p));
+    m
+}
+
+/// In project `p`: export X (12.5), edit to Y, the record cannot be replaced so the export leaves NIF Y without its
+/// record, undo to X. The record is writable again afterwards. Returns NIF X's bytes.
+fn partial_y_undone_to_x(d: &tempfile::TempDir, m: &mut MeshesModel) -> Vec<u8> {
+    m.open_edit();
+    gloss(m, 12.5);
+    assert_eq!(export(m), Ok(1));
+    let nif_x = std::fs::read(exported(d)).unwrap();
+    gloss(m, 13.5);
+    let rec = nif_doc(&export_root(d));
+    read_only(&rec, true);
+    let why = export(m).unwrap_err();
+    read_only(&rec, false);
+    assert!(why.contains("is in place, but its record"), "{why}");
+    assert!(m.undo_edit());
+    assert_eq!(vals(m), [12.5], "premise: undone to X");
+    nif_x
+}
+
+/// The open edit is pending with its row, not blocked, and says why. Once the session that wrote NIF Y is gone, Y is
+/// a file this session did not write, so the row asks Keep or Overwrite for it (the remembered hash is gone).
+fn pending_and_repairable(m: &MeshesModel) {
+    assert!(m.edit.as_ref().unwrap().pending(), "pending");
+    let row = review_row(m);
+    assert_eq!(row.blocked, None, "Export can repair it");
+    assert_eq!(m.quick_export_note(), Some(NIF_NOT_RECORDED), "the reason");
+}
+
+/// Review round 3 (B4, B3, B7, ruling E6-N): export state comes from disk whenever a session meets a folder: the
+/// record's ops, its source and its NIF against the installed one.
+#[test]
+fn export_state_is_read_from_disk_not_remembered() {
+    table(&[
+        ("restart after a partial export undone", || {
+            let (d, mut m, p) = session_in_project("p", None);
+            partial_y_undone_to_x(&d, &mut m);
+            drop(m);
+            let mut m = restart(&d, &p);
+            m.open_edit();
+            assert_eq!(vals(&m), [12.5], "premise: the draft holds X");
+            pending_and_repairable(&m);
+        }),
+        ("Close edit and reopen", || {
+            let (d, mut m, _p) = session_in_project("p", None);
+            partial_y_undone_to_x(&d, &mut m);
+            m.close_edit();
+            m.open_edit();
+            pending_and_repairable(&m);
+        }),
+        ("select another NIF and come back", || {
+            let (d, mut m, _p) = session_in_project("p", None);
+            partial_y_undone_to_x(&d, &mut m);
+            let x = m.selected_nif.unwrap();
+            m.select_nif(y_nif(&m));
+            m.select_nif(x);
+            m.open_edit();
+            pending_and_repairable(&m);
+        }),
+        ("export folder A to B and back to A", || {
+            let (d, mut m, _p) = session_in_project("p", None);
+            partial_y_undone_to_x(&d, &mut m);
+            let (a, b) = (export_root(&d), d.path().join(r"mods\Other"));
+            std::fs::create_dir_all(&b).unwrap();
+            m.set_nif_export_root(Some(b));
+            m.set_nif_export_root(Some(a));
+            pending_and_repairable(&m);
+        }),
+        (
+            "a first export left partial and undone to no ops is blocked with its reason",
+            || {
+                let (d, mut m, _p) = session_in_project("p", None);
+                m.open_edit();
+                gloss(&mut m, 12.5);
+                let blocker = export_root(&d).join(".sdc");
+                std::fs::write(&blocker, b"a file").unwrap(); // the record's folder cannot be made
+                assert!(export(&mut m).is_err());
+                assert!(exported(&d).is_file(), "premise: the NIF was written");
+                assert!(m.undo_edit());
+                std::fs::remove_file(&blocker).unwrap();
+                let why = m.quick_export_block().unwrap_or_default();
+                assert!(why.contains("holds an edit that was undone"), "{why}");
+                assert_eq!(review_row(&m).blocked.as_deref(), Some(why.as_str()));
+            },
+        ),
+        ("source S1 to S2 and back to S1 ends current", || {
+            let (d, mut m, _p) = session_in_project("p", None);
+            m.open_edit();
+            gloss(&mut m, 12.5);
+            assert_eq!(export(&mut m), Ok(1));
+            let s1 = std::fs::read(d.path().join("mods/A/meshes/x.nif")).unwrap();
+            let s2 = changed_source(&m);
+            m.edit_with(|e| e.reload_source(s2).unwrap());
+            assert!(m.edit.as_ref().unwrap().pending(), "premise: S2 is stale");
+            m.edit_with(|e| e.reload_source(s1).unwrap());
+            assert!(
+                !m.edit.as_ref().unwrap().pending(),
+                "S1 is what the record names"
+            );
+        }),
+    ]);
 }
 
 /// Ruling E6-I: a partial export belongs to its folder: in another folder whose record is current, the session is not
