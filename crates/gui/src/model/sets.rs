@@ -2806,11 +2806,21 @@ pub(crate) fn member_game_path_in(
 /// folder changed and the plan has not landed), and an item that writes no output of its own. The link index folds the
 /// result with ASCII lower case, and the views are rebuilt when the output moves (`view_reads` holds it).
 pub(crate) fn written_game_location(roots: &[PathBuf; 2], it: &TextureItem) -> Option<String> {
+    let (_, rel) = written_output_paths(roots, it)?;
+    game_location_of(rel)
+}
+
+/// The settled output and its path below the output or export folder, shared by links and JSON fills.
+pub(crate) fn written_output_paths<'a>(
+    roots: &[PathBuf; 2],
+    it: &'a TextureItem,
+) -> Option<(&'a Path, &'a Path)> {
     let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
     if it.job_key.is_empty() {
         return None;
     }
-    game_location_of(roots.iter().find_map(|r| job.output.strip_prefix(r).ok())?)
+    let rel = roots.iter().find_map(|r| job.output.strip_prefix(r).ok())?;
+    Some((&job.output, rel))
 }
 
 /// Ruling 3b-F11: the game location of `rel` (a path under the output folder): its filesystem components (`.` and
