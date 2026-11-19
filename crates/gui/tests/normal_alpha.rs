@@ -2667,3 +2667,38 @@ fn an_ordinary_share_into_an_empty_slot_writes_in_its_step() {
     );
     assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
 }
+
+/// N8-n (round 3, B2): `fresh` holds while a `[files]`-only edit's full plan is out, and that plan may give an empty
+/// set its files back. The emptied borrower still points at the listed normal; `armor/bronze` shares it too. An
+/// unrelated `[files]` edit starts a full plan, and while it is out the user ends `armor/bronze`'s share, the last one a
+/// populated regular set holds. The empty borrower is not gone while a plan is out, so the normal stays unsure and its
+/// `data` stays.
+#[test]
+fn an_empty_borrower_is_not_gone_while_a_files_plan_is_out() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, _id) = emptied_borrower(d.path());
+    share(&mut m, IRON_N, "armor/bronze");
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: still data"
+    );
+    m.edit_docs("unrelated", None, true, |p, _| {
+        p.set_file_value("armor/bronze.png", "alpha.policy", &json!("remove"))
+    });
+    assert!(
+        m.full_plan_pending(),
+        "precondition: the files edit's full plan is out"
+    );
+    m.set_slot_command("armor/bronze", 2, SlotCommand::Clear)
+        .unwrap();
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "an empty set is not gone while a plan is out"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+}
