@@ -7,6 +7,7 @@ use super::{
     Continue, ExportPress, ItemStatus,
 };
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 /// How long `review_json` reuses its read of the JSON files. Tests expire it with `expire_review_json` instead of
@@ -124,6 +125,65 @@ pub fn whole_disk_reads(m: &AppModel) -> u64 {
     m.whole_disk_reads.get()
 }
 
+/// E7: hovers of the files Review's footer lists besides the outputs.
+pub const HOVER_SDC_TOML: &str = "Your texture settings. Export saves them first.";
+pub const HOVER_PROJECT_TOML: &str =
+    "Sets and export choices. Export saves them first, and records the hash of each JSON it writes.";
+pub const HOVER_GENERATED: &str =
+    "Tessalith's record of the JSON files it wrote, so the next export does not ask about them.";
+pub const HOVER_MANIFEST: &str =
+    "Tessalith's record of what it wrote. The next export reads it to skip files that did not change.";
+pub const HOVER_COPY: &str = "A vanilla file a set borrows, copied so PGPatcher finds it.";
+pub const HOVER_NIF: &str = "The NIF with your edits.";
+pub const HOVER_NIF_RECORD: &str = "Tessalith's record of this NIF edit.";
+pub const HOVER_ALSO_FOLDER: &str = "Every file in this folder is written or checked again.";
+
+/// E7: one file (or, with an Also tick, one folder) the export changes besides its outputs, and what it is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewWrite {
+    pub path: PathBuf,
+    pub hover: &'static str,
+}
+
+/// E7: every path the export touches. `outputs` are the DDS and JSON files; `also_updated` the rest, in the order
+/// the footer names them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ReviewWrites {
+    pub outputs: Vec<PathBuf>,
+    pub also_updated: Vec<ReviewWrite>,
+}
+
+impl ReviewWrites {
+    /// The Also folder entries of `also_updated`: their files exist only after the engine plans them (JF1), so a
+    /// changed path under one counts as listed.
+    pub fn also_folders(&self) -> Vec<PathBuf> {
+        self.also_updated
+            .iter()
+            .filter(|w| w.hover == HOVER_ALSO_FOLDER)
+            .map(|w| w.path.clone())
+            .collect()
+    }
+}
+
+/// What `AppModel::review_writes` reads besides the disk (see `writes_key`).
+#[derive(Clone, PartialEq)]
+pub(super) struct WritesKey {
+    view: super::ViewKey,
+    project_rev: u64,
+    project_unsaved: bool,
+    doc_unsaved: bool,
+    export_root: PathBuf,
+    reencode_all: bool,
+    nif_rows: (usize, u64),
+    answer: Option<JsonAnswer>,
+}
+
+pub(super) struct WritesCache {
+    key: WritesKey,
+    at: Instant,
+    value: Arc<ReviewWrites>,
+}
+
 fn nif_edits(n: usize) -> String {
     counted(n, "NIF edit", "NIF edits")
 }
@@ -136,6 +196,29 @@ impl AppModel {
             .get_or_insert_with(Review::default)
             .toml_unwritable = unwritable;
         self.show_tab(BottomTab::Review);
+        // E7: the list Review opens with reads the disk as it is now, not a second-old answer.
+        self.review_writes_cache.take();
+        #[cfg(feature = "test-hooks")]
+        {
+            let w = self.review_writes();
+            *self.review_writes_open.borrow_mut() = Some(w);
+        }
+    }
+
+    /// Tests: the list of files Review showed when it opened (E7), kept after Review's Export takes `review`.
+    #[cfg(feature = "test-hooks")]
+    pub fn review_writes_at_open(&self) -> ReviewWrites {
+        self.review_writes_open
+            .borrow()
+            .as_deref()
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    /// Tests: how many times `review_writes` built its list (a cache hit builds nothing).
+    #[cfg(feature = "test-hooks")]
+    pub fn review_writes_builds(&self) -> u64 {
+        self.review_writes_builds.get()
     }
 
     /// Tests: end `review_json`'s cache and the header's drawing cache now, as `REVIEW_JSON_TTL` passing would.
@@ -143,6 +226,190 @@ impl AppModel {
     pub fn expire_review_json(&self) {
         self.review_json_cache.take();
         self.whole_disk.take();
+        self.review_writes_cache.take();
+    }
+
+    /// E7: every file the export touches (the DDS and JSON outputs, and the files saved and recorded around them),
+    /// for Review's footer. Cached like `review_json`: the `Arc` is rebuilt when the key moves or `REVIEW_JSON_TTL`
+    /// passes (disk state), so a frame whose key is unchanged reads no file.
+    pub fn review_writes(&self) -> Arc<ReviewWrites> {
+        let key = self.writes_key();
+        if let Some(c) = &*self.review_writes_cache.borrow() {
+            if c.key == key && c.at.elapsed() < REVIEW_JSON_TTL {
+                return c.value.clone();
+            }
+        }
+        #[cfg(feature = "test-hooks")]
+        self.review_writes_builds
+            .set(self.review_writes_builds.get() + 1);
+        let value = Arc::new(self.build_review_writes(&self.review_json()));
+        *self.review_writes_cache.borrow_mut() = Some(WritesCache {
+            key,
+            at: Instant::now(),
+            value: value.clone(),
+        });
+        value
+    }
+
+    /// Everything `build_review_writes` reads besides the disk. The Also ticks are `sdc.toml` text, so
+    /// `project.rev()` carries them; the view key carries the plan and scope revisions and the output folder.
+    fn writes_key(&self) -> WritesKey {
+        use std::hash::{Hash, Hasher};
+        // The NIF rows the export writes: their paths and whether each is blocked (a count alone would miss a row
+        // that became blocked).
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        for r in &self.nif_rows {
+            r.path.hash(&mut h);
+            r.blocked.is_none().hash(&mut h);
+        }
+        WritesKey {
+            view: self.view_key(),
+            project_rev: self
+                .project
+                .as_ref()
+                .map_or(0, crate::project::ProjectDoc::rev),
+            project_unsaved: self.project_unsaved(),
+            doc_unsaved: self.sets_unsaved(),
+            export_root: self.export_root(),
+            reencode_all: self.reencode_all,
+            nif_rows: (self.nif_rows.len(), h.finish()),
+            answer: self.review.as_ref().and_then(|r| r.json_answer.clone()),
+        }
+    }
+
+    /// `save()` writes `sdc.toml`: it has unsaved edits, or a blame still holds some (Note FP7).
+    fn project_unsaved(&self) -> bool {
+        self.project
+            .as_ref()
+            .is_some_and(crate::project::ProjectDoc::is_dirty)
+            || self.tentative_edits().is_some()
+    }
+
+    /// `save()` writes `sdc-project.toml`: unsaved edits in a document that takes them.
+    fn sets_unsaved(&self) -> bool {
+        self.sets_doc
+            .as_ref()
+            .is_some_and(|s| s.is_dirty() && !s.read_only())
+    }
+
+    fn build_review_writes(&self, lines: &[JsonLine]) -> ReviewWrites {
+        let answer = self.review.as_ref().and_then(|r| r.json_answer.as_ref());
+        // The JSON files the finishers write: a new or Tessalith's own file; an edited PGPatcher JSON only when Review's
+        // answer for these very bytes is Overwrite. Any other edited file is kept, with a note.
+        let json: Vec<&JsonLine> = lines
+            .iter()
+            .filter(|l| match l.state {
+                DiskState::New | DiskState::Ours => true,
+                DiskState::Edited => {
+                    l.kind == JsonKind::PgPatcher
+                        && answer.is_some_and(|a| a.overwrite && a.answers(l))
+                }
+                DiskState::Unreadable => false,
+            })
+            .collect();
+        let mut outputs: Vec<PathBuf> = self
+            .items
+            .iter()
+            .filter(|i| self.writes_a_file(i))
+            .filter_map(|i| i.job.as_ref().map(|j| j.output.clone()))
+            .chain(json.iter().map(|l| l.path.clone()))
+            // A plan's output path can mix `/` and `\`; one path, one spelling.
+            .map(|p| p.components().collect())
+            .collect();
+        outputs.sort();
+        outputs.dedup();
+        let mut also: Vec<ReviewWrite> = vec![];
+        let mut put = |path: PathBuf, hover: &'static str| also.push(ReviewWrite { path, hover });
+        // `save()` first: `sdc.toml`, then `sdc-project.toml` (each only when it holds unsaved edits).
+        if let (Some(p), true) = (&self.project, self.project_unsaved()) {
+            put(p.path().to_path_buf(), HOVER_SDC_TOML);
+        }
+        // `record_json_sha` and `copy_files` record a hash and save `sdc-project.toml` when it differs from the record:
+        // true of a JSON that is new (or edited, and overwritten), never of one Tessalith wrote and would write the
+        // same bytes to.
+        // shortcut: a JSON of ours (`Ours`) is assumed to keep its bytes, so it alone does not list `sdc-project.toml`;
+        // upgrade when the review can render the text it would write.
+        let rewritten = json.iter().any(|l| l.state != DiskState::Ours);
+        let copies = self.vanilla_copies_changed();
+        let records = rewritten || !copies.is_empty();
+        if let Some(d) = &self.sets_doc {
+            if self.sets_unsaved() || (records && !d.read_only()) {
+                put(d.path().to_path_buf(), HOVER_PROJECT_TOML);
+            }
+            // `put_side` writes the sidecar whenever a record is made.
+            if !json.is_empty() || !copies.is_empty() {
+                put(d.sidecar_path(), HOVER_GENERATED);
+            }
+        }
+        // The engine plans into `export/<root prefix>` (Note HQ1), and its manifest lives there.
+        if let Some(root) = &self.root {
+            let planned = engine::discover::effective_output_root(root, &self.output_root());
+            put(planned.join("_sdc").join("manifest.jsonl"), HOVER_MANIFEST);
+        }
+        for c in copies {
+            put(c, HOVER_COPY);
+        }
+        // One loop per NIF row, so Plan 3e changes the record path in one place (its `row.record`).
+        let out = self.output_root();
+        for r in self.nif_rows.iter().filter(|r| r.blocked.is_none()) {
+            if let Ok(p) = super::meshes::edit_doc::export_path(&out, &r.path) {
+                put(p, HOVER_NIF);
+            }
+            if let Ok(p) = super::meshes::edit_doc::doc_path(&out, &r.path) {
+                put(p, HOVER_NIF_RECORD);
+            }
+        }
+        // `n` is unknown before the engine plans a folder (JF1), so the entry says "all its files".
+        if self.also_runs() {
+            let folders = self.also_folders();
+            put(folders[1].clone(), HOVER_ALSO_FOLDER);
+            if self.also_ticks().1 {
+                put(folders[2].clone(), HOVER_ALSO_FOLDER);
+            }
+        }
+        ReviewWrites {
+            outputs,
+            also_updated: also,
+        }
+    }
+
+    /// The vanilla borrowed-slot copies the export would write: a target that is missing, or whose hash is not the one
+    /// recorded for it (`SetsDoc::copy_shas`). The hash is read again only when the target's stamp changed.
+    fn vanilla_copies_changed(&self) -> Vec<PathBuf> {
+        use engine::policy::SourceStamp;
+        if self.target == engine::config::Target::Cs {
+            return vec![];
+        }
+        let Some(p) = super::pbr_export::prepare(self).filter(|p| !p.copies.is_empty()) else {
+            return vec![];
+        };
+        let recorded = self
+            .sets_doc
+            .as_ref()
+            .map(|d| d.copy_shas())
+            .unwrap_or_default();
+        let mut memo = self.copy_sha_memo.borrow_mut();
+        let mut out = vec![];
+        for (_, dst, _) in &p.copies {
+            let sha = match SourceStamp::of(dst) {
+                None => None,
+                Some(st) => match memo.get(dst) {
+                    Some((old, sha)) if *old == st => sha.clone(),
+                    _ => {
+                        let sha = sha256_of(dst);
+                        memo.insert(dst.clone(), (st, sha.clone()));
+                        sha
+                    }
+                },
+            };
+            let now = recorded.get(&record_key(dst));
+            if sha.is_none() || sha.as_ref() != now {
+                out.push(dst.clone());
+            }
+        }
+        out.sort();
+        out.dedup();
+        out
     }
 
     /// C4: the JSON files the export would write and their state on disk. Cached (K3) per view key for
@@ -277,20 +544,20 @@ impl AppModel {
     }
 
     fn count_export_files(&self) -> usize {
-        self.items
-            .iter()
-            .filter(|i| {
-                i.job.is_some()
-                    && self.item_in_run(i)
-                    && !matches!(
-                        i.status,
-                        ItemStatus::NeedsDecision
-                            | ItemStatus::PackedInto(_)
-                            | ItemStatus::Skipped(_)
-                            | ItemStatus::Error(_)
-                    )
-            })
-            .count()
+        self.items.iter().filter(|i| self.writes_a_file(i)).count()
+    }
+
+    /// `i` is one of the files `export_files` counts.
+    fn writes_a_file(&self, i: &super::TextureItem) -> bool {
+        i.job.is_some()
+            && self.item_in_run(i)
+            && !matches!(
+                i.status,
+                ItemStatus::NeedsDecision
+                    | ItemStatus::PackedInto(_)
+                    | ItemStatus::Skipped(_)
+                    | ItemStatus::Error(_)
+            )
     }
 
     /// Export can start: a folder is open, no export runs, and `sdc.toml` is not ignored (M3a spec §7.4: an export

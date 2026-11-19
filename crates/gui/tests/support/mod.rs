@@ -329,6 +329,38 @@ pub fn decide_all(m: &mut AppModel) {
     assert!(m.wait_idle(Duration::from_secs(60)));
 }
 
+/// E7: the sha256 of every file under `roots`, by path. No exclusion: a cache or a recovery file the export writes is
+/// a change like any other.
+pub fn tree_hashes(roots: &[&Path]) -> std::collections::BTreeMap<PathBuf, String> {
+    use sha2::{Digest, Sha256};
+    let mut out = std::collections::BTreeMap::new();
+    for root in roots {
+        for e in walkdir::WalkDir::new(root)
+            .into_iter()
+            .map(|e| e.unwrap())
+            .filter(|e| e.file_type().is_file())
+        {
+            let bytes = std::fs::read(e.path()).unwrap();
+            out.insert(e.path().to_path_buf(), hex::encode(Sha256::digest(&bytes)));
+        }
+    }
+    out
+}
+
+/// E7: `pbr_opened` (export folder `dir/export`), then leaf (Diffuse, Cutout) and odd (Diffuse, Acknowledge DimSmall)
+/// decided, not rock01's `decide_all` lines. Review's gate is open, so a first export really writes files, among them
+/// a PGPatcher JSON.
+pub fn pbr_opened_chosen_decided(dir: &Path) -> AppModel {
+    let mut m = pbr_opened(dir);
+    m.decide("landscape/leaf.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/leaf.png", Answer::Alpha(AlphaPolicy::Cutout));
+    m.decide("landscape/odd.png", Answer::Subtype(Subtype::Diffuse));
+    m.decide("landscape/odd.png", Answer::Acknowledge(Code::DimSmall));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
+    m
+}
+
 /// `pbr_opened`, planned and idle (was pbr_export.rs::ready).
 pub fn pbr_ready(dir: &Path) -> AppModel {
     let mut m = pbr_opened(dir);

@@ -2251,3 +2251,263 @@ fn a_missing_destination_is_resolved_through_its_nearest_existing_parent() {
     .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
+
+// ---- Task 4 (E7): Review lists every file the export touches ----
+
+/// The acceptance test's body: the changed files under the project folder, against what Review listed when it
+/// opened. Two listing rules and no other exemption: a changed path under a listed Also folder counts as listed, and
+/// the manifest is one listed path whenever the export runs.
+fn assert_every_changed_file_is_listed(mut m: AppModel, dir: &std::path::Path) {
+    use std::collections::BTreeSet;
+    use std::path::PathBuf;
+    let out = m.output_root();
+    let root = m.root.clone().unwrap();
+    m.header_export_clicked();
+    assert!(m.review.is_some(), "the header opens Review");
+    let listed: BTreeSet<PathBuf> = {
+        let w = m.review_writes();
+        w.outputs
+            .iter()
+            .cloned()
+            .chain(w.also_updated.iter().map(|r| r.path.clone()))
+            .collect()
+    };
+    let before = support::tree_hashes(&[dir]);
+    m.export_from_review();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let after = support::tree_hashes(&[dir]);
+    let changed: BTreeSet<PathBuf> = after
+        .iter()
+        .filter(|(p, h)| before.get(*p) != Some(*h))
+        .map(|(p, _)| p.clone())
+        .collect();
+    // A first export that really writes files: equality under the two listing rules only (controller ruling).
+    assert!(!changed.is_empty());
+    let also_dirs: Vec<PathBuf> = m.review_writes_at_open().also_folders();
+    let changed: BTreeSet<PathBuf> = changed
+        .into_iter()
+        .map(|p| {
+            also_dirs
+                .iter()
+                .find(|f| p.starts_with(f))
+                .cloned()
+                .unwrap_or(p)
+        })
+        .collect();
+    assert_eq!(changed, listed, "changed vs listed");
+    assert!(listed.contains(&root.join("_sdc").join("generated.json")));
+    // The engine plans into `<export>\<root prefix>` (Note HQ1; here `textures`), so its manifest is there, not at
+    // `<export>\_sdc` as the brief's text has it.
+    let planned = engine::discover::effective_output_root(&root, &out);
+    assert_ne!(planned, out, "guard: the fixture's root has a prefix");
+    assert!(listed.contains(&planned.join("_sdc").join("manifest.jsonl")));
+}
+
+#[test]
+fn review_lists_every_file_the_export_changes() {
+    let d = tempfile::tempdir().unwrap();
+    let m = support::pbr_opened_chosen_decided(d.path());
+    assert_every_changed_file_is_listed(m, d.path());
+}
+
+#[test]
+fn review_lists_every_file_with_an_also_tick() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    assert!(m.review_gate().is_ok(), "{:?}", m.review_gate());
+    assert_every_changed_file_is_listed(m, d.path());
+}
+
+#[test]
+fn review_writes_is_cached() {
+    use std::sync::Arc;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.header_export_clicked();
+    let a = m.review_writes();
+    let b = m.review_writes();
+    assert!(Arc::ptr_eq(&a, &b), "two calls in a row share one list");
+    let builds = m.review_writes_builds();
+    for _ in 0..50 {
+        let _ = m.review_writes();
+    }
+    assert_eq!(m.review_writes_builds(), builds, "a frame reads no file");
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    let c = m.review_writes();
+    assert!(!Arc::ptr_eq(&a, &c), "a new plan builds a new list");
+    // The disk-state expiry: the same key, a second later, is read again.
+    let d2 = m.review_writes();
+    assert!(Arc::ptr_eq(&c, &d2));
+    m.expire_review_json();
+    assert!(!Arc::ptr_eq(&c, &m.review_writes()));
+}
+
+fn review_harness_at(m: AppModel, size: egui::Vec2) -> Harness<'static, AppModel> {
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(size)
+        .build_ui_state(|ui, model: &mut AppModel| sdc_gui::ui::draw(ui, model), m);
+    h.run_steps(8);
+    h
+}
+
+/// Task 4: every control of the footer and the whole "Also updated:" line lie inside the footer's panel, with the
+/// Export group in its three states (open, a blocker reason beside a disabled button, "Planning…").
+fn assert_the_footer_holds_its_controls(h: &Harness<'static, AppModel>, state: &str) {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let footer = support::panel(&h.ctx, "review-footer");
+    let m = h.state();
+    let mut seen: Vec<(String, egui::Rect)> = vec![];
+    let lead = h.get_by_label("Also updated:").rect();
+    seen.push(("Also updated:".into(), lead));
+    // Every label on the line's row: the names and the `…`.
+    for n in h.query_all_by_role(Role::Label) {
+        let r = n.rect();
+        if r.center().y > lead.top() && r.center().y < lead.bottom() && r.left() >= lead.left() {
+            seen.push((format!("{:?}", n.accesskit_node().value()), r));
+        }
+    }
+    seen.push((
+        "Close".into(),
+        h.get_by_role_and_label(Role::Button, "Close").rect(),
+    ));
+    seen.push((
+        "Export without review next time".into(),
+        h.get_by_role_and_label(Role::CheckBox, "Export without review next time")
+            .rect(),
+    ));
+    let export = m.review_button_text();
+    seen.push((
+        export.clone(),
+        h.get_by_role_and_label(Role::Button, &export).rect(),
+    ));
+    if let Err(why) = m.review_gate() {
+        // A reason the Blockers column does not list is drawn beside the disabled button.
+        let n = h
+            .query_all_by_label_contains(&why)
+            .find(|n| n.rect().top() >= footer.top())
+            .unwrap_or_else(|| panic!("{state}: the reason is drawn in the footer"));
+        seen.push((why.clone(), n.rect()));
+    }
+    if m.full_plan_pending() {
+        let n = h
+            .query_all_by_label("Planning…")
+            .find(|n| n.rect().top() >= footer.top())
+            .expect("Planning… is drawn in the footer");
+        seen.push(("Planning…".into(), n.rect()));
+    }
+    assert!(seen.len() >= 5, "{state}: {seen:?}");
+    for (name, r) in seen {
+        assert!(
+            footer.contains_rect(r),
+            "{state}: {name} {r:?} outside the footer {footer:?}"
+        );
+    }
+}
+
+#[test]
+fn reviews_footer_holds_the_also_updated_line_and_every_control_at_1100() {
+    let size = egui::vec2(1100.0, 864.0);
+    // Open: the Export button is live.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.open_review();
+    let h = review_harness_at(m, size);
+    assert!(h.state().review_gate().is_ok());
+    assert_the_footer_holds_its_controls(&h, "open");
+    // Blocked: undecided textures, a disabled button and its reason.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_unchosen(d.path());
+    m.open_review();
+    let h = review_harness_at(m, size);
+    assert!(h.state().review_gate().is_err(), "guard: a blocker reason");
+    assert_the_footer_holds_its_controls(&h, "blocked");
+    // Planning: decisions just made, the plan still running.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Subtype(engine::config::Subtype::Diffuse),
+    );
+    m.open_review();
+    let h = review_harness_at(m, size);
+    if h.state().full_plan_pending() {
+        assert_the_footer_holds_its_controls(&h, "planning");
+    } else {
+        eprintln!("the plan settled before the first frame: the Planning state is not covered");
+    }
+}
+
+#[test]
+fn a_line_that_does_not_fit_is_cut_in_the_middle_and_names_every_file() {
+    use egui_kittest::kittest::{NodeT, Queryable};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.set_also_tick(AlsoTarget::Cm, true);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    m.open_review();
+    let w = m.review_writes();
+    let names: Vec<String> = w
+        .also_updated
+        .iter()
+        .map(|e| e.path.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    assert!(names.len() >= 4, "{names:?}");
+    // Wide: every file is its own label, named by its full path, and nothing is cut.
+    let wide = review_harness_at(m, egui::vec2(2200.0, 864.0));
+    assert!(
+        wide.query_all_by_label_contains("Also updated: ")
+            .next()
+            .is_none(),
+        "nothing is cut at 2200"
+    );
+    for e in &w.also_updated {
+        wide.get_by_label_contains(&e.path.display().to_string());
+    }
+    // Narrow: cut in the middle; the `…` holds the whole line, the first and last names stay.
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.set_also_tick(AlsoTarget::Cm, true);
+    assert!(m.wait_idle(Duration::from_secs(120)));
+    m.open_review();
+    let w = m.review_writes();
+    let narrow = review_harness_at(m, egui::vec2(480.0, 864.0));
+    let whole = narrow
+        .query_all_by_label_contains("Also updated: ")
+        .next()
+        .expect("the cut line is named whole");
+    let whole = whole.accesskit_node().value().unwrap_or_default();
+    for n in &names {
+        assert!(whole.contains(n.as_str()), "{whole} lacks {n}");
+    }
+    // Both ends stay as labels of their own, named by their full path; the middle is the ….
+    let own = |e: &sdc_gui::model::review::ReviewWrite| {
+        let name = e.path.file_name().unwrap().to_string_lossy().into_owned();
+        let shown = if e.hover == sdc_gui::model::review::HOVER_ALSO_FOLDER {
+            format!("{name}, all its files")
+        } else {
+            name.clone()
+        };
+        let named = format!("{shown} ({})", e.path.display());
+        narrow
+            .query_all_by_label_contains(&name)
+            .filter(|n| {
+                n.accesskit_node()
+                    .value()
+                    .is_some_and(|v| v.starts_with(&named))
+            })
+            .count()
+    };
+    assert_eq!(own(w.also_updated.first().unwrap()), 1);
+    assert_eq!(own(w.also_updated.last().unwrap()), 1);
+    let drawn: usize = w.also_updated.iter().map(own).sum();
+    assert!(drawn < w.also_updated.len(), "something is cut at 480");
+}

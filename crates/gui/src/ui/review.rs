@@ -8,13 +8,16 @@ use crate::model::code_text::{
 };
 use crate::model::items::{alpha_asked, Decision};
 use crate::model::picker::{self, PickerPurpose, PickerSpec};
-use crate::model::review::{DiskState, JsonKind, JsonLine, NO_EXPORT_FOLDER};
+use crate::model::review::{
+    DiskState, JsonKind, JsonLine, ReviewWrite, ReviewWrites, HOVER_ALSO_FOLDER, NO_EXPORT_FOLDER,
+};
 use crate::model::{also, pbr_export, sets, Answer, AppModel};
 use eframe::egui;
 use engine::codes::Code;
 use engine::config::{Subtype, Target};
 use engine::presets::{AlsoTarget, ExportConfig};
 use std::path::Path;
+use std::sync::Arc;
 
 /// Note FI5: what the Also location reads while no export folder is chosen (the fallback is never shown as a path).
 const NOT_CHOSEN_YET: &str = "the export folder (not chosen yet)";
@@ -321,6 +324,137 @@ enum Footer<'a> {
     NifSkipped(&'a crate::model::meshes::NifReviewRow),
     Written(String),
     Json(&'a JsonLine),
+    /// E7: the files besides the outputs the export saves or records (`AppModel::review_writes`).
+    Also(&'a Arc<ReviewWrites>),
+}
+
+/// E7: how an entry of the "Also updated:" line reads: the file's name; a folder adds that all its files are written
+/// (`n` is unknown before the engine plans the folder, JF1).
+fn also_name(w: &ReviewWrite) -> String {
+    let name = w.path.file_name().map_or_else(
+        || w.path.display().to_string(),
+        |n| n.to_string_lossy().into_owned(),
+    );
+    if w.hover == HOVER_ALSO_FOLDER {
+        format!("{name}, all its files")
+    } else {
+        name
+    }
+}
+
+/// E7: `path` as the footer shows it: under `‹export folder›` while no folder is chosen (Note FI5: the fallback
+/// `sdc-out` is never shown as a path).
+fn also_path(path: &Path, unchosen: Option<&Path>) -> String {
+    match unchosen.and_then(|r| path.strip_prefix(r).ok()) {
+        Some(rel) => format!("{NOT_CHOSEN_ROOT}\\{}", rel.display()),
+        None => path.display().to_string(),
+    }
+}
+
+/// E7: one entry's hover, built when the pointer is on it: what the file is, then its full path.
+fn also_hover(ui: &mut egui::Ui, w: &ReviewWrite, unchosen: Option<&Path>) {
+    ui.label(w.hover);
+    ui.weak(also_path(&w.path, unchosen));
+}
+
+/// E7: the whole line as one string, for the accessible name and the hover of an elided line. Built once per list,
+/// not per frame (kept in the context beside the list it was built from).
+fn also_whole_text(ui: &egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<&Path>) -> Arc<str> {
+    let id = ui.scope_id().with("also-updated-text");
+    let kept: Option<(Arc<ReviewWrites>, Arc<str>)> = ui.data(|d| d.get_temp(id));
+    if let Some((from, text)) = kept {
+        if Arc::ptr_eq(&from, w) {
+            return text;
+        }
+    }
+    let names: Vec<String> = w
+        .also_updated
+        .iter()
+        .map(|e| format!("{} ({})", also_name(e), also_path(&e.path, unchosen)))
+        .collect();
+    let text: Arc<str> = format!("Also updated: {}", names.join(", ")).into();
+    ui.data_mut(|d| d.insert_temp(id, (w.clone(), text.clone())));
+    text
+}
+
+/// E7: "Also updated:" and the files' names, each a label with its full path and what it is on hover. A line that
+/// does not fit is cut in the middle: names from both ends, then `…`, whose accessible name and hover hold all of them.
+/// Only the names that are drawn are measured, so a long list costs what shows.
+fn also_updated_line(ui: &mut egui::Ui, w: &Arc<ReviewWrites>, unchosen: Option<&Path>) {
+    ui.style_mut().wrap_mode = Some(egui::TextWrapMode::Truncate);
+    ui.strong("Also updated:");
+    let list = &w.also_updated;
+    let n = list.len();
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let color = ui.visuals().text_color();
+    let width = |s: &str| {
+        ui.painter()
+            .layout_no_wrap(s.to_string(), font.clone(), color)
+            .size()
+            .x
+    };
+    // Every name but the last is followed by a comma.
+    let text = |i: usize| {
+        let t = also_name(&list[i]);
+        if i + 1 < n {
+            format!("{t},")
+        } else {
+            t
+        }
+    };
+    let gap = ui.spacing().item_spacing.x;
+    let avail = ui.available_width();
+    let marker = width("…") + gap;
+    let (mut lo, mut hi, mut used) = (0, n, 0.0_f32);
+    let mut from_head = true;
+    while lo < hi {
+        // The other end is tried when this one does not fit: a short name there may still.
+        let fit = [from_head, !from_head].into_iter().find_map(|head| {
+            let i = if head { lo } else { hi - 1 };
+            let w_i = width(&text(i)) + gap;
+            let reserve = if hi - lo == 1 { 0.0 } else { marker };
+            (used + w_i + reserve <= avail).then_some((head, w_i))
+        });
+        let Some((head, w_i)) = fit else {
+            break;
+        };
+        used += w_i;
+        if head {
+            lo += 1;
+        } else {
+            hi -= 1;
+        }
+        from_head = !head;
+    }
+    let one = |ui: &mut egui::Ui, i: usize| {
+        let e = &list[i];
+        let r = ui.label(text(i));
+        r.widget_info(|| {
+            egui::WidgetInfo::labeled(
+                egui::Role::Label,
+                true,
+                format!("{} ({})", also_name(e), also_path(&e.path, unchosen)),
+            )
+        });
+        r.on_hover_ui(|ui| also_hover(ui, e, unchosen));
+    };
+    for i in 0..lo {
+        one(ui, i);
+    }
+    if lo < hi {
+        let whole = also_whole_text(ui, w, unchosen);
+        let r = ui.label("…");
+        r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Label, true, &*whole));
+        r.on_hover_ui(|ui| {
+            for e in list {
+                ui.label(also_name(e));
+                ui.weak(format!("{} {}", e.hover, also_path(&e.path, unchosen)));
+            }
+        });
+    }
+    for i in hi..n {
+        one(ui, i);
+    }
 }
 
 /// Note FB10: under this window width the Review sections stack in one scroll area.
@@ -607,6 +741,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
     let nif_folder = m.export_folder_chosen();
     let folder_chosen = nif_folder.is_some();
     let json = m.review_json();
+    let writes = m.review_writes();
     let nif_rows = m.nif_review_rows();
     // Note CN85: a fourth column in the cs mode or while a tick is on; the Also reason only with a tick, as the gate.
     // Note HF10: none for a scope, which Also never runs on.
@@ -660,6 +795,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
             list.push(Footer::Written(m.written_text()));
             // Note FC5: the Keep/Overwrite question moved to Blockers.
             list.extend(json.iter().map(Footer::Json));
+            // E7: after the files of What will be written, the ones it saves and records besides.
+            if !writes.also_updated.is_empty() {
+                list.push(Footer::Also(&writes));
+            }
             let row_h = ui.spacing().interact_size.y;
             let stride = row_h + ui.spacing().item_spacing.y;
             ui.scope(|ui| {
@@ -706,6 +845,10 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                                 Footer::Json(l) => {
                                     let fallback = (!folder_chosen).then(|| m.export_root());
                                     ui.label(json_line_text(l, fallback.as_deref()));
+                                }
+                                Footer::Also(w) => {
+                                    let fallback = (!folder_chosen).then(|| m.export_root());
+                                    also_updated_line(ui, w, fallback.as_deref());
                                 }
                             });
                         }

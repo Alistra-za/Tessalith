@@ -481,9 +481,23 @@ fn no_sdc_out_path_is_shown_before_a_folder_is_chosen() {
     h.run();
     assert!(!all(&h).iter().any(|t| t.contains("sdc-out")));
     // The JSON line, if it is drawn (the footer scrolls): it is relative to the export folder.
+    // (Task 4: the "Also updated:" line's `generated.json` lives in the project folder, not the export folder; its
+    // `manifest.jsonl` is under the export folder and reads relative to it too.)
+    let also: Vec<String> = all(&h)
+        .into_iter()
+        .filter(|t| t.starts_with("manifest.jsonl ("))
+        .collect();
+    assert!(
+        !also.is_empty() && also.iter().all(|t| t.contains("(‹export folder›\\")),
+        "{also:?}"
+    );
     let json: Vec<String> = all(&h)
         .into_iter()
-        .filter(|t| t.contains(".json"))
+        .filter(|t| {
+            t.contains(".json")
+                && !t.starts_with("generated.json")
+                && !t.starts_with("manifest.jsonl")
+        })
         .collect();
     assert!(
         json.iter().all(|t| t.starts_with("‹export folder›\\")),

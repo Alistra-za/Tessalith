@@ -574,6 +574,19 @@ pub struct AppModel {
     pub(crate) views: std::cell::RefCell<ViewCache>,
     /// K3: `review_json` for a view key, and when it was read; cleared with `review`.
     review_json_cache: std::cell::RefCell<Option<(ViewKey, Instant, Vec<review::JsonLine>)>>,
+    /// E7: `review_writes` for its key, and when it was built; the footer draws from the `Arc`.
+    review_writes_cache: std::cell::RefCell<Option<review::WritesCache>>,
+    /// E7: the sha of each vanilla copy's target, kept beside the target's stamp so a file is hashed again only when
+    /// its stamp changed (it outlives `review_writes_cache`'s 1 s).
+    copy_sha_memo:
+        std::cell::RefCell<std::collections::HashMap<PathBuf, (SourceStamp, Option<String>)>>,
+    /// E7 (test hook): the list Review showed when it opened (`open_review` takes it; `start_export_pass` takes
+    /// `review`, so it cannot live there).
+    #[cfg(feature = "test-hooks")]
+    review_writes_open: std::cell::RefCell<Option<Arc<review::ReviewWrites>>>,
+    /// E7 (test hook): how many times `review_writes` built its list.
+    #[cfg(feature = "test-hooks")]
+    pub(crate) review_writes_builds: std::cell::Cell<u64>,
     /// The rename dialog's last plan, for drawing only (Note FA).
     rename_cache: std::cell::RefCell<Option<rename::PlanCache>>,
     pub unmatched_keys: Vec<String>,
@@ -940,6 +953,12 @@ impl AppModel {
             item_index: Default::default(),
             views: Default::default(),
             review_json_cache: Default::default(),
+            review_writes_cache: Default::default(),
+            copy_sha_memo: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_open: Default::default(),
+            #[cfg(feature = "test-hooks")]
+            review_writes_builds: Default::default(),
             rename_cache: Default::default(),
             sets: vec![],
             sets_root: None,
