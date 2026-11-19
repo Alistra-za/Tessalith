@@ -808,7 +808,7 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
                     });
             });
             if m.reencode_all {
-                ui.label("Re-encode every output is on: every file is written again.");
+                ui.label("Re-encode every output is on: every file Tessalith recorded is written again.");
             }
             ui.horizontal(|ui| {
                 // Ruling 3c-43: with no project (a meshes-only Review) there is no key to set, so no box.
@@ -997,14 +997,13 @@ pub fn tab(ui: &mut egui::Ui, model: &mut AppModel) {
         _ => {
             let mut text = String::from("Options");
             if !options_open {
-                let cfg = m.also_config();
-                if cfg.also.contains(&AlsoTarget::Cm) {
+                let ((vanilla, cm), n) = m.also_summary();
+                if cm {
                     text.push_str(" · Also export as Vanilla and CM");
-                } else if cfg.also.contains(&AlsoTarget::Vanilla) {
+                } else if vanilla {
                     text.push_str(" · Also export as Vanilla");
                 }
-                let n = cfg.skip.len();
-                if n > 0 {
+                if (vanilla || cm) && n > 0 {
                     text.push_str(&format!(" · skipping {n} set{}", plural(n)));
                 }
             }

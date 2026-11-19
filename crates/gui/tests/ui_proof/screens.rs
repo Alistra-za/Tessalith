@@ -305,7 +305,17 @@ pub const SCREENS: &[Screen] = &[
         open: |h| model(h).open_review(),
         steps: &[],
         act: None,
-        marker: &[has("What will be written")],
+        marker: &[has("What will be written"), lacks("Also export as")],
+        transient: false,
+        dialog: false,
+    },
+    Screen {
+        name: "review tab with Options open",
+        fixture: "demo",
+        open: |h| model(h).open_review(),
+        steps: &[r#"{"op":"click","at":{"starts":"Options","role":"DisclosureTriangle"}}"#],
+        act: None,
+        marker: &[has("What will be written"), has("Also export as")],
         transient: false,
         dialog: false,
     },
@@ -825,6 +835,30 @@ fn the_export_witness_counts_the_exports_started() {
     assert_ne!(export_witness(h.state()), before, "an export started");
     h.state_mut().model.folder_epoch += 1;
     assert_eq!(export_witness(h.state()), before, "a folder opened");
+}
+
+#[test]
+fn the_walk_opens_review_options_at_each_size() {
+    let screen = SCREENS
+        .iter()
+        .find(|s| s.name == "review tab with Options open")
+        .unwrap();
+    for size in crate::invariants::SIZES {
+        let (_dir, h) = enter(screen, size).unwrap();
+        let snap = snapshot(&h);
+        assert!(holds(&snap, &[has("Also export as")]));
+        if size.x >= 1280.0 {
+            assert!(holds(
+                &snap,
+                &[
+                    has_role("Button", "Choose where the Also folders go…"),
+                    has_role("TextInput", "Vanilla folder name"),
+                    has_role("TextInput", "CM folder name"),
+                    has_role("TextInput", "PBR folder name"),
+                ]
+            ));
+        }
+    }
 }
 
 #[test]

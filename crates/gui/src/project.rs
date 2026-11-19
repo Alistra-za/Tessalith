@@ -143,7 +143,7 @@ pub struct ProjectDoc {
     /// The document and dirty flag `set_error` dropped, kept until `unblame` or `reload` (trace-debug #9).
     stash: Option<(DocumentMut, bool)>,
     /// `[export]` as last parsed, by `rev` (Note CN: Review and `view_key` read it every frame).
-    export_cache: std::cell::RefCell<Option<(u64, ExportConfig)>>,
+    export_cache: std::cell::RefCell<(Option<u64>, ExportConfig)>,
 }
 
 /// `v` without the fields equal to `d`'s, recursively; an object left empty goes too. A field that `written` (the
@@ -704,19 +704,20 @@ impl ProjectDoc {
 
     /// `[export]` (Track A, TA9), the default when absent or unparsable. Cached by `rev`.
     pub fn export_config(&self) -> ExportConfig {
+        self.with_export_config(Clone::clone)
+    }
+
+    pub(crate) fn with_export_config<T>(&self, read: impl FnOnce(&ExportConfig) -> T) -> T {
         let rev = self.rev();
-        if let Some((r, c)) = &*self.export_cache.borrow() {
-            if *r == rev {
-                return c.clone();
-            }
+        if self.export_cache.borrow().0 != Some(rev) {
+            let config = self
+                .config()
+                .ok()
+                .and_then(|c| c.export)
+                .unwrap_or_default();
+            *self.export_cache.borrow_mut() = (Some(rev), config);
         }
-        let c = self
-            .config()
-            .ok()
-            .and_then(|c| c.export)
-            .unwrap_or_default();
-        *self.export_cache.borrow_mut() = Some((rev, c.clone()));
-        c
+        read(&self.export_cache.borrow().1)
     }
 
     /// Write `[export]` as `cfg`: only the fields that differ from the default, so a tick does not freeze today's

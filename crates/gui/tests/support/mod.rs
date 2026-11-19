@@ -397,21 +397,29 @@ pub struct PendingRemovals {
 }
 
 impl PendingRemovals {
+    fn unsaved_documents(m: &AppModel) -> BTreeSet<PathBuf> {
+        // Includes tentative stashed edits, dirty writable sets and automatic-only settings edits.
+        m.recovery_snapshot()
+            .into_iter()
+            .map(|(path, _)| path)
+            .chain(
+                m.project
+                    .as_ref()
+                    .filter(|p| p.is_dirty())
+                    .map(|p| p.path().to_owned()),
+            )
+            .collect()
+    }
+
     pub fn before_export(m: &AppModel) -> Self {
         use sdc_gui::model::history::{case_twin, record_key, records_at};
         use sdc_gui::model::review::JsonKind;
         let mut credits = Self {
             drawer_epoch: m.drawer_epoch,
             folder_epoch: m.folder_epoch,
+            initial_saves: Self::unsaved_documents(m),
             ..Self::default()
         };
-        // Includes tentative stashed edits and dirty writable sets. Automatic-only sdc.toml edits also get saved.
-        credits
-            .initial_saves
-            .extend(m.recovery_snapshot().into_iter().map(|(path, _)| path));
-        if let Some(p) = m.project.as_ref().filter(|p| p.is_dirty()) {
-            credits.initial_saves.insert(p.path().to_path_buf());
-        }
         if let Some(doc) = &m.sets_doc {
             let lines = m.review_json();
             let root = m.output_root();
@@ -442,16 +450,21 @@ impl PendingRemovals {
         self.folder_epoch == m.folder_epoch && self.drawer_epoch != m.drawer_epoch
     }
 
-    pub fn after_export(self, m: &AppModel) -> RemovalCredits {
-        if !self.started(m) {
+    pub fn after_export(mut self, m: &AppModel) -> RemovalCredits {
+        if self.folder_epoch != m.folder_epoch {
             return RemovalCredits::default();
+        }
+        let started = self.started(m);
+        if !started {
+            let unsaved = Self::unsaved_documents(m);
+            self.initial_saves.retain(|path| !unsaved.contains(path));
         }
         RemovalCredits {
             initial_saves: self.initial_saves,
             guarded_twins: self
                 .twins
                 .into_iter()
-                .filter(|(kind, _, _, _)| m.guarded_json_phase_passed(*kind))
+                .filter(|(kind, _, _, _)| started && m.guarded_json_phase_passed(*kind))
                 .map(|(_, path, old, sha)| (path, (old, sha)))
                 .collect(),
         }

@@ -770,6 +770,7 @@ fn undecorated(source: &str) -> &str {
 pub const AUTHORED: &[&str] = &[
     "Assign…",
     "Choose export folder…",
+    "Choose where the Also folders go…",
     "Choose…",
     "Copy settings from stonewall.png to 0 selected…",
     "Edit match…",
@@ -1516,6 +1517,38 @@ pub const ALLOWED: &[Allowed] = &[
         px: 0.0,
         members: &[],
         reason: "the presets tab's ScrollArea::both (ui/presets.rs, id presets-scroll) shows a floating bar that paints only transparent fills at rest; it has no look::thin_scroll()",
+    },
+    Allowed {
+        screen: "review tab with Options open",
+        invariant: "scroll_bar_clearance",
+        size: (1280.0, 800.0),
+        what: "scroll bar 1 of 1 in the bottom-review panel",
+        ordinal: 0,
+        count: 1,
+        px: 3.7,
+        members: &[
+            ("Button:Choose where the Also folders go…", 3.7),
+            ("TextInput:CM folder name", 3.7),
+            ("TextInput:PBR folder name", 3.7),
+            ("TextInput:Vanilla folder name", 3.7),
+        ],
+        reason: "with Review Options open, the Also folders controls end 3.7 px inside the bar's hovered width",
+    },
+    Allowed {
+        screen: "review tab with Options open",
+        invariant: "scroll_bar_clearance",
+        size: (1600.0, 900.0),
+        what: "scroll bar 1 of 1 in the bottom-review panel",
+        ordinal: 0,
+        count: 1,
+        px: 4.0,
+        members: &[
+            ("Button:Choose where the Also folders go…", 4.0),
+            ("TextInput:CM folder name", 4.0),
+            ("TextInput:PBR folder name", 4.0),
+            ("TextInput:Vanilla folder name", 4.0),
+        ],
+        reason: "with Review Options open, the Also folders controls end 4 px inside the bar's hovered width",
     },
 ];
 fn covers(a: &Allowed, h: &Hit) -> bool {

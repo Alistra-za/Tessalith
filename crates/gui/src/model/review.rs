@@ -277,6 +277,7 @@ struct Produced {
     unresolved_names: std::collections::HashSet<std::ffi::OsString>,
     folders: Vec<(PathBuf, bool)>,
     directories: std::cell::RefCell<std::collections::HashMap<PathBuf, (PathBuf, bool)>>,
+    file_links: std::cell::RefCell<std::collections::HashMap<PathBuf, bool>>,
 }
 
 impl Produced {
@@ -320,6 +321,20 @@ impl Produced {
         } else {
             self.keys.iter().any(|k| k.file_name() == key.file_name())
         }
+    }
+
+    fn may_read_output(&self, path: &Path) -> bool {
+        if self.has(path) {
+            return true;
+        }
+        // A file link may read any job or copy, even one with a different basename that is still missing.
+        if self.keys.is_empty() && self.folders.is_empty() {
+            return false;
+        }
+        let mut links = self.file_links.borrow_mut();
+        *links
+            .entry(path.to_owned())
+            .or_insert_with(|| path.is_symlink())
     }
 
     fn add(&mut self, p: &Path) {
@@ -651,8 +666,8 @@ impl AppModel {
                 }
                 let key = record_key(dst);
                 let by_run = (!owner_key.is_empty() && touched(owner_key))
-                    || produced.has(src)
-                    || dep_file(owner_key).is_some_and(|f| produced.has(&f));
+                    || produced.may_read_output(src)
+                    || dep_file(owner_key).is_some_and(|f| produced.may_read_output(&f));
                 if by_run {
                     // The owner's DDS comes from this run (its job, or an earlier copy): whether it is copied, and
                     // its bytes, are the run's.
@@ -689,8 +704,9 @@ impl AppModel {
             // Then `pbr_export::finish` and `record_json_sha`. Its text is built from this run's rows when an entry
             // depends on a job of the run, or on a file the run may produce (`dep_ok` reads it on disk).
             let run_dep = p.entries.iter().any(|(_, deps, _)| {
-                deps.iter()
-                    .any(|k| touched(k) || dep_file(k).is_some_and(|f| produced.has(&f)))
+                deps.iter().any(|k| {
+                    touched(k) || dep_file(k).is_some_and(|f| produced.may_read_output(&f))
+                })
             });
             if run_dep {
                 run_records = true;
@@ -723,7 +739,7 @@ impl AppModel {
                 }
             }
         }
-        let written = |p: &Path| produced.has(p);
+        let written = |p: &Path| produced.may_read_output(p);
         // `finish_guarded` for each kind: written only with a project document, and recorded when the record moves.
         fn guarded<P: Guarded>(
             p: Option<&P>,
@@ -1712,6 +1728,20 @@ mod tests {
         assert!(produced.has(&dir.path().join("new/also/nested/leaf_n.dds")));
         assert!(!produced.has(&dir.path().join("new/also-other/leaf_n.dds")));
         assert!(produced.has(&unknown));
+    }
+
+    #[test]
+    fn a_final_file_link_can_read_an_output_with_a_different_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let source = dir.path().join("alias/rock_n.dds");
+        let mut produced = Produced::default();
+        produced.add(&dir.path().join("real/stone_n.dds"));
+        assert!(
+            !produced.may_read_output(&source),
+            "an ordinary absent file is unrelated"
+        );
+        produced.file_links.get_mut().insert(source.clone(), true);
+        assert!(produced.may_read_output(&source));
     }
 
     #[test]

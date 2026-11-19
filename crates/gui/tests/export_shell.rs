@@ -2759,6 +2759,52 @@ fn a_failed_initial_save_cannot_credit_the_previous_cm_exports_twin() {
 }
 
 #[test]
+#[cfg(windows)]
+fn a_failed_second_save_credits_only_the_completed_settings_save() {
+    use std::os::windows::fs::OpenOptionsExt;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let old = json.with_file_name("IRON_M.json");
+    std::fs::rename(&json, &old).unwrap();
+    m.set_field("m/iron.png", "mips.filter", serde_json::json!("tent"));
+    idle(&mut m);
+    let settings = m.project.as_ref().unwrap().path().to_owned();
+    let recovery = sdc_gui::crash_log::recovery_path(&settings);
+    std::fs::write(&recovery, "recover settings").unwrap();
+    let doc = m.sets_doc.as_mut().unwrap();
+    doc.set_json_name(Some("iron-project"));
+    assert!(doc.is_dirty());
+    let lock = std::fs::File::options()
+        .read(true)
+        .share_mode(1)
+        .open(doc.path())
+        .unwrap();
+    m.open_review();
+    assert!(m.review_gate().is_ok());
+    let w = m.review_writes();
+    let pending = support::PendingRemovals::before_export(&m);
+    let before = support::tree_hashes(&[d.path()]);
+    m.export_from_review();
+    idle(&mut m);
+    drop(lock);
+    let after = support::tree_hashes(&[d.path()]);
+    assert!(matches!(m.dialog, Some(Dialog::Error(_))));
+    assert!(!pending.started(&m));
+    assert!(!m.project.as_ref().unwrap().is_dirty() && m.sets_doc.as_ref().unwrap().is_dirty());
+    assert!(before.contains_key(&recovery) && !after.contains_key(&recovery));
+    assert_ne!(before[&settings], after[&settings]);
+    assert_eq!(before[&old], after[&old]);
+    let credits = pending.after_export(&m);
+    assert_eq!(credits.initial_saves, [settings].into());
+    assert!(credits.guarded_twins.is_empty());
+    let comparison = support::compare_listing(&w, &before, &after, None, &credits);
+    assert!(!comparison
+        .violations
+        .iter()
+        .any(|v| v.contains(".recovery")));
+}
+
+#[test]
 fn the_listing_rules_reject_a_foreign_json_twin() {
     let d = tempfile::tempdir().unwrap();
     let (mut m, json) = cm_exported_once(d.path());
@@ -3518,14 +3564,24 @@ fn a_directory_at_a_copy_destination_cannot_feed_a_later_copy_or_profile() {
 
 #[test]
 fn a_dangling_junction_marks_the_borrowed_copy_and_both_records() {
+    check_dangling_borrowed_normal(false);
+}
+
+#[test]
+fn a_dangling_file_link_marks_the_borrowed_copy_and_both_records() {
+    check_dangling_borrowed_normal(true);
+}
+
+fn check_dangling_borrowed_normal(file_link: bool) {
     use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
     use sdc_gui::model::set_groups::GroupTarget;
     use sdc_gui::model::sets::{DropChoice, DropOutcome};
     let d = tempfile::tempdir().unwrap();
     let src = d.path().join("textures");
-    for folder in ["alias", "real"] {
-        support::colour(&src.join(folder).join("rock.png"), 90);
-        support::flat(&src.join(folder).join("rock_n.png"));
+    let included = if file_link { "stone" } else { "rock" };
+    for (folder, name) in [("alias", "rock"), ("real", included)] {
+        support::colour(&src.join(folder).join(format!("{name}.png")), 90);
+        support::flat(&src.join(folder).join(format!("{name}_n.png")));
     }
     support::colour(&src.join("other/leaf.png"), 90);
     let mut m = support::opened_as_the_app(src, d.path().join("export"));
@@ -3543,16 +3599,32 @@ fn a_dangling_junction_marks_the_borrowed_copy_and_both_records() {
     let out = m.export_root().join("textures");
     std::fs::create_dir_all(&out).unwrap();
     let real = out.join("real");
-    dir_link(&out.join("alias"), &real);
+    let job = real.join(format!("{included}_n.dds"));
+    if file_link {
+        std::fs::create_dir(out.join("alias")).unwrap();
+        let link = out.join("alias/rock_n.dds");
+        #[cfg(windows)]
+        if let Err(err) = std::os::windows::fs::symlink_file(&job, &link) {
+            if err.raw_os_error() == Some(1314) {
+                eprintln!(
+                    "File symlink privilege unavailable; see the final-file-link library test."
+                );
+                return;
+            }
+            panic!("creating {link:?}: {err}");
+        }
+        #[cfg(not(windows))]
+        std::os::unix::fs::symlink(&job, &link).unwrap();
+        assert!(link.is_symlink() && !link.exists());
+    } else {
+        dir_link(&out.join("alias"), &real);
+    }
     assert!(!real.exists());
     assert!(m.sets_doc.as_ref().unwrap().copy_shas().is_empty());
 
     let s = export_and_compare(&mut m, d.path());
     let copy = out.join("other/leaf_n.dds");
-    assert_eq!(
-        std::fs::read(&copy).unwrap(),
-        std::fs::read(real.join("rock_n.dds")).unwrap()
-    );
+    assert_eq!(std::fs::read(&copy).unwrap(), std::fs::read(job).unwrap());
     let doc = m.sets_doc.as_ref().unwrap();
     for (path, hover) in [
         (copy.as_path(), HOVER_COPY),

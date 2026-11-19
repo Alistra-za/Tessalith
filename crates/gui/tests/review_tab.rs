@@ -89,6 +89,27 @@ fn a_closed_options_names_the_skipped_sets_and_both_cm_folders() {
 }
 
 #[test]
+fn the_closed_header_names_a_saved_skip_only_while_an_also_folder_is_on() {
+    use engine::presets::AlsoTarget;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_opened_chosen_decided(d.path());
+    m.set_also_tick(AlsoTarget::Vanilla, true);
+    m.set_skip_also("landscape/rock01", true);
+    m.set_also_tick(AlsoTarget::Vanilla, false);
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    m.open_review();
+    let mut h = harness(m);
+    h.run();
+    h.get_by_role_and_label(Role::DisclosureTriangle, "Options");
+    h.state_mut().set_also_tick(AlsoTarget::Vanilla, true);
+    settle(&mut h);
+    h.get_by_role_and_label(
+        Role::DisclosureTriangle,
+        "Options · Also export as Vanilla · skipping 1 set",
+    );
+}
+
+#[test]
 fn an_also_blocker_opens_options_and_names_the_reason_in_blockers() {
     let d = tempfile::tempdir().unwrap();
     let mut m = pbr_opened_chosen_decided(d.path());
@@ -122,7 +143,7 @@ fn the_footer_says_when_every_output_will_be_reencoded() {
     let mut m = cs_opened_chosen(d.path());
     m.open_review();
     let mut h = harness(m);
-    let text = "Re-encode every output is on: every file is written again.";
+    let text = "Re-encode every output is on: every file Tessalith recorded is written again.";
     h.run();
     assert!(h.query_by_label(text).is_none());
     h.state_mut().reencode_all = true;

@@ -55,11 +55,18 @@ impl AppModel {
 
     /// (Vanilla, CM) from `[export] also`.
     pub fn also_ticks(&self) -> (bool, bool) {
-        let c = self.also_config();
-        (
-            c.also.contains(&AlsoTarget::Vanilla),
-            c.also.contains(&AlsoTarget::Cm),
-        )
+        self.also_summary().0
+    }
+
+    pub(crate) fn also_summary(&self) -> ((bool, bool), usize) {
+        let Some(project) = self.project.as_ref().filter(|p| !p.read_only()) else {
+            return Default::default();
+        };
+        project.with_export_config(|c| {
+            let vanilla = c.also.contains(&AlsoTarget::Vanilla);
+            let cm = c.also.contains(&AlsoTarget::Cm);
+            ((vanilla, cm), c.skip.len())
+        })
     }
 
     /// Either tick is on.
@@ -401,6 +408,19 @@ mod tests {
     use super::super::tests::{bare_model, panicked};
     use engine::also::{AlsoSummary, Phase};
     use engine::events::{EngineEvent, EventKind, EVENT_SCHEMA};
+
+    #[test]
+    fn repeated_also_reads_borrow_the_same_skip_list_until_an_edit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut doc = super::ProjectDoc::open(dir.path());
+        doc.set_skip_also("rock", true);
+        doc.with_export_config(|first| {
+            assert_eq!(first.skip, ["rock"]);
+            doc.with_export_config(|second| assert!(std::ptr::eq(&first.skip[0], &second.skip[0])));
+        });
+        doc.set_skip_also("rock", false);
+        doc.with_export_config(|cfg| assert!(cfg.skip.is_empty()));
+    }
 
     fn discovered(m: &mut super::AppModel, job: &str) {
         m.export.on_event(EngineEvent {
