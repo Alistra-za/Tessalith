@@ -4014,8 +4014,9 @@ fn an_overwrite_answer_for_older_bytes_does_not_write() {
     assert_eq!(std::fs::read(&p).unwrap(), b"changed");
 }
 
-/// Note GP10: the write checks the export path again. A file equal to the export when the rows were read is not
-/// foreign; a source change re-applies the ops at the write, so it no longer matches and is not replaced.
+/// Note GP10, ruling E6-S2 (was: a file equal to the export when the rows were read is not foreign, and the write
+/// found it foreign once a source change re-applied the ops): a present NIF the record does not name is foreign even
+/// when its bytes equal the export's, so the row asks before anything is written, whatever the source does.
 #[test]
 fn a_file_that_turns_foreign_at_the_write_is_not_written() {
     let (d, mut m) = export_session();
@@ -4043,18 +4044,11 @@ fn a_file_that_turns_foreign_at_the_write_is_not_written() {
     std::fs::write(d.path().join("mods/A/meshes/x.nif"), &src).unwrap();
     assert_eq!(
         review_row(&m).foreign,
-        None,
-        "the rows still see the old export"
+        Some(sha(&theirs)),
+        "the row asks for the unrecorded file, equal bytes or not"
     );
-    export_fails(&mut m, NIF_FOREIGN_AT_WRITE);
+    export_fails(&mut m, NIF_UNANSWERED);
     assert_eq!(std::fs::read(&p).unwrap(), theirs);
-    let e = m.edit.as_ref().unwrap();
-    assert_ne!(
-        *e.out, theirs,
-        "the write re-applied the ops to the new source"
-    );
-    let note = format!("Not exported: {NIF_FOREIGN_AT_WRITE}.");
-    assert_eq!(e.export_note, Some((note, true)));
 }
 
 /// Note GD2: an answer counts only while the file has the hash it was given for: Keep for a file that is then
@@ -7601,6 +7595,68 @@ fn one_waiting_target_and_a_failure_clears_only_when_durable() {
                 assert!(!exported(&d).exists(), "nothing is exported: {r:?}");
                 let why = r.unwrap_err();
                 assert!(why.contains("Could not save the edits of"), "the reason stays: {why}");
+            },
+        ),
+    ]);
+}
+
+/// Review round 5 (Important "Export X, leave X applied, move its record away, then run Review's texture Export ...",
+/// "Export X, undo to zero, move the record away and click Export" and "Export X, leave the session current, replace
+/// its record with malformed contents ...", rulings E6-S2, E6-S3): a present unrecorded NIF needs its answer, and an
+/// Export that does nothing says why.
+#[test]
+fn export_asks_for_an_unrecorded_nif_and_says_why_it_does_nothing() {
+    table(&[
+        (
+            "export X, leave X applied, move its record away, then run Review's texture Export with the installed X \
+             still present",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                assert_eq!(export(&mut m), Ok(1));
+                let t = std::fs::metadata(exported(&d)).unwrap().modified().unwrap();
+                let rec = nif_doc(&export_root(&d));
+                std::fs::rename(&rec, d.path().join("moved.toml")).unwrap();
+                let r = export(&mut m);
+                assert!(!rec.exists(), "no record is written: {r:?}");
+                assert_eq!(
+                    std::fs::metadata(exported(&d)).unwrap().modified().unwrap(),
+                    t,
+                    "the NIF is not replaced: {r:?}"
+                );
+                let why = r.unwrap_err();
+                assert!(why.contains(NIF_UNANSWERED), "the question: {why}");
+            },
+        ),
+        (
+            "export X, undo to zero, move the record away and click Export",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                assert_eq!(export(&mut m), Ok(1));
+                let nif_x = std::fs::read(exported(&d)).unwrap();
+                assert!(m.undo_edit());
+                let rec = nif_doc(&export_root(&d));
+                std::fs::rename(&rec, d.path().join("moved.toml")).unwrap();
+                let r = export(&mut m);
+                assert_eq!(std::fs::read(exported(&d)).unwrap(), nif_x, "{r:?}");
+                assert!(!rec.exists(), "{r:?}");
+                let why = r.unwrap_err();
+                assert!(why.contains("holds no record of it"), "the reason: {why}");
+            },
+        ),
+        (
+            "export X, leave the session current, replace its record with malformed contents, then run Review's \
+             texture Export",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                assert_eq!(export(&mut m), Ok(1));
+                let nif_x = std::fs::read(exported(&d)).unwrap();
+                let rec = nif_doc(&export_root(&d));
+                std::fs::write(&rec, b"not a document [[[").unwrap();
+                let r = export(&mut m);
+                assert_eq!(std::fs::read(exported(&d)).unwrap(), nif_x, "{r:?}");
+                assert_eq!(std::fs::read(&rec).unwrap(), b"not a document [[[", "{r:?}");
+                let why = r.unwrap_err();
+                assert!(why.contains("cannot be read"), "the read error: {why}");
             },
         ),
     ]);

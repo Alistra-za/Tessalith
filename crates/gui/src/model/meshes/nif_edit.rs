@@ -9,7 +9,6 @@ use super::pg_entries::{
 use super::worklist::{NifProblem, NifTab};
 use super::{db_err, texture_sources, MeshesModel, ScanTarget};
 use crate::model::viewport3d::{read_file, Clock, Content, FileSource};
-use engine::dds::Kept;
 use modscan::mo2::Instance;
 use modscan::store::{PathCopy, ShapeView, KIND_BSA};
 use nif::anim::{apply_anim, clip_tracks_in, free_tracks_in, Track};
@@ -278,6 +277,11 @@ pub const NIF_NOT_RECORDED: &str =
 /// Ruling E6-N: no ops, and the installed NIF holds an edit since undone; nothing is written for it.
 pub const NIF_UNDONE: &str =
     "The exported NIF holds an edit that was undone: redo it and export to repair the export";
+/// Ruling E6-S3: no ops (after edits), and an export of this NIF is installed with no record: nothing is written, and
+/// the words do not claim to know who wrote it.
+pub const NIF_INSTALLED_UNRECORDED: &str =
+    "an export of this NIF is in the export folder and Tessalith holds no \
+     record of it; with no edits, nothing is written";
 /// Note GP10: the write found a file Tessalith did not write that the row had not (it changed in between).
 pub const NIF_FOREIGN_AT_WRITE: &str =
     "the file on disk changed before the write: answer Keep or Overwrite on its row";
@@ -1357,7 +1361,6 @@ impl NifEdit {
         let path = self.export_path.clone();
         match foreign_hash(
             &path,
-            &out,
             self.doc.export.sha256.as_deref(),
             self.partial.as_deref(),
         ) {
@@ -2617,26 +2620,26 @@ pub(crate) fn same_dir(a: &Path, b: &Path) -> bool {
     norm(a) == norm(b)
 }
 
-/// Note GP10: what an export of `out` to `path` finds there: None when the file is absent, equal to `out` or
-/// Tessalith's own (its hash is `last`, the last export's, or `partial`, the NIF a partial export wrote, ruling
-/// E6-I); Some(its SHA-256) when Tessalith did not write it; Err when it cannot be read.
+/// Note GP10: what an export finds at `path`: None when the file is absent or Tessalith's own (its hash is `last`, the
+/// NIF the record names, or `partial`, the NIF a partial export wrote, ruling E6-I); Some(its SHA-256) otherwise;
+/// Err when it cannot be read. Ruling E6-S2: a present NIF the record does not name needs its Overwrite answer even
+/// when its bytes equal the export's (no equal-output shortcut; "never a silent replace").
 fn foreign_hash(
     path: &Path,
-    out: &[u8],
     last: Option<&str>,
     partial: Option<&str>,
 ) -> Result<Option<[u8; 32]>, String> {
-    let cannot = |e: std::io::Error| format!("Cannot read {}: {e}", path.display());
-    let ours = |b: &[u8]| {
-        let h = edit_doc::sha256_hex(b);
-        last == Some(h.as_str()) || partial == Some(h.as_str())
-    };
-    match engine::dds::may_replace(path, out, ours) {
-        Ok(()) => Ok(None),
-        Err(Kept::Unreadable(e)) => Err(cannot(e)),
-        Err(Kept::Foreign) => std::fs::read(path)
-            .map(|b| Some(Sha256::digest(&b).into()))
-            .map_err(cannot),
+    match std::fs::read(path) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("Cannot read {}: {e}", path.display())),
+        Ok(b) => {
+            let h: [u8; 32] = Sha256::digest(&b).into();
+            let hex = hex::encode(h);
+            match last == Some(hex.as_str()) || partial == Some(hex.as_str()) {
+                true => Ok(None),
+                false => Ok(Some(h)),
+            }
+        }
     }
 }
 
@@ -3257,8 +3260,8 @@ impl MeshesModel {
 
     /// The export path of `e` as the export would find it: None when absent or Tessalith's own, Some(SHA-256) when
     /// Tessalith did not write it, Err when it cannot be read.
-    // shortcut: the key leaves out the edit's bytes, so a file that equals them reads as foreign until it changes;
-    // add `e.rev` if that case shows up (it would re-read the file on every drag tick).
+    // The edit's bytes are not part of the answer (ruling E6-S2: a file equal to them is not Tessalith's for that), so
+    // the key leaves them out.
     fn disk_state(&self, e: &NifEdit) -> Result<Option<[u8; 32]>, String> {
         let meta = std::fs::metadata(&e.export_path)
             .ok()
@@ -3278,7 +3281,6 @@ impl MeshesModel {
         );
         let v = foreign_hash(
             &e.export_path,
-            &e.out,
             e.doc.export.sha256.as_deref(),
             e.partial.as_deref(),
         );
@@ -3382,13 +3384,36 @@ impl MeshesModel {
     /// skipped, else Err listing each skipped NIF and why. Each write is a line in Messages, with its placement.
     pub fn export_nif_edits(&mut self) -> Result<usize, String> {
         self.foreign_cache.take(); // check again at write time
+                                   // ruling E6-S3: what the Export read then is said before the rows are filtered on pending edits: a record that
+                                   // cannot be read, or (with no ops, after edits) an installed NIF with no record. Nothing is written for it.
+        let mut refused: Option<(String, String)> = None;
         if let Some(e) = self.edit.as_mut() {
             e.recheck_record(true); // rulings E6-F, E6-O: read again, a moved blocking record no longer blocks
+            let installed = !matches!(present(&e.export_path), (false, None));
+            refused = match &e.record_err {
+                Some(why) => Some((e.data_path.clone(), why.clone())),
+                None if e.touched()
+                    && e.doc.ops.is_empty()
+                    && e.doc.export.sha256.is_none()
+                    && e.partial.is_none()
+                    && !e.export_path.as_os_str().is_empty()
+                    && installed =>
+                {
+                    Some((e.data_path.clone(), NIF_INSTALLED_UNRECORDED.into()))
+                }
+                None => None,
+            };
         }
         let rows = self.nif_review_rows();
         self.nif_answers.clear();
         let (mut written, mut skipped) = (0, vec![]);
+        if let Some((path, why)) = &refused {
+            skipped.push(format!("{path}: {why}"));
+        }
         for r in rows {
+            if refused.as_ref().is_some_and(|(p, _)| *p == r.path) {
+                continue; // said above
+            }
             let why = match (&r.blocked, r.foreign, r.answer) {
                 (Some(b), _, _) => Some(b.clone()),
                 (None, Some(_), None) => Some(NIF_UNANSWERED.to_string()),
