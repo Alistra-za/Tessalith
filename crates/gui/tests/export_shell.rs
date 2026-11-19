@@ -3552,6 +3552,39 @@ fn a_cm_json_whose_m_this_run_writes_is_marked_even_when_the_m_is_on_disk() {
     assert!(s.changed.contains(&json));
 }
 
+#[test]
+fn an_xpmf_profile_is_marked_when_the_run_rewrites_a_required_dds_already_on_disk() {
+    use serde_json::{json, Value};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened_chosen_decided(d.path());
+    let id = "landscape/rock01";
+    m.set_xpmf_on(id, true);
+    m.set_xpmf_value(id, "editorIds", Some(json!(["MatoA"])));
+    idle(&mut m);
+    export_and_compare(&mut m, d.path());
+    let profile = m
+        .output_root()
+        .join("SKSE/Plugins/XPMF/tessalith_rock01.json");
+    let first: Value = serde_json::from_slice(&std::fs::read(&profile).unwrap()).unwrap();
+    let diffuse = m
+        .output_root()
+        .join(first["diffuseTexture"].as_str().unwrap());
+    assert!(diffuse.is_file());
+
+    support::colour(&d.path().join("textures/landscape/rock01.png"), 200);
+    m.set_xpmf_value(id, "editorIds", Some(json!(["MatoB"])));
+    m.save().unwrap();
+    m.replan();
+    idle(&mut m);
+    let s = export_and_compare(&mut m, d.path());
+    assert!(s.changed.contains(&diffuse) && s.changed.contains(&profile));
+    assert!(
+        s.w.outputs.iter().any(|o| o.path == profile && o.marked),
+        "the required DDS is produced by the run: {:?}",
+        s.w.outputs
+    );
+}
+
 /// Ruling 3c-58: two borrowers of one excluded owner. One build of Review's list reads the owner's DDS once; each
 /// borrower's destination still gets its own check (both copies are listed when the owner changed).
 #[test]
