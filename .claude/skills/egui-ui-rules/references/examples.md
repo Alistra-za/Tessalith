@@ -189,7 +189,6 @@ pub fn dot(ui: &mut egui::Ui, s: Status) -> egui::Response {
     r
 }
 ```
-Other files import these constants (`pub(super) use super::status::{AMBER, RED};`) and never define their own.
 
 ## 9. Accessible names for shortened or painted widgets
 ```rust

@@ -18,3 +18,6 @@ rayon.workspace = true
 [[example]]
 name = "quality"
 test = true
+
+[lints]
+workspace = true

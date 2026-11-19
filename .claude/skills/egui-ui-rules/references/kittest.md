@@ -14,11 +14,11 @@ These patterns are the ones that caught real layout and safety bugs in Tessalith
 8. Cache and per-frame-cost pins
 
 ## 0. egui_kittest 0.37: what the harness does for you
-- **The unnamed-widget check is on by default** (`builder.rs:51`, `:150-158`). It panics with "N widget(s) lack accessible name … The widgets: <Role> at <rect> inside <closest named ancestor>" (`accessibility.rs:26-43`).
+- **The unnamed-widget check is on by default** (`builder.rs:51`, `:150-158`); its panic lists each unnamed widget's role, rect and closest named ancestor (`accessibility.rs:26-43`).
   - **Which roles:** every visible, not read-only node whose role is an input in `egui::accessibility::is_input` (egui `accessibility.rs:11-45`): Button, CheckBox, ColorWell, ComboBox, DisclosureTriangle, Link, ListBoxOption, MenuItem*, MultilineTextInput, NumberInput, RadioButton, SearchInput, Slider, SpinButton, Splitter, Tab, TextInput and more. ScrollBar and ProgressIndicator are not inputs, so the check skips them; test a progress bar's name yourself (Tessalith `accessible_names.rs::unnamed_progress`).
   - **What counts as a name:** a non-blank label or a non-blank placeholder (`accessibility.rs:46-55`). A TextEdit with only a hint passes.
   - **When it runs:** at the end of `run()`, `try_run()` and `run_ok()` (`lib.rs:518-521`), and before every snapshot (`snapshot.rs:741`). Not after `step()` or `run_steps()`. The builder calls `run_ok()` once (`lib.rs:298`), so an unnamed widget on the first screen fails the build itself.
-  - **Never switch it off here.** The opt-out is `HarnessBuilder::with_accessibility_check(false)`; Tessalith never adds it to a test. It is the acceptance test for "every interactive widget has an AccessKit name". Name the widget instead.
+  - **Never switch it off: it is the acceptance test for "every interactive widget has an AccessKit name".** Name the widget instead; `it::kittest_checks_are_never_switched_off` fails on `with_accessibility_check(` or `allow_missing_glyphs(` in `crates/gui/tests` or `crates/gui/src` (a line scan; a wrapped harness builder is not seen).
 - **Fonts go in `with_context_setup`.** The harness runs one frame inside `build_*` (`lib.rs:247-251`), before the test can call anything, and the default `MissingGlyphPolicy` is `Panic` (`builder.rs:50`; `allow_missing_glyphs()` switches to tofu, `:99-100`). With egui's `default_fonts` off, a harness without fonts panics at build. `with_context_setup` runs before the first frame and before the harness's own theme and settings (`builder.rs:244`, run at `lib.rs:225-227`):
   ```rust
   Harness::builder()
@@ -111,7 +111,7 @@ Each one names the edge it guards, so the failure message points at the bug:
 
 ## 6. Isolation: app-data folders
 - **Tests never read or write the user's real settings, logs or caches** (`%APPDATA%`, `%LOCALAPPDATA%`, or the platform's equivalent). Redirect them to a temp dir before you build the app. [CLAUDE.md; CA23]
-- **The environment is process-wide.** A test that sets env vars goes in a test binary of its own (`tests/meshes_header.rs`), so it can't race other tests in the same process. [B3 pre K6]
+- **The environment is process-wide, so a test that changes it is a `[[test]]` of its own, never a module of `it`**: otherwise it races the other tests in the process. `it::no_it_module_changes_process_state` fails on an `it` module that sets or removes an env var, swaps the panic hook or calls the crash-log or device-lost wrappers. [B3 pre K6]
 - **Prefer passing paths into the app over reading env at startup.** Tessalith's `SdcApp::new` takes the scan DB from the model, so only `%APPDATA%` still needs redirecting. [CA23]
 - **Generate fixtures in the test.** Don't commit real assets.
 
