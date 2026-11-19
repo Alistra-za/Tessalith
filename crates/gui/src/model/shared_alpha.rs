@@ -304,6 +304,35 @@ fn changes(f: &Facts, b: &Before, p: &ProjectDoc, s: &SetsDoc) -> Changes {
     c
 }
 
+/// N8-c (N-34): the listed keys with the `alpha.policy` each holds, read before a user's step.
+pub(super) fn listed_alpha(p: &ProjectDoc, s: &SetsDoc) -> Vec<(String, Option<Value>)> {
+    s.auto_data()
+        .into_iter()
+        .map(|k| {
+            let v = p.file_value(&k, "alpha.policy");
+            (k, v)
+        })
+        .collect()
+}
+
+/// N8-c (N-34): a listed key whose `alpha.policy` the user's step changed to `data` holds the user's own value now: it
+/// leaves `auto_data` in that step, before the follow-on runs, so the follow-on's own writes never count. A pick of the
+/// `data` the key already holds changes nothing a compare can see: `data_pick_unlists` takes that one.
+pub(super) fn unlist_user_data(held: &[(String, Option<Value>)], p: &ProjectDoc, s: &mut SetsDoc) {
+    let data = Some(json!("data"));
+    let mine: Vec<&String> = held
+        .iter()
+        .filter(|(k, v)| *v != data && p.file_value(k, "alpha.policy") == data)
+        .map(|(k, _)| k)
+        .collect();
+    if mine.is_empty() {
+        return;
+    }
+    let mut l = s.auto_data();
+    l.retain(|k| !mine.contains(&k));
+    s.set_auto_data(&l);
+}
+
 fn apply(c: &Changes, p: &mut ProjectDoc, s: &mut SetsDoc) {
     for k in &c.write {
         p.set_file_value(k, "alpha.policy", &json!("data"));

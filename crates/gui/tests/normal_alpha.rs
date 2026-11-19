@@ -1816,3 +1816,54 @@ fn a_normal_retyped_before_its_plan_lands_gets_no_data() {
     settle(&mut m);
     assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
 }
+
+/// N8-c (finding 5): a listed key the user reset, then retyped as a diffuse (so no set's Normal slot holds it), then
+/// confirmed Data on: that `data` is the user's. It stays after the step and after a later step that ends the share,
+/// and the key is off the list.
+#[test]
+fn a_confirmed_data_on_a_listed_key_is_the_users() {
+    use sdc_gui::model::sets::SlotCommand;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_sets(d.path());
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "precondition: the share listed it"
+    );
+    m.clear_alpha(IRON_N);
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "precondition: reset"
+    );
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "precondition: a reset leaves the entry (N-27)"
+    );
+    m.decide(IRON_N, Answer::Subtype(Subtype::Diffuse));
+    settle(&mut m);
+    assert_ne!(
+        normal_owner(&m, "pbr/iron").as_deref(),
+        Some(IRON_N),
+        "precondition: the file left the Normal slot"
+    );
+    m.decide(IRON_N, Answer::Alpha(AlphaPolicy::Data));
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the Data the user confirmed"
+    );
+    assert!(auto_data(&m).is_empty(), "the user's now");
+    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
+        .unwrap();
+    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "ending the share leaves it"
+    );
+}

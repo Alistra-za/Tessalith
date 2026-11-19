@@ -2246,9 +2246,20 @@ impl AppModel {
                 .as_ref()
                 .is_some_and(crate::sets_doc::SetsDoc::is_dirty),
         );
+        // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's batch.
+        let held = self
+            .project
+            .as_ref()
+            .zip(self.sets_doc.as_ref())
+            .filter(|_| !self.automatic_step)
+            .map(|(p, s)| shared_alpha::listed_alpha(p, s));
         self.batch = true;
         f(self);
         self.batch = false;
+        if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_ref(), self.sets_doc.as_mut())
+        {
+            shared_alpha::unlist_user_data(h, p, s);
+        }
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         if after == before {
             // Trace #28: writes that changed nothing leave the documents as clean as they were.
@@ -3371,13 +3382,19 @@ impl AppModel {
         } else {
             None
         };
+        let user = !self.automatic_step;
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
         let revs = (p.rev(), s.rev());
+        // Note JS7 (N8-c, N-34): a user's `data` on a listed key leaves the list in the user's step.
+        let held = user.then(|| shared_alpha::listed_alpha(p, s));
         f(p, s);
+        if let Some(h) = &held {
+            shared_alpha::unlist_user_data(h, p, s);
+        }
         let changed = (p.rev(), s.rev()) != revs;
         // Note JS7 (N-10, N-33): after a user's step that changed either document, the follow-on joins it.
         if let Some(b) = start.as_ref().filter(|_| changed) {
