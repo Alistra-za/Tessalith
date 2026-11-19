@@ -2845,7 +2845,7 @@ impl AppModel {
         let mut post = None;
         if let (Some(h), Some(p), Some(s)) = (&held, self.project.as_mut(), self.sets_doc.as_mut())
         {
-            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), p, s);
+            shared_alpha::unlist_user_data(h, post.insert(shared_alpha::Tables::of(p)), s);
         }
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         // N8-d: equal text leaves any leftover data for the next user edit, even if a setter moved a revision.
@@ -4019,7 +4019,7 @@ impl AppModel {
         let mut post = None;
         if let Some(h) = &held {
             let t = post.insert(shared_alpha::Tables::of(p));
-            shared_alpha::unlist_user_data(h, t, p, s);
+            shared_alpha::unlist_user_data(h, t, s);
         }
         // N8-d: the content, not the revision: a write of the value already held changes nothing to follow.
         let changed = start.is_some() && Self::snapshot_of(Some(p), Some(s)) != before;
@@ -4043,7 +4043,8 @@ impl AppModel {
         dirty: (bool, bool),
     ) -> Option<bool> {
         let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
-        if after == before {
+        let changed = before != after;
+        if !changed {
             // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
             if let Some(p) = self.project.as_mut() {
                 p.set_dirty(dirty.0);
@@ -4051,19 +4052,22 @@ impl AppModel {
             if let Some(s) = self.sets_doc.as_mut() {
                 s.set_dirty(dirty.1);
             }
+        }
+        if let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_ref()) {
+            p.reconcile_ownership(s, &after.sdc_toml);
+        }
+        if !changed {
             return None;
         }
         self.drop_undo_note();
         let files_edit = before.project == after.project;
-        if let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_ref()) {
-            p.refresh_claims(s);
-        }
         self.history.push(history::Command {
             label: label.into(),
             before,
             after,
             merge,
             created_file: None,
+            normal_prunes: Default::default(),
         });
         self.auto_replans = 0;
         Some(files_edit)
@@ -4158,7 +4162,12 @@ impl AppModel {
         self.edit_docs(label, None, true, |p, _| f(p));
     }
 
-    fn apply_snapshot(&mut self, s: &history::Snapshot) {
+    fn apply_snapshot(&mut self, command: &history::Command, redo: bool) {
+        let s = if redo {
+            &command.after
+        } else {
+            &command.before
+        };
         self.dropped_fills.clear();
         if self
             .auto_note
@@ -4185,9 +4194,17 @@ impl AppModel {
         }
         // The JSON hash is not part of a step: export writes it outside history (spec §7.2, final review I2).
         if let Some(d) = self.sets_doc.as_mut() {
+            let side = usize::from(redo);
+            if let Some(p) = &self.project {
+                d.restore_normal_baseline(
+                    p.saved_text(),
+                    &command.normal_prunes[1 - side],
+                    &command.normal_prunes[side],
+                );
+            }
             d.restore_keeping_json_sha(&s.project);
             if let Some(p) = self.project.as_mut() {
-                p.refresh_claims(d);
+                p.reconcile_ownership(d, &s.sdc_toml);
             }
         }
         // An undo or redo changes the project like an edit (AF11), without the edit's type-follow bookkeeping.
@@ -4289,7 +4306,7 @@ impl AppModel {
                 self.refresh_banner();
             }
         }
-        self.apply_snapshot(&c.before);
+        self.apply_snapshot(&c, false);
         self.undo_noted("Undid", &c.label);
     }
 
@@ -4422,7 +4439,7 @@ impl AppModel {
                 }
             }
         }
-        self.apply_snapshot(&c.after);
+        self.apply_snapshot(&c, true);
         self.undo_noted("Redid", &c.label);
     }
 

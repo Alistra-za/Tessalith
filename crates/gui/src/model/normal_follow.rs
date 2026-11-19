@@ -396,14 +396,13 @@ pub(super) fn relist(p: &ProjectDoc, s: &mut SetsDoc, changes: &[(String, Option
 
 /// N-27: the user picked the word the list holds, so the key is theirs now (the rare write to `sdc-project.toml`). A
 /// different value needs no write: it already reads as the user's.
-pub(super) fn unlist_same(p: &mut ProjectDoc, s: &mut SetsDoc, key: &str, new: Option<Subtype>) {
+pub(super) fn unlist_same(s: &mut SetsDoc, key: &str, new: Option<Subtype>) {
     if s.read_only() {
         return;
     }
     let mut l = s.auto_normal();
     if new.is_some_and(|st| l.get(key).is_some_and(|w| *w == word(st))) {
-        let claimed = l.remove(key).expect("matched the listed word");
+        l.remove(key);
         s.set_auto_normal(&l);
-        p.claim(key, "subtype", &claimed);
     }
 }

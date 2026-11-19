@@ -81,6 +81,8 @@ fn reencode_button_writes_the_selector() {
     let mut h = harness(m);
     h.run();
     h.get_by_label("Already a DDS file: it is left as it is and not written to the export.");
+    assert!(!h.state().can_undo());
+    check_close(h.state_mut(), (false, false), (false, false));
     let (before, steps) = (toml(h.state()), h.state().history.undo.len());
     h.get_by_label(REENCODE).click();
     idle(&mut h);
@@ -93,6 +95,7 @@ fn reencode_button_writes_the_selector() {
     // Note FI3: the plan's FC1 recording joined the re-encode: one step, one Undo, one Redo.
     assert_eq!(h.state().history.undo.len(), steps + 1, "one undo step");
     assert_eq!(h.state().undo_label(), Some("Re-encode 1 DDS file"));
+    check_close(h.state_mut(), (true, false), (true, false));
     h.state_mut().undo();
     idle(&mut h);
     assert_eq!(toml(h.state()), before, "one Undo takes back both");
@@ -102,10 +105,32 @@ fn reencode_button_writes_the_selector() {
         "Undo leaves only pending image types"
     );
     assert!(h.state().recovery_snapshot().is_empty());
+    assert!(!h.state().can_undo());
+    check_close(h.state_mut(), (false, false), (false, false));
     h.state_mut().redo();
     idle(&mut h);
     assert_eq!(toml(h.state()), t, "one Redo puts back both");
     assert!(has_job(h.state(), "a.dds"));
+    check_close(h.state_mut(), (true, false), (true, false));
+    h.state_mut().undo();
+    idle(&mut h);
+    check_close(h.state_mut(), (false, false), (false, false));
+    record_another_colour(h.state_mut());
+    check_close(h.state_mut(), (false, false), (false, false));
+    h.state_mut().redo();
+    idle(&mut h);
+    assert!(!h.state().can_redo());
+    assert_eq!(
+        h.state()
+            .project
+            .as_ref()
+            .unwrap()
+            .file_value("extra_d.png", "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    assert!(toml(h.state()).contains("reencode = true\nsubtype = \"diffuse\""));
+    assert!(has_job(h.state(), "a.dds"));
+    check_close(h.state_mut(), (true, false), (true, false));
 }
 
 #[test]

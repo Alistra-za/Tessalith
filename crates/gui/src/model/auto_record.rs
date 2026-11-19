@@ -16,7 +16,7 @@ use engine::policy::{AcceptSuggestions, Provenance};
 use engine::shader::{member_subtype, Shader, ShaderOrigin};
 use engine::suggest::Confidence;
 use serde_json::json;
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 /// The last recording, for its Problems row.
@@ -612,12 +612,14 @@ impl AppModel {
             p.touch_auto(&writes, allowed.as_deref().unwrap_or(&writes));
         }
         super::normal_follow::list_normals(p, sets, &mut listing, &writes);
-        p.refresh_claims(sets);
         let listing_changed = sets.rev() != revs.1 && old_listing != listing;
-        if listing_changed && !joins_user {
+        let mut baseline_pruned = if listing_changed && !joins_user {
             let allowed = super::normal_follow::allowed_listing(&old_listing, &listing, &protected);
-            sets.touch_auto_normals(p.baseline(), &old_listing, &allowed);
-        }
+            sets.touch_auto_normals(&old_listing, &allowed)
+        } else {
+            BTreeMap::new()
+        };
+        p.reconcile_ownership(sets, &p.text());
         if revs == (p.rev(), sets.rev()) {
             return false;
         }
@@ -652,12 +654,16 @@ impl AppModel {
                     let allowed =
                         super::normal_follow::allowed_listing(&old_listing, &prior, &protected);
                     if old_listing != *allowed {
-                        crate::sets_doc::SetsDoc::apply_auto_normals(
+                        let mut removed = crate::sets_doc::SetsDoc::apply_auto_normals(
                             &mut state.project,
-                            &state.sdc_toml,
+                            Some(&state.sdc_toml),
                             &old_listing,
                             &allowed,
                         );
+                        removed.retain(|key, word| baseline_pruned.get(key) == Some(word));
+                        removed
+                    } else {
+                        BTreeMap::new()
                     }
                 });
             } else if !replay.is_empty() {
@@ -666,12 +672,13 @@ impl AppModel {
             if let Some(before) = before_step.as_mut().filter(|_| !replay.is_empty()) {
                 before.sdc_toml = crate::project::apply_auto(&before.sdc_toml, replay);
                 if lists {
-                    crate::sets_doc::SetsDoc::apply_auto_normals(
+                    let removed = crate::sets_doc::SetsDoc::apply_auto_normals(
                         &mut before.project,
-                        &before.sdc_toml,
+                        Some(&before.sdc_toml),
                         &old_listing,
                         &prior,
                     );
+                    baseline_pruned.retain(|key, word| removed.get(key) != Some(word));
                 }
             }
         }
@@ -680,12 +687,13 @@ impl AppModel {
             .extend(followed.iter().cloned());
         if let Some(before) = before_step {
             let after = Self::snapshot_of(Some(p), Some(sets));
-            self.history.push_undo(super::history::Command {
+            self.history.push(super::history::Command {
                 before,
                 after,
                 label: format!("Set {n} {noun}{s} automatically"),
                 merge: join.clone(),
                 created_file: None,
+                normal_prunes: [BTreeMap::new(), baseline_pruned],
             });
         }
         if let Some(k) = join {
@@ -706,7 +714,14 @@ impl AppModel {
                 " (High confidence)"
             };
             self.auto_note = Some(AutoNote {
-                step: (!followed.is_empty()).then_some(self.history.pushes),
+                step: if followed.is_empty() {
+                    self.auto_note
+                        .as_ref()
+                        .and_then(|n| n.step)
+                        .filter(|&step| step == self.history.pushes)
+                } else {
+                    Some(self.history.pushes)
+                },
                 text: format!("{n} {noun}{s} set automatically{confidence}"),
                 lines: lines
                     .into_iter()

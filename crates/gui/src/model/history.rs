@@ -1,5 +1,6 @@
 //! Undo and redo over every edit (M3b spec §7.2, DECISIONS P9): a command keeps the text of `sdc.toml` and
 //! `sdc-project.toml` before and after. Opening another folder clears it; Export and Save are not steps.
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -24,6 +25,19 @@ pub struct Command {
     /// Consecutive commands with the same `Some` key are one step (a slider drag, typing in one field).
     pub merge: Option<String>,
     pub created_file: Option<CreatedFile>,
+    /// Automatic listing removals unique to the before or after snapshot, respectively.
+    pub normal_prunes: [BTreeMap<String, String>; 2],
+}
+
+impl Command {
+    fn record_prune(&mut self, side: usize, key: String, word: String) {
+        let opposite = &mut self.normal_prunes[1 - side];
+        if opposite.get(&key) == Some(&word) {
+            opposite.remove(&key);
+        } else {
+            self.normal_prunes[side].insert(key, word);
+        }
+    }
 }
 
 #[derive(Debug, Default)]
@@ -45,11 +59,6 @@ impl History {
 
     pub fn push(&mut self, c: Command) {
         self.redo.clear();
-        self.push_undo(c);
-    }
-
-    /// An automatic follow can offer its own Undo without discarding the user's Redo.
-    pub(super) fn push_undo(&mut self, c: Command) {
         self.pushes += 1;
         if let (Some(last), Some(k)) = (self.undo.last_mut(), c.merge.as_ref()) {
             if last.merge.as_ref() == Some(k)
@@ -57,6 +66,11 @@ impl History {
                 && c.created_file.is_none()
             {
                 last.after = c.after;
+                for (side, prunes) in c.normal_prunes.into_iter().enumerate() {
+                    for (key, word) in prunes {
+                        last.record_prune(side, key, word);
+                    }
+                }
                 return;
             }
         }
@@ -67,7 +81,10 @@ impl History {
     }
 
     pub fn apply_auto(&mut self, writes: &[crate::project::AutoWrite]) {
-        self.apply_auto_in(writes, |state, _, apply| apply(&mut state.sdc_toml));
+        self.apply_auto_in(writes, |state, _, apply| {
+            apply(&mut state.sdc_toml);
+            BTreeMap::new()
+        });
     }
 
     pub(super) fn apply_auto_in(
@@ -77,7 +94,7 @@ impl History {
             &mut Snapshot,
             Option<&crate::project::NewFileEntries>,
             &mut dyn FnMut(&mut String),
-        ),
+        ) -> BTreeMap<String, String>,
     ) {
         if self.undo.is_empty() && self.redo.is_empty() {
             return;
@@ -96,8 +113,14 @@ impl History {
                 .clone();
         };
         for command in self.undo.iter_mut().chain(&mut self.redo) {
-            for state in [&mut command.before, &mut command.after] {
-                adapt(state, entries.as_ref(), &mut apply);
+            let removed = [&mut command.before, &mut command.after]
+                .map(|state| adapt(state, entries.as_ref(), &mut apply));
+            for side in 0..2 {
+                for (key, word) in &removed[side] {
+                    if removed[1 - side].get(key) != Some(word) {
+                        command.record_prune(side, key.clone(), word.clone());
+                    }
+                }
             }
         }
     }
@@ -265,6 +288,7 @@ mod tests {
                 after,
                 merge: None,
                 created_file: None,
+                normal_prunes: Default::default(),
             });
         }
         history.undo_step();
@@ -320,7 +344,7 @@ mod tests {
             let expected = crate::project::apply_auto(text, &writes);
             let snapshot = Snapshot { sdc_toml: text.to_owned(), project: "same".into() };
             let mut history = History::default();
-            history.push(Command { label: "edit".into(), before: snapshot.clone(), after: snapshot, merge: None, created_file: None });
+            history.push(Command { label: "edit".into(), before: snapshot.clone(), after: snapshot, merge: None, created_file: None, normal_prunes: Default::default() });
             history.apply_auto(&writes);
             assert_eq!(history.undo[0].before.sdc_toml, expected, "before {text:?}");
             assert_eq!(history.undo[0].after.sdc_toml, expected, "after {text:?}");
@@ -366,6 +390,7 @@ mod tests {
                 after: snapshot,
                 merge: None,
                 created_file: None,
+                normal_prunes: Default::default(),
             });
             history.apply_auto(std::slice::from_ref(&write));
             for side in [&history.undo[0].before, &history.undo[0].after] {
@@ -405,6 +430,7 @@ mod tests {
                 },
                 merge: None,
                 created_file: None,
+                normal_prunes: Default::default(),
             });
         }
         let writes = [AutoWrite {

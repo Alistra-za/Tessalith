@@ -1842,7 +1842,16 @@ fn scroll_editor(h: &mut Harness<'static, AppModel>) {
 }
 
 /// Short, so both the texture panel and the set editor overflow and scroll.
-fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
+fn short_harness(mut m: AppModel) -> Harness<'static, AppModel> {
+    // Start these editor walks at the saved fixture, with the normal recorder enabled.
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.replan();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m.save().unwrap();
+    m.reload_documents();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_undo());
+    check_close(&mut m, (false, false), (false, false));
     let h = Harness::builder()
         .with_context_setup(|ctx| {
             sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
@@ -1854,6 +1863,34 @@ fn short_harness(m: AppModel) -> Harness<'static, AppModel> {
 
 fn set_keys(m: &AppModel) -> Vec<String> {
     m.sets.iter().map(|s| s.key.clone()).collect()
+}
+
+fn walk_scrolled_edit(m: &mut AppModel) {
+    let set = "landscape/rock01";
+    if !m.can_undo() {
+        m.set_json_value(set, "roughness_scale", Some(serde_json::json!(0.5)));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    let edited = m.sets_doc.as_ref().unwrap().text();
+    check_close(m, (false, true), (false, true));
+    m.undo();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_undo());
+    check_close(m, (false, false), (false, false));
+    record_another_colour(m);
+    check_close(m, (false, false), (false, false));
+    m.redo();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(!m.can_redo());
+    assert_eq!(m.sets_doc.as_ref().unwrap().text(), edited);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value("extra_d.png", "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    check_close(m, (false, true), (true, true));
 }
 
 #[test]
@@ -1891,6 +1928,7 @@ fn the_set_editor_opens_at_its_top_after_a_scrolled_texture() {
         "the first slot row is at the top: {} vs {top}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 #[test]
@@ -1920,6 +1958,7 @@ fn going_back_to_a_set_opens_it_at_its_top() {
         "set A reopens at its top: {} vs {top}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 /// A guard: it passes before the fix too. The reset fires on a switch only, never on a re-plan of the same set.
@@ -1947,6 +1986,7 @@ fn the_offset_survives_a_replan_of_the_same_set() {
         "the offset is kept: {} vs {scrolled}",
         diffuse_top(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }
 
 #[test]
@@ -1983,4 +2023,5 @@ fn the_bulk_panel_opens_at_its_top_after_a_scrolled_set() {
         "the bulk panel is at its top: {} vs {top}",
         type_header_y(&h)
     );
+    walk_scrolled_edit(h.state_mut());
 }

@@ -1253,27 +1253,29 @@ impl SetsDoc {
     /// Replay just the recorder's changes. A shader pick or an explicit unlisting in this state still owns its keys.
     pub(crate) fn apply_auto_normals(
         text: &mut String,
-        files: &str,
+        snapshot_files: Option<&str>,
         before: &BTreeMap<String, String>,
         after: &BTreeMap<String, String>,
-    ) {
+    ) -> BTreeMap<String, String> {
         let Ok(mut doc) = text.parse::<toml_edit::DocumentMut>() else {
-            return;
+            return BTreeMap::new();
         };
+        let mut removed = BTreeMap::new();
         let mut listing = Self::normal_listing(&doc);
         let project = std::cell::LazyCell::new(|| {
-            crate::project::ProjectDoc::from_snapshot(files).expect("serialized project")
+            snapshot_files.map(|files| {
+                crate::project::ProjectDoc::from_snapshot(files).expect("serialized project")
+            })
         });
         for (key, old) in before {
             if !after.contains_key(key)
                 && listing.get(key) == Some(old)
-                && project
-                    .file_value(key, "subtype")
-                    .as_ref()
-                    .and_then(Json::as_str)
-                    != Some(old)
+                && project.as_ref().is_none_or(|p| {
+                    p.file_value(key, "subtype").as_ref().and_then(Json::as_str) != Some(old)
+                })
             {
                 listing.remove(key);
+                removed.insert(key.clone(), old.clone());
             }
         }
         for (key, word) in after {
@@ -1287,18 +1289,49 @@ impl SetsDoc {
         {
             *text = doc.to_string();
         }
+        removed
     }
 
     pub(crate) fn touch_auto_normals(
         &mut self,
-        files: &str,
         before: &BTreeMap<String, String>,
         after: &BTreeMap<String, String>,
-    ) {
-        if before != after {
-            Self::apply_auto_normals(&mut self.f.baseline_text, files, before, after);
+    ) -> BTreeMap<String, String> {
+        if before == after {
+            return BTreeMap::new();
         }
+        let removed = Self::apply_auto_normals(&mut self.f.baseline_text, None, before, after);
         self.f.update_user_dirty(&self.text());
+        removed
+    }
+
+    pub(crate) fn restore_normal_baseline(
+        &mut self,
+        saved_files: &str,
+        restore: &BTreeMap<String, String>,
+        prune: &BTreeMap<String, String>,
+    ) {
+        if restore.is_empty() && prune.is_empty() {
+            return;
+        }
+        let files = std::cell::LazyCell::new(|| {
+            crate::project::ProjectDoc::from_snapshot(saved_files)
+                .expect("serialized files document")
+        });
+        let saved = std::cell::LazyCell::new(|| {
+            Self::normal_listing(&self.f.saved_text.parse().expect("serialized sets document"))
+        });
+        // Undo may restore a listing the user has since claimed and saved.
+        let mut restore = restore.clone();
+        restore.retain(|key, word| {
+            saved.get(key) == Some(word)
+                || files
+                    .file_value(key, "subtype")
+                    .as_ref()
+                    .and_then(Json::as_str)
+                    != Some(word)
+        });
+        Self::apply_auto_normals(&mut self.f.baseline_text, None, prune, &restore);
     }
 
     /// Note JS7 (N-10, N-27): the owner normals the share step wrote `alpha.policy = "data"` on; one that no longer

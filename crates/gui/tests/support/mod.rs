@@ -11,6 +11,31 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 
+/// Both pairs are (sdc.toml, sdc-project.toml). Recovery includes pending automatic writes alongside user work.
+/// Check the dialog's flags and every recovery path and text.
+#[track_caller]
+pub fn check_close(m: &mut AppModel, dirty: (bool, bool), recovery: (bool, bool)) {
+    assert_eq!(m.request_close(), !(dirty.0 || dirty.1), "close");
+    assert_eq!(
+        matches!(m.dialog, Some(sdc_gui::model::Dialog::CloseUnsaved)),
+        dirty.0 || dirty.1,
+        "close dialog"
+    );
+    m.dialog = None;
+    let files = m.project.as_ref().unwrap();
+    let sets = m.sets_doc.as_ref().unwrap();
+    assert_eq!((files.user_dirty(), sets.user_dirty()), dirty, "documents");
+    let expected: Vec<_> = [
+        (recovery.0, files.path(), files.text()),
+        (recovery.1, sets.path(), sets.text()),
+    ]
+    .into_iter()
+    .filter(|(include, _, _)| *include)
+    .map(|(_, path, text)| (path.to_owned(), text))
+    .collect();
+    assert_eq!(m.recovery_snapshot(), expected, "recovery");
+}
+
 pub fn mod_folder(dir: &Path) -> PathBuf {
     let r = dir.join("textures/landscape");
     std::fs::create_dir_all(&r).unwrap();
@@ -59,6 +84,20 @@ pub fn colour(path: &Path, tint: u8) {
     ImageBuffer::from_fn(64, 64, |x, y| Rgb([(x * 4) as u8, (y * 4) as u8, tint]))
         .save(path)
         .unwrap();
+}
+
+/// Add a High-confidence diffuse between history steps and check that it recorded without a command.
+pub fn record_another_colour(m: &mut AppModel) {
+    let pushes = m.history.pushes;
+    let key = "extra_d.png";
+    colour(&m.root.as_ref().unwrap().join(key), 90);
+    m.replan();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert_eq!(
+        m.project.as_ref().unwrap().file_value(key, "subtype"),
+        Some(serde_json::json!("diffuse"))
+    );
+    assert_eq!(m.history.pushes, pushes);
 }
 
 /// A flat normal map (128, 128, 255): nothing to decide, no check result.

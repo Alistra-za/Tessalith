@@ -125,7 +125,7 @@ impl AppModel {
             }
             // Note JS5 (N-27): only the listed word itself takes the key off; another value is already the user's,
             // and the edit stays files-only.
-            super::normal_follow::unlist_same(p, s, &k, new);
+            super::normal_follow::unlist_same(s, &k, new);
             let before = s.auto_pbr();
             // A sub-type the user just chose is no longer automatic.
             let mut auto: Vec<String> = before.iter().filter(|a| **a != k).cloned().collect();

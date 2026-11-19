@@ -850,12 +850,7 @@ pub(super) fn listed_without_data(pre: &Tables, s: &SetsDoc) -> Vec<String> {
 }
 
 /// A user's write claims only the exact table that gained Data. A same-value pick is handled by `data_pick_unlists`.
-pub(super) fn unlist_user_data(
-    without_data: &[String],
-    post: &Tables,
-    p: &mut ProjectDoc,
-    s: &mut SetsDoc,
-) {
+pub(super) fn unlist_user_data(without_data: &[String], post: &Tables, s: &mut SetsDoc) {
     let data = Some(json!("data"));
     let mine: HashSet<&String> = without_data
         .iter()
@@ -867,9 +862,6 @@ pub(super) fn unlist_user_data(
     let mut l = s.auto_data();
     l.retain(|k| !mine.contains(&k));
     s.set_auto_data(&l);
-    for k in mine {
-        p.claim(k, "alpha.policy", "data");
-    }
 }
 
 /// N8-d, N8-i: a value and its list entry are written together or not at all, and a failed attempt changes nothing.
@@ -978,7 +970,6 @@ impl AppModel {
             if exact_alpha(p, &table) == Some(json!("data")) {
                 list.retain(|e| e != &table);
                 s.set_auto_data(&list);
-                p.claim(&table, "alpha.policy", "data");
             }
         });
         true
