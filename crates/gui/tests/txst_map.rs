@@ -1129,6 +1129,34 @@ fn one_normal_is_written() {
     assert!(outs.next().is_some() && outs.next().is_none());
 }
 
+/// Ruling 3b-F13: a stored `slot2` of any value (`""` or a hand-edited `false`) on the mapped skin set C, which owns
+/// an unshared `_rfaos` and no normal, keeps the record from filling slot 2, as on main a0e2610c: the engine is told of
+/// no borrowed normal, so C's `_rfaos` bakes as main bakes it. With no slot key the record's normal is borrowed.
+#[test]
+fn a_stored_slot_key_keeps_the_record_normal_out_of_the_engine_inputs() {
+    use serde_json::json;
+    let borrowed = |m: &AppModel| sdc_gui::model::sets::borrowed_normal(m).get(M).cloned();
+    let d = tempfile::tempdir().unwrap();
+    let m = r(d.path());
+    assert_eq!(
+        borrowed(&m).as_deref(),
+        Some(X),
+        "no slot key: the record's normal"
+    );
+    for value in [json!(""), json!(false)] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = r(d.path());
+        m.set_json_value(M, "slot2", Some(value.clone()));
+        idle(&mut m);
+        assert_eq!(borrowed(&m), None, "slot2 = {value}");
+        assert_eq!(
+            m.request().unwrap().borrowed_normal.get(M),
+            None,
+            "slot2 = {value}: the request the engine gets"
+        );
+    }
+}
+
 #[test]
 fn a_record_slot_nothing_writes_is_supplied() {
     let d = tempfile::tempdir().unwrap();

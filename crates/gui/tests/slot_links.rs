@@ -1511,11 +1511,12 @@ fn record_height_project(dir: &std::path::Path) -> AppModel {
     m
 }
 
-/// Ruling 3b-F9: on a set that writes no entry (statics Never) a stored `slot4` link or clear changes nothing, the
-/// record's borrowed height included: the view keeps the borrow and the candidate entry its Parallax default. Once the
-/// same set writes an entry, the command is what the JSON carries.
+/// Ruling 3b-F13 (withdrawing 3b-F9's record-fill clause): a stored `slot4` keeps the TXST record from filling slot 4
+/// on every set, as on main a0e2610c, so on a set that writes no entry (statics Never) the record's borrowed height
+/// goes and with it the Parallax default (that decision feeds the engine's inputs: JR14's one exception to R4). Once
+/// the same set writes an entry, the command is what the JSON carries.
 #[test]
-fn a_stored_slot_command_leaves_a_record_fill_alone_on_a_set_that_writes_no_entry() {
+fn a_stored_slot_command_keeps_a_record_fill_out_as_on_main() {
     use sdc_gui::model::cs_pbr::{Kind, Statics};
     let typed = r"textures\other\x_p.dds";
     // Stored as the JSON editor stores them: the menu's Clear on a record fill turns the fill off instead (Note HG).
@@ -1538,12 +1539,20 @@ fn a_stored_slot_command_leaves_a_record_fill_alone_on_a_set_that_writes_no_entr
         m.set_json_value(REC_LEAF, "slot4", Some(json!(cmd)));
         assert!(m.wait_idle(std::time::Duration::from_secs(60)));
         let after = at(&m);
-        assert_eq!(after.slots, v.slots, "{cmd:?}: the slots");
-        assert_eq!(after.filled, v.filled, "{cmd:?}: the record fills");
         assert_eq!(
-            entry(&m, REC_LEAF).get("parallax").cloned(),
-            parallax,
-            "{cmd:?}: the feature default"
+            after.slots.get(&SlotKind::Height),
+            None,
+            "{cmd:?}: the record fill goes, as on main"
+        );
+        assert!(
+            !after.filled.contains_key(&4),
+            "{cmd:?}: {:?}",
+            after.filled
+        );
+        assert_eq!(
+            entry(&m, REC_LEAF).get("parallax"),
+            None,
+            "{cmd:?}: no height, no feature default"
         );
         // The same set writing an entry: the command is the JSON's slot 4.
         m.set_cs_statics(REC_LEAF, Statics::Always);

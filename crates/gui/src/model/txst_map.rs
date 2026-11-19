@@ -267,22 +267,14 @@ pub(super) fn fill_from_records(
         if pbr_on_cs(m, &v.slots) {
             continue;
         }
-        // Ruling 3b-F9: a stored `slotN` decides a slot only on a set that writes an entry; elsewhere it changes
-        // nothing. `json` and the match are set by `finish_view`, which runs after this, so a copy is finished to ask.
-        let slot_key = |v: &SetView, n: u8| {
-            n <= LAST_GAME_SLOT && v.settings.contains_key(&format!("slot{n}"))
-        };
-        let commands = (1..=LAST_GAME_SLOT).any(|n| slot_key(v, n)) && {
-            let mut probe = v.clone();
-            super::sets::finish_view(m, &mut probe);
-            writes_entry(m, &probe)
-        };
-        // A slot another source already decided: its own file, an explicit borrow, a pin, or a `slotN` command.
+        // A slot another source already decided: its own file, an explicit borrow, a pin, or a `slotN` setting.
+        // Ruling 3b-F13: a `slotN` of any value decides it on every set, a set that writes no entry included, as on
+        // main: the decision feeds the engine's `borrowed_normal` input, so encoded bytes follow it.
         let decided = |v: &SetView, n: u8| {
             v.slots.keys().any(|k| k.slot_number() == Some(n))
                 || e.borrow.contains_key(&n)
                 || v.locks.contains(&n)
-                || (commands && slot_key(v, n))
+                || (n <= LAST_GAME_SLOT && v.settings.contains_key(&format!("slot{n}")))
         };
         for (&n, path) in txst.slots.iter().filter(|(n, _)| **n >= 2) {
             if decided(v, n) {
