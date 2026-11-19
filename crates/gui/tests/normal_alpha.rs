@@ -2662,6 +2662,12 @@ fn a_twice_listed_clear_leaves_the_users_stem_twin() {
 /// is reopened and settles, and an unrelated diffuse `armor/bronze.png` is in the folder. The borrower is left with no
 /// file of its own and still points at the listed normal. Returns the borrower's id.
 fn emptied_borrower(dir: &Path) -> (AppModel, String) {
+    emptied_borrower_with(dir, false)
+}
+
+/// `emptied_borrower`; with `twice`, a second `[[sets]]` entry carrying only the borrower's id is appended by hand
+/// before the reopen (the GUI edits the first entry of an id, the engine reads every one).
+fn emptied_borrower_with(dir: &Path, twice: bool) -> (AppModel, String) {
     two_sets_files(dir);
     let armor = dir.join("textures/armor");
     std::fs::remove_file(armor.join("steel_n.png")).unwrap();
@@ -2683,6 +2689,12 @@ fn emptied_borrower(dir: &Path) -> (AppModel, String) {
     ImageBuffer::from_fn(64, 64, |_, _| Rgb([150u8, 110, 60]))
         .save(armor.join("bronze.png"))
         .unwrap();
+    if twice {
+        let f = dir.join("textures/sdc-project.toml");
+        let mut text = std::fs::read_to_string(&f).unwrap();
+        text.push_str(&format!("\n[[sets]]\nid = \"{id}\"\n"));
+        std::fs::write(&f, text).unwrap();
+    }
     let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
     settle(&mut m);
     assert!(
@@ -2719,7 +2731,45 @@ fn a_duplicate_into_an_emptied_borrower_keeps_the_data() {
     assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
 }
 
-/// N8-m (B3): as above, with the diffuse moved in.
+/// N8-u (round 5, the reviewer's sequence): as `a_move_into_an_emptied_borrower_keeps_the_data`, with a second
+/// `[[sets]]` entry under the borrower's id written by hand. The Move edits the first entry; the comparison keeps every
+/// entry of an id, so the borrower is still a set whose membership the step changed, and the `data` stays.
+#[test]
+fn a_move_into_an_emptied_borrower_with_a_second_entry_keeps_the_data() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = emptied_borrower_with(d.path(), true);
+    let rows = |m: &AppModel| {
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .filter(|e| e.id == id)
+            .count()
+    };
+    assert_eq!(rows(&m), 2, "precondition: two entries under the id");
+    drop_now(&mut m, "armor/bronze.png", &id, DropChoice::Move);
+    assert!(
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .any(|e| e.id == id && e.add.iter().any(|f| f == "armor/bronze.png")),
+        "precondition: the Move wrote an add line"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a set whose membership the step changed is not gone"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N8-m (B3): as `a_duplicate_into_an_emptied_borrower_keeps_the_data`, with the diffuse moved in.
 #[test]
 fn a_move_into_an_emptied_borrower_keeps_the_data() {
     use sdc_gui::model::sets::DropChoice;

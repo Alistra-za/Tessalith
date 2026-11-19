@@ -218,10 +218,12 @@ pub(super) struct Before {
 /// N8-f, N8-r: what the sets document says about which files the sets hold, from every field the engine's set edits
 /// are made of (`sets::engine_inputs`): each `[[sets]]` entry's `created`, `renamed_from`, `add`, `remove` and `share`
 /// lines, by folded id, and `[project] no_set`. A borrow line, a shader pick or a lock moves no file. (The `[inputs]`
-/// aliases, in the project document, are compared whole: `aliases`.)
+/// aliases, in the project document, are compared whole: `aliases`.) N8-u: every entry an id has, in document order:
+/// the GUI edits the first entry of an id and the engine reads all of them, so a hand-written second entry must not
+/// hide a change to the first.
 #[derive(Debug, Default, PartialEq)]
 struct Membership {
-    entries: BTreeMap<String, Lines>,
+    entries: BTreeMap<String, Vec<Lines>>,
     no_set: BTreeSet<String>,
 }
 
@@ -237,20 +239,16 @@ struct Lines {
 
 /// N8-f, N8-r: the one reader of `Membership`.
 fn membership(s: &SetsDoc) -> Membership {
-    let entries = s
-        .entries()
-        .iter()
-        .map(|e| {
-            let l = Lines {
-                created: e.created,
-                renamed_from: e.renamed_from.clone(),
-                add: e.add.clone(),
-                remove: e.remove.clone(),
-                share: e.share.clone(),
-            };
-            (fold_id(&e.id), l)
-        })
-        .collect();
+    let mut entries: BTreeMap<String, Vec<Lines>> = BTreeMap::new();
+    for e in s.entries().iter() {
+        entries.entry(fold_id(&e.id)).or_default().push(Lines {
+            created: e.created,
+            renamed_from: e.renamed_from.clone(),
+            add: e.add.clone(),
+            remove: e.remove.clone(),
+            share: e.share.clone(),
+        });
+    }
     Membership {
         entries,
         no_set: s.no_set().into_iter().collect(),
@@ -276,16 +274,16 @@ fn touched(m: &AppModel, b: &Before, s: &SetsDoc) -> BTreeSet<String> {
     let mut out = BTreeSet::new();
     let mut lines = BTreeSet::new();
     // An entry that is not there says what an entry with no membership lines says (a borrow or a shader pick that
-    // creates the entry moves no file).
-    let none = Lines::default();
+    // creates the entry moves no file). N8-u: an id's entries are compared as a whole, in document order.
+    fn rows<'a>(m: &'a Membership, id: &str, none: &'a [Lines]) -> &'a [Lines] {
+        m.entries.get(id).map_or(none, Vec::as_slice)
+    }
+    let none = [Lines::default()];
     for id in b.members.entries.keys().chain(now.entries.keys()) {
-        let (x, y) = (
-            b.members.entries.get(id).unwrap_or(&none),
-            now.entries.get(id).unwrap_or(&none),
-        );
+        let (x, y) = (rows(&b.members, id, &none), rows(&now, id, &none));
         if x != y {
             out.insert(id.clone());
-            for l in [x, y] {
+            for l in x.iter().chain(y) {
                 lines.extend(l.add.iter().chain(&l.remove).cloned());
             }
         }
@@ -874,6 +872,10 @@ mod tests {
         for (field, text) in controls {
             assert_eq!(read(text), start, "{field} moves no file");
         }
+        // N8-u: a change to the first of two entries under one id is not hidden by the second.
+        let two = "[[sets]]\nid = \"a/b\"\n\n[[sets]]\nid = \"a/b\"\n";
+        let first_moved = "[[sets]]\nid = \"a/b\"\nadd = [\"a/x.png\"]\n\n[[sets]]\nid = \"a/b\"\n";
+        assert_ne!(read(first_moved), read(two), "the first of two entries");
     }
 
     /// N8-j: on a project with 10,000 `[files]` keys and 2,000 listed entries, the tables are read in one pass and
