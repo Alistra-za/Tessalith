@@ -25,6 +25,10 @@ pub struct Node {
     pub focused: bool,
     pub disabled: bool,
     pub hovered: bool,
+    /// The AccessKit selected state (`Some(false)` is a node that can be selected and is not).
+    pub selected: Option<bool>,
+    /// The node offers the AccessKit ScrollIntoView action (a set card does: `sets_column::card_node`).
+    pub scroll_into_view: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +62,9 @@ pub struct Snapshot {
     /// Whether every painted shape above has its layer: true only when `track_paint` was installed before the frame and
     /// the layers it read hold exactly the shapes egui output. False means `layer` is `None` everywhere.
     pub paint_layers_known: bool,
+    /// The layers whose paint egui moves by a transform other than identity when it drains the pass (their shapes, and
+    /// their nodes' rects, are then not in window coordinates).
+    pub transformed_layers: Vec<String>,
     /// Where the pointer is, when egui has one in the window; `None` is a frame with no pointer (a bar at rest).
     pub pointer: Option<Pos2>,
     /// The outer rects of the named panels the frame built (`ui::panel_ids`), and the centre column as "centre": what
@@ -153,6 +160,7 @@ pub struct PaintLayers {
     discs: Vec<Disc>,
     /// How many shapes the layers held: equals `FullOutput::shapes.len()` when no layer was missed.
     total: usize,
+    transformed: Vec<String>,
 }
 
 impl egui::Plugin for PaintLayers {
@@ -171,6 +179,11 @@ impl egui::Plugin for PaintLayers {
         self.filled.clear();
         self.discs.clear();
         self.total = 0;
+        self.transformed = layers
+            .iter()
+            .filter(|l| ctx.layer_transform_to_global(**l).is_some())
+            .map(|l| format!("{l:?}"))
+            .collect();
         ctx.graphics(|g| {
             for l in &layers {
                 let Some(list) = g.get(*l) else { continue };
@@ -312,6 +325,10 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
             focused: a.is_focused(),
             disabled: a.is_disabled(),
             hovered: joined.is_some_and(|w| ctx.read_response(w.id).is_some_and(|r| r.hovered())),
+            selected: a.data().is_selected(),
+            scroll_into_view: a
+                .data()
+                .supports_action(egui::accesskit::Action::ScrollIntoView),
         });
         for c in n.children() {
             walk(&c, Some(idx), depth + 1, rect_of, h, ctx, out);
@@ -335,16 +352,17 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
     // shapes alone, with no layer.
     let tracked = h.ctx.plugin_opt::<PaintLayers>().and_then(|p| {
         let p = p.lock();
-        (p.total == h.output().shapes.len()).then(|| (p.filled.clone(), p.discs.clone()))
+        (p.total == h.output().shapes.len())
+            .then(|| (p.filled.clone(), p.discs.clone(), p.transformed.clone()))
     });
     let paint_layers_known = tracked.is_some();
-    let (filled, discs) = tracked.unwrap_or_else(|| {
+    let (filled, discs, transformed_layers) = tracked.unwrap_or_else(|| {
         let (mut filled, mut discs) = (vec![], vec![]);
         for c in &h.output().shapes {
             fills_in(&c.shape, c.clip_rect, &None, &mut filled);
             discs_in(&c.shape, c.clip_rect, &None, &mut discs);
         }
-        (filled, discs)
+        (filled, discs, vec![])
     });
     let mut panels: Vec<(String, Rect)> = PANEL_NAMES
         .iter()
@@ -362,6 +380,7 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
         filled,
         discs,
         paint_layers_known,
+        transformed_layers,
         pointer: h.ctx.input(|i| i.pointer.latest_pos()),
         panels,
     }

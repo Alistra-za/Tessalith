@@ -850,6 +850,8 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         focused: false,
         disabled: false,
         hovered: false,
+        selected: None,
+        scroll_into_view: false,
     };
     let pin = "Pin this slot (always use this file)";
     let mut nodes = vec![node("textures/architecture/stone/cobble", 400.0)];
@@ -874,6 +876,7 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         filled: vec![],
         discs: vec![],
         paint_layers_known: false,
+        transformed_layers: vec![],
         pointer: None,
         panels: vec![],
     }

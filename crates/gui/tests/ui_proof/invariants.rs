@@ -9,7 +9,7 @@
 use crate::checks::{run_checks, Finding};
 use crate::frame::{snapshot, Node, Snapshot, Text};
 use crate::screens::{entries, holds, Needle, Screen, ScreenEntry};
-use crate::support::{bar_clearance, bar_like};
+use crate::support::bar_clearance;
 use eframe::egui::{vec2, Key, Rect, Vec2};
 use egui_kittest::Harness;
 use std::collections::BTreeMap;
@@ -186,61 +186,127 @@ type ObservingInvariant = fn(&Frame, &mut Vec<String>) -> Vec<Hit>;
 pub const OBSERVING_INVARIANTS: &[ObservingInvariant] =
     &[scroll_bars_are_visible_and_clear, status_dots_have_names];
 
-/// What a scroll bar's own paint says: its track (the tallest candidate) and whether any of it is visible. A candidate is
-/// a filled rect of the bar node's own layer, visible inside its clip, that `support::bar_like` takes for a bar at the
-/// node's right edge and that lies in the node's strip. `Err` is what the frame cannot tell: no candidate, or candidates
-/// that are not one track with its handle (another x range, or outside the track's span, or more than two).
+/// What a scroll bar's own paint says: its track and whether the bar is visible. A candidate is a filled rect of the bar
+/// node's own layer, visible inside its clip, lying inside the node's strip (a handle can be as short as egui allows,
+/// 12 px). The track is the one candidate that spans the strip's length; a handle is a candidate nested in the track, at
+/// most one. The bar is visible when the track or the handle has alpha above 0. `Err` is any other count or arrangement:
+/// what the frame cannot tell is never a pass.
+// shortcut (ST-9): a decoy in the bar's own layer, inside the bar's own strip, nested in the track like a handle, is
+// taken for the handle; upgrade if a bar ever gets painted by two widgets in one strip.
 fn bar_paint(f: &Frame, bar: &Node, layer: &str) -> Result<(Rect, bool), String> {
-    let visible: Vec<(Rect, u8)> = f
+    let strip = bar.rect.expand(0.5);
+    let cands: Vec<(Rect, u8)> = f
         .snapshot
         .filled
         .iter()
         .filter(|x| x.layer.as_deref() == Some(layer))
         .filter_map(|x| {
             let seen = x.rect.intersect(x.clip);
-            seen.is_positive().then_some((seen, x.alpha))
+            (seen.is_positive() && strip.contains_rect(seen)).then_some((seen, x.alpha))
         })
         .collect();
-    let cands: Vec<(Rect, u8)> = bar_like(&visible, bar.rect)
-        .into_iter()
-        .filter(|(r, _)| r.intersects(bar.rect))
-        .collect();
-    let Some(track) = cands
-        .iter()
-        .map(|(r, _)| *r)
-        .max_by(|a, b| a.height().total_cmp(&b.height()))
+    let spans = |r: &Rect| {
+        (r.min.y - bar.rect.min.y).abs() <= 0.5 && (r.max.y - bar.rect.max.y).abs() <= 0.5
+    };
+    // the track is the tallest candidate that spans the strip; a handle as long as the track (content that barely
+    // overflows) spans it too and is taken for the handle
+    let Some(at) = (0..cands.len())
+        .filter(|i| spans(&cands[*i].0))
+        .max_by(|a, b| cands[*a].0.height().total_cmp(&cands[*b].0.height()))
     else {
         return Err(format!(
-            "the scroll bar node at {:?} has no filled rect of its own layer painted in view at its right edge, so its visibility cannot be told",
-            bar.rect
+            "the scroll bar node at {:?} has no filled rect of its own layer spanning its strip in view ({:?}), so which paint is the bar's cannot be told",
+            bar.rect, cands
         ));
     };
-    let one_set = cands.len() <= 2
-        && cands.iter().all(|(r, _)| {
-            (r.min.x - track.min.x).abs() <= 0.5
-                && (r.max.x - track.max.x).abs() <= 0.5
-                && r.min.y >= track.min.y - 0.5
-                && r.max.y <= track.max.y + 0.5
-        });
-    if !one_set {
-        return Err(format!(
-            "the scroll bar node at {:?} has more than one candidate set of paint in its strip ({:?}), so which of them is the bar cannot be told",
-            bar.rect,
-            cands.iter().map(|(r, a)| (*r, *a)).collect::<Vec<_>>()
-        ));
+    let (track, track_alpha) = cands[at];
+    let others: Vec<&(Rect, u8)> = cands
+        .iter()
+        .enumerate()
+        .filter(|(i, _)| *i != at)
+        .map(|(_, c)| c)
+        .collect();
+    let arrangement = |why: &str| {
+        Err(format!(
+            "the scroll bar node at {:?} has {why} in its strip ({:?}), so which paint is the bar's cannot be told",
+            bar.rect, cands
+        ))
+    };
+    let nested = |r: &Rect| {
+        (r.min.x - track.min.x).abs() <= 0.5
+            && (r.max.x - track.max.x).abs() <= 0.5
+            && r.min.y >= track.min.y - 0.5
+            && r.max.y <= track.max.y + 0.5
+    };
+    if others.len() > 1 || others.iter().any(|&&(r, _)| !nested(&r)) {
+        return arrangement("paint that is not one track with at most one nested handle");
     }
-    Ok((track, cands.iter().any(|(_, a)| *a > 0)))
+    let visible = track_alpha > 0 || others.iter().any(|&&(_, a)| a > 0);
+    Ok((track, visible))
 }
 
-/// Where a scroll bar belongs, as a name that does not move with the layout: the smallest named panel (`Snapshot::panels`,
-/// the centre column included) that holds the bar's node, else its egui layer (a dialog's or a window's own).
-fn bar_owner(snap: &Snapshot, bar: &Node, layer: &str) -> String {
-    snap.panels
+/// Where each scroll bar node belongs, as a name that does not move with the layout: "scroll bar K of N in the P panel",
+/// P the smallest named panel (`Snapshot::panels`, the centre column included) that holds the bar's node, K its place
+/// among all N bars of that panel on the screen (top to bottom, then left to right). A bar no named panel holds is an
+/// `Err`, never a weaker name: add the panel to `PANEL_NAMES` in frame.rs. (node index, name).
+pub fn bar_places(snap: &Snapshot) -> Vec<(usize, Result<String, String>)> {
+    let mut owned: Vec<(usize, Option<&str>)> = vec![];
+    for (i, n) in snap.nodes.iter().enumerate() {
+        if n.role != "ScrollBar" || !n.rect.is_positive() {
+            continue;
+        }
+        let owner = snap
+            .panels
+            .iter()
+            .filter(|(_, r)| r.expand(0.5).contains_rect(n.rect))
+            .min_by(|a, b| a.1.area().total_cmp(&b.1.area()))
+            .map(|(name, _)| name.as_str());
+        owned.push((i, owner));
+    }
+    owned
         .iter()
-        .filter(|(_, r)| r.expand(0.5).contains_rect(bar.rect))
-        .min_by(|a, b| a.1.area().total_cmp(&b.1.area()))
-        .map(|(name, _)| format!("the {name} panel"))
-        .unwrap_or_else(|| format!("the layer {layer}"))
+        .map(|&(i, owner)| {
+            let rect = snap.nodes[i].rect;
+            let Some(owner) = owner else {
+                return (
+                    i,
+                    Err(format!(
+                        "no named panel holds the scroll bar at {rect:?}, so it has no stable name; add its panel to PANEL_NAMES in crates/gui/tests/ui_drive/frame.rs"
+                    )),
+                );
+            };
+            let mut same: Vec<Rect> = owned
+                .iter()
+                .filter(|(_, o)| *o == Some(owner))
+                .map(|&(j, _)| snap.nodes[j].rect)
+                .collect();
+            same.sort_by(|a, b| a.min.y.total_cmp(&b.min.y).then(a.min.x.total_cmp(&b.min.x)));
+            let k = same.iter().position(|r| *r == rect).unwrap_or(0) + 1;
+            (i, Ok(format!("scroll bar {k} of {} in the {owner} panel", same.len())))
+        })
+        .collect()
+}
+
+/// A set card as `sets_column::card_node` builds it (Note FM32), read from the node: a Button named "Set <id>, position
+/// <i> of <n>", with a selected state and the ScrollIntoView action, inside the Sets column's panel width (a card
+/// scrolled partly out of view may run past the panel's top or bottom). A button that only starts with "Set " is not one.
+fn is_set_card(snap: &Snapshot, n: &Node) -> bool {
+    let named = n
+        .label
+        .strip_prefix("Set ")
+        .and_then(|rest| rest.rsplit_once(", position "))
+        .and_then(|(_, place)| place.split_once(" of "))
+        .is_some_and(|(i, total)| i.parse::<usize>().is_ok() && total.parse::<usize>().is_ok());
+    n.role == "Button"
+        && named
+        && n.selected.is_some()
+        && n.scroll_into_view
+        && snap.panel("sets").is_some_and(|p| {
+            n.rect.min.x >= p.min.x - 0.5
+                && n.rect.max.x <= p.max.x + 0.5
+                && n.rect.max.y > p.min.y
+                && n.rect.min.y < p.max.y
+        })
 }
 
 /// Every shown scroll bar is visible with no pointer in the window, and no interactive widget comes within the bar's
@@ -271,6 +337,7 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
     }
     let bar_width = sdc_gui::look::thin_scroll().bar_width;
     let mut hits = vec![];
+    let places = bar_places(snap);
     for bar in bars {
         let r = bar.rect;
         if !r.is_positive() {
@@ -289,7 +356,29 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
             ));
             continue;
         };
-        let owner = bar_owner(snap, bar, layer);
+        if snap.transformed_layers.iter().any(|l| l == layer) {
+            errors.push(format!(
+                "the scroll bar node at {r:?} is in the layer {layer}, which egui moves by a transform when it drains the pass, so its paint and its neighbours are not in window coordinates"
+            ));
+            continue;
+        }
+        let idx = snap
+            .nodes
+            .iter()
+            .position(|n| std::ptr::eq(n, bar))
+            .unwrap_or(0);
+        let what = match places.iter().find(|(i, _)| *i == idx) {
+            Some((_, Ok(what))) => what.clone(),
+            Some((_, Err(why))) => {
+                errors.push(why.clone());
+                continue;
+            }
+            None => {
+                errors.push(format!("the scroll bar at {r:?} has no place"));
+                continue;
+            }
+        };
+        let owner = what.clone();
         let (track, visible) = match bar_paint(f, bar, layer) {
             Ok(found) => found,
             Err(why) => {
@@ -297,7 +386,6 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
                 continue;
             }
         };
-        let what = format!("scroll bar in {owner}");
         if !visible {
             hits.push(Hit {
                 screen: f.screen.to_string(),
@@ -332,17 +420,7 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
             } else {
                 n.label.clone()
             };
-            // A set card: a "Set ..." button inside the Sets column's panel.
-            let is_set_card = n.role == "Button"
-                && n.label.starts_with("Set ")
-                && snap.panel("sets").is_some_and(|p| {
-                    // inside the panel's width; a card scrolled partly out of view may run past its top or bottom
-                    n.rect.min.x >= p.min.x - 0.5
-                        && n.rect.max.x <= p.max.x + 0.5
-                        && n.rect.max.y > p.min.y
-                        && n.rect.min.y < p.max.y
-                });
-            let limit = bar_clearance(is_set_card, track, bar_width);
+            let limit = bar_clearance(is_set_card(snap, n), track, bar_width);
             if n.rect.max.x <= limit + 0.5 {
                 continue;
             }
@@ -393,7 +471,7 @@ fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec
 }
 
 /// Every filled circle in a status colour (`ui::status::RED`, `AMBER`, `GREEN`) lies under a named node: the innermost
-/// node of the circle's own layer whose visible rect (its rect cut by its clip) holds the whole circle has a non-empty
+/// node of the circle's own layer whose rect holds the whole circle has a non-empty
 /// accessible name. A text input's value is no name; a Label's text is (the snapshot folds it into `label`). The
 /// innermost node is the deepest one in the tree, the smallest on a tie; its ancestors do not count, so a named window
 /// or row cannot name an unnamed dot. A circle clipped away entirely is not judged. Nodes with no layer that hold the
@@ -413,11 +491,13 @@ fn status_dots_have_names(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
         else {
             continue;
         };
-        // the part of the circle that is shown: a circle clipped away entirely is not judged, and a node holds it when its
-        // visible rect holds that part
-        let bounds =
-            Rect::from_center_size(d.center, Vec2::splat(2.0 * d.radius)).intersect(d.clip);
-        if !bounds.is_positive() {
+        // A node holds the WHOLE circle: a node's rect is its widget's full rect, not cut by a clip (frame.rs takes it from
+        // the AccessKit bounds, which egui sets from `Response::rect`, response.rs `fill_accesskit_node_common`), so a
+        // circle that a clip cuts part of is judged like any other. A circle clipped away entirely shows nothing and is
+        // not judged.
+        let bounds = Rect::from_center_size(d.center, Vec2::splat(2.0 * d.radius));
+        let shown = bounds.intersect(d.clip);
+        if !shown.is_positive() {
             continue;
         }
         let Some(layer) = d.layer.as_deref() else {
@@ -427,9 +507,19 @@ fn status_dots_have_names(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
             ));
             continue;
         };
+        if snap.transformed_layers.iter().any(|l| l == layer) {
+            errors.push(format!(
+                "the {colour} status circle at {:?} is in the layer {layer}, which egui moves by a transform when it drains the pass, so its position and the nodes' rects are not in the same coordinates",
+                d.center
+            ));
+            continue;
+        }
+        // ... and it has to be there: a node whose own clip leaves nothing of it where the circle shows (a row clipped to a
+        // sliver beside the circle) is not what the user sees under it
         let holds = |n: &&Node| {
-            let seen = n.clip.map_or(n.rect, |c| n.rect.intersect(c));
-            seen.is_positive() && seen.expand(0.5).contains_rect(bounds)
+            n.rect.is_positive()
+                && n.rect.expand(0.5).contains_rect(bounds)
+                && n.clip.is_none_or(|c| c.intersect(n.rect).intersects(shown))
         };
         if let Some(n) = snap.nodes.iter().filter(|n| n.layer.is_none()).find(holds) {
             errors.push(format!(
@@ -742,6 +832,8 @@ pub struct Walked {
     pub painted_ellipsis_texts: std::collections::BTreeSet<String>,
     /// Every key the key step pressed: what the proof counts, so a step that presses nothing cannot pass.
     pub presses: Vec<Press>,
+    /// The name of every scroll bar the walk saw, with its screen and size (`bar_places`): what the proof counts, so a bar no panel names cannot hide.
+    pub bars: Vec<String>,
 }
 
 /// One key the key step pressed on a screen.
@@ -793,6 +885,7 @@ pub fn walk(
         visits: vec![],
         painted_ellipsis_texts: Default::default(),
         presses: vec![],
+        bars: vec![],
     };
     let mut middle: Vec<Option<Snapshot>> = vec![];
     for e in entries.iter_mut() {
@@ -820,6 +913,13 @@ pub fn walk(
                 findings: &findings,
             };
             let first = walked.hits.len();
+            for (_, place) in bar_places(&snap) {
+                if let Ok(what) = place {
+                    walked
+                        .bars
+                        .push(format!("{} at {}x{}: {what}", e.name(), size.x, size.y));
+                }
+            }
             for invariant in FRAME_INVARIANTS {
                 walked.hits.extend(invariant(&frame));
             }
@@ -1269,7 +1369,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "presets tab",
         invariant: "scroll_bar_at_rest",
         size: (1100.0, 800.0),
-        what: "scroll bar in the centre panel",
+        what: "scroll bar 1 of 1 in the centre panel",
         ordinal: 0,
         count: 1,
         px: 0.0,
@@ -1280,7 +1380,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "presets tab",
         invariant: "scroll_bar_at_rest",
         size: (1280.0, 800.0),
-        what: "scroll bar in the centre panel",
+        what: "scroll bar 1 of 1 in the centre panel",
         ordinal: 0,
         count: 1,
         px: 0.0,
@@ -1291,7 +1391,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "presets tab",
         invariant: "scroll_bar_at_rest",
         size: (1600.0, 900.0),
-        what: "scroll bar in the centre panel",
+        what: "scroll bar 1 of 1 in the centre panel",
         ordinal: 0,
         count: 1,
         px: 0.0,
@@ -1302,7 +1402,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "review tab",
         invariant: "scroll_bar_clearance",
         size: (1100.0, 800.0),
-        what: "scroll bar in the bottom-review panel",
+        what: "scroll bar 1 of 1 in the bottom-review panel",
         ordinal: 0,
         count: 1,
         px: 4.0,
@@ -1313,7 +1413,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "review tab",
         invariant: "scroll_bar_clearance",
         size: (1280.0, 800.0),
-        what: "scroll bar in the bottom-review panel",
+        what: "scroll bar 1 of 1 in the bottom-review panel",
         ordinal: 0,
         count: 1,
         px: 3.7,
@@ -1334,7 +1434,7 @@ pub const ALLOWED: &[Allowed] = &[
         screen: "review tab",
         invariant: "scroll_bar_clearance",
         size: (1600.0, 900.0),
-        what: "scroll bar in the bottom-review panel",
+        what: "scroll bar 1 of 1 in the bottom-review panel",
         ordinal: 0,
         count: 1,
         px: 4.0,
@@ -1416,6 +1516,9 @@ fn the_walk_finds_nothing_new_on_any_screen() {
         }
         for p in &walked.presses {
             println!("PRESS {p:?}");
+        }
+        for b in &walked.bars {
+            println!("BAR {b}");
         }
     }
     let mut bad = verdict(&walked, ALLOWED);
@@ -1956,6 +2059,7 @@ fn walked(hits: Vec<Hit>) -> Walked {
         visits: vec![],
         painted_ellipsis_texts: Default::default(),
         presses: vec![],
+        bars: vec![],
     }
 }
 
@@ -2518,13 +2622,23 @@ enum Planted {
     /// Status circles: red with no node, green with no node, a named green dot, amber over a whole named row (passes),
     /// and amber over an unnamed button with a small named label of another layer over it.
     Dots,
+    /// A thin bar over very tall content, so its handle is the shortest egui draws (12 px): a clean bar.
+    ShortHandle,
+    /// A floating (transparent) bar over very tall content, with an opaque same-layer shape outside the bar's strip
+    /// where the handle would be: the bar is invisible.
+    ShortHandleDecoy,
+    /// A thin bar in the Sets panel with a plain button named Set up now as wide as the area: no set card, so it is held
+    /// to the hovered width like any control.
+    SetUpButton,
+    /// A status circle painted in a layer egui moves by a transform: an error, never a judgement.
+    TransformedLayer,
 }
 
 struct PlantedScreen(Planted);
 
 impl PlantedScreen {
     fn ui(kind: Planted, ui: &mut eframe::egui::Ui) {
-        use eframe::egui::{pos2, Area, Button, Color32, Id, Rect, ScrollArea, Sense};
+        use eframe::egui::{pos2, Area, Button, Id, Sense};
         use sdc_gui::ui::status::{dot, Status, AMBER, GREEN, RED};
         let title = match kind {
             Planted::HiddenBar => "Hidden bar screen",
@@ -2535,6 +2649,10 @@ impl PlantedScreen {
             Planted::CleanBar => "Clean bar screen",
             Planted::PointerOverBar => "Pointer screen",
             Planted::Dots => "Status dots screen",
+            Planted::ShortHandle => "Short handle screen",
+            Planted::ShortHandleDecoy => "Short handle decoy screen",
+            Planted::SetUpButton => "Set up screen",
+            Planted::TransformedLayer => "Transformed layer screen",
         };
         ui.label(title);
         if let Planted::Dots = kind {
@@ -2563,32 +2681,74 @@ impl PlantedScreen {
                 });
             return;
         }
+        if let Planted::TransformedLayer = kind {
+            Area::new(Id::unique("moved"))
+                .fixed_pos(pos2(100.0, 100.0))
+                .show(ui.ctx(), |ui| {
+                    let (r, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+                    ui.painter().circle_filled(r.center(), 4.0, RED);
+                    ui.ctx().set_transform_layer(
+                        ui.layer_id(),
+                        eframe::egui::emath::TSTransform::from_translation(vec2(40.0, 30.0)),
+                    );
+                });
+            return;
+        }
+        // the bar lives in a named panel (a bar has no name of its own); the Set up screen in the Sets panel
+        let panel = if let Planted::SetUpButton = kind {
+            "sets"
+        } else {
+            "textures"
+        };
+        sdc_gui::ui::panel_ids::left(ui, panel)
+            .exact_size(300.0)
+            .show(ui, |ui| Self::bar(kind, ui));
+    }
+
+    fn bar(kind: Planted, ui: &mut eframe::egui::Ui) {
+        use eframe::egui::{pos2, Area, Button, Color32, Id, Rect, ScrollArea, Sense};
         if !matches!(
             kind,
             Planted::HiddenBar
                 | Planted::ClippedDecoy
                 | Planted::LayerDecoy
                 | Planted::SameLayerDecoy
+                | Planted::ShortHandleDecoy
         ) {
             ui.style_mut().spacing.scroll = sdc_gui::look::thin_scroll();
         }
+        let tall = if matches!(kind, Planted::ShortHandle | Planted::ShortHandleDecoy) {
+            6000.0
+        } else {
+            600.0
+        };
         ScrollArea::vertical()
             .id_salt("planted")
             .max_height(150.0)
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                let width = if let Planted::BarOverButton = kind {
+                let width = if matches!(kind, Planted::BarOverButton | Planted::SetUpButton) {
                     ui.available_width()
                 } else {
                     100.0
                 };
-                ui.add_sized(vec2(width, 20.0), Button::new("A control"));
-                ui.allocate_space(vec2(10.0, 600.0));
+                let text = if let Planted::SetUpButton = kind {
+                    "Set up now"
+                } else {
+                    "A control"
+                };
+                ui.add_sized(vec2(width, 20.0), Button::new(text));
+                ui.allocate_space(vec2(10.0, tall));
             });
         // an opaque rect in the bar's strip, 2 px wide, that is not the bar's
         let right = ui.max_rect().right();
         let decoy = |at: f32| Rect::from_min_size(pos2(right - at, 40.0), vec2(2.0, 100.0));
         match kind {
+            // where a short handle would be, 30 px left of the strip
+            Planted::ShortHandleDecoy => {
+                let short = Rect::from_min_size(pos2(right - 30.0, 30.0), vec2(2.0, 12.0));
+                ui.painter().rect_filled(short, 0.0, Color32::WHITE);
+            }
             Planted::ClippedDecoy => {
                 let cut = Rect::from_min_size(pos2(0.0, 0.0), vec2(5.0, 5.0));
                 ui.painter()
@@ -2622,6 +2782,10 @@ impl Entry for PlantedScreen {
             Planted::CleanBar => "test-only clean bar",
             Planted::PointerOverBar => "test-only bar with a pointer",
             Planted::Dots => "test-only status dots",
+            Planted::ShortHandle => "test-only short handle",
+            Planted::ShortHandleDecoy => "test-only transparent short handle with a decoy",
+            Planted::SetUpButton => "test-only set up button",
+            Planted::TransformedLayer => "test-only transformed layer",
         }
     }
 
@@ -2634,6 +2798,10 @@ impl Entry for PlantedScreen {
         const CLEAN: &[Needle] = &[crate::screens::has("Clean bar screen")];
         const POINTER: &[Needle] = &[crate::screens::has("Pointer screen")];
         const DOTS: &[Needle] = &[crate::screens::has("Status dots screen")];
+        const SHORT: &[Needle] = &[crate::screens::has("Short handle screen")];
+        const SHORT_DECOY: &[Needle] = &[crate::screens::has("Short handle decoy screen")];
+        const SET_UP: &[Needle] = &[crate::screens::has("Set up screen")];
+        const MOVED: &[Needle] = &[crate::screens::has("Transformed layer screen")];
         match self.0 {
             Planted::HiddenBar => HIDDEN,
             Planted::ClippedDecoy => CLIPPED,
@@ -2643,6 +2811,10 @@ impl Entry for PlantedScreen {
             Planted::CleanBar => CLEAN,
             Planted::PointerOverBar => POINTER,
             Planted::Dots => DOTS,
+            Planted::ShortHandle => SHORT,
+            Planted::ShortHandleDecoy => SHORT_DECOY,
+            Planted::SetUpButton => SET_UP,
+            Planted::TransformedLayer => MOVED,
         }
     }
 
@@ -2684,6 +2856,9 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
         Planted::BarOverButton,
         Planted::CleanBar,
         Planted::Dots,
+        Planted::ShortHandle,
+        Planted::ShortHandleDecoy,
+        Planted::SetUpButton,
     ];
     let mut list: Vec<Box<dyn Entry>> = vec![the_start_screen()];
     list.extend(kinds.map(|k| Box::new(PlantedScreen(k)) as Box<dyn Entry>));
@@ -2699,11 +2874,11 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
             want_calls.push((e.name().to_string(), (size.x, size.y)));
         }
     }
-    assert_eq!(want_calls.len(), 21);
+    assert_eq!(want_calls.len(), 30);
     assert_eq!(calls, want_calls, "the checker ran on every frame");
     assert!(walked.errors.is_empty(), "{:?}", walked.errors);
-    let owner = r#"the layer LayerId { Background Id::unique("background") }"#;
-    let what = format!("{:?}", format!("scroll bar in {owner}"));
+    let what = format!("{:?}", "scroll bar 1 of 1 in the textures panel");
+    let sets = format!("{:?}", "scroll bar 1 of 1 in the sets panel");
     let mut got: Vec<&str> = bad.iter().map(|m| head(m)).collect();
     got.sort();
     let mut want = vec![];
@@ -2712,6 +2887,7 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
             "test-only hidden bar",
             "test-only hidden bar with a clipped decoy",
             "test-only hidden bar with a decoy in another layer",
+            "test-only transparent short handle with a decoy",
         ] {
             want.push(format!(
                 r#"{screen} at {size}: scroll_bar_at_rest {what} #0 (0.0 px)"#
@@ -2719,6 +2895,9 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
         }
         want.push(format!(
             r#"test-only bar over a button at {size}: scroll_bar_clearance {what} #0 (4.0 px)"#
+        ));
+        want.push(format!(
+            r#"test-only set up button at {size}: scroll_bar_clearance {sets} #0 (4.0 px)"#
         ));
         for dot in ["amber", "green", "red"] {
             want.push(format!(
@@ -2734,10 +2913,15 @@ fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
         .iter()
         .filter(|h| h.invariant == "scroll_bar_clearance")
         .collect();
-    assert_eq!(over.len(), 3);
+    assert_eq!(over.len(), 6);
     for h in over {
         assert_eq!(h.members.len(), 1);
-        assert_eq!(h.members[0].0, "Button:A control");
+        let name = if h.screen == "test-only set up button" {
+            "Button:Set up now"
+        } else {
+            "Button:A control"
+        };
+        assert_eq!(h.members[0].0, name);
         assert!((h.members[0].1 - 4.0).abs() < 0.2, "{:?}", h.members);
     }
     // every failure names where to go: ALLOWED, and what to do instead
@@ -2828,8 +3012,8 @@ fn paint_that_cannot_be_told_from_the_bars_is_an_error() {
     for (e, size) in walked.errors.iter().zip(WIDTHS) {
         assert!(
             e.starts_with(&format!(
-                "test-only hidden bar with a decoy in its layer at {size}: the layer"
-            )) && e.contains("more than one candidate set"),
+                "test-only hidden bar with a decoy in its layer at {size}: scroll bar 1 of 1 in the textures panel"
+            )) && e.contains("paint that is not one track with at most one nested handle"),
             "{e}"
         );
     }
@@ -2916,27 +3100,173 @@ fn only_a_set_card_may_stop_at_the_track() {
         assert!(errors.is_empty(), "{errors:?}");
         hits.len()
     };
-    let mut snap = PlantedScreen(Planted::BarOverButton).at(size).unwrap();
-    assert_eq!(observe(&snap), 1, "a plain button over the bar is a hit");
-    for n in snap.nodes.iter_mut().filter(|n| n.label == "A control") {
+    // a plain button named "Set up now" in the Sets panel is held to the hovered width (the planted screen)
+    let set_up = PlantedScreen(Planted::SetUpButton).at(size).unwrap();
+    assert_eq!(observe(&set_up), 1, "a Set up now button is no set card");
+    // what a card has by `sets_column::card_node`: the Button role, "Set <id>, position <i> of <n>", a selected state and
+    // ScrollIntoView, in the Sets panel. Each one alone missing makes the node an ordinary control again.
+    let mut card = set_up.clone();
+    for n in card.nodes.iter_mut().filter(|n| n.label == "Set up now") {
         n.label = "Set stone/cobble, position 1 of 3".into();
+        n.selected = Some(false);
+        n.scroll_into_view = true;
     }
-    assert_eq!(
-        observe(&snap),
-        1,
-        "the name alone is no card: no Sets panel"
-    );
-    let button = snap.nodes.iter().find(|n| n.role == "Button").unwrap().rect;
-    snap.panels.push(("sets".into(), button.expand(20.0)));
-    assert_eq!(
-        observe(&snap),
-        0,
-        "a card inside the Sets panel stops at the track"
-    );
-    for n in snap.nodes.iter_mut().filter(|n| n.role == "Button") {
-        n.role = "Link".into();
+    assert_eq!(observe(&card), 0, "a real card stops at the track");
+    type Spoil = fn(&mut Node);
+    let broken: [(&str, Spoil); 5] = [
+        ("no selected state", |n| n.selected = None),
+        ("no ScrollIntoView", |n| n.scroll_into_view = false),
+        ("a name without the position", |n| {
+            n.label = "Set stone/cobble".into()
+        }),
+        ("a name with a prefix only", |n| {
+            n.label = "Set up, position now of later".into()
+        }),
+        ("another role", |n| n.role = "Link".into()),
+    ];
+    for (what, spoil) in broken {
+        let mut c = card.clone();
+        c.nodes
+            .iter_mut()
+            .filter(|n| n.label.starts_with("Set ") || n.role == "Button" && n.interactive)
+            .for_each(spoil);
+        assert_eq!(observe(&c), 1, "{what}");
     }
-    assert_eq!(observe(&snap), 1, "a Link with the name is no card");
+    // outside the Sets panel the card is held to the hovered width too
+    let mut away = card.clone();
+    away.panels.retain(|(name, _)| name != "sets");
+    away.panels.push((
+        "centre".into(),
+        Rect::from_min_size(eframe::egui::Pos2::ZERO, vec2(2000.0, 2000.0)),
+    ));
+    away.panels.push((
+        "sets".into(),
+        Rect::from_min_size(eframe::egui::Pos2::ZERO, vec2(1.0, 1.0)),
+    ));
+    assert_eq!(observe(&away), 1, "a card outside the Sets panel");
+}
+
+fn observe_bars(snap: &Snapshot) -> (Vec<Hit>, Vec<String>) {
+    let mut errors = vec![];
+    let hits = scroll_bars_are_visible_and_clear(
+        &Frame {
+            screen: "s",
+            size: SIZES[1],
+            snapshot: snap,
+            findings: &[],
+        },
+        &mut errors,
+    );
+    (hits, errors)
+}
+
+/// A bar is "scroll bar K of N in the P panel": two bars of one panel are told apart by their place, top to bottom,
+/// and a bar no named panel holds has no name, which is an error rather than a weaker name.
+#[test]
+fn a_bar_is_known_by_its_place_in_its_panel() {
+    let clean = PlantedScreen(Planted::CleanBar).at(SIZES[1]).unwrap();
+    let bar = clean
+        .nodes
+        .iter()
+        .find(|n| n.role == "ScrollBar")
+        .unwrap()
+        .clone();
+    let names = |s: &Snapshot| -> Vec<Result<String, String>> {
+        bar_places(s).into_iter().map(|(_, p)| p).collect()
+    };
+    assert_eq!(
+        names(&clean),
+        [Ok("scroll bar 1 of 1 in the textures panel".to_string())]
+    );
+    let mut two = clean.clone();
+    let mut lower = bar.clone();
+    lower.rect = lower.rect.translate(vec2(0.0, 200.0));
+    two.nodes.push(lower);
+    assert_eq!(
+        names(&two),
+        [
+            Ok("scroll bar 1 of 2 in the textures panel".to_string()),
+            Ok("scroll bar 2 of 2 in the textures panel".to_string())
+        ]
+    );
+    let mut nameless = clean.clone();
+    nameless.panels.clear();
+    let places = names(&nameless);
+    assert!(
+        matches!(&places[..], [Err(e)] if e.contains("PANEL_NAMES")),
+        "{places:?}"
+    );
+    let (hits, errors) = observe_bars(&nameless);
+    assert_eq!(hits.len(), 0);
+    assert!(errors[0].contains("no named panel holds"), "{errors:?}");
+}
+
+/// A handle shorter than 20 px is the bar's own paint (egui draws one as short as 12 px); a transparent bar beside an
+/// opaque shape of its layer outside its strip is invisible, whatever the shape's size and place.
+#[test]
+fn a_short_handle_is_judged_on_the_bars_own_paint() {
+    let strip_of = |s: &Snapshot| s.nodes.iter().find(|n| n.role == "ScrollBar").unwrap().rect;
+    let short = PlantedScreen(Planted::ShortHandle).at(SIZES[1]).unwrap();
+    let strip = strip_of(&short).expand(0.5);
+    assert!(
+        short
+            .filled
+            .iter()
+            .any(|x| x.alpha > 0 && x.rect.height() < 20.0 && strip.contains_rect(x.rect)),
+        "the fixture paints a visible handle under 20 px: {:?}",
+        short.filled
+    );
+    let (hits, errors) = observe_bars(&short);
+    assert!(hits.is_empty() && errors.is_empty(), "{hits:?} {errors:?}");
+    let decoy = PlantedScreen(Planted::ShortHandleDecoy)
+        .at(SIZES[1])
+        .unwrap();
+    let strip = strip_of(&decoy).expand(0.5);
+    assert!(
+        decoy
+            .filled
+            .iter()
+            .any(|x| x.alpha == 255 && x.rect.height() == 12.0 && !strip.intersects(x.rect)),
+        "the fixture paints an opaque 12 px shape outside the strip: {:?}",
+        decoy.filled
+    );
+    let (hits, errors) = observe_bars(&decoy);
+    assert!(errors.is_empty(), "{errors:?}");
+    assert_eq!(
+        hits.iter().map(|h| h.invariant).collect::<Vec<_>>(),
+        ["scroll_bar_at_rest"]
+    );
+}
+
+/// Paint in a layer egui moves by a transform is in other coordinates than the nodes: a status circle or a bar there is
+/// an error naming the screen, the width and the layer, never a judgement.
+#[test]
+fn a_transformed_layer_is_an_error() {
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(PlantedScreen(Planted::TransformedLayer))];
+    let walked = walk(&mut list, &mut real_checker);
+    assert!(walked.hits.is_empty(), "{:?}", walked.hits);
+    assert_eq!(walked.errors.len(), 3, "{:?}", walked.errors);
+    for (e, size) in walked.errors.iter().zip(WIDTHS) {
+        assert!(
+            e.starts_with(&format!(
+                "test-only transformed layer at {size}: the red status circle"
+            )) && e.contains("is in the layer LayerId")
+                && e.contains("transform"),
+            "{e}"
+        );
+    }
+    let mut moved = PlantedScreen(Planted::CleanBar).at(SIZES[1]).unwrap();
+    let layer = moved
+        .nodes
+        .iter()
+        .find(|n| n.role == "ScrollBar")
+        .and_then(|n| n.layer.clone())
+        .unwrap();
+    moved.transformed_layers.push(layer);
+    let (hits, errors) = observe_bars(&moved);
+    assert!(hits.is_empty(), "{hits:?}");
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("transform"), "{errors:?}");
 }
 
 /// A per-bar entry pins the bar and its widgets: the same widgets under another bar, another widget with the same
@@ -2956,32 +3286,32 @@ fn an_entry_for_a_bar_names_its_bar_and_its_widgets() {
         ..entry("", 0, 1, 4.0)
     };
     let list: &'static [(&'static str, f32)] = &[("Button:A", 4.0), ("Link:B", 3.5)];
-    let allow = [allowed("scroll bar in the x panel", list)];
+    let allow = [allowed("scroll bar 1 of 2 in the x panel", list)];
     let ok = |hits: Vec<Hit>| verdict(&walked(hits), &allow).is_empty();
     assert!(ok(vec![bar_hit(
-        "scroll bar in the x panel",
+        "scroll bar 1 of 2 in the x panel",
         &[("Button:A", 4.0), ("Link:B", 3.5)]
     )]));
     assert!(ok(vec![bar_hit(
-        "scroll bar in the x panel",
+        "scroll bar 1 of 2 in the x panel",
         &[("Button:A", 5.9), ("Link:B", 2.0)]
     )]));
     for (bar, members) in [
         (
-            "scroll bar in the y panel",
+            "scroll bar 2 of 2 in the x panel",
             &[("Button:A", 4.0), ("Link:B", 3.5)][..],
         ),
         (
-            "scroll bar in the x panel",
+            "scroll bar 1 of 2 in the x panel",
             &[("Button:A", 4.0), ("Link:C", 3.5)][..],
         ),
-        ("scroll bar in the x panel", &[("Button:A", 4.0)][..]),
+        ("scroll bar 1 of 2 in the x panel", &[("Button:A", 4.0)][..]),
         (
-            "scroll bar in the x panel",
+            "scroll bar 1 of 2 in the x panel",
             &[("Button:A", 4.0), ("Link:B", 3.5), ("Link:C", 1.0)][..],
         ),
         (
-            "scroll bar in the x panel",
+            "scroll bar 1 of 2 in the x panel",
             &[("Button:A", 7.0), ("Link:B", 3.5)][..],
         ),
     ] {
@@ -2998,6 +3328,7 @@ fn an_error_is_never_allowed() {
         visits: vec![],
         painted_ellipsis_texts: Default::default(),
         presses: vec![],
+        bars: vec![],
     };
     assert_eq!(verdict(&w, &[]).len(), 1);
 }
