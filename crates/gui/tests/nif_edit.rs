@@ -3977,7 +3977,9 @@ fn hand_edited_export_asks_before_overwrite() {
     assert_eq!(export(&mut m), Ok(1));
     let p = exported(&d);
     std::fs::write(&p, b"junk").unwrap();
-    assert_eq!(export(&mut m), Ok(0), "nothing pending: no row");
+    // ruling E6-S (was "nothing pending: no row", Ok(0)): Export reads the installed NIF then; it is not the recorded
+    // one (E6-N drift), so the row is pending and asks before anything is written
+    export_fails(&mut m, NIF_UNANSWERED);
     assert_eq!(std::fs::read(&p).unwrap(), b"junk");
     gloss(&mut m, 13.5);
     // Unanswered, a hand-edited file is not written; its row has the block diff.
@@ -7208,6 +7210,74 @@ fn every_route_into_a_project_runs_the_one_carry() {
                 let mut m = restart(&d, &p);
                 m.open_edit();
                 assert_eq!(vals(&m), [12.5, 13.5, 14.5], "reopening P loads X and Y");
+            },
+        ),
+    ]);
+}
+
+/// Review round 4 (Critical "Export X, undo to zero, move its record away ..." and Important "Produce drift in A, then
+/// choose an empty B ...", ruling E6-S): Export decides on the record and the installed NIF it reads then; derived
+/// export state belongs to the present folder's files only.
+#[test]
+fn export_decides_on_what_it_reads_then() {
+    table(&[
+        (
+            "export X, undo to zero, move its record away while the session stays open, then click Export",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                assert_eq!(export(&mut m), Ok(1));
+                let nif_x = std::fs::read(exported(&d)).unwrap();
+                assert!(m.undo_edit());
+                let rec = nif_doc(&export_root(&d));
+                std::fs::rename(&rec, d.path().join("moved.toml")).unwrap();
+                m.messages.clear();
+                let r = export(&mut m);
+                assert_eq!(
+                    std::fs::read(exported(&d)).unwrap(),
+                    nif_x,
+                    "the NIF is not replaced: {r:?}"
+                );
+                assert!(!rec.exists(), "no empty record is written: {r:?}");
+                assert!(
+                    !m.messages.iter().any(|l| l.starts_with("Exported ")),
+                    "{:?}",
+                    m.messages
+                );
+            },
+        ),
+        (
+            "with the record in place, replace the installed NIF and answer Overwrite with zero ops",
+            || {
+                let (d, mut m, _p) = saved_in_p();
+                assert_eq!(export(&mut m), Ok(1));
+                assert!(m.undo_edit());
+                std::fs::write(exported(&d), b"another program's NIF").unwrap();
+                answer(&mut m, GuardChoice::Overwrite);
+                let r = export(&mut m);
+                assert_eq!(
+                    std::fs::read(exported(&d)).unwrap(),
+                    b"another program's NIF",
+                    "not replaced: {r:?}"
+                );
+                let why = r.unwrap_err();
+                assert!(why.contains("holds an edit that was undone"), "blocked: {why}");
+            },
+        ),
+        (
+            "produce drift in A, then choose an empty B with no record or installed NIF",
+            || {
+                let (d, mut m, _p) = session_in_project("p", None);
+                partial_y_undone_to_x(&d, &mut m);
+                assert_eq!(m.quick_export_note(), Some(NIF_NOT_RECORDED), "premise: drift in A");
+                let b = d.path().join(r"mods\Other");
+                std::fs::create_dir_all(&b).unwrap();
+                m.set_nif_export_root(Some(b));
+                assert_eq!(m.quick_export_note(), None, "no hover from A");
+                assert!(m.undo_edit(), "to zero ops in B");
+                let why = m.quick_export_block().unwrap_or_default();
+                assert!(!why.contains("undone"), "no block from A: {why}");
+                let row = m.nif_review_rows().first().and_then(|r| r.blocked.clone());
+                assert!(!row.is_some_and(|w| w.contains("undone")), "no row block from A");
             },
         ),
     ]);

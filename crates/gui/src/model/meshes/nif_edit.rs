@@ -1056,6 +1056,8 @@ impl NifEdit {
             self.foreign_record = None;
             self.record_fp = None;
             self.record_source = None;
+            // ruling E6-S: derived export state is the present folder's alone; with no record nothing drifts
+            self.nif_drift = false;
             return;
         };
         self.record_source = Some(r.source.sha256.clone());
@@ -1066,7 +1068,7 @@ impl NifEdit {
         let ours = self.record_fp.as_ref() == Some(&(path.clone(), fp.clone()))
             || same_ops(&r.ops, &self.doc.ops);
         self.record_fp = ours.then_some((path, fp));
-        self.foreign_record = (!starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
+        self.foreign_record = (!ours && !starts(&r.ops, &self.doc.ops)).then(|| r.ops.clone());
         self.doc.export = r.export;
         self.derive_export();
     }
@@ -1110,7 +1112,8 @@ impl NifEdit {
     /// blocks with its own reason (`record_err`); `force` (Export) reads it whatever its metadata says. Nothing is
     /// cloned or read on an idle frame without a block.
     pub(super) fn recheck_record(&mut self, force: bool) {
-        if self.foreign_record.is_none() && self.record_err.is_none() {
+        // ruling E6-S: Export (`force`) decides on what it reads then, also when nothing blocked before
+        if !force && self.foreign_record.is_none() && self.record_err.is_none() {
             return;
         }
         let Some(p) = self.record_path.as_deref() else {
