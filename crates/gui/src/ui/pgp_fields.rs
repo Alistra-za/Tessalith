@@ -661,7 +661,9 @@ fn row(ui: &mut egui::Ui, k: &KeySpec, c: &Ctx, edits: &mut Vec<Edit>) {
             // An unset value shows what applies, greyed.
             ui.style_mut().visuals.override_text_color = Some(ui.visuals().weak_text_color());
         }
-        control(ui, k, own.cloned(), c, edits);
+        if let Some(field) = control(ui, k, own.cloned(), c, edits) {
+            take_focus(ui, &field, c.set, k.key);
+        }
     });
     if let Some(why) = reason {
         r.response.on_disabled_hover_text(why);
@@ -682,13 +684,14 @@ fn row(ui: &mut egui::Ui, k: &KeySpec, c: &Ctx, edits: &mut Vec<Edit>) {
     }
 }
 
+/// Returns the text field so the main set editor can handle Fix path on its own row.
 pub(crate) fn control(
     ui: &mut egui::Ui,
     k: &KeySpec,
     value: Option<Value>,
     c: &Ctx,
     edits: &mut Vec<(String, Option<Value>)>,
-) {
+) -> Option<egui::Response> {
     let key = edit_key(k.key).to_string();
     match k.kind {
         KeyKind::OnlyTrue | KeyKind::Object => {
@@ -812,7 +815,6 @@ pub(crate) fn control(
                     .desired_width(160.0),
             );
             let r = super::name_input(r, k.label);
-            take_focus(ui, &r, c.set, k.key);
             if r.changed() {
                 ui.data_mut(|d| d.insert_temp(id, text.clone()));
             }
@@ -825,6 +827,7 @@ pub(crate) fn control(
                     edits.push((key, (!t.is_empty()).then(|| json!(t))));
                 }
             }
+            return Some(r);
         }
         KeyKind::Rgb | KeyKind::Rgba => {
             // AG133: a float per channel, 0..=RGB_MAX; an old 0-255 colour reads as value/255.
@@ -864,6 +867,7 @@ pub(crate) fn control(
         }
         KeyKind::Slot => {}
     }
+    None
 }
 
 /// egui's own number parsing (whitespace ignored, U+2212 read as a minus), so the box accepts what it always did.
