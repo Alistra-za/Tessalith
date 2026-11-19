@@ -11552,23 +11552,38 @@ fn slot_list_session(
     app_data();
     let t = tempfile::tempdir().unwrap();
     let model = support::opened(&t.path().join("mod"));
-    let (d, mut h) = in_the_meshes_view_sized(model, 5, size);
+    // Built tall, so the head has room for the click on its header; the window shrinks to `size` after it.
+    let (d, mut h) = in_the_meshes_view_sized(model, 5, egui::vec2(size.x, size.y.max(900.0)));
     let (shape, _) = lit_shape(h.state().meshes.edit.as_ref().unwrap());
     h.state_mut().meshes.select_edit(Selection::Shape(shape));
+    h.run_steps(4);
+    // The pending list is opened while the head still has room (no bottom panel yet): once Review is open the head is
+    // cut to 48 px and its clipped header lies under the tab strip, where a click would hit a tab.
+    let head = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap().top;
+    let header = h.get_by_label("Pending edits (5)").rect();
+    assert!(
+        head.contains_rect(header),
+        "the pending header {header:?} is not reachable in the head {head:?}: the replay cannot open it"
+    );
+    h.get_by_label("Pending edits (5)").click();
+    h.run_steps(8);
+    assert!(
+        h.query_by_label_contains("Revert 1:").is_some(),
+        "no pending row is shown after the click on the header"
+    );
+    h.set_size(size);
     if tab == BottomTab::Review {
         h.state_mut().model.open_review();
     } else {
         h.state_mut().model.show_tab(tab);
     }
     h.run_steps(8);
-    // At 1280x720 the head is cut to 48 px, and its clipped header sits under the tab strip: a click there would hit
-    // a tab, so that replay leaves the list closed (the head is taller than its 48 px either way).
-    let pending = h.get_by_label("Pending edits (5)").rect();
-    let head = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap().top;
-    if head.contains_rect(pending) {
-        h.get_by_label("Pending edits (5)").click();
-        h.run_steps(8);
-    }
+    let header = h.get_by_label("Pending edits (5)");
+    assert_eq!(
+        header.accesskit_node().data().is_expanded(),
+        Some(true),
+        "the pending list is not expanded in the replay"
+    );
     (d, h)
 }
 
