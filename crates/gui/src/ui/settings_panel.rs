@@ -591,11 +591,8 @@ pub fn commit_slider(
         || r.clicked()
         || (r.changed() && !r.dragged() && !r.is_pointer_button_down_on());
     let mut out = None;
-    let edited = pending.is_some_and(|p| !p.committed && (mixed || p.value != current));
-    if let Some(commit) = super::drafts::finish(&r, edited, released) {
-        if !commit {
-            pending = None;
-        } else if let Some(Pending {
+    if released {
+        if let Some(Pending {
             value,
             committed: false,
         }) = pending

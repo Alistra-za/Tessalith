@@ -112,57 +112,36 @@ fn app_data() -> &'static std::path::Path {
     .path()
 }
 
-fn json_name_caret(dir: &std::path::Path, popped: bool) -> app_harness::H {
-    use egui_kittest::kittest::Queryable;
+#[test]
+fn close_with_only_a_focused_json_name_neither_prompts_nor_writes() {
+    use egui_kittest::kittest::{NodeT, Queryable};
     app_data();
-    let mut m = support::pbr_opened(dir);
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::pbr_opened(d.path());
     m.save().unwrap();
     m.open_json_editor();
-    m.json_editor_popped = popped;
-    m.banner = Some("Reload project files".into());
+    let roots = [("project", d.path().to_owned())];
+    let before = invariants::tree_of(&roots).unwrap();
     let mut h = app_harness::plain_harness_no_mo2(m);
     h.run_steps(3);
-    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "JSON file name")
-        .click();
+    let role = egui::accesskit::Role::TextInput;
+    h.get_by_role_and_label(role, "JSON file name").click();
     h.run_steps(2);
-    h
-}
-
-fn focused_json_name(dir: &std::path::Path) -> app_harness::H {
-    let mut h = json_name_caret(dir, false);
     h.event(egui::Event::Text("my-pack".into()));
     h.run_steps(2);
-    assert!(h.state().model.unsaved(), "the pending draft counts");
-    h
-}
-
-fn assert_draft_prompt(h: &mut app_harness::H, expected: sdc_gui::model::Dialog) {
+    let field = h.get_by_role_and_label(role, "JSON file name");
+    assert!(field.is_focused());
+    assert_eq!(field.accesskit_node().value().as_deref(), Some("my-pack"));
+    assert_eq!(h.state().model.sets_doc.as_ref().unwrap().json_name(), None);
+    close_event(&mut h);
     h.run_steps(3);
-    assert_eq!(h.state().model.dialog.as_ref(), Some(&expected));
     assert_eq!(
-        h.state()
-            .model
-            .sets_doc
-            .as_ref()
-            .unwrap()
-            .json_name()
-            .as_deref(),
+        h.state().model.dialog,
         None,
-        "the question leaves the name uncommitted"
+        "a field draft alone lets close proceed"
     );
-}
-
-#[test]
-fn focused_json_name_prompts_on_native_close() {
-    let d = tempfile::tempdir().unwrap();
-    let mut h = focused_json_name(d.path());
-    h.input_mut()
-        .viewports
-        .get_mut(&egui::ViewportId::ROOT)
-        .unwrap()
-        .events
-        .push(egui::ViewportEvent::Close);
-    assert_draft_prompt(&mut h, sdc_gui::model::Dialog::CloseUnsaved);
+    assert_eq!(h.state().model.sets_doc.as_ref().unwrap().json_name(), None);
+    assert_eq!(invariants::tree_of(&roots).unwrap(), before);
 }
 
 fn close_event(h: &mut app_harness::H) {
@@ -172,35 +151,6 @@ fn close_event(h: &mut app_harness::H) {
         .unwrap()
         .events
         .push(egui::ViewportEvent::Close);
-}
-
-#[test]
-fn same_frame_json_paste_and_close_save_the_docked_and_popped_name() {
-    use egui_kittest::kittest::Queryable;
-    for popped in [false, true] {
-        let d = tempfile::tempdir().unwrap();
-        let mut h = json_name_caret(d.path(), popped);
-        let path = h.state().model.sets_doc.as_ref().unwrap().path().to_owned();
-        let before = std::fs::read(&path).unwrap();
-        h.input_mut()
-            .events
-            .push(egui::Event::Paste("my-pack".into()));
-        close_event(&mut h);
-        assert_draft_prompt(&mut h, sdc_gui::model::Dialog::CloseUnsaved);
-        assert_eq!(std::fs::read(&path).unwrap(), before);
-        h.query_all_by_role_and_label(egui::accesskit::Role::Button, "Save")
-            .last()
-            .unwrap()
-            .click();
-        h.run_steps(4);
-        assert_eq!(
-            sdc_gui::sets_doc::SetsDoc::open(path.parent().unwrap())
-                .json_name()
-                .as_deref(),
-            Some("my-pack")
-        );
-        assert!(!h.state().model.unsaved());
-    }
 }
 
 #[test]
@@ -288,105 +238,6 @@ fn close_with_mesh_slot_draft(project_dirty: bool) {
         assert!(h.state().meshes.edit.as_ref().unwrap().doc.ops.is_empty());
         assert!(h.state().meshes.error.is_none());
     }
-}
-
-#[test]
-fn focused_json_name_prompts_on_folder_drop() {
-    use egui_kittest::kittest::Queryable;
-    for popped in [false, true] {
-        let d = tempfile::tempdir().unwrap();
-        let other = tempfile::tempdir().unwrap();
-        let mut h = json_name_caret(d.path(), popped);
-        h.event(egui::Event::Text("my-pack".into()));
-        h.run_steps(2);
-        let old_file = h.state().model.sets_doc.as_ref().unwrap().path().to_owned();
-        let before = std::fs::read(&old_file).unwrap();
-        #[derive(Debug)]
-        struct Folder(std::path::PathBuf);
-        impl egui::DroppedFile for Folder {
-            fn path(&self) -> &std::path::Path {
-                &self.0
-            }
-            fn bytes(&self) -> Result<Vec<u8>, String> {
-                Err("folder".into())
-            }
-        }
-        h.input_mut()
-            .dropped_files
-            .push(std::sync::Arc::new(Folder(other.path().to_owned())));
-        assert_draft_prompt(
-            &mut h,
-            sdc_gui::model::Dialog::OpenUnsaved(other.path().to_owned()),
-        );
-        h.get_by_role_and_label(egui::accesskit::Role::Button, "Don't save")
-            .click();
-        h.run_steps(4);
-        assert_eq!(h.state().model.root.as_deref(), Some(other.path()));
-        assert_eq!(std::fs::read(old_file).unwrap(), before);
-        assert!(!h.state().model.unsaved());
-    }
-}
-
-#[test]
-fn focused_json_name_prompts_on_reload() {
-    use egui_kittest::kittest::Queryable;
-    let d = tempfile::tempdir().unwrap();
-    let mut h = focused_json_name(d.path());
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "Reload")
-        .click();
-    assert_draft_prompt(&mut h, sdc_gui::model::Dialog::ReloadUnsaved);
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "Discard and reload")
-        .click();
-    h.run_steps(4);
-    assert!(!h.state().model.unsaved());
-    assert_eq!(h.state().model.sets_doc.as_ref().unwrap().json_name(), None);
-}
-
-#[test]
-fn a_typed_cache_limit_waits_for_the_reload_answer() {
-    use egui_kittest::kittest::Queryable;
-    app_data();
-    let d = tempfile::tempdir().unwrap();
-    let mut m = support::pbr_opened(d.path());
-    m.save().unwrap();
-    m.open_settings_tab();
-    m.banner = Some("Reload project files".into());
-    let file = d.path().join("settings/gui.toml");
-    m.settings_path = Some(file.clone());
-    let mut h = app_harness::plain_harness_no_mo2(m);
-    h.run_steps(3);
-    h.get_by_role_and_label(egui::accesskit::Role::SpinButton, "Analysis cache limit")
-        .focus();
-    h.run_steps(1);
-    h.key_press_modifiers(Modifiers::COMMAND, Key::A);
-    h.run_steps(1);
-    h.event(egui::Event::Text("800".into()));
-    h.run_steps(2);
-    assert!(h.state().model.unsaved());
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "Reload")
-        .click();
-    h.run_steps(3);
-    assert_eq!(
-        h.state().model.dialog,
-        Some(sdc_gui::model::Dialog::ReloadUnsaved)
-    );
-    assert_ne!(h.state().model.settings.analysis_cache_mb, Some(800));
-    assert_ne!(
-        sdc_gui::settings::GuiSettings::load(&file)
-            .0
-            .analysis_cache_mb,
-        Some(800)
-    );
-    h.get_by_role_and_label(egui::accesskit::Role::Button, "Save and reload")
-        .click();
-    h.run_steps(4);
-    assert_eq!(
-        sdc_gui::settings::GuiSettings::load(&file)
-            .0
-            .analysis_cache_mb,
-        Some(800)
-    );
-    assert!(!h.state().model.unsaved());
 }
 
 #[derive(Default)]

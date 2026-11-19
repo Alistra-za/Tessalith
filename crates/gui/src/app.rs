@@ -286,8 +286,17 @@ impl SdcApp {
     }
 
     fn draw_meshes(&mut self, ui: &mut egui::Ui) {
+        use crate::model::Dialog;
         let ctx = ui.ctx();
-        let asking = crate::ui::drafts::asking(&self.model);
+        let asking = matches!(
+            self.model.dialog,
+            Some(
+                Dialog::CloseUnsaved
+                    | Dialog::ReloadUnsaved
+                    | Dialog::OpenUnsaved(_)
+                    | Dialog::ExportRunning(_)
+            )
+        );
         let session = self.meshes.edit.as_ref().map(|e| e.session);
         if let Some((held_session, field)) = self.paused_mesh_focus {
             if session == Some(held_session) {
@@ -328,33 +337,16 @@ impl eframe::App for SdcApp {
             });
         }
         let ctx = ui.ctx().clone();
-        let close = ctx.input(|i| i.viewport().close_requested());
-        use crate::ui::drafts::{self, Mode};
-        let answer = self.model.draft_answer.take();
-        let replacing = close
-            || self.model.picker.opening_folder()
-            || drafts::asking(&self.model)
-            || ctx.input(|i| !i.raw.dropped_files.is_empty());
-        drafts::begin(
-            &ctx,
-            match &answer {
-                Some((true, _)) => Mode::Save,
-                Some((false, _)) => Mode::Discard,
-                None if replacing => Mode::Hold,
-                None => Mode::Editing,
-            },
-        );
-        self.model.drawing_editors = true;
         self.model.poll();
-        if self.model.after_draft.is_some() {
-            drafts::hold(&ctx);
-        }
         let now = std::time::Instant::now();
         self.model.tick(now);
         if let Some(left) = self.model.undo_note_left(now) {
             ctx.request_repaint_after(left);
         }
 
+        if ctx.input(|i| i.viewport().close_requested()) && !self.model.request_close() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         // The export that was in the way of a close has ended; close again (unsaved edits still ask).
         if self.model.take_close_ready() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -477,23 +469,6 @@ impl eframe::App for SdcApp {
         } else {
             self.paused_mesh_focus = None;
             crate::ui::draw_with_scan(ui, &mut self.model, &mut self.state, Some(&mut self.meshes));
-        }
-        self.model.drawing_editors = false;
-        let pending = drafts::pending(&ctx);
-        if self.model.pending_draft != pending {
-            self.model.pending_draft = pending;
-            ctx.request_repaint();
-        }
-        if let Some((_, then)) = answer {
-            then(&mut self.model);
-        }
-        if let Some(request) = self.model.after_draft.take() {
-            request(&mut self.model);
-            ctx.request_repaint();
-        }
-        if close && !self.model.request_close() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            ctx.request_repaint();
         }
         // A "Open in Textures" click of this frame.
         self.route_3d(&ctx);

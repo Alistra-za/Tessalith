@@ -105,14 +105,13 @@ pub const NAME_LABEL: &str = "JSON name:";
 /// empty restores it. One undo step per committed edit (`AppModel::set_json_name`), on focus loss.
 fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
     let id = egui::Id::unique("json-name");
-    let current = model
-        .sets_doc
-        .as_ref()
-        .and_then(|d| d.json_name())
-        .unwrap_or_default();
-    let mut t = ui
-        .data(|d| d.get_temp::<String>(id))
-        .unwrap_or_else(|| current.clone());
+    let mut t = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| {
+        model
+            .sets_doc
+            .as_ref()
+            .and_then(|d| d.json_name())
+            .unwrap_or_default()
+    });
     let off = model.sets_read_only_reason();
     let editable = off.is_none();
     let why = off.unwrap_or_default();
@@ -145,10 +144,10 @@ fn name_field(ui: &mut egui::Ui, model: &mut AppModel) {
         if r.changed() {
             ui.data_mut(|d| d.insert_temp(id, t.clone()));
         }
-        if let Some(commit) = super::drafts::text(&r, t != current) {
+        if r.lost_focus() {
             ui.data_mut(|d| d.remove::<String>(id));
             // Esc cancels (AG10/AG11, trace-debug #57): egui drops the focus on it.
-            if commit && t != current {
+            if !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
                 model.set_json_name(&t);
             }
         }
@@ -377,10 +376,10 @@ fn text_box(
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, t.clone()));
     }
-    if let Some(commit) = super::drafts::text(&r, t.trim() != current.trim()) {
+    if r.lost_focus() {
         ui.data_mut(|d| d.remove::<String>(id));
         // Esc cancels (AG10/AG11, trace-debug #57).
-        if commit && t.trim() != current.trim() {
+        if t.trim() != current.trim() && !ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             return Some(t.trim().to_string());
         }
     }

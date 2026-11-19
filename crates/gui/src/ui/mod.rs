@@ -10,7 +10,6 @@ pub mod columns;
 pub mod cs_pbr;
 pub mod cube_section;
 pub mod dialogs;
-pub(crate) mod drafts;
 pub mod drawer;
 pub mod group;
 pub mod header;

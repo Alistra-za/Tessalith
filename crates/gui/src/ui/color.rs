@@ -60,14 +60,14 @@ pub fn color_field(ui: &mut egui::Ui, id: egui::Id, name: &str, rgb: [u8; 3]) ->
             egui::StrokeKind::Outside,
         );
     }
-    let edited = parse_hex(&text) != Some(rgb);
-    if r.has_focus() || r.changed() || edited {
+    if r.has_focus() || r.changed() {
         ui.data_mut(|d| d.insert_temp(buf, (text.clone(), frame)));
     }
-    if let Some(commit) = super::drafts::text(&r, edited) {
+    if r.lost_focus() {
         ui.data_mut(|d| d.remove::<(String, u64)>(buf));
         // Esc cancels the edit (AG10): revert, commit nothing.
-        if let Some(v) = parse_hex(&text).filter(|v| *v != rgb && commit) {
+        let cancelled = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        if let Some(v) = parse_hex(&text).filter(|v| *v != rgb && !cancelled) {
             out.get_or_insert(v);
         }
     }

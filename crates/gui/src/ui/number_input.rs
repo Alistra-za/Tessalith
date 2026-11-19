@@ -5,7 +5,7 @@ use eframe::egui;
 
 /// A number box named `name`; true once its value is settled and differs from what came in: a drag ended, or typed
 /// text was accepted by leaving the box (Enter, Tab or a click away; Esc keeps the old value). Typing "200" is one
-/// edit, not three (Note FN2): the parsed number stays in the draft until it settles.
+/// edit, not three (Note FN2): the text is applied only when the box loses focus (`update_while_editing(false)`).
 /// The in-progress value of a drag, or of arrow keys on the focused box, is held in egui memory, so a caller that
 /// rebuilds `value` from the model each frame still gets the final value on release or when the box is left. While
 /// `busy` (a re-plan is out) a settled value stays on show until the model hands it back (Backlog R2); `scope` (the
@@ -24,7 +24,12 @@ pub(super) fn settled_drag<T: egui::emath::Numeric>(
     let came_in = *value;
     let mut shown = came_in;
     let (out, _) = held(ui, id, came_in, busy, true, |ui, v| {
-        let r = ui.add(egui::DragValue::new(v).speed(speed).range(range));
+        let r = ui.add(
+            egui::DragValue::new(v)
+                .speed(speed)
+                .range(range)
+                .update_while_editing(false),
+        );
         let x = v.to_f64();
         r.widget_info(|| {
             let mut i = egui::WidgetInfo::drag_value(r.enabled(), x);
@@ -69,11 +74,8 @@ pub(super) fn held<T: egui::emath::Numeric>(
         || r.lost_focus()
         || (r.changed() && !r.dragged() && !(on_blur && r.has_focus()));
     let mut out = None;
-    let edited = pending.is_some_and(|(pv, sent)| !sent && pv != cur);
-    if let Some(commit) = super::drafts::finish(&r, edited, settled) {
-        if !commit {
-            pending = None;
-        } else if let Some((pv, false)) = pending.filter(|(pv, _)| *pv != cur) {
+    if let Some((pv, false)) = pending {
+        if settled && pv != cur {
             out = Some(T::from_f64(pv));
             pending = Some((pv, true));
         }
@@ -94,10 +96,9 @@ pub(super) fn held_value(
     ui: &mut egui::Ui,
     id: impl std::hash::Hash + std::fmt::Debug,
     current: f64,
-    on_blur: bool,
     add: impl FnOnce(&mut egui::Ui, &mut f64) -> egui::Response,
 ) -> (egui::Response, Option<f64>) {
-    let (out, r) = held(ui, egui::Id::unique(id), current, false, on_blur, add);
+    let (out, r) = held(ui, egui::Id::unique(id), current, false, false, add);
     (r, out)
 }
 
@@ -199,8 +200,8 @@ mod tests {
     }
 
     fn held_box(ui: &mut egui::Ui, s: &mut St) {
-        let (_, done) = held_value(ui, "t", s.cur, true, |ui, x| {
-            let r = ui.add(egui::DragValue::new(x));
+        let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
+            let r = ui.add(egui::DragValue::new(x).update_while_editing(false));
             crate::ui::name_input(r, "fill")
         });
         s.take(done);
@@ -220,7 +221,7 @@ mod tests {
     }
 
     fn slider_box(ui: &mut egui::Ui, s: &mut St) {
-        let (_, done) = held_value(ui, "t", s.cur, false, |ui, x| {
+        let (_, done) = held_value(ui, "t", s.cur, |ui, x| {
             let r = ui.add(egui::Slider::new(x, 0.0..=100.0).show_value(false));
             crate::ui::name_input(r, "fill")
         });

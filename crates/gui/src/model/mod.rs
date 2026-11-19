@@ -709,11 +709,6 @@ pub struct AppModel {
     /// Note FC8: clicks and keys that waited one frame for a focused text field to commit (`ui::after_commit`); run
     /// first thing next frame, by `ui::actions::keys`.
     pub after_commit: Vec<AfterCommit>,
-    /// Replacement decisions wait until every viewport has reported this frame's drafts.
-    pub(crate) drawing_editors: bool,
-    pub(crate) pending_draft: bool,
-    pub(crate) draft_answer: Option<(bool, AfterCommit)>,
-    pub(crate) after_draft: Option<AfterCommit>,
     /// Note FC8 (CP10): a BC7 weighting pick whose own value may have hidden an inherited one: (item key, pick, the
     /// pick's history merge key). The settled plan checks it and completes the pick in the same step.
     weighting_follow: Vec<(String, String, String)>,
@@ -1085,10 +1080,6 @@ impl AppModel {
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
-            drawing_editors: false,
-            pending_draft: false,
-            draft_answer: None,
-            after_draft: None,
             weighting_follow: Vec::new(),
             reencode_follow: None,
             report_saving: false,
@@ -4460,8 +4451,7 @@ impl AppModel {
 
     /// The user's changes since the last save, including a tentative edit the retry plan still holds.
     pub fn unsaved(&self) -> bool {
-        self.pending_draft
-            || self.project_user_dirty()
+        self.project_user_dirty()
             || self
                 .sets_doc
                 .as_ref()
@@ -4684,10 +4674,6 @@ impl AppModel {
     /// Reload both documents from disk (the banner's Reload), then plan once.
     /// The banner's Reload: at once when nothing is unsaved, else ask first (`Dialog::ReloadUnsaved`).
     pub fn request_reload(&mut self) {
-        if self.drawing_editors {
-            self.after_draft = Some(Box::new(Self::request_reload));
-            return;
-        }
         if self.unsaved() {
             self.dialog = Some(Dialog::ReloadUnsaved);
         } else {
@@ -4821,12 +4807,6 @@ impl AppModel {
 
     /// Open `root`, or ask first when unsaved edits would be lost. True when the folder was opened.
     pub fn request_open(&mut self, root: PathBuf) -> bool {
-        if self.drawing_editors {
-            self.after_draft = Some(Box::new(move |m| {
-                m.request_open(root);
-            }));
-            return false;
-        }
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
             false

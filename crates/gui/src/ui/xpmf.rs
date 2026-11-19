@@ -336,13 +336,14 @@ fn text_value(
     if r.changed() {
         ui.data_mut(|d| d.insert_temp(id, text.clone()));
     }
-    if let Some(commit) =
-        super::drafts::text(&r, text != cur.and_then(Value::as_str).unwrap_or_default())
-    {
+    if r.lost_focus() {
         // Review I1: only text changed during this focus is an edit; tabbing through an unset row writes nothing.
         let edited = ui.data_mut(|d| d.remove_temp::<String>(id)).is_some();
         let t = text.trim();
-        if edited && commit && cur.and_then(Value::as_str) != Some(t) {
+        if edited
+            && !ui.input(|i| i.key_pressed(egui::Key::Escape))
+            && cur.and_then(Value::as_str) != Some(t)
+        {
             let game = f.kind == FieldKind::Texture && dflt.is_some();
             let new = match t {
                 "" if game => Some(json!("")),
