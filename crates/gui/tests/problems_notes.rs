@@ -5297,6 +5297,54 @@ fn a_keyed_selection_follows_the_set_once_it_loses_its_key() {
     assert_eq!(m.selection, id_selection("landscape/solo"));
 }
 
+fn two_selected_created_sets(dir: &std::path::Path) -> AppModel {
+    let mut m = pbr_opened(dir);
+    for (id, file) in [
+        ("landscape/first", "landscape/one.png"),
+        ("landscape/active", "landscape/two.png"),
+    ] {
+        m.edit_docs("t", None, true, |_, s| s.create_set(id));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        give_a_file(&mut m, id, file);
+    }
+    let first = view_by_id(&m, "landscape/first");
+    let active = view_by_id(&m, "landscape/active");
+    m.click_set(&first.key, false, false);
+    m.click_set(&active.key, true, false);
+    assert_eq!(m.selected_sets(), [first.key, active.key.clone()]);
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(active.key));
+    m
+}
+
+#[test]
+fn reload_keeps_the_active_set_when_both_selected_keys_disappear() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_selected_created_sets(d.path());
+    let root = m.root.as_ref().unwrap();
+    for file in ["landscape/one.png", "landscape/two.png"] {
+        std::fs::remove_file(root.join(file)).unwrap();
+    }
+    m.reload_changed();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "landscape/first").key.is_empty());
+    assert!(view_by_id(&m, "landscape/active").key.is_empty());
+    assert_eq!(m.selection, id_selection("landscape/active"));
+    assert!(m.multi.keys.is_empty());
+}
+
+#[test]
+fn reload_keeps_the_surviving_key_when_the_active_set_loses_its_key() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = two_selected_created_sets(d.path());
+    let first = view_by_id(&m, "landscape/first").key;
+    std::fs::remove_file(m.root.as_ref().unwrap().join("landscape/two.png")).unwrap();
+    m.reload_changed();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert!(view_by_id(&m, "landscape/active").key.is_empty());
+    assert_eq!(m.selection, sdc_gui::model::Selection::Set(first));
+    assert!(m.multi.keys.is_empty());
+}
+
 #[test]
 fn a_selected_set_that_gains_its_key_brings_the_selection_tab_back() {
     use sdc_gui::model::CentreTab;

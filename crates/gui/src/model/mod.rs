@@ -2936,7 +2936,13 @@ impl AppModel {
             *shown = true;
         }
         self.counts_status();
+        // If every selected key is pruned, the active set may still have a document card.
+        let active_set =
+            (self.multi.sets && !self.multi.keys.is_empty()).then(|| self.selection.clone());
         self.prune_selection();
+        if let (Selection::None, Some(active)) = (&self.selection, active_set) {
+            self.selection = active;
+        }
         // Keep the selection when its item or set still exists; else nothing.
         match &self.selection {
             Selection::Item(k) if self.item(k).is_none() => self.selection = Selection::None,
