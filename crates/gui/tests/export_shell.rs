@@ -1082,6 +1082,47 @@ fn the_click_reads_the_export_blockers_fresh() {
     assert!(m.review.is_some(), "the overlap blocker opens Review");
 }
 
+/// Round 4, ruling 3c-34 (re-review B1): a fresh blocker read drops what was derived from the old one. The export
+/// folder junction overlaps the target mod while Problems is built (its overlap blocker is a counted row); then the
+/// junction is retargeted to a safe folder with no key moving. The click reads the blockers fresh, and must not answer
+/// "Problems" from the old list: it writes.
+#[test]
+fn the_click_does_not_read_problems_built_from_old_blockers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = support::opened_chosen_decided(d.path());
+    m.set_export_without_review(true);
+    let (out, target) = (d.path().join("out"), d.path().join("target mod"));
+    let inside = target.join("textures out");
+    std::fs::create_dir_all(&out).unwrap();
+    std::fs::create_dir_all(&inside).unwrap();
+    let link = d.path().join("export link");
+    dir_link(&link, &out);
+    support::choose_export(&mut m, link.clone());
+    m.set_target_mod(Some(target.clone())).unwrap();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    // The junction moves into the target mod; a key moving afterwards (any edit would) builds blockers and Problems
+    // from it.
+    std::fs::remove_dir(&link).unwrap();
+    dir_link(&link, &inside);
+    m.invalidate_views();
+    assert!(
+        m.has_problem_rows(),
+        "guard: the overlap is a counted Problems row"
+    );
+    assert!(m.header_export_text().starts_with("Review "), "guard");
+    // Back to a safe folder, no key moving.
+    std::fs::remove_dir(&link).unwrap();
+    dir_link(&link, &out);
+    m.header_export_clicked();
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    assert!(
+        m.review.is_none() && out.join("textures/g/a.dds").is_file(),
+        "the click answered from Problems built on the old blocker list: {:?}",
+        m.review_gate()
+    );
+    assert!(!inside.join("textures/g/a.dds").exists());
+}
+
 /// Round 3, ruling 3c-28 (re-review B5): the header computes its answer once per frame, also on the clean, settled,
 /// write-now frame under a scope where it used to evaluate the rule three times (label, accent count, label count).
 #[test]

@@ -354,10 +354,14 @@ pub fn export_blocks(m: &AppModel) -> Arc<Vec<ExportIssue>> {
     )
 }
 
-/// E3 (ruling 3c-27): forget the cached `export_blocks` list, so the next read builds it from the disk as it is now. A
-/// write decision calls it; nothing per frame does.
+/// E3 (rulings 3c-27, 3c-34): forget the cached `export_blocks` list, so the next read builds it from the disk as it
+/// is now, and what was derived from it: the Problems list copies its rows (`bottom::problems`), and the flagged keys
+/// read that list. A write decision calls it; nothing per frame does.
 pub(super) fn drop_blocks(m: &AppModel) {
-    m.views.borrow_mut().blocks = None;
+    let mut c = m.views.borrow_mut();
+    c.blocks = None;
+    c.problems = None;
+    c.flagged = None;
 }
 
 fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
