@@ -1615,7 +1615,7 @@ fn set_match(v: &mut SetView, diffuse: Option<&str>) {
 }
 
 /// PBR, derived match, prefix.
-fn finish_view(m: &AppModel, v: &mut SetView) {
+pub(super) fn finish_view(m: &AppModel, v: &mut SetView) {
     let diffuse = match v.slots.get(&SlotKind::Diffuse) {
         Some(SlotFill::Own { item: k } | SlotFill::Borrowed { item: k, .. }) => m.item(k),
         _ => None,

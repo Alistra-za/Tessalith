@@ -1431,6 +1431,111 @@ fn a_set_the_statics_rule_drops_takes_no_link_and_no_clear() {
     );
 }
 
+const REC_LEAF: &str = "textures/n/leaf";
+
+/// Ruling 3b-F9: a PBR-picked no-albedo set `textures/n/leaf` (`_n` only) whose TXST record names the height
+/// `textures/h/hgt_p.dds`, which the set `textures/h/hgt` writes, so the record borrows it into slot 4.
+fn record_height_project(dir: &std::path::Path) -> AppModel {
+    for f in ["textures/n/leaf_n.png", "textures/h/hgt_p.png"] {
+        let p = dir.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        image::ImageBuffer::from_fn(64, 64, |_, _| image::Rgb([128u8, 128, 255]))
+            .save(&p)
+            .unwrap();
+    }
+    std::fs::write(
+        dir.join("sdc-project.toml"),
+        format!(
+            "[[sets]]\nid = \"{REC_LEAF}\"\nshader = \"pbr\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\n\
+             edid = \"L\"\nslot4 = \"textures/h/hgt_p.dds\"\n"
+        ),
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(dir.to_path_buf(), dir.join("export"));
+    m.decide("textures/h/hgt_p.png", Answer::Subtype(Subtype::Height));
+    m.decide("textures/n/leaf_n.png", Answer::Subtype(Subtype::PbrNormal));
+    m.decide(
+        "textures/n/leaf_n.png",
+        Answer::Green(GreenConvention::Directx),
+    );
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    m
+}
+
+/// Ruling 3b-F9: on a set that writes no entry (statics Never) a stored `slot4` link or clear changes nothing, the
+/// record's borrowed height included: the view keeps the borrow and the candidate entry its Parallax default. Once the
+/// same set writes an entry, the command is what the JSON carries.
+#[test]
+fn a_stored_slot_command_leaves_a_record_fill_alone_on_a_set_that_writes_no_entry() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    let typed = r"textures\other\x_p.dds";
+    // Stored as the JSON editor stores them: the menu's Clear on a record fill turns the fill off instead (Note HG).
+    for cmd in ["", typed] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = record_height_project(d.path());
+        m.add_cs_block(REC_LEAF, Kind::Txst);
+        m.set_cs_statics(REC_LEAF, Statics::Never);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let at = |m: &AppModel| set_views(m).into_iter().find(|v| v.id == REC_LEAF).unwrap();
+        let v = at(&m);
+        assert!(!m.pgp_entry_wanted(&v), "premise: no entry");
+        assert!(
+            matches!(v.slots.get(&SlotKind::Height), Some(SlotFill::Borrowed { from, .. }) if from == "textures/h/hgt"),
+            "premise: the record borrows the height: {:?}",
+            v.slots
+        );
+        let parallax = entry(&m, REC_LEAF).get("parallax").cloned();
+        assert_eq!(parallax, Some(json!(true)), "premise: the default");
+        m.set_json_value(REC_LEAF, "slot4", Some(json!(cmd)));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let after = at(&m);
+        assert_eq!(after.slots, v.slots, "{cmd:?}: the slots");
+        assert_eq!(after.filled, v.filled, "{cmd:?}: the record fills");
+        assert_eq!(
+            entry(&m, REC_LEAF).get("parallax").cloned(),
+            parallax,
+            "{cmd:?}: the feature default"
+        );
+        // The same set writing an entry: the command is the JSON's slot 4.
+        m.set_cs_statics(REC_LEAF, Statics::Always);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert!(m.pgp_entry_wanted(&at(&m)), "premise: an entry");
+        assert_eq!(entry(&m, REC_LEAF)["slot4"], json!(cmd), "{cmd:?}");
+    }
+}
+
+/// Ruling 3b-F9: the 3D preview simulates a set whose statics drop its entry from its candidate entry, which a stored
+/// link or clear does not change (the editor shows the set's own files); once the set writes an entry, it does.
+#[test]
+fn the_preview_of_a_set_that_writes_no_entry_simulates_no_stored_slot_command() {
+    use sdc_gui::model::cs_pbr::{Kind, Statics};
+    use sdc_gui::model::set_preview::fingerprint;
+    for cmd in ["", r"textures\other\x_n.dds"] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = no_albedo_pair(d.path());
+        m.add_cs_block(LEAF, Kind::Txst);
+        m.set_cs_statics(LEAF, Statics::Never);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let key = leaf(&m).key;
+        let simulated = |m: &AppModel| {
+            fingerprint(m, &key)
+                .and_then(|f| f.entry)
+                .expect("the preview simulates the candidate entry")
+        };
+        let before = simulated(&m);
+        m.set_json_value(LEAF, "slot2", Some(json!(cmd)));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(simulated(&m), before, "{cmd:?}");
+        m.set_cs_statics(LEAF, Statics::Always);
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        assert_eq!(
+            simulated(&m).slots.get(&2).map(String::as_str),
+            Some(cmd),
+            "{cmd:?}: an entry the set writes carries the command"
+        );
+    }
+}
+
 /// R4: on a target with no PGPatcher JSON a stored `slotN = ""` leaves the own file as it is: no dim chip, no "Left
 /// out of the JSON" sentence.
 #[test]

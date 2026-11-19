@@ -3,9 +3,9 @@ use super::bottom::Fix;
 use super::export::{Row, RowState};
 use super::history::{recorded, sha256_of};
 use super::sets::{
-    engine_inputs, feature_slots, item_output_key, item_output_key_in, json_files, json_keeps_fill,
-    output_candidates, packed_owners, set_views, slot_string, JsonFile, SetView, SlotFill,
-    SlotKind,
+    engine_inputs, feature_slots, has_slot_clear, has_slot_link, item_output_key,
+    item_output_key_in, json_files, json_keeps_fill, output_candidates, packed_owners, set_views,
+    slot_string, JsonFile, SetView, SlotFill, SlotKind,
 };
 use super::txst_map::record_entries;
 use super::AppModel;
@@ -254,7 +254,9 @@ pub(crate) fn writes_entry(m: &AppModel, v: &SetView) -> bool {
     exports_json(m, v) && m.pgp_entry_wanted(v)
 }
 
-/// Every PBR set's JSON entry, in display order (CS only; empty otherwise).
+/// Every PBR set's JSON entry, in display order (CS only; empty otherwise). A candidate: it keeps the sets whose
+/// entry the statics rule drops, which the 3D preview simulates (`written_json_entries` is what the file holds).
+/// Ruling 3b-F9: such a set's stored `slotN` commands change nothing, so its candidate leaves them out.
 pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
     if m.target != Target::Cs {
         return vec![];
@@ -265,7 +267,18 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
         .iter()
         // An entry with no match could never apply, and the schema refuses one (F1 spec §3.2, DECISIONS V4).
         .filter(|v| exports_json(m, v))
-        .map(|v| {
+        .map(|full| {
+            let bare;
+            let commands = has_slot_link(&full.settings) || has_slot_clear(&full.settings);
+            let v = if commands && !writes_entry(m, full) {
+                bare = SetView {
+                    settings: without_slot_commands(&full.settings),
+                    ..full.clone()
+                };
+                &bare
+            } else {
+                full
+            };
             let slots = slots_of(v, &views, &paths, m);
             let mut settings = crate::model::auto_flags::resolved_for(
                 v.json,
@@ -280,9 +293,16 @@ pub fn json_entries(m: &AppModel) -> Vec<(SetView, EntryInput)> {
                 derived_match: v.derived_match.clone().unwrap_or_default(),
                 section: false,
             };
-            (v.clone(), e)
+            (full.clone(), e)
         })
         .collect()
+}
+
+/// `s` less its string `slot1`-`slot8` (links and clears).
+fn without_slot_commands(s: &Settings) -> Settings {
+    let mut s = s.clone();
+    s.retain(|k, v| !(v.is_string() && (1..=8u8).any(|n| *k == format!("slot{n}"))));
+    s
 }
 
 /// `json_entries` less the sets whose entry the statics rule drops (design §5.1): what the written file holds.

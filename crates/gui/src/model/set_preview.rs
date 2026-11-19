@@ -1075,6 +1075,8 @@ pub struct SetFingerprint {
 
 /// `None` when the set is gone.
 pub fn fingerprint(m: &AppModel, set_key: &str) -> Option<SetFingerprint> {
+    // The candidate entries, not `written_json_entries`: a set whose statics drop its entry is still previewed on the
+    // plane. Its candidate carries no stored `slotN` command, as its written result would not (ruling 3b-F9).
     let (v, entry) = match json_entries(m).into_iter().find(|(v, _)| v.key == set_key) {
         Some((v, e)) => (v, Some(e)),
         None => (set_views(m).into_iter().find(|v| v.key == set_key)?, None),

@@ -1400,12 +1400,11 @@ fn build_problems(m: &AppModel) -> Vec<Problem> {
         let at = || set_at(&v.key, &v.id);
         // `v.json` ignores the target (a PBR pick with a filled slot); `pgp_written` is the export's own test.
         if m.pgp_written(v) {
-            // A typed match that matches nothing drops the set's entry (`json_entries`), so the mesh keeps nothing.
-            let has_entry = !crate::pgp::prefix::matches_nothing(
-                &v.settings,
-                v.derived_match.as_deref().unwrap_or(""),
-            );
-            if let Some(path) = pbr_export::no_albedo_slot1(v).filter(|_| has_entry) {
+            // Ruling 3b-F9: the row promises what the written entry does, so it reads `writes_entry` (a typed match
+            // that matches nothing writes no entry, and the mesh keeps nothing).
+            if let Some(path) =
+                pbr_export::no_albedo_slot1(v).filter(|_| pbr_export::writes_entry(m, v))
+            {
                 out.push(row(
                     Level::Info,
                     at(),
