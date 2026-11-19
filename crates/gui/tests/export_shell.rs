@@ -2262,10 +2262,12 @@ struct Seen {
 }
 
 /// The acceptance helper: open Review if it is not open, take its list, press its Export and compare the files that
-/// changed under `dir` (the union of both snapshots, so a removed or renamed file is a change) with the
+/// changed under `dir` (the union of both snapshots, so a removed or renamed file is a change, ruling 3c-48) with the
 /// list, under the listing rules and nothing else:
 /// 1. a changed path under a listed Also folder counts as listed;
-/// 2. the manifest is a listed path whenever the export runs, changed or not.
+/// 2. the manifest is a listed path whenever the export runs, changed or not;
+/// 3. (ruling 3c-48) a `.recovery` sibling of a listed document, the old case spelling of a listed JSON and a NIF record
+///    moved aside beside a listed record count under that entry.
 ///
 /// Every changed file must be listed (ruling 3c-47). A listed file may stay unchanged only where its bytes cannot be
 /// known before the run: the manifest; a vanilla copy (its source is a DDS this run writes) and the two record files
@@ -2306,7 +2308,7 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
                 .iter()
                 .find(|f| p.starts_with(f))
                 .cloned()
-                .unwrap_or_else(|| p.clone())
+                .unwrap_or_else(|| credited(p, &w).unwrap_or_else(|| p.clone()))
         })
         .collect();
     let unlisted: Vec<&PathBuf> = seen.difference(&listed).collect();
@@ -2330,6 +2332,43 @@ fn export_and_compare(m: &mut AppModel, dir: &std::path::Path) -> Seen {
         changed: seen,
         w,
     }
+}
+
+/// Rule 3 (ruling 3c-48): the listed entry a removed or moved file counts under, if any.
+fn credited(
+    p: &std::path::Path,
+    w: &sdc_gui::model::review::ReviewWrites,
+) -> Option<std::path::PathBuf> {
+    use sdc_gui::model::review::HOVER_NIF_RECORD;
+    let name = p.file_name()?.to_string_lossy().into_owned();
+    let all = || {
+        w.outputs
+            .iter()
+            .chain(w.also_updated.iter().map(|e| &e.path))
+    };
+    // (a) `<document>.recovery`, removed when the listed document is saved.
+    if let Some(doc) = name.strip_suffix(".recovery") {
+        let doc = p.with_file_name(doc);
+        if all().any(|l| *l == doc) {
+            return Some(doc);
+        }
+    }
+    // (b) the old case spelling of a listed JSON, removed when it is written under its new one.
+    let lower = p.to_string_lossy().to_lowercase();
+    if let Some(l) = all().find(|l| **l != *p && l.to_string_lossy().to_lowercase() == lower) {
+        return Some(l.clone());
+    }
+    // (c) a NIF edit record moved aside to `<stem>.<seconds>.toml` beside a listed record.
+    w.also_updated
+        .iter()
+        .filter(|e| e.hover == HOVER_NIF_RECORD && e.path.parent() == p.parent())
+        .find(|e| {
+            let stem = e.path.file_stem().unwrap_or_default().to_string_lossy();
+            name.strip_prefix(&format!("{stem}."))
+                .and_then(|r| r.strip_suffix(".toml"))
+                .is_some_and(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+        })
+        .map(|e| e.path.clone())
 }
 
 /// The first export of the acceptance test, checked under the listing rules (controller ruling).
@@ -2587,6 +2626,117 @@ fn a_foreign_nif_answered_keep_is_not_listed() {
         .changed
         .iter()
         .any(|p| p.to_string_lossy().contains("x.nif")));
+}
+
+// ---- Task 4 fix round 1 (ruling 3c-48): what a listed write replaces or moves counts under it ----
+
+/// (a) Saving a listed document removes its crash `.recovery` sibling; the removal counts under the document.
+#[test]
+fn a_recovery_file_removed_by_a_listed_save_counts_under_the_document() {
+    use engine::config::AlphaPolicy;
+    use sdc_gui::model::review::HOVER_SDC_TOML;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    m.decide(
+        "landscape/leaf.png",
+        sdc_gui::model::Answer::Alpha(AlphaPolicy::Blend),
+    );
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    let toml = m.project.as_ref().unwrap().path().to_path_buf();
+    let recovery = sdc_gui::crash_log::recovery_path(&toml);
+    std::fs::write(&recovery, "# edits from a crash\n").unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert_eq!(listed_with(&s, HOVER_SDC_TOML), [toml]);
+    assert!(!recovery.exists(), "the save removed it");
+    assert!(!s.listed.contains(&recovery), "not an entry of its own");
+}
+
+/// The complex-material fixture of `cm_json.rs`: `iron` (diffuse + `_m`) under `<dir>/src/m`, its JSON export on,
+/// exported once. Returns the model and the JSON's path.
+fn cm_exported_once(dir: &std::path::Path) -> (AppModel, std::path::PathBuf) {
+    use image::{ImageBuffer, Rgb, Rgba};
+    let r = dir.join("src/m");
+    std::fs::create_dir_all(&r).unwrap();
+    let rgb = |x: u32, y: u32| [(x * 4) as u8, (y * 4) as u8, 90u8];
+    ImageBuffer::from_fn(64, 64, |x, y| Rgb(rgb(x, y)))
+        .save(r.join("iron.png"))
+        .unwrap();
+    ImageBuffer::from_fn(64, 64, |x, y| {
+        let [a, b, c] = rgb(x, y);
+        Rgba([a, b, c, (40 + x * 2) as u8])
+    })
+    .save(r.join("iron_m.png"))
+    .unwrap();
+    let settings = sdc_gui::settings::GuiSettings {
+        export_folder: Some(dir.join("export")),
+        ..Default::default()
+    };
+    let mut m = AppModel::new(settings, None, support::session());
+    m.accept = engine::policy::AcceptSuggestions::High;
+    m.open_folder(dir.join("src"));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    support::choose_export(&mut m, dir.join("export"));
+    let iron = sdc_gui::model::sets::set_views(&m)
+        .into_iter()
+        .find(|v| v.key.ends_with("m/iron"))
+        .expect("the iron set")
+        .id;
+    m.set_cm_export(&iron, true);
+    m.set_cm_value(&iron, "glossiness", Some(serde_json::json!(80)));
+    assert!(m.wait_idle(Duration::from_secs(60)));
+    export_and_compare(&mut m, dir);
+    let json = m.export_root().join("m").join("iron_m.json");
+    assert!(json.is_file(), "{:?}", m.export.notes);
+    (m, json)
+}
+
+/// (b) A JSON of ours renamed on disk to another case: the next export writes it under the name it has now and removes
+/// the old spelling. The JSON is listed (its name on disk changes); the old spelling counts under it.
+#[test]
+fn a_case_only_rename_lists_the_json_and_counts_the_old_spelling_under_it() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, json) = cm_exported_once(d.path());
+    let old = json.with_file_name("IRON_M.json");
+    std::fs::rename(&json, &old).unwrap();
+    let s = export_and_compare(&mut m, d.path());
+    assert!(s.listed.contains(&json), "{:?}", s.w.outputs);
+    assert!(!s.listed.contains(&old));
+    let names: Vec<String> = std::fs::read_dir(json.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".json"))
+        .collect();
+    assert_eq!(names, ["iron_m.json"], "written under its new spelling");
+}
+
+/// (c) A NIF edit record moved aside to `<stem>.<seconds>.toml` (Note GD25) counts under the listed record beside it,
+/// and under nothing else.
+// shortcut: the NIF export runs in `MeshesModel` (app.rs hands it the rows), which this binary does not build; the move
+// itself is pinned by `nif_edit.rs`'s own tests. This pins the listing: the row's record is listed and the rule credits
+// a moved-aside file to it. Upgrade to a full run when a test harness drives both models.
+#[test]
+fn a_nif_record_moved_aside_counts_under_the_listed_record() {
+    use sdc_gui::model::review::{HOVER_NIF, HOVER_NIF_RECORD};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = pbr_exported_once(d.path());
+    m.set_nif_review_rows(vec![support::nif_row("meshes\\x.nif", None)]);
+    m.header_export_clicked();
+    let w = (*m.review_writes()).clone();
+    let record = w
+        .also_updated
+        .iter()
+        .find(|e| e.hover == HOVER_NIF_RECORD)
+        .expect("the row's record is listed")
+        .path
+        .clone();
+    assert!(w.also_updated.iter().any(|e| e.hover == HOVER_NIF));
+    let stem = record.file_stem().unwrap().to_string_lossy().into_owned();
+    let moved = record.with_file_name(format!("{stem}.1763500000.toml"));
+    assert_eq!(credited(&moved, &w), Some(record.clone()));
+    let other = record.with_file_name(format!("{stem}.backup.toml"));
+    assert_eq!(credited(&other, &w), None, "only `<stem>.<seconds>.toml`");
+    let elsewhere = d.path().join(format!("{stem}.1763500000.toml"));
+    assert_eq!(credited(&elsewhere, &w), None, "only beside the record");
 }
 
 #[test]

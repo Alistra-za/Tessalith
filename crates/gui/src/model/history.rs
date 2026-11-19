@@ -158,11 +158,15 @@ pub fn case_twin(path: &std::path::Path) -> Option<std::path::PathBuf> {
 /// a record `last` exists and the twin still hashes to it. No record, or a twin that cannot be read, is not sdc's
 /// file and stays (wave 2 #48).
 pub fn remove_own_case_twin(path: &std::path::Path, last: Option<&str>) {
-    if let (Some(old), Some(last)) = (case_twin(path), last) {
-        if sha256_of(&old).as_deref() == Some(last) {
-            let _ = std::fs::remove_file(old);
-        }
+    if let Some(old) = own_case_twin(path, last) {
+        let _ = std::fs::remove_file(old);
     }
+}
+
+/// The case twin `remove_own_case_twin` removes: `path`'s twin when a record `last` exists and the twin hashes to it.
+pub fn own_case_twin(path: &std::path::Path, last: Option<&str>) -> Option<std::path::PathBuf> {
+    let (old, last) = (case_twin(path)?, last?);
+    (sha256_of(&old).as_deref() == Some(last)).then_some(old)
 }
 
 /// The recorded files under `root` this run did not write (`this_run`, relative to `root`) that are still on disk,

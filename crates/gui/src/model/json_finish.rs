@@ -47,16 +47,20 @@ pub(super) const UNKNOWN_SHA: &str = "unknown until the export writes it";
 /// E7 (ruling 3c-46): what `guarded_write` would do with `text` at `path`, asked of the disk now and written nowhere.
 /// `None`: the file is kept. `Some(changes)`: it is written (and `out` gets the hash it would record), and `changes`
 /// says whether that changes the file. A `text` of `None` is not known before the run (it depends on a DDS this run
-/// writes): only an absent file or one whose hash is recorded is replaced, and the change is assumed.
+/// writes): only an absent file or one whose hash is recorded is replaced, and the change is assumed. Ruling 3c-48: a
+/// case-only rename (`remove_own_case_twin` drops sdc's own file under the old spelling) changes the file's name on
+/// disk, so it is a change; the removed spelling counts under this entry.
 pub(super) fn guarded_plan(
     path: &Path,
     text: Option<&str>,
     out: &mut BTreeMap<String, String>,
 ) -> Option<bool> {
-    use super::history::{record_key, recorded};
+    use super::history::{own_case_twin, record_key, recorded};
     use sha2::{Digest, Sha256};
     let key = record_key(path);
     let last = out.get(&key).cloned();
+    // On a case-insensitive disk `path` reads the twin, which is ours, so `may_replace` answers as after the removal.
+    let renamed = own_case_twin(path, last.as_deref()).is_some();
     let new = text.map_or(&[][..], str::as_bytes);
     engine::dds::may_replace(path, new, recorded(last.as_deref())).ok()?;
     let Some(text) = text else {
@@ -64,7 +68,7 @@ pub(super) fn guarded_plan(
         return Some(true);
     };
     out.insert(key, hex::encode(Sha256::digest(text.as_bytes())));
-    Some(std::fs::read(path).map_or(true, |b| b != text.as_bytes()))
+    Some(renamed || std::fs::read(path).map_or(true, |b| b != text.as_bytes()))
 }
 
 /// E7 (ruling 3c-46): `Guarded::write` asked instead of done: the record it would return, and in `list` each file it
