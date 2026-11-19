@@ -2157,6 +2157,8 @@ enum Missing {
     UnderARetargetedLink,
     /// A plain new folder, unchanged while the click waits: the ordinary first export writes at once.
     Unchanged,
+    /// A plain new folder created while the click waits: the same parent, the same destination, so it writes.
+    CreatedMeanwhile,
 }
 
 fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
@@ -2175,7 +2177,7 @@ fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
             dir_link(&link, &a);
             link.join("new")
         }
-        Missing::Unchanged => d.path().join("first export"),
+        Missing::Unchanged | Missing::CreatedMeanwhile => d.path().join("first export"),
     };
     support::choose_export(&mut m, folder.clone());
     assert!(m.wait_idle(Duration::from_secs(60)));
@@ -2193,9 +2195,13 @@ fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
     m.header_export_clicked();
     assert!(m.export_queued(), "{case:?}: guard: armed");
     let msgs = held_plan(&mut m);
-    if matches!(case, Missing::UnderARetargetedLink) {
-        std::fs::remove_dir(&link).unwrap();
-        dir_link(&link, &b);
+    match case {
+        Missing::UnderARetargetedLink => {
+            std::fs::remove_dir(&link).unwrap();
+            dir_link(&link, &b);
+        }
+        Missing::CreatedMeanwhile => std::fs::create_dir_all(&folder).unwrap(),
+        Missing::Unchanged => {}
     }
     land_plan(&mut m, msgs);
     let mut wrong = vec![];
@@ -2212,7 +2218,7 @@ fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
                 wrong.push("no Review is open".into());
             }
         }
-        Missing::Unchanged => {
+        Missing::Unchanged | Missing::CreatedMeanwhile => {
             if !folder.join("textures/g/a.dds").is_file() || m.review.is_some() {
                 wrong.push(format!("the first export did not write: {:?}", m.dialog));
             }
@@ -2230,13 +2236,18 @@ fn armed_into_a_missing_folder(case: Missing) -> Vec<String> {
 /// Round 5, ruling 3c-40 (re-review: two failed resolutions compare equal): the recorded destination is the canonical
 /// nearest existing ancestor plus the missing components, so `link\new` under a retargeted `link` is another
 /// destination: Review opens and nothing is written. An unchanged missing folder still compares equal, so the ordinary
-/// first export into a new folder writes. (A read that fails for another reason than "not found" is the unit test
-/// `model::target_mod::tests`.)
+/// first export into a new folder writes, and so does one whose folder was created meanwhile under the same parent. (A
+/// read that fails for another reason than "not found" is the unit test
+/// `model::tests::an_indeterminate_destination_never_compares_equal`.)
 #[test]
 fn a_missing_destination_is_resolved_through_its_nearest_existing_parent() {
-    let wrong: Vec<String> = [Missing::UnderARetargetedLink, Missing::Unchanged]
-        .into_iter()
-        .flat_map(armed_into_a_missing_folder)
-        .collect();
+    let wrong: Vec<String> = [
+        Missing::UnderARetargetedLink,
+        Missing::Unchanged,
+        Missing::CreatedMeanwhile,
+    ]
+    .into_iter()
+    .flat_map(armed_into_a_missing_folder)
+    .collect();
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
