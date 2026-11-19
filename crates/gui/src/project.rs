@@ -108,10 +108,17 @@ impl TomlFile {
         if let Ok(doc) = text.parse::<DocumentMut>() {
             self.doc = doc;
             self.touch();
-            let restored = self.text();
-            self.dirty = restored != self.saved_text;
-            self.user_dirty = restored != self.baseline_text;
+            self.reconcile(&self.text());
         }
+    }
+
+    pub(crate) fn reconcile(&mut self, text: &str) {
+        self.dirty = text != self.saved_text;
+        self.user_dirty = self.dirty && text != self.baseline_text;
+    }
+
+    pub(crate) fn update_user_dirty(&mut self, text: &str) {
+        self.user_dirty = self.dirty && text != self.baseline_text && text != self.saved_text;
     }
 
     pub(crate) fn changed_on_disk(&self) -> bool {
@@ -257,17 +264,15 @@ fn files_append_at_end(text: &str) -> bool {
                 return false;
             }
             in_section = true;
-        } else if !in_section {
+        } else {
             let Some((field, _)) = line.split_once('=') else {
                 return false;
             };
             let field = field.trim_end();
-            if field == "files" || !bare(field) {
+            // The editor groups dotted fields even when another assignment separates them.
+            if !bare(field) || (!in_section && field == "files") {
                 return false;
             }
-        } else if !line.as_bytes()[0].is_ascii_alphanumeric() && !line.starts_with('_') {
-            // Among other things this rejects comments at EOF and indented or quoted headers.
-            return false;
         }
     }
     true
@@ -473,8 +478,12 @@ impl ProjectDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
+        self.update_user_dirty(&self.text());
+    }
+
+    pub(crate) fn update_user_dirty(&mut self, text: &str) {
         if !self.blamed() {
-            self.f.user_dirty = self.text() != self.f.baseline_text;
+            self.f.update_user_dirty(text);
         }
     }
     pub fn user_dirty(&self) -> bool {
@@ -498,18 +507,9 @@ impl ProjectDoc {
     }
 
     pub(crate) fn touch_auto(&mut self, writes: &[AutoWrite]) {
-        let user_dirty = self.f.user_dirty;
         self.apply_writes(writes);
         self.f.baseline_text = apply_auto(&self.f.baseline_text, writes);
-        self.f.user_dirty = user_dirty;
-    }
-
-    /// Undoing an automatic fuzz switch can return to disk while differing from the baseline.
-    pub(crate) fn accept_saved_text(&mut self) {
-        if !self.is_dirty() && self.user_dirty() {
-            self.f.baseline_text.clone_from(&self.f.saved_text);
-            self.f.user_dirty = false;
-        }
+        self.update_user_dirty(&self.text());
     }
 
     pub fn rev(&self) -> u64 {
@@ -542,6 +542,17 @@ impl ProjectDoc {
     /// alone: its edits never happened.
     pub fn restore(&mut self, text: &str) {
         self.f.restore(text);
+    }
+
+    pub(crate) fn restore_snapshot(&mut self, text: &str) {
+        if self.read_only() {
+            return;
+        }
+        if self.text() == text {
+            self.f.reconcile(text);
+        } else {
+            self.restore(text);
+        }
     }
 
     /// The document as the engine parses it (version and removed-key checks included, Note FM10).

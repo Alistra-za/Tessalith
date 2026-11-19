@@ -196,29 +196,37 @@ fn a_long_value_does_not_widen_the_column() {
 #[test]
 fn rows_stay_inside_the_column_at_1100() {
     let d = tempfile::tempdir().unwrap();
-    let mut m = model(d.path());
-    m.save().unwrap(); // Measure the full settings column after the new-project line closes.
-    let h = harness(m, 1100.0);
+    let mut h = harness(model(d.path()), 1100.0);
+    h.get_by_label("New project: nothing saved yet.");
     let c = centre(&h);
     let edge = h.ctx.content_rect().right() - 8.0;
     assert!(c.max.x <= edge + 0.5, "the centre {c:?} runs past {edge}");
-    for (n, r) in controls(&h, c) {
+    let mut combo_width = None;
+    for (role, n) in COMBOS
+        .map(|n| (Role::ComboBox, n))
+        .into_iter()
+        .chain(CHECKS.map(|n| (Role::CheckBox, n)))
+    {
+        h.query_all(by().role(role).label(n))
+            .find(|n| n.rect().left() >= c.left())
+            .unwrap()
+            .scroll_to_me();
+        h.run();
+        let r = control(&h, role, n, c);
         assert!(
             r.max.x <= c.max.x,
             "{n} ends at {}, the centre at {}",
             r.max.x,
             c.max.x
         );
-    }
-    // Scaled down or not, the column keeps one width.
-    let all = combos(&h, c);
-    for (n, r) in &all {
-        assert!(
-            (r.width() - all[0].1.width()).abs() <= 1.0,
-            "{n} is {} wide, Sub-type {}",
-            r.width(),
-            all[0].1.width()
-        );
+        if role == Role::ComboBox {
+            let width = *combo_width.get_or_insert(r.width());
+            assert!(
+                (r.width() - width).abs() <= 1.0,
+                "{n} is {} wide, Sub-type {width}",
+                r.width()
+            );
+        }
     }
 }
 

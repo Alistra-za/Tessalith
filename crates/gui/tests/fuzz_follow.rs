@@ -2046,6 +2046,38 @@ fn the_switch_alone_asks_nothing() {
     }
 }
 
+#[test]
+fn cube_faces_join_the_fuzz_switch_without_a_user_edit() {
+    let d = tempfile::tempdir().unwrap();
+    let cubes = d.path().join("textures/cubemaps");
+    std::fs::create_dir_all(&cubes).unwrap();
+    let faces = ["px", "nx", "py", "ny", "pz", "nz"];
+    for face in faces {
+        rgb(&cubes, &format!("env_{face}.png"));
+    }
+    let mut m = open_with(
+        d.path(),
+        &["rock01_roughness.png", "rock01_fuzz.png"],
+        OLD_SKIN,
+        AcceptSuggestions::High,
+    );
+    assert!(m.fuzz_note_for_test().is_some());
+    assert_eq!(m.history.undo.len(), 1);
+    for face in faces {
+        let key = format!("textures/cubemaps/env_{face}.png");
+        assert_eq!(
+            m.project.as_ref().unwrap().file_value(&key, "subtype"),
+            Some(json!("cubemap")),
+            "{key}"
+        );
+    }
+    assert!(!m.unsaved(), "the joined six-face recording is automatic");
+    assert!(m.request_close());
+    m.undo();
+    m.redo();
+    assert!(!m.unsaved(), "all six faces are in the baseline");
+}
+
 /// Fix round 1, I1: a user edit after the switch asks, in all three places.
 #[test]
 fn a_user_edit_after_the_switch_asks() {
@@ -2088,9 +2120,8 @@ fn a_later_recording_after_the_switch_asks_nothing() {
     assert!(!m.unsaved());
 }
 
-/// Undo of the switch is the user's decision, whether or not the switch reached disk.
 #[test]
-fn undoing_the_switch_asks_before_and_after_save() {
+fn undoing_the_switch_before_save_returns_to_disk() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2100,10 +2131,16 @@ fn undoing_the_switch_asks_before_and_after_save() {
     );
     m.undo();
     idle(&mut m);
-    assert!(
-        !m.needs_write() && m.unsaved(),
-        "Undo rejects the new automatic baseline"
-    );
+    assert!(!m.unsaved(), "Undo restored exactly the text read on open");
+    assert!(!m.needs_write() && m.recovery_snapshot().is_empty());
+    assert!(m.request_close());
+    let other = tempfile::tempdir().unwrap();
+    assert!(m.request_open(other.path().to_path_buf()));
+    idle(&mut m);
+}
+
+#[test]
+fn a_user_dirty_undo_after_save_writes_through_the_stamp_check() {
     let d = tempfile::tempdir().unwrap();
     let mut m = open_with(
         d.path(),
@@ -2115,6 +2152,22 @@ fn undoing_the_switch_asks_before_and_after_save() {
     m.undo();
     idle(&mut m);
     assert!(m.unsaved());
+    let path = m.project.as_ref().unwrap().path().to_owned();
+    std::fs::remove_file(&path).unwrap();
+    assert_eq!(m.save(), Err(sdc_gui::project::SaveError::ChangedOnDisk));
+    assert!(m.unsaved());
+    assert!(!path.exists());
+    m.resolve_external_change(sdc_gui::model::DocKind::SdcToml, true);
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), OLD_SKIN);
+    assert!(!m.unsaved());
+    m.redo();
+    idle(&mut m);
+    assert!(m.unsaved());
+    let redone = m.project.as_ref().unwrap().text();
+    assert_ne!(redone, OLD_SKIN);
+    m.save().unwrap();
+    assert_eq!(std::fs::read_to_string(path).unwrap(), redone);
+    assert!(!m.unsaved());
 }
 
 /// Fix round 1, I1: between the switch and its row, the switch alone asks nothing.

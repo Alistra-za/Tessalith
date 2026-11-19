@@ -378,7 +378,7 @@ pub fn draw(
 }
 
 /// The 2D | 3D switch, the input name box (the set's one name, C14), the output prefix, the output name and the
-/// delete-section warnings, then a separator.
+/// delete-section warnings, then a separator above the 2D slot rows.
 fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     ui.horizontal_wrapped(|ui| {
         if view.switch {
@@ -435,7 +435,9 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
             }
         });
     }
-    ui.separator();
+    if !view.three_d {
+        ui.separator();
+    }
 }
 
 /// The set editor's tab (Note JI2): kept in egui memory only, never in gui.toml (spec 2.6, review finding 9).

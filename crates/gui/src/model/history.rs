@@ -285,6 +285,7 @@ mod tests {
             (true, "[files.\"a.png\"]\nformat = 'bc7'\n[files.\"b.png\"]\nformat = 'bc4'\n"),
             (false, "[files.\"other.png\"]\nsubtype = \"diffuse\"\n\n"),
             (false, "# Notes only\n"),
+            (false, "[files.\"other.png\"]\nalpha.policy = 'cutout'\nformat = 'bc7'\nalpha.threshold = 128\n"),
             (false, "target = 'cs'\n# trailing comment\n"),
             (false, "files = { 'other.png' = { subtype = 'normal' } }\n"),
             (false, "[files.'NEW']\nformat = 'bc7'\n"),

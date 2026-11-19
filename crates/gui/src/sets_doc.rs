@@ -567,7 +567,10 @@ impl SetsDoc {
     /// Put the flag back after a write that left the text as it was.
     pub fn set_dirty(&mut self, dirty: bool) {
         self.f.dirty = dirty;
-        self.f.user_dirty = self.text() != self.f.baseline_text;
+        self.update_user_dirty(&self.text());
+    }
+    pub(crate) fn update_user_dirty(&mut self, text: &str) {
+        self.f.update_user_dirty(text);
     }
     pub fn read_only(&self) -> bool {
         self.f.read_only()
@@ -592,11 +595,15 @@ impl SetsDoc {
     /// does not change, so it is outside the undoable state. When only the hash differs, nothing changes (and the
     /// document is not marked dirty).
     pub fn restore_keeping_json_sha(&mut self, text: &str) {
-        if self.read_only() || self.text() == text {
+        if self.read_only() {
+            return;
+        }
+        if self.text() == text {
+            self.f.reconcile(text);
             return;
         }
         // Note FC11: the document's own copies (not the sidecar's), put back into the document only.
-        let (doc, dirty, sha) = (self.f.doc.clone(), self.f.dirty, self.project_str(LAST_SHA));
+        let sha = self.project_str(LAST_SHA);
         let cs = self.doc_shas(CS_SHA);
         let cm = self.doc_shas(CM_SHA);
         let pgp = self.doc_shas(PGP_SHA);
@@ -606,8 +613,6 @@ impl SetsDoc {
         let folder = self.export_folder();
         let review = self.export_without_review();
         let target = self.target_mod();
-        let old = self.text();
-        let user_dirty = self.f.user_dirty;
         self.restore(text);
         if self.project_str(LAST_SHA) != sha {
             self.set_project(LAST_SHA, sha.map(Value::from));
@@ -638,16 +643,7 @@ impl SetsDoc {
         if self.target_mod() != target {
             self.set_target_mod(target.as_deref());
         }
-        if self.text() == old {
-            self.f.doc = doc;
-            self.f.dirty = dirty;
-            self.f.user_dirty = user_dirty;
-        } else {
-            // The `set_*` calls above touch the document; back at the saved text it is clean again (Note FB3).
-            let restored = self.text();
-            self.f.dirty = restored != self.f.saved_text;
-            self.f.user_dirty = restored != self.f.baseline_text;
-        }
+        self.f.reconcile(&self.text());
     }
 
     pub fn save(&mut self, force: bool) -> Result<(), SaveError> {
@@ -734,7 +730,7 @@ impl SetsDoc {
         }
     }
     pub fn set_last_json_sha256(&mut self, sha: &str) -> std::io::Result<()> {
-        self.set_project(LAST_SHA, Some(Value::from(sha)));
+        self.record_project_hash(LAST_SHA, Some(Value::from(sha)));
         self.put_side(LAST_SHA, Json::from(sha))
     }
 
@@ -770,8 +766,24 @@ impl SetsDoc {
     /// A hash record made now: the document's copy (if writable) and the sidecar (Note FC11). Err: the sidecar was not
     /// written (Note FC14).
     fn record_shas(&mut self, key: &str, shas: &BTreeMap<String, String>) -> std::io::Result<()> {
-        self.set_shas(key, shas);
+        self.record_project_hash(key, shas_value(shas));
         self.put_side(key, shas_json(shas))
+    }
+
+    fn record_project_hash(&mut self, key: &str, value: Option<Value>) {
+        if self.read_only() {
+            return;
+        }
+        self.set_project(key, value.clone());
+        let mut baseline = self
+            .f
+            .baseline_text
+            .parse::<toml_edit::DocumentMut>()
+            .expect("baseline is serialized TOML");
+        if !project_value_same(&baseline, key, &value) && put_project(&mut baseline, key, value) {
+            self.f.baseline_text = baseline.to_string();
+        }
+        self.update_user_dirty(&self.text());
     }
 
     /// E7 (ruling 3c-46): a copy of the records as they are now, for Review to apply the hash records an export would

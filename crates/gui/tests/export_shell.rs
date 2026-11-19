@@ -245,7 +245,6 @@ fn a_real_save_clears_the_new_project_line() {
     m.rename_set(&set, "first").unwrap();
     assert!(m.wait_idle(Duration::from_secs(60)));
     m.save().unwrap();
-    assert!(!m.never_saved);
     assert!(d.path().join("sdc-project.toml").is_file());
     assert!(!d.path().join("sdc.toml").exists());
     m.rename_set("first", "second").unwrap();
@@ -257,6 +256,7 @@ fn a_real_save_clears_the_new_project_line() {
             .count(),
         0
     );
+    assert!(!h.state().never_saved);
 }
 
 fn harness(model: AppModel) -> Harness<'static, AppModel> {

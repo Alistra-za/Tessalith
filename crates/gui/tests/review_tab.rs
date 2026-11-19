@@ -328,9 +328,9 @@ fn review_export_is_disabled_with_the_blocker_count() {
 #[test]
 fn deciding_a_row_in_review_keeps_the_columns_usable() {
     let d = tempfile::tempdir().unwrap();
-    let root = mod_folder(d.path());
-    std::fs::write(root.join("sdc.toml"), "# existing project\n").unwrap();
-    let mut h = harness(opened(d.path()));
+    let mut m = opened(d.path());
+    m.set_json_name("review-pack");
+    let mut h = harness(m);
     h.run();
     press_export(&mut h);
     // One `Set type: X ✓` per row that asks its sub-type with a suggestion, in list order (Backlog L64).
@@ -341,10 +341,16 @@ fn deciding_a_row_in_review_keeps_the_columns_usable() {
         .filter(|k| matches!(h.state().subtype_question(k), Some(Some(_))))
         .collect();
     let at = with_check.iter().position(|k| k == ROCK).unwrap();
+    h.get_by_label("New project: nothing saved yet.");
     let before = h.query_all_by_label_contains("Set type: ").count();
     assert_eq!(before, with_check.len());
     let node = h.query_all_by_label_contains("Set type: ").nth(at).unwrap();
-    node.hover();
+    node.scroll_to_me();
+    h.run();
+    h.query_all_by_label_contains("Set type: ")
+        .nth(at)
+        .unwrap()
+        .hover();
     h.run();
     h.query_all_by_label_contains("Set type: ")
         .nth(at)
@@ -362,15 +368,26 @@ fn deciding_a_row_in_review_keeps_the_columns_usable() {
         before - 1
     );
     // The Textures column still takes a click while Review is open (Note DY16: the raw roughness is a helper row now).
-    h.query_all_by_role(eframe::egui::accesskit::Role::Button)
-        .find(|n| {
-            n.accesskit_node()
-                .label()
-                .is_some_and(|l| l.starts_with("Helper rock01_roughness.png:"))
-        })
-        .expect("the roughness helper row")
-        .click();
-    h.run();
+    h.hover_at(
+        sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "textures")
+            .unwrap()
+            .center(),
+    );
+    h.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -300.0),
+        source: egui::MouseWheelSource::Wheel,
+        phase: egui::TouchPhase::Move,
+        modifiers: Default::default(),
+    });
+    h.run_steps(10);
+    let helper = h
+        .get_by_label_contains("Helper rock01_roughness.png:")
+        .accesskit_node()
+        .label()
+        .unwrap()
+        .to_owned();
+    press(&mut h, &helper);
     assert!(
         matches!(&h.state().selection, Selection::Item(k) if k.ends_with("rock01_roughness.png")),
         "{:?}",

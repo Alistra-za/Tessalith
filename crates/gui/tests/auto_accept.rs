@@ -123,6 +123,27 @@ fn auto_accepted_types_are_recorded_as_the_baseline() {
     assert!(!m.can_redo());
 }
 
+#[test]
+fn undo_after_the_same_normal_type_is_recorded_again_is_clean() {
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("textures");
+    rgb(&root, "rock_n.png", [128, 128, 255]);
+    let mut m = support::opened_as_the_app(root, d.path().join("export"));
+    m.save().unwrap();
+    let saved = text(&m);
+    m.clear_field("rock_n.png", "subtype");
+    assert!(m.wait_idle(WAIT));
+    assert_eq!(text(&m), saved);
+    assert!(m.can_undo());
+    m.undo();
+    assert!(
+        !m.unsaved(),
+        "Undo to the saved normal type is clean immediately"
+    );
+    assert!(!m.needs_write());
+    assert!(m.request_close());
+}
+
 /// Note FI11 (A17, D15): the row's hover names files and types in words and explains High confidence.
 #[test]
 fn the_automatic_row_explains_high_confidence() {
@@ -555,7 +576,7 @@ fn evidence_decisions_are_recorded_and_recorded_values_stay() {
     );
 }
 
-/// Note HR2: a mesh `remove` on a varying alpha is recorded like any mesh verdict; an Undo stays undone; the CLI
+/// Note HR2: a mesh `remove` on a varying alpha survives Undo of a user edit; the CLI
 /// plans the same from the text with no evidence.
 #[test]
 fn a_mesh_remove_is_recorded_and_survives_undo() {
@@ -564,6 +585,8 @@ fn a_mesh_remove_is_recorded_and_survives_undo() {
     varying(&root, "a/wall.png");
     let mut m = support::opened_as_the_app(root.clone(), d.path().join("export"));
     assert_eq!(value(&m, "a/wall.png", "alpha.policy"), None);
+    m.set_json_name("wall-pack");
+    assert_eq!(m.history.undo.len(), 1);
     let none = MeshAlpha {
         blend: false,
         test: false,
@@ -590,7 +613,8 @@ fn a_mesh_remove_is_recorded_and_survives_undo() {
         (AlphaPolicy::Remove, w.profile.format)
     );
     m.undo();
-    assert!(m.wait_idle(WAIT));
+    assert!(m.sets_doc.as_ref().unwrap().json_name().is_none());
+    assert!(m.can_redo());
     assert_eq!(
         value(&m, "a/wall.png", "alpha.policy"),
         Some(json!("remove")),

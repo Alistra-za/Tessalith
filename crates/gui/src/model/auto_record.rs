@@ -427,13 +427,27 @@ impl AppModel {
         let n = lines.len();
         let noun = if only_types { "type" } else { "value" };
         let s = if n == 1 { "" } else { "s" };
+        // A six-file cube's settings apply to all its faces (DT31).
+        for (key, faces) in self.cube_face_keys() {
+            let others: Vec<_> = writes
+                .iter()
+                .filter(|w| w.key == key)
+                .flat_map(|w| {
+                    faces.iter().map(|face| AutoWrite {
+                        key: face.clone(),
+                        ..w.clone()
+                    })
+                })
+                .collect();
+            writes.extend(others);
+        }
         if let Some(k) = join {
             let label = format!("Set {n} {noun}{s} automatically");
             // One step with the re-encode (its label stays), so no row of its own offers a separate Undo. Fuzz-8: the
             // switch's row lists what it joined.
             let joins_switch = self.fuzz_switch.as_ref().is_some_and(|sw| sw.merge == k);
             let pushes = self.history.pushes;
-            self.edit_docs(&label, Some(k), true, |p, _| {
+            self.record_doc_edit(&label, Some(k), true, |p, _| {
                 if joins_switch {
                     p.touch_auto(&writes);
                 } else {
@@ -456,20 +470,6 @@ impl AppModel {
                 sw.step = self.history.pushes;
             }
             return self.history.pushes != pushes;
-        }
-        // A six-file cube's settings apply to all its faces (DT31).
-        for (key, faces) in self.cube_face_keys() {
-            let others: Vec<_> = writes
-                .iter()
-                .filter(|w| w.key == key)
-                .flat_map(|w| {
-                    faces.iter().map(|face| AutoWrite {
-                        key: face.clone(),
-                        ..w.clone()
-                    })
-                })
-                .collect();
-            writes.extend(others);
         }
         let p = self
             .project

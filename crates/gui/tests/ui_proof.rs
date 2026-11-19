@@ -112,6 +112,86 @@ fn app_data() -> &'static std::path::Path {
     .path()
 }
 
+fn focused_json_name(dir: &std::path::Path) -> app_harness::H {
+    use egui_kittest::kittest::Queryable;
+    app_data();
+    let mut m = support::pbr_opened(dir);
+    m.save().unwrap();
+    m.open_json_editor();
+    m.banner = Some("Reload project files".into());
+    let mut h = app_harness::plain_harness_no_mo2(m);
+    h.run_steps(3);
+    h.get_by_role_and_label(egui::accesskit::Role::TextInput, "JSON file name")
+        .click();
+    h.run_steps(2);
+    h.event(egui::Event::Text("my-pack".into()));
+    h.run_steps(2);
+    assert!(!h.state().model.unsaved(), "still a draft");
+    h
+}
+
+fn assert_draft_prompt(h: &mut app_harness::H, expected: sdc_gui::model::Dialog) {
+    h.run_steps(3);
+    assert_eq!(h.state().model.dialog.as_ref(), Some(&expected));
+    assert_eq!(
+        h.state()
+            .model
+            .sets_doc
+            .as_ref()
+            .unwrap()
+            .json_name()
+            .as_deref(),
+        Some("my-pack")
+    );
+}
+
+#[test]
+fn focused_json_name_prompts_on_native_close() {
+    let d = tempfile::tempdir().unwrap();
+    let mut h = focused_json_name(d.path());
+    h.input_mut()
+        .viewports
+        .get_mut(&egui::ViewportId::ROOT)
+        .unwrap()
+        .events
+        .push(egui::ViewportEvent::Close);
+    assert_draft_prompt(&mut h, sdc_gui::model::Dialog::CloseUnsaved);
+}
+
+#[test]
+fn focused_json_name_prompts_on_folder_drop() {
+    let d = tempfile::tempdir().unwrap();
+    let other = tempfile::tempdir().unwrap();
+    let mut h = focused_json_name(d.path());
+    #[derive(Debug)]
+    struct Folder(std::path::PathBuf);
+    impl egui::DroppedFile for Folder {
+        fn path(&self) -> &std::path::Path {
+            &self.0
+        }
+        fn bytes(&self) -> Result<Vec<u8>, String> {
+            Err("folder".into())
+        }
+    }
+    h.input_mut()
+        .dropped_files
+        .push(std::sync::Arc::new(Folder(other.path().to_owned())));
+    assert_draft_prompt(
+        &mut h,
+        sdc_gui::model::Dialog::OpenUnsaved(other.path().to_owned()),
+    );
+}
+
+#[test]
+fn focused_json_name_prompts_on_reload() {
+    use egui_kittest::kittest::Queryable;
+    let d = tempfile::tempdir().unwrap();
+    let mut h = focused_json_name(d.path());
+    h.get_by_role_and_label(egui::accesskit::Role::Button, "Reload")
+        .click();
+    assert_draft_prompt(&mut h, sdc_gui::model::Dialog::ReloadUnsaved);
+}
+
 #[derive(Default)]
 struct Tiny {
     clicks: Vec<u32>,

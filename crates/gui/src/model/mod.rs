@@ -709,6 +709,9 @@ pub struct AppModel {
     /// Note FC8: clicks and keys that waited one frame for a focused text field to commit (`ui::after_commit`); run
     /// first thing next frame, by `ui::actions::keys`.
     pub after_commit: Vec<AfterCommit>,
+    /// A native frame with a focused editor must draw its focus loss before replacing the documents.
+    pub(crate) editing_draft: bool,
+    pub(crate) after_draft: Option<AfterCommit>,
     /// Note FC8 (CP10): a BC7 weighting pick whose own value may have hidden an inherited one: (item key, pick, the
     /// pick's history merge key). The settled plan checks it and completes the pick in the same step.
     weighting_follow: Vec<(String, String, String)>,
@@ -1080,6 +1083,8 @@ impl AppModel {
             shell: Vec::new(),
             stats: Default::default(),
             after_commit: Vec::new(),
+            editing_draft: false,
+            after_draft: None,
             weighting_follow: Vec::new(),
             reencode_follow: None,
             report_saving: false,
@@ -2663,27 +2668,9 @@ impl AppModel {
         self.batch = true;
         f(self);
         self.batch = false;
-        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
-        if after == before {
-            // Trace #28: writes that changed nothing leave the documents as clean as they were.
-            if let Some(p) = self.project.as_mut() {
-                p.set_dirty(dirty.0);
-            }
-            if let Some(s) = self.sets_doc.as_mut() {
-                s.set_dirty(dirty.1);
-            }
+        let Some(files_edit) = self.record_step(label, None, before, dirty) else {
             return false;
-        }
-        self.drop_undo_note();
-        let files_edit = before.project == after.project;
-        self.history.push(history::Command {
-            label: label.into(),
-            before,
-            after,
-            merge: None,
-            created_file: None,
-        });
-        self.auto_replans = 0;
+        };
         self.replan_after_edit(files_edit);
         true
     }
@@ -3755,13 +3742,22 @@ impl AppModel {
         // DT31: a six-file cube's faces must resolve alike (CUBE-FACES), so whatever an edit does to the item's own
         // entry (its +X face) is repeated on the other five face entries, inside the same step.
         let cubes = self.cube_face_keys();
-        let f = move |p: &mut ProjectDoc, s: &mut crate::sets_doc::SetsDoc| {
+        self.record_doc_edit(label, merge, replan, move |p, s| {
             let before: Vec<_> = cubes.iter().map(|(k, _)| p.entry_fields(k)).collect();
             f(p, s);
             for ((k, others), b) in cubes.iter().zip(&before) {
                 p.copy_entry_changes(k, b, others);
             }
-        };
+        });
+    }
+
+    fn record_doc_edit(
+        &mut self,
+        label: &str,
+        merge: Option<String>,
+        replan: bool,
+        f: impl FnOnce(&mut ProjectDoc, &mut crate::sets_doc::SetsDoc),
+    ) {
         let (Some(p), Some(s)) = (self.project.as_mut(), self.sets_doc.as_mut()) else {
             return;
         };
@@ -3772,12 +3768,37 @@ impl AppModel {
         let before = Self::snapshot_of(Some(p), Some(s));
         let dirty = (p.is_dirty(), s.is_dirty());
         f(p, s);
-        let after = Self::snapshot_of(Some(p), Some(s));
+        if let Some(files_edit) = self.record_step(label, merge, before, dirty) {
+            if replan {
+                self.replan_after_edit(files_edit);
+            }
+        }
+    }
+
+    fn record_step(
+        &mut self,
+        label: &str,
+        merge: Option<String>,
+        before: history::Snapshot,
+        dirty: (bool, bool),
+    ) -> Option<bool> {
+        let after = Self::snapshot_of(self.project.as_ref(), self.sets_doc.as_ref());
         if after == before {
             // An equal write is no edit: `touch` marked the document dirty, so undo that (trace #28).
-            p.set_dirty(dirty.0);
-            s.set_dirty(dirty.1);
-            return;
+            if let Some(p) = self.project.as_mut() {
+                p.set_dirty(dirty.0);
+            }
+            if let Some(s) = self.sets_doc.as_mut() {
+                s.set_dirty(dirty.1);
+            }
+            return None;
+        }
+        // Typing a saved value again is clean. Reuse the texts already built for history.
+        if let Some(p) = self.project.as_mut() {
+            p.update_user_dirty(&after.sdc_toml);
+        }
+        if let Some(s) = self.sets_doc.as_mut() {
+            s.update_user_dirty(&after.project);
         }
         self.drop_undo_note();
         let files_edit = before.project == after.project;
@@ -3789,9 +3810,7 @@ impl AppModel {
             created_file: None,
         });
         self.auto_replans = 0;
-        if replan {
-            self.replan_after_edit(files_edit);
-        }
+        Some(files_edit)
     }
 
     /// Review E2: mark the row named `row` as intended (`on`) or take its mark off, as one undo step named for the
@@ -3898,10 +3917,8 @@ impl AppModel {
         // Fast re-plan: a step that leaves the sets document as it is may send a partial (`replan` checks the rest).
         // Compared as the edit path compares its snapshots (Minor 3: no sets document on both sides is unchanged).
         let files_edit = Self::snapshot_of(None, self.sets_doc.as_ref()).project == s.project;
-        // Only a document the step changed is restored: `restore` marks it dirty, and an untouched one must stay clean
-        // (no empty sdc-project.toml on Save, no spurious changed-on-disk dialog).
-        if let Some(p) = self.project.as_mut().filter(|p| p.text() != s.sdc_toml) {
-            p.restore(&s.sdc_toml);
+        if let Some(p) = self.project.as_mut() {
+            p.restore_snapshot(&s.sdc_toml);
         }
         // The JSON hash is not part of a step: export writes it outside history (spec §7.2, final review I2).
         if let Some(d) = self.sets_doc.as_mut() {
@@ -4669,6 +4686,10 @@ impl AppModel {
     /// Reload both documents from disk (the banner's Reload), then plan once.
     /// The banner's Reload: at once when nothing is unsaved, else ask first (`Dialog::ReloadUnsaved`).
     pub fn request_reload(&mut self) {
+        if self.editing_draft {
+            self.after_draft = Some(Box::new(Self::request_reload));
+            return;
+        }
         if self.unsaved() {
             self.dialog = Some(Dialog::ReloadUnsaved);
         } else {
@@ -4745,9 +4766,6 @@ impl AppModel {
             crate::crash_log::discard_recovery(s.path());
             wrote = true;
         }
-        if let Some(p) = self.project.as_mut() {
-            p.accept_saved_text();
-        }
         if wrote {
             self.refresh_banner();
             if user_save {
@@ -4805,6 +4823,12 @@ impl AppModel {
 
     /// Open `root`, or ask first when unsaved edits would be lost. True when the folder was opened.
     pub fn request_open(&mut self, root: PathBuf) -> bool {
+        if self.editing_draft {
+            self.after_draft = Some(Box::new(move |m| {
+                m.request_open(root);
+            }));
+            return false;
+        }
         if self.export.running.is_some() {
             self.dialog = Some(Dialog::ExportRunning(AfterExport::Open(root)));
             false

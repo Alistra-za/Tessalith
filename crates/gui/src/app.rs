@@ -294,6 +294,12 @@ impl eframe::App for SdcApp {
             });
         }
         let ctx = ui.ctx().clone();
+        let close = ctx.input(|i| i.viewport().close_requested());
+        let after_draft = self.model.after_draft.take();
+        self.model.editing_draft = crate::ui::actions::text_field_focused(&ctx);
+        if close || after_draft.is_some() {
+            ctx.memory_mut(|m| m.stop_text_input());
+        }
         self.model.poll();
         let now = std::time::Instant::now();
         self.model.tick(now);
@@ -301,9 +307,6 @@ impl eframe::App for SdcApp {
             ctx.request_repaint_after(left);
         }
 
-        if ctx.input(|i| i.viewport().close_requested()) && !self.model.request_close() {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
         // The export that was in the way of a close has ended; close again (unsaved edits still ask).
         if self.model.take_close_ready() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
@@ -425,6 +428,18 @@ impl eframe::App for SdcApp {
             }
         } else {
             crate::ui::draw_with_scan(ui, &mut self.model, &mut self.state, Some(&mut self.meshes));
+        }
+        self.model.editing_draft = false;
+        if let Some(request) = after_draft {
+            request(&mut self.model);
+            ctx.request_repaint();
+        }
+        if self.model.after_draft.is_some() {
+            ctx.request_repaint();
+        }
+        if close && !self.model.request_close() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            ctx.request_repaint();
         }
         // A "Open in Textures" click of this frame.
         self.route_3d(&ctx);

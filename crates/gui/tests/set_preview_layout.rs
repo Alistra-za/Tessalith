@@ -277,7 +277,7 @@ fn in_3d_the_viewport_takes_most_of_the_centre() {
         // The project line takes its own row before the viewport. All other controls retain their height budget.
         let line = outer(&h, "new-project-line").map_or(0.0, |r| r.height());
         assert!(
-            img.height() >= 0.72 * centre - line,
+            img.height() >= 0.72 * (centre - line),
             "{w}x{hh} (landscape {landscape}): frame {} high in a centre of {centre}",
             img.height()
         );
