@@ -1037,18 +1037,24 @@ fn a_deferred_click_on_a_pending_plan_never_survives_a_dialog() {
 
 /// `link` becomes a directory junction (Windows; a symlink elsewhere) to `target`. Neither needs admin rights.
 fn dir_link(link: &std::path::Path, target: &std::path::Path) {
+    try_dir_link(link, target).unwrap();
+}
+
+fn try_dir_link(link: &std::path::Path, target: &std::path::Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
         let ok = std::process::Command::new("cmd")
             .args(["/C", "mklink", "/J"])
             .arg(link)
             .arg(target)
-            .output()
-            .expect("cmd runs");
-        assert!(ok.status.success(), "mklink /J failed: {ok:?}");
+            .output()?;
+        if !ok.status.success() {
+            return Err(std::io::Error::other(format!("mklink /J failed: {ok:?}")));
+        }
+        Ok(())
     }
     #[cfg(not(windows))]
-    std::os::unix::fs::symlink(target, link).unwrap();
+    std::os::unix::fs::symlink(target, link)
 }
 
 /// Round 3, ruling 3c-27: the write decision drops the view-keyed `export_blocks` list, whose target-mod overlap check
@@ -3435,19 +3441,42 @@ fn a_directory_at_a_copy_destination_cannot_feed_a_later_copy_or_profile() {
 
 #[test]
 fn a_job_writing_a_borrowers_destination_marks_the_copy_and_both_records() {
+    check_job_at_borrower_destination("landscape/leaf_normal.png");
+}
+
+#[test]
+fn a_job_writing_through_a_junction_marks_the_borrowed_copy_and_both_records() {
+    check_job_at_borrower_destination("job/leaf_normal.png");
+}
+
+fn check_job_at_borrower_destination(key: &str) {
     use engine::config::GreenConvention;
     use sdc_gui::model::review::{HOVER_COPY, HOVER_GENERATED, HOVER_PROJECT_TOML};
     use sdc_gui::model::set_groups::GroupTarget;
     use sdc_gui::model::Answer;
     let d = tempfile::tempdir().unwrap();
-    let key = "landscape/leaf_normal.png";
     let leaf = d.path().join("textures").join(key);
     support::colour(&leaf, 255);
     let (mut m, owner_source, dst) = vanilla_borrow(d.path());
     m.set_field(key, "subtype", serde_json::json!("landscape_normal"));
     m.decide(key, Answer::Green(GreenConvention::Directx));
     idle(&mut m);
-    assert_eq!(m.item(key).unwrap().job.as_ref().unwrap().output, dst);
+    let output = &m.item(key).unwrap().job.as_ref().unwrap().output;
+    if key.starts_with("job/") {
+        assert_ne!(output, &dst);
+        let target = dst.parent().unwrap();
+        std::fs::create_dir_all(target).unwrap();
+        if let Err(e) = try_dir_link(output.parent().unwrap(), target) {
+            eprintln!("Skipping junction export test: {e}");
+            return;
+        }
+        assert_eq!(
+            output.parent().unwrap().canonicalize().unwrap(),
+            target.canonicalize().unwrap()
+        );
+    } else {
+        assert_eq!(output, &dst);
+    }
     let first = export_and_compare(&mut m, d.path());
     let owner = std::fs::read(dst.with_file_name("rock01_n.dds")).unwrap();
     assert_ne!(std::fs::read(&dst).unwrap(), owner);

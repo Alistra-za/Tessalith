@@ -268,18 +268,64 @@ pub(super) fn may_change(path: &Path, last: Option<&str>) -> bool {
 /// Ruling 3c-55: the files this run may produce, which every decision of `build_review_writes` reads: the outputs of
 /// the run's jobs, every file under a listed Also folder, and each borrower copy the run may write, added in
 /// `copy_files`' order so an earlier copy is an input to every later copy and to every finisher.
+#[derive(Default)]
 struct Produced {
-    keys: std::collections::HashSet<String>,
-    folders: Vec<PathBuf>,
+    keys: std::collections::HashSet<PathBuf>,
+    unresolved_names: std::collections::HashSet<std::ffi::OsString>,
+    folders: Vec<(PathBuf, bool)>,
+    directories: std::cell::RefCell<std::collections::HashMap<PathBuf, (PathBuf, bool)>>,
 }
 
 impl Produced {
+    // Keep the lexical directory on failure. The flag distinguishes it from a resolved directory.
+    fn directory_key(&self, dir: &Path) -> (PathBuf, bool) {
+        self.directories
+            .borrow_mut()
+            .entry(dir.to_path_buf())
+            .or_insert_with(|| {
+                let resolved = super::target_mod::resolve_destination(dir);
+                let key = record_key(resolved.as_deref().unwrap_or(dir));
+                (PathBuf::from(key), resolved.is_some())
+            })
+            .clone()
+    }
+
+    fn file_key(&self, p: &Path) -> (PathBuf, bool) {
+        match (p.parent(), p.file_name()) {
+            (Some(parent), Some(name)) => {
+                let (dir, resolved) = self.directory_key(parent);
+                (dir.join(name.to_string_lossy().to_lowercase()), resolved)
+            }
+            _ => self.directory_key(p),
+        }
+    }
+
     fn has(&self, p: &Path) -> bool {
-        self.keys.contains(&record_key(p)) || self.folders.iter().any(|f| p.starts_with(f))
+        let (key, resolved) = self.file_key(p);
+        if self.keys.contains(&key)
+            || self
+                .folders
+                .iter()
+                .any(|(folder, known)| !resolved || !known || key.starts_with(folder))
+        {
+            return true;
+        }
+        // An unknown parent may alias another output's parent, but the file names must still match.
+        if resolved {
+            key.file_name()
+                .is_some_and(|n| self.unresolved_names.contains(n))
+        } else {
+            self.keys.iter().any(|k| k.file_name() == key.file_name())
+        }
     }
 
     fn add(&mut self, p: &Path) {
-        self.keys.insert(record_key(p));
+        let (key, resolved) = self.file_key(p);
+        if !resolved {
+            self.unresolved_names
+                .extend(key.file_name().map(ToOwned::to_owned));
+        }
+        self.keys.insert(key);
     }
 }
 
@@ -596,6 +642,7 @@ impl AppModel {
                     run_copy_destination = true;
                     run_records = true;
                     copies.insert(dst.clone(), true);
+                    produced.add(dst);
                     continue;
                 }
                 let key = record_key(dst);
@@ -843,15 +890,20 @@ impl AppModel {
     /// Ruling 3c-55: `Produced` before the copies: the output of every job in the run, whatever its state, and the
     /// listed Also folders.
     fn produced(&self, also_folders: &[PathBuf]) -> Produced {
-        Produced {
-            keys: self
-                .items
-                .iter()
-                .filter(|i| self.item_in_run(i))
-                .filter_map(|i| i.job.as_ref().map(|j| record_key(&j.output)))
-                .collect(),
-            folders: also_folders.to_vec(),
+        let mut produced = Produced::default();
+        for job in self
+            .items
+            .iter()
+            .filter(|i| self.item_in_run(i))
+            .filter_map(|i| i.job.as_ref())
+        {
+            produced.add(&job.output);
         }
+        produced.folders = also_folders
+            .iter()
+            .map(|f| produced.directory_key(f))
+            .collect();
+        produced
     }
 
     /// `finish_json`'s Overwrite arm: Review's answer is Overwrite, for the PGPatcher JSON as it is on disk now.
@@ -1639,6 +1691,24 @@ impl AppModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unresolved_parent_on_either_side_is_a_possible_produced_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let good = dir.path().join("leaf_n.dds");
+        let unknown = dir.path().join("bad\0parent").join("leaf_n.dds");
+        let m = AppModel::placeholder(Default::default());
+        for (output, lookup) in [(&good, &unknown), (&unknown, &good)] {
+            let mut produced = m.produced(&[]);
+            produced.add(output);
+            assert!(produced.has(lookup), "{output:?} may be {lookup:?}");
+            assert!(!produced.has(&lookup.with_file_name("other.dds")));
+        }
+        let produced = m.produced(&[dir.path().join("new/also")]);
+        assert!(produced.has(&dir.path().join("new/also/nested/leaf_n.dds")));
+        assert!(!produced.has(&dir.path().join("new/also-other/leaf_n.dds")));
+        assert!(produced.has(&unknown));
+    }
 
     #[test]
     fn copy_cache_keeps_only_an_inline_fingerprint_per_owner() {
