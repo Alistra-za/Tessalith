@@ -6,8 +6,8 @@ use super::known_paths::TxstRecord;
 use super::pbr_export::writes_entry;
 use super::sets::{
     entry_of, has_slot_clear, has_slot_link, link_row_kind, linked_map_slot, missing_map_slot,
-    output_game_path, recipe_suffix, renamed_output, slot_of, slot_string, DefaultOutputs, SetView,
-    SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
+    recipe_suffix, renamed_output, slot_of, slot_string, written_game_location, DefaultOutputs,
+    SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
@@ -361,20 +361,20 @@ struct Written<'a> {
 }
 
 /// Review E1 (Task 15a): every planned output of every set (each member that writes a file of its own, the members
-/// after the first of a slot kind and the unslotted outputs included), built in one pass. Ruling 3b-F6: a key is the
-/// game location of the file the job writes (`output_game_path`, folded), the path the Path… and From another set
-/// menus write; an output under no `textures` folder has none and is in no entry. The first set in display order that
-/// writes a path keeps it.
+/// after the first of a slot kind and the unslotted outputs included), built in one pass. Rulings 3b-F6 and 3b-F16: a
+/// key is the game location of the file the settled job writes (`written_game_location`, folded), the path From
+/// another set writes while the plan is current; an explicit path asked for is never read here, so the index holds no
+/// prediction. An output under no `textures` folder has none and is in no entry. The first set in display order that
+/// writes a path keeps it. The folders are read once per build.
 fn written_outputs<'a>(m: &'a AppModel, views: &'a [SetView]) -> HashMap<String, Written<'a>> {
     let mut out = HashMap::new();
-    // The views are being built, so the explicit paths are read over them, not from the cache.
-    let paths = super::sets::engine_inputs_in(m, views).1;
+    let roots = super::sets::output_roots(m);
     for v in views {
         for item in &v.members {
             let Some(it) = m.item(item) else {
                 continue;
             };
-            if let Some(p) = output_game_path(m, &v.id, &paths, it) {
+            if let Some(p) = written_game_location(&roots, it) {
                 out.entry(p.to_ascii_lowercase()).or_insert(Written {
                     from: &v.id,
                     short: &v.short,

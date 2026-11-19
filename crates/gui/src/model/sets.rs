@@ -1184,11 +1184,41 @@ pub fn engine_input_builds() -> u64 {
     ENGINE_INPUT_BUILDS.with(std::cell::Cell::get)
 }
 
+#[cfg(feature = "test-hooks")]
+thread_local! {
+    /// Test probe: how many times `output_roots` ran on this thread (ruling 3b-F16).
+    static OUTPUT_ROOT_READS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+/// Tests: how many times the output and export folders were read (`output_roots`) on this thread.
+#[cfg(feature = "test-hooks")]
+pub fn output_root_reads() -> u64 {
+    OUTPUT_ROOT_READS.with(std::cell::Cell::get)
+}
+
+/// The two folders a job's output is read under, the output folder first, then the export folder. Ruling 3b-F16: read
+/// once per index build or menu call (each read clones the export configuration), never per member.
+pub(crate) fn output_roots(m: &AppModel) -> [PathBuf; 2] {
+    #[cfg(feature = "test-hooks")]
+    OUTPUT_ROOT_READS.with(|c| c.set(c.get() + 1));
+    [m.output_root(), m.export_root()]
+}
+
 /// Tests: how many whole `build_views` builds ran (a splice is not one).
 #[cfg(feature = "test-hooks")]
 pub fn view_builds(m: &AppModel) -> u64 {
     m.view_builds.get()
 }
+
+/// `view_reads`' value: slot, sub-type, waiting, game path, job key, the settled job's output.
+pub(crate) type ViewReads<'a> = (
+    Option<SlotKind>,
+    Option<Subtype>,
+    bool,
+    Option<&'a str>,
+    &'a str,
+    Option<&'a Path>,
+);
 
 /// What the views read of an item besides its key and set: an item whose value of this is unchanged leaves its set's
 /// view as it was (final fix I2). Every item field `build_views` reads (round 2 B): `base_view` `slot_of` (status
@@ -1197,18 +1227,18 @@ pub fn view_builds(m: &AppModel) -> u64 {
 /// checked against `job.game_path`, so an alias that keeps the set id still rebuilds the view, Note JH1). The keys are
 /// compared apart (`full_plan_changes`), the rest of a view comes from its `SetItem` (compared whole) and the sets
 /// document (in the views key), and `waiting` decides whether a lone member's set has a card (`card_hidden`).
-/// `link_slots` reads the output path (`job_key`, through `engine_inputs`' mirrored paths and `game_path_in`) to find
-/// the set a `slotN` link names, so a moved output rebuilds the views.
+/// `link_slots` reads the output path to find the set a `slotN` link names: `job_key`, and the settled job's output
+/// (`written_game_location`, ruling 3b-F16), whose spelling can change while the folded job key stays (a mapping
+/// removed between two spellings of one folder), so a moved output rebuilds the views and no link is carried.
 /// `output_suffix` and `recipe_suffix` feed `engine_inputs` and the export blocks, not the views.
-pub(crate) fn view_reads(
-    i: &TextureItem,
-) -> (Option<SlotKind>, Option<Subtype>, bool, Option<&str>, &str) {
+pub(crate) fn view_reads(i: &TextureItem) -> ViewReads<'_> {
     (
         slot_of(i),
         i.job.as_ref().map(|j| j.profile.subtype),
         i.waiting,
         i.job.as_ref().map(|j| j.game_path.as_str()),
         i.job_key.as_str(),
+        i.job.as_ref().map(|j| j.output.as_path()),
     )
 }
 
@@ -2666,66 +2696,74 @@ pub fn slot_gives(m: &AppModel, set: &str, n: u8) -> String {
 pub const NO_GAME_PATH: &str = "no game path (not under a textures folder)";
 
 /// F3a Task 8: the path the game loads `item`'s output from, in the form Path… stores (relative to Data\,
-/// backslashes, `.dds`): where its job writes it (`output_game_path`). A member whose output is under no `textures`
-/// folder has none.
+/// backslashes, `.dds`): where its job writes it (`written_game_location`). A member whose output is under no
+/// `textures` folder has none. While a plan is out (`full_plan_pending`) the path the pending edit asks for is shown
+/// instead, a prediction for display only (ruling 3b-F16).
 pub fn member_game_path(m: &AppModel, item: &str) -> Result<String, String> {
     let it = m.item(item).ok_or_else(|| format!("no texture {item}"))?;
     let views = views(m);
     let set = views.iter().find(|v| v.members.contains(&it.key));
-    let paths = engine_inputs_in(m, &views).1;
-    member_game_path_in(m, set.map_or("", |v| v.id.as_str()), &paths, it)
+    let asked = m.full_plan_pending().then(|| engine_inputs_in(m, &views).1);
+    let roots = output_roots(m);
+    member_game_path_in(
+        set.map_or("", |v| v.id.as_str()),
+        asked.as_ref(),
+        &roots,
+        it,
+    )
 }
 
-/// `member_game_path` for a member of set `set` over export inputs already built (ruling 3b-F14: the slot menu builds
-/// them once per call, not once per member).
+/// `member_game_path` for a member of set `set`, over what the caller read once per call (rulings 3b-F14, 3b-F16):
+/// the folders (`output_roots`) and, only while a plan is out, the export inputs (`asked`), whose explicit path for
+/// the output is what the pending edit asks for. With the plan current (`asked` is `None`) the settled job's output is
+/// read: the engine may write another file name than the one asked for.
 pub(crate) fn member_game_path_in(
-    m: &AppModel,
     set: &str,
-    paths: &BTreeMap<OutputKey, PathBuf>,
+    asked: Option<&BTreeMap<OutputKey, PathBuf>>,
+    roots: &[PathBuf; 2],
     it: &TextureItem,
 ) -> Result<String, String> {
     if !writes_own_output(it) || it.job_key.is_empty() {
         return Err(format!("{} writes no output", it.name));
     }
-    output_game_path(m, set, paths, it).ok_or_else(|| NO_GAME_PATH.into())
+    // The producing set is passed in (ruling 3b-F14), so no view is searched per member.
+    let key = || {
+        if it.kind == ItemKind::Packed {
+            recipe_suffix(it).map(|suffix| OutputKey::Packed {
+                set: set.to_string(),
+                suffix,
+            })
+        } else {
+            Some(OutputKey::File(it.key.clone()))
+        }
+    };
+    let predicted = asked
+        .and_then(|paths| paths.get(&key()?))
+        .and_then(|p| game_location_of(p));
+    predicted
+        .or_else(|| written_game_location(roots, it))
+        .ok_or_else(|| NO_GAME_PATH.into())
 }
 
-/// Review E1 (Task 15a, rulings 3b-F6 and 3b-F11): the game location of the file `it`'s job writes, spelt as on
-/// disk. The path is the one the job writes: an explicit output path (`paths`, keyed as `item_output_key` keys it, a
-/// packed output by its producing set `set`: a PBR set's under its current prefix, a mapped record path), which the
-/// next plan writes, so it is read before that plan
-/// lands too; else the job's output, under the output folder. Its filesystem components are walked (`.` and empty
-/// parts are gone, as the writer resolves them) and cut at the first `textures` component (ASCII case-insensitive),
-/// then joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as
-/// text. `None` for an output under no `textures` folder (never a `textures\` put in front) and for an item that
-/// writes no output of its own. The link index folds the result with ASCII lower case.
-pub(crate) fn output_game_path(
-    m: &AppModel,
-    set: &str,
-    paths: &BTreeMap<OutputKey, PathBuf>,
-    it: &TextureItem,
-) -> Option<String> {
+/// Review E1 (Task 15a, rulings 3b-F6, 3b-F11 and 3b-F16): the game location of the file `it`'s settled job writes,
+/// spelt as on disk: the job's output under the output folder or the export folder (`roots`, read once per call). An
+/// explicit path asked for is not read: the engine may settle on another file name (a mapped `rock_fuzz.png` typed
+/// `pbr_fuzz` writes `rock_f.dds`). `None` for an output under no `textures` folder, one outside both folders (the
+/// folder changed and the plan has not landed), and an item that writes no output of its own. The link index folds the
+/// result with ASCII lower case, and the views are rebuilt when the output moves (`view_reads` holds it).
+pub(crate) fn written_game_location(roots: &[PathBuf; 2], it: &TextureItem) -> Option<String> {
     let job = it.job.as_ref().filter(|_| writes_own_output(it))?;
     if it.job_key.is_empty() {
         return None;
     }
-    // The producing set is passed in (ruling 3b-F14), so no view is searched per member.
-    let key = if it.kind == ItemKind::Packed {
-        recipe_suffix(it).map(|suffix| OutputKey::Packed {
-            set: set.to_string(),
-            suffix,
-        })
-    } else {
-        Some(OutputKey::File(it.key.clone()))
-    };
-    let explicit = key.and_then(|k| paths.get(&k));
-    let rel: &Path = match explicit {
-        Some(p) => p,
-        // An output outside both folders (the folder changed and the plan has not landed) is read as none.
-        None => [m.output_root(), m.export_root()]
-            .iter()
-            .find_map(|r| job.output.strip_prefix(r).ok())?,
-    };
+    game_location_of(roots.iter().find_map(|r| job.output.strip_prefix(r).ok())?)
+}
+
+/// Ruling 3b-F11: the game location of `rel` (a path under the output folder): its filesystem components (`.` and
+/// empty parts are gone, as the writer resolves them) from the first `textures` component (ASCII case-insensitive) on,
+/// joined with backslashes. Never the manifest's job key (Unicode-lowercased) and never a split of the path as text;
+/// `None` under no `textures` folder (never a `textures\` put in front).
+fn game_location_of(rel: &Path) -> Option<String> {
     let parts: Vec<String> = rel
         .components()
         .filter_map(|c| match c {

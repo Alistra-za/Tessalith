@@ -1655,6 +1655,8 @@ struct Layout {
     toml: &'static str,
     /// Files decided `pbr_albedo` after the folder is opened.
     albedos: &'static [&'static str],
+    /// Other files decided by hand after the folder is opened: (file, sub-type).
+    subtypes: &'static [(&'static str, Subtype)],
     out_name: &'static str,
     slot: u8,
     real: Option<&'static str>,
@@ -1669,6 +1671,7 @@ const LAYOUTS: &[Layout] = &[
         files: &["textures/p/plain.png"],
         toml: "",
         albedos: &[],
+        subtypes: &[],
         out_name: "plain.dds",
         slot: 1,
         real: Some(r"textures\p\plain.dds"),
@@ -1680,6 +1683,7 @@ const LAYOUTS: &[Layout] = &[
         files: &["textures/s/q_roughness.png", "textures/s/q_ao.png"],
         toml: "",
         albedos: &[],
+        subtypes: &[],
         out_name: "q_rmaos.dds",
         slot: 6,
         real: Some(r"textures\s\q_rmaos.dds"),
@@ -1701,6 +1705,7 @@ const LAYOUTS: &[Layout] = &[
                slot6 = \"textures/s/q\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"W\"\n\
                slot6 = \"textures/z/w_rmaos.dds\"\n",
         albedos: &["textures/s/q.png"],
+        subtypes: &[],
         out_name: "w_rmaos.dds",
         slot: 6,
         real: Some(r"textures\z\w_rmaos.dds"),
@@ -1713,6 +1718,7 @@ const LAYOUTS: &[Layout] = &[
         toml: "[[sets]]\nid = \"textures/p/map\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"B\"\n\
                slot1 = \"textures/b/body.dds\"\n",
         albedos: &[],
+        subtypes: &[],
         out_name: "body.dds",
         slot: 1,
         real: Some(r"textures\b\body.dds"),
@@ -1725,6 +1731,7 @@ const LAYOUTS: &[Layout] = &[
         toml: "[[sets]]\nid = \"mod_a/textures/m/x\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"X\"\n\
                slot1 = \"textures/m2/y.dds\"\n",
         albedos: &[],
+        subtypes: &[],
         out_name: "y.dds",
         slot: 1,
         real: Some(r"textures\m2\y.dds"),
@@ -1736,6 +1743,7 @@ const LAYOUTS: &[Layout] = &[
         files: &["arch/leaf.png"],
         toml: "[[sets]]\nid = \"arch/leaf\"\noutput_name = \"maple\"\n",
         albedos: &[],
+        subtypes: &[],
         out_name: "maple.dds",
         slot: 1,
         real: None,
@@ -1747,6 +1755,7 @@ const LAYOUTS: &[Layout] = &[
         files: &["textures/\u{130}/plain.png"],
         toml: "",
         albedos: &[],
+        subtypes: &[],
         out_name: "plain.dds",
         slot: 1,
         real: Some("textures\\\u{130}\\plain.dds"),
@@ -1758,6 +1767,7 @@ const LAYOUTS: &[Layout] = &[
         files: &["textures/k/rock.png"],
         toml: "[[sets]]\nid = \"textures/k/rock\"\nshader = \"pbr\"\n",
         albedos: &["textures/k/rock.png"],
+        subtypes: &[],
         out_name: "wall.dds",
         slot: 1,
         real: Some(r"textures\stone\wall.dds"),
@@ -1769,10 +1779,24 @@ const LAYOUTS: &[Layout] = &[
         files: &["mod_a/textures/a/textures/b.png"],
         toml: "",
         albedos: &[],
+        subtypes: &[],
         out_name: "b.dds",
         slot: 1,
         real: Some(r"textures\a\textures\b.dds"),
         invented: &[r"textures\b.dds"],
+        json: &[],
+    },
+    Layout {
+        name: "a mapped fuzz map the engine renames (rock_fuzz to rock_f)",
+        files: &["textures/r/rock_fuzz.png"],
+        toml: "[[sets]]\nid = \"textures/r/rock\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\nedid = \"R\"\n\
+               slot7 = \"textures/z/rock_fuzz.dds\"\n",
+        albedos: &[],
+        subtypes: &[("textures/r/rock_fuzz.png", Subtype::PbrFuzz)],
+        out_name: "rock_f.dds",
+        slot: 7,
+        real: Some(r"textures\z\rock_f.dds"),
+        invented: &[r"textures\z\rock_fuzz.dds"],
         json: &[],
     },
 ];
@@ -1799,6 +1823,9 @@ fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
     let mut m = opened_as_the_app(dir.to_path_buf(), dir.join("export"));
     for f in layout.albedos.iter().chain(&["textures/c/con.png"]) {
         m.decide(f, Answer::Subtype(Subtype::PbrAlbedo));
+    }
+    for (f, s) in layout.subtypes {
+        m.decide(f, Answer::Subtype(*s));
     }
     for (set, key, value) in layout.json {
         m.set_json_value(set, key, Some(json!(value)));
@@ -1919,6 +1946,12 @@ fn the_output_index_holds_where_each_file_is_written() {
         };
         let key = format!("slot{}", layout.slot);
         if let Some(real) = layout.real {
+            // Ruling 3b-F16: with the plan current, From another set offers the written file's path.
+            assert_eq!(
+                member_game_path(&m, &producer.key).map(|p| p.to_ascii_lowercase()),
+                Ok(real.to_ascii_lowercase()),
+                "{case}: the picker's path"
+            );
             m.set_json_value(CONSUMER, &key, Some(json!(real)));
             let l = con(&m).linked[&layout.slot].clone();
             assert_eq!(l.from.as_deref(), Some(set.as_str()), "{case}: {real}");
@@ -1991,6 +2024,11 @@ fn the_slot_menu_builds_the_export_inputs_once_per_call() {
     assert!(links(&m) >= 3, "premise: three members listed");
     let once = engine_input_builds() - before;
     assert!(once <= 1, "one menu built the export inputs {once} times");
+    // Ruling 3b-F16: the output and export folders are read once per menu call, not per listed member.
+    let roots = sdc_gui::model::sets::output_root_reads();
+    let _ = links(&m);
+    let reads = sdc_gui::model::sets::output_root_reads() - roots;
+    assert!(reads <= 1, "one menu read the folders {reads} times");
     let before = engine_input_builds();
     let _ = links(&m);
     assert!(
@@ -1998,4 +2036,65 @@ fn the_slot_menu_builds_the_export_inputs_once_per_call() {
         "a second frame: {}",
         engine_input_builds() - before
     );
+}
+
+/// Ruling 3b-F16: a link resolved against a mapped output is not carried across the plan that moves the output back.
+/// `textures/İ/plain` is mapped to `textures\i\u{307}\plain.dds` (the same job key once Unicode-lowercased) and the
+/// consumer names that file; after the mapping is removed and the new plan lands, the file is written at
+/// `textures\İ\plain.dds`, so the consumer's slot names no written file: an external path, with no dependency.
+#[test]
+fn a_link_is_recomputed_when_the_plan_moves_its_output_back() {
+    let layout = Layout {
+        name: "mapped to the combining-dot spelling",
+        files: &["textures/\u{130}/plain.png"],
+        toml: "[[sets]]\nid = \"textures/\u{130}/plain\"\n[sets.txst]\nplugin = \"a.esp\"\nformid = \"1\"\n\
+               edid = \"P\"\nslot1 = \"textures/i\u{307}/plain.dds\"\n",
+        albedos: &[],
+        subtypes: &[],
+        out_name: "plain.dds",
+        slot: 1,
+        real: None,
+        invented: &[],
+        json: &[],
+    };
+    let old = "textures\\i\u{307}\\plain.dds";
+    let d = tempfile::tempdir().unwrap();
+    let mut m = layout_project(d.path(), &layout);
+    let producer = m
+        .items
+        .iter()
+        .find(|i| i.key.ends_with("plain.png"))
+        .expect("premise: the producer")
+        .clone();
+    assert!(
+        producer
+            .job
+            .as_ref()
+            .is_some_and(|j| j.output.to_string_lossy().contains("i\u{307}")),
+        "premise: the mapped output: {:?}",
+        producer.job.as_ref().map(|j| &j.output)
+    );
+    m.set_json_value(CONSUMER, "slot1", Some(json!(old)));
+    let link =
+        |m: &AppModel| views(m).iter().find(|v| v.id == CONSUMER).unwrap().linked[&1].clone();
+    assert!(
+        link(&m).from.is_some(),
+        "premise: linked to the mapped output"
+    );
+    m.unmap_record("textures/\u{130}/plain").unwrap();
+    // The views are built while the new plan is out, so they read the old output.
+    let _ = views(&m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let moved = m.item(&producer.key).unwrap().clone();
+    assert_eq!(moved.job_key, producer.job_key, "premise: the same job key");
+    assert!(
+        moved
+            .job
+            .as_ref()
+            .is_some_and(|j| j.output.to_string_lossy().contains("\u{130}")),
+        "premise: the output moved back: {:?}",
+        moved.job.as_ref().map(|j| &j.output)
+    );
+    let l = link(&m);
+    assert_eq!(l.from, None, "the link is recomputed: {l:?}");
 }
