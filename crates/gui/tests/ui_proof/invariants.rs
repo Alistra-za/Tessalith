@@ -57,6 +57,19 @@ pub trait Entry {
     fn reopen(&mut self, _size: Vec2) -> Result<(), String> {
         Err("this entry cannot be reopened".into())
     }
+    /// Drops what the entry holds open (a window and its folders) once the walk is done with it.
+    fn release(&mut self) {}
+}
+
+/// `snap` when it was taken at `size`, else an error: a frame of another size is not a visit at this one.
+fn at_the_size(snap: Snapshot, size: Vec2) -> Result<Snapshot, String> {
+    if (snap.size - size).abs().max_elem() > 0.5 {
+        return Err(format!(
+            "the frame is {}x{}, not the {}x{} asked for, so it is no visit at this size",
+            snap.size.x, snap.size.y, size.x, size.y
+        ));
+    }
+    Ok(snap)
 }
 
 /// What one key did to a screen, besides the files (those are hashed).
@@ -973,6 +986,7 @@ pub fn walk(
             let snap = match e
                 .at(size)
                 .and_then(|snap| no_stray_dialog(&snap, e.dialog()).map(|()| snap))
+                .and_then(|snap| at_the_size(snap, size))
             {
                 Ok(snap) => snap,
                 Err(why) => {
@@ -1030,6 +1044,8 @@ pub fn walk(
         if e.takes_keys() {
             press_keys(&mut **e, SIZES[1], &mut walked);
         }
+        // the pairwise marker check below reads only the kept middle frame and the marker
+        e.release();
     }
     for (a, ea) in entries.iter().enumerate() {
         for (b, eb) in entries.iter().enumerate() {
@@ -2061,6 +2077,34 @@ fn a_failed_visit_is_collected_and_the_walk_goes_on() {
         "{:?}",
         walked.hits
     );
+}
+
+/// A frame of another size than the one asked for is an error of that size, never a visit credited to it.
+#[test]
+fn a_frame_of_another_size_is_an_error() {
+    struct OneSize;
+    impl Entry for OneSize {
+        fn name(&self) -> &str {
+            "test-only one-size screen"
+        }
+        fn marker(&self) -> &'static [Needle] {
+            FAULTY_MARKER
+        }
+        fn at(&mut self, _size: Vec2) -> Result<Snapshot, String> {
+            Faulty.at(SIZES[1])
+        }
+    }
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(OneSize)];
+    let walked = walk(&mut list, &mut real_checker);
+    assert_eq!(
+        walked.errors,
+        [
+            "test-only one-size screen at 1100x800: the frame is 1280x800, not the 1100x800 asked for, so it is no visit at this size",
+            "test-only one-size screen at 1600x900: the frame is 1280x800, not the 1600x900 asked for, so it is no visit at this size",
+        ]
+    );
+    let sizes: Vec<(f32, f32)> = walked.visits.iter().map(|v| v.size).collect();
+    assert_eq!(sizes, [(1280.0, 800.0)]);
 }
 
 /// A shipped-kind entry whose `open` panics is a collected failure naming screen and size; a clean entry beside it is

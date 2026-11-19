@@ -771,6 +771,10 @@ impl Entry for ScreenEntry {
         self.open = Some((d, h));
         Ok(())
     }
+
+    fn release(&mut self) {
+        self.open = None;
+    }
 }
 
 /// Every screen of `SCREENS`, each as one entry.
