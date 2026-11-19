@@ -581,6 +581,7 @@ fn finish_leaves_out_sets_whose_outputs_did_not_export() {
         ],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     let rows = vec![
         Row {
@@ -639,6 +640,7 @@ fn finish_with_every_set_failed_keeps_the_old_json_even_with_a_delete_section() 
         ],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     let rows = vec![Row {
         job_key: "a/one.dds".into(),
@@ -665,6 +667,7 @@ fn finish_with_every_set_failed_keeps_the_old_json_even_with_a_delete_section() 
         entries: vec![("delete section 1".into(), vec![], section)],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     let mut notes = vec![];
     assert_eq!(
@@ -702,6 +705,7 @@ fn finish_copies_borrowed_slots_and_skips_what_did_not_export() {
             (stale, dir.path().join("y.dds"), "o/stale.dds".into()),
         ],
         untouched_root: None,
+        held: vec![],
     };
     let row = |k: &str, state| Row {
         job_key: k.into(),
@@ -831,6 +835,7 @@ fn an_unfinished_export_writes_no_json_and_says_why() {
         entries: vec![("a/one".into(), vec![], Default::default())],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     assert_eq!(
         unfinished_note(&p, false).as_deref(),
@@ -848,6 +853,7 @@ fn an_unfinished_export_writes_no_json_and_says_why() {
         entries: vec![],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     assert_eq!(unfinished_note(&v, false), None);
 }
@@ -870,6 +876,7 @@ fn an_identical_file_on_disk_is_not_asked_about() {
         )],
         copies: vec![],
         untouched_root: None,
+        held: vec![],
     };
     let rows = vec![Row {
         job_key: "a/one.dds".into(),
@@ -1368,6 +1375,7 @@ fn an_unfinished_vanilla_export_says_the_copies_were_not_made() {
         entries: vec![],
         copies: vec![("a.dds".into(), "b_n.dds".into(), "a.dds".into())],
         untouched_root: None,
+        held: vec![],
     };
     assert_eq!(
         unfinished_note(&p, true).as_deref(),

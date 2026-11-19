@@ -409,60 +409,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
         if m.target == Target::Cs && !m.pgp_entry_wanted(v) {
             continue;
         }
-        if clash(v, SlotKind::Coat, SlotKind::Fuzz) {
-            out.push(issue(v, format!("{}: _cnr and _f both use slot 7", v.id)));
-        }
-        if clash(v, SlotKind::Emissive, SlotKind::SkinSk) {
-            out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
-        }
-        if m.target != Target::Cs || !v.json {
-            continue;
-        }
-        let s = &v.settings;
-        for text in missing_texture_texts(&v.id, s, |k| has(v, k)) {
-            out.push(issue(v, text));
-        }
-        for (f, _) in FEATURE_KEYS {
-            if let Some(b) = feature_on(s, f).then(|| blocked_by(s, f)).flatten() {
-                if f < b {
-                    let text = format!(
-                        "{}: {} and {} can't both be on",
-                        v.id,
-                        feature_key(f).trim_end_matches("_on"),
-                        feature_key(b).trim_end_matches("_on")
-                    );
-                    // P26, owner 2026-11-04 (Note FN5): the row offers to turn off either one.
-                    out.push(ExportIssue {
-                        fix: Some(Fix::FeatureClash(v.id.clone(), f, b)),
-                        ..issue(v, text)
-                    });
-                }
-            }
-        }
-        // Note FC3 (P13): every path error starts with its field's key; the row goes to that field when it has a box
-        // to focus, else it keeps Go to set.
-        let fix_path = |e: &str| {
-            let field = e.split_once(':').map_or(e, |(f, _)| f);
-            // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
-            crate::pgp::prefix::is_path_key(field)
-                .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
-        };
-        if let Some(e) = &v.prefix_error {
-            out.push(ExportIssue {
-                fix: fix_path(e),
-                ..issue(v, format!("{}: {e}", v.id))
-            });
-        }
-        for n in 1..=8u8 {
-            if let Some(Value::String(p)) = s.get(&format!("slot{n}")) {
-                if !p.is_empty() {
-                    if let Err(e) = check_json_path(p, &format!("slot{n}")) {
-                        // Slot paths have no focusable box (the JSON editor holds them): the row offers Go to set.
-                        out.push(issue(v, format!("{}: {}", v.id, e.0)));
-                    }
-                }
-            }
-        }
+        out.extend(set_blocks(m, v));
     }
     out.extend(path_collisions(m));
     if m.target == Target::Cs {
@@ -481,14 +428,7 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                     .iter()
                     .filter(|v| v.json && m.pgp_entry_wanted(v) && m.in_run(&v.key))
                 {
-                    for (n, from) in unresolved_slots(v, &views, &paths, m) {
-                        let text = match from {
-                            Some(from) => format!(
-                                "{}: slot{n} borrows from {from}, which has no output path",
-                                v.id
-                            ),
-                            None => format!("{}: slot{n}'s texture has no output path", v.id),
-                        };
+                    for text in unresolved_texts(v, &views, &paths, m) {
                         out.push(issue(v, text));
                     }
                 }
@@ -501,6 +441,86 @@ fn build_blocks(m: &AppModel) -> Vec<ExportIssue> {
                     "PGPatcher JSON does not validate: {}",
                     errs[0]
                 )));
+            }
+        }
+    }
+    out
+}
+
+/// The blocks `unresolved_slots` raises for one set, each starting with its id.
+fn unresolved_texts(
+    v: &SetView,
+    views: &[SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+    m: &AppModel,
+) -> Vec<String> {
+    unresolved_slots(v, views, paths, m)
+        .into_iter()
+        .map(|(n, from)| match from {
+            Some(from) => format!(
+                "{}: slot{n} borrows from {from}, which has no output path",
+                v.id
+            ),
+            None => format!("{}: slot{n}'s texture has no output path", v.id),
+        })
+        .collect()
+}
+
+/// One set's own blocks: the slot clashes and, for a JSON set on CS, its missing textures, feature clashes and path
+/// errors. Export reads them for the sets in the run, and `prepare` for the entries it keeps from outside it (3b-F7).
+fn set_blocks(m: &AppModel, v: &SetView) -> Vec<ExportIssue> {
+    let mut out = vec![];
+    if clash(v, SlotKind::Coat, SlotKind::Fuzz) {
+        out.push(issue(v, format!("{}: _cnr and _f both use slot 7", v.id)));
+    }
+    if clash(v, SlotKind::Emissive, SlotKind::SkinSk) {
+        out.push(issue(v, format!("{}: _g and _sk both use slot 3", v.id)));
+    }
+    if m.target != Target::Cs || !v.json {
+        return out;
+    }
+    let s = &v.settings;
+    for text in missing_texture_texts(&v.id, s, |k| has(v, k)) {
+        out.push(issue(v, text));
+    }
+    for (f, _) in FEATURE_KEYS {
+        if let Some(b) = feature_on(s, f).then(|| blocked_by(s, f)).flatten() {
+            if f < b {
+                let text = format!(
+                    "{}: {} and {} can't both be on",
+                    v.id,
+                    feature_key(f).trim_end_matches("_on"),
+                    feature_key(b).trim_end_matches("_on")
+                );
+                // P26, owner 2026-11-04 (Note FN5): the row offers to turn off either one.
+                out.push(ExportIssue {
+                    fix: Some(Fix::FeatureClash(v.id.clone(), f, b)),
+                    ..issue(v, text)
+                });
+            }
+        }
+    }
+    // Note FC3 (P13): every path error starts with its field's key; the row goes to that field when it has a box
+    // to focus, else it keeps Go to set.
+    let fix_path = |e: &str| {
+        let field = e.split_once(':').map_or(e, |(f, _)| f);
+        // `rename` has its box in the Advanced group, `match1`-`match8` theirs in the main panel's Matching group.
+        crate::pgp::prefix::is_path_key(field)
+            .then(|| Fix::FixPath(v.key.clone(), field.to_string()))
+    };
+    if let Some(e) = &v.prefix_error {
+        out.push(ExportIssue {
+            fix: fix_path(e),
+            ..issue(v, format!("{}: {e}", v.id))
+        });
+    }
+    for n in 1..=8u8 {
+        if let Some(Value::String(p)) = s.get(&format!("slot{n}")) {
+            if !p.is_empty() {
+                if let Err(e) = check_json_path(p, &format!("slot{n}")) {
+                    // Slot paths have no focusable box (the JSON editor holds them): the row offers Go to set.
+                    out.push(issue(v, format!("{}: {}", v.id, e.0)));
+                }
             }
         }
     }
@@ -646,6 +666,9 @@ pub struct PendingJson {
     /// Note HF9: on a run that leaves sets out, the plan's output root: a dep with no row passes when its file is
     /// there. `None`: every dep needs its row, as before.
     pub untouched_root: Option<PathBuf>,
+    /// 3b-F7: entries of sets outside the run that their own checks refuse, as (set id, why); `finish` notes each as
+    /// "not in JSON" and writes the rest.
+    pub held: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -704,6 +727,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             entries: vec![],
             copies,
             untouched_root: m.untouched_root(),
+            held: vec![],
         });
     }
     // Review E1 (Task 15a): the local files the JSON names (`json_files`): a link that names a set's output is a dep as
@@ -722,11 +746,24 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             })
             .collect()
     };
+    // 3b-F7: a set outside the run gates nothing (Note HF9), so its entry goes in only when its own checks pass.
+    let (_, paths) = engine_inputs(m);
+    let refused = |v: &SetView| -> Option<String> {
+        let mut why = set_blocks(m, v).into_iter().map(|i| i.text);
+        let text = why
+            .next()
+            .or_else(|| unresolved_texts(v, &views, &paths, m).into_iter().next())?;
+        let prefix = format!("{}: ", v.id);
+        Some(text.strip_prefix(&prefix).unwrap_or(&text).to_string())
+    };
+    let (mut entries, mut held) = (vec![], vec![]);
     // Design §5.1: a set with a texture-set block gets its entry only for the statics that use its diffuse.
-    let mut entries: Vec<_> = written_json_entries(m)
-        .into_iter()
-        .map(|(v, e)| (v.id.clone(), deps(&v), e))
-        .collect();
+    for (v, e) in written_json_entries(m) {
+        match (!m.in_run(&v.key)).then(|| refused(&v)).flatten() {
+            Some(why) => held.push((v.id.clone(), why)),
+            None => entries.push((v.id.clone(), deps(&v), e)),
+        }
+    }
     // GUI tweaks G4: the delete sections go last, so nothing after them changes the shapes they match.
     for (i, s) in m.sections().into_iter().enumerate() {
         if crate::model::sections::written(&s) {
@@ -738,7 +775,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
             entries.push((format!("delete section {}", i + 1), vec![], e));
         }
     }
-    if entries.is_empty() {
+    if entries.is_empty() && held.is_empty() {
         return None;
     }
     let root = m.output_root();
@@ -750,6 +787,7 @@ pub fn prepare(m: &AppModel) -> Option<PendingJson> {
         copies: vec![],
         root,
         untouched_root: m.untouched_root(),
+        held,
     })
 }
 
@@ -831,6 +869,9 @@ pub fn finish(
     last_sha: Option<&str>,
     notes: &mut Vec<String>,
 ) -> Finish {
+    for (id, why) in &p.held {
+        notes.push(format!("not in JSON: {id} ({why})"));
+    }
     if p.entries.is_empty() {
         return Finish::Nothing;
     }

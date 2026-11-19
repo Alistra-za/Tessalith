@@ -1138,7 +1138,8 @@ const GUARD_JSON: &str = r#"{
 }
 "#;
 
-/// Task 15a's guard, written first and kept unchanged through the task: on a project with no link and no clear, the
+/// Task 15a's guard, written first and kept unchanged through the task (fix round 1 changed one note's reason, under
+/// 3b-F7): on a project with no link and no clear, the
 /// export blocks and the written PGPatcher JSON are what the task's base gave (captured there). The `_cnr` + `_f` set
 /// blocks a whole export, so the JSON is taken from a whole export with that set's group excluded.
 #[test]
@@ -1165,7 +1166,8 @@ fn with_no_link_and_no_clear_export_blocks_and_writes_what_it_did() {
             .lines()
             .filter(|l| l.starts_with("not in JSON"))
             .collect::<Vec<_>>(),
-        ["not in JSON: arch/lacq (not exported yet)"]
+        // 3b-F7 (fix round 1): the excluded set's own clash now holds its entry; the base said "not exported yet".
+        ["not in JSON: arch/lacq (_cnr and _f both use slot 7)"]
     );
 }
 
@@ -1307,4 +1309,67 @@ fn a_borrow_under_a_link_is_no_dependency() {
         "premise: the lender was left out: {files:?}"
     );
     assert!(entry.is_some(), "{}", notes(&m));
+}
+
+// ---- Task 15a fix round 1 (ruling 3b-F7): an entry left out of the run passes the run's own checks ----
+
+/// 3b-F7: an entry left out of the run that the run's own checks would refuse (Parallax on with its height cleared) is
+/// held with the "not in JSON" note naming why, and the selected sets still export.
+#[test]
+fn an_entry_left_out_of_the_run_is_held_when_its_own_checks_refuse_it() {
+    use engine::config::Subtype;
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("leaf_p.png", [128, 128, 128], Subtype::Height)],
+    );
+    m.set_json_value("arch/leaf", "parallax", Some(json!(true)));
+    whole(&mut m);
+    assert!(
+        what_the_run_left(&m).1.is_some(),
+        "premise: the entry is written while it has its height: {}",
+        notes(&m)
+    );
+    m.set_json_value("arch/leaf", "slot4", Some(json!("")));
+    group(&mut m, "Leaf", &["arch/leaf"]);
+    m.set_group_excluded("Leaf", true).unwrap();
+    idle(&mut m);
+    assert!(
+        sdc_gui::model::pbr_export::export_blocks(&m).is_empty(),
+        "an entry outside the run blocks nothing: {:?}",
+        sdc_gui::model::pbr_export::export_blocks(&m)
+    );
+    whole(&mut m);
+    let (_, entry, held) = what_the_run_left(&m);
+    assert_eq!(
+        held,
+        ["not in JSON: arch/leaf (parallax is on but the set has no height texture (_p))"],
+        "{}",
+        notes(&m)
+    );
+    assert!(entry.is_none(), "{entry:?}");
+    assert!(
+        pgp_text(&m).contains(r"arch\\wall.dds"),
+        "the run's own set is written"
+    );
+}
+
+/// 3b-F7 (pin): an entry's dependencies are the local files its slots name, for a clear as for a link, so a clear over
+/// a borrow from a never-exported set left out of the run lets the entry in.
+#[test]
+fn a_clear_over_a_never_exported_borrow_lets_the_entry_in() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = lender_project(d.path());
+    leaf_takes_stone(&mut m, false);
+    m.set_json_value("arch/leaf", "slot4", Some(json!("")));
+    group(&mut m, "Lender", &["arch/stone"]);
+    m.set_group_excluded("Lender", true).unwrap();
+    whole(&mut m);
+    let (files, entry, held) = what_the_run_left(&m);
+    assert!(
+        !files.iter().any(|f| f.ends_with("stone_p.dds")),
+        "premise: the lender was left out: {files:?}"
+    );
+    assert!(!held.iter().any(|l| l.contains("arch/leaf")), "{held:?}");
+    assert_eq!(entry.expect("the entry is written")["slot4"], json!(""));
 }
