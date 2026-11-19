@@ -1267,8 +1267,8 @@ fn a_shared_normal_keeps_its_alpha_while_a_regular_set_uses_it() {
     assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
 }
 
-/// N-10 (b), N-27: the user's Remove on a listed key is files-only and keeps the listing, and a value the user wrote
-/// over the step's is never taken back, Data included.
+/// N-10 (b), N8-p: the user's Remove on a listed key takes the entry off in the Remove's own step (its table no longer
+/// holds `data`), and a value the user wrote over the step's is never taken back, Data included.
 #[test]
 fn the_users_alpha_on_a_shared_normal_is_never_taken_back() {
     let d = tempfile::tempdir().unwrap();
@@ -1279,10 +1279,13 @@ fn the_users_alpha_on_a_shared_normal_is_never_taken_back() {
         Some(json!("data")),
         "precondition: the step wrote it"
     );
-    let rev = m.sets_doc.as_ref().unwrap().rev();
     m.set_alpha(IRON_N, AlphaPolicy::Remove);
+    assert!(
+        m.sets_doc.as_ref().unwrap().auto_data().is_empty(),
+        "the entry leaves the list in the Remove's step"
+    );
+    assert_eq!(m.undo_label(), Some("Alpha"));
     settle(&mut m);
-    assert_eq!(m.sets_doc.as_ref().unwrap().rev(), rev, "files-only");
     m.set_alpha(IRON_N, AlphaPolicy::Data);
     settle(&mut m);
     assert!(
@@ -1598,6 +1601,10 @@ fn auto_data(m: &AppModel) -> Vec<String> {
     m.sets_doc.as_ref().unwrap().auto_data()
 }
 
+/// `sdc-project.toml` as saved: `pbr/iron_n.png` listed, and `armor/steel` borrowing `pbr/iron`'s slot 2. Written as a
+/// file, not by a seed step: since N8-p a step that runs the follow-on drops an entry whose own table holds no `data`.
+const LISTED_AND_BORROWED: &str = "[project]\nauto_data = [\"pbr/iron_n.png\"]\n\n[[sets]]\nid = \"armor/steel\"\nborrow = { slot2 = \"pbr/iron\" }\n";
+
 /// N8-a (Task 8a round 1, finding 1): the user's `alpha.policy = "remove"` under the extension-less spelling and the
 /// `subtype` under the full name. The engine applies both tables, so the alpha is the user's: the share writes no
 /// `data` in either and lists nothing.
@@ -1675,13 +1682,10 @@ fn ending_a_share_leaves_the_users_data_under_another_spelling() {
     .unwrap();
     std::fs::write(
         d.path().join("textures/sdc-project.toml"),
-        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+        LISTED_AND_BORROWED,
     )
     .unwrap();
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
-    m.edit_docs("seed", None, true, |_, s| {
-        s.set_borrow("armor/steel", 2, Some("pbr/iron"))
-    });
     settle(&mut m);
     assert!(
         !m.project.as_ref().unwrap().has_file_key(IRON_N),
@@ -1900,21 +1904,23 @@ fn a_normal_retyped_before_its_plan_lands_gets_no_data() {
     assert_eq!(held(&m, IRON_N, "alpha.policy"), None);
 }
 
-/// N8-c (finding 5): a listed key the user reset, then retyped as a diffuse (so no set's Normal slot holds it), then
-/// confirmed Data on: that `data` is the user's. It stays after the step and after a later step that ends the share,
-/// and the key is off the list.
+/// N8-c (finding 5): as saved, a listed key with no alpha (reset), retyped as a diffuse (so no set's Normal slot holds
+/// it), which `armor/steel` borrows; the user's first step confirms Data on it: that `data` is the user's. It stays
+/// after the step and after a later step that ends the share, and the key is off the list. (Written as files: since
+/// N8-p a step that runs the follow-on drops such an entry, so only a project opened so reaches the Data pick with it.)
 #[test]
 fn a_confirmed_data_on_a_listed_key_is_the_users() {
     use sdc_gui::model::sets::SlotCommand;
     let d = tempfile::tempdir().unwrap();
-    let mut m = two_sets(d.path());
-    share(&mut m, IRON_N, "armor/steel");
-    assert_eq!(
-        auto_data(&m),
-        vec![IRON_N.to_string()],
-        "precondition: the share listed it"
-    );
-    m.clear_alpha(IRON_N);
+    two_sets_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.\"pbr/iron_n.png\"]\nsubtype = \"diffuse\"\n",
+    )
+    .unwrap();
+    std::fs::write(t.join("sdc-project.toml"), LISTED_AND_BORROWED).unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
     settle(&mut m);
     assert_eq!(
         held(&m, IRON_N, "alpha.policy"),
@@ -1924,10 +1930,8 @@ fn a_confirmed_data_on_a_listed_key_is_the_users() {
     assert_eq!(
         auto_data(&m),
         vec![IRON_N.to_string()],
-        "precondition: a reset leaves the entry (N-27)"
+        "precondition: listed"
     );
-    m.decide(IRON_N, Answer::Subtype(Subtype::Diffuse));
-    settle(&mut m);
     assert_ne!(
         normal_owner(&m, "pbr/iron").as_deref(),
         Some(IRON_N),
@@ -2042,13 +2046,10 @@ fn ending_the_share_over(table: &str) -> (tempfile::TempDir, AppModel) {
     .unwrap();
     std::fs::write(
         d.path().join("textures/sdc-project.toml"),
-        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+        LISTED_AND_BORROWED,
     )
     .unwrap();
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
-    m.edit_docs("seed", None, true, |_, s| {
-        s.set_borrow("armor/steel", 2, Some("pbr/iron"))
-    });
     settle(&mut m);
     assert!(
         !m.project.as_ref().unwrap().has_file_key(IRON_N),
@@ -2101,13 +2102,10 @@ fn ending_a_share_leaves_the_users_data_in_a_unicode_twin() {
     .unwrap();
     std::fs::write(
         d.path().join("textures/sdc-project.toml"),
-        "[project]\nauto_data = [\"pbr/ärz_n.png\"]\n",
+        "[project]\nauto_data = [\"pbr/ärz_n.png\"]\n\n[[sets]]\nid = \"armor/steel\"\nborrow = { slot2 = \"pbr/ärz\" }\n",
     )
     .unwrap();
     let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
-    m.edit_docs("seed", None, true, |_, s| {
-        s.set_borrow("armor/steel", 2, Some("pbr/ärz"))
-    });
     settle(&mut m);
     assert!(
         !m.project.as_ref().unwrap().has_file_key(ARZ_N),
@@ -2404,13 +2402,20 @@ fn aged(p: &Path) {
 fn a_crash_restore_keeps_the_list_it_restores() {
     use sdc_gui::model::sets::SlotCommand;
     let d = tempfile::tempdir().unwrap();
-    let mut m = two_sets(d.path());
-    share(&mut m, IRON_N, "armor/steel");
-    m.clear_alpha(IRON_N);
+    two_sets_files(d.path());
+    // As saved (written as a file: since N8-p a step that runs the follow-on drops such an entry).
+    std::fs::write(
+        d.path().join("textures/sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
     settle(&mut m);
-    m.set_slot_command("armor/steel", 2, SlotCommand::Clear)
-        .unwrap();
-    settle(&mut m);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        None,
+        "precondition: reset"
+    );
     assert_eq!(
         auto_data(&m),
         vec![IRON_N.to_string()],
@@ -2465,7 +2470,8 @@ fn a_failed_write_leaves_the_list_as_it_was() {
     settle(&mut m);
     let start = vec![IRON_N.to_string(), "x/stale.png".to_string()];
     let l = start.clone();
-    m.edit_docs("seed", None, true, move |_, s| s.set_auto_data(&l));
+    // No plan, so no follow-on: since N8-p one would drop both entries (neither table holds `data`).
+    m.edit_docs("seed", None, false, move |_, s| s.set_auto_data(&l));
     settle(&mut m);
     assert_eq!(auto_data(&m), start, "precondition");
     m.fail_shared_alpha_write = true;
@@ -2784,4 +2790,87 @@ fn the_exact_remover_touches_only_its_own_table_while_it_holds_the_value() {
         p.file_value("pbr/iron_n.png", "alpha.policy"),
         Some(json!("remove"))
     );
+}
+
+/// N8-p (round 4, the reviewer's sequence): the listed table was re-spelled by hand, so no table is spelled as the
+/// entry. The next user step that runs the follow-on drops the entry, in that step's own Undo step. Later the user writes
+/// their own `data` under the original spelling, between sessions: the next step leaves it, as nothing lists it.
+#[test]
+fn an_entry_whose_table_is_gone_leaves_the_list_in_the_next_step() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        t.join("sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(t.clone(), d.path().join("export"));
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table spelled as the entry"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.set_alpha("armor/steel.png", AlphaPolicy::Remove);
+    assert!(auto_data(&m).is_empty(), "the stale entry is dropped");
+    assert_eq!(m.undo_label(), Some("Alpha"), "in the user's own step");
+    m.undo();
+    assert_eq!(
+        auto_data(&m),
+        vec![IRON_N.to_string()],
+        "one Undo brings both back"
+    );
+    assert_eq!(held(&m, "armor/steel.png", "alpha.policy"), None);
+    m.redo();
+    settle(&mut m);
+    m.save().expect("saved");
+    drop(m);
+    let mut text = std::fs::read_to_string(t.join("sdc.toml")).unwrap();
+    text.push_str("\n[files.'pbr/iron_n.png']\nalpha.policy = \"data\"\n");
+    std::fs::write(t.join("sdc.toml"), text).unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    assert!(
+        m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: the user's own table under the original spelling"
+    );
+    m.set_alpha("armor/steel.png", AlphaPolicy::Data);
+    assert_eq!(
+        m.project
+            .as_ref()
+            .unwrap()
+            .file_value(IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the user's data stays"
+    );
+}
+
+/// N8-p: an entry whose exact table holds another value is dropped too, in a step that writes and clears nothing.
+#[test]
+fn an_entry_whose_table_holds_another_value_leaves_the_list() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'pbr/iron_n.png']\nalpha.policy = \"remove\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        t.join("sdc-project.toml"),
+        "[project]\nauto_data = [\"pbr/iron_n.png\"]\n",
+    )
+    .unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.set_alpha("armor/steel.png", AlphaPolicy::Remove);
+    assert!(auto_data(&m).is_empty(), "the stale entry is dropped");
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("remove")));
 }

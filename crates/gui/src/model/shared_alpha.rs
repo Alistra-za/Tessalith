@@ -4,9 +4,10 @@
 //! follow-on compares the share before and after the step, both read inside it: it writes `alpha.policy = "data"` on
 //! each owner's own Normal-slot file that became shared so, and lists it in `[project] auto_data`; it re-checks every
 //! listed key and clears a value still `data` that no regular set shares. Nothing else is stored between steps. It
-//! never runs in an automatic step (`AppModel::automatic_step`). A listed key the user moved to another value no
-//! longer counts (the edit stays files-only); a user's Data pick takes the key off (N-34). What a step cannot see (a
-//! set's automatic shader and its Normal-slot member are the last plan's) is Task 9's Note row.
+//! never runs in an automatic step (`AppModel::automatic_step`). A listed key whose own table the user moved to another
+//! value or removed leaves the list in the next step the follow-on runs in (N8-p); a user's Data pick takes the key off
+//! (N-34). What a step cannot see (a set's automatic shader and its Normal-slot member are the last plan's) is Task 9's
+//! Note row.
 use super::normal_follow::tangent;
 use super::sets::{locked_items, own_fills, views, SlotFill, SlotKind};
 use super::AppModel;
@@ -527,7 +528,7 @@ fn distinct(list: Vec<String>) -> Vec<String> {
 }
 
 /// One run, from the documents as the step left them: `data` on each key shared now and not at `b`; every listed key
-/// no regular set shares, still `data`, cleared (N-33).
+/// no regular set shares, still `data`, cleared (N-33); an entry whose own table no longer holds `data` dropped (N8-p).
 fn changes(
     f: &Facts,
     b: &Before,
@@ -553,7 +554,12 @@ fn changes(
     let (now, unsure) = (&sh.out, &sh.unsure);
     let data = Some(json!("data"));
     let raw = s.auto_data();
-    let start = distinct(raw.clone());
+    // N8-p: the list holds only what is still true. Before any clear is decided, an entry whose exact table is absent
+    // or holds no `data` is dropped; the drop is a list-only change in this step. An entry comes back only through the
+    // step's own write.
+    let true_now = |k: &String| tables.exact_alpha(k) == data;
+    let stale = !raw.iter().all(true_now);
+    let start: Vec<String> = distinct(raw.clone()).into_iter().filter(true_now).collect();
     // N8-a, N8-j, N8-o: alpha is read as Task 6 reads it, from every `[files]` table that matches the file, through the
     // step's one index of the document after the edit; each file asks two lookups.
     // N8-f: a key any borrower makes unsure is not written either.
@@ -575,20 +581,18 @@ fn changes(
     }
     let (locked, now_f, unsure_f) = (all_forms(&f.locked), all_forms(now), all_forms(unsure));
     for k in &start {
-        // N8-e: only the `data` the share step wrote: the table spelled exactly as the entry; a `data` in any other
-        // table is the user's.
-        let ours = tables.exact_alpha(k) == data && !names(k, &locked);
+        // N8-e: only the `data` the share step wrote: the table spelled exactly as the entry (every entry left in
+        // `start` holds it); a `data` in any other table is the user's.
         // N8-b: in a `blind` step a borrow may read any of them.
-        if ours && !names(k, &now_f) && !names(k, &unsure_f) && !sh.blind {
+        if !names(k, &locked) && !names(k, &now_f) && !names(k, &unsure_f) && !sh.blind {
             c.clear.push(k.clone());
         }
     }
-    if !c.write.is_empty() || !c.clear.is_empty() {
-        // N-27: stale entries (no longer `data`) are pruned only on this, Tessalith's own, write.
+    if stale || !c.write.is_empty() || !c.clear.is_empty() {
         let cleared: HashSet<&String> = c.clear.iter().collect();
         let mut l: Vec<String> = start
             .iter()
-            .filter(|k| !cleared.contains(k) && tables.exact_alpha(k) == data)
+            .filter(|k| !cleared.contains(k))
             .cloned()
             .collect();
         let mut kept: HashSet<String> = l.iter().cloned().collect();
