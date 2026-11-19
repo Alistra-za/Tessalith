@@ -28,3 +28,6 @@ bcdec_rs.workspace = true
 half.workspace = true
 image.workspace = true
 bcenc.workspace = true
+
+[lints]
+workspace = true

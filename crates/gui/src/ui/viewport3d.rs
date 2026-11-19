@@ -5,11 +5,10 @@ use crate::model::meshes::LE_WARNING;
 use crate::model::viewport3d::{
     off_line, Clock, Look, V3State, Viewport3d, DEFERRED_LABEL, FEATURES_LABEL, FRAME_LABEL,
 };
+use crate::ui::status::{AMBER, RED};
 use eframe::egui;
 use render3d::ShapeStatus;
 
-const AMBER: egui::Color32 = egui::Color32::from_rgb(230, 160, 30);
-const RED: egui::Color32 = egui::Color32::from_rgb(210, 60, 60);
 /// A missing texture's colour, as the frame shows it (AU3).
 const MAGENTA: egui::Color32 = egui::Color32::from_rgb(255, 0, 255);
 /// The tallest the problem list above the frame gets; it scrolls past that.

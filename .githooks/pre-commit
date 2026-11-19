@@ -29,4 +29,65 @@ for f in .claude/DECISIONS.md .claude/DECISIONS-ARCHIVE.md; do
     fi
 done
 
+# No game or mod assets (CLAUDE.md Hard rules): the pinned CS shader source is the one exception (Note GT).
+assets=$(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR | LC_ALL=C grep -iE '\.(dds|bsa|ba2|esp|esm|esl)$' | LC_ALL=C grep -v '^crates/render3d/shaders/cs/')
+if [ -n "$assets" ]; then
+    echo "$assets" | while IFS= read -r p; do
+        echo "pre-commit: $p is a game or mod asset (.dds, .bsa, .ba2, .esp, .esm, .esl); the repo holds none. Generate the fixture in the test instead, and unstage it with git restore --staged." >&2
+    done
+    fail=1
+fi
+
+# Line endings, only where the working copy is CRLF (core.autocrlf=true; .claude/mistakes/general.md 2026-11-16).
+# Staged paths only; files marked -text (vendored sources, fixtures) are skipped, and so is a .rs pinned eol=lf in
+# the LF test. Paths are read unquoted (core.quotePath=false), so a non-ASCII name is checked too. git reports a CRLF
+# blob as i/crlf, a mixed one as i/mixed, and a lone CR as i/-text (binary), so the blob is read to tell a lone CR
+# from a real binary.
+# shortcut: a staged text file that also holds a NUL byte is treated as binary and not checked; upgrade if one appears.
+if [ "$(git config core.autocrlf)" = true ]; then
+    eolmsgs=$(git diff --cached --name-only --diff-filter=ACMR -z | xargs -0 -r git -c core.quotePath=false --literal-pathspecs ls-files --eol -- \
+        | awk -F'\t' '{ split($1, a, / +/); p = substr($0, index($0, "\t") + 1);
+            if (p ~ /\.rs$/ && a[2] == "w/lf" && a[3] != "attr/-text" && $1 !~ /eol=lf/) print "LF\t" p;
+            if (a[3] != "attr/-text" && (a[1] == "i/crlf" || a[1] == "i/mixed" || a[1] == "i/-text")) print "CR\t" p }' \
+        | while IFS="$(printf '\t')" read -r kind p; do
+            if [ "$kind" = LF ]; then
+                echo "pre-commit: $p: the working copy has LF line endings but core.autocrlf=true expects CRLF. cargo fmt and the Write tool write LF: stage it, delete the file and run git checkout -- $p to get CRLF back."
+            else
+                size=$(git show ":$p" | wc -c)
+                nonul=$(git show ":$p" | LC_ALL=C tr -d '\000' | wc -c)
+                [ "$size" = "$nonul" ] || continue
+                ln=$(git show ":$p" | LC_ALL=C tr '\r' '\001' | LC_ALL=C awk '/\001/ { print NR; exit }')
+                [ -n "$ln" ] && echo "pre-commit: $p:$ln: the staged text blob holds a CR byte (CRLF or a lone CR); the index keeps LF. Re-save the file with LF, or mark the path -text in .gitattributes if it must keep CR."
+            fi
+        done)
+    if [ -n "$eolmsgs" ]; then
+        printf '%s\n' "$eolmsgs" >&2
+        fail=1
+    fi
+fi
+
+# Every note heading has its letters in the Index block of DECISIONS.md. The match is a whole word anywhere in the
+# block, so an area name in capitals (CLI, GUI) would also count; the notes today do not collide with one.
+f=.claude/DECISIONS.md
+if git diff --cached --name-only | grep -qxF "$f"; then
+    staged=$(git show ":$f" | tr -d '\r')
+    index=$(printf '%s\n' "$staged" | awk '/^## Index/ { on = 1; next } /^## / { on = 0 } on')
+    for n in $(printf '%s\n' "$staged" | LC_ALL=C grep -oE '^## Note [A-Z]+' | awk '{ print $3 }' | sort -u); do
+        if ! printf '%s\n' "$index" | LC_ALL=C grep -qw -- "$n"; then
+            echo "pre-commit: Note $n is not in the ## Index block of $f; add the letter $n to the index line of every crate or area the note governs." >&2
+            fail=1
+        fi
+    done
+fi
+
+# Mistakes entries keep the README's format: - YYYY-MM-DD <what> -> <instead> (<where>), the arrow being the Unicode one.
+for f in $(git -c core.quotePath=false diff --cached --name-only --diff-filter=ACMR -- '.claude/mistakes/*.md'); do
+    [ "$f" = .claude/mistakes/README.md ] && continue
+    badm=$(git show ":$f" | tr -d '\r' | LC_ALL=C grep -n '^- ' | LC_ALL=C grep -vE '^[0-9]+:- [0-9]{4}-[0-9]{2}-[0-9]{2} .+ → .+ \(.+\)$' | cut -d: -f1)
+    for ln in $badm; do
+        echo "pre-commit: $f:$ln: a mistakes entry must read '- YYYY-MM-DD <what went wrong> → <what to do instead> (<where>)' with the → arrow and the where in parentheses at the end of the line (.claude/mistakes/README.md)." >&2
+        fail=1
+    done
+done
+
 exit $fail

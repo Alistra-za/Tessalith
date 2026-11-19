@@ -32,3 +32,6 @@ engine = { workspace = true, features = ["test-hooks"] }
 # test-hooks only so `cargo test -p sdc` builds the same sdc-gui, modscan, pgpsim and render3d as the workspace run
 # (no test here reads a GUI hook).
 sdc-gui = { path = "../gui", features = ["test-hooks"] }
+
+[lints]
+workspace = true

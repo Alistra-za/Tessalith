@@ -175,6 +175,9 @@ pub fn close_after_device_loss(folder: Option<&Path>, on_exit: impl FnOnce()) ->
                 .spawn()
         });
         match spawned {
+            // The device is gone and eframe cannot recreate it, so this process ends here, after attempting the
+            // recovery writes and calling `on_exit`; the replacement it just started takes over.
+            #[allow(clippy::exit)]
             Ok(_) => std::process::exit(0),
             Err(e) => {
                 if let Some(path) = RUN_LOG.get() {
@@ -195,7 +198,10 @@ pub fn close_after_device_loss(folder: Option<&Path>, on_exit: impl FnOnce()) ->
         .set_title(crate::PRODUCT_NAME)
         .set_description(text)
         .show();
-    std::process::exit(1)
+    // The device is gone and eframe cannot recreate it, so the process ends after attempting the recovery writes,
+    // calling `on_exit` and showing the message.
+    #[allow(clippy::exit)]
+    std::process::exit(1);
 }
 
 pub fn set_recovery(files: Vec<(PathBuf, String)>) {

@@ -13,9 +13,8 @@ docs/research/ is a record of measurements. It may describe old results, but eac
 Documentation describes the build on `main` as it is now. History lives only in the changelog.
 - Delete anything that is no longer true. Don't mark it "old" or "deprecated", and don't strike it through.
 - **Banned in user-facing docs:**
-  - "now", "no longer", "used to", "was renamed", "previously", "since 1.x";
-  - "(new)" badges;
-  - "in earlier versions…".
+  - "now", "no longer", "was renamed";
+  - "used to", "previously", "since `<version>`", "in earlier versions" and "(new)" badges, which `tools/doc-lint.py` fails on.
   
   A feature is described as what it is, not as what changed.
 - **Where an upgrade note goes:** a user who upgrades needs to know what changed, for example "the Resize option was renamed". That goes in the version's CHANGELOG.md entry. A doc page may link to that entry ("Upgrading from 1.1: see CHANGELOG 1.2.0") but doesn't repeat it.
@@ -166,6 +165,7 @@ DECISIONS.md is the ruling log: why the code behaves as it does. It keeps only r
 6. If a ruling was reverted, move it to the archive (section 7).
 7. Preview the wiki with `tools\publish-wiki.ps1 -Out <dir>`. Publish only when the owner asks.
 8. Run `tools\doc-markers.ps1` and fix every marker it lists (section 9).
+9. Run `py -3.13 -I tools\doc-lint.py` and fix every failure it lists.
 
 ## 9. Ruling markers
 A statement of Tessalith behaviour that a ruling decided carries a hidden marker at that fact's one home (§2), so the ruling behind it can be found and a stale sentence is caught when the ruling is archived.
