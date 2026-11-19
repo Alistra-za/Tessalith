@@ -15482,6 +15482,79 @@ fn the_saved_line_builds_its_text_once_for_one_path_and_width() {
     );
 }
 
+/// Ruling E6-Y9: A is saved, its draft cannot be replaced (read only), and an edit to B fails to save: the line does not
+/// name the draft, which holds A, not B; undoing back to A names it again with no write.
+#[test]
+fn an_unsaved_edit_hides_the_draft_and_an_undo_to_the_written_ops_names_it() {
+    let (_d, mut m, p) = session_in_project("p", None);
+    m.open_edit();
+    gloss(&mut m, 12.5);
+    let before = std::fs::read(draft(&p)).unwrap();
+    read_only(&draft(&p), true);
+    gloss(&mut m, 13.5);
+    assert_eq!(
+        std::fs::read(draft(&p)).unwrap(),
+        before,
+        "the draft still holds A"
+    );
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_off_reason(),
+        Some("The last save failed. Make another edit to try again.")
+    );
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label_contains("Draft not saved yet");
+    assert!(h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+    assert!(h.state_mut().edit.as_mut().unwrap().undo());
+    h.run_steps(4);
+    read_only(&draft(&p), false);
+    h.get_by_label_contains(&format!("Draft saved in {}", draft(&p).display()));
+    assert!(!h
+        .get_by_label("Show in Explorer: the draft")
+        .accesskit_node()
+        .is_disabled());
+    assert_eq!(h.state().edit.as_ref().unwrap().draft_off_reason(), None);
+}
+
+/// Ruling E6-Y8: the disabled button's hover follows the state.
+#[test]
+fn the_disabled_draft_button_says_why() {
+    // a fresh session
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_off_reason(),
+        Some("The draft is saved with your first edit.")
+    );
+    // a drag that waits for its save
+    tick(&mut m, 40.5);
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_off_reason(),
+        Some("Finish the edit to save the draft.")
+    );
+    // no draft location
+    let m = direct(fixture("TestNifFile_Animated_LE.nif"));
+    assert_eq!(
+        m.edit.as_ref().unwrap().draft_off_reason(),
+        Some("This edit has no draft location.")
+    );
+}
+
+/// Ruling E6-Y8: the sentence is the button's hover on screen.
+#[test]
+fn the_disabled_draft_button_shows_its_reason_on_hover() {
+    let (_d, mut m) = export_session();
+    m.open_edit();
+    let mut h = view(m);
+    h.run_steps(4);
+    h.get_by_label("Show in Explorer: the draft").hover();
+    h.run_steps(30);
+    h.get_by_label("The draft is saved with your first edit.");
+}
+
 /// Ruling E6-Y1: an edit whose save failed is not on disk, so the line does not name the older draft.
 #[test]
 fn an_edit_whose_save_fails_does_not_name_the_older_draft() {

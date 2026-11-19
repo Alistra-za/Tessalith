@@ -107,8 +107,13 @@ pub struct NifEdit {
     /// whichever the session was opened from or last wrote successfully (the footer's line and Show in Explorer).
     /// A failed write of ops the file does not hold clears it; a save not yet tried keeps it.
     held_at: Option<PathBuf>,
-    /// The ops changed since the last successful write (`ops_changed`): `held_at` holds older ops.
-    ops_ahead: bool,
+    /// Ruling E6-Y5: the ops `held_at` holds (as last written or read there).
+    held_ops: Vec<DocOp>,
+    /// A write failed while the session's ops differed from `held_ops`: `held_at` is not named until the ops equal
+    /// `held_ops` again (an undo back to what the file holds) or a write works.
+    held_stale: bool,
+    /// The last write of the session's ops failed (the disabled button's hover says so); a write that works clears it.
+    save_failed: bool,
     /// `retarget_error` says no save worked when the session was to end (a project switch, or ruling E6-C's other
     /// ways out), not a record folder's; `switch_wording`: it was a project switch.
     switch_failed: bool,
@@ -982,7 +987,9 @@ impl NifEdit {
             kept_line: None,
             kept_older,
             held_at,
-            ops_ahead: false,
+            held_ops: vec![],
+            held_stale: false,
+            save_failed: false,
             switch_failed: false,
             switch_wording: false,
             switch_saved: false,
@@ -1060,9 +1067,11 @@ impl NifEdit {
         // Applying re-anchors each op on the current source: `nif::edit::rebase` and the patched bytes in one pass.
         let read = e.doc.ops.clone();
         e.reapply();
+        if e.held_at.is_some() {
+            e.held_ops = read.clone(); // what the file this session opened from holds
+        }
         if !same_ops(&read, &e.doc.ops) {
             e.unsaved = true;
-            e.ops_ahead = true;
         }
         if changed {
             e.count_changed();
@@ -1239,22 +1248,44 @@ impl NifEdit {
     /// (also after a failed carry), the kept autosave (a fallback write, or a winning one at open). None before the
     /// first save, and after a failed write of ops the file did not hold. Never a project the edit has not reached.
     pub fn draft_on_disk(&self) -> Option<&Path> {
-        self.held_at.as_deref()
+        self.held_at.as_deref().filter(|_| !self.held_stale)
+    }
+
+    /// Ruling E6-Y8: why Show in Explorer is off, for the state the session is in (None while a file is named).
+    pub fn draft_off_reason(&self) -> Option<&'static str> {
+        if self.draft_on_disk().is_some() {
+            return None;
+        }
+        Some(if self.draft_path.as_os_str().is_empty() {
+            "This edit has no draft location."
+        } else if self.save_failed {
+            "The last save failed. Make another edit to try again."
+        } else if self.drag.is_some() {
+            "Finish the edit to save the draft."
+        } else {
+            "The draft is saved with your first edit."
+        })
     }
 
     /// A write of the session's ops worked at `at`.
     fn held(&mut self, at: &Path) {
-        self.ops_ahead = false;
+        self.held_ops = self.doc.ops.clone();
+        self.held_stale = false;
+        self.save_failed = false;
         if self.held_at.as_deref() != Some(at) {
             self.held_at = Some(at.to_path_buf());
         }
     }
 
-    /// A write of the session's ops failed (ruling E6-Y1): a file that holds older ops is no longer named, and one that
-    /// holds these is only while it is still there (the check runs on the failure, never per frame).
+    /// A write of the session's ops failed (ruling E6-Y5): the file is named only while it holds the current ops (an
+    /// undo back to them names it again with no write), and one that holds these only while it is still there (the
+    /// check runs on the failure, never per frame).
     fn held_failed(&mut self) {
-        let ahead = self.ops_ahead;
-        self.held_at = self.held_at.take().filter(|p| !ahead && p.is_file());
+        self.save_failed = true;
+        if self.held_at.as_deref().is_some_and(|p| !p.is_file()) {
+            self.held_at = None;
+        }
+        self.held_stale = self.held_at.is_some() && !same_ops(&self.held_ops, &self.doc.ops);
     }
 
     /// Why the current state cannot be exported, from memory alone (export steps 2-4): refused ops first (A16 keeps
@@ -2134,7 +2165,10 @@ impl NifEdit {
     /// tick) leaves the save to `flush`, except after a failed switch, where every change is the next try.
     fn ops_changed(&mut self, now: bool) {
         self.unsaved = true;
-        self.ops_ahead = true;
+        if self.held_stale {
+            // undo (or redo) back to what the file holds names it again
+            self.held_stale = !same_ops(&self.held_ops, &self.doc.ops);
+        }
         if now || self.switch_failed {
             self.save();
         }

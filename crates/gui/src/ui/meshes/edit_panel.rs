@@ -566,7 +566,7 @@ fn draft_and_review_row(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act, reveal_id
                     "Show in Explorer: the draft",
                 )
             });
-            let r = r.on_disabled_hover_text("The draft is saved with your first edit.");
+            let r = r.on_disabled_hover_text(e.draft_off_reason().unwrap_or_default());
             if r.clicked() {
                 ui.data_mut(|d| d.insert_temp(reveal_id, true));
             }
