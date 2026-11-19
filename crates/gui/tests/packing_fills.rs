@@ -920,7 +920,7 @@ fn an_unbuildable_recipe_row_clears_the_recipe() {
     m.open_problems(None);
     let mut h = app(m);
     h.run();
-    h.get_by_label("Clear the packing recipe of rock01_rmaos.dds")
+    h.get_by_label("Clear the packing recipe of rock01_rmaos.dds (PACK-RECIPE-UNBUILDABLE)")
         .click();
     h.run();
     idle(h.state_mut());
@@ -960,7 +960,7 @@ fn a_recipe_conflict_row_clears_both_entries() {
     m.open_problems(None);
     let mut h = app(m);
     h.run();
-    h.get_by_label("Clear the packing recipe of rock01_rfaos.dds")
+    h.get_by_label("Clear the packing recipe of rock01_rfaos.dds (PACK-RECIPE-CONFLICT)")
         .click();
     h.run();
     idle(h.state_mut());
@@ -1051,7 +1051,8 @@ fn a_read_only_sdc_toml_disables_clear_recipe_and_says_why() {
         s.interaction.show_tooltips_only_when_still = false;
     });
     h.run();
-    let button = h.get_by_label("Clear the packing recipe of rock01_rmaos.dds");
+    let button =
+        h.get_by_label("Clear the packing recipe of rock01_rmaos.dds (PACK-RECIPE-UNBUILDABLE)");
     assert!(button.accesskit_node().is_disabled());
     h.hover_at(button.rect().center());
     h.run_steps(4);
@@ -1114,8 +1115,10 @@ fn extra_row_clears(mut m: AppModel, id: &str, packed: &str, out: &str, after: &
     m.open_problems(None);
     let mut h = app(m);
     h.run();
-    h.get_by_label(&format!("Clear the packing recipe of {out}"))
-        .click();
+    h.get_by_label(&format!(
+        "Clear the packing recipe of {out} (SHADER-EXTRA-MAP)"
+    ))
+    .click();
     h.run();
     idle(h.state_mut());
     h.run();

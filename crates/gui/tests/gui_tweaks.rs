@@ -377,7 +377,7 @@ fn the_2d_3d_switch_swaps_the_slot_cards_for_the_preview_and_keeps_the_truepbr_s
     let mut h = harness(m, true);
     h.run();
     // One "Match on this" per slot card.
-    assert!(h.query_all_by_label("Match on this").count() >= 1);
+    assert!(h.query_all_by_label_contains("Match on this").count() >= 1);
     widget(&h, egui::accesskit::Role::SpinButton, "Specular level");
     assert!(h.query_by_label(FRAME_LABEL).is_none());
     h.get_by_label("3D").click();
@@ -385,7 +385,7 @@ fn the_2d_3d_switch_swaps_the_slot_cards_for_the_preview_and_keeps_the_truepbr_s
     assert!(h.state().0.settings.set_view_3d);
     // The 3D view (no poll in this harness, so it may still be preparing).
     assert!(h.query_by_label(FRAME_LABEL).is_some() || h.query_by_label(PREPARING).is_some());
-    assert!(h.query_by_label("Match on this").is_none());
+    assert!(h.query_by_label_contains("Match on this").is_none());
     // AG132: the TruePBR settings are in their window.
     assert!(h.query_by_label("Specular level").is_none());
     h.get_by_label(SETTINGS_BUTTON).click();
@@ -394,7 +394,7 @@ fn the_2d_3d_switch_swaps_the_slot_cards_for_the_preview_and_keeps_the_truepbr_s
     h.query_all_by_label("2D").next().unwrap().click();
     h.run();
     assert!(!h.state().0.settings.set_view_3d);
-    assert!(h.query_all_by_label("Match on this").count() >= 1);
+    assert!(h.query_all_by_label_contains("Match on this").count() >= 1);
 }
 
 #[test]

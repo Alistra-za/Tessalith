@@ -501,7 +501,11 @@ fn shader_menu(
         .inner
     });
     let menu = r.inner;
-    let name = format!("Change shader for {id}");
+    // Two rows of one set can both offer it: the row's code tells their names apart (final wave Group 5).
+    let name = format!(
+        "Change shader for {id} ({})",
+        p.code.map_or("", |c| c.as_str())
+    );
     menu.response
         .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, off.is_none(), &name));
     if let Some(why) = off {
@@ -710,7 +714,12 @@ fn fix_click(
         // Owner A1-8: it writes sdc.toml, so a read-only one disables it with its reason; a pointer click only (FC5).
         Fix::ClearRecipe(k) => {
             let out = format!("{}.dds", k.rsplit('/').next().unwrap_or(k));
-            let name = format!("Clear the packing recipe of {out}");
+            // Two rows (a PACK-RECIPE-* and the SHADER-EXTRA-MAP of one output) can both offer it: the row's code
+            // tells their names apart (egui-ui-rules 8.4; final wave Group 5).
+            let name = format!(
+                "Clear the packing recipe of {out} ({})",
+                p.code.map_or("", |c| c.as_str())
+            );
             let toml = m.toml_read_only_reason();
             let off = toml.as_deref().or(off);
             click_only_button(

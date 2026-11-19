@@ -273,33 +273,7 @@ fn letter_box(
     outline: Option<egui::Color32>,
     filled: Option<&dyn Fn() -> String>,
 ) -> egui::Response {
-    let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(CHIP), egui::Sense::hover());
-    let vis = ui.visuals();
-    let stroke = match outline {
-        Some(c) => egui::Stroke::new(2.0, c),
-        None if filled.is_some() => vis.widgets.inactive.bg_stroke,
-        None => vis.widgets.noninteractive.bg_stroke,
-    };
-    let bg = if filled.is_some() {
-        vis.widgets.inactive.bg_fill
-    } else {
-        vis.extreme_bg_color
-    };
-    let p = ui.painter();
-    p.rect_filled(rect, 2.0, bg);
-    p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
-    if outline.is_none() {
-        paint_letter(ui, rect, letter, filled.is_none(), f32::INFINITY);
-    } else {
-        // The missing entry's "?" stays centred.
-        ui.painter().text(
-            rect.center(),
-            egui::Align2::CENTER_CENTER,
-            letter,
-            egui::TextStyle::Small.resolve(ui.style()),
-            dim_letter_colour(ui.visuals()),
-        );
-    }
+    let r = letter_box_painted(ui, letter, outline, filled.is_some());
     // an empty chip's name is "<letter>, empty"; a missing entry's outlined "?" keeps its own
     r.widget_info(|| {
         let name = match (outline, filled) {
@@ -312,9 +286,47 @@ fn letter_box(
     r
 }
 
-/// The slot lock's cell on a member chip (`columns::member`): a 10 px glyph, 1 px in from the corner.
-const LOCK_W: f32 = 10.0;
-const LOCK_PAD: f32 = 1.0;
+/// `letter_box`'s drawing with no AccessKit info, for a caller that registers its own (a cleared chip, a typed path's
+/// box): a Label's name would stay behind as the node's value under the caller's Button (final wave Group 5).
+fn letter_box_painted(
+    ui: &mut egui::Ui,
+    letter: &str,
+    outline: Option<egui::Color32>,
+    filled: bool,
+) -> egui::Response {
+    let (rect, r) = ui.allocate_exact_size(egui::Vec2::splat(CHIP), egui::Sense::hover());
+    let vis = ui.visuals();
+    let stroke = match outline {
+        Some(c) => egui::Stroke::new(2.0, c),
+        None if filled => vis.widgets.inactive.bg_stroke,
+        None => vis.widgets.noninteractive.bg_stroke,
+    };
+    let bg = if filled {
+        vis.widgets.inactive.bg_fill
+    } else {
+        vis.extreme_bg_color
+    };
+    let p = ui.painter();
+    p.rect_filled(rect, 2.0, bg);
+    p.rect_stroke(rect, 2.0, stroke, egui::StrokeKind::Inside);
+    if outline.is_none() {
+        paint_letter(ui, rect, letter, !filled, f32::INFINITY);
+    } else {
+        // The missing entry's "?" stays centred.
+        ui.painter().text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            letter,
+            egui::TextStyle::Small.resolve(ui.style()),
+            dim_letter_colour(ui.visuals()),
+        );
+    }
+    r
+}
+
+/// The slot lock's cell on a member chip (`columns::paint_locks`, the one copy of the geometry).
+const LOCK_W: f32 = super::columns::LOCK_GLYPH;
+const LOCK_PAD: f32 = super::columns::LOCK_INSET;
 /// The link mark's top edge below the chip's top.
 const MARK_TOP: f32 = 2.0;
 
@@ -2635,9 +2647,14 @@ fn linked_chip<'a>(
             r.rect
         }
         None => {
-            // a typed path: no item to show, so the box takes the slot menu a thumbnail would have
-            let r = letter_box(ui, letter, None, Some(&name)).interact(egui::Sense::click());
+            // a typed path: no item to show, so the box takes the slot menu a thumbnail would have, and paints the
+            // slot's locks as a thumbnail does (final wave Group 5)
+            let r = letter_box_painted(ui, letter, None, true).interact(egui::Sense::click());
+            let (locked, pgp) = chip_locks(v, Some(k));
+            super::columns::paint_locks(ui, r.rect, locked, pgp);
             r.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name()));
+            ui.ctx()
+                .accesskit_node_builder(r.id, |b| b.set_description(hover()));
             let r = r.on_hover_ui(|ui| {
                 ui.label(hover());
             });
@@ -2700,7 +2717,7 @@ fn chip_row<'a>(
             // the JSON leaves the slot empty: dim like an empty chip, named for what it is
             SlotShown::Cleared { item } => {
                 // a click-sensed box with the slot menu, so the clear can be undone from the card
-                let r = letter_box(ui, &letter, None, None).interact(egui::Sense::click());
+                let r = letter_box_painted(ui, &letter, None, false).interact(egui::Sense::click());
                 r.widget_info(|| {
                     egui::WidgetInfo::labeled(
                         egui::Role::Button,
@@ -2708,9 +2725,14 @@ fn chip_row<'a>(
                         format!("{letter}, cleared"),
                     )
                 });
-                let r = r.on_hover_ui(|ui| {
+                let hover = || {
                     let file = model.item(item).map_or(item, |i| i.name.as_str());
-                    ui.label(format!("{} (cleared): {file}", v.slot_text(k)));
+                    format!("{} (cleared): {file}", v.slot_text(k))
+                };
+                ui.ctx()
+                    .accesskit_node_builder(r.id, |b| b.set_description(hover()));
+                let r = r.on_hover_ui(|ui| {
+                    ui.label(hover());
                 });
                 slot_box_menu(model, v, k, &r, acts, member_menu);
                 fixed.push(r.rect);

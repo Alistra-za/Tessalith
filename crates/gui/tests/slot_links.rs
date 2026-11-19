@@ -1,7 +1,7 @@
 //! Review E1: a `slotN` path a JSON set carries is part of its view (`SetView::linked`), and the albedo check counts it.
 mod support;
 use eframe::egui;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use engine::codes::Code;
 use engine::config::{GreenConvention, Subtype};
@@ -94,9 +94,8 @@ fn every_listed_output_exists_after_export() {
     h.get_by_label_contains("Output files").click();
     h.run();
     for (_, _, p) in &listed {
-        let name = p.file_name().unwrap().to_string_lossy();
         assert!(h
-            .query_by_label(&format!("Show {name} in Explorer"))
+            .query_by_label(&format!("Show {} in Explorer", p.display()))
             .is_some());
     }
 }
@@ -179,8 +178,8 @@ fn a_member_that_fills_no_slot_is_listed_after_the_slot_files() {
         h.query_by_label(&line).is_some(),
         "the unslotted line {line:?}"
     );
-    let name = out.file_name().unwrap().to_string_lossy().into_owned();
-    let show = format!("Show {name} in Explorer");
+    // Final wave Group 5: named by the whole path.
+    let show = format!("Show {} in Explorer", out.display());
     assert!(h.query_by_label(&show).is_none(), "no file yet");
     std::fs::create_dir_all(out.parent().unwrap()).unwrap();
     std::fs::write(&out, b"dds").unwrap();
@@ -796,6 +795,37 @@ fn use_this_file_over_a_borrow_keeps_the_borrow_and_the_sets_sharing_through() {
     });
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     click_and_check_the_borrows_stay(m, &before, "Use wall_n.png for Normal _n");
+}
+
+/// Final wave Group 5 (Q7): a linked row's file label and its "from set" link say in their AccessKit description what
+/// their hovers say: the whole path PGPatcher reads, and what the link does.
+#[test]
+fn a_linked_rows_file_and_set_link_describe_their_hovers() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, WALL_ALBEDO).unwrap();
+    assert_eq!(
+        m.run_menu(MenuAction::SlotLink {
+            set: LEAF.into(),
+            n: 1,
+            item: WALL_ALBEDO.into(),
+        }),
+        None
+    );
+    select_set(&mut m, LEAF);
+    let h = harness(m);
+    let open = h.get_by_label("Open set arch/wall (Diffuse)");
+    assert_eq!(
+        open.accesskit_node().description().as_deref(),
+        Some("Open the set this file comes from.")
+    );
+    let file = game.rsplit('\\').next().unwrap();
+    let sentence = format!("PGPatcher reads {game} for this slot.");
+    assert!(
+        h.query_all_by_label(file)
+            .any(|n| n.accesskit_node().description().as_deref() == Some(sentence.as_str())),
+        "the file label {file:?} is described {sentence:?}"
+    );
 }
 
 /// Final wave Group 4 (Important 5): picking from another set the file a slot already links to writes nothing, so it

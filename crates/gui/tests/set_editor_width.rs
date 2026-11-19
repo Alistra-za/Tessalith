@@ -78,7 +78,8 @@ fn set_editor_is_one_column() {
             let mut rows = vec![diffuse, slot_rect(&h, "Normal _n"), cmds];
             for l in [
                 "Diffuse thumbnail",
-                "Match on this",
+                "Match on this (Diffuse)",
+                "Match on this (Normal _n)",
                 "Assign…",
                 "ready",
                 "warning",

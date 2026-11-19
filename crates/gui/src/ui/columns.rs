@@ -1079,29 +1079,11 @@ pub(super) fn member(
             egui::Stroke::new(if selected { 2.0 } else { 1.0 }, color),
             egui::StrokeKind::Inside,
         );
-        // F3a Task 8: the member fills a locked slot.
-        if locked {
-            ui.painter().text(
-                rect.right_top() + egui::vec2(-1.0, 1.0),
-                egui::Align2::RIGHT_TOP,
-                "🔒",
-                egui::FontId::proportional(10.0),
-                ui.visuals().strong_text_color(),
-            );
-        }
-        // Note AN, FC9 (AN6): PGPatcher keeps the mesh's own texture in this member's slot: a grey padlock, not a status.
-        if pgp_locked {
-            ui.painter().text(
-                rect.left_top() + egui::vec2(1.0, 1.0),
-                egui::Align2::LEFT_TOP,
-                "🔒",
-                egui::FontId::proportional(10.0),
-                ui.visuals().weak_text_color(),
-            );
-        }
+        paint_locks(ui, rect, locked, pgp_locked);
     }
-    // built when the tooltip shows, not per frame
-    response.on_hover_ui(|ui| {
+    // built when the tooltip shows or a screen reader reads the node, not per frame; the AccessKit description says
+    // what the hover says (final wave Group 5: the file, its locks and the caller's note, such as a link's target)
+    let text = || {
         let mut hover = item.name.clone();
         if locked {
             hover.push_str(" (slot pinned)");
@@ -1113,9 +1095,43 @@ pub(super) fn member(
             hover.push('\n');
             hover.push_str(&n());
         }
-        ui.label(hover);
+        hover
+    };
+    ui.ctx()
+        .accesskit_node_builder(response.id, |b| b.set_description(text()));
+    response.on_hover_ui(|ui| {
+        ui.label(text());
     })
 }
+
+/// The lock glyphs of a chip at `rect`, the one copy of their geometry (final wave Group 5 and ledger 92): the slot
+/// pin top right (F3a Task 8), PGPatcher's lock top left (Note AN, FC9 (AN6): a grey padlock, not a status). Each is a
+/// `LOCK_GLYPH` px glyph `LOCK_INSET` px in from its corner.
+pub(super) fn paint_locks(ui: &egui::Ui, rect: egui::Rect, locked: bool, pgp_locked: bool) {
+    if locked {
+        ui.painter().text(
+            rect.right_top() + egui::vec2(-LOCK_INSET, LOCK_INSET),
+            egui::Align2::RIGHT_TOP,
+            "🔒",
+            egui::FontId::proportional(LOCK_GLYPH),
+            ui.visuals().strong_text_color(),
+        );
+    }
+    if pgp_locked {
+        ui.painter().text(
+            rect.left_top() + egui::vec2(LOCK_INSET, LOCK_INSET),
+            egui::Align2::LEFT_TOP,
+            "🔒",
+            egui::FontId::proportional(LOCK_GLYPH),
+            ui.visuals().weak_text_color(),
+        );
+    }
+}
+
+/// A chip lock's glyph size and its inset from the chip's corner (`paint_locks`; `sets_column`'s link mark sits
+/// between the two lock cells).
+pub(super) const LOCK_GLYPH: f32 = 10.0;
+pub(super) const LOCK_INSET: f32 = 1.0;
 
 /// The export folder as a prefix of set keys: `<export folder>/`.
 pub fn export_prefix(model: &AppModel) -> String {

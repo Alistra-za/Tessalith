@@ -2603,7 +2603,7 @@ fn an_unused_map_row_offers_remove_from_set_and_it_clears_the_row() {
     // Controller ruling 2: left to right, the fix, the second fix, then Go to set.
     let xs: Vec<f32> = [
         remove.as_str(),
-        "Change shader for landscape/rock01",
+        "Change shader for landscape/rock01 (SHADER-EXTRA-MAP)",
         "Go to set",
     ]
     .iter()
@@ -2774,7 +2774,7 @@ fn a_missing_map_row_offers_change_shader() {
     m.open_problems(None);
     let mut h = harness(m);
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();
@@ -2792,7 +2792,7 @@ fn a_missing_map_row_offers_change_shader() {
             .with_data(serde_json::json!({"map": "_n", "shader": "pbr"}))],
     );
     h.run();
-    let opener = h.get_by_label("Change shader for landscape/rock01");
+    let opener = h.get_by_label("Change shader for landscape/rock01 (SHADER-MISSING-MAP)");
     let at = opener.rect();
     opener.click();
     h.run();

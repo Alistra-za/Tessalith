@@ -334,7 +334,7 @@ fn alpha_reads_in_full(set: &str, m: AppModel, want: &str, w: f32) {
         let c = combo.rect();
         // the Flags cell reaches back to the Match toggle on its row (a JSON set)
         let cell_left = h
-            .query_all_by_label("Match on this")
+            .query_all_by_label_contains("Match on this")
             .map(|n| n.rect())
             .filter(|t| (t.center().y - c.center().y).abs() <= 2.0)
             .fold(c.min.x, |a, t| a.min(t.min.x));
@@ -353,7 +353,7 @@ fn alpha_reads_in_full(set: &str, m: AppModel, want: &str, w: f32) {
             "{set} {w} frame {frame}: the heading {head:?} starts at the combo {c:?}"
         );
         // the Match toggle on this row (a JSON set) is not under the heading
-        for t in h.query_all_by_label("Match on this") {
+        for t in h.query_all_by_label_contains("Match on this") {
             let t = t.rect();
             if (t.center().y - c.center().y).abs() <= 2.0 {
                 assert!(
@@ -425,7 +425,7 @@ fn the_match_toggle_is_the_painted_mark() {
         });
         h.run_steps(4);
         let n = h
-            .query_all_by_label("Match on this")
+            .query_all_by_label_contains("Match on this")
             .next()
             .unwrap_or_else(|| panic!("{w}: Match on this"));
         let r = n.rect();

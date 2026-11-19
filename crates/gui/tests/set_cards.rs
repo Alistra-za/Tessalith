@@ -1015,6 +1015,68 @@ fn a_cleared_slot_has_a_cleared_chip() {
     assert_eq!(on_card_of(&h, "arch/wall", "N, cleared").len(), 1);
 }
 
+/// Final wave Group 5 (Important 6, ledger 88, 89): a chip's AccessKit node says what its hover says, while the hover
+/// stays lazy: an own chip its file and lock, a cleared chip its file (and no "empty" value left behind by the box's
+/// Label), a typed-path box its path; the typed-path box paints its slot's lock as a thumbnail does.
+#[test]
+fn chips_describe_what_their_hover_says_and_a_typed_path_box_paints_its_lock() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    m.set_slot_command("arch/wall", 2, SlotCommand::Clear)
+        .unwrap();
+    m.set_slot_command(
+        "arch/leaf",
+        1,
+        SlotCommand::Path(r"textures\other\x_d.dds".into()),
+    )
+    .unwrap();
+    for set in ["arch/wall", "arch/leaf"] {
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLock {
+                set: set.into(),
+                n: 1,
+                on: true
+            }),
+            None
+        );
+    }
+    let mut h = harness(m);
+    h.run();
+    let desc = |h: &Harness<'static, AppModel>, set: &str, label: &str| {
+        let n = on_card_of(h, set, label);
+        assert_eq!(n.len(), 1, "{set}: one {label:?} chip");
+        let a = n[0].accesskit_node();
+        (a.description(), a.value(), n[0].rect())
+    };
+    let (own, _, _) = desc(&h, "arch/wall", "D");
+    let own = own.unwrap_or_default();
+    assert!(
+        own.contains("wall.png") && own.contains("(slot pinned)"),
+        "own chip: {own:?}"
+    );
+    let (cleared, value, _) = desc(&h, "arch/wall", "N, cleared");
+    assert!(
+        cleared
+            .as_deref()
+            .is_some_and(|c| c.contains("wall_n.png") && c.contains("(cleared)")),
+        "cleared chip: {cleared:?}"
+    );
+    assert!(
+        value.as_deref().is_none_or(|v| !v.contains("empty")),
+        "no empty value: {value:?}"
+    );
+    let (typed, _, rect) = desc(&h, "arch/leaf", "D, path x_d.dds");
+    assert_eq!(
+        typed.as_deref(),
+        Some(r"Diffuse linked to textures\other\x_d.dds")
+    );
+    assert!(
+        texts_in(&h, rect).iter().any(|(t, _)| t == "🔒"),
+        "the typed-path box paints its slot's lock: {:?}",
+        texts_in(&h, rect)
+    );
+}
+
 /// The painted text shapes of the frame inside `chip`: (text, galley rect in screen space).
 fn texts_in(h: &Harness<'static, AppModel>, chip: egui::Rect) -> Vec<(String, egui::Rect)> {
     shapes(h)

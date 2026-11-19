@@ -461,6 +461,9 @@ fn head(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView, view: View) {
     ui.separator();
 }
 
+/// The Match toggle's label; its AccessKit name adds the slot: "Match on this (Diffuse)" (final wave Group 5).
+pub const MATCH_ON_THIS: &str = "Match on this";
+
 /// The first line of an open Output files group: what its header counts (final wave Group 2, a proposed string).
 pub const OUTPUTS_COUNT_NOTE: &str =
     "The count is of the files at these paths now, whichever export wrote them.";
@@ -508,10 +511,6 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                     None => model.item(item).map_or("File", |i| i.name.as_str()),
                 };
                 let rel = abs.strip_prefix(&root).unwrap_or(abs);
-                let name = abs
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
                 egui::Sides::new().shrink_left().truncate().show(
                     ui,
                     |ui| {
@@ -532,11 +531,12 @@ fn outputs(ui: &mut egui::Ui, model: &mut AppModel, v: &SetView) {
                     |ui| {
                         if model.stat_is_file(abs) {
                             let r = ui.small_button("Show in Explorer");
+                            // Named by the whole path: two outputs can share a file name (final wave Group 5).
                             r.widget_info(|| {
                                 egui::WidgetInfo::labeled(
                                     egui::Role::Button,
                                     true,
-                                    format!("Show {name} in Explorer"),
+                                    format!("Show {} in Explorer", abs.display()),
                                 )
                             });
                             if r.clicked() {
@@ -850,7 +850,14 @@ fn match_toggle_span(ui: &egui::Ui) -> f32 {
 
 /// A Flags toggle painted as the link mark (two rings, no emoji glyph): its accessible name is the full `label`, which
 /// also leads its hover. True when clicked.
-fn flag(ui: &mut egui::Ui, enabled: bool, on: bool, label: &str, hover: &str, why: &str) -> bool {
+fn flag(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    on: bool,
+    (label, name): (&str, &dyn Fn() -> String),
+    hover: &str,
+    why: &str,
+) -> bool {
     let mark = egui::IdSalt::new("flag-mark");
     let mut button = None;
     ui.add_enabled_ui(enabled, |ui| {
@@ -862,13 +869,18 @@ fn flag(ui: &mut egui::Ui, enabled: bool, on: bool, label: &str, hover: &str, wh
         }
         button = Some(a.response);
     });
-    let r = button
-        .expect("the toggle is drawn")
-        .on_hover_text(format!("{label}. {hover}"))
-        .on_disabled_hover_text(why);
-    ui.ctx()
-        .accesskit_node_builder(r.id, |b| b.set_label(label));
-    r.clicked()
+    let r = button.expect("the toggle is drawn");
+    // Named before its hover is attached (egui-ui-rules 8.8), by `name` (it tells two toggles apart), with the hover's
+    // sentence as its description; the hover is built when it shows (final wave Groups 5 and 7).
+    ui.ctx().accesskit_node_builder(r.id, |b| {
+        b.set_label(name());
+        b.set_description(hover);
+    });
+    r.on_hover_ui(|ui| {
+        ui.label(format!("{label}. {hover}"));
+    })
+    .on_disabled_hover_text(why)
+    .clicked()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1154,6 +1166,9 @@ fn row(
                 // A value the row has no room for is cut: its full text is on hover (rule 3.4), and on a disabled
                 // combo it leads the reason's line (as the pickers' hover does).
                 if w + 0.01 < want {
+                    // what the hover shows, for a screen reader too (final wave Group 5)
+                    ui.ctx()
+                        .accesskit_node_builder(r.id, |b| b.set_description(value.as_str()));
                     let why = lock.as_deref();
                     r.on_hover_ui(|ui| {
                         ui.label(&value);
@@ -1211,11 +1226,13 @@ fn row(
                 let path = slot_match_path(derived, slot.suffix());
                 // Audit lead 17: a read-only sdc-project.toml is the reason.
                 let refused = model.sets_read_only_reason();
+                // The Diffuse and Normal toggles are told apart by the slot (egui-ui-rules 8.4).
+                let name = || format!("{MATCH_ON_THIS} ({})", v.slot_label(slot, ""));
                 if flag(
                     ui,
                     refused.is_none(),
                     on,
-                    "Match on this",
+                    (MATCH_ON_THIS, &name),
                     "PGPatcher applies the entry to meshes with this exact texture in this slot",
                     refused.as_deref().unwrap_or_default(),
                 ) {
@@ -1332,8 +1349,14 @@ fn linked_cell(
     acts: &mut Vec<Act>,
 ) {
     let file = link.path.rsplit('\\').next().unwrap_or(&link.path);
+    let sentence = || format!("PGPatcher reads {} for this slot.", link.path);
     let hover = |ui: &mut egui::Ui| {
-        ui.label(format!("PGPatcher reads {} for this slot.", link.path));
+        ui.label(sentence());
+    };
+    // The label shows the file name; its description holds the whole path the hover shows (final wave Group 5).
+    let described = |r: &egui::Response| {
+        r.ctx
+            .accesskit_node_builder(r.id, |b| b.set_description(sentence()));
     };
     // The set link keeps its size on the right, but takes at most half of the cell and truncates (its full text on
     // hover); the file name truncates on the left in what is left and keeps its text on hover.
@@ -1342,15 +1365,17 @@ fn linked_cell(
         ui,
         |ui| match (&link.from, &link.from_short) {
             (Some(_), Some(_)) => {
-                ui.add(egui::Label::new(egui::RichText::new(file).small()).truncate())
-                    .on_hover_ui(hover);
+                let r = ui.add(egui::Label::new(egui::RichText::new(file).small()).truncate());
+                described(&r);
+                r.on_hover_ui(hover);
             }
             _ => {
-                ui.add(
+                let r = ui.add(
                     egui::Label::new(egui::RichText::new(format!("{file} · set by path")).small())
                         .truncate(),
-                )
-                .on_hover_ui(hover);
+                );
+                described(&r);
+                r.on_hover_ui(hover);
             }
         },
         |ui| {
@@ -1366,13 +1391,17 @@ fn linked_cell(
                         ui.label(format!("from set {short}"));
                         ui.label("Open the set this file comes from.");
                     });
-                    // Two slots linked from one set name the slot, so their names differ (egui-ui-rules 8.4).
+                    // Two slots linked from one set name the slot, so their names differ (egui-ui-rules 8.4); the
+                    // hover's sentence is its description (final wave Group 5).
                     r.widget_info(|| {
                         egui::WidgetInfo::labeled(
                             egui::Role::Link,
                             true,
                             format!("Open set {short} ({})", v.slot_label(kind, "")),
                         )
+                    });
+                    ui.ctx().accesskit_node_builder(r.id, |b| {
+                        b.set_description("Open the set this file comes from.")
                     });
                     if r.clicked() {
                         acts.push(Act::OpenSet(from.clone()));

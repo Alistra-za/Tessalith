@@ -205,12 +205,6 @@ const SHARED_NAME_ALLOWED: &[(&str, &str, &[&str], &str)] = &[
     ("set editor", "D", &["Button", "Button", "Button"], CHIP),
     (
         "set editor",
-        "Match on this",
-        &["Button", "Button"],
-        "one fixed-name flag per filled slot row",
-    ),
-    (
-        "set editor",
         "Assign…",
         &["Button", "Button", "Button"],
         "one fixed-name menu button per empty slot row",

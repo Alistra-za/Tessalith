@@ -1193,7 +1193,7 @@ fn the_matching_header_lists_the_default_match1() {
 
 fn match_toggles(h: &Harness<'static, AppModel>) -> Vec<bool> {
     use eframe::egui::accesskit::Toggled;
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .map(|n| n.accesskit_node().toggled() == Some(Toggled::True))
         .collect()
 }
@@ -1225,12 +1225,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
             .count(),
         1
     );
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .nth(1)
         .unwrap()
         .click();
@@ -1240,12 +1240,12 @@ fn the_card_toggles_mirror_the_matching_rows() {
         serde_json::json!(r"landscape\rock01_n")
     );
     assert!(text_inputs(&h).contains(&r"landscape\rock01_n".to_string()));
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .scroll_to_me();
     h.run();
-    h.query_all_by_label("Match on this")
+    h.query_all_by_label_contains("Match on this")
         .next()
         .unwrap()
         .click();
@@ -1267,12 +1267,12 @@ fn each_match_click_is_one_undo_step() {
     let mut h = harness(m);
     h.run();
     let click_normal = |h: &mut Harness<'static, AppModel>| {
-        h.query_all_by_label("Match on this")
+        h.query_all_by_label_contains("Match on this")
             .nth(1)
             .unwrap()
             .scroll_to_me();
         h.run();
-        h.query_all_by_label("Match on this")
+        h.query_all_by_label_contains("Match on this")
             .nth(1)
             .unwrap()
             .click();
