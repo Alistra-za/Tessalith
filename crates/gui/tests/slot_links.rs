@@ -1120,3 +1120,114 @@ fn a_cleared_slot_turns_no_feature_on() {
         "one Undo brings the key back"
     );
 }
+
+// ---- Task 15a: Export reads the slots the editor shows ----
+
+fn leaf(m: &AppModel) -> SetView {
+    views(m).iter().find(|v| v.id == LEAF).unwrap().clone()
+}
+
+/// R3: a link is looked up with PGPatcher's explicit-slot rule (`pgpsim` `slots.rs`: lower case, `textures\` put in
+/// front unless it is there): `pbr\arch\wall.dds` names the file `textures\pbr\arch\wall.dds` names, and
+/// `other\textures\pbr\arch\wall.dds` names another file.
+#[test]
+fn a_link_is_looked_up_with_the_games_slot_path_rule() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let game = member_game_path(&m, WALL_ALBEDO).unwrap();
+    let bare = game
+        .strip_prefix(r"textures\")
+        .expect("premise: a textures path")
+        .to_string();
+    for (typed, from) in [
+        (bare, Some("arch/wall")),
+        (game.to_ascii_uppercase(), Some("arch/wall")),
+        (format!(r"other\{game}"), None),
+    ] {
+        m.set_slot_command(LEAF, 1, SlotCommand::Path(typed.clone()))
+            .unwrap();
+        assert_eq!(leaf(&m).linked[&1].from.as_deref(), from, "{typed}");
+    }
+}
+
+/// R3: every pick the From another set menu offers is shown as a link to its set and logs its Info line, a second
+/// member of one kind included; an unslotted output named by hand is a link to its set too.
+#[test]
+fn every_pick_the_menu_offers_is_a_link_to_its_set() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("rock_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("moss_n.png", [128, 128, 255], Subtype::PbrNormal),
+            ("glass_m.png", [10, 20, 30], Subtype::ComplexMaterial),
+        ],
+    );
+    for n in ["arch/rock_n.png", "arch/moss_n.png"] {
+        m.decide(n, Answer::Green(GreenConvention::Directx));
+    }
+    m.edit_docs("two normals", None, true, |_, s| {
+        s.add_member("arch/rock", "arch/moss_n.png")
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let rock = views(&m)
+        .iter()
+        .find(|v| v.id == "arch/rock")
+        .unwrap()
+        .clone();
+    for k in ["arch/rock_n.png", "arch/moss_n.png"] {
+        assert!(
+            rock.members.iter().any(|x| x == k)
+                && m.item(k).and_then(slot_of) == Some(SlotKind::Normal),
+            "premise: arch/rock has two normals: {:?}",
+            rock.members
+        );
+    }
+    let picks: Vec<MenuAction> = m
+        .slot_menu(LEAF, SlotKind::Normal)
+        .into_iter()
+        .filter(|e| matches!(e.action, MenuAction::SlotLink { .. }) && e.disabled.is_none())
+        .map(|e| e.action)
+        .collect();
+    let picked = |item: &str| {
+        picks
+            .iter()
+            .any(|a| matches!(a, MenuAction::SlotLink { item: i, .. } if i == item))
+    };
+    assert!(
+        picked("arch/rock_n.png") && picked("arch/moss_n.png") && picked("arch/wall_n.png"),
+        "premise: {picks:?}"
+    );
+    for a in picks {
+        let MenuAction::SlotLink { item, .. } = &a else {
+            unreachable!()
+        };
+        let set = views(&m)
+            .iter()
+            .find(|v| v.members.contains(item))
+            .unwrap()
+            .clone();
+        let logged = m.messages.entries().count();
+        assert_eq!(m.run_menu(a.clone()), None);
+        match slot_shown(&leaf(&m), SlotKind::Normal) {
+            SlotShown::Linked(l) => assert_eq!(l.from.as_deref(), Some(set.id.as_str()), "{item}"),
+            other => panic!("{item}: {other:?}"),
+        }
+        let lines: Vec<String> = m.messages.entries().map(|e| e.text.clone()).collect();
+        assert_eq!(lines.len(), logged + 1, "{item}: {lines:?}");
+        assert!(
+            lines[logged].ends_with(&format!("(from set {})", set.short)),
+            "{item}: {lines:?}"
+        );
+        m.undo();
+    }
+    let glass = member_game_path(&m, "arch/glass_m.png").unwrap();
+    m.set_slot_command(LEAF, 3, SlotCommand::Path(glass))
+        .unwrap();
+    let l = leaf(&m).linked[&3].clone();
+    assert_eq!(
+        (l.from.as_deref(), l.item.as_deref()),
+        (Some("arch/glass"), Some("arch/glass_m.png")),
+        "{l:?}"
+    );
+}

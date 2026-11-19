@@ -6,8 +6,9 @@ use super::known_paths::TxstRecord;
 use super::pbr_export::exports_json;
 use super::sets::{
     engine_inputs_in, entry_of, game_path_in, has_slot_clear, has_slot_link, link_row_kind,
-    linked_map_slot, missing_map_slot, recipe_suffix, renamed_output, slot_string, DefaultOutputs,
-    SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT, READ_ONLY,
+    linked_map_slot, missing_map_slot, recipe_suffix, renamed_output, slot_of, slot_string,
+    writes_own_output, DefaultOutputs, SetView, SlotFill, SlotKind, SlotLink, LAST_GAME_SLOT,
+    READ_ONLY,
 };
 use super::target_mod::{FileBase, MeshPath};
 use super::AppModel;
@@ -318,48 +319,76 @@ pub(super) fn fill_from_records(
 
 /// Review E1: fills `linked` of every set written as a JSON entry (`exports_json`) from its non-empty `slotN` strings:
 /// each path is resolved to the set and file that write it, and the row it fills is that file's kind when the kind
-/// belongs to the slot (a typed path's, or another kind's, is `link_row_kind`). A source is found by the game path a
-/// link to it is written with (`game_path_in`, the Path… and
-/// From another set menus' own function), so the opened folder does not matter; the first set in display order that
+/// belongs to the slot (a typed path's, or another kind's, is `link_row_kind`). A source is found in the index of every
+/// planned output (`written_outputs`), so the opened folder does not matter; the first set in display order that
 /// writes a path keeps it. Then each `SHADER-MISSING-MAP` warning of a slot that holds a link is dropped: the JSON
-/// names a file for it. Runs after `finish_view` and the short names; the arguments are `fill_from_records`'.
-pub(super) fn link_slots(
-    m: &AppModel,
-    views: &mut [SetView],
-    _entries: &[SetEntry],
-    own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
-) {
+/// names a file for it. Runs after `finish_view` and the short names.
+pub(super) fn link_slots(m: &AppModel, views: &mut [SetView]) {
     let any_link = views.iter().any(|v| has_slot_link(&v.settings));
     if !any_link && !views.iter().any(|v| has_slot_clear(&v.settings)) {
         return;
     }
     if any_link {
-        set_links(m, views, own_slots);
+        set_links(m, views);
     }
     set_features(m, views);
 }
 
-/// Fills `linked` (see `link_slots`).
-fn set_links(
-    m: &AppModel,
-    views: &mut [SetView],
-    own_slots: &[(String, BTreeMap<SlotKind, SlotFill>)],
-) {
-    let paths = engine_inputs_in(m, views).1;
-    let mut written: HashMap<String, (&str, &str)> = HashMap::new();
-    for (id, slots) in own_slots {
-        for item in slots.values().filter_map(|f| match f {
-            SlotFill::Own { item } => Some(item),
-            _ => None,
-        }) {
-            if let Ok(p) = game_path_in(m, views, &paths, item) {
-                written
-                    .entry(game_key(&p))
-                    .or_insert((id.as_str(), item.as_str()));
+/// Review E1 (Task 15a): the path PGPatcher puts in a game slot for a `slotN` string, folded for comparison: its
+/// explicit-slot rule (`pgpsim` `slots.rs`, `apply_slots`: ASCII lower case, `textures\` put in front unless the
+/// string starts with it, `""` clears). So `pbr\a\b_n.dds` and `textures\pbr\a\b_n.dds` name one file, while
+/// `other\textures\pbr\a\b_n.dds` names `textures\other\textures\…`. Unlike `game_key` (Note HG's record paths), no
+/// part of the path is cut.
+pub(crate) fn slot_path_key(path: &str) -> String {
+    let mut p = path.to_ascii_lowercase();
+    if !p.is_empty() && !p.starts_with("textures\\") {
+        p.insert_str(0, "textures\\");
+    }
+    p
+}
+
+/// One planned output in the link index (`written_outputs`).
+#[derive(Clone, Copy)]
+struct Written<'a> {
+    from: &'a str,
+    short: &'a str,
+    item: &'a str,
+    /// The output's slot kind (`slot_of`); `None` for an output that fills no slot (a complex `_m`).
+    kind: Option<SlotKind>,
+}
+
+/// Review E1 (Task 15a): every planned output of every set (each member that writes a file of its own, the members
+/// after the first of a slot kind and the unslotted outputs included), by `slot_path_key` of the path a link to it is
+/// written with (`game_path_in`, the Path… and From another set menus' own function), built in one pass. The first set
+/// in display order that writes a path keeps it.
+fn written_outputs<'a>(
+    m: &'a AppModel,
+    views: &'a [SetView],
+    paths: &BTreeMap<OutputKey, PathBuf>,
+) -> HashMap<String, Written<'a>> {
+    let mut out = HashMap::new();
+    for v in views {
+        for item in &v.members {
+            let Some(it) = m.item(item).filter(|i| writes_own_output(i)) else {
+                continue;
+            };
+            if let Ok(p) = game_path_in(m, views, paths, item) {
+                out.entry(slot_path_key(&p)).or_insert(Written {
+                    from: &v.id,
+                    short: &v.short,
+                    item,
+                    kind: slot_of(it),
+                });
             }
         }
     }
-    let writer = |path: &str| written.get(&game_key(path)).copied();
+    out
+}
+
+/// Fills `linked` (see `link_slots`).
+fn set_links(m: &AppModel, views: &mut [SetView]) {
+    let paths = engine_inputs_in(m, views).1;
+    let written = written_outputs(m, views, &paths);
     let found: Vec<BTreeMap<u8, SlotLink>> = views
         .iter()
         .map(|v| {
@@ -369,24 +398,13 @@ fn set_links(
             (1..=LAST_GAME_SLOT)
                 .filter_map(|n| {
                     let path = slot_string(&v.settings, n).filter(|p| !p.is_empty())?;
-                    let source = writer(path).map(|(from, item)| {
-                        let kind = own_slots
-                            .iter()
-                            .find(|(id, _)| same_id(id, from))
-                            .and_then(|(_, slots)| {
-                                slots.iter().find(
-                                    |(_, f)| matches!(f, SlotFill::Own { item: i } if i == item),
-                                )
-                            })
-                            .map(|(k, _)| *k);
-                        let short = views
-                            .iter()
-                            .find(|o| same_id(&o.id, from))
-                            .map(|o| o.short.clone());
-                        (from.to_string(), short, item.to_string(), kind)
-                    });
-                    let (from, from_short, item, kind) = match source {
-                        Some((f, s, i, k)) => (Some(f), s, Some(i), k),
+                    let (from, from_short, item, kind) = match written.get(&slot_path_key(path)) {
+                        Some(w) => (
+                            Some(w.from.to_string()),
+                            Some(w.short.to_string()),
+                            Some(w.item.to_string()),
+                            w.kind,
+                        ),
                         None => (None, None, None, None),
                     };
                     // A link shows on the row of the game slot it sits on: a typed path to another kind's output
@@ -922,5 +940,24 @@ mod tests {
             let abs = Path::new(root).join(&rel);
             assert_eq!(engine::discover::game_path(&abs, &rel), record, "{root}");
         }
+    }
+
+    /// Review E1 (Task 15a): `slot_path_key` is PGPatcher's explicit-slot rule (`pgpsim` `slots.rs`, the `slot1`..
+    /// `slot8` pass): lower case, `textures\` in front unless the string starts with it, nothing cut.
+    #[test]
+    fn a_slot_path_is_keyed_by_the_games_rule() {
+        let file = r"textures\pbr\arch\wall_n.dds";
+        for same in [
+            file,
+            r"pbr\arch\wall_n.dds",
+            r"TEXTURES\PBR\Arch\Wall_N.dds",
+        ] {
+            assert_eq!(slot_path_key(same), file, "{same}");
+        }
+        assert_eq!(
+            slot_path_key(r"other\textures\pbr\arch\wall_n.dds"),
+            r"textures\other\textures\pbr\arch\wall_n.dds"
+        );
+        assert_eq!(slot_path_key(""), "");
     }
 }

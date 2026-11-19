@@ -422,9 +422,10 @@ pub struct SlotLink {
     pub from: Option<String>,
     /// That set's `short` name.
     pub from_short: Option<String>,
-    /// The item key that writes it.
+    /// The item key that writes it (any planned output of that set, `txst_map::written_outputs`).
     pub item: Option<String>,
-    /// The source item's kind in its set (`Some` exactly when `item` is): Z9's "exact slot kind".
+    /// The source item's slot kind (`slot_of`), Z9's "exact slot kind": `None` when no set writes the path, and for an
+    /// output that fills no slot (a complex `_m`), which is a local file but counts for no feature (`set_features`).
     pub kind: Option<SlotKind>,
     /// The row this link fills: `kind`, or for a typed path `link_row_kind(v, n)`. `None` for game slot 5.
     pub row: Option<SlotKind>,
@@ -1216,7 +1217,7 @@ fn build_views(m: &AppModel) -> Vec<SetView> {
         v.short = s;
     }
     // Review E1: after `finish_view` (`exports_json` reads `json`) and the short names (a link names its source's).
-    link_slots(m, &mut views, &entries, &own_slots);
+    link_slots(m, &mut views);
     // Ownership marks.
     let owners = owners(&views);
     for v in &mut views {
@@ -1720,8 +1721,8 @@ pub(crate) fn splice_views(m: &AppModel, views: &mut Vec<SetView>, scope: &BTree
         rebuilt.push(v);
     }
     // Task 12: a cleared slot sets `features` on the way `build_views` does. No link exists on this path (a project
-    // with one rebuilt every view above), so `own_slots` is not read.
-    link_slots(m, &mut rebuilt, &entries, &[]);
+    // with one rebuilt every view above), so the link index is not built.
+    link_slots(m, &mut rebuilt);
     // The outputs whose users may have changed: every item the rebuilt views used before or use now.
     let mut touched: HashSet<String> = HashSet::new();
     for (&i, v) in affected.iter().zip(&rebuilt) {
@@ -4650,7 +4651,7 @@ pub fn fill_proposals(m: &AppModel, set: &str) -> Vec<FillProposal> {
 /// Whether `item` writes an output of its own: it has a job and is neither a raw packing source nor a helper. A
 /// record-only slot (`_s` backlight, env mask, cubemap) has no `slot_of` but writes a file like any other, so the
 /// output key must not depend on the slot.
-fn writes_own_output(item: &TextureItem) -> bool {
+pub(crate) fn writes_own_output(item: &TextureItem) -> bool {
     item.job.is_some()
         && !matches!(item.status, ItemStatus::PackedInto(_))
         && item.kind != ItemKind::Helper
