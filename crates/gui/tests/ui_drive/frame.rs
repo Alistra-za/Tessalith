@@ -50,6 +50,39 @@ pub struct Snapshot {
     /// The right edge of the Sets column's panel (`ui::panel_ids::panel_rect`), when the frame built it: the set
     /// editor is the area right of it.
     pub sets_right: Option<f32>,
+    /// Every filled rect the frame paints, with its fill's alpha: where a scroll bar's track and handle show.
+    pub filled: Vec<Filled>,
+    /// Every filled circle the frame paints: where a status dot shows.
+    pub discs: Vec<Disc>,
+    /// Where the pointer is, when egui has one in the window; `None` is a frame with no pointer (a bar at rest).
+    pub pointer: Option<Pos2>,
+}
+
+/// A painted filled rect.
+#[derive(Clone, Debug)]
+pub struct Filled {
+    pub rect: Rect,
+    pub alpha: u8,
+}
+
+/// A painted filled circle.
+#[derive(Clone, Debug)]
+pub struct Disc {
+    pub center: Pos2,
+    pub radius: f32,
+    pub fill: egui::Color32,
+}
+
+fn discs_in(s: &Shape, out: &mut Vec<Disc>) {
+    match s {
+        Shape::Vec(v) => v.iter().for_each(|s| discs_in(s, out)),
+        Shape::Circle(c) if c.fill.a() > 0 => out.push(Disc {
+            center: c.center,
+            radius: c.radius,
+            fill: c.fill,
+        }),
+        _ => {}
+    }
 }
 
 const INTERACTIVE_ROLES: [&str; 10] = [
@@ -192,12 +225,22 @@ pub fn snapshot<S>(h: &Harness<'_, S>) -> Snapshot {
     for c in &h.output().shapes {
         flatten(&c.shape, c.clip_rect, &mut texts, &mut bare_ellipses);
     }
+    let mut discs = Vec::new();
+    for c in &h.output().shapes {
+        discs_in(&c.shape, &mut discs);
+    }
     Snapshot {
         size: h.ctx.content_rect().size(),
         nodes,
         texts,
         bare_ellipses,
         sets_right: sdc_gui::ui::panel_ids::panel_rect(&h.ctx, "sets").map(|r| r.max.x),
+        filled: crate::support::filled_rects(&h.output().shapes)
+            .into_iter()
+            .map(|(rect, alpha)| Filled { rect, alpha })
+            .collect(),
+        discs,
+        pointer: h.ctx.input(|i| i.pointer.latest_pos()),
     }
 }
 

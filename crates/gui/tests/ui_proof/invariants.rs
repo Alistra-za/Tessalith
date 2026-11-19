@@ -9,7 +9,8 @@
 use crate::checks::{run_checks, Finding};
 use crate::frame::{snapshot, Node, Snapshot, Text};
 use crate::screens::{entries, holds, Needle, Screen, ScreenEntry};
-use eframe::egui::{vec2, Key, Vec2};
+use crate::support::{bar_clearance, bar_like};
+use eframe::egui::{vec2, Key, Rect, Vec2};
 use egui_kittest::Harness;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -173,7 +174,190 @@ pub const FRAME_INVARIANTS: &[FrameInvariant] = &[
     nothing_past_the_window_edge,
     no_clipped_text,
     cut_text_keeps_its_value,
+    status_dots_have_names,
 ];
+
+/// An invariant that can also fail to observe: it pushes to `errors` what the snapshot cannot tell (the visit is then
+/// an error of its screen, never a pass).
+type ObservingInvariant = fn(&Frame, &mut Vec<String>) -> Vec<Hit>;
+
+pub const OBSERVING_INVARIANTS: &[ObservingInvariant] = &[scroll_bars_are_visible_and_clear];
+
+/// A scroll bar's node and its painted rects are what the bar check reads; its track is the tallest thin rect painted
+/// at the node's right edge (`support::bar_like`, the helper `scroll_bars.rs` uses).
+fn track_of(f: &Frame, bar: &Node) -> Option<(Rect, bool)> {
+    let all: Vec<(Rect, u8)> = f
+        .snapshot
+        .filled
+        .iter()
+        .map(|x| (x.rect, x.alpha))
+        .collect();
+    let fills: Vec<(Rect, u8)> = bar_like(&all, bar.rect)
+        .into_iter()
+        .filter(|(r, _)| r.intersects(bar.rect))
+        .collect();
+    let track = fills
+        .iter()
+        .map(|(r, _)| *r)
+        .max_by(|a, b| a.height().total_cmp(&b.height()))?;
+    Some((track, fills.iter().any(|(_, a)| *a > 0)))
+}
+
+/// Every shown scroll bar is visible with no pointer in the window, and no interactive widget comes within the bar's
+/// width of its track (the room the bar takes when hovered), except a set card, which only has to stop short of the
+/// track itself (`support::bar_clearance`).
+// shortcut: vertical bars only (every bar of the shipped screens is one: a horizontal one is an error until this reads
+// it), and the widgets beside the bar are the nodes the snapshot lists as interactive; upgrade with the first
+// horizontal bar the app gets.
+fn scroll_bars_are_visible_and_clear(f: &Frame, errors: &mut Vec<String>) -> Vec<Hit> {
+    let snap = f.snapshot;
+    let bars: Vec<&Node> = snap
+        .nodes
+        .iter()
+        .filter(|n| n.role == "ScrollBar")
+        .collect();
+    if bars.is_empty() {
+        return vec![];
+    }
+    if let Some(p) = snap.pointer {
+        errors.push(format!(
+            "the pointer is at {p:?} in the window, so a scroll bar's opacity is not the one at rest; the walk must send the pointer away before it reads the frame"
+        ));
+        return vec![];
+    }
+    let bar_width = sdc_gui::look::thin_scroll().bar_width;
+    let mut hits = vec![];
+    for bar in bars {
+        let r = bar.rect;
+        if !r.is_positive() {
+            errors.push("a scroll bar node has no rect, so its track cannot be found".into());
+            continue;
+        }
+        if r.width() > r.height() {
+            errors.push(format!(
+                "a horizontal scroll bar at {r:?}: the scroll bar check reads vertical bars only"
+            ));
+            continue;
+        }
+        let Some((track, visible)) = track_of(f, bar) else {
+            errors.push(format!(
+                "the scroll bar node at {r:?} has no filled rect painted at its right edge, so its visibility cannot be told"
+            ));
+            continue;
+        };
+        if !visible {
+            hits.push(Hit {
+                screen: f.screen.to_string(),
+                size: f.size,
+                invariant: "scroll_bar_at_rest",
+                what: "scroll bar".into(),
+                y: r.min.y,
+                ordinal: 0,
+                px: 0.0,
+                message: format!(
+                    "the scroll bar at {r:?} paints only fully transparent fills with no pointer in the window; scope look::thin_scroll() (or solid) on its ScrollArea so the bar shows at rest"
+                ),
+            });
+        }
+        // One hit per bar, not per widget: one fault in a panel's right-edge reserve puts every widget of that panel
+        // under the bar, and a hit each would fill ALLOWED's 30 entries. The hit's name counts them and its message
+        // lists them all, so a widget added or removed changes the name and fails the entry.
+        let mut under: Vec<(String, f32)> = vec![];
+        for n in &snap.nodes {
+            // A node in another egui layer (a menu, a popup, a dialog) floats over the area on purpose; a Splitter is a
+            // panel's resize handle, which lies across the foot of the area and is no content of it.
+            if !n.interactive
+                || n.role == "ScrollBar"
+                || n.role == "Splitter"
+                || n.layer != bar.layer
+                || !n.rect.is_positive()
+                || n.rect.max.y <= track.min.y
+                || n.rect.min.y >= track.max.y
+                || n.rect.min.x >= track.max.x
+            {
+                continue;
+            }
+            let label = if n.label.is_empty() {
+                n.value.clone().unwrap_or_default()
+            } else {
+                n.label.clone()
+            };
+            let limit = bar_clearance(&label, track, bar_width);
+            if n.rect.max.x <= limit + 0.5 {
+                continue;
+            }
+            under.push((
+                format!(
+                    "{} {label:?} {:?} (right edge past {limit:.1})",
+                    n.role, n.rect
+                ),
+                n.rect.max.x - limit,
+            ));
+        }
+        if !under.is_empty() {
+            let px = under.iter().map(|(_, px)| *px).fold(0.0, f32::max);
+            hits.push(Hit {
+                screen: f.screen.to_string(),
+                size: f.size,
+                invariant: "scroll_bar_clearance",
+                what: format!("{} widgets reach the scroll bar", under.len()),
+                y: r.min.y,
+                ordinal: 0,
+                px,
+                message: format!(
+                    "the scroll bar {track:?} has {} interactive widgets within its width: {}; end each {bar_width} px before the track, with the right-edge reserve of look::thin_scroll(), so the bar never lies over a widget",
+                    under.len(),
+                    under
+                        .iter()
+                        .map(|(text, _)| text.as_str())
+                        .collect::<Vec<_>>()
+                        .join("; ")
+                ),
+            });
+        }
+    }
+    hits
+}
+
+/// Every filled circle in a status colour (`ui::status::RED`, `AMBER`, `GREEN`) lies under a node that names it: the
+/// dot `status::dot` allocates and names ("ready", "warning", "blocks export"), or a named node about its own size.
+/// A bigger named node (a row, a card) names its row, not the colour.
+fn status_dots_have_names(f: &Frame) -> Vec<Hit> {
+    use sdc_gui::ui::status::{AMBER, GREEN, RED};
+    let mut hits = vec![];
+    for d in &f.snapshot.discs {
+        let [r, g, b, _] = d.fill.to_srgba_unmultiplied();
+        let Some(colour) = [(RED, "red"), (AMBER, "amber"), (GREEN, "green")]
+            .into_iter()
+            .find(|(c, _)| (c.r(), c.g(), c.b()) == (r, g, b))
+            .map(|(_, name)| name)
+        else {
+            continue;
+        };
+        let bounds = Rect::from_center_size(d.center, Vec2::splat(2.0 * d.radius));
+        let named = f.snapshot.nodes.iter().any(|n| {
+            (!n.label.is_empty() || n.value.as_deref().is_some_and(|v| !v.is_empty()))
+                && n.rect.expand(0.5).contains_rect(bounds)
+                && n.rect.width().max(n.rect.height()) <= 3.0 * bounds.width()
+        });
+        if !named {
+            hits.push(Hit {
+                screen: f.screen.to_string(),
+                size: f.size,
+                invariant: "status_dot_named",
+                what: format!("{colour} dot"),
+                y: d.center.y,
+                ordinal: 0,
+                px: 0.0,
+                message: format!(
+                    "a {colour} status circle at {:?} has no named node over it; draw it with ui::status::dot (it names the status), or name the node with the status word, instead of colour alone",
+                    d.center
+                ),
+            });
+        }
+    }
+    hits
+}
 
 /// The findings of `check`, as hits with the rule's message and what to do instead; `px` measures each.
 fn from_findings(
@@ -523,6 +707,15 @@ pub fn walk(
             let first = walked.hits.len();
             for invariant in FRAME_INVARIANTS {
                 walked.hits.extend(invariant(&frame));
+            }
+            for invariant in OBSERVING_INVARIANTS {
+                let mut unseen = vec![];
+                walked.hits.extend(invariant(&frame, &mut unseen));
+                walked.errors.extend(
+                    unseen
+                        .into_iter()
+                        .map(|why| format!("{} at {}x{}: {why}", e.name(), size.x, size.y)),
+                );
             }
             number_same_named(&mut walked.hits[first..]);
             walked.visits.push(Visit {
@@ -938,6 +1131,66 @@ pub const ALLOWED: &[Allowed] = &[
         count: 1,
         px: 0.0,
         reason: "the chip's own \"Assign…\" inside parentheses; its button's name goes on with \" — go to the fix\"",
+    },
+    Allowed {
+        screen: "presets tab",
+        invariant: "scroll_bar_at_rest",
+        size: (1100.0, 800.0),
+        what: "scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 0.0,
+        reason: "the presets tab's ScrollArea::both (ui/presets.rs, id presets-scroll) shows a floating bar that paints only transparent fills at rest; it has no look::thin_scroll()",
+    },
+    Allowed {
+        screen: "presets tab",
+        invariant: "scroll_bar_at_rest",
+        size: (1280.0, 800.0),
+        what: "scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 0.0,
+        reason: "the presets tab's ScrollArea::both (ui/presets.rs, id presets-scroll) shows a floating bar that paints only transparent fills at rest; it has no look::thin_scroll()",
+    },
+    Allowed {
+        screen: "presets tab",
+        invariant: "scroll_bar_at_rest",
+        size: (1600.0, 900.0),
+        what: "scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 0.0,
+        reason: "the presets tab's ScrollArea::both (ui/presets.rs, id presets-scroll) shows a floating bar that paints only transparent fills at rest; it has no look::thin_scroll()",
+    },
+    Allowed {
+        screen: "review tab",
+        invariant: "scroll_bar_clearance",
+        size: (1100.0, 800.0),
+        what: "1 widgets reach the scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 4.0,
+        reason: "the Also folders panel's \"Choose where the Also folders go…\" button ends 4 px inside the bar's hovered width",
+    },
+    Allowed {
+        screen: "review tab",
+        invariant: "scroll_bar_clearance",
+        size: (1280.0, 800.0),
+        what: "9 widgets reach the scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 3.7,
+        reason: "the Also folders panel's nine controls (the folder boxes, the set checks and Recipe settings…) end 3.7 px inside the bar's hovered width",
+    },
+    Allowed {
+        screen: "review tab",
+        invariant: "scroll_bar_clearance",
+        size: (1600.0, 900.0),
+        what: "9 widgets reach the scroll bar",
+        ordinal: 0,
+        count: 1,
+        px: 4.0,
+        reason: "the Also folders panel's nine controls (the folder boxes, the set checks and Recipe settings…) end 4 px inside the bar's hovered width",
     },
 ];
 fn covers(a: &Allowed, h: &Hit) -> bool {
@@ -2075,6 +2328,227 @@ fn a_tree_differs_by_content_and_paths_not_by_modification_time() {
     .map(|(p, k)| (p.to_string(), k))
     .to_vec();
     assert_eq!(got, want);
+}
+
+/// The test-only screens of the scroll-bar and status-dot invariants: tiny UIs with one planted violation each (and a
+/// clean control), none in the shipped list.
+#[derive(Clone, Copy)]
+enum Planted {
+    /// A floating bar (egui's default style) that paints only transparent fills at rest.
+    HiddenBar,
+    /// A thin bar with a button as wide as the area, so the bar lies over the button's right end.
+    BarOverButton,
+    /// A thin bar and a narrow button: nothing to find.
+    CleanBar,
+    /// The clean screen with the pointer in the window.
+    PointerOverBar,
+    /// A red circle with no node, a named green dot, and an amber circle under only a big named label.
+    Dots,
+}
+
+struct PlantedScreen(Planted);
+
+impl PlantedScreen {
+    fn ui(kind: Planted, ui: &mut eframe::egui::Ui) {
+        use eframe::egui::{Button, ScrollArea, Sense};
+        use sdc_gui::ui::status::{dot, Status, AMBER, RED};
+        let title = match kind {
+            Planted::HiddenBar => "Hidden bar screen",
+            Planted::BarOverButton => "Bar over button screen",
+            Planted::CleanBar => "Clean bar screen",
+            Planted::PointerOverBar => "Pointer screen",
+            Planted::Dots => "Status dots screen",
+        };
+        ui.label(title);
+        if let Planted::Dots = kind {
+            let (red, _) = ui.allocate_exact_size(Vec2::splat(8.0), Sense::hover());
+            ui.painter().circle_filled(red.center(), 4.0, RED);
+            dot(ui, Status::Ready);
+            let row = ui.label("a whole row that names itself, not its colour");
+            ui.painter()
+                .circle_filled(row.rect.left_center() + vec2(20.0, 0.0), 4.0, AMBER);
+            return;
+        }
+        if !matches!(kind, Planted::HiddenBar) {
+            ui.style_mut().spacing.scroll = sdc_gui::look::thin_scroll();
+        }
+        ScrollArea::vertical()
+            .id_salt("planted")
+            .max_height(150.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                let width = if let Planted::BarOverButton = kind {
+                    ui.available_width()
+                } else {
+                    100.0
+                };
+                ui.add_sized(vec2(width, 20.0), Button::new("A control"));
+                ui.allocate_space(vec2(10.0, 600.0));
+            });
+    }
+}
+
+impl Entry for PlantedScreen {
+    fn name(&self) -> &str {
+        match self.0 {
+            Planted::HiddenBar => "test-only hidden bar",
+            Planted::BarOverButton => "test-only bar over a button",
+            Planted::CleanBar => "test-only clean bar",
+            Planted::PointerOverBar => "test-only bar with a pointer",
+            Planted::Dots => "test-only status dots",
+        }
+    }
+
+    fn marker(&self) -> &'static [Needle] {
+        const HIDDEN: &[Needle] = &[crate::screens::has("Hidden bar screen")];
+        const OVER: &[Needle] = &[crate::screens::has("Bar over button screen")];
+        const CLEAN: &[Needle] = &[crate::screens::has("Clean bar screen")];
+        const POINTER: &[Needle] = &[crate::screens::has("Pointer screen")];
+        const DOTS: &[Needle] = &[crate::screens::has("Status dots screen")];
+        match self.0 {
+            Planted::HiddenBar => HIDDEN,
+            Planted::BarOverButton => OVER,
+            Planted::CleanBar => CLEAN,
+            Planted::PointerOverBar => POINTER,
+            Planted::Dots => DOTS,
+        }
+    }
+
+    fn at(&mut self, size: Vec2) -> Result<Snapshot, String> {
+        let kind = self.0;
+        let mut h = Harness::builder()
+            .with_context_setup(|ctx| {
+                sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+            })
+            .with_size(size)
+            .build_ui(move |ui| PlantedScreen::ui(kind, ui));
+        h.run_steps(3);
+        if let Planted::PointerOverBar = kind {
+            h.event(eframe::egui::Event::PointerMoved(eframe::egui::pos2(
+                50.0, 50.0,
+            )));
+            h.run_steps(3);
+        }
+        Ok(snapshot(&h))
+    }
+}
+
+/// A scroll bar that is invisible at rest, an interactive widget inside a bar's width of the track, and a status-coloured
+/// circle with no named node over it each fail the walk, through `walk` and `verdict` beside a clean shipped entry and a
+/// clean planted bar. The checker's own calls are the fifteen frames of the five entries, and the failure list is exactly
+/// the planted ones, at every size.
+#[test]
+fn a_hidden_bar_a_widget_under_a_bar_and_a_nameless_dot_fail_the_walk() {
+    let mut list: Vec<Box<dyn Entry>> = vec![
+        the_start_screen(),
+        Box::new(PlantedScreen(Planted::HiddenBar)),
+        Box::new(PlantedScreen(Planted::BarOverButton)),
+        Box::new(PlantedScreen(Planted::CleanBar)),
+        Box::new(PlantedScreen(Planted::Dots)),
+    ];
+    let mut calls: Vec<(String, (f32, f32))> = vec![];
+    let walked = walk(&mut list, &mut |screen, size, snap| {
+        calls.push((screen.to_string(), (size.x, size.y)));
+        real_checker(screen, size, snap)
+    });
+    let bad = verdict(&walked, &[]);
+    let mut want_calls = vec![];
+    for name in [
+        "start screen",
+        "test-only hidden bar",
+        "test-only bar over a button",
+        "test-only clean bar",
+        "test-only status dots",
+    ] {
+        for size in SIZES {
+            want_calls.push((name.to_string(), (size.x, size.y)));
+        }
+    }
+    assert_eq!(calls, want_calls, "the checker ran on every frame");
+    assert!(walked.errors.is_empty(), "{:?}", walked.errors);
+    let mut got: Vec<&str> = bad.iter().map(|m| head(m)).collect();
+    got.sort();
+    let mut want = vec![];
+    for size in ["1100x800", "1280x800", "1600x900"] {
+        want.push(format!(
+            r#"test-only hidden bar at {size}: scroll_bar_at_rest "scroll bar" #0 (0.0 px)"#
+        ));
+        want.push(format!(
+            r#"test-only bar over a button at {size}: scroll_bar_clearance "1 widgets reach the scroll bar" #0 (4.0 px)"#
+        ));
+        want.push(format!(
+            r#"test-only status dots at {size}: status_dot_named "amber dot" #0 (0.0 px)"#
+        ));
+        want.push(format!(
+            r#"test-only status dots at {size}: status_dot_named "red dot" #0 (0.0 px)"#
+        ));
+    }
+    want.sort();
+    assert_eq!(got, want, "{bad:#?}");
+    // every failure names where to go: ALLOWED, and what to do instead
+    for m in &bad {
+        assert!(m.contains("ALLOWED"), "{m}");
+        let what = if m.contains("scroll_bar_at_rest") {
+            "look::thin_scroll()"
+        } else if m.contains("scroll_bar_clearance") {
+            "right-edge reserve"
+        } else {
+            "ui::status::dot"
+        };
+        assert!(m.contains(what), "{m}");
+    }
+}
+
+/// A frame with the pointer in the window is an error of its screen, not a pass: the bar's opacity at rest cannot be
+/// read from it.
+#[test]
+fn a_bar_read_with_the_pointer_in_the_window_is_an_error() {
+    let mut list: Vec<Box<dyn Entry>> = vec![Box::new(PlantedScreen(Planted::PointerOverBar))];
+    let walked = walk(&mut list, &mut real_checker);
+    assert!(walked.hits.is_empty(), "{:?}", walked.hits);
+    assert_eq!(walked.errors.len(), 3, "{:?}", walked.errors);
+    for (e, size) in walked
+        .errors
+        .iter()
+        .zip(["1100x800", "1280x800", "1600x900"])
+    {
+        assert!(
+            e.starts_with(&format!(
+                "test-only bar with a pointer at {size}: the pointer is at"
+            )),
+            "{e}"
+        );
+    }
+}
+
+/// A scroll bar node with no filled rect painted at its edge is an error, not a pass; a frame with no bar node reports
+/// nothing.
+#[test]
+fn a_bar_with_no_painted_rect_is_an_error() {
+    let size = SIZES[1];
+    let mut snap = PlantedScreen(Planted::CleanBar).at(size).unwrap();
+    let findings: Vec<Finding> = vec![];
+    let frame = |snap: &Snapshot| {
+        let mut errors = vec![];
+        let hits = scroll_bars_are_visible_and_clear(
+            &Frame {
+                screen: "s",
+                size,
+                snapshot: snap,
+                findings: &findings,
+            },
+            &mut errors,
+        );
+        (hits.len(), errors)
+    };
+    assert_eq!(frame(&snap), (0, vec![]), "the clean bar passes");
+    snap.filled.clear();
+    let (hits, errors) = frame(&snap);
+    assert_eq!(hits, 0);
+    assert_eq!(errors.len(), 1, "{errors:?}");
+    assert!(errors[0].contains("no filled rect painted"), "{errors:?}");
+    snap.nodes.retain(|n| n.role != "ScrollBar");
+    assert_eq!(frame(&snap), (0, vec![]), "no bar node, nothing to observe");
 }
 
 /// Errors are never allowed.

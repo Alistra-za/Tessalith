@@ -562,6 +562,20 @@ fn enter_inner(s: &Screen, size: Vec2) -> Result<(tempfile::TempDir, H), String>
     Ok((d, h))
 }
 
+/// The walk's pointer state: no pointer in the window when a frame is read (a hover can raise a scroll bar's opacity,
+/// and the steps' clicks leave the pointer where they last aimed). Sends the pointer away, lets the app settle and
+/// proves egui has no pointer position.
+fn pointer_away(h: &mut H) -> Result<(), String> {
+    h.event(eframe::egui::Event::PointerGone);
+    if !settle(h, 2) {
+        return Err("the window did not go idle after the pointer left it".into());
+    }
+    if h.ctx.input(|i| i.pointer.latest_pos()).is_some() {
+        return Err("the pointer is still in the window after PointerGone".into());
+    }
+    Ok(())
+}
+
 /// A screen of `SCREENS` as an entry of the walk.
 pub struct ScreenEntry {
     screen: &'static Screen,
@@ -590,6 +604,7 @@ impl Entry for ScreenEntry {
                 if !settle(h, 2) {
                     return Err("the window did not go idle after the resize".into());
                 }
+                pointer_away(h)?;
                 let snap = snapshot(h);
                 if !holds(&snap, self.screen.marker) {
                     return Err(format!(
@@ -602,8 +617,12 @@ impl Entry for ScreenEntry {
         }
         // the old window and its folder go before the new ones are built
         self.open = None;
-        let (d, h) = enter(self.screen, size)?;
+        let (d, mut h) = enter(self.screen, size)?;
+        pointer_away(&mut h)?;
         let snap = snapshot(&h);
+        if !holds(&snap, self.screen.marker) {
+            return Err("the screen no longer shows its marker once the pointer is away".into());
+        }
         self.open = Some((d, h));
         Ok(snap)
     }
@@ -842,6 +861,9 @@ fn pin_frame(pin_x: f32, as_node: bool) -> Snapshot {
         texts,
         bare_ellipses: vec![],
         sets_right: Some(300.0),
+        filled: vec![],
+        discs: vec![],
+        pointer: None,
     }
 }
 
