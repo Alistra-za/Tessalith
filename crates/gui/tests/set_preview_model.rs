@@ -143,6 +143,68 @@ fn a_coat_link_skips_a_replaced_borrowed_fuzz() {
     );
 }
 
+#[test]
+fn an_unresolved_link_uses_the_game_texture_in_the_preview_scene() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let key = rock_named(&m, "arch/wall").0.key;
+    m.select_set(&key);
+    let local = member_game_path(&m, "arch/leaf_n.png").unwrap();
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(local)));
+    let mut preview = SetPreview::new(Some(bsa_db(d.path())), DEFAULT_CAP);
+    run(&mut preview, &m);
+    let Some(Content::Builtin { textures, .. }) = preview.v3.content() else {
+        panic!("expected the built-in preview");
+    };
+    assert!(matches!(
+        textures.get(&canon(&local)),
+        Some(FileSource::Memory { .. })
+    ));
+
+    let external = r"textures\clutter\vanilla_m.dds";
+    m.set_json_value("arch/wall", "slot2", Some(serde_json::json!(external)));
+    run(&mut preview, &m);
+    let Some(Content::Builtin {
+        material, textures, ..
+    }) = preview.v3.content()
+    else {
+        panic!("expected the built-in preview after resync");
+    };
+    assert_eq!(material.slots[1].norm, canon(external));
+    assert_eq!(
+        textures.get(&canon(external)),
+        Some(&FileSource::Bsa {
+            archive: d.path().join("Skyrim - Textures0.bsa"),
+            norm: canon(external),
+        })
+    );
+    assert!(
+        !textures.contains_key(&canon(&local)),
+        "old linked bytes survived resync"
+    );
+}
+
+#[test]
+fn a_link_with_no_preview_row_contributes_no_local_bytes() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair(d.path());
+    let local = member_game_path(&m, "arch/wall_n.png").unwrap();
+    m.set_json_value("arch/leaf", "slot5", Some(serde_json::json!(local)));
+    let (v, entry) = rock_named(&m, "arch/leaf");
+    assert_eq!(v.linked[&5].item.as_deref(), Some("arch/wall_n.png"));
+    assert!(v.linked[&5].row.is_none());
+    assert_eq!(entry.slots[&5], local);
+    let mut enc = Encoder::new(DEFAULT_CAP);
+    enc.sync(&m, member_slots(&m, &v, Some(&entry)), Instant::now(), true);
+    settle(&mut enc, &m);
+    let sources = enc.memory_sources();
+    assert!(
+        !sources.contains_key(&canon(&local)),
+        "rowless link served local bytes"
+    );
+    assert!(sources.contains_key("textures/pbr/arch/leaf_n.dds"));
+}
+
 fn no_shared_kind(slots: &[MemberSlot]) {
     let mut kinds: Vec<_> = slots.iter().map(|s| s.kind).collect();
     kinds.sort();
@@ -220,6 +282,7 @@ fn syncing_an_unchanged_linked_set_twice_resets_no_member() {
     enc.set_mode(PreviewMode::Source, Instant::now());
     settle(&mut enc, &m);
     let source = enc.members[&SlotKind::Normal].state.shown().unwrap().id;
+    assert_ne!(first, source, "the linked PNG has two distinct A/B encodes");
     enc.sync(&m, slots.clone(), Instant::now(), false);
     enc.sync(&m, slots, Instant::now(), false);
     assert!(matches!(&enc.members[&SlotKind::Normal].state, EncState::Fresh(e) if e.id == source));

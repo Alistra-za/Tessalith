@@ -1580,6 +1580,216 @@ fn exported_entry(m: &mut AppModel, match1: &str) -> (Option<Value>, String) {
 const LEAF_MATCH: &str = r"arch\leaf.dds";
 const NO_HEIGHT: &str = "arch/leaf: parallax is on but the set has no height texture (_p)";
 
+/// Each run has its own JSON name so a refused export cannot pass on an earlier file.
+fn fresh_document(m: &mut AppModel, name: &str) -> Value {
+    m.set_json_name(name);
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    let path = pgp_json_path(m);
+    assert!(!path.exists(), "fresh export destination {path:?}");
+    export_through(m);
+    assert!(m.wait_idle(std::time::Duration::from_secs(120)));
+    let bytes = std::fs::read(&path)
+        .unwrap_or_else(|e| panic!("{path:?}: {e}; {} {:?}", m.status_line, m.export.notes));
+    serde_json::from_slice(&bytes).expect("written PGPatcher JSON")
+}
+
+fn disk_set<'a>(doc: &'a Value, match1: &str) -> &'a Value {
+    doc["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["match1"] == match1)
+        .unwrap_or_else(|| panic!("missing {match1} in {doc}"))
+}
+
+#[test]
+fn linked_and_cleared_feature_defaults_change_the_json_on_disk() {
+    for (n, file, subtype, feature) in [
+        (3, "wall_g.png", Subtype::PbrEmissive, "emissive"),
+        (4, "wall_p.png", Subtype::Height, "parallax"),
+        (7, "wall_cnr.png", Subtype::CoatNormal, "multilayer"),
+        (7, "wall_f.png", Subtype::PbrFuzz, "fuzz"),
+        (8, "wall_s.png", Subtype::PbrSubsurface, "subsurface"),
+    ] {
+        let d = tempfile::tempdir().unwrap();
+        let mut m = no_albedo_pair_with(d.path(), &[(file, [128, 128, 255], subtype)]);
+        let wall_match = r"arch\wall.dds";
+        if subtype == Subtype::PbrFuzz {
+            for set in ["arch/wall", LEAF] {
+                m.set_json_value(set, "fuzz.weight", Some(json!(0.375)));
+            }
+        }
+        let before = fresh_document(&mut m, "before");
+        let own = disk_set(&before, wall_match);
+        let enabled = own
+            .get(feature)
+            .unwrap_or_else(|| panic!("{file}: missing {feature} in {own}"));
+        if feature == "fuzz" {
+            assert_eq!(enabled["weight"], 0.375);
+        } else {
+            assert_eq!(enabled, &json!(true));
+        }
+        assert!(disk_set(&before, LEAF_MATCH).get(feature).is_none());
+        let item = format!("arch/{file}");
+        let path = member_game_path(&m, &item).unwrap();
+        link(&mut m, n, &item);
+        m.set_slot_command("arch/wall", n, SlotCommand::Clear)
+            .unwrap();
+        let after = fresh_document(&mut m, "after");
+        let (linked, cleared) = (disk_set(&after, LEAF_MATCH), disk_set(&after, wall_match));
+        let slot = format!("slot{n}");
+        assert_eq!(linked[&slot], json!(path));
+        assert_eq!(cleared[&slot], json!(""));
+        assert_eq!(linked.get(feature), Some(enabled), "{file}: linked default");
+        assert!(
+            cleared.get(feature).is_none(),
+            "{file}: cleared default in {cleared}"
+        );
+        if subtype == Subtype::CoatNormal {
+            assert_eq!(linked["coat_normal"], true);
+            assert!(cleared.get("coat_normal").is_none());
+        }
+    }
+}
+
+#[test]
+fn explicit_off_and_a_stored_property_follow_feature_activation_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[("glow_g.png", [255, 128, 0], Subtype::PbrEmissive)],
+    );
+    m.set_json_value(LEAF, "emissive_scale", Some(json!(2.5)));
+    m.set_json_value(LEAF, "emissive", Some(json!(false)));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    link(&mut m, 3, "arch/glow_g.png");
+    let off = fresh_document(&mut m, "explicit-off");
+    let e = disk_set(&off, LEAF_MATCH);
+    assert!(e["slot3"].is_string());
+    assert!(e.get("emissive").is_none() && e.get("emissive_scale").is_none());
+    assert_eq!(leaf(&m).settings["emissive"], false);
+    m.set_json_value(LEAF, "emissive", None);
+    let on = fresh_document(&mut m, "active");
+    let e = disk_set(&on, LEAF_MATCH);
+    assert_eq!(e["emissive"], true);
+    assert_eq!(e["emissive_scale"], 2.5);
+    m.set_slot_command(LEAF, 3, SlotCommand::Clear).unwrap();
+    let clear = fresh_document(&mut m, "cleared");
+    let e = disk_set(&clear, LEAF_MATCH);
+    assert_eq!(e["slot3"], "");
+    assert!(e.get("emissive").is_none() && e.get("emissive_scale").is_none());
+    assert_eq!(leaf(&m).settings["emissive_scale"], 2.5);
+    link(&mut m, 3, "arch/glow_g.png");
+    assert_eq!(
+        disk_set(&fresh_document(&mut m, "reactivated"), LEAF_MATCH)["emissive_scale"],
+        2.5
+    );
+}
+
+#[test]
+fn a_linked_s_uses_the_subsurface_mode_of_its_destination_on_disk() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(d.path().join("textures/arch/plants")).unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("plants/fern.png", [20, 80, 20], Subtype::PbrAlbedo),
+            ("skin_s.png", [200, 160, 150], Subtype::PbrSubsurface),
+            ("glow_g.png", [255, 128, 0], Subtype::PbrEmissive),
+        ],
+    );
+    let fern = "arch/plants/fern";
+    let fern_match = r"arch\plants\fern.dds";
+    let skin = "arch/skin_s.png";
+    m.set_shader(fern, Some(engine::shader::Shader::PbrGrass));
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    for (set, n, item) in [
+        (fern, 8, skin),
+        (fern, 3, "arch/glow_g.png"),
+        (LEAF, 8, skin),
+    ] {
+        assert_eq!(
+            m.run_menu(MenuAction::SlotLink {
+                set: set.into(),
+                n,
+                item: item.into()
+            }),
+            None
+        );
+    }
+    let before = fresh_document(&mut m, "subsurface");
+    let grass = disk_set(&before, fern_match);
+    assert_eq!(
+        grass["slot3"],
+        member_game_path(&m, "arch/glow_g.png").unwrap()
+    );
+    assert_eq!(grass["slot8"], member_game_path(&m, skin).unwrap());
+    assert_eq!(grass["subsurface_foliage"], true);
+    assert!(grass.get("subsurface").is_none() && grass.get("emissive").is_none());
+    let standard = disk_set(&before, LEAF_MATCH);
+    assert_eq!(standard["subsurface"], true);
+    assert!(standard.get("subsurface_foliage").is_none() && standard.get("coat_diffuse").is_none());
+    m.set_json_value(LEAF, "multilayer", Some(json!(true)));
+    m.set_slot_command(fern, 8, SlotCommand::Clear).unwrap();
+    let after = fresh_document(&mut m, "coat");
+    let coat = disk_set(&after, LEAF_MATCH);
+    assert_eq!(coat["multilayer"], true);
+    assert_eq!(coat["coat_diffuse"], true);
+    assert!(coat.get("subsurface").is_none() && coat.get("subsurface_foliage").is_none());
+    let grass = disk_set(&after, fern_match);
+    assert_eq!(grass["slot8"], "");
+    assert!(grass.get("subsurface_foliage").is_none());
+}
+
+#[test]
+fn a_height_link_and_clear_change_the_scale_rows_for_both_landscapes() {
+    use sdc_gui::model::bottom::{problems, At};
+    let d = tempfile::tempdir().unwrap();
+    let mut m = no_albedo_pair_with(
+        d.path(),
+        &[
+            ("leaf.png", [80; 3], Subtype::PbrAlbedo),
+            ("wall_p.png", [128; 3], Subtype::Height),
+        ],
+    );
+    for id in [LEAF, "arch/wall"] {
+        m.set_shader(id, Some(engine::shader::Shader::PbrLandscape));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    }
+    m.set_json_value(LEAF, "displacement_scale", Some(json!(5.0)));
+    let rows = |m: &mut AppModel| {
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        m.poll();
+        let mut ids: Vec<_> = problems(m)
+            .iter()
+            .filter(|p| p.code == Some(Code::ChkParallaxScale))
+            .map(|p| match &p.at {
+                At::Set { id, .. } => id.clone(),
+                at => panic!("scale warning at {at:?}"),
+            })
+            .collect();
+        ids.sort();
+        ids
+    };
+    assert!(rows(&mut m).is_empty(), "only wall owns a height");
+    link(&mut m, 4, "arch/wall_p.png");
+    let v = leaf(&m);
+    assert!(v.json && v.linked[&4].item.as_deref() == Some("arch/wall_p.png"));
+    assert_eq!(
+        rows(&mut m),
+        [LEAF, "arch/wall"],
+        "linked height joins the comparison"
+    );
+    m.set_slot_command("arch/wall", 4, SlotCommand::Clear)
+        .unwrap();
+    assert!(
+        rows(&mut m).is_empty(),
+        "clearing the owned height removes both rows"
+    );
+    m.undo();
+    assert_eq!(rows(&mut m), [LEAF, "arch/wall"], "Undo restores both rows");
+}
+
 /// R1 (a): Parallax set by hand on a set with no height of its own, and a height linked from another set: Export does
 /// not refuse the set, and the written JSON carries the linked path and the key.
 #[test]
@@ -1904,6 +2114,19 @@ fn a_set_the_statics_rule_drops_takes_no_link_and_no_clear() {
         "{:?}",
         slot_shown(&v, SlotKind::Normal)
     );
+    let never = fresh_document(&mut m, "never");
+    disk_set(&never, r"arch\wall.dds");
+    assert!(never["entries"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|e| e["match1"] != LEAF_MATCH));
+    m.set_cs_statics(LEAF, Statics::Always);
+    let always = fresh_document(&mut m, "always");
+    let e = disk_set(&always, LEAF_MATCH);
+    assert_eq!(e["slot4"], member_game_path(&m, "arch/bump_p.png").unwrap());
+    assert_eq!(e["parallax"], true);
+    assert_eq!(e["slot2"], "");
 }
 
 const REC_LEAF: &str = "textures/n/leaf";
@@ -2266,6 +2489,40 @@ fn layout_project(dir: &std::path::Path, layout: &Layout) -> AppModel {
     m.set_group_excluded("Consumer", true).unwrap();
     assert!(m.wait_idle(std::time::Duration::from_secs(60)));
     m
+}
+
+#[test]
+fn a_link_uses_the_first_writer_in_display_order_when_game_paths_coincide() {
+    let d = tempfile::tempdir().unwrap();
+    let files = &["east/textures/p/plain.png", "west/textures/p/plain.png"];
+    let layout = Layout {
+        files,
+        ..LAYOUTS[0]
+    };
+    let mut m = layout_project(d.path(), &layout);
+    let game = r"textures\p\plain.dds";
+    for item in files {
+        assert_eq!(member_game_path(&m, item).unwrap(), game);
+    }
+    assert_ne!(
+        m.item(files[0]).unwrap().job.as_ref().unwrap().output,
+        m.item(files[1]).unwrap().job.as_ref().unwrap().output,
+        "distinct DDS files provide the same game path"
+    );
+    m.set_slot_command(CONSUMER, 1, SlotCommand::Path(game.into()))
+        .unwrap();
+    for item in files {
+        let first = item.trim_end_matches(".png");
+        let order = vec![first.to_string()];
+        m.edit_docs("Order sets", None, true, |_, s| s.set_order(&order));
+        assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+        let v = views(&m);
+        let link = &v.iter().find(|v| v.id == CONSUMER).unwrap().linked[&1];
+        assert_eq!(
+            (link.from.as_deref(), link.item.as_deref()),
+            (Some(first), Some(*item))
+        );
+    }
 }
 
 /// Every `.dds` under `root`, `/`-separated and relative to it.

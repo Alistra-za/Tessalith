@@ -1375,6 +1375,14 @@ fn an_excluded_linked_lender_holds_the_entry_as_a_borrowed_one_does() {
             .contains(&"not in JSON: arch/leaf (not exported yet)".to_string()),
         "premise: {borrowed:?}"
     );
+    assert!(
+        linked.1.is_none(),
+        "the held consumer reached disk: {linked:?}"
+    );
+    assert!(
+        !linked.0.iter().any(|f| f.ends_with("stone_p.dds")),
+        "{linked:?}"
+    );
     assert_eq!(linked, borrowed);
 }
 
