@@ -11735,6 +11735,36 @@ fn an_open_diff_gives_way_before_the_editor_loses_its_floors_at_1280x720() {
     );
 }
 
+/// Fix round 2, Important 3: egui's 64 px scrolled minimum applies to the Diff list too, so a cap between 40 and 64
+/// px was not obeyed (a cap of 60 gave 64 and the slot list fell to 44). At 1280x560 with Review open the panel leaves
+/// 312 px of room (323 at 720 and above): the list is its cap, under 64, and the slot list keeps its 48.
+#[test]
+fn a_diff_cap_under_64_px_is_obeyed_at_1280x560() {
+    use sdc_gui::model::bottom::BottomTab;
+    let (_d, mut h) = slot_list_session(egui::vec2(1280.0, 560.0), BottomTab::Review);
+    let path = h.state().meshes.edit.as_ref().unwrap().data_path.clone();
+    let lines: Vec<String> = (0..20).map(|i| format!("block {i}: changed")).collect();
+    h.state_mut().meshes.nif_diff_view = Some((path, lines));
+    h.run_steps(8);
+    let r = sdc_gui::ui::meshes::layout_rects(&h.ctx).unwrap();
+    assert!(r.tab_area.height() >= 48.0 - 0.5, "slot list {r:?}");
+    assert!(
+        r.tab_area.max.y <= r.footer.min.y + 0.5,
+        "slot list under the footer: {r:?}"
+    );
+    let bars: Vec<_> = h
+        .query_all_by_role(AkRole::ScrollBar)
+        .map(|n| n.rect())
+        .filter(|b| b.height() > b.width() && r.footer.contains_rect(b.shrink(0.5)))
+        .collect();
+    assert_eq!(bars.len(), 1, "the Diff list's bar: {bars:?} in {r:?}");
+    let list = bars[0].height();
+    assert!(
+        (40.0 - 0.5..64.0 - 0.5).contains(&list),
+        "Diff list {list} px: its cap is under 64 here, {r:?}"
+    );
+}
+
 /// Fix round 1: after one pass of a first frame (the cached tab height still its first-frame 28 px) no part of the
 /// editor reaches below the footer's top, and the head is over the slot list, not on it.
 #[test]

@@ -397,6 +397,8 @@ fn export_block(
         egui::ScrollArea::vertical()
             .id_salt("meshes-edit-diff")
             .max_height(list_cap)
+            // egui applies its 64 px scrolled minimum after the maximum: without this a cap under 64 is not obeyed.
+            .min_scrolled_height(DIFF_MIN_H)
             .show(ui, |ui| {
                 for l in lines {
                     let r = ui.add(egui::Label::new(egui::RichText::new(l).monospace()).truncate());
