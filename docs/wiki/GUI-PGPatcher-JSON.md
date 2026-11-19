@@ -23,7 +23,7 @@ This page is for mod authors making a PBR mod that PGPatcher patches: how to set
 | CS PBR records | Community Shaders' records ([PBR Landscape](PBR-Landscape.md#cs-pbr-records)). |
 | Advanced TruePBR settings | Path contains, Mesh path contains, [Rename](#rename), UV and cubemap, vertex colours and depth, texture locks. |
 
-Each group's header shows its state, like "Standard", "on", "2 matches" or an amber "matches nothing". Hover a plain-named key ("SSS width") to see its JSON key.
+A feature's state shows once. Coat, Emissive, Glint and Fuzz have no on or off in their header: the **Features** tick says it. Subsurface shows its mode, like "Standard", in its header while the group is closed. A feature that is on but blocked reads in amber, like "on, blocked by hair". Matching shows its count, like "2 matches", or an amber "matches nothing". <!-- D:JR6 --> Hover a plain-named key ("SSS width") to see its JSON key.
 
 ## Your textures turn features on
 
@@ -39,6 +39,8 @@ You rarely tick features by hand. Tessalith reads the set's files:
 
 These read "(auto)", with the reason on hover, and go into the JSON. Untick one to store an explicit off, which wins over the file; ↺ removes your choice again. Remove the texture and its auto value goes with it.
 
+A slot linked from another set counts as that kind of file; a path you typed counts only when another set writes it. <!-- D:JR8 --> A slot you cleared counts as empty, even when the set has a file for it. <!-- D:JR9 -->
+
 ## Features that can't go together
 
 These are greyed out, with the reason on hover. A switch that's already on stays clickable so you can turn it off.
@@ -51,7 +53,7 @@ A feature that's on without its texture blocks export, so add the texture or tur
 
 ## Values you turned off are kept
 
-Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group reads "off" and "kept, not used", and you can still edit or reset them. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
+Turn Coat, Emissive, Glint or Fuzz off and its values stay. The group stays and reads "kept, not used", and you can still edit or reset them. They aren't written to the JSON until you turn the feature back on. Displacement scale works the same way with Parallax.
 
 ## Numbers and colours
 
