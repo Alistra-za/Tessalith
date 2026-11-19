@@ -3281,3 +3281,34 @@ fn another_files_table_changed_by_hand_does_not_roll_the_step_back() {
         "the other file's table stays as the user wrote it"
     );
 }
+
+/// N8-x (round 5, a pin): while the share is still live, a listed entry whose own table is gone, with the user's `data`
+/// in a case twin, leaves the list in the next step: the stale-entry reader is exact, so the twin's `data` does not
+/// keep the string listed. (A reader that took any matching table would keep it, and the exact remover would not show
+/// it, since nothing is cleared while the share is live.)
+#[test]
+fn a_stale_entry_leaves_the_list_while_its_share_is_live() {
+    const UPPER: &str = "PBR/IRON_N.PNG";
+    let d = tempfile::tempdir().unwrap();
+    open_slot_files(d.path());
+    let t = d.path().join("textures");
+    std::fs::write(
+        t.join("sdc.toml"),
+        "[files.'PBR/IRON_N.PNG']\nalpha.policy = \"data\"\n",
+    )
+    .unwrap();
+    std::fs::write(t.join("sdc-project.toml"), LISTED_AND_BORROWED).unwrap();
+    let mut m = opened_as_the_app(t, d.path().join("export"));
+    settle(&mut m);
+    assert!(
+        !m.project.as_ref().unwrap().has_file_key(IRON_N),
+        "precondition: no table spelled as the entry"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    m.set_alpha("armor/steel.png", AlphaPolicy::Remove);
+    assert!(
+        auto_data(&m).is_empty(),
+        "the stale entry leaves the list though the share is live"
+    );
+    assert_eq!(held(&m, UPPER, "alpha.policy"), Some(json!("data")));
+}
