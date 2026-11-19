@@ -19,12 +19,13 @@
 use crate::app_harness::{plain_harness, settle, H};
 use crate::fixtures;
 use crate::frame::{snapshot, Snapshot};
-use crate::invariants::Entry;
-use eframe::egui::Vec2;
+use crate::invariants::{clear_focus, Entry, Pressed};
+use eframe::egui::{Key, Vec2};
 use sdc_gui::model::bottom::BottomTab;
 use sdc_gui::model::rename::RenameMode;
 use sdc_gui::model::AppModel;
 use sdc_gui::settings::GuiSettings;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -604,6 +605,54 @@ impl Entry for ScreenEntry {
         let snap = snapshot(&h);
         self.open = Some((d, h));
         Ok(snap)
+    }
+
+    fn takes_keys(&self) -> bool {
+        true
+    }
+
+    /// The entry's own temp folder (the project, its export folder, the sdc.toml the app writes) and the folder the
+    /// harness gives `%APPDATA%` and `%LOCALAPPDATA%`, which every entry of the process shares. Nothing is excluded:
+    /// measured with no key pressed, the app writes nothing there while idle (the model has no settings or presets path
+    /// in tests) and no test of this binary does, so any change in it counts. A concurrent test that starts writing there
+    /// would fail the step; give it its own folder rather than excluding the shared one.
+    fn watched(&self) -> Vec<(&'static str, PathBuf)> {
+        let mut roots = vec![];
+        if let Some((d, _)) = &self.open {
+            roots.push(("project folder", d.path().to_path_buf()));
+        }
+        crate::app_data();
+        roots.push((
+            "app data",
+            PathBuf::from(std::env::var_os("APPDATA").expect("app_data() sets APPDATA")),
+        ));
+        roots
+    }
+
+    fn press(&mut self, key: Key) -> Result<Pressed, String> {
+        let marker = self.screen.marker;
+        let (_, h) = self.open.as_mut().ok_or("the screen is not open")?;
+        clear_focus(h)?;
+        let running = |h: &H| h.state().model.export.running.is_some();
+        let running_before = running(h);
+        h.key_press(key);
+        h.run_steps(2);
+        let running_after_key = running(h);
+        settle(h, 4);
+        Ok(Pressed {
+            running_before,
+            running_after_key,
+            running_after_settle: running(h),
+            shown: holds(&snapshot(h), marker),
+        })
+    }
+
+    fn reopen(&mut self, size: Vec2) -> Result<(), String> {
+        // the old window and its folder go before the new ones are built
+        self.open = None;
+        let (d, h) = enter(self.screen, size)?;
+        self.open = Some((d, h));
+        Ok(())
     }
 }
 
