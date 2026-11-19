@@ -10,6 +10,7 @@ use crate::ui::status::{self, Status, AMBER, GREEN, RED};
 use eframe::egui;
 use nif::edit::{Op, Outcome};
 use nif::fields::Field;
+use nif::shape_head::ShapeKind;
 
 /// The tab list keeps at least this much height (about four slot rows) while the head above it can still give up room.
 const TAB_MIN_H: f32 = 200.0;
@@ -163,10 +164,14 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         // Meshes UI T6 (Note CZ21): what the tabs act on, always in sight.
         let (line, class) = editing_line(e);
         let r = ui.add(egui::Label::new(line).truncate());
-        if let Some(class) = class {
-            r.on_hover_ui(|ui| {
-                ui.label(class);
-            });
+        match class {
+            ClassHover::None => {}
+            ClassHover::Fixed(text) => {
+                r.on_hover_text(text);
+            }
+            ClassHover::Named(k) => {
+                super::shared_hover(r, k, || format!("Block type: {k}."));
+            }
         }
         ui.separator();
         let measured = ui.cursor().min.y - tabs_start;
@@ -202,31 +207,53 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
     apply(m, act);
 }
 
+/// The editing line's hover: a sentence kept as text in the program, or a class name only the file knows.
+enum ClassHover<'a> {
+    None,
+    Fixed(&'static str),
+    /// A root class the program has no sentence for; `panel` builds "Block type: {name}." once.
+    Named(&'a str),
+}
+
 /// "Editing: BodyMesh", or "Editing: Root" while the root is selected, and the block's NIF class for the hover.
-fn editing_line(e: &NifEdit) -> (String, Option<String>) {
+fn editing_line(e: &NifEdit) -> (String, ClassHover<'_>) {
     match e.selection {
         Selection::Root => (
             "Editing: Root".into(),
-            Some(&*e.model.root_kind)
-                .filter(|k| !k.is_empty())
-                .map(block_type_hover),
+            match &*e.model.root_kind {
+                "" => ClassHover::None,
+                "BSFadeNode" => ClassHover::Fixed(
+                    "Block type: BSFadeNode, the NIF's top node. The game fades it out with distance.",
+                ),
+                k => ClassHover::Named(k),
+            },
         ),
         Selection::Shape(b) => match e.model.shape(b) {
             Some(s) => (
                 format!("Editing: {}", s.name.as_deref().unwrap_or("(unnamed)")),
-                Some(block_type_hover(&format!("{:?}", s.kind))),
+                ClassHover::Fixed(shape_class_hover(s.kind)),
             ),
-            None => (format!("Editing: block {b} (not in this NIF)"), None),
+            None => (
+                format!("Editing: block {b} (not in this NIF)"),
+                ClassHover::None,
+            ),
         },
     }
 }
 
-/// The hover of the editing line: the block's NIF class, with a sentence for the two a modder meets most.
-fn block_type_hover(kind: &str) -> String {
+/// The hover sentence of a shape's NIF class; a plain "Block type: {kind}." except for the one a modder meets on heads.
+fn shape_class_hover(kind: ShapeKind) -> &'static str {
     match kind {
-        "BSDynamicTriShape" => "Block type: BSDynamicTriShape, a shape whose vertices the game can move while it plays, as on heads and faces.".into(),
-        "BSFadeNode" => "Block type: BSFadeNode, the NIF's top node. The game fades it out with distance.".into(),
-        _ => format!("Block type: {kind}."),
+        ShapeKind::BSTriShape => "Block type: BSTriShape.",
+        ShapeKind::BSSubIndexTriShape => "Block type: BSSubIndexTriShape.",
+        ShapeKind::BSDynamicTriShape => "Block type: BSDynamicTriShape, a shape whose vertices the game can move while it plays, as on heads and faces.",
+        ShapeKind::BSMeshLODTriShape => "Block type: BSMeshLODTriShape.",
+        ShapeKind::NiTriShape => "Block type: NiTriShape.",
+        ShapeKind::NiTriStrips => "Block type: NiTriStrips.",
+        ShapeKind::BSLODTriShape => "Block type: BSLODTriShape.",
+        ShapeKind::BSSegmentedTriShape => "Block type: BSSegmentedTriShape.",
+        ShapeKind::NiParticleSystem => "Block type: NiParticleSystem.",
+        ShapeKind::BSStripParticleSystem => "Block type: BSStripParticleSystem.",
     }
 }
 

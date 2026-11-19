@@ -2665,6 +2665,138 @@ fn the_nif_panel_uses_plain_labels_and_keeps_the_class_on_hover() {
     }
 }
 
+/// The AccessKit description of the node `h` finds by `label`, read before any hover.
+fn described(h: &Harness<'static, MeshesModel>, label: &str) -> Option<String> {
+    h.get_by_label(label)
+        .accesskit_node()
+        .description()
+        .map(|d| d.to_string())
+}
+
+/// Face-tint shape "B" selected, shown on the Shader tab.
+fn face_tint_panel() -> Harness<'static, MeshesModel> {
+    let mut n = builder::Nif::new(100);
+    let (a, b) = (n.string("A"), n.string("B"));
+    n.block("BSTriShape", one_tri(a, 2));
+    n.block("BSTriShape", one_tri(b, 3));
+    n.block("BSLightingShaderProperty", scenes::lsp(0, -1));
+    n.block("BSLightingShaderProperty", scenes::lsp(4, -1));
+    let mut m = direct(n.bytes());
+    select(&mut m, "B");
+    let mut h = view(m);
+    h.run_steps(5);
+    h
+}
+
+/// Round 1: every hover sentence of the jargon list is also the description of its widget, read on the original
+/// node before any hover (a screen-reader user gets the class names and the field notes too).
+#[test]
+fn the_editing_line_describes_its_block_class() {
+    let h = face_tint_panel();
+    assert_eq!(
+        described(&h, "Editing: B").as_deref(),
+        Some("Block type: BSTriShape.")
+    );
+}
+
+#[test]
+fn the_shader_type_combo_describes_its_number_and_nothing_more() {
+    let h = face_tint_panel();
+    assert_eq!(
+        h.get_by_role_and_label(AkRole::ComboBox, "Shader type")
+            .accesskit_node()
+            .description()
+            .as_deref(),
+        Some("Shader type 4 in the NIF.")
+    );
+}
+
+#[test]
+fn the_texture_wrap_combo_describes_the_clamp_mode() {
+    let h = face_tint_panel();
+    let wrap = h.get_by_role_and_label(AkRole::ComboBox, "Texture wrap");
+    assert_eq!(
+        wrap.accesskit_node().description().as_deref(),
+        Some(
+            "Clamp mode 3 in the NIF. Wrap repeats the texture past its edge; clamp stretches the edge pixel."
+        )
+    );
+}
+
+#[test]
+fn the_flag_headers_describe_their_nifskope_names() {
+    let h = face_tint_panel();
+    let f1 = h.get_by_label_contains("Shader flags 1 (0x");
+    assert_eq!(
+        f1.accesskit_node().description().as_deref(),
+        Some("SLSF1 in NifSkope.")
+    );
+    let f2 = h.get_by_label_contains("Shader flags 2 (0x");
+    assert_eq!(
+        f2.accesskit_node().description().as_deref(),
+        Some("SLSF2 in NifSkope.")
+    );
+}
+
+#[test]
+fn the_no_alpha_line_describes_the_missing_block() {
+    let mut h = face_tint_panel();
+    h.get_by_label("Alpha tab").click();
+    h.run_steps(4);
+    assert_eq!(
+        described(&h, "This shape has no alpha settings.").as_deref(),
+        Some("The NIF has no NiAlphaProperty block for this shape.")
+    );
+}
+/// Round 1: the root's class reads as a description too (a class the panel knows by sentence, and one it does not).
+#[test]
+fn the_editing_line_describes_the_root_and_the_dynamic_shape() {
+    let mut m = direct(ctrl_scene(0x82));
+    m.select_edit(Selection::Root);
+    let mut h = view(m);
+    h.run_steps(3);
+    assert_eq!(
+        described(&h, "Editing: Root").as_deref(),
+        Some("Block type: NiNode.")
+    );
+    let mut n = Nif::new(100);
+    let s = n.string("D");
+    n.block("BSDynamicTriShape", one_tri(s, -1));
+    let mut m = direct(n.bytes());
+    select(&mut m, "D");
+    let mut h = view(m);
+    h.run_steps(3);
+    assert_eq!(
+        described(&h, "Editing: D").as_deref(),
+        Some("Block type: BSDynamicTriShape, a shape whose vertices the game can move while it plays, as on heads and faces.")
+    );
+}
+
+/// Round 1: the Undo step names of the relabelled fields (field_label's words, first letter lower case).
+#[test]
+fn the_undo_steps_of_the_relabelled_fields_read_in_plain_words() {
+    let mut m = direct(scenes::shared_alpha_and_set());
+    let a = select(&mut m, "A");
+    let e = m.edit.as_ref().unwrap();
+    let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
+    let bits = |field| Op::SetBits {
+        at: at.clone(),
+        field,
+        mask: 1,
+        value: 1,
+        base: 0,
+    };
+    assert_eq!(op_name(&bits(Field::Slsf1)), "Set shader flags 1");
+    assert_eq!(op_name(&bits(Field::Slsf2)), "Set shader flags 2");
+    let wrap = Op::SetField {
+        at: at.clone(),
+        field: Field::ClampMode,
+        value: Value::U32(1),
+        base: Value::U32(3),
+    };
+    assert_eq!(op_name(&wrap), "Set texture wrap");
+}
+
 /// A colour change is three channel ops; a drag of the picker merges them as three ops with the first bases.
 #[test]
 fn a_colour_drag_is_three_ops_with_the_original_bases() {

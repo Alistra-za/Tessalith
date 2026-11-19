@@ -230,7 +230,11 @@ fn shapes_show_shader_type_flags_and_slot_resolution() {
     h.run();
     h.get_by_label("LE mesh: optimise it for SSE, e.g. with Cathedral Assets Optimizer.");
     h.get_by_label_contains("Body");
-    h.get_by_label_contains("Environment Map");
+    let ty = h.get_by_label("Environment Map");
+    assert_eq!(
+        ty.accesskit_node().description().as_deref(),
+        Some("Shader type 1 in the NIF.")
+    );
     // Meshes UI T2: the winning mod of each texture sits in Details, closed by default.
     assert!(h.query_by_label_contains("→ A (2 copies)").is_none());
     h.get_by_label("Details of NIF block 4").click();
@@ -1466,6 +1470,14 @@ fn the_nif_filter_reads_winning() {
     h.run();
     // The row chip "Wins" (status_label) is another text; the filter chip is the Button.
     assert!(h.query_by_role_and_label(Role::Button, "Wins").is_none());
+    // The description is on the original node, before any hover.
+    assert_eq!(
+        h.get_by_role_and_label(Role::Button, "Winning")
+            .accesskit_node()
+            .description()
+            .as_deref(),
+        Some("NIFs where this mod's copy is the one the game loads.")
+    );
     h.get_by_role_and_label(Role::Button, "Winning").hover();
     h.run_steps(30);
     h.get_by_label_contains("is the one the game loads");

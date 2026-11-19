@@ -3,7 +3,7 @@
 mod b;
 #[path = "../../modscan/tests/common/mod.rs"]
 mod scan_fixture;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 use egui_kittest::Harness;
 use modscan::plugin_store::{MeshUse, ShapeSwap};
 use modscan::store::{NifRow, ShapeView};
@@ -341,6 +341,83 @@ fn a_pick_goes_into_the_3d_view_and_from_the_nif_takes_it_out() {
     m.reload();
     assert!(m.txst_pick(block).is_none(), "the shapes reloaded: no pick");
     assert!(spec(&m).txst.is_empty());
+}
+
+/// Round 1: a picked TXST that lists no texture files says so, and the sentence behind it is the label's description.
+#[test]
+fn an_empty_texture_set_explains_itself_in_its_description() {
+    let inst = scan_fixture::instance_fixture("+A\n");
+    let root = inst.path();
+    let nif = std::fs::read(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../nif/tests/fixtures/TestNifFile_Skinned_SE.nif"
+    ))
+    .unwrap();
+    scan_fixture::put(root, "mods/A/meshes/x.nif", &nif);
+    let txst = b::rec(b"TXST", DIRT, &[b::edid("EmptyTXST")]);
+    let stat = b::rec(
+        b"STAT",
+        0xDEF,
+        &[
+            b::edid("RockStat"),
+            b::sub(b"MODL", &b::zstr("x.nif")),
+            b::sub(b"MODS", &b::alt(&[("Whatever", DIRT, 0)])),
+        ],
+    );
+    scan_fixture::put(
+        root,
+        "Game/Data/Skyrim.esm",
+        &b::plugin(
+            esp::FLAG_ESM,
+            &[],
+            &[b::top(b"TXST", &[txst]), b::top(b"STAT", &[stat])],
+        ),
+    );
+    scan_fixture::put(root, "profiles/Default/plugins.txt", b"");
+    let mut m = MeshesModel::new(Some(root.join("scan.db")), MeshesSettings::default());
+    m.procs = sdc_gui::model::meshes::no_procs;
+    m.activate_with(None);
+    m.use_instance(root.to_path_buf(), "Default".into());
+    m.request_scan();
+    assert!(m.take_request());
+    m.start();
+    let t = std::time::Instant::now();
+    m.poll();
+    while m.scanning() || m.rows_loading() {
+        assert!(t.elapsed().as_secs() < 60, "scan did not end");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        m.poll();
+    }
+    assert_eq!(m.error, None);
+    let a = m.mods.iter().find(|r| r.name == "A").expect("mod A").id;
+    m.select_mod(a);
+    while m.rows_loading() {
+        assert!(t.elapsed().as_secs() < 60, "rows did not load");
+        std::thread::sleep(std::time::Duration::from_millis(10));
+        m.poll();
+    }
+    let copy = m
+        .nifs
+        .iter()
+        .find(|r| r.path == "meshes/x.nif")
+        .expect("x.nif scanned")
+        .copy_id;
+    m.select_nif(copy);
+    let block = m
+        .shapes
+        .iter()
+        .find(|s| s.index3d == Some(0))
+        .expect("a shape with 3D index 0")
+        .block;
+    m.set_txst(block, Some(DIRT)).unwrap();
+    m.shapes_col = true;
+    let mut h = harness(m);
+    h.run_steps(4);
+    let l = h.get_by_label("This texture set has no textures");
+    assert_eq!(
+        l.accesskit_node().description().as_deref(),
+        Some("The plugin's texture set (TXST) lists no texture files.")
+    );
 }
 
 /// The render thread loads a scanned mesh with the pick's slots in place of the shape's own (WARP, stand-in shaders).

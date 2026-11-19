@@ -48,7 +48,6 @@ pub(super) struct Act {
 const LABEL_W: f32 = 132.0;
 const SKINNED_HOVER: &str = "Set by the mesh; changing it breaks skinning.";
 const PBR_HOVER: &str = "TruePBR marker: PGPatcher and CS rely on it.";
-const TYPE_HOVER: &str = "Changing the type changes the trailer fields.";
 const BROWSE_LIMIT: usize = 200;
 
 /// A row's name, painted: the control beside it carries the same name for AccessKit, so the name is one node.
@@ -375,12 +374,8 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         let typ = egui::Role::ComboBox;
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
-        r.on_hover_ui(|ui| {
-            ui.label(format!(
-                "Shader type {} in the NIF. {TYPE_HOVER}",
-                lt.shader_type
-            ));
-        });
+        let n = lt.shader_type;
+        super::shared_hover(r, n, || format!("Shader type {n} in the NIF."));
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {
                 at: at.clone(),
@@ -484,10 +479,8 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         );
         take_focus(ui, &r, Field::ClampMode);
         let clamp = p.texture_clamp_mode;
-        r.on_hover_ui(|ui| {
-            ui.label(format!(
-                "Clamp mode {clamp} in the NIF. Wrap repeats the texture past its edge; clamp stretches the edge pixel."
-            ));
+        super::shared_hover(r, clamp, || {
+            format!("Clamp mode {clamp} in the NIF. Wrap repeats the texture past its edge; clamp stretches the edge pixel.")
         });
         if c != p.texture_clamp_mode {
             act.push = Some((
@@ -655,9 +648,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
                     }
                 }
             });
-        section.header_response.on_hover_ui(|ui| {
-            ui.label(nifskope);
-        });
+        section.header_response.on_hover_text(nifskope);
     }
 }
 
@@ -916,9 +907,7 @@ pub(super) fn alpha_tab(ui: &mut egui::Ui, e: &NifEdit, act: &mut Act) {
     let on_shape = anchor_shape(&e.model, shape.block);
     let Some(a) = shape.alpha.and_then(|b| e.model.alphas.get(&b)) else {
         ui.label("This shape has no alpha settings.")
-            .on_hover_ui(|ui| {
-                ui.label("The NIF has no NiAlphaProperty block for this shape.");
-            });
+            .on_hover_text("The NIF has no NiAlphaProperty block for this shape.");
         if ui.button("Add alpha").clicked() {
             act.push = Some((
                 vec![Op::AddAlpha {

@@ -95,6 +95,26 @@ pub fn request_undo(ctx: &egui::Context, undo: bool) -> bool {
     true
 }
 
+/// A hover sentence that depends on a value: built once per (`r`, `key`), kept in the context's temp data, and shared
+/// by the tooltip (lazy, rule 9.3) and the widget's AccessKit description, which `on_hover_ui` does not set.
+/// A static sentence uses `on_hover_text`, which sets both.
+pub(crate) fn shared_hover(
+    r: egui::Response,
+    key: impl std::hash::Hash + std::fmt::Debug,
+    make: impl FnOnce() -> String,
+) -> egui::Response {
+    let id = r.id.with(("meshes-hover", key));
+    let text: std::sync::Arc<str> = r.ctx.data_mut(|d| {
+        d.get_temp_mut_or_insert_with(id, || std::sync::Arc::<str>::from(make()))
+            .clone()
+    });
+    r.ctx
+        .accesskit_node_builder(r.id, |n| n.set_description(&*text));
+    r.on_hover_ui(move |ui| {
+        ui.label(&*text);
+    })
+}
+
 pub fn show(ui: &mut egui::Ui, m: &mut MeshesModel) {
     let (target, request) = undo_ids();
     match ui.ctx().data_mut(|d| d.remove_temp::<bool>(request)) {
@@ -560,9 +580,8 @@ fn tree(ui: &mut egui::Ui, m: &mut MeshesModel) {
             }
             let r = ui.selectable_label(m.filter == f, f.label());
             if f == crate::model::meshes::NifFilter::Wins {
-                r.clone().on_hover_ui(|ui| {
-                    ui.label("NIFs where this mod's copy is the one the game loads.");
-                });
+                r.clone()
+                    .on_hover_text("NIFs where this mod's copy is the one the game loads.");
             }
             if r.clicked() {
                 m.filter = f;
@@ -1399,9 +1418,7 @@ fn shape(
         _ => egui::RichText::new("No shader"),
     });
     if let (1, Some(t)) = (s.shader_kind, s.shader_type) {
-        shader.on_hover_ui(|ui| {
-            ui.label(format!("Shader type {t} in the NIF."));
-        });
+        shared_hover(shader, t, || format!("Shader type {t} in the NIF."));
     }
     let empty = s.textures.iter().filter(|t| t.is_none()).count();
     ui.indent(("slots", s.block), |ui| {

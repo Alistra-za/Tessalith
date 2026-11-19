@@ -68,9 +68,7 @@ pub fn row(ui: &mut egui::Ui, m: &MeshesModel, s: &ShapeView) -> Option<Option<u
             }
             if slots.iter().all(String::is_empty) {
                 ui.colored_label(AMBER, "This texture set has no textures")
-                    .on_hover_ui(|ui| {
-                        ui.label("The plugin's texture set (TXST) lists no texture files.");
-                    });
+                    .on_hover_text("The plugin's texture set (TXST) lists no texture files.");
             }
         });
     }
