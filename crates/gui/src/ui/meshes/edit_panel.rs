@@ -164,13 +164,36 @@ pub fn panel(ui: &mut egui::Ui, m: &mut MeshesModel) {
         // Meshes UI T6 (Note CZ21): what the tabs act on, always in sight.
         let (line, class) = editing_line(e);
         let r = ui.add(egui::Label::new(line).truncate());
-        match class {
-            ClassHover::None => {}
-            ClassHover::Fixed(text) => {
+        // egui describes an elided label by its whole text (and shows that text on hover). The class goes after it,
+        // set on the node here, because `on_hover_text` keeps a description that is already there.
+        let cut = ui
+            .ctx()
+            .accesskit_node_builder(r.id, |n| n.description().map(str::to_owned))
+            .flatten();
+        match (class, cut) {
+            (ClassHover::None, _) => {}
+            (ClassHover::Fixed(text), None) => {
                 r.on_hover_text(text);
             }
-            ClassHover::Named(k) => {
-                super::shared_hover(r, k, || format!("Block type: {k}."));
+            (ClassHover::Named(k), None) => {
+                super::shared_hover(r, "block-type", k, || format!("Block type: {k}."));
+            }
+            (class, Some(full)) => {
+                let ctx = ui.ctx().clone();
+                let sentence: std::sync::Arc<str> = match class {
+                    ClassHover::Named(k) => {
+                        super::shared_text(&ctx, "block-type", k, || format!("Block type: {k}."))
+                    }
+                    ClassHover::Fixed(text) => text.into(),
+                    ClassHover::None => unreachable!("matched above"),
+                };
+                let joined = super::shared_text(&ctx, "block-type-cut", (&full, &sentence), || {
+                    format!("{full} {sentence}")
+                });
+                ctx.accesskit_node_builder(r.id, |n| n.set_description(&*joined));
+                r.on_hover_ui(move |ui| {
+                    ui.label(&*sentence);
+                });
             }
         }
         ui.separator();

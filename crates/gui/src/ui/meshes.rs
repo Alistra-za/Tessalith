@@ -95,19 +95,30 @@ pub fn request_undo(ctx: &egui::Context, undo: bool) -> bool {
     true
 }
 
-/// A hover sentence that depends on a value: built once per (`r`, `key`), kept in the context's temp data, and shared
-/// by the tooltip (lazy, rule 9.3) and the widget's AccessKit description, which `on_hover_ui` does not set.
-/// A static sentence uses `on_hover_text`, which sets both.
-pub(crate) fn shared_hover(
-    r: egui::Response,
-    key: impl std::hash::Hash + std::fmt::Debug,
+/// A hover sentence that depends on a value: built once per (`kind`, `value`), whatever widget shows it, and kept in
+/// the context's temp data, so the entries are bounded by the distinct values seen.
+pub(crate) fn shared_text(
+    ctx: &egui::Context,
+    kind: &'static str,
+    value: impl std::hash::Hash + std::fmt::Debug,
     make: impl FnOnce() -> String,
-) -> egui::Response {
-    let id = r.id.with(("meshes-hover", key));
-    let text: std::sync::Arc<str> = r.ctx.data_mut(|d| {
+) -> std::sync::Arc<str> {
+    let id = egui::Id::NULL.with(("meshes-hover", kind, value));
+    ctx.data_mut(|d| {
         d.get_temp_mut_or_insert_with(id, || std::sync::Arc::<str>::from(make()))
             .clone()
-    });
+    })
+}
+
+/// `shared_text` as the tooltip (lazy, rule 9.3) and the AccessKit description of `r`; `on_hover_ui` sets no
+/// description. A static sentence uses `on_hover_text`, which sets both.
+pub(crate) fn shared_hover(
+    r: egui::Response,
+    kind: &'static str,
+    value: impl std::hash::Hash + std::fmt::Debug,
+    make: impl FnOnce() -> String,
+) -> egui::Response {
+    let text = shared_text(&r.ctx, kind, value, make);
     r.ctx
         .accesskit_node_builder(r.id, |n| n.set_description(&*text));
     r.on_hover_ui(move |ui| {
@@ -1418,7 +1429,9 @@ fn shape(
         _ => egui::RichText::new("No shader"),
     });
     if let (1, Some(t)) = (s.shader_kind, s.shader_type) {
-        shared_hover(shader, t, || format!("Shader type {t} in the NIF."));
+        shared_hover(shader, "shader-type", t, || {
+            format!("Shader type {t} in the NIF.")
+        });
     }
     let empty = s.textures.iter().filter(|t| t.is_none()).count();
     ui.indent(("slots", s.block), |ui| {

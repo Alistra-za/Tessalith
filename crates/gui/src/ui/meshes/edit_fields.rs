@@ -375,7 +375,9 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         set_name(&r, typ, "Shader type", None, Some(shown));
         take_focus(ui, &r, Field::ShaderType);
         let n = lt.shader_type;
-        super::shared_hover(r, n, || format!("Shader type {n} in the NIF."));
+        super::shared_hover(r, "shader-type", n, || {
+            format!("Shader type {n} in the NIF.")
+        });
         if t != lt.shader_type {
             let mut ops = vec![Op::SetField {
                 at: at.clone(),
@@ -479,7 +481,7 @@ pub(super) fn shader_tab(ui: &mut egui::Ui, m: &MeshesModel, e: &NifEdit, act: &
         );
         take_focus(ui, &r, Field::ClampMode);
         let clamp = p.texture_clamp_mode;
-        super::shared_hover(r, clamp, || {
+        super::shared_hover(r, "clamp-mode", clamp, || {
             format!("Clamp mode {clamp} in the NIF. Wrap repeats the texture past its edge; clamp stretches the edge pixel.")
         });
         if c != p.texture_clamp_mode {

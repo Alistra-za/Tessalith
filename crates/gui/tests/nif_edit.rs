@@ -2772,31 +2772,80 @@ fn the_editing_line_describes_the_root_and_the_dynamic_shape() {
     );
 }
 
-/// Round 1: the Undo step names of the relabelled fields (field_label's words, first letter lower case).
+/// Round 2: a cut editing line (a long name in a narrow panel) keeps its class: the description holds the whole line
+/// and then the class sentence, set on the original node before any hover.
+#[test]
+fn a_cut_editing_line_still_describes_its_block_class() {
+    let name = "A_very_long_shape_name_".repeat(12);
+    let mut n = Nif::new(100);
+    let s = n.string(&name);
+    n.block("BSTriShape", one_tri(s, -1));
+    let mut m = direct(n.bytes());
+    select(&mut m, &name);
+    let mut h = Harness::builder()
+        .with_context_setup(|ctx| {
+            sdc_gui::fonts::install_system_fonts(ctx).expect("system fonts");
+        })
+        .with_size(egui::vec2(700.0, 900.0))
+        .build_ui_state(
+            |ui, m: &mut MeshesModel| sdc_gui::ui::meshes::show(ui, m),
+            m,
+        );
+    h.run_steps(5);
+    let line = format!("Editing: {name}");
+    let node = h.get_by_label(&line);
+    assert!(
+        node.accesskit_node()
+            .bounding_box()
+            .is_some_and(|b| b.width() < 500.0),
+        "the line is cut by the narrow panel"
+    );
+    assert_eq!(
+        node.accesskit_node().description().as_deref(),
+        Some(format!("{line} Block type: BSTriShape.").as_str())
+    );
+}
+/// Round 1: the Undo step names of the relabelled fields, as the shared Undo returns them after a real edit.
 #[test]
 fn the_undo_steps_of_the_relabelled_fields_read_in_plain_words() {
     let mut m = direct(scenes::shared_alpha_and_set());
     let a = select(&mut m, "A");
-    let e = m.edit.as_ref().unwrap();
-    let at = nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap();
-    let bits = |field| Op::SetBits {
+    let mut h = view(m);
+    sdc_gui::ui::header::set_meshes_view(&h.ctx, true);
+    h.run_steps(3);
+    let at = {
+        let e = h.state().edit.as_ref().unwrap();
+        nif::edit::anchor_role(&e.model, Some(a), Role::Shader).unwrap()
+    };
+    let bits = |field, base| Op::SetBits {
         at: at.clone(),
         field,
         mask: 1,
         value: 1,
-        base: 0,
+        base,
     };
-    assert_eq!(op_name(&bits(Field::Slsf1)), "Set shader flags 1");
-    assert_eq!(op_name(&bits(Field::Slsf2)), "Set shader flags 2");
     let wrap = Op::SetField {
         at: at.clone(),
         field: Field::ClampMode,
         value: Value::U32(1),
         base: Value::U32(3),
     };
-    assert_eq!(op_name(&wrap), "Set texture wrap");
+    let (f1, f2) = {
+        let e = h.state().edit.as_ref().unwrap();
+        let l = &e.model.lighting[&e.model.shape(a).unwrap().shader.unwrap()].lighting;
+        (l.slsf1, l.slsf2)
+    };
+    for (op, want) in [
+        (bits(Field::Slsf1, f1 & !1), "Set shader flags 1"),
+        (bits(Field::Slsf2, f2 & !1), "Set shader flags 2"),
+        (wrap, "Set texture wrap"),
+    ] {
+        h.state_mut().edit_push(vec![op], None);
+        h.run_steps(4);
+        let u = sdc_gui::ui::meshes::undo_target(&h.ctx).expect("the NIF history");
+        assert_eq!(u.undo_label.as_deref(), Some(want));
+    }
 }
-
 /// A colour change is three channel ops; a drag of the picker merges them as three ops with the first bases.
 #[test]
 fn a_colour_drag_is_three_ops_with_the_original_bases() {
