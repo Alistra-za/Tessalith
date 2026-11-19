@@ -2554,3 +2554,116 @@ fn a_twice_listed_clear_leaves_the_users_stem_twin() {
         "the user's stem twin keeps its value"
     );
 }
+
+/// The reviewer's N8-m fixture: a set the user created (New set from `armor/steel.png`, a diffuse only, its shader
+/// chosen Default) borrows `pbr/iron`'s normal, which the share listed; then the diffuse is gone from disk, the project
+/// is reopened and settles, and an unrelated diffuse `armor/bronze.png` is in the folder. The borrower is left with no
+/// file of its own and still points at the listed normal. Returns the borrower's id.
+fn emptied_borrower(dir: &Path) -> (AppModel, String) {
+    two_sets_files(dir);
+    let armor = dir.join("textures/armor");
+    std::fs::remove_file(armor.join("steel_n.png")).unwrap();
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    let id = m.drop_new_set("armor/steel.png").expect("a new set");
+    settle(&mut m);
+    m.set_shader(&id, Some(Shader::Default));
+    settle(&mut m);
+    share(&mut m, IRON_N, &id);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: the share wrote it"
+    );
+    settle(&mut m);
+    m.save().expect("saved");
+    drop(m);
+    std::fs::remove_file(armor.join("steel.png")).unwrap();
+    ImageBuffer::from_fn(64, 64, |_, _| Rgb([150u8, 110, 60]))
+        .save(armor.join("bronze.png"))
+        .unwrap();
+    let mut m = opened_as_the_app(dir.join("textures"), dir.join("export"));
+    settle(&mut m);
+    assert!(
+        sdc_gui::model::sets::views(&m)
+            .iter()
+            .any(|v| v.id == id && v.members.is_empty()),
+        "precondition: the borrower has no file"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "precondition: still data"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()], "precondition");
+    (m, id)
+}
+
+/// N8-m (round 3, B3): a diffuse duplicated into the emptied borrower gives it its first file in a step whose views
+/// still show it empty. Its membership changed, so it is not gone: the listed `data` is not cleared in that step, and
+/// the share is live once the plan lands.
+#[test]
+fn a_duplicate_into_an_emptied_borrower_keeps_the_data() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = emptied_borrower(d.path());
+    drop_now(&mut m, "armor/bronze.png", &id, DropChoice::Duplicate);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a set whose membership the step changed is not gone"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N8-m (B3): as above, with the diffuse moved in.
+#[test]
+fn a_move_into_an_emptied_borrower_keeps_the_data() {
+    use sdc_gui::model::sets::DropChoice;
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, id) = emptied_borrower(d.path());
+    drop_now(&mut m, "armor/bronze.png", &id, DropChoice::Move);
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "a set whose membership the step changed is not gone"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+    settle(&mut m);
+    assert_eq!(held(&m, IRON_N, "alpha.policy"), Some(json!("data")));
+}
+
+/// N8-m control: an ordinary Share into the empty Normal slot of a populated borrower changes only its borrow line,
+/// so the borrower stays known and the share writes `data` in its own step.
+#[test]
+fn an_ordinary_share_into_an_empty_slot_writes_in_its_step() {
+    let d = tempfile::tempdir().unwrap();
+    two_sets_files(d.path());
+    std::fs::remove_file(d.path().join("textures/armor/steel_n.png")).unwrap();
+    let mut m = opened_as_the_app(d.path().join("textures"), d.path().join("export"));
+    settle(&mut m);
+    let lines = |m: &AppModel| {
+        m.sets_doc
+            .as_ref()
+            .unwrap()
+            .entries()
+            .iter()
+            .find(|e| e.id == "armor/steel")
+            .map(|e| (e.add.clone(), e.remove.clone()))
+            .unwrap_or_default()
+    };
+    let before = lines(&m);
+    share(&mut m, IRON_N, "armor/steel");
+    assert_eq!(
+        lines(&m),
+        before,
+        "precondition: only the borrow line changed"
+    );
+    assert_eq!(
+        held(&m, IRON_N, "alpha.policy"),
+        Some(json!("data")),
+        "the ordinary share writes in its step"
+    );
+    assert_eq!(auto_data(&m), vec![IRON_N.to_string()]);
+}

@@ -115,9 +115,11 @@ pub(super) struct Share {
 // back to Auto, a set with no card) makes its pairs `unsure` (spec limit 4): that owner normal is neither written nor
 // cleared in the step, and other keys are unaffected; after the plan, Task 9's row or a leftover `data` shows the result.
 // A `blind` step clears no listed key at all, since the key the borrow reads is not known.
-// N8-f: a lender in `touched` (a set whose files the step's own edit moved, so the views' members are not what the
-// documents say) is not known either: a chain through it is `blind`, and the key it would lend is not named, so
-// nothing is written for it.
+// N8-f, N8-m: a set in `touched` (one whose files the step's own edit added, removed, moved, duplicated or replaced,
+// so the views' members are not what the documents say) is not known, on either side of the borrow: as a lender, a
+// chain through it is `blind` and the key it would lend is not named, so nothing is written for it; as a borrower, it
+// is never `gone` and the owner normal it reaches is `unsure`. A step that changes only a borrow line (an ordinary
+// Share into a slot, an Unshare) touches no set.
 pub(super) fn shared_into_regular(
     f: &Facts,
     s: &SetsDoc,
@@ -140,7 +142,9 @@ pub(super) fn shared_into_regular(
     let unread = |id: &str| f.memberless.contains(id) && !gone.contains(id);
     let mut sh = Share::default();
     for (b, first) in &borrows {
-        if gone.contains(b) {
+        // N8-m: a borrower whose membership the step changed is never gone from the views, which predate the step.
+        let moved = touched.contains(b);
+        if gone.contains(b) && !moved {
             continue;
         }
         // JN1, walked as the set resolver walks it (`entry_view`): a lender with its own Normal-slot file lends its
@@ -175,6 +179,11 @@ pub(super) fn shared_into_regular(
         let Some((cur, n)) = owner else {
             continue;
         };
+        // N8-m: nor is it known: its files and its automatic shader are the last plan's, so its pair is unsure.
+        if moved {
+            sh.unsure.insert(n.clone());
+            continue;
+        }
         let (Some(bs), Some(os)) = (shader(b), shader(&cur)) else {
             sh.unsure.insert(n.clone());
             continue;
