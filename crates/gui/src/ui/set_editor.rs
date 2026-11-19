@@ -1073,8 +1073,9 @@ fn row(
     let format_w = ui
         .vertical(|ui| {
             if let (SlotShown::Linked(_), Some(n)) = (&shown, slot.game_slot()) {
-                // Review E1: the link is what the slot gives; Unlink removes it (`slotN` back to the set's own).
-                // Refused like the slot menu's entries: a read-only `sdc-project.toml`, a pinned slot.
+                // Review E1: the link is what the slot gives; Unlink removes the stored `slotN` and nothing else, so
+                // what is under it shows again (ruling 3b-W1: a borrow line stays). Refused like the slot menu's
+                // entries: a read-only `sdc-project.toml`, a pinned slot.
                 let off = model.slot_command_off(v, n);
                 let r = ui
                     .add_enabled(off.is_none(), egui::Button::new("Unlink"))
@@ -1092,7 +1093,7 @@ fn row(
                     acts.push(Act::Slot(MenuAction::Slot {
                         set: v.id.clone(),
                         n,
-                        cmd: SlotCommand::FromSet,
+                        cmd: SlotCommand::RemoveSlotKey,
                     }));
                 }
             } else if item.is_none() {
@@ -1408,7 +1409,8 @@ fn linked_cell(
 }
 
 /// Review E1: under the own file's name, a slot the set cleared (`slotN = ""`): the file is converted but the JSON
-/// leaves it out. **Use this file** gives the slot back (`FromSet`); `off` is the slot menu's reason for refusing it.
+/// leaves it out. **Use this file** removes the stored `slotN = ""` and nothing else (`RemoveSlotKey`, ruling 3b-W1),
+/// so the own or shared file it names fills the slot again; `off` is the slot menu's reason for refusing it.
 fn cleared_cell(
     ui: &mut egui::Ui,
     v: &SetView,
@@ -1440,7 +1442,7 @@ fn cleared_cell(
         acts.push(Act::Slot(MenuAction::Slot {
             set: v.id.clone(),
             n,
-            cmd: SlotCommand::FromSet,
+            cmd: SlotCommand::RemoveSlotKey,
         }));
     }
 }

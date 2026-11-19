@@ -633,6 +633,120 @@ fn a_clear_over_an_own_file_says_so() {
         .is_none());
 }
 
+const MOSS: &str = "arch/moss";
+const FERN: &str = "arch/fern";
+
+/// Final wave Group 1: a chain of shared normals, `arch/fern` → `arch/moss` → `arch/wall`. Neither moss nor fern has
+/// a normal of its own, so the old drop-the-borrow command passed fern's line on to wall. Returns the model and the
+/// text of `sdc-project.toml` with the two borrow lines.
+fn shared_through_moss(dir: &std::path::Path) -> (AppModel, String) {
+    let mut m = no_albedo_pair_with(
+        dir,
+        &[
+            ("moss.png", [60, 120, 60], Subtype::PbrAlbedo),
+            ("fern.png", [40, 140, 40], Subtype::PbrAlbedo),
+        ],
+    );
+    m.edit_docs("t", None, true, |_, s| {
+        s.set_borrow(MOSS, 2, Some("arch/wall"));
+        s.set_borrow(FERN, 2, Some(MOSS));
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    assert_eq!(
+        chain_borrows(&m),
+        [Some("arch/wall".to_string()), Some(MOSS.to_string())],
+        "premise: moss borrows wall's normal and fern shares through moss"
+    );
+    let text = m.sets_doc.as_ref().unwrap().text();
+    (m, text)
+}
+
+/// What `sdc-project.toml` says moss and fern borrow for slot 2.
+fn chain_borrows(m: &AppModel) -> Vec<Option<String>> {
+    [MOSS, FERN]
+        .iter()
+        .map(|id| {
+            m.sets_doc
+                .as_ref()
+                .unwrap()
+                .entries()
+                .iter()
+                .find(|e| e.id == *id)
+                .and_then(|e| e.borrow.get(&2).cloned())
+        })
+        .collect()
+}
+
+/// Clicks `button` on moss's editor and checks ruling 3b-W1: the borrow lines are byte-identical to `before`'s, one
+/// Undo step, the row shows the shared file with no link or clear left, and the plan's borrowed normals are the
+/// model's (the action needs no plan).
+fn click_and_check_the_borrows_stay(mut m: AppModel, before: &str, button: &str) {
+    select_set(&mut m, MOSS);
+    let mut h = harness(m);
+    let steps = h.state().history.undo.len();
+    h.get_by_label(button).click();
+    h.run();
+    assert!(h.state_mut().wait_idle(std::time::Duration::from_secs(60)));
+    h.run();
+    let m = h.state();
+    assert_eq!(
+        chain_borrows(m),
+        [Some("arch/wall".to_string()), Some(MOSS.to_string())],
+        "{button}: both borrow lines stay"
+    );
+    assert_eq!(
+        m.sets_doc.as_ref().unwrap().text(),
+        before,
+        "{button}: sdc-project.toml is back to its text before the slot2 key"
+    );
+    assert_eq!(m.history.undo.len(), steps + 1, "{button}: one Undo step");
+    let v = views(m).iter().find(|v| v.id == MOSS).unwrap().clone();
+    assert!(
+        matches!(
+            v.slots.get(&SlotKind::Normal),
+            Some(SlotFill::Borrowed { from, .. }) if from == "arch/wall"
+        ),
+        "{button}: the row shows the shared file: {:?}",
+        v.slots.get(&SlotKind::Normal)
+    );
+    assert!(
+        !v.linked.contains_key(&2)
+            && !matches!(slot_shown(&v, SlotKind::Normal), SlotShown::Cleared { .. }),
+        "{button}: no link or clear is left on slot 2"
+    );
+    assert_eq!(
+        m.request().unwrap().borrowed_normal,
+        borrowed_normal(m),
+        "{button}: the plan's borrowed normals are still the model's"
+    );
+}
+
+/// Final wave Group 1 (ruling 3b-W1, Critical 3): **Unlink** over a link that sits over a borrow removes the stored
+/// `slotN` and nothing else.
+#[test]
+fn unlink_over_a_borrow_keeps_the_borrow_and_the_sets_sharing_through() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, before) = shared_through_moss(d.path());
+    m.set_slot_command(MOSS, 2, SlotCommand::Path(r"textures\other\x_n.dds".into()))
+        .unwrap();
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    click_and_check_the_borrows_stay(m, &before, "Unlink Normal _n");
+}
+
+/// Final wave Group 1 (ruling 3b-W1, Critical 3): **Use this file** over `slot2 = ""` on a borrowed normal removes the
+/// stored `slotN` and nothing else, so the file the button names fills the slot again.
+#[test]
+fn use_this_file_over_a_borrow_keeps_the_borrow_and_the_sets_sharing_through() {
+    let d = tempfile::tempdir().unwrap();
+    let (mut m, before) = shared_through_moss(d.path());
+    // Written directly: the slot menu's Clear on a shared file drops the borrow (its purpose), so it cannot build this.
+    m.edit_docs("clear", None, false, |_, s| {
+        s.set_value(MOSS, "slot2", Some(Value::from("")))
+    });
+    assert!(m.wait_idle(std::time::Duration::from_secs(60)));
+    click_and_check_the_borrows_stay(m, &before, "Use wall_n.png for Normal _n");
+}
+
 /// Fix round 1 (I1 of the review): a link shows on the row of the slot it sits on, whatever kind the typed path's
 /// file is. Unlink then acts on that slot.
 #[test]

@@ -2553,6 +2553,10 @@ pub enum SlotCommand {
     FromSet,
     Path(String),
     Clear,
+    /// The editor row's **Unlink** and **Use this file** (ruling 3b-W1): removes the stored `slotN` (a link, a typed
+    /// path or `""`) and nothing else, so what is under it (an own or shared file, a record's, or nothing) fills the
+    /// slot again. A borrow line stays, and no set sharing through this one is retargeted.
+    RemoveSlotKey,
 }
 
 pub(super) const READ_ONLY: &str = "sdc-project.toml is read-only";
@@ -4602,8 +4606,9 @@ impl AppModel {
             );
             return Ok(());
         }
+        // `RemoveSlotKey` never reaches the borrow arm above: it plans nothing, as `FromSet` on an unshared slot.
         let v = match cmd {
-            SlotCommand::FromSet => None,
+            SlotCommand::FromSet | SlotCommand::RemoveSlotKey => None,
             SlotCommand::Clear => Some(Value::from("")),
             SlotCommand::Path(p) => {
                 let p = strip_lead(&p);
