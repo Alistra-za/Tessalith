@@ -1087,15 +1087,22 @@ pub const KEYS: [(Key, &str); 3] = [
     (Key::Space, "Space"),
 ];
 
-/// Every path under some folders: a folder is `None`, a file is its length and a hash of its bytes. A file counts as
-/// changed when its bytes are, not when its modification time is: a save that writes the same bytes is no change.
-pub type Tree = BTreeMap<String, Option<(u64, u64)>>;
+/// Every path under some folders, keyed by the folder's name and the native path relative to it (two names that print
+/// alike stay two entries; `shown` formats a key for a message): a folder is `None`, a file is its length and a hash of
+/// its bytes. A file counts as changed when its bytes are, not when its modification time is: a save that writes the
+/// same bytes is no change.
+pub type Tree = BTreeMap<(&'static str, PathBuf), Option<(u64, u64)>>;
+
+/// A key of a `Tree` as a message names it: "<folder name>/<relative path>", with forward slashes.
+fn shown(key: &(&'static str, PathBuf)) -> String {
+    format!("{}/{}", key.0, key.1.to_string_lossy().replace('\\', "/"))
+}
 
 /// How `scan` reads a file; the real one is `std::fs::read`, a test injects a failing one.
 type ReadFile<'a> = &'a dyn Fn(&Path) -> std::io::Result<Vec<u8>>;
 
 fn add_to_tree(
-    name: &str,
+    name: &'static str,
     root: &Path,
     dir: &Path,
     read: ReadFile,
@@ -1121,8 +1128,7 @@ fn add_to_tree(
                 )
             })?
             .is_dir();
-        let rel = path.strip_prefix(root).unwrap_or(&path);
-        let key = format!("{name}/{}", rel.to_string_lossy().replace('\\', "/"));
+        let key = (name, path.strip_prefix(root).unwrap_or(&path).to_path_buf());
         if is_dir {
             tree.insert(key, None);
             add_to_tree(name, root, &path, read, tree)?;
@@ -1159,16 +1165,16 @@ pub fn changes(before: &Tree, after: &Tree) -> Vec<(String, &'static str)> {
     let mut out = vec![];
     for (path, now) in after {
         match (before.get(path), now) {
-            (None, None) => out.push((path.clone(), "new folder")),
-            (None, Some(_)) => out.push((path.clone(), "new file")),
-            (Some(was), now) if was != now => out.push((path.clone(), "changed")),
+            (None, None) => out.push((shown(path), "new folder")),
+            (None, Some(_)) => out.push((shown(path), "new file")),
+            (Some(was), now) if was != now => out.push((shown(path), "changed")),
             _ => {}
         }
     }
     for (path, was) in before {
         if !after.contains_key(path) {
             out.push((
-                path.clone(),
+                shown(path),
                 if was.is_none() {
                     "deleted folder"
                 } else {
@@ -2803,6 +2809,43 @@ fn a_tree_differs_by_content_and_paths_not_by_modification_time() {
     .map(|(p, k)| (p.to_string(), k))
     .to_vec();
     assert_eq!(got, want);
+}
+
+/// Two files whose names print alike (each with a code unit the lossy text form replaces by U+FFFD) are two entries of
+/// the tree, and a change to one is that one change: the native path is the key, the text only the message.
+#[test]
+fn two_names_that_print_alike_are_two_paths() {
+    #[cfg(windows)]
+    let names: [std::ffi::OsString; 2] = {
+        use std::os::windows::ffi::OsStringExt as _;
+        [
+            std::ffi::OsString::from_wide(&[0x61, 0xD800]),
+            std::ffi::OsString::from_wide(&[0x61, 0xD801]),
+        ]
+    };
+    #[cfg(unix)]
+    let names: [std::ffi::OsString; 2] = {
+        use std::os::unix::ffi::OsStringExt as _;
+        [
+            std::ffi::OsString::from_vec(b"a\xfe".to_vec()),
+            std::ffi::OsString::from_vec(b"a\xff".to_vec()),
+        ]
+    };
+    assert_eq!(
+        names[0].to_string_lossy(),
+        names[1].to_string_lossy(),
+        "the fixture: the two names print alike"
+    );
+    let d = tempfile::tempdir().unwrap();
+    for n in &names {
+        std::fs::write(d.path().join(n), "one").unwrap();
+    }
+    let roots = [("root", d.path().to_path_buf())];
+    let first = tree_of(&roots).unwrap();
+    assert_eq!(first.len(), 2, "{first:?}");
+    std::fs::write(d.path().join(&names[1]), "two").unwrap();
+    let got = changes(&first, &tree_of(&roots).unwrap());
+    assert_eq!(got, [("root/a\u{FFFD}".to_string(), "changed")]);
 }
 
 /// The test-only screens of the scroll-bar and status-dot invariants: tiny UIs with one planted violation each (and a
